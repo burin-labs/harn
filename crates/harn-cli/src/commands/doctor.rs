@@ -41,6 +41,7 @@ pub(crate) async fn run_doctor(network: bool) {
     checks.push(check_binary("cargo"));
     checks.extend(check_provider_selection());
     checks.extend(check_manifest());
+    checks.extend(check_skills());
     checks.extend(check_provider_health(network).await);
 
     let mut failed = false;
@@ -181,6 +182,71 @@ fn check_manifest() -> Vec<DoctorCheck> {
                 },
             });
         }
+    }
+
+    checks
+}
+
+fn check_skills() -> Vec<DoctorCheck> {
+    use crate::skill_loader;
+
+    let loaded = skill_loader::load_skills(&skill_loader::SkillLoaderInputs {
+        cli_dirs: Vec::new(),
+        source_path: None,
+    });
+
+    let mut checks = Vec::new();
+    let winners = &loaded.report.winners;
+    if winners.is_empty() {
+        checks.push(DoctorCheck {
+            status: DoctorStatus::Skip,
+            label: "skills".to_string(),
+            detail: "no SKILL.md files discovered (use --skill-dir, $HARN_SKILLS_PATH, .harn/skills, or harn.toml [skills])".to_string(),
+        });
+    } else {
+        let mut by_layer: std::collections::BTreeMap<&str, usize> =
+            std::collections::BTreeMap::new();
+        for w in winners {
+            *by_layer.entry(w.layer.label()).or_default() += 1;
+        }
+        let breakdown: Vec<String> = by_layer.iter().map(|(k, v)| format!("{v} {k}")).collect();
+        checks.push(DoctorCheck {
+            status: DoctorStatus::Ok,
+            label: "skills".to_string(),
+            detail: format!("{} loaded ({})", winners.len(), breakdown.join(", ")),
+        });
+    }
+
+    for shadow in &loaded.report.shadowed {
+        checks.push(DoctorCheck {
+            status: DoctorStatus::Warn,
+            label: format!("skill:{}", shadow.id),
+            detail: format!(
+                "shadowed by {} layer; {} version at {} is hidden",
+                shadow.winner.label(),
+                shadow.loser.label(),
+                shadow.loser_origin,
+            ),
+        });
+    }
+
+    for (id, fields) in &loaded.report.unknown_fields {
+        checks.push(DoctorCheck {
+            status: DoctorStatus::Warn,
+            label: format!("skill:{id}"),
+            detail: format!(
+                "unknown frontmatter field(s) forwarded as metadata: {}",
+                fields.join(", ")
+            ),
+        });
+    }
+
+    for layer in &loaded.report.disabled_layers {
+        checks.push(DoctorCheck {
+            status: DoctorStatus::Skip,
+            label: format!("skills-layer:{}", layer.label()),
+            detail: "layer disabled by harn.toml [skills.disable]".to_string(),
+        });
     }
 
     checks

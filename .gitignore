@@ -11,6 +11,11 @@ tree-sitter-harn/*.dylib
 tree-sitter-harn/*.so
 tree-sitter-harn/*.dll
 .harn/
+# Conformance skill fixtures deliberately ship a .harn/ subdir so the
+# project-layer loader (issue #73) has something to discover. The
+# blanket `.harn/` ignore above would drop them otherwise.
+!conformance/tests/**/.harn/
+!conformance/tests/**/.harn/**
 .cargo/config.toml
 # .claude/ is local-only except for shared skill definitions
 .claude/*

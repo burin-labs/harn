@@ -17,6 +17,7 @@ pub mod metadata;
 pub mod orchestration;
 pub mod runtime_paths;
 pub mod schema;
+pub mod skills;
 pub mod stdlib;
 pub mod stdlib_modules;
 pub mod store;

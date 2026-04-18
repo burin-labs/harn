@@ -20,6 +20,82 @@ pub struct Manifest {
     pub check: CheckConfig,
     #[serde(default)]
     pub workspace: WorkspaceConfig,
+    /// `[skills]` table — per-project skill discovery configuration
+    /// (paths, lookup_order, disable).
+    #[serde(default)]
+    pub skills: SkillsConfig,
+    /// `[[skill.source]]` array-of-tables — declared skill sources
+    /// (filesystem, git, reserved registry).
+    #[serde(default)]
+    pub skill: SkillTables,
+}
+
+/// `[skills]` table body.
+#[derive(Debug, Default, Clone, Deserialize)]
+#[allow(dead_code)] // `defaults` is parsed now and consumed by a follow-up CLI wiring PR.
+pub struct SkillsConfig {
+    /// Additional filesystem roots to scan. Each entry may be a
+    /// literal directory or a glob (`packages/*/skills`). Resolved
+    /// relative to the directory holding harn.toml.
+    #[serde(default)]
+    pub paths: Vec<String>,
+    /// Override priority order. Values are layer labels —
+    /// `cli`, `env`, `project`, `manifest`, `user`, `package`,
+    /// `system`, `host`. Unlisted layers fall through to default
+    /// priority after listed ones.
+    #[serde(default)]
+    pub lookup_order: Vec<String>,
+    /// Disable entire layers. Same label set as `lookup_order`.
+    #[serde(default)]
+    pub disable: Vec<String>,
+    /// `[skills.defaults]` inline sub-table — applied to every
+    /// discovered skill when the field is unset in its SKILL.md
+    /// frontmatter.
+    #[serde(default)]
+    pub defaults: SkillDefaults,
+}
+
+#[derive(Debug, Default, Clone, Deserialize)]
+#[allow(dead_code)] // Wired in the follow-up that threads defaults into the loader.
+pub struct SkillDefaults {
+    #[serde(default)]
+    pub tool_search: Option<String>,
+    #[serde(default)]
+    pub always_loaded: Vec<String>,
+}
+
+/// Container for `[[skill.source]]` array-of-tables.
+#[derive(Debug, Default, Clone, Deserialize)]
+pub struct SkillTables {
+    #[serde(default, rename = "source")]
+    pub sources: Vec<SkillSourceEntry>,
+}
+
+/// One `[[skill.source]]` entry. The `registry` variant is accepted
+/// for forward-compat but inert — see issue #73 and `docs/src/skills.md`
+/// for the marketplace timeline.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
+#[allow(dead_code)]
+pub enum SkillSourceEntry {
+    Fs {
+        path: String,
+        #[serde(default)]
+        namespace: Option<String>,
+    },
+    Git {
+        url: String,
+        #[serde(default)]
+        tag: Option<String>,
+        #[serde(default)]
+        namespace: Option<String>,
+    },
+    Registry {
+        #[serde(default)]
+        url: Option<String>,
+        #[serde(default)]
+        name: Option<String>,
+    },
 }
 
 /// Severity override for preflight diagnostics. `error` (default) fails
@@ -651,6 +727,115 @@ pub fn add_package(name: &str, git_url: Option<&str>, tag: Option<&str>, local_p
     println!("Run `harn install` to fetch the package.");
 }
 
+/// Resolved `[skills]` section plus the directory the manifest came
+/// from. Paths in `skills.paths` are joined against `manifest_dir`;
+/// `[[skill.source]]` fs entries get absolutized here too.
+pub struct ResolvedSkillsConfig {
+    pub config: SkillsConfig,
+    pub sources: Vec<SkillSourceEntry>,
+    pub manifest_dir: PathBuf,
+}
+
+/// Load the `[skills]` + `[[skill.source]]` tables from the nearest
+/// harn.toml, walking up from `anchor` like [`load_check_config`].
+/// Returns `None` when there is no manifest on the walk path.
+pub fn load_skills_config(anchor: Option<&Path>) -> Option<ResolvedSkillsConfig> {
+    let anchor = anchor
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    let (manifest, dir) = find_nearest_manifest(&anchor)?;
+
+    // Absolutize `[[skill.source]]` fs paths relative to manifest_dir.
+    let sources = manifest
+        .skill
+        .sources
+        .into_iter()
+        .map(|s| match s {
+            SkillSourceEntry::Fs { path, namespace } => {
+                let abs = if PathBuf::from(&path).is_absolute() {
+                    path
+                } else {
+                    dir.join(&path).display().to_string()
+                };
+                SkillSourceEntry::Fs {
+                    path: abs,
+                    namespace,
+                }
+            }
+            other => other,
+        })
+        .collect();
+
+    Some(ResolvedSkillsConfig {
+        config: manifest.skills,
+        sources,
+        manifest_dir: dir,
+    })
+}
+
+/// Expand `skills.paths` (which may include simple `*` globs) into
+/// concrete directories relative to `manifest_dir`. We implement just
+/// enough globbing for the documented `packages/*/skills` pattern so
+/// we don't force a `glob`-crate dep on harn-cli.
+pub fn resolve_skills_paths(cfg: &ResolvedSkillsConfig) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    for entry in &cfg.config.paths {
+        let raw = PathBuf::from(entry);
+        let absolute = if raw.is_absolute() {
+            raw
+        } else {
+            cfg.manifest_dir.join(raw)
+        };
+        out.extend(expand_single_star_glob(&absolute));
+    }
+    out
+}
+
+fn expand_single_star_glob(path: &Path) -> Vec<PathBuf> {
+    let as_str = path.to_string_lossy().to_string();
+    if !as_str.contains('*') {
+        return vec![path.to_path_buf()];
+    }
+    let components: Vec<&str> = as_str.split('/').collect();
+    let mut results: Vec<PathBuf> = vec![PathBuf::new()];
+    for comp in components {
+        let mut next: Vec<PathBuf> = Vec::new();
+        if comp == "*" {
+            for parent in &results {
+                if let Ok(entries) = fs::read_dir(parent) {
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        if path.is_dir() {
+                            next.push(path);
+                        }
+                    }
+                }
+            }
+        } else if comp.is_empty() {
+            for parent in &results {
+                if parent.as_os_str().is_empty() {
+                    next.push(PathBuf::from("/"));
+                } else {
+                    next.push(parent.clone());
+                }
+            }
+        } else {
+            for parent in &results {
+                let joined = parent.join(comp);
+                // Filter branches whose literal suffix does not exist on
+                // disk so downstream FS sources don't iterate over phantom
+                // directories (one Rust round-trip cheaper than discovering
+                // them at load time).
+                if joined.exists() || parent.as_os_str().is_empty() {
+                    next.push(joined);
+                }
+            }
+        }
+        results = next;
+    }
+    results
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -724,6 +909,85 @@ pipelines = ["pipelines", "scripts"]
         assert_eq!(workspace.pipelines, vec!["pipelines", "scripts"]);
         // Walk-up lands on the directory containing the harn.toml.
         assert_eq!(manifest_dir, root);
+    }
+
+    #[test]
+    fn load_skills_config_parses_tables_and_sources() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        fs::write(
+            root.join(MANIFEST),
+            r#"
+[skills]
+paths = ["packages/*/skills", "../shared-skills"]
+lookup_order = ["cli", "project", "host"]
+disable = ["system"]
+
+[skills.defaults]
+tool_search = "bm25"
+always_loaded = ["look", "edit"]
+
+[[skill.source]]
+type = "fs"
+path = "../shared"
+
+[[skill.source]]
+type = "git"
+url = "https://github.com/acme/harn-skills"
+tag = "v1.2.0"
+
+[[skill.source]]
+type = "registry"
+url = "https://skills.harn.burincode.com"
+name = "acme/ops"
+"#,
+        )
+        .unwrap();
+        let harn_file = root.join("main.harn");
+        fs::write(&harn_file, "pipeline main() {}\n").unwrap();
+
+        let resolved = load_skills_config(Some(&harn_file)).expect("skills config should load");
+        assert_eq!(resolved.config.paths.len(), 2);
+        assert_eq!(resolved.config.lookup_order, vec!["cli", "project", "host"]);
+        assert_eq!(resolved.config.disable, vec!["system"]);
+        assert_eq!(
+            resolved.config.defaults.tool_search.as_deref(),
+            Some("bm25")
+        );
+        assert_eq!(resolved.config.defaults.always_loaded, vec!["look", "edit"]);
+
+        assert_eq!(resolved.sources.len(), 3);
+        match &resolved.sources[0] {
+            SkillSourceEntry::Fs { path, .. } => {
+                assert!(path.ends_with("shared"), "fs path absolutized: {path}");
+            }
+            other => panic!("expected fs source, got {other:?}"),
+        }
+        match &resolved.sources[1] {
+            SkillSourceEntry::Git { url, tag, .. } => {
+                assert!(url.contains("harn-skills"));
+                assert_eq!(tag.as_deref(), Some("v1.2.0"));
+            }
+            other => panic!("expected git source, got {other:?}"),
+        }
+        assert!(matches!(
+            &resolved.sources[2],
+            SkillSourceEntry::Registry { .. }
+        ));
+    }
+
+    #[test]
+    fn expand_single_star_glob_handles_packages_pattern() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join("packages/pkg-a/skills")).unwrap();
+        fs::create_dir_all(root.join("packages/pkg-b/skills")).unwrap();
+        fs::create_dir_all(root.join("packages/pkg-c")).unwrap();
+
+        let raw = root.join("packages").join("*").join("skills");
+        let expanded = expand_single_star_glob(&raw);
+        assert_eq!(expanded.len(), 2);
     }
 
     #[test]

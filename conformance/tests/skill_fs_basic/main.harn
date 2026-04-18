@@ -1,0 +1,43 @@
+// Filesystem skill discovery (issue #73).
+//
+// The CLI walks up from this file, finds `harn.toml`, then loads every
+// `<name>/SKILL.md` under `.harn/skills/`. Each discovered skill is
+// visible on the pre-populated `skills` global (same shape as the
+// `skill_registry()` builtin).
+pipeline test(task) {
+  // Two fixtures land in the registry: `deploy` (with a rich
+  // frontmatter) and `review` (minimal).
+  assert(skill_count(skills) == 2, "two bundled skills should load")
+  let deploy = skill_find(skills, "deploy")
+  assert(deploy != nil, "deploy skill discovered")
+  assert(deploy.name == "deploy", "name matches")
+  assert(
+    deploy.description == "Deploy the application to production",
+    "description parsed from frontmatter",
+  )
+  assert(
+    deploy.when_to_use == "User says deploy / ship / release",
+    "hyphenated `when-to-use` key is normalized",
+  )
+  assert(deploy.model == "claude-opus-4-7", "model field preserved")
+  assert(deploy.effort == "high", "effort field preserved")
+  assert(deploy.argument_hint == "<target-env>", "argument_hint preserved")
+  assert(len(deploy.allowed_tools) == 2, "allowed_tools length")
+  assert(deploy.allowed_tools[0] == "bash", "allowed_tools[0]")
+  assert(deploy.allowed_tools[1] == "git", "allowed_tools[1]")
+  assert(len(deploy.paths) == 2, "paths length")
+  // `source` tags every entry with the layer it came from. A project-
+  // layer skill is the expected landing spot when no higher layer
+  // overrides it.
+  assert(deploy.source == "project", "deploy came from the project layer (.harn/skills/)")
+  // Body is exposed intact, ready for `$ARGUMENTS` / `$N` substitution.
+  assert(contains(deploy.body, "Deploy runbook"), "body header")
+  assert(contains(deploy.body, "$1"), "body preserves raw placeholders")
+  let review = skill_find(skills, "review")
+  assert(review != nil, "review skill discovered")
+  assert(review.user_invocable == true, "user_invocable=true preserved")
+  // `disable-model-invocation: false` is the default and isn't round-tripped
+  // as an explicit field — keep the assertion focused on what we know to be
+  // present to avoid schema fragility.
+  log("skill_fs_basic passed")
+}

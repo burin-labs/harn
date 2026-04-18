@@ -116,6 +116,12 @@ pub(crate) struct RunArgs {
     /// Evaluate inline Harn code instead of a file.
     #[arg(short = 'e')]
     pub eval: Option<String>,
+    /// Extra skill-discovery roots. Repeatable; each path is a
+    /// directory of `<name>/SKILL.md` bundles, equivalent to a
+    /// single-entry `$HARN_SKILLS_PATH`. Highest-priority layer —
+    /// wins ties against every other layer. See `docs/src/skills.md`.
+    #[arg(long = "skill-dir", value_name = "PATH")]
+    pub skill_dir: Vec<String>,
     /// Path to the .harn file to execute.
     pub file: Option<String>,
     /// Positional arguments passed to the pipeline as the global `argv`
@@ -261,6 +267,11 @@ pub(crate) struct TestArgs {
     /// Replay LLM fixtures from .harn-fixtures/.
     #[arg(long)]
     pub replay: bool,
+    /// Extra skill-discovery roots (repeatable). See `harn run
+    /// --skill-dir` — applied the same way to user tests and
+    /// conformance fixtures so bundled `skills/` dirs are picked up.
+    #[arg(long = "skill-dir", value_name = "PATH")]
+    pub skill_dir: Vec<String>,
     /// User test path, or `conformance` to target the conformance suite.
     pub target: Option<String>,
     /// Optional file or directory under conformance/ when target is `conformance`.

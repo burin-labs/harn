@@ -1,0 +1,265 @@
+//! CLI-side glue that assembles `harn-vm`'s layered skill discovery
+//! from the inputs `harn run` / `harn test` / `harn check` see at
+//! startup: repeatable `--skill-dir`, `$HARN_SKILLS_PATH`, the nearest
+//! `harn.toml`, and the user's home / system directories.
+//!
+//! The output is a pre-populated `skills` VM global — a registry dict
+//! in the shape the existing `skill_*` builtins already understand, so
+//! scripts can call `skill_count(skills)` / `skill_find(skills, name)`
+//! without any new language surface.
+
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+use std::rc::Rc;
+
+use harn_vm::skills::{
+    build_fs_discovery, default_system_dirs, default_user_dir, parse_env_skills_path,
+    skill_entry_to_vm, DiscoveryOptions, DiscoveryReport, FsLayerConfig, Layer, LayeredDiscovery,
+    ManifestSource,
+};
+use harn_vm::value::VmValue;
+
+use crate::package::{
+    load_skills_config, resolve_skills_paths, ResolvedSkillsConfig, SkillSourceEntry,
+};
+
+/// Inputs threaded in from the CLI layer. Anything we can compute from
+/// the environment or from the source path we compute internally; this
+/// struct captures only the stuff the user passed via flags.
+#[derive(Debug, Default, Clone)]
+pub struct SkillLoaderInputs {
+    pub cli_dirs: Vec<PathBuf>,
+    pub source_path: Option<PathBuf>,
+}
+
+/// Bundle of everything the run path needs: the registry VmValue to set
+/// as a global, plus the raw discovery report (for `harn doctor` and
+/// post-run diagnostics). The `loader_warnings` vec carries per-skill
+/// messages — unknown frontmatter fields, unreadable SKILL.md files —
+/// that the caller prints to stderr before the VM starts.
+pub struct LoadedSkills {
+    pub registry: VmValue,
+    pub report: DiscoveryReport,
+    pub loader_warnings: Vec<String>,
+    /// Lives on so callers can re-resolve a skill by id without
+    /// rebuilding the layered discovery — hot-reload uses this to
+    /// re-fetch a single SKILL.md after `skills/update` fires.
+    #[allow(dead_code)]
+    pub discovery: LayeredDiscovery,
+}
+
+/// Build a [`LoadedSkills`] from CLI inputs. Does no I/O unless one of
+/// the input layers has a directory to walk.
+pub fn load_skills(inputs: &SkillLoaderInputs) -> LoadedSkills {
+    let mut cfg = FsLayerConfig {
+        cli_dirs: inputs.cli_dirs.clone(),
+        ..FsLayerConfig::default()
+    };
+
+    if let Ok(raw) = std::env::var("HARN_SKILLS_PATH") {
+        if !raw.is_empty() {
+            cfg.env_dirs = parse_env_skills_path(&raw);
+        }
+    }
+
+    if let Some(project_root) = inputs
+        .source_path
+        .as_deref()
+        .and_then(harn_vm::stdlib::process::find_project_root)
+    {
+        cfg.project_root = Some(project_root.clone());
+        cfg.packages_dir = Some(project_root.join(".harn").join("packages"));
+    }
+
+    let resolved = load_skills_config(inputs.source_path.as_deref());
+    let mut options = DiscoveryOptions::default();
+    if let Some(resolved) = resolved.as_ref() {
+        cfg.manifest_paths.extend(resolve_skills_paths(resolved));
+        cfg.manifest_sources
+            .extend(resolved.sources.iter().filter_map(manifest_source_to_vm));
+        apply_option_overrides(&mut options, resolved);
+    }
+
+    cfg.user_dir = default_user_dir();
+    cfg.system_dirs = default_system_dirs();
+
+    let discovery = build_fs_discovery(&cfg, options);
+    let report = discovery.build_report();
+
+    let mut loader_warnings = Vec::new();
+    let mut entries: Vec<VmValue> = Vec::new();
+    for winner in &report.winners {
+        match discovery.fetch(&winner.id) {
+            Ok(skill) => {
+                if !skill.unknown_fields.is_empty() {
+                    loader_warnings.push(format!(
+                        "skills: {} has unknown frontmatter fields: {}",
+                        skill.id(),
+                        skill.unknown_fields.join(", "),
+                    ));
+                }
+                entries.push(skill_entry_to_vm(&skill));
+            }
+            Err(err) => {
+                loader_warnings.push(format!("skills: could not load '{}': {err}", winner.id));
+            }
+        }
+    }
+
+    let mut registry: BTreeMap<String, VmValue> = BTreeMap::new();
+    registry.insert(
+        "_type".to_string(),
+        VmValue::String(Rc::from("skill_registry")),
+    );
+    registry.insert("skills".to_string(), VmValue::List(Rc::new(entries)));
+    let registry_value = VmValue::Dict(Rc::new(registry));
+
+    LoadedSkills {
+        registry: registry_value,
+        report,
+        loader_warnings,
+        discovery,
+    }
+}
+
+fn manifest_source_to_vm(entry: &SkillSourceEntry) -> Option<ManifestSource> {
+    match entry {
+        SkillSourceEntry::Fs { path, namespace } => Some(ManifestSource::Fs {
+            path: PathBuf::from(path),
+            namespace: namespace.clone(),
+        }),
+        SkillSourceEntry::Git {
+            url,
+            tag,
+            namespace,
+        } => {
+            // Git deps are materialized by `harn install` under
+            // `.harn/packages/<name>`. We can't know the name from just
+            // the URL without parsing, and we don't want to re-clone on
+            // every `harn run` — so the fs source that covers the
+            // installed copy is already layered in via the Package layer
+            // (see `cfg.packages_dir`). Here we just surface the raw
+            // config so `harn doctor` can warn if the manifest declares
+            // a git source but `harn install` hasn't been run.
+            let _ = (url, tag);
+            namespace.as_ref().map(|ns| ManifestSource::Git {
+                path: PathBuf::new(),
+                namespace: Some(ns.clone()),
+            })
+        }
+        SkillSourceEntry::Registry { .. } => None,
+    }
+}
+
+fn apply_option_overrides(options: &mut DiscoveryOptions, resolved: &ResolvedSkillsConfig) {
+    for label in &resolved.config.disable {
+        if let Some(layer) = Layer::from_label(label) {
+            options.disabled_layers.push(layer);
+        }
+    }
+    if !resolved.config.lookup_order.is_empty() {
+        let ordered: Vec<Layer> = resolved
+            .config
+            .lookup_order
+            .iter()
+            .filter_map(|s| Layer::from_label(s))
+            .collect();
+        if !ordered.is_empty() {
+            options.lookup_order = Some(ordered);
+        }
+    }
+}
+
+/// Set the resolved skill registry as the VM global `skills`. Safe to
+/// call even when no skills were discovered — the value is an empty
+/// `skill_registry` so `skill_count(skills)` still returns `0`.
+pub fn install_skills_global(vm: &mut harn_vm::Vm, loaded: &LoadedSkills) {
+    vm.set_global("skills", loaded.registry.clone());
+}
+
+/// Print loader warnings to stderr. Non-fatal — a malformed SKILL.md
+/// simply doesn't participate in the registry.
+pub fn emit_loader_warnings(warnings: &[String]) {
+    for w in warnings {
+        eprintln!("warning: {w}");
+    }
+}
+
+/// Convenience: canonicalize CLI-provided `--skill-dir` paths against
+/// the provided cwd (or the process cwd when `None`). Non-existent paths
+/// are kept as-is so `harn doctor` can flag the typo.
+pub fn canonicalize_cli_dirs(raw: &[String], cwd: Option<&Path>) -> Vec<PathBuf> {
+    let base = cwd
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    raw.iter()
+        .map(|p| {
+            let candidate = PathBuf::from(p);
+            if candidate.is_absolute() {
+                candidate
+            } else {
+                base.join(candidate)
+            }
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    fn write_skill(root: &Path, sub: &str, name: &str, body: &str) {
+        let dir = root.join(sub);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("SKILL.md"),
+            format!("---\nname: {name}\n---\n{body}"),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn cli_dirs_produce_registry_entries() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_skill(tmp.path(), "deploy", "deploy", "body A");
+        let loaded = load_skills(&SkillLoaderInputs {
+            cli_dirs: vec![tmp.path().to_path_buf()],
+            source_path: None,
+        });
+        assert_eq!(loaded.report.winners.len(), 1);
+        assert!(loaded.loader_warnings.is_empty());
+        let VmValue::Dict(registry) = &loaded.registry else {
+            panic!("registry should be a dict");
+        };
+        let VmValue::List(entries) = registry.get("skills").unwrap() else {
+            panic!("skills should be a list");
+        };
+        assert_eq!(entries.len(), 1);
+    }
+
+    #[test]
+    fn unknown_frontmatter_fields_surface_as_warnings() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("thing");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("SKILL.md"),
+            "---\nname: thing\nfuture_mystery_field: 42\n---\nbody",
+        )
+        .unwrap();
+        let loaded = load_skills(&SkillLoaderInputs {
+            cli_dirs: vec![tmp.path().to_path_buf()],
+            source_path: None,
+        });
+        assert_eq!(loaded.report.winners.len(), 1);
+        assert!(
+            loaded
+                .loader_warnings
+                .iter()
+                .any(|w| w.contains("future_mystery_field")),
+            "{:?}",
+            loaded.loader_warnings
+        );
+    }
+}
