@@ -292,6 +292,9 @@ Project metadata helpers plus deterministic project evidence scanning:
 | `project_scan(path, options?)` | Scan a directory for deterministic L0/L1 evidence |
 | `project_enrich(path, options)` | Run caller-owned L2 enrichment over bounded project context with schema validation and caching |
 | `project_scan_tree(path, options?)` | Walk subdirectories and return a `{rel_path: evidence}` map |
+| `project_enrich(path, options?)` | Run a structured per-directory L2 enrichment with caller-owned prompt/schema |
+| `project_deep_scan(path, options?)` | Build or refresh a cached per-directory evidence tree backed by metadata namespaces |
+| `project_deep_scan_status(namespace, path?)` | Return the last deep-scan status for a namespace/scope |
 | `project_catalog()` | Return the built-in anchor/lockfile catalog used by `project_scan(...)` |
 | `project_scan_paths(path, options?)` | Return only the keys from `project_scan_tree(...)` |
 | `project_stale(namespace?)` | Return the stale summary from `metadata_status(...)` |

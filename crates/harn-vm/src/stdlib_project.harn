@@ -72,6 +72,369 @@ pub fn project_scan_paths(path = ".", options = nil) {
   return project_scan_tree(path, options).keys()
 }
 
+/** project_deep_scan. */
+pub fn project_deep_scan(path = ".", options = nil) {
+  let opts = options ?? {}
+  let namespace = opts?.namespace ?? "project-enrichment"
+  let tiers = __project_deep_scan_tiers(opts)
+  let walk_options = __project_deep_scan_walk_options(opts)
+  let walk = project_walk_tree_native(path, walk_options)
+  let scope_dir = if len(walk) == 0 { "." } else { walk[0].dir }
+  var cache = __project_deep_scan_cache(namespace)
+  let signature = __project_deep_scan_signature(opts, tiers, walk_options)
+  let incremental = if opts?.incremental == nil { true } else { opts.incremental }
+  let now = date_now().timestamp
+  let max_staleness_seconds = opts?.max_staleness_seconds
+  var tree = {}
+  var cache_hits = 0
+  var enriched_dirs = 0
+  var last_refresh = nil
+
+  for entry in walk {
+    let cached = cache[entry.dir]?._deep_scan
+    if !__project_deep_scan_needs_refresh(
+      cached,
+      entry,
+      signature,
+      tiers,
+      max_staleness_seconds,
+      incremental,
+      now,
+    ) {
+      let cached_evidence = __project_deep_scan_select_tiers(cached?.evidence ?? {}, tiers)
+      tree[entry.path] = cached_evidence
+      cache_hits = cache_hits + 1
+      if cached_evidence?.enriched != nil {
+        enriched_dirs = enriched_dirs + 1
+      }
+      last_refresh = __project_deep_scan_last_refresh(last_refresh, cached?.refreshed_at)
+      continue
+    }
+
+    let record = __project_deep_scan_refresh_entry(
+      entry,
+      tiers,
+      opts?.enrichment ?? {},
+      walk_options,
+      signature,
+      now,
+    )
+    metadata_set(entry.dir, namespace, {_deep_scan: record})
+    cache[entry.dir] = {_deep_scan: record}
+    tree[entry.path] = __project_deep_scan_select_tiers(record.evidence ?? {}, tiers)
+    if tree[entry.path]?.enriched != nil {
+      enriched_dirs = enriched_dirs + 1
+    }
+    last_refresh = __project_deep_scan_last_refresh(last_refresh, record.refreshed_at)
+  }
+
+  let status = {
+    version: 1,
+    scope: scope_dir,
+    total_dirs: len(walk),
+    enriched_dirs: enriched_dirs,
+    stale_dirs: 0,
+    cache_hits: cache_hits,
+    last_refresh: last_refresh,
+    options: {
+      tiers: tiers,
+      walk: walk_options,
+      max_staleness_seconds: max_staleness_seconds,
+      signature: signature,
+    },
+  }
+  metadata_set(scope_dir, namespace, {_deep_scan_status: status})
+  metadata_save()
+  return tree
+}
+
+/** project_deep_scan_status. */
+pub fn project_deep_scan_status(namespace, path = ".") {
+  let scope_dir = __project_deep_scan_scope_dir(path)
+  let local = metadata_local_namespace(scope_dir, namespace)
+  let status = local?._deep_scan_status
+  if status != nil {
+    return status
+  }
+
+  var total_dirs = 0
+  var enriched_dirs = 0
+  for entry in metadata_entries(namespace) {
+    let record = entry.local?._deep_scan
+    if record == nil {
+      continue
+    }
+    total_dirs = total_dirs + 1
+    if record?.evidence?.enriched != nil {
+      enriched_dirs = enriched_dirs + 1
+    }
+  }
+  return {
+    version: 1,
+    scope: scope_dir,
+    total_dirs: total_dirs,
+    enriched_dirs: enriched_dirs,
+    stale_dirs: 0,
+    cache_hits: 0,
+    last_refresh: nil,
+  }
+}
+
+fn __project_deep_scan_tiers(options) {
+  if options?.tiers != nil {
+    return options.tiers
+  }
+  if options?.enrichment != nil {
+    return ["ambient", "config", "enriched"]
+  }
+  return ["ambient", "config"]
+}
+
+fn __project_deep_scan_walk_options(options) {
+  return {
+    depth: if options?.depth == nil { nil } else { options.depth },
+    include_hidden: options?.include_hidden ?? false,
+    include_vendor: options?.include_vendor ?? false,
+    respect_gitignore: if options?.respect_gitignore == nil { true } else { options.respect_gitignore },
+  }
+}
+
+fn __project_deep_scan_scope_dir(path) {
+  let scope = project_walk_tree_native(path, {depth: 0})
+  if len(scope) == 0 {
+    return "."
+  }
+  return scope[0].dir
+}
+
+fn __project_deep_scan_cache(namespace) {
+  var cache = {}
+  for entry in metadata_entries(namespace) {
+    if entry.local != nil {
+      cache[entry.dir] = entry.local
+    }
+  }
+  return cache
+}
+
+fn __project_deep_scan_signature(options, tiers, walk_options) {
+  let enrichment = options?.enrichment ?? {}
+  return sha256(json_stringify({
+    version: 1,
+    tiers: tiers,
+    walk: walk_options,
+    prompt: enrichment?.prompt ?? "",
+    system: enrichment?.system ?? "",
+    schema: enrichment?.schema ?? nil,
+    provider: enrichment?.provider ?? "",
+    model: enrichment?.model ?? "",
+    temperature: enrichment?.temperature ?? nil,
+    max_tokens: enrichment?.budget_tokens_per_dir ?? nil,
+  }))
+}
+
+fn __project_has_tier(tiers, name) {
+  for tier in tiers {
+    if tier == name {
+      return true
+    }
+  }
+  return false
+}
+
+fn __project_deep_scan_deterministic_tiers(tiers) {
+  var result = []
+  if __project_has_tier(tiers, "ambient") {
+    result = result + ["ambient"]
+  }
+  if __project_has_tier(tiers, "config") {
+    result = result + ["config"]
+  }
+  return result
+}
+
+fn __project_deep_scan_needs_refresh(
+  cached,
+  entry,
+  signature,
+  tiers,
+  max_staleness_seconds,
+  incremental,
+  now,
+) {
+  if !incremental {
+    return true
+  }
+  if cached == nil {
+    return true
+  }
+  if cached?.version != 1 {
+    return true
+  }
+  if cached?.config_signature != signature {
+    return true
+  }
+  if cached?.structure_hash != entry.structure_hash {
+    return true
+  }
+  if cached?.content_hash != entry.content_hash {
+    return true
+  }
+  if max_staleness_seconds != nil {
+    if cached?.refreshed_at == nil {
+      return true
+    }
+    if now - cached.refreshed_at > max_staleness_seconds {
+      return true
+    }
+  }
+  if __project_has_tier(tiers, "ambient") && cached?.evidence?.ambient == nil {
+    return true
+  }
+  if __project_has_tier(tiers, "config") && cached?.evidence?.config == nil {
+    return true
+  }
+  if __project_has_tier(tiers, "enriched") && cached?.evidence?.enriched == nil {
+    return true
+  }
+  return false
+}
+
+fn __project_deep_scan_refresh_entry(entry, tiers, enrichment, walk_options, signature, now) {
+  let scan_tiers = __project_deep_scan_deterministic_tiers(tiers)
+  let scan = if len(scan_tiers) == 0 {
+    {}
+  } else {
+    project_scan(entry.dir, {tiers: scan_tiers})
+  }
+  var evidence = __project_deep_scan_evidence(scan, tiers)
+  if __project_has_tier(tiers, "enriched") {
+    let files = __project_deep_scan_files(entry.dir, walk_options?.include_hidden ?? false)
+    evidence["enriched"] = __project_enrich_with_context(
+      entry.dir,
+      entry.path,
+      evidence,
+      files,
+      enrichment,
+    )
+  }
+  return {
+    version: 1,
+    dir: entry.dir,
+    path: entry.path,
+    structure_hash: entry.structure_hash,
+    content_hash: entry.content_hash,
+    config_signature: signature,
+    refreshed_at: now,
+    evidence: evidence,
+  }
+}
+
+fn __project_deep_scan_evidence(scan, tiers) {
+  var evidence = {}
+  if __project_has_tier(tiers, "ambient") {
+    evidence["ambient"] = __project_scan_ambient(scan)
+  }
+  if __project_has_tier(tiers, "config") {
+    evidence["config"] = __project_scan_config(scan)
+  }
+  return evidence
+}
+
+fn __project_scan_ambient(scan) {
+  return {
+    path: scan?.path,
+    languages: scan?.languages ?? [],
+    frameworks: scan?.frameworks ?? [],
+    build_systems: scan?.build_systems ?? [],
+    vcs: scan?.vcs,
+    lockfiles: scan?.lockfiles ?? [],
+    anchors: scan?.anchors ?? [],
+    confidence: scan?.confidence ?? {},
+  }
+}
+
+fn __project_scan_config(scan) {
+  return {
+    package_name: scan?.package_name,
+    build_commands: scan?.build_commands ?? [],
+    declared_scripts: scan?.declared_scripts ?? {},
+    readme_code_fences: scan?.readme_code_fences ?? [],
+    dockerfile_commands: scan?.dockerfile_commands ?? [],
+    makefile_targets: scan?.makefile_targets ?? [],
+  }
+}
+
+fn __project_deep_scan_files(path, include_hidden) {
+  return scan_directory(path, {
+    include_dirs: true,
+    include_files: true,
+    include_hidden: include_hidden,
+    max_depth: 0,
+  })
+}
+
+fn __project_enrich_with_context(dir, display_path, evidence, files, options) {
+  let system_prompt = options?.system ?? options?.prompt ?? "Return a compact JSON summary of this directory. No markdown."
+  let prompt = __project_enrich_prompt(dir, display_path, evidence, files)
+  var llm_options = {
+    response_format: "json",
+    output_validation: "error",
+    schema_retries: 1,
+  }
+  if options?.schema != nil {
+    llm_options["output_schema"] = options.schema
+  }
+  if options?.budget_tokens_per_dir != nil {
+    llm_options["max_tokens"] = options.budget_tokens_per_dir
+  }
+  if options?.provider != nil {
+    llm_options["provider"] = options.provider
+  }
+  if options?.model != nil {
+    llm_options["model"] = options.model
+  }
+  if options?.temperature != nil {
+    llm_options["temperature"] = options.temperature
+  }
+  let response = llm_call(prompt, system_prompt, llm_options)
+  if response?.data != nil {
+    return response.data
+  }
+  return json_parse(response.text)
+}
+
+fn __project_enrich_prompt(dir, display_path, evidence, files) {
+  return "Directory key: ${dir}\nDisplay path: ${display_path}\nDeterministic evidence:\n${json_stringify(evidence)}\nImmediate entries:\n${json_stringify(files)}"
+}
+
+fn __project_deep_scan_select_tiers(evidence, tiers) {
+  var selected = {}
+  if __project_has_tier(tiers, "ambient") && evidence?.ambient != nil {
+    selected["ambient"] = evidence.ambient
+  }
+  if __project_has_tier(tiers, "config") && evidence?.config != nil {
+    selected["config"] = evidence.config
+  }
+  if __project_has_tier(tiers, "enriched") && evidence?.enriched != nil {
+    selected["enriched"] = evidence.enriched
+  }
+  return selected
+}
+
+fn __project_deep_scan_last_refresh(current, next) {
+  if next == nil {
+    return current
+  }
+  if current == nil {
+    return next
+  }
+  if next > current {
+    return next
+  }
+  return current
+}
+
 /** project_stale. */
 pub fn project_stale(namespace) {
   return metadata_status(namespace).stale

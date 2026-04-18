@@ -4,6 +4,7 @@ use std::rc::Rc;
 
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use ignore::WalkBuilder;
+use sha2::{Digest, Sha256};
 
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
@@ -35,7 +36,7 @@ enum ScanTier {
 #[derive(Debug, Clone)]
 struct ProjectScanOptions {
     tiers: BTreeSet<ScanTier>,
-    depth: usize,
+    depth: Option<usize>,
     include_hidden: bool,
     include_vendor: bool,
     respect_gitignore: bool,
@@ -45,11 +46,42 @@ impl Default for ProjectScanOptions {
     fn default() -> Self {
         Self {
             tiers: BTreeSet::from([ScanTier::Ambient]),
-            depth: 3,
+            depth: Some(3),
             include_hidden: false,
             include_vendor: false,
             respect_gitignore: true,
         }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+struct ProjectTreeEntry {
+    relative_path: String,
+    metadata_path: String,
+    structure_hash: String,
+    content_hash: String,
+}
+
+impl ProjectTreeEntry {
+    fn into_vm_value(self) -> VmValue {
+        let mut value = BTreeMap::new();
+        value.insert(
+            "path".to_string(),
+            VmValue::String(Rc::from(self.relative_path)),
+        );
+        value.insert(
+            "dir".to_string(),
+            VmValue::String(Rc::from(self.metadata_path)),
+        );
+        value.insert(
+            "structure_hash".to_string(),
+            VmValue::String(Rc::from(self.structure_hash)),
+        );
+        value.insert(
+            "content_hash".to_string(),
+            VmValue::String(Rc::from(self.content_hash)),
+        );
+        VmValue::Dict(Rc::new(value))
     }
 }
 
@@ -211,6 +243,21 @@ pub(crate) fn register_project_builtins(vm: &mut Vm) {
         )))
     });
 
+    vm.register_builtin("project_walk_tree_native", |args, _out| {
+        let path = args
+            .first()
+            .map(|value| value.display())
+            .unwrap_or_else(|| ".".to_string());
+        let options = parse_project_options(args.get(1));
+        let base = resolve_existing_directory(&path)?;
+        let tree = walk_project_tree(&base, &options)?;
+        Ok(VmValue::List(Rc::new(
+            tree.into_iter()
+                .map(ProjectTreeEntry::into_vm_value)
+                .collect(),
+        )))
+    });
+
     vm.register_builtin("project_catalog_native", |_args, _out| {
         let entries = project_catalog()
             .iter()
@@ -234,8 +281,13 @@ fn parse_project_options(value: Option<&VmValue>) -> ProjectScanOptions {
         return options;
     };
 
-    if let Some(raw_depth) = dict.get("depth").and_then(VmValue::as_int) {
-        options.depth = raw_depth.max(0) as usize;
+    if let Some(depth_value) = dict.get("depth") {
+        options.depth = match depth_value {
+            VmValue::Nil => None,
+            _ => depth_value
+                .as_int()
+                .map(|raw_depth| raw_depth.max(0) as usize),
+        };
     }
     if let Some(include_hidden) = dict.get("include_hidden").and_then(value_as_bool) {
         options.include_hidden = include_hidden;
@@ -315,45 +367,7 @@ fn scan_project_tree(
     base: &Path,
     options: &ProjectScanOptions,
 ) -> Result<BTreeMap<String, ProjectEvidence>, VmError> {
-    let gitignore = build_gitignore(base, options.respect_gitignore);
-    let mut builder = WalkBuilder::new(base);
-    builder
-        .hidden(!options.include_hidden)
-        .follow_links(false)
-        .git_ignore(false)
-        .git_global(false)
-        .git_exclude(false)
-        .parents(false)
-        .ignore(false)
-        .max_depth(Some(options.depth))
-        .sort_by_file_name(|left, right| left.cmp(right));
-
-    let include_vendor = options.include_vendor;
-    builder.filter_entry(move |entry| {
-        if entry.depth() == 0 {
-            return true;
-        }
-        let Some(file_type) = entry.file_type() else {
-            return true;
-        };
-        if gitignore
-            .matched_path_or_any_parents(entry.path(), file_type.is_dir())
-            .is_ignore()
-        {
-            return false;
-        }
-        if !file_type.is_dir() {
-            return true;
-        }
-        if include_vendor {
-            return true;
-        }
-        let name = entry.file_name().to_string_lossy();
-        if STANDARD_VENDOR_DIRS.contains(&name.as_ref()) {
-            return false;
-        }
-        true
-    });
+    let builder = build_project_walk_builder(base, options);
 
     let mut results = BTreeMap::new();
     results.insert(".".to_string(), scan_exact_directory(base, options));
@@ -378,12 +392,197 @@ fn scan_project_tree(
     Ok(results)
 }
 
+fn walk_project_tree(
+    base: &Path,
+    options: &ProjectScanOptions,
+) -> Result<Vec<ProjectTreeEntry>, VmError> {
+    let builder = build_project_walk_builder(base, options);
+    let metadata_root = resolve_source_relative_path(".")
+        .canonicalize()
+        .unwrap_or_else(|_| resolve_source_relative_path("."));
+    let mut entries = Vec::new();
+    entries.push(ProjectTreeEntry {
+        relative_path: ".".to_string(),
+        metadata_path: relative_posix(&metadata_root, base),
+        structure_hash: compute_directory_structure_hash(base, base, options),
+        content_hash: compute_directory_content_hash(base, base, options),
+    });
+
+    for entry in builder.build() {
+        let Ok(entry) = entry else {
+            continue;
+        };
+        if entry.depth() == 0 || !entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
+            continue;
+        }
+        let dir = entry.path();
+        entries.push(ProjectTreeEntry {
+            relative_path: relative_posix(base, dir),
+            metadata_path: relative_posix(&metadata_root, dir),
+            structure_hash: compute_directory_structure_hash(base, dir, options),
+            content_hash: compute_directory_content_hash(base, dir, options),
+        });
+    }
+
+    Ok(entries)
+}
+
+fn build_project_walk_builder(base: &Path, options: &ProjectScanOptions) -> WalkBuilder {
+    let gitignore = build_gitignore(base, options.respect_gitignore);
+    let mut builder = WalkBuilder::new(base);
+    builder
+        .hidden(!options.include_hidden)
+        .follow_links(false)
+        .git_ignore(false)
+        .git_global(false)
+        .git_exclude(false)
+        .parents(false)
+        .ignore(false)
+        .max_depth(options.depth)
+        .sort_by_file_name(|left, right| left.cmp(right));
+
+    let include_vendor = options.include_vendor;
+    builder.filter_entry(move |entry| {
+        if entry.depth() == 0 {
+            return true;
+        }
+        let Some(file_type) = entry.file_type() else {
+            return true;
+        };
+        if gitignore
+            .matched_path_or_any_parents(entry.path(), file_type.is_dir())
+            .is_ignore()
+        {
+            return false;
+        }
+        if !file_type.is_dir() {
+            return true;
+        }
+        if include_vendor {
+            return true;
+        }
+        let name = entry.file_name().to_string_lossy();
+        !STANDARD_VENDOR_DIRS.contains(&name.as_ref())
+    });
+
+    builder
+}
+
 fn build_gitignore(base: &Path, enabled: bool) -> Gitignore {
     let mut builder = GitignoreBuilder::new(base);
     if enabled {
         let _ = builder.add(base.join(".gitignore"));
     }
     builder.build().unwrap_or_else(|_| Gitignore::empty())
+}
+
+fn compute_directory_structure_hash(
+    base: &Path,
+    dir: &Path,
+    options: &ProjectScanOptions,
+) -> String {
+    let gitignore = build_gitignore(base, options.respect_gitignore);
+    let mut entries = Vec::new();
+    for child in list_immediate_entries(dir) {
+        if !should_include_tree_entry(base, &child, &gitignore, options) {
+            continue;
+        }
+        let name = child.file_name().to_string_lossy().into_owned();
+        let Ok(file_type) = child.file_type() else {
+            continue;
+        };
+        entries.push(format!(
+            "{}:{}",
+            name,
+            if file_type.is_dir() { "dir" } else { "file" }
+        ));
+    }
+    stable_sha256(entries)
+}
+
+fn compute_directory_content_hash(base: &Path, dir: &Path, options: &ProjectScanOptions) -> String {
+    let gitignore = build_gitignore(base, options.respect_gitignore);
+    let mut digest = Sha256::new();
+    for child in list_immediate_entries(dir) {
+        if !should_include_tree_entry(base, &child, &gitignore, options) {
+            continue;
+        }
+        let name = child.file_name().to_string_lossy().into_owned();
+        let Ok(file_type) = child.file_type() else {
+            continue;
+        };
+        if file_type.is_dir() {
+            continue;
+        }
+        digest.update(name.as_bytes());
+        digest.update([0]);
+        if let Ok(bytes) = std::fs::read(child.path()) {
+            digest.update(bytes);
+        }
+        digest.update([0xff]);
+    }
+    hex_digest(digest.finalize())
+}
+
+fn list_immediate_entries(dir: &Path) -> Vec<std::fs::DirEntry> {
+    let Ok(read_dir) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut entries = read_dir.flatten().collect::<Vec<_>>();
+    entries.sort_by_key(|entry| entry.file_name());
+    entries
+}
+
+fn should_include_tree_entry(
+    base: &Path,
+    child: &std::fs::DirEntry,
+    gitignore: &Gitignore,
+    options: &ProjectScanOptions,
+) -> bool {
+    let Ok(file_type) = child.file_type() else {
+        return false;
+    };
+    let name = child.file_name().to_string_lossy().into_owned();
+    if !options.include_hidden && name.starts_with('.') {
+        return false;
+    }
+    if gitignore
+        .matched_path_or_any_parents(
+            child
+                .path()
+                .strip_prefix(base)
+                .unwrap_or(child.path().as_path()),
+            file_type.is_dir(),
+        )
+        .is_ignore()
+    {
+        return false;
+    }
+    if file_type.is_dir()
+        && !options.include_vendor
+        && STANDARD_VENDOR_DIRS.contains(&name.as_str())
+    {
+        return false;
+    }
+    true
+}
+
+fn stable_sha256(mut entries: Vec<String>) -> String {
+    entries.sort();
+    let mut digest = Sha256::new();
+    for entry in entries {
+        digest.update(entry.as_bytes());
+        digest.update([0xff]);
+    }
+    hex_digest(digest.finalize())
+}
+
+fn hex_digest(bytes: impl AsRef<[u8]>) -> String {
+    bytes
+        .as_ref()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 fn scan_exact_directory(dir: &Path, options: &ProjectScanOptions) -> ProjectEvidence {
@@ -670,8 +869,10 @@ fn scan_sources(
     options: &ProjectScanOptions,
     depth: usize,
 ) -> bool {
-    if depth > options.depth.saturating_add(2) {
-        return false;
+    if let Some(max_depth) = options.depth {
+        if depth > max_depth.saturating_add(2) {
+            return false;
+        }
     }
     let Ok(read_dir) = std::fs::read_dir(dir) else {
         return false;
@@ -1003,5 +1204,54 @@ mod tests {
         assert!(tree.contains_key("frontend"));
         assert!(!tree.contains_key("ignored"));
         assert!(!tree.contains_key("node_modules"));
+    }
+
+    #[test]
+    fn walk_tree_includes_all_directories_and_hashes_local_content_only() {
+        let dir = temp_dir("walk");
+        std::fs::create_dir_all(dir.path().join("src/auth")).unwrap();
+        std::fs::create_dir_all(dir.path().join("src/api")).unwrap();
+        std::fs::write(
+            dir.path().join("src/auth/lib.rs"),
+            "pub fn login() -> bool { true }\n",
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("src/api/lib.rs"), "pub fn handle() {}\n").unwrap();
+
+        let first = walk_project_tree(dir.path(), &ProjectScanOptions::default()).unwrap();
+        let src = first
+            .iter()
+            .find(|entry| entry.relative_path == "src")
+            .expect("src entry");
+        let auth = first
+            .iter()
+            .find(|entry| entry.relative_path == "src/auth")
+            .expect("auth entry");
+        assert_eq!(
+            first
+                .iter()
+                .map(|entry| entry.relative_path.as_str())
+                .collect::<Vec<_>>(),
+            vec![".", "src", "src/api", "src/auth"]
+        );
+
+        std::fs::write(
+            dir.path().join("src/auth/lib.rs"),
+            "pub fn login() -> bool { false }\n",
+        )
+        .unwrap();
+
+        let second = walk_project_tree(dir.path(), &ProjectScanOptions::default()).unwrap();
+        let src_after = second
+            .iter()
+            .find(|entry| entry.relative_path == "src")
+            .expect("src entry");
+        let auth_after = second
+            .iter()
+            .find(|entry| entry.relative_path == "src/auth")
+            .expect("auth entry");
+
+        assert_eq!(src.content_hash, src_after.content_hash);
+        assert_ne!(auth.content_hash, auth_after.content_hash);
     }
 }

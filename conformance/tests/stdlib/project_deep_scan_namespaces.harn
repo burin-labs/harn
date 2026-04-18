@@ -1,0 +1,37 @@
+import "std/project"
+
+pipeline test(task) {
+  let suffix = uuid()
+  let alpha_namespace = "alpha-${suffix}"
+  let beta_namespace = "beta-${suffix}"
+  mkdir("project_deep_scan_ns/src")
+  write_file("project_deep_scan_ns/src/lib.rs", "pub fn ping() {}\n")
+  llm_mock({text: "{\"purpose\":\"alpha root\"}"})
+  llm_mock({text: "{\"purpose\":\"alpha src\"}"})
+  let alpha = project_deep_scan(
+    "project_deep_scan_ns",
+    {
+    namespace: alpha_namespace,
+    tiers: ["ambient", "enriched"],
+    incremental: true,
+    depth: nil,
+    enrichment: {prompt: "Return valid JSON only.", provider: "mock", schema: {purpose: "string"}},
+  },
+  )
+  llm_mock({text: "{\"purpose\":\"beta root\"}"})
+  llm_mock({text: "{\"purpose\":\"beta src\"}"})
+  let beta = project_deep_scan(
+    "project_deep_scan_ns",
+    {
+    namespace: beta_namespace,
+    tiers: ["ambient", "enriched"],
+    incremental: true,
+    depth: nil,
+    enrichment: {prompt: "Return valid JSON only.", provider: "mock", schema: {purpose: "string"}},
+  },
+  )
+  println(alpha["src"].enriched.purpose == "alpha src")
+  println(beta["src"].enriched.purpose == "beta src")
+  println(project_deep_scan_status(alpha_namespace, "project_deep_scan_ns").total_dirs == 2)
+  println(project_deep_scan_status(beta_namespace, "project_deep_scan_ns").total_dirs == 2)
+}

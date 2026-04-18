@@ -1,0 +1,30 @@
+import "std/project"
+
+pipeline test(task) {
+  let namespace = "ambient-${uuid()}"
+  mkdir("project_deep_scan_ignore/app/src")
+  mkdir("project_deep_scan_ignore/ignored/src")
+  mkdir("project_deep_scan_ignore/target/tooling")
+  mkdir("project_deep_scan_ignore/node_modules/pkg")
+  write_file("project_deep_scan_ignore/.gitignore", "ignored/\n")
+  write_file(
+    "project_deep_scan_ignore/app/Cargo.toml",
+    "[package]\nname = \"app\"\nversion = \"0.1.0\"\n",
+  )
+  write_file("project_deep_scan_ignore/app/Cargo.lock", "# lock\n")
+  write_file("project_deep_scan_ignore/app/src/main.rs", "fn main() {}\n")
+  write_file("project_deep_scan_ignore/ignored/go.mod", "module ignored\n")
+  write_file(
+    "project_deep_scan_ignore/target/tooling/Cargo.toml",
+    "[package]\nname = \"tooling\"\nversion = \"0.1.0\"\n",
+  )
+  write_file("project_deep_scan_ignore/node_modules/pkg/package.json", "{\"name\":\"pkg\"}\n")
+  let tree = project_deep_scan(
+    "project_deep_scan_ignore",
+    {namespace: namespace, tiers: ["ambient"], incremental: true, depth: nil},
+  )
+  println(tree.app.ambient.languages[0] == "rust")
+  println(tree["ignored"] == nil)
+  println(tree["target/tooling"] == nil)
+  println(tree["node_modules/pkg"] == nil)
+}
