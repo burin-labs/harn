@@ -1,0 +1,280 @@
+use std::collections::BTreeMap;
+use std::rc::Rc;
+use std::sync::atomic::Ordering;
+use std::{cell::RefCell, future::Future, pin::Pin};
+
+use crate::mcp::VmMcpClientHandle;
+
+use super::{VmAtomicHandle, VmChannelHandle, VmClosure, VmError, VmGenerator, VmRange};
+
+/// An async builtin function for the VM.
+pub type VmAsyncBuiltinFn =
+    Rc<dyn Fn(Vec<VmValue>) -> Pin<Box<dyn Future<Output = Result<VmValue, VmError>>>>>;
+
+/// VM runtime value.
+#[derive(Debug, Clone)]
+pub enum VmValue {
+    Int(i64),
+    Float(f64),
+    String(Rc<str>),
+    Bool(bool),
+    Nil,
+    List(Rc<Vec<VmValue>>),
+    Dict(Rc<BTreeMap<String, VmValue>>),
+    Closure(Rc<VmClosure>),
+    /// Reference to a registered builtin function, used when a builtin name is
+    /// referenced as a value (e.g. `snake_dict.rekey(snake_to_camel)`). The
+    /// contained string is the builtin's registered name.
+    BuiltinRef(Rc<str>),
+    Duration(u64),
+    EnumVariant {
+        enum_name: String,
+        variant: String,
+        fields: Vec<VmValue>,
+    },
+    StructInstance {
+        struct_name: String,
+        fields: BTreeMap<String, VmValue>,
+    },
+    TaskHandle(String),
+    Channel(VmChannelHandle),
+    Atomic(VmAtomicHandle),
+    McpClient(VmMcpClientHandle),
+    Set(Rc<Vec<VmValue>>),
+    Generator(VmGenerator),
+    Range(VmRange),
+    /// Lazy iterator handle. Single-pass, fused. See `crate::vm::iter::VmIter`.
+    Iter(Rc<RefCell<crate::vm::iter::VmIter>>),
+    /// Two-element pair value. Produced by `pair(a, b)`, yielded by the
+    /// Dict iterator source, and (later) by `zip` / `enumerate` combinators.
+    /// Accessed via `.first` / `.second`, and destructurable in
+    /// `for (a, b) in ...` loops.
+    Pair(Rc<(VmValue, VmValue)>),
+}
+
+impl VmValue {
+    pub fn is_truthy(&self) -> bool {
+        match self {
+            VmValue::Bool(b) => *b,
+            VmValue::Nil => false,
+            VmValue::Int(n) => *n != 0,
+            VmValue::Float(n) => *n != 0.0,
+            VmValue::String(s) => !s.is_empty(),
+            VmValue::List(l) => !l.is_empty(),
+            VmValue::Dict(d) => !d.is_empty(),
+            VmValue::Closure(_) => true,
+            VmValue::BuiltinRef(_) => true,
+            VmValue::Duration(ms) => *ms > 0,
+            VmValue::EnumVariant { .. } => true,
+            VmValue::StructInstance { .. } => true,
+            VmValue::TaskHandle(_) => true,
+            VmValue::Channel(_) => true,
+            VmValue::Atomic(_) => true,
+            VmValue::McpClient(_) => true,
+            VmValue::Set(s) => !s.is_empty(),
+            VmValue::Generator(_) => true,
+            // Match Python semantics: range objects are always truthy,
+            // even the empty range (analogous to generators / iterators).
+            VmValue::Range(_) => true,
+            VmValue::Iter(_) => true,
+            VmValue::Pair(_) => true,
+        }
+    }
+
+    pub fn type_name(&self) -> &'static str {
+        match self {
+            VmValue::String(_) => "string",
+            VmValue::Int(_) => "int",
+            VmValue::Float(_) => "float",
+            VmValue::Bool(_) => "bool",
+            VmValue::Nil => "nil",
+            VmValue::List(_) => "list",
+            VmValue::Dict(_) => "dict",
+            VmValue::Closure(_) => "closure",
+            VmValue::BuiltinRef(_) => "builtin",
+            VmValue::Duration(_) => "duration",
+            VmValue::EnumVariant { .. } => "enum",
+            VmValue::StructInstance { .. } => "struct",
+            VmValue::TaskHandle(_) => "task_handle",
+            VmValue::Channel(_) => "channel",
+            VmValue::Atomic(_) => "atomic",
+            VmValue::McpClient(_) => "mcp_client",
+            VmValue::Set(_) => "set",
+            VmValue::Generator(_) => "generator",
+            VmValue::Range(_) => "range",
+            VmValue::Iter(_) => "iter",
+            VmValue::Pair(_) => "pair",
+        }
+    }
+
+    pub fn display(&self) -> String {
+        let mut out = String::new();
+        self.write_display(&mut out);
+        out
+    }
+
+    /// Writes the display representation directly into `out`,
+    /// avoiding intermediate Vec<String> allocations for collections.
+    pub fn write_display(&self, out: &mut String) {
+        use std::fmt::Write;
+
+        match self {
+            VmValue::Int(n) => {
+                let _ = write!(out, "{n}");
+            }
+            VmValue::Float(n) => {
+                if *n == (*n as i64) as f64 && n.abs() < 1e15 {
+                    let _ = write!(out, "{n:.1}");
+                } else {
+                    let _ = write!(out, "{n}");
+                }
+            }
+            VmValue::String(s) => out.push_str(s),
+            VmValue::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
+            VmValue::Nil => out.push_str("nil"),
+            VmValue::List(items) => {
+                out.push('[');
+                for (i, item) in items.iter().enumerate() {
+                    if i > 0 {
+                        out.push_str(", ");
+                    }
+                    item.write_display(out);
+                }
+                out.push(']');
+            }
+            VmValue::Dict(map) => {
+                out.push('{');
+                for (i, (k, v)) in map.iter().enumerate() {
+                    if i > 0 {
+                        out.push_str(", ");
+                    }
+                    out.push_str(k);
+                    out.push_str(": ");
+                    v.write_display(out);
+                }
+                out.push('}');
+            }
+            VmValue::Closure(c) => {
+                let _ = write!(out, "<fn({})>", c.func.params.join(", "));
+            }
+            VmValue::BuiltinRef(name) => {
+                let _ = write!(out, "<builtin {name}>");
+            }
+            VmValue::Duration(ms) => {
+                if *ms >= 3_600_000 && ms % 3_600_000 == 0 {
+                    let _ = write!(out, "{}h", ms / 3_600_000);
+                } else if *ms >= 60_000 && ms % 60_000 == 0 {
+                    let _ = write!(out, "{}m", ms / 60_000);
+                } else if *ms >= 1000 && ms % 1000 == 0 {
+                    let _ = write!(out, "{}s", ms / 1000);
+                } else {
+                    let _ = write!(out, "{}ms", ms);
+                }
+            }
+            VmValue::EnumVariant {
+                enum_name,
+                variant,
+                fields,
+            } => {
+                if fields.is_empty() {
+                    let _ = write!(out, "{enum_name}.{variant}");
+                } else {
+                    let _ = write!(out, "{enum_name}.{variant}(");
+                    for (i, v) in fields.iter().enumerate() {
+                        if i > 0 {
+                            out.push_str(", ");
+                        }
+                        v.write_display(out);
+                    }
+                    out.push(')');
+                }
+            }
+            VmValue::StructInstance {
+                struct_name,
+                fields,
+            } => {
+                let _ = write!(out, "{struct_name} {{");
+                for (i, (k, v)) in fields.iter().enumerate() {
+                    if i > 0 {
+                        out.push_str(", ");
+                    }
+                    out.push_str(k);
+                    out.push_str(": ");
+                    v.write_display(out);
+                }
+                out.push('}');
+            }
+            VmValue::TaskHandle(id) => {
+                let _ = write!(out, "<task:{id}>");
+            }
+            VmValue::Channel(ch) => {
+                let _ = write!(out, "<channel:{}>", ch.name);
+            }
+            VmValue::Atomic(a) => {
+                let _ = write!(out, "<atomic:{}>", a.value.load(Ordering::SeqCst));
+            }
+            VmValue::McpClient(c) => {
+                let _ = write!(out, "<mcp_client:{}>", c.name);
+            }
+            VmValue::Set(items) => {
+                out.push_str("set(");
+                for (i, item) in items.iter().enumerate() {
+                    if i > 0 {
+                        out.push_str(", ");
+                    }
+                    item.write_display(out);
+                }
+                out.push(')');
+            }
+            VmValue::Generator(g) => {
+                if g.done.get() {
+                    out.push_str("<generator (done)>");
+                } else {
+                    out.push_str("<generator>");
+                }
+            }
+            // Print form mirrors source syntax: `1 to 5` / `0 to 3 exclusive`.
+            // `.to_list()` is the explicit path to materialize for display.
+            VmValue::Range(r) => {
+                let _ = write!(out, "{} to {}", r.start, r.end);
+                if !r.inclusive {
+                    out.push_str(" exclusive");
+                }
+            }
+            VmValue::Iter(h) => {
+                if matches!(&*h.borrow(), crate::vm::iter::VmIter::Exhausted) {
+                    out.push_str("<iter (exhausted)>");
+                } else {
+                    out.push_str("<iter>");
+                }
+            }
+            VmValue::Pair(p) => {
+                out.push('(');
+                p.0.write_display(out);
+                out.push_str(", ");
+                p.1.write_display(out);
+                out.push(')');
+            }
+        }
+    }
+
+    /// Get the value as a BTreeMap reference, if it's a Dict.
+    pub fn as_dict(&self) -> Option<&BTreeMap<String, VmValue>> {
+        if let VmValue::Dict(d) = self {
+            Some(d)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_int(&self) -> Option<i64> {
+        if let VmValue::Int(n) = self {
+            Some(*n)
+        } else {
+            None
+        }
+    }
+}
+
+/// Sync builtin function for the VM.
+pub type VmBuiltinFn = Rc<dyn Fn(&[VmValue], &mut String) -> Result<VmValue, VmError>>;
