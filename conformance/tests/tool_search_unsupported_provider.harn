@@ -1,10 +1,11 @@
-// Tool Vault: capability gating.
+// Tool Vault: capability gating for `mode: "native"`.
 //
-// Phase 1 supports native tool_search on Anthropic Claude 4.0+ Opus/Sonnet
-// and Haiku 4.5+. Everything else errors with a specific diagnostic that
-// points at the follow-up issue (harn#70) for the client-executed fallback.
-// This test exercises the gate against the mock provider so CI never
-// depends on a live Anthropic key.
+// Phase 1 (#69) added native tool_search on Anthropic Claude 4.0+
+// Opus/Sonnet and Haiku 4.5+. Phase 2 (#70) added the client-executed
+// fallback for everyone else, so `mode: "auto"` and `mode: "client"`
+// both succeed against the mock provider now. Only `mode: "native"`
+// still errors when the provider has no native support, pointing at
+// the client fallback as the fix.
 pipeline test(task) {
   var registry = tool_registry()
   registry = tool_define(
@@ -23,20 +24,8 @@ pipeline test(task) {
     handler: { args -> "deployed to " + args.env },
   },
   )
-  // mode: "auto" against an unsupported provider → clear error referencing
-  // harn#70 and the Anthropic support matrix. Must NOT silently fall back.
-  let auto_err = try {
-    llm_call("hello", nil, {provider: "mock", tools: registry, tool_search: "bm25"})
-    nil
-  } catch (e) {
-    e
-  }
-  assert(auto_err != nil, "auto mode must error on unsupported provider")
-  assert(auto_err.contains("tool_search"), "error message mentions tool_search")
-  assert(auto_err.contains("harn#70"), "error message points at issue #70")
-  // mode: "native" against an unsupported provider → similar error. Here
-  // we're explicit, so the error tells the user to switch providers
-  // rather than suggest the (still-unimplemented) client fallback.
+  // mode: "native" against an unsupported provider → error with
+  // "does not expose native" text and a pointer to the client fallback.
   let native_err = try {
     llm_call(
     "hello",
@@ -49,14 +38,6 @@ pipeline test(task) {
   }
   assert(native_err != nil, "native mode must error on unsupported provider")
   assert(native_err.contains("does not expose native"), "error mentions missing native support")
-  // mode: "client" is not implemented yet — must point at the issue.
-  let client_err = try {
-    llm_call("hello", nil, {provider: "mock", tools: registry, tool_search: {mode: "client"}})
-    nil
-  } catch (e) {
-    e
-  }
-  assert(client_err != nil, "client mode must error (not implemented)")
-  assert(client_err.contains("harn#70"), "client-mode error points at the implementation issue")
+  assert(native_err.contains("mode: \"client\""), "error suggests the client fallback")
   log("tool_search_unsupported_provider tests passed")
 }

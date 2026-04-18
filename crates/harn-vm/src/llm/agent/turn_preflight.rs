@@ -75,9 +75,18 @@ pub(super) async fn run_turn_preflight(
         state.idle_backoff_ms = 100;
     }
 
+    // Client-mode tool_search: regenerate the tool-contract prompt on
+    // every turn so freshly-promoted deferred tools appear in the
+    // schema list. Without this, turn 1's prompt (minus the deferred
+    // tools) would be reused for turn N, and the model wouldn't see
+    // the schemas the search tool just surfaced.
+    let dynamic_contract_prompt = state.rebuild_tool_contract_prompt(opts);
+    let tool_prompt_override = dynamic_contract_prompt.as_deref();
+    let tool_prompt_slot = tool_prompt_override.or(ctx.tool_contract_prompt);
+
     let default_system = build_agent_system_prompt(
         ctx.base_system,
-        ctx.tool_contract_prompt,
+        tool_prompt_slot,
         ctx.persistent_system_prompt,
     );
     let mut call_messages = state.visible_messages.clone();

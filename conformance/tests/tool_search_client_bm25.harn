@@ -1,0 +1,107 @@
+// Tool Vault phase 2 (harn#70): client-executed `tool_search` fallback
+// with the BM25 strategy, exercised in text-mode (mock provider).
+//
+// Validates the full lifecycle:
+//   1. Options parsing injects the synthetic `__harn_tool_search` tool
+//      and hides deferred tools from the initial turn's contract
+//      prompt.
+//   2. When the model calls the synthetic tool, Harn runs BM25
+//      in-process and returns matching tool names.
+//   3. The matching tool gets promoted into the next turn's prompt.
+//   4. `tool_search_query` / `tool_search_result` transcript events
+//      land with the Anthropic-compatible shape (tagged `mode:
+//      "client"` so replayers can distinguish path-1 from path-2).
+pipeline test(task) {
+  llm_mock_clear()
+  var registry = tool_registry()
+  registry = tool_define(
+    registry,
+    "look",
+    "Read file contents (always available)",
+    {parameters: {path: {type: "string"}}, handler: { args -> args.path }},
+  )
+  registry = tool_define(
+    registry,
+    "deploy_service",
+    "Deploy the production service stack",
+    {
+    parameters: {env: {type: "string"}},
+    defer_loading: true,
+    handler: { args -> "deployed to " + args.env },
+  },
+  )
+  registry = tool_define(
+    registry,
+    "query_metrics",
+    "Query observability metrics",
+    {
+    parameters: {query: {type: "string"}},
+    defer_loading: true,
+    handler: { args -> "metrics: " + args.query },
+  },
+  )
+  // Turn 1: model calls the synthetic search tool with "deploy".
+  llm_mock(
+    {
+    text: "Looking up deploy tooling.",
+    tool_calls: [{id: "srv1", name: "__harn_tool_search", arguments: {query: "deploy"}}],
+  },
+  )
+  // Turn 2: model calls the freshly-promoted deploy tool.
+  llm_mock(
+    {
+    text: "Deploying now.",
+    tool_calls: [{id: "tool2", name: "deploy_service", arguments: {env: "prod"}}],
+  },
+  )
+  // Turn 3: signal completion.
+  llm_mock({text: "<done>##DONE##</done>"})
+  let result = agent_loop(
+    "Ship the release",
+    nil,
+    {provider: "mock", tools: registry, tool_search: "bm25", persistent: true, max_iterations: 5},
+  )
+  let calls = llm_mock_calls()
+  assert(len(calls) >= 2, "at least two LLM calls happened")
+  // Turn 1 system prompt: synthetic tool visible, deferred tools hidden.
+  let first_system = calls[0].system
+  assert(contains(first_system, "__harn_tool_search"), "synthetic tool advertised on turn 1")
+  assert(contains(first_system, "look"), "non-deferred `look` tool on turn 1")
+  assert(!contains(first_system, "deploy_service"), "deferred `deploy_service` hidden on turn 1")
+  assert(!contains(first_system, "query_metrics"), "deferred `query_metrics` hidden on turn 1")
+  // Turn 2 system prompt: `deploy_service` is now visible because BM25
+  // promoted it. `query_metrics` stays hidden (not a BM25 hit).
+  let second_system = calls[1].system
+  assert(
+    contains(second_system, "deploy_service"),
+    "BM25 must promote `deploy_service` into turn 2's contract prompt",
+  )
+  assert(!contains(second_system, "query_metrics"), "non-matching deferred tools must stay hidden")
+  // Transcript events: mirror the Anthropic shape with mode:"client" tagging.
+  let events = transcript_events(result?.transcript)
+  var query_events = 0
+  var result_events = 0
+  for ev in events {
+    if ev.kind == "tool_search_query" {
+      query_events = query_events + 1
+      assert(ev.metadata?.mode == "client", "query event tagged client mode")
+      assert(ev.metadata?.strategy == "bm25", "query event records strategy")
+      assert(ev.metadata?.query?.query == "deploy", "query event carries the query")
+    }
+    if ev.kind == "tool_search_result" {
+      result_events = result_events + 1
+      assert(ev.metadata?.mode == "client", "result event tagged client mode")
+      let promoted = ev.metadata?.promoted
+      var has_deploy = false
+      for name in promoted {
+        if name == "deploy_service" {
+          has_deploy = true
+        }
+      }
+      assert(has_deploy, "result event records what was promoted")
+    }
+  }
+  assert(query_events == 1, "exactly one search query happened")
+  assert(result_events == 1, "exactly one search result event emitted")
+  log("tool_search_client_bm25 tests passed")
+}

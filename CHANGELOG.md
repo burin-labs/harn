@@ -7,6 +7,74 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
+## Unreleased
+
+### Added
+
+- **Tool Vault phase 2: universal client-executed `tool_search` fallback (harn#70).**
+  `tool_search` now works on every provider, not just the
+  Anthropic-native path landed in phase 1. When the active provider
+  lacks native `defer_loading` (Gemini, Ollama, OpenAI pre-5.4,
+  Together, Fireworks, Groq, Deepseek, HuggingFace, local, mock),
+  Harn auto-switches to an in-VM fallback: a synthetic
+  `__harn_tool_search` tool is injected, the deferred tools are
+  stripped from the initial turn's schema list, and when the model
+  calls the synthetic tool the configured strategy runs against the
+  deferred-tool corpus and the matching tools get promoted onto the
+  *next* turn's schema list. The option surface is unchanged —
+  `tool_search: "bm25"` / `"regex"` / `true` / `{variant, mode, ...}`
+  all Just Work on any provider. `mode: "auto"` falls back silently;
+  `mode: "client"` forces the fallback even on native-capable
+  providers.
+- **Four client-mode strategies.**
+  - `"bm25"` (default) — tokenized BM25 over tool
+    `name + description + parameter text`, matching Anthropic's native
+    ergonomic for cross-provider consistency.
+  - `"regex"` — case-insensitive Rust-regex over the same corpus
+    (no backreferences / lookaround; see the regex crate docs).
+  - `"semantic"` — delegates to the host via a new
+    `tool_search/query` bridge RPC so integrators can wire embeddings
+    without Harn depending on ML crates.
+  - `"host"` — same RPC shape as semantic; the host decides how to
+    rank. The VM round-trips the query and promotes whatever names
+    come back.
+- **New client-mode knobs on `tool_search`.** `budget_tokens: N`
+  (soft cap with oldest-eviction for promoted schemas),
+  `name: "find_tool"` (rename the synthetic search tool so skills can
+  pick a verb the model prefers), `include_stub_listing: true`
+  (append a short list of deferred-tool names to the contract prompt
+  so the model can eyeball what's available without a search call),
+  and `strategy: "..."` (explicit strategy override independent of
+  `variant`, so you can pick a BM25-framed prompt with a semantic
+  backend, for example).
+- **`tool_search/query` bridge RPC.** Standard JSON-RPC request
+  issued by the VM for `strategy: "semantic"` / `"host"`. Payload:
+  `{strategy, query, candidates}`; response: `{tool_names, diagnostic?}`
+  (or the ACP wrapper `{result: {...}}`). Documented in
+  `docs/src/bridge-protocol.md`.
+- **Cross-provider transcript parity.** Client-mode
+  `tool_search_query` / `tool_search_result` events use the same
+  shape as the Anthropic-native path — id, name, query / tool_use_id,
+  tool_references — so replayers and analytics stay agnostic.
+  Metadata adds `mode: "client"` tagging for distinguishing paths
+  when that matters.
+- **New `crates/harn-vm/src/llm/tool_search/` module.** In-tree BM25
+  and regex indices with per-strategy tests. BM25 uses the conventional
+  `k1 = 1.5`, `b = 0.75`; tokenization splits on non-alphanumeric
+  boundaries so `open file` matches `open_file`.
+
+### Changed
+
+- Non-Anthropic providers no longer error when the user opts into
+  `tool_search`. The phase-1 "no silent degradation" diagnostic that
+  previously pointed at harn#70 is replaced by the actual fallback
+  behavior. The `mode: "native"` explicit-intent path still errors on
+  providers without native support (its error message now suggests
+  `mode: "client"` as the escape hatch).
+- `tool_search_unsupported_provider.harn` conformance test adjusted
+  to match the new behavior (only `mode: "native"` on mock still
+  errors).
+
 ## v0.7.17
 
 ### Added

@@ -41,6 +41,69 @@ impl ToolSearchVariant {
     }
 }
 
+/// Implementation of the client-executed tool-search fallback (harn#70).
+/// Only consulted when `ToolSearchMode::Client` resolves (either
+/// explicit or via auto-fallback when the provider lacks native
+/// support). Orthogonal to `ToolSearchVariant`: a user can ask for
+/// `variant: bm25` (the model sees the BM25-style tool) and
+/// `strategy: semantic` (the host runs embedding search under the
+/// hood).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ToolSearchStrategy {
+    /// In-tree BM25 over the deferred tool corpus. **Default.**
+    Bm25,
+    /// In-tree regex over the deferred tool corpus (case-insensitive).
+    Regex,
+    /// Delegated to the host via the `tool_search/query` bridge RPC so
+    /// integrators can wire embeddings without Harn depending on ML
+    /// crates.
+    Semantic,
+    /// Pure host-side implementation; the VM just round-trips the query
+    /// and promotes whatever names the host returns.
+    Host,
+}
+
+impl ToolSearchStrategy {
+    pub(crate) fn as_short(self) -> &'static str {
+        match self {
+            ToolSearchStrategy::Bm25 => "bm25",
+            ToolSearchStrategy::Regex => "regex",
+            ToolSearchStrategy::Semantic => "semantic",
+            ToolSearchStrategy::Host => "host",
+        }
+    }
+
+    /// Whether this strategy runs entirely inside the VM (no bridge
+    /// hop). Used by the dispatch path to decide between the sync
+    /// in-tree index and the `tool_search/query` RPC.
+    #[allow(dead_code)] // consumed by harness tests + future dispatch refactors
+    pub(crate) fn is_in_tree(self) -> bool {
+        matches!(self, ToolSearchStrategy::Bm25 | ToolSearchStrategy::Regex)
+    }
+
+    /// Map to the in-tree strategy enum used by
+    /// [`crate::llm::tool_search::run_in_tree`]. Panics on non-in-tree
+    /// strategies — callers must gate on `is_in_tree()`.
+    pub(crate) fn as_in_tree(self) -> crate::llm::tool_search::InTreeStrategy {
+        match self {
+            ToolSearchStrategy::Bm25 => crate::llm::tool_search::InTreeStrategy::Bm25,
+            ToolSearchStrategy::Regex => crate::llm::tool_search::InTreeStrategy::Regex,
+            _ => unreachable!("as_in_tree called on {self:?}"),
+        }
+    }
+
+    /// Default strategy for a given variant when the user did not
+    /// specify one explicitly. Native-facing variant leaks into the
+    /// client path as a sensible default: `variant: regex` users
+    /// probably want regex semantics in the fallback too.
+    pub(crate) fn default_for_variant(variant: ToolSearchVariant) -> Self {
+        match variant {
+            ToolSearchVariant::Bm25 => ToolSearchStrategy::Bm25,
+            ToolSearchVariant::Regex => ToolSearchStrategy::Regex,
+        }
+    }
+}
+
 /// How to resolve `tool_search` against the active provider.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ToolSearchMode {
@@ -58,18 +121,42 @@ pub(crate) enum ToolSearchMode {
 /// option on `llm_call` / `agent_loop`. Absent means no deferred-loading
 /// machinery is engaged — tools ship eagerly as always.
 #[derive(Clone, Debug)]
-#[allow(dead_code)] // variant + mode drive option-parse decisions; always_loaded is
-                    // reserved for harn#70 (client-executed tool-search fallback)
 pub(crate) struct ToolSearchConfig {
     pub variant: ToolSearchVariant,
     pub mode: ToolSearchMode,
     /// Tool names that must remain eager even when `defer_loading: true`
     /// is otherwise set on them. Useful for a "safety net" a skill wants
     /// always available regardless of the tool-search index's decisions.
-    /// Phase 1 accepts and stores this but only #70 (client-executed
-    /// fallback) consumes it — for the native Anthropic path, eagerness
-    /// is already controlled per-tool via `defer_loading`.
+    /// Only consumed by the client-executed path — for the native
+    /// Anthropic path, eagerness is already controlled per-tool via
+    /// `defer_loading`.
     pub always_loaded: Vec<String>,
+    /// Client-mode implementation strategy. When unset, defaults to
+    /// `ToolSearchStrategy::default_for_variant(variant)`.
+    pub strategy: Option<ToolSearchStrategy>,
+    /// Soft cap on how many deferred tools the client-executed loop
+    /// may promote into the eager set over the life of this call.
+    /// Oldest-promoted tools are evicted when the cap is hit. `None`
+    /// means no cap — rely on the `max_results` per search call.
+    pub budget_tokens: Option<i64>,
+    /// Override for the synthetic tool's name. Default
+    /// `__harn_tool_search`. Lets skills with a brand-specific vocabulary
+    /// name the tool something the model will understand out of the
+    /// box (`find_tool`, `discover_tool`, etc.).
+    pub name: Option<String>,
+    /// When true, the client-mode loop includes a short stub line for
+    /// each deferred tool (name + one-line summary) alongside the
+    /// synthetic search tool so the model knows what's available
+    /// without calling search first. Default: `false` — the Anthropic
+    /// native path also ships no stubs.
+    pub include_stub_listing: bool,
+    /// Canonical native-shape JSON for every tool that had
+    /// `defer_loading: true` at option-parse time, keyed by tool name.
+    /// Populated by `apply_tool_search_client_injection` and later
+    /// drained by `AgentLoopState::new` when it builds the per-loop
+    /// client state. Never populated for native mode — the provider
+    /// handles deferral server-side.
+    pub deferred_bodies: std::collections::BTreeMap<String, serde_json::Value>,
 }
 
 impl ToolSearchConfig {
@@ -79,7 +166,25 @@ impl ToolSearchConfig {
             variant: ToolSearchVariant::Bm25,
             mode: ToolSearchMode::Auto,
             always_loaded: Vec::new(),
+            strategy: None,
+            budget_tokens: None,
+            name: None,
+            include_stub_listing: false,
+            deferred_bodies: std::collections::BTreeMap::new(),
         }
+    }
+
+    /// Resolve the effective strategy, falling back to the variant
+    /// default when the user left `strategy` unset.
+    pub(crate) fn effective_strategy(&self) -> ToolSearchStrategy {
+        self.strategy
+            .unwrap_or_else(|| ToolSearchStrategy::default_for_variant(self.variant))
+    }
+
+    /// Resolve the synthetic tool's name. Default matches the spec's
+    /// proposed `__harn_tool_search` sentinel.
+    pub(crate) fn effective_name(&self) -> &str {
+        self.name.as_deref().unwrap_or("__harn_tool_search")
     }
 }
 

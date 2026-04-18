@@ -175,26 +175,64 @@ Accepted shapes:
 | `tool_search: "bm25"` | Natural-language queries. |
 | `tool_search: "regex"` | Python-regex queries. |
 | `tool_search: false` | Explicit off (same as omitting). |
-| `tool_search: {variant, mode, always_loaded}` | Explicit dict form. |
+| `tool_search: {variant, mode, strategy, always_loaded, budget_tokens, name, include_stub_listing}` | Explicit dict form. |
 
 `mode` options:
 
-- `"auto"` (default) — use native if the provider supports it, else
-  error. Phase 1 of the Tool Vault rollout; a client-executed fallback
-  is tracked in [harn#70](https://github.com/burin-labs/harn/issues/70).
+- `"auto"` (default) — use native if the provider supports it,
+  otherwise fall back to the client-executed path (no error).
 - `"native"` — force the provider's native mechanism. Errors if
   unsupported.
-- `"client"` — force client-executed fallback. Currently errors with
-  an implementation-status pointer; ships with harn#70.
+- `"client"` — force the client-executed path even on providers with
+  native support. Useful for A/B-ing strategies or pinning behavior
+  across heterogeneous provider fleets.
 
 ### Provider support
 
 | Provider | Native `tool_search` | Variants |
 |---|---|---|
 | Anthropic Claude Opus/Sonnet 4.0+, Haiku 4.5+ | ✓ | `bm25`, `regex` |
-| Anthropic 3.x or earlier 4.x Haiku | ✗ | — |
-| OpenAI Responses API (gpt-5.4+) | ✗ (tracked: [harn#71](https://github.com/burin-labs/harn/issues/71)) | will add `hosted`, `client` |
-| Others (Gemini, Ollama, HuggingFace, Together, Fireworks, Groq, Deepseek, local) | ✗ | tracked: [harn#70](https://github.com/burin-labs/harn/issues/70) |
+| Anthropic 3.x or earlier 4.x Haiku | ✗ (uses client fallback) | — |
+| OpenAI Responses API (gpt-5.4+) | ✗ (tracked: [harn#71](https://github.com/burin-labs/harn/issues/71)) | client fallback works today |
+| Others (Gemini, Ollama, HuggingFace, Together, Fireworks, Groq, Deepseek, local, mock) | ✗ | client fallback works today |
+
+### Client-executed fallback
+
+On providers without native `defer_loading`, Harn falls back to an
+in-VM execution path (landed in [harn#70](https://github.com/burin-labs/harn/issues/70)).
+The fallback is identical to the native path from a script's point of
+view: same option surface, same transcript events, same promotion
+behavior across turns. Internally, Harn injects a synthetic tool
+called `__harn_tool_search` — when the model calls it, the loop runs
+the configured strategy against the deferred-tool index, promotes the
+matching tools into the *next* turn's schema list, and emits the
+same `tool_search_query` / `tool_search_result` transcript events as
+native mode (tagged `mode: "client"` in metadata so replays can
+distinguish paths).
+
+Strategies (client mode only):
+
+| `strategy` | Runs in | Notes |
+|---|---|---|
+| `"bm25"` *(default)* | VM | Tokenized BM25 over `name + description + param text`. Matches `open_file` from query `open file`. |
+| `"regex"` | VM | Case-insensitive Rust-regex over the same corpus. No backreferences, no lookaround. |
+| `"semantic"` | Host (bridge) | Delegated to the host via `tool_search/query` so integrators can wire embeddings without Harn pulling in ML crates. |
+| `"host"` | Host (bridge) | Pure host-side; the VM round-trips the query and promotes whatever the host returns. |
+
+Extra client-mode knobs:
+
+- `budget_tokens: N` — soft cap on the total token footprint of
+  promoted tool schemas. Oldest-first eviction when exceeded. Omit to
+  keep every promoted schema for the life of the call.
+- `name: "find_tool"` — override the synthetic tool's name. Handy
+  when a skill's vocabulary suggests a more natural verb (`discover`,
+  `lookup`, …).
+- `always_loaded: ["read_file", "run"]` — pin tool names to the eager
+  set even if `defer_loading: true` is set on their registry entries.
+- `include_stub_listing: true` — append a short list of deferred tool
+  names + one-line descriptions to the tool-contract prompt so the
+  model can eyeball what's available without a search call. Off by
+  default to match Anthropic's native ergonomic.
 
 ### Pre-flight validation
 

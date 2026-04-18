@@ -93,3 +93,57 @@ Payload:
 
 A host may also wake the daemon by sending a queued `user_message`, `session/input`, or
 `agent/user_message` notification.
+
+## Client-executed tool search
+
+When a Harn script opts into `tool_search` against a provider that lacks
+native defer-loading support, the runtime switches to a client-executed
+fallback (see the [LLM and agents guide](./llm-and-agents.md)). For the
+`"bm25"` and `"regex"` strategies everything stays in-VM; the
+`"semantic"` and `"host"` strategies round-trip the query through the
+bridge.
+
+### `tool_search/query`
+
+Request payload (harn-issued, host response required):
+
+```json
+{
+  "strategy": "semantic",
+  "query": "deploy a new service version",
+  "candidates": ["deploy_service", "rollback_service", "query_metrics", "..."]
+}
+```
+
+- `strategy`: one of `"semantic"` or `"host"`. The in-tree strategies
+  (`"bm25"` / `"regex"`) never hit the bridge.
+- `query`: the raw query string the model passed to the synthetic
+  search tool. For `strategy: "regex"` / `"bm25"` hosts *don't* see
+  this; those strategies run inside the VM.
+- `candidates`: full list of deferred tool names the host may choose
+  from. The host should return a subset.
+
+Response payload (host-issued):
+
+```json
+{
+  "tool_names": ["deploy_service", "rollback_service"],
+  "diagnostic": "matched by vector similarity"
+}
+```
+
+- `tool_names` (required): ordered list of tool names to promote.
+  Unknown names are ignored by the runtime — they can't be surfaced
+  because their schemas weren't registered. Return at most ~20 names
+  per call; the runtime caps promotions soft-per-turn regardless.
+- `diagnostic` (optional): short explanation surfaced to the model in
+  the tool result alongside `tool_names`. Useful for "no hits, try
+  broader terms"-style feedback.
+
+An ACP-style wrapper `{ "result": { "tool_names": [...] } }` is also
+accepted for hosts that re-wrap everything in a `result` envelope.
+
+Errors: a JSON-RPC error response (standard shape) is surfaced to the
+model as a `tool_names: []` result with a diagnostic that includes the
+host error message. The loop continues — the model can retry with a
+different query.

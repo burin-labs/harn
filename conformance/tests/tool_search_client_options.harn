@@ -1,0 +1,116 @@
+// Tool Vault phase 2 (harn#70): advanced client-mode options —
+// `mode: "client"`, `budget_tokens` cap with oldest-eviction, and the
+// `name` override for the synthetic tool.
+pipeline test(task) {
+  // ---------- Explicit mode:"client" + custom tool name ----------
+  llm_mock_clear()
+  var registry = tool_registry()
+  registry = tool_define(
+    registry,
+    "stay",
+    "Anchor tool (non-deferred)",
+    {parameters: {op: {type: "string"}}, handler: { _ -> "ok" }},
+  )
+  registry = tool_define(
+    registry,
+    "deploy_service",
+    "Ship the service",
+    {parameters: {env: {type: "string"}}, defer_loading: true, handler: { _ -> "ok" }},
+  )
+  // Turn 1: model invokes the renamed search tool.
+  llm_mock(
+    {
+    text: "Searching via the custom name.",
+    tool_calls: [{id: "s1", name: "find_a_tool", arguments: {query: "deploy"}}],
+  },
+  )
+  llm_mock({text: "<done>##DONE##</done>"})
+  let result = agent_loop(
+    "deploy",
+    nil,
+    {
+    provider: "mock",
+    tools: registry,
+    tool_search: {mode: "client", name: "find_a_tool"},
+    persistent: true,
+    max_iterations: 3,
+  },
+  )
+  let calls = llm_mock_calls()
+  assert(contains(calls[0].system, "find_a_tool"), "custom synthetic tool name advertised")
+  assert(!contains(calls[0].system, "__harn_tool_search"), "default name not used when overridden")
+  let events = transcript_events(result?.transcript)
+  var promoted_deploy = false
+  for ev in events {
+    if ev.kind == "tool_search_result" {
+      for n in ev.metadata?.promoted {
+        if n == "deploy_service" {
+          promoted_deploy = true
+        }
+      }
+    }
+  }
+  assert(promoted_deploy, "explicit client mode promotes matches")
+  // ---------- budget_tokens cap with oldest-eviction ----------
+  llm_mock_clear()
+  var big = tool_registry()
+  big = tool_define(
+    big,
+    "anchor",
+    "Always present",
+    {parameters: {op: {type: "string"}}, handler: { _ -> "ok" }},
+  )
+  // Three hefty deferred tools. Descriptions padded so each schema
+  // costs ~200+ tokens (≈800 chars) once JSON-serialized. A tiny
+  // `budget_tokens: 150` only fits one at a time.
+  let fat_desc = "A very detailed tool whose description is deliberately long enough \\\n  that its JSON schema runs hundreds of characters, ensuring the \\\n  token-estimator predicts a real budget impact rather than rounding down \\\n  to a trivial cost on the budget accounting path."
+  big = tool_define(
+    big,
+    "alpha",
+    fat_desc,
+    {parameters: {x: {type: "string"}}, defer_loading: true, handler: { _ -> "a" }},
+  )
+  big = tool_define(
+    big,
+    "beta",
+    fat_desc,
+    {parameters: {x: {type: "string"}}, defer_loading: true, handler: { _ -> "b" }},
+  )
+  big = tool_define(
+    big,
+    "gamma",
+    fat_desc,
+    {parameters: {x: {type: "string"}}, defer_loading: true, handler: { _ -> "c" }},
+  )
+  // Turn 1: promote alpha.
+  llm_mock(
+    {text: "alpha", tool_calls: [{id: "q1", name: "__harn_tool_search", arguments: {query: "alpha"}}]},
+  )
+  // Turn 2: promote beta (alpha should be evicted).
+  llm_mock(
+    {text: "beta", tool_calls: [{id: "q2", name: "__harn_tool_search", arguments: {query: "beta"}}]},
+  )
+  // Turn 3: promote gamma (beta should be evicted).
+  llm_mock(
+    {text: "gamma", tool_calls: [{id: "q3", name: "__harn_tool_search", arguments: {query: "gamma"}}]},
+  )
+  llm_mock({text: "<done>##DONE##</done>"})
+  agent_loop(
+    "go",
+    nil,
+    {
+    provider: "mock",
+    tools: big,
+    tool_search: {variant: "bm25", budget_tokens: 150},
+    persistent: true,
+    max_iterations: 5,
+  },
+  )
+  // After three turns: gamma promoted, alpha+beta evicted.
+  let calls2 = llm_mock_calls()
+  let last_system = calls2[len(calls2) - 1].system
+  assert(contains(last_system, "gamma"), "most-recently-promoted tool is visible")
+  assert(!contains(last_system, "alpha"), "oldest promotion evicted under budget")
+  assert(!contains(last_system, "beta"), "second-oldest promotion evicted under budget")
+  log("tool_search_client_options tests passed")
+}

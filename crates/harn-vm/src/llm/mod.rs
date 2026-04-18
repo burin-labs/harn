@@ -23,6 +23,7 @@ pub(crate) mod daemon;
 pub(crate) mod helpers;
 pub(crate) mod ledger;
 pub(crate) mod mock;
+pub(crate) mod tool_search;
 mod transcript_stats;
 
 use std::sync::OnceLock;
