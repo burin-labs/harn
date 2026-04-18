@@ -781,11 +781,63 @@ Worker lifecycle builtins:
 | Function | Description |
 |---|---|
 | `spawn_agent(config)` | Start a worker from a workflow graph or delegated stage |
+| `sub_agent_run(task, options?)` | Run an isolated child agent loop and return a single clean result envelope to the parent |
 | `send_input(handle, task)` | Re-run a completed worker with a new task, carrying transcript/artifacts forward when applicable |
 | `resume_agent(id_or_snapshot_path)` | Restore a persisted worker snapshot and continue it in the current runtime |
 | `wait_agent(handle_or_list)` | Wait for one worker or a list of workers to finish |
 | `close_agent(handle)` | Cancel a worker and mark it terminal |
 | `list_agents()` | Return summaries for all known workers in the current runtime |
+
+### `sub_agent_run`
+
+Use `sub_agent_run(...)` when you want a full child `agent_loop` with its own
+session and narrowed capability scope, but you do not want the child transcript
+to spill into the parent conversation history.
+
+```harn
+let result = sub_agent_run("Find the config entrypoints.", {
+  provider: "mock",
+  tools: repo_tools(),
+  allowed_tools: ["search", "read"],
+  token_budget: 1200,
+  returns: {
+    schema: {
+      type: "object",
+      properties: {
+        paths: {type: "array", items: {type: "string"}}
+      },
+      required: ["paths"]
+    }
+  }
+})
+
+if result.ok {
+  println(result.data.paths)
+} else {
+  println(result.error.category)
+}
+```
+
+The parent transcript only records the outer tool call and tool result. The
+child keeps its own session and transcript, linked by `session_id` / parent
+lineage metadata.
+
+`sub_agent_run(...)` returns an envelope with:
+
+- `ok`
+- `summary`
+- `artifacts`
+- `evidence_added`
+- `tokens_used`
+- `budget_exceeded`
+- `session_id`
+- `data` when `returns.schema` succeeds
+- `error: {category, message, tool?}` when the child fails or a narrowed tool
+  policy rejects a call
+
+Set `background: true` to get a normal worker handle back instead of waiting
+inline. The resulting worker uses `mode: "sub_agent"` and can be resumed with
+`wait_agent(...)`, `send_input(...)`, and `close_agent(...)`.
 
 Workers can persist state and child run paths between sessions. Use `carry`
 inside `spawn_agent(...)` when you want continuation to reset transcript state,
