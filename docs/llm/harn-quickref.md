@@ -521,27 +521,36 @@ Provider support matrix for `tool_search`:
 |---|---|---|
 | Anthropic — Opus/Sonnet 4.0+, Haiku 4.5+ | ✓ (`bm25`, `regex`) | ✓ |
 | Anthropic — pre-4.0 / other Claude | ✗ | ✓ |
-| OpenAI (native tracked in harn#71), Gemini, Ollama, others | ✗ | ✓ |
+| OpenAI — GPT 5.4+ (Responses API, hosted) | ✓ (`tool_search`) | ✓ |
+| OpenAI — pre-5.4 (`gpt-4o`, `gpt-4.1`, older) | ✗ | ✓ |
+| OpenRouter, Together, Groq, DeepSeek, Fireworks, HuggingFace, local vLLM | ✓ when model matches `gpt-5.4+` upstream | ✓ |
+| Gemini, Ollama, others | ✗ | ✓ |
 
 Semantics:
 
 - `defer_loading: true` on an individual tool keeps its schema out of
   the model's context until a tool-search call surfaces it. On
   capable Anthropic models the schema goes into the API prefix but not
-  the model's context, so prompt caching stays warm.
+  the model's context, so prompt caching stays warm. On OpenAI GPT
+  5.4+ the wrapper-level flag rides alongside the `{"type":
+  "tool_search"}` meta-tool in the tools array.
 - `tool_search: "bm25"` prepends the server-side
   `tool_search_tool_bm25_20251119` meta-tool on capable Anthropic
-  models. On any other provider, Harn falls back to a client-executed
-  equivalent: a synthetic `__harn_tool_search` tool whose handler runs
-  BM25/regex/semantic/host in-VM or through the bridge, then promotes
-  the matching deferred tools into subsequent turns' schema list.
+  models, or `{"type": "tool_search", "mode": "hosted"}` on GPT 5.4+
+  via the Responses API. On any other provider, Harn falls back to a
+  client-executed equivalent: a synthetic `__harn_tool_search` tool
+  whose handler runs BM25/regex/semantic/host in-VM or through the
+  bridge, then promotes the matching deferred tools into subsequent
+  turns' schema list.
 - `tool_search: "regex"` uses the Python-regex variant
   (`tool_search_tool_regex_20251119`) on Anthropic, or an
   in-VM case-insensitive Rust-regex search on everything else.
 - `tool_search: {mode: "native"}` refuses to silently downgrade —
   errors if the provider isn't natively capable.
 - `tool_search: {mode: "client"}` forces the client-executed path
-  even on providers with native support.
+  even on providers with native support (useful for debuggability on
+  GPT 5.4+, where the hosted path hides search deltas in the usage
+  accounting).
 - `tool_search: {strategy: "bm25" | "regex" | "semantic" | "host"}`
   (client mode only) picks the implementation. `"semantic"` and
   `"host"` delegate to the host via the `tool_search/query` bridge
@@ -554,13 +563,24 @@ Semantics:
   tool (default `__harn_tool_search`).
 - `tool_search: {include_stub_listing: true}` appends a short list
   of deferred tool names to the contract prompt.
+- `namespace: "ops"` on a `tool_define(...)` call groups deferred
+  tools for OpenAI's `tool_search` meta-tool. The distinct set of
+  namespaces is collected into the meta-tool's `namespaces` field;
+  Anthropic ignores the label (harmless passthrough).
+- Escape hatch for proxied OpenAI-compat endpoints whose model ID
+  Harn cannot parse: pass `{<provider_name>:
+  {force_native_tool_search: true}}` on the call options. Asserts
+  the endpoint forwards `tool_search` + `defer_loading` unchanged and
+  opts into the hosted path regardless of model detection.
 - Pre-flight: at least one user tool must be non-deferred, matching
   Anthropic's 400 on all-deferred tool lists.
 - Transcript events: `tool_search_query` and `tool_search_result`
   blocks appear in the run record so replay / eval can see which tools
   got promoted and when. Client-mode events carry a
   `metadata.mode: "client"` tag so replayers can distinguish the two
-  paths; otherwise the shapes are identical.
+  paths; otherwise the shapes are identical. OpenAI hosted mode emits
+  the same block shapes from the wire `tool_search_call` and
+  `tool_search_output` entries in the response.
 
 ### Skills (bundled tool + prompt + MCP metadata)
 

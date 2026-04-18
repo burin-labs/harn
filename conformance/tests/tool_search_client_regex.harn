@@ -53,8 +53,17 @@ pipeline test(task) {
   let result = agent_loop(
     "Refactor the file",
     nil,
-    {provider: "mock", tools: registry, tool_search: "regex", persistent: true, max_iterations: 5},
+    {
+    provider: "mock",
+    tools: registry,
+    tool_search: {variant: "regex", mode: "client"},
+    persistent: true,
+    max_iterations: 5,
+  },
   )
+  // Explicit `mode: "client"` — mock spoofs native tool_search for
+  // Claude 4.0+ / GPT 5.4+ default models after harn#71, so
+  // client-mode tests must opt into the client path explicitly.
   let events = transcript_events(result?.transcript)
   var found_regex_strategy = false
   var promoted_edit = false

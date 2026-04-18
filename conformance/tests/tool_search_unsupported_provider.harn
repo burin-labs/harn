@@ -2,10 +2,11 @@
 //
 // Phase 1 (#69) added native tool_search on Anthropic Claude 4.0+
 // Opus/Sonnet and Haiku 4.5+. Phase 2 (#70) added the client-executed
-// fallback for everyone else, so `mode: "auto"` and `mode: "client"`
-// both succeed against the mock provider now. Only `mode: "native"`
-// still errors when the provider has no native support, pointing at
-// the client fallback as the fix.
+// fallback for everyone else. Phase 3 (#71) added OpenAI Responses-API
+// native support at GPT 5.4+. `mode: "auto"` and `mode: "client"` both
+// succeed against the mock provider; only `mode: "native"` on a
+// (provider, model) pair that exposes no native path still errors,
+// pointing at the client fallback as the fix.
 pipeline test(task) {
   var registry = tool_registry()
   registry = tool_define(
@@ -24,13 +25,17 @@ pipeline test(task) {
     handler: { args -> "deployed to " + args.env },
   },
   )
-  // mode: "native" against an unsupported provider → error with
-  // "does not expose native" text and a pointer to the client fallback.
+  // mode: "native" against an unsupported (provider, model) → error
+  // with "does not expose native" text and a pointer to the client
+  // fallback. Pin the model explicitly to `gpt-4o`: pre-harn#71 this
+  // path only gated on provider name, but mock now spoofs OpenAI
+  // capability by model generation. `gpt-4o` is below the 5.4 cutoff
+  // so the error still fires.
   let native_err = try {
     llm_call(
     "hello",
     nil,
-    {provider: "mock", tools: registry, tool_search: {variant: "bm25", mode: "native"}},
+    {provider: "mock", model: "gpt-4o", tools: registry, tool_search: {variant: "bm25", mode: "native"}},
   )
     nil
   } catch (e) {

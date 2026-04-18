@@ -6,6 +6,61 @@ use crate::llm::api::{DeltaSender, LlmRequestPayload, LlmResult};
 use crate::llm::provider::{LlmProvider, LlmProviderChat};
 use crate::value::VmError;
 
+/// Parse the (major, minor) version out of a GPT model ID. Handles dotted
+/// forms like `gpt-5.4`, `gpt-5.4-preview`, `gpt-5.4-turbo-20260115`, and
+/// dashed forms like `gpt-5-4`. Also strips OpenRouter-style prefixes
+/// (`openai/gpt-5.4`, `azure/gpt-5.4`) so the same parser can gate
+/// capabilities regardless of which OpenAI-compatible provider is routing.
+///
+/// Returns `None` for non-GPT shapes (`claude-opus-4-7`, `llama-3.1`, …).
+pub(crate) fn gpt_generation(model: &str) -> Option<(u32, u32)> {
+    let lower = model.to_lowercase();
+    // Strip any `namespace/` prefix (OpenRouter, Azure, vertex).
+    let stripped = match lower.rsplit_once('/') {
+        Some((_, tail)) => tail,
+        None => lower.as_str(),
+    };
+    let needle = "gpt-";
+    let idx = stripped.find(needle)?;
+    let tail = &stripped[idx + needle.len()..];
+    // Dotted: "5.4" / "5.4-preview" / "5.4-turbo".
+    if let Some((major, rest)) = tail.split_once('.') {
+        if let Ok(major) = major.parse::<u32>() {
+            let minor_str: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+            if let Ok(minor) = minor_str.parse::<u32>() {
+                return Some((major, minor));
+            }
+        }
+    }
+    // Dashed: "5-4" / "5-4-preview" / "5" (minor=0).
+    let mut parts = tail.split('-');
+    if let Some(major_str) = parts.next() {
+        if let Ok(major) = major_str.parse::<u32>() {
+            if let Some(minor_str) = parts.next() {
+                if let Ok(minor) = minor_str.parse::<u32>() {
+                    // Dates ≥ 1000 are stamps, not minor versions.
+                    let minor = if minor >= 1000 { 0 } else { minor };
+                    return Some((major, minor));
+                }
+            }
+            return Some((major, 0));
+        }
+    }
+    None
+}
+
+/// True for GPT models that expose OpenAI's Responses-API `tool_search` meta-tool
+/// and the `defer_loading: true` flag on user tool definitions. Per OpenAI's
+/// docs, the feature is gated on GPT 5.4+ (hosted + client-executed modes).
+/// We intentionally ignore legacy `gpt-4*`, `gpt-3.5*`, and any non-GPT model;
+/// those fall back to the client-executed path from harn#70.
+pub(crate) fn gpt_model_supports_tool_search(model: &str) -> bool {
+    match gpt_generation(model) {
+        Some((major, minor)) => (major, minor) >= (5, 4),
+        None => false,
+    }
+}
+
 /// OpenAI-compatible provider parameterized by name. A single struct handles
 /// all OpenAI-style backends — the provider name is used to resolve config
 /// (base URL, auth, etc.) from `llm_config`.
@@ -34,6 +89,23 @@ impl LlmProvider for OpenAiCompatibleProvider {
             if let Some(obj) = body.as_object_mut() {
                 obj.remove("chat_template_kwargs");
             }
+        }
+    }
+
+    fn supports_defer_loading(&self, model: &str) -> bool {
+        gpt_model_supports_tool_search(model)
+    }
+
+    fn native_tool_search_variants(&self, model: &str) -> &'static [&'static str] {
+        if gpt_model_supports_tool_search(model) {
+            // OpenAI Responses-API `tool_search` exposes two execution modes.
+            // `"hosted"` runs the search server-side (default — lowest token
+            // cost); `"client"` mirrors harn#70's client-executed fallback
+            // but keeps OpenAI's `call_id` round-trip semantics. Users who
+            // omit `mode` get `"hosted"` implicitly via the `Auto` resolver.
+            &["hosted", "client"]
+        } else {
+            &[]
         }
     }
 }
@@ -144,5 +216,75 @@ impl OpenAiCompatibleProvider {
             false, // is_ollama
         )
         .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tool_search_supported_for_gpt_5_4_and_up() {
+        assert!(gpt_model_supports_tool_search("gpt-5.4"));
+        assert!(gpt_model_supports_tool_search("gpt-5.4-preview"));
+        assert!(gpt_model_supports_tool_search("gpt-5.4-turbo"));
+        assert!(gpt_model_supports_tool_search("gpt-5-4"));
+        assert!(gpt_model_supports_tool_search("gpt-5.5"));
+        assert!(gpt_model_supports_tool_search("gpt-6.0"));
+    }
+
+    #[test]
+    fn tool_search_unsupported_for_pre_5_4() {
+        assert!(!gpt_model_supports_tool_search("gpt-4o"));
+        assert!(!gpt_model_supports_tool_search("gpt-4.1"));
+        assert!(!gpt_model_supports_tool_search("gpt-4-turbo"));
+        assert!(!gpt_model_supports_tool_search("gpt-3.5-turbo"));
+        assert!(!gpt_model_supports_tool_search("gpt-5.0"));
+        assert!(!gpt_model_supports_tool_search("gpt-5.3-preview"));
+        assert!(!gpt_model_supports_tool_search("gpt-5"));
+    }
+
+    #[test]
+    fn tool_search_unsupported_for_non_gpt() {
+        assert!(!gpt_model_supports_tool_search("claude-opus-4-7"));
+        assert!(!gpt_model_supports_tool_search("llama-3.1-70b"));
+        assert!(!gpt_model_supports_tool_search(""));
+    }
+
+    #[test]
+    fn gpt_generation_handles_openrouter_prefix() {
+        // OpenRouter model IDs carry an `openai/` prefix. Same capability
+        // check must produce the same answer.
+        assert_eq!(gpt_generation("openai/gpt-5.4-preview"), Some((5, 4)));
+        assert_eq!(gpt_generation("azure/gpt-5.5-turbo"), Some((5, 5)));
+        assert!(gpt_model_supports_tool_search("openai/gpt-5.4"));
+        assert!(!gpt_model_supports_tool_search("openai/gpt-4o"));
+    }
+
+    #[test]
+    fn gpt_generation_ignores_date_suffix_as_minor() {
+        // `gpt-5-20260115` should parse as generation (5, 0), not (5, 20260115).
+        assert_eq!(gpt_generation("gpt-5-20260115"), Some((5, 0)));
+        assert!(!gpt_model_supports_tool_search("gpt-5-20260115"));
+    }
+
+    #[test]
+    fn native_tool_search_variants_lists_hosted_first() {
+        let provider = OpenAiCompatibleProvider::new("openai".to_string());
+        let variants = provider.native_tool_search_variants("gpt-5.4-preview");
+        assert_eq!(variants, &["hosted", "client"]);
+    }
+
+    #[test]
+    fn native_tool_search_variants_empty_for_old_model() {
+        let provider = OpenAiCompatibleProvider::new("openai".to_string());
+        assert!(provider.native_tool_search_variants("gpt-4o").is_empty());
+    }
+
+    #[test]
+    fn supports_defer_loading_matches_tool_search_gate() {
+        let provider = OpenAiCompatibleProvider::new("openai".to_string());
+        assert!(provider.supports_defer_loading("gpt-5.4"));
+        assert!(!provider.supports_defer_loading("gpt-4o"));
     }
 }

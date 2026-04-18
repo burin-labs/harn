@@ -1,0 +1,66 @@
+// Tool Vault phase 3 (harn#71): `provider_overrides.<name>.force_native_tool_search`
+// escape hatch for proxied OpenAI-compat endpoints. A self-hosted router
+// or enterprise gateway may advertise a model ID Harn cannot parse
+// (`my-internal-gpt-clone-v2`), yet forward OpenAI's `tool_search` +
+// `defer_loading` fields unchanged. The override lets the user assert
+// that capability and opt into the native path.
+pipeline test(task) {
+  llm_mock_clear()
+  var registry = tool_registry()
+  registry = tool_define(
+    registry,
+    "anchor",
+    "Always-on tool",
+    {parameters: {op: {type: "string"}}, handler: { _ -> "ok" }},
+  )
+  registry = tool_define(
+    registry,
+    "deploy",
+    "Deploy the app",
+    {
+    parameters: {env: {type: "string"}},
+    defer_loading: true,
+    handler: { args -> "deployed to " + args.env },
+  },
+  )
+  // Without the override: Harn cannot parse "my-internal-model", so
+  // `mode: "native"` errors out.
+  let err_without = try {
+    llm_call(
+    "x",
+    nil,
+    {
+    provider: "mock",
+    model: "my-internal-model",
+    tools: registry,
+    tool_search: {variant: "bm25", mode: "native"},
+  },
+  )
+    nil
+  } catch (e) {
+    e
+  }
+  assert(err_without != nil, "unparsable model rejects native without override")
+  assert(err_without.contains("does not expose native"), "helpful diagnostic fired")
+  // With the override: the same config succeeds and emits the OpenAI
+  // meta-tool. `provider_overrides` is keyed by provider name so the
+  // same call can pass multiple provider-specific flags.
+  llm_mock_clear()
+  llm_mock({text: "ack"})
+  llm_call(
+    "x",
+    nil,
+    {
+    provider: "mock",
+    model: "my-internal-model",
+    tools: registry,
+    tool_search: {variant: "bm25", mode: "native"},
+    mock: {force_native_tool_search: true},
+  },
+  )
+  let calls = llm_mock_calls()
+  let meta = calls[0].tools[0]
+  assert(meta.type == "tool_search", "escape hatch emits OpenAI meta-tool")
+  assert(meta.mode == "hosted", "defaults to hosted mode")
+  log("tool_search_provider_overrides tests passed")
+}

@@ -59,8 +59,18 @@ pipeline test(task) {
   let result = agent_loop(
     "Ship the release",
     nil,
-    {provider: "mock", tools: registry, tool_search: "bm25", persistent: true, max_iterations: 5},
+    {
+    provider: "mock",
+    tools: registry,
+    tool_search: {variant: "bm25", mode: "client"},
+    persistent: true,
+    max_iterations: 5,
+  },
   )
+  // Explicit `mode: "client"` — the mock provider now spoofs native
+  // tool_search when its (default) model looks like Claude 4.0+ or
+  // GPT 5.4+, which would otherwise route through the Anthropic
+  // native path. Client-mode tests must opt into the client path.
   let calls = llm_mock_calls()
   assert(len(calls) >= 2, "at least two LLM calls happened")
   // Turn 1 system prompt: synthetic tool visible, deferred tools hidden.
