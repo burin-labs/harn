@@ -208,12 +208,12 @@ pub(crate) fn extract_llm_options(
         let provider_has_native = model_based_native || forced;
         // If the forced path is active, use OpenAI's default variants
         // so the injection below picks the right shape.
-        let forced_variants: &'static [&'static str] = &["hosted", "client"];
-        let effective_variants = if forced && native_variants.is_empty() {
-            forced_variants
+        let effective_variants: Vec<String> = if forced && native_variants.is_empty() {
+            vec!["hosted".to_string(), "client".to_string()]
         } else {
             native_variants
         };
+        let variant_supported = |v: &str| effective_variants.iter().any(|x| x == v);
         let resolution = match cfg.mode {
             ToolSearchMode::Native => {
                 if !provider_has_native {
@@ -272,7 +272,7 @@ pub(crate) fn extract_llm_options(
                         // `effective_variants`; fall back to element 0
                         // with a warn if the user asked for something
                         // this model doesn't support.
-                        if !effective_variants.contains(&cfg.variant.as_short()) {
+                        if !variant_supported(cfg.variant.as_short()) {
                             crate::events::log_warn(
                                 "llm.tool_search",
                                 &format!(
@@ -283,15 +283,14 @@ pub(crate) fn extract_llm_options(
                                 ),
                             );
                         }
-                        let effective_variant =
-                            if effective_variants.contains(&cfg.variant.as_short()) {
-                                cfg.variant
-                            } else {
-                                match effective_variants[0] {
-                                    "regex" => ToolSearchVariant::Regex,
-                                    _ => ToolSearchVariant::Bm25,
-                                }
-                            };
+                        let effective_variant = if variant_supported(cfg.variant.as_short()) {
+                            cfg.variant
+                        } else {
+                            match effective_variants[0].as_str() {
+                                "regex" => ToolSearchVariant::Regex,
+                                _ => ToolSearchVariant::Bm25,
+                            }
+                        };
                         crate::llm::tools::apply_tool_search_native_injection_typed(
                             &mut native_tools,
                             shape,

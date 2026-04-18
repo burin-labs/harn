@@ -1460,6 +1460,28 @@ active (provider, model) pair is not natively capable; `mode: "client"`
 forces the fallback everywhere; `mode: "auto"` (default) picks native
 when available.
 
+The per-provider / per-model capability table that gates native
+`tool_search`, `defer_loading`, prompt caching, and extended thinking
+is a shipped TOML matrix overridable per-project via
+`[[capabilities.provider.<name>]]` in `harn.toml`. Scripts query the
+effective matrix at runtime with:
+
+```harn
+let caps = provider_capabilities("anthropic", "claude-opus-4-7")
+// {
+//   provider, model, native_tools, defer_loading,
+//   tool_search: [string], max_tools: int | nil,
+//   prompt_caching, thinking,
+// }
+```
+
+The `provider_capabilities_install(toml_src)` and
+`provider_capabilities_clear()` builtins let scripts install and
+revert overrides in-process for cases where editing the manifest is
+awkward (runtime proxy detection, conformance test setup). See
+`docs/src/llm-and-agents.md#capability-matrix--harntoml-overrides`
+for the rule schema.
+
 ### skill declarations
 
 ```harn

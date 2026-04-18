@@ -240,6 +240,86 @@ llm_call(prompt, sys, {
 The override is keyed by the provider name (the same dict you'd use for
 any provider-specific knob).
 
+### Capability matrix + `harn.toml` overrides
+
+The provider support table above is **not** hard-coded: it's the output
+of a shipped data file (`crates/harn-vm/src/llm/capabilities.toml`)
+matched against the `(provider, model)` pair at call time. Scripts
+can query the effective capability surface without carrying
+vendor-specific knowledge:
+
+```harn
+let caps = provider_capabilities("anthropic", "claude-opus-4-7")
+// {
+//   native_tools: true, defer_loading: true,
+//   tool_search: ["bm25", "regex"], max_tools: 10000,
+//   prompt_caching: true, thinking: true,
+// }
+
+if "bm25" in caps.tool_search {
+  llm_call(prompt, sys, {
+    tools: registry,
+    tool_search: "bm25",
+  })
+}
+```
+
+Projects override or extend the shipped table in `harn.toml` — useful
+for flagging a proxied OpenAI-compat endpoint as supporting
+`tool_search` ahead of a Harn release that knows about it natively:
+
+```toml
+# harn.toml
+[[capabilities.provider.my-proxy]]
+model_match = "*"
+native_tools = true
+defer_loading = true
+tool_search = ["hosted"]
+prompt_caching = true
+
+# Shadow the built-in Anthropic rule to force client-executed
+# fallback on every Opus call (e.g. while a regional outage is
+# active):
+[[capabilities.provider.anthropic]]
+model_match = "claude-opus-*"
+native_tools = true
+defer_loading = false
+tool_search = []
+prompt_caching = true
+thinking = true
+```
+
+Each `[[capabilities.provider.<name>]]` entry accepts these fields:
+
+| Field | Type | Purpose |
+|---|---|---|
+| `model_match` | glob string | Required. Matched against the lowercased model ID. Leading/trailing `*` or a single middle `*` supported. |
+| `version_min` | `[major, minor]` | Narrows the match to a parseable version (Anthropic / OpenAI extractors). Rules where `version_min` is set but the model ID won't parse are skipped. |
+| `native_tools` | bool | Whether the provider accepts a native tool-call wire shape. |
+| `defer_loading` | bool | Whether `defer_loading: true` on tool definitions is honored server-side. |
+| `tool_search` | list of strings | Native `tool_search` variants, preferred first. Anthropic: `["bm25", "regex"]`. OpenAI: `["hosted", "client"]`. Empty = no native support (client fallback only). |
+| `max_tools` | int | Cap on tool count. `harn lint` will warn if a registry exceeds the smallest cap any active provider advertises. |
+| `prompt_caching` | bool | `cache_control` blocks honored. |
+| `thinking` | bool | Extended or adaptive thinking available. |
+
+First match wins. User rules for a given provider are consulted
+before the shipped rules — so the order inside the TOML file matters
+(place more specific patterns above wildcards).
+
+`[provider_family]` declares sibling providers that inherit rules
+from a canonical family. The shipped table routes OpenRouter,
+Together, Groq, DeepSeek, Fireworks, HuggingFace, and local vLLM to
+`[[provider.openai]]` by default.
+
+Two programmatic helpers mirror the `harn.toml` path for cases where
+editing the manifest is awkward:
+
+- `provider_capabilities_install(toml_src)` — install overrides from
+  a TOML string (same layout as `capabilities.toml`, without the
+  `capabilities.` prefix: just `[[provider.<name>]]`). Useful when a
+  script detects a proxied endpoint at runtime.
+- `provider_capabilities_clear()` — revert to shipped defaults.
+
 ### Client-executed fallback
 
 On providers without native `defer_loading`, Harn falls back to an

@@ -1,0 +1,38 @@
+// Per-project capability overrides (harn#77). Scripts (and harn.toml)
+// can declare `[[capabilities.provider.<name>]]` rules that win over
+// the built-in matrix. Here we exercise the override path with the
+// `provider_capabilities_install` builtin so the test is self-contained
+// (harn.toml is not loaded by the conformance runner).
+pipeline test(task) {
+  // Baseline: unknown proxied provider has no capabilities.
+  provider_capabilities_clear()
+  let baseline = provider_capabilities("my-proxy", "opaque-id-v2")
+  assert(baseline.native_tools == false, "baseline: unknown provider gets no native_tools")
+  assert(baseline.defer_loading == false, "baseline: unknown provider gets no defer_loading")
+  assert(len(baseline.tool_search) == 0, "baseline: empty tool_search")
+  // Install an override for the custom proxy.
+  provider_capabilities_install(
+    "[[provider.my-proxy]]\nmodel_match = \"*\"\nnative_tools = true\ndefer_loading = true\ntool_search = [\"hosted\"]\nprompt_caching = true\n",
+  )
+  let proxied = provider_capabilities("my-proxy", "opaque-id-v2")
+  assert(proxied.native_tools == true, "override: native_tools on")
+  assert(proxied.defer_loading == true, "override: defer_loading on")
+  assert(len(proxied.tool_search) == 1, "override: hosted variant only")
+  assert(proxied.tool_search[0] == "hosted", "override: variant is hosted")
+  assert(proxied.prompt_caching == true, "override: prompt_caching on")
+  // Override targeting a built-in name takes precedence over the
+  // shipped rule. Use it to downgrade capabilities (e.g. force a
+  // client-side fallback on a flaky proxy).
+  provider_capabilities_install(
+    "[[provider.anthropic]]\nmodel_match = \"claude-opus-*\"\nnative_tools = true\ndefer_loading = false\ntool_search = []\n",
+  )
+  let down = provider_capabilities("anthropic", "claude-opus-4-7")
+  assert(down.native_tools == true, "shadowed: native_tools still on")
+  assert(down.defer_loading == false, "shadowed: defer_loading off")
+  assert(len(down.tool_search) == 0, "shadowed: empty tool_search")
+  // Clear reverts to the shipped table.
+  provider_capabilities_clear()
+  let restored = provider_capabilities("anthropic", "claude-opus-4-7")
+  assert(restored.defer_loading == true, "clear: shipped defaults restored")
+  log("provider_capabilities_override tests passed")
+}

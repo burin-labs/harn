@@ -28,6 +28,15 @@ pub struct Manifest {
     /// (filesystem, git, reserved registry).
     #[serde(default)]
     pub skill: SkillTables,
+    /// `[capabilities]` section — per-provider-per-model override of
+    /// the shipped capability matrix (`defer_loading`, `tool_search`,
+    /// `prompt_caching`, etc.). Entries under `[[capabilities.provider.<name>]]`
+    /// are prepended to the built-in rules for the same provider so
+    /// early adopters can flag proxied endpoints as supporting tool
+    /// search without waiting for a Harn release. See
+    /// `harn_vm::llm::capabilities` for the rule schema.
+    #[serde(default)]
+    pub capabilities: Option<harn_vm::llm::capabilities::CapabilitiesFile>,
 }
 
 /// `[skills]` table body.
@@ -347,6 +356,16 @@ pub fn try_read_manifest_for(harn_file: &std::path::Path) -> Option<Manifest> {
             None
         }
     }
+}
+
+/// Install this manifest's `[[capabilities.provider.<name>]]` overrides
+/// on the current thread so the VM's `capabilities::lookup` picks them
+/// up for the duration of the run. Called by each CLI entry point that
+/// constructs a VM after reading harn.toml. Safe to call with a
+/// manifest that omits the section — clears any prior override so the
+/// built-in rules apply cleanly.
+pub fn install_capability_overrides(manifest: &Manifest) {
+    harn_vm::llm::capabilities::set_user_overrides(manifest.capabilities.clone());
 }
 
 fn absolutize_check_config_paths(mut config: CheckConfig, manifest_dir: &Path) -> CheckConfig {

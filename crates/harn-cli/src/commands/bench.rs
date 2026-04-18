@@ -90,6 +90,9 @@ pub(crate) async fn run_bench(path: &str, iterations: usize) {
         .and_then(|segment| segment.to_str())
         .unwrap_or("default");
     let manifest = package::try_read_manifest_for(Path::new(path));
+    if let Some(m) = manifest.as_ref() {
+        package::install_capability_overrides(m);
+    }
 
     let mut runs = Vec::with_capacity(iterations);
     for iteration in 0..iterations {

@@ -1,0 +1,484 @@
+//! Data-driven provider capabilities.
+//!
+//! The per-(provider, model) capability matrix (native tools, deferred
+//! tool loading, tool-search variants, prompt caching, extended thinking,
+//! max tool count) lives in the shipped `capabilities.toml` and is
+//! overridable per-project via `[[capabilities.provider.<name>]]` blocks
+//! in `harn.toml`. This module owns:
+//!
+//! - loading the built-in TOML (compiled in via `include_str!`);
+//! - merging user overrides on top;
+//! - matching a `(provider, model)` pair against the rule list with
+//!   glob + semver semantics;
+//! - exposing a stable `Capabilities` struct that the `LlmProvider`
+//!   trait delegates to as the single source of truth.
+//!
+//! Before this module the Anthropic / OpenAI gates were spread across
+//! `providers/anthropic.rs` (`claude_generation`, `claude_model_supports_tool_search`)
+//! and `providers/openai_compat.rs` (`gpt_generation`, `gpt_model_supports_tool_search`).
+//! Those parsers are still used here — they supply the version extractor —
+//! but the boolean gates that used to live alongside them are now data.
+
+use std::cell::RefCell;
+use std::collections::BTreeMap;
+use std::sync::OnceLock;
+
+use serde::Deserialize;
+
+use super::providers::anthropic::claude_generation;
+use super::providers::openai_compat::gpt_generation;
+
+/// Shipped default rules. Compiled into the binary at build time.
+const BUILTIN_TOML: &str = include_str!("capabilities.toml");
+
+/// Parsed on-disk capabilities schema. Public so harn-cli can
+/// construct one directly when wiring harn.toml overrides.
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct CapabilitiesFile {
+    /// Per-provider ordered rule lists. First matching rule wins.
+    #[serde(default)]
+    pub provider: BTreeMap<String, Vec<ProviderRule>>,
+    /// Sibling → canonical family mapping. Providers with no rule of
+    /// their own fall through to the named family (recursively).
+    #[serde(default)]
+    pub provider_family: BTreeMap<String, String>,
+}
+
+/// One row of the capability matrix.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ProviderRule {
+    /// Glob pattern (supports leading / trailing `*` and a single mid-`*`).
+    /// Matched case-insensitively against the model ID.
+    pub model_match: String,
+    /// Optional `[major, minor]` lower bound. When set, the model ID
+    /// must parse via the provider's version extractor AND compare ≥
+    /// this tuple. Rules with an unparseable `version_min` for the
+    /// given model are skipped, not merged.
+    #[serde(default)]
+    pub version_min: Option<Vec<u32>>,
+    #[serde(default)]
+    pub native_tools: Option<bool>,
+    #[serde(default)]
+    pub defer_loading: Option<bool>,
+    #[serde(default)]
+    pub tool_search: Option<Vec<String>>,
+    #[serde(default)]
+    pub max_tools: Option<u32>,
+    #[serde(default)]
+    pub prompt_caching: Option<bool>,
+    #[serde(default)]
+    pub thinking: Option<bool>,
+}
+
+/// Resolved capabilities for a `(provider, model)` pair. Unset rule
+/// fields resolve to `false` / empty / `None` so callers never have to
+/// unwrap an `Option<bool>` for what are really boolean gates.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Capabilities {
+    pub native_tools: bool,
+    pub defer_loading: bool,
+    pub tool_search: Vec<String>,
+    pub max_tools: Option<u32>,
+    pub prompt_caching: bool,
+    pub thinking: bool,
+}
+
+thread_local! {
+    /// Per-thread user overrides installed by the CLI at startup. Kept
+    /// thread-local (not process-static) to match the rest of the VM
+    /// state model — the VM is !Send and each VM thread owns its own
+    /// configuration.
+    static USER_OVERRIDES: RefCell<Option<CapabilitiesFile>> = const { RefCell::new(None) };
+}
+
+/// Lazily-parsed built-in rules. The `include_str!` content is a static
+/// constant; parsing it once per process is safe and free of ordering
+/// hazards.
+static BUILTIN: OnceLock<CapabilitiesFile> = OnceLock::new();
+
+fn builtin() -> &'static CapabilitiesFile {
+    BUILTIN.get_or_init(|| {
+        toml::from_str::<CapabilitiesFile>(BUILTIN_TOML)
+            .expect("capabilities.toml must parse at build time")
+    })
+}
+
+/// Install project-level overrides for the current thread. Usually
+/// called once at CLI bootstrap after reading `harn.toml`. Passing
+/// `None` clears any prior override.
+pub fn set_user_overrides(file: Option<CapabilitiesFile>) {
+    USER_OVERRIDES.with(|cell| *cell.borrow_mut() = file);
+}
+
+/// Clear any thread-local user overrides. Used between test runs.
+pub fn clear_user_overrides() {
+    set_user_overrides(None);
+}
+
+/// Parse a TOML string containing the capabilities section's own shape
+/// (i.e. top-level `[[provider.X]]` + optional `[provider_family]`, the
+/// same layout used by the built-in `capabilities.toml`) and install as
+/// the current thread's override.
+pub fn set_user_overrides_toml(src: &str) -> Result<(), String> {
+    let parsed: CapabilitiesFile = toml::from_str(src).map_err(|e| e.to_string())?;
+    set_user_overrides(Some(parsed));
+    Ok(())
+}
+
+/// Extract the `[capabilities]` section from a full `harn.toml` source
+/// and install it as the current thread's override. The schema inside
+/// that section mirrors `CapabilitiesFile` but with every key prefixed
+/// by `capabilities.`:
+///
+/// ```toml
+/// [[capabilities.provider.my-proxy]]
+/// model_match = "*"
+/// native_tools = true
+/// tool_search = ["hosted"]
+/// ```
+pub fn set_user_overrides_from_manifest_toml(src: &str) -> Result<(), String> {
+    #[derive(Deserialize)]
+    struct Manifest {
+        #[serde(default)]
+        capabilities: Option<CapabilitiesFile>,
+    }
+    let parsed: Manifest = toml::from_str(src).map_err(|e| e.to_string())?;
+    set_user_overrides(parsed.capabilities);
+    Ok(())
+}
+
+/// Look up effective capabilities for a `(provider, model)` pair.
+/// Walks the provider_family chain until it finds a rule list that
+/// matches. Within any one provider's rule list, user overrides are
+/// consulted before the built-in rules. The first matching rule wins —
+/// later rules (and later layers in the family chain) are ignored.
+pub fn lookup(provider: &str, model: &str) -> Capabilities {
+    let user = USER_OVERRIDES.with(|cell| cell.borrow().clone());
+    lookup_with(provider, model, builtin(), user.as_ref())
+}
+
+fn lookup_with(
+    provider: &str,
+    model: &str,
+    builtin: &CapabilitiesFile,
+    user: Option<&CapabilitiesFile>,
+) -> Capabilities {
+    // Special case: mock spoofs either shape. Try anthropic first
+    // (Claude-shape model strings) so `mock` + `claude-opus-4-7`
+    // resolves to the Anthropic capability row — the same behaviour
+    // the hardcoded dispatch gave before this refactor.
+    if provider == "mock" {
+        if let Some(caps) = try_match_layer(user, builtin, "anthropic", model, provider) {
+            return caps;
+        }
+        if let Some(caps) = try_match_layer(user, builtin, "openai", model, provider) {
+            return caps;
+        }
+        return Capabilities::default();
+    }
+
+    // Normal chain: walk provider → family(provider) → ... with a
+    // visited-guard to avoid cycles in malformed user overrides.
+    let mut current = provider.to_string();
+    let mut visited: std::collections::HashSet<String> = std::collections::HashSet::new();
+    while visited.insert(current.clone()) {
+        if let Some(caps) = try_match_layer(user, builtin, &current, model, provider) {
+            return caps;
+        }
+        let next = user
+            .and_then(|f| f.provider_family.get(&current))
+            .or_else(|| builtin.provider_family.get(&current))
+            .cloned();
+        match next {
+            Some(parent) => current = parent,
+            None => break,
+        }
+    }
+    Capabilities::default()
+}
+
+/// Try the ordered rule list for `layer_provider` (user rules first,
+/// then built-in rules). Returns `Some(caps)` on the first match, else
+/// `None`. `original_provider` is threaded through only for diagnostics.
+fn try_match_layer(
+    user: Option<&CapabilitiesFile>,
+    builtin: &CapabilitiesFile,
+    layer_provider: &str,
+    model: &str,
+    _original_provider: &str,
+) -> Option<Capabilities> {
+    if let Some(user) = user {
+        if let Some(rules) = user.provider.get(layer_provider) {
+            for rule in rules {
+                if rule_matches(rule, model) {
+                    return Some(rule_to_caps(rule));
+                }
+            }
+        }
+    }
+    if let Some(rules) = builtin.provider.get(layer_provider) {
+        for rule in rules {
+            if rule_matches(rule, model) {
+                return Some(rule_to_caps(rule));
+            }
+        }
+    }
+    None
+}
+
+fn rule_to_caps(rule: &ProviderRule) -> Capabilities {
+    Capabilities {
+        native_tools: rule.native_tools.unwrap_or(false),
+        defer_loading: rule.defer_loading.unwrap_or(false),
+        tool_search: rule.tool_search.clone().unwrap_or_default(),
+        max_tools: rule.max_tools,
+        prompt_caching: rule.prompt_caching.unwrap_or(false),
+        thinking: rule.thinking.unwrap_or(false),
+    }
+}
+
+fn rule_matches(rule: &ProviderRule, model: &str) -> bool {
+    let lower = model.to_lowercase();
+    if !glob_match(&rule.model_match.to_lowercase(), &lower) {
+        return false;
+    }
+    if let Some(version_min) = &rule.version_min {
+        if version_min.len() != 2 {
+            return false;
+        }
+        let want = (version_min[0], version_min[1]);
+        let have = match extract_version(model) {
+            Some(v) => v,
+            // `version_min` was set but the model ID can't be parsed.
+            // Fail closed: skip this rule so more permissive catch-all
+            // rules below can still match.
+            None => return false,
+        };
+        if have < want {
+            return false;
+        }
+    }
+    true
+}
+
+/// Extract `(major, minor)` from a model ID by trying the Anthropic
+/// parser first (for `claude-*` shapes) then the OpenAI parser (`gpt-*`).
+/// Both parsers return `None` for shapes they don't recognise so this
+/// never mis-parses across families.
+fn extract_version(model: &str) -> Option<(u32, u32)> {
+    claude_generation(model).or_else(|| gpt_generation(model))
+}
+
+/// Simple glob matching with `*` wildcards. Mirrors the helper in
+/// `llm_config.rs` — keep them in sync if either ever grows regex or
+/// character-class support.
+fn glob_match(pattern: &str, input: &str) -> bool {
+    if let Some(prefix) = pattern.strip_suffix('*') {
+        if let Some(rest) = prefix.strip_prefix('*') {
+            // `*foo*` — substring match.
+            return input.contains(rest);
+        }
+        return input.starts_with(prefix);
+    }
+    if let Some(suffix) = pattern.strip_prefix('*') {
+        return input.ends_with(suffix);
+    }
+    if pattern.contains('*') {
+        let parts: Vec<&str> = pattern.split('*').collect();
+        if parts.len() == 2 {
+            return input.starts_with(parts[0]) && input.ends_with(parts[1]);
+        }
+        return input == pattern;
+    }
+    input == pattern
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn reset() {
+        clear_user_overrides();
+    }
+
+    #[test]
+    fn anthropic_opus_47_gets_full_capabilities() {
+        reset();
+        let caps = lookup("anthropic", "claude-opus-4-7");
+        assert!(caps.native_tools);
+        assert!(caps.defer_loading);
+        assert_eq!(caps.tool_search, vec!["bm25", "regex"]);
+        assert!(caps.prompt_caching);
+        assert!(caps.thinking);
+        assert_eq!(caps.max_tools, Some(10000));
+    }
+
+    #[test]
+    fn anthropic_haiku_44_has_no_tool_search() {
+        reset();
+        let caps = lookup("anthropic", "claude-haiku-4-4");
+        // Haiku 4.4 falls through to the `claude-*` catch-all row.
+        assert!(caps.native_tools);
+        assert!(caps.prompt_caching);
+        assert!(!caps.defer_loading);
+        assert!(caps.tool_search.is_empty());
+    }
+
+    #[test]
+    fn anthropic_haiku_45_supports_tool_search() {
+        reset();
+        let caps = lookup("anthropic", "claude-haiku-4-5");
+        assert!(caps.defer_loading);
+        assert_eq!(caps.tool_search, vec!["bm25", "regex"]);
+    }
+
+    #[test]
+    fn old_claude_gets_catchall() {
+        reset();
+        let caps = lookup("anthropic", "claude-opus-3-5");
+        assert!(caps.native_tools);
+        assert!(caps.prompt_caching);
+        assert!(!caps.defer_loading);
+        assert!(caps.tool_search.is_empty());
+    }
+
+    #[test]
+    fn openai_gpt_54_supports_tool_search() {
+        reset();
+        let caps = lookup("openai", "gpt-5.4");
+        assert!(caps.defer_loading);
+        assert_eq!(caps.tool_search, vec!["hosted", "client"]);
+    }
+
+    #[test]
+    fn openai_gpt_53_has_native_tools_only() {
+        reset();
+        let caps = lookup("openai", "gpt-5.3");
+        assert!(caps.native_tools);
+        assert!(!caps.defer_loading);
+        assert!(caps.tool_search.is_empty());
+    }
+
+    #[test]
+    fn openrouter_inherits_openai() {
+        reset();
+        let caps = lookup("openrouter", "gpt-5.4");
+        assert!(caps.defer_loading);
+        assert_eq!(caps.tool_search, vec!["hosted", "client"]);
+    }
+
+    #[test]
+    fn groq_inherits_openai_family_only() {
+        reset();
+        let caps = lookup("groq", "gpt-5.5-preview");
+        assert!(caps.defer_loading);
+    }
+
+    #[test]
+    fn mock_with_claude_model_routes_to_anthropic() {
+        reset();
+        let caps = lookup("mock", "claude-sonnet-4-7");
+        assert!(caps.defer_loading);
+        assert_eq!(caps.tool_search, vec!["bm25", "regex"]);
+    }
+
+    #[test]
+    fn mock_with_gpt_model_routes_to_openai() {
+        reset();
+        let caps = lookup("mock", "gpt-5.4-preview");
+        assert!(caps.defer_loading);
+        assert_eq!(caps.tool_search, vec!["hosted", "client"]);
+    }
+
+    #[test]
+    fn unknown_provider_has_no_capabilities() {
+        reset();
+        let caps = lookup("my-custom-proxy", "foo-bar-1");
+        assert!(!caps.native_tools);
+        assert!(!caps.defer_loading);
+        assert!(caps.tool_search.is_empty());
+    }
+
+    #[test]
+    fn user_override_adds_new_provider() {
+        reset();
+        let toml_src = r#"
+[[provider.my-proxy]]
+model_match = "*"
+native_tools = true
+tool_search = ["hosted"]
+"#;
+        set_user_overrides_toml(toml_src).unwrap();
+        let caps = lookup("my-proxy", "anything");
+        assert!(caps.native_tools);
+        assert_eq!(caps.tool_search, vec!["hosted"]);
+        clear_user_overrides();
+    }
+
+    #[test]
+    fn user_override_takes_precedence_over_builtin() {
+        reset();
+        let toml_src = r#"
+[[provider.anthropic]]
+model_match = "claude-opus-*"
+native_tools = true
+defer_loading = false
+tool_search = []
+"#;
+        set_user_overrides_toml(toml_src).unwrap();
+        let caps = lookup("anthropic", "claude-opus-4-7");
+        assert!(caps.native_tools);
+        assert!(!caps.defer_loading);
+        assert!(caps.tool_search.is_empty());
+        clear_user_overrides();
+    }
+
+    #[test]
+    fn user_override_from_manifest_toml() {
+        reset();
+        let manifest = r#"
+[package]
+name = "demo"
+
+[[capabilities.provider.my-proxy]]
+model_match = "*"
+native_tools = true
+tool_search = ["hosted"]
+"#;
+        set_user_overrides_from_manifest_toml(manifest).unwrap();
+        let caps = lookup("my-proxy", "foo");
+        assert!(caps.native_tools);
+        assert_eq!(caps.tool_search, vec!["hosted"]);
+        clear_user_overrides();
+    }
+
+    #[test]
+    fn version_min_requires_parseable_model() {
+        reset();
+        let toml_src = r#"
+[[provider.custom]]
+model_match = "*"
+version_min = [5, 4]
+native_tools = true
+"#;
+        set_user_overrides_toml(toml_src).unwrap();
+        // Unparseable model ID + version_min → rule doesn't match.
+        let caps = lookup("custom", "mystery-model");
+        assert!(!caps.native_tools);
+        clear_user_overrides();
+    }
+
+    #[test]
+    fn glob_match_substring() {
+        assert!(glob_match("*gpt*", "openai/gpt-5.4"));
+        assert!(glob_match("*claude*", "anthropic/claude-opus-4-7"));
+        assert!(!glob_match("*xyz*", "openai/gpt-5.4"));
+    }
+
+    #[test]
+    fn openrouter_namespaced_anthropic_model() {
+        reset();
+        let caps = lookup("anthropic", "anthropic/claude-opus-4-7");
+        assert!(caps.defer_loading);
+    }
+}

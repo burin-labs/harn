@@ -210,6 +210,7 @@ pub(crate) async fn run_file_with_skill_dirs(
     );
 
     if let Some(manifest) = package::try_read_manifest_for(Path::new(path)) {
+        package::install_capability_overrides(&manifest);
         if !manifest.mcp.is_empty() {
             connect_mcp_servers(&manifest.mcp, &mut vm).await;
         }
@@ -425,6 +426,7 @@ pub(crate) async fn run_file_mcp_serve(path: &str) {
     install_skills_global(&mut vm, &loaded);
 
     if let Some(manifest) = package::try_read_manifest_for(Path::new(path)) {
+        package::install_capability_overrides(&manifest);
         if !manifest.mcp.is_empty() {
             connect_mcp_servers(&manifest.mcp, &mut vm).await;
         }

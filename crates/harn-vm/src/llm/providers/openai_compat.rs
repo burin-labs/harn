@@ -54,6 +54,12 @@ pub(crate) fn gpt_generation(model: &str) -> Option<(u32, u32)> {
 /// docs, the feature is gated on GPT 5.4+ (hosted + client-executed modes).
 /// We intentionally ignore legacy `gpt-4*`, `gpt-3.5*`, and any non-GPT model;
 /// those fall back to the client-executed path from harn#70.
+///
+/// Retained only as a pure-parse helper for `capabilities::lookup` callers
+/// that want to ask the model-ID question without loading the full rule
+/// table. The authoritative gate is
+/// `capabilities::lookup(provider, model).defer_loading`.
+#[allow(dead_code)]
 pub(crate) fn gpt_model_supports_tool_search(model: &str) -> bool {
     match gpt_generation(model) {
         Some((major, minor)) => (major, minor) >= (5, 4),
@@ -92,22 +98,11 @@ impl LlmProvider for OpenAiCompatibleProvider {
         }
     }
 
-    fn supports_defer_loading(&self, model: &str) -> bool {
-        gpt_model_supports_tool_search(model)
-    }
-
-    fn native_tool_search_variants(&self, model: &str) -> &'static [&'static str] {
-        if gpt_model_supports_tool_search(model) {
-            // OpenAI Responses-API `tool_search` exposes two execution modes.
-            // `"hosted"` runs the search server-side (default — lowest token
-            // cost); `"client"` mirrors harn#70's client-executed fallback
-            // but keeps OpenAI's `call_id` round-trip semantics. Users who
-            // omit `mode` get `"hosted"` implicitly via the `Auto` resolver.
-            &["hosted", "client"]
-        } else {
-            &[]
-        }
-    }
+    // `supports_defer_loading` and `native_tool_search_variants` are
+    // served by the default trait impl, which reads `capabilities.toml`.
+    // The `gpt_model_supports_tool_search` helper below is retained for
+    // shape detection in `helpers/options.rs::classify_native_shape`
+    // (deciding Anthropic- vs OpenAI-wire shape for the mock provider).
 }
 
 impl LlmProviderChat for OpenAiCompatibleProvider {
@@ -272,7 +267,7 @@ mod tests {
     fn native_tool_search_variants_lists_hosted_first() {
         let provider = OpenAiCompatibleProvider::new("openai".to_string());
         let variants = provider.native_tool_search_variants("gpt-5.4-preview");
-        assert_eq!(variants, &["hosted", "client"]);
+        assert_eq!(variants, vec!["hosted".to_string(), "client".to_string()]);
     }
 
     #[test]

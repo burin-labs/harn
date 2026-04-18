@@ -1,0 +1,18 @@
+// Mock provider spoofs either Anthropic or OpenAI shape depending on
+// the model ID, matching the pre-refactor hardcoded dispatch. Test
+// both paths round-trip through `capabilities::lookup`.
+pipeline test(task) {
+  let as_claude = provider_capabilities("mock", "claude-opus-4-7")
+  assert(as_claude.defer_loading == true, "mock+claude routes to anthropic row")
+  assert(as_claude.tool_search[0] == "bm25", "mock+claude gets anthropic variants")
+  assert(as_claude.prompt_caching == true, "mock+claude inherits claude-family caching")
+  let as_gpt = provider_capabilities("mock", "gpt-5.4-preview")
+  assert(as_gpt.defer_loading == true, "mock+gpt routes to openai row")
+  assert(as_gpt.tool_search[0] == "hosted", "mock+gpt gets openai variants")
+  let as_legacy = provider_capabilities("mock", "gpt-4o")
+  assert(as_legacy.defer_loading == false, "mock+gpt-4o has no tool search")
+  assert(as_legacy.native_tools == true, "mock+gpt-4o still has native tools")
+  let as_unknown = provider_capabilities("mock", "mystery-model-7b")
+  assert(as_unknown.defer_loading == false, "mock+unknown has no capabilities")
+  log("provider_capabilities_mock tests passed")
+}

@@ -16,6 +16,7 @@ mod agent_config;
 mod agent_observe;
 mod agent_tools;
 pub(crate) mod api;
+pub mod capabilities;
 mod config_builtins;
 mod conversation;
 pub(crate) mod cost;
@@ -296,6 +297,7 @@ pub fn reset_llm_state() {
     provider::register_default_providers();
     rate_limit::reset_rate_limit_state();
     mock::reset_llm_mock_state();
+    capabilities::clear_user_overrides();
 }
 
 /// Shared implementation of `llm_call` / `llm_call_safe`. Runs the

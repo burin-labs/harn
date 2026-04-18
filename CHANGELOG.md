@@ -11,6 +11,69 @@ granular archaeology.
 
 ### Added
 
+- **Tool Vault phase 4: data-driven provider capabilities (harn#77).**
+  The per-provider / per-model capability gates used by the tool-search
+  and defer-loading paths (hard-coded Rust `match` blocks added in
+  harn#69 and harn#71) are now a data table. A shipped
+  `crates/harn-vm/src/llm/capabilities.toml` declares one rule per
+  family:
+
+  ```toml
+  [[provider.anthropic]]
+  model_match = "claude-opus-*"
+  version_min = [4, 0]
+  native_tools = true
+  defer_loading = true
+  tool_search = ["bm25", "regex"]
+  max_tools = 10000
+  prompt_caching = true
+  thinking = true
+
+  [[provider.openai]]
+  model_match = "gpt-*"
+  version_min = [5, 4]
+  native_tools = true
+  defer_loading = true
+  tool_search = ["hosted", "client"]
+  ```
+
+  - Matcher is glob + semver: `model_match` is a `*`-glob against the
+    lowercased model ID, `version_min` is a `[major, minor]` lower
+    bound parsed with the same Claude / GPT version extractors the
+    providers used before.
+  - `[provider_family]` declares sibling providers that inherit rules
+    from a canonical family. OpenRouter, Together, Groq, DeepSeek,
+    Fireworks, HuggingFace, and local vLLM all fall through to
+    `[[provider.openai]]` by default.
+  - New `[[capabilities.provider.<name>]]` section in `harn.toml` lets
+    users override or extend the matrix per-project. Useful for
+    flagging a proxied OpenAI-compat endpoint as supporting
+    `tool_search` ahead of a Harn release. User rules take precedence
+    over built-in rules for the same provider name.
+  - `provider_capabilities(provider, model)` stdlib builtin returns a
+    dict (`native_tools`, `defer_loading`, `tool_search`, `max_tools`,
+    `prompt_caching`, `thinking`) so scripts can branch on the
+    capability surface without vendor-specific knowledge:
+
+    ```harn
+    let caps = provider_capabilities("anthropic", "claude-opus-4-7")
+    if "bm25" in caps.tool_search { ... }
+    ```
+
+    `provider_capabilities_install(toml_src)` and
+    `provider_capabilities_clear()` expose the override path in-script
+    for conformance tests and for scripts that detect proxied
+    endpoints at runtime.
+  - `LlmProvider::supports_defer_loading` and
+    `native_tool_search_variants` now default-delegate to
+    `capabilities::lookup` — the Anthropic and OpenAI provider impls
+    no longer carry their own gate logic, so a new model generation
+    needs one rule in the TOML instead of an `if` branch in Rust.
+  - Conformance fixtures under `conformance/tests/provider_capabilities_*`
+    cover the built-in matrix, the mock provider's dual-shape
+    routing, and the user-override path (both adding a new provider
+    and shadowing a built-in).
+
 - **Skills & Tool Vault phase 3: `agent_loop` skill lifecycle (harn#74).**
   `agent_loop` now accepts a `skills:` option (a `skill_registry`
   produced by the `skill { }` top-level form or `skill_define(...)`)

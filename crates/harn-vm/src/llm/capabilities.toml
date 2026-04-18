@@ -1,0 +1,175 @@
+# Harn provider capability matrix.
+#
+# One `[[provider.<name>]]` array entry per rule; first match wins per
+# (provider, model). Place more specific `model_match` patterns before
+# wildcards. `version_min = [major, minor]` narrows the match to a model
+# ID whose `(major, minor)` version (parsed from the Anthropic / OpenAI
+# naming schemes) is greater than or equal to the given tuple. Rules
+# whose `version_min` is unparseable for the given model are skipped.
+#
+# `[provider_family]` declares the sibling providers that inherit rules
+# from a canonical family when they have no rule of their own (OpenRouter
+# et al. speak the same Responses API and forward `tool_search` /
+# `defer_loading` unchanged — they fall through to `[[provider.openai]]`
+# by default).
+#
+# Users override or extend this table per-project via
+# `[[capabilities.provider.<name>]]` entries in `harn.toml`. Project
+# overrides are checked before the built-in rules for the same provider
+# name and are authoritative on overlap.
+#
+# Supported per-rule fields:
+#   model_match     : glob pattern matched against the lowercased model ID.
+#   version_min     : [major, minor] lower bound, provider-aware parse.
+#   native_tools    : whether the model accepts native tool-call wire shape.
+#   defer_loading   : whether `defer_loading: true` is honored on tool defs.
+#   tool_search     : list of native tool-search variants, preferred first.
+#                     Anthropic = ["bm25", "regex"];
+#                     OpenAI    = ["hosted", "client"].
+#   max_tools       : cap on tool-definition count the provider will accept.
+#                     Used by harn-lint to warn about oversized registries.
+#   prompt_caching  : whether the provider honors cache_control blocks.
+#   thinking        : whether extended / adaptive thinking is available.
+
+# ---------- Anthropic (Claude) ------------------------------------------------
+
+# Haiku 4.5+ supports server-side tool search.
+[[provider.anthropic]]
+model_match = "claude-haiku-*"
+version_min = [4, 5]
+native_tools = true
+defer_loading = true
+tool_search = ["bm25", "regex"]
+max_tools = 10000
+prompt_caching = true
+thinking = true
+
+# Opus 4.0+ supports tool search.
+[[provider.anthropic]]
+model_match = "claude-opus-*"
+version_min = [4, 0]
+native_tools = true
+defer_loading = true
+tool_search = ["bm25", "regex"]
+max_tools = 10000
+prompt_caching = true
+thinking = true
+
+# Sonnet 4.0+ supports tool search.
+[[provider.anthropic]]
+model_match = "claude-sonnet-*"
+version_min = [4, 0]
+native_tools = true
+defer_loading = true
+tool_search = ["bm25", "regex"]
+max_tools = 10000
+prompt_caching = true
+thinking = true
+
+# OpenRouter-style `anthropic/claude-...` prefixes.
+[[provider.anthropic]]
+model_match = "anthropic/claude-haiku-*"
+version_min = [4, 5]
+native_tools = true
+defer_loading = true
+tool_search = ["bm25", "regex"]
+max_tools = 10000
+prompt_caching = true
+thinking = true
+
+[[provider.anthropic]]
+model_match = "anthropic/claude-opus-*"
+version_min = [4, 0]
+native_tools = true
+defer_loading = true
+tool_search = ["bm25", "regex"]
+max_tools = 10000
+prompt_caching = true
+thinking = true
+
+[[provider.anthropic]]
+model_match = "anthropic/claude-sonnet-*"
+version_min = [4, 0]
+native_tools = true
+defer_loading = true
+tool_search = ["bm25", "regex"]
+max_tools = 10000
+prompt_caching = true
+thinking = true
+
+# Catch-all for older Claude models — native tools + prompt caching +
+# thinking, but no progressive tool disclosure.
+[[provider.anthropic]]
+model_match = "claude-*"
+native_tools = true
+prompt_caching = true
+thinking = true
+
+# ---------- OpenAI family -----------------------------------------------------
+#
+# `provider.openai` rules are inherited by the sibling providers declared
+# in `[provider_family]` below (OpenRouter, Together, Groq, DeepSeek,
+# Fireworks, HuggingFace, local vLLM/SGLang). Siblings may still add their
+# own `[[provider.<name>]]` rules and those win over the openai fallback.
+
+# gpt-5.4+ exposes native `tool_search` on the Responses API.
+[[provider.openai]]
+model_match = "gpt-*"
+version_min = [5, 4]
+native_tools = true
+defer_loading = true
+tool_search = ["hosted", "client"]
+
+# Legacy GPT: native tool calls only.
+[[provider.openai]]
+model_match = "gpt-*"
+native_tools = true
+
+# Reasoning family (o1, o3, o4, ...).
+[[provider.openai]]
+model_match = "o1*"
+native_tools = true
+
+[[provider.openai]]
+model_match = "o3*"
+native_tools = true
+
+[[provider.openai]]
+model_match = "o4*"
+native_tools = true
+
+# OpenRouter-style provider-prefixed IDs.
+[[provider.openai]]
+model_match = "openai/gpt-*"
+version_min = [5, 4]
+native_tools = true
+defer_loading = true
+tool_search = ["hosted", "client"]
+
+[[provider.openai]]
+model_match = "openai/gpt-*"
+native_tools = true
+
+# ---------- Local / Ollama ----------------------------------------------------
+#
+# Local providers don't advertise native tool_search or prompt caching.
+# Native-tools coverage depends on the specific model; leave conservative
+# (unset) at the default so users must opt in via a harn.toml override.
+
+# ---------- Mock --------------------------------------------------------------
+#
+# Mock spoofs either Anthropic or OpenAI shape depending on the model ID.
+# Handled specially in the loader (see `capabilities::lookup`): Claude-
+# shape model strings route to the `anthropic` rule list first, otherwise
+# fall through to the `openai` rule list.
+
+# ---------- provider_family aliases ------------------------------------------
+
+[provider_family]
+openrouter = "openai"
+together = "openai"
+groq = "openai"
+deepseek = "openai"
+fireworks = "openai"
+huggingface = "openai"
+local = "openai"

@@ -60,22 +60,27 @@ pub(crate) trait LlmProvider {
     /// context until a tool-search call surfaces them. See Anthropic's tool
     /// search docs and OpenAI's Responses API `tool_search` guide.
     ///
-    /// Keyed on the specific model because the capability is model-generation
-    /// dependent (e.g. Anthropic: Claude 4.0+ Opus/Sonnet, Haiku 4.5+).
-    fn supports_defer_loading(&self, _model: &str) -> bool {
-        false
+    /// Default impl reads from `capabilities.toml` so new providers and
+    /// new model generations ship as data, not code. Override only to
+    /// short-circuit the lookup (e.g. the mock provider, which the
+    /// capability layer already handles specially).
+    fn supports_defer_loading(&self, model: &str) -> bool {
+        super::capabilities::lookup(self.name(), model).defer_loading
     }
 
-    /// Native tool-search variants this provider supports at the given model.
-    /// Return one of:
-    ///   - `[]` — no native support; callers must fall back (tracked in #70).
-    ///   - `["regex", "bm25"]` — Anthropic's two `tool_search_tool_*_20251119` types.
-    ///   - `["hosted", "client"]` — OpenAI Responses API `tool_search` modes.
+    /// Native tool-search variants this provider supports at the given
+    /// model. Reads the capabilities matrix:
+    ///   - `[]` — no native support; callers fall back to the client-
+    ///     executed search (harn#70).
+    ///   - `["bm25", "regex"]` — Anthropic's two
+    ///     `tool_search_tool_*_20251119` types.
+    ///   - `["hosted", "client"]` — OpenAI Responses API `tool_search`
+    ///     execution modes.
     ///
-    /// Ordering is the provider's recommended default first. Callers that
-    /// don't care which variant they get pick element 0.
-    fn native_tool_search_variants(&self, _model: &str) -> &'static [&'static str] {
-        &[]
+    /// Ordering is the provider's recommended default first. Callers
+    /// that don't care which variant they get pick element 0.
+    fn native_tool_search_variants(&self, model: &str) -> Vec<String> {
+        super::capabilities::lookup(self.name(), model).tool_search
     }
 }
 
@@ -143,71 +148,20 @@ pub(crate) fn registered_provider_names() -> Vec<String> {
 
 /// Module-level dispatch for `LlmProvider::supports_defer_loading`.
 ///
-/// The VM doesn't carry a trait-object handle for the active provider yet
-/// (dispatch is still by string); until it does, this helper keeps the
-/// capability logic in one place so callers don't reach into provider
-/// structs directly.
+/// Thin wrapper over `capabilities::lookup`. Kept as a named export
+/// because `options.rs` reads better with the predicate form than with
+/// an inline `.defer_loading` field access, and because custom
+/// providers registered at runtime (via `provider_register`) still
+/// flow through this function rather than carrying a trait object.
 pub(crate) fn provider_supports_defer_loading(provider: &str, model: &str) -> bool {
-    // `provider_overrides.force_native_tool_search = true` is the escape
-    // hatch for users pointed at a proxied OpenAI-compat endpoint (a
-    // self-hosted router, an enterprise gateway) whose model ID we
-    // cannot parse. The caller consults the override in `options.rs`
-    // before falling through here, so this function is the model-
-    // detection path only.
-    match provider {
-        "anthropic" => super::providers::AnthropicProvider.supports_defer_loading(model),
-        // OpenAI's native `tool_search` + `defer_loading` land on the
-        // Responses API at GPT 5.4+. Every OpenAI-shape provider
-        // (OpenAI, OpenRouter, Together, Groq, DeepSeek, Fireworks,
-        // HuggingFace, local vLLM) delegates to the same capability
-        // check; whether the underlying backend actually forwards the
-        // payload is up to that backend. OpenRouter in particular
-        // forwards `tool_search` unchanged for upstream OpenAI routes.
-        "openai" | "openrouter" | "together" | "groq" | "deepseek" | "fireworks"
-        | "huggingface" | "local" => {
-            super::providers::OpenAiCompatibleProvider::new(provider.to_string())
-                .supports_defer_loading(model)
-        }
-        // Mock: spoof the real provider whose shape the model ID
-        // suggests. This lets conformance tests exercise the native
-        // Anthropic/OpenAI paths without making HTTP calls. The mock's
-        // tool-capture surface (llm_mock_calls) records the native
-        // payload so tests can assert on it directly.
-        "mock" => {
-            if super::providers::anthropic::claude_model_supports_tool_search(model) {
-                true
-            } else {
-                super::providers::openai_compat::gpt_model_supports_tool_search(model)
-            }
-        }
-        // Everything else: no native support — use the client-executed
-        // fallback tracked in harn#70.
-        _ => false,
-    }
+    super::capabilities::lookup(provider, model).defer_loading
 }
 
 /// Module-level dispatch for `LlmProvider::native_tool_search_variants`.
-pub(crate) fn provider_tool_search_variants(
-    provider: &str,
-    model: &str,
-) -> &'static [&'static str] {
-    match provider {
-        "anthropic" => super::providers::AnthropicProvider.native_tool_search_variants(model),
-        "openai" | "openrouter" | "together" | "groq" | "deepseek" | "fireworks"
-        | "huggingface" | "local" => {
-            super::providers::OpenAiCompatibleProvider::new(provider.to_string())
-                .native_tool_search_variants(model)
-        }
-        "mock" => {
-            if super::providers::anthropic::claude_model_supports_tool_search(model) {
-                super::providers::AnthropicProvider.native_tool_search_variants(model)
-            } else {
-                super::providers::OpenAiCompatibleProvider::new("openai".to_string())
-                    .native_tool_search_variants(model)
-            }
-        }
-        _ => &[],
-    }
+/// Reads the capability matrix — the single source of truth since
+/// `capabilities.toml` replaced the per-provider hard-coded gates.
+pub(crate) fn provider_tool_search_variants(provider: &str, model: &str) -> Vec<String> {
+    super::capabilities::lookup(provider, model).tool_search
 }
 
 /// Which wire shape to emit for the native tool-search meta-tool. Kept

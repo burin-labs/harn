@@ -10,6 +10,90 @@ use super::helpers::resolve_api_key;
 
 /// Register config-based LLM builtins (llm_infer_provider, llm_resolve_model, etc.).
 pub(crate) fn register_config_builtins(vm: &mut Vm) {
+    vm.register_builtin("provider_capabilities", |args, _out| {
+        // provider_capabilities(provider, model) -> dict of capabilities.
+        //
+        // Returns a dict with every capability the (provider, model)
+        // pair advertises in the loaded matrix. Scripts can branch on
+        // the returned values without caring which vendor they're
+        // pointed at (e.g. `if "bm25" in caps.tool_search { ... }`).
+        //
+        // Unknown provider/model pairs return an all-default dict
+        // (everything off, empty tool_search, no max_tools). This is
+        // the same shape the defaults trait impl uses.
+        let provider = args.first().map(|a| a.display()).unwrap_or_default();
+        let model = args.get(1).map(|a| a.display()).unwrap_or_default();
+        if provider.is_empty() {
+            return Err(crate::value::VmError::Runtime(
+                "provider_capabilities: provider name is required".to_string(),
+            ));
+        }
+        let caps = super::capabilities::lookup(&provider, &model);
+        let mut dict = BTreeMap::new();
+        dict.insert(
+            "provider".to_string(),
+            VmValue::String(Rc::from(provider.as_str())),
+        );
+        dict.insert(
+            "model".to_string(),
+            VmValue::String(Rc::from(model.as_str())),
+        );
+        dict.insert("native_tools".to_string(), VmValue::Bool(caps.native_tools));
+        dict.insert(
+            "defer_loading".to_string(),
+            VmValue::Bool(caps.defer_loading),
+        );
+        let tool_search: Vec<VmValue> = caps
+            .tool_search
+            .iter()
+            .map(|s| VmValue::String(Rc::from(s.as_str())))
+            .collect();
+        dict.insert(
+            "tool_search".to_string(),
+            VmValue::List(Rc::new(tool_search)),
+        );
+        dict.insert(
+            "max_tools".to_string(),
+            caps.max_tools
+                .map(|n| VmValue::Int(n as i64))
+                .unwrap_or(VmValue::Nil),
+        );
+        dict.insert(
+            "prompt_caching".to_string(),
+            VmValue::Bool(caps.prompt_caching),
+        );
+        dict.insert("thinking".to_string(), VmValue::Bool(caps.thinking));
+        Ok(VmValue::Dict(Rc::new(dict)))
+    });
+
+    // provider_capabilities_install(toml_src) — install capability
+    // overrides from a raw TOML source (same layout as the shipped
+    // `capabilities.toml`: top-level `[[provider.<name>]]` arrays plus
+    // an optional `[provider_family]` table). Mirrors harn.toml's
+    // `[capabilities]` section but in-script, so conformance tests and
+    // scripts that autodetect proxied endpoints can exercise the
+    // override path without editing the manifest. Returns true on
+    // success, throws a runtime error on parse failure.
+    vm.register_builtin("provider_capabilities_install", |args, _out| {
+        let src = args.first().map(|a| a.display()).unwrap_or_default();
+        if src.is_empty() {
+            return Err(crate::value::VmError::Runtime(
+                "provider_capabilities_install: TOML source string required".to_string(),
+            ));
+        }
+        super::capabilities::set_user_overrides_toml(&src).map_err(|e| {
+            crate::value::VmError::Runtime(format!(
+                "provider_capabilities_install: parse error: {e}"
+            ))
+        })?;
+        Ok(VmValue::Bool(true))
+    });
+
+    vm.register_builtin("provider_capabilities_clear", |_args, _out| {
+        super::capabilities::clear_user_overrides();
+        Ok(VmValue::Bool(true))
+    });
+
     vm.register_builtin("llm_infer_provider", |args, _out| {
         let model_id = args.first().map(|a| a.display()).unwrap_or_default();
         Ok(VmValue::String(Rc::from(llm_config::infer_provider(
