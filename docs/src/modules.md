@@ -79,9 +79,10 @@ code or inside any pipeline.
 
 `import "std/..."` is only needed for the Harn-written helper modules
 described below (`std/text`, `std/json`, `std/math`, `std/collections`,
-`std/path`, `std/context`, `std/agents`, `std/runtime`, `std/project`,
-`std/worktree`, `std/checkpoint`). These add layered utilities on top of
-the core builtins; the core builtins themselves are always available.
+`std/path`, `std/context`, `std/agent_state`, `std/agents`, `std/runtime`,
+`std/project`, `std/worktree`, `std/checkpoint`). These add layered
+utilities on top of the core builtins; the core builtins themselves are
+always available.
 
 ## Standard library modules
 
@@ -95,6 +96,7 @@ import "std/math"
 import "std/path"
 import "std/json"
 import "std/context"
+import "std/agent_state"
 import "std/agents"
 ```
 
@@ -241,6 +243,25 @@ Structured prompt/context assembly helpers:
 | `context(sections, options?)` | Build a context object |
 | `context_render(ctx, options?)` | Render a context into prompt text |
 | `prompt_compose(task, ctx, options?)` | Compose `{prompt, system, rendered_context}` |
+
+### std/agent_state
+
+Durable session-scoped state helpers built on the VM-side durable-state
+backend:
+
+| Function | Description |
+|---|---|
+| `agent_state_init(root, options?)` | Create or reopen a session-scoped durable state handle |
+| `agent_state_resume(root, session_id, options?)` | Reopen an existing durable state session |
+| `agent_state_write(handle, key, content)` | Atomically persist text content under a relative key |
+| `agent_state_read(handle, key)` | Read a key, returning `nil` when it is absent |
+| `agent_state_list(handle)` | Recursively list keys in deterministic order |
+| `agent_state_delete(handle, key)` | Delete a key |
+| `agent_state_handoff(handle, summary)` | Write a structured JSON handoff envelope to the reserved handoff key |
+| `agent_state_handoff_key()` | Return the reserved handoff key name |
+
+See [Agent state](./agent-state.md) for the handle format, conflict
+policies, and backend details.
 
 ### std/runtime
 

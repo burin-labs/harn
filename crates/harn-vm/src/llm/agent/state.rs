@@ -174,6 +174,21 @@ impl Drop for SessionSinkGuard {
     }
 }
 
+/// Tracks the currently-executing agent session id on a thread-local
+/// stack so stdlib code can default to the active session when it makes
+/// sense to do so.
+pub(super) struct CurrentSessionGuard {
+    pub(super) session_id: String,
+}
+
+impl Drop for CurrentSessionGuard {
+    fn drop(&mut self) {
+        if !self.session_id.is_empty() {
+            crate::agent_sessions::pop_current_session();
+        }
+    }
+}
+
 /// Strategy for picking a skill from the registry. `Metadata` runs
 /// entirely inside the VM; `Host` / `Embedding` delegate to the host via
 /// the `skill/match` bridge RPC.
@@ -503,6 +518,7 @@ pub(super) struct AgentLoopState {
     pub(super) _approval_guard: ApprovalPolicyGuard,
     pub(super) _policy_guard: ExecutionPolicyGuard,
     pub(super) _sink_guard: SessionSinkGuard,
+    pub(super) _current_session_guard: CurrentSessionGuard,
     pub(super) _iteration_guard: TranscriptIterationGuard,
 }
 
@@ -801,6 +817,12 @@ impl AgentLoopState {
             }
         }
         let _sink_guard = SessionSinkGuard {
+            session_id: session_id.clone(),
+        };
+        if !session_id.is_empty() {
+            crate::agent_sessions::push_current_session(session_id.clone());
+        }
+        let _current_session_guard = CurrentSessionGuard {
             session_id: session_id.clone(),
         };
 
@@ -1162,6 +1184,7 @@ impl AgentLoopState {
             _approval_guard,
             _policy_guard,
             _sink_guard,
+            _current_session_guard,
             _iteration_guard,
         })
     }

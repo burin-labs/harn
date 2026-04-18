@@ -1,6 +1,7 @@
 //! Standard library builtins for the Harn VM.
 
 mod agent_sessions;
+pub mod agent_state;
 mod agents;
 mod concurrency;
 mod crypto;
@@ -57,6 +58,7 @@ pub fn register_io_stdlib(vm: &mut Vm) {
     io::register_io_builtins(vm);
     host::register_host_builtins(vm);
     fs::register_fs_builtins(vm);
+    agent_state::register_agent_state_builtins(vm);
     process::register_process_builtins(vm);
     process::register_path_builtins(vm);
     tracing::register_tracing_builtins(vm);
