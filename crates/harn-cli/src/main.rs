@@ -24,6 +24,7 @@ async fn main() {
             false,
             std::collections::HashSet::new(),
             Vec::new(),
+            commands::run::CliLlmMockMode::Off,
         )
         .await;
         return;
@@ -47,6 +48,17 @@ async fn main() {
         Command::Run(args) => {
             let denied =
                 commands::run::build_denied_builtins(args.deny.as_deref(), args.allow.as_deref());
+            let llm_mock_mode = if let Some(path) = args.llm_mock.as_ref() {
+                commands::run::CliLlmMockMode::Replay {
+                    fixture_path: PathBuf::from(path),
+                }
+            } else if let Some(path) = args.llm_mock_record.as_ref() {
+                commands::run::CliLlmMockMode::Record {
+                    fixture_path: PathBuf::from(path),
+                }
+            } else {
+                commands::run::CliLlmMockMode::Off
+            };
 
             match (args.eval.as_deref(), args.file.as_deref()) {
                 (Some(code), None) => {
@@ -73,6 +85,7 @@ async fn main() {
                         denied,
                         args.argv.clone(),
                         args.skill_dir.clone(),
+                        llm_mock_mode.clone(),
                     )
                     .await;
                     drop(tmp);
@@ -84,6 +97,7 @@ async fn main() {
                         denied,
                         args.argv.clone(),
                         args.skill_dir.clone(),
+                        llm_mock_mode,
                     )
                     .await
                 }

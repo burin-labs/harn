@@ -128,6 +128,32 @@ log(result)
 
 This queues a canned response that the next LLM call consumes.
 
+For end-to-end CLI runs, `harn run` can preload the same mock
+infrastructure from a JSONL fixture file:
+
+```jsonl
+{"text":"PLAN: find the middleware module first","model":"fixture-model"}
+{"match":"*hello*","text":"matched","model":"fixture-model"}
+{"match":"*","error":{"category":"rate_limit","message":"fake rate limit"}}
+```
+
+```bash
+harn run script.harn --llm-mock fixtures.jsonl
+```
+
+- A line without `match` is FIFO and is consumed on use.
+- A line with `match` is a reusable glob against the prompt text.
+- When no fixture matches, `harn run --llm-mock ...` fails with the
+  first prompt snippet so you can add the missing case directly.
+
+To capture a replayable fixture from a run, record once and then replay
+the saved JSONL:
+
+```bash
+harn run script.harn --llm-mock-record fixtures.jsonl
+harn run script.harn --llm-mock fixtures.jsonl
+```
+
 ## Built-in assertions
 
 Harn provides `assert`, `assert_eq`, and `assert_ne` builtins for test pipelines:
