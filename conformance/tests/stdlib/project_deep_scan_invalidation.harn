@@ -26,11 +26,8 @@ pipeline test(task) {
   },
   },
   )
-  let calls = llm_mock_calls()
-  println(len(keys(first)) == 4)
-  println(first["src/auth"].enriched.purpose == "auth")
-  println(len(calls) == 4)
-  println(contains(calls[0].messages[0].content, "Return valid JSON only."))
+  write_file("project_deep_scan_repo/README.md", "# repo changed\n")
+  llm_mock({text: "{\"purpose\":\"root changed\"}"})
   let second = project_deep_scan(
     "project_deep_scan_repo",
     {
@@ -47,8 +44,9 @@ pipeline test(task) {
   },
   )
   let second_status = project_deep_scan_status(namespace, "project_deep_scan_repo")
-  println(second["src/api"].enriched.purpose == "api")
-  println(second_status.total_dirs == 4)
-  println(second_status.cache_hits == 4)
-  println(len(llm_mock_calls()) == 4)
+  println(first["."].enriched.purpose == "root")
+  println(second["."].enriched.purpose == "root changed")
+  println(second["src/auth"].enriched.purpose == "auth")
+  println(second_status.cache_hits == 3)
+  println(len(llm_mock_calls()) == 5)
 }
