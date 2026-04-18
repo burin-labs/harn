@@ -42,6 +42,10 @@ pub(crate) fn init_project(name: Option<&str>, template: ProjectTemplate) {
         ProjectTemplate::McpServer => {
             println!("  harn mcp-serve main.harn # expose the starter MCP server");
         }
+        ProjectTemplate::PipelineLab => {
+            println!("  harn playground --task \"Explain this repo\"    # run the lab");
+            println!("  harn playground --watch --task \"Refine the prompt\"  # live iteration");
+        }
     }
     println!("  harn fmt main.harn       # format code");
     println!("  harn lint main.harn      # lint code");
@@ -255,6 +259,59 @@ pipeline test_add(task) {
                 .to_string(),
             ),
         ],
+        ProjectTemplate::PipelineLab => vec![
+            ("harn.toml", manifest),
+            (
+                "host.harn",
+                r#"pub fn build_context(task) {
+  return {
+    task: task,
+    cwd: cwd(),
+  }
+}
+
+pub fn request_permission(tool_name, request_args) -> bool {
+  return true
+}
+"#
+                .to_string(),
+            ),
+            (
+                "pipeline.harn",
+                r#"pipeline default(task) {
+  let context = build_context(env_or("HARN_TASK", ""))
+  let result = llm_call(
+    "Task: " + context.task + "\nWorkspace: " + context.cwd,
+    "You are a concise coding assistant. Reply in 3 bullets max.",
+  )
+  println(result.text)
+}
+"#
+                .to_string(),
+            ),
+            (
+                "README.md",
+                r#"# Pipeline Lab
+
+Use this project to iterate on a Harn workflow against a local Harn-native host module.
+
+## Run
+
+```bash
+harn playground --task "Explain this repository"
+```
+
+## Watch mode
+
+```bash
+harn playground --watch --task "Tighten the workflow prompt"
+```
+
+Edit `host.harn` or `pipeline.harn` and the playground will re-run automatically.
+"#
+                .to_string(),
+            ),
+        ],
     }
 }
 
@@ -284,5 +341,11 @@ mod tests {
 
         let eval = template_files("sample", ProjectTemplate::Eval);
         assert!(eval.iter().any(|(path, _)| *path == "eval-suite.json"));
+
+        let pipeline_lab = template_files("sample", ProjectTemplate::PipelineLab);
+        assert!(pipeline_lab.iter().any(|(path, _)| *path == "host.harn"));
+        assert!(pipeline_lab
+            .iter()
+            .any(|(path, _)| *path == "pipeline.harn"));
     }
 }

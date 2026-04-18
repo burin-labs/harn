@@ -44,6 +44,44 @@ pub use records::*;
 
 thread_local! {
     static CURRENT_MUTATION_SESSION: RefCell<Option<MutationSessionRecord>> = const { RefCell::new(None) };
+    /// Workflow-level skill context, installed by `workflow_execute` so
+    /// every per-node agent loop constructed inside `execute_stage_node`
+    /// can pick up the same `skills:` / `skill_match:` registry without
+    /// threading a new parameter through every helper. Cleared on
+    /// workflow exit (success or error) by `WorkflowSkillContextGuard`.
+    static CURRENT_WORKFLOW_SKILL_CONTEXT: RefCell<Option<WorkflowSkillContext>> = const { RefCell::new(None) };
+}
+
+/// Skill wiring threaded from `workflow_execute` into the per-stage
+/// agent loops via thread-local context. `VmValue` wraps `Rc` and is
+/// not `Send`, so we store it in a thread-local rather than a mutex —
+/// the workflow runner pins itself to one task via `LocalSet`, so
+/// every stage observes the same context.
+#[derive(Clone, Default)]
+pub struct WorkflowSkillContext {
+    pub registry: Option<VmValue>,
+    pub match_config: Option<VmValue>,
+}
+
+pub fn install_workflow_skill_context(context: Option<WorkflowSkillContext>) {
+    CURRENT_WORKFLOW_SKILL_CONTEXT.with(|slot| {
+        *slot.borrow_mut() = context;
+    });
+}
+
+pub fn current_workflow_skill_context() -> Option<WorkflowSkillContext> {
+    CURRENT_WORKFLOW_SKILL_CONTEXT.with(|slot| slot.borrow().clone())
+}
+
+/// RAII guard that clears the workflow skill context on drop. Paired
+/// with `install_workflow_skill_context` at the top of `execute_workflow`
+/// so the context never leaks past a workflow's scope.
+pub struct WorkflowSkillContextGuard;
+
+impl Drop for WorkflowSkillContextGuard {
+    fn drop(&mut self) {
+        install_workflow_skill_context(None);
+    }
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]

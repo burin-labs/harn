@@ -274,6 +274,8 @@ fn build_schema_nudge(
     }
 }
 
+pub(crate) use self::agent::parse_skill_match_config_public as parse_skill_match_config_dict;
+pub(crate) use self::agent::SkillMatchConfig;
 pub(crate) use self::agent::{
     current_agent_session_id, current_host_bridge, parse_skill_config, run_agent_loop_internal,
 };

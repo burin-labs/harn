@@ -1,0 +1,130 @@
+// harn v0.7.20 Gap 1: promote `tool_search_query` / `tool_search_result`
+// to canonical `AgentEvent` variants so ACP / agent_subscribe consumers
+// see the search lifecycle in real time (not just on transcript replay).
+//
+// Mirrors `tool_search_client_bm25.harn` but wires an `agent_subscribe`
+// callback. Closure subscribers run in a cloned child VM whose env is
+// a snapshot — direct outer-var mutation doesn't propagate back — so
+// we instead have the callback side-effect into `agent_inject_feedback`
+// and assert the feedback surfaces on the next turn's user messages.
+// That proves the subscriber fired live (not on post-turn replay).
+pipeline test(task) {
+  llm_mock_clear()
+  var registry = tool_registry()
+  registry = tool_define(
+    registry,
+    "look",
+    "Read file contents (always available)",
+    {parameters: {path: {type: "string"}}, handler: { args -> args.path }},
+  )
+  registry = tool_define(
+    registry,
+    "deploy_service",
+    "Deploy the production service stack",
+    {
+    parameters: {env: {type: "string"}},
+    defer_loading: true,
+    handler: { args -> "deployed to " + args.env },
+  },
+  )
+  registry = tool_define(
+    registry,
+    "query_metrics",
+    "Query observability metrics",
+    {
+    parameters: {query: {type: "string"}},
+    defer_loading: true,
+    handler: { args -> "metrics: " + args.query },
+  },
+  )
+  let events_session = "ts_events_session"
+  agent_subscribe(
+    events_session,
+    { ev ->
+    if ev?.type == "tool_search_query" {
+      agent_inject_feedback(events_session, "observed_ts_query", "LIVE_TS_QUERY_FIRED")
+    }
+    if ev?.type == "tool_search_result" {
+      agent_inject_feedback(events_session, "observed_ts_result", "LIVE_TS_RESULT_FIRED")
+    }
+  },
+  )
+  // Turn 1: model calls the synthetic search tool with "deploy".
+  llm_mock(
+    {
+    text: "Looking up deploy tooling.",
+    tool_calls: [{id: "srv1", name: "__harn_tool_search", arguments: {query: "deploy"}}],
+  },
+  )
+  // Turn 2: model calls the freshly-promoted deploy tool.
+  llm_mock(
+    {
+    text: "Deploying now.",
+    tool_calls: [{id: "tool2", name: "deploy_service", arguments: {env: "prod"}}],
+  },
+  )
+  // Turn 3: signal completion.
+  llm_mock({text: "<done>##DONE##</done>"})
+  let result = agent_loop(
+    "Ship the release",
+    nil,
+    {
+    provider: "mock",
+    tools: registry,
+    tool_search: {variant: "bm25", mode: "client"},
+    persistent: true,
+    max_iterations: 5,
+    session_id: events_session,
+  },
+  )
+  assert(result?.status == "done", "loop completes")
+  // Turn 2's recorded messages must include the two feedback markers
+  // injected by the subscriber — direct proof the live event fired.
+  // `llm_mock_calls()` captures every inbound call's final message list;
+  // turn 2 is the first call after the tool_search events fired on turn 1.
+  let calls = llm_mock_calls()
+  assert(len(calls) >= 2, "at least two LLM calls happened")
+  let turn2_messages = calls[1].messages
+  var saw_query_marker = false
+  var saw_result_marker = false
+  for m in turn2_messages {
+    let content = m?.content
+    if content != nil {
+      if contains(content, "LIVE_TS_QUERY_FIRED") {
+        saw_query_marker = true
+      }
+      if contains(content, "LIVE_TS_RESULT_FIRED") {
+        saw_result_marker = true
+      }
+    }
+  }
+  assert(saw_query_marker, "subscriber fired for tool_search_query (live, not replayed)")
+  assert(saw_result_marker, "subscriber fired for tool_search_result (live, not replayed)")
+  // Transcript fidelity: the transcript events still match the client-path
+  // shape — same metadata the direct agent-loop subscriber path saw.
+  let events = transcript_events(result?.transcript)
+  var query_events = 0
+  var result_events = 0
+  for ev in events {
+    if ev.kind == "tool_search_query" {
+      query_events = query_events + 1
+      assert(ev.metadata?.mode == "client", "client tag on query")
+      assert(ev.metadata?.strategy == "bm25", "bm25 strategy on query")
+    }
+    if ev.kind == "tool_search_result" {
+      result_events = result_events + 1
+      assert(ev.metadata?.mode == "client", "client tag on result")
+      let promoted = ev.metadata?.promoted
+      var saw_deploy = false
+      for name in promoted {
+        if name == "deploy_service" {
+          saw_deploy = true
+        }
+      }
+      assert(saw_deploy, "promoted list carries the BM25 hit")
+    }
+  }
+  assert(query_events == 1, "one tool_search_query in transcript")
+  assert(result_events == 1, "one tool_search_result in transcript")
+  log("tool_search_client_bm25_events tests passed")
+}

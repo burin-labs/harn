@@ -344,6 +344,13 @@ pub struct ModelPolicy {
     pub require_successful_tools: Option<Vec<String>>,
     /// Turn-shape constraints for action stages.
     pub turn_policy: Option<TurnPolicy>,
+    /// Tool-calling contract format for the per-stage agent loop.
+    /// `"native"` routes user tools through the provider's native
+    /// function-call channel; `"text"` embeds the `<tool_call>` contract
+    /// prompt. Mirrors the top-level `agent_loop(..., {tool_format: ...})`
+    /// option. When `None`, the workflow falls back to `HARN_AGENT_TOOL_FORMAT`
+    /// env / the provider-model default.
+    pub tool_format: Option<String>,
 }
 
 /// Wrapper that always compares equal, allowing non-Eq types in derived PartialEq structs.

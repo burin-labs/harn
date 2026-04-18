@@ -259,6 +259,28 @@ pub(crate) fn register_skill_builtins(vm: &mut Vm) {
                 }
             }
         }
+        // `allowed_tools` supports three shapes per entry:
+        //   - exact tool name (no colon)
+        //   - `"namespace:<tag>"` (prefix with non-empty tag)
+        //   - `"*"` wildcard
+        // Anything else with a colon is a typo — fail loud so authors
+        // don't silently scope to an empty set.
+        if let Some(VmValue::List(list)) = config.get("allowed_tools") {
+            for entry in list.iter() {
+                let rendered = entry.display();
+                if let Some(tag) = rendered.strip_prefix("namespace:") {
+                    if tag.is_empty() {
+                        return Err(VmError::Thrown(VmValue::String(Rc::from(
+                            "skill_define: 'allowed_tools' entry 'namespace:' missing a tag after the colon",
+                        ))));
+                    }
+                } else if rendered.contains(':') {
+                    return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                        "skill_define: 'allowed_tools' entry '{rendered}' contains ':' — only the `namespace:<tag>` prefix is recognized"
+                    )))));
+                }
+            }
+        }
 
         let mut entry = BTreeMap::new();
         entry.insert("name".to_string(), VmValue::String(Rc::from(name.as_str())));

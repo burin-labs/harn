@@ -1,0 +1,86 @@
+// harn v0.7.20 Gap 3: `namespace:<tag>` entries in a skill's
+// `allowed_tools` list match any tool declared with that namespace,
+// instead of requiring an exact tool-name enumeration.
+pipeline test(task) {
+  llm_mock_clear()
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "read_file",
+    "Read a file",
+    {parameters: {path: {type: "string"}}, namespace: "read", handler: { args -> "read " + args.path }},
+  )
+  tools = tool_define(
+    tools,
+    "list_files",
+    "List files",
+    {
+    parameters: {path: {type: "string"}},
+    namespace: "read",
+    handler: { args -> "listed " + args.path },
+  },
+  )
+  tools = tool_define(
+    tools,
+    "write_file",
+    "Write a file",
+    {
+    parameters: {path: {type: "string"}, content: {type: "string"}},
+    namespace: "write",
+    handler: { args -> "wrote " + args.path },
+  },
+  )
+  skill explorer {
+    description "Explore a codebase"
+    when_to_use "User wants to investigate code"
+    allowed_tools ["namespace:read"]
+  }
+  llm_mock({text: "On it."})
+  let result = agent_loop(
+    "Investigate the auth flow",
+    "You are a code explorer.",
+    {provider: "mock", tools: tools, tool_format: "native", max_iterations: 1, skills: explorer},
+  )
+  assert(result?.status == "done", "agent loop completes")
+  let calls = llm_mock_calls()
+  assert(len(calls) >= 1, "LLM was called")
+  let first_tools = calls[0].tools
+  var seen_read = false
+  var seen_list = false
+  var seen_write = false
+  if first_tools != nil {
+    for t in first_tools {
+      if t?.function?.name == "read_file" {
+        seen_read = true
+      }
+      if t?.function?.name == "list_files" {
+        seen_list = true
+      }
+      if t?.function?.name == "write_file" {
+        seen_write = true
+      }
+    }
+  }
+  assert(seen_read, "namespace:read matches read_file")
+  assert(seen_list, "namespace:read matches list_files (multiple tools per namespace)")
+  assert(!seen_write, "write-namespace tool filtered out")
+  // Validation: malformed namespace entry raises at skill_define time.
+  var threw = false
+  try {
+    var bad = skill_registry()
+    bad = skill_define(bad, "broken", {allowed_tools: ["namespace:"]})
+  } catch (err) {
+    threw = true
+  }
+  assert(threw, "empty namespace tag rejected at skill_define")
+  // Validation: non-namespace colon in an entry is a typo.
+  var threw_typo = false
+  try {
+    var bad = skill_registry()
+    bad = skill_define(bad, "broken", {allowed_tools: ["ns:read"]})
+  } catch (err) {
+    threw_typo = true
+  }
+  assert(threw_typo, "unrecognized colon-prefixed entry rejected")
+  log("skill_lifecycle_namespace_scope tests passed")
+}

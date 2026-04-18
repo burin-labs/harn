@@ -345,6 +345,12 @@ async fn main() {
         Command::Portal(args) => {
             commands::portal::run_portal(&args.dir, &args.host, args.port, args.open).await
         }
+        Command::Playground(args) => {
+            if let Err(error) = commands::playground::run_command(args).await {
+                eprint!("{error}");
+                process::exit(1);
+            }
+        }
         Command::Runs(args) => match args.command {
             RunsCommand::Inspect(inspect) => {
                 inspect_run_record(&inspect.path, inspect.compare.as_deref())

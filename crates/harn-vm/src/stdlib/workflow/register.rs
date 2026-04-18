@@ -4,10 +4,11 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::rc::Rc;
 
 use crate::orchestration::{
-    append_audit_entry, builtin_ceiling, install_current_mutation_session, load_run_record,
-    next_nodes_for, normalize_run_record, normalize_workflow_value, pop_execution_policy,
-    push_execution_policy, validate_workflow, ArtifactRecord, MutationSessionRecord, RunRecord,
-    RunStageRecord, RunTransitionRecord, WorkflowEdge, WorkflowGraph,
+    append_audit_entry, builtin_ceiling, install_current_mutation_session,
+    install_workflow_skill_context, load_run_record, next_nodes_for, normalize_run_record,
+    normalize_workflow_value, pop_execution_policy, push_execution_policy, validate_workflow,
+    ArtifactRecord, MutationSessionRecord, RunRecord, RunStageRecord, RunTransitionRecord,
+    WorkflowEdge, WorkflowGraph, WorkflowSkillContext, WorkflowSkillContextGuard,
 };
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
@@ -26,6 +27,34 @@ use super::policy::{
 };
 use super::stage::{execute_stage_attempts, replay_stage};
 use super::usage::{llm_usage_delta, llm_usage_snapshot};
+
+/// Accept a skill registry dict on `workflow_execute(task, graph,
+/// artifacts, {skills: ...})`. Mirrors the agent-loop normalizer: a
+/// raw registry dict passes through, a list of skill entries is
+/// wrapped into a synthetic registry. Other shapes are dropped —
+/// failing silently rather than erroring keeps backwards compatibility
+/// for callers that already pass unvalidated option dicts through.
+fn validate_workflow_skill_registry(value: VmValue) -> Option<VmValue> {
+    match &value {
+        VmValue::Dict(d)
+            if d.get("_type")
+                .map(|v| v.display() == "skill_registry")
+                .unwrap_or(false) =>
+        {
+            Some(value)
+        }
+        VmValue::List(list) => {
+            let mut dict = BTreeMap::new();
+            dict.insert(
+                "_type".to_string(),
+                VmValue::String(Rc::from("skill_registry")),
+            );
+            dict.insert("skills".to_string(), VmValue::List(list.clone()));
+            Some(VmValue::Dict(Rc::new(dict)))
+        }
+        _ => None,
+    }
+}
 
 pub(in crate::stdlib) async fn execute_workflow(
     task: String,
@@ -269,6 +298,26 @@ pub(in crate::stdlib) async fn execute_workflow(
         .map(|source| VecDeque::from(source.stages.clone()));
     install_current_mutation_session(Some(mutation_session.clone()));
     let _mutation_session_guard = MutationSessionResetGuard;
+
+    // Install workflow-level skill wiring so each per-stage agent loop
+    // (execute / verify / plan / subagent — every kind that constructs
+    // an `AgentLoopConfig` through `execute_stage_node`) picks up the
+    // same registry without a new parameter on every signature. Before
+    // this, only direct `agent_loop(...)` callers received `skills:` —
+    // the workflow path silently dropped it.
+    let workflow_skill_registry = options
+        .get("skills")
+        .cloned()
+        .and_then(validate_workflow_skill_registry);
+    let workflow_skill_match = options.get("skill_match").cloned();
+    if workflow_skill_registry.is_some() || workflow_skill_match.is_some() {
+        install_workflow_skill_context(Some(WorkflowSkillContext {
+            registry: workflow_skill_registry,
+            match_config: workflow_skill_match,
+        }));
+    }
+    let _workflow_skill_guard = WorkflowSkillContextGuard;
+
     let workflow_approval_guard = match mutation_session.approval_policy.clone() {
         Some(policy) => {
             crate::orchestration::push_approval_policy(policy);

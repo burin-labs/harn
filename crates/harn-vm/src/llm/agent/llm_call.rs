@@ -31,6 +31,7 @@
 
 use std::rc::Rc;
 
+use crate::agent_events::AgentEvent;
 use crate::bridge::HostBridge;
 use crate::value::VmError;
 
@@ -130,6 +131,107 @@ pub(super) async fn run_llm_call(
                 &thinking,
                 None,
             ));
+        }
+    }
+
+    // Surface provider-native `tool_search` events (harn#71 Anthropic +
+    // OpenAI Responses). The response parser records these as blocks on
+    // `result.blocks`, but ACP sinks and `transcript_events(...)` live
+    // on the AgentEvent + state.transcript_events paths — mirror the
+    // client-path emission shape so downstream consumers can't tell the
+    // two apart. `mode` is set to the provider family so IDEs rendering
+    // a Tool Vault chip can distinguish server-hosted search from the
+    // in-process fallback.
+    let native_search_mode =
+        if crate::llm::helpers::ResolvedProvider::resolve(&result.provider).is_anthropic_style {
+            "anthropic"
+        } else {
+            "openai"
+        };
+    for block in &result.blocks {
+        match block.get("type").and_then(|v| v.as_str()) {
+            Some("tool_search_query") => {
+                let tool_use_id = block
+                    .get("id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let name = block
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let query = block
+                    .get("query")
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Null);
+                state.transcript_events.push(transcript_event(
+                    "tool_search_query",
+                    "assistant",
+                    "internal",
+                    "",
+                    Some(serde_json::json!({
+                        "id": tool_use_id,
+                        "name": name,
+                        "query": query,
+                        "mode": native_search_mode,
+                    })),
+                ));
+                super::emit_agent_event(&AgentEvent::ToolSearchQuery {
+                    session_id: state.session_id.clone(),
+                    tool_use_id,
+                    name,
+                    query,
+                    // Native paths don't expose a strategy knob — the
+                    // provider chooses. Use an empty string so replays
+                    // can still match against `ev.metadata?.strategy`
+                    // without a nil guard.
+                    strategy: String::new(),
+                    mode: native_search_mode.to_string(),
+                })
+                .await;
+            }
+            Some("tool_search_result") => {
+                let tool_use_id = block
+                    .get("tool_use_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let promoted: Vec<String> = block
+                    .get("tool_references")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|r| {
+                                r.get("tool_name")
+                                    .and_then(|n| n.as_str())
+                                    .map(String::from)
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                state.transcript_events.push(transcript_event(
+                    "tool_search_result",
+                    "tool",
+                    "internal",
+                    "",
+                    Some(serde_json::json!({
+                        "tool_use_id": tool_use_id,
+                        "tool_references": block.get("tool_references").cloned().unwrap_or(serde_json::Value::Array(Vec::new())),
+                        "promoted": promoted,
+                        "mode": native_search_mode,
+                    })),
+                ));
+                super::emit_agent_event(&AgentEvent::ToolSearchResult {
+                    session_id: state.session_id.clone(),
+                    tool_use_id,
+                    promoted,
+                    strategy: String::new(),
+                    mode: native_search_mode.to_string(),
+                })
+                .await;
+            }
+            _ => {}
         }
     }
 
