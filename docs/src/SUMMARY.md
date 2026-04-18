@@ -41,6 +41,7 @@
 
 - [CLI reference](./cli-reference.md)
 - [Builtin functions](./builtins.md)
+- [Project scanning](./project-scan.md)
 - [Prompt templating](./prompt-templating.md)
 - [Configuring LLM providers](./providers.md)
 - [Debugging agent runs](./debugging.md)

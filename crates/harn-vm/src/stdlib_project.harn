@@ -37,71 +37,10 @@ pub fn project_root_package() -> string {
   }
   if !root_package {
     let project_root = project_root() ?? ""
-    let pyproject = read_file(project_root + "/pyproject.toml")
-    if pyproject {
-      for line in pyproject.split("\n") {
-        let trimmed = line.trim()
-        if trimmed.starts_with("name") && trimmed.contains("=") {
-          let quoted = trimmed.split("\"")
-          if quoted?.count ?? 0 >= 2 {
-            root_package = quoted[1]
-            break
-          }
-          let single_quoted = trimmed.split("'")
-          if single_quoted?.count ?? 0 >= 2 {
-            root_package = single_quoted[1]
-            break
-          }
-        }
-      }
-    }
-  }
-  if !root_package {
-    let project_root = project_root() ?? ""
-    let package_json = read_file(project_root + "/package.json")
-    if package_json {
-      for line in package_json.split("\n") {
-        let trimmed = line.trim()
-        if trimmed.starts_with("\"name\"") {
-          let parts = trimmed.split("\"")
-          if parts?.count ?? 0 >= 4 {
-            root_package = parts[3]
-            break
-          }
-        }
-      }
-    }
-  }
-  if !root_package {
-    let project_root = project_root() ?? ""
-    let go_mod = read_file(project_root + "/go.mod")
-    if go_mod {
-      for line in go_mod.split("\n") {
-        let trimmed = line.trim()
-        if trimmed.starts_with("module ") {
-          let module_path = trimmed.replace("module ", "")
-          let parts = module_path.split("/")
-          if parts?.count ?? 0 > 0 {
-            root_package = parts[parts?.count ?? 0 - 1]
-            break
-          }
-        }
-      }
-    }
-  }
-  if !root_package {
-    let project_root = project_root() ?? ""
-    let cargo_toml = read_file(project_root + "/Cargo.toml")
-    if cargo_toml {
-      for line in cargo_toml.split("\n") {
-        let trimmed = line.trim()
-        if trimmed.starts_with("name") && trimmed.contains("=") {
-          let parts = trimmed.split("\"")
-          if parts?.count ?? 0 >= 2 {
-            root_package = parts[1]
-            break
-          }
-        }
+    if project_root {
+      let scan = project_scan(project_root, {tiers: ["ambient", "config"]})
+      if scan?.package_name {
+        root_package = scan.package_name
       }
     }
   }
@@ -109,17 +48,23 @@ pub fn project_root_package() -> string {
 }
 
 /** project_scan. */
-pub fn project_scan(path, options) {
-  return scan_directory(path, options)
+pub fn project_scan(path = ".", options = nil) {
+  return project_scan_native(path, options ?? {})
+}
+
+/** project_scan_tree. */
+pub fn project_scan_tree(path = ".", options = nil) {
+  return project_scan_tree_native(path, options ?? {})
+}
+
+/** project_catalog. */
+pub fn project_catalog() {
+  return project_catalog_native()
 }
 
 /** project_scan_paths. */
-pub fn project_scan_paths(path, options) {
-  var paths = []
-  for entry in project_scan(path, options) {
-    paths = paths + [entry.path]
-  }
-  return paths
+pub fn project_scan_paths(path = ".", options = nil) {
+  return project_scan_tree(path, options).keys()
 }
 
 /** project_stale. */
