@@ -27,6 +27,20 @@ fn main() {
              <code>crates/harn-cli/portal-dist</code>.</p></body></html>",
         )
         .expect("write placeholder portal index.html");
+
+        // The portal router also serves static assets from
+        // portal-dist/assets/portal/. Emit empty stubs for the entry
+        // points a real build produces so asset-routing tests pass
+        // without requiring npm. `emptyOutDir: true` in vite config
+        // overwrites these on a real build.
+        let assets = portal_dist.join("assets").join("portal");
+        fs::create_dir_all(&assets).expect("create portal-dist assets dir");
+        for stub in ["app.js", "api.js", "styles.css"] {
+            let path = assets.join(stub);
+            if !path.exists() {
+                fs::write(&path, b"").expect("write placeholder portal asset");
+            }
+        }
     }
 
     println!("cargo:rerun-if-changed=portal-dist");
