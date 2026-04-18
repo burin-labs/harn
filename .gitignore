@@ -26,8 +26,13 @@ meta_scratch/
 # Codex worktree environment files are per-worktree local state.
 .codex/environments/
 # Test artifacts from conformance tests that create fixtures in CWD
-# (project_scan_* and polyglot_tree tests in conformance/tests/stdlib/).
+# (project_scan_*, project_deep_scan_*, and polyglot_tree tests in
+# conformance/tests/stdlib/).
 /polyglot_tree/
 /project_scan_catalog/
+/project_scan_empty/
 /project_scan_ignored/
 /project_scan_single/
+/project_deep_scan_ignore/
+/project_deep_scan_ns/
+/project_deep_scan_repo/
