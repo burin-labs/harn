@@ -1389,21 +1389,19 @@ fn narrow_union_leaf(node: &Node, members: &[TypeExpr]) -> Option<TypeExpr> {
     // `"pos" | "neg"` on a `"pos" | "neg" | "zero"` union refine
     // correctly: each alternative picks out its literal member.
     match node {
-        Node::StringLiteral(s) => {
+        Node::StringLiteral(s)
             if members
                 .iter()
-                .any(|m| matches!(m, TypeExpr::LitString(lit) if lit == s))
-            {
-                return Some(TypeExpr::LitString(s.clone()));
-            }
+                .any(|m| matches!(m, TypeExpr::LitString(lit) if lit == s)) =>
+        {
+            return Some(TypeExpr::LitString(s.clone()));
         }
-        Node::IntLiteral(v) => {
+        Node::IntLiteral(v)
             if members
                 .iter()
-                .any(|m| matches!(m, TypeExpr::LitInt(lit) if lit == v))
-            {
-                return Some(TypeExpr::LitInt(*v));
-            }
+                .any(|m| matches!(m, TypeExpr::LitInt(lit) if lit == v)) =>
+        {
+            return Some(TypeExpr::LitInt(*v));
         }
         _ => {}
     }
