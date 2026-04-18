@@ -7,6 +7,40 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
+## Unreleased
+
+### Added
+
+- **`project_enrich` L2 enrichment primitive (#110, closes #102).** New
+  native-backed stdlib fn that layers a caller-owned LLM enrichment
+  pass on top of deterministic `project_scan` evidence. Caller supplies
+  the prompt template + output schema; Harn owns prompt rendering,
+  bounded file selection, schema-retry plumbing, and content-hash
+  caching under `.harn/cache/enrichment/`. Budget-token short-circuit
+  returns the base evidence with `budget_exceeded: true` instead of
+  failing. Schema-retry exhaustion returns `validation_error` +
+  `base_evidence` instead of raising.
+- **`project_deep_scan` cached per-directory tree (#111, closes #103).**
+  Namespace-scoped hierarchical cache built on top of the metadata
+  store. Reuses cached directory-level structure + content hashes
+  across recursive walks. `project_deep_scan_status(namespace, path?)`
+  surfaces the latest run summary (`total_dirs`, `enriched_dirs`,
+  `stale_dirs`, `cache_hits`, `last_refresh`). Metadata shards persist
+  under `.harn/metadata/<namespace>/entries.json` while legacy
+  root-metadata reads remain backward-compatible. `harn doctor`
+  surfaces metadata cache state.
+
+### Changed
+
+- **Split `crates/harn-vm/src/llm/helpers/mod.rs` (#112, closes #60)**
+  into topic-focused submodules (`blocks`, `messages`, `opt_get`,
+  `provider`, `transcript`). `mod.rs` shrinks from 1266 lines to a 20-
+  line re-export hub. Pure refactor; behavior unchanged.
+- **Split `crates/harn-vm/src/stdlib/agents_workers.rs` (#113, closes #56)**
+  into `audit`, `bridge`, `config`, `execution`, `policy`, `tests`,
+  `worktree` submodules plus an extracted `agents_sub_agent.rs`. Pure
+  refactor; behavior unchanged.
+
 ## v0.7.20
 
 ### Added
