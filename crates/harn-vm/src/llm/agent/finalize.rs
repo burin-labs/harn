@@ -120,6 +120,12 @@ pub(super) async fn run_finalize(
     );
     if !state.anonymous_session {
         crate::agent_sessions::store_transcript(&state.session_id, transcript_vm.clone());
+        // Persist the active-skill set so a re-entry of this session
+        // resumes the same scope without re-matching from scratch.
+        crate::agent_sessions::set_active_skills(
+            &state.session_id,
+            state.active_skills.iter().map(|s| s.name.clone()).collect(),
+        );
     }
     let transcript_json = crate::llm::helpers::vm_value_to_json(&transcript_vm);
 

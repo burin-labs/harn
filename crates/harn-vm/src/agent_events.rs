@@ -111,6 +111,29 @@ pub enum AgentEvent {
         attempts: usize,
         elapsed_ms: u64,
     },
+    /// Emitted when a skill is activated. Carries the match reason so
+    /// replayers can reconstruct *why* a given skill took effect at
+    /// this iteration.
+    SkillActivated {
+        session_id: String,
+        skill_name: String,
+        iteration: usize,
+        reason: String,
+    },
+    /// Emitted when a previously-active skill is deactivated because
+    /// the reassess phase no longer matches it.
+    SkillDeactivated {
+        session_id: String,
+        skill_name: String,
+        iteration: usize,
+    },
+    /// Emitted once per activation when the skill's `allowed_tools` filter
+    /// narrows the effective tool surface exposed to the model.
+    SkillScopeTools {
+        session_id: String,
+        skill_name: String,
+        allowed_tools: Vec<String>,
+    },
 }
 
 impl AgentEvent {
@@ -126,7 +149,10 @@ impl AgentEvent {
             | Self::FeedbackInjected { session_id, .. }
             | Self::BudgetExhausted { session_id, .. }
             | Self::LoopStuck { session_id, .. }
-            | Self::DaemonWatchdogTripped { session_id, .. } => session_id,
+            | Self::DaemonWatchdogTripped { session_id, .. }
+            | Self::SkillActivated { session_id, .. }
+            | Self::SkillDeactivated { session_id, .. }
+            | Self::SkillScopeTools { session_id, .. } => session_id,
         }
     }
 }

@@ -8,7 +8,7 @@
 use std::rc::Rc;
 
 use crate::llm::daemon::{watch_state, DaemonLoopConfig};
-use crate::value::VmError;
+use crate::value::{VmError, VmValue};
 
 use super::super::agent_config::AgentLoopConfig;
 use super::super::agent_tools::{
@@ -174,6 +174,200 @@ impl Drop for SessionSinkGuard {
     }
 }
 
+/// Strategy for picking a skill from the registry. `Metadata` runs
+/// entirely inside the VM; `Host` / `Embedding` delegate to the host via
+/// the `skill/match` bridge RPC.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum SkillMatchStrategy {
+    #[default]
+    Metadata,
+    Host,
+    Embedding,
+}
+
+impl SkillMatchStrategy {
+    pub fn parse(s: &str) -> Self {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "host" => Self::Host,
+            "embedding" => Self::Embedding,
+            "metadata" | "" => Self::Metadata,
+            other => {
+                crate::events::log_warn(
+                    "agent.skill_match",
+                    &format!("unknown strategy '{other}', falling back to 'metadata'"),
+                );
+                Self::Metadata
+            }
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Metadata => "metadata",
+            Self::Host => "host",
+            Self::Embedding => "embedding",
+        }
+    }
+}
+
+/// User-facing `skill_match:` config dict parsed off the agent_loop
+/// options dict.
+#[derive(Clone, Debug)]
+pub struct SkillMatchConfig {
+    pub strategy: SkillMatchStrategy,
+    pub top_n: usize,
+    /// When `true`, once a skill activates it stays active for the rest
+    /// of the loop. When `false`, the reassess phase re-runs after each
+    /// turn and may swap it out.
+    pub sticky: bool,
+}
+
+impl Default for SkillMatchConfig {
+    fn default() -> Self {
+        Self {
+            strategy: SkillMatchStrategy::Metadata,
+            top_n: 1,
+            sticky: true,
+        }
+    }
+}
+
+/// Concrete per-skill metadata after activation. Derived from the raw
+/// skill-registry entry once on activation so downstream phases don't
+/// re-walk VM dicts every turn.
+#[derive(Clone, Debug, Default)]
+#[allow(dead_code)]
+pub struct ActiveSkill {
+    pub name: String,
+    pub description: String,
+    pub prompt: Option<String>,
+    pub when_to_use: String,
+    pub paths: Vec<String>,
+    pub allowed_tools: Vec<String>,
+    pub mcp_servers: Vec<String>,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    pub invocation: String,
+    pub disable_model_invocation: bool,
+    pub user_invocable: bool,
+}
+
+impl ActiveSkill {
+    /// Project a raw skill-registry entry (a `VmValue::Dict`) into the
+    /// strongly-typed activation view. Tolerates missing fields with
+    /// defaults matching Anthropic's SKILL.md frontmatter semantics
+    /// (`user-invocable` defaults to `true`, `disable-model-invocation`
+    /// to `false`).
+    ///
+    /// Single source of truth for ActiveSkill construction — the
+    /// matching phase and the session-rehydration path both route
+    /// through here so the two can't drift.
+    pub(crate) fn from_entry(entry: &VmValue) -> Self {
+        let Some(dict) = entry.as_dict() else {
+            return Self::default();
+        };
+        let list_strings = |v: Option<&VmValue>| -> Vec<String> {
+            match v {
+                Some(VmValue::List(list)) => list.iter().map(|x| x.display()).collect(),
+                _ => Vec::new(),
+            }
+        };
+        let non_empty = |v: Option<&VmValue>| -> Option<String> {
+            v.map(|value| value.display()).filter(|s| !s.is_empty())
+        };
+        let bool_with = |keys: &[&str], default: bool| -> bool {
+            keys.iter()
+                .find_map(|key| dict.get(*key))
+                .map(|v| matches!(v, VmValue::Bool(true)))
+                .unwrap_or(default)
+        };
+        Self {
+            name: dict.get("name").map(|v| v.display()).unwrap_or_default(),
+            description: dict
+                .get("description")
+                .map(|v| v.display())
+                .unwrap_or_default(),
+            prompt: non_empty(dict.get("prompt")),
+            when_to_use: dict
+                .get("when_to_use")
+                .map(|v| v.display())
+                .unwrap_or_default(),
+            paths: list_strings(dict.get("paths")),
+            allowed_tools: list_strings(dict.get("allowed_tools")),
+            mcp_servers: list_strings(dict.get("mcp")),
+            model: non_empty(dict.get("model")),
+            effort: non_empty(dict.get("effort")),
+            invocation: dict
+                .get("invocation")
+                .map(|v| v.display())
+                .unwrap_or_default(),
+            disable_model_invocation: bool_with(
+                &["disable-model-invocation", "disable_model_invocation"],
+                false,
+            ),
+            user_invocable: bool_with(&["user-invocable", "user_invocable"], true),
+        }
+    }
+
+    /// True when the skill's `disable-model-invocation` frontmatter is
+    /// set. Used by the metadata matcher to filter candidates.
+    pub(crate) fn is_disabled_for_model(entry: &VmValue) -> bool {
+        let Some(dict) = entry.as_dict() else {
+            return false;
+        };
+        matches!(
+            dict.get("disable-model-invocation")
+                .or_else(|| dict.get("disable_model_invocation")),
+            Some(VmValue::Bool(true))
+        )
+    }
+}
+
+/// Restore previously-active skills for a session when the caller
+/// re-enters it. Anonymous (caller-less session_id) loops always start
+/// empty — their transcript doesn't persist either.
+///
+/// Rehydration runs against the *current* skill registry, so a skill
+/// that was active on the last run but has since been removed just
+/// quietly drops off the active set — it won't block the match phase
+/// from re-running.
+fn rehydrate_active_skills(
+    anonymous: bool,
+    session_id: &str,
+    registry: Option<&crate::value::VmValue>,
+) -> Vec<ActiveSkill> {
+    if anonymous {
+        return Vec::new();
+    }
+    let Some(registry) = registry else {
+        return Vec::new();
+    };
+    let Some(dict) = registry.as_dict() else {
+        return Vec::new();
+    };
+    let skills: Vec<crate::value::VmValue> = match dict.get("skills") {
+        Some(crate::value::VmValue::List(list)) => list.iter().cloned().collect(),
+        _ => Vec::new(),
+    };
+    let names = crate::agent_sessions::active_skills(session_id);
+    if names.is_empty() {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    for name in names {
+        let Some(entry) = skills.iter().find(|s| {
+            s.as_dict()
+                .and_then(|d| d.get("name"))
+                .map(|v| v.display() == name)
+                .unwrap_or(false)
+        }) else {
+            continue;
+        };
+        out.push(ActiveSkill::from_entry(entry));
+    }
+    out
+}
+
 /// Every long-lived local the agent loop carried in
 /// `run_agent_loop_internal`, gathered onto a single owned struct so
 /// phase methods can take `&mut self` and mutate state in place.
@@ -263,6 +457,32 @@ pub(super) struct AgentLoopState {
     /// `ToolSearchMode::Client` resolved for this loop (harn#70).
     pub(super) tool_search_client: Option<ClientToolSearchState>,
 
+    /// Skill registry (validated `{_type: "skill_registry", skills: [...]}`)
+    /// passed in via `agent_loop(…, {skills: …})`. `None` when no
+    /// skill system is configured for this loop.
+    pub(crate) skill_registry: Option<VmValue>,
+    /// Match configuration — strategy, top_n, sticky flag.
+    pub(crate) skill_match: SkillMatchConfig,
+    /// Host-supplied working file set. Feeds `paths:` auto-trigger
+    /// scoring in the metadata matcher and rides along as a hint to
+    /// host-based matchers.
+    pub(crate) working_files: Vec<String>,
+    /// Currently-active skills after the most recent match / reassess
+    /// phase. Empty when no skill activated. Preserves insertion order
+    /// so deterministic top_n selection stays stable across turns.
+    pub(crate) active_skills: Vec<ActiveSkill>,
+    /// Snapshot of `opts.native_tools` taken in `new()` before any
+    /// skill-scope narrowing. Used to restore the full tool list when
+    /// an active skill deactivates. `None` when no native tools were
+    /// configured.
+    pub(super) native_tools_snapshot: Option<Vec<serde_json::Value>>,
+    /// True when `active_skills` was populated from a persisted
+    /// session. Signals the matching phase to preserve the restored
+    /// set on iteration 0 instead of re-matching from scratch — that
+    /// keeps session-resume semantics stable across agent_loop
+    /// invocations under the same `session_id`.
+    pub(crate) rehydrated_from_session: bool,
+
     // Drop guards: see "Drop ordering" on the struct docs.
     pub(super) _approval_guard: ApprovalPolicyGuard,
     pub(super) _policy_guard: ExecutionPolicyGuard,
@@ -271,6 +491,103 @@ pub(super) struct AgentLoopState {
 }
 
 impl AgentLoopState {
+    /// Union of `allowed_tools` across every active skill. Empty when
+    /// no skill narrows the tool surface — callers should fall through
+    /// to the unfiltered registry and native_tools list.
+    pub(crate) fn skill_allowed_tools(&self) -> std::collections::BTreeSet<String> {
+        self.active_skills
+            .iter()
+            .filter(|s| !s.allowed_tools.is_empty())
+            .flat_map(|s| s.allowed_tools.iter().cloned())
+            .collect()
+    }
+
+    /// Produce a skill-scoped view of the original `tools_val` registry.
+    /// When any active skill carries a non-empty `allowed_tools` list,
+    /// the union of those names is the whitelist for the upcoming turn.
+    /// Tools outside the whitelist are filtered out of the registry so
+    /// the provider schema, contract prompt, and dispatch all see the
+    /// narrower surface.
+    ///
+    /// Returns `None` when there's no active scope to apply — callers
+    /// should fall through to the original registry.
+    pub(crate) fn skill_scoped_tools_val(
+        &self,
+        tools_val: Option<&crate::value::VmValue>,
+    ) -> Option<crate::value::VmValue> {
+        use crate::value::VmValue;
+        use std::rc::Rc;
+
+        let tools_val = tools_val?;
+        let dict = tools_val.as_dict()?;
+        let allowed = self.skill_allowed_tools();
+        if allowed.is_empty() {
+            return None;
+        }
+        let tools_list = match dict.get("tools") {
+            Some(VmValue::List(list)) => list,
+            _ => return None,
+        };
+        let mut kept: Vec<VmValue> = Vec::with_capacity(tools_list.len());
+        for entry in tools_list.iter() {
+            let keep = match entry {
+                VmValue::Dict(d) => d
+                    .get("name")
+                    .map(|v| v.display())
+                    .map(|name| allowed.contains(&name))
+                    .unwrap_or(false),
+                _ => false,
+            };
+            if keep {
+                kept.push(entry.clone());
+            }
+        }
+        let mut new_dict = dict.clone();
+        new_dict.insert("tools".to_string(), VmValue::List(Rc::new(kept)));
+        Some(VmValue::Dict(Rc::new(new_dict)))
+    }
+
+    /// Rebuild `opts.native_tools` from the canonical snapshot, then
+    /// apply the skill-scope whitelist. Single source of truth for
+    /// "what the provider sees this turn": activate narrows, deactivate
+    /// restores, and the rebuild is idempotent.
+    ///
+    /// No-op when `native_tools_snapshot` is `None` (text-mode contract
+    /// prompt without a native channel).
+    pub(super) fn rebuild_scoped_native_tools(&self, opts: &mut crate::llm::api::LlmCallOptions) {
+        let Some(snapshot) = self.native_tools_snapshot.as_ref() else {
+            return;
+        };
+        let allowed = self.skill_allowed_tools();
+        if allowed.is_empty() {
+            opts.native_tools = Some(snapshot.clone());
+            return;
+        }
+        let filtered: Vec<serde_json::Value> = snapshot
+            .iter()
+            .filter(|entry| {
+                let name = entry
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .or_else(|| {
+                        entry
+                            .get("function")
+                            .and_then(|f| f.get("name"))
+                            .and_then(|v| v.as_str())
+                    })
+                    .unwrap_or("");
+                // Always keep the synthetic `__harn_tool_search` tool —
+                // a skill's `allowed_tools` gates the user-declared
+                // surface, not the runtime's own scaffolding. Without
+                // this, activating a skill while `tool_search` is
+                // configured silently kills progressive disclosure.
+                name.starts_with("__harn_") || allowed.contains(name)
+            })
+            .cloned()
+            .collect();
+        opts.native_tools = Some(filtered);
+    }
+
     /// Rebuild the tool-calling contract prompt for a turn with the
     /// current promoted-tool set factored in. Returns `None` when the
     /// loop isn't running in client-mode tool_search (use the baked-in
@@ -424,6 +741,9 @@ impl AgentLoopState {
         let max_iterations = config.max_iterations;
         let persistent = config.persistent;
         let max_nudges = config.max_nudges;
+        let config_skill_registry = config.skill_registry.clone();
+        let config_skill_match = config.skill_match.clone();
+        let config_working_files = config.working_files.clone();
         let custom_nudge = config.nudge.clone();
         let done_sentinel = config
             .done_sentinel
@@ -522,6 +842,11 @@ impl AgentLoopState {
         let native_tools_for_prompt = opts.native_tools.clone();
         opts.native_tools =
             normalize_native_tools_for_format(&tool_format, opts.native_tools.clone());
+        // Capture the post-normalization native_tools list as the
+        // canonical full set. Subsequent turn_preflights use this to
+        // rebuild `opts.native_tools` from scratch — activate narrows,
+        // deactivate restores the full surface.
+        let native_tools_snapshot = opts.native_tools.clone();
         opts.tool_choice = normalize_tool_choice_for_format(
             &opts.provider,
             &tool_format,
@@ -712,6 +1037,12 @@ impl AgentLoopState {
             }
         }
 
+        let rehydrated_active_skills = rehydrate_active_skills(
+            anonymous_session,
+            &session_id,
+            config_skill_registry.as_ref(),
+        );
+
         Ok(Self {
             config,
             session_id,
@@ -760,6 +1091,12 @@ impl AgentLoopState {
             daemon_config,
             custom_nudge,
             tool_search_client,
+            rehydrated_from_session: !rehydrated_active_skills.is_empty(),
+            active_skills: rehydrated_active_skills,
+            skill_registry: config_skill_registry,
+            skill_match: config_skill_match,
+            working_files: config_working_files,
+            native_tools_snapshot,
             _approval_guard,
             _policy_guard,
             _sink_guard,

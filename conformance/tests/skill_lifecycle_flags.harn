@@ -1,0 +1,51 @@
+// Skills & Tool Vault phase 3 (harn#74): flag honouring.
+//
+// - `disable-model-invocation: true` excludes a skill from the
+//   matcher even when keywords would otherwise land it.
+// - An empty top-1 match produces `skill_matched` with no candidates
+//   and no activation.
+pipeline test(task) {
+  llm_mock_clear()
+  skill private_work {
+    description "Rotate database credentials"
+    when_to_use "User requests a credential rotation"
+    prompt "Never execute without manual approval."
+    allowed_tools ["rotate"]
+  }
+  // Flip the flag imperatively so the test still exercises the
+  // language form's metadata path.
+  let guarded = skill_define(
+    private_work,
+    "private_work",
+    {
+    description: "Rotate database credentials",
+    when_to_use: "User requests a credential rotation",
+    prompt: "Never execute without manual approval.",
+    allowed_tools: ["rotate"],
+    ["disable-model-invocation"]: true,
+  },
+  )
+  llm_mock({text: "Nothing to do."})
+  let result = agent_loop(
+    "Please rotate the staging credentials for me",
+    nil,
+    {provider: "mock", max_iterations: 1, skills: guarded},
+  )
+  let events = transcript_events(result?.transcript)
+  var activated = 0
+  var matched_events = 0
+  for ev in events {
+    if ev.kind == "skill_activated" {
+      activated = activated + 1
+    }
+    if ev.kind == "skill_matched" {
+      matched_events = matched_events + 1
+    }
+  }
+  assert(activated == 0, "disable-model-invocation hides the skill from the matcher")
+  assert(matched_events >= 1, "skill_matched event fires even with zero candidates")
+  // Active-skill section is omitted when no skill activated.
+  let calls = llm_mock_calls()
+  assert(!contains(calls[0].system, "## Active skills"), "no active-skill section when no match")
+  log("skill_lifecycle_flags tests passed")
+}

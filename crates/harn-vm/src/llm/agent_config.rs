@@ -77,6 +77,14 @@ pub struct AgentLoopConfig {
     /// - `true`: stop the stage immediately
     /// - `{message, stop}` dict: both (optional `message`, optional `stop`)
     pub post_turn_callback: Option<crate::value::VmValue>,
+    /// Skill registry (from `skill_registry()` / `skill { }` decls)
+    /// exposed to the skill-matching phase. `None` disables skills for
+    /// this loop.
+    pub skill_registry: Option<VmValue>,
+    /// Skill matching configuration (strategy, top_n, sticky).
+    pub skill_match: super::agent::SkillMatchConfig,
+    /// Working file set fed into `paths:` auto-trigger scoring.
+    pub working_files: Vec<String>,
 }
 
 impl std::fmt::Debug for AgentLoopConfig {
@@ -309,6 +317,8 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                     serde_json::from_value::<crate::orchestration::TurnPolicy>(json)
                         .unwrap_or_default()
                 });
+            let (skill_registry, skill_match, working_files) =
+                super::agent::parse_skill_config(&options);
             let mut opts = extract_llm_options(&args)?;
             let result = run_agent_loop_internal(
                 &mut opts,
@@ -351,6 +361,9 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                         .and_then(|o| o.get("post_turn_callback"))
                         .filter(|v| matches!(v, crate::value::VmValue::Closure(_)))
                         .cloned(),
+                    skill_registry,
+                    skill_match,
+                    working_files,
                 },
             )
             .await?;

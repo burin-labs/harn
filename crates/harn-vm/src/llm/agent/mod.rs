@@ -9,10 +9,16 @@ mod finalize;
 mod helpers;
 mod llm_call;
 mod post_turn;
+mod skill_match;
 mod state;
 mod tool_dispatch;
 mod tool_search_client;
 mod turn_preflight;
+
+pub use skill_match::parse_skill_config;
+pub use state::SkillMatchConfig;
+#[allow(unused_imports)]
+pub use state::{ActiveSkill, SkillMatchStrategy};
 
 thread_local! {
     static CURRENT_HOST_BRIDGE: std::cell::RefCell<Option<Rc<crate::bridge::HostBridge>>> = const { std::cell::RefCell::new(None) };
@@ -196,6 +202,40 @@ pub async fn run_agent_loop_internal(
 
     let mut iteration_exited_via_break = false;
     for iteration in 0..max_iterations {
+        // Skill matching runs at the head of iteration 0 (always) and,
+        // when sticky=false, again before each subsequent iteration.
+        // Reassess-in-place keeps the active skill when nothing
+        // changed, so sticky=true + a still-applicable skill stays hot
+        // for the rest of the loop.
+        //
+        // Exception: if this loop resumed a persisted session whose
+        // previous run left skills active, iteration 0 preserves that
+        // set instead of re-matching from a cold prompt. sticky=false
+        // still lets the post-turn reassess run after turn 1.
+        let skip_initial_match =
+            iteration == 0 && state.rehydrated_from_session && state.skill_match.sticky;
+        let should_match = (iteration == 0 || !state.skill_match.sticky) && !skip_initial_match;
+        if should_match {
+            skill_match::run_skill_match(
+                &mut state,
+                opts,
+                &bridge,
+                &session_id,
+                iteration,
+                iteration > 0,
+            )
+            .await?;
+        }
+
+        // If any active skill narrows the tool surface via
+        // `allowed_tools`, compute the scoped registry for this turn.
+        // Downstream phases see the narrowed view; the original
+        // `tools_owned` stays intact so deactivation restores the full
+        // surface on a later iteration.
+        let scoped_tools = state.skill_scoped_tools_val(tools_val);
+        let effective_tools_val: Option<&crate::value::VmValue> =
+            scoped_tools.as_ref().or(tools_val);
+
         turn_preflight::run_turn_preflight(
             &mut state,
             opts,
@@ -207,6 +247,7 @@ pub async fn run_agent_loop_internal(
                 base_system: base_system.as_deref(),
                 tool_contract_prompt: tool_contract_prompt.as_deref(),
                 persistent_system_prompt: persistent_system_prompt.as_deref(),
+                scoped_tools_val: scoped_tools.as_ref(),
             },
         )
         .await?;
@@ -225,7 +266,7 @@ pub async fn run_agent_loop_internal(
                 turn_policy: turn_policy.as_ref(),
                 llm_retries,
                 llm_backoff_ms,
-                tools_val,
+                tools_val: effective_tools_val,
             },
             iteration,
         )
@@ -239,7 +280,7 @@ pub async fn run_agent_loop_internal(
                     &tool_dispatch::ToolDispatchContext {
                         bridge: &bridge,
                         tool_format: &tool_format,
-                        tools_val,
+                        tools_val: effective_tools_val,
                         tool_retries,
                         tool_backoff_ms,
                         loop_detect_enabled,

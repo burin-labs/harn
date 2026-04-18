@@ -931,6 +931,9 @@ pub async fn execute_stage_node(
                         .and_then(|d| d.get("post_turn_callback"))
                         .filter(|v| matches!(v, crate::value::VmValue::Closure(_)))
                         .cloned(),
+                    skill_registry: None,
+                    skill_match: Default::default(),
+                    working_files: Vec::new(),
                 },
             )
             .await?

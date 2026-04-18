@@ -388,6 +388,9 @@ Same as `llm_call`, plus additional options:
 | `loop_detect_warn` | int | `2` | Consecutive identical tool calls before appending a redirection hint |
 | `loop_detect_block` | int | `3` | Consecutive identical tool calls before replacing the result with a hard redirect |
 | `loop_detect_skip` | int | `4` | Consecutive identical tool calls before skipping execution entirely |
+| `skills` | skill_registry or list | nil | Skill registry exposed to the match-and-activate lifecycle phase. See [Skills lifecycle](#skills-lifecycle) |
+| `skill_match` | dict | `{strategy: "metadata", top_n: 1, sticky: true}` | Match configuration — `strategy` (`"metadata"` \| `"host"` \| `"embedding"`), `top_n`, `sticky` |
+| `working_files` | list\|string | `[]` | Paths that feed `paths:` glob auto-trigger in the metadata matcher and ride along as a hint to host-delegated matchers |
 
 When `daemon: true`, the loop transitions `active -> idle -> active` instead of
 terminating on a text-only turn. Idle daemons can be woken by queued human
@@ -527,6 +530,104 @@ retry 3 {
   println(result.text)
 }
 ```
+
+## Skills lifecycle
+
+Skills bundle metadata, a system-prompt fragment, scoped tools, and
+lifecycle hooks into a typed unit. Declare them with the top-level
+`skill NAME { ... }` language form (see [the Harn spec](./language-spec.md))
+or the imperative `skill_define(...)` builtin, then pass the resulting
+`skill_registry` to `agent_loop` via the `skills:` option. The agent
+loop matches, activates, and (optionally) deactivates skills across
+turns automatically.
+
+### Matching strategies
+
+`skill_match: { strategy: ..., top_n: 1, sticky: true }` controls how
+the loop picks which skill(s) to activate:
+
+- `"metadata"` (default) — in-VM BM25-ish scoring over
+  `description` + `when_to_use` combined with glob matching against
+  the `paths:` list. Name-in-prompt mentions count as a strong
+  boost. No host round-trip, so matching is fast and deterministic.
+- `"host"` — delegates scoring to the host via the `skill/match`
+  bridge RPC (see [bridge-protocol.md](./bridge-protocol.md)).
+  Useful for embedding-based or LLM-driven matchers. Failing RPC
+  falls back to metadata scoring with a warning.
+- `"embedding"` — alias for `"host"`; accepted so the language
+  matches Anthropic's canonical terminology.
+
+### Activation lifecycle
+
+- **Match** runs at the head of iteration 0 (always) and, when
+  `sticky: false`, before every subsequent iteration (reassess).
+- **Activate**: the skill's `on_activate` closure (if any) is
+  called, its `prompt` body is woven into the effective system
+  prompt, and `allowed_tools` narrows the tool surface for the
+  next LLM call. Each activation emits
+  `AgentEvent::SkillActivated` + a `skill_activated` transcript
+  event with the match score and reason.
+- **Deactivate** (only in `sticky: false` mode) — when reassess
+  picks a different top-N, the previously-active skill's
+  `on_deactivate` runs and the scoped tool filter is dropped.
+  Emits `AgentEvent::SkillDeactivated` + a `skill_deactivated`
+  transcript event.
+- **Session resume**: when `session_id:` is set, the set of active
+  skills at the end of one run is persisted in the session store.
+  The next `agent_loop` call on the same session rehydrates them
+  before iteration-0 matching runs, so sticky re-entry stays hot
+  without re-matching from a cold prompt.
+
+### Scoped tools
+
+A skill's `allowed_tools` list is the union across all active
+skills; any tool outside that union is filtered out of both the
+contract prompt and the native tool schemas the provider sees.
+Runtime-internal tools like `__harn_tool_search` are never filtered
+— scoping gates the user-declared surface, not the runtime's own
+scaffolding.
+
+### Frontmatter honoured by the runtime
+
+| Field | Type | Effect |
+|---|---|---|
+| `description` | string | Primary ranking signal for metadata matching |
+| `when_to_use` | string | Secondary ranking signal |
+| `paths` | `list<string>` | Glob patterns for `paths:` auto-trigger |
+| `allowed_tools` | `list<string>` | Whitelist applied to the tool surface on activation |
+| `prompt` | string | Body woven into the active-skill system-prompt block |
+| `disable-model-invocation` | bool | When `true`, the matcher skips the skill entirely |
+| `user-invocable` | bool | Placeholder for host UI (not consumed by the runtime today) |
+| `mcp` | `list<string>` | MCP servers the skill wants booted (consumed by host integrations) |
+| `on_activate` / `on_deactivate` | fn | Closures invoked on transition |
+
+### Example
+
+```harn
+skill ship {
+  description "Ship a production release"
+  when_to_use "User says ship/release/deploy"
+  paths ["infra/**", "Dockerfile"]
+  allowed_tools ["deploy_service"]
+  prompt "Follow the deploy runbook. One command at a time."
+}
+
+let result = agent_loop(
+  "Ship the new release to production",
+  "You are a staff deploy engineer.",
+  {
+    provider: "anthropic",
+    tools: tools(),
+    skills: ship,
+    working_files: ["infra/terraform/cluster.tf"],
+  }
+)
+```
+
+The loop emits one `skill_matched` event per match pass (including
+zero-candidate passes so replayers see the boundary), one
+`skill_activated` per activated skill, and one `skill_scope_tools`
+event per activation whose `allowed_tools` narrowed the surface.
 
 ## Streaming responses
 

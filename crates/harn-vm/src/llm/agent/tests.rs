@@ -89,6 +89,9 @@ fn base_agent_config() -> AgentLoopConfig {
         event_sink: None,
         task_ledger: Default::default(),
         post_turn_callback: None,
+        skill_registry: None,
+        skill_match: Default::default(),
+        working_files: Vec::new(),
     }
 }
 

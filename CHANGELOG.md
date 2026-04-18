@@ -11,6 +11,34 @@ granular archaeology.
 
 ### Added
 
+- **Skills & Tool Vault phase 3: `agent_loop` skill lifecycle (harn#74).**
+  `agent_loop` now accepts a `skills:` option (a `skill_registry`
+  produced by the `skill { }` top-level form or `skill_define(...)`)
+  and runs a match-activate-reassess phase around every turn. The
+  default metadata matcher scores skills by BM25-ish keyword overlap
+  over `description` + `when_to_use`, name-in-prompt mentions, and
+  `paths:` glob matching against the host-supplied `working_files:`
+  list; opt into host-delegated ranking (embedding / LLM scorers /
+  whatever) via `skill_match: { strategy: "host" }` or `"embedding"`
+  — both route through a new `skill/match` JSON-RPC bridge method.
+  - Activation binds the skill's `prompt` body into the effective
+    system prompt, narrows the tool surface via its `allowed_tools`
+    whitelist (union when multiple skills are active), and calls
+    its `on_activate` hook. Deactivation (in `sticky: false` mode)
+    unwinds everything and calls `on_deactivate`.
+  - `disable-model-invocation: true` and `user-invocable: false`
+    SKILL.md frontmatter are honoured: the matcher skips disabled
+    skills entirely; `user-invocable` rides through for host UIs.
+  - Transcript events `skill_matched`, `skill_activated`,
+    `skill_deactivated`, `skill_scope_tools` emit with stable
+    schemas. The first three also emit as `AgentEvent` variants so
+    ACP hosts see live session updates (`harn-cli`'s ACP server
+    translates them into `session/update` notifications).
+  - Session-resume: when `session_id:` is set, the active skill set
+    at the end of one run is persisted in the session store and
+    rehydrated on the next `agent_loop` invocation, skipping
+    iteration-0 match so sticky re-entry stays hot.
+  - Conformance coverage under `conformance/tests/skill_lifecycle_*`.
 - **Skills phase 2: filesystem `SKILL.md` loader + layered discovery (harn#73).**
   `harn run` / `harn test` / `harn check` now pre-populate the `skills`
   VM global with every `SKILL.md` they find across eight priority

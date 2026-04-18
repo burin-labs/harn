@@ -1,0 +1,39 @@
+// Skills & Tool Vault phase 3 (harn#74): session-resume restores
+// the last active skill when the user re-enters a named session.
+//
+// The resume path reads `agent_sessions::active_skills(session_id)`;
+// this test rides on the public `agent_session_*` builtins to bake
+// a durable session first, then re-enters it under a fresh
+// agent_loop invocation and checks the skill stayed hot without
+// re-matching.
+pipeline test(task) {
+  llm_mock_clear()
+  skill sticky_skill {
+    description "Handle every task"
+    prompt "Take a careful, confirmed approach."
+  }
+  llm_mock({text: "First turn done."})
+  let sid = "skill-resume-test"
+  let r1 = agent_loop(
+    "please handle this task carefully",
+    nil,
+    {provider: "mock", max_iterations: 1, skills: sticky_skill, session_id: sid},
+  )
+  assert(r1?.status == "done", "first run completes")
+  // Second invocation under the same session id: the matcher still
+  // runs (iteration 0 always re-matches) but the rehydration path
+  // seeded state.active_skills before it ran, so the transcript
+  // carries no extra skill_deactivated event (name didn't change).
+  llm_mock({text: "Resume done."})
+  let r2 = agent_loop(
+    "continue",
+    nil,
+    {provider: "mock", max_iterations: 1, skills: sticky_skill, session_id: sid},
+  )
+  assert(r2?.status == "done", "resume run completes")
+  // The second run's system prompt still mentions the skill body.
+  let calls = llm_mock_calls()
+  let last = calls[len(calls) - 1]
+  assert(contains(last.system, "sticky_skill"), "resume turn keeps skill active")
+  log("skill_lifecycle_session_resume tests passed")
+}
