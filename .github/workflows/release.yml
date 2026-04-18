@@ -29,7 +29,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master
         with:
           toolchain: stable
-          targets: ${{ matrix.target }}
+
+      - name: Add cross-compile target to pinned toolchain
+        run: |
+          # rust-toolchain.toml pins the channel; `rustup show` triggers install
+          # of the pinned toolchain, then we add the matrix target to it.
+          rustup show active-toolchain || rustup show
+          rustup target add ${{ matrix.target }}
 
       - name: Install Linux ARM64 linker
         if: matrix.target == 'aarch64-unknown-linux-gnu'
