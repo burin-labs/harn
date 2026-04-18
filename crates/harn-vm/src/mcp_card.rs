@@ -227,13 +227,20 @@ mod tests {
     use super::*;
     use std::io::Write as _;
 
+    // Serializes tests that touch the process-wide CARD_CACHE. Rust runs
+    // `#[test]`s across threads by default; without this guard, one test's
+    // `clear()` or `put()` can race with another's cache-hit assertion.
+    fn cache_guard() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     fn reset_cache() {
         CARD_CACHE.lock().unwrap().clear();
     }
 
     #[test]
     fn loads_card_from_local_path() {
-        reset_cache();
         let tmp = tempfile::NamedTempFile::new().unwrap();
         let path = tmp.path().to_path_buf();
         let mut f = std::fs::File::create(&path).unwrap();
@@ -248,7 +255,6 @@ mod tests {
 
     #[test]
     fn parse_error_is_reported() {
-        reset_cache();
         let tmp = tempfile::NamedTempFile::new().unwrap();
         let path = tmp.path().to_path_buf();
         std::fs::write(&path, "not json").unwrap();
@@ -270,6 +276,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn cache_ttl_is_respected() {
+        let _guard = cache_guard();
         reset_cache();
         let tmp = tempfile::NamedTempFile::new().unwrap();
         let path = tmp.path().to_str().unwrap().to_string();
