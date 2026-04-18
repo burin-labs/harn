@@ -482,6 +482,11 @@ pub(super) struct AgentLoopState {
     /// phase. Empty when no skill activated. Preserves insertion order
     /// so deterministic top_n selection stays stable across turns.
     pub(crate) active_skills: Vec<ActiveSkill>,
+    /// Skills loaded explicitly at runtime via `load_skill`. Kept
+    /// separate from match-driven activation so reassess can continue
+    /// updating `active_skills` without discarding deliberate
+    /// progressive-disclosure loads.
+    pub(crate) loaded_skills: Vec<ActiveSkill>,
     /// Snapshot of `opts.native_tools` taken in `new()` before any
     /// skill-scope narrowing. Used to restore the full tool list when
     /// an active skill deactivates. `None` when no native tools were
@@ -508,9 +513,26 @@ impl AgentLoopState {
     pub(crate) fn skill_allowed_tools(&self) -> std::collections::BTreeSet<String> {
         self.active_skills
             .iter()
+            .chain(self.loaded_skills.iter())
             .filter(|s| !s.allowed_tools.is_empty())
             .flat_map(|s| s.allowed_tools.iter().cloned())
             .collect()
+    }
+
+    /// Effective skill list for prompts: match-driven skills first,
+    /// then any runtime-loaded skills that are not already active
+    /// under the same name. When both exist, prefer the runtime-loaded
+    /// version because it carries the substituted SKILL.md body.
+    pub(crate) fn prompt_active_skills(&self) -> Vec<ActiveSkill> {
+        let mut merged: Vec<ActiveSkill> = self.active_skills.clone();
+        for loaded in &self.loaded_skills {
+            if let Some(existing) = merged.iter_mut().find(|skill| skill.name == loaded.name) {
+                *existing = loaded.clone();
+            } else {
+                merged.push(loaded.clone());
+            }
+        }
+        merged
     }
 
     /// Produce a skill-scoped view of the original `tools_val` registry.
@@ -592,7 +614,7 @@ impl AgentLoopState {
                 // surface, not the runtime's own scaffolding. Without
                 // this, activating a skill while `tool_search` is
                 // configured silently kills progressive disclosure.
-                name.starts_with("__harn_") || allowed.contains(name)
+                name.starts_with("__harn_") || name == "load_skill" || allowed.contains(name)
             })
             .cloned()
             .collect();
@@ -814,6 +836,34 @@ impl AgentLoopState {
         let _approval_guard = ApprovalPolicyGuard {
             active: effective_approval_policy.is_some(),
         };
+
+        let has_skill_registry = config_skill_registry
+            .as_ref()
+            .and_then(|value| value.as_dict())
+            .and_then(|dict| dict.get("skills"))
+            .and_then(|value| match value {
+                crate::value::VmValue::List(skills) => Some(skills),
+                _ => None,
+            })
+            .is_some_and(|skills| !skills.is_empty());
+        if has_skill_registry {
+            let schema = crate::llm::tools::build_load_skill_tool_schema(&opts.provider);
+            match opts.native_tools.as_mut() {
+                Some(native_tools) => {
+                    let already_present = native_tools.iter().any(|tool| {
+                        tool.get("name").and_then(|v| v.as_str()).or_else(|| {
+                            tool.get("function")
+                                .and_then(|function| function.get("name"))
+                                .and_then(|v| v.as_str())
+                        }) == Some("load_skill")
+                    });
+                    if !already_present {
+                        native_tools.insert(0, schema);
+                    }
+                }
+                None => opts.native_tools = Some(vec![schema]),
+            }
+        }
 
         let tools_owned = opts.tools.clone();
         let tools_val = tools_owned.as_ref();
@@ -1104,6 +1154,7 @@ impl AgentLoopState {
             tool_search_client,
             rehydrated_from_session: !rehydrated_active_skills.is_empty(),
             active_skills: rehydrated_active_skills,
+            loaded_skills: Vec::new(),
             skill_registry: config_skill_registry,
             skill_match: config_skill_match,
             working_files: config_working_files,

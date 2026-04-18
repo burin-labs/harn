@@ -70,6 +70,148 @@ pub(super) struct ToolDispatchResult {
     pub observations: String,
 }
 
+fn runtime_skill_entry_id(entry: &std::collections::BTreeMap<String, VmValue>) -> String {
+    let name = entry.get("name").map(|v| v.display()).unwrap_or_default();
+    let namespace = entry
+        .get("namespace")
+        .map(|v| v.display())
+        .filter(|value| !value.is_empty());
+    match namespace {
+        Some(ns) => format!("{ns}/{name}"),
+        None => name,
+    }
+}
+
+fn runtime_tool_error(error: &str, skill: &str, message: impl Into<String>) -> String {
+    serde_json::to_string_pretty(&serde_json::json!({
+        "error": error,
+        "skill": skill,
+        "message": message.into(),
+    }))
+    .unwrap_or_else(|_| format!("{{\"error\":\"{error}\",\"skill\":\"{skill}\"}}"))
+}
+
+fn resolve_runtime_skill_entry(
+    registry: &VmValue,
+    target: &str,
+) -> Result<std::collections::BTreeMap<String, VmValue>, String> {
+    let dict = registry
+        .as_dict()
+        .ok_or_else(|| "load_skill: bound skill registry is not a dict".to_string())?;
+    let skills = match dict.get("skills") {
+        Some(VmValue::List(list)) => list,
+        _ => return Err("load_skill: bound skill registry is malformed".to_string()),
+    };
+
+    let mut bare_matches: Vec<std::collections::BTreeMap<String, VmValue>> = Vec::new();
+    for skill in skills.iter() {
+        let Some(entry) = skill.as_dict() else {
+            continue;
+        };
+        if runtime_skill_entry_id(entry) == target {
+            return Ok(entry.clone());
+        }
+        if entry
+            .get("name")
+            .map(|value| value.display())
+            .is_some_and(|name| name == target)
+        {
+            bare_matches.push(entry.clone());
+        }
+    }
+
+    match bare_matches.len() {
+        1 => Ok(bare_matches.remove(0)),
+        0 => Err(format!("skill '{target}' not found")),
+        _ => Err(format!(
+            "skill '{target}' is ambiguous; use the fully qualified id from the catalog"
+        )),
+    }
+}
+
+fn apply_loaded_skill_prompt(state: &mut AgentLoopState, entry: &VmValue, prompt: String) {
+    let mut active = super::state::ActiveSkill::from_entry(entry);
+    active.prompt = if prompt.trim().is_empty() {
+        None
+    } else {
+        Some(prompt)
+    };
+
+    if let Some(existing) = state
+        .active_skills
+        .iter_mut()
+        .find(|skill| skill.name == active.name)
+    {
+        *existing = active.clone();
+    }
+    if let Some(existing) = state
+        .loaded_skills
+        .iter_mut()
+        .find(|skill| skill.name == active.name)
+    {
+        *existing = active;
+    } else {
+        state.loaded_skills.push(active);
+    }
+}
+
+fn execute_runtime_load_skill(
+    state: &mut AgentLoopState,
+    requested: &str,
+    session_id: &str,
+) -> String {
+    let Some(registry) = state.skill_registry.as_ref() else {
+        return runtime_tool_error(
+            "skill_registry_unavailable",
+            requested,
+            "load_skill requires agent_loop to receive a `skills:` registry",
+        );
+    };
+
+    let entry = match resolve_runtime_skill_entry(registry, requested) {
+        Ok(entry) => entry,
+        Err(message) => return runtime_tool_error("skill_not_found", requested, message),
+    };
+    let entry_value = VmValue::Dict(Rc::new(entry.clone()));
+    let active = super::state::ActiveSkill::from_entry(&entry_value);
+    let skill_id = runtime_skill_entry_id(&entry);
+
+    if active.disable_model_invocation {
+        return runtime_tool_error(
+            "skill_model_invocation_disabled",
+            &skill_id,
+            format!("skill '{skill_id}' is gated to explicit user invocation"),
+        );
+    }
+
+    let body = entry
+        .get("body")
+        .map(|value| value.display())
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            entry
+                .get("prompt")
+                .map(|value| value.display())
+                .filter(|value| !value.is_empty())
+        })
+        .unwrap_or_default();
+    let skill_dir = entry
+        .get("skill_dir")
+        .map(|value| value.display())
+        .filter(|value| !value.is_empty());
+    let rendered = crate::skills::substitute_skill_body(
+        &body,
+        &crate::skills::SubstitutionContext {
+            arguments: Vec::new(),
+            skill_dir,
+            session_id: Some(session_id.to_string()),
+            extra_env: Default::default(),
+        },
+    );
+    apply_loaded_skill_prompt(state, &entry_value, rendered.clone());
+    rendered
+}
+
 pub(super) async fn run_tool_dispatch(
     state: &mut AgentLoopState,
     opts: &mut super::super::api::LlmCallOptions,
@@ -189,6 +331,57 @@ pub(super) async fn run_tool_dispatch(
                 "status": "ok",
                 "rejected": false,
             }));
+            if ctx.tool_format == "native" {
+                append_message_to_contexts(
+                    &mut state.visible_messages,
+                    &mut state.recorded_messages,
+                    build_tool_result_message(tool_id, &result_text, &opts.provider),
+                );
+            } else {
+                observations.push_str(&format!(
+                    "[result of {tool_name}]\n{result_text}\n[end of {tool_name} result]\n\n"
+                ));
+            }
+            continue;
+        }
+
+        if tool_name == "load_skill" {
+            let requested = tool_args
+                .get("name")
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .unwrap_or("");
+            let result_text = if requested.is_empty() {
+                runtime_tool_error(
+                    "invalid_arguments",
+                    "",
+                    "load_skill requires a non-empty `name` argument",
+                )
+            } else {
+                execute_runtime_load_skill(state, requested, ctx.session_id)
+            };
+            let status = if result_text.starts_with('{') && result_text.contains("\"error\"") {
+                "error"
+            } else {
+                "ok"
+            };
+            tools_used_this_iter.push(tool_name.to_string());
+            tool_results_this_iter.push(serde_json::json!({
+                "tool_name": tool_name,
+                "status": status,
+                "rejected": false,
+            }));
+            state.transcript_events.push(transcript_event(
+                "tool_execution",
+                "tool",
+                "internal",
+                &result_text,
+                Some(serde_json::json!({
+                    "tool_name": tool_name,
+                    "tool_use_id": tool_id,
+                    "rejected": false,
+                })),
+            ));
             if ctx.tool_format == "native" {
                 append_message_to_contexts(
                     &mut state.visible_messages,
