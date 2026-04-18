@@ -668,8 +668,7 @@ impl AgentLoopState {
                 // surface, not the runtime's own scaffolding. Without
                 // this, activating a skill while `tool_search` is
                 // configured silently kills progressive disclosure.
-                if name.starts_with("__harn_") || name == "load_skill" || allowed.contains(name)
-                {
+                if name.starts_with("__harn_") || name == "load_skill" || allowed.contains(name) {
                     return true;
                 }
                 // Namespace-prefixed entries (`"namespace:read"`) match
