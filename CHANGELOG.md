@@ -7,9 +7,80 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
-## Unreleased
+## v0.7.20
 
 ### Added
+
+- **`harn playground` CLI (#109, closes #99).** New `harn playground`
+  subcommand runs a Harn script against an in-process Harn host for
+  fast pipeline iteration without JSON-RPC bridge boilerplate. Flags:
+  `--host <file>` (exports host functions), `--script <file>` (the
+  pipeline under test), `--task <string>` (forwarded to the script's
+  `task` parameter), `--llm mock:<fixtures>` (pairs with the new
+  `--llm-mock` replay infra), and `--watch` (re-runs on edit).
+  Missing host-capability failures now report the missing function
+  name with caller context instead of a generic bridge error.
+  Companion `pipeline-lab` scaffolding ships in
+  `crates/harn-cli/src/commands/init.rs`. Intended as the substrate
+  for prototyping multi-agent architectures end-to-end without the
+  crates.io release cycle.
+
+- **`load_skill(name)` runtime tool + always-on catalog (#108, closes
+  #96).** `agent_loop` configured with a skills registry now exposes a
+  first-class `load_skill(name)` tool the agent can call mid-session
+  to promote a deferred skill body into the active prompt. Two helper
+  builtins — `skills_catalog_entries` and
+  `render_always_on_catalog` — render the compact catalog harnesses
+  advertise in the always-on prompt. `disable-model-invocation` and
+  `allowed-tools` flow through both the VM-side text channel and the
+  native-channel tool narrowing so a loaded skill's tool surface
+  matches its frontmatter.
+
+- **`std/project` scan builtins (#105, closes #97).** New deterministic
+  L0/L1 project-evidence primitives for non-LLM dispatch:
+  `project_scan(path, options)` returns a single directory's evidence
+  (languages, frameworks, build systems, confidence); `project_scan_tree`
+  walks recursively for polyglot repos and returns a per-directory
+  dict keyed by relative path; `project_catalog()` exposes the
+  detector catalog itself so callers can extend detection by shipping
+  entries rather than patching Rust. `.gitignore`, vendor-dir skipping,
+  and shared package-name parsing now share one deterministic path
+  that also feeds `project_root_package()`.
+
+- **`sub_agent_run(task, options)` context-firewall primitive (#107,
+  closes #98).** New VM builtin that runs a nested agent loop in an
+  isolated child session and returns a typed envelope (`summary`,
+  `artifacts`, `evidence_added`, `tokens_used`, `budget_exceeded`,
+  `session_id`, `ok`, `error`, optional `data`). The child's
+  transcript stays in the child session, so the parent transcript
+  records only the outer call/result pair. `allowed_tools` narrows
+  the child's tool surface via intersection with inherited policy;
+  `returns: { schema: ... }` produces a structured result envelope;
+  `background: true` returns a worker handle compatible with the
+  existing `wait_agent` / `list_agents` / `resume_agent` lifecycle
+  builtins. Child session lineage is recorded in the session store.
+
+- **`std/agent_state` durable session state (#106, closes #101).** New
+  module that persists small durable blobs under a caller-owned root
+  keyed by session id, with atomic writes, resumable handles, and a
+  reserved well-known key for structured handoff documents. The
+  backend is a stable trait with a filesystem implementation so
+  future backends (e.g. a real KV store, a host-managed sandbox) can
+  plug in without changing the Harn-facing API. Covers round-trip,
+  cross-process resume, and two-writer conflict behavior via
+  conformance tests. Substrate for the later `project.deep_scan()` L3
+  cache (harn#103).
+
+- **`harn run --llm-mock` / `--llm-mock-record` (#104, closes #100).**
+  Surfaces the existing VM-side mock infrastructure as first-class
+  `harn run` flags: `--llm-mock <fixtures.jsonl>` replays LLM
+  responses from a JSONL fixture file (FIFO by default, glob match
+  via `"match"` field), `--llm-mock-record <fixtures.jsonl>` captures
+  real provider responses into a fixture file. Unmatched prompts fail
+  with a snippet of the prompt that didn't match. Intercepts
+  non-`mock` providers in replay mode so fixture replay never hits
+  live APIs. Pairs with `harn playground --llm mock:<fixtures>` for
+  deterministic pipeline iteration.
 
 - **Agent event variants for `tool_search_query` / `tool_search_result`
   (harn-vm, harn-cli).** Both the client-executed fallback
