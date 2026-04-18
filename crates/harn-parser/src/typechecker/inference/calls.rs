@@ -398,6 +398,11 @@ impl TypeChecker {
                     self.visit_for_deprecation(s);
                 }
             }
+            Node::SkillDecl { fields, .. } => {
+                for (_k, v) in fields {
+                    self.visit_for_deprecation(v);
+                }
+            }
             Node::IfElse {
                 condition,
                 then_body,

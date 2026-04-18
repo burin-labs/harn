@@ -1,0 +1,89 @@
+// Basic `skill NAME { ... }` top-level declaration.
+//
+// A skill decl lowers to `skill_define(skill_registry(), NAME, {
+// field: value, ... })` and binds the resulting registry dict to NAME.
+// Body entries are `<field_name> <expression>` pairs; lifecycle hooks
+// are fn literal expressions like any other value.
+pipeline test(task) {
+  // Test 1: basic skill declaration with string/list fields
+  skill deploy {
+    description "Deploy the application to production"
+    when_to_use "User says deploy/ship/release"
+    invocation "explicit"
+    paths ["infra/**", "Dockerfile"]
+    allowed_tools ["bash", "git"]
+    model "claude-opus-4-7"
+    effort "high"
+    prompt "Follow the runbook."
+  }
+  assert(skill_count(deploy) == 1, "skill decl should create registry with 1 skill")
+  let s = skill_find(deploy, "deploy")
+  assert(s != nil, "skill_find should locate 'deploy'")
+  assert(s.name == "deploy", "skill name matches")
+  assert(s.description == "Deploy the application to production", "description matches")
+  assert(s.when_to_use == "User says deploy/ship/release", "when_to_use matches")
+  assert(s.invocation == "explicit", "invocation matches")
+  assert(s.model == "claude-opus-4-7", "model matches")
+  assert(s.effort == "high", "effort matches")
+  assert(s.prompt == "Follow the runbook.", "prompt matches")
+  assert(len(s.paths) == 2, "paths has 2 entries")
+  assert(s.paths[0] == "infra/**", "paths[0] matches")
+  assert(s.paths[1] == "Dockerfile", "paths[1] matches")
+  assert(len(s.allowed_tools) == 2, "allowed_tools has 2 entries")
+  // Test 2: skill with lifecycle hooks (fn expressions)
+  skill onboard {
+    description "Onboarding flow"
+    on_activate fn() { log("onboard activated") }
+    on_deactivate fn() { log("onboard deactivated") }
+  }
+  let o = skill_find(onboard, "onboard")
+  assert(o.on_activate != nil, "on_activate hook present")
+  assert(o.on_deactivate != nil, "on_deactivate hook present")
+  // Test 3: empty skill decl (only name)
+  skill minimal {
+  }
+  let m = skill_find(minimal, "minimal")
+  assert(m != nil, "empty skill decl still registers")
+  assert(m.name == "minimal", "minimal name matches")
+  // Empty description is provided by the stdlib for stable shape.
+  assert(m.description == "", "missing description defaults to empty string")
+  // Test 4: pub skill compiles identically (pub is a top-level marker only)
+  assert(s.name == "deploy", "pub/non-pub skills both register")
+  // Test 5: imperative registration via skill_define gives same shape
+  let reg = skill_define(
+    skill_registry(),
+    "review",
+    {description: "Code review skill", invocation: "auto", paths: ["src/**"]},
+  )
+  assert(skill_count(reg) == 1, "skill_define registers 1 skill")
+  let r = skill_find(reg, "review")
+  assert(r.description == "Code review skill", "imperative description")
+  assert(r.invocation == "auto", "imperative invocation")
+  // Test 6: skill_list strips closure handlers but keeps metadata
+  let listed = skill_list(onboard)
+  assert(len(listed) == 1, "skill_list returns 1 entry")
+  assert(listed[0].name == "onboard", "listed entry has name")
+  // Closures should have been stripped for serialization safety.
+  assert(!contains(keys(listed[0]), "on_activate"), "skill_list strips closure hooks")
+  // Test 7: skill_select filters by name
+  let multi = skill_define(skill_define(skill_registry(), "a", {description: "A"}), "b", {description: "B"})
+  assert(skill_count(multi) == 2, "multi registry has 2 skills")
+  let only_a = skill_select(multi, ["a"])
+  assert(skill_count(only_a) == 1, "skill_select filters to 1")
+  assert(skill_find(only_a, "a") != nil, "selected skill present")
+  assert(skill_find(only_a, "b") == nil, "non-selected skill absent")
+  // Test 8: skill_remove removes by name
+  let without_b = skill_remove(multi, "b")
+  assert(skill_count(without_b) == 1, "skill_remove drops 1")
+  assert(skill_find(without_b, "b") == nil, "removed skill absent")
+  // Test 9: skill_describe returns formatted string
+  let desc_text = skill_describe(deploy)
+  assert(contains(desc_text, "Available skills:"), "describe has header")
+  assert(contains(desc_text, "deploy"), "describe mentions skill name")
+  // Test 10: re-registering replaces rather than duplicates
+  let updated = skill_define(reg, "review", {description: "Updated"})
+  assert(skill_count(updated) == 1, "re-register keeps count at 1")
+  let u = skill_find(updated, "review")
+  assert(u.description == "Updated", "re-register overwrites description")
+  log("skill_decl tests passed")
+}

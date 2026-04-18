@@ -1440,6 +1440,92 @@ model's context (prompt caching stays warm). On providers without
 native support, Phase 1 refuses `tool_search` with a diagnostic error;
 client-executed fallback is tracked separately.
 
+### skill declarations
+
+```harn
+pub skill deploy {
+  description "Deploy the application to production"
+  when_to_use "User says deploy/ship/release"
+  invocation "explicit"
+  paths ["infra/**", "Dockerfile"]
+  allowed_tools ["bash", "git"]
+  model "claude-opus-4-7"
+  effort "high"
+  prompt "Follow the deployment runbook."
+
+  on_activate fn() {
+    log("deploy skill activated")
+  }
+  on_deactivate fn() {
+    log("deploy skill deactivated")
+  }
+}
+```
+
+Declares a named skill and registers it with a skill registry. A skill
+bundles metadata, tool references, MCP server lists, system-prompt
+fragments, and auto-activation rules into a typed unit that hosts can
+enumerate, select, and invoke.
+
+Body entries are `<field_name> <expression>` pairs separated by
+newlines. The field name is an ordinary identifier (no keyword is
+reserved), and the value is any expression — string literal, list
+literal, identifier reference, dict literal, or fn-literal (for
+lifecycle hooks). The compiler lowers the decl to:
+
+```harn,ignore
+skill_define(skill_registry(), NAME, { field: value, ... })
+```
+
+and binds the resulting registry dict to `NAME`, parallel to how
+`tool NAME { ... }` works.
+
+`skill_define` performs light value-shape validation on known keys:
+`description`, `when_to_use`, `prompt`, `invocation`, `model`, `effort`
+must be strings; `paths`, `allowed_tools`, `mcp` must be lists.
+Mistyped values fail at registration rather than at use. Unknown keys
+pass through unchanged to support integrator metadata.
+
+Like `fn` and `tool`, `skill` may be prefixed with `pub` to export it
+from the module. The registry-dict value is bound as a module-level
+variable.
+
+#### Skill registry operations
+
+```harn
+let reg = skill_registry()
+let reg = skill_define(reg, "review", {
+  description: "Code review",
+  invocation: "auto",
+  paths: ["src/**"],
+})
+skill_count(reg)           // int
+skill_find(reg, "review")  // dict | nil
+skill_list(reg)            // list (closure hooks stripped)
+skill_select(reg, ["review"])
+skill_remove(reg, "review")
+skill_describe(reg)        // formatted string
+```
+
+`skill_list` strips closure-valued fields (lifecycle hooks) so its
+output is safe to serialize. `skill_find` returns the full entry
+including closures.
+
+#### `@acp_skill` attribute
+
+Functions can be promoted into skills via the `@acp_skill` attribute:
+
+```harn,ignore
+@acp_skill(name: "deploy", when_to_use: "User says deploy", invocation: "explicit")
+pub fn deploy_run() { ... }
+```
+
+Attribute arguments populate the skill's metadata dict, and the
+annotated function is registered as the skill's `on_activate`
+lifecycle hook. Like `@acp_tool`, `@acp_skill` only applies to
+function declarations; using it on other kinds of item is a compile
+error.
+
 ### Closures
 
 ```harn

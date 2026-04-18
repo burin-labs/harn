@@ -52,6 +52,17 @@ fn collect_mock_host_capabilities_from_node(
                 );
             }
         }
+        Node::SkillDecl { fields, .. } => {
+            for (_k, v) in fields {
+                collect_mock_host_capabilities_from_node(
+                    v,
+                    file_path,
+                    source,
+                    visited,
+                    capabilities,
+                );
+            }
+        }
         Node::ImportDecl { path } | Node::SelectiveImport { path, .. } => {
             if path.starts_with("std/") {
                 return;

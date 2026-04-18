@@ -1,0 +1,19 @@
+// `@acp_skill` desugars to a runtime skill_define call. The attribute
+// args populate skill metadata (when_to_use, invocation, etc.) and the
+// annotated fn is registered as the skill's `on_activate` lifecycle
+// hook so the skill can invoke it on selection.
+//
+// Note: skill_registry() in the current runtime returns a fresh
+// registry per call rather than a global, so the registration's side
+// effect isn't observable across calls. This test just verifies the
+// function remains directly callable and the attribute compiles
+// cleanly.
+@acp_skill(name: "deploy", when_to_use: "ship it", invocation: "explicit")
+pub fn deploy_activate() -> string {
+  return "ready"
+}
+
+pipeline test_acp_skill(task) {
+  assert(deploy_activate() == "ready", "function still callable")
+  log("attributes_acp_skill ok")
+}

@@ -36,6 +36,8 @@
 "from" @keyword
 "timeout" @keyword
 "default" @keyword
+"tool" @keyword
+"skill" @keyword
 "not" @keyword.operator
 "to" @keyword.operator
 "exclusive" @keyword.operator
@@ -65,6 +67,12 @@
   name: (identifier) @function)
 
 (override_declaration
+  name: (identifier) @function)
+
+(tool_declaration
+  name: (identifier) @function)
+
+(skill_declaration
   name: (identifier) @function)
 
 ; Function calls

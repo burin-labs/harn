@@ -17,6 +17,7 @@ pub mod process;
 mod regex;
 mod sets;
 mod shapes;
+mod skills;
 mod strings;
 pub mod template;
 mod testing;
@@ -65,6 +66,7 @@ pub fn register_io_stdlib(vm: &mut Vm) {
 pub fn register_agent_stdlib(vm: &mut Vm) {
     concurrency::register_concurrency_builtins(vm);
     tools::register_tool_builtins(vm);
+    skills::register_skill_builtins(vm);
     agents::register_agent_builtins(vm);
     agent_sessions::register_agent_session_builtins(vm);
     register_http_builtins(vm);

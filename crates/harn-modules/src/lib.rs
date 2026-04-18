@@ -12,6 +12,7 @@ pub enum DefKind {
     Function,
     Pipeline,
     Tool,
+    Skill,
     Struct,
     Enum,
     Interface,
@@ -384,6 +385,15 @@ fn collect_module_info(file: &Path, snode: &SNode, module: &mut ModuleInfo) {
             module.declarations.insert(
                 name.clone(),
                 decl_site(file, snode.span, name, DefKind::Tool),
+            );
+        }
+        Node::SkillDecl { name, is_pub, .. } => {
+            if *is_pub {
+                module.exports.insert(name.clone());
+            }
+            module.declarations.insert(
+                name.clone(),
+                decl_site(file, snode.span, name, DefKind::Skill),
             );
         }
         Node::StructDecl { name, is_pub, .. } => {

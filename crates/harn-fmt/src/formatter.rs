@@ -304,6 +304,21 @@ impl Formatter {
                 self.dedent();
                 self.writeln("}");
             }
+            Node::SkillDecl {
+                name,
+                fields,
+                is_pub,
+            } => {
+                let pub_prefix = if *is_pub { "pub " } else { "" };
+                self.writeln(&format!("{pub_prefix}skill {name} {{"));
+                self.indent();
+                for (field_name, field_expr) in fields {
+                    let expr_str = self.format_expr(field_expr);
+                    self.writeln(&format!("{field_name} {expr_str}"));
+                }
+                self.dedent();
+                self.writeln("}");
+            }
             Node::IfElse {
                 condition,
                 then_body,
@@ -1127,6 +1142,25 @@ impl Formatter {
                     &effective_body,
                 )
             }
+            Node::SkillDecl {
+                name,
+                fields,
+                is_pub,
+            } => {
+                let pub_prefix = if *is_pub { "pub " } else { "" };
+                let item_indent = "  ".repeat(self.indent + 1);
+                let close_indent = "  ".repeat(self.indent);
+                let mut inner = String::new();
+                for (field_name, field_expr) in fields {
+                    let expr_str = self.format_expr(field_expr);
+                    inner.push_str(&item_indent);
+                    inner.push_str(field_name);
+                    inner.push(' ');
+                    inner.push_str(&expr_str);
+                    inner.push('\n');
+                }
+                format!("{pub_prefix}skill {name} {{\n{inner}{close_indent}}}")
+            }
             Node::LetBinding {
                 pattern,
                 type_ann,
@@ -1357,6 +1391,25 @@ impl Formatter {
                     &effective_body,
                     indent_level,
                 )
+            }
+            Node::SkillDecl {
+                name,
+                fields,
+                is_pub,
+            } => {
+                let pub_prefix = if *is_pub { "pub " } else { "" };
+                let item_indent = "  ".repeat(indent_level + 1);
+                let close_indent = "  ".repeat(indent_level);
+                let mut inner = String::new();
+                for (field_name, field_expr) in fields {
+                    let expr_str = self.format_expr(field_expr);
+                    inner.push_str(&item_indent);
+                    inner.push_str(field_name);
+                    inner.push(' ');
+                    inner.push_str(&expr_str);
+                    inner.push('\n');
+                }
+                format!("{pub_prefix}skill {name} {{\n{inner}{close_indent}}}")
             }
             Node::LetBinding {
                 pattern,

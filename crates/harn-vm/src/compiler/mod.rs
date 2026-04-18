@@ -263,6 +263,9 @@ impl Compiler {
             } => {
                 self.compile_tool_decl(name, description, params, return_type, body)?;
             }
+            Node::SkillDecl { name, fields, .. } => {
+                self.compile_skill_decl(name, fields)?;
+            }
             Node::Closure { params, body, .. } => {
                 self.compile_closure(params, body)?;
             }

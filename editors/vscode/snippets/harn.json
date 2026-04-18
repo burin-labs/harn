@@ -27,6 +27,18 @@
     ],
     "description": "Create a tool definition"
   },
+  "Skill": {
+    "prefix": "skill",
+    "body": [
+      "skill ${1:name} {",
+      "  description \"${2:What this skill does}\"",
+      "  when_to_use \"${3:When the skill should auto-activate}\"",
+      "  invocation \"${4|explicit,auto,both|}\"",
+      "  ${0}",
+      "}"
+    ],
+    "description": "Create a skill definition"
+  },
   "Parallel Each": {
     "prefix": "parallel-each",
     "body": [

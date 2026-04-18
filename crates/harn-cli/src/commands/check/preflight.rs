@@ -854,6 +854,19 @@ fn scan_node_preflight(
                 diagnostics,
             );
         }
+        Node::SkillDecl { fields, .. } => {
+            for (_k, v) in fields {
+                scan_node_preflight(
+                    v,
+                    file_path,
+                    source,
+                    config,
+                    host_capabilities,
+                    visited,
+                    diagnostics,
+                );
+            }
+        }
         Node::LetBinding { value, .. } | Node::VarBinding { value, .. } => {
             scan_node_preflight(
                 value,

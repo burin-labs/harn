@@ -203,6 +203,18 @@ pub enum Node {
         body: Vec<SNode>,
         is_pub: bool,
     },
+    /// Top-level `skill NAME { ... }` declaration.
+    ///
+    /// Skills bundle metadata, tool references, MCP server lists, and
+    /// optional lifecycle hooks into a typed unit. Each body entry is a
+    /// `<field_name> <expression>` pair; the compiler lowers the decl to
+    /// `skill_define(skill_registry(), NAME, { field: expr, ... })` and
+    /// binds the resulting registry dict to `NAME`.
+    SkillDecl {
+        name: String,
+        fields: Vec<(String, SNode)>,
+        is_pub: bool,
+    },
     TypeDecl {
         name: String,
         type_params: Vec<TypeParam>,

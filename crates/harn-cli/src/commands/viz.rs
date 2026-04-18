@@ -125,6 +125,10 @@ impl MermaidGraph {
             Node::ToolDecl { name, body, .. } => {
                 self.emit_named_block(&format!("tool {name}"), body)
             }
+            Node::SkillDecl { name, .. } => {
+                // Skills are metadata; represent as a single node with no body.
+                self.emit_named_block(&format!("skill {name}"), &[])
+            }
             Node::OverrideDecl { name, body, .. } => {
                 self.emit_named_block(&format!("override {name}"), body)
             }
@@ -435,6 +439,7 @@ fn summarize_node(node: &SNode) -> String {
         Node::Pipeline { name, .. } => format!("pipeline {name}"),
         Node::FnDecl { name, .. } => format!("fn {name}"),
         Node::ToolDecl { name, .. } => format!("tool {name}"),
+        Node::SkillDecl { name, .. } => format!("skill {name}"),
         Node::OverrideDecl { name, .. } => format!("override {name}"),
         Node::IfElse { condition, .. } => format!("if {}", inline_label(condition)),
         Node::ForIn {

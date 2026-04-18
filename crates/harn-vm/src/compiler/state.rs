@@ -758,6 +758,7 @@ impl Compiler {
                 inner_kind,
                 Node::FnDecl { .. }
                     | Node::ToolDecl { .. }
+                    | Node::SkillDecl { .. }
                     | Node::ImplBlock { .. }
                     | Node::StructDecl { .. }
                     | Node::EnumDecl { .. }
@@ -786,6 +787,11 @@ impl Compiler {
                 Node::FnDecl { body, .. } | Node::ToolDecl { body, .. } => {
                     Self::collect_enum_names(body, names);
                 }
+                Node::SkillDecl { fields, .. } => {
+                    for (_k, v) in fields {
+                        Self::collect_enum_names(std::slice::from_ref(v), names);
+                    }
+                }
                 Node::Block(stmts) => {
                     Self::collect_enum_names(stmts, names);
                 }
@@ -812,6 +818,11 @@ impl Compiler {
                 | Node::FnDecl { body, .. }
                 | Node::ToolDecl { body, .. } => {
                     Self::collect_interface_methods(body, interfaces);
+                }
+                Node::SkillDecl { fields, .. } => {
+                    for (_k, v) in fields {
+                        Self::collect_interface_methods(std::slice::from_ref(v), interfaces);
+                    }
                 }
                 Node::Block(stmts) => {
                     Self::collect_interface_methods(stmts, interfaces);
@@ -870,6 +881,7 @@ impl Compiler {
             | Node::ReturnStmt { .. }
             | Node::FnDecl { .. }
             | Node::ToolDecl { .. }
+            | Node::SkillDecl { .. }
             | Node::ImplBlock { .. }
             | Node::StructDecl { .. }
             | Node::EnumDecl { .. }

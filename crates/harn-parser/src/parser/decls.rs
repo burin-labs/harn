@@ -117,6 +117,7 @@ impl Parser {
         match &inner.node {
             Node::FnDecl { .. }
             | Node::ToolDecl { .. }
+            | Node::SkillDecl { .. }
             | Node::Pipeline { .. }
             | Node::StructDecl { .. }
             | Node::EnumDecl { .. }
@@ -127,7 +128,7 @@ impl Parser {
                 return Err(ParserError::Unexpected {
                     got: "non-declaration statement".into(),
                     expected:
-                        "fn/tool/pipeline/struct/enum/type/interface/impl declaration after `@attr`"
+                        "fn/tool/skill/pipeline/struct/enum/type/interface/impl declaration after `@attr`"
                             .into(),
                     span: inner.span,
                 });
@@ -319,6 +320,45 @@ impl Parser {
                 params,
                 return_type,
                 body,
+                is_pub,
+            },
+            Span::merge(start, self.prev_span()),
+        ))
+    }
+
+    /// Parse a top-level `pub? skill NAME { <field> <expr> ... }` declaration.
+    ///
+    /// Each body entry is a `<field_name_identifier> <expression>` pair.
+    /// Newlines separate entries. Lifecycle hooks are ordinary fn-literal
+    /// expressions (`on_activate fn() { ... }`). No field names are
+    /// reserved at the parser level — the compiler validates the schema.
+    pub(super) fn parse_skill_decl(&mut self, is_pub: bool) -> Result<SNode, ParserError> {
+        let start = self.current_span();
+        self.consume(&TokenKind::Skill, "skill")?;
+        let name = self.consume_identifier("skill name")?;
+        self.consume(&TokenKind::LBrace, "{")?;
+
+        let mut fields: Vec<(String, SNode)> = Vec::new();
+        loop {
+            self.skip_newlines();
+            if self.check(&TokenKind::RBrace) {
+                break;
+            }
+            let field_name = self.consume_identifier("skill field name")?;
+            self.skip_newlines();
+            let value = self.parse_expression()?;
+            fields.push((field_name, value));
+            // Separator: newline, semicolon, or close brace.
+            if self.check(&TokenKind::Semicolon) {
+                self.advance();
+            }
+        }
+        self.consume(&TokenKind::RBrace, "}")?;
+
+        Ok(spanned(
+            Node::SkillDecl {
+                name,
+                fields,
                 is_pub,
             },
             Span::merge(start, self.prev_span()),
