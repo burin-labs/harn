@@ -72,6 +72,7 @@ pub(crate) fn is_top_level_item(node: &Node) -> bool {
             | Node::InterfaceDecl { .. }
             | Node::TypeDecl { .. }
             | Node::ToolDecl { .. }
+            | Node::SkillDecl { .. }
             | Node::ImplBlock { .. }
             | Node::OverrideDecl { .. }
             | Node::LetBinding { .. }
@@ -95,6 +96,7 @@ pub(crate) fn is_documentable_item(node: &Node) -> bool {
             | Node::InterfaceDecl { .. }
             | Node::TypeDecl { .. }
             | Node::ToolDecl { .. }
+            | Node::SkillDecl { .. }
             | Node::ImplBlock { .. }
             | Node::OverrideDecl { .. }
     )
@@ -106,7 +108,8 @@ pub(crate) fn item_is_pub(node: &Node) -> bool {
         | Node::Pipeline { is_pub, .. }
         | Node::StructDecl { is_pub, .. }
         | Node::EnumDecl { is_pub, .. }
-        | Node::ToolDecl { is_pub, .. } => *is_pub,
+        | Node::ToolDecl { is_pub, .. }
+        | Node::SkillDecl { is_pub, .. } => *is_pub,
         // InterfaceDecl / ImplBlock / TypeDecl / OverrideDecl have no
         // is_pub flag — treat them as always-eligible when they appear at
         // the top level.

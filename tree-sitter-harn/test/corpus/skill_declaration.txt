@@ -1,0 +1,32 @@
+==================
+Public Skill Declaration
+==================
+
+pub skill deploy {
+  description "Deploy the app"
+  invocation "explicit"
+  paths ["infra/**", "Dockerfile"]
+  on_activate fn() { log("activated") }
+}
+
+---
+
+(source_file
+  (skill_declaration
+    name: (identifier)
+    field_name: (identifier)
+    field_value: (string_literal)
+    field_name: (identifier)
+    field_value: (string_literal)
+    field_name: (identifier)
+    field_value: (list_literal
+      (string_literal)
+      (string_literal))
+    field_name: (identifier)
+    field_value: (fn_expression
+      body: (block
+        (expression_statement
+          (call_expression
+            function: (identifier)
+            (argument_list
+              (string_literal))))))))

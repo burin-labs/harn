@@ -209,6 +209,9 @@ impl TypeChecker {
                     scope.define_fn(name, sig);
                     walk_all(scope, body);
                 }
+                Node::SkillDecl { name, .. } => {
+                    scope.define_var(name, None);
+                }
                 Node::LetBinding { pattern, .. } | Node::VarBinding { pattern, .. } => {
                     // Only bare-identifier patterns at module scope
                     // need forward-ref placeholders; destructuring

@@ -320,6 +320,7 @@ fn node_children_bundle(node: &SNode) -> Vec<&SNode> {
             }
             children
         }
+        Node::SkillDecl { fields, .. } => fields.iter().map(|(_, v)| v).collect(),
         Node::IfElse {
             condition,
             then_body,

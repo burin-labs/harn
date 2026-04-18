@@ -267,6 +267,17 @@ impl TypeChecker {
                 self.check_fn_body(&[], params, return_type, body, &[]);
             }
 
+            Node::SkillDecl { name, fields, .. } => {
+                // Skills lower to `skill_define(skill_registry(), name, { ... })`.
+                // The bound variable holds a registry dict. Type-check each
+                // field expression so references to tools/pipelines/fns get
+                // checked like any other expression.
+                for (_key, value) in fields {
+                    self.check_node(value, scope);
+                }
+                scope.define_var(name, None);
+            }
+
             Node::FunctionCall { name, args } => {
                 self.check_call(name, args, scope, span);
                 // Strict types: schema_expect clears untyped source status

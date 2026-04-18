@@ -189,6 +189,53 @@ impl Compiler {
         Ok(())
     }
 
+    /// Lower a `skill NAME { key value ... }` declaration to
+    /// `let NAME = skill_define(skill_registry(), NAME, { key: value, ... })`.
+    ///
+    /// Each `(field_name, expr)` pair becomes a dict entry. Lifecycle hook
+    /// expressions (e.g. `on_activate fn() { ... }`) lower to closure
+    /// values just like any other `fn(...) { ... }` literal.
+    pub(super) fn compile_skill_decl(
+        &mut self,
+        name: &str,
+        fields: &[(String, SNode)],
+    ) -> Result<(), CompileError> {
+        // Push skill_define
+        let define_idx = self
+            .chunk
+            .add_constant(Constant::String("skill_define".into()));
+        self.chunk.emit_u16(Op::Constant, define_idx, self.line);
+
+        // Push skill_registry()
+        let reg_idx = self
+            .chunk
+            .add_constant(Constant::String("skill_registry".into()));
+        self.chunk.emit_u16(Op::Constant, reg_idx, self.line);
+        self.chunk.emit_u8(Op::Call, 0, self.line);
+
+        // Push skill name
+        let name_const = self.chunk.add_constant(Constant::String(name.to_string()));
+        self.chunk.emit_u16(Op::Constant, name_const, self.line);
+
+        // Build config dict from fields.
+        let mut field_count: u16 = 0;
+        for (key, value) in fields {
+            let key_idx = self.chunk.add_constant(Constant::String(key.clone()));
+            self.chunk.emit_u16(Op::Constant, key_idx, self.line);
+            self.compile_node(value)?;
+            field_count += 1;
+        }
+        self.chunk.emit_u16(Op::BuildDict, field_count, self.line);
+
+        // Call skill_define(registry, name, config) — 3 args.
+        self.chunk.emit_u8(Op::Call, 3, self.line);
+
+        // Bind result to skill name as a variable.
+        let bind_idx = self.chunk.add_constant(Constant::String(name.to_string()));
+        self.chunk.emit_u16(Op::DefLet, bind_idx, self.line);
+        Ok(())
+    }
+
     pub(super) fn compile_closure(
         &mut self,
         params: &[TypedParam],

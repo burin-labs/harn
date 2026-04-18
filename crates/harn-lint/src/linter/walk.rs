@@ -152,6 +152,23 @@ impl<'a> Linter<'a> {
                 self.pop_scope();
             }
 
+            Node::SkillDecl {
+                name,
+                fields,
+                is_pub,
+            } => {
+                self.known_functions.insert(name.clone());
+                self.fn_declarations.push(FnDeclaration {
+                    name: name.clone(),
+                    span: snode.span,
+                    is_pub: *is_pub,
+                    is_method: false,
+                });
+                for (_k, value) in fields {
+                    self.lint_node(value);
+                }
+            }
+
             Node::ImplBlock { type_name, methods } => {
                 self.type_references.insert(type_name.clone());
                 let saved = self.in_impl_block;

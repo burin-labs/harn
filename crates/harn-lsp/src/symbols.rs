@@ -284,6 +284,29 @@ fn collect_symbols(
                 recurse!(s, Some(snode.span));
             }
         }
+        Node::SkillDecl { name, fields, .. } => {
+            let field_names = fields
+                .iter()
+                .map(|(n, _)| n.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            let sig = format!("skill {name} {{ {field_names} }}");
+            symbols.push(SymbolInfo {
+                name: name.clone(),
+                kind: HarnSymbolKind::Variable,
+                def_span: snode.span,
+                type_info: None,
+                signature: Some(sig),
+                scope_span,
+                doc_comment: extract_doc_comment(source, &snode.span),
+                impl_type: None,
+                fields: Vec::new(),
+                enum_variants: Vec::new(),
+            });
+            for (_k, value) in fields {
+                recurse!(value, Some(snode.span));
+            }
+        }
         Node::LetBinding {
             pattern,
             type_ann,

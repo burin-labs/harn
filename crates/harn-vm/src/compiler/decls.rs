@@ -173,16 +173,27 @@ impl Compiler {
                     line: self.line,
                 });
             }
+            if attr.name == "acp_skill" && !matches!(inner.node, Node::FnDecl { .. }) {
+                return Err(CompileError {
+                    message: "@acp_skill can only be applied to function declarations".into(),
+                    line: self.line,
+                });
+            }
         }
         self.compile_node(inner)?;
         // @acp_tool desugars to a `tool_define(...)` call that
         // mirrors the imperative tool registration path. Emitted
         // after the inner FnDecl so the handler binding is in
-        // scope.
+        // scope. @acp_skill follows the same pattern against the
+        // skill registry.
         for attr in attributes {
             if attr.name == "acp_tool" {
                 if let Node::FnDecl { name, .. } = &inner.node {
                     self.emit_acp_tool_registration(attr, name)?;
+                }
+            } else if attr.name == "acp_skill" {
+                if let Node::FnDecl { name, .. } = &inner.node {
+                    self.emit_acp_skill_registration(attr, name)?;
                 }
             }
         }
@@ -258,6 +269,78 @@ impl Compiler {
 
         // Call tool_define(registry, name, desc, config) — 4 args.
         self.chunk.emit_u8(Op::Call, 4, self.line);
+        self.chunk.emit(Op::Pop, self.line);
+        Ok(())
+    }
+
+    /// Emit bytecode equivalent to:
+    ///   skill_define(skill_registry(), <attr.name | fn_name>, {
+    ///     on_activate: <fn_name>,
+    ///     ...attribute_args (excluding `name`)
+    ///   })
+    ///
+    /// Each attribute argument (except `name`) becomes a config dict
+    /// entry — the attribute literal is the value. This lets authors
+    /// write `@acp_skill(name: "deploy", when_to_use: "...", invocation: "explicit")`
+    /// and have the resulting skill entry carry those fields. The
+    /// annotated fn itself is registered as the `on_activate` lifecycle
+    /// hook so invoking the skill calls the user's function.
+    pub(super) fn emit_acp_skill_registration(
+        &mut self,
+        attr: &harn_parser::Attribute,
+        fn_name: &str,
+    ) -> Result<(), CompileError> {
+        let skill_name = attr
+            .string_arg("name")
+            .unwrap_or_else(|| fn_name.to_string());
+
+        // Push skill_define
+        let define_idx = self
+            .chunk
+            .add_constant(Constant::String("skill_define".into()));
+        self.chunk.emit_u16(Op::Constant, define_idx, self.line);
+
+        // Push skill_registry()
+        let reg_idx = self
+            .chunk
+            .add_constant(Constant::String("skill_registry".into()));
+        self.chunk.emit_u16(Op::Constant, reg_idx, self.line);
+        self.chunk.emit_u8(Op::Call, 0, self.line);
+
+        // Push skill name
+        let name_const = self.chunk.add_constant(Constant::String(skill_name));
+        self.chunk.emit_u16(Op::Constant, name_const, self.line);
+
+        // Build config dict: every named attr arg (except `name`) + on_activate.
+        let mut entries: u16 = 0;
+        for arg in &attr.args {
+            let Some(ref key) = arg.name else {
+                continue;
+            };
+            if key == "name" {
+                continue;
+            }
+            let key_idx = self.chunk.add_constant(Constant::String(key.clone()));
+            self.chunk.emit_u16(Op::Constant, key_idx, self.line);
+            self.compile_attribute_value(&arg.value)?;
+            entries += 1;
+        }
+
+        // on_activate: <fn_name>
+        let activate_key = self
+            .chunk
+            .add_constant(Constant::String("on_activate".into()));
+        self.chunk.emit_u16(Op::Constant, activate_key, self.line);
+        let fn_name_const = self
+            .chunk
+            .add_constant(Constant::String(fn_name.to_string()));
+        self.chunk.emit_u16(Op::GetVar, fn_name_const, self.line);
+        entries += 1;
+
+        self.chunk.emit_u16(Op::BuildDict, entries, self.line);
+
+        // Call skill_define(registry, name, config) — 3 args.
+        self.chunk.emit_u8(Op::Call, 3, self.line);
         self.chunk.emit(Op::Pop, self.line);
         Ok(())
     }

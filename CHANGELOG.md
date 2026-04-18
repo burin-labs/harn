@@ -11,6 +11,31 @@ granular archaeology.
 
 ### Added
 
+- **Skills are a first-class top-level form.** Adds `skill NAME { ... }`
+  alongside `pipeline` / `fn` / `tool`. Each body entry is a
+  `<field_name> <expression>` pair; lifecycle hooks
+  (`on_activate fn() { ... }`, `on_deactivate`) are ordinary fn-literal
+  expressions. The decl lowers to
+  `skill_define(skill_registry(), NAME, { field: value, ... })` and
+  binds the resulting registry dict to `NAME`. New stdlib module
+  `crates/harn-vm/src/stdlib/skills.rs` exposes `skill_registry`,
+  `skill_define`, `skill_list`, `skill_find`, `skill_select`,
+  `skill_remove`, `skill_count`, `skill_describe`. `skill_define`
+  validates known-key value shapes (`description`/`when_to_use`/
+  `prompt`/`invocation`/`model`/`effort` as strings;
+  `paths`/`allowed_tools`/`mcp` as lists) so typos raise at
+  registration rather than at use. Attribute sugar `@acp_skill(name:
+  "...", when_to_use: "...", invocation: "explicit", ...)` applied to
+  a `fn` registers the fn as the skill's `on_activate` hook and lifts
+  the remaining named args into the skill metadata. Covered by
+  `conformance/tests/skill_decl.{harn,expected}`,
+  `conformance/tests/attributes_acp_skill.{harn,expected}`, and
+  `conformance/errors/skill_define_invalid.{harn,error}`. Coordinated
+  updates to lexer (new `skill` keyword), parser (new `SkillDecl` AST
+  with `fields: Vec<(String, SNode)>`), tree-sitter grammar + tests,
+  VS Code syntax highlighter and snippets, spec, and quickref. Closes
+  [#72](https://github.com/burin-labs/harn/issues/72).
+
 - **Debugger M1–M4: DAP surface reaches protocol parity.** Adds the full
   Debug Adapter Protocol feature set needed for IDEs to drive Harn runs
   as first-class debug sessions. Capabilities advertised:

@@ -1306,6 +1306,38 @@ pub(crate) const BUILTIN_SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("float")),
     },
     BuiltinSig {
+        name: "skill_count",
+        return_type: Some(BuiltinReturn::Named("int")),
+    },
+    BuiltinSig {
+        name: "skill_define",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
+        name: "skill_describe",
+        return_type: Some(BuiltinReturn::Named("string")),
+    },
+    BuiltinSig {
+        name: "skill_find",
+        return_type: None,
+    },
+    BuiltinSig {
+        name: "skill_list",
+        return_type: Some(BuiltinReturn::Named("list")),
+    },
+    BuiltinSig {
+        name: "skill_registry",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
+        name: "skill_remove",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
+        name: "skill_select",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
         name: "sleep",
         return_type: Some(BuiltinReturn::Named("nil")),
     },

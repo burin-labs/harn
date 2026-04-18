@@ -143,6 +143,7 @@ pub fn compute(x: int) -> int { return x + 1 }
 | `@test` | Marks a `pipeline` as a test. `harn test` discovers it alongside the legacy `test_*` naming convention. |
 | `@complexity(allow)` | Suppresses the `cyclomatic-complexity` lint warning on this fn. |
 | `@acp_tool(name: "X", kind: "edit", side_effect_level: "mutation", ...)` | Compiles to `tool_define(...)` with the fn as the handler and the named args (minus `name`) lifted into `annotations`. `name` defaults to the fn name. |
+| `@acp_skill(name: "X", when_to_use: "...", invocation: "explicit", ...)` | Compiles to `skill_define(...)` with the fn bound as the skill's `on_activate` hook. Named args (minus `name`) become skill-metadata fields. `name` defaults to the fn name. |
 
 Unknown attribute names produce a type-checker warning (typo guard)
 but don't break compilation. Attached to any non-decl statement is a
@@ -527,6 +528,41 @@ Semantics:
 - Transcript events: `tool_search_query` and `tool_search_result`
   blocks appear in the run record so replay / eval can see which tools
   got promoted and when.
+
+### Skills (bundled tool + prompt + MCP metadata)
+
+Use `skill NAME { ... }` to declare a named skill: metadata, a tool
+registry reference, MCP server names, a system-prompt fragment, and
+optional lifecycle hooks that run on activate/deactivate. Each body
+entry is `<field_name> <expression>` — unreserved identifiers, regular
+expressions as values. The decl lowers to `skill_define(skill_registry(), NAME, { ... })`
+and binds the result to `NAME`.
+
+```harn
+pub skill deploy {
+  description "Deploy the application to production"
+  when_to_use "User says deploy/ship/release"
+  invocation "explicit"           // "auto" | "explicit" | "both"
+  paths ["infra/**", "Dockerfile"]
+  allowed_tools ["bash", "git"]
+  model "claude-opus-4-7"
+  effort "high"
+  prompt "Follow the deployment runbook."
+
+  on_activate fn() { log("deploy activated") }
+  on_deactivate fn() { log("deploy deactivated") }
+}
+```
+
+Registry ops: `skill_registry()`, `skill_define(reg, name, config)`,
+`skill_list(reg)`, `skill_find(reg, name)`, `skill_count(reg)`,
+`skill_select(reg, names)`, `skill_remove(reg, name)`,
+`skill_describe(reg)`. `skill_list` strips closure hooks for
+serialization; `skill_find` returns the full entry.
+
+Known-key validation in `skill_define`: `description`, `when_to_use`,
+`prompt`, `invocation`, `model`, `effort` must be strings; `paths`,
+`allowed_tools`, `mcp` must be lists. Unknown keys pass through.
 
 ### Common patterns
 

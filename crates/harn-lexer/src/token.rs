@@ -118,6 +118,7 @@ pub const KEYWORDS: &[&str] = &[
     "retry",
     "return",
     "select",
+    "skill",
     "spawn",
     "struct",
     "throw",
@@ -177,6 +178,7 @@ pub enum TokenKind {
     Continue,
     Select,
     Impl,
+    Skill,
 
     Identifier(String),
     StringLiteral(String),
@@ -288,6 +290,7 @@ impl fmt::Display for TokenKind {
             TokenKind::Continue => write!(f, "continue"),
             TokenKind::Select => write!(f, "select"),
             TokenKind::Impl => write!(f, "impl"),
+            TokenKind::Skill => write!(f, "skill"),
             TokenKind::Identifier(s) => write!(f, "id({s})"),
             TokenKind::StringLiteral(s) => write!(f, "str({s})"),
             TokenKind::InterpolatedString(_) => write!(f, "istr(...)"),

@@ -696,6 +696,7 @@ impl Lexer {
             "continue" => TokenKind::Continue,
             "select" => TokenKind::Select,
             "impl" => TokenKind::Impl,
+            "skill" => TokenKind::Skill,
             _ => TokenKind::Identifier(ident),
         };
 

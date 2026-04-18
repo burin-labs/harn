@@ -228,6 +228,7 @@ module.exports = grammar({
         $.throw_statement,
         $.fn_declaration,
         $.tool_declaration,
+        $.skill_declaration,
         $.override_declaration,
         $.enum_declaration,
         $.struct_declaration,
@@ -438,6 +439,21 @@ module.exports = grammar({
         repeat(choice($._block_sep, $._line_sep)),
         optional(seq("description", $.string_literal, repeat(choice($._block_sep, $._line_sep)))),
         layoutSeparated($, $._statement),
+        "}"
+      ),
+
+    skill_declaration: ($) =>
+      seq(
+        optional("pub"),
+        "skill",
+        field("name", $.identifier),
+        "{",
+        repeat(choice($._block_sep, $._line_sep)),
+        repeat(seq(
+          field("field_name", $.identifier),
+          field("field_value", $._expression),
+          repeat(choice($._block_sep, $._line_sep))
+        )),
         "}"
       ),
 
