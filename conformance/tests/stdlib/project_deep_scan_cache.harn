@@ -7,65 +7,66 @@ pipeline test(task) {
   write_file("project_deep_scan_repo/README.md", "# repo\n")
   write_file("project_deep_scan_repo/src/auth/mod.rs", "pub fn login() -> bool { true }\n")
   write_file("project_deep_scan_repo/src/api/mod.rs", "pub fn handle() {}\n")
-
   llm_mock({text: "{\"purpose\":\"root\"}"})
   llm_mock({text: "{\"purpose\":\"src\"}"})
   llm_mock({text: "{\"purpose\":\"api\"}"})
   llm_mock({text: "{\"purpose\":\"auth\"}"})
-
-  let first = project_deep_scan("project_deep_scan_repo", {
+  let first = project_deep_scan(
+    "project_deep_scan_repo",
+    {
     namespace: namespace,
     tiers: ["ambient", "config", "enriched"],
     incremental: true,
     depth: nil,
     enrichment: {
-      prompt: "Return valid JSON only.",
-      provider: "mock",
-      schema: {purpose: "string"},
-      budget_tokens_per_dir: 256,
-    },
-  })
-
+    prompt: "Return valid JSON only.",
+    provider: "mock",
+    schema: {purpose: "string"},
+    budget_tokens_per_dir: 256,
+  },
+  },
+  )
   println(len(keys(first)) == 4)
   println(first["src/auth"].enriched.purpose == "auth")
   println(len(llm_mock_calls()) == 4)
-
-  let second = project_deep_scan("project_deep_scan_repo", {
+  let second = project_deep_scan(
+    "project_deep_scan_repo",
+    {
     namespace: namespace,
     tiers: ["ambient", "config", "enriched"],
     incremental: true,
     depth: nil,
     enrichment: {
-      prompt: "Return valid JSON only.",
-      provider: "mock",
-      schema: {purpose: "string"},
-      budget_tokens_per_dir: 256,
-    },
-  })
+    prompt: "Return valid JSON only.",
+    provider: "mock",
+    schema: {purpose: "string"},
+    budget_tokens_per_dir: 256,
+  },
+  },
+  )
   let second_status = project_deep_scan_status(namespace, "project_deep_scan_repo")
-
   println(second["src/api"].enriched.purpose == "api")
   println(second_status.total_dirs == 4)
   println(second_status.cache_hits == 4)
   println(len(llm_mock_calls()) == 4)
-
   write_file("project_deep_scan_repo/src/auth/mod.rs", "pub fn login() -> bool { false }\n")
   llm_mock({text: "{\"purpose\":\"auth changed\"}"})
-
-  let third = project_deep_scan("project_deep_scan_repo", {
+  let third = project_deep_scan(
+    "project_deep_scan_repo",
+    {
     namespace: namespace,
     tiers: ["ambient", "config", "enriched"],
     incremental: true,
     depth: nil,
     enrichment: {
-      prompt: "Return valid JSON only.",
-      provider: "mock",
-      schema: {purpose: "string"},
-      budget_tokens_per_dir: 256,
-    },
-  })
+    prompt: "Return valid JSON only.",
+    provider: "mock",
+    schema: {purpose: "string"},
+    budget_tokens_per_dir: 256,
+  },
+  },
+  )
   let third_status = project_deep_scan_status(namespace, "project_deep_scan_repo")
-
   println(third["src/auth"].enriched.purpose == "auth changed")
   println(third["src/api"].enriched.purpose == "api")
   println(third_status.cache_hits == 3)
