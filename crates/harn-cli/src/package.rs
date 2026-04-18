@@ -179,6 +179,21 @@ pub struct McpServerConfig {
     pub protocol_version: Option<String>,
     #[serde(default)]
     pub proxy_server_name: Option<String>,
+    /// When `true`, the server is NOT booted up-front. It boots on the
+    /// first `mcp_call` or on skill activation that declares it in
+    /// `requires_mcp`. See harn#75.
+    #[serde(default)]
+    pub lazy: bool,
+    /// Optional pointer to a Server Card — either an HTTP(S) URL or a
+    /// local filesystem path. When set, `mcp_server_card("name")` reads
+    /// the card from this source (cached per-process with a TTL).
+    #[serde(default)]
+    pub card: Option<String>,
+    /// How long (milliseconds) to keep a lazy server's process alive
+    /// after its last binder releases. 0 / unset → disconnect
+    /// immediately. Ignored for non-lazy servers.
+    #[serde(default, alias = "keep-alive-ms", alias = "keep_alive")]
+    pub keep_alive_ms: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]

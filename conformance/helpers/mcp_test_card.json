@@ -1,0 +1,19 @@
+{
+  "name": "test-echo",
+  "version": "1.0.0",
+  "description": "Minimal MCP echo server for conformance testing.",
+  "protocolVersion": "2025-11-25",
+  "capabilities": {
+    "tools": true,
+    "resources": false,
+    "prompts": false
+  },
+  "tools": [
+    {"name": "echo", "description": "Echo a message back"},
+    {"name": "add", "description": "Add two numbers"}
+  ],
+  "publisher": {
+    "name": "Harn conformance suite",
+    "url": "https://harn.burincode.com"
+  }
+}

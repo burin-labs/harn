@@ -40,6 +40,11 @@ pub(crate) struct ToolCandidate {
     /// parameter on a tool whose top-level description only mentions
     /// "edit".
     pub param_text: Vec<String>,
+    /// Auto-assigned tags — currently populated for MCP-originated
+    /// tools as `["mcp:<server_name>", "<server_name>"]` so a query
+    /// like "github" or "mcp:github" promotes them. Empty for
+    /// non-MCP tools.
+    pub tags: Vec<String>,
 }
 
 impl ToolCandidate {
@@ -55,6 +60,10 @@ impl ToolCandidate {
         for p in &self.param_text {
             out.push(' ');
             out.push_str(p);
+        }
+        for tag in &self.tags {
+            out.push(' ');
+            out.push_str(tag);
         }
         out
     }
@@ -97,10 +106,25 @@ fn candidate_from_native_entry(tool: &serde_json::Value) -> Option<ToolCandidate
     };
 
     let param_text = extract_param_text(input_schema.as_ref());
+    // Tag MCP-origin tools. The mcp.rs list_tools builtin injects
+    // `_mcp_server` on every MCP tool dict before handing it off, so
+    // we pick it up here and seed the corpus with both `mcp:<name>`
+    // (canonical tag) and the bare server name (matches "github"
+    // queries too).
+    let mut tags = Vec::new();
+    if let Some(server) = tool
+        .get("_mcp_server")
+        .or_else(|| tool.get("function").and_then(|f| f.get("_mcp_server")))
+        .and_then(|v| v.as_str())
+    {
+        tags.push(format!("mcp:{server}"));
+        tags.push(server.to_string());
+    }
     Some(ToolCandidate {
         name,
         description,
         param_text,
+        tags,
     })
 }
 

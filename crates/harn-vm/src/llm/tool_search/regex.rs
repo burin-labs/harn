@@ -84,6 +84,7 @@ mod tests {
             name: name.to_string(),
             description: description.to_string(),
             param_text: Vec::new(),
+            tags: Vec::new(),
         }
     }
 

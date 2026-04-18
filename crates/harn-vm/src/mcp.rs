@@ -667,6 +667,122 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
         Ok(VmValue::McpClient(handle))
     });
 
+    // Lazy registry: ensure a registered server is booted and return its
+    // live client handle. Used by skill activation (`requires_mcp`) and
+    // by user code that wants to trigger a lazy connect explicitly.
+    vm.register_async_builtin("mcp_ensure_active", |args| async move {
+        let name = match args.first() {
+            Some(VmValue::String(s)) => s.to_string(),
+            Some(other) => other.display(),
+            None => String::new(),
+        };
+        if name.is_empty() {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(
+                "mcp_ensure_active: server name is required",
+            ))));
+        }
+        let handle = crate::mcp_registry::ensure_active(&name).await?;
+        Ok(VmValue::McpClient(handle))
+    });
+
+    // Decrement the binder refcount for a registered server. Called by
+    // skill deactivation paths and by user code that manually bound via
+    // `mcp_ensure_active`. No-op when the name isn't registered.
+    vm.register_builtin("mcp_release", |args, _out| {
+        let name = match args.first() {
+            Some(VmValue::String(s)) => s.to_string(),
+            Some(other) => other.display(),
+            None => {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                    "mcp_release: server name is required",
+                ))));
+            }
+        };
+        crate::mcp_registry::release(&name);
+        Ok(VmValue::Nil)
+    });
+
+    // Return the declared MCP servers and their current state as a list
+    // of dicts. Purely diagnostic — useful for `harn` scripts that want
+    // to show connection state in a status-line or dashboard.
+    vm.register_builtin("mcp_registry_status", |_args, _out| {
+        let mut out = Vec::new();
+        for entry in crate::mcp_registry::snapshot_status() {
+            let mut dict = BTreeMap::new();
+            dict.insert(
+                "name".to_string(),
+                VmValue::String(Rc::from(entry.name.as_str())),
+            );
+            dict.insert("lazy".to_string(), VmValue::Bool(entry.lazy));
+            dict.insert("active".to_string(), VmValue::Bool(entry.active));
+            dict.insert(
+                "ref_count".to_string(),
+                VmValue::Int(entry.ref_count as i64),
+            );
+            if let Some(card) = entry.card {
+                dict.insert("card".to_string(), VmValue::String(Rc::from(card.as_str())));
+            }
+            out.push(VmValue::Dict(Rc::new(dict)));
+        }
+        Ok(VmValue::List(Rc::new(out)))
+    });
+
+    // Fetch (or read from cache) the Server Card for a registered MCP
+    // server, or from an explicit URL / local path.
+    //
+    // `mcp_server_card("notion")`           -> looks up `card = ...` in harn.toml
+    // `mcp_server_card("https://.../card")` -> fetches that URL directly
+    // `mcp_server_card("./card.json")`      -> reads that file directly
+    vm.register_async_builtin("mcp_server_card", |args| async move {
+        let target = match args.first() {
+            Some(VmValue::String(s)) => s.to_string(),
+            Some(other) => other.display(),
+            None => {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                    "mcp_server_card: server name, URL, or path is required",
+                ))));
+            }
+        };
+
+        // Source resolution: if the arg looks like a URL or path
+        // (contains '/', '\\', or starts with a scheme), use it as-is.
+        // Otherwise treat it as a registered server name and look up
+        // its `card` field. This matches the user model: "I already
+        // wrote down where the card lives in harn.toml — just use it."
+        let source = if target.starts_with("http://")
+            || target.starts_with("https://")
+            || target.contains('/')
+            || target.contains('\\')
+            || target.ends_with(".json")
+        {
+            target.clone()
+        } else {
+            match crate::mcp_registry::get_registration(&target) {
+                Some(reg) => match reg.card {
+                    Some(card) => card,
+                    None => {
+                        return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                            "mcp_server_card: server '{target}' has no 'card' field in harn.toml"
+                        )))));
+                    }
+                },
+                None => {
+                    return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                        "mcp_server_card: no MCP server '{target}' registered (check harn.toml) \
+                         — pass a URL or path directly instead"
+                    )))));
+                }
+            }
+        };
+
+        let card = crate::mcp_card::fetch_server_card(&source, None)
+            .await
+            .map_err(|e| {
+                VmError::Thrown(VmValue::String(Rc::from(format!("mcp_server_card: {e}"))))
+            })?;
+        Ok(json_to_vm_value(&card))
+    });
+
     vm.register_async_builtin("mcp_list_tools", |args| async move {
         let client = match args.first() {
             Some(VmValue::McpClient(c)) => c.clone(),
@@ -678,11 +794,23 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
         };
 
         let result = client.call("tools/list", serde_json::json!({})).await?;
-        let tools = result
+        let mut tools = result
             .get("tools")
             .and_then(|t| t.as_array())
             .cloned()
             .unwrap_or_default();
+
+        // Tag every tool with its originating server name so
+        // downstream indexers (tool_search BM25) can surface them
+        // under queries like "github" or "mcp:github". Harmless to
+        // non-indexing callers — just an extra dict key.
+        let server_name = client.name.clone();
+        for tool in tools.iter_mut() {
+            if let Some(obj) = tool.as_object_mut() {
+                obj.entry("_mcp_server")
+                    .or_insert_with(|| serde_json::Value::String(server_name.clone()));
+            }
+        }
 
         let vm_tools: Vec<VmValue> = tools.iter().map(json_to_vm_value).collect();
         Ok(VmValue::List(Rc::new(vm_tools)))

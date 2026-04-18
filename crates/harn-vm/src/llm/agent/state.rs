@@ -294,7 +294,18 @@ impl ActiveSkill {
                 .unwrap_or_default(),
             paths: list_strings(dict.get("paths")),
             allowed_tools: list_strings(dict.get("allowed_tools")),
-            mcp_servers: list_strings(dict.get("mcp")),
+            // Accept both `mcp` (legacy) and `requires_mcp` (harn#75
+            // canonical). If both are present, union them so no user
+            // ever loses a declared binding to a naming inconsistency.
+            mcp_servers: {
+                let mut servers = list_strings(dict.get("mcp"));
+                for extra in list_strings(dict.get("requires_mcp")) {
+                    if !servers.contains(&extra) {
+                        servers.push(extra);
+                    }
+                }
+                servers
+            },
             model: non_empty(dict.get("model")),
             effort: non_empty(dict.get("effort")),
             invocation: dict

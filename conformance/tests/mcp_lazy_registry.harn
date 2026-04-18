@@ -1,0 +1,19 @@
+// Verify `mcp_registry_status()` and `mcp_ensure_active`/`mcp_release`
+// behave sanely when no MCP servers are registered (conformance tests
+// don't load harn.toml MCP configs).
+pipeline default() {
+  // Empty registry reports no servers.
+  let status = mcp_registry_status()
+  println(status.count)
+  // Ensuring an unknown server throws — catch + print.
+  try {
+    mcp_ensure_active("not-registered")
+    println("unreachable")
+  } catch (e) {
+    // Error text should mention the missing name.
+    println(e.contains("not-registered"))
+  }
+  // Release of an unknown server is a silent no-op.
+  mcp_release("also-not-registered")
+  println("ok")
+}

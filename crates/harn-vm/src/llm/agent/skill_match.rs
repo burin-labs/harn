@@ -175,8 +175,29 @@ pub(super) async fn run_skill_match(
                 "iteration": iteration,
             })),
         ));
+        // Release MCP server bindings — ref-counted, so another
+        // active skill that needs the same server keeps it alive.
+        for server in &skill.mcp_servers {
+            if crate::mcp_registry::is_registered(server) {
+                crate::mcp_registry::release(server);
+                state.transcript_events.push(transcript_event(
+                    "skill_mcp_unbound",
+                    "system",
+                    "internal",
+                    &skill.name,
+                    Some(serde_json::json!({
+                        "skill": skill.name,
+                        "server": server,
+                    })),
+                ));
+            }
+        }
         run_skill_hook(&registry, &skill.name, "on_deactivate").await?;
     }
+    // Drop any keep-alive-expired lazy connections from the previous
+    // turn before reactivating — keeps the registry tidy without adding
+    // a background sweeper thread.
+    crate::mcp_registry::sweep_expired();
 
     // Activate newly-matched skills.
     state
@@ -230,6 +251,48 @@ pub(super) async fn run_skill_match(
                     "allowed_tools": active.allowed_tools,
                 })),
             ));
+        }
+        // Bring up any MCP servers the skill declares in
+        // `requires_mcp` / `mcp`. Lazy servers boot here on first
+        // activation; eager servers just bump the refcount. Failures
+        // log-and-continue — a missing MCP server shouldn't tear down
+        // the loop, the skill's own handler will error out later with
+        // a clearer message.
+        for server in &active.mcp_servers {
+            match crate::mcp_registry::ensure_active(server).await {
+                Ok(_) => {
+                    state.transcript_events.push(transcript_event(
+                        "skill_mcp_bound",
+                        "system",
+                        "internal",
+                        &active.name,
+                        Some(serde_json::json!({
+                            "skill": active.name,
+                            "server": server,
+                        })),
+                    ));
+                }
+                Err(err) => {
+                    crate::events::log_warn(
+                        "agent.skill_mcp",
+                        &format!(
+                            "skill={} requires MCP server '{}' but activation failed: {}",
+                            active.name, server, err
+                        ),
+                    );
+                    state.transcript_events.push(transcript_event(
+                        "skill_mcp_bind_failed",
+                        "system",
+                        "internal",
+                        &active.name,
+                        Some(serde_json::json!({
+                            "skill": active.name,
+                            "server": server,
+                            "error": err.to_string(),
+                        })),
+                    ));
+                }
+            }
         }
         run_skill_hook(&registry, &active.name, "on_activate").await?;
         state.active_skills.push(active);
