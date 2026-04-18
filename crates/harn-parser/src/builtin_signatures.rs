@@ -1050,6 +1050,18 @@ pub(crate) const BUILTIN_SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Union(UNION_STRING_NIL)),
     },
     BuiltinSig {
+        name: "provider_capabilities",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
+        name: "provider_capabilities_clear",
+        return_type: Some(BuiltinReturn::Named("bool")),
+    },
+    BuiltinSig {
+        name: "provider_capabilities_install",
+        return_type: Some(BuiltinReturn::Named("bool")),
+    },
+    BuiltinSig {
         name: "provider_register",
         return_type: Some(BuiltinReturn::Named("bool")),
     },

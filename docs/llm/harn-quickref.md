@@ -582,6 +582,61 @@ Semantics:
   the same block shapes from the wire `tool_search_call` and
   `tool_search_output` entries in the response.
 
+### Provider capabilities (data-driven matrix)
+
+The per-provider / per-model capability surface lives in a shipped
+TOML table (`crates/harn-vm/src/llm/capabilities.toml`), overridable
+per-project via `[[capabilities.provider.<name>]]` in `harn.toml`:
+
+```toml
+# harn.toml
+[[capabilities.provider.my-proxy]]
+model_match = "*"
+native_tools = true
+tool_search = ["hosted"]
+```
+
+Query the effective matrix at runtime:
+
+```harn
+let caps = provider_capabilities("anthropic", "claude-opus-4-7")
+// {
+//   provider: "anthropic", model: "claude-opus-4-7",
+//   native_tools: true, defer_loading: true,
+//   tool_search: ["bm25", "regex"], max_tools: 10000,
+//   prompt_caching: true, thinking: true,
+// }
+
+if "bm25" in caps.tool_search {
+  // opt into progressive disclosure
+}
+```
+
+Additional helpers:
+
+- `provider_capabilities_install(toml_src)` — install overrides from
+  a TOML string (same layout as the shipped table). Useful for
+  scripts that detect a proxied endpoint at runtime without editing
+  `harn.toml`.
+- `provider_capabilities_clear()` — revert to the shipped defaults.
+
+Rule schema (per `[[provider.<name>]]` entry):
+
+| Field | Type | Purpose |
+|---|---|---|
+| `model_match` | glob string | Required. Matched against lowercased model ID. |
+| `version_min` | `[major, minor]` | Optional lower bound; parsed via Claude / GPT version extractors. |
+| `native_tools` | bool | Native tool-call wire shape supported. |
+| `defer_loading` | bool | Provider honors `defer_loading: true` on tool defs. |
+| `tool_search` | `[string]` | Native variants (`["bm25", "regex"]` or `["hosted", "client"]`). Empty = no native support. |
+| `max_tools` | int | Cap on tool count (used by `harn lint`). |
+| `prompt_caching` | bool | `cache_control` blocks honored. |
+| `thinking` | bool | Extended / adaptive thinking available. |
+
+First match wins within a provider's rule list. `[provider_family]`
+declares siblings that inherit a canonical family's rules
+(OpenRouter → `openai`, etc.).
+
 ### Skills (bundled tool + prompt + MCP metadata)
 
 Use `skill NAME { ... }` to declare a named skill: metadata, a tool

@@ -22,7 +22,7 @@ thread_local! {
 /// plus dated IDs like `claude-haiku-4-5-20251001`.
 ///
 /// Returns `None` if the ID isn't a known Claude shape (e.g. `gpt-4o`).
-fn claude_generation(model: &str) -> Option<(u32, u32)> {
+pub(crate) fn claude_generation(model: &str) -> Option<(u32, u32)> {
     let lower = model.to_lowercase();
     if !lower.starts_with("claude-") && !lower.contains("/claude-") {
         return None;
@@ -181,21 +181,11 @@ impl LlmProvider for AnthropicProvider {
         true
     }
 
-    fn supports_defer_loading(&self, model: &str) -> bool {
-        claude_model_supports_tool_search(model)
-    }
-
-    fn native_tool_search_variants(&self, model: &str) -> &'static [&'static str] {
-        if claude_model_supports_tool_search(model) {
-            // BM25 first — natural-language queries are more ergonomic for
-            // the model than Python regexes. Both variants are produced by
-            // Anthropic at version `20251119`; we surface them as the short
-            // names Harn scripts use.
-            &["bm25", "regex"]
-        } else {
-            &[]
-        }
-    }
+    // `supports_defer_loading` and `native_tool_search_variants` are
+    // served by the default trait impl, which reads the data-driven
+    // capability matrix in `capabilities.toml`. The old model-gate
+    // logic (Claude 4.0+ for Opus/Sonnet, 4.5+ for Haiku) is now one
+    // row per family in that file.
 }
 
 impl LlmProviderChat for AnthropicProvider {
@@ -379,7 +369,7 @@ mod tests {
     fn native_tool_search_variants_lists_bm25_first() {
         let provider = AnthropicProvider;
         let variants = provider.native_tool_search_variants("claude-opus-4-7");
-        assert_eq!(variants, &["bm25", "regex"]);
+        assert_eq!(variants, vec!["bm25".to_string(), "regex".to_string()]);
     }
 
     #[test]
