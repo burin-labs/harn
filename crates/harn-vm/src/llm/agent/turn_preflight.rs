@@ -111,7 +111,8 @@ pub(super) async fn run_turn_preflight(
         .or(scoped_contract_prompt.as_deref())
         .or(ctx.tool_contract_prompt);
 
-    let skill_prompt = render_active_skill_prompt(&state.active_skills);
+    let prompt_skills = state.prompt_active_skills();
+    let skill_prompt = render_active_skill_prompt(&prompt_skills);
     let base_with_skill = merge_optional(ctx.base_system, skill_prompt.as_deref());
     let default_system = build_agent_system_prompt(
         base_with_skill.as_deref(),

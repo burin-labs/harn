@@ -1407,6 +1407,44 @@ pub(crate) fn build_client_search_tool_schema(
     }
 }
 
+/// Shape the runtime-owned `load_skill` tool for the provider's API
+/// style. This is available whenever an agent loop has a skills
+/// registry bound; the handler lives in the agent runtime, not in the
+/// user-declared tool registry.
+pub(crate) fn build_load_skill_tool_schema(provider: &str) -> serde_json::Value {
+    let description =
+        "Promote a skill's full body into the next turn's context. Accepts the skill id returned by the always-on catalog.";
+    let input_schema = serde_json::json!({
+        "type": "object",
+        "properties": {
+            "name": {
+                "type": "string",
+                "description": "Skill id from the always-on catalog.",
+            }
+        },
+        "required": ["name"],
+        "additionalProperties": false,
+    });
+
+    let is_anthropic_style = super::helpers::ResolvedProvider::resolve(provider).is_anthropic_style;
+    if is_anthropic_style {
+        serde_json::json!({
+            "name": "load_skill",
+            "description": description,
+            "input_schema": input_schema,
+        })
+    } else {
+        serde_json::json!({
+            "type": "function",
+            "function": {
+                "name": "load_skill",
+                "description": description,
+                "parameters": input_schema,
+            }
+        })
+    }
+}
+
 #[cfg(test)]
 pub(crate) fn apply_tool_search_native_injection(
     native_tools: &mut Option<Vec<serde_json::Value>>,

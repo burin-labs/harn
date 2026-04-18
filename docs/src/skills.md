@@ -23,7 +23,8 @@ This page describes:
 The companion language form — `skill NAME { ... }` — is documented in
 [Language basics](./language-basics.md) and the skill builtins
 (`skill_registry`, `skill_define`, `skill_find`, `skill_list`,
-`skill_render`, …) in [Builtin functions](./builtins.md).
+`skill_render`, `skills_catalog_entries`, `render_always_on_catalog`,
+…) in [Builtin functions](./builtins.md).
 
 ## Layered discovery
 
@@ -122,6 +123,69 @@ let deploy = skill_find(skills, "deploy")
 let rendered = skill_render(deploy, ["prod", "us-east-1"])
 // rendered now has $1 and $2 replaced with "prod" and "us-east-1".
 ```
+
+## Progressive disclosure with `load_skill`
+
+When an agent loop receives a skill registry through `skills:`,
+Harn automatically exposes a runtime-owned `load_skill({ name })` tool.
+The tool:
+
+- resolves the requested skill id against the loop's resolved skill
+  registry,
+- applies the same SKILL.md body substitution described above, and
+- returns the substituted body as the tool result so it lands in the
+  next turn's transcript naturally.
+
+If the target skill has `disable-model-invocation: true`,
+`load_skill` returns a typed error instead of leaking the body.
+
+### Always-on catalog helper
+
+The recommended harness convention is:
+
+1. Keep a compact catalog of available skills in the system prompt.
+2. Let the model call `load_skill` only when one of those entries looks
+   relevant.
+
+Harn ships two pure helpers for that pattern:
+
+```harn
+let entries = skills_catalog_entries(skills)
+let catalog = render_always_on_catalog(entries, 2000)
+```
+
+`skills_catalog_entries` projects the resolved registry into compact
+`{name, description, when_to_use}` cards (sorted deterministically by
+skill id, using `<namespace>/<name>` when present). `render_always_on_catalog`
+formats those cards into a stable prompt block and trims the list to the
+requested character budget.
+
+Copy-pasteable example:
+
+```harn
+let catalog = render_always_on_catalog(skills_catalog_entries(skills), 2000)
+
+let result = agent_loop(
+  "Help me ship this release",
+  catalog,
+  {
+    provider: "mock",
+    model: "gpt-5.4",
+    persistent: true,
+    skills: skills,
+  },
+)
+```
+
+On a later turn the model can emit:
+
+```text
+load_skill({ name: "deploy" })
+```
+
+and the next turn will see the substituted SKILL.md body in the tool
+result, while any `allowed-tools` declared by that skill narrow the
+tool surface for subsequent turns.
 
 ## harn.toml `[skills]` + `[[skill.source]]`
 
