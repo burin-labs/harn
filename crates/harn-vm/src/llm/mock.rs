@@ -20,25 +20,37 @@ pub enum ToolRecordingMode {
     Replay,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CliLlmMockMode {
+    Off,
+    Replay,
+    Record,
+}
+
 /// Categorized error injected by a mock. When present, the mock
 /// short-circuits the provider call and surfaces as
 /// `VmError::CategorizedError`, so `llm_call` throws and
 /// `llm_call_safe` populates its `error` envelope.
 #[derive(Clone)]
-pub(crate) struct MockError {
+pub struct MockError {
     pub category: ErrorCategory,
     pub message: String,
 }
 
-pub(crate) struct LlmMock {
+#[derive(Clone)]
+pub struct LlmMock {
     pub text: String,
     pub tool_calls: Vec<serde_json::Value>,
     pub match_pattern: Option<String>, // None = FIFO (consumed), Some = glob (reusable)
     pub input_tokens: Option<i64>,
     pub output_tokens: Option<i64>,
+    pub cache_read_tokens: Option<i64>,
+    pub cache_write_tokens: Option<i64>,
     pub thinking: Option<String>,
     pub stop_reason: Option<String>,
     pub model: String,
+    pub provider: Option<String>,
+    pub blocks: Option<Vec<serde_json::Value>>,
     /// When `Some`, this mock synthesizes an error instead of an
     /// `LlmResult`. `text`/`tool_calls` are ignored for error mocks.
     pub error: Option<MockError>,
@@ -58,6 +70,9 @@ thread_local! {
     static TOOL_RECORDINGS: RefCell<Vec<ToolCallRecord>> = const { RefCell::new(Vec::new()) };
     static TOOL_REPLAY_FIXTURES: RefCell<Vec<ToolCallRecord>> = const { RefCell::new(Vec::new()) };
     static LLM_MOCKS: RefCell<Vec<LlmMock>> = const { RefCell::new(Vec::new()) };
+    static CLI_LLM_MOCK_MODE: RefCell<CliLlmMockMode> = const { RefCell::new(CliLlmMockMode::Off) };
+    static CLI_LLM_MOCKS: RefCell<Vec<LlmMock>> = const { RefCell::new(Vec::new()) };
+    static CLI_LLM_RECORDINGS: RefCell<Vec<LlmMock>> = const { RefCell::new(Vec::new()) };
     static LLM_MOCK_CALLS: RefCell<Vec<LlmMockCall>> = const { RefCell::new(Vec::new()) };
 }
 
@@ -71,7 +86,36 @@ pub(crate) fn get_llm_mock_calls() -> Vec<LlmMockCall> {
 
 pub(crate) fn reset_llm_mock_state() {
     LLM_MOCKS.with(|v| v.borrow_mut().clear());
+    CLI_LLM_MOCK_MODE.with(|v| *v.borrow_mut() = CliLlmMockMode::Off);
+    CLI_LLM_MOCKS.with(|v| v.borrow_mut().clear());
+    CLI_LLM_RECORDINGS.with(|v| v.borrow_mut().clear());
     LLM_MOCK_CALLS.with(|v| v.borrow_mut().clear());
+}
+
+pub fn clear_cli_llm_mock_mode() {
+    CLI_LLM_MOCK_MODE.with(|v| *v.borrow_mut() = CliLlmMockMode::Off);
+    CLI_LLM_MOCKS.with(|v| v.borrow_mut().clear());
+    CLI_LLM_RECORDINGS.with(|v| v.borrow_mut().clear());
+}
+
+pub fn install_cli_llm_mocks(mocks: Vec<LlmMock>) {
+    CLI_LLM_MOCK_MODE.with(|v| *v.borrow_mut() = CliLlmMockMode::Replay);
+    CLI_LLM_MOCKS.with(|v| *v.borrow_mut() = mocks);
+    CLI_LLM_RECORDINGS.with(|v| v.borrow_mut().clear());
+}
+
+pub fn enable_cli_llm_mock_recording() {
+    CLI_LLM_MOCK_MODE.with(|v| *v.borrow_mut() = CliLlmMockMode::Record);
+    CLI_LLM_MOCKS.with(|v| v.borrow_mut().clear());
+    CLI_LLM_RECORDINGS.with(|v| v.borrow_mut().clear());
+}
+
+pub fn take_cli_llm_recordings() -> Vec<LlmMock> {
+    CLI_LLM_RECORDINGS.with(|v| std::mem::take(&mut *v.borrow_mut()))
+}
+
+pub(crate) fn cli_llm_mock_replay_active() -> bool {
+    CLI_LLM_MOCK_MODE.with(|v| *v.borrow() == CliLlmMockMode::Replay)
 }
 
 fn record_llm_mock_call(
@@ -90,48 +134,54 @@ fn record_llm_mock_call(
 
 /// Build an LlmResult from a matched mock.
 fn build_mock_result(mock: &LlmMock, last_msg_len: usize) -> LlmResult {
-    let mut blocks = Vec::new();
+    let (tool_calls, blocks) = if let Some(blocks) = &mock.blocks {
+        (mock.tool_calls.clone(), blocks.clone())
+    } else {
+        let mut blocks = Vec::new();
 
-    if !mock.text.is_empty() {
-        blocks.push(serde_json::json!({
-            "type": "output_text",
-            "text": mock.text,
-            "visibility": "public",
-        }));
-    }
+        if !mock.text.is_empty() {
+            blocks.push(serde_json::json!({
+                "type": "output_text",
+                "text": mock.text,
+                "visibility": "public",
+            }));
+        }
 
-    let mut tool_calls = Vec::new();
-    for (i, tc) in mock.tool_calls.iter().enumerate() {
-        let id = format!("mock_call_{}", i + 1);
-        let name = tc.get("name").and_then(|n| n.as_str()).unwrap_or("unknown");
-        let arguments = tc
-            .get("arguments")
-            .cloned()
-            .unwrap_or(serde_json::json!({}));
-        tool_calls.push(serde_json::json!({
-            "id": id,
-            "type": "tool_call",
-            "name": name,
-            "arguments": arguments,
-        }));
-        blocks.push(serde_json::json!({
-            "type": "tool_call",
-            "id": id,
-            "name": name,
-            "arguments": arguments,
-            "visibility": "internal",
-        }));
-    }
+        let mut tool_calls = Vec::new();
+        for (i, tc) in mock.tool_calls.iter().enumerate() {
+            let id = format!("mock_call_{}", i + 1);
+            let name = tc.get("name").and_then(|n| n.as_str()).unwrap_or("unknown");
+            let arguments = tc
+                .get("arguments")
+                .cloned()
+                .unwrap_or(serde_json::json!({}));
+            tool_calls.push(serde_json::json!({
+                "id": id,
+                "type": "tool_call",
+                "name": name,
+                "arguments": arguments,
+            }));
+            blocks.push(serde_json::json!({
+                "type": "tool_call",
+                "id": id,
+                "name": name,
+                "arguments": arguments,
+                "visibility": "internal",
+            }));
+        }
+
+        (tool_calls, blocks)
+    };
 
     LlmResult {
         text: mock.text.clone(),
         tool_calls,
         input_tokens: mock.input_tokens.unwrap_or(last_msg_len as i64),
         output_tokens: mock.output_tokens.unwrap_or(30),
-        cache_read_tokens: 0,
-        cache_write_tokens: 0,
+        cache_read_tokens: mock.cache_read_tokens.unwrap_or(0),
+        cache_write_tokens: mock.cache_write_tokens.unwrap_or(0),
         model: mock.model.clone(),
-        provider: "mock".to_string(),
+        provider: mock.provider.clone().unwrap_or_else(|| "mock".to_string()),
         thinking: mock.thinking.clone(),
         stop_reason: mock.stop_reason.clone(),
         blocks,
@@ -186,33 +236,69 @@ fn mock_error_to_vm_error(err: &MockError) -> VmError {
 /// Try to find and return a matching mock response. Returns
 /// `Some(Ok(LlmResult))` on a text/tool_call match, `Some(Err(VmError))`
 /// on an error-mock match, and `None` to fall through to default.
-fn try_match_mock(last_msg: &str) -> Option<Result<LlmResult, VmError>> {
-    LLM_MOCKS.with(|mocks| {
-        let mut mocks = mocks.borrow_mut();
+fn try_match_mock_queue(
+    mocks: &mut Vec<LlmMock>,
+    last_msg: &str,
+) -> Option<Result<LlmResult, VmError>> {
+    if let Some(idx) = mocks.iter().position(|m| m.match_pattern.is_none()) {
+        let mock = mocks.remove(idx);
+        return Some(match &mock.error {
+            Some(err) => Err(mock_error_to_vm_error(err)),
+            None => Ok(build_mock_result(&mock, last_msg.len())),
+        });
+    }
 
-        // FIFO: first mock without a match pattern (consumed on use).
-        if let Some(idx) = mocks.iter().position(|m| m.match_pattern.is_none()) {
-            let mock = mocks.remove(idx);
-            return Some(match &mock.error {
-                Some(err) => Err(mock_error_to_vm_error(err)),
-                None => Ok(build_mock_result(&mock, last_msg.len())),
-            });
-        }
-
-        // Pattern match (last registered wins).
-        for mock in mocks.iter().rev() {
-            if let Some(ref pattern) = mock.match_pattern {
-                if mock_glob_match(pattern, last_msg) {
-                    return Some(match &mock.error {
-                        Some(err) => Err(mock_error_to_vm_error(err)),
-                        None => Ok(build_mock_result(mock, last_msg.len())),
-                    });
-                }
+    for mock in mocks.iter().rev() {
+        if let Some(ref pattern) = mock.match_pattern {
+            if mock_glob_match(pattern, last_msg) {
+                return Some(match &mock.error {
+                    Some(err) => Err(mock_error_to_vm_error(err)),
+                    None => Ok(build_mock_result(mock, last_msg.len())),
+                });
             }
         }
+    }
 
-        None
-    })
+    None
+}
+
+fn try_match_builtin_mock(last_msg: &str) -> Option<Result<LlmResult, VmError>> {
+    LLM_MOCKS.with(|mocks| try_match_mock_queue(&mut mocks.borrow_mut(), last_msg))
+}
+
+fn try_match_cli_mock(last_msg: &str) -> Option<Result<LlmResult, VmError>> {
+    CLI_LLM_MOCKS.with(|mocks| try_match_mock_queue(&mut mocks.borrow_mut(), last_msg))
+}
+
+pub(crate) fn record_cli_llm_result(result: &LlmResult) {
+    if !CLI_LLM_MOCK_MODE.with(|mode| *mode.borrow() == CliLlmMockMode::Record) {
+        return;
+    }
+    CLI_LLM_RECORDINGS.with(|recordings| {
+        recordings.borrow_mut().push(LlmMock {
+            text: result.text.clone(),
+            tool_calls: result.tool_calls.clone(),
+            match_pattern: None,
+            input_tokens: Some(result.input_tokens),
+            output_tokens: Some(result.output_tokens),
+            cache_read_tokens: Some(result.cache_read_tokens),
+            cache_write_tokens: Some(result.cache_write_tokens),
+            thinking: result.thinking.clone(),
+            stop_reason: result.stop_reason.clone(),
+            model: result.model.clone(),
+            provider: Some(result.provider.clone()),
+            blocks: Some(result.blocks.clone()),
+            error: None,
+        });
+    });
+}
+
+fn unmatched_cli_prompt_error(last_msg: &str) -> VmError {
+    let mut snippet: String = last_msg.chars().take(200).collect();
+    if last_msg.chars().count() > 200 {
+        snippet.push_str("...");
+    }
+    VmError::Runtime(format!("No --llm-mock fixture matched prompt: {snippet:?}"))
 }
 
 /// Set LLM replay mode (record/replay) and fixture directory.
@@ -360,8 +446,16 @@ pub(crate) fn mock_llm_response(
         .and_then(|c| c.as_str())
         .unwrap_or("");
 
-    if let Some(matched) = try_match_mock(last_msg) {
+    if let Some(matched) = try_match_cli_mock(last_msg) {
         return matched;
+    }
+
+    if let Some(matched) = try_match_builtin_mock(last_msg) {
+        return matched;
+    }
+
+    if cli_llm_mock_replay_active() {
+        return Err(unmatched_cli_prompt_error(last_msg));
     }
 
     // Generate a mock tool call for the first tool, filling required
