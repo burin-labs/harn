@@ -34,6 +34,29 @@ targets produce a static error and the VM is never started — the same
 `harn check`. The inline `-e <code>` form has no importing file and
 therefore skips the cross-module check.
 
+## harn playground
+
+Run a pipeline against a Harn-native host module for fast local iteration.
+
+```bash
+harn playground --host host.harn --script pipeline.harn --task "Explain this repo"
+harn playground --watch --task "Refine the prompt"
+harn playground --llm ollama:qwen2.5-coder:latest --task "Use a local model"
+```
+
+| Flag | Description |
+|---|---|
+| `--host <file>` | Host module exporting the functions the script expects (default: `host.harn`) |
+| `--script <file>` | Pipeline entrypoint to execute (default: `pipeline.harn`) |
+| `--task <text>` | Task string exposed as `HARN_TASK` during the run |
+| `--llm <provider:model>` | Override the provider/model selection for this invocation |
+| `--watch` | Re-run when the host module or script changes |
+
+`harn playground` type-checks the host module, merges its exported function
+names into the script's static call-target validation, then executes the script
+with an in-process host adapter. Missing host functions fail with a pointed
+error naming the function and caller location.
+
 ## harn test
 
 Run tests.

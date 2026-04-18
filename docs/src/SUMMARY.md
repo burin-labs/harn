@@ -31,6 +31,7 @@
 
 # Hosts and integration
 
+- [Playground](./playground.md)
 - [Host boundary](./host-boundary.md)
 - [Bridge protocol](./bridge-protocol.md)
 - [MCP and ACP integration](./mcp-and-acp.md)

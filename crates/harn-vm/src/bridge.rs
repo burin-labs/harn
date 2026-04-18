@@ -4,8 +4,10 @@
 //! file I/O, tool execution) to a host process over stdin/stdout JSON-RPC.
 //! The host application handles these requests using its own providers.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -14,8 +16,9 @@ use tokio::io::AsyncBufReadExt;
 use tokio::sync::{oneshot, Mutex};
 
 use crate::orchestration::MutationSessionRecord;
-use crate::value::{ErrorCategory, VmError, VmValue};
+use crate::value::{ErrorCategory, VmClosure, VmError, VmValue};
 use crate::visible_text::VisibleTextState;
+use crate::vm::Vm;
 
 /// Default timeout for bridge calls (5 minutes).
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(300);
@@ -51,8 +54,122 @@ pub struct HostBridge {
     visible_call_states: std::sync::Mutex<HashMap<String, VisibleTextState>>,
     /// Whether an LLM call's deltas should be exposed to end users while streaming.
     visible_call_streams: std::sync::Mutex<HashMap<String, bool>>,
+    /// Optional in-process host-module backend used by `harn playground`.
+    in_process: Option<InProcessHost>,
     #[cfg(test)]
     recorded_notifications: Arc<std::sync::Mutex<Vec<serde_json::Value>>>,
+}
+
+struct InProcessHost {
+    module_path: PathBuf,
+    exported_functions: BTreeMap<String, Rc<VmClosure>>,
+    vm: Vm,
+}
+
+impl InProcessHost {
+    async fn dispatch(
+        &self,
+        method: &str,
+        params: serde_json::Value,
+    ) -> Result<serde_json::Value, VmError> {
+        match method {
+            "builtin_call" => {
+                let name = params
+                    .get("name")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or_default();
+                let args = params
+                    .get("args")
+                    .and_then(|value| value.as_array())
+                    .cloned()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|value| json_result_to_vm_value(&value))
+                    .collect::<Vec<_>>();
+                self.invoke_export(name, &args).await
+            }
+            "session/request_permission" => self.request_permission(params).await,
+            other => Err(VmError::Runtime(format!(
+                "playground host backend does not implement bridge method '{other}'"
+            ))),
+        }
+    }
+
+    async fn invoke_export(
+        &self,
+        name: &str,
+        args: &[VmValue],
+    ) -> Result<serde_json::Value, VmError> {
+        let Some(closure) = self.exported_functions.get(name) else {
+            return Err(VmError::Runtime(format!(
+                "Playground host is missing capability '{name}'. Define `pub fn {name}(...)` in {}",
+                self.module_path.display()
+            )));
+        };
+
+        let mut vm = self.vm.child_vm_for_host();
+        let result = vm.call_closure_pub(closure, args, &[]).await?;
+        Ok(crate::llm::vm_value_to_json(&result))
+    }
+
+    async fn request_permission(
+        &self,
+        params: serde_json::Value,
+    ) -> Result<serde_json::Value, VmError> {
+        let Some(closure) = self.exported_functions.get("request_permission") else {
+            return Ok(serde_json::json!({ "granted": true }));
+        };
+
+        let tool_name = params
+            .get("toolCall")
+            .and_then(|tool_call| tool_call.get("toolName"))
+            .and_then(|value| value.as_str())
+            .unwrap_or_default();
+        let tool_args = params
+            .get("toolCall")
+            .and_then(|tool_call| tool_call.get("rawInput"))
+            .map(json_result_to_vm_value)
+            .unwrap_or(VmValue::Nil);
+        let full_payload = json_result_to_vm_value(&params);
+
+        let arg_count = closure.func.params.len();
+        let args = if arg_count >= 3 {
+            vec![
+                VmValue::String(Rc::from(tool_name.to_string())),
+                tool_args,
+                full_payload,
+            ]
+        } else if arg_count == 2 {
+            vec![VmValue::String(Rc::from(tool_name.to_string())), tool_args]
+        } else if arg_count == 1 {
+            vec![full_payload]
+        } else {
+            Vec::new()
+        };
+
+        let mut vm = self.vm.child_vm_for_host();
+        let result = vm.call_closure_pub(closure, &args, &[]).await?;
+        let payload = match result {
+            VmValue::Bool(granted) => serde_json::json!({ "granted": granted }),
+            VmValue::String(reason) if !reason.is_empty() => {
+                serde_json::json!({ "granted": false, "reason": reason.to_string() })
+            }
+            other => {
+                let json = crate::llm::vm_value_to_json(&other);
+                if json
+                    .get("granted")
+                    .and_then(|value| value.as_bool())
+                    .is_some()
+                    || json.get("outcome").is_some()
+                {
+                    json
+                } else {
+                    serde_json::json!({ "granted": other.is_truthy() })
+                }
+            }
+        };
+        Ok(payload)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -184,6 +301,7 @@ impl HostBridge {
             skills_reload_requested,
             visible_call_states: std::sync::Mutex::new(HashMap::new()),
             visible_call_streams: std::sync::Mutex::new(HashMap::new()),
+            in_process: None,
             #[cfg(test)]
             recorded_notifications: Arc::new(std::sync::Mutex::new(Vec::new())),
         }
@@ -212,9 +330,36 @@ impl HostBridge {
             skills_reload_requested: Arc::new(AtomicBool::new(false)),
             visible_call_states: std::sync::Mutex::new(HashMap::new()),
             visible_call_streams: std::sync::Mutex::new(HashMap::new()),
+            in_process: None,
             #[cfg(test)]
             recorded_notifications: Arc::new(std::sync::Mutex::new(Vec::new())),
         }
+    }
+
+    /// Create an in-process host bridge backed by exported functions from a
+    /// Harn module. Used by `harn playground` to avoid JSON-RPC boilerplate.
+    pub async fn from_harn_module(mut vm: Vm, module_path: &Path) -> Result<Self, VmError> {
+        let exported_functions = vm.load_module_exports(module_path).await?;
+        Ok(Self {
+            next_id: AtomicU64::new(1),
+            pending: Arc::new(Mutex::new(HashMap::new())),
+            cancelled: Arc::new(AtomicBool::new(false)),
+            stdout_lock: Arc::new(std::sync::Mutex::new(())),
+            session_id: std::sync::Mutex::new(String::new()),
+            script_name: std::sync::Mutex::new(String::new()),
+            queued_user_messages: Arc::new(Mutex::new(VecDeque::new())),
+            resume_requested: Arc::new(AtomicBool::new(false)),
+            skills_reload_requested: Arc::new(AtomicBool::new(false)),
+            visible_call_states: std::sync::Mutex::new(HashMap::new()),
+            visible_call_streams: std::sync::Mutex::new(HashMap::new()),
+            in_process: Some(InProcessHost {
+                module_path: module_path.to_path_buf(),
+                exported_functions,
+                vm,
+            }),
+            #[cfg(test)]
+            recorded_notifications: Arc::new(std::sync::Mutex::new(Vec::new())),
+        })
     }
 
     /// Set the ACP session ID for session-scoped notifications.
@@ -266,6 +411,10 @@ impl HostBridge {
         method: &str,
         params: serde_json::Value,
     ) -> Result<serde_json::Value, VmError> {
+        if let Some(in_process) = &self.in_process {
+            return in_process.dispatch(method, params).await;
+        }
+
         if self.is_cancelled() {
             return Err(VmError::Runtime("Bridge: operation cancelled".into()));
         }
@@ -331,6 +480,9 @@ impl HostBridge {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .push(notification.clone());
+        if self.in_process.is_some() {
+            return;
+        }
         if let Ok(line) = serde_json::to_string(&notification) {
             let _ = self.write_line(&line);
         }

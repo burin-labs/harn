@@ -996,6 +996,12 @@ impl Vm {
         }
     }
 
+    /// Create a child VM for external adapters that need to invoke Harn
+    /// closures while sharing the parent's builtins, globals, and module state.
+    pub(crate) fn child_vm_for_host(&self) -> Vm {
+        self.child_vm()
+    }
+
     /// Set the source directory for import resolution and introspection.
     /// Also auto-detects the project root if not already set.
     pub fn set_source_dir(&mut self, dir: &std::path::Path) {

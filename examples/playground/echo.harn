@@ -1,0 +1,8 @@
+pipeline default(task) {
+  let prompt = build_prompt(env_or("HARN_TASK", "say hi"))
+  let result = llm_call(
+    prompt,
+    "You are concise. Reply with a single sentence that acknowledges the task.",
+  )
+  println(result.text)
+}

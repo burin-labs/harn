@@ -73,6 +73,8 @@ SCRIPTING
     Watch(WatchArgs),
     /// Launch the local Harn observability portal.
     Portal(PortalArgs),
+    /// Run a pipeline against a Harn-native host module for fast iteration.
+    Playground(PlaygroundArgs),
     /// Inspect persisted workflow run records.
     Runs(RunsArgs),
     /// Replay a persisted workflow run record.
@@ -296,6 +298,8 @@ pub(crate) enum ProjectTemplate {
     #[value(name = "mcp-server")]
     McpServer,
     Eval,
+    #[value(name = "pipeline-lab")]
+    PipelineLab,
 }
 
 #[derive(Debug, Args)]
@@ -427,6 +431,25 @@ pub(crate) struct PortalArgs {
     /// Open the portal in a browser after starting.
     #[arg(long, default_value_t = true, action = ArgAction::Set)]
     pub open: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct PlaygroundArgs {
+    /// Host module exporting the capabilities the script expects.
+    #[arg(long, default_value = "host.harn")]
+    pub host: String,
+    /// Pipeline entrypoint to execute.
+    #[arg(long, default_value = "pipeline.harn")]
+    pub script: String,
+    /// Runtime task string exposed via `runtime_task()`.
+    #[arg(long)]
+    pub task: Option<String>,
+    /// Provider/model override as `provider:model`.
+    #[arg(long)]
+    pub llm: Option<String>,
+    /// Re-run when the script or host module changes.
+    #[arg(long)]
+    pub watch: bool,
 }
 
 #[derive(Debug, Args)]
@@ -711,6 +734,48 @@ mod tests {
         };
         assert_eq!(args.name.as_deref(), Some("review-bot"));
         assert_eq!(args.template, ProjectTemplate::Agent);
+    }
+
+    #[test]
+    fn test_parses_pipeline_lab_template() {
+        let cli = Cli::parse_from([
+            "harn",
+            "new",
+            "pipeline-lab-demo",
+            "--template",
+            "pipeline-lab",
+        ]);
+
+        let Command::New(args) = cli.command.unwrap() else {
+            panic!("expected new command");
+        };
+        assert_eq!(args.template, ProjectTemplate::PipelineLab);
+    }
+
+    #[test]
+    fn test_parses_playground_args() {
+        let cli = Cli::parse_from([
+            "harn",
+            "playground",
+            "--host",
+            "examples/playground/host.harn",
+            "--script",
+            "examples/playground/echo.harn",
+            "--task",
+            "hi",
+            "--llm",
+            "ollama:qwen2.5-coder:latest",
+            "--watch",
+        ]);
+
+        let Command::Playground(args) = cli.command.unwrap() else {
+            panic!("expected playground command");
+        };
+        assert_eq!(args.host, "examples/playground/host.harn");
+        assert_eq!(args.script, "examples/playground/echo.harn");
+        assert_eq!(args.task.as_deref(), Some("hi"));
+        assert_eq!(args.llm.as_deref(), Some("ollama:qwen2.5-coder:latest"));
+        assert!(args.watch);
     }
 
     #[test]
