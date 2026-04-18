@@ -7,6 +7,30 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
+## v0.7.19
+
+### Fixed
+
+- **Release workflow cross-compile target (release.yml).** After
+  `rust-toolchain.toml` pinned the repo to Rust 1.95.0,
+  `dtolnay/rust-toolchain`'s `targets:` input was installing the
+  requested target against the `stable` channel only, while cargo then
+  picked up the pinned 1.95.0 toolchain (without rust-std for the
+  matrix target) and failed with `E0463: can't find crate for core`.
+  The release build now runs an explicit `rustup show` + `rustup target
+  add ${{ matrix.target }}` so the matrix target is installed against
+  the active (pinned) toolchain. No change required to
+  `rust-toolchain.toml` when bumping the pin.
+
+- **mcp_card test flakiness (harn-vm).** Three tests in
+  `mcp_card::tests` were each calling `reset_cache()` on the
+  process-wide `CARD_CACHE`, which races under default parallel test
+  execution and could wipe the cached entry mid-assertion — producing
+  intermittent `Some("updated") != Some("cached")` failures on CI. The
+  two callers that don't actually touch the cache dropped the
+  defensive reset; the TTL test now holds a static serialization mutex
+  so future cache-touching tests take their turn.
+
 ## v0.7.18
 
 ### Added
