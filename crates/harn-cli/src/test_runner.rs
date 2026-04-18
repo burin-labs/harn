@@ -143,6 +143,13 @@ pub async fn run_test_file(
                         vm.set_source_dir(parent);
                     }
                 }
+                let loaded =
+                    crate::skill_loader::load_skills(&crate::skill_loader::SkillLoaderInputs {
+                        cli_dirs: Vec::new(),
+                        source_path: Some(path.to_path_buf()),
+                    });
+                crate::skill_loader::emit_loader_warnings(&loaded.loader_warnings);
+                crate::skill_loader::install_skills_global(&mut vm, &loaded);
                 match vm.execute(&chunk).await {
                     Ok(val) => Ok(val),
                     Err(e) => {

@@ -340,6 +340,53 @@ pub(crate) fn register_skill_builtins(vm: &mut Vm) {
         Ok(VmValue::Dict(Rc::new(new_registry)))
     });
 
+    // `skill_render(skill, args_list)` — substitute `$ARGUMENTS`, `$N`,
+    // `${HARN_SKILL_DIR}`, `${HARN_SESSION_ID}` in the skill body.
+    //
+    // Accepts a skill entry (as returned by `skill_find`) or a raw
+    // string body. Args is an optional list of strings; missing values
+    // pass through unchanged so authors can spot under-supplied calls.
+    vm.register_builtin("skill_render", |args, _out| {
+        if args.is_empty() {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(
+                "skill_render: requires a skill entry or body string",
+            ))));
+        }
+        let (body, skill_dir) = match &args[0] {
+            VmValue::String(s) => (s.to_string(), None),
+            VmValue::Dict(map) => {
+                let body = map.get("body").map(|v| v.display()).unwrap_or_default();
+                let dir = map
+                    .get("skill_dir")
+                    .map(|v| v.display())
+                    .filter(|s| !s.is_empty());
+                (body, dir)
+            }
+            _ => {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                    "skill_render: first argument must be a skill entry or a string body",
+                ))));
+            }
+        };
+        let arguments: Vec<String> = match args.get(1) {
+            Some(VmValue::List(list)) => list.iter().map(|v| v.display()).collect(),
+            Some(VmValue::Nil) | None => Vec::new(),
+            Some(_) => {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                    "skill_render: second argument must be a list of strings",
+                ))));
+            }
+        };
+        let ctx = crate::skills::SubstitutionContext {
+            arguments,
+            skill_dir,
+            session_id: std::env::var("HARN_SESSION_ID").ok(),
+            extra_env: Default::default(),
+        };
+        let rendered = crate::skills::substitute_skill_body(&body, &ctx);
+        Ok(VmValue::String(Rc::from(rendered.as_str())))
+    });
+
     vm.register_builtin("skill_count", |args, _out| {
         let registry = match args.first() {
             Some(VmValue::Dict(map)) => map,

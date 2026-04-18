@@ -10,6 +10,10 @@ use harn_parser::DiagnosticSeverity;
 use crate::commands::mcp::{self, AuthResolution};
 use crate::package;
 use crate::parse_source_file;
+use crate::skill_loader::{
+    canonicalize_cli_dirs, emit_loader_warnings, install_skills_global, load_skills,
+    SkillLoaderInputs,
+};
 
 /// Core builtins that are never denied, even when using `--allow`.
 const CORE_BUILTINS: &[&str] = &[
@@ -87,6 +91,16 @@ pub(crate) async fn run_file(
     trace: bool,
     denied_builtins: HashSet<String>,
     script_argv: Vec<String>,
+) {
+    run_file_with_skill_dirs(path, trace, denied_builtins, script_argv, Vec::new()).await;
+}
+
+pub(crate) async fn run_file_with_skill_dirs(
+    path: &str,
+    trace: bool,
+    denied_builtins: HashSet<String>,
+    script_argv: Vec<String>,
+    skill_dirs_raw: Vec<String>,
 ) {
     let (source, program) = parse_source_file(path);
 
@@ -173,6 +187,16 @@ pub(crate) async fn run_file(
             vm.set_source_dir(p);
         }
     }
+
+    // Load filesystem + manifest skills before the pipeline runs so
+    // `skills` is populated with a pre-discovered registry (see #73).
+    let cli_dirs = canonicalize_cli_dirs(&skill_dirs_raw, None);
+    let loaded = load_skills(&SkillLoaderInputs {
+        cli_dirs,
+        source_path: Some(std::path::PathBuf::from(path)),
+    });
+    emit_loader_warnings(&loaded.loader_warnings);
+    install_skills_global(&mut vm, &loaded);
 
     // `harn run script.harn -- a b c` yields `argv == ["a", "b", "c"]`.
     // Always set so scripts can rely on `len(argv)`.
@@ -391,6 +415,14 @@ pub(crate) async fn run_file_mcp_serve(path: &str) {
             vm.set_source_dir(p);
         }
     }
+
+    // Same skill discovery as `harn run` — see comment there.
+    let loaded = load_skills(&SkillLoaderInputs {
+        cli_dirs: Vec::new(),
+        source_path: Some(std::path::PathBuf::from(path)),
+    });
+    emit_loader_warnings(&loaded.loader_warnings);
+    install_skills_global(&mut vm, &loaded);
 
     if let Some(manifest) = package::try_read_manifest_for(Path::new(path)) {
         if !manifest.mcp.is_empty() {

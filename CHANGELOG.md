@@ -11,6 +11,26 @@ granular archaeology.
 
 ### Added
 
+- **Skills phase 2: filesystem `SKILL.md` loader + layered discovery (harn#73).**
+  `harn run` / `harn test` / `harn check` now pre-populate the `skills`
+  VM global with every `SKILL.md` they find across eight priority
+  layers: `--skill-dir` (CLI), `$HARN_SKILLS_PATH` (env),
+  `.harn/skills/` (project), `harn.toml` `[skills] paths` &
+  `[[skill.source]]` (manifest), `~/.harn/skills` (user),
+  `.harn/packages/**/skills/` (package), `/etc/harn/skills` &
+  `$XDG_CONFIG_HOME/harn/skills` (system), bridge-registered (host).
+  Frontmatter follows Anthropic / Claude-Code's Agent Skills spec
+  (`name`, `description`, `when-to-use`, `disable-model-invocation`,
+  `allowed-tools`, `user-invocable`, `paths`, `context`, `agent`,
+  `hooks`, `model`, `effort`, `shell`, `argument-hint`); unknown
+  fields surface as `harn doctor` warnings, not hard errors, so the
+  spec can evolve without breaking older VMs. New `skill_render(skill,
+  args)` builtin applies `$ARGUMENTS` / `$N` / `${HARN_SKILL_DIR}` /
+  `${HARN_SESSION_ID}` substitutions to the SKILL.md body. Bridge
+  protocol gains `skills/list` + `skills/fetch` requests and a
+  `skills/update` notification for host-driven hot-reload. See
+  `docs/src/skills.md` for the full reference and
+  `docs/src/bridge-protocol.md` for the wire format.
 - **Tool Vault phase 2: universal client-executed `tool_search` fallback (harn#70).**
   `tool_search` now works on every provider, not just the
   Anthropic-native path landed in phase 1. When the active provider

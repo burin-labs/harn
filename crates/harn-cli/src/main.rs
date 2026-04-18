@@ -4,6 +4,7 @@ mod cli;
 mod commands;
 mod config;
 mod package;
+mod skill_loader;
 mod test_runner;
 
 use clap::{error::ErrorKind, CommandFactory, Parser as ClapParser};
@@ -66,11 +67,25 @@ async fn main() {
                         command_error(&format!("failed to write temp file for -e: {e}"))
                     });
                     let tmp_str = tmp_path.to_string_lossy().into_owned();
-                    commands::run::run_file(&tmp_str, args.trace, denied, args.argv.clone()).await;
+                    commands::run::run_file_with_skill_dirs(
+                        &tmp_str,
+                        args.trace,
+                        denied,
+                        args.argv.clone(),
+                        args.skill_dir.clone(),
+                    )
+                    .await;
                     drop(tmp);
                 }
                 (None, Some(file)) => {
-                    commands::run::run_file(file, args.trace, denied, args.argv.clone()).await
+                    commands::run::run_file_with_skill_dirs(
+                        file,
+                        args.trace,
+                        denied,
+                        args.argv.clone(),
+                        args.skill_dir.clone(),
+                    )
+                    .await
                 }
                 (Some(_), Some(_)) => command_error(
                     "`harn run` accepts either `-e <code>` or `<file.harn>`, not both",
@@ -865,6 +880,15 @@ pub(crate) async fn execute(source: &str, source_path: Option<&Path>) -> Result<
                     }
                 }
             }
+            // Conformance tests land here via `run_conformance_tests`; for
+            // `skill_fs_*` fixtures to see the bundled `skills/` folder
+            // we run the same layered discovery as `harn run`.
+            let loaded = skill_loader::load_skills(&skill_loader::SkillLoaderInputs {
+                cli_dirs: Vec::new(),
+                source_path: source_path.map(Path::to_path_buf),
+            });
+            skill_loader::emit_loader_warnings(&loaded.loader_warnings);
+            skill_loader::install_skills_global(&mut vm, &loaded);
             let execution_result = vm.execute(&chunk).await.map_err(|e| e.to_string());
             harn_vm::stdlib::process::set_thread_execution_context(None);
             execution_result?;

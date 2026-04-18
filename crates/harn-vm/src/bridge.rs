@@ -42,6 +42,11 @@ pub struct HostBridge {
     queued_user_messages: Arc<Mutex<VecDeque<QueuedUserMessage>>>,
     /// Host-triggered resume signal for daemon agents.
     resume_requested: Arc<AtomicBool>,
+    /// Host-triggered skill-registry invalidation signal. Set when the
+    /// host sends a `skills/update` notification; consumed by the CLI
+    /// between runs (watch mode, long-running agents) to rebuild the
+    /// layered skill catalog from its current filesystem + host state.
+    skills_reload_requested: Arc<AtomicBool>,
     /// Per-call visible assistant text state for call_progress notifications.
     visible_call_states: std::sync::Mutex<HashMap<String, VisibleTextState>>,
     /// Whether an LLM call's deltas should be exposed to end users while streaming.
@@ -94,12 +99,14 @@ impl HostBridge {
         let queued_user_messages: Arc<Mutex<VecDeque<QueuedUserMessage>>> =
             Arc::new(Mutex::new(VecDeque::new()));
         let resume_requested = Arc::new(AtomicBool::new(false));
+        let skills_reload_requested = Arc::new(AtomicBool::new(false));
 
         // Stdin reader: reads JSON-RPC lines and dispatches responses
         let pending_clone = pending.clone();
         let cancelled_clone = cancelled.clone();
         let queued_clone = queued_user_messages.clone();
         let resume_clone = resume_requested.clone();
+        let skills_reload_clone = skills_reload_requested.clone();
         tokio::task::spawn_local(async move {
             let stdin = tokio::io::stdin();
             let reader = tokio::io::BufReader::new(stdin);
@@ -123,6 +130,8 @@ impl HostBridge {
                             cancelled_clone.store(true, Ordering::SeqCst);
                         } else if method == "agent/resume" {
                             resume_clone.store(true, Ordering::SeqCst);
+                        } else if method == "skills/update" {
+                            skills_reload_clone.store(true, Ordering::SeqCst);
                         } else if method == "user_message"
                             || method == "session/input"
                             || method == "agent/user_message"
@@ -172,6 +181,7 @@ impl HostBridge {
             script_name: std::sync::Mutex::new(String::new()),
             queued_user_messages,
             resume_requested,
+            skills_reload_requested,
             visible_call_states: std::sync::Mutex::new(HashMap::new()),
             visible_call_streams: std::sync::Mutex::new(HashMap::new()),
             #[cfg(test)]
@@ -199,6 +209,7 @@ impl HostBridge {
             script_name: std::sync::Mutex::new(String::new()),
             queued_user_messages: Arc::new(Mutex::new(VecDeque::new())),
             resume_requested: Arc::new(AtomicBool::new(false)),
+            skills_reload_requested: Arc::new(AtomicBool::new(false)),
             visible_call_states: std::sync::Mutex::new(HashMap::new()),
             visible_call_streams: std::sync::Mutex::new(HashMap::new()),
             #[cfg(test)]
@@ -344,6 +355,50 @@ impl HostBridge {
 
     pub fn signal_resume(&self) {
         self.resume_requested.store(true, Ordering::SeqCst);
+    }
+
+    /// Consume any pending `skills/update` signal the host has sent.
+    /// Returns `true` exactly once per notification, letting callers
+    /// trigger a layered-discovery rebuild without polling false
+    /// positives. See issue #73 for the hot-reload contract.
+    pub fn take_skills_reload_signal(&self) -> bool {
+        self.skills_reload_requested.swap(false, Ordering::SeqCst)
+    }
+
+    /// Manually mark the skill catalog as stale. Used by tests and by
+    /// the CLI when an internal event (e.g. `harn install`) should
+    /// trigger the same rebuild a `skills/update` notification would.
+    pub fn signal_skills_reload(&self) {
+        self.skills_reload_requested.store(true, Ordering::SeqCst);
+    }
+
+    /// Call the host's `skills/list` RPC and return the raw JSON array
+    /// it responded with. Shape:
+    /// `[{ "id": "...", "name": "...", "description": "...", "source": "..." }, ...]`.
+    /// The CLI adapter converts each entry into a
+    /// [`crate::skills::SkillManifestRef`].
+    pub async fn list_host_skills(&self) -> Result<Vec<serde_json::Value>, VmError> {
+        let result = self.call("skills/list", serde_json::json!({})).await?;
+        match result {
+            serde_json::Value::Array(items) => Ok(items),
+            serde_json::Value::Object(map) => match map.get("skills") {
+                Some(serde_json::Value::Array(items)) => Ok(items.clone()),
+                _ => Err(VmError::Runtime(
+                    "skills/list: host response must be an array or { skills: [...] }".into(),
+                )),
+            },
+            _ => Err(VmError::Runtime(
+                "skills/list: unexpected response shape".into(),
+            )),
+        }
+    }
+
+    /// Call the host's `skills/fetch` RPC for one skill id. Returns the
+    /// raw JSON body so the CLI can inspect both the frontmatter fields
+    /// and the skill markdown body in whatever shape the host sends.
+    pub async fn fetch_host_skill(&self, id: &str) -> Result<serde_json::Value, VmError> {
+        self.call("skills/fetch", serde_json::json!({ "id": id }))
+            .await
     }
 
     pub async fn push_queued_user_message(&self, content: String, mode: &str) {

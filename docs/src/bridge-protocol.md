@@ -147,3 +147,56 @@ Errors: a JSON-RPC error response (standard shape) is surfaced to the
 model as a `tool_names: []` result with a diagnostic that includes the
 host error message. The loop continues — the model can retry with a
 different query.
+
+## Skill registry (issue #73)
+
+Hosts expose their own managed skill store to the VM through three RPCs.
+Filesystem skill discovery works without the bridge (`harn run` walks
+the seven non-host layers described in [Skills](./skills.md)); these
+RPCs add a layer 8 so cloud hosts, enterprise deployments, and the
+Burin Code IDE can serve skills the filesystem can't see.
+
+### `skills/list`
+
+VM-issued request. No parameters (or an empty object). The host
+responds with an array of `SkillManifestRef` entries. Minimal shape:
+
+```json
+[
+  { "id": "deploy", "name": "deploy", "description": "Ship it", "source": "host" },
+  { "id": "acme/ops/review", "name": "review", "description": "Code review", "source": "host" }
+]
+```
+
+The VM also accepts `{ "skills": [ ... ] }` for hosts that wrap
+collections in an object.
+
+### `skills/fetch`
+
+VM-issued request. Parameters: `{ "id": "<skill id>" }`. Response is a
+single skill object carrying enough metadata to populate a `Skill`:
+
+```json
+{
+  "name": "deploy",
+  "description": "Ship it",
+  "body": "# Deploy runbook\n...",
+  "manifest": {
+    "when_to_use": "...",
+    "allowed_tools": ["bash", "git"],
+    "paths": ["infra/**"],
+    "model": "claude-opus-4-7"
+  }
+}
+```
+
+Hosts may flatten the manifest fields into the top level instead — the
+CLI accepts either shape.
+
+### `skills/update`
+
+Host-issued notification. No parameters. Invalidates the VM's cached
+skill catalog; the CLI re-runs layered discovery (including another
+`skills/list` call) on the next iteration boundary — for `harn watch`,
+between file changes; for long-running agents, between turns. A VM
+without an active bridge simply ignores the notification.

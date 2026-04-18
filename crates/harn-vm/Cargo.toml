@@ -34,3 +34,6 @@ httpdate = "1"
 opentelemetry = { version = "0.31", optional = true }
 opentelemetry_sdk = { version = "0.31", optional = true, features = ["rt-tokio"] }
 opentelemetry-otlp = { version = "0.31", optional = true }
+
+[dev-dependencies]
+tempfile = "3"
