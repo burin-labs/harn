@@ -1,0 +1,20 @@
+import "std/agent_state"
+
+pipeline default() {
+  let root = path_join(temp_dir(), "harn-agent-state-" + uuid())
+  let handle = agent_state_init(root, {session_id: "roundtrip-session", writer_id: "writer-a"})
+  println(handle._type == "state_handle")
+  println(handle.session_id == "roundtrip-session")
+  agent_state_write(handle, "ledger.md", "hello state")
+  agent_state_write(handle, "evidence/b.json", "{\"rank\":2}")
+  agent_state_write(handle, "evidence/a.json", "{\"rank\":1}")
+  agent_state_handoff(handle, {status: "ready", artifacts: ["ledger.md"]})
+  println(agent_state_read(handle, "ledger.md"))
+  println(json_stringify(agent_state_list(handle)))
+  let handoff = json_parse(agent_state_read(handle, agent_state_handoff_key()))
+  println(handoff.summary.status)
+  println(handoff.key == agent_state_handoff_key())
+  agent_state_delete(handle, "ledger.md")
+  println(agent_state_read(handle, "ledger.md") == nil)
+  delete_file(root)
+}
