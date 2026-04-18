@@ -106,7 +106,7 @@ Ship it: `$ARGUMENTS`. Skill directory: `${HARN_SKILL_DIR}`.
 Tool declarations that carry a `namespace:` field can be grouped into
 one `allowed-tools` entry instead of enumerating names. Given
 
-```harn
+```harn,ignore
 tool_define(reg, "read_file", "...", {namespace: "read", ...})
 tool_define(reg, "list_files", "...", {namespace: "read", ...})
 tool_define(reg, "write_file", "...", {namespace: "write", ...})
