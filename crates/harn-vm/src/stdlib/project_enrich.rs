@@ -40,6 +40,7 @@ struct ProjectEnrichOptions {
     budget_tokens: i64,
     model: String,
     provider: String,
+    temperature: Option<f64>,
     cache_key: String,
     cache_dir: Option<String>,
     schema_retries: usize,
@@ -199,6 +200,7 @@ fn parse_project_enrich_options(value: Option<&VmValue>) -> Result<ProjectEnrich
         .get("provider")
         .and_then(value_as_string)
         .unwrap_or_else(|| "auto".to_string());
+    let temperature = dict.get("temperature").and_then(value_as_float);
     let cache_key = dict
         .get("cache_key")
         .and_then(value_as_string)
@@ -217,6 +219,7 @@ fn parse_project_enrich_options(value: Option<&VmValue>) -> Result<ProjectEnrich
         budget_tokens,
         model,
         provider,
+        temperature,
         cache_key,
         cache_dir,
         schema_retries,
@@ -448,6 +451,9 @@ fn llm_options_value(options: &ProjectEnrichOptions, rendered_prompt: &str) -> V
         "model".to_string(),
         VmValue::String(Rc::from(options.model.clone())),
     );
+    if let Some(temperature) = options.temperature {
+        llm_options.insert("temperature".to_string(), VmValue::Float(temperature));
+    }
     llm_options.insert("output_schema".to_string(), options.schema.clone());
     llm_options.insert(
         "output_validation".to_string(),
@@ -686,6 +692,14 @@ fn value_as_list(value: &VmValue) -> Option<&[VmValue]> {
     }
 }
 
+fn value_as_float(value: &VmValue) -> Option<f64> {
+    match value {
+        VmValue::Float(number) => Some(*number),
+        VmValue::Int(number) => Some(*number as f64),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 fn value_as_bool(value: &VmValue) -> Option<bool> {
     match value {
@@ -726,5 +740,25 @@ mod tests {
                 .and_then(value_as_bool),
             Some(false)
         );
+    }
+
+    #[test]
+    fn llm_options_value_forwards_temperature() {
+        let options = ProjectEnrichOptions {
+            base_evidence: None,
+            prompt: "Return JSON.".to_string(),
+            schema: VmValue::Dict(Rc::new(BTreeMap::new())),
+            budget_tokens: 4000,
+            model: "mock-model".to_string(),
+            provider: "mock".to_string(),
+            temperature: Some(0.25),
+            cache_key: "cache-v1".to_string(),
+            cache_dir: None,
+            schema_retries: 1,
+        };
+
+        let llm_options = llm_options_value(&options, "rendered prompt");
+        let dict = llm_options.as_dict().expect("dict");
+        assert_eq!(dict.get("temperature").and_then(value_as_float), Some(0.25));
     }
 }

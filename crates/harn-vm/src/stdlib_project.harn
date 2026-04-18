@@ -112,10 +112,10 @@ pub fn project_deep_scan(path = ".", options = nil) {
     }
 
     let record = __project_deep_scan_refresh_entry(
+      namespace,
       entry,
       tiers,
       opts?.enrichment ?? {},
-      walk_options,
       signature,
       now,
     )
@@ -220,7 +220,7 @@ fn __project_deep_scan_cache(namespace) {
 fn __project_deep_scan_signature(options, tiers, walk_options) {
   let enrichment = options?.enrichment ?? {}
   return sha256(json_stringify({
-    version: 1,
+    version: 2,
     tiers: tiers,
     walk: walk_options,
     prompt: enrichment?.prompt ?? "",
@@ -229,7 +229,7 @@ fn __project_deep_scan_signature(options, tiers, walk_options) {
     provider: enrichment?.provider ?? "",
     model: enrichment?.model ?? "",
     temperature: enrichment?.temperature ?? nil,
-    max_tokens: enrichment?.budget_tokens_per_dir ?? nil,
+    budget_tokens: enrichment?.budget_tokens_per_dir ?? nil,
   }))
 }
 
@@ -300,7 +300,7 @@ fn __project_deep_scan_needs_refresh(
   return false
 }
 
-fn __project_deep_scan_refresh_entry(entry, tiers, enrichment, walk_options, signature, now) {
+fn __project_deep_scan_refresh_entry(namespace, entry, tiers, enrichment, signature, now) {
   let scan_tiers = __project_deep_scan_deterministic_tiers(tiers)
   let scan = if len(scan_tiers) == 0 {
     {}
@@ -309,13 +309,14 @@ fn __project_deep_scan_refresh_entry(entry, tiers, enrichment, walk_options, sig
   }
   var evidence = __project_deep_scan_evidence(scan, tiers)
   if __project_has_tier(tiers, "enriched") {
-    let files = __project_deep_scan_files(entry.dir, walk_options?.include_hidden ?? false)
-    evidence["enriched"] = __project_enrich_with_context(
+    evidence["enriched"] = project_enrich_native(
       entry.dir,
-      entry.path,
-      evidence,
-      files,
-      enrichment,
+      __project_deep_scan_enrichment_options(
+        namespace,
+        entry,
+        evidence,
+        enrichment,
+      ),
     )
   }
   return {
@@ -365,47 +366,27 @@ fn __project_scan_config(scan) {
   }
 }
 
-fn __project_deep_scan_files(path, include_hidden) {
-  return scan_directory(path, {
-    include_dirs: true,
-    include_files: true,
-    include_hidden: include_hidden,
-    max_depth: 0,
-  })
+fn __project_deep_scan_enrichment_options(namespace, entry, evidence, options) {
+  return {
+    base_evidence: evidence,
+    prompt: __project_deep_scan_enrichment_prompt(
+      entry.dir,
+      entry.path,
+      evidence,
+      options,
+    ),
+    schema: options?.schema ?? nil,
+    provider: options?.provider ?? nil,
+    model: options?.model ?? nil,
+    temperature: options?.temperature ?? nil,
+    budget_tokens: options?.budget_tokens_per_dir ?? nil,
+    cache_key: "${namespace}/${entry.path}",
+  }
 }
 
-fn __project_enrich_with_context(dir, display_path, evidence, files, options) {
-  let system_prompt = options?.system ?? options?.prompt ?? "Return a compact JSON summary of this directory. No markdown."
-  let prompt = __project_enrich_prompt(dir, display_path, evidence, files)
-  var llm_options = {
-    response_format: "json",
-    output_validation: "error",
-    schema_retries: 1,
-  }
-  if options?.schema != nil {
-    llm_options["output_schema"] = options.schema
-  }
-  if options?.budget_tokens_per_dir != nil {
-    llm_options["max_tokens"] = options.budget_tokens_per_dir
-  }
-  if options?.provider != nil {
-    llm_options["provider"] = options.provider
-  }
-  if options?.model != nil {
-    llm_options["model"] = options.model
-  }
-  if options?.temperature != nil {
-    llm_options["temperature"] = options.temperature
-  }
-  let response = llm_call(prompt, system_prompt, llm_options)
-  if response?.data != nil {
-    return response.data
-  }
-  return json_parse(response.text)
-}
-
-fn __project_enrich_prompt(dir, display_path, evidence, files) {
-  return "Directory key: ${dir}\nDisplay path: ${display_path}\nDeterministic evidence:\n${json_stringify(evidence)}\nImmediate entries:\n${json_stringify(files)}"
+fn __project_deep_scan_enrichment_prompt(dir, display_path, evidence, options) {
+  let instruction = options?.system ?? options?.prompt ?? "Return a compact JSON summary of this directory. No markdown."
+  return "${instruction}\n\nDirectory key: ${dir}\nDisplay path: ${display_path}\nDeterministic evidence:\n${json_stringify(evidence)}\nRelevant files:\n{{ for file in files }}FILE {{file.path}}\n{{file.content}}\n{{ end }}"
 }
 
 fn __project_deep_scan_select_tiers(evidence, tiers) {

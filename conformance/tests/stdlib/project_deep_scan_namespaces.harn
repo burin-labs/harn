@@ -30,8 +30,31 @@ pipeline test(task) {
     enrichment: {prompt: "Return valid JSON only.", provider: "mock", schema: {purpose: "string"}},
   },
   )
+  let alpha_cached = project_deep_scan(
+    "project_deep_scan_ns",
+    {
+    namespace: alpha_namespace,
+    tiers: ["ambient", "enriched"],
+    incremental: true,
+    depth: nil,
+    enrichment: {prompt: "Return valid JSON only.", provider: "mock", schema: {purpose: "string"}},
+  },
+  )
+  let beta_cached = project_deep_scan(
+    "project_deep_scan_ns",
+    {
+    namespace: beta_namespace,
+    tiers: ["ambient", "enriched"],
+    incremental: true,
+    depth: nil,
+    enrichment: {prompt: "Return valid JSON only.", provider: "mock", schema: {purpose: "string"}},
+  },
+  )
   println(alpha["src"].enriched.purpose == "alpha src")
   println(beta["src"].enriched.purpose == "beta src")
-  println(project_deep_scan_status(alpha_namespace, "project_deep_scan_ns").total_dirs == 2)
-  println(project_deep_scan_status(beta_namespace, "project_deep_scan_ns").total_dirs == 2)
+  println(alpha_cached["src"].enriched.purpose == "alpha src")
+  println(beta_cached["src"].enriched.purpose == "beta src")
+  println(project_deep_scan_status(alpha_namespace, "project_deep_scan_ns").cache_hits == 2)
+  println(project_deep_scan_status(beta_namespace, "project_deep_scan_ns").cache_hits == 2)
+  println(len(llm_mock_calls()) == 4)
 }
