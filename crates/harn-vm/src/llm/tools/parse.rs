@@ -103,8 +103,10 @@ pub(crate) fn parse_bare_calls_in_body(
         .into_iter()
         .map(|s| s.name)
         .collect();
-    // `ledger` is a runtime-owned pseudo-tool (handled in `agent.rs`).
+    // Runtime-owned pseudo-tools (handled in the agent runtime, not in
+    // the user-declared tool registry).
     known.insert("ledger".to_string());
+    known.insert("load_skill".to_string());
     let mut calls = Vec::new();
     let mut errors = Vec::new();
     // Byte ranges excised from the original text to form `prose`.
@@ -588,7 +590,7 @@ fn try_parse_angle_wrapped_call(
     let known: BTreeSet<String> = collect_tool_schemas(tools_val, None)
         .into_iter()
         .map(|s| s.name)
-        .chain(std::iter::once("ledger".to_string()))
+        .chain(["ledger".to_string(), "load_skill".to_string()])
         .collect();
     if !known.contains(name_str) {
         return None;
