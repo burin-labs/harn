@@ -1142,6 +1142,10 @@ pub(crate) const BUILTIN_SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("string")),
     },
     BuiltinSig {
+        name: "render_always_on_catalog",
+        return_type: Some(BuiltinReturn::Named("string")),
+    },
+    BuiltinSig {
         name: "render_prompt",
         return_type: Some(BuiltinReturn::Named("string")),
     },
@@ -1380,6 +1384,10 @@ pub(crate) const BUILTIN_SIGNATURES: &[BuiltinSig] = &[
     BuiltinSig {
         name: "skill_select",
         return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
+        name: "skills_catalog_entries",
+        return_type: Some(BuiltinReturn::Named("list")),
     },
     BuiltinSig {
         name: "sleep",

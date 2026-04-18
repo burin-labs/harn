@@ -1,0 +1,41 @@
+pipeline test(task) {
+  llm_mock_clear()
+  let catalog = render_always_on_catalog(skills_catalog_entries(skills), 2000)
+  llm_mock(
+    {
+    text: "Try the gated skill.",
+    tool_calls: [{id: "ls1", name: "load_skill", arguments: {name: "secure-review"}}],
+  },
+  )
+  llm_mock(
+    {
+    text: "Try a missing skill.",
+    tool_calls: [{id: "ls2", name: "load_skill", arguments: {name: "does-not-exist"}}],
+  },
+  )
+  llm_mock({text: "<done>##DONE##</done>"})
+  let result = agent_loop(
+    "Use the skills catalog",
+    catalog,
+    {
+    provider: "mock",
+    model: "gpt-5.4",
+    tool_format: "native",
+    persistent: true,
+    max_iterations: 5,
+    session_id: "skills-load-skill-errors",
+    skills: skills,
+  },
+  )
+  assert(result?.status == "done", "agent loop completes")
+  let calls = llm_mock_calls()
+  let second_messages = json_stringify(calls[1].messages)
+  assert(
+    contains(second_messages, "skill_model_invocation_disabled"),
+    "gated skill returns a typed error",
+  )
+  assert(!contains(second_messages, "top secret"), "gated skill body does not leak")
+  let third_messages = json_stringify(calls[2].messages)
+  assert(contains(third_messages, "skill_not_found"), "missing skill returns a typed error")
+  log("skills_load_skill_errors passed")
+}

@@ -1,0 +1,27 @@
+pipeline default() {
+  let root = path_join(temp_dir(), "harn-agent-state-process-" + uuid())
+  let script_dir = path_join(root, "scripts")
+  mkdir(script_dir)
+  let writer = script_dir + "/writer.harn"
+  let reader = script_dir + "/reader.harn"
+  write_file(
+    writer,
+    "import \"std/agent_state\"\n\npipeline default() {\n  let root = argv[0]\n  let handle = agent_state_init(root, {session_id: \"resume-session\", writer_id: \"writer-a\"})\n  agent_state_write(handle, \"plan.md\", \"persisted plan\")\n  agent_state_handoff(handle, {status: \"ready\", source: \"writer\"})\n  println(agent_state_read(handle, \"plan.md\"))\n}\n",
+  )
+  write_file(
+    reader,
+    "import \"std/agent_state\"\n\npipeline default() {\n  let root = argv[0]\n  let handle = agent_state_resume(root, \"resume-session\", nil)\n  println(agent_state_read(handle, \"plan.md\"))\n  let handoff = json_parse(agent_state_read(handle, agent_state_handoff_key()))\n  println(handoff.summary.status)\n  println(handoff.session_id)\n}\n",
+  )
+  let repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+  let target_dir = env("CARGO_TARGET_DIR") ?? path_join(repo_root, "target")
+  let harn_bin = path_join(target_dir, "debug/harn")
+  let first = exec(harn_bin, "run", writer, "--", root)
+  println(first.success)
+  println(first.stdout.contains("persisted plan"))
+  let second = exec(harn_bin, "run", reader, "--", root)
+  println(second.success)
+  println(second.stdout.contains("persisted plan"))
+  println(second.stdout.contains("ready"))
+  println(second.stdout.contains("resume-session"))
+  delete_file(root)
+}

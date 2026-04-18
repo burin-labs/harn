@@ -1,0 +1,18 @@
+pipeline test(task) {
+  skill beta {
+    description "Second skill"
+    when_to_use "Use beta second"
+  }
+  skill alpha {
+    description "First skill"
+    when_to_use "Use alpha first"
+  }
+  let registry = skill_define(beta, "alpha", skill_find(alpha, "alpha"))
+  let entries = skills_catalog_entries(registry)
+  let rendered = render_always_on_catalog(entries, 500)
+  let expected = "## Available skills\n\nThese skills are available. Call `load_skill({ name: \"<skill-id>\" })` to load the full body of a skill when it becomes relevant.\n\n- `alpha`: First skill\n  when: Use alpha first\n- `beta`: Second skill\n  when: Use beta second"
+  assert(rendered == expected, "catalog render is deterministic and sorted")
+  let small = render_always_on_catalog(entries, 170)
+  assert(contains(small, "omitted to stay within budget"), "budget note emitted")
+  log("skills_load_skill_catalog passed")
+}

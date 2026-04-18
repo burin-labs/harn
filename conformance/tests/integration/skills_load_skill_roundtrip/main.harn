@@ -1,0 +1,57 @@
+pipeline test(task) {
+  llm_mock_clear()
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "deploy_service",
+    "Deploy the production service stack",
+    {parameters: {env: {type: "string"}}, handler: { args -> "deploy " + args.env }},
+  )
+  tools = tool_define(
+    tools,
+    "query_metrics",
+    "Query observability metrics",
+    {parameters: {query: {type: "string"}}, handler: { args -> "query " + args.query }},
+  )
+  let catalog = render_always_on_catalog(skills_catalog_entries(skills), 2000)
+  assert(contains(catalog, "rust-scripting"), "catalog contains the skill id")
+  llm_mock(
+    {
+    text: "Load the rust instructions.",
+    tool_calls: [{id: "ls1", name: "load_skill", arguments: {name: "rust-scripting"}}],
+  },
+  )
+  llm_mock({text: "<done>##DONE##</done>"})
+  let result = agent_loop(
+    "Help with rust scripting",
+    catalog,
+    {
+    provider: "mock",
+    model: "gpt-5.4",
+    tools: tools,
+    tool_format: "native",
+    persistent: true,
+    max_iterations: 3,
+    session_id: "skills-load-skill",
+    skills: skills,
+  },
+  )
+  assert(result?.status == "done", "agent loop finishes")
+  let calls = llm_mock_calls()
+  assert(len(calls) == 2, "two llm calls happened")
+  let first_tools = json_stringify(calls[0].tools)
+  assert(contains(first_tools, "load_skill"), "load_skill is advertised")
+  let second_messages = json_stringify(calls[1].messages)
+  assert(contains(second_messages, "cargo run --bin harn"), "tool result carries the skill body")
+  assert(contains(second_messages, "skills-load-skill"), "session id is substituted")
+  assert(contains(second_messages, "Args: []"), "$ARGUMENTS is substituted")
+  assert(
+    contains(second_messages, ".harn/skills/rust-scripting")
+    || contains(second_messages, ".harn\\\\skills\\\\rust-scripting"),
+    "skill dir is substituted",
+  )
+  let second_tools = json_stringify(calls[1].tools)
+  assert(contains(second_tools, "deploy_service"), "allowed tool remains visible")
+  assert(!contains(second_tools, "query_metrics"), "out-of-scope tool is filtered")
+  log("skills_load_skill_roundtrip passed")
+}
