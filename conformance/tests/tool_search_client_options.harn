@@ -101,11 +101,13 @@ pipeline test(task) {
     {
     provider: "mock",
     tools: big,
-    tool_search: {variant: "bm25", budget_tokens: 150},
+    tool_search: {variant: "bm25", mode: "client", budget_tokens: 150},
     persistent: true,
     max_iterations: 5,
   },
   )
+  // Explicit `mode: "client"` — mock now spoofs native tool_search
+  // for its default Claude model after harn#71.
   // After three turns: gamma promoted, alpha+beta evicted.
   let calls2 = llm_mock_calls()
   let last_system = calls2[len(calls2) - 1].system

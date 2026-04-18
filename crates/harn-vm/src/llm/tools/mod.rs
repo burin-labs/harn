@@ -1143,6 +1143,13 @@ pub(crate) fn vm_tools_to_native(
                 let params = entry.get("parameters").and_then(|v| v.as_dict());
                 let output_schema = entry.get("outputSchema").map(vm_value_to_json);
                 let defer_loading = matches!(entry.get("defer_loading"), Some(VmValue::Bool(true)));
+                // Optional `namespace: "crm"` groups deferred tools for
+                // OpenAI's `tool_search` meta-tool. Provider-agnostic at
+                // this layer; Anthropic simply ignores the field.
+                let namespace = entry.get("namespace").and_then(|v| match v {
+                    VmValue::String(s) if !s.is_empty() => Some(s.to_string()),
+                    _ => None,
+                });
 
                 let input_schema = vm_build_json_schema(params);
 
@@ -1169,6 +1176,13 @@ pub(crate) fn vm_tools_to_native(
                         // turns; we just pass the flag through.
                         tool_json["defer_loading"] = serde_json::Value::Bool(true);
                     }
+                    if let Some(ns) = namespace {
+                        // Anthropic ignores `namespace` today — harmless
+                        // passthrough keeps replay fidelity and lets a
+                        // future Anthropic release pick it up without
+                        // another round of schema plumbing.
+                        tool_json["namespace"] = serde_json::Value::String(ns);
+                    }
                     native_tools.push(tool_json);
                 } else {
                     let mut tool_json = serde_json::json!({
@@ -1187,12 +1201,20 @@ pub(crate) fn vm_tools_to_native(
                         // harn#71 (OpenAI Responses tool_search) and
                         // harn#70 (client-executed fallback) can read it
                         // without re-walking the VmValue tree. Non-
-                        // Anthropic providers that don't understand
-                        // `defer_loading` today will return an error when
-                        // the user explicitly requests tool_search — the
-                        // capability gate in options.rs catches that
-                        // before the payload ever reaches the provider.
+                        // OpenAI OpenAI-compat providers that don't
+                        // understand `defer_loading` today will return an
+                        // error when the user explicitly requests
+                        // tool_search — the capability gate in options.rs
+                        // catches that before the payload ever reaches
+                        // the provider.
                         tool_json["defer_loading"] = serde_json::Value::Bool(true);
+                    }
+                    if let Some(ns) = namespace {
+                        // OpenAI's `tool_search` meta-tool groups
+                        // deferred tools by namespace. Placed on the
+                        // wrapper (alongside `type: "function"`) so the
+                        // Responses API sees it next to `defer_loading`.
+                        tool_json["namespace"] = serde_json::Value::String(ns);
                     }
                     native_tools.push(tool_json);
                 }
@@ -1385,45 +1407,101 @@ pub(crate) fn build_client_search_tool_schema(
     }
 }
 
+#[cfg(test)]
 pub(crate) fn apply_tool_search_native_injection(
     native_tools: &mut Option<Vec<serde_json::Value>>,
     provider: &str,
     variant: &str,
 ) {
-    let is_anthropic_style = super::helpers::ResolvedProvider::resolve(provider).is_anthropic_style;
-    if !is_anthropic_style {
-        // OpenAI's native tool_search lands in harn#71 with a different
-        // shape; the options.rs capability gate prevents non-Anthropic
-        // providers from reaching this call for now. This guard is just
-        // defense in depth.
-        return;
-    }
-
-    // Anthropic's documented versioned types. If/when Anthropic issues a
-    // newer dated variant, we'll bump these constants in lockstep; the
-    // short names (`bm25`/`regex`) stay stable for users.
-    let (type_name, tool_name) = match variant {
-        "regex" => ("tool_search_tool_regex_20251119", "tool_search_tool_regex"),
-        // "bm25" and anything else → default to bm25.
-        _ => ("tool_search_tool_bm25_20251119", "tool_search_tool_bm25"),
+    // Back-compat entry for existing unit tests: pick the shape by
+    // provider name alone. The canonical call site (options.rs) uses the
+    // model-aware helper below.
+    let shape = if provider == "anthropic" {
+        super::provider::NativeToolSearchShape::Anthropic
+    } else {
+        super::provider::NativeToolSearchShape::OpenAi
     };
+    apply_tool_search_native_injection_typed(native_tools, shape, variant, "hosted");
+}
 
-    let meta = serde_json::json!({
-        "type": type_name,
-        "name": tool_name,
-    });
+/// Native tool-search injection with an explicit wire shape + OpenAI
+/// execution mode. `mode` is `"hosted"` or `"client"`; it only affects
+/// the OpenAI Responses-API shape (Anthropic's server always runs the
+/// search). `"hosted"` is the OpenAI default.
+pub(crate) fn apply_tool_search_native_injection_typed(
+    native_tools: &mut Option<Vec<serde_json::Value>>,
+    shape: super::provider::NativeToolSearchShape,
+    variant: &str,
+    mode: &str,
+) {
+    use super::provider::NativeToolSearchShape;
 
-    match native_tools {
-        Some(list) => {
-            // Prepend so the search tool is the first thing the model
-            // sees. Cheap — tool lists are rarely longer than a few dozen
-            // entries.
-            list.insert(0, meta);
+    match shape {
+        NativeToolSearchShape::Anthropic => {
+            // Anthropic's documented versioned types. If/when Anthropic
+            // issues a newer dated variant, we'll bump these constants
+            // in lockstep; the short names (`bm25`/`regex`) stay stable
+            // for users.
+            let (type_name, tool_name) = match variant {
+                "regex" => ("tool_search_tool_regex_20251119", "tool_search_tool_regex"),
+                // "bm25" and anything else → default to bm25.
+                _ => ("tool_search_tool_bm25_20251119", "tool_search_tool_bm25"),
+            };
+            let meta = serde_json::json!({
+                "type": type_name,
+                "name": tool_name,
+            });
+            prepend_meta_tool(native_tools, meta);
         }
-        None => {
-            *native_tools = Some(vec![meta]);
+        NativeToolSearchShape::OpenAi => {
+            // OpenAI Responses-API shape (harn#71). The meta-tool goes
+            // at the front of the tools array and carries a `mode`
+            // field ("hosted"/"client"). Deferred tools get
+            // `defer_loading: true` set at the wrapper level in
+            // `vm_tools_to_native`; the model sees only stub schemas
+            // until a `tool_search_call` surfaces them. See
+            // <https://developers.openai.com/api/docs/guides/tools-tool-search>.
+            let resolved_mode = if mode == "client" { "client" } else { "hosted" };
+            let mut meta = serde_json::json!({
+                "type": "tool_search",
+                "mode": resolved_mode,
+            });
+            // Collect any `namespace` values declared on user tools so
+            // OpenAI can group deferred tools into searchable buckets.
+            // Omit the field when no tool declared a namespace — keeps
+            // the payload minimal for the common case.
+            if let Some(tools) = native_tools.as_ref() {
+                let mut namespaces: Vec<String> = tools.iter().filter_map(tool_namespace).collect();
+                namespaces.sort();
+                namespaces.dedup();
+                if !namespaces.is_empty() {
+                    meta["namespaces"] = serde_json::json!(namespaces);
+                }
+            }
+            prepend_meta_tool(native_tools, meta);
         }
     }
+}
+
+fn prepend_meta_tool(native_tools: &mut Option<Vec<serde_json::Value>>, meta: serde_json::Value) {
+    match native_tools {
+        Some(list) => list.insert(0, meta),
+        None => *native_tools = Some(vec![meta]),
+    }
+}
+
+/// Extract the user-declared namespace from a native tool JSON, if any.
+/// Anthropic shape keeps the field at the top level; OpenAI shape nests
+/// it inside `function`. Either location is honoured.
+pub(crate) fn tool_namespace(tool: &serde_json::Value) -> Option<String> {
+    tool.get("namespace")
+        .and_then(|v| v.as_str())
+        .or_else(|| {
+            tool.get("function")
+                .and_then(|f| f.get("namespace"))
+                .and_then(|v| v.as_str())
+        })
+        .map(|s| s.to_string())
 }
 
 fn vm_build_json_schema(params: Option<&BTreeMap<String, VmValue>>) -> serde_json::Value {

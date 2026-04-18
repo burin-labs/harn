@@ -1432,13 +1432,33 @@ falling back to eager loading.
 
 Deferred tools are only materialised on the wire when the call opts
 into `tool_search` (see the `llm_call` option of the same name and
-`docs/src/llm-and-agents.md`). On providers that support native
-progressive disclosure (Anthropic Claude Opus/Sonnet 4.0+ and
-Haiku 4.5+), Harn emits `defer_loading: true` in the native tool JSON
-and Anthropic keeps the schemas in the API prefix but out of the
-model's context (prompt caching stays warm). On providers without
-native support, Phase 1 refuses `tool_search` with a diagnostic error;
-client-executed fallback is tracked separately.
+`docs/src/llm-and-agents.md`). Harn supports two native backends plus a
+provider-agnostic client fallback:
+
+- **Anthropic Claude Opus/Sonnet 4.0+ and Haiku 4.5+** — Harn emits
+  `defer_loading: true` on each deferred tool and prepends the
+  `tool_search_tool_{bm25,regex}_20251119` meta-tool. Anthropic keeps
+  deferred schemas in the API prefix (prompt caching stays warm) but
+  out of the model's context.
+- **OpenAI GPT 5.4+ (Responses API)** — Harn emits
+  `defer_loading: true` on each deferred tool and prepends
+  `{"type": "tool_search", "mode": "hosted"}` to the tools array.
+  OpenRouter, Together, Groq, DeepSeek, Fireworks, HuggingFace, and
+  local vLLM inherit the capability when their routed model matches
+  `gpt-5.4+`.
+- **Everyone else (and any of the above on older models)** — Harn
+  injects a synthetic `__harn_tool_search` tool and runs the configured
+  strategy (BM25, regex, semantic, or host-delegated) in-VM, promoting
+  matching deferred tools into the next turn's schema list.
+
+Tool entries may also set `namespace: "<label>"` to group deferred tools
+for the OpenAI meta-tool's `namespaces` field. The field is a harmless
+passthrough on Anthropic — ignored by the API, preserved in replay.
+
+`mode: "native"` refuses to silently downgrade and errors when the
+active (provider, model) pair is not natively capable; `mode: "client"`
+forces the fallback everywhere; `mode: "auto"` (default) picks native
+when available.
 
 ### skill declarations
 

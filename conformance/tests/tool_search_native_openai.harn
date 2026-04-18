@@ -1,0 +1,110 @@
+// Tool Vault phase 3 (harn#71): native OpenAI Responses-API
+// `tool_search` payload emission for GPT 5.4+. Verifies that:
+//   1. Opting into `tool_search` routes auto-resolution to native
+//      mode when the provider+model supports it.
+//   2. The payload prepends the OpenAI-shape meta-tool
+//      `{"type": "tool_search", "mode": "hosted"}` to the tools
+//      array (distinct from Anthropic's versioned
+//      `tool_search_tool_*_20251119`).
+//   3. `defer_loading: true` flows to the OpenAI-shape wrapper so
+//      the server knows which user tools to hide from the model
+//      until a `tool_search_call` surfaces them.
+//   4. `mode: "native"` against a pre-5.4 GPT model fires the same
+//      "does not expose native" diagnostic as other non-supporting
+//      providers.
+pipeline test(task) {
+  llm_mock_clear()
+  var registry = tool_registry()
+  registry = tool_define(
+    registry,
+    "lookup_account",
+    "Read an account record (always available)",
+    {parameters: {id: {type: "string"}}, handler: { args -> "acct " + args.id }},
+  )
+  registry = tool_define(
+    registry,
+    "deploy_service",
+    "Deploy the service stack",
+    {
+    parameters: {env: {type: "string"}},
+    defer_loading: true,
+    handler: { args -> "deployed to " + args.env },
+  },
+  )
+  registry = tool_define(
+    registry,
+    "query_metrics",
+    "Query observability metrics",
+    {
+    parameters: {query: {type: "string"}},
+    defer_loading: true,
+    handler: { args -> "metrics: " + args.query },
+  },
+  )
+  // One-shot llm_call: with mode:"native" + a supported gpt-5.4 model,
+  // options parsing must inject the OpenAI meta-tool and preserve the
+  // deferred flags. The mock provider won't actually call the tools —
+  // we just need a response that lets the call return so we can
+  // inspect `llm_mock_calls()`.
+  llm_mock({text: "ack"})
+  llm_call(
+    "do a thing",
+    nil,
+    {
+    provider: "mock",
+    model: "gpt-5.4-preview",
+    tools: registry,
+    tool_search: {variant: "bm25", mode: "native"},
+  },
+  )
+  let calls = llm_mock_calls()
+  assert(len(calls) >= 1, "at least one LLM call happened")
+  let tools = calls[0].tools
+  assert(tools != nil, "tools captured")
+  assert(len(tools) == 4, "meta-tool + 3 user tools = 4")
+  // First entry is the OpenAI-shape `tool_search` meta-tool.
+  let meta = tools[0]
+  assert(meta.type == "tool_search", "OpenAI meta-tool uses the `tool_search` type")
+  assert(meta.mode == "hosted", "native path defaults to hosted mode")
+  assert(meta.name == nil, "OpenAI meta-tool has no `name` field")
+  // User tools follow, preserving `defer_loading` on the wrapper.
+  var saw_deploy_deferred = false
+  var saw_metrics_deferred = false
+  var saw_lookup_eager = false
+  for t in tools {
+    if t.type == "function" {
+      let fname = t.function?.name
+      if fname == "deploy_service" {
+        assert(t.defer_loading == true, "deploy_service keeps defer_loading: true")
+        saw_deploy_deferred = true
+      }
+      if fname == "query_metrics" {
+        assert(t.defer_loading == true, "query_metrics keeps defer_loading: true")
+        saw_metrics_deferred = true
+      }
+      if fname == "lookup_account" {
+        assert(t.defer_loading == nil, "eager tool has no defer_loading flag")
+        saw_lookup_eager = true
+      }
+    }
+  }
+  assert(saw_deploy_deferred, "deploy_service present + deferred")
+  assert(saw_metrics_deferred, "query_metrics present + deferred")
+  assert(saw_lookup_eager, "lookup_account present + eager")
+  // Negative path: mode:"native" on a pre-5.4 GPT fires the same
+  // diagnostic the unsupported-provider test uses.
+  llm_mock_clear()
+  let pre54_err = try {
+    llm_call(
+    "x",
+    nil,
+    {provider: "mock", model: "gpt-4o", tools: registry, tool_search: {variant: "bm25", mode: "native"}},
+  )
+    nil
+  } catch (e) {
+    e
+  }
+  assert(pre54_err != nil, "pre-5.4 gpt rejects native")
+  assert(pre54_err.contains("does not expose native"), "diagnostic mentions missing native support")
+  log("tool_search_native_openai tests passed")
+}

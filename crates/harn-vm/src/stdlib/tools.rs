@@ -402,9 +402,9 @@ pub(crate) fn register_tool_builtins(vm: &mut Vm) {
         }
 
         // `defer_loading` controls progressive-disclosure behavior on
-        // capable providers (Anthropic Claude 4.0+ today; OpenAI via
-        // harn#71). Gate the type here so typos don't silently fall back
-        // to the "no defer" default.
+        // capable providers (Anthropic Claude 4.0+ and OpenAI GPT 5.4+).
+        // Gate the type here so typos don't silently fall back to the
+        // "no defer" default.
         if let Some(v) = config.get("defer_loading") {
             if !matches!(v, VmValue::Bool(_)) {
                 return Err(VmError::Thrown(VmValue::String(Rc::from(
@@ -412,6 +412,23 @@ pub(crate) fn register_tool_builtins(vm: &mut Vm) {
                      (true → hold schema back until a tool_search call \
                      surfaces it; false or absent → ship eagerly)",
                 ))));
+            }
+        }
+
+        // `namespace` groups deferred tools for OpenAI's `tool_search`
+        // meta-tool (Anthropic ignores the field). Must be a non-empty
+        // string so typos don't silently flow through to the payload.
+        if let Some(v) = config.get("namespace") {
+            match v {
+                VmValue::String(s) if !s.is_empty() => {}
+                VmValue::Nil => {}
+                _ => {
+                    return Err(VmError::Thrown(VmValue::String(Rc::from(
+                        "tool_define: `namespace` must be a non-empty string \
+                         (groups deferred tools for OpenAI tool_search; \
+                         Anthropic ignores it)",
+                    ))));
+                }
             }
         }
 

@@ -1,0 +1,111 @@
+// Tool Vault phase 3 (harn#71): `namespace` field on tool registry
+// entries groups deferred tools for OpenAI's `tool_search` meta-tool.
+// Anthropic ignores the field; Harn passes it through either way so
+// replays remain faithful and future versions can adopt the semantic
+// without another round of schema plumbing.
+pipeline test(task) {
+  llm_mock_clear()
+  var registry = tool_registry()
+  registry = tool_define(
+    registry,
+    "anchor",
+    "Always-on tool",
+    {parameters: {op: {type: "string"}}, handler: { _ -> "ok" }},
+  )
+  registry = tool_define(
+    registry,
+    "deploy_api",
+    "Deploy the API service",
+    {
+    parameters: {env: {type: "string"}},
+    defer_loading: true,
+    namespace: "ops",
+    handler: { args -> "deployed api to " + args.env },
+  },
+  )
+  registry = tool_define(
+    registry,
+    "deploy_web",
+    "Deploy the web frontend",
+    {
+    parameters: {env: {type: "string"}},
+    defer_loading: true,
+    namespace: "ops",
+    handler: { args -> "deployed web to " + args.env },
+  },
+  )
+  registry = tool_define(
+    registry,
+    "lookup_customer",
+    "Look up a customer record",
+    {
+    parameters: {id: {type: "string"}},
+    defer_loading: true,
+    namespace: "crm",
+    handler: { args -> "customer " + args.id },
+  },
+  )
+  // Registry inspection: namespace survives into tool_list metadata.
+  let tools = tool_list(registry)
+  var deploy_api_ns = nil
+  var lookup_ns = nil
+  for t in tools {
+    if t.name == "deploy_api" {
+      deploy_api_ns = t.namespace
+    }
+    if t.name == "lookup_customer" {
+      lookup_ns = t.namespace
+    }
+  }
+  assert(deploy_api_ns == "ops", "namespace preserved in registry")
+  assert(lookup_ns == "crm", "second namespace preserved")
+  // Payload emission: for a supported gpt-5.4+ model with
+  // `mode: "native"`, the OpenAI meta-tool collects distinct
+  // namespaces into its `namespaces` field.
+  llm_mock({text: "ack"})
+  llm_call(
+    "x",
+    nil,
+    {
+    provider: "mock",
+    model: "gpt-5.4-preview",
+    tools: registry,
+    tool_search: {variant: "bm25", mode: "native"},
+  },
+  )
+  let calls = llm_mock_calls()
+  let meta = calls[0].tools[0]
+  assert(meta.type == "tool_search", "meta-tool in slot 0")
+  let ns_list = meta.namespaces
+  assert(ns_list != nil, "meta-tool carries namespaces")
+  assert(len(ns_list) == 2, "two distinct namespaces")
+  // `namespaces` is sorted for determinism.
+  assert(ns_list[0] == "crm", "crm sorts first")
+  assert(ns_list[1] == "ops", "ops second")
+  // Individual user tools still carry their namespace.
+  var saw_deploy_api_ns = false
+  for t in calls[0].tools {
+    if t.type == "function" {
+      let fname = t.function?.name
+      if fname == "deploy_api" {
+        assert(t.namespace == "ops", "deploy_api.namespace reaches OpenAI wrapper")
+        saw_deploy_api_ns = true
+      }
+    }
+  }
+  assert(saw_deploy_api_ns, "deploy_api namespace passthrough confirmed")
+  // Type validation: a non-string namespace is rejected by tool_define.
+  let caught_bad_ns = try {
+    tool_define(
+    tool_registry(),
+    "busted",
+    "bad namespace",
+    {parameters: {}, namespace: 42, handler: { _ -> "ok" }},
+  )
+    false
+  } catch (e) {
+    true
+  }
+  assert(caught_bad_ns, "non-string namespace must be rejected")
+  log("tool_search_namespace tests passed")
+}

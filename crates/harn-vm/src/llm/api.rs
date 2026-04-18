@@ -1535,6 +1535,49 @@ fn parse_llm_response(
         let mut tool_calls = Vec::new();
         if let Some(calls) = message["tool_calls"].as_array() {
             for call in calls {
+                // OpenAI Responses-API tool_search (harn#71) emits
+                // `tool_search_call` blocks when the server-hosted
+                // search runs. These are NOT dispatchable tools — the
+                // server executes them for us — so we record the query
+                // as a transcript event and continue without touching
+                // tool_calls. `tool_search_output` blocks on the
+                // response carry server results and are recorded
+                // symmetrically.
+                let call_type = call["type"].as_str().unwrap_or("");
+                if call_type == "tool_search_call" {
+                    let id = call["id"].as_str().unwrap_or("").to_string();
+                    let query = call.get("query").cloned().unwrap_or_else(|| {
+                        call.get("input")
+                            .cloned()
+                            .unwrap_or(serde_json::Value::Null)
+                    });
+                    blocks.push(serde_json::json!({
+                        "type": "tool_search_query",
+                        "id": id,
+                        "name": "tool_search",
+                        "query": query,
+                        "visibility": "internal",
+                    }));
+                    continue;
+                }
+                if call_type == "tool_search_output" {
+                    let tool_use_id = call["call_id"]
+                        .as_str()
+                        .or_else(|| call["id"].as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let references = call["tool_references"]
+                        .as_array()
+                        .cloned()
+                        .unwrap_or_default();
+                    blocks.push(serde_json::json!({
+                        "type": "tool_search_result",
+                        "tool_use_id": tool_use_id,
+                        "tool_references": references,
+                        "visibility": "internal",
+                    }));
+                    continue;
+                }
                 let name = call["function"]["name"].as_str().unwrap_or("").to_string();
                 let args_str = call["function"]["arguments"].as_str().unwrap_or("{}");
                 let arguments: serde_json::Value = match serde_json::from_str(args_str) {
@@ -1573,10 +1616,24 @@ fn parse_llm_response(
             .as_str()
             .map(|s| s.to_string());
 
+        // OpenAI Responses-API `tool_search_call` / `tool_search_output`
+        // blocks (harn#71) are server-executed and get stripped from
+        // `tool_calls` during parsing; they show up only as transcript
+        // blocks. Count their presence as "did deliver something" so
+        // the empty-response error below doesn't trip when the
+        // server's response consisted entirely of a search
+        // query/result exchange.
+        let has_tool_search_block = blocks.iter().any(|b| {
+            matches!(
+                b.get("type").and_then(|v| v.as_str()),
+                Some("tool_search_query") | Some("tool_search_result")
+            )
+        });
         if text.is_empty()
             && extracted_thinking.is_empty()
             && output_tokens > 0
             && tool_calls.is_empty()
+            && !has_tool_search_block
         {
             return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
                 "openai-compatible model {model} reported completion_tokens={output_tokens} but delivered no content, reasoning, or tool calls"
@@ -1865,6 +1922,44 @@ async fn vm_call_llm_api_sse_from_response(
 
             if let Some(tcs) = delta["tool_calls"].as_array() {
                 for tc in tcs {
+                    // OpenAI Responses-API server-side tool_search
+                    // (harn#71) streams as `tool_search_call` /
+                    // `tool_search_output` entries in the tool_calls
+                    // array. Record them as transcript events, never
+                    // as dispatchable calls.
+                    let tc_type = tc["type"].as_str().unwrap_or("");
+                    if tc_type == "tool_search_call" {
+                        let id = tc["id"].as_str().unwrap_or("").to_string();
+                        let query = tc.get("query").cloned().unwrap_or_else(|| {
+                            tc.get("input").cloned().unwrap_or(serde_json::Value::Null)
+                        });
+                        blocks.push(serde_json::json!({
+                            "type": "tool_search_query",
+                            "id": id,
+                            "name": "tool_search",
+                            "query": query,
+                            "visibility": "internal",
+                        }));
+                        continue;
+                    }
+                    if tc_type == "tool_search_output" {
+                        let tool_use_id = tc["call_id"]
+                            .as_str()
+                            .or_else(|| tc["id"].as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let references = tc["tool_references"]
+                            .as_array()
+                            .cloned()
+                            .unwrap_or_default();
+                        blocks.push(serde_json::json!({
+                            "type": "tool_search_result",
+                            "tool_use_id": tool_use_id,
+                            "tool_references": references,
+                            "visibility": "internal",
+                        }));
+                        continue;
+                    }
                     let idx = tc["index"].as_u64().unwrap_or(0);
                     let entry = oai_tool_map.entry(idx).or_insert_with(|| {
                         let id = tc["id"].as_str().unwrap_or("").to_string();
@@ -1922,7 +2017,18 @@ async fn vm_call_llm_api_sse_from_response(
         blocks
             .push(serde_json::json!({"type": "output_text", "text": text, "visibility": "public"}));
     }
-    if text.is_empty() && thinking_text.is_empty() && output_tokens > 0 && tool_calls.is_empty() {
+    let has_tool_search_block = blocks.iter().any(|b| {
+        matches!(
+            b.get("type").and_then(|v| v.as_str()),
+            Some("tool_search_query") | Some("tool_search_result")
+        )
+    });
+    if text.is_empty()
+        && thinking_text.is_empty()
+        && output_tokens > 0
+        && tool_calls.is_empty()
+        && !has_tool_search_block
+    {
         return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
             "openai-compatible model {model} reported completion_tokens={output_tokens} but delivered no content, reasoning, or tool calls"
         )))));
@@ -3369,6 +3475,86 @@ mod tests {
             "expected tool_search_query block; got {:#?}",
             result.blocks
         );
+    }
+
+    #[test]
+    fn openai_parser_records_tool_search_call_as_query_event() {
+        // OpenAI's Responses API (harn#71) surfaces the server-hosted
+        // tool_search as a `tool_search_call` entry in the `tool_calls`
+        // array. The parser must NOT add it to the dispatchable
+        // `tool_calls` vector — OpenAI runs the search on their side —
+        // but must record a `tool_search_query` transcript block so
+        // replay lines up with the Anthropic path.
+        let resolved = super::super::helpers::ResolvedProvider::resolve("openai");
+        let response = serde_json::json!({
+            "choices": [{
+                "message": {
+                    "content": "searching",
+                    "tool_calls": [
+                        {
+                            "id": "tsc_01",
+                            "type": "tool_search_call",
+                            "query": {"q": "weather"}
+                        }
+                    ]
+                },
+                "finish_reason": "tool_calls"
+            }],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 5}
+        });
+        let result = super::parse_llm_response(&response, "openai", "gpt-5.4-preview", &resolved)
+            .expect("parser succeeds");
+
+        assert!(
+            result.tool_calls.is_empty(),
+            "tool_search_call is server-executed; must not be dispatchable"
+        );
+        let query = result
+            .blocks
+            .iter()
+            .find(|b| b.get("type").and_then(|v| v.as_str()) == Some("tool_search_query"))
+            .expect("tool_search_query block present");
+        assert_eq!(query["id"].as_str(), Some("tsc_01"));
+        assert_eq!(query["query"]["q"].as_str(), Some("weather"));
+    }
+
+    #[test]
+    fn openai_parser_records_tool_search_output_as_result_event() {
+        let resolved = super::super::helpers::ResolvedProvider::resolve("openai");
+        let response = serde_json::json!({
+            "choices": [{
+                "message": {
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "tso_01",
+                            "type": "tool_search_output",
+                            "call_id": "tsc_01",
+                            "tool_references": [
+                                {"tool_name": "get_weather"}
+                            ]
+                        }
+                    ]
+                },
+                "finish_reason": "stop"
+            }],
+            "usage": {"prompt_tokens": 3, "completion_tokens": 1}
+        });
+        let result = super::parse_llm_response(&response, "openai", "gpt-5.4-preview", &resolved)
+            .expect("parser succeeds");
+
+        assert!(result.tool_calls.is_empty());
+        let result_block = result
+            .blocks
+            .iter()
+            .find(|b| b.get("type").and_then(|v| v.as_str()) == Some("tool_search_result"))
+            .expect("tool_search_result block present");
+        assert_eq!(result_block["tool_use_id"].as_str(), Some("tsc_01"));
+        let refs = result_block["tool_references"]
+            .as_array()
+            .expect("tool_references array");
+        assert_eq!(refs.len(), 1);
+        assert_eq!(refs[0]["tool_name"].as_str(), Some("get_weather"));
     }
 
     #[test]

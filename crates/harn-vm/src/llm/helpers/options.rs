@@ -24,10 +24,51 @@ pub(crate) fn expects_structured_output(opts: &crate::llm::api::LlmCallOptions) 
 /// Three-way resolution of `tool_search.mode` against the provider's
 /// native capability. Kept as a private enum so the option-parse path
 /// reads linearly; the `Client` variant feeds the harn#70 fallback
-/// injection, the `Native` variant feeds the phase-1 Anthropic path.
+/// injection, the `Native` variant feeds the phase-1 Anthropic path
+/// (and phase-2 OpenAI path via harn#71).
 enum ToolSearchResolution {
     Native,
     Client,
+}
+
+/// Read the `provider_overrides.force_native_tool_search` escape hatch
+/// (bool). Set to true when a user is pointed at a proxied OpenAI-compat
+/// endpoint (self-hosted router, enterprise gateway) whose model ID
+/// Harn cannot parse but that is known to forward `tool_search` +
+/// `defer_loading` unchanged.
+fn provider_overrides_force_native(
+    options: Option<&BTreeMap<String, VmValue>>,
+    provider: &str,
+) -> bool {
+    let Some(options) = options else { return false };
+    let Some(VmValue::Dict(overrides)) = options.get(provider) else {
+        return false;
+    };
+    matches!(
+        overrides.get("force_native_tool_search"),
+        Some(VmValue::Bool(true))
+    )
+}
+
+/// Decide which wire shape this (provider, model) pair should emit for
+/// the native tool-search meta-tool. Anthropic + Claude → Anthropic
+/// shape; anything else → OpenAI shape. For `provider: "mock"` we
+/// inspect the model string so conformance tests can spoof either
+/// backend without HTTP.
+fn classify_native_shape(
+    provider: &str,
+    model: &str,
+) -> crate::llm::provider::NativeToolSearchShape {
+    use crate::llm::provider::NativeToolSearchShape;
+    if provider == "anthropic" {
+        return NativeToolSearchShape::Anthropic;
+    }
+    if provider == "mock"
+        && crate::llm::providers::anthropic::claude_model_supports_tool_search(model)
+    {
+        return NativeToolSearchShape::Anthropic;
+    }
+    NativeToolSearchShape::OpenAi
 }
 
 /// Extract all LLM call options from the standard (prompt, system, options) args.
@@ -36,9 +77,7 @@ pub(crate) fn extract_llm_options(
 ) -> Result<crate::llm::api::LlmCallOptions, VmError> {
     use crate::llm::api::{LlmCallOptions, ThinkingConfig, ToolSearchMode, ToolSearchVariant};
     use crate::llm::provider::{provider_supports_defer_loading, provider_tool_search_variants};
-    use crate::llm::tools::{
-        apply_tool_search_native_injection, extract_deferred_tool_names, vm_tools_to_native,
-    };
+    use crate::llm::tools::{extract_deferred_tool_names, vm_tools_to_native};
 
     let prompt = args.first().map(|a| a.display()).unwrap_or_default();
     let system = args.get(1).and_then(|a| {
@@ -151,15 +190,30 @@ pub(crate) fn extract_llm_options(
     if let Some(cfg) = tool_search.as_mut() {
         // Resolve tool_search against the active provider now. Three
         // possible outcomes:
-        //   - native: prepend the provider's meta-tool (Anthropic path).
+        //   - native: prepend the provider's meta-tool (Anthropic path
+        //     for Claude 4.0+; OpenAI Responses-API path for GPT 5.4+).
         //   - client: keep native_tools as-is so the agent loop can
         //     strip deferred tools per-turn and inject the synthetic
         //     `__harn_tool_search` dispatchable.
         //   - error: explicit native mode on a provider that cannot
         //     satisfy it.
         let native_variants = provider_tool_search_variants(&provider, &model);
-        let provider_has_native =
+        let model_based_native =
             provider_supports_defer_loading(&provider, &model) && !native_variants.is_empty();
+        // Escape hatch for proxied OpenAI-compat providers whose model
+        // ID Harn cannot parse. The override forces the OpenAI
+        // Responses-API shape; user asserts the endpoint forwards
+        // `tool_search` + `defer_loading` unchanged.
+        let forced = provider_overrides_force_native(options.as_ref(), &provider);
+        let provider_has_native = model_based_native || forced;
+        // If the forced path is active, use OpenAI's default variants
+        // so the injection below picks the right shape.
+        let forced_variants: &'static [&'static str] = &["hosted", "client"];
+        let effective_variants = if forced && native_variants.is_empty() {
+            forced_variants
+        } else {
+            native_variants
+        };
         let resolution = match cfg.mode {
             ToolSearchMode::Native => {
                 if !provider_has_native {
@@ -202,34 +256,66 @@ pub(crate) fn extract_llm_options(
 
         match resolution {
             ToolSearchResolution::Native => {
-                // Confirm the requested variant is actually supported;
-                // downgrade with a warning if not (future-proof for any
-                // future provider that only exposes one variant).
-                if !native_variants.contains(&cfg.variant.as_short()) {
-                    crate::events::log_warn(
-                        "llm.tool_search",
-                        &format!(
-                            "provider \"{provider}\" model \"{model}\" does not support \
-                             tool_search variant \"{}\"; falling back to \"{}\"",
-                            cfg.variant.as_short(),
-                            native_variants[0],
-                        ),
-                    );
-                }
-
-                let effective_variant = if native_variants.contains(&cfg.variant.as_short()) {
-                    cfg.variant
-                } else {
-                    match native_variants[0] {
-                        "regex" => ToolSearchVariant::Regex,
-                        _ => ToolSearchVariant::Bm25,
+                // Classify the native wire shape for this provider so
+                // the injection and response parser agree on what to
+                // emit / look for. Anthropic path emits the
+                // `tool_search_tool_*_20251119` meta-tool; OpenAI path
+                // emits `{"type": "tool_search"}`. For the "mock"
+                // provider we infer from the model string so
+                // conformance tests can exercise both paths without
+                // HTTP. See `provider_native_tool_search_shape`.
+                let shape = classify_native_shape(&provider, &model);
+                match shape {
+                    crate::llm::provider::NativeToolSearchShape::Anthropic => {
+                        // Anthropic exposes {bm25, regex}. Variant
+                        // names are documented in
+                        // `effective_variants`; fall back to element 0
+                        // with a warn if the user asked for something
+                        // this model doesn't support.
+                        if !effective_variants.contains(&cfg.variant.as_short()) {
+                            crate::events::log_warn(
+                                "llm.tool_search",
+                                &format!(
+                                    "provider \"{provider}\" model \"{model}\" does not support \
+                                     tool_search variant \"{}\"; falling back to \"{}\"",
+                                    cfg.variant.as_short(),
+                                    effective_variants[0],
+                                ),
+                            );
+                        }
+                        let effective_variant =
+                            if effective_variants.contains(&cfg.variant.as_short()) {
+                                cfg.variant
+                            } else {
+                                match effective_variants[0] {
+                                    "regex" => ToolSearchVariant::Regex,
+                                    _ => ToolSearchVariant::Bm25,
+                                }
+                            };
+                        crate::llm::tools::apply_tool_search_native_injection_typed(
+                            &mut native_tools,
+                            shape,
+                            effective_variant.as_short(),
+                            "hosted",
+                        );
                     }
-                };
-                apply_tool_search_native_injection(
-                    &mut native_tools,
-                    &provider,
-                    effective_variant.as_short(),
-                );
+                    crate::llm::provider::NativeToolSearchShape::OpenAi => {
+                        // OpenAI Responses API exposes hosted + client
+                        // modes. When the user picked `mode: "native"`
+                        // they meant "let OpenAI handle the search on
+                        // their side" — the hosted mode. Users who want
+                        // Harn to execute the search locally should
+                        // write `mode: "client"`, which flows through
+                        // the harn#70 synthetic-tool path below (same
+                        // ergonomics across every provider).
+                        crate::llm::tools::apply_tool_search_native_injection_typed(
+                            &mut native_tools,
+                            shape,
+                            cfg.variant.as_short(),
+                            "hosted",
+                        );
+                    }
+                }
             }
             ToolSearchResolution::Client => {
                 // Client mode: capture the deferred tool bodies into

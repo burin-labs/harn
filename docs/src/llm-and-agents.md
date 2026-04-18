@@ -189,12 +189,56 @@ Accepted shapes:
 
 ### Provider support
 
-| Provider | Native `tool_search` | Variants |
+| Provider | Native `tool_search` | Variants / modes |
 |---|---|---|
 | Anthropic Claude Opus/Sonnet 4.0+, Haiku 4.5+ | ✓ | `bm25`, `regex` |
 | Anthropic 3.x or earlier 4.x Haiku | ✗ (uses client fallback) | — |
-| OpenAI Responses API (gpt-5.4+) | ✗ (tracked: [harn#71](https://github.com/burin-labs/harn/issues/71)) | client fallback works today |
-| Others (Gemini, Ollama, HuggingFace, Together, Fireworks, Groq, Deepseek, local, mock) | ✗ | client fallback works today |
+| OpenAI Responses API — GPT 5.4+ | ✓ | `hosted` (default), `client` |
+| OpenAI pre-5.4 (`gpt-4o`, `gpt-4.1`, …) | ✗ | client fallback works today |
+| OpenRouter / Together / Groq / DeepSeek / Fireworks / HuggingFace / local | ✓ when routed model matches `gpt-5.4+` upstream | hosted forwarded; escape hatch below for proxies |
+| Gemini, Ollama, mock (default model) | ✗ | client fallback works today |
+
+The OpenAI native path (harn#71) emits a flat `{"type": "tool_search",
+"mode": "hosted"}` meta-tool at the front of the tools array, alongside
+`defer_loading: true` on the wrapper of each user tool. The server runs
+the search and replies with `tool_search_call` / `tool_search_output`
+entries that Harn parses into the same transcript event shape as the
+Anthropic path (replays are indistinguishable across providers).
+
+#### Namespace grouping
+
+OpenAI's `tool_search` can group deferred tools into namespaces; pass
+`namespace: "<label>"` on `tool_define(...)` to tag a tool. Harn collects
+the distinct set into the meta-tool's `namespaces` field. Anthropic
+ignores the label — harmless passthrough for replay fidelity.
+
+```harn
+tool_define(registry, "deploy_api", "Deploy the API", {
+  parameters: {env: {type: "string"}},
+  defer_loading: true,
+  namespace: "ops",
+  handler: { args -> shell("deploy api " + args.env) },
+})
+```
+
+#### Escape hatch for proxied OpenAI-compat endpoints
+
+Self-hosted routers and enterprise gateways sometimes advertise a model
+ID Harn cannot parse (`my-internal-gpt-clone-v2`) yet forward the OpenAI
+Responses payload unchanged. Opt into the hosted path with:
+
+```harn
+llm_call(prompt, sys, {
+  provider: "openrouter",
+  model: "my-custom/gpt-forward",
+  tools: registry,
+  tool_search: {mode: "native"},
+  openrouter: {force_native_tool_search: true},
+})
+```
+
+The override is keyed by the provider name (the same dict you'd use for
+any provider-specific knob).
 
 ### Client-executed fallback
 

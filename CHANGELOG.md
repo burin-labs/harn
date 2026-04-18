@@ -31,6 +31,58 @@ granular archaeology.
   `skills/update` notification for host-driven hot-reload. See
   `docs/src/skills.md` for the full reference and
   `docs/src/bridge-protocol.md` for the wire format.
+- **Tool Vault phase 3: OpenAI Responses-API native `tool_search` (harn#71).**
+  `tool_search` now flows through OpenAI's native progressive-disclosure
+  mechanism on GPT 5.4+ with zero script changes: the capability gate
+  detects the model generation (via `gpt_generation()` — parses
+  `gpt-5.4-preview`, `gpt-5.4-turbo`, `gpt-5-4-20260115`, and
+  OpenRouter-style `openai/gpt-5.4` prefixes), prepends the meta-tool
+  `{"type": "tool_search", "mode": "hosted"}` to the tools array, and
+  emits `defer_loading: true` on each deferred user tool's wrapper.
+  Server-executed `tool_search_call` / `tool_search_output` entries in
+  the response get parsed into the same `tool_search_query` /
+  `tool_search_result` transcript events as the Anthropic path —
+  replays are indistinguishable across providers. OpenRouter, Together,
+  Groq, DeepSeek, Fireworks, HuggingFace, and `local` all inherit the
+  same capability check; when their routed model ID matches `gpt-5.4+`
+  they forward the payload unchanged.
+- **`namespace: "<label>"` on `tool_define(...)`** groups deferred tools
+  for OpenAI's `tool_search` meta-tool. Distinct namespaces are
+  collected into the meta-tool's `namespaces` field (sorted, deduped).
+  Anthropic ignores the label — harmless passthrough for replay
+  fidelity. Type-validated: non-string values error at `tool_define`
+  time so typos surface immediately.
+- **Escape hatch `<provider>: {force_native_tool_search: true}`** on
+  call options forces the hosted OpenAI path regardless of model
+  detection. Useful for self-hosted routers and enterprise gateways
+  whose model IDs Harn cannot parse but that forward `tool_search` +
+  `defer_loading` unchanged.
+- **Mock provider spoofs native capability by model generation.** When
+  a conformance test writes `provider: "mock", model: "gpt-5.4"` or
+  `"claude-sonnet-4-6"`, the capability gate reports native support so
+  the test can exercise the real native payload shape via
+  `llm_mock_calls()[0].tools`. Non-matching models still report no
+  native support (used by `tool_search_unsupported_provider.harn`).
+- **Response-parser coverage for OpenAI `tool_search_call` /
+  `tool_search_output`.** Both non-streaming and SSE streaming paths
+  now strip these blocks from the dispatchable `tool_calls` vector
+  (they're server-executed) and record them as transcript events with
+  the same shape Anthropic's `server_tool_use` /
+  `tool_search_tool_result` emits. The empty-response sanity check
+  exempts calls whose output consists entirely of these blocks.
+- **New `crates/harn-vm/src/llm/providers/openai_compat.rs` helpers.**
+  `gpt_generation(model)` parses major/minor from GPT model IDs;
+  `gpt_model_supports_tool_search(model)` gates on `(major, minor) >=
+  (5, 4)`. Unit-tested on dotted (`gpt-5.4`), dashed (`gpt-5-4`),
+  namespaced (`openai/gpt-5.4-turbo`), and dated
+  (`gpt-5-20260115` → `(5, 0)`, unsupported) forms.
+- **Conformance tests.** `tool_search_native_openai.{harn,expected}`
+  verifies the native injection + deferred-flag passthrough +
+  unsupported-model diagnostic. `tool_search_namespace.{harn,expected}`
+  verifies namespace passthrough through the registry, into the
+  OpenAI wrapper, and into the meta-tool's `namespaces` field.
+  `tool_search_provider_overrides.{harn,expected}` verifies the
+  escape hatch.
 - **Tool Vault phase 2: universal client-executed `tool_search` fallback (harn#70).**
   `tool_search` now works on every provider, not just the
   Anthropic-native path landed in phase 1. When the active provider
@@ -85,6 +137,15 @@ granular archaeology.
 
 ### Changed
 
+- **`tool_search_unsupported_provider.harn` pins `model: "gpt-4o"`**
+  (phase 3 / harn#71) so it continues to error on `mode: "native"`
+  after mock capability spoofing. The diagnostic still suggests
+  `mode: "client"` as the escape hatch; the error text is unchanged.
+- **Client-mode conformance tests now use `mode: "client"`
+  explicitly** (phase 3 / harn#71). With mock spoofing a Claude 4.0+
+  or GPT 5.4+ model, `mode: "auto"` would otherwise route through a
+  native path. The tests name themselves `tool_search_client_*`;
+  they now opt into the path they claim to cover.
 - Non-Anthropic providers no longer error when the user opts into
   `tool_search`. The phase-1 "no silent degradation" diagnostic that
   previously pointed at harn#70 is replaced by the actual fallback
