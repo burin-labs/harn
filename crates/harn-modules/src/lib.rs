@@ -98,10 +98,25 @@ pub fn build(files: &[PathBuf]) -> ModuleGraph {
         let module = load_module(&path);
         // Enqueue resolved import targets so the whole reachable graph is
         // discovered without the caller having to pre-walk imports.
+        //
+        // `resolve_import_path` returns paths as `base.join(import)` —
+        // i.e. with `..` segments preserved rather than collapsed. If we
+        // dedupe on those raw forms, two files that import each other
+        // across sibling dirs (`lib/context/` ↔ `lib/runtime/`) produce a
+        // different path spelling on every cycle — `.../context/../runtime/`,
+        // then `.../context/../runtime/../context/`, and so on — each of
+        // which is treated as a new file. The walk only terminates when
+        // `path.exists()` starts failing at the filesystem's `PATH_MAX`,
+        // which is 1024 on macOS but 4096 on Linux. Linux therefore
+        // re-parses the same handful of files thousands of times, balloons
+        // RSS into the multi-GB range, and gets SIGKILL'd by CI runners.
+        // Canonicalize once here so `seen` dedupes by the underlying file,
+        // not by its path spelling.
         for import in &module.imports {
             if let Some(import_path) = &import.path {
-                if seen.insert(import_path.clone()) {
-                    queue.push_back(import_path.clone());
+                let canonical = normalize_path(import_path);
+                if seen.insert(canonical.clone()) {
+                    queue.push_back(canonical);
                 }
             }
         }
@@ -595,6 +610,48 @@ mod tests {
 
         // Just ensuring this terminates and yields sensible names.
         let graph = build(std::slice::from_ref(&entry));
+        let imported = graph
+            .imported_names_for_file(&entry)
+            .expect("cyclic imports still resolve to known exports");
+        assert!(imported.contains("b_fn"));
+    }
+
+    #[test]
+    fn cross_directory_cycle_does_not_explode_module_count() {
+        // Regression: two files in sibling directories that import each
+        // other produced a fresh path spelling on every round-trip
+        // (`../runtime/../context/../runtime/...`), and `build()`'s
+        // `seen` set deduped on the raw spelling rather than the
+        // canonical path. The walk only terminated when `PATH_MAX` was
+        // hit — 1024 on macOS, 4096 on Linux — so Linux re-parsed the
+        // same pair thousands of times until it ran out of memory.
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let context = root.join("context");
+        let runtime = root.join("runtime");
+        fs::create_dir_all(&context).unwrap();
+        fs::create_dir_all(&runtime).unwrap();
+        write_file(
+            &context,
+            "a.harn",
+            "import \"../runtime/b\"\npub fn a_fn() { 1 }\n",
+        );
+        write_file(
+            &runtime,
+            "b.harn",
+            "import \"../context/a\"\npub fn b_fn() { 1 }\n",
+        );
+        let entry = context.join("a.harn");
+
+        let graph = build(std::slice::from_ref(&entry));
+        // The graph should contain exactly the two real files, keyed by
+        // their canonical paths. Pre-fix this was thousands of entries.
+        assert_eq!(
+            graph.modules.len(),
+            2,
+            "cross-directory cycle loaded {} modules, expected 2",
+            graph.modules.len()
+        );
         let imported = graph
             .imported_names_for_file(&entry)
             .expect("cyclic imports still resolve to known exports");

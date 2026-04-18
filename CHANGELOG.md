@@ -7,6 +7,34 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
+## Unreleased
+
+### Fixed
+
+- **Module graph path-spelling explosion (harn-modules).**
+  `harn_modules::build()` deduped discovered imports on the raw path
+  returned by `resolve_import_path`, which preserves `..` segments
+  (`base.join(import)` without collapsing). Two files in sibling
+  directories that imported each other (e.g. `lib/context/a.harn`
+  importing `../runtime/b.harn` and vice versa) produced a fresh path
+  spelling on every round-trip — `.../context/../runtime/`,
+  `.../context/../runtime/../context/`, `.../context/../runtime/../context/../runtime/`,
+  and so on. Because each spelling was treated as a new module, the
+  walk only terminated when `path.exists()` started failing at the
+  filesystem's `PATH_MAX`. macOS's effective `PATH_MAX` of 1024
+  masked the blow-up; Linux's `PATH_MAX` of 4096 let the walk run
+  ~4× longer, re-parsing the same pair tens of thousands of times —
+  RSS ballooned to 7+ GB and GitHub Actions runners SIGTERM'd or
+  SIGKILL'd the process. Symptom was a `harn lint <dir>` or
+  `harn check --workspace` that looked like a hang at 0% CPU
+  (actually thrashing and eventually OOM-killed). `build()` now
+  canonicalizes each import path through `normalize_path` before
+  inserting into the `seen` set, so the graph size is bounded by the
+  number of underlying files rather than path-spelling cycles. On a
+  representative 88-file pipeline tree, Linux lint dropped from
+  OOM-killed-at-48s (7.7 GB RSS) to 0.22s / 16 MB; macOS dropped
+  from 6.7s / 1.2 GB to 0.09s / 14 MB.
+
 ## v0.7.19
 
 ### Fixed
