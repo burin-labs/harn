@@ -2559,6 +2559,55 @@ fn check(x: string | int) {
 }
 ```
 
+#### Or-patterns (`pat1 | pat2 -> body`)
+
+A match arm may list two or more alternative patterns separated by `|`;
+the shared body runs when any alternative matches. Each alternative
+contributes to exhaustiveness coverage independently, so an or-pattern
+and a single-literal arm compose naturally:
+
+```harn
+fn verdict(v: "pass" | "fail" | "unclear") -> string {
+  return match v {
+    "pass" -> { "ok" }
+    "fail" | "unclear" -> { "not ok" }
+  }
+}
+```
+
+Narrowing inside the or-arm refines the matched variable to the *union
+of the alternatives' single-literal narrowings*. On a literal union
+this is a sub-union; on a tagged shape union it is a union of the
+matching shape variants:
+
+```harn,ignore
+type Msg =
+  {kind: "ping", ttl: int} |
+  {kind: "pong", latency_ms: int} |
+  {kind: "close", reason: string}
+
+fn summarise(m: Msg) -> string {
+  return match m.kind {
+    "ping" | "pong" -> {
+      // m is narrowed to {kind:"ping",…} | {kind:"pong",…};
+      // the shared `kind` discriminant stays accessible.
+      "live:" + m.kind
+    }
+    "close" -> { "closed:" + m.reason }
+  }
+}
+```
+
+Guards apply to the arm as a whole: `1 | 2 | 3 if n > 2 -> …` runs the
+body only when some alternative matched *and* the guard held. A guard
+failure falls through to the next arm, exactly like a literal-pattern
+arm.
+
+Or-patterns are restricted to literal alternatives (string, int,
+float, bool, nil) in this release. Alternatives that introduce
+identifier bindings or destructuring patterns are a forward-compatible
+extension and currently rejected.
+
 #### `.has()` on shapes
 
 `dict.has("key")` narrows optional shape fields to required:

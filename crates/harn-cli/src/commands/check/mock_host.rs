@@ -591,5 +591,16 @@ fn collect_mock_host_capabilities_from_node(
                 capabilities,
             );
         }
+        Node::OrPattern(alternatives) => {
+            for alt in alternatives {
+                collect_mock_host_capabilities_from_node(
+                    alt,
+                    file_path,
+                    source,
+                    visited,
+                    capabilities,
+                );
+            }
+        }
     }
 }

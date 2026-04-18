@@ -1,0 +1,23 @@
+// Post-distribution narrowing: `Container<A | B>` distributes over the
+// closed union at alias-application time, producing
+// `Container<A> | Container<B>` — a tagged shape union that supports
+// discriminator narrowing on match arms. This pins the end-to-end
+// behaviour that the distribution + narrowing paths compose.
+type Tag = "click" | "scroll"
+
+type Event<T> = {event: T, weight: int}
+
+pipeline default() {
+  fn classify(e: Event<Tag>) -> string {
+    // `Event<Tag>` distributes to `Event<"click"> | Event<"scroll">`,
+    // which the checker recognises as a tagged shape union discriminated
+    // on the `event` field.
+    return match e.event {
+      "click" -> { "c:" + to_string(e.weight) }
+      "scroll" -> { "s:" + to_string(e.weight) }
+    }
+  }
+  // Narrowed to the `event: "click"` variant.
+  println(classify({event: "click", weight: 3}))
+  println(classify({event: "scroll", weight: 7}))
+}

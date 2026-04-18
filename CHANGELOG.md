@@ -270,6 +270,64 @@ granular archaeology.
   `harn-scripting` skill autoloads `docs/llm/harn-quickref.md`,
   which now ships a "Discriminated unions & distribution" block
   with copy-paste-ready examples for all three forms.
+- **Residual + post-distribution narrowing conformance.** Two new
+  fixtures pin behaviour that was previously only covered by
+  typechecker unit tests:
+  `shape_union_not_equal_narrowing.{harn,expected}` exercises the
+  residual narrow on `if obj.<tag> != "value"` (truthy branch
+  narrows to the union of the other variants; else branch narrows
+  to the single matched variant). `shape_union_post_distribution.
+  {harn,expected}` exercises `Container<A | B>` distributing to
+  `Container<A> | Container<B>` and then going through the tagged-
+  shape-union discriminator-narrowing path end-to-end.
+- **LSP: tagged shape union hover expands each variant.** Hovering
+  on a variable typed as a tagged shape union (two-plus dict
+  shapes) previously collapsed onto a single wide line. The hover
+  handler in `crates/harn-lsp/src/handlers.rs` now invokes
+  `format_union_shapes_expanded` (new in `symbols.rs`) to render
+  each variant on its own block with field-per-line formatting,
+  separated by `|` — matching the existing `format_shape_expanded`
+  style used for single shapes.
+- **LSP: completion of discriminator literal values inside `match`.**
+  When the cursor sits in arm-pattern position of a `match obj.<tag>
+  { … }` block and `obj` resolves to a tagged shape union, the
+  completion list now surfaces each distinct discriminator literal
+  as an `ENUM_MEMBER` item (with the matched variants for arms
+  already present filtered out). Implemented via an AST walk in
+  `discriminator_value_completions`; the type-alias chain is
+  resolved through `resolve_type_alias_from_ast` so `m: Msg` with
+  `type Msg = Ping | Pong` is treated identically to an inline
+  union.
+- **LSP: quick-fix to add missing `match` arms.** The typechecker
+  now attaches a structured `DiagnosticDetails::NonExhaustiveMatch
+  { missing: Vec<String> }` payload to non-exhaustive-match errors
+  on enums, tagged shape unions, and literal unions. The LSP code-
+  action provider reads it and synthesises a `WorkspaceEdit` that
+  inserts one stub arm per missing variant
+  (`<literal> -> { unreachable("TODO: handle <literal>") }`),
+  indented to match the match body's closing brace. Marked
+  `isPreferred: true` so the client surfaces it first.
+- **Or-patterns in `match` arms (`pat1 | pat2 -> body`).** A single
+  arm may list two or more literal alternatives separated by `|`;
+  the shared body runs when any alternative matches, and each
+  alternative contributes to exhaustiveness coverage independently.
+  Inside the arm, the matched variable is narrowed to the *union*
+  of the alternatives' single-literal narrowings — on a literal
+  union this is a sub-union, on a tagged shape union it is a union
+  of the matching shape variants. Guards compose naturally:
+  `1 | 2 | 3 if n > 2 -> …` runs the body only when some
+  alternative matched *and* the guard held. Alternatives are
+  restricted to literal patterns (string, int, float, bool, nil)
+  and the wildcard `_`; identifier-binding and destructuring
+  alternatives are rejected with a specific diagnostic. Lowering
+  mirrors the existing literal-arm shape in `crates/harn-vm/src/
+  compiler/patterns.rs`, so no new opcodes were needed. Pinned by
+  conformance tests `match_or_pattern` (literal-union + guard
+  combinations) and `shape_union_or_pattern` (narrowing into a
+  two-variant union on a tagged shape union), plus typechecker
+  tests in `exhaustiveness.rs` and `narrowing.rs`. Tree-sitter
+  grammar adds an `or_pattern` rule, pinned by the new
+  `match_arms` corpus.
 
 ### Breaking — typechecker
 
@@ -305,6 +363,29 @@ granular archaeology.
 
 ### Fixed
 
+- **Tagged shape unions with `Named`-alias members now narrow.**
+  `type Ping = {kind:"ping",…}; type Msg = Ping | {kind:"pong",…}`
+  previously lost discriminator narrowing: the bare-`Shape` check in
+  `discriminant_field` rejected the `Named("Ping")` member on sight,
+  so `match m.kind` and `if m.kind == "ping"` both degraded to the
+  raw `Msg` type inside the branch. `resolve_union_shape_members`
+  (new helper in
+  `crates/harn-parser/src/typechecker/inference/flow.rs`) resolves
+  the `Named`-alias chain in each union member before
+  `discriminant_field` / `narrow_shape_union_by_tag` inspect the
+  shapes. Pinned by conformance
+  `shape_union_named_alias_member.{harn,expected}` and typechecker
+  tests `test_match_narrows_through_named_alias_member` /
+  `test_if_narrows_through_named_alias_member` in `narrowing.rs`.
+- **Match-arm guard no longer consumes the match value on fail.**
+  When a literal-pattern match arm's guard evaluated to false, the
+  emitted bytecode over-popped and consumed the match value before
+  the next arm's `Dup`, surfacing as a runtime
+  "Stack underflow" once a subsequent arm ran. The guard-fail path
+  now falls through to the shared trailing `Pop` (same as the
+  match-fail path), matching the discipline used by dict/list
+  destructuring arms. The new or-pattern lowering follows the same
+  corrected shape.
 - **Bare function references now carry their full `fn(...)` type.**
   Previously, a top-level (or nested) function used as a plain value
   (e.g. inside a dict literal) inferred as `None`, which collapsed to

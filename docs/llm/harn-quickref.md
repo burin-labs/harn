@@ -229,6 +229,23 @@ Add the missing arm or end with `_ -> { … }`. `if/elif/else` chains
 stay intentionally partial; opt into exhaustiveness by ending the
 chain with `unreachable("…")`.
 
+**Or-patterns (`pat1 | pat2 -> body`)** let a single arm body cover
+two or more alternatives, and each alternative counts toward
+exhaustiveness. Inside the arm, the matched variable is narrowed to
+the *union* of the alternatives' matches — on a tagged shape union
+this is a sub-union, not a single variant:
+
+```harn,ignore
+match m.kind {
+  "ping" | "pong" -> { /* m is {kind:"ping",…} | {kind:"pong",…} */ }
+  "close"         -> { /* m is the close variant */ }
+}
+```
+
+Or-pattern alternatives are restricted to literals (string, int,
+float, bool, nil) and the wildcard `_`. Guards (`… if cond ->`) work
+on or-pattern arms too.
+
 **Generic aliases distribute over closed unions.** When you write
 `Container<A | B>`, the checker expands it to
 `Container<A> | Container<B>` so each instantiation fixes the type

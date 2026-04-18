@@ -512,3 +512,100 @@ if x.has("name") {
     );
     assert!(errs.is_empty(), "got: {:?}", errs);
 }
+
+#[test]
+fn test_match_or_pattern_narrows_to_union_of_variants() {
+    // `"ping" | "pong"` arm on a 3-variant tagged shape union narrows
+    // `m` to a 2-variant union inside the arm body. Both variants'
+    // shared fields (discriminant `kind` + no common payload) remain
+    // accessible, and variant-specific payloads on the unmatched
+    // `close` variant must not be reachable.
+    let errs = errors(
+        r#"type Msg =
+  {kind: "ping", ttl: int} |
+  {kind: "pong", latency_ms: int} |
+  {kind: "close", reason: string}
+
+pipeline t(task) {
+  fn handle(m: Msg) -> string {
+    return match m.kind {
+      "ping" | "pong" -> {
+        // Both kinds carry `kind` — access is fine.
+        let k: string = m.kind
+        "live"
+      }
+      "close" -> { m.reason }
+    }
+  }
+}"#,
+    );
+    assert!(errs.is_empty(), "got: {:?}", errs);
+}
+
+#[test]
+fn test_match_narrows_through_named_alias_member() {
+    // A tagged shape union whose members include a `Named` alias that
+    // resolves to a shape must still support discriminator narrowing.
+    // Prior to the fix, the bare-`Shape` check in `discriminant_field`
+    // rejected the union on sight.
+    let errs = errors(
+        r#"type Ping = {kind: "ping", ttl: int}
+type Msg = Ping | {kind: "pong", latency_ms: int}
+
+pipeline t(task) {
+  fn handle(m: Msg) -> string {
+    return match m.kind {
+      "ping" -> {
+        let p: {kind: "ping", ttl: int} = m
+        "p"
+      }
+      "pong" -> { "o" }
+    }
+  }
+}"#,
+    );
+    assert!(errs.is_empty(), "got: {:?}", errs);
+}
+
+#[test]
+fn test_if_narrows_through_named_alias_member() {
+    // Same shape as the match test but exercises the
+    // `if obj.kind == "…"` path, which routes through
+    // `extract_discriminator_refinements`.
+    let errs = errors(
+        r#"type Ping = {kind: "ping", ttl: int}
+type Msg = Ping | {kind: "pong", latency_ms: int}
+
+pipeline t(task) {
+  fn handle(m: Msg) -> string {
+    if m.kind == "ping" {
+      let p: {kind: "ping", ttl: int} = m
+      return "p"
+    }
+    return "o"
+  }
+}"#,
+    );
+    assert!(errs.is_empty(), "got: {:?}", errs);
+}
+
+#[test]
+fn test_match_or_pattern_on_literal_union_narrows_to_sub_union() {
+    // A two-alternative or-pattern on a three-literal union refines
+    // to a two-literal sub-union inside the arm: pinning `v` as
+    // `"pos" | "neg"` inside the or-arm must type-check.
+    let errs = errors(
+        r#"pipeline t(task) {
+  fn sign(v: "pos" | "neg" | "zero") -> string {
+    return match v {
+      "pos" | "neg" -> {
+        let rest: "pos" | "neg" = v
+        rest
+      }
+      "zero" -> { v }
+    }
+  }
+}"#,
+    );
+    assert!(errs.is_empty(), "got: {:?}", errs);
+}

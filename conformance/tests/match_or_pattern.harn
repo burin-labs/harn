@@ -1,0 +1,38 @@
+// Or-patterns in match arms: `p1 | p2 | ... -> body` shares one arm
+// body across multiple alternative values. Covers literal unions,
+// mixed int/string arms on an int/string-tagged value, and guarded
+// or-pattern arms.
+pipeline default() {
+  fn classify(n: int) -> string {
+    return match n {
+      0 | 1 | 2 -> { "small" }
+      3 | 4 | 5 -> { "medium" }
+      _ -> { "large" }
+    }
+  }
+  println(classify(0))
+  println(classify(2))
+  println(classify(4))
+  println(classify(100))
+  fn verdict(v: "pass" | "fail" | "unclear" | "skip") -> string {
+    return match v {
+      "pass" -> { "ok" }
+      "fail" | "unclear" | "skip" -> { "not ok" }
+    }
+  }
+  println(verdict("pass"))
+  println(verdict("fail"))
+  println(verdict("unclear"))
+  println(verdict("skip"))
+  // Or-pattern with a guard applies the guard once per match.
+  fn describe(n: int) -> string {
+    return match n {
+      1 | 2 | 3 if n > 2 -> { "three" }
+      1 | 2 | 3 -> { "one or two" }
+      _ -> { "other" }
+    }
+  }
+  println(describe(1))
+  println(describe(3))
+  println(describe(10))
+}

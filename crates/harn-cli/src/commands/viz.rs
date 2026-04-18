@@ -469,6 +469,11 @@ fn summarize_node(node: &SNode) -> String {
                 .join(" ");
             format!("{} {}", attr_names, summarize_node(inner))
         }
+        Node::OrPattern(alternatives) => alternatives
+            .iter()
+            .map(summarize_node)
+            .collect::<Vec<_>>()
+            .join(" | "),
     }
 }
 

@@ -1238,6 +1238,11 @@ impl Formatter {
                 let attrs = format_attributes(attributes);
                 format!("{}{}", attrs, self.format_expr(inner))
             }
+            Node::OrPattern(alternatives) => alternatives
+                .iter()
+                .map(|p| self.format_expr(p))
+                .collect::<Vec<_>>()
+                .join(" | "),
         }
     }
 

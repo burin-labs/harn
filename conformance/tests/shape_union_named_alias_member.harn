@@ -1,0 +1,32 @@
+// Tagged shape unions whose members include a `Named` alias that
+// resolves to a shape still support discriminator narrowing. Both the
+// `match obj.kind` and `if obj.kind == "…"` paths resolve the alias
+// chain before the shape-union check.
+type Ping = {kind: "ping", ttl: int}
+
+type Msg = Ping | {kind: "pong", latency_ms: int} | {kind: "close", reason: string}
+
+pipeline default() {
+  fn summarise(m: Msg) -> string {
+    return match m.kind {
+      "ping" -> { "ping:" + to_string(m.ttl) }
+      "pong" -> { "pong:" + to_string(m.latency_ms) }
+      "close" -> { "close:" + m.reason }
+    }
+  }
+  // Narrowed to the Ping shape — `ttl` is reachable.
+  println(summarise({kind: "ping", ttl: 30}))
+  println(summarise({kind: "pong", latency_ms: 42}))
+  println(summarise({kind: "close", reason: "bye"}))
+  fn via_if(m: Msg) -> string {
+    if m.kind == "ping" {
+      return "p:" + to_string(m.ttl)
+    }
+    if m.kind == "pong" {
+      return "q:" + to_string(m.latency_ms)
+    }
+    return "c"
+  }
+  println(via_if({kind: "ping", ttl: 9}))
+  println(via_if({kind: "pong", latency_ms: 7}))
+}

@@ -25,6 +25,37 @@ use super::super::union::{
 };
 use super::super::TypeChecker;
 
+/// Flatten a match-arm pattern into its leaf alternatives. For an
+/// `OrPattern(a, b, c)` this yields `[a, b, c]`; for any other pattern
+/// node it yields a single-element iterator over the pattern itself.
+/// Exhaustiveness checks and arm-level narrowing treat each alternative
+/// as an independent "sub-arm" that contributes to coverage.
+pub(in crate::typechecker) fn pattern_alternatives(p: &SNode) -> Vec<&SNode> {
+    match &p.node {
+        Node::OrPattern(alts) => alts.iter().collect(),
+        _ => vec![p],
+    }
+}
+
+/// Resolve every member of a union through the `Named`-alias chain so
+/// downstream shape-union helpers (`discriminant_field`,
+/// `narrow_shape_union_by_tag`) see concrete shapes. Without this,
+/// `type Ping = {kind:"ping",…}; type Msg = Ping | {kind:"pong",…}`
+/// wouldn't be recognised as a tagged shape union — the `Named("Ping")`
+/// member would fail the bare-`Shape` check. Only simple (non-
+/// parameterised) alias chains are unwrapped here; generic aliases
+/// still route through `TypeChecker::resolve_alias` at the narrowing
+/// call sites that have `&self` access.
+pub(in crate::typechecker) fn resolve_union_shape_members(
+    members: &[TypeExpr],
+    scope: &TypeScope,
+) -> Vec<TypeExpr> {
+    members
+        .iter()
+        .map(|m| resolve_named_alias_chain(m.clone(), scope))
+        .collect()
+}
+
 /// Walk through `Named(alias)` indirections in `scope.type_aliases` to a
 /// concrete type. Stops as soon as the alias body is something other than
 /// another `Named` reference, or the lookup fails. The parameterised
@@ -344,6 +375,7 @@ impl TypeChecker {
         let TypeExpr::Union(members) = resolved else {
             return Refinements::empty();
         };
+        let members = resolve_union_shape_members(&members, scope);
         let Some(detected) = discriminant_field(&members) else {
             return Refinements::empty();
         };
@@ -490,26 +522,28 @@ impl TypeChecker {
         let mut has_wildcard = false;
 
         for arm in arms {
-            match &arm.pattern.node {
-                // String literal pattern (matching on .variant): "VariantA"
-                Node::StringLiteral(s) => covered.push(s.clone()),
-                // Identifier pattern acts as a wildcard/catch-all
-                Node::Identifier(name)
-                    if name == "_"
-                        || !variants
-                            .variants
-                            .iter()
-                            .any(|variant| variant.name == *name) =>
-                {
-                    has_wildcard = true;
-                }
-                // Direct enum construct pattern: EnumName.Variant
-                Node::EnumConstruct { variant, .. } => covered.push(variant.clone()),
-                // PropertyAccess pattern: EnumName.Variant (no args)
-                Node::PropertyAccess { property, .. } => covered.push(property.clone()),
-                _ => {
-                    // Unknown pattern shape — conservatively treat as wildcard
-                    has_wildcard = true;
+            for leaf in pattern_alternatives(&arm.pattern) {
+                match &leaf.node {
+                    // String literal pattern (matching on .variant): "VariantA"
+                    Node::StringLiteral(s) => covered.push(s.clone()),
+                    // Identifier pattern acts as a wildcard/catch-all
+                    Node::Identifier(name)
+                        if name == "_"
+                            || !variants
+                                .variants
+                                .iter()
+                                .any(|variant| variant.name == *name) =>
+                    {
+                        has_wildcard = true;
+                    }
+                    // Direct enum construct pattern: EnumName.Variant
+                    Node::EnumConstruct { variant, .. } => covered.push(variant.clone()),
+                    // PropertyAccess pattern: EnumName.Variant (no args)
+                    Node::PropertyAccess { property, .. } => covered.push(property.clone()),
+                    _ => {
+                        // Unknown pattern shape — conservatively treat as wildcard
+                        has_wildcard = true;
+                    }
                 }
             }
         }
@@ -525,17 +559,16 @@ impl TypeChecker {
             .filter(|variant| !covered.contains(variant))
             .collect();
         if !missing.is_empty() {
-            let missing_str = missing
-                .iter()
-                .map(|s| format!("\"{}\"", s))
-                .collect::<Vec<_>>()
-                .join(", ");
-            self.exhaustiveness_error_at(
+            let missing_literals: Vec<String> =
+                missing.iter().map(|s| format!("\"{}\"", s)).collect();
+            let missing_str = missing_literals.join(", ");
+            self.exhaustiveness_error_with_missing(
                 format!(
                     "Non-exhaustive match on enum {}: missing variants {}",
                     enum_name, missing_str
                 ),
                 span,
+                missing_literals,
             );
         }
     }
@@ -564,6 +597,7 @@ impl TypeChecker {
         let TypeExpr::Union(members) = resolved else {
             return false;
         };
+        let members = resolve_union_shape_members(&members, scope);
         if discriminant_field(&members).as_deref() != Some(property.as_str()) {
             return false;
         }
@@ -571,11 +605,13 @@ impl TypeChecker {
         let mut has_wildcard = false;
         let mut covered: Vec<DiscriminantValue> = Vec::new();
         for arm in arms {
-            match &arm.pattern.node {
-                Node::StringLiteral(s) => covered.push(DiscriminantValue::Str(s.clone())),
-                Node::IntLiteral(v) => covered.push(DiscriminantValue::Int(*v)),
-                Node::Identifier(name) if name == "_" => has_wildcard = true,
-                _ => has_wildcard = true,
+            for leaf in pattern_alternatives(&arm.pattern) {
+                match &leaf.node {
+                    Node::StringLiteral(s) => covered.push(DiscriminantValue::Str(s.clone())),
+                    Node::IntLiteral(v) => covered.push(DiscriminantValue::Int(*v)),
+                    Node::Identifier(name) if name == "_" => has_wildcard = true,
+                    _ => has_wildcard = true,
+                }
             }
         }
         if has_wildcard {
@@ -598,12 +634,13 @@ impl TypeChecker {
             }
         }
         if !missing.is_empty() {
-            self.exhaustiveness_error_at(
+            self.exhaustiveness_error_with_missing(
                 format!(
                     "Non-exhaustive match on tagged shape union: missing variants {}",
                     missing.join(", ")
                 ),
                 span,
+                missing,
             );
         }
         true
@@ -645,35 +682,37 @@ impl TypeChecker {
         let mut covered_types: Vec<String> = Vec::new();
 
         for arm in arms {
-            match &arm.pattern.node {
-                // type_of(x) == "string" style patterns are common but hard to detect here
-                // Literal patterns cover specific types
-                Node::NilLiteral => covered_types.push("nil".into()),
-                Node::BoolLiteral(_) => {
-                    if !covered_types.contains(&"bool".into()) {
-                        covered_types.push("bool".into());
+            for leaf in pattern_alternatives(&arm.pattern) {
+                match &leaf.node {
+                    // type_of(x) == "string" style patterns are common but hard to detect here
+                    // Literal patterns cover specific types
+                    Node::NilLiteral => covered_types.push("nil".into()),
+                    Node::BoolLiteral(_) => {
+                        if !covered_types.contains(&"bool".into()) {
+                            covered_types.push("bool".into());
+                        }
                     }
-                }
-                Node::IntLiteral(_) => {
-                    if !covered_types.contains(&"int".into()) {
-                        covered_types.push("int".into());
+                    Node::IntLiteral(_) => {
+                        if !covered_types.contains(&"int".into()) {
+                            covered_types.push("int".into());
+                        }
                     }
-                }
-                Node::FloatLiteral(_) => {
-                    if !covered_types.contains(&"float".into()) {
-                        covered_types.push("float".into());
+                    Node::FloatLiteral(_) => {
+                        if !covered_types.contains(&"float".into()) {
+                            covered_types.push("float".into());
+                        }
                     }
-                }
-                Node::StringLiteral(_) => {
-                    if !covered_types.contains(&"string".into()) {
-                        covered_types.push("string".into());
+                    Node::StringLiteral(_) => {
+                        if !covered_types.contains(&"string".into()) {
+                            covered_types.push("string".into());
+                        }
                     }
-                }
-                Node::Identifier(name) if name == "_" => {
-                    has_wildcard = true;
-                }
-                _ => {
-                    has_wildcard = true;
+                    Node::Identifier(name) if name == "_" => {
+                        has_wildcard = true;
+                    }
+                    _ => {
+                        has_wildcard = true;
+                    }
                 }
             }
         }
@@ -720,11 +759,13 @@ impl TypeChecker {
         let mut has_wildcard = false;
         let mut covered: Vec<DiscriminantValue> = Vec::new();
         for arm in arms {
-            match &arm.pattern.node {
-                Node::StringLiteral(s) => covered.push(DiscriminantValue::Str(s.clone())),
-                Node::IntLiteral(v) => covered.push(DiscriminantValue::Int(*v)),
-                Node::Identifier(name) if name == "_" => has_wildcard = true,
-                _ => has_wildcard = true,
+            for leaf in pattern_alternatives(&arm.pattern) {
+                match &leaf.node {
+                    Node::StringLiteral(s) => covered.push(DiscriminantValue::Str(s.clone())),
+                    Node::IntLiteral(v) => covered.push(DiscriminantValue::Int(*v)),
+                    Node::Identifier(name) if name == "_" => has_wildcard = true,
+                    _ => has_wildcard = true,
+                }
             }
         }
         if has_wildcard {
@@ -740,12 +781,13 @@ impl TypeChecker {
             }
         }
         if !missing.is_empty() {
-            self.exhaustiveness_error_at(
+            self.exhaustiveness_error_with_missing(
                 format!(
                     "Non-exhaustive match on literal union: missing {}",
                     missing.join(", ")
                 ),
                 span,
+                missing,
             );
         }
     }

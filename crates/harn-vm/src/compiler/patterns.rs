@@ -580,6 +580,64 @@ impl Compiler {
                     self.chunk.patch_jump_to(skip_type, pre_scope_fail_target);
                     self.chunk.patch_jump_to(next_arm_jump, next_arm_target);
                 }
+                // Or-pattern: `p1 | p2 | ... | pN -> body`. Each
+                // alternative is compared to the match value via
+                // `Dup; compile(pi); Equal`. A hit on any alternative
+                // (JumpIfTrue) threads into the shared body; only when
+                // every alternative fails does the arm fall through to
+                // the next one via the final `JumpIfFalse`.
+                //
+                // Stack discipline mirrors the literal-pattern case:
+                // `match_val` stays on the stack throughout the arm,
+                // and both the match-fail and guard-fail paths converge
+                // on a single trailing `Pop` that removes whichever
+                // false bool is on top.
+                Node::OrPattern(alternatives) if !alternatives.is_empty() => {
+                    let mut success_jumps = Vec::new();
+                    let last = alternatives.len() - 1;
+                    let mut final_skip: Option<usize> = None;
+                    for (i, alt) in alternatives.iter().enumerate() {
+                        self.chunk.emit(Op::Dup, self.line);
+                        self.compile_node(alt)?;
+                        self.chunk.emit(Op::Equal, self.line);
+                        if i < last {
+                            success_jumps.push(self.chunk.emit_jump(Op::JumpIfTrue, self.line));
+                            self.chunk.emit(Op::Pop, self.line);
+                        } else {
+                            final_skip = Some(self.chunk.emit_jump(Op::JumpIfFalse, self.line));
+                        }
+                    }
+                    for j in success_jumps {
+                        self.chunk.patch_jump(j);
+                    }
+                    // Shared success entry: true bool sits atop match_val.
+                    self.chunk.emit(Op::Pop, self.line);
+                    if let Some(ref guard) = arm.guard {
+                        self.compile_node(guard)?;
+                        let guard_skip = self.chunk.emit_jump(Op::JumpIfFalse, self.line);
+                        self.chunk.emit(Op::Pop, self.line);
+                        self.begin_scope();
+                        self.chunk.emit(Op::Pop, self.line);
+                        self.compile_match_body(&arm.body)?;
+                        self.end_scope();
+                        end_jumps.push(self.chunk.emit_jump(Op::Jump, self.line));
+                        // Guard fail: the false guard bool sits on top
+                        // of match_val. Fall through to the trailing
+                        // Pop (shared with match-fail) — do NOT emit an
+                        // extra Pop here, or match_val gets consumed.
+                        self.chunk.patch_jump(guard_skip);
+                    } else {
+                        self.begin_scope();
+                        self.chunk.emit(Op::Pop, self.line);
+                        self.compile_match_body(&arm.body)?;
+                        self.end_scope();
+                        end_jumps.push(self.chunk.emit_jump(Op::Jump, self.line));
+                    }
+                    if let Some(skip) = final_skip {
+                        self.chunk.patch_jump(skip);
+                    }
+                    self.chunk.emit(Op::Pop, self.line);
+                }
                 // Literal/expression pattern — compare with Equal.
                 _ => {
                     self.chunk.emit(Op::Dup, self.line);
@@ -596,8 +654,11 @@ impl Compiler {
                         self.compile_match_body(&arm.body)?;
                         self.end_scope();
                         end_jumps.push(self.chunk.emit_jump(Op::Jump, self.line));
+                        // Guard fail: fall through to the shared trailing
+                        // Pop (same as match-fail). Emitting an extra
+                        // Pop here would consume match_val and break the
+                        // next arm.
                         self.chunk.patch_jump(guard_skip);
-                        self.chunk.emit(Op::Pop, self.line);
                     } else {
                         self.begin_scope();
                         self.chunk.emit(Op::Pop, self.line);

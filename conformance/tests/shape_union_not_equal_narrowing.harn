@@ -1,0 +1,20 @@
+// `if obj.<tag> != "value"` narrows `obj` to the residual (all
+// variants except the matched one) in the truthy branch, and to the
+// single matched variant in the else branch. This is the symmetric
+// counterpart of `==` discriminator narrowing.
+type Msg = {kind: "ping", ttl: int} | {kind: "pong", latency_ms: int} | {kind: "close", reason: string}
+
+pipeline default() {
+  fn describe(m: Msg) -> string {
+    if m.kind != "close" {
+      // Narrowed to ping|pong: shared `kind` field is reachable,
+      // `reason` is not.
+      return "open:" + m.kind
+    }
+    // Else-branch narrows to the single `close` variant.
+    return "closed:" + m.reason
+  }
+  println(describe({kind: "ping", ttl: 30}))
+  println(describe({kind: "pong", latency_ms: 42}))
+  println(describe({kind: "close", reason: "done"}))
+}

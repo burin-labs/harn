@@ -18,7 +18,10 @@ use crate::helpers::{
 };
 use crate::references::find_references;
 use crate::semantic_tokens::{build_semantic_tokens, semantic_token_legend};
-use crate::symbols::{format_shape_expanded, EnumVariantInfo, HarnSymbolKind, SymbolInfo};
+use crate::symbols::{
+    format_shape_expanded, format_union_shapes_expanded, EnumVariantInfo, HarnSymbolKind,
+    SymbolInfo,
+};
 use crate::HarnLsp;
 
 /// Resolve the symbol through the current document's imported modules using
@@ -27,6 +30,325 @@ use crate::HarnLsp;
 /// `harn_modules::build` recursively follows import paths, so seeding it
 /// with the current file is enough to discover every module reachable via
 /// imports.
+/// Collect discriminator-value completion items for a cursor inside
+/// a `match obj.<tag> { … }` block. Returns `None` when the cursor
+/// isn't inside such a match; returns an empty `Vec` when the match
+/// is found but `obj` isn't a recognised tagged shape union (the
+/// caller then falls through to the normal completion list).
+fn discriminator_value_completions(
+    ast: &[harn_parser::SNode],
+    source: &str,
+    position: Position,
+    symbols: &[SymbolInfo],
+) -> Option<Vec<CompletionItem>> {
+    let cursor_offset = lsp_position_to_offset(source, position);
+    let match_node = find_innermost_match_at(ast, cursor_offset)?;
+    let harn_parser::Node::MatchExpr { value, arms } = &match_node.node else {
+        return None;
+    };
+    // Only offer discriminator completions when the cursor is inside
+    // the match's body region — i.e. after the opening `{` — not when
+    // editing the matched expression itself.
+    if cursor_offset <= value.span.end {
+        return None;
+    }
+    // Skip when the cursor sits inside an existing arm's body block;
+    // we only want to suggest literals at arm-pattern position.
+    for arm in arms {
+        let body_span_start = arm.pattern.span.end;
+        let body_span_end = arm
+            .body
+            .last()
+            .map(|b| b.span.end)
+            .unwrap_or(arm.pattern.span.end);
+        if cursor_offset > body_span_start && cursor_offset < body_span_end {
+            return None;
+        }
+    }
+    let harn_parser::Node::PropertyAccess { object, property } = &value.node else {
+        return Some(Vec::new());
+    };
+    let harn_parser::Node::Identifier(obj_name) = &object.node else {
+        return Some(Vec::new());
+    };
+    // Find the object's type from the symbol table. Function params
+    // store their declared type verbatim, so `m: Msg` yields
+    // `TypeExpr::Named("Msg")` — we then resolve one level of alias
+    // by walking the AST for `type Msg = ...` declarations.
+    let sym = symbols.iter().find(|s| s.name == *obj_name)?;
+    let ty = sym.type_info.as_ref()?;
+    let resolved = resolve_type_alias_from_ast(ty, ast);
+    let TypeExpr::Union(members) = resolved else {
+        return Some(Vec::new());
+    };
+    let mut already_covered: Vec<String> = Vec::new();
+    for arm in arms {
+        collect_literal_alternatives(&arm.pattern, &mut already_covered);
+    }
+    let mut seen: Vec<String> = Vec::new();
+    let mut out = Vec::new();
+    for member in members {
+        let TypeExpr::Shape(fields) = member else {
+            continue;
+        };
+        let Some(field) = fields.iter().find(|f| f.name == *property) else {
+            continue;
+        };
+        let (label, insert) = match &field.type_expr {
+            TypeExpr::LitString(s) => (format!("\"{s}\""), format!("\"{s}\"")),
+            TypeExpr::LitInt(v) => (v.to_string(), v.to_string()),
+            _ => continue,
+        };
+        if seen.contains(&label) || already_covered.contains(&label) {
+            continue;
+        }
+        seen.push(label.clone());
+        out.push(CompletionItem {
+            label,
+            kind: Some(CompletionItemKind::ENUM_MEMBER),
+            detail: Some(format!("{obj_name}.{property} variant")),
+            insert_text: Some(insert),
+            ..Default::default()
+        });
+    }
+    Some(out)
+}
+
+/// Resolve a `TypeExpr::Named(alias)` by looking up the matching
+/// top-level `type NAME = <body>` declaration in the AST and
+/// substituting its body. Walks the alias chain up to a small depth
+/// so nested aliases unwrap correctly. Non-`Named` inputs pass
+/// through unchanged. The LSP helpers only need this because the
+/// symbol table stores the declared-name form of a parameter type;
+/// upstream consumers that already call `TypeChecker::resolve_alias`
+/// don't need it.
+fn resolve_type_alias_from_ast(ty: &TypeExpr, ast: &[harn_parser::SNode]) -> TypeExpr {
+    let mut current = ty.clone();
+    let mut seen: Vec<String> = Vec::new();
+    loop {
+        let TypeExpr::Named(name) = &current else {
+            return current;
+        };
+        if seen.contains(name) {
+            return current;
+        }
+        seen.push(name.clone());
+        let Some(body) = find_type_alias_body(ast, name) else {
+            return current;
+        };
+        current = body;
+    }
+}
+
+fn find_type_alias_body(ast: &[harn_parser::SNode], name: &str) -> Option<TypeExpr> {
+    let mut found: Option<TypeExpr> = None;
+    visit_nodes(ast, &mut |node| {
+        if found.is_some() {
+            return;
+        }
+        if let harn_parser::Node::TypeDecl {
+            name: n, type_expr, ..
+        } = &node.node
+        {
+            if n == name {
+                found = Some(type_expr.clone());
+            }
+        }
+    });
+    found
+}
+
+fn collect_literal_alternatives(pattern: &harn_parser::SNode, out: &mut Vec<String>) {
+    match &pattern.node {
+        harn_parser::Node::StringLiteral(s) => out.push(format!("\"{s}\"")),
+        harn_parser::Node::IntLiteral(v) => out.push(v.to_string()),
+        harn_parser::Node::OrPattern(alts) => {
+            for alt in alts {
+                collect_literal_alternatives(alt, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Depth-first search of the AST for the innermost `Node::MatchExpr`
+/// whose span contains `offset`. The LSP completion handler uses this
+/// to decide when the cursor is inside a match's arm-pattern position.
+fn find_innermost_match_at(
+    ast: &[harn_parser::SNode],
+    offset: usize,
+) -> Option<&harn_parser::SNode> {
+    let mut best: Option<&harn_parser::SNode> = None;
+    visit_nodes(ast, &mut |node| {
+        if !matches!(node.node, harn_parser::Node::MatchExpr { .. }) {
+            return;
+        }
+        let span = node.span;
+        if offset < span.start || offset > span.end {
+            return;
+        }
+        // Prefer the node with the smallest span (deepest nesting).
+        if let Some(current) = best {
+            let current_len = current.span.end - current.span.start;
+            let node_len = span.end - span.start;
+            if node_len < current_len {
+                best = Some(node);
+            }
+        } else {
+            best = Some(node);
+        }
+    });
+    best
+}
+
+fn visit_nodes<'a, F>(nodes: &'a [harn_parser::SNode], visitor: &mut F)
+where
+    F: FnMut(&'a harn_parser::SNode),
+{
+    for node in nodes {
+        visit_node(node, visitor);
+    }
+}
+
+fn visit_node<'a, F>(node: &'a harn_parser::SNode, visitor: &mut F)
+where
+    F: FnMut(&'a harn_parser::SNode),
+{
+    visitor(node);
+    use harn_parser::Node;
+    match &node.node {
+        Node::Pipeline { body, .. }
+        | Node::FnDecl { body, .. }
+        | Node::ToolDecl { body, .. }
+        | Node::Block(body)
+        | Node::Closure { body, .. }
+        | Node::TryExpr { body }
+        | Node::SpawnExpr { body }
+        | Node::MutexBlock { body }
+        | Node::DeferStmt { body } => visit_nodes(body, visitor),
+        Node::MatchExpr { value, arms } => {
+            visit_node(value, visitor);
+            for arm in arms {
+                visit_node(&arm.pattern, visitor);
+                if let Some(g) = &arm.guard {
+                    visit_node(g, visitor);
+                }
+                visit_nodes(&arm.body, visitor);
+            }
+        }
+        Node::IfElse {
+            condition,
+            then_body,
+            else_body,
+        } => {
+            visit_node(condition, visitor);
+            visit_nodes(then_body, visitor);
+            if let Some(eb) = else_body {
+                visit_nodes(eb, visitor);
+            }
+        }
+        Node::ForIn { iterable, body, .. } => {
+            visit_node(iterable, visitor);
+            visit_nodes(body, visitor);
+        }
+        Node::WhileLoop { condition, body } => {
+            visit_node(condition, visitor);
+            visit_nodes(body, visitor);
+        }
+        Node::BinaryOp { left, right, .. } => {
+            visit_node(left, visitor);
+            visit_node(right, visitor);
+        }
+        Node::PropertyAccess { object, .. }
+        | Node::OptionalPropertyAccess { object, .. }
+        | Node::TryOperator { operand: object }
+        | Node::TryStar { operand: object } => visit_node(object, visitor),
+        Node::MethodCall { object, args, .. } | Node::OptionalMethodCall { object, args, .. } => {
+            visit_node(object, visitor);
+            for a in args {
+                visit_node(a, visitor);
+            }
+        }
+        Node::FunctionCall { args, .. } => {
+            for a in args {
+                visit_node(a, visitor);
+            }
+        }
+        Node::LetBinding { value, .. } | Node::VarBinding { value, .. } => {
+            visit_node(value, visitor);
+        }
+        Node::ReturnStmt { value: Some(v) } | Node::YieldExpr { value: Some(v) } => {
+            visit_node(v, visitor)
+        }
+        Node::AttributedDecl { inner, .. } => visit_node(inner, visitor),
+        _ => {}
+    }
+}
+
+/// Build a `TextEdit` that inserts "missing" match arms just before
+/// the `}` that closes the match expression at `match_span`. Each
+/// missing variant becomes one new arm of the form
+/// `{pattern} -> { unreachable("TODO: handle {pattern}") }`, indented
+/// relative to the closing brace.
+///
+/// Returns `None` when the span doesn't look like a well-formed
+/// `match` expression (e.g. the closing `}` isn't at the expected
+/// byte position) — in that case the code-action is silently skipped
+/// rather than emitting a broken edit.
+fn build_missing_arms_edit(
+    source: &str,
+    match_span: &harn_lexer::Span,
+    missing: &[String],
+) -> Option<TextEdit> {
+    if missing.is_empty() {
+        return None;
+    }
+    // Span.end is exclusive: the last byte of the match — the `}` —
+    // is at span.end - 1.
+    let close_brace_byte = match_span.end.checked_sub(1)?;
+    let bytes = source.as_bytes();
+    if close_brace_byte >= bytes.len() || bytes[close_brace_byte] != b'}' {
+        return None;
+    }
+    // Measure the closing brace's indent by walking back from its
+    // position to the start of its line and counting whitespace.
+    let line_start = source[..close_brace_byte]
+        .rfind('\n')
+        .map(|n| n + 1)
+        .unwrap_or(0);
+    let indent_slice = &source[line_start..close_brace_byte];
+    let brace_indent: String = indent_slice
+        .chars()
+        .take_while(|c| *c == ' ' || *c == '\t')
+        .collect();
+    // Arm indent is brace indent + 2 spaces (Harn formatter
+    // convention). If the brace is on the same line as other content
+    // (e.g. a single-line match), `indent_slice` still starts with
+    // whatever lead-in was there — we conservatively still add 2
+    // spaces of nesting, which produces correct but possibly ugly
+    // output on single-line matches.
+    let arm_indent = format!("{brace_indent}  ");
+    let mut inserted = String::new();
+    for pattern in missing {
+        inserted.push('\n');
+        inserted.push_str(&arm_indent);
+        inserted.push_str(pattern);
+        inserted.push_str(" -> { unreachable(\"TODO: handle ");
+        inserted.push_str(pattern);
+        inserted.push_str("\") }");
+    }
+    inserted.push('\n');
+    inserted.push_str(&brace_indent);
+    let brace_pos = offset_to_position(source, close_brace_byte);
+    Some(TextEdit {
+        range: Range {
+            start: brace_pos,
+            end: brace_pos,
+        },
+        new_text: inserted,
+    })
+}
+
 fn resolve_cross_file_definition(uri: &Url, word: &str) -> Option<Location> {
     let current_path = uri.to_file_path().ok()?;
     let module_graph = harn_modules::build(std::slice::from_ref(&current_path));
@@ -324,6 +646,7 @@ impl tower_lsp::LanguageServer for HarnLsp {
 
         let source = state.source.clone();
         let symbols = state.symbols.clone();
+        let ast = state.cached_ast.clone();
         drop(docs);
 
         let mut items = Vec::new();
@@ -332,6 +655,23 @@ impl tower_lsp::LanguageServer for HarnLsp {
             return Ok(Some(CompletionResponse::Array(dot_completion_items(
                 &source, position, &symbols,
             ))));
+        }
+
+        // Discriminator-value completion: when the cursor sits inside
+        // a `match obj.<tag> { … }` arm position and `obj` resolves to
+        // a tagged shape union, offer each distinct discriminator
+        // literal as a completion item. This fires only when the
+        // match's value expression is the common `ident.prop` form;
+        // more complex matched expressions fall through to the normal
+        // identifier/builtin/keyword list.
+        if let Some(ast) = ast.as_ref() {
+            if let Some(discriminator_items) =
+                discriminator_value_completions(ast, &source, position, &symbols)
+            {
+                if !discriminator_items.is_empty() {
+                    return Ok(Some(CompletionResponse::Array(discriminator_items)));
+                }
+            }
         }
 
         // Symbol is visible iff it's top-level (no scope_span) or the cursor
@@ -646,10 +986,18 @@ impl tower_lsp::LanguageServer for HarnLsp {
 
             // Signatures already show `-> type`; expand only shape types for
             // variables/params so complex shapes get a human-readable breakdown.
+            // Tagged shape unions (union-of-shapes) also get an expanded view
+            // so the variants are laid out vertically instead of collapsed
+            // onto one line.
             if sym.signature.is_none() {
                 if let Some(ref ty) = sym.type_info {
                     if matches!(ty, harn_parser::TypeExpr::Shape(_)) {
                         let expanded = format_shape_expanded(ty, 0);
+                        if !expanded.is_empty() {
+                            hover_text.push_str(&format!("\n{expanded}"));
+                        }
+                    } else if matches!(ty, harn_parser::TypeExpr::Union(_)) {
+                        let expanded = format_union_shapes_expanded(ty);
                         if !expanded.is_empty() {
                             hover_text.push_str(&format!("\n{expanded}"));
                         }
@@ -923,6 +1271,41 @@ impl tower_lsp::LanguageServer for HarnLsp {
                             ..Default::default()
                         }));
                         continue;
+                    }
+
+                    // Non-exhaustive match: synthesise an "Add missing
+                    // arms" quick-fix from the structured details on
+                    // the diagnostic. The diagnostic's span covers the
+                    // whole `match` expression, so the closing `}`
+                    // sits at `span.end - 1`. We insert `arm_indent`
+                    // + pattern + `-> { unreachable(...) }` right
+                    // before the `}`, using the closing brace's
+                    // column as the reference indent.
+                    if let (
+                        Some(harn_parser::DiagnosticDetails::NonExhaustiveMatch { missing }),
+                        Some(span),
+                    ) = (td.details.as_ref(), td.span.as_ref())
+                    {
+                        if let Some(edit) = build_missing_arms_edit(&source, span, missing) {
+                            let mut changes = HashMap::new();
+                            changes.insert(uri.clone(), vec![edit]);
+                            actions.push(CodeActionOrCommand::CodeAction(CodeAction {
+                                title: if missing.len() == 1 {
+                                    format!("Add missing match arm {}", missing[0])
+                                } else {
+                                    format!("Add missing match arms ({})", missing.len())
+                                },
+                                kind: Some(CodeActionKind::QUICKFIX),
+                                diagnostics: Some(vec![diag.clone()]),
+                                edit: Some(WorkspaceEdit {
+                                    changes: Some(changes),
+                                    ..Default::default()
+                                }),
+                                is_preferred: Some(true),
+                                ..Default::default()
+                            }));
+                            continue;
+                        }
                     }
                 }
             }
@@ -1265,5 +1648,148 @@ mod tests {
             }),
             "items: {items:?}"
         );
+    }
+
+    fn discriminator_items_at(source: &str, marker: &str) -> Vec<String> {
+        use crate::handlers::discriminator_value_completions;
+        let state = DocumentState::new(source.to_string());
+        let mut location = None;
+        for (line_index, line) in source.lines().enumerate() {
+            if let Some(column) = line.find(marker) {
+                location = Some(Position::new(
+                    line_index as u32,
+                    (column + marker.len()) as u32,
+                ));
+                break;
+            }
+        }
+        let position = location.expect("marker should exist in source");
+        let ast = state
+            .cached_ast
+            .as_ref()
+            .expect("ast should parse — check the test fixture for syntax issues");
+        discriminator_value_completions(ast, &state.source, position, &state.symbols)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|item| item.label)
+            .collect()
+    }
+
+    #[test]
+    fn discriminator_completion_suggests_tagged_shape_union_literals() {
+        // Cursor sits at the start of an empty dummy arm; all
+        // discriminator variants should be offered. The dummy `_`
+        // arm keeps the match parseable while the user is typing
+        // real alternatives in its place.
+        let items = discriminator_items_at(
+            r#"type Msg = {kind: "ping", ttl: int} | {kind: "pong", latency_ms: int}
+
+fn handle(m: Msg) -> string {
+  return match m.kind {
+    MARK_ -> { "todo" }
+  }
+}
+pipeline default() { }"#,
+            "MARK",
+        );
+        assert!(
+            items.iter().any(|l| l == "\"ping\""),
+            "expected \"ping\" completion, got: {items:?}"
+        );
+        assert!(
+            items.iter().any(|l| l == "\"pong\""),
+            "expected \"pong\" completion, got: {items:?}"
+        );
+    }
+
+    #[test]
+    fn discriminator_completion_excludes_already_covered_arms() {
+        // Same shape but with one explicit arm already covering
+        // "ping"; the completion should omit it and still offer
+        // "pong".
+        let items = discriminator_items_at(
+            r#"type Msg = {kind: "ping", ttl: int} | {kind: "pong", latency_ms: int}
+
+fn handle(m: Msg) -> string {
+  return match m.kind {
+    "ping" -> { "p" }
+    MARK_ -> { "todo" }
+  }
+}
+pipeline default() { }"#,
+            "MARK",
+        );
+        assert!(
+            !items.iter().any(|l| l == "\"ping\""),
+            "expected \"ping\" filtered out after explicit arm, got: {items:?}"
+        );
+        assert!(
+            items.iter().any(|l| l == "\"pong\""),
+            "expected \"pong\" still offered, got: {items:?}"
+        );
+    }
+
+    #[test]
+    fn missing_arms_edit_inserts_each_variant_before_close_brace() {
+        use crate::handlers::build_missing_arms_edit;
+        use harn_lexer::Span;
+
+        let source = "pipeline default() {\n  match v {\n    \"pass\" -> { }\n  }\n}\n";
+        // Byte range covering `match v { ... }`.
+        let start = source.find("match").unwrap();
+        let end = source[start..].find('\n').unwrap();
+        let match_block_start = start;
+        let match_block_end_brace = source
+            .match_indices('\n')
+            .filter(|(idx, _)| *idx > start)
+            .nth(2)
+            .map(|(idx, _)| idx)
+            .unwrap();
+        // Find the actual `}` that closes the match block.
+        let close_brace_pos = source[match_block_start..match_block_end_brace]
+            .rfind('}')
+            .map(|r| match_block_start + r)
+            .unwrap();
+        let span = Span {
+            start: match_block_start,
+            end: close_brace_pos + 1,
+            line: 2,
+            column: 3,
+            end_line: 4,
+        };
+        let missing = vec!["\"fail\"".to_string(), "\"skip\"".to_string()];
+        let _ = end;
+        let edit = build_missing_arms_edit(source, &span, &missing)
+            .expect("expected edit for well-formed match");
+        assert!(edit.new_text.contains("\"fail\" -> "), "{:?}", edit);
+        assert!(edit.new_text.contains("\"skip\" -> "), "{:?}", edit);
+        assert!(
+            edit.new_text.contains("unreachable"),
+            "edit should scaffold with unreachable: {:?}",
+            edit
+        );
+        // Indent should be 4 spaces for arms (brace at col 2 + 2).
+        assert!(
+            edit.new_text.contains("\n    \"fail\""),
+            "expected 4-space arm indent, got: {:?}",
+            edit.new_text
+        );
+    }
+
+    #[test]
+    fn missing_arms_edit_returns_none_when_close_brace_missing() {
+        use crate::handlers::build_missing_arms_edit;
+        use harn_lexer::Span;
+
+        let source = "not a match expression";
+        let span = Span {
+            start: 0,
+            end: source.len(),
+            line: 1,
+            column: 1,
+            end_line: 1,
+        };
+        let edit = build_missing_arms_edit(source, &span, &["\"x\"".to_string()]);
+        assert!(edit.is_none());
     }
 }

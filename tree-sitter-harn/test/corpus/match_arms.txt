@@ -1,0 +1,80 @@
+==================
+Match Or Pattern With Guard
+==================
+
+pipeline default() {
+  let result = match n {
+    0 | 1 | 2 -> { "small" }
+    3 | 4 | 5 if n == 3 -> { "three" }
+    _ -> { "other" }
+  }
+}
+
+---
+
+(source_file
+  (pipeline_declaration
+    name: (identifier)
+    (block
+      (let_binding
+        name: (identifier)
+        value: (match_statement
+          value: (identifier)
+          (match_arm
+            pattern: (or_pattern
+              (integer_literal)
+              (integer_literal)
+              (integer_literal))
+            body: (block
+              (expression_statement
+                (string_literal))))
+          (match_arm
+            pattern: (or_pattern
+              (integer_literal)
+              (integer_literal)
+              (integer_literal))
+            guard: (binary_expression
+              (identifier)
+              (integer_literal))
+            body: (block
+              (expression_statement
+                (string_literal))))
+          (match_arm
+            pattern: (identifier)
+            body: (block
+              (expression_statement
+                (string_literal)))))))))
+
+==================
+Match String Or Pattern
+==================
+
+pipeline default() {
+  let s = match v {
+    "ping" | "pong" -> { "live" }
+    "close" -> { "closed" }
+  }
+}
+
+---
+
+(source_file
+  (pipeline_declaration
+    name: (identifier)
+    (block
+      (let_binding
+        name: (identifier)
+        value: (match_statement
+          value: (identifier)
+          (match_arm
+            pattern: (or_pattern
+              (string_literal)
+              (string_literal))
+            body: (block
+              (expression_statement
+                (string_literal))))
+          (match_arm
+            pattern: (string_literal)
+            body: (block
+              (expression_statement
+                (string_literal)))))))))

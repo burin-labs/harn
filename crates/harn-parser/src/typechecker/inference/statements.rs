@@ -26,6 +26,7 @@ use super::super::union::{
     discriminant_field, narrow_shape_union_by_tag, narrow_to_single, DiscriminantValue,
 };
 use super::super::{InlayHintInfo, TypeChecker};
+use super::flow::{pattern_alternatives, resolve_union_shape_members};
 
 impl TypeChecker {
     pub(in crate::typechecker) fn check_block(&mut self, stmts: &[SNode], scope: &mut TypeScope) {
@@ -625,96 +626,102 @@ impl TypeChecker {
                 let value_type = self.infer_type(value, scope);
                 for arm in arms {
                     self.check_node(&arm.pattern, scope);
-                    // Check for incompatible literal pattern types
+                    // Check for incompatible literal pattern types —
+                    // once per alternative inside an OrPattern so
+                    // mixed-type or-patterns still surface the warning.
                     if let Some(ref vt) = value_type {
                         let value_type_name = format_type(vt);
-                        let mismatch = match &arm.pattern.node {
-                            Node::StringLiteral(_) => {
-                                !self.types_compatible(vt, &TypeExpr::Named("string".into()), scope)
-                            }
-                            Node::IntLiteral(_) => {
-                                !self.types_compatible(vt, &TypeExpr::Named("int".into()), scope)
-                                    && !self.types_compatible(
+                        for leaf in pattern_alternatives(&arm.pattern) {
+                            let mismatch = match &leaf.node {
+                                Node::StringLiteral(_) => !self.types_compatible(
+                                    vt,
+                                    &TypeExpr::Named("string".into()),
+                                    scope,
+                                ),
+                                Node::IntLiteral(_) => {
+                                    !self.types_compatible(
+                                        vt,
+                                        &TypeExpr::Named("int".into()),
+                                        scope,
+                                    ) && !self.types_compatible(
                                         vt,
                                         &TypeExpr::Named("float".into()),
                                         scope,
                                     )
-                            }
-                            Node::FloatLiteral(_) => {
-                                !self.types_compatible(vt, &TypeExpr::Named("float".into()), scope)
-                                    && !self.types_compatible(
+                                }
+                                Node::FloatLiteral(_) => {
+                                    !self.types_compatible(
+                                        vt,
+                                        &TypeExpr::Named("float".into()),
+                                        scope,
+                                    ) && !self.types_compatible(
                                         vt,
                                         &TypeExpr::Named("int".into()),
                                         scope,
                                     )
-                            }
-                            Node::BoolLiteral(_) => {
-                                !self.types_compatible(vt, &TypeExpr::Named("bool".into()), scope)
-                            }
-                            _ => false,
-                        };
-                        if mismatch {
-                            let pattern_type = match &arm.pattern.node {
-                                Node::StringLiteral(_) => "string",
-                                Node::IntLiteral(_) => "int",
-                                Node::FloatLiteral(_) => "float",
-                                Node::BoolLiteral(_) => "bool",
-                                _ => unreachable!(),
-                            };
-                            self.warning_at(
-                                format!(
-                                    "Match pattern type mismatch: matching {} against {} literal",
-                                    value_type_name, pattern_type
+                                }
+                                Node::BoolLiteral(_) => !self.types_compatible(
+                                    vt,
+                                    &TypeExpr::Named("bool".into()),
+                                    scope,
                                 ),
-                                arm.pattern.span,
-                            );
+                                _ => false,
+                            };
+                            if mismatch {
+                                let pattern_type = match &leaf.node {
+                                    Node::StringLiteral(_) => "string",
+                                    Node::IntLiteral(_) => "int",
+                                    Node::FloatLiteral(_) => "float",
+                                    Node::BoolLiteral(_) => "bool",
+                                    _ => unreachable!(),
+                                };
+                                self.warning_at(
+                                    format!(
+                                        "Match pattern type mismatch: matching {} against {} literal",
+                                        value_type_name, pattern_type
+                                    ),
+                                    leaf.span,
+                                );
+                            }
                         }
                     }
                     let mut arm_scope = scope.child();
-                    // Narrow the matched value's type in each arm
+                    // Narrow the matched value's type in each arm. For an
+                    // OrPattern we narrow once per alternative and combine
+                    // the results into a union, so `"pass" | "fail"` on a
+                    // `"pass" | "fail" | "skip"` union refines to
+                    // `"pass" | "fail"` inside the arm.
                     if let Node::Identifier(var_name) = &value.node {
                         if let Some(Some(TypeExpr::Union(members))) = scope.get_var(var_name) {
-                            let narrowed = match &arm.pattern.node {
-                                Node::NilLiteral => narrow_to_single(members, "nil"),
-                                Node::StringLiteral(_) => narrow_to_single(members, "string"),
-                                Node::IntLiteral(_) => narrow_to_single(members, "int"),
-                                Node::FloatLiteral(_) => narrow_to_single(members, "float"),
-                                Node::BoolLiteral(_) => narrow_to_single(members, "bool"),
-                                _ => None,
-                            };
+                            let narrowed = narrow_union_by_arm_pattern(&arm.pattern, members);
                             if let Some(narrowed_type) = narrowed {
                                 arm_scope.define_var(var_name, Some(narrowed_type));
                             }
                         }
                     }
+
                     // Discriminator narrowing on `match obj.<tag> { "v" -> ... }`:
                     // when the matched value is a property access on a tagged
-                    // shape union and the arm is a literal pattern matching
-                    // the union's auto-detected discriminant, narrow `obj` to
-                    // the single matching variant inside the arm.
+                    // shape union and the arm is a literal pattern (or an
+                    // or-pattern of literals) matching the union's
+                    // auto-detected discriminant, narrow `obj` to the
+                    // matching variant(s) inside the arm body.
                     if let Node::PropertyAccess { object, property } = &value.node {
                         if let Node::Identifier(obj_var) = &object.node {
                             if let Some(Some(raw_type)) = scope.get_var(obj_var).cloned() {
                                 let resolved = self.resolve_alias(&raw_type, scope);
                                 if let TypeExpr::Union(members) = resolved {
+                                    let members = resolve_union_shape_members(&members, scope);
                                     if discriminant_field(&members).as_deref()
                                         == Some(property.as_str())
                                     {
-                                        let tag_value = match &arm.pattern.node {
-                                            Node::StringLiteral(s) => {
-                                                Some(DiscriminantValue::Str(s.clone()))
-                                            }
-                                            Node::IntLiteral(v) => Some(DiscriminantValue::Int(*v)),
-                                            _ => None,
-                                        };
-                                        if let Some(tag_value) = tag_value {
-                                            if let Some((matched_shape, _)) =
-                                                narrow_shape_union_by_tag(
-                                                    &members, property, &tag_value,
-                                                )
-                                            {
-                                                arm_scope.define_var(obj_var, Some(matched_shape));
-                                            }
+                                        let narrowed = narrow_shape_union_by_arm_pattern(
+                                            &arm.pattern,
+                                            &members,
+                                            property,
+                                        );
+                                        if let Some(t) = narrowed {
+                                            arm_scope.define_var(obj_var, Some(t));
                                         }
                                     }
                                 }
@@ -1280,6 +1287,38 @@ impl TypeChecker {
                 self.check_attributes(attributes, inner);
                 self.check_node(inner, scope);
             }
+
+            // Or-patterns are only meaningful as a match-arm pattern.
+            // Enforce the literal-only restriction here: an alternative
+            // that is not a literal pattern (string, int, float, bool,
+            // nil, or the wildcard `_`) would silently degrade
+            // exhaustiveness to "assume wildcard" and make VM lowering
+            // surface its own errors. Rejecting early keeps diagnostics
+            // local to the offending alternative.
+            Node::OrPattern(alternatives) => {
+                for alt in alternatives {
+                    let is_literal = matches!(
+                        &alt.node,
+                        Node::StringLiteral(_)
+                            | Node::IntLiteral(_)
+                            | Node::FloatLiteral(_)
+                            | Node::BoolLiteral(_)
+                            | Node::NilLiteral
+                    );
+                    let is_wildcard = matches!(&alt.node, Node::Identifier(name) if name == "_");
+                    if !is_literal && !is_wildcard {
+                        self.error_at(
+                            "Or-pattern alternatives must be literal patterns \
+                             (string, int, float, bool, nil, or `_`). Identifier \
+                             bindings and destructuring patterns are not allowed \
+                             inside `|`."
+                                .into(),
+                            alt.span,
+                        );
+                    }
+                    self.check_node(alt, scope);
+                }
+            }
         }
     }
 
@@ -1309,5 +1348,101 @@ impl TypeChecker {
                 );
             }
         }
+    }
+}
+
+/// Narrow a union-typed match value by a single arm pattern. Returns
+/// the narrowed type, or `None` when the pattern is not a recognised
+/// type-narrowing literal. For `OrPattern`, the per-alternative
+/// narrowings are combined into a union (deduped) so a two-alternative
+/// arm on a three-member literal union refines to a two-member union.
+fn narrow_union_by_arm_pattern(pattern: &SNode, members: &[TypeExpr]) -> Option<TypeExpr> {
+    let leaves = pattern_alternatives(pattern);
+    let mut collected: Vec<TypeExpr> = Vec::new();
+    for leaf in &leaves {
+        let narrowed = narrow_union_leaf(&leaf.node, members)?;
+        match narrowed {
+            TypeExpr::Union(inner) => {
+                for m in inner {
+                    if !collected.contains(&m) {
+                        collected.push(m);
+                    }
+                }
+            }
+            other => {
+                if !collected.contains(&other) {
+                    collected.push(other);
+                }
+            }
+        }
+    }
+    match collected.len() {
+        0 => None,
+        1 => Some(collected.into_iter().next().unwrap()),
+        _ => Some(TypeExpr::Union(collected)),
+    }
+}
+
+fn narrow_union_leaf(node: &Node, members: &[TypeExpr]) -> Option<TypeExpr> {
+    // Literal pattern against a union containing the exact literal
+    // value — narrow to that literal. This is what makes
+    // `"pos" | "neg"` on a `"pos" | "neg" | "zero"` union refine
+    // correctly: each alternative picks out its literal member.
+    match node {
+        Node::StringLiteral(s) => {
+            if members
+                .iter()
+                .any(|m| matches!(m, TypeExpr::LitString(lit) if lit == s))
+            {
+                return Some(TypeExpr::LitString(s.clone()));
+            }
+        }
+        Node::IntLiteral(v) => {
+            if members
+                .iter()
+                .any(|m| matches!(m, TypeExpr::LitInt(lit) if lit == v))
+            {
+                return Some(TypeExpr::LitInt(*v));
+            }
+        }
+        _ => {}
+    }
+    let type_name = match node {
+        Node::NilLiteral => "nil",
+        Node::StringLiteral(_) => "string",
+        Node::IntLiteral(_) => "int",
+        Node::FloatLiteral(_) => "float",
+        Node::BoolLiteral(_) => "bool",
+        _ => return None,
+    };
+    narrow_to_single(members, type_name)
+}
+
+/// Narrow a tagged shape union by a single arm pattern on its
+/// discriminant. For `OrPattern`, the matched shape variants are
+/// combined into a union so `"ping" | "pong" -> …` refines `obj` to
+/// `{kind:"ping",…} | {kind:"pong",…}` inside the arm.
+fn narrow_shape_union_by_arm_pattern(
+    pattern: &SNode,
+    members: &[TypeExpr],
+    property: &str,
+) -> Option<TypeExpr> {
+    let leaves = pattern_alternatives(pattern);
+    let mut matched: Vec<TypeExpr> = Vec::new();
+    for leaf in &leaves {
+        let tag = match &leaf.node {
+            Node::StringLiteral(s) => DiscriminantValue::Str(s.clone()),
+            Node::IntLiteral(v) => DiscriminantValue::Int(*v),
+            _ => return None,
+        };
+        let (shape, _) = narrow_shape_union_by_tag(members, property, &tag)?;
+        if !matched.contains(&shape) {
+            matched.push(shape);
+        }
+    }
+    match matched.len() {
+        0 => None,
+        1 => Some(matched.into_iter().next().unwrap()),
+        _ => Some(TypeExpr::Union(matched)),
     }
 }

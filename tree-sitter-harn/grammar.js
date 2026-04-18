@@ -354,10 +354,21 @@ module.exports = grammar({
 
     match_arm: ($) =>
       seq(
-        field("pattern", $._expression),
+        field("pattern", $._match_pattern),
         optional(seq("if", field("guard", $._expression))),
         "->",
         field("body", $.block)
+      ),
+
+    // An arm pattern is either a single expression or an or-pattern
+    // made of two-plus `|`-separated alternatives. Keeping this as a
+    // dedicated rule (rather than inlining `|` in `match_arm`) gives
+    // tooling a stable anchor to walk when synthesising new arms.
+    _match_pattern: ($) => choice($._expression, $.or_pattern),
+
+    or_pattern: ($) =>
+      prec.right(
+        seq($._expression, "|", $._expression, repeat(seq("|", $._expression)))
       ),
 
     retry_statement: ($) =>

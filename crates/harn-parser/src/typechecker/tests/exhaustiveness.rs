@@ -519,3 +519,119 @@ fn test_match_pattern_untyped_no_warning() {
         .collect();
     assert!(pattern_warns.is_empty());
 }
+
+#[test]
+fn test_or_pattern_covers_literal_union_exhaustive() {
+    // An or-pattern that combines alternatives still contributes each
+    // literal to the exhaustiveness coverage set. Three-member literal
+    // union, two arms: one literal + one two-alternative or-pattern.
+    let errs = errors(
+        r#"pipeline t(task) {
+  fn verdict(v: "pass" | "fail" | "skip") -> string {
+    return match v {
+      "pass" -> { "ok" }
+      "fail" | "skip" -> { "not ok" }
+    }
+  }
+}"#,
+    );
+    let exh: Vec<_> = errs
+        .iter()
+        .filter(|e| e.contains("Non-exhaustive"))
+        .collect();
+    assert!(exh.is_empty(), "expected no error, got: {:?}", errs);
+}
+
+#[test]
+fn test_or_pattern_missing_alternative_errors() {
+    // Or-pattern with only two alternatives on a three-member union
+    // must still be flagged as non-exhaustive.
+    let errs = errors(
+        r#"pipeline t(task) {
+  fn verdict(v: "pass" | "fail" | "skip") -> string {
+    return match v {
+      "pass" | "fail" -> { "ok" }
+    }
+  }
+}"#,
+    );
+    let exh: Vec<_> = errs
+        .iter()
+        .filter(|e| e.contains("Non-exhaustive"))
+        .collect();
+    assert_eq!(exh.len(), 1, "got: {:?}", errs);
+    assert!(exh[0].contains("\"skip\""));
+}
+
+#[test]
+fn test_or_pattern_tagged_shape_union_exhaustive() {
+    // Or-pattern on the discriminant of a tagged shape union satisfies
+    // exhaustiveness when the alternatives cover every variant's tag.
+    let errs = errors(
+        r#"type Msg =
+  {kind: "ping", ttl: int} |
+  {kind: "pong", latency_ms: int} |
+  {kind: "close", reason: string}
+
+pipeline t(task) {
+  fn handle(m: Msg) -> string {
+    return match m.kind {
+      "ping" -> { "p" }
+      "pong" | "close" -> { "other" }
+    }
+  }
+}"#,
+    );
+    let exh: Vec<_> = errs
+        .iter()
+        .filter(|e| e.contains("Non-exhaustive"))
+        .collect();
+    assert!(exh.is_empty(), "expected no error, got: {:?}", errs);
+}
+
+#[test]
+fn test_or_pattern_tagged_shape_union_missing() {
+    // Or-pattern that covers two of three variants must still report
+    // the missing one.
+    let errs = errors(
+        r#"type Msg =
+  {kind: "ping", ttl: int} |
+  {kind: "pong", latency_ms: int} |
+  {kind: "close", reason: string}
+
+pipeline t(task) {
+  fn handle(m: Msg) -> string {
+    return match m.kind {
+      "ping" | "pong" -> { "live" }
+    }
+  }
+}"#,
+    );
+    let exh: Vec<_> = errs
+        .iter()
+        .filter(|e| e.contains("Non-exhaustive"))
+        .collect();
+    assert_eq!(exh.len(), 1, "got: {:?}", errs);
+    assert!(exh[0].contains("\"close\""));
+}
+
+#[test]
+fn test_or_pattern_enum_exhaustive() {
+    // Or-pattern on `enum.variant` (string-literal match against a
+    // known enum) covers each listed variant.
+    let errs = errors(
+        r#"pipeline t(task) {
+  enum Color { Red, Green, Blue }
+  let c = Color.Red
+  match c.variant {
+"Red" | "Green" -> { log("warm-ish") }
+"Blue" -> { log("cool") }
+  }
+}"#,
+    );
+    let exh: Vec<_> = errs
+        .iter()
+        .filter(|e| e.contains("Non-exhaustive"))
+        .collect();
+    assert!(exh.is_empty(), "expected no error, got: {:?}", errs);
+}

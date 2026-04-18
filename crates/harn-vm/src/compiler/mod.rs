@@ -461,6 +461,12 @@ impl Compiler {
             Node::AttributedDecl { attributes, inner } => {
                 self.compile_attributed_decl(attributes, inner)?;
             }
+            Node::OrPattern(_) => {
+                return Err(CompileError {
+                    message: "or-pattern (|) can only appear as a match arm pattern".into(),
+                    line: self.line,
+                });
+            }
         }
         Ok(())
     }

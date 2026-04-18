@@ -37,6 +37,28 @@ pub struct TypeDiagnostic {
     pub help: Option<String>,
     /// Machine-applicable fix edits.
     pub fix: Option<Vec<FixEdit>>,
+    /// Optional structured payload that higher-level tooling (e.g. the
+    /// LSP code-action provider) can consume to synthesise fixes that
+    /// need more than a static `FixEdit`. Out-of-band from `fix` so the
+    /// string-based rendering pipeline doesn't have to care.
+    pub details: Option<DiagnosticDetails>,
+}
+
+/// Optional structured companion data on a `TypeDiagnostic`. The
+/// variants map one-to-one with diagnostics that have specific
+/// tooling-consumable state beyond the human-readable message; each
+/// variant is attached only by the sites that produce its
+/// corresponding diagnostic, so a consumer can pattern-match on the
+/// variant without parsing the error string.
+#[derive(Debug, Clone)]
+pub enum DiagnosticDetails {
+    /// A `match` expression with missing variant coverage. `missing`
+    /// holds the formatted literal values of each uncovered variant
+    /// (quoted for strings, bare for ints), ready to drop into a new
+    /// arm prefix. The diagnostic's `span` covers the whole `match`
+    /// expression, so a code-action can locate the closing `}` by
+    /// reading the source at `span.end`.
+    NonExhaustiveMatch { missing: Vec<String> },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -232,6 +254,7 @@ impl TypeChecker {
             span: Some(span),
             help: None,
             fix: None,
+            details: None,
         });
     }
 
@@ -248,6 +271,7 @@ impl TypeChecker {
             span: Some(span),
             help: Some(help),
             fix: None,
+            details: None,
         });
     }
 
@@ -263,6 +287,7 @@ impl TypeChecker {
             span: Some(span),
             help: None,
             fix: Some(fix),
+            details: None,
         });
     }
 
@@ -279,6 +304,27 @@ impl TypeChecker {
             span: Some(span),
             help: None,
             fix: None,
+            details: None,
+        });
+    }
+
+    /// Like `exhaustiveness_error_at` but additionally attaches the
+    /// missing-variant list as structured details. LSP code-actions
+    /// read this to synthesise an "Add missing match arms" quick-fix
+    /// without string-parsing the message.
+    pub(in crate::typechecker) fn exhaustiveness_error_with_missing(
+        &mut self,
+        message: String,
+        span: Span,
+        missing: Vec<String>,
+    ) {
+        self.diagnostics.push(TypeDiagnostic {
+            message,
+            severity: DiagnosticSeverity::Error,
+            span: Some(span),
+            help: None,
+            fix: None,
+            details: Some(DiagnosticDetails::NonExhaustiveMatch { missing }),
         });
     }
 
@@ -289,6 +335,7 @@ impl TypeChecker {
             span: Some(span),
             help: None,
             fix: None,
+            details: None,
         });
     }
 
@@ -305,6 +352,7 @@ impl TypeChecker {
             span: Some(span),
             help: Some(help),
             fix: None,
+            details: None,
         });
     }
 }

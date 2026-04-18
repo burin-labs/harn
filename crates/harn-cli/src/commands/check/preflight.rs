@@ -970,6 +970,19 @@ fn scan_node_preflight(
                 diagnostics,
             );
         }
+        Node::OrPattern(alternatives) => {
+            for alt in alternatives {
+                scan_node_preflight(
+                    alt,
+                    file_path,
+                    source,
+                    config,
+                    host_capabilities,
+                    visited,
+                    diagnostics,
+                );
+            }
+        }
     }
 }
 

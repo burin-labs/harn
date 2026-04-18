@@ -476,6 +476,7 @@ fn node_children_bundle(node: &SNode) -> Vec<&SNode> {
         | Node::BreakStmt
         | Node::ContinueStmt => Vec::new(),
         Node::AttributedDecl { inner, .. } => vec![inner.as_ref()],
+        Node::OrPattern(alternatives) => alternatives.iter().collect(),
     }
 }
 

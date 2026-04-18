@@ -196,7 +196,28 @@ impl Parser {
 
         let mut arms = Vec::new();
         while !self.is_at_end() && !self.check(&TokenKind::RBrace) {
-            let pattern = self.parse_expression()?;
+            let first_pat = self.parse_expression()?;
+            // Or-pattern: `pat1 | pat2 | pat3 -> body`. `|` is the `Bar`
+            // token (only used in type position elsewhere), so an
+            // unguarded expression parse never consumes it. The resulting
+            // `OrPattern` lowers through the same narrowing/compilation
+            // paths as a single literal pattern.
+            let pattern = if self.check(&TokenKind::Bar) {
+                let pat_start = first_pat.span;
+                let mut alternatives = vec![first_pat];
+                while self.check(&TokenKind::Bar) {
+                    self.advance();
+                    self.skip_newlines();
+                    alternatives.push(self.parse_expression()?);
+                }
+                let pat_end = self.prev_span();
+                spanned(
+                    Node::OrPattern(alternatives),
+                    Span::merge(pat_start, pat_end),
+                )
+            } else {
+                first_pat
+            };
             let guard = if self.check(&TokenKind::If) {
                 self.advance();
                 Some(Box::new(self.parse_expression()?))

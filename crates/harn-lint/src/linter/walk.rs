@@ -992,6 +992,12 @@ impl<'a> Linter<'a> {
                     self.complexity_suppression_depth -= 1;
                 }
             }
+
+            Node::OrPattern(alternatives) => {
+                for alt in alternatives {
+                    self.lint_node(alt);
+                }
+            }
         }
     }
 }

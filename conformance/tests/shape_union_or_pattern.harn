@@ -1,0 +1,23 @@
+// Or-patterns in match arms over a tagged shape union: each
+// alternative contributes its matching variant to the narrowed type
+// inside the arm body. The two-variant or-pattern arm below refines
+// `m` to a two-variant union so the shared `kind` field is still
+// accessible without touching the variant-specific `reason` field.
+type Msg = {kind: "ping", ttl: int} | {kind: "pong", latency_ms: int} | {kind: "close", reason: string}
+
+pipeline default() {
+  fn summarise(m: Msg) -> string {
+    return match m.kind {
+      "ping" | "pong" -> { "live:" + m.kind }
+      "close" -> {
+        let c: {kind: "close", reason: string} = m
+        "closed:" + c.reason
+      }
+    }
+  }
+  // Both variants share the `kind` discriminant; both narrowed
+  // shapes carry it, so property access type-checks.
+  println(summarise({kind: "ping", ttl: 30}))
+  println(summarise({kind: "pong", latency_ms: 42}))
+  println(summarise({kind: "close", reason: "done"}))
+}

@@ -378,6 +378,11 @@ pub enum Node {
         operand: Box<SNode>,
     },
 
+    /// Or-pattern in a `match` arm: `"ping" | "pong" -> body`. One or
+    /// more alternative patterns that share a single arm body. Only
+    /// legal inside a `MatchArm.pattern` slot.
+    OrPattern(Vec<SNode>),
+
     Block(Vec<SNode>),
     Closure {
         params: Vec<TypedParam>,

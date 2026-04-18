@@ -811,6 +811,12 @@ fn collect_symbols(
         Node::AttributedDecl { inner, .. } => {
             collect_symbols(inner, symbols, scope_span, source, None);
         }
+
+        Node::OrPattern(alternatives) => {
+            for alt in alternatives {
+                collect_symbols(alt, symbols, scope_span, source, None);
+            }
+        }
     }
 }
 
@@ -922,6 +928,44 @@ pub(crate) fn format_shape_expanded(ty: &TypeExpr, indent: usize) -> String {
         String::new()
     }
 }
+
+/// Expanded hover rendering for a `TypeExpr::Union` whose members are
+/// dict shapes — a.k.a. a tagged shape union. Produces one block per
+/// variant with the fields laid out vertically, so the IDE can show
+/// "`Msg` is one of:" with the ping/pong/close variants beneath. If
+/// the union isn't made entirely of shapes (or has fewer than two
+/// members), returns an empty string and the caller falls back to the
+/// compact one-liner.
+pub(crate) fn format_union_shapes_expanded(ty: &TypeExpr) -> String {
+    let TypeExpr::Union(members) = ty else {
+        return String::new();
+    };
+    if members.len() < 2 {
+        return String::new();
+    }
+    if !members.iter().all(|m| matches!(m, TypeExpr::Shape(_))) {
+        return String::new();
+    }
+    let mut lines = Vec::new();
+    lines.push("```harn".to_string());
+    let mut first = true;
+    for member in members {
+        if !first {
+            lines.push("|".to_string());
+        }
+        first = false;
+        if let TypeExpr::Shape(fields) = member {
+            lines.push("{".to_string());
+            for f in fields {
+                let opt = if f.optional { "?" } else { "" };
+                lines.push(format!("  {}{opt}: {}", f.name, format_type(&f.type_expr)));
+            }
+            lines.push("}".to_string());
+        }
+    }
+    lines.push("```".to_string());
+    lines.join("\n")
+}
 fn format_type_params(type_params: &[TypeParam]) -> String {
     if type_params.is_empty() {
         String::new()
@@ -934,5 +978,57 @@ fn format_type_params(type_params: &[TypeParam]) -> String {
                 .collect::<Vec<_>>()
                 .join(", ")
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use harn_parser::{ShapeField, TypeExpr};
+
+    fn shape(kind_value: &str, other_name: &str, other_type: &str) -> TypeExpr {
+        TypeExpr::Shape(vec![
+            ShapeField {
+                name: "kind".into(),
+                type_expr: TypeExpr::LitString(kind_value.into()),
+                optional: false,
+            },
+            ShapeField {
+                name: other_name.into(),
+                type_expr: TypeExpr::Named(other_type.into()),
+                optional: false,
+            },
+        ])
+    }
+
+    #[test]
+    fn union_expand_tagged_shape_union_lists_each_variant() {
+        let ty = TypeExpr::Union(vec![
+            shape("ping", "ttl", "int"),
+            shape("pong", "latency_ms", "int"),
+        ]);
+        let out = format_union_shapes_expanded(&ty);
+        assert!(out.contains("kind: \"ping\""), "got: {out}");
+        assert!(out.contains("ttl: int"), "got: {out}");
+        assert!(out.contains("kind: \"pong\""), "got: {out}");
+        assert!(out.contains("latency_ms: int"), "got: {out}");
+        assert!(out.contains("|"), "expected variant separator, got: {out}");
+    }
+
+    #[test]
+    fn union_expand_empty_for_non_shape_union() {
+        let ty = TypeExpr::Union(vec![
+            TypeExpr::Named("int".into()),
+            TypeExpr::Named("string".into()),
+        ]);
+        let out = format_union_shapes_expanded(&ty);
+        assert!(out.is_empty(), "expected empty, got: {out}");
+    }
+
+    #[test]
+    fn union_expand_empty_for_single_member() {
+        let ty = TypeExpr::Union(vec![shape("ping", "ttl", "int")]);
+        let out = format_union_shapes_expanded(&ty);
+        assert!(out.is_empty(), "expected empty, got: {out}");
     }
 }
