@@ -959,7 +959,9 @@ registries programmatically. For MCP serving, see the `tool_define` /
 
 Project metadata store backed by host-managed sharded JSON files.
 Supports hierarchical namespace resolution (child directories inherit
-from parents).
+from parents). The default filesystem backend persists namespace shards
+under `.harn/metadata/<namespace>/entries.json` and still reads the legacy
+monolithic `root.json` shard.
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|

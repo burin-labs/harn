@@ -17,6 +17,8 @@ use crate::vm::Vm;
 
 type Namespace = String;
 type FieldKey = String;
+const LEGACY_SHARD_NAME: &str = "root.json";
+const NAMESPACE_ENTRIES_FILE: &str = "entries.json";
 
 /// Per-directory metadata: namespaces -> keys -> JSON values.
 #[derive(Clone, Default)]
@@ -24,10 +26,30 @@ struct DirectoryMetadata {
     namespaces: BTreeMap<Namespace, BTreeMap<FieldKey, serde_json::Value>>,
 }
 
+trait MetadataBackend {
+    fn backend_name(&self) -> &'static str;
+    fn load(&self, root: &Path) -> Result<BTreeMap<String, DirectoryMetadata>, String>;
+    fn save(
+        &self,
+        root: &Path,
+        entries: &BTreeMap<String, DirectoryMetadata>,
+    ) -> Result<(), String>;
+}
+
+#[derive(Default)]
+struct FilesystemMetadataBackend;
+
+impl FilesystemMetadataBackend {
+    fn new() -> Self {
+        Self
+    }
+}
+
 /// The full metadata store (all directories).
 struct MetadataState {
     entries: BTreeMap<String, DirectoryMetadata>,
     base_dir: PathBuf,
+    backend: Box<dyn MetadataBackend>,
     loaded: bool,
     dirty: bool,
 }
@@ -37,6 +59,7 @@ impl MetadataState {
         Self {
             entries: BTreeMap::new(),
             base_dir: base_dir.to_path_buf(),
+            backend: Box::new(FilesystemMetadataBackend::new()),
             loaded: false,
             dirty: false,
         }
@@ -51,33 +74,8 @@ impl MetadataState {
             return;
         }
         self.loaded = true;
-        let meta_dir = self.metadata_dir();
-        let entries = match std::fs::read_dir(&meta_dir) {
-            Ok(e) => e,
-            Err(_) => return,
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().map(|e| e == "json").unwrap_or(false) {
-                if let Ok(contents) = std::fs::read_to_string(&path) {
-                    self.load_shard(&contents);
-                }
-            }
-        }
-    }
-
-    fn load_shard(&mut self, contents: &str) {
-        let parsed: serde_json::Value = match serde_json::from_str(contents) {
-            Ok(v) => v,
-            Err(_) => return,
-        };
-        let shard_entries = match parsed.get("entries").and_then(|e| e.as_object()) {
-            Some(e) => e,
-            None => return,
-        };
-        for (dir, meta_val) in shard_entries {
-            let meta = parse_directory_metadata(meta_val);
-            self.entries.insert(dir.clone(), meta);
+        if let Ok(entries) = self.backend.load(&self.metadata_dir()) {
+            self.entries = entries;
         }
     }
 
@@ -147,26 +145,82 @@ impl MetadataState {
             return Ok(());
         }
         let meta_dir = self.metadata_dir();
-        std::fs::create_dir_all(&meta_dir).map_err(|e| format!("metadata mkdir: {e}"))?;
+        self.backend.save(&meta_dir, &self.entries)?;
+        self.dirty = false;
+        Ok(())
+    }
+}
 
-        // Everything goes in one shard; sufficient for single-package projects.
-        let mut shard = serde_json::Map::new();
-        for (dir, meta) in &self.entries {
-            shard.insert(dir.clone(), serialize_directory_metadata(meta));
+impl MetadataBackend for FilesystemMetadataBackend {
+    fn backend_name(&self) -> &'static str {
+        "filesystem"
+    }
+
+    fn load(&self, root: &Path) -> Result<BTreeMap<String, DirectoryMetadata>, String> {
+        let mut entries = BTreeMap::new();
+        let legacy_path = root.join(LEGACY_SHARD_NAME);
+        if let Ok(contents) = std::fs::read_to_string(&legacy_path) {
+            entries = parse_legacy_entries(&contents);
         }
 
-        let store_obj = serde_json::json!({
-            "version": 2,
-            "generatedAt": chrono_now_iso(),
-            "entries": serde_json::Value::Object(shard)
-        });
+        let namespace_dirs = match std::fs::read_dir(root) {
+            Ok(read_dir) => read_dir,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(entries),
+            Err(error) => return Err(format!("metadata load: {error}")),
+        };
 
-        let json =
-            serde_json::to_string_pretty(&store_obj).map_err(|e| format!("metadata json: {e}"))?;
+        let mut dirs = namespace_dirs
+            .flatten()
+            .filter(|entry| entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false))
+            .collect::<Vec<_>>();
+        dirs.sort_by_key(|entry| entry.file_name());
 
-        let shard_path = meta_dir.join("root.json");
-        std::fs::write(&shard_path, json).map_err(|e| format!("metadata write: {e}"))?;
-        self.dirty = false;
+        for dir in dirs {
+            let shard_path = dir.path().join(NAMESPACE_ENTRIES_FILE);
+            let Ok(contents) = std::fs::read_to_string(&shard_path) else {
+                continue;
+            };
+            merge_namespace_entries(&mut entries, &contents);
+        }
+
+        Ok(entries)
+    }
+
+    fn save(
+        &self,
+        root: &Path,
+        entries: &BTreeMap<String, DirectoryMetadata>,
+    ) -> Result<(), String> {
+        std::fs::create_dir_all(root).map_err(|error| format!("metadata mkdir: {error}"))?;
+
+        let mut namespaces: BTreeMap<String, serde_json::Map<String, serde_json::Value>> =
+            BTreeMap::new();
+        for (dir, meta) in entries {
+            for (namespace, fields) in &meta.namespaces {
+                namespaces
+                    .entry(namespace.clone())
+                    .or_default()
+                    .insert(dir.clone(), serialize_namespace_fields(fields));
+            }
+        }
+
+        for (namespace, shard_entries) in namespaces {
+            let namespace_dir = root.join(namespace_path_component(&namespace));
+            std::fs::create_dir_all(&namespace_dir)
+                .map_err(|error| format!("metadata mkdir: {error}"))?;
+            let shard = serde_json::json!({
+                "version": 1,
+                "namespace": namespace,
+                "backend": self.backend_name(),
+                "generatedAt": chrono_now_iso(),
+                "entries": serde_json::Value::Object(shard_entries),
+            });
+            let json = serde_json::to_string_pretty(&shard)
+                .map_err(|error| format!("metadata json: {error}"))?;
+            std::fs::write(namespace_dir.join(NAMESPACE_ENTRIES_FILE), json)
+                .map_err(|error| format!("metadata write: {error}"))?;
+        }
+
         Ok(())
     }
 }
@@ -240,6 +294,25 @@ fn merge_metadata(target: &mut DirectoryMetadata, source: &DirectoryMetadata) {
     }
 }
 
+fn parse_namespace_fields(val: &serde_json::Value) -> BTreeMap<FieldKey, serde_json::Value> {
+    let mut fields = BTreeMap::new();
+    let Some(obj) = val.as_object() else {
+        return fields;
+    };
+    for (key, value) in obj {
+        fields.insert(key.clone(), value.clone());
+    }
+    fields
+}
+
+fn serialize_namespace_fields(fields: &BTreeMap<FieldKey, serde_json::Value>) -> serde_json::Value {
+    let mut fields_obj = serde_json::Map::new();
+    for (k, v) in fields {
+        fields_obj.insert(k.clone(), v.clone());
+    }
+    serde_json::Value::Object(fields_obj)
+}
+
 fn parse_directory_metadata(val: &serde_json::Value) -> DirectoryMetadata {
     let mut meta = DirectoryMetadata::default();
     let obj = match val.as_object() {
@@ -260,16 +333,53 @@ fn parse_directory_metadata(val: &serde_json::Value) -> DirectoryMetadata {
     meta
 }
 
-fn serialize_directory_metadata(meta: &DirectoryMetadata) -> serde_json::Value {
-    let mut ns_obj = serde_json::Map::new();
-    for (ns_name, fields) in &meta.namespaces {
-        let mut fields_obj = serde_json::Map::new();
-        for (k, v) in fields {
-            fields_obj.insert(k.clone(), v.clone());
-        }
-        ns_obj.insert(ns_name.clone(), serde_json::Value::Object(fields_obj));
+fn parse_legacy_entries(contents: &str) -> BTreeMap<String, DirectoryMetadata> {
+    let mut entries = BTreeMap::new();
+    let parsed: serde_json::Value = match serde_json::from_str(contents) {
+        Ok(v) => v,
+        Err(_) => return entries,
+    };
+    let Some(shard_entries) = parsed.get("entries").and_then(|e| e.as_object()) else {
+        return entries;
+    };
+    for (dir, meta_val) in shard_entries {
+        entries.insert(dir.clone(), parse_directory_metadata(meta_val));
     }
-    serde_json::json!({ "namespaces": serde_json::Value::Object(ns_obj) })
+    entries
+}
+
+fn merge_namespace_entries(entries: &mut BTreeMap<String, DirectoryMetadata>, contents: &str) {
+    let parsed: serde_json::Value = match serde_json::from_str(contents) {
+        Ok(v) => v,
+        Err(_) => return,
+    };
+    let Some(namespace) = parsed.get("namespace").and_then(|value| value.as_str()) else {
+        return;
+    };
+    let Some(shard_entries) = parsed.get("entries").and_then(|value| value.as_object()) else {
+        return;
+    };
+    for (dir, fields_val) in shard_entries {
+        let directory = entries.entry(dir.clone()).or_default();
+        directory
+            .namespaces
+            .insert(namespace.to_string(), parse_namespace_fields(fields_val));
+    }
+}
+
+fn namespace_path_component(namespace: &str) -> String {
+    let mut result = String::new();
+    for ch in namespace.chars() {
+        match ch {
+            'a'..='z' | 'A'..='Z' | '0'..='9' | '-' | '_' | '.' => result.push(ch),
+            _ => result.push_str(&format!("_{:02X}", ch as u32)),
+        }
+    }
+    if result.is_empty() || result == "." || result == ".." {
+        "_".to_string()
+    } else {
+        result
+    }
 }
 
 fn vm_to_json(val: &VmValue) -> serde_json::Value {
@@ -958,6 +1068,109 @@ mod tests {
             Some(&serde_json::json!("rust"))
         );
         assert_eq!(classification.get("owner"), Some(&serde_json::json!("vm")));
+    }
+
+    #[test]
+    fn metadata_save_writes_namespace_shards() {
+        let base = temp_path("save");
+        let mut state = MetadataState::new(&base);
+        state.set_namespace(
+            ".",
+            "classification",
+            BTreeMap::from([("language".into(), serde_json::json!("rust"))]),
+        );
+        state.set_namespace(
+            "src",
+            "coding-enrichment-v1",
+            BTreeMap::from([("_deep_scan".into(), serde_json::json!({"version": 1}))]),
+        );
+        state.save().expect("save");
+
+        let metadata_root = crate::runtime_paths::metadata_dir(&base);
+        let classification = std::fs::read_to_string(
+            metadata_root
+                .join("classification")
+                .join(NAMESPACE_ENTRIES_FILE),
+        )
+        .expect("classification shard");
+        let parsed = serde_json::from_str::<serde_json::Value>(&classification).expect("json");
+        assert_eq!(
+            parsed.get("namespace").and_then(|value| value.as_str()),
+            Some("classification")
+        );
+        assert!(parsed
+            .get("entries")
+            .and_then(|value| value.get("."))
+            .is_some());
+
+        let enrichment = std::fs::read_to_string(
+            metadata_root
+                .join("coding-enrichment-v1")
+                .join(NAMESPACE_ENTRIES_FILE),
+        )
+        .expect("enrichment shard");
+        let parsed = serde_json::from_str::<serde_json::Value>(&enrichment).expect("json");
+        assert!(parsed
+            .get("entries")
+            .and_then(|value| value.get("src"))
+            .is_some());
+    }
+
+    #[test]
+    fn metadata_load_merges_legacy_and_namespace_shards() {
+        let base = temp_path("load");
+        let metadata_root = crate::runtime_paths::metadata_dir(&base);
+        std::fs::create_dir_all(metadata_root.join("facts")).unwrap();
+        std::fs::write(
+            metadata_root.join(LEGACY_SHARD_NAME),
+            serde_json::json!({
+                "version": 2,
+                "entries": {
+                    ".": {
+                        "namespaces": {
+                            "classification": {
+                                "language": "rust"
+                            }
+                        }
+                    }
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+        std::fs::write(
+            metadata_root.join("facts").join(NAMESPACE_ENTRIES_FILE),
+            serde_json::json!({
+                "version": 1,
+                "namespace": "facts",
+                "entries": {
+                    "src": {
+                        "kind": "module"
+                    }
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let mut state = MetadataState::new(&base);
+        state.ensure_loaded();
+        assert_eq!(
+            state
+                .entries
+                .get(".")
+                .and_then(|meta| meta.namespaces.get("classification"))
+                .and_then(|fields| fields.get("language")),
+            Some(&serde_json::json!("rust"))
+        );
+        assert_eq!(
+            state
+                .entries
+                .get("src")
+                .and_then(|meta| meta.namespaces.get("facts"))
+                .and_then(|fields| fields.get("kind")),
+            Some(&serde_json::json!("module"))
+        );
     }
 
     #[test]

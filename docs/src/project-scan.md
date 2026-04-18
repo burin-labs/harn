@@ -120,6 +120,47 @@ By default, cache entries live under `.harn/cache/enrichment/` inside the
 project root. Override that with `cache_dir` when a caller wants a different
 location.
 
+## Cached deep scans
+
+`project_deep_scan(path, options?)` layers a cached per-directory tree on top
+of the metadata store. It is intended for repeated L2/L3 repo analysis where
+callers want stable hierarchical evidence instead of re-running enrichment on
+every turn.
+
+Typical shape:
+
+```harn
+let tree = project_deep_scan(".", {
+  namespace: "coding-enrichment-v1",
+  tiers: ["ambient", "config", "enriched"],
+  incremental: true,
+  max_staleness_seconds: 86400,
+  depth: nil,
+  enrichment: {
+    prompt: "Return valid JSON only.",
+    schema: {purpose: "string", conventions: ["string"]},
+    provider: "mock",
+    budget_tokens_per_dir: 1024,
+  },
+})
+```
+
+Notes:
+
+- `namespace` is caller-owned, so multiple agents can keep separate trees for
+  the same repo without collisions.
+- `incremental: true` reuses cached directories whose local directory
+  `structure_hash` and `content_hash` still match.
+- `depth: nil` means unbounded traversal.
+- The filesystem backend persists namespace shards under
+  `.harn/metadata/<namespace>/entries.json`.
+- `project_deep_scan_status(namespace, path?)` returns the last recorded scan
+  summary for that scope: `{total_dirs, enriched_dirs, stale_dirs, cache_hits,
+  last_refresh, ...}`.
+
+`project_enrich(path, options?)` is the single-directory building block used by
+deep scan when the `enriched` tier is requested.
+
 ## Catalog
 
 `project_catalog()` returns the authoritative built-in catalog that drives

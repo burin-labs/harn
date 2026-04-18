@@ -5,6 +5,7 @@ use std::process::Command;
 use std::time::Duration;
 
 use harn_vm::llm_config::{self, AuthEnv, ProviderDef};
+use harn_vm::runtime_paths;
 use reqwest::{header::CONTENT_TYPE, Method};
 
 use crate::package;
@@ -41,6 +42,7 @@ pub(crate) async fn run_doctor(network: bool) {
     checks.push(check_binary("cargo"));
     checks.extend(check_provider_selection());
     checks.extend(check_manifest());
+    checks.extend(check_metadata_cache());
     checks.extend(check_skills());
     checks.extend(check_provider_health(network).await);
 
@@ -250,6 +252,80 @@ fn check_skills() -> Vec<DoctorCheck> {
     }
 
     checks
+}
+
+fn check_metadata_cache() -> Vec<DoctorCheck> {
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let metadata_dir = runtime_paths::metadata_dir(&cwd);
+    let read_dir = match fs::read_dir(&metadata_dir) {
+        Ok(read_dir) => read_dir,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return vec![DoctorCheck {
+                status: DoctorStatus::Skip,
+                label: "metadata".to_string(),
+                detail: format!("no metadata cache under {}", metadata_dir.display()),
+            }];
+        }
+        Err(error) => {
+            return vec![DoctorCheck {
+                status: DoctorStatus::Warn,
+                label: "metadata".to_string(),
+                detail: format!("failed to read {}: {error}", metadata_dir.display()),
+            }];
+        }
+    };
+
+    let mut namespace_summaries = Vec::new();
+    let mut saw_legacy_root = false;
+    for entry in read_dir.flatten() {
+        let path = entry.path();
+        if path.is_file() && entry.file_name() == "root.json" {
+            saw_legacy_root = true;
+            continue;
+        }
+        if !path.is_dir() {
+            continue;
+        }
+        let shard_path = path.join("entries.json");
+        let Ok(text) = fs::read_to_string(&shard_path) else {
+            continue;
+        };
+        let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&text) else {
+            continue;
+        };
+        let Some(namespace) = parsed.get("namespace").and_then(|value| value.as_str()) else {
+            continue;
+        };
+        let count = parsed
+            .get("entries")
+            .and_then(|value| value.as_object())
+            .map(|entries| entries.len())
+            .unwrap_or(0);
+        namespace_summaries.push(format!("{namespace} ({count} dirs)"));
+    }
+
+    namespace_summaries.sort();
+    let detail = if namespace_summaries.is_empty() {
+        if saw_legacy_root {
+            format!(
+                "legacy metadata shard present at {}",
+                metadata_dir.join("root.json").display()
+            )
+        } else {
+            format!(
+                "metadata directory present at {} but no namespace shards found",
+                metadata_dir.display()
+            )
+        }
+    } else {
+        namespace_summaries.join(", ")
+    };
+
+    vec![DoctorCheck {
+        status: DoctorStatus::Ok,
+        label: "metadata".to_string(),
+        detail,
+    }]
 }
 
 async fn check_provider_health(network: bool) -> Vec<DoctorCheck> {

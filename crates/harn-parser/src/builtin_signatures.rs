@@ -1074,6 +1074,10 @@ pub(crate) const BUILTIN_SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("dict")),
     },
     BuiltinSig {
+        name: "project_walk_tree_native",
+        return_type: Some(BuiltinReturn::Named("list")),
+    },
+    BuiltinSig {
         name: "prompt_mark_rendered",
         return_type: Some(BuiltinReturn::Named("int")),
     },
