@@ -15,7 +15,7 @@ mod tool_dispatch;
 mod tool_search_client;
 mod turn_preflight;
 
-pub use skill_match::parse_skill_config;
+pub use skill_match::{parse_skill_config, parse_skill_match_config_public};
 pub use state::SkillMatchConfig;
 #[allow(unused_imports)]
 pub use state::{ActiveSkill, SkillMatchStrategy};

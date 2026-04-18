@@ -14,6 +14,7 @@ use std::rc::Rc;
 
 use serde_json::Value;
 
+use crate::agent_events::AgentEvent;
 use crate::bridge::HostBridge;
 use crate::llm::api::{LlmCallOptions, ToolSearchStrategy, ToolSearchVariant};
 use crate::llm::tool_search::{self, SearchOutcome};
@@ -67,6 +68,8 @@ pub(super) async fn handle_client_tool_search(
     // so partial failures (host RPC error mid-flight) still record the
     // intent. Mirrors Anthropic's `server_tool_use` → `tool_search_query`
     // shape: id, name, query, visibility.
+    let search_tool_name = search_tool_display_name(client_state.variant);
+    let strategy_str = client_state.strategy.as_short();
     state.transcript_events.push(transcript_event(
         "tool_search_query",
         "assistant",
@@ -74,12 +77,21 @@ pub(super) async fn handle_client_tool_search(
         "",
         Some(serde_json::json!({
             "id": tool_use_id,
-            "name": search_tool_display_name(client_state.variant),
+            "name": search_tool_name,
             "query": raw_args.clone(),
-            "strategy": client_state.strategy.as_short(),
+            "strategy": strategy_str,
             "mode": "client",
         })),
     ));
+    super::emit_agent_event(&AgentEvent::ToolSearchQuery {
+        session_id: state.session_id.clone(),
+        tool_use_id: tool_use_id.to_string(),
+        name: search_tool_name.to_string(),
+        query: raw_args.clone(),
+        strategy: strategy_str.to_string(),
+        mode: "client".to_string(),
+    })
+    .await;
 
     let outcome = run_strategy(client_state, bridge, &query).await;
     let promoted_names = outcome.tool_names.clone();
@@ -94,6 +106,12 @@ pub(super) async fn handle_client_tool_search(
         .iter()
         .map(|name| serde_json::json!({"tool_name": name}))
         .collect();
+    let result_strategy = state
+        .tool_search_client
+        .as_ref()
+        .map(|c| c.strategy.as_short())
+        .unwrap_or("bm25")
+        .to_string();
     state.transcript_events.push(transcript_event(
         "tool_search_result",
         "tool",
@@ -102,15 +120,19 @@ pub(super) async fn handle_client_tool_search(
         Some(serde_json::json!({
             "tool_use_id": tool_use_id,
             "tool_references": refs,
-            "strategy": state
-                .tool_search_client
-                .as_ref()
-                .map(|c| c.strategy.as_short())
-                .unwrap_or("bm25"),
+            "strategy": result_strategy,
             "mode": "client",
             "promoted": newly_added,
         })),
     ));
+    super::emit_agent_event(&AgentEvent::ToolSearchResult {
+        session_id: state.session_id.clone(),
+        tool_use_id: tool_use_id.to_string(),
+        promoted: newly_added.clone(),
+        strategy: result_strategy,
+        mode: "client".to_string(),
+    })
+    .await;
 
     let result_value = outcome.into_tool_result();
     Ok(serde_json::to_string(&result_value).unwrap_or_default())

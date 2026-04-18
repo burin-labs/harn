@@ -134,6 +134,31 @@ pub enum AgentEvent {
         skill_name: String,
         allowed_tools: Vec<String>,
     },
+    /// Emitted when a `tool_search` query is issued by the model. Carries
+    /// the raw query args, the configured strategy, and a `mode` tag
+    /// distinguishing the client-executed fallback (`"client"`) from
+    /// provider-native paths (`"anthropic"` / `"openai"`). Mirrors the
+    /// transcript event shape so IDEs can render a search-in-progress
+    /// chip in real time — the replay path walks the transcript after
+    /// the turn, which is too late for live UX.
+    ToolSearchQuery {
+        session_id: String,
+        tool_use_id: String,
+        name: String,
+        query: serde_json::Value,
+        strategy: String,
+        mode: String,
+    },
+    /// Emitted when `tool_search` resolves — carries the list of tool
+    /// names newly promoted into the model's effective surface for the
+    /// next turn. Pair-emitted with `ToolSearchQuery` on every search.
+    ToolSearchResult {
+        session_id: String,
+        tool_use_id: String,
+        promoted: Vec<String>,
+        strategy: String,
+        mode: String,
+    },
 }
 
 impl AgentEvent {
@@ -152,7 +177,9 @@ impl AgentEvent {
             | Self::DaemonWatchdogTripped { session_id, .. }
             | Self::SkillActivated { session_id, .. }
             | Self::SkillDeactivated { session_id, .. }
-            | Self::SkillScopeTools { session_id, .. } => session_id,
+            | Self::SkillScopeTools { session_id, .. }
+            | Self::ToolSearchQuery { session_id, .. }
+            | Self::ToolSearchResult { session_id, .. } => session_id,
         }
     }
 }

@@ -688,6 +688,12 @@ fn normalize_skill_registry(value: &VmValue) -> Option<VmValue> {
     }
 }
 
+/// Workflow-level entry point used by orchestration to parse a
+/// `skill_match:` dict lifted from the workflow's `run_options`.
+pub fn parse_skill_match_config_public(dict: &BTreeMap<String, VmValue>) -> SkillMatchConfig {
+    parse_skill_match_config(dict)
+}
+
 fn parse_skill_match_config(dict: &BTreeMap<String, VmValue>) -> SkillMatchConfig {
     let strategy = dict
         .get("strategy")

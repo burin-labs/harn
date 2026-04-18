@@ -9,6 +9,58 @@ granular archaeology.
 
 ## Unreleased
 
+### Added
+
+- **Agent event variants for `tool_search_query` / `tool_search_result`
+  (harn-vm, harn-cli).** Both the client-executed fallback
+  (`crates/harn-vm/src/llm/agent/tool_search_client.rs`) and the
+  provider-native paths (Anthropic / OpenAI Responses server-hosted
+  tool search) now emit canonical `AgentEvent::ToolSearchQuery` and
+  `AgentEvent::ToolSearchResult` alongside the existing transcript
+  events. `AcpAgentEventSink` forwards both as `session/update`
+  notifications with `sessionUpdate: "tool_search_query"` /
+  `"tool_search_result"` kinds so ACP hosts (burin-code et al.) can
+  render a "Tool Vault search in progress" chip in real time.
+  Previously these events existed only as content blocks on the
+  assistant's response and transcript-events list, so IDEs could not
+  observe a search until the whole turn completed. `mode` is tagged
+  `"client"`, `"anthropic"`, or `"openai"` so downstream consumers
+  can distinguish the path. `AgentEvent` is not `#[non_exhaustive]`
+  so this is a SemVer-breaking change for out-of-tree consumers that
+  match the enum exhaustively — add arms for the two new variants.
+
+- **`skills:` / `skill_match:` pass-through in `workflow_execute`
+  (harn-vm).** `workflow_execute(task, graph, artifacts, {skills:
+  ..., skill_match: ...})` now threads the registry through every
+  per-stage agent loop via a workflow-level thread-local context
+  (`WorkflowSkillContext`). Per-node `model_policy.skills` /
+  `model_policy.skill_match` overrides the workflow-level setting,
+  mirroring the precedence that already holds for other model_policy
+  fields. Before this, only direct `agent_loop(...)` callers received
+  the `skills:` option — workflow-graph callers silently dropped it,
+  which was blocking burin-code's Skills & Tool Vault cutover.
+
+- **Namespace-prefixed entries in skill `allowed_tools` (harn-vm).**
+  A skill's `allowed_tools` list now accepts three shapes per entry:
+  an exact tool name (unchanged), `"namespace:<tag>"` to match every
+  tool declared with that `namespace` field, and `"*"` as a "keep the
+  full surface" escape hatch useful for skills that only want to
+  carry prompt context without narrowing the tool surface. Namespace
+  matching lands in both the VM-side `skill_scoped_tools_val` (text
+  channel + contract prompt) and the native-channel
+  `rebuild_scoped_native_tools` (OpenAI Responses / Anthropic JSON
+  schema lists). Malformed entries — `"namespace:"` with no tag, or
+  any other colon-prefixed token — fail loud at `skill_define` time
+  rather than silently scoping to an empty set.
+
+- **`model_policy.tool_format` on workflow nodes (harn-vm).** The
+  per-stage agent loop previously resolved its tool-calling contract
+  format solely from `HARN_AGENT_TOOL_FORMAT` env / provider-model
+  default. `ModelPolicy` gained an optional `tool_format: Option<String>`
+  field that takes precedence, so workflow authors can pin
+  `tool_format: "native"` per-stage without touching env or rebuilding
+  the pipeline runner.
+
 ### Fixed
 
 - **Module graph path-spelling explosion (harn-modules).**

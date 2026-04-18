@@ -26,6 +26,57 @@ the "Prepare vX.Y.Z release" commit. Once that commit is in place and the
 tree is clean, `release_ship.sh` handles audit, bump, tag, push, publish,
 and GitHub release creation.
 
+## Fire-and-forget mode
+
+Once the "Prepare vX.Y.Z release" commit is in place and the tree is clean,
+`./scripts/release_ship.sh --bump patch` is a **fire-and-forget** command:
+it performs audit → dry-run publish → bump → commit → tag → push branch+tag
+→ `cargo publish` → release notes → GitHub release, then exits. Check the
+exit code when it returns; if non-zero, the step names in its stdout tell
+you which gate tripped.
+
+Typical wall-clock: ~6–10 min cold, ~2–4 min warm (sccache hot). Do not
+babysit it. Start the command and work on other things. Failure modes,
+roughly in frequency order:
+
+- `release_gate.sh audit` clippy/test failure → fix the code, re-commit
+  into the same "Prepare vX.Y.Z release" commit (amend), re-run.
+- `publish --dry-run` failure → usually a missing `include = [...]` file
+  in a crate manifest; fix and re-commit.
+- `cargo publish` rate-limit / transient network → re-run; it's idempotent
+  once the tag exists.
+- `gh release create` failure → the release is already on crates.io and
+  tagged; finish manually with
+  `gh release create <tag> --title <tag> --notes-file <rendered>`.
+
+## Batching multiple tickets in one release
+
+When several unrelated tickets are ready to ship together:
+
+1. Merge each ticket's PR to `main` individually (each may carry a
+   one-line CHANGELOG addition under an "Unreleased" heading — that is
+   fine).
+2. Immediately before releasing, consolidate the CHANGELOG: promote the
+   "Unreleased" section to `## [vX.Y.Z] - YYYY-MM-DD` with the grouped
+   entries and reference each closed ticket by number.
+3. Commit that consolidation as the "Prepare vX.Y.Z release" commit
+   (docs/spec edits ride along if needed).
+4. Run `release_ship.sh --bump patch` once. The release covers all the
+   batched tickets.
+
+Prefer larger batches over many small releases when the tickets are
+topically related (e.g. the "iteration unblocker" pair, the "evidence
+stack" pair). A single batched release is one cargo publish cycle instead
+of N, and downstream consumers pick up a coherent surface.
+
+## Cross-repo iteration does not wait on releases
+
+Downstream repos (notably `burin-code`) can consume in-progress Harn
+changes without a release via `./scripts/fetch-harn.sh --local` in the
+consumer repo — it builds Harn from `~/projects/harn` in release mode and
+installs the binaries directly. Release batching exists to control the
+*published* version surface; it never blocks cross-repo iteration.
+
 ## Default workflow
 
 1. Inspect the worktree first with `git status --short` and `git diff --stat`.

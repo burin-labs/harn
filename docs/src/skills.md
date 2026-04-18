@@ -89,7 +89,7 @@ Ship it: `$ARGUMENTS`. Skill directory: `${HARN_SKILL_DIR}`.
 | `description` | string | One-liner the model sees for auto-activation. |
 | `when-to-use` | string | Longer activation trigger. |
 | `disable-model-invocation` | bool | If `true`, never auto-activate — explicit use only. |
-| `allowed-tools` | list of string | Restrict tool surface while the skill is active. |
+| `allowed-tools` | list of string | Restrict tool surface while the skill is active. Entries accept three shapes: an exact tool name (`"deploy_service"`), a namespace tag (`"namespace:read"` — matches every tool declared with `namespace: "read"`), or `"*"` (escape hatch that keeps the full surface, useful for skills that only carry prompt context). |
 | `user-invocable` | bool | Expose the skill to end users via a slash menu. |
 | `paths` | list of glob | Files the skill expects to touch. |
 | `context` | string | `"fork"` runs in an isolated subcontext. |
@@ -99,6 +99,29 @@ Ship it: `$ARGUMENTS`. Skill directory: `${HARN_SKILL_DIR}`.
 | `effort` | string | `low` / `medium` / `high`. |
 | `shell` | string | Shell to run the body under when `context` is shell-ish. |
 | `argument-hint` | string | UI hint for `$ARGUMENTS`. |
+
+## Tool scoping with `namespace:<tag>`
+
+Tool declarations that carry a `namespace:` field can be grouped into
+one `allowed-tools` entry instead of enumerating names. Given
+
+```harn
+tool_define(reg, "read_file", "...", {namespace: "read", ...})
+tool_define(reg, "list_files", "...", {namespace: "read", ...})
+tool_define(reg, "write_file", "...", {namespace: "write", ...})
+```
+
+a skill with `allowed-tools: ["namespace:read"]` scopes the turn to
+`read_file` + `list_files` and hides `write_file`. Exact tool names
+and the wildcard `"*"` remain valid and can mix freely:
+
+```yaml
+allowed-tools: ["namespace:read", "grep", "*"]
+```
+
+Malformed entries fail loudly at `skill_define` time — a bare `":"`
+without a tag or a colon-prefixed entry that isn't `namespace:` raises
+so authors don't silently scope to an empty set.
 
 ## Body substitution
 

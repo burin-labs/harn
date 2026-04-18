@@ -63,6 +63,34 @@ impl Drop for ApprovalPolicyGuard {
 /// alongside its backing `VmValue`.
 struct VmValueOwned(crate::value::VmValue);
 
+/// Match a VM-side tool-registry entry against a skill's `allowed_tools`
+/// whitelist. Supports exact `name` matches and `namespace:<tag>`
+/// entries that match the tool's `namespace:` declaration. The
+/// wildcard `"*"` is handled by callers at a higher level so the
+/// registry can short-circuit to "keep everything".
+fn skill_whitelist_matches_entry(
+    entry: &std::collections::BTreeMap<String, crate::value::VmValue>,
+    allowed: &std::collections::BTreeSet<String>,
+) -> bool {
+    let name = entry.get("name").map(|v| v.display()).unwrap_or_default();
+    if allowed.contains(&name) {
+        return true;
+    }
+    let namespace = entry.get("namespace").and_then(|v| match v {
+        crate::value::VmValue::String(s) if !s.is_empty() => Some(s.to_string()),
+        _ => None,
+    });
+    if let Some(ns) = namespace {
+        if allowed.iter().any(|a| {
+            a.strip_prefix("namespace:")
+                .is_some_and(|tag| tag == ns.as_str())
+        }) {
+            return true;
+        }
+    }
+    false
+}
+
 /// Build a `VmValue` equivalent to `tools_val` but with `defer_loading:
 /// true` entries removed when they aren't already promoted. Returns
 /// `None` when the input isn't a registry dict (nothing to filter) —
@@ -520,6 +548,15 @@ impl AgentLoopState {
     /// the provider schema, contract prompt, and dispatch all see the
     /// narrower surface.
     ///
+    /// Each whitelist entry is matched in one of three ways:
+    ///   - `"*"`: allow every tool (escape hatch for skills that only
+    ///     want to carry prompt context without narrowing the surface).
+    ///   - `"namespace:<tag>"`: allow every tool whose declaration
+    ///     carries `namespace: "<tag>"`. Lets authors group tools
+    ///     ("read-only", "write-capable", "delegation") and scope a
+    ///     skill with one entry instead of enumerating names.
+    ///   - otherwise: exact-match on the tool's `name` field.
+    ///
     /// Returns `None` when there's no active scope to apply — callers
     /// should fall through to the original registry.
     pub(crate) fn skill_scoped_tools_val(
@@ -535,6 +572,11 @@ impl AgentLoopState {
         if allowed.is_empty() {
             return None;
         }
+        if allowed.iter().any(|a| a == "*") {
+            // Wildcard: keep the original registry as-is. Returning None
+            // routes callers to the unfiltered surface.
+            return None;
+        }
         let tools_list = match dict.get("tools") {
             Some(VmValue::List(list)) => list,
             _ => return None,
@@ -542,11 +584,7 @@ impl AgentLoopState {
         let mut kept: Vec<VmValue> = Vec::with_capacity(tools_list.len());
         for entry in tools_list.iter() {
             let keep = match entry {
-                VmValue::Dict(d) => d
-                    .get("name")
-                    .map(|v| v.display())
-                    .map(|name| allowed.contains(&name))
-                    .unwrap_or(false),
+                VmValue::Dict(d) => skill_whitelist_matches_entry(d, &allowed),
                 _ => false,
             };
             if keep {
@@ -570,7 +608,7 @@ impl AgentLoopState {
             return;
         };
         let allowed = self.skill_allowed_tools();
-        if allowed.is_empty() {
+        if allowed.is_empty() || allowed.iter().any(|a| a == "*") {
             opts.native_tools = Some(snapshot.clone());
             return;
         }
@@ -592,7 +630,29 @@ impl AgentLoopState {
                 // surface, not the runtime's own scaffolding. Without
                 // this, activating a skill while `tool_search` is
                 // configured silently kills progressive disclosure.
-                name.starts_with("__harn_") || allowed.contains(name)
+                if name.starts_with("__harn_") || allowed.contains(name) {
+                    return true;
+                }
+                // Namespace-prefixed entries (`"namespace:read"`) match
+                // any tool declaration that carries `namespace: "read"`.
+                // The field lands on the native JSON either at the top
+                // level (Anthropic) or nested under `function` (OpenAI)
+                // depending on the API style — accept both.
+                let ns = entry.get("namespace").and_then(|v| v.as_str()).or_else(|| {
+                    entry
+                        .get("function")
+                        .and_then(|f| f.get("namespace"))
+                        .and_then(|v| v.as_str())
+                });
+                if let Some(ns) = ns {
+                    if allowed
+                        .iter()
+                        .any(|a| a.strip_prefix("namespace:").is_some_and(|tag| tag == ns))
+                    {
+                        return true;
+                    }
+                }
+                false
             })
             .cloned()
             .collect();

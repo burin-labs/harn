@@ -1,0 +1,93 @@
+// harn v0.7.20 Gap 2: `skills:` / `skill_match:` pass through
+// `workflow_execute` to every per-node agent loop. Mirrors
+// `skill_lifecycle_metadata.harn` (direct `agent_loop` call) but runs
+// the same assertions against a 2-node workflow graph so the
+// workflow-level skill wiring is no longer silently dropped.
+pipeline test(task) {
+  llm_mock_clear()
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "deploy_service",
+    "Deploy the production service stack",
+    {parameters: {env: {type: "string"}}, handler: { args -> "deployed to " + args.env }},
+  )
+  tools = tool_define(
+    tools,
+    "query_metrics",
+    "Query observability metrics",
+    {parameters: {query: {type: "string"}}, handler: { args -> "metrics: " + args.query }},
+  )
+  skill ship {
+    description "Ship a production release"
+    when_to_use "User says ship/release/deploy"
+    prompt "Follow the deploy runbook. One command at a time."
+    allowed_tools ["deploy_service"]
+  }
+  skill inspect {
+    description "Inspect observability signals"
+    when_to_use "User asks to check metrics or dashboards"
+    allowed_tools ["query_metrics"]
+  }
+  let registry = skill_define(ship, "inspect", skill_find(inspect, "inspect"))
+  let flow = workflow_graph(
+    {
+    name: "deploy",
+    entry: "execute",
+    nodes: {
+    execute: {
+    kind: "stage",
+    mode: "agent",
+    model_policy: {provider: "mock", tool_format: "native", max_iterations: 1},
+    tools: tools,
+  },
+    verify: {kind: "verify", mode: "llm", model_policy: {provider: "mock"}},
+  },
+    edges: [{from: "execute", to: "verify"}],
+  },
+  )
+  // One-shot mock per stage (2 stages, 2 calls). The execute stage is
+  // the only one with tools + skills attached, so only its system
+  // prompt carries the active-skill section.
+  llm_mock({text: "Queued up deploy."})
+  llm_mock({text: "Verification ok."})
+  let result = workflow_execute(
+    "Ship the new release to production",
+    flow,
+    [],
+    {max_steps: 4, skills: registry, skill_match: {strategy: "metadata"}},
+  )
+  assert(result?.status == "completed", "workflow completes")
+  // The first LLM call must come from the execute stage. Its system
+  // prompt carries the skill body and its tools list has been
+  // narrowed by `allowed_tools`.
+  let calls = llm_mock_calls()
+  assert(len(calls) >= 1, "at least one LLM call happened")
+  let execute_system = calls[0].system
+  assert(
+    contains(execute_system, "## Active skills"),
+    "skills section surfaces in workflow stage prompt",
+  )
+  assert(contains(execute_system, "ship"), "activated skill name appears")
+  assert(contains(execute_system, "runbook"), "skill body woven into workflow stage prompt")
+  assert(
+    contains(execute_system, "Scoped tools: deploy_service"),
+    "allowed_tools listed in workflow stage prompt",
+  )
+  let execute_tools = calls[0].tools
+  var seen_deploy = false
+  var seen_metrics = false
+  if execute_tools != nil {
+    for t in execute_tools {
+      if t?.function?.name == "deploy_service" {
+        seen_deploy = true
+      }
+      if t?.function?.name == "query_metrics" {
+        seen_metrics = true
+      }
+    }
+  }
+  assert(seen_deploy, "scoped tool survives into the execute stage's tool schema")
+  assert(!seen_metrics, "out-of-scope tool filtered out on the workflow path")
+  log("skill_lifecycle_workflow tests passed")
+}

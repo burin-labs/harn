@@ -182,6 +182,44 @@ impl AgentEventSink for AcpAgentEventSink {
                     },
                 }));
             }
+            AgentEvent::ToolSearchQuery {
+                session_id,
+                tool_use_id,
+                name,
+                query,
+                strategy,
+                mode,
+            } => {
+                self.write_notification(serde_json::json!({
+                    "sessionId": session_id,
+                    "update": {
+                        "sessionUpdate": "tool_search_query",
+                        "toolUseId": tool_use_id,
+                        "name": name,
+                        "query": query,
+                        "strategy": strategy,
+                        "mode": mode,
+                    },
+                }));
+            }
+            AgentEvent::ToolSearchResult {
+                session_id,
+                tool_use_id,
+                promoted,
+                strategy,
+                mode,
+            } => {
+                self.write_notification(serde_json::json!({
+                    "sessionId": session_id,
+                    "update": {
+                        "sessionUpdate": "tool_search_result",
+                        "toolUseId": tool_use_id,
+                        "promoted": promoted,
+                        "strategy": strategy,
+                        "mode": mode,
+                    },
+                }));
+            }
             // Pipeline-loop milestones with no canonical ACP session/update
             // mapping; deliberately not forwarded.
             AgentEvent::TurnStart { .. }

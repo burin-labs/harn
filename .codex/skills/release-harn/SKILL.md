@@ -21,6 +21,16 @@ release. The push happens before `cargo publish` so downstream
 consumers (e.g. `burin-code`'s `fetch-harn`, GitHub release-binary
 workflows) can start working in parallel with crates.io.
 
+**Fire-and-forget:** once the "Prepare vX.Y.Z release" commit lands and
+the tree is clean, `release_ship.sh` is safe to invoke and walk away
+from. Check the exit code when it returns; otherwise do not babysit.
+
+**Cross-repo consumers do not wait on releases.** `burin-code`'s
+`scripts/fetch-harn.sh --local` builds Harn from `~/projects/harn` and
+installs the binaries directly — use it during cross-repo iteration
+instead of waiting for crates.io. Release batching is a published-version
+concern, not a developer-loop concern.
+
 Before releasing, make sure the local developer workflow and observability
 surface are documented coherently:
 

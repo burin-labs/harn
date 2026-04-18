@@ -650,6 +650,74 @@ fn reachable_nodes(graph: &WorkflowGraph) -> BTreeSet<String> {
 /// `agent_session_open` / `agent_session_fork` flowing through a graph
 /// line up); falls back to a stable, node-derived id so multi-stage
 /// graphs with no explicit session share a conversation across stages.
+/// Per-stage skill registry. Per-node `model_policy.skills` takes
+/// precedence over the workflow-level `run_options.skills` — authors
+/// can scope a skill set to one stage without affecting siblings. When
+/// neither is set, returns `None` so the agent loop runs without
+/// skill matching (preserves pre-Gap-2 behavior for callers that
+/// didn't opt in).
+fn resolve_stage_skill_registry(node: &WorkflowNode) -> Option<VmValue> {
+    let per_node = node
+        .raw_model_policy
+        .as_ref()
+        .and_then(|v| v.as_dict())
+        .and_then(|d| d.get("skills"))
+        .cloned()
+        .and_then(normalize_inline_registry);
+    if per_node.is_some() {
+        return per_node;
+    }
+    super::current_workflow_skill_context().and_then(|ctx| ctx.registry)
+}
+
+/// Mirror of `resolve_stage_skill_registry` for the match config:
+/// per-node `model_policy.skill_match` wins, falling back to the
+/// workflow-level setting.
+fn resolve_stage_skill_match(node: &WorkflowNode) -> crate::llm::SkillMatchConfig {
+    let per_node = node
+        .raw_model_policy
+        .as_ref()
+        .and_then(|v| v.as_dict())
+        .and_then(|d| d.get("skill_match"))
+        .and_then(|v| v.as_dict().cloned());
+    if let Some(dict) = per_node {
+        return crate::llm::parse_skill_match_config_dict(&dict);
+    }
+    super::current_workflow_skill_context()
+        .and_then(|ctx| ctx.match_config)
+        .and_then(|v| v.as_dict().cloned())
+        .map(|d| crate::llm::parse_skill_match_config_dict(&d))
+        .unwrap_or_default()
+}
+
+/// Accept both a validated `skill_registry` dict and a bare list of
+/// skill entries. The workflow-level parser in `register.rs` does the
+/// same — we duplicate here so per-node `model_policy.skills` settings
+/// (not routed through that parser) also benefit.
+fn normalize_inline_registry(value: VmValue) -> Option<VmValue> {
+    use std::collections::BTreeMap;
+    use std::rc::Rc;
+    match &value {
+        VmValue::Dict(d)
+            if d.get("_type")
+                .map(|v| v.display() == "skill_registry")
+                .unwrap_or(false) =>
+        {
+            Some(value)
+        }
+        VmValue::List(list) => {
+            let mut dict = BTreeMap::new();
+            dict.insert(
+                "_type".to_string(),
+                VmValue::String(Rc::from("skill_registry")),
+            );
+            dict.insert("skills".to_string(), VmValue::List(list.clone()));
+            Some(VmValue::Dict(Rc::new(dict)))
+        }
+        _ => None,
+    }
+}
+
 fn resolve_node_session_id(node: &WorkflowNode) -> String {
     if let Some(explicit) = node
         .raw_model_policy
@@ -702,9 +770,23 @@ pub async fn execute_stage_node(
     }
     let prompt = super::render_workflow_prompt(task, node.task_label.as_deref(), &rendered_context);
 
-    let tool_format = std::env::var("HARN_AGENT_TOOL_FORMAT")
-        .ok()
+    // Precedence for the tool-calling contract format:
+    //   1. explicit `model_policy.tool_format` on the node
+    //   2. `HARN_AGENT_TOOL_FORMAT` env override
+    //   3. provider/model default
+    // Mirrors the top-level agent_loop / llm_call resolution so workflow
+    // authors can pin `tool_format: "native"` per-stage and have it
+    // reach the inner agent loop.
+    let tool_format = node
+        .model_policy
+        .tool_format
+        .clone()
         .filter(|value| !value.trim().is_empty())
+        .or_else(|| {
+            std::env::var("HARN_AGENT_TOOL_FORMAT")
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+        })
         .unwrap_or_else(|| {
             let model = std::env::var("HARN_LLM_MODEL").unwrap_or_default();
             let provider = std::env::var("HARN_LLM_PROVIDER").unwrap_or_default();
@@ -931,8 +1013,14 @@ pub async fn execute_stage_node(
                         .and_then(|d| d.get("post_turn_callback"))
                         .filter(|v| matches!(v, crate::value::VmValue::Closure(_)))
                         .cloned(),
-                    skill_registry: None,
-                    skill_match: Default::default(),
+                    // Inherit the workflow-level skill wiring installed
+                    // by `workflow_execute`. Per-node `model_policy.skills`
+                    // (optional) overrides, letting authors scope a skill
+                    // set to one stage without affecting siblings. Empty
+                    // thread-local = no skills configured (direct
+                    // `execute_stage_node` callers outside a workflow).
+                    skill_registry: resolve_stage_skill_registry(node),
+                    skill_match: resolve_stage_skill_match(node),
                     working_files: Vec::new(),
                 },
             )
