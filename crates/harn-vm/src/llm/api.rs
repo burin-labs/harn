@@ -21,7 +21,8 @@ use std::rc::Rc;
 use crate::value::{VmError, VmValue};
 
 use super::mock::{
-    fixture_hash, get_replay_mode, load_fixture, mock_llm_response, save_fixture, LlmReplayMode,
+    fixture_hash, get_replay_mode, load_fixture, mock_llm_response, record_cli_llm_result,
+    save_fixture, LlmReplayMode,
 };
 
 // ─── Public surface (crate-wide) ────────────────────────────────────────
@@ -90,12 +91,13 @@ async fn vm_call_llm_full_inner_request(
     request: &LlmRequestPayload,
     delta_tx: Option<DeltaSender>,
 ) -> Result<LlmResult, VmError> {
-    if request.provider == "mock" {
+    if crate::llm::providers::MockProvider::should_intercept(&request.provider) {
         let result = mock_llm_response(
             &request.messages,
             request.system.as_deref(),
             request.native_tools.as_deref(),
         )?;
+        record_cli_llm_result(&result);
         if let Some(tx) = delta_tx {
             if !result.text.is_empty() {
                 let _ = tx.send(result.text.clone());
@@ -131,6 +133,7 @@ async fn vm_call_llm_full_inner_request(
     if replay_mode == LlmReplayMode::Record {
         save_fixture(&hash, &result);
     }
+    record_cli_llm_result(&result);
 
     super::cost::accumulate_cost(&result.model, result.input_tokens, result.output_tokens)?;
 
@@ -141,13 +144,15 @@ async fn vm_call_llm_full_inner_offthread(
     request: &LlmRequestPayload,
     delta_tx: Option<DeltaSender>,
 ) -> Result<LlmResult, String> {
-    if request.provider == "mock" {
-        return mock_llm_response(
+    if crate::llm::providers::MockProvider::should_intercept(&request.provider) {
+        let result = mock_llm_response(
             &request.messages,
             request.system.as_deref(),
             request.native_tools.as_deref(),
         )
-        .map_err(|e| e.to_string());
+        .map_err(|e| e.to_string())?;
+        record_cli_llm_result(&result);
+        return Ok(result);
     }
 
     let replay_mode = get_replay_mode();
@@ -170,6 +175,7 @@ async fn vm_call_llm_full_inner_offthread(
     if replay_mode == LlmReplayMode::Record {
         save_fixture(&hash, &result);
     }
+    record_cli_llm_result(&result);
 
     super::cost::accumulate_cost(&result.model, result.input_tokens, result.output_tokens)
         .map_err(|err| err.to_string())?;
