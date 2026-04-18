@@ -312,8 +312,15 @@ pub fn reset_llm_state() {
 /// failure returns the underlying `VmError`. `llm_call` propagates the
 /// error; `llm_call_safe` wraps it in a `{ok: false, error: …}` envelope.
 async fn llm_call_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
-    let mut opts = extract_llm_options(&args)?;
     let options = args.get(2).and_then(|a| a.as_dict()).cloned();
+    let opts = extract_llm_options(&args)?;
+    execute_llm_call(opts, options).await
+}
+
+pub(crate) async fn execute_llm_call(
+    mut opts: api::LlmCallOptions,
+    options: Option<std::collections::BTreeMap<String, VmValue>>,
+) -> Result<VmValue, VmError> {
     // Default `llm_retries` to 2 for resilience against transient
     // HTTP / provider failures. Pass `llm_retries: 0` to opt out.
     let retry_config = agent_observe::LlmRetryConfig {

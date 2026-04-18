@@ -1,0 +1,60 @@
+import "std/project"
+
+pipeline test(task) {
+  let base_dir = path_join(temp_dir(), "harn-project-enrich-invalidation-" + uuid())
+  mkdir(path_join(base_dir, "src"))
+  write_file(
+    path_join(base_dir, "Cargo.toml"),
+    "[package]\nname = \"project-enrich-invalidation\"\nversion = \"0.1.0\"\n",
+  )
+  write_file(path_join(base_dir, "Cargo.lock"), "# lock\n")
+  write_file(
+    path_join(base_dir, "src/lib.rs"),
+    "pub struct FirstName;\npub fn greet_name() -> &'static str { \"hi\" }\n",
+  )
+  let base = project_scan(base_dir, {tiers: ["ambient", "config"]})
+  let prompt = "Project path: {{path}}\n{{ for file in files }}FILE {{file.path}}\n{{file.content}}\n{{ end }}\nReturn JSON."
+  let schema = {
+    type: "object",
+    required: ["framework", "indent_style", "naming_conventions", "test_runner"],
+    properties: {
+    framework: {type: "string"},
+    indent_style: {type: "string"},
+    naming_conventions: {type: "array", items: {type: "string"}},
+    test_runner: {type: "string"},
+  },
+  }
+  let first = project_enrich(
+    base_dir,
+    {
+    base_evidence: base,
+    prompt: prompt,
+    schema: schema,
+    budget_tokens: 4000,
+    provider: "mock",
+    model: "mock-model",
+    cache_key: "cache-v1",
+  },
+  )
+  write_file(
+    path_join(base_dir, "src/lib.rs"),
+    "pub struct ChangedName;\npub fn greet_name() -> &'static str { \"hello\" }\n",
+  )
+  let second = project_enrich(
+    base_dir,
+    {
+    base_evidence: base,
+    prompt: prompt,
+    schema: schema,
+    budget_tokens: 4000,
+    provider: "mock",
+    model: "mock-model",
+    cache_key: "cache-v1",
+  },
+  )
+  println(first.framework == "axum")
+  println(second.framework == "tokio")
+  println(first._provenance.cached == false)
+  println(second._provenance.cached == false)
+  println(len(llm_mock_calls()) == 2)
+}

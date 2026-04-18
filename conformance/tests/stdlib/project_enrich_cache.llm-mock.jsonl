@@ -1,0 +1,1 @@
+{"text":"{\"framework\":\"axum\",\"indent_style\":\"2-space\",\"naming_conventions\":[\"snake_case functions\",\"PascalCase structs\"],\"test_runner\":\"cargo test\"}","model":"mock-model","provider":"mock"}

@@ -17,6 +17,7 @@ mod path;
 pub mod process;
 mod project;
 mod project_catalog;
+mod project_enrich;
 mod regex;
 mod sets;
 mod shapes;
