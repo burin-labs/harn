@@ -126,6 +126,21 @@ pub(crate) struct RunArgs {
     /// wins ties against every other layer. See `docs/src/skills.md`.
     #[arg(long = "skill-dir", value_name = "PATH")]
     pub skill_dir: Vec<String>,
+    /// Replay LLM responses from a JSONL fixture file instead of
+    /// calling the configured provider.
+    #[arg(
+        long = "llm-mock",
+        value_name = "PATH",
+        conflicts_with = "llm_mock_record"
+    )]
+    pub llm_mock: Option<String>,
+    /// Record executed LLM responses into a JSONL fixture file.
+    #[arg(
+        long = "llm-mock-record",
+        value_name = "PATH",
+        conflicts_with = "llm_mock"
+    )]
+    pub llm_mock_record: Option<String>,
     /// Path to the .harn file to execute.
     pub file: Option<String>,
     /// Positional arguments passed to the pipeline as the global `argv`
@@ -664,6 +679,25 @@ mod tests {
         .unwrap_err();
 
         assert_eq!(err.kind(), clap::error::ErrorKind::ArgumentConflict);
+    }
+
+    #[test]
+    fn test_parses_run_llm_mock_flags() {
+        let cli = Cli::parse_from(["harn", "run", "--llm-mock", "fixtures.jsonl", "main.harn"]);
+
+        let Command::Run(args) = cli.command.unwrap() else {
+            panic!("expected run command");
+        };
+        assert_eq!(args.llm_mock.as_deref(), Some("fixtures.jsonl"));
+        assert_eq!(args.llm_mock_record, None);
+
+        let cli = Cli::parse_from(["harn", "run", "--llm-mock-record", "out.jsonl", "main.harn"]);
+
+        let Command::Run(args) = cli.command.unwrap() else {
+            panic!("expected run command");
+        };
+        assert_eq!(args.llm_mock_record.as_deref(), Some("out.jsonl"));
+        assert_eq!(args.llm_mock, None);
     }
 
     #[test]

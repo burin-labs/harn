@@ -43,6 +43,148 @@ fn vm_get_skills(dict: &BTreeMap<String, VmValue>) -> &[VmValue] {
     }
 }
 
+fn vm_skill_entry_id(entry: &BTreeMap<String, VmValue>) -> String {
+    let name = entry.get("name").map(|v| v.display()).unwrap_or_default();
+    let namespace = entry
+        .get("namespace")
+        .map(|v| v.display())
+        .filter(|value| !value.is_empty());
+    match namespace {
+        Some(ns) => format!("{ns}/{name}"),
+        None => name,
+    }
+}
+
+fn vm_skill_catalog_entries(skills: &[VmValue]) -> Vec<VmValue> {
+    let mut catalog: Vec<(String, VmValue)> = Vec::new();
+    for skill in skills {
+        let Some(entry) = skill.as_dict() else {
+            continue;
+        };
+        let id = vm_skill_entry_id(entry);
+        if id.is_empty() {
+            continue;
+        }
+        let description = entry
+            .get("description")
+            .map(|v| v.display())
+            .unwrap_or_default();
+        let when_to_use = entry
+            .get("when_to_use")
+            .map(|v| v.display())
+            .unwrap_or_default();
+        let mut rendered = BTreeMap::new();
+        rendered.insert("name".to_string(), VmValue::String(Rc::from(id.as_str())));
+        rendered.insert(
+            "description".to_string(),
+            VmValue::String(Rc::from(description.as_str())),
+        );
+        rendered.insert(
+            "when_to_use".to_string(),
+            VmValue::String(Rc::from(when_to_use.as_str())),
+        );
+        catalog.push((id, VmValue::Dict(Rc::new(rendered))));
+    }
+    catalog.sort_by(|a, b| a.0.cmp(&b.0));
+    catalog.into_iter().map(|(_, value)| value).collect()
+}
+
+fn render_catalog_entry(entry: &BTreeMap<String, VmValue>) -> Option<String> {
+    let name = entry.get("name").map(|v| v.display()).unwrap_or_default();
+    if name.is_empty() {
+        return None;
+    }
+    let description = entry
+        .get("description")
+        .map(|v| v.display())
+        .unwrap_or_default();
+    let when_to_use = entry
+        .get("when_to_use")
+        .map(|v| v.display())
+        .unwrap_or_default();
+    let mut lines = Vec::new();
+    if description.is_empty() {
+        lines.push(format!("- `{name}`"));
+    } else {
+        lines.push(format!("- `{name}`: {description}"));
+    }
+    if !when_to_use.is_empty() {
+        lines.push(format!("  when: {when_to_use}"));
+    }
+    Some(lines.join("\n"))
+}
+
+fn render_catalog(entries: &[VmValue], budget: usize) -> String {
+    let header = concat!(
+        "## Available skills\n\n",
+        "These skills are available. Call `load_skill({ name: \"<skill-id>\" })` to load the full body of a skill when it becomes relevant.\n\n",
+    );
+    if entries.is_empty() {
+        return format!("{header}(none)");
+    }
+
+    let omission_template = "\n\n... 1 more skill(s) omitted to stay within budget.";
+    let budget = budget.max(header.len() + omission_template.len());
+    let mut blocks = Vec::new();
+
+    for entry in entries {
+        let Some(dict) = entry.as_dict() else {
+            continue;
+        };
+        let Some(block) = render_catalog_entry(dict) else {
+            continue;
+        };
+        blocks.push(block);
+    }
+    if blocks.is_empty() {
+        return format!("{header}(none)");
+    }
+
+    let mut visible = 0usize;
+    let mut rendered = String::from(header);
+    while visible < blocks.len() {
+        let candidate_len = rendered.len()
+            + if visible == 0 {
+                blocks[visible].len()
+            } else {
+                1 + blocks[visible].len()
+            };
+        if candidate_len > budget {
+            break;
+        }
+        if visible > 0 {
+            rendered.push('\n');
+        }
+        rendered.push_str(&blocks[visible]);
+        visible += 1;
+    }
+
+    let mut omitted = blocks.len().saturating_sub(visible);
+    if omitted > 0 {
+        loop {
+            let suffix = format!("\n\n... {omitted} more skill(s) omitted to stay within budget.");
+            if rendered.len() + suffix.len() <= budget {
+                rendered.push_str(&suffix);
+                break;
+            }
+            if visible == 0 {
+                break;
+            }
+            visible -= 1;
+            omitted += 1;
+            rendered = String::from(header);
+            for (index, block) in blocks.iter().take(visible).enumerate() {
+                if index > 0 {
+                    rendered.push('\n');
+                }
+                rendered.push_str(block);
+            }
+        }
+    }
+
+    rendered
+}
+
 pub(crate) fn register_skill_builtins(vm: &mut Vm) {
     vm.register_builtin("skill_registry", |_args, _out| {
         let mut registry = BTreeMap::new();
@@ -204,6 +346,47 @@ pub(crate) fn register_skill_builtins(vm: &mut Vm) {
             }
         }
         Ok(VmValue::List(Rc::new(result)))
+    });
+
+    vm.register_builtin("skills_catalog_entries", |args, _out| {
+        let registry = match args.first() {
+            Some(VmValue::Dict(map)) => map,
+            _ => {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                    "skills_catalog_entries: requires a skill registry",
+                ))));
+            }
+        };
+        vm_validate_registry("skills_catalog_entries", registry)?;
+        Ok(VmValue::List(Rc::new(vm_skill_catalog_entries(
+            vm_get_skills(registry),
+        ))))
+    });
+
+    vm.register_builtin("render_always_on_catalog", |args, _out| {
+        let entries: Vec<VmValue> = match args.first() {
+            Some(VmValue::List(list)) => list.iter().cloned().collect(),
+            Some(VmValue::Dict(map)) => {
+                vm_validate_registry("render_always_on_catalog", map)?;
+                vm_skill_catalog_entries(vm_get_skills(map))
+            }
+            _ => {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                    "render_always_on_catalog: first argument must be a catalog entry list or skill registry",
+                ))));
+            }
+        };
+        let budget = match args.get(1) {
+            Some(VmValue::Int(value)) if *value > 0 => *value as usize,
+            Some(VmValue::Nil) | None => 2000usize,
+            Some(_) => {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                    "render_always_on_catalog: second argument must be a positive integer budget",
+                ))));
+            }
+        };
+        let rendered = render_catalog(&entries, budget);
+        Ok(VmValue::String(Rc::from(rendered.as_str())))
     });
 
     vm.register_builtin("skill_find", |args, _out| {
@@ -422,4 +605,82 @@ pub(crate) fn register_skill_builtins(vm: &mut Vm) {
         let count = vm_get_skills(registry).len();
         Ok(VmValue::Int(count as i64))
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{render_catalog, vm_skill_catalog_entries};
+    use crate::value::VmValue;
+    use std::collections::BTreeMap;
+    use std::rc::Rc;
+
+    #[test]
+    fn catalog_entries_use_fully_qualified_ids_and_sort() {
+        let skills = vec![
+            VmValue::Dict(Rc::new(BTreeMap::from([
+                ("name".to_string(), VmValue::String(Rc::from("beta"))),
+                (
+                    "description".to_string(),
+                    VmValue::String(Rc::from("Second skill")),
+                ),
+            ]))),
+            VmValue::Dict(Rc::new(BTreeMap::from([
+                ("name".to_string(), VmValue::String(Rc::from("deploy"))),
+                (
+                    "namespace".to_string(),
+                    VmValue::String(Rc::from("acme/ops")),
+                ),
+                (
+                    "description".to_string(),
+                    VmValue::String(Rc::from("Deploy service")),
+                ),
+                (
+                    "when_to_use".to_string(),
+                    VmValue::String(Rc::from("Ship a release")),
+                ),
+            ]))),
+        ];
+
+        let catalog = vm_skill_catalog_entries(&skills);
+        assert_eq!(catalog.len(), 2);
+        let first = catalog[0].as_dict().unwrap();
+        let second = catalog[1].as_dict().unwrap();
+        assert_eq!(first.get("name").unwrap().display(), "acme/ops/deploy");
+        assert_eq!(second.get("name").unwrap().display(), "beta");
+    }
+
+    #[test]
+    fn render_catalog_is_deterministic_and_budgeted() {
+        let entries = vec![
+            VmValue::Dict(Rc::new(BTreeMap::from([
+                ("name".to_string(), VmValue::String(Rc::from("alpha"))),
+                (
+                    "description".to_string(),
+                    VmValue::String(Rc::from("First skill")),
+                ),
+                (
+                    "when_to_use".to_string(),
+                    VmValue::String(Rc::from("Use alpha first")),
+                ),
+            ]))),
+            VmValue::Dict(Rc::new(BTreeMap::from([
+                ("name".to_string(), VmValue::String(Rc::from("beta"))),
+                (
+                    "description".to_string(),
+                    VmValue::String(Rc::from("Second skill")),
+                ),
+                (
+                    "when_to_use".to_string(),
+                    VmValue::String(Rc::from("Use beta second")),
+                ),
+            ]))),
+        ];
+
+        let once = render_catalog(&entries, 10_000);
+        let twice = render_catalog(&entries, 10_000);
+        assert_eq!(once, twice);
+        assert!(once.contains("- `alpha`: First skill"));
+        let small = render_catalog(&entries, 160);
+        assert!(small.contains("omitted to stay within budget"));
+    }
 }

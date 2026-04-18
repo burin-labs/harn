@@ -1,0 +1,43 @@
+// std/agent_state — durable session-scoped state helpers.
+//
+// Import: import "std/agent_state"
+
+/** agent_state_init. */
+pub fn agent_state_init(root, options) {
+  return __agent_state_init(root, options)
+}
+
+/** agent_state_resume. */
+pub fn agent_state_resume(root, session_id, options) {
+  return __agent_state_resume(root, session_id, options)
+}
+
+/** agent_state_write. */
+pub fn agent_state_write(handle, key, content) {
+  return __agent_state_write(handle, key, content)
+}
+
+/** agent_state_read. */
+pub fn agent_state_read(handle, key) {
+  return __agent_state_read(handle, key)
+}
+
+/** agent_state_list. */
+pub fn agent_state_list(handle) {
+  return __agent_state_list(handle)
+}
+
+/** agent_state_delete. */
+pub fn agent_state_delete(handle, key) {
+  return __agent_state_delete(handle, key)
+}
+
+/** agent_state_handoff. */
+pub fn agent_state_handoff(handle, summary) {
+  return __agent_state_handoff(handle, summary)
+}
+
+/** agent_state_handoff_key. */
+pub fn agent_state_handoff_key() {
+  return "__handoff.json"
+}

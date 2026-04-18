@@ -285,7 +285,10 @@ pub use self::cost::peek_total_cost;
 pub(crate) use self::helpers::extract_llm_options;
 pub use self::helpers::resolve_api_key;
 pub use self::helpers::vm_value_to_json;
-pub use self::mock::{set_replay_mode, LlmReplayMode};
+pub use self::mock::{
+    clear_cli_llm_mock_mode, enable_cli_llm_mock_recording, install_cli_llm_mocks, set_replay_mode,
+    take_cli_llm_recordings, LlmMock, LlmReplayMode, MockError,
+};
 pub use self::trace::{
     agent_trace_summary, enable_tracing, peek_agent_trace, peek_trace, peek_trace_summary,
     take_agent_trace, take_trace, AgentTraceEvent, LlmTraceEntry,
@@ -802,9 +805,13 @@ fn register_llm_mock_builtins(vm: &mut Vm) {
             match_pattern,
             input_tokens,
             output_tokens,
+            cache_read_tokens: None,
+            cache_write_tokens: None,
             thinking,
             stop_reason,
             model,
+            provider: None,
+            blocks: None,
             error,
         });
         Ok(VmValue::Nil)
