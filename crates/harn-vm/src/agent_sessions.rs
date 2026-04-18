@@ -64,6 +64,7 @@ impl SessionState {
 thread_local! {
     static SESSIONS: RefCell<HashMap<String, SessionState>> = RefCell::new(HashMap::new());
     static SESSION_CAP: Cell<usize> = const { Cell::new(DEFAULT_SESSION_CAP) };
+    static CURRENT_SESSION_STACK: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
 }
 
 /// Set the per-thread session cap. Primarily for tests; production VMs
@@ -79,6 +80,24 @@ pub fn session_cap() -> usize {
 /// Clear the session store. Wired into `reset_llm_state` for test isolation.
 pub fn reset_session_store() {
     SESSIONS.with(|s| s.borrow_mut().clear());
+    CURRENT_SESSION_STACK.with(|stack| stack.borrow_mut().clear());
+}
+
+pub(crate) fn push_current_session(id: String) {
+    if id.is_empty() {
+        return;
+    }
+    CURRENT_SESSION_STACK.with(|stack| stack.borrow_mut().push(id));
+}
+
+pub(crate) fn pop_current_session() {
+    CURRENT_SESSION_STACK.with(|stack| {
+        let _ = stack.borrow_mut().pop();
+    });
+}
+
+pub(crate) fn current_session_id() -> Option<String> {
+    CURRENT_SESSION_STACK.with(|stack| stack.borrow().last().cloned())
 }
 
 pub fn exists(id: &str) -> bool {

@@ -339,6 +339,10 @@ Imports starting with `std/` load embedded stdlib modules:
   parse_float_or)
 - `import "std/collections"` — collection utilities (filter_nil, store_stale,
   store_refresh)
+- `import "std/agent_state"` — durable session-scoped state helpers
+  (agent_state_init, agent_state_resume, agent_state_write,
+  agent_state_read, agent_state_list, agent_state_delete,
+  agent_state_handoff)
 
 These modules are compiled into the interpreter binary and require no
 filesystem access.
@@ -3152,6 +3156,28 @@ Checkpoint files are stored at `.harn/checkpoints/<pipeline>.json` relative to
 the project root (where `harn.toml` lives), or relative to the source file
 directory if no project root is found. Files are plain JSON and can be copied
 between machines to migrate pipeline state.
+
+### std/agent_state module
+
+```harn
+import "std/agent_state"
+```
+
+Provides a durable, session-scoped text/blob store rooted at a
+caller-supplied directory.
+
+| Function | Notes |
+|---|---|
+| `agent_state_init(root, options?)` | Create or reopen a session root under `root/<session_id>/` |
+| `agent_state_resume(root, session_id, options?)` | Reopen an existing session; errors when absent |
+| `agent_state_write(handle, key, content)` | Atomic temp-write plus rename |
+| `agent_state_read(handle, key)` | Returns `string` or `nil` |
+| `agent_state_list(handle)` | Deterministic recursive key listing |
+| `agent_state_delete(handle, key)` | Deletes a key |
+| `agent_state_handoff(handle, summary)` | Writes a JSON handoff envelope to `__handoff.json` |
+
+Keys must be relative paths inside the session root. Absolute paths and
+parent-directory escapes are rejected.
 
 ## Workspace manifest (`harn.toml`)
 

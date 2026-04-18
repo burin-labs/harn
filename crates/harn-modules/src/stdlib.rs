@@ -25,6 +25,7 @@ pub(crate) fn get_stdlib_source(module: &str) -> Option<&'static str> {
         "project" => Some(include_str!("../../harn-vm/src/stdlib_project.harn")),
         "async" => Some(include_str!("../../harn-vm/src/stdlib_async.harn")),
         "agents" => Some(include_str!("../../harn-vm/src/stdlib_agents.harn")),
+        "agent_state" => Some(include_str!("../../harn-vm/src/stdlib_agent_state.harn")),
         "checkpoint" => Some(include_str!("../../harn-vm/src/stdlib_checkpoint.harn")),
         "worktree" => Some(include_str!("../../harn-vm/src/stdlib_worktree.harn")),
         "acp" => Some(include_str!("../../harn-vm/src/stdlib_acp.harn")),
