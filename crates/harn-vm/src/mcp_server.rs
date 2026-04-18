@@ -292,6 +292,11 @@ pub struct McpServer {
     resource_templates: Vec<McpResourceTemplateDef>,
     prompts: Vec<McpPromptDef>,
     log_level: RefCell<String>,
+    /// Optional Server Card payload — advertised in the `initialize`
+    /// response's `serverInfo.card` field and exposed as a static
+    /// resource at the well-known URI `well-known://mcp-card`.
+    /// Populated by `harn mcp-serve --card path/to/card.json`.
+    server_card: Option<serde_json::Value>,
 }
 
 impl McpServer {
@@ -310,7 +315,16 @@ impl McpServer {
             resource_templates,
             prompts,
             log_level: RefCell::new("warning".to_string()),
+            server_card: None,
         }
+    }
+
+    /// Attach a Server Card to be advertised over `initialize` and via
+    /// the `well-known://mcp-card` resource. Call on a freshly-built
+    /// `McpServer` before `run`.
+    pub fn with_server_card(mut self, card: serde_json::Value) -> Self {
+        self.server_card = Some(card);
+        self
     }
 
     /// Run the MCP server loop, reading JSON-RPC from stdin and writing to stdout.
@@ -382,7 +396,10 @@ impl McpServer {
         if !self.tools.is_empty() {
             capabilities.insert("tools".into(), serde_json::json!({}));
         }
-        if !self.resources.is_empty() || !self.resource_templates.is_empty() {
+        if !self.resources.is_empty()
+            || !self.resource_templates.is_empty()
+            || self.server_card.is_some()
+        {
             capabilities.insert("resources".into(), serde_json::json!({}));
         }
         if !self.prompts.is_empty() {
@@ -390,16 +407,21 @@ impl McpServer {
         }
         capabilities.insert("logging".into(), serde_json::json!({}));
 
+        let mut server_info = serde_json::json!({
+            "name": self.server_name,
+            "version": self.server_version
+        });
+        if let Some(ref card) = self.server_card {
+            server_info["card"] = card.clone();
+        }
+
         serde_json::json!({
             "jsonrpc": "2.0",
             "id": id,
             "result": {
                 "protocolVersion": PROTOCOL_VERSION,
                 "capabilities": capabilities,
-                "serverInfo": {
-                    "name": self.server_name,
-                    "version": self.server_version
-                }
+                "serverInfo": server_info
             }
         })
     }
@@ -508,9 +530,22 @@ impl McpServer {
         id: &serde_json::Value,
         params: &serde_json::Value,
     ) -> serde_json::Value {
+        // Virtually prepend the Server Card as a static resource so
+        // clients that browse resources can discover the card without
+        // a separate well-known GET. Kept out of the underlying
+        // `self.resources` vec so cursor paging stays simple.
+        let card_entry = self.server_card.as_ref().map(|_| {
+            serde_json::json!({
+                "uri": "well-known://mcp-card",
+                "name": "Server Card",
+                "description": "MCP v2.1 Server Card advertising this server's identity and capabilities",
+                "mimeType": "application/json",
+            })
+        });
+
         let (offset, page_size) = parse_cursor(params);
         let page_end = (offset + page_size).min(self.resources.len());
-        let resources: Vec<serde_json::Value> = self.resources[offset..page_end]
+        let mut resources: Vec<serde_json::Value> = self.resources[offset..page_end]
             .iter()
             .map(|r| {
                 let mut entry = serde_json::json!({ "uri": r.uri, "name": r.name });
@@ -526,6 +561,11 @@ impl McpServer {
                 entry
             })
             .collect();
+        if offset == 0 {
+            if let Some(entry) = card_entry {
+                resources.insert(0, entry);
+            }
+        }
 
         let mut result = serde_json::json!({ "resources": resources });
         if page_end < self.resources.len() {
@@ -546,6 +586,24 @@ impl McpServer {
         vm: &mut Vm,
     ) -> serde_json::Value {
         let uri = params.get("uri").and_then(|u| u.as_str()).unwrap_or("");
+
+        // Expose the Server Card at the well-known URI. Matches the
+        // HTTP convention (.well-known/mcp-card) but routed through
+        // the stdio resource protocol.
+        if uri == "well-known://mcp-card" {
+            if let Some(ref card) = self.server_card {
+                let content = serde_json::json!({
+                    "uri": uri,
+                    "text": serde_json::to_string(card).unwrap_or_else(|_| "{}".to_string()),
+                    "mimeType": "application/json",
+                });
+                return serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "result": { "contents": [content] }
+                });
+            }
+        }
 
         // Static resources take precedence over templates.
         if let Some(resource) = self.resources.iter().find(|r| r.uri == uri) {

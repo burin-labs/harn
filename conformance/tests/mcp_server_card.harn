@@ -1,0 +1,18 @@
+// Verify `mcp_server_card(path)` loads a local Server Card JSON file
+// and surfaces the expected fields as a VmValue dict.
+pipeline default() {
+  let root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+  let card_path = root + "/conformance/helpers/mcp_test_card.json"
+  // Direct path access — bypass the registered-server lookup.
+  let card = mcp_server_card(card_path)
+  println(card.name)
+  println(card.version)
+  println(card.protocolVersion)
+  println(card.capabilities.tools)
+  println(card.tools.count)
+  println(card.tools[0].name)
+  println(card.publisher.name)
+  // Second call should hit the cache and return identical data.
+  let cached = mcp_server_card(card_path)
+  println(cached.name)
+}

@@ -340,6 +340,12 @@ pub(crate) struct AcpArgs {
 pub(crate) struct McpServeArgs {
     /// Path to the .harn file that defines the MCP surface.
     pub file: String,
+    /// Optional Server Card JSON to advertise (MCP v2.1). Path to a
+    /// `.json` file OR an inline JSON string. The card is embedded in
+    /// the `initialize` response's `serverInfo.card` field AND exposed
+    /// as a static resource at `well-known://mcp-card`.
+    #[arg(long = "card", value_name = "PATH_OR_JSON")]
+    pub card: Option<String>,
 }
 
 #[derive(Debug, Args)]

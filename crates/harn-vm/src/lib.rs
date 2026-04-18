@@ -12,6 +12,8 @@ pub mod jsonrpc;
 pub mod llm;
 pub mod llm_config;
 pub mod mcp;
+pub mod mcp_card;
+pub mod mcp_registry;
 pub mod mcp_server;
 pub mod metadata;
 pub mod orchestration;
@@ -35,6 +37,14 @@ pub use llm::register_llm_builtins;
 pub use mcp::{
     connect_mcp_server, connect_mcp_server_from_json, connect_mcp_server_from_spec,
     register_mcp_builtins,
+};
+pub use mcp_card::{fetch_server_card, load_server_card_from_path, CardError};
+pub use mcp_registry::{
+    active_handle as mcp_active_handle, ensure_active as mcp_ensure_active,
+    get_registration as mcp_get_registration, install_active as mcp_install_active,
+    is_registered as mcp_is_registered, register_servers as mcp_register_servers,
+    release as mcp_release, reset as mcp_reset_registry, snapshot_status as mcp_snapshot_status,
+    sweep_expired as mcp_sweep_expired, RegisteredMcpServer, RegistryStatus,
 };
 pub use mcp_server::{
     take_mcp_serve_prompts, take_mcp_serve_registry, take_mcp_serve_resource_templates,
@@ -70,4 +80,5 @@ pub fn reset_thread_local_state() {
     events::reset_event_sinks();
     agent_events::reset_all_sinks();
     agent_sessions::reset_session_store();
+    mcp_registry::reset();
 }

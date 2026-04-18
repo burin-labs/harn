@@ -319,7 +319,9 @@ async fn main() {
         Command::Doctor(args) => commands::doctor::run_doctor(!args.no_network).await,
         Command::Serve(args) => a2a::run_a2a_server(&args.file, args.port).await,
         Command::Acp(args) => acp::run_acp_server(args.pipeline.as_deref()).await,
-        Command::McpServe(args) => commands::run::run_file_mcp_serve(&args.file).await,
+        Command::McpServe(args) => {
+            commands::run::run_file_mcp_serve(&args.file, args.card.as_deref()).await
+        }
         Command::Mcp(args) => commands::mcp::handle_mcp_command(&args.command).await,
         Command::Watch(args) => {
             let denied =

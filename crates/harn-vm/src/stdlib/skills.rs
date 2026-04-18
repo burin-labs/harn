@@ -108,7 +108,7 @@ pub(crate) fn register_skill_builtins(vm: &mut Vm) {
                 }
             }
         }
-        for key in ["paths", "allowed_tools", "mcp"] {
+        for key in ["paths", "allowed_tools", "mcp", "requires_mcp"] {
             if let Some(value) = config.get(key) {
                 if !matches!(value, VmValue::List(_) | VmValue::Nil) {
                     return Err(VmError::Thrown(VmValue::String(Rc::from(format!(

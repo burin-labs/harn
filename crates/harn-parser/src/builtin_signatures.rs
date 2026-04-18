@@ -842,6 +842,10 @@ pub(crate) const BUILTIN_SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("nil")),
     },
     BuiltinSig {
+        name: "mcp_ensure_active",
+        return_type: None,
+    },
+    BuiltinSig {
         name: "mcp_get_prompt",
         return_type: Some(BuiltinReturn::Named("dict")),
     },
@@ -870,6 +874,14 @@ pub(crate) const BUILTIN_SIGNATURES: &[BuiltinSig] = &[
         return_type: None,
     },
     BuiltinSig {
+        name: "mcp_registry_status",
+        return_type: Some(BuiltinReturn::Named("list")),
+    },
+    BuiltinSig {
+        name: "mcp_release",
+        return_type: Some(BuiltinReturn::Named("nil")),
+    },
+    BuiltinSig {
         name: "mcp_resource",
         return_type: Some(BuiltinReturn::Named("nil")),
     },
@@ -880,6 +892,10 @@ pub(crate) const BUILTIN_SIGNATURES: &[BuiltinSig] = &[
     BuiltinSig {
         name: "mcp_serve",
         return_type: None,
+    },
+    BuiltinSig {
+        name: "mcp_server_card",
+        return_type: Some(BuiltinReturn::Named("dict")),
     },
     BuiltinSig {
         name: "mcp_server_info",

@@ -136,6 +136,7 @@ mod tests {
             name: name.to_string(),
             description: description.to_string(),
             param_text: params.iter().map(|s| s.to_string()).collect(),
+            tags: Vec::new(),
         }
     }
 

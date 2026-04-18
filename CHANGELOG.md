@@ -74,6 +74,36 @@ granular archaeology.
     routing, and the user-override path (both adding a new provider
     and shadowing a built-in).
 
+- **MCP Server Cards, lazy boot, skill-scoped binding (harn#75).**
+  Harn now consumes MCP v2.1 Server Cards, defers booting MCP servers
+  until a skill or user code actually needs them, and wires skill
+  `requires_mcp` declarations into the agent loop's activation/deactivation
+  hooks.
+  - `harn.toml` `[[mcp]]` entries gain `lazy = true`, optional `card =
+    "<url-or-path>"`, and `keep_alive_ms` for post-release grace. Lazy
+    servers are registered with a process-wide registry but not booted
+    until first use.
+  - New builtins: `mcp_server_card(name|url|path)` (fetches + caches with
+    a 5-minute TTL; falls back to `/.well-known/mcp-card` on bare HTTP
+    URLs), `mcp_ensure_active(name)`, `mcp_release(name)`,
+    `mcp_registry_status()`.
+  - Skill activation ref-counts MCP server binders: `requires_mcp` (or
+    legacy `mcp`) triggers `mcp_ensure_active` on every listed server;
+    deactivation decrements. At count zero the server disconnects
+    (immediately or after `keep_alive_ms`). Transcript events
+    `skill_mcp_bound`, `skill_mcp_unbound`, `skill_mcp_bind_failed`
+    ride along.
+  - `mcp_list_tools` now stamps every returned tool with
+    `_mcp_server: "<name>"`, and the client-side `tool_search`
+    BM25 index auto-tags these tools as `mcp:<server>` and `<server>`
+    so queries like `"github"` surface every tool from that server.
+  - `harn mcp-serve` learns `--card <path-or-json>` which embeds the
+    Server Card into the `initialize` response's `serverInfo.card`
+    field and exposes it as the well-known resource
+    `well-known://mcp-card`.
+  - Conformance coverage: `mcp_server_card.harn`, `mcp_lazy_registry.harn`.
+  - Docs: `docs/src/mcp-and-acp.md` gains sections on lazy boot, Server
+    Cards, skill-scoped binding, and `--card`.
 - **Skills & Tool Vault phase 3: `agent_loop` skill lifecycle (harn#74).**
   `agent_loop` now accepts a `skills:` option (a `skill_registry`
   produced by the `skill { }` top-level form or `skill_define(...)`)

@@ -78,6 +78,127 @@ url = "https://mcp.notion.com/mcp"
 scopes = "read write"
 ```
 
+### Lazy boot (harn#75)
+
+Servers marked `lazy = true` are NOT booted at pipeline startup. They
+start on the first `mcp_call`, `mcp_ensure_active("name")`, or skill
+activation that declares the server in `requires_mcp`. This keeps cold
+starts fast when many servers are declared but only a few are needed
+per run.
+
+```toml
+[[mcp]]
+name = "github"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-github"]
+lazy = true
+keep_alive_ms = 30_000   # keep the process alive 30s after last release
+
+[[mcp]]
+name = "datadog"
+command = "datadog-mcp"
+lazy = true
+```
+
+**Ref-counting**: each skill activation or explicit
+`mcp_ensure_active(name)` call bumps a binder count. On deactivation or
+`mcp_release(name)`, the count drops. When it reaches zero, Harn
+disconnects the server — immediately if `keep_alive_ms` is absent, or
+after the window elapses if set.
+
+Explicit control from user code:
+
+```harn
+// Start the lazy server and hold it open.
+let client = mcp_ensure_active("github")
+let issues = mcp_call(client, "list_issues", {repo: "burin-labs/harn"})
+
+// Release when done — lets the registry shut it down.
+mcp_release("github")
+
+// Inspect current state.
+let status = mcp_registry_status()
+for s in status {
+  println("${s.name}: lazy=${s.lazy} active=${s.active} refs=${s.ref_count}")
+}
+```
+
+### Server Cards (MCP v2.1)
+
+A Server Card is a small JSON document that advertises a server's
+identity, capabilities, and tool catalog **without requiring a
+connection**. Harn consumes cards for discoverability and can publish
+its own when running as an MCP server.
+
+Declare a card source in `harn.toml`:
+
+```toml
+[[mcp]]
+name = "notion"
+transport = "http"
+url = "https://mcp.notion.com/mcp"
+card = "https://mcp.notion.com/.well-known/mcp-card"
+
+[[mcp]]
+name = "local-agent"
+command = "my-agent"
+lazy = true
+card = "./agents/my-agent-card.json"
+```
+
+Fetch it from a pipeline:
+
+```harn,ignore
+// Look up by registered server name.
+let card = mcp_server_card("notion")
+println(card.description)
+for t in card.tools {
+  println("- ${t.name}")
+}
+
+// Or pass a URL / path directly.
+let card = mcp_server_card("./agents/my-agent-card.json")
+```
+
+Cards are cached in-process with a 5-minute TTL — repeated calls are
+free. Skill matchers can factor card metadata into scoring without
+paying connection cost.
+
+### Skill-scoped MCP binding
+
+Skills can declare the MCP servers they need via `requires_mcp` (or the
+equivalent `mcp`) frontmatter field. On activation, Harn ensures every
+listed server is running; on deactivation, it releases them.
+
+```harn,ignore
+skill github_triage {
+  description: "Triage GitHub issues and cut fixes",
+  when_to_use: "User mentions a GitHub issue or PR by number",
+  requires_mcp: ["github"],
+  allowed_tools: ["list_issues", "create_pr", "add_comment"],
+  prompt: "You are a triage assistant...",
+}
+```
+
+When `agent_loop` activates `github_triage`, the lazy `github` MCP
+server boots (if configured that way) and its process stays alive for
+as long as the skill is active. When the skill deactivates, the server
+is released — and if no other skill holds it, the process shuts down
+(respecting `keep_alive_ms`).
+
+Transcript events emitted along the way: `skill_mcp_bound`,
+`skill_mcp_unbound`, `skill_mcp_bind_failed`.
+
+### MCP tools in the tool-search index
+
+When an LLM uses `tool_search` (progressive tool disclosure), MCP tools
+are auto-tagged with both `mcp:<server>` and `<server>` in the BM25
+corpus. That means a query like `"github"` or `"mcp:github"` surfaces
+every tool from that server even when the tool's own name and
+description don't contain the word. Tools returned by `mcp_list_tools`
+carry an `_mcp_server` field that the indexer consumes automatically —
+no extra wiring needed.
+
 Use them in your pipeline:
 
 ```harn
@@ -204,6 +325,35 @@ harn mcp-serve agent.harn
 All `print`/`println` output goes to stderr (stdout is the MCP
 transport). The server supports the `2025-11-25` MCP protocol version
 over stdio.
+
+#### Publishing a Server Card
+
+Attach a Server Card so clients can discover your server's identity and
+capabilities before connecting:
+
+```bash
+harn mcp-serve agent.harn --card ./card.json
+```
+
+The card JSON is embedded in the `initialize` response's
+`serverInfo.card` field and also exposed as a read-only resource at
+`well-known://mcp-card`. Minimal shape:
+
+```json
+{
+  "name": "my-agent",
+  "version": "1.0.0",
+  "description": "Short one-line summary shown in pickers.",
+  "protocolVersion": "2025-11-25",
+  "capabilities": { "tools": true, "resources": false, "prompts": false },
+  "tools": [
+    {"name": "greet", "description": "Greet someone by name"}
+  ]
+}
+```
+
+`--card` also accepts an inline JSON string for ad-hoc publishing:
+`--card '{"name":"demo","description":"…"}'`.
 
 ### Configuring in Claude Desktop
 

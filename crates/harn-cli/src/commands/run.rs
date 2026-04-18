@@ -273,14 +273,21 @@ pub(crate) async fn run_file_with_skill_dirs(
 /// Connect to MCP servers declared in `harn.toml` and register them as
 /// `mcp.<name>` globals on the VM. Connection failures are warned but do
 /// not abort execution.
+///
+/// Servers with `lazy = true` are registered with the VM-side MCP
+/// registry but NOT booted — their processes start the first time a
+/// skill's `requires_mcp` list names them or user code calls
+/// `mcp_ensure_active("name")` / `mcp_call(mcp.<name>, ...)`.
 pub(crate) async fn connect_mcp_servers(
     servers: &[package::McpServerConfig],
     vm: &mut harn_vm::Vm,
 ) {
     use std::collections::BTreeMap;
     use std::rc::Rc;
+    use std::time::Duration;
 
     let mut mcp_dict: BTreeMap<String, harn_vm::VmValue> = BTreeMap::new();
+    let mut registrations: Vec<harn_vm::RegisteredMcpServer> = Vec::new();
 
     for server in servers {
         let resolved_auth = match mcp::resolve_auth_for_server(server).await {
@@ -307,9 +314,29 @@ pub(crate) async fn connect_mcp_servers(
             "protocol_version": server.protocol_version,
             "proxy_server_name": server.proxy_server_name,
         });
+
+        // Register with the VM-side registry regardless of lazy flag —
+        // skill activation and `mcp_ensure_active` look up specs there.
+        registrations.push(harn_vm::RegisteredMcpServer {
+            name: server.name.clone(),
+            spec: spec.clone(),
+            lazy: server.lazy,
+            card: server.card.clone(),
+            keep_alive: server.keep_alive_ms.map(Duration::from_millis),
+        });
+
+        if server.lazy {
+            eprintln!(
+                "[harn] mcp: deferred '{}' (lazy, boots on first use)",
+                server.name
+            );
+            continue;
+        }
+
         match harn_vm::connect_mcp_server_from_json(&spec).await {
             Ok(handle) => {
                 eprintln!("[harn] mcp: connected to '{}'", server.name);
+                harn_vm::mcp_install_active(&server.name, handle.clone());
                 mcp_dict.insert(server.name.clone(), harn_vm::VmValue::McpClient(handle));
             }
             Err(e) => {
@@ -320,6 +347,10 @@ pub(crate) async fn connect_mcp_servers(
             }
         }
     }
+
+    // Install registrations AFTER eager connects so `install_active`
+    // above doesn't get overwritten.
+    harn_vm::mcp_register_servers(registrations);
 
     if !mcp_dict.is_empty() {
         vm.set_global("mcp", harn_vm::VmValue::Dict(Rc::new(mcp_dict)));
@@ -365,7 +396,12 @@ fn print_trace_summary() {
 
 /// Run a .harn file as an MCP server over stdio. The pipeline must call
 /// `mcp_serve(registry)` so the CLI can expose its tools.
-pub(crate) async fn run_file_mcp_serve(path: &str) {
+///
+/// `card_source` — optional `--card` argument. Accepts either a path to
+/// a JSON file or an inline JSON string. When present, the card is
+/// embedded in the `initialize` response and exposed as the
+/// `well-known://mcp-card` resource.
+pub(crate) async fn run_file_mcp_serve(path: &str, card_source: Option<&str>) {
     let (source, program) = crate::parse_source_file(path);
 
     let type_diagnostics = typecheck_with_imports(&program, Path::new(path));
@@ -503,14 +539,36 @@ pub(crate) async fn run_file_mcp_serve(path: &str) {
                 caps.join(", ")
             );
 
-            let server =
+            let mut server =
                 harn_vm::McpServer::new(server_name, tools, resources, resource_templates, prompts);
+            if let Some(source) = card_source {
+                match resolve_card_source(source) {
+                    Ok(card) => server = server.with_server_card(card),
+                    Err(e) => {
+                        eprintln!("error: --card: {e}");
+                        process::exit(1);
+                    }
+                }
+            }
             if let Err(e) = server.run(&mut vm).await {
                 eprintln!("error: MCP server error: {e}");
                 process::exit(1);
             }
         })
         .await;
+}
+
+/// Accept either a path to a JSON file or an inline JSON blob and
+/// return the parsed `serde_json::Value`. Used by `--card`. Disambiguates
+/// by peeking at the first non-whitespace character: `{` → inline JSON,
+/// anything else → path.
+fn resolve_card_source(source: &str) -> Result<serde_json::Value, String> {
+    let trimmed = source.trim_start();
+    if trimmed.starts_with('{') || trimmed.starts_with('[') {
+        return serde_json::from_str(source).map_err(|e| format!("inline JSON parse error: {e}"));
+    }
+    let path = std::path::Path::new(source);
+    harn_vm::load_server_card_from_path(path).map_err(|e| format!("{e}"))
 }
 
 pub(crate) async fn run_watch(path: &str, denied_builtins: HashSet<String>) {
