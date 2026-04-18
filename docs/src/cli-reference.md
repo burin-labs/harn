@@ -40,8 +40,8 @@ Run tests.
 
 ```bash
 harn test conformance                  # run conformance test suite
-harn test conformance tests/parser.harn # run one conformance file
-harn test conformance tests/exprs/      # run a conformance subtree
+harn test conformance tests/language/arithmetic.harn # run one conformance file
+harn test conformance tests/stdlib/     # run a conformance subtree
 harn test tests/                       # run user tests in directory
 harn test tests/ --filter "auth*"      # filter by pattern
 harn test tests/ --parallel            # run tests concurrently

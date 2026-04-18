@@ -117,9 +117,9 @@ is a `.harn` file paired with a `.expected` (output match) or `.error`
 (error substring match) file.
 
 ```bash
-# Add a new test
-echo 'pipeline default() { println("hello") }' > conformance/tests/my_test.harn
-echo 'hello' > conformance/tests/my_test.expected
+# Add a new test (pick the subdirectory that matches the feature area, e.g. language/, stdlib/)
+echo 'pipeline default() { println("hello") }' > conformance/tests/language/my_test.harn
+echo 'hello' > conformance/tests/language/my_test.expected
 
 # Run it
 cargo run --bin harn -- test conformance --filter my_test
@@ -128,8 +128,10 @@ cargo run --bin harn -- test conformance --filter my_test
 cargo run --bin harn -- test conformance --timing --filter my_test
 ```
 
-Tests live in `conformance/tests/` (passing) and `conformance/errors/`
-(expected failures).
+Tests live under `conformance/tests/` (passing) and `conformance/errors/`
+(expected failures), each organized into feature-area subdirectories — the
+runner discovers `.harn` files recursively, so just drop new tests into
+the subdirectory that best matches their area.
 
 ## Code style
 

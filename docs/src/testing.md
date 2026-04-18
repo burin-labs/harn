@@ -7,12 +7,26 @@ agent behavior from real host capabilities.
 ## Conformance tests
 
 Conformance tests are the primary executable specification for the Harn
-language and runtime. They live in `conformance/tests/` as paired files:
+language and runtime. They live under `conformance/tests/` as paired files:
 
 - `test_name.harn` — Harn source code
 - `test_name.expected` — exact expected stdout output
 
-Shared helpers live in `conformance/tests/lib/`.
+Tests are grouped by area into subdirectories. `ls conformance/tests/` gives
+the current top-level map (examples: `language/`, `control_flow/`, `types/`,
+`collections/`, `concurrency/`, `stdlib/`, `templates/`, `modules/`,
+`agents/`, `integration/`, `runtime/`). The runner discovers `.harn` files
+recursively, so new tests just need to be dropped into the appropriate
+subdirectory.
+
+Shared helpers live alongside the tests that use them:
+`conformance/tests/modules/lib/` holds import targets for the `modules/`
+tests, and `conformance/tests/templates/fixtures/` holds prompt-template
+fixtures for the `templates/` tests.
+
+Error tests (Harn programs that are expected to fail) live under
+`conformance/errors/`, similarly subdivided into `syntax/`, `types/`,
+`semantic/`, and `runtime/`.
 
 ### Running tests
 
@@ -39,7 +53,7 @@ Create a `.harn` file with a `pipeline default(task)` entry point and use
 `log()` or `println()` to produce output:
 
 ```harn
-// conformance/tests/my_feature.harn
+// conformance/tests/<group>/my_feature.harn  (e.g. stdlib/, types/)
 pipeline default(task) {
   let result = my_feature(42)
   log(result)
