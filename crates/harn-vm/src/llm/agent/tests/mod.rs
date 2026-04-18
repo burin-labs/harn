@@ -90,6 +90,7 @@ pub(super) fn base_agent_config() -> AgentLoopConfig {
         daemon_config: DaemonLoopConfig::default(),
         llm_retries: 0,
         llm_backoff_ms: 1,
+        token_budget: None,
         exit_when_verified: false,
         loop_detect_warn: 0,
         loop_detect_block: 0,

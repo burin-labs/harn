@@ -274,7 +274,9 @@ fn build_schema_nudge(
     }
 }
 
-pub(crate) use self::agent::{current_host_bridge, run_agent_loop_internal};
+pub(crate) use self::agent::{
+    current_agent_session_id, current_host_bridge, parse_skill_config, run_agent_loop_internal,
+};
 pub(crate) use self::agent_config::{agent_loop_result_from_llm, AgentLoopConfig};
 pub use self::agent_config::{register_agent_loop_with_bridge, register_llm_call_with_bridge};
 pub use self::api::fetch_provider_max_context;
@@ -654,6 +656,7 @@ pub fn register_llm_builtins(vm: &mut Vm) {
                 daemon_config,
                 llm_retries: opt_int(&options, "llm_retries").unwrap_or(3) as usize,
                 llm_backoff_ms: opt_int(&options, "llm_backoff_ms").unwrap_or(2000) as u64,
+                token_budget: opt_int(&options, "token_budget"),
                 exit_when_verified,
                 loop_detect_warn: opt_int(&options, "loop_detect_warn").unwrap_or(2) as usize,
                 loop_detect_block: opt_int(&options, "loop_detect_block").unwrap_or(3) as usize,

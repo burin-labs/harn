@@ -19,6 +19,9 @@ pub(super) enum WorkerConfig {
         artifacts: Vec<ArtifactRecord>,
         transcript: Option<VmValue>,
     },
+    SubAgent {
+        spec: Box<SubAgentRunSpec>,
+    },
 }
 
 #[derive(Clone)]
@@ -231,7 +234,75 @@ fn worker_config_to_json(config: &WorkerConfig) -> serde_json::Value {
             "artifacts": artifacts,
             "transcript": transcript.as_ref().map(crate::llm::vm_value_to_json),
         }),
+        WorkerConfig::SubAgent { spec } => serde_json::json!({
+            "mode": "sub_agent",
+            "spec": sub_agent_spec_to_json(spec),
+        }),
     }
+}
+
+fn sub_agent_spec_to_json(spec: &SubAgentRunSpec) -> serde_json::Value {
+    serde_json::json!({
+        "name": &spec.name,
+        "task": &spec.task,
+        "system": &spec.system,
+        "options": spec
+            .options
+            .iter()
+            .map(|(key, value)| (key.clone(), crate::llm::vm_value_to_json(value)))
+            .collect::<BTreeMap<_, _>>(),
+        "returns_schema": spec
+            .returns_schema
+            .as_ref()
+            .map(crate::llm::vm_value_to_json),
+        "session_id": &spec.session_id,
+        "parent_session_id": &spec.parent_session_id,
+    })
+}
+
+fn sub_agent_spec_from_json(value: &serde_json::Value) -> Result<SubAgentRunSpec, VmError> {
+    let dict = value.as_object().ok_or_else(|| {
+        VmError::Runtime("worker snapshot sub-agent spec must be an object".to_string())
+    })?;
+    let options = dict
+        .get("options")
+        .and_then(|options| options.as_object())
+        .map(|options| {
+            options
+                .iter()
+                .map(|(key, value)| (key.clone(), crate::stdlib::json_to_vm_value(value)))
+                .collect::<BTreeMap<_, _>>()
+        })
+        .unwrap_or_default();
+    Ok(SubAgentRunSpec {
+        name: dict
+            .get("name")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default()
+            .to_string(),
+        task: dict
+            .get("task")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default()
+            .to_string(),
+        system: dict
+            .get("system")
+            .and_then(|value| value.as_str())
+            .map(|value| value.to_string()),
+        options,
+        returns_schema: dict
+            .get("returns_schema")
+            .map(crate::stdlib::json_to_vm_value),
+        session_id: dict
+            .get("session_id")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default()
+            .to_string(),
+        parent_session_id: dict
+            .get("parent_session_id")
+            .and_then(|value| value.as_str())
+            .map(|value| value.to_string()),
+    })
 }
 
 fn worker_config_from_json(value: &serde_json::Value) -> Result<WorkerConfig, VmError> {
@@ -281,6 +352,16 @@ fn worker_config_from_json(value: &serde_json::Value) -> Result<WorkerConfig, Vm
                 node: Box::new(node),
                 artifacts,
                 transcript,
+            })
+        }
+        "sub_agent" => {
+            let spec =
+                sub_agent_spec_from_json(value.get("spec").unwrap_or(&serde_json::Value::Null))
+                    .map_err(|e| {
+                        VmError::Runtime(format!("worker snapshot sub-agent parse error: {e}"))
+                    })?;
+            Ok(WorkerConfig::SubAgent {
+                spec: Box::new(spec),
             })
         }
         _ => Err(VmError::Runtime(
@@ -586,17 +667,7 @@ fn resolve_worker_policy(
         (None, Some(tool_policy)) => Some(tool_policy),
         (None, None) => None,
     };
-    let parent = crate::orchestration::current_execution_policy();
-    match (parent, requested) {
-        (Some(parent), Some(requested)) => {
-            Ok(Some(parent.intersect(&requested).map_err(|e| {
-                VmError::Runtime(format!("spawn_agent: {e}"))
-            })?))
-        }
-        (Some(parent), None) => Ok(Some(parent)),
-        (None, Some(requested)) => Ok(Some(requested)),
-        (None, None) => Ok(None),
-    }
+    resolve_inherited_worker_policy(requested)
 }
 
 fn parse_worker_audit(dict: &BTreeMap<String, VmValue>) -> Result<MutationSessionRecord, VmError> {
@@ -635,7 +706,7 @@ fn parse_worker_audit(dict: &BTreeMap<String, VmValue>) -> Result<MutationSessio
     Ok(audit.normalize())
 }
 
-fn parse_worker_execution_profile(
+pub(super) fn parse_worker_execution_profile(
     value: Option<&VmValue>,
 ) -> Result<WorkerExecutionProfile, VmError> {
     match value {
@@ -643,6 +714,44 @@ fn parse_worker_execution_profile(
             .map_err(|e| VmError::Runtime(format!("worker execution parse error: {e}"))),
         None => Ok(WorkerExecutionProfile::default()),
     }
+}
+
+pub(super) fn resolve_inherited_worker_policy(
+    requested: Option<CapabilityPolicy>,
+) -> Result<Option<CapabilityPolicy>, VmError> {
+    let parent = crate::orchestration::current_execution_policy();
+    match (parent, requested) {
+        (Some(parent), Some(requested)) => {
+            Ok(Some(parent.intersect(&requested).map_err(|e| {
+                VmError::Runtime(format!("spawn_agent: {e}"))
+            })?))
+        }
+        (Some(parent), None) => Ok(Some(parent)),
+        (None, Some(requested)) => Ok(Some(requested)),
+        (None, None) => Ok(None),
+    }
+}
+
+pub(super) fn inherited_worker_audit(execution_kind: &str) -> MutationSessionRecord {
+    let parent_session = crate::orchestration::current_mutation_session();
+    MutationSessionRecord {
+        parent_session_id: parent_session
+            .as_ref()
+            .map(|session| session.session_id.clone()),
+        run_id: parent_session
+            .as_ref()
+            .and_then(|session| session.run_id.clone()),
+        execution_kind: Some(execution_kind.to_string()),
+        mutation_scope: parent_session
+            .as_ref()
+            .map(|session| session.mutation_scope.clone())
+            .unwrap_or_else(|| "read_only".to_string()),
+        approval_policy: parent_session
+            .as_ref()
+            .and_then(|session| session.approval_policy.clone()),
+        ..Default::default()
+    }
+    .normalize()
 }
 
 fn parse_execution_profile_json(
@@ -932,6 +1041,15 @@ async fn execute_worker_config(
                 }),
                 transcript: next_transcript,
                 artifacts: produced,
+                execution,
+            })
+        }
+        WorkerConfig::SubAgent { spec } => {
+            let result = super::execute_sub_agent(spec.as_ref().clone()).await?;
+            Ok(WorkerExecutionResult {
+                payload: result.payload,
+                transcript: Some(result.transcript),
+                artifacts: Vec::new(),
                 execution,
             })
         }

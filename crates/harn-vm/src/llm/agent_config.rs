@@ -41,6 +41,10 @@ pub struct AgentLoopConfig {
     pub llm_retries: usize,
     /// Base backoff in milliseconds between LLM retries.
     pub llm_backoff_ms: u64,
+    /// Optional total token budget for the loop. When exceeded, the
+    /// loop exits gracefully with a budget-exhausted status after the
+    /// current iteration finishes.
+    pub token_budget: Option<i64>,
     /// Exit only when verification passes.
     pub exit_when_verified: bool,
     /// Tool loop detection thresholds.
@@ -339,6 +343,7 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                     daemon_config,
                     llm_retries: opt_int(&options, "llm_retries").unwrap_or(4) as usize,
                     llm_backoff_ms: opt_int(&options, "llm_backoff_ms").unwrap_or(2000) as u64,
+                    token_budget: opt_int(&options, "token_budget"),
                     exit_when_verified: opt_bool(&options, "exit_when_verified"),
                     loop_detect_warn: opt_int(&options, "loop_detect_warn").unwrap_or(2) as usize,
                     loop_detect_block: opt_int(&options, "loop_detect_block").unwrap_or(3) as usize,

@@ -22,6 +22,7 @@ pub use state::{ActiveSkill, SkillMatchStrategy};
 
 thread_local! {
     static CURRENT_HOST_BRIDGE: std::cell::RefCell<Option<Rc<crate::bridge::HostBridge>>> = const { std::cell::RefCell::new(None) };
+    static CURRENT_AGENT_SESSION_ID: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
     /// Queue of feedback items pushed via `agent_inject_feedback(session_id, kind, content)`
     /// from inside a pipeline event handler. The turn loop drains this
     /// queue at safe boundaries (before each LLM call) and appends each
@@ -136,11 +137,35 @@ pub(crate) fn current_host_bridge() -> Option<Rc<crate::bridge::HostBridge>> {
     CURRENT_HOST_BRIDGE.with(|slot| slot.borrow().clone())
 }
 
+pub(crate) fn current_agent_session_id() -> Option<String> {
+    CURRENT_AGENT_SESSION_ID.with(|slot| slot.borrow().clone())
+}
+
+struct AgentSessionGuard {
+    previous: Option<String>,
+}
+
+impl AgentSessionGuard {
+    fn install(session_id: String) -> Self {
+        let previous = CURRENT_AGENT_SESSION_ID.with(|slot| slot.replace(Some(session_id)));
+        Self { previous }
+    }
+}
+
+impl Drop for AgentSessionGuard {
+    fn drop(&mut self) {
+        CURRENT_AGENT_SESSION_ID.with(|slot| {
+            *slot.borrow_mut() = self.previous.take();
+        });
+    }
+}
+
 pub async fn run_agent_loop_internal(
     opts: &mut super::api::LlmCallOptions,
     config: AgentLoopConfig,
 ) -> Result<serde_json::Value, VmError> {
     let mut state = state::AgentLoopState::new(opts, config)?;
+    let _session_guard = AgentSessionGuard::install(state.session_id.clone());
 
     let tools_owned = opts.tools.clone();
     let tools_val = tools_owned.as_ref();
@@ -151,6 +176,7 @@ pub async fn run_agent_loop_internal(
     // them without fighting the `&mut state` borrow in the loop body.
     let llm_retries = state.config.llm_retries;
     let llm_backoff_ms = state.config.llm_backoff_ms;
+    let token_budget = state.config.token_budget;
     let turn_policy = state.config.turn_policy.clone();
     let stop_after_successful_tools = state.config.stop_after_successful_tools.clone();
     let post_turn_callback = state.config.post_turn_callback.clone();
@@ -201,6 +227,7 @@ pub async fn run_agent_loop_internal(
     }
 
     let mut iteration_exited_via_break = false;
+    let mut loop_tokens_used = 0i64;
     for iteration in 0..max_iterations {
         // Skill matching runs at the head of iteration 0 (always) and,
         // when sticky=false, again before each subsequent iteration.
@@ -297,7 +324,7 @@ pub async fn run_agent_loop_internal(
             None
         };
 
-        match post_turn::run_post_turn(
+        let iteration_outcome = post_turn::run_post_turn(
             &mut state,
             opts,
             &post_turn::PostTurnContext {
@@ -318,8 +345,20 @@ pub async fn run_agent_loop_internal(
             &mut call_result,
             dispatch,
         )
-        .await?
-        {
+        .await?;
+
+        if let Some(token_budget) = token_budget {
+            loop_tokens_used = loop_tokens_used
+                .saturating_add(call_result.input_tokens)
+                .saturating_add(call_result.output_tokens);
+            if loop_tokens_used >= token_budget {
+                iteration_exited_via_break = true;
+                state.final_status = "budget_exhausted";
+                break;
+            }
+        }
+
+        match iteration_outcome {
             post_turn::IterationOutcome::Continue => continue,
             post_turn::IterationOutcome::Break => {
                 iteration_exited_via_break = true;

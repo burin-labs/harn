@@ -1438,6 +1438,10 @@ pub(crate) const BUILTIN_SIGNATURES: &[BuiltinSig] = &[
         return_type: None,
     },
     BuiltinSig {
+        name: "sub_agent_run",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
         name: "substring",
         return_type: Some(BuiltinReturn::Named("string")),
     },

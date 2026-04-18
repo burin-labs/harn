@@ -34,6 +34,8 @@ pub struct SessionState {
     pub subscribers: Vec<VmValue>,
     pub created_at: Instant,
     pub last_accessed: Instant,
+    pub parent_id: Option<String>,
+    pub child_ids: Vec<String>,
     /// Names of skills that were active at the end of the most recent
     /// `agent_loop` run on this session. Empty when no skills were
     /// matched, when the skill system wasn't used, or when the
@@ -52,6 +54,8 @@ impl SessionState {
             subscribers: Vec::new(),
             created_at: now,
             last_accessed: now,
+            parent_id: None,
+            child_ids: Vec::new(),
             active_skills: Vec::new(),
         }
     }
@@ -135,6 +139,47 @@ pub fn open_or_create(id: Option<String>) -> String {
         try_register_jsonl_event_log(&resolved);
     }
     resolved
+}
+
+pub fn open_child_session(parent_id: &str, id: Option<String>) -> String {
+    let resolved = open_or_create(id);
+    link_child_session(parent_id, &resolved);
+    resolved
+}
+
+pub fn link_child_session(parent_id: &str, child_id: &str) {
+    if parent_id == child_id {
+        return;
+    }
+    open_or_create(Some(parent_id.to_string()));
+    open_or_create(Some(child_id.to_string()));
+    SESSIONS.with(|s| {
+        let mut map = s.borrow_mut();
+        if let Some(parent) = map.get_mut(parent_id) {
+            parent.last_accessed = Instant::now();
+            if !parent.child_ids.iter().any(|id| id == child_id) {
+                parent.child_ids.push(child_id.to_string());
+            }
+        }
+        if let Some(child) = map.get_mut(child_id) {
+            child.last_accessed = Instant::now();
+            child.parent_id = Some(parent_id.to_string());
+            child.transcript = clone_transcript_with_parent(&child.transcript, parent_id);
+        }
+    });
+}
+
+pub fn parent_id(id: &str) -> Option<String> {
+    SESSIONS.with(|s| s.borrow().get(id).and_then(|state| state.parent_id.clone()))
+}
+
+pub fn child_ids(id: &str) -> Vec<String> {
+    SESSIONS.with(|s| {
+        s.borrow()
+            .get(id)
+            .map(|state| state.child_ids.clone())
+            .unwrap_or_default()
+    })
 }
 
 /// Auto-register a [`JsonlEventSink`] for a newly-created session
@@ -454,6 +499,29 @@ fn clone_transcript_with_id(transcript: &VmValue, new_id: &str) -> VmValue {
     VmValue::Dict(Rc::new(next))
 }
 
+fn clone_transcript_with_parent(transcript: &VmValue, parent_id: &str) -> VmValue {
+    let Some(dict) = transcript.as_dict() else {
+        return transcript.clone();
+    };
+    let mut next = dict.clone();
+    let metadata = match next.get("metadata") {
+        Some(VmValue::Dict(metadata)) => {
+            let mut metadata = metadata.as_ref().clone();
+            metadata.insert(
+                "parent_session_id".to_string(),
+                VmValue::String(Rc::from(parent_id.to_string())),
+            );
+            VmValue::Dict(Rc::new(metadata))
+        }
+        _ => VmValue::Dict(Rc::new(BTreeMap::from([(
+            "parent_session_id".to_string(),
+            VmValue::String(Rc::from(parent_id.to_string())),
+        )]))),
+    };
+    next.insert("metadata".to_string(), metadata);
+    VmValue::Dict(Rc::new(next))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -504,5 +572,25 @@ mod tests {
     fn fork_at_on_unknown_source_returns_none() {
         reset_session_store();
         assert!(fork_at("does-not-exist", 3, None).is_none());
+    }
+
+    #[test]
+    fn child_sessions_record_parent_lineage() {
+        reset_session_store();
+        let parent = open_or_create(Some("parent-session".into()));
+        let child = open_child_session(&parent, Some("child-session".into()));
+        assert_eq!(parent_id(&child).as_deref(), Some("parent-session"));
+        assert_eq!(child_ids(&parent), vec!["child-session".to_string()]);
+
+        let transcript = snapshot(&child).expect("child transcript");
+        let metadata = transcript
+            .as_dict()
+            .and_then(|dict| dict.get("metadata"))
+            .and_then(|value| value.as_dict())
+            .expect("child metadata");
+        assert!(matches!(
+            metadata.get("parent_session_id"),
+            Some(VmValue::String(value)) if value.as_ref() == "parent-session"
+        ));
     }
 }
