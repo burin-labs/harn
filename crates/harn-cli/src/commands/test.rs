@@ -4,6 +4,7 @@ use std::process;
 
 use regex::Regex;
 
+use crate::commands::run::{install_cli_llm_mock_mode, CliLlmMockMode};
 use crate::execute;
 use crate::test_runner;
 
@@ -129,6 +130,17 @@ fn collect_harn_files_sorted(dir: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
     super::collect_harn_files(dir, &mut files);
     files
+}
+
+fn conformance_llm_mock_mode(harn_file: &Path) -> CliLlmMockMode {
+    let fixture = harn_file.with_extension("llm-mock.jsonl");
+    if fixture.is_file() {
+        CliLlmMockMode::Replay {
+            fixture_path: fixture,
+        }
+    } else {
+        CliLlmMockMode::Off
+    }
 }
 
 fn canonicalize_or_err(path: &Path) -> Result<PathBuf, String> {
@@ -276,6 +288,15 @@ pub(crate) async fn run_conformance_tests(
             };
 
             harn_vm::reset_thread_local_state();
+            let llm_mock_mode = conformance_llm_mock_mode(harn_file);
+            if let Err(error) = install_cli_llm_mock_mode(&llm_mock_mode) {
+                println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
+                let msg = format!("{rel_path}: llm mock setup error: {error}");
+                errors.push(msg.clone());
+                junit_results.push((rel_path, false, msg, 0));
+                failed += 1;
+                continue;
+            }
 
             let start = std::time::Instant::now();
             let result = tokio::time::timeout(
@@ -284,6 +305,7 @@ pub(crate) async fn run_conformance_tests(
             )
             .await;
             let duration_ms = start.elapsed().as_millis() as u64;
+            harn_vm::llm::clear_cli_llm_mock_mode();
 
             match result {
                 Ok(Ok(output)) => {
@@ -361,6 +383,15 @@ pub(crate) async fn run_conformance_tests(
             };
 
             harn_vm::reset_thread_local_state();
+            let llm_mock_mode = conformance_llm_mock_mode(harn_file);
+            if let Err(error) = install_cli_llm_mock_mode(&llm_mock_mode) {
+                println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
+                let msg = format!("{rel_path}: llm mock setup error: {error}");
+                errors.push(msg.clone());
+                junit_results.push((rel_path, false, msg, 0));
+                failed += 1;
+                continue;
+            }
 
             let start = std::time::Instant::now();
             let result = tokio::time::timeout(
@@ -369,6 +400,7 @@ pub(crate) async fn run_conformance_tests(
             )
             .await;
             let duration_ms = start.elapsed().as_millis() as u64;
+            harn_vm::llm::clear_cli_llm_mock_mode();
 
             match result {
                 Ok(Err(ref err)) if error_matches(err, &expected_error) => {

@@ -1,0 +1,34 @@
+import "std/project"
+
+pipeline test(task) {
+  let base_dir = path_join(temp_dir(), "harn-project-enrich-budget-" + uuid())
+  mkdir(path_join(base_dir, "src"))
+  write_file(
+    path_join(base_dir, "Cargo.toml"),
+    "[package]\nname = \"project-enrich-budget\"\nversion = \"0.1.0\"\n",
+  )
+  write_file(path_join(base_dir, "Cargo.lock"), "# lock\n")
+  write_file(
+    path_join(base_dir, "src/lib.rs"),
+    "pub struct UserName;\npub fn greet_name() -> &'static str { \"hi\" }\n",
+  )
+  let base = project_scan(base_dir, {tiers: ["ambient", "config"]})
+  let prompt = "Project path: {{path}}\n{{ for file in files }}FILE {{file.path}}\n{{file.content}}\n{{ end }}\nReturn JSON."
+  let schema = {type: "object", required: ["framework"], properties: {framework: {type: "string"}}}
+  let result = project_enrich(
+    base_dir,
+    {
+    base_evidence: base,
+    prompt: prompt,
+    schema: schema,
+    budget_tokens: 1,
+    provider: "mock",
+    model: "mock-model",
+    cache_key: "budget-v1",
+  },
+  )
+  println(result.budget_exceeded == true)
+  println(result.package_name == "project-enrich-budget")
+  println(result.languages[0] == "rust")
+  println(len(llm_mock_calls()) == 0)
+}

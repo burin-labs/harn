@@ -1058,6 +1058,10 @@ pub(crate) const BUILTIN_SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("list")),
     },
     BuiltinSig {
+        name: "project_enrich_native",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
         name: "project_root",
         return_type: Some(BuiltinReturn::Named("string")),
     },

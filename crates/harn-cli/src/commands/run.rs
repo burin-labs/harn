@@ -263,7 +263,7 @@ fn optional_vec_field(
     }
 }
 
-fn install_cli_llm_mock_mode(mode: &CliLlmMockMode) -> Result<(), String> {
+pub(crate) fn install_cli_llm_mock_mode(mode: &CliLlmMockMode) -> Result<(), String> {
     harn_vm::llm::clear_cli_llm_mock_mode();
     match mode {
         CliLlmMockMode::Off => Ok(()),

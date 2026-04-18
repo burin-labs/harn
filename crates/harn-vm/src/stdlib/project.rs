@@ -10,6 +10,7 @@ use crate::vm::Vm;
 
 use super::process::resolve_source_relative_path;
 use super::project_catalog::{project_catalog, ProjectCatalogEntry};
+use super::project_enrich::register_project_enrich_builtin;
 
 const STANDARD_VENDOR_DIRS: &[&str] = &[
     ".git",
@@ -217,6 +218,14 @@ pub(crate) fn register_project_builtins(vm: &mut Vm) {
             .collect::<Vec<_>>();
         Ok(VmValue::List(Rc::new(entries)))
     });
+
+    register_project_enrich_builtin(vm);
+}
+
+pub(crate) fn project_scan_config_value(dir: &Path) -> VmValue {
+    let mut options = ProjectScanOptions::default();
+    options.tiers.insert(ScanTier::Config);
+    scan_exact_directory(dir, &options).into_vm_value()
 }
 
 fn parse_project_options(value: Option<&VmValue>) -> ProjectScanOptions {

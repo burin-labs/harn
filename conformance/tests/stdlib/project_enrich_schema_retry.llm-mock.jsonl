@@ -1,0 +1,2 @@
+{"text":"{\"framework\":\"axum\",\"indent_style\":\"2-space\",\"naming_conventions\":[\"snake_case functions\"]}","model":"mock-model","provider":"mock"}
+{"text":"{\"framework\":\"axum\",\"indent_style\":\"2-space\",\"naming_conventions\":[\"snake_case functions\"],\"test_runner\":\"cargo nextest\"}","model":"mock-model","provider":"mock"}

@@ -71,6 +71,55 @@ You can override those defaults with:
 - `include_vendor: true`
 - `include_hidden: true`
 
+## Enrichment
+
+`project_enrich(path, options)` layers an L2, caller-owned enrichment pass on
+top of deterministic `project_scan(...)` evidence. The caller supplies the
+prompt template and the output schema; Harn owns prompt rendering, bounded file
+selection, schema-retry plumbing, and content-hash caching.
+
+Typical use:
+
+```harn
+let base = project_scan(".", {tiers: ["ambient", "config"]})
+let enriched = project_enrich(".", {
+  base_evidence: base,
+  prompt: "Project: {{package_name}}\n{{ for file in files }}FILE {{file.path}}\n{{file.content}}\n{{ end }}\nReturn JSON.",
+  schema: {
+    type: "object",
+    required: ["framework", "indent_style"],
+    properties: {
+      framework: {type: "string"},
+      indent_style: {type: "string"},
+    },
+  },
+  budget_tokens: 4000,
+  model: "auto",
+  cache_key: "coding-enrichment-v1",
+})
+```
+
+Bindings available to the template:
+
+- `path`: absolute project path
+- `base_evidence` / `evidence`: the supplied or auto-scanned L0/L1 evidence
+- every top-level key from `base_evidence`
+- `files`: deterministic bounded file context as `{path, content, truncated}`
+
+Behavior:
+
+- cache key includes `cache_key`, path, schema, rendered prompt, and the content
+  hash of the selected files
+- cached hits surface `_provenance.cached == true`
+- when the rendered prompt would exceed `budget_tokens`, the call returns the
+  base evidence with `budget_exceeded: true` instead of failing
+- schema-retry exhaustion returns an envelope with `validation_error` and
+  `base_evidence` instead of raising
+
+By default, cache entries live under `.harn/cache/enrichment/` inside the
+project root. Override that with `cache_dir` when a caller wants a different
+location.
+
 ## Catalog
 
 `project_catalog()` returns the authoritative built-in catalog that drives

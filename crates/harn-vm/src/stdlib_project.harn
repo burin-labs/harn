@@ -62,6 +62,11 @@ pub fn project_catalog() {
   return project_catalog_native()
 }
 
+/** project_enrich. */
+pub fn project_enrich(path = ".", options = nil) {
+  return project_enrich_native(path, options ?? {})
+}
+
 /** project_scan_paths. */
 pub fn project_scan_paths(path = ".", options = nil) {
   return project_scan_tree(path, options).keys()
