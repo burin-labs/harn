@@ -30,18 +30,16 @@ fn parent_tools() {
     "delegate",
     "Run a sub-agent",
     {
-    handler: { args ->
-    sub_agent_run(
-      args.task,
-      {
-      provider: "mock",
-      tools: child_tools(),
-      allowed_tools: ["search", "read"],
-      tool_format: "native",
-      max_iterations: 3,
-    },
-    )
+    handler: { args -> sub_agent_run(
+    args.task,
+    {
+    provider: "mock",
+    tools: child_tools(),
+    allowed_tools: ["search", "read"],
+    tool_format: "native",
+    max_iterations: 3,
   },
+  ) },
     parameters: {task: {type: "string"}},
     returns: {type: "object"},
   },
@@ -50,18 +48,20 @@ fn parent_tools() {
 }
 
 pipeline main() {
-  llm_mock({tool_calls: [{id: "parent_1", name: "delegate", arguments: {task: "Find the config path"}}]})
+  llm_mock(
+    {tool_calls: [{id: "parent_1", name: "delegate", arguments: {task: "Find the config path"}}]},
+  )
   llm_mock({tool_calls: [{id: "child_1", name: "search", arguments: {query: "config path"}}]})
-  llm_mock({tool_calls: [{id: "child_2", name: "read", arguments: {path: "crates/harn-vm/src/lib.rs"}}]})
+  llm_mock(
+    {tool_calls: [{id: "child_2", name: "read", arguments: {path: "crates/harn-vm/src/lib.rs"}}]},
+  )
   llm_mock({text: "The config path is crates/harn-vm/src/lib.rs"})
   llm_mock({text: "Delegation complete."})
-
   let result = agent_loop(
     "Investigate the config path",
     "You are helpful.",
     {provider: "mock", tools: parent_tools(), tool_format: "native", max_iterations: 2},
   )
-
   let stats = transcript_stats(result?.transcript)
   let transcript = json_stringify(transcript_messages(result?.transcript))
   println(stats?.tool_call_count == 1)

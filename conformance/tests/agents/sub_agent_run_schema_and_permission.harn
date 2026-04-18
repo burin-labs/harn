@@ -22,9 +22,7 @@ pipeline main() {
     returns: {
     schema: {
     type: "object",
-    properties: {
-    callers: {type: "array", items: {type: "string"}},
-  },
+    properties: {callers: {type: "array", items: {type: "string"}}},
     required: ["callers"],
   },
   },
@@ -32,7 +30,6 @@ pipeline main() {
   )
   println(typed?.ok)
   println(len(typed?.data?.callers ?? []) == 2)
-
   llm_mock({tool_calls: [{id: "deny_1", name: "write_note", arguments: {path: "notes.txt"}}]})
   let denied = sub_agent_run(
     "Try to write a note.",
