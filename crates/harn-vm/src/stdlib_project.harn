@@ -72,16 +72,6 @@ pub fn project_scan_paths(path = ".", options = nil) {
   return project_scan_tree(path, options).keys()
 }
 
-/** project_enrich. */
-pub fn project_enrich(path = ".", options = nil) {
-  let opts = options ?? {}
-  let tiers = opts?.tiers ?? ["ambient", "config"]
-  let scan = project_scan(path, {tiers: tiers})
-  let evidence = __project_deep_scan_evidence(scan, tiers)
-  let files = __project_deep_scan_files(path, opts?.include_hidden ?? false)
-  return __project_enrich_with_context(path, path, evidence, files, opts)
-}
-
 /** project_deep_scan. */
 pub fn project_deep_scan(path = ".", options = nil) {
   let opts = options ?? {}
