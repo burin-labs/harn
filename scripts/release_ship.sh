@@ -154,6 +154,15 @@ if [[ -z "$PREVIOUS_VERSION" ]]; then
   exit 1
 fi
 
+# Build the portal frontend up front so `portal-dist/` exists for every
+# downstream step. The `harn-cli` crate embeds portal-dist via `include_dir!`
+# at compile time and ships it via the crate's `include = [...]` field, so
+# both the audit (clippy + tests) and the subsequent cargo publish need the
+# real bundle on disk. portal-dist/ is gitignored — a fresh clone or CI run
+# would otherwise get the build.rs placeholder.
+log_step "Build portal frontend"
+make portal-check
+
 log_step "Release audit"
 ./scripts/release_gate.sh audit
 

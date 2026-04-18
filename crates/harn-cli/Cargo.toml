@@ -5,6 +5,19 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "CLI for the Harn programming language — run, test, REPL, format, and lint"
+build = "build.rs"
+# portal-dist/ is a gitignored build artifact produced by `npm run build` in
+# crates/harn-cli/portal. It is embedded at compile time via include_dir! in
+# src/commands/portal/assets.rs, so it must ship with the published crate.
+# The release workflow (scripts/release_ship.sh) builds the portal before
+# invoking cargo publish; this `include` field forces cargo to package the
+# resulting portal-dist/ tree even though it is gitignored.
+include = [
+    "src/**/*",
+    "build.rs",
+    "Cargo.toml",
+    "portal-dist/**/*",
+]
 
 [[bin]]
 name = "harn"

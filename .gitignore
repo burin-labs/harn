@@ -1,4 +1,5 @@
 /target
+/crates/harn-cli/portal-dist/
 node_modules/
 __pycache__/
 *.pyc
