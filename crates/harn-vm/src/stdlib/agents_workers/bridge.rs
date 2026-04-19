@@ -14,6 +14,7 @@ fn worker_bridge_metadata(state: &WorkerState) -> serde_json::Value {
         "created_at": state.created_at,
         "started_at": state.started_at,
         "finished_at": state.finished_at,
+        "awaiting_started_at": state.awaiting_started_at,
         "artifact_count": state.artifacts.len(),
         "has_transcript": state.transcript.is_some(),
         "parent_worker_id": state.parent_worker_id,

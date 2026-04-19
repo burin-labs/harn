@@ -39,6 +39,15 @@ granular archaeology.
   from daemon stdlib wrapper activity, `harn runs inspect` prints
   the lifecycle timeline, and the portal run detail view exposes a
   dedicated Daemons section alongside the rest of observability.
+- **Re-triggerable workers via `carry_policy.retriggerable` (#198,
+  closes #143 part (b)).** Workers can now park in an `awaiting`
+  state after a successful run, wake back up through the new
+  `worker_trigger(...)` builtin, and keep appending follow-up turns
+  onto the same transcript instead of starting from scratch. One-
+  shot workers remain the default, `worker_wait` now blocks
+  retriggerable workers until a real terminal state, and the
+  persisted worker snapshot keeps the new lifecycle/carry-policy
+  fields across resume.
 
 ## v0.7.22
 

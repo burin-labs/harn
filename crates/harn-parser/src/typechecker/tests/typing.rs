@@ -210,6 +210,7 @@ fn test_workflow_and_transcript_builtins_are_known() {
   let transcript = transcript_reset({metadata: {source: "test"}})
   let visible: string = transcript_render_visible(transcript_archive(transcript))
   let events: list = transcript_events(transcript)
+  let worker: dict = worker_trigger({id: "worker_1"}, {follow_up: "next"})
   let context: string = artifact_context([], {max_artifacts: 1})
   println(report)
   println(run)
@@ -234,6 +235,7 @@ fn test_workflow_and_transcript_builtins_are_known() {
   println(apply)
   println(visible)
   println(events)
+  println(worker)
   println(context)
 }"#,
     );

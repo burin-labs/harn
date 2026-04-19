@@ -5,7 +5,7 @@ use super::WorkerCarryPolicy;
 use crate::orchestration::{select_artifacts, ArtifactRecord, CapabilityPolicy, ContextPolicy};
 use crate::value::{VmError, VmValue};
 
-pub(super) fn parse_worker_carry_policy(
+pub(in crate::stdlib::agents) fn parse_worker_carry_policy(
     dict: &BTreeMap<String, VmValue>,
 ) -> Result<WorkerCarryPolicy, VmError> {
     let carry = dict
@@ -30,6 +30,7 @@ pub(super) fn parse_worker_carry_policy(
         context_policy,
         resume_workflow: !matches!(carry.get("resume_workflow"), Some(VmValue::Bool(false))),
         persist_state: !matches!(carry.get("persist_state"), Some(VmValue::Bool(false))),
+        retriggerable: matches!(carry.get("retriggerable"), Some(VmValue::Bool(true))),
         policy: None,
     })
 }

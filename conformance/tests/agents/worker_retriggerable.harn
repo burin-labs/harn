@@ -1,0 +1,83 @@
+import "std/agents"
+
+fn current_worker(handle) {
+  let worker_id = handle?.id
+  for worker in list_agents() {
+    if worker?.id == worker_id {
+      return worker
+    }
+  }
+  return nil
+}
+
+fn wait_for_status(handle, status) {
+  var attempts = 0
+  var worker = current_worker(handle)
+  while attempts < 200 && worker?.status != status {
+    sleep(10ms)
+    worker = current_worker(handle)
+    attempts = attempts + 1
+  }
+  return worker
+}
+
+fn worker_snapshot(handle) {
+  let worker = current_worker(handle)
+  return json_parse(read_file(worker?.snapshot_path))
+}
+
+fn worker_snapshot_text(handle) {
+  let worker = current_worker(handle)
+  return read_file(worker?.snapshot_path)
+}
+
+pipeline main() {
+  llm_mock({text: "one-shot summary"})
+  let one_shot = sub_agent_run("Answer once.", {provider: "mock", background: true})
+  let one_shot_done = wait_agent(one_shot)
+  println(one_shot_done?.status == "completed")
+  let one_shot_trigger_error = try {
+    worker_trigger(one_shot_done, {follow_up: "again"})
+    false
+  } catch (e) {
+    contains(to_string(e), "not retriggerable")
+  }
+  println(one_shot_trigger_error)
+  llm_mock({text: "first answer"})
+  llm_mock({text: "follow-up answer"})
+  let loop = sub_agent_run(
+    "Answer the first question.",
+    {provider: "mock", background: true, carry: {retriggerable: true}},
+  )
+  let first = wait_for_status(loop, "awaiting")
+  println(first?.status == "awaiting")
+  println(contains(worker_result(first)?.summary ?? "", "first answer"))
+  let first_snapshot = worker_snapshot(loop)
+  let first_snapshot_text = worker_snapshot_text(loop)
+  let first_messages = first_snapshot?.transcript?.messages ?? []
+  println(len(first_messages) >= 2)
+  println(contains(first_snapshot_text, "Answer the first question."))
+  let waiter = channel("waiter")
+  let _wait_task = spawn {
+    let done = wait_agent(loop)
+    send(waiter, done?.status)
+  }
+  sleep(20ms)
+  println(try_receive(waiter) == nil)
+  let retriggered = worker_trigger(loop, {follow_up: "Need one more detail"})
+  println(retriggered?.status == "running")
+  let second = wait_for_status(loop, "awaiting")
+  println(second?.status == "awaiting")
+  println(contains(worker_result(second)?.summary ?? "", "follow-up answer"))
+  println(worker_request(second)?.task == "Answer the first question.")
+  println(worker_provenance(second)?.worker_id == loop?.id)
+  let closed = close_agent(loop)
+  println(closed?.status == "cancelled")
+  let final_snapshot_path = path_join(temp_dir(), "worker-final-" + closed?.id + ".json")
+  copy_file(closed?.snapshot_path, final_snapshot_path)
+  let final_snapshot_text = read_file(final_snapshot_path)
+  println(len(final_snapshot_text) > len(first_snapshot_text))
+  println(contains(final_snapshot_text, "Answer the first question."))
+  println(contains(final_snapshot_text, "Need one more detail"))
+  println(receive(waiter) == "cancelled")
+}
