@@ -7,8 +7,9 @@ use crate::orchestration::{
     append_audit_entry, builtin_ceiling, install_current_mutation_session,
     install_workflow_skill_context, load_run_record, next_nodes_for, normalize_run_record,
     normalize_workflow_value, pop_execution_policy, push_execution_policy, validate_workflow,
-    ArtifactRecord, MutationSessionRecord, RunRecord, RunStageRecord, RunTransitionRecord,
-    WorkflowEdge, WorkflowGraph, WorkflowSkillContext, WorkflowSkillContextGuard,
+    workflow_verification_contracts, ArtifactRecord, MutationSessionRecord, RunRecord,
+    RunStageRecord, RunTransitionRecord, WorkflowEdge, WorkflowGraph, WorkflowSkillContext,
+    WorkflowSkillContextGuard,
 };
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
@@ -80,6 +81,7 @@ pub(in crate::stdlib) async fn execute_workflow(
             report.errors.join("; ")
         )));
     }
+    let workflow_verification_contracts = workflow_verification_contracts(&graph)?;
 
     let resumed_run = match optional_string_option(&options, "resume_path") {
         Some(path) if !path.is_empty() => Some(load_run_record(std::path::Path::new(&path))?),
@@ -365,7 +367,11 @@ pub(in crate::stdlib) async fn execute_workflow(
                 continue;
             }
         }
-        let node = apply_runtime_node_overrides(node, &options);
+        let mut node = apply_runtime_node_overrides(node, &options);
+        crate::orchestration::inject_workflow_verification_contracts(
+            &mut node,
+            &workflow_verification_contracts,
+        );
         let stage_policy = effective_node_policy(&graph, &node)?;
         let stage_approval = effective_node_approval_policy(&graph, &node);
 
@@ -449,6 +455,20 @@ pub(in crate::stdlib) async fn execute_workflow(
         }
         if let Some(rendered_context) = executed.result.get("rendered_context") {
             stage_metadata.insert("rendered_context".to_string(), rendered_context.clone());
+        }
+        if let Some(verification_contracts) = executed.result.get("verification_contracts") {
+            stage_metadata.insert(
+                "verification_contracts".to_string(),
+                verification_contracts.clone(),
+            );
+        }
+        if let Some(rendered_verification_context) =
+            executed.result.get("rendered_verification_context")
+        {
+            stage_metadata.insert(
+                "rendered_verification_context".to_string(),
+                rendered_verification_context.clone(),
+            );
         }
         if let Some(selected_artifact_ids) = executed.result.get("selected_artifact_ids") {
             stage_metadata.insert(

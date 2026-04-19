@@ -1,10 +1,16 @@
 use super::artifact::{load_run_tree, snapshot_trace_spans};
 use super::map::{execute_join_policy, LocalTask};
+use super::register::execute_workflow;
 use super::stage::{classify_stage_outcome, execute_stage_attempts};
-use crate::orchestration::{render_artifacts_context, render_workflow_prompt};
-use crate::orchestration::{save_run_record, RunChildRecord, RunRecord};
+use crate::orchestration::{
+    inject_workflow_verification_contracts, render_artifacts_context, render_workflow_prompt,
+    save_run_record, workflow_verification_contracts, RunChildRecord, RunExecutionRecord,
+    RunRecord, VerificationContract, VerificationRequirement, WorkflowEdge, WorkflowGraph,
+    WorkflowNode,
+};
 use crate::tracing::{set_tracing_enabled, span_end, span_start, SpanKind};
 use std::cell::Cell;
+use std::collections::BTreeMap;
 use std::rc::Rc;
 
 #[test]
@@ -101,6 +107,7 @@ fn render_workflow_prompt_puts_task_before_context() {
     let prompt = render_workflow_prompt(
         "Create the missing test file with one edit call.",
         Some("Create Required Outputs"),
+        "",
         "<artifact>\n<title>tests/unit/test_example.py</title>\n<body>\npass\n</body>\n</artifact>",
     );
     let task_index = prompt
@@ -120,6 +127,28 @@ fn render_workflow_prompt_puts_task_before_context() {
         prompt.trim_end().ends_with("</workflow_response_contract>"),
         "prompt should end on the response contract instead of artifact text"
     );
+}
+
+#[test]
+fn render_workflow_prompt_places_verification_before_context() {
+    let prompt = render_workflow_prompt(
+        "Implement the verifier-exact wiring.",
+        Some("Implement"),
+        "<contract>\n<required_identifiers>\n- rateLimit\n</required_identifiers>\n</contract>",
+        "<artifact>\n<title>src/server.ts</title>\n<body>\nexisting code\n</body>\n</artifact>",
+    );
+
+    let verification_index = prompt
+        .find("<workflow_verification>")
+        .expect("verification block should exist");
+    let context_index = prompt
+        .find("<workflow_context>")
+        .expect("context block should exist");
+    assert!(
+        verification_index < context_index,
+        "verification block should precede artifact context"
+    );
+    assert!(prompt.contains("rateLimit"));
 }
 
 #[test]
@@ -383,4 +412,234 @@ async fn stage_task_reaches_execution_verbatim() {
             .expect("stage executes");
 
     assert_eq!(executed.attempts.len(), 1);
+}
+
+#[test]
+fn workflow_verification_contracts_collect_exact_requirements() {
+    let graph = WorkflowGraph {
+        entry: "act".to_string(),
+        nodes: BTreeMap::from([(
+            "verify".to_string(),
+            WorkflowNode {
+                id: Some("verify".to_string()),
+                kind: "verify".to_string(),
+                verify: Some(serde_json::json!({
+                    "command": "python verify.py",
+                    "expect_status": 0,
+                    "required_identifiers": ["rateLimit"],
+                    "required_paths": ["src/middleware/rateLimit.ts"],
+                    "required_text": ["app.use(rateLimit)"],
+                    "notes": ["Do not rename the middleware export."],
+                })),
+                ..Default::default()
+            },
+        )]),
+        ..Default::default()
+    };
+
+    let contracts = workflow_verification_contracts(&graph).expect("verification contracts");
+    assert_eq!(contracts.len(), 1);
+    assert_eq!(
+        contracts[0].required_identifiers,
+        vec!["rateLimit".to_string()]
+    );
+    assert_eq!(
+        contracts[0].required_paths,
+        vec!["src/middleware/rateLimit.ts".to_string()]
+    );
+    assert_eq!(
+        contracts[0].required_text,
+        vec!["app.use(rateLimit)".to_string()]
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn workflow_execute_injects_verify_contract_into_act_prompt() {
+    crate::reset_thread_local_state();
+    crate::llm::mock::push_llm_mock(crate::llm::mock::LlmMock {
+        text: "done".to_string(),
+        tool_calls: Vec::new(),
+        match_pattern: None,
+        input_tokens: None,
+        output_tokens: None,
+        cache_read_tokens: None,
+        cache_write_tokens: None,
+        thinking: None,
+        stop_reason: None,
+        model: "mock-model".to_string(),
+        provider: Some("mock".to_string()),
+        blocks: None,
+        error: None,
+    });
+
+    let temp_dir = std::env::temp_dir().join(format!("harn-issue-126-{}", uuid::Uuid::now_v7()));
+    std::fs::create_dir_all(&temp_dir).expect("temp dir");
+    let persist_path = temp_dir.join("run.json");
+
+    let graph = WorkflowGraph {
+        type_name: "workflow_graph".to_string(),
+        id: "wf".to_string(),
+        entry: "act".to_string(),
+        nodes: BTreeMap::from([
+            (
+                "act".to_string(),
+                WorkflowNode {
+                    id: Some("act".to_string()),
+                    kind: "stage".to_string(),
+                    mode: Some("llm".to_string()),
+                    model_policy: crate::orchestration::ModelPolicy {
+                        provider: Some("mock".to_string()),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+            ),
+            (
+                "verify".to_string(),
+                WorkflowNode {
+                    id: Some("verify".to_string()),
+                    kind: "verify".to_string(),
+                    verify: Some(serde_json::json!({
+                        "command": "echo ok",
+                        "expect_status": 0,
+                        "required_identifiers": ["rateLimit"],
+                        "required_text": ["app.use(rateLimit)"],
+                    })),
+                    output_contract: crate::orchestration::StageContract {
+                        output_kinds: vec!["verification_result".to_string()],
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+            ),
+        ]),
+        edges: vec![WorkflowEdge {
+            from: "act".to_string(),
+            to: "verify".to_string(),
+            branch: None,
+            label: None,
+        }],
+        ..Default::default()
+    };
+
+    let result = execute_workflow(
+        "Implement the verifier-exact middleware.".to_string(),
+        graph,
+        Vec::new(),
+        BTreeMap::from([
+            (
+                "persist_path".to_string(),
+                crate::value::VmValue::String(Rc::from(
+                    persist_path.to_string_lossy().into_owned(),
+                )),
+            ),
+            ("max_steps".to_string(), crate::value::VmValue::Int(2)),
+        ]),
+    )
+    .await
+    .expect("workflow executes");
+
+    let run_value = result
+        .as_dict()
+        .and_then(|value| value.get("run"))
+        .cloned()
+        .expect("workflow envelope run");
+    let run = crate::orchestration::normalize_run_record(&run_value).expect("run record");
+    let act_stage = run
+        .stages
+        .iter()
+        .find(|stage| stage.node_id == "act")
+        .expect("act stage");
+    let prompt = act_stage
+        .metadata
+        .get("prompt")
+        .and_then(|value| value.as_str())
+        .expect("prompt metadata");
+    assert!(prompt.contains("<workflow_verification>"));
+    assert!(prompt.contains("rateLimit"));
+    assert!(prompt.contains("app.use(rateLimit)"));
+
+    let _ = std::fs::remove_dir_all(&temp_dir);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn stage_prompt_loads_contract_file_relative_to_execution_context() {
+    crate::reset_thread_local_state();
+    crate::llm::mock::push_llm_mock(crate::llm::mock::LlmMock {
+        text: "done".to_string(),
+        tool_calls: Vec::new(),
+        match_pattern: None,
+        input_tokens: None,
+        output_tokens: None,
+        cache_read_tokens: None,
+        cache_write_tokens: None,
+        thinking: None,
+        stop_reason: None,
+        model: "mock-model".to_string(),
+        provider: Some("mock".to_string()),
+        blocks: None,
+        error: None,
+    });
+
+    let temp_dir =
+        std::env::temp_dir().join(format!("harn-issue-126-file-{}", uuid::Uuid::now_v7()));
+    std::fs::create_dir_all(&temp_dir).expect("temp dir");
+    let contract_path = temp_dir.join("verify.contract.json");
+    std::fs::write(
+        &contract_path,
+        serde_json::json!({
+            "summary": "Verifier expects the exact middleware symbol.",
+            "required_identifiers": ["rateLimit"],
+            "required_paths": ["src/middleware/rateLimit.ts"],
+            "required_text": ["app.use(rateLimit)"],
+        })
+        .to_string(),
+    )
+    .expect("contract file");
+
+    crate::stdlib::process::set_thread_execution_context(Some(RunExecutionRecord {
+        cwd: Some(temp_dir.to_string_lossy().into_owned()),
+        ..Default::default()
+    }));
+
+    let mut node = WorkflowNode {
+        id: Some("act".to_string()),
+        kind: "stage".to_string(),
+        mode: Some("llm".to_string()),
+        model_policy: crate::orchestration::ModelPolicy {
+            provider: Some("mock".to_string()),
+            ..Default::default()
+        },
+        verify: Some(serde_json::json!({
+            "contract_path": "verify.contract.json",
+        })),
+        ..Default::default()
+    };
+    inject_workflow_verification_contracts(
+        &mut node,
+        &[VerificationContract {
+            source_node: Some("verify".to_string()),
+            checks: vec![VerificationRequirement {
+                kind: "identifier".to_string(),
+                value: "rateLimit".to_string(),
+                note: Some("Use the exact exported name.".to_string()),
+            }],
+            ..Default::default()
+        }],
+    );
+
+    let executed = execute_stage_attempts("Implement the middleware.", "act", &node, &[], None)
+        .await
+        .expect("stage executes");
+    let prompt = executed
+        .result
+        .get("prompt")
+        .and_then(|value| value.as_str())
+        .expect("prompt");
+    assert!(prompt.contains("rateLimit"));
+    assert!(prompt.contains("src/middleware/rateLimit.ts"));
+    assert!(prompt.contains("app.use(rateLimit)"));
+
+    crate::reset_thread_local_state();
+    let _ = std::fs::remove_dir_all(&temp_dir);
 }
