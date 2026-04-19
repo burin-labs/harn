@@ -214,6 +214,39 @@ Command-based verification records `stdout`, `stderr`, `exit_status`, and a
 derived success flag on the stage result while still flowing through the same
 workflow branch/outcome machinery as LLM-backed verification.
 
+Verifier requirements can also be published as structured contract inputs for
+earlier planning and execution stages. Harn injects these contracts into the
+stage prompt automatically so the model sees exact verifier-owned identifiers,
+paths, and wiring text before it starts editing:
+
+```harn,ignore
+verify: {
+  kind: "verify",
+  verify: {
+    command: "python scripts/verify_rate_limit.py",
+    expect_status: 0,
+    required_identifiers: ["rateLimit"],
+    required_paths: ["src/middleware/rateLimit.ts"],
+    required_text: ["app.use(rateLimit)"],
+    notes: ["Use the verifier-exact symbol names. Do not rename them."]
+  }
+}
+```
+
+When the verifier contract lives outside the workflow file, point `contract_path`
+at a JSON file relative to the workflow execution context:
+
+```harn,ignore
+verify: {
+  kind: "verify",
+  verify: {
+    command: "python scripts/verify_rate_limit.py",
+    contract_path: "scripts/verify_rate_limit.contract.json",
+    expect_status: 0
+  }
+}
+```
+
 Options currently include:
 
 - `max_steps`

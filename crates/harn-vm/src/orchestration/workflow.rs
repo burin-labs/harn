@@ -14,6 +14,8 @@ use crate::llm::{extract_llm_options, vm_call_llm_full, vm_value_to_json};
 use crate::tool_annotations::{SideEffectLevel, ToolAnnotations, ToolArgSchema, ToolKind};
 use crate::value::{VmError, VmValue};
 
+pub const WORKFLOW_VERIFICATION_CONTRACTS_METADATA_KEY: &str = "workflow_verification_contracts";
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct WorkflowNode {
@@ -73,6 +75,367 @@ impl PartialEq for WorkflowNode {
     fn eq(&self, other: &Self) -> bool {
         serde_json::to_value(self).ok() == serde_json::to_value(other).ok()
     }
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct VerificationRequirement {
+    pub kind: String,
+    pub value: String,
+    pub note: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct VerificationContract {
+    pub source_node: Option<String>,
+    pub summary: Option<String>,
+    pub command: Option<String>,
+    pub expect_status: Option<i64>,
+    pub assert_text: Option<String>,
+    pub expect_text: Option<String>,
+    pub required_identifiers: Vec<String>,
+    pub required_paths: Vec<String>,
+    pub required_text: Vec<String>,
+    pub notes: Vec<String>,
+    pub checks: Vec<VerificationRequirement>,
+}
+
+impl VerificationContract {
+    fn is_empty(&self) -> bool {
+        self.summary.is_none()
+            && self.command.is_none()
+            && self.expect_status.is_none()
+            && self.assert_text.is_none()
+            && self.expect_text.is_none()
+            && self.required_identifiers.is_empty()
+            && self.required_paths.is_empty()
+            && self.required_text.is_empty()
+            && self.notes.is_empty()
+            && self.checks.is_empty()
+    }
+}
+
+fn push_unique_string(values: &mut Vec<String>, value: &str) {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+    if !values.iter().any(|existing| existing == trimmed) {
+        values.push(trimmed.to_string());
+    }
+}
+
+fn push_unique_requirement(
+    values: &mut Vec<VerificationRequirement>,
+    kind: &str,
+    value: &str,
+    note: Option<&str>,
+) {
+    let trimmed_kind = kind.trim();
+    let trimmed_value = value.trim();
+    let trimmed_note = note
+        .map(str::trim)
+        .filter(|candidate| !candidate.is_empty())
+        .map(|candidate| candidate.to_string());
+    if trimmed_kind.is_empty() || trimmed_value.is_empty() {
+        return;
+    }
+    let candidate = VerificationRequirement {
+        kind: trimmed_kind.to_string(),
+        value: trimmed_value.to_string(),
+        note: trimmed_note,
+    };
+    if !values.iter().any(|existing| existing == &candidate) {
+        values.push(candidate);
+    }
+}
+
+fn json_string_list(value: Option<&serde_json::Value>) -> Vec<String> {
+    match value {
+        Some(serde_json::Value::String(text)) => {
+            let mut values = Vec::new();
+            push_unique_string(&mut values, text);
+            values
+        }
+        Some(serde_json::Value::Array(items)) => {
+            let mut values = Vec::new();
+            for item in items {
+                if let Some(text) = item.as_str() {
+                    push_unique_string(&mut values, text);
+                }
+            }
+            values
+        }
+        _ => Vec::new(),
+    }
+}
+
+fn merge_verification_requirement_list(
+    target: &mut Vec<VerificationRequirement>,
+    value: Option<&serde_json::Value>,
+) {
+    let Some(items) = value.and_then(|raw| raw.as_array()) else {
+        return;
+    };
+    for item in items {
+        let Some(object) = item.as_object() else {
+            continue;
+        };
+        let kind = object
+            .get("kind")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default();
+        let value = object
+            .get("value")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default();
+        let note = object
+            .get("note")
+            .or_else(|| object.get("description"))
+            .or_else(|| object.get("reason"))
+            .and_then(|value| value.as_str());
+        push_unique_requirement(target, kind, value, note);
+    }
+}
+
+fn merge_verification_contract_fields(
+    target: &mut VerificationContract,
+    object: &serde_json::Map<String, serde_json::Value>,
+) {
+    if target.summary.is_none() {
+        target.summary = object
+            .get("summary")
+            .and_then(|value| value.as_str())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|value| value.to_string());
+    }
+    if target.command.is_none() {
+        target.command = object
+            .get("command")
+            .and_then(|value| value.as_str())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|value| value.to_string());
+    }
+    if target.expect_status.is_none() {
+        target.expect_status = object.get("expect_status").and_then(|value| value.as_i64());
+    }
+    if target.assert_text.is_none() {
+        target.assert_text = object
+            .get("assert_text")
+            .and_then(|value| value.as_str())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|value| value.to_string());
+    }
+    if target.expect_text.is_none() {
+        target.expect_text = object
+            .get("expect_text")
+            .and_then(|value| value.as_str())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|value| value.to_string());
+    }
+
+    for value in json_string_list(
+        object
+            .get("required_identifiers")
+            .or_else(|| object.get("identifiers")),
+    ) {
+        push_unique_string(&mut target.required_identifiers, &value);
+    }
+    for value in json_string_list(object.get("required_paths").or_else(|| object.get("paths"))) {
+        push_unique_string(&mut target.required_paths, &value);
+    }
+    for value in json_string_list(
+        object
+            .get("required_text")
+            .or_else(|| object.get("exact_text"))
+            .or_else(|| object.get("required_strings")),
+    ) {
+        push_unique_string(&mut target.required_text, &value);
+    }
+    for value in json_string_list(object.get("notes")) {
+        push_unique_string(&mut target.notes, &value);
+    }
+    merge_verification_requirement_list(&mut target.checks, object.get("checks"));
+}
+
+fn load_verification_contract_file(path: &str) -> Result<serde_json::Value, VmError> {
+    let resolved = crate::stdlib::process::resolve_source_asset_path(path);
+    let contents = std::fs::read_to_string(&resolved).map_err(|error| {
+        VmError::Runtime(format!(
+            "workflow verification contract read failed for {}: {error}",
+            resolved.display()
+        ))
+    })?;
+    serde_json::from_str(&contents).map_err(|error| {
+        VmError::Runtime(format!(
+            "workflow verification contract parse failed for {}: {error}",
+            resolved.display()
+        ))
+    })
+}
+
+fn resolve_verification_contract_path(
+    verify: &serde_json::Map<String, serde_json::Value>,
+) -> Result<Option<serde_json::Value>, VmError> {
+    let Some(path) = verify
+        .get("contract_path")
+        .or_else(|| verify.get("verification_contract_path"))
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(None);
+    };
+    Ok(Some(load_verification_contract_file(path)?))
+}
+
+pub fn verification_contract_from_verify(
+    node_id: &str,
+    verify: Option<&serde_json::Value>,
+) -> Result<Option<VerificationContract>, VmError> {
+    let Some(verify_object) = verify.and_then(|value| value.as_object()) else {
+        return Ok(None);
+    };
+
+    let mut contract = VerificationContract {
+        source_node: Some(node_id.to_string()),
+        ..Default::default()
+    };
+
+    if let Some(file_contract) = resolve_verification_contract_path(verify_object)? {
+        let Some(object) = file_contract.as_object() else {
+            return Err(VmError::Runtime(
+                "workflow verification contract file must parse to a JSON object".to_string(),
+            ));
+        };
+        merge_verification_contract_fields(&mut contract, object);
+    }
+
+    if let Some(inline_contract) = verify_object.get("contract") {
+        let Some(object) = inline_contract.as_object() else {
+            return Err(VmError::Runtime(
+                "workflow verify.contract must be an object".to_string(),
+            ));
+        };
+        merge_verification_contract_fields(&mut contract, object);
+    }
+
+    merge_verification_contract_fields(&mut contract, verify_object);
+
+    if let Some(assert_text) = contract.assert_text.clone() {
+        push_unique_requirement(
+            &mut contract.checks,
+            "visible_text_contains",
+            &assert_text,
+            Some("verify stage requires visible output to contain this text"),
+        );
+    }
+    if let Some(expect_text) = contract.expect_text.clone() {
+        push_unique_requirement(
+            &mut contract.checks,
+            "combined_output_contains",
+            &expect_text,
+            Some("verify command requires combined stdout/stderr to contain this text"),
+        );
+    }
+    if let Some(expect_status) = contract.expect_status {
+        push_unique_requirement(
+            &mut contract.checks,
+            "expect_status",
+            &expect_status.to_string(),
+            Some("verify command exit status must match exactly"),
+        );
+    }
+    for identifier in contract.required_identifiers.clone() {
+        push_unique_requirement(
+            &mut contract.checks,
+            "identifier",
+            &identifier,
+            Some("use this exact identifier spelling"),
+        );
+    }
+    for path in contract.required_paths.clone() {
+        push_unique_requirement(
+            &mut contract.checks,
+            "path",
+            &path,
+            Some("preserve this exact path"),
+        );
+    }
+    for text in contract.required_text.clone() {
+        push_unique_requirement(
+            &mut contract.checks,
+            "text",
+            &text,
+            Some("required exact text or wiring snippet"),
+        );
+    }
+
+    if contract.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(contract))
+}
+
+fn push_unique_contract(values: &mut Vec<VerificationContract>, candidate: VerificationContract) {
+    if !values.iter().any(|existing| existing == &candidate) {
+        values.push(candidate);
+    }
+}
+
+pub fn workflow_verification_contracts(
+    graph: &WorkflowGraph,
+) -> Result<Vec<VerificationContract>, VmError> {
+    let mut contracts = Vec::new();
+    for (node_id, node) in &graph.nodes {
+        if let Some(contract) = verification_contract_from_verify(node_id, node.verify.as_ref())? {
+            push_unique_contract(&mut contracts, contract);
+        }
+    }
+    Ok(contracts)
+}
+
+pub fn inject_workflow_verification_contracts(
+    node: &mut WorkflowNode,
+    contracts: &[VerificationContract],
+) {
+    if contracts.is_empty() {
+        return;
+    }
+    node.metadata.insert(
+        WORKFLOW_VERIFICATION_CONTRACTS_METADATA_KEY.to_string(),
+        serde_json::to_value(contracts).unwrap_or_default(),
+    );
+}
+
+pub fn stage_verification_contracts(
+    node_id: &str,
+    node: &WorkflowNode,
+) -> Result<Vec<VerificationContract>, VmError> {
+    let mut contracts = node
+        .metadata
+        .get(WORKFLOW_VERIFICATION_CONTRACTS_METADATA_KEY)
+        .cloned()
+        .map(|value| {
+            serde_json::from_value::<Vec<VerificationContract>>(value).map_err(|error| {
+                VmError::Runtime(format!(
+                    "workflow stage {node_id} verification contract metadata parse failed: {error}"
+                ))
+            })
+        })
+        .transpose()?
+        .unwrap_or_default();
+
+    if let Some(local_contract) = verification_contract_from_verify(node_id, node.verify.as_ref())?
+    {
+        push_unique_contract(&mut contracts, local_contract);
+    }
+    Ok(contracts)
 }
 
 pub fn workflow_tool_names(value: &serde_json::Value) -> Vec<String> {
@@ -746,6 +1109,8 @@ pub async fn execute_stage_node(
     }
     let selected = super::select_artifacts_adaptive(artifacts.to_vec(), &selection_policy);
     let rendered_context = super::render_artifacts_context(&selected, &node.context_policy);
+    let verification_contracts = super::stage_verification_contracts(node_id, node)?;
+    let rendered_verification = super::render_verification_context(&verification_contracts);
     let stage_session_id = resolve_node_session_id(node);
     if node.input_contract.require_transcript && !crate::agent_sessions::exists(&stage_session_id) {
         return Err(VmError::Runtime(format!(
@@ -768,7 +1133,12 @@ pub async fn execute_stage_node(
             )));
         }
     }
-    let prompt = super::render_workflow_prompt(task, node.task_label.as_deref(), &rendered_context);
+    let prompt = super::render_workflow_prompt(
+        task,
+        node.task_label.as_deref(),
+        &rendered_verification,
+        &rendered_context,
+    );
 
     // Precedence for the tool-calling contract format:
     //   1. explicit `model_policy.tool_format` on the node
@@ -1041,6 +1411,16 @@ pub async fn execute_stage_node(
             "rendered_context".to_string(),
             serde_json::json!(rendered_context),
         );
+        if !verification_contracts.is_empty() {
+            payload.insert(
+                "verification_contracts".to_string(),
+                serde_json::to_value(&verification_contracts).unwrap_or_default(),
+            );
+            payload.insert(
+                "rendered_verification_context".to_string(),
+                serde_json::json!(rendered_verification),
+            );
+        }
         payload.insert(
             "selected_artifact_ids".to_string(),
             serde_json::json!(selected

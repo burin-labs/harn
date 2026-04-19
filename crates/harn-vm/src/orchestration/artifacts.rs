@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-use super::{microcompact_tool_output, new_id, now_rfc3339, ContextPolicy};
+use super::{microcompact_tool_output, new_id, now_rfc3339, ContextPolicy, VerificationContract};
 
 /// Snip an artifact's text to fit within a token budget.
 pub fn microcompact_artifact(artifact: &mut ArtifactRecord, max_tokens: usize) {
@@ -303,6 +303,7 @@ pub fn render_artifacts_context(artifacts: &[ArtifactRecord], policy: &ContextPo
 pub fn render_workflow_prompt(
     task: &str,
     task_label: Option<&str>,
+    rendered_verification: &str,
     rendered_context: &str,
 ) -> String {
     let label = task_label
@@ -314,6 +315,12 @@ pub fn render_workflow_prompt(
         escape_prompt_text(label),
         task.trim(),
     );
+    let verification = rendered_verification.trim();
+    if !verification.is_empty() {
+        prompt.push_str("\n\n<workflow_verification>\n");
+        prompt.push_str(verification);
+        prompt.push_str("\n</workflow_verification>");
+    }
     let context = rendered_context.trim();
     if !context.is_empty() {
         prompt.push_str("\n\n<workflow_context>\n");
@@ -327,6 +334,105 @@ Keep commentary minimal and use the active tool-calling contract for concrete pr
 </workflow_response_contract>",
     );
     prompt
+}
+
+pub fn render_verification_context(contracts: &[VerificationContract]) -> String {
+    if contracts.is_empty() {
+        return String::new();
+    }
+
+    let mut out = String::from(
+        "Treat this verifier contract as the source of truth for exact identifiers, file paths, and required wiring. Prefer the exact strings below over guessed synonyms.\n",
+    );
+
+    for contract in contracts {
+        out.push_str("\n<contract>\n");
+        if let Some(source_node) = contract.source_node.as_deref() {
+            out.push_str("<source_node>");
+            out.push_str(&escape_prompt_text(source_node));
+            out.push_str("</source_node>\n");
+        }
+        if let Some(summary) = contract.summary.as_deref() {
+            out.push_str("<summary>");
+            out.push_str(&escape_prompt_text(summary));
+            out.push_str("</summary>\n");
+        }
+        if let Some(command) = contract.command.as_deref() {
+            out.push_str("<command>");
+            out.push_str(&escape_prompt_text(command));
+            out.push_str("</command>\n");
+        }
+        if let Some(expect_status) = contract.expect_status {
+            out.push_str("<expect_status>");
+            out.push_str(&expect_status.to_string());
+            out.push_str("</expect_status>\n");
+        }
+        if let Some(assert_text) = contract.assert_text.as_deref() {
+            out.push_str("<assert_text>");
+            out.push_str(&escape_prompt_text(assert_text));
+            out.push_str("</assert_text>\n");
+        }
+        if let Some(expect_text) = contract.expect_text.as_deref() {
+            out.push_str("<expect_text>");
+            out.push_str(&escape_prompt_text(expect_text));
+            out.push_str("</expect_text>\n");
+        }
+        if !contract.required_identifiers.is_empty() {
+            out.push_str("<required_identifiers>\n");
+            for value in &contract.required_identifiers {
+                out.push_str("- ");
+                out.push_str(&escape_prompt_text(value));
+                out.push('\n');
+            }
+            out.push_str("</required_identifiers>\n");
+        }
+        if !contract.required_paths.is_empty() {
+            out.push_str("<required_paths>\n");
+            for value in &contract.required_paths {
+                out.push_str("- ");
+                out.push_str(&escape_prompt_text(value));
+                out.push('\n');
+            }
+            out.push_str("</required_paths>\n");
+        }
+        if !contract.required_text.is_empty() {
+            out.push_str("<required_text>\n");
+            for value in &contract.required_text {
+                out.push_str("- ");
+                out.push_str(&escape_prompt_text(value));
+                out.push('\n');
+            }
+            out.push_str("</required_text>\n");
+        }
+        if !contract.checks.is_empty() {
+            out.push_str("<checks>\n");
+            for check in &contract.checks {
+                out.push_str("- ");
+                out.push_str(&escape_prompt_text(&check.kind));
+                out.push_str(": ");
+                out.push_str(&escape_prompt_text(&check.value));
+                if let Some(note) = check.note.as_deref() {
+                    out.push_str(" (");
+                    out.push_str(&escape_prompt_text(note));
+                    out.push(')');
+                }
+                out.push('\n');
+            }
+            out.push_str("</checks>\n");
+        }
+        if !contract.notes.is_empty() {
+            out.push_str("<notes>\n");
+            for note in &contract.notes {
+                out.push_str("- ");
+                out.push_str(&escape_prompt_text(note));
+                out.push('\n');
+            }
+            out.push_str("</notes>\n");
+        }
+        out.push_str("</contract>");
+    }
+
+    out
 }
 
 fn escape_prompt_text(text: &str) -> String {
