@@ -9,6 +9,7 @@ use crate::orchestration::{
     WorkflowNode,
 };
 use crate::tracing::{set_tracing_enabled, span_end, span_start, SpanKind};
+use crate::value::VmValue;
 use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
@@ -719,4 +720,155 @@ async fn stage_prompt_can_scope_verification_to_local_contract_only() {
     assert!(prompt.contains("src/current.ts"));
     assert!(!prompt.contains("src/future.ts"));
     assert!(!prompt.contains("futureOnly"));
+}
+
+fn base_workflow_node_with_raw_auto_compact(raw: BTreeMap<String, VmValue>) -> WorkflowNode {
+    WorkflowNode {
+        id: Some("edit".to_string()),
+        kind: "stage".to_string(),
+        mode: Some("agent".to_string()),
+        done_sentinel: Some("##DONE##".to_string()),
+        model_policy: crate::orchestration::ModelPolicy {
+            provider: Some("mock".to_string()),
+            max_iterations: Some(2),
+            ..Default::default()
+        },
+        auto_compact: crate::orchestration::AutoCompactPolicy {
+            enabled: true,
+            token_threshold: Some(1),
+            compact_strategy: Some("llm".to_string()),
+            ..Default::default()
+        },
+        raw_auto_compact: Some(VmValue::Dict(Rc::new(raw))),
+        ..Default::default()
+    }
+}
+
+fn mock_llm_opts() -> crate::llm::api::LlmCallOptions {
+    // The stage builder seeds the provider + model through options so
+    // extract_llm_options produces a shape the resolver expects.
+    let mut options = BTreeMap::new();
+    options.insert(
+        "provider".to_string(),
+        VmValue::String(Rc::from("mock".to_string())),
+    );
+    options.insert(
+        "model".to_string(),
+        VmValue::String(Rc::from("mock-model".to_string())),
+    );
+    let args = vec![
+        VmValue::String(Rc::from(String::new())),
+        VmValue::Nil,
+        VmValue::Dict(Rc::new(options)),
+    ];
+    crate::llm::extract_llm_options(&args).expect("mock LlmCallOptions")
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn workflow_resolve_stage_auto_compact_forwards_raw_keep_last_and_summary_prompt() {
+    crate::reset_thread_local_state();
+    let opts = mock_llm_opts();
+
+    let prompt_path = std::env::temp_dir().join(format!(
+        "harn-workflow-compaction-summary-{}.harn.prompt",
+        uuid::Uuid::now_v7()
+    ));
+    std::fs::write(&prompt_path, "CUSTOM_WORKFLOW_SUMMARY_PROMPT\n")
+        .expect("summary prompt fixture");
+    let closure_marker = VmValue::String(Rc::from("compress-callback-sentinel".to_string()));
+
+    let raw = BTreeMap::from([
+        ("enabled".to_string(), VmValue::Bool(true)),
+        ("token_threshold".to_string(), VmValue::Int(1)),
+        (
+            "compact_strategy".to_string(),
+            VmValue::String(Rc::from("llm".to_string())),
+        ),
+        ("compact_keep_last".to_string(), VmValue::Int(5)),
+        (
+            "summarize_prompt".to_string(),
+            VmValue::String(Rc::from(prompt_path.to_string_lossy().into_owned())),
+        ),
+        ("compress_callback".to_string(), closure_marker.clone()),
+    ]);
+    let node = base_workflow_node_with_raw_auto_compact(raw);
+
+    let config = crate::orchestration::resolve_stage_auto_compact(&node, &opts)
+        .await
+        .expect("resolves")
+        .expect("auto_compact enabled");
+
+    assert_eq!(
+        config.keep_last, 5,
+        "compact_keep_last from raw dict should override the typed policy default"
+    );
+    assert_eq!(
+        config.summarize_prompt.as_deref(),
+        Some(prompt_path.to_string_lossy().as_ref()),
+        "summarize_prompt from raw dict should be forwarded verbatim"
+    );
+    // VmValue is not PartialEq; compare display forms as a sentinel that the
+    // same value the host wrote was threaded through to AutoCompactConfig.
+    assert_eq!(
+        config
+            .compress_callback
+            .as_ref()
+            .map(|v| v.display())
+            .as_deref(),
+        Some(closure_marker.display().as_str()),
+        "compress_callback VmValue should thread through to AutoCompactConfig"
+    );
+
+    let _ = std::fs::remove_file(&prompt_path);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn workflow_resolve_stage_auto_compact_accepts_keep_last_alias_and_skips_empty_summary_prompt(
+) {
+    crate::reset_thread_local_state();
+    let opts = mock_llm_opts();
+
+    // `keep_last` is the legacy alias hosts still emit. Empty-string
+    // summarize_prompt must leave the default in place (not crash and not
+    // become Some("")).
+    let raw = BTreeMap::from([
+        ("enabled".to_string(), VmValue::Bool(true)),
+        ("keep_last".to_string(), VmValue::Int(7)),
+        (
+            "summarize_prompt".to_string(),
+            VmValue::String(Rc::from("   ".to_string())),
+        ),
+    ]);
+    let node = base_workflow_node_with_raw_auto_compact(raw);
+
+    let config = crate::orchestration::resolve_stage_auto_compact(&node, &opts)
+        .await
+        .expect("resolves")
+        .expect("auto_compact enabled");
+
+    assert_eq!(
+        config.keep_last, 7,
+        "keep_last alias should populate the AutoCompactConfig"
+    );
+    assert!(
+        config.summarize_prompt.is_none(),
+        "blank summarize_prompt must stay None rather than becoming an empty override"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn workflow_resolve_stage_auto_compact_returns_none_when_disabled() {
+    crate::reset_thread_local_state();
+    let opts = mock_llm_opts();
+
+    let mut node = base_workflow_node_with_raw_auto_compact(BTreeMap::new());
+    node.auto_compact.enabled = false;
+
+    let config = crate::orchestration::resolve_stage_auto_compact(&node, &opts)
+        .await
+        .expect("resolves");
+    assert!(
+        config.is_none(),
+        "disabled auto_compact must return None so the agent loop skips compaction wiring"
+    );
 }
