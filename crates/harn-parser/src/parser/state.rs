@@ -65,13 +65,19 @@ impl Parser {
             };
 
             match result {
-                Ok(node) => nodes.push(node),
+                Ok(node) => {
+                    let end_line = node.span.end_line;
+                    nodes.push(node);
+                    let consumed_sep = self.consume_statement_separator();
+                    if !consumed_sep && !self.is_at_end() {
+                        self.require_statement_separator(end_line, "top-level item")?;
+                    }
+                }
                 Err(err) => {
                     self.errors.push(err);
                     self.synchronize();
                 }
             }
-            self.skip_newlines();
         }
 
         if let Some(first) = self.errors.first() {
@@ -114,7 +120,12 @@ impl Parser {
                     | TokenKind::Deadline
                     | TokenKind::Yield
                     | TokenKind::Mutex
+                    | TokenKind::Defer
+                    | TokenKind::Break
+                    | TokenKind::Continue
                     | TokenKind::Tool
+                    | TokenKind::Skill
+                    | TokenKind::Impl
             )
         )
     }
@@ -122,6 +133,11 @@ impl Parser {
     /// Advance past tokens until we reach a likely statement boundary.
     pub(super) fn synchronize(&mut self) {
         while !self.is_at_end() {
+            if self.check(&TokenKind::Semicolon) {
+                self.advance();
+                self.skip_newlines();
+                return;
+            }
             if self.check(&TokenKind::Newline) {
                 self.advance();
                 if self.is_at_end() || self.is_statement_start() {
@@ -289,6 +305,41 @@ impl Parser {
         while self.pos < self.tokens.len() && self.tokens[self.pos].kind == TokenKind::Newline {
             self.pos += 1;
         }
+    }
+
+    /// Consume an optional semicolon statement separator followed by any
+    /// number of newlines, or one-or-more newlines on their own.
+    ///
+    /// This is intentionally narrower than `skip_newlines()`: semicolons are
+    /// only legal between already-parsed list items, not in arbitrary parse
+    /// positions.
+    pub(super) fn consume_statement_separator(&mut self) -> bool {
+        let mut consumed = false;
+        if self.check(&TokenKind::Semicolon) {
+            self.advance();
+            consumed = true;
+        }
+        let start = self.pos;
+        self.skip_newlines();
+        consumed || self.pos != start
+    }
+
+    pub(super) fn require_statement_separator(
+        &self,
+        prev_end_line: usize,
+        expected_item: &str,
+    ) -> Result<(), ParserError> {
+        let Some(tok) = self.current() else {
+            return Ok(());
+        };
+        if tok.kind == TokenKind::Eof || tok.span.line != prev_end_line {
+            return Ok(());
+        }
+        Err(ParserError::Unexpected {
+            got: tok.kind.to_string(),
+            expected: format!("{expected_item} separator (`;` or newline)"),
+            span: tok.span,
+        })
     }
 
     pub(super) fn make_error(&self, expected: &str) -> ParserError {

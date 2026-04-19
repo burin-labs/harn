@@ -172,7 +172,8 @@ fn test_let_var() {
 #[test]
 fn test_if_else() {
     let out = run_output(
-        r#"pipeline t(task) { if true { log("yes") } if false { log("wrong") } else { log("no") } }"#,
+        r#"pipeline t(task) { if true { log("yes") }
+if false { log("wrong") } else { log("no") } }"#,
     );
     assert_eq!(out, "[harn] yes\n[harn] no");
 }
@@ -364,7 +365,7 @@ fn test_list_properties() {
 #[test]
 fn test_recursive_function() {
     let out = run_output(
-        "pipeline t(task) { fn fib(n) { if n <= 1 { return n } return fib(n - 1) + fib(n - 2) }\nlog(fib(10)) }",
+        "pipeline t(task) { fn fib(n) { if n <= 1 { return n }\nreturn fib(n - 1) + fib(n - 2) }\nlog(fib(10)) }",
     );
     assert_eq!(out, "[harn] 55");
 }

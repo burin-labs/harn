@@ -10,8 +10,13 @@ impl Parser {
         self.skip_newlines();
 
         while !self.is_at_end() && !self.check(&TokenKind::RBrace) {
-            stmts.push(self.parse_statement()?);
-            self.skip_newlines();
+            let stmt = self.parse_statement()?;
+            let end_line = stmt.span.end_line;
+            stmts.push(stmt);
+            let consumed_sep = self.consume_statement_separator();
+            if !consumed_sep && !self.is_at_end() && !self.check(&TokenKind::RBrace) {
+                self.require_statement_separator(end_line, "statement")?;
+            }
         }
         Ok(stmts)
     }
@@ -395,7 +400,11 @@ impl Parser {
     pub(super) fn parse_return(&mut self) -> Result<SNode, ParserError> {
         let start = self.current_span();
         self.consume(&TokenKind::Return, "return")?;
-        if self.is_at_end() || self.check(&TokenKind::Newline) || self.check(&TokenKind::RBrace) {
+        if self.is_at_end()
+            || self.check(&TokenKind::Semicolon)
+            || self.check(&TokenKind::Newline)
+            || self.check(&TokenKind::RBrace)
+        {
             return Ok(spanned(
                 Node::ReturnStmt { value: None },
                 Span::merge(start, self.prev_span()),
@@ -638,7 +647,11 @@ impl Parser {
     pub(super) fn parse_yield(&mut self) -> Result<SNode, ParserError> {
         let start = self.current_span();
         self.consume(&TokenKind::Yield, "yield")?;
-        if self.is_at_end() || self.check(&TokenKind::Newline) || self.check(&TokenKind::RBrace) {
+        if self.is_at_end()
+            || self.check(&TokenKind::Semicolon)
+            || self.check(&TokenKind::Newline)
+            || self.check(&TokenKind::RBrace)
+        {
             return Ok(spanned(
                 Node::YieldExpr { value: None },
                 Span::merge(start, self.prev_span()),

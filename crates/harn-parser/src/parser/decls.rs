@@ -310,6 +310,14 @@ impl Parser {
             }
         }
 
+        if description.is_some() {
+            let desc_end_line = self.prev_span().end_line;
+            let consumed_sep = self.consume_statement_separator();
+            if !consumed_sep && !self.check(&TokenKind::RBrace) {
+                self.require_statement_separator(desc_end_line, "tool body item")?;
+            }
+        }
+
         let body = self.parse_block()?;
         self.consume(&TokenKind::RBrace, "}")?;
 
@@ -347,10 +355,11 @@ impl Parser {
             let field_name = self.consume_identifier("skill field name")?;
             self.skip_newlines();
             let value = self.parse_expression()?;
+            let value_end_line = value.span.end_line;
             fields.push((field_name, value));
-            // Separator: newline, semicolon, or close brace.
-            if self.check(&TokenKind::Semicolon) {
-                self.advance();
+            let consumed_sep = self.consume_statement_separator();
+            if !consumed_sep && !self.check(&TokenKind::RBrace) {
+                self.require_statement_separator(value_end_line, "skill field")?;
             }
         }
         self.consume(&TokenKind::RBrace, "}")?;

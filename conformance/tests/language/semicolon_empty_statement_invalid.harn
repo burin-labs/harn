@@ -1,0 +1,3 @@
+pipeline test(task) {
+  log("one");; log("two")
+}

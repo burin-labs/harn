@@ -9654,10 +9654,6 @@
           "named": true
         },
         {
-          "type": "string_literal",
-          "named": true
-        },
-        {
           "type": "struct_declaration",
           "named": true
         },
@@ -9667,6 +9663,10 @@
         },
         {
           "type": "tool_declaration",
+          "named": true
+        },
+        {
+          "type": "tool_description",
           "named": true
         },
         {
@@ -9687,6 +9687,21 @@
         },
         {
           "type": "yield_expression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "tool_description",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "string_literal",
           "named": true
         }
       ]
@@ -11148,6 +11163,10 @@
   },
   {
     "type": ":",
+    "named": false
+  },
+  {
+    "type": ";",
     "named": false
   },
   {
