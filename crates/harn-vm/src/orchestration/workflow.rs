@@ -1116,6 +1116,101 @@ fn resolve_node_session_id(node: &WorkflowNode) -> String {
     format!("workflow_stage_{}", uuid::Uuid::now_v7())
 }
 
+fn raw_auto_compact_dict(
+    node: &WorkflowNode,
+) -> Option<&std::collections::BTreeMap<String, VmValue>> {
+    node.raw_auto_compact
+        .as_ref()
+        .and_then(|value| value.as_dict())
+}
+
+fn raw_auto_compact_int(node: &WorkflowNode, key: &str) -> Option<usize> {
+    raw_auto_compact_dict(node)
+        .and_then(|dict| dict.get(key))
+        .and_then(|value| value.as_int())
+        .filter(|value| *value >= 0)
+        .map(|value| value as usize)
+}
+
+fn raw_auto_compact_string(node: &WorkflowNode, key: &str) -> Option<String> {
+    raw_auto_compact_dict(node)
+        .and_then(|dict| dict.get(key))
+        .and_then(|value| match value {
+            VmValue::String(text) if !text.trim().is_empty() => Some(text.to_string()),
+            _ => None,
+        })
+}
+
+pub(crate) async fn resolve_stage_auto_compact(
+    node: &WorkflowNode,
+    opts: &crate::llm::api::LlmCallOptions,
+) -> Result<Option<crate::orchestration::AutoCompactConfig>, VmError> {
+    if !node.auto_compact.enabled {
+        return Ok(None);
+    }
+
+    let mut ac = crate::orchestration::AutoCompactConfig::default();
+    if let Some(v) = node.auto_compact.token_threshold {
+        ac.token_threshold = v;
+    }
+    if let Some(v) = node.auto_compact.tool_output_max_chars {
+        ac.tool_output_max_chars = v;
+    }
+    if let Some(ref strategy) = node.auto_compact.compact_strategy {
+        if let Ok(s) = crate::orchestration::parse_compact_strategy(strategy) {
+            ac.compact_strategy = s;
+        }
+    }
+    if let Some(v) = node.auto_compact.hard_limit_tokens {
+        ac.hard_limit_tokens = Some(v);
+    }
+    if let Some(ref strategy) = node.auto_compact.hard_limit_strategy {
+        if let Ok(s) = crate::orchestration::parse_compact_strategy(strategy) {
+            ac.hard_limit_strategy = s;
+        }
+    }
+
+    // Workflow nodes keep the richer agent-loop-only compaction knobs in the
+    // raw dict because the typed policy shape intentionally models only the
+    // common workflow fields.
+    if let Some(v) = raw_auto_compact_int(node, "compact_keep_last")
+        .or_else(|| raw_auto_compact_int(node, "keep_last"))
+    {
+        ac.keep_last = v;
+    }
+    if let Some(prompt) = raw_auto_compact_string(node, "summarize_prompt") {
+        ac.summarize_prompt = Some(prompt);
+    }
+
+    // Closure fields can't round-trip through serde, so extract them directly
+    // from the raw VmValue dict.
+    if let Some(dict) = raw_auto_compact_dict(node) {
+        if let Some(cb) = dict.get("compress_callback") {
+            ac.compress_callback = Some(cb.clone());
+        }
+        if let Some(cb) = dict.get("mask_callback") {
+            ac.mask_callback = Some(cb.clone());
+        }
+        if let Some(cb) = dict.get("custom_compactor") {
+            ac.custom_compactor = Some(cb.clone());
+        }
+    }
+
+    let user_specified_threshold = node.auto_compact.token_threshold.is_some();
+    let user_specified_hard_limit = node.auto_compact.hard_limit_tokens.is_some();
+    crate::llm::api::adapt_auto_compact_to_provider(
+        &mut ac,
+        user_specified_threshold,
+        user_specified_hard_limit,
+        &opts.provider,
+        &opts.model,
+        &opts.api_key,
+    )
+    .await;
+
+    Ok(Some(ac))
+}
+
 pub async fn execute_stage_node(
     node_id: &str,
     node: &WorkflowNode,
@@ -1290,65 +1385,13 @@ pub async fn execute_stage_node(
             VmValue::Dict(Rc::new(options)),
         ];
         let mut opts = extract_llm_options(&args)?;
+        let auto_compact = resolve_stage_auto_compact(node, &opts).await?;
 
         if node.mode.as_deref() == Some("agent") || !tool_names.is_empty() {
             let tool_policy = workflow_tool_policy_from_tools(&node.tools);
             let effective_policy = tool_policy
                 .intersect(&node.capability_policy)
                 .map_err(VmError::Runtime)?;
-            let auto_compact = if node.auto_compact.enabled {
-                let mut ac = crate::orchestration::AutoCompactConfig::default();
-                if let Some(v) = node.auto_compact.token_threshold {
-                    ac.token_threshold = v;
-                }
-                if let Some(v) = node.auto_compact.tool_output_max_chars {
-                    ac.tool_output_max_chars = v;
-                }
-                if let Some(ref strategy) = node.auto_compact.compact_strategy {
-                    if let Ok(s) = crate::orchestration::parse_compact_strategy(strategy) {
-                        ac.compact_strategy = s;
-                    }
-                }
-                if let Some(v) = node.auto_compact.hard_limit_tokens {
-                    ac.hard_limit_tokens = Some(v);
-                }
-                if let Some(ref strategy) = node.auto_compact.hard_limit_strategy {
-                    if let Ok(s) = crate::orchestration::parse_compact_strategy(strategy) {
-                        ac.hard_limit_strategy = s;
-                    }
-                }
-                // Closure fields can't round-trip through serde, so extract them
-                // directly from the raw VmValue dict.
-                if let Some(ref raw_ac) = node.raw_auto_compact {
-                    if let Some(dict) = raw_ac.as_dict() {
-                        if let Some(cb) = dict.get("compress_callback") {
-                            ac.compress_callback = Some(cb.clone());
-                        }
-                        if let Some(cb) = dict.get("mask_callback") {
-                            ac.mask_callback = Some(cb.clone());
-                        }
-                        if let Some(cb) = dict.get("custom_compactor") {
-                            ac.custom_compactor = Some(cb.clone());
-                        }
-                    }
-                }
-                {
-                    let user_specified_threshold = node.auto_compact.token_threshold.is_some();
-                    let user_specified_hard_limit = node.auto_compact.hard_limit_tokens.is_some();
-                    crate::llm::api::adapt_auto_compact_to_provider(
-                        &mut ac,
-                        user_specified_threshold,
-                        user_specified_hard_limit,
-                        &opts.provider,
-                        &opts.model,
-                        &opts.api_key,
-                    )
-                    .await;
-                }
-                Some(ac)
-            } else {
-                None
-            };
             crate::llm::run_agent_loop_internal(
                 &mut opts,
                 crate::llm::AgentLoopConfig {
