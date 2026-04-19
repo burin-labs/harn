@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
+use std::time::Duration as StdDuration;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -15,6 +16,7 @@ use crate::event_log::{AnyEventLog, EventLog, LogEvent, Topic};
 use crate::triggers::event::KnownProviderPayload;
 use crate::triggers::{
     CronEventPayload, ProviderId, ProviderPayload, SignatureStatus, TriggerEvent,
+    DEFAULT_INBOX_RETENTION_DAYS,
 };
 
 use self::scheduler::{run_tick_loop, Clock, CronSchedule, RealClock, TickHandler};
@@ -27,6 +29,7 @@ pub(crate) mod state;
 mod tests;
 
 pub const CRON_TICK_TOPIC: &str = "connectors.cron.tick";
+const TEST_FAIL_AFTER_EMIT_ENV: &str = "HARN_TEST_CRON_FAIL_AFTER_EMIT";
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -126,10 +129,12 @@ impl Connector for CronConnector {
     ) -> Result<ActivationHandle, ConnectorError> {
         let ctx = self.context()?;
         let state_store = Arc::new(CronStateStore::new(ctx.event_log.clone()));
-        let sink: Arc<dyn CronEventSink> = self
-            .sink_override
-            .clone()
-            .unwrap_or_else(|| Arc::new(EventLogCronEventSink::new(ctx.event_log.clone())));
+        let sink: Arc<dyn CronEventSink> = self.sink_override.clone().unwrap_or_else(|| {
+            Arc::new(EventLogCronEventSink::new(
+                ctx.event_log.clone(),
+                ctx.inbox.clone(),
+            ))
+        });
         {
             let mut tasks = self
                 .tasks
@@ -221,18 +226,25 @@ impl ConnectorClient for CronClient {
 
 #[async_trait]
 pub(crate) trait CronEventSink: Send + Sync {
-    async fn emit(&self, event: TriggerEvent) -> Result<(), ConnectorError>;
+    async fn emit(
+        &self,
+        binding_id: &str,
+        retention: StdDuration,
+        event: TriggerEvent,
+    ) -> Result<(), ConnectorError>;
 }
 
 struct EventLogCronEventSink {
     event_log: Arc<AnyEventLog>,
+    inbox: Arc<crate::triggers::InboxIndex>,
     topic: Topic,
 }
 
 impl EventLogCronEventSink {
-    fn new(event_log: Arc<AnyEventLog>) -> Self {
+    fn new(event_log: Arc<AnyEventLog>, inbox: Arc<crate::triggers::InboxIndex>) -> Self {
         Self {
             event_log,
+            inbox,
             topic: Topic::new(CRON_TICK_TOPIC).expect("cron tick topic is valid"),
         }
     }
@@ -240,7 +252,19 @@ impl EventLogCronEventSink {
 
 #[async_trait]
 impl CronEventSink for EventLogCronEventSink {
-    async fn emit(&self, event: TriggerEvent) -> Result<(), ConnectorError> {
+    async fn emit(
+        &self,
+        binding_id: &str,
+        retention: StdDuration,
+        event: TriggerEvent,
+    ) -> Result<(), ConnectorError> {
+        if !self
+            .inbox
+            .insert_if_new(binding_id, &event.dedupe_key, retention)
+            .await?
+        {
+            return Ok(());
+        }
         let payload = serde_json::to_value(&event).map_err(ConnectorError::from)?;
         self.event_log
             .append(&self.topic, LogEvent::new("trigger_event", payload))
@@ -261,7 +285,14 @@ struct CronTaskHandler {
 impl TickHandler for CronTaskHandler {
     async fn on_tick(&self, tick_at: OffsetDateTime, catchup: bool) -> Result<(), ConnectorError> {
         let event = self.trigger.to_event(tick_at, catchup);
-        self.sink.emit(event).await?;
+        self.sink
+            .emit(
+                &self.trigger.trigger_id,
+                self.trigger.dedupe_retention,
+                event,
+            )
+            .await?;
+        maybe_fail_after_emit();
         self.state_store
             .persist(PersistedCronState {
                 trigger_id: self.trigger.trigger_id.clone(),
@@ -279,6 +310,7 @@ struct CronTrigger {
     timezone_raw: String,
     schedule: CronSchedule,
     catchup_mode: CatchupMode,
+    dedupe_retention: StdDuration,
 }
 
 impl CronTrigger {
@@ -292,6 +324,9 @@ impl CronTrigger {
             timezone_raw: config.timezone.clone(),
             schedule: CronSchedule::parse(config.schedule, timezone)?,
             catchup_mode: config.catchup_mode,
+            dedupe_retention: StdDuration::from_secs(
+                u64::from(config.retention_days.max(1)) * 24 * 60 * 60,
+            ),
         })
     }
 
@@ -324,6 +359,12 @@ struct CronBindingConfig {
     timezone: String,
     #[serde(default, alias = "catch_up", alias = "catchup")]
     catchup_mode: CatchupMode,
+    #[serde(default = "default_retention_days")]
+    retention_days: u32,
+}
+
+fn default_retention_days() -> u32 {
+    DEFAULT_INBOX_RETENTION_DAYS
 }
 
 fn parse_iana_timezone(raw: &str) -> Result<chrono_tz::Tz, ConnectorError> {
@@ -354,4 +395,10 @@ pub(crate) fn looks_like_utc_offset(raw: &str) -> bool {
     chars[1..]
         .iter()
         .all(|ch| ch.is_ascii_digit() || *ch == ':')
+}
+
+fn maybe_fail_after_emit() {
+    if std::env::var_os(TEST_FAIL_AFTER_EMIT_ENV).is_some() {
+        std::process::exit(86);
+    }
 }

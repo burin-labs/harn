@@ -41,9 +41,9 @@ pub use connectors::{
     cron::{CatchupMode, CronConnector},
     hmac::verify_hmac_signed,
     ActivationHandle, ClientError, Connector, ConnectorClient, ConnectorCtx, ConnectorError,
-    ConnectorRegistry, GenericWebhookConnector, InboxIndex, MetricsRegistry, ProviderPayloadSchema,
-    RateLimitConfig, RateLimiterFactory, RawInbound, TriggerBinding, TriggerKind, TriggerRegistry,
-    WebhookSignatureVariant,
+    ConnectorMetricsSnapshot, ConnectorRegistry, GenericWebhookConnector, MetricsRegistry,
+    ProviderPayloadSchema, RateLimitConfig, RateLimiterFactory, RawInbound, TriggerBinding,
+    TriggerKind, TriggerRegistry, WebhookSignatureVariant,
 };
 pub use http::{register_http_builtins, reset_http_state};
 pub use llm::register_llm_builtins;
@@ -79,13 +79,14 @@ pub use triggers::{
     redact_headers, register_provider_schema, registered_provider_metadata,
     registered_provider_schema_names, reset_provider_catalog, resolve_live_trigger_binding,
     snapshot_dispatcher_stats, snapshot_trigger_bindings, DispatchError, DispatchOutcome,
-    DispatchStatus, Dispatcher, DispatcherStatsSnapshot, HeaderRedactionPolicy, ProviderCatalog,
-    ProviderCatalogError, ProviderId, ProviderMetadata, ProviderOutboundMethod, ProviderPayload,
-    ProviderRuntimeMetadata, ProviderSchema, ProviderSecretRequirement, RetryPolicy,
-    SignatureStatus, SignatureVerificationMetadata, TenantId, TraceId, TriggerBindingSnapshot,
-    TriggerBindingSource, TriggerBindingSpec, TriggerDispatchOutcome, TriggerEvent, TriggerEventId,
-    TriggerHandlerSpec, TriggerId, TriggerMetricsSnapshot, TriggerPredicateSpec,
-    TriggerRegistryError, TriggerRetryConfig, TriggerState,
+    DispatchStatus, Dispatcher, DispatcherStatsSnapshot, HeaderRedactionPolicy, InboxIndex,
+    ProviderCatalog, ProviderCatalogError, ProviderId, ProviderMetadata, ProviderOutboundMethod,
+    ProviderPayload, ProviderRuntimeMetadata, ProviderSchema, ProviderSecretRequirement,
+    RetryPolicy, SignatureStatus, SignatureVerificationMetadata, TenantId, TraceId,
+    TriggerBindingSnapshot, TriggerBindingSource, TriggerBindingSpec, TriggerDispatchOutcome,
+    TriggerEvent, TriggerEventId, TriggerHandlerSpec, TriggerId, TriggerMetricsSnapshot,
+    TriggerPredicateSpec, TriggerRegistryError, TriggerRetryConfig, TriggerState,
+    DEFAULT_INBOX_RETENTION_DAYS, TRIGGER_INBOX_TOPIC,
 };
 pub use value::*;
 pub use vm::*;

@@ -7,7 +7,9 @@ use tokio::sync::Mutex;
 
 use crate::connectors::cron::scheduler::CronSchedule;
 use crate::connectors::cron::state::{CronStateStore, PersistedCronState};
-use crate::connectors::cron::{looks_like_utc_offset, CatchupMode, CronConnector, CronEventSink};
+use crate::connectors::cron::{
+    looks_like_utc_offset, CatchupMode, CronConnector, CronEventSink, EventLogCronEventSink,
+};
 use crate::connectors::{Connector, ConnectorCtx, TriggerBinding};
 use crate::event_log::{AnyEventLog, EventLog, FileEventLog, MemoryEventLog, Topic};
 use crate::secrets::{
@@ -36,7 +38,12 @@ impl RecordingSink {
 
 #[async_trait]
 impl CronEventSink for RecordingSink {
-    async fn emit(&self, event: TriggerEvent) -> Result<(), crate::connectors::ConnectorError> {
+    async fn emit(
+        &self,
+        _binding_id: &str,
+        _retention: std::time::Duration,
+        event: TriggerEvent,
+    ) -> Result<(), crate::connectors::ConnectorError> {
         self.events.lock().await.push(event);
         Ok(())
     }
@@ -52,16 +59,22 @@ fn binding(id: &str, schedule: &str, timezone: &str, catchup_mode: CatchupMode) 
             "schedule": schedule,
             "timezone": timezone,
             "catchup_mode": catchup_mode,
+            "retention_days": crate::triggers::DEFAULT_INBOX_RETENTION_DAYS,
         }),
     }
 }
 
-fn ctx(event_log: Arc<AnyEventLog>) -> ConnectorCtx {
+async fn ctx(event_log: Arc<AnyEventLog>) -> ConnectorCtx {
+    let metrics = Arc::new(MetricsRegistry::default());
     ConnectorCtx {
+        inbox: Arc::new(
+            InboxIndex::new(event_log.clone(), metrics.clone())
+                .await
+                .unwrap(),
+        ),
         event_log,
         secrets: Arc::new(FakeSecretProvider),
-        inbox: Arc::new(InboxIndex::default()),
-        metrics: Arc::new(MetricsRegistry),
+        metrics,
         rate_limiter: Arc::new(RateLimiterFactory::default()),
     }
 }
@@ -190,7 +203,7 @@ async fn catchup_skip_drops_missed_ticks() {
         .unwrap();
 
     let mut connector = CronConnector::with_clock_and_sink(clock.clone(), sink.clone());
-    connector.init(ctx(log)).await.unwrap();
+    connector.init(ctx(log).await).await.unwrap();
     connector
         .activate(&[binding("hourly", "* * * * *", "UTC", CatchupMode::Skip)])
         .await
@@ -215,7 +228,7 @@ async fn catchup_all_replays_every_missed_tick_in_order() {
         .unwrap();
 
     let mut connector = CronConnector::with_clock_and_sink(clock.clone(), sink.clone());
-    connector.init(ctx(log)).await.unwrap();
+    connector.init(ctx(log).await).await.unwrap();
     connector
         .activate(&[binding("hourly", "* * * * *", "UTC", CatchupMode::All)])
         .await
@@ -243,7 +256,7 @@ async fn catchup_latest_replays_only_the_most_recent_tick() {
         .unwrap();
 
     let mut connector = CronConnector::with_clock_and_sink(clock.clone(), sink.clone());
-    connector.init(ctx(log)).await.unwrap();
+    connector.init(ctx(log).await).await.unwrap();
     connector
         .activate(&[binding("hourly", "* * * * *", "UTC", CatchupMode::Latest)])
         .await
@@ -266,7 +279,7 @@ async fn restart_uses_durable_state_to_avoid_duplicate_tick() {
     ));
 
     let mut first = CronConnector::with_clock_and_sink(clock_one.clone(), sink_one.clone());
-    first.init(ctx(log_one)).await.unwrap();
+    first.init(ctx(log_one).await).await.unwrap();
     first
         .activate(&[binding("hourly", "* * * * *", "UTC", CatchupMode::Skip)])
         .await
@@ -280,7 +293,7 @@ async fn restart_uses_durable_state_to_avoid_duplicate_tick() {
     let clock_two = crate::connectors::test_util::MockClock::new(parse("2026-04-19T00:01:30Z"));
     let log_two = Arc::new(AnyEventLog::File(FileEventLog::open(path, 32).unwrap()));
     let mut second = CronConnector::with_clock_and_sink(clock_two.clone(), sink_two.clone());
-    second.init(ctx(log_two)).await.unwrap();
+    second.init(ctx(log_two).await).await.unwrap();
     second
         .activate(&[binding("hourly", "* * * * *", "UTC", CatchupMode::Skip)])
         .await
@@ -300,7 +313,7 @@ async fn default_sink_writes_trigger_events_to_event_log() {
     let clock = crate::connectors::test_util::MockClock::new(parse("2026-04-19T00:00:30Z"));
     let log = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(32)));
     let mut connector = CronConnector::with_clock(clock.clone());
-    connector.init(ctx(log.clone())).await.unwrap();
+    connector.init(ctx(log.clone()).await).await.unwrap();
     connector
         .activate(&[binding("hourly", "* * * * *", "UTC", CatchupMode::Skip)])
         .await
@@ -319,4 +332,60 @@ fn utc_offset_detection_rejects_offset_style_timezones() {
     assert!(looks_like_utc_offset("UTC-5"));
     assert!(!looks_like_utc_offset("UTC"));
     assert!(!looks_like_utc_offset("America/New_York"));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn inbox_dedupe_survives_restart_without_cron_state() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().to_path_buf();
+    let tick_at = parse("2026-04-19T00:02:00Z");
+
+    let log_one = Arc::new(AnyEventLog::File(
+        FileEventLog::open(path.clone(), 32).unwrap(),
+    ));
+    let metrics_one = Arc::new(MetricsRegistry::default());
+    let inbox_one = Arc::new(
+        InboxIndex::new(log_one.clone(), metrics_one.clone())
+            .await
+            .unwrap(),
+    );
+    let sink_one = EventLogCronEventSink::new(log_one.clone(), inbox_one.clone());
+    let event = binding("hourly", "* * * * *", "UTC", CatchupMode::Latest);
+    let trigger = super::CronTrigger::from_binding(&event).unwrap();
+    sink_one
+        .emit(
+            "hourly",
+            trigger.dedupe_retention,
+            trigger.to_event(tick_at, false),
+        )
+        .await
+        .unwrap();
+    drop(inbox_one);
+    drop(log_one);
+
+    let log_two = Arc::new(AnyEventLog::File(FileEventLog::open(path, 32).unwrap()));
+    let metrics_two = Arc::new(MetricsRegistry::default());
+    let sink_two = EventLogCronEventSink::new(
+        log_two.clone(),
+        Arc::new(
+            InboxIndex::new(log_two.clone(), metrics_two.clone())
+                .await
+                .unwrap(),
+        ),
+    );
+    sink_two
+        .emit(
+            "hourly",
+            trigger.dedupe_retention,
+            trigger.to_event(tick_at, false),
+        )
+        .await
+        .unwrap();
+
+    let topic = Topic::new(CRON_TICK_TOPIC).unwrap();
+    let events = log_two.read_range(&topic, None, usize::MAX).await.unwrap();
+    assert_eq!(events.len(), 1);
+    let snapshot = metrics_two.snapshot();
+    assert_eq!(snapshot.inbox_duplicates_rejected, 1);
+    assert_eq!(snapshot.inbox_durable_hits, 1);
 }

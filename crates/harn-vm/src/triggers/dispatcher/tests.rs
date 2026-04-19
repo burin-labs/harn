@@ -84,6 +84,7 @@ async fn dispatcher_fixture(
         retry,
         match_events: vec!["issues.opened".to_string()],
         dedupe_key: Some("event.dedupe_key".to_string()),
+        dedupe_retention_days: crate::triggers::DEFAULT_INBOX_RETENTION_DAYS,
         filter: None,
         daily_cost_usd: None,
         max_concurrent: None,
