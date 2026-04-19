@@ -144,12 +144,8 @@ if command -v npm >/dev/null 2>&1; then
   echo "Installing repo-local Node tooling..."
   npm install
 
-  if [[ -f crates/harn-cli/portal/package-lock.json ]]; then
-    echo "Installing portal frontend dependencies..."
-    npm --prefix crates/harn-cli/portal ci
-  elif [[ -f crates/harn-cli/portal/package.json ]]; then
-    echo "Installing portal frontend dependencies..."
-    npm --prefix crates/harn-cli/portal install
+  if [[ -f crates/harn-cli/portal/package.json ]]; then
+    ./scripts/ensure_portal_deps.sh
   fi
 
   if [[ -f tree-sitter-harn/package.json ]]; then
@@ -164,7 +160,7 @@ if command -v npm >/dev/null 2>&1; then
 
   if [[ -f crates/harn-cli/portal/package.json ]]; then
     echo "Building portal frontend..."
-    npm --prefix crates/harn-cli/portal run build
+    npm run portal:build
   fi
 else
   echo "warning: npm not found; skipping markdown, portal, tree-sitter, and VS Code extension dependencies"

@@ -98,7 +98,10 @@ This runs:
 Pre-commit hooks (`.githooks/pre-commit`) run fmt + clippy + highlight keyword
 regeneration + markdown lint automatically. Pre-push hooks
 (`.githooks/pre-push`) run workspace tests, Harn formatting checks, and
-markdown lint before code leaves your machine.
+markdown lint before code leaves your machine. Both hooks now bootstrap the
+portal frontend dependencies through `./scripts/ensure_portal_deps.sh` before
+running portal lint, and the repo-root `npm run portal:*` commands reuse the
+same bootstrap path.
 
 ## Project structure
 
