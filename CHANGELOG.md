@@ -186,8 +186,10 @@ granular archaeology.
   either the inline remote result or a pending task handle payload.
   A2A card discovery now prefers HTTPS, only falls back to cleartext
   after an HTTPS connect-refused failure, and rejects agent cards whose
-  declared URL authority does not match the requested target. The
-  broader host-allowlist follow-up remains deferred.
+  declared URL authority does not match the requested target. Cleartext
+  A2A discovery / dispatch now also requires explicit
+  `allow_cleartext = true` on the trigger binding. The broader
+  host-allowlist follow-up remains deferred.
   Dispatcher retries / DLQ behavior now apply to remote A2A attempts the
   same way they already applied to local handlers. Persisted
   observability adds `a2a_hop` nodes and `a2a_dispatch` edges with

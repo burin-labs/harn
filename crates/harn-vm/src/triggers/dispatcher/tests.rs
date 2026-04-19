@@ -117,6 +117,7 @@ async fn dispatcher_fixture(
 async fn a2a_dispatcher_fixture(
     target: String,
     retry: TriggerRetryConfig,
+    allow_cleartext: bool,
 ) -> (
     tempfile::TempDir,
     Arc<crate::event_log::AnyEventLog>,
@@ -137,6 +138,7 @@ async fn a2a_dispatcher_fixture(
         provider: ProviderId::from("github"),
         handler: TriggerHandlerSpec::A2a {
             target: target.clone(),
+            allow_cleartext,
         },
         when: None,
         retry,
@@ -215,6 +217,25 @@ impl MockA2aServer {
 }
 
 fn spawn_mock_a2a_server(task_result: serde_json::Value) -> MockA2aServer {
+    spawn_mock_a2a_server_with_schemes(task_result, "https", "https")
+}
+
+fn spawn_mock_https_a2a_server_with_card_scheme(
+    task_result: serde_json::Value,
+    card_scheme: &'static str,
+) -> MockA2aServer {
+    spawn_mock_a2a_server_with_schemes(task_result, "https", card_scheme)
+}
+
+fn spawn_mock_http_a2a_server(task_result: serde_json::Value) -> MockA2aServer {
+    spawn_mock_a2a_server_with_schemes(task_result, "http", "http")
+}
+
+fn spawn_mock_a2a_server_with_schemes(
+    task_result: serde_json::Value,
+    listener_scheme: &'static str,
+    card_scheme: &'static str,
+) -> MockA2aServer {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock A2A listener");
     listener
         .set_nonblocking(true)
@@ -224,10 +245,15 @@ fn spawn_mock_a2a_server(task_result: serde_json::Value) -> MockA2aServer {
     let (tx, rx) = mpsc::channel();
     let stop = Arc::new(AtomicBool::new(false));
     let stop_thread = stop.clone();
-    let tls_config = mock_a2a_tls_config();
+    let tls_config = (listener_scheme == "https").then(mock_a2a_tls_config);
+    let max_connections = if listener_scheme == "http" && card_scheme == "http" {
+        3
+    } else {
+        2
+    };
     let join = thread::spawn(move || {
         let mut handled_requests = 0;
-        while handled_requests < 2 {
+        while handled_requests < max_connections {
             if stop_thread.load(Ordering::SeqCst) {
                 break;
             }
@@ -248,10 +274,33 @@ fn spawn_mock_a2a_server(task_result: serde_json::Value) -> MockA2aServer {
             stream
                 .set_write_timeout(Some(Duration::from_secs(5)))
                 .expect("set write timeout");
-            let connection = ServerConnection::new(tls_config.clone())
-                .expect("construct mock A2A TLS connection");
-            let mut stream = StreamOwned::new(connection, stream);
-            handle_mock_a2a_connection(&mut stream, addr.port(), &tx, &task_result);
+            if let Some(tls_config) = &tls_config {
+                let connection = ServerConnection::new(tls_config.clone())
+                    .expect("construct mock A2A TLS connection");
+                let mut stream = StreamOwned::new(connection, stream);
+                handle_mock_a2a_connection(
+                    &mut stream,
+                    card_scheme,
+                    addr.port(),
+                    &tx,
+                    &task_result,
+                );
+            } else {
+                let mut stream = stream;
+                let mut first = [0u8; 1];
+                let read = stream.peek(&mut first).expect("peek mock A2A stream");
+                if read == 0 || !matches!(first[0], b'G' | b'P') {
+                    handled_requests += 1;
+                    continue;
+                }
+                handle_mock_a2a_connection(
+                    &mut stream,
+                    card_scheme,
+                    addr.port(),
+                    &tx,
+                    &task_result,
+                );
+            }
             handled_requests += 1;
         }
     });
@@ -265,6 +314,7 @@ fn spawn_mock_a2a_server(task_result: serde_json::Value) -> MockA2aServer {
 
 fn handle_mock_a2a_connection<T: Read + Write>(
     stream: &mut T,
+    card_scheme: &str,
     port: u16,
     tx: &mpsc::Sender<serde_json::Value>,
     task_result: &serde_json::Value,
@@ -275,7 +325,7 @@ fn handle_mock_a2a_connection<T: Read + Write>(
             stream,
             &serde_json::json!({
                 "id": "mock-a2a",
-                "url": format!("https://127.0.0.1:{port}"),
+                "url": format!("{card_scheme}://127.0.0.1:{port}"),
                 "interfaces": [{"protocol": "jsonrpc", "url": "/rpc"}],
             }),
         );
@@ -454,6 +504,7 @@ async fn a2a_handler_returns_inline_result_and_emits_a2a_action_graph() {
             let (_dir, log, dispatcher) = a2a_dispatcher_fixture(
                 format!("{}/triage", server.authority),
                 TriggerRetryConfig::default(),
+                false,
             )
             .await;
 
@@ -515,6 +566,7 @@ async fn a2a_handler_returns_pending_task_handle() {
             let (_dir, _log, dispatcher) = a2a_dispatcher_fixture(
                 format!("{}/triage", server.authority),
                 TriggerRetryConfig::default(),
+                false,
             )
             .await;
 
@@ -561,6 +613,7 @@ async fn shutdown_cancels_a2a_dispatch_started_after_shutdown() {
             let (_dir, _log, dispatcher) = a2a_dispatcher_fixture(
                 format!("{}/triage", server.authority),
                 TriggerRetryConfig::default(),
+                false,
             )
             .await;
 
@@ -586,6 +639,92 @@ async fn shutdown_cancels_a2a_dispatch_started_after_shutdown() {
                 server.request_within(Duration::from_millis(100)).is_none(),
                 "A2A dispatch should not reach the remote after shutdown"
             );
+
+            server.finish();
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a2a_handler_rejects_cleartext_by_default() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let server = spawn_mock_https_a2a_server_with_card_scheme(serde_json::json!({
+                "id": "task-inline",
+                "status": {"state": "completed"},
+                "history": [
+                    {"id": "msg-agent", "role": "agent", "parts": [{"type": "text", "text": "\"unexpected\""}]},
+                ],
+                "artifacts": [],
+            }), "http");
+            let (_dir, _log, dispatcher) = a2a_dispatcher_fixture(
+                format!("{}/triage", server.authority),
+                TriggerRetryConfig::new(1, RetryPolicy::Linear { delay_ms: 0 }),
+                false,
+            )
+            .await;
+
+            let outcomes = dispatcher
+                .dispatch_event(trigger_event("issues.opened", "delivery-a2a-http-denied"))
+                .await
+                .expect("cleartext denial returns terminal outcome");
+            assert_eq!(outcomes.len(), 1);
+            assert_eq!(outcomes[0].status, DispatchStatus::Dlq);
+            assert!(outcomes[0]
+                .error
+                .as_deref()
+                .is_some_and(|message| message.contains("allow_cleartext = true")));
+            assert!(
+                server.request_within(Duration::from_millis(100)).is_none(),
+                "cleartext A2A dispatch should not reach the HTTP rpc endpoint without opt-in"
+            );
+
+            server.finish();
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a2a_handler_allows_cleartext_after_opt_in() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let server = spawn_mock_http_a2a_server(serde_json::json!({
+                "id": "task-inline",
+                "status": {"state": "completed"},
+                "history": [
+                    {"id": "msg-user", "role": "user", "parts": [{"type": "text", "text": "ignored"}]},
+                    {"id": "msg-agent", "role": "agent", "parts": [{"type": "text", "text": "{\"trace_id\":\"trace_http\",\"target_agent\":\"triage\"}"}]},
+                ],
+                "artifacts": [],
+            }));
+            let (_dir, _log, dispatcher) = a2a_dispatcher_fixture(
+                format!("{}/triage", server.authority),
+                TriggerRetryConfig::default(),
+                true,
+            )
+            .await;
+
+            let mut event = trigger_event("issues.opened", "delivery-a2a-http-allowed");
+            event.trace_id = TraceId("trace_http".to_string());
+
+            let outcomes = dispatcher
+                .dispatch_event(event)
+                .await
+                .expect("cleartext A2A dispatch succeeds after opt-in");
+            assert_eq!(outcomes.len(), 1);
+            assert_eq!(outcomes[0].status, DispatchStatus::Succeeded);
+            assert_eq!(
+                outcomes[0].result,
+                Some(serde_json::json!({
+                    "trace_id": "trace_http",
+                    "target_agent": "triage",
+                }))
+            );
+
+            let request = server.next_request();
+            assert_eq!(request["method"], "a2a.SendMessage");
 
             server.finish();
         })

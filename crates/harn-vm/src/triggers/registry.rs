@@ -74,16 +74,31 @@ impl TriggerBindingSource {
 
 #[derive(Clone)]
 pub enum TriggerHandlerSpec {
-    Local { raw: String, closure: Rc<VmClosure> },
-    A2a { target: String },
-    Worker { queue: String },
+    Local {
+        raw: String,
+        closure: Rc<VmClosure>,
+    },
+    A2a {
+        target: String,
+        allow_cleartext: bool,
+    },
+    Worker {
+        queue: String,
+    },
 }
 
 impl std::fmt::Debug for TriggerHandlerSpec {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Local { raw, .. } => f.debug_struct("Local").field("raw", raw).finish(),
-            Self::A2a { target } => f.debug_struct("A2a").field("target", target).finish(),
+            Self::A2a {
+                target,
+                allow_cleartext,
+            } => f
+                .debug_struct("A2a")
+                .field("target", target)
+                .field("allow_cleartext", allow_cleartext)
+                .finish(),
             Self::Worker { queue } => f.debug_struct("Worker").field("queue", queue).finish(),
         }
     }

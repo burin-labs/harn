@@ -1093,7 +1093,10 @@ impl Dispatcher {
                     .await?;
                 Ok(vm_value_to_json(&value))
             }
-            DispatchUri::A2a { target } => {
+            DispatchUri::A2a {
+                target,
+                allow_cleartext,
+            } => {
                 if self.state.shutting_down.load(Ordering::SeqCst) {
                     return Err(DispatchError::Cancelled(
                         "dispatcher shutdown cancelled A2A dispatch".to_string(),
@@ -1101,6 +1104,7 @@ impl Dispatcher {
                 }
                 let (_endpoint, ack) = crate::a2a::dispatch_trigger_event(
                     target,
+                    *allow_cleartext,
                     binding.id.as_str(),
                     &binding.binding_key(),
                     event,
@@ -1354,14 +1358,14 @@ fn dispatch_node_kind(route: &DispatchUri) -> &'static str {
 
 fn dispatch_node_label(route: &DispatchUri) -> String {
     match route {
-        DispatchUri::A2a { target } => crate::a2a::target_agent_label(target),
+        DispatchUri::A2a { target, .. } => crate::a2a::target_agent_label(target),
         _ => route.target_uri(),
     }
 }
 
 fn dispatch_target_agent(route: &DispatchUri) -> Option<String> {
     match route {
-        DispatchUri::A2a { target } => Some(crate::a2a::target_agent_label(target)),
+        DispatchUri::A2a { target, .. } => Some(crate::a2a::target_agent_label(target)),
         _ => None,
     }
 }

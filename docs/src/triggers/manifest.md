@@ -42,6 +42,14 @@ Harn currently accepts three handler forms:
 
 Unsupported URI schemes fail fast at load time.
 
+`a2a://...` handlers accept one extra opt-in field:
+
+- `allow_cleartext = true` permits HTTP A2A card discovery / JSON-RPC dispatch
+  for that binding
+
+Leave it unset for normal remote targets. It exists for bounded local-dev cases
+such as dispatching into `harn serve`, which currently listens on HTTP only.
+
 Local handlers and predicates resolve through the same module-export plumbing as
 the manifest hook loader:
 
@@ -56,6 +64,8 @@ The manifest loader rejects invalid trigger declarations before execution:
 - trigger ids must be unique across the loaded root manifest plus installed package manifests
 - `provider` must exist in the registered trigger provider catalog
 - `handler` must be a supported URI, and local handlers must resolve to exported functions
+- `allow_cleartext`, when present, must be a boolean and is only valid for
+  `a2a://...` handlers
 - `when` must resolve to a function with signature `fn(TriggerEvent) -> bool`
 - `dedupe_key` and `filter` must parse as JMESPath expressions
 - `retry.max` must be `<= 100`

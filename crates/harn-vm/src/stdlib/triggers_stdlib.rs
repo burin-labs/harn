@@ -505,17 +505,20 @@ fn parse_trigger_config(config: &BTreeMap<String, VmValue>) -> Result<TriggerBin
     let kind = required_string(config, "kind", "trigger_register")?;
     let provider =
         crate::ProviderId::from(required_string(config, "provider", "trigger_register")?);
+    let allow_cleartext =
+        optional_bool(config, "allow_cleartext", "trigger_register")?.unwrap_or(false);
     let (handler, handler_descriptor) = parse_handler_value(
         config
             .get("handler")
             .ok_or_else(|| VmError::Runtime("trigger_register: missing `handler`".to_string()))?,
         "trigger_register",
         "handler",
+        allow_cleartext,
     )?;
     let when = match config.get("when") {
         Some(VmValue::Nil) | None => None,
         Some(value) => {
-            let (handler, _) = parse_handler_value(value, "trigger_register", "when")?;
+            let (handler, _) = parse_handler_value(value, "trigger_register", "when", false)?;
             match handler {
                 TriggerHandlerSpec::Local { raw, closure } => {
                     Some(TriggerPredicateSpec { raw, closure })
@@ -572,6 +575,7 @@ fn parse_trigger_config(config: &BTreeMap<String, VmValue>) -> Result<TriggerBin
         "match_events": match_events,
         "dedupe_key": dedupe_key,
         "filter": filter,
+        "allow_cleartext": allow_cleartext,
         "daily_cost_usd": daily_cost_usd,
         "max_concurrent": max_concurrent,
         "manifest_path": manifest_path.as_ref().map(|path| path.display().to_string()),
@@ -627,6 +631,7 @@ fn parse_handler_value(
     value: &VmValue,
     builtin: &str,
     field_name: &str,
+    allow_cleartext: bool,
 ) -> Result<(TriggerHandlerSpec, serde_json::Value), VmError> {
     match value {
         VmValue::Closure(closure) => {
@@ -647,10 +652,12 @@ fn parse_handler_value(
                 return Ok((
                     TriggerHandlerSpec::A2a {
                         target: target.to_string(),
+                        allow_cleartext,
                     },
                     serde_json::json!({
                         "kind": "a2a",
                         "target": target,
+                        "allow_cleartext": allow_cleartext,
                     }),
                 ));
             }
@@ -776,6 +783,20 @@ fn optional_string(map: &BTreeMap<String, VmValue>, key: &str) -> Option<String>
         VmValue::String(text) => Some(text.to_string()),
         _ => None,
     })
+}
+
+fn optional_bool(
+    map: &BTreeMap<String, VmValue>,
+    key: &str,
+    builtin: &str,
+) -> Result<Option<bool>, VmError> {
+    match map.get(key) {
+        Some(VmValue::Bool(value)) => Ok(Some(*value)),
+        Some(VmValue::Nil) | None => Ok(None),
+        Some(_) => Err(VmError::Runtime(format!(
+            "{builtin}: field `{key}` must be a bool"
+        ))),
+    }
 }
 
 fn parse_string_list(value: &VmValue) -> Result<Vec<String>, VmError> {

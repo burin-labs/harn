@@ -51,6 +51,8 @@ stable handler kind and target URI in lifecycle logs and action-graph nodes.
 For `a2a://host[:port]/path` routes, the dispatcher:
 
 - fetches `/.well-known/a2a-agent` from the target host
+- defaults to HTTPS-only discovery + dispatch; cleartext HTTP is rejected unless
+  the trigger binding explicitly sets `allow_cleartext = true`
 - requires exactly one JSON-RPC interface in the agent card before it will
   dispatch
 - treats the URI path as the `target_agent` label that propagates into the
@@ -58,6 +60,10 @@ For `a2a://host[:port]/path` routes, the dispatcher:
 - sends the `TriggerEvent` envelope over `a2a.SendMessage`
 - returns either the inline agent result (when the peer completes
   synchronously) or a pending task handle payload for the caller
+
+For local-dev receivers started with `harn serve`, add `allow_cleartext = true`
+on the trigger binding. `harn serve` is HTTP-only today, so the dispatcher will
+otherwise stop after the HTTPS probe instead of silently downgrading.
 
 ## Retry policy
 

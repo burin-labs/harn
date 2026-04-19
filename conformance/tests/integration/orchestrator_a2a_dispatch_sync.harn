@@ -39,7 +39,7 @@ pipeline test(task) {
     "pipeline default(task) {\n  let envelope = json_parse(task)\n  println(json_stringify({trace_id: envelope.event.trace_id, target_agent: envelope.target_agent}))\n}\n",
   )
   let repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
-  let harn_bin = resolve_harn_bin(repo_root)
+  let harn_bin = env_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(repo_root))
   assert(file_exists(harn_bin), "missing built harn binary at " + harn_bin)
   let start = shell_at(
     root,
@@ -64,6 +64,7 @@ pipeline test(task) {
     kind: "issue.opened",
     provider: "github",
     handler: "a2a://127.0.0.1:" + to_string(port) + "/triage",
+    allow_cleartext: true,
     when: nil,
     retry: {max: 1, backoff: "immediate"},
     match: {events: ["issue.opened"]},
