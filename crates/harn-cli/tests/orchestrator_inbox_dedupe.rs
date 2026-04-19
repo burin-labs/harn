@@ -12,11 +12,11 @@ use std::time::{Duration, Instant};
 use harn_vm::event_log::{EventLog, SqliteEventLog, Topic};
 use tempfile::TempDir;
 
-// Since O-02 (#179/#215) landed, the orchestrator binds a real HTTP listener
-// and prints a ready line. This test predates that work; the startup needle is
-// updated to the post-#215 ready message so it keeps serving its real purpose
-// (waiting for startup to complete before asserting dedupe behaviour).
-const STARTUP_NEEDLE: &str = "HTTP listener ready on";
+// This fixture only exercises cron dispatch + inbox dedupe recovery. Waiting
+// for connector activation is sufficient and avoids a race where the
+// fail-after-emit test hook can terminate the process before the HTTP listener
+// readiness line is logged.
+const STARTUP_NEEDLE: &str = "activated connectors: cron(1)";
 
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
