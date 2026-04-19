@@ -99,6 +99,18 @@ granular archaeology.
   deliveries into `TriggerEvent` envelopes, appends accepted
   payloads onto `orchestrator.triggers.pending`, and drains
   in-flight requests during shutdown.
+- **MVP auth middleware for orchestrator `a2a-push` routes (#180).**
+  `harn orchestrator serve` now requires `Authorization` on manifest
+  `a2a-push` endpoints while leaving webhook routes on their existing
+  connector-level signature checks and keeping `/healthz` + `/readyz`
+  public. Bearer auth accepts comma-separated API keys from
+  `HARN_ORCHESTRATOR_API_KEYS`; HMAC auth accepts
+  `Authorization: HMAC-SHA256 timestamp=<unix>,signature=<base64>`
+  signed over `METHOD\nPATH\nTIMESTAMP\nSHA256(BODY)` with the shared
+  secret from `HARN_ORCHESTRATOR_HMAC_SECRET`. Invalid or missing auth
+  now returns `401 Unauthorized`, and the new listener coverage includes
+  subprocess + conformance checks for unauthenticated, bad-HMAC, and
+  valid-bearer requests.
 - **DST-safe cron connector with durable tick state and catch-up modes
   (#210, closes #169).** `harn_vm::connectors::CronConnector` now schedules
   named IANA time zones through `croner` + `chrono-tz`, persists the

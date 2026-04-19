@@ -5,13 +5,14 @@ use std::time::Duration;
 
 use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, Extension, Query};
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::{HeaderMap, Method, StatusCode, Uri};
 use axum::middleware;
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::Router;
 use serde_json::{json, Value as JsonValue};
 use sha2::{Digest, Sha256};
+use subtle::ConstantTimeEq;
 use time::OffsetDateTime;
 
 use harn_vm::event_log::{AnyEventLog, EventLog, LogEvent, Topic};
@@ -24,6 +25,9 @@ use crate::package::{CollectedManifestTrigger, TriggerKind};
 const DEFAULT_MAX_BODY_BYTES: usize = 10 * 1024 * 1024;
 const PENDING_TOPIC: &str = "orchestrator.triggers.pending";
 const REQUEST_DELAY_ENV: &str = "HARN_ORCHESTRATOR_TEST_REQUEST_DELAY_MS";
+const API_KEYS_ENV: &str = "HARN_ORCHESTRATOR_API_KEYS";
+const HMAC_SECRET_ENV: &str = "HARN_ORCHESTRATOR_HMAC_SECRET";
+const AUTH_TIMESTAMP_WINDOW_SECS: i64 = 5 * 60;
 
 #[derive(Clone)]
 pub(crate) struct ListenerConfig {
@@ -51,6 +55,11 @@ impl ListenerRuntime {
     pub(crate) async fn start(config: ListenerConfig) -> Result<Self, String> {
         let pending_topic =
             Topic::new(PENDING_TOPIC).map_err(|error| format!("invalid pending topic: {error}"))?;
+        let requires_auth = config
+            .routes
+            .iter()
+            .any(|route| route.auth_mode.requires_credentials());
+        let auth = Arc::new(ListenerAuth::from_env(requires_auth)?);
         let request_delay = std::env::var(REQUEST_DELAY_ENV)
             .ok()
             .and_then(|value| value.parse::<u64>().ok())
@@ -80,6 +89,7 @@ impl ListenerRuntime {
                 route: route.clone(),
                 event_log: config.event_log.clone(),
                 secrets: config.secrets.clone(),
+                auth: auth.clone(),
                 pending_topic: pending_topic.clone(),
                 request_delay,
                 metrics: Arc::new(RouteRuntimeMetrics::default()),
@@ -139,6 +149,7 @@ pub(crate) struct RouteConfig {
     pub(crate) binding_version: u32,
     pub(crate) provider: harn_vm::ProviderId,
     pub(crate) path: String,
+    pub(crate) auth_mode: AuthMode,
     pub(crate) signature_mode: SignatureMode,
     pub(crate) signing_secret: Option<SecretId>,
 }
@@ -165,6 +176,7 @@ impl RouteConfig {
                     binding_version,
                     provider,
                     path: trigger_path(trigger)?,
+                    auth_mode: AuthMode::Public,
                     signature_mode,
                     signing_secret: parse_secret_id(
                         trigger
@@ -180,6 +192,7 @@ impl RouteConfig {
                 binding_version,
                 provider: harn_vm::ProviderId::from("a2a-push"),
                 path: trigger_path(trigger)?,
+                auth_mode: AuthMode::BearerOrHmac,
                 signature_mode: SignatureMode::Unsigned,
                 signing_secret: None,
             })),
@@ -193,9 +206,22 @@ struct RouteContext {
     route: RouteConfig,
     event_log: Arc<AnyEventLog>,
     secrets: Arc<dyn SecretProvider>,
+    auth: Arc<ListenerAuth>,
     pending_topic: Topic,
     request_delay: Option<Duration>,
     metrics: Arc<RouteRuntimeMetrics>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum AuthMode {
+    Public,
+    BearerOrHmac,
+}
+
+impl AuthMode {
+    fn requires_credentials(self) -> bool {
+        !matches!(self, Self::Public)
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -243,6 +269,8 @@ fn snapshot_metrics(
 
 async fn ingest_trigger(
     Extension(context): Extension<Arc<RouteContext>>,
+    method: Method,
+    uri: Uri,
     headers: HeaderMap,
     Query(query): Query<BTreeMap<String, String>>,
     body: Bytes,
@@ -250,11 +278,26 @@ async fn ingest_trigger(
     context.metrics.received.fetch_add(1, Ordering::Relaxed);
     context.metrics.in_flight.fetch_add(1, Ordering::Relaxed);
 
+    let normalized_headers = normalize_headers(&headers);
+    if let Err(error) = authorize_request(
+        &context,
+        method.as_str(),
+        uri.path(),
+        &normalized_headers,
+        body.as_ref(),
+    )
+    .await
+    {
+        context.metrics.failed.fetch_add(1, Ordering::Relaxed);
+        context.metrics.in_flight.fetch_sub(1, Ordering::Relaxed);
+        return error.into_response();
+    }
+
     if let Some(delay) = context.request_delay {
         tokio::time::sleep(delay).await;
     }
 
-    let result = normalize_request(&context, &headers, &query, body.as_ref()).await;
+    let result = normalize_request(&context, &normalized_headers, &query, body.as_ref()).await;
 
     match result {
         Ok(event) => {
@@ -303,15 +346,31 @@ async fn ingest_trigger(
     }
 }
 
+async fn authorize_request(
+    context: &RouteContext,
+    method: &str,
+    path: &str,
+    headers: &BTreeMap<String, String>,
+    body: &[u8],
+) -> Result<(), HttpError> {
+    match context.route.auth_mode {
+        AuthMode::Public => Ok(()),
+        AuthMode::BearerOrHmac => context
+            .auth
+            .authorize(context.event_log.as_ref(), method, path, headers, body)
+            .await
+            .map_err(|()| HttpError::unauthorized("auth failed")),
+    }
+}
+
 async fn normalize_request(
     context: &RouteContext,
-    headers: &HeaderMap,
+    normalized_headers: &BTreeMap<String, String>,
     _query: &BTreeMap<String, String>,
     body: &[u8],
 ) -> Result<harn_vm::TriggerEvent, HttpError> {
     let received_at = OffsetDateTime::now_utc();
-    let normalized_headers = normalize_headers(headers);
-    let normalized_body = normalize_body(body, &normalized_headers);
+    let normalized_body = normalize_body(body, normalized_headers);
     let provider = context.route.provider.clone();
 
     let signature_status = match context.route.signature_mode {
@@ -323,7 +382,7 @@ async fn normalize_request(
                 &provider,
                 harn_vm::connectors::HmacSignatureStyle::github(),
                 body,
-                &normalized_headers,
+                normalized_headers,
                 &secret,
                 None,
                 received_at,
@@ -339,7 +398,7 @@ async fn normalize_request(
                 &provider,
                 harn_vm::connectors::HmacSignatureStyle::standard_webhooks(),
                 body,
-                &normalized_headers,
+                normalized_headers,
                 &secret,
                 Some(time::Duration::minutes(5)),
                 received_at,
@@ -350,18 +409,18 @@ async fn normalize_request(
         }
     };
 
-    let provider_kind = provider_event_kind(&provider, &normalized_headers, &normalized_body);
-    let trigger_kind = trigger_event_kind(&provider, &normalized_headers, &normalized_body);
+    let provider_kind = provider_event_kind(&provider, normalized_headers, &normalized_body);
+    let trigger_kind = trigger_event_kind(&provider, normalized_headers, &normalized_body);
     let dedupe_key = dedupe_key(
         context.route.signature_mode,
-        &normalized_headers,
+        normalized_headers,
         &normalized_body,
         body,
     );
     let provider_payload = harn_vm::ProviderPayload::normalize(
         &provider,
         &provider_kind,
-        &normalized_headers,
+        normalized_headers,
         normalized_body,
     )
     .map_err(|error| HttpError::unprocessable(error.to_string()))?;
@@ -376,7 +435,7 @@ async fn normalize_request(
         trace_id: harn_vm::TraceId::new(),
         tenant_id: None,
         headers: harn_vm::redact_headers(
-            &normalized_headers,
+            normalized_headers,
             &harn_vm::HeaderRedactionPolicy::default(),
         ),
         provider_payload,
@@ -445,6 +504,100 @@ fn parse_secret_id(raw: Option<&str>) -> Option<SecretId> {
         return None;
     }
     Some(SecretId::new(namespace, name).with_version(version))
+}
+
+#[derive(Clone, Default)]
+struct ListenerAuth {
+    api_keys: Vec<String>,
+    hmac_secret: Option<String>,
+}
+
+impl ListenerAuth {
+    fn from_env(required: bool) -> Result<Self, String> {
+        let api_keys = std::env::var(API_KEYS_ENV)
+            .ok()
+            .map(|value| {
+                value
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|segment| !segment.is_empty())
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let hmac_secret = std::env::var(HMAC_SECRET_ENV)
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+
+        if required && api_keys.is_empty() {
+            return Err(format!(
+                "{API_KEYS_ENV} must contain at least one API key when a2a-push routes are configured"
+            ));
+        }
+        if required && hmac_secret.is_none() {
+            return Err(format!(
+                "{HMAC_SECRET_ENV} must be set when a2a-push routes are configured"
+            ));
+        }
+
+        Ok(Self {
+            api_keys,
+            hmac_secret,
+        })
+    }
+
+    async fn authorize(
+        &self,
+        event_log: &AnyEventLog,
+        method: &str,
+        path: &str,
+        headers: &BTreeMap<String, String>,
+        body: &[u8],
+    ) -> Result<(), ()> {
+        let authorization = header_value(headers, "authorization").ok_or(())?;
+        let Some((scheme, value)) = authorization.split_once(' ') else {
+            return Err(());
+        };
+        let value = value.trim();
+        if value.is_empty() {
+            return Err(());
+        }
+
+        if scheme.eq_ignore_ascii_case("Bearer") {
+            if self.matches_api_key(value) {
+                return Ok(());
+            }
+            return Err(());
+        }
+
+        if scheme.eq_ignore_ascii_case(harn_vm::connectors::DEFAULT_CANONICAL_HMAC_SCHEME) {
+            let Some(secret) = self.hmac_secret.as_deref() else {
+                return Err(());
+            };
+            return harn_vm::connectors::verify_hmac_authorization(
+                event_log,
+                &harn_vm::ProviderId::from("orchestrator"),
+                method,
+                path,
+                body,
+                headers,
+                secret,
+                time::Duration::seconds(AUTH_TIMESTAMP_WINDOW_SECS),
+                OffsetDateTime::now_utc(),
+            )
+            .await
+            .map_err(|_| ());
+        }
+
+        Err(())
+    }
+
+    fn matches_api_key(&self, candidate: &str) -> bool {
+        self.api_keys
+            .iter()
+            .any(|key| key.as_bytes().ct_eq(candidate.as_bytes()).into())
+    }
 }
 
 fn normalize_headers(headers: &HeaderMap) -> BTreeMap<String, String> {
@@ -601,6 +754,13 @@ struct HttpError {
 }
 
 impl HttpError {
+    fn unauthorized(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::UNAUTHORIZED,
+            message: message.into(),
+        }
+    }
+
     fn internal(message: impl Into<String>) -> Self {
         Self {
             status: StatusCode::INTERNAL_SERVER_ERROR,

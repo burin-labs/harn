@@ -72,6 +72,50 @@ max_body_bytes = 10485760
 - `max_body_bytes` defaults to `10485760` bytes (10 MiB). Larger
   requests are rejected with `413 Payload Too Large`.
 
+### Listener auth
+
+Health probes stay public:
+
+- `GET /healthz`
+- `GET /readyz`
+
+Webhook routes keep using their provider-specific signature checks.
+`a2a-push` routes now require either a bearer API key or a shared-secret
+HMAC authorization header.
+
+Configure the MVP auth material with environment variables:
+
+```bash
+export HARN_ORCHESTRATOR_API_KEYS="dev-key-1,dev-key-2"
+export HARN_ORCHESTRATOR_HMAC_SECRET="replace-me"
+```
+
+Bearer requests use:
+
+```text
+Authorization: Bearer <api-key>
+```
+
+HMAC requests use:
+
+```text
+Authorization: HMAC-SHA256 timestamp=<unix>,signature=<base64>
+```
+
+The canonical string is:
+
+```text
+METHOD
+PATH
+TIMESTAMP
+SHA256(BODY)
+```
+
+`METHOD` is uppercased, `PATH` is the request path without the query
+string, `TIMESTAMP` is a Unix epoch seconds value, and `SHA256(BODY)` is
+the lowercase hex digest of the raw request body. Timestamps outside the
+5-minute replay window are rejected with `401 Unauthorized`.
+
 ### Trigger examples
 
 ```toml
@@ -96,4 +140,5 @@ handler = "a2a://reviewer.prod/triage"
 GitHub webhook triggers verify the `X-Hub-Signature-256` HMAC against
 `secrets.signing_secret` before enqueueing. Generic `provider = "webhook"`
 triggers use the shared Standard Webhooks verifier. `a2a-push` routes
-currently accept unsigned deliveries.
+require either `Authorization: Bearer <api-key>` or a valid
+`Authorization: HMAC-SHA256 ...` header before enqueueing.
