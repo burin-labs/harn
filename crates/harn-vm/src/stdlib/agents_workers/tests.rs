@@ -3,6 +3,10 @@ use std::rc::Rc;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
+use crate::orchestration::{
+    ArtifactRecord, CapabilityPolicy, ContextPolicy, MutationSessionRecord,
+};
+
 use super::*;
 
 #[test]
@@ -20,6 +24,8 @@ fn worker_snapshot_round_trip_preserves_resume_fields() {
         created_at: "created".to_string(),
         started_at: "started".to_string(),
         finished_at: Some("finished".to_string()),
+        awaiting_started_at: None,
+        awaiting_since: None,
         mode: "workflow".to_string(),
         history: vec!["task".to_string()],
         config: WorkerConfig::Stage {
@@ -84,6 +90,7 @@ fn worker_snapshot_round_trip_preserves_resume_fields() {
             context_policy: ContextPolicy::default(),
             resume_workflow: false,
             persist_state: true,
+            retriggerable: true,
             policy: Some(CapabilityPolicy {
                 tools: vec!["read".to_string()],
                 side_effect_level: Some("read_only".to_string()),
@@ -114,6 +121,7 @@ fn worker_snapshot_round_trip_preserves_resume_fields() {
     );
     assert_eq!(loaded.carry_policy.artifact_mode, "none");
     assert!(!loaded.carry_policy.resume_workflow);
+    assert!(loaded.carry_policy.retriggerable);
     assert_eq!(
         loaded.request.payload,
         Some(serde_json::json!({
@@ -152,6 +160,8 @@ fn worker_summary_exposes_request_and_provenance() {
         created_at: "created".to_string(),
         started_at: "started".to_string(),
         finished_at: Some("finished".to_string()),
+        awaiting_started_at: None,
+        awaiting_since: None,
         mode: "sub_agent".to_string(),
         history: vec!["original task".to_string(), "latest task".to_string()],
         config: WorkerConfig::SubAgent {

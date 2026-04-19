@@ -1105,6 +1105,14 @@ fn resolve_node_session_id(node: &WorkflowNode) -> String {
     {
         return explicit;
     }
+    if let Some(persisted) = node
+        .metadata
+        .get("worker_session_id")
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.trim().is_empty())
+    {
+        return persisted.to_string();
+    }
     format!("workflow_stage_{}", uuid::Uuid::now_v7())
 }
 

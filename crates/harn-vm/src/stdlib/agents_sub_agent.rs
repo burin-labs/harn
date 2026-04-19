@@ -9,6 +9,7 @@ use crate::value::{VmError, VmValue};
 pub(super) struct ParsedSubAgentRequest {
     pub(super) spec: SubAgentRunSpec,
     pub(super) background: bool,
+    pub(super) carry_policy: agents_workers::WorkerCarryPolicy,
     pub(super) execution: agents_workers::WorkerExecutionProfile,
     pub(super) worker_policy: Option<CapabilityPolicy>,
 }
@@ -136,6 +137,7 @@ pub(super) fn parse_sub_agent_request(args: &[VmValue]) -> Result<ParsedSubAgent
     };
     let requested_policy = sub_agent_requested_policy(&raw_options, &allowed_tools)?;
     let worker_policy = agents_workers::resolve_inherited_worker_policy(requested_policy.clone())?;
+    let carry_policy = agents_workers::parse_worker_carry_policy(&raw_options)?;
     let execution = agents_workers::parse_worker_execution_profile(raw_options.get("execution"))?;
     let returns_schema = raw_options
         .get("returns")
@@ -157,6 +159,7 @@ pub(super) fn parse_sub_agent_request(args: &[VmValue]) -> Result<ParsedSubAgent
     let mut options = raw_options.clone();
     for key in [
         "background",
+        "carry",
         "returns",
         "allowed_tools",
         "name",
@@ -202,6 +205,7 @@ pub(super) fn parse_sub_agent_request(args: &[VmValue]) -> Result<ParsedSubAgent
             parent_session_id: crate::llm::current_agent_session_id(),
         },
         background,
+        carry_policy,
         execution,
         worker_policy,
     })

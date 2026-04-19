@@ -4,6 +4,11 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+use std::time::Instant;
+
+use crate::orchestration::{
+    ArtifactRecord, CapabilityPolicy, ContextPolicy, MutationSessionRecord, WorkflowGraph,
+};
 
 mod audit;
 mod bridge;
@@ -18,8 +23,12 @@ pub(super) use config::{
     load_worker_state_snapshot, parse_worker_config, parse_worker_execution_profile,
     persist_worker_state_snapshot,
 };
-pub(super) use execution::{execute_delegated_stage, spawn_worker_task};
-pub(super) use policy::{apply_worker_artifact_policy, resolve_inherited_worker_policy};
+pub(super) use execution::{
+    ensure_worker_config_session_ids, execute_delegated_stage, spawn_worker_task,
+};
+pub(super) use policy::{
+    apply_worker_artifact_policy, parse_worker_carry_policy, resolve_inherited_worker_policy,
+};
 
 #[derive(Clone)]
 pub(super) enum WorkerConfig {
@@ -52,6 +61,7 @@ pub(super) struct WorkerCarryPolicy {
     pub(super) context_policy: ContextPolicy,
     pub(super) resume_workflow: bool,
     pub(super) persist_state: bool,
+    pub(super) retriggerable: bool,
     /// Capability policy scoped to this worker. Pushed onto the policy stack
     /// during execution and popped when the worker completes.
     pub(super) policy: Option<CapabilityPolicy>,
@@ -120,6 +130,8 @@ pub(super) struct WorkerState {
     pub(super) created_at: String,
     pub(super) started_at: String,
     pub(super) finished_at: Option<String>,
+    pub(super) awaiting_started_at: Option<String>,
+    pub(super) awaiting_since: Option<Instant>,
     pub(super) mode: String,
     pub(super) history: Vec<String>,
     pub(super) config: WorkerConfig,
@@ -151,6 +163,18 @@ pub(super) fn next_worker_id() -> String {
         counter.set(next);
         format!("worker_{}", uuid::Uuid::now_v7())
     })
+}
+
+pub(super) fn worker_trigger_payload_text(value: &VmValue) -> String {
+    match value {
+        VmValue::String(text) => text.to_string(),
+        _ => serde_json::to_string(&crate::llm::vm_value_to_json(value))
+            .unwrap_or_else(|_| value.display()),
+    }
+}
+
+pub(super) fn worker_wait_blocks(status: &str) -> bool {
+    matches!(status, "running" | "awaiting")
 }
 
 pub(super) fn worker_id_from_value(value: &VmValue) -> Result<String, VmError> {
@@ -358,6 +382,7 @@ pub(super) fn clone_worker_state(state: &WorkerState) -> serde_json::Value {
         "created_at": state.created_at,
         "started_at": state.started_at,
         "finished_at": state.finished_at,
+        "awaiting_started_at": state.awaiting_started_at,
         "history": state.history,
         "request": state.request,
         "provenance": worker_provenance(state),

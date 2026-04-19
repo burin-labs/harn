@@ -44,14 +44,104 @@ fn execution_record(profile: &WorkerExecutionProfile) -> crate::orchestration::R
     record
 }
 
+const WORKER_SESSION_ID_METADATA_KEY: &str = "worker_session_id";
+
+fn worker_stage_session_id(node: &crate::orchestration::WorkflowNode) -> Option<String> {
+    node.raw_model_policy
+        .as_ref()
+        .and_then(|value| value.as_dict())
+        .and_then(|dict| dict.get("session_id"))
+        .and_then(|value| match value {
+            VmValue::String(text) if !text.trim().is_empty() => Some(text.to_string()),
+            _ => None,
+        })
+        .or_else(|| {
+            node.metadata
+                .get(WORKER_SESSION_ID_METADATA_KEY)
+                .and_then(|value| value.as_str())
+                .filter(|value| !value.trim().is_empty())
+                .map(|value| value.to_string())
+        })
+}
+
+fn ensure_worker_stage_session_id(
+    node: &mut crate::orchestration::WorkflowNode,
+    session_id: String,
+) -> String {
+    if let Some(existing) = worker_stage_session_id(node) {
+        return existing;
+    }
+    node.metadata.insert(
+        WORKER_SESSION_ID_METADATA_KEY.to_string(),
+        serde_json::json!(session_id.clone()),
+    );
+    let mut raw_model_policy = node
+        .raw_model_policy
+        .as_ref()
+        .and_then(|value| value.as_dict())
+        .cloned()
+        .unwrap_or_default();
+    raw_model_policy.insert(
+        "session_id".to_string(),
+        VmValue::String(Rc::from(session_id.clone())),
+    );
+    node.raw_model_policy = Some(VmValue::Dict(Rc::new(raw_model_policy)));
+    session_id
+}
+
+pub(in super::super) fn ensure_worker_config_session_ids(
+    config: &mut WorkerConfig,
+    worker_id: &str,
+) {
+    match config {
+        WorkerConfig::Workflow { graph, .. } => {
+            for (node_id, node) in &mut graph.nodes {
+                ensure_worker_stage_session_id(
+                    node,
+                    format!("worker_session_{}_{}", worker_id, node_id),
+                );
+            }
+        }
+        WorkerConfig::Stage { node, .. } => {
+            let node_id = node.id.clone().unwrap_or_else(|| "stage".to_string());
+            ensure_worker_stage_session_id(
+                node,
+                format!("worker_session_{}_{}", worker_id, node_id),
+            );
+        }
+        WorkerConfig::SubAgent { .. } => {}
+    }
+}
+
+fn restore_worker_transcript(config: &WorkerConfig, transcript: Option<&VmValue>) {
+    let Some(transcript) = transcript.cloned() else {
+        return;
+    };
+    match config {
+        WorkerConfig::Stage { node, .. } => {
+            if let Some(session_id) = worker_stage_session_id(node) {
+                crate::agent_sessions::open_or_create(Some(session_id.clone()));
+                crate::agent_sessions::store_transcript(&session_id, transcript);
+            }
+        }
+        WorkerConfig::SubAgent { spec } => {
+            crate::agent_sessions::open_or_create(Some(spec.session_id.clone()));
+            crate::agent_sessions::store_transcript(&spec.session_id, transcript);
+        }
+        WorkerConfig::Workflow { .. } => {}
+    }
+}
+
 async fn execute_worker_config(
     worker_id: String,
     task: String,
     config: WorkerConfig,
+    prior_transcript: Option<VmValue>,
     mut execution: WorkerExecutionProfile,
     audit: MutationSessionRecord,
 ) -> Result<WorkerExecutionResult, VmError> {
     ensure_worker_worktree(&worker_id, &mut execution)?;
+    restore_worker_transcript(&config, prior_transcript.as_ref());
     let execution_record = execution_record(&execution);
     crate::stdlib::process::set_thread_execution_context(Some(execution_record.clone()));
     crate::orchestration::install_current_mutation_session(Some(audit));
@@ -151,7 +241,7 @@ async fn execute_worker_config(
 
 pub(in super::super) fn spawn_worker_task(state: Rc<RefCell<WorkerState>>) {
     let child_vm = crate::vm::clone_async_builtin_child_vm();
-    let (worker_id, task, config, execution, cancel_token, worker_policy, audit) = {
+    let (worker_id, task, config, prior_transcript, execution, cancel_token, worker_policy, audit) = {
         let worker = state.borrow();
         if worker.carry_policy.persist_state {
             persist_worker_state_snapshot(&worker).ok();
@@ -160,6 +250,7 @@ pub(in super::super) fn spawn_worker_task(state: Rc<RefCell<WorkerState>>) {
             worker.id.clone(),
             worker.task.clone(),
             worker.config.clone(),
+            worker.transcript.clone(),
             worker.execution.clone(),
             worker.cancel_token.clone(),
             worker.carry_policy.policy.clone(),
@@ -189,7 +280,9 @@ pub(in super::super) fn spawn_worker_task(state: Rc<RefCell<WorkerState>>) {
         if let Some(ref approval) = worker_approval {
             crate::orchestration::push_approval_policy(approval.clone());
         }
-        let result = execute_worker_config(worker_id, task, config, execution, audit).await;
+        let result =
+            execute_worker_config(worker_id, task, config, prior_transcript, execution, audit)
+                .await;
         if worker_approval.is_some() {
             crate::orchestration::pop_approval_policy();
         }
@@ -197,12 +290,12 @@ pub(in super::super) fn spawn_worker_task(state: Rc<RefCell<WorkerState>>) {
             pop_execution_policy();
         }
         {
-            let completion_snapshot = {
+            let completion = {
                 let mut worker = state_for_task.borrow_mut();
-                worker.finished_at = Some(uuid::Uuid::now_v7().to_string());
+                worker.awaiting_since = None;
+                worker.awaiting_started_at = None;
                 match &result {
                     Ok(executed) => {
-                        worker.status = "completed".to_string();
                         worker.latest_payload = Some(executed.payload.clone());
                         worker.latest_error = None;
                         worker.transcript = executed.transcript.clone();
@@ -222,6 +315,15 @@ pub(in super::super) fn spawn_worker_task(state: Rc<RefCell<WorkerState>>) {
                         if let Some(run_id) = &worker.child_run_id {
                             worker.audit.run_id = Some(run_id.clone());
                         }
+                        if worker.carry_policy.retriggerable {
+                            worker.status = "awaiting".to_string();
+                            worker.finished_at = None;
+                            worker.awaiting_started_at = Some(uuid::Uuid::now_v7().to_string());
+                            worker.awaiting_since = Some(std::time::Instant::now());
+                        } else {
+                            worker.status = "completed".to_string();
+                            worker.finished_at = Some(uuid::Uuid::now_v7().to_string());
+                        }
                         if worker.carry_policy.persist_state {
                             persist_worker_state_snapshot(&worker).ok();
                         }
@@ -238,23 +340,28 @@ pub(in super::super) fn spawn_worker_task(state: Rc<RefCell<WorkerState>>) {
                         } else {
                             worker.status = "failed".to_string();
                         }
+                        worker.finished_at = Some(uuid::Uuid::now_v7().to_string());
                         worker.latest_error = Some(error.to_string());
                         if worker.carry_policy.persist_state {
                             persist_worker_state_snapshot(&worker).ok();
                         }
                     }
                 }
-                worker_event_snapshot(&worker)
+                let snapshot = worker_event_snapshot(&worker);
+                let event = match &result {
+                    Ok(_) if worker.carry_policy.retriggerable => None,
+                    Ok(_) => Some(WorkerEvent::WorkerCompleted),
+                    Err(VmError::CategorizedError {
+                        category: crate::value::ErrorCategory::Cancelled,
+                        ..
+                    }) => Some(WorkerEvent::WorkerCancelled),
+                    Err(_) => Some(WorkerEvent::WorkerFailed),
+                };
+                (snapshot, event)
             };
-            let event = match &result {
-                Ok(_) => WorkerEvent::WorkerCompleted,
-                Err(VmError::CategorizedError {
-                    category: crate::value::ErrorCategory::Cancelled,
-                    ..
-                }) => WorkerEvent::WorkerCancelled,
-                Err(_) => WorkerEvent::WorkerFailed,
-            };
-            emit_worker_event(&completion_snapshot, event).await?;
+            if let Some(event) = completion.1 {
+                emit_worker_event(&completion.0, event).await?;
+            }
         }
         result
     });
@@ -339,6 +446,8 @@ pub(in super::super) async fn execute_delegated_stage(
         created_at: uuid::Uuid::now_v7().to_string(),
         started_at: uuid::Uuid::now_v7().to_string(),
         finished_at: None,
+        awaiting_started_at: None,
+        awaiting_since: None,
         mode: "delegated_stage".to_string(),
         history: vec![task.to_string()],
         config,
@@ -358,6 +467,7 @@ pub(in super::super) async fn execute_delegated_stage(
             context_policy: ContextPolicy::default(),
             resume_workflow: true,
             persist_state: true,
+            retriggerable: false,
             policy: current_execution_policy(),
         },
         execution,

@@ -185,6 +185,7 @@ pub(in super::super) fn persist_worker_state_snapshot(state: &WorkerState) -> Re
         "created_at": state.created_at,
         "started_at": state.started_at,
         "finished_at": state.finished_at,
+        "awaiting_started_at": state.awaiting_started_at,
         "mode": state.mode,
         "history": state.history,
         "config": worker_config_to_json(&state.config),
@@ -202,6 +203,7 @@ pub(in super::super) fn persist_worker_state_snapshot(state: &WorkerState) -> Re
             "context_policy": state.carry_policy.context_policy,
             "resume_workflow": state.carry_policy.resume_workflow,
             "persist_state": state.carry_policy.persist_state,
+            "retriggerable": state.carry_policy.retriggerable,
             "policy": state.carry_policy.policy,
         },
         "execution": state.execution,
@@ -243,6 +245,7 @@ pub(in super::super) fn load_worker_state_snapshot(target: &str) -> Result<Worke
             context_policy: parse_context_policy(dict.get("context_policy"))?,
             resume_workflow: !matches!(dict.get("resume_workflow"), Some(VmValue::Bool(false))),
             persist_state: !matches!(dict.get("persist_state"), Some(VmValue::Bool(false))),
+            retriggerable: matches!(dict.get("retriggerable"), Some(VmValue::Bool(true))),
             policy: worker_policy_value(dict.get("policy"))
                 .map(parse_worker_policy_value)
                 .transpose()?,
@@ -301,6 +304,11 @@ pub(in super::super) fn load_worker_state_snapshot(target: &str) -> Result<Worke
             .get("finished_at")
             .and_then(|value| value.as_str())
             .map(|value| value.to_string()),
+        awaiting_started_at: payload
+            .get("awaiting_started_at")
+            .and_then(|value| value.as_str())
+            .map(|value| value.to_string()),
+        awaiting_since: None,
         mode: payload
             .get("mode")
             .and_then(|value| value.as_str())

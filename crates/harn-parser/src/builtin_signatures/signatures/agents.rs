@@ -299,4 +299,8 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         name: "wait_agent",
         return_type: None,
     },
+    BuiltinSig {
+        name: "worker_trigger",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
 ];
