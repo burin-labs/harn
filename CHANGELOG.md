@@ -12,7 +12,7 @@ granular archaeology.
 ### Added
 
 - **Action-graph observability extended with `trigger` and `predicate`
-  node kinds (#PR-NUM, partial #163).** Persisted run records now
+  node kinds (#202, partial #163).** Persisted run records now
   synthesize a `trigger` node from `trigger_event` metadata, render
   workflow `condition` stages as `predicate` nodes, propagate
   `trace_id` across the derived action graph, and stream updates onto
