@@ -6,6 +6,10 @@ use std::time::Duration;
 
 use harn_vm::llm_config::{self, AuthEnv, ProviderDef};
 use harn_vm::runtime_paths;
+use harn_vm::secrets::{
+    configured_default_chain, EnvSecretProvider, KeyringSecretProvider, SecretId,
+    DEFAULT_SECRET_PROVIDER_CHAIN, SECRET_PROVIDER_CHAIN_ENV,
+};
 use reqwest::{header::CONTENT_TYPE, Method};
 
 use crate::package;
@@ -41,6 +45,7 @@ pub(crate) async fn run_doctor(network: bool) {
     checks.push(check_binary("rustc"));
     checks.push(check_binary("cargo"));
     checks.extend(check_provider_selection());
+    checks.extend(check_secret_providers());
     checks.extend(check_manifest());
     checks.extend(check_metadata_cache());
     checks.extend(check_skills());
@@ -118,6 +123,77 @@ fn check_provider_selection() -> Vec<DoctorCheck> {
             label: "selected provider".to_string(),
             detail: format!("HARN_LLM_PROVIDER={provider}"),
         });
+    }
+
+    checks
+}
+
+fn check_secret_providers() -> Vec<DoctorCheck> {
+    let namespace = default_secret_namespace();
+    let configured = std::env::var(SECRET_PROVIDER_CHAIN_ENV)
+        .unwrap_or_else(|_| DEFAULT_SECRET_PROVIDER_CHAIN.to_string());
+    let mut checks = Vec::new();
+
+    match configured_default_chain(namespace.clone()) {
+        Ok(chain) => checks.push(DoctorCheck {
+            status: if chain.providers().is_empty() {
+                DoctorStatus::Fail
+            } else {
+                DoctorStatus::Ok
+            },
+            label: "secret providers".to_string(),
+            detail: format!(
+                "{} (namespace {})",
+                configured.replace(',', " -> "),
+                namespace
+            ),
+        }),
+        Err(error) => {
+            checks.push(DoctorCheck {
+                status: DoctorStatus::Fail,
+                label: "secret providers".to_string(),
+                detail: error.to_string(),
+            });
+            return checks;
+        }
+    }
+
+    for provider in configured
+        .split(',')
+        .map(str::trim)
+        .filter(|provider| !provider.is_empty())
+    {
+        match provider {
+            "env" => {
+                let env_provider = EnvSecretProvider::new(namespace.clone());
+                let sample = env_provider.env_var_name(&SecretId::new("sample", "token"));
+                checks.push(DoctorCheck {
+                    status: DoctorStatus::Ok,
+                    label: "secret:env".to_string(),
+                    detail: format!("reads process env via {sample}"),
+                });
+            }
+            "keyring" => {
+                let keyring_provider = KeyringSecretProvider::new(namespace.clone());
+                match keyring_provider.healthcheck() {
+                    Ok(detail) => checks.push(DoctorCheck {
+                        status: DoctorStatus::Ok,
+                        label: "secret:keyring".to_string(),
+                        detail,
+                    }),
+                    Err(error) => checks.push(DoctorCheck {
+                        status: DoctorStatus::Fail,
+                        label: "secret:keyring".to_string(),
+                        detail: error.to_string(),
+                    }),
+                }
+            }
+            other => checks.push(DoctorCheck {
+                status: DoctorStatus::Fail,
+                label: format!("secret:{other}"),
+                detail: format!("unsupported provider '{other}'"),
+            }),
+        }
     }
 
     checks
@@ -511,6 +587,22 @@ fn find_nearest_manifest(start: &Path) -> Option<PathBuf> {
             return None;
         }
     }
+}
+
+fn default_secret_namespace() -> String {
+    if let Ok(namespace) = std::env::var("HARN_SECRET_NAMESPACE") {
+        if !namespace.trim().is_empty() {
+            return namespace;
+        }
+    }
+
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let leaf = cwd
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .unwrap_or("workspace");
+    format!("harn/{leaf}")
 }
 
 fn read_manifest(path: &Path) -> Result<package::Manifest, String> {

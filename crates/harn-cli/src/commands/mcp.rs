@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use std::{env, fs, process};
 
 use base64::Engine;
+use harn_vm::secrets::{KeyringSecretProvider, SecretBytes, SecretId, SecretProvider};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use url::Url;
@@ -92,10 +93,12 @@ pub(crate) async fn handle_mcp_command(command: &McpCommand) {
                 eprintln!("error: {error}");
                 process::exit(1);
             });
-            delete_stored_token(&server.url).unwrap_or_else(|error| {
-                eprintln!("error: {error}");
-                process::exit(1);
-            });
+            delete_stored_token(&server.url)
+                .await
+                .unwrap_or_else(|error| {
+                    eprintln!("error: {error}");
+                    process::exit(1);
+                });
             println!(
                 "Removed stored OAuth token for {} ({})",
                 server.name, server.url
@@ -106,7 +109,7 @@ pub(crate) async fn handle_mcp_command(command: &McpCommand) {
                 eprintln!("error: {error}");
                 process::exit(1);
             });
-            match load_stored_token(&server.url) {
+            match load_stored_token(&server.url).await {
                 Ok(Some(token)) => {
                     println!("Server: {}", server.name);
                     println!("URL: {}", server.url);
@@ -153,13 +156,13 @@ pub(crate) async fn resolve_auth_for_server(
         return Ok(AuthResolution::None);
     }
 
-    let Some(mut stored) = load_stored_token(&server.url)? else {
+    let Some(mut stored) = load_stored_token(&server.url).await? else {
         return Ok(AuthResolution::None);
     };
 
     if token_needs_refresh(&stored) {
         stored = refresh_token_if_needed(&stored).await?;
-        save_stored_token(&stored)?;
+        save_stored_token(&stored).await?;
     }
 
     Ok(AuthResolution::Bearer(stored.access_token))
@@ -266,7 +269,7 @@ async fn login(options: &McpLoginArgs) -> Result<(), String> {
         resource: server.url.clone(),
         scopes: options.scope.clone().or(server.scopes),
     };
-    save_stored_token(&stored)?;
+    save_stored_token(&stored).await?;
     println!("OAuth token stored for {}.", server.name);
     Ok(())
 }
@@ -756,38 +759,35 @@ fn current_unix_timestamp() -> i64 {
         .unwrap_or_default()
 }
 
-fn save_stored_token(token: &StoredOAuthToken) -> Result<(), String> {
-    let entry = keyring::Entry::new(KEYRING_SERVICE, &token_store_account(&token.resource))
-        .map_err(|error| format!("Failed to open keyring entry: {error}"))?;
+async fn save_stored_token(token: &StoredOAuthToken) -> Result<(), String> {
     let payload = serde_json::to_string(token)
         .map_err(|error| format!("Failed to serialize OAuth token: {error}"))?;
-    entry
-        .set_password(&payload)
+    oauth_token_provider()
+        .put(
+            &token_secret_id(&token.resource),
+            SecretBytes::from(payload.into_bytes()),
+        )
+        .await
         .map_err(|error| format!("Failed to store OAuth token in keyring: {error}"))
 }
 
-fn load_stored_token(resource: &str) -> Result<Option<StoredOAuthToken>, String> {
-    let entry = keyring::Entry::new(KEYRING_SERVICE, &token_store_account(resource))
-        .map_err(|error| format!("Failed to open keyring entry: {error}"))?;
-    let payload = match entry.get_password() {
-        Ok(value) => value,
-        Err(keyring::Error::NoEntry) => return Ok(None),
+async fn load_stored_token(resource: &str) -> Result<Option<StoredOAuthToken>, String> {
+    let payload = match oauth_token_provider().get(&token_secret_id(resource)).await {
+        Ok(secret) => secret,
+        Err(harn_vm::secrets::SecretError::NotFound { .. }) => return Ok(None),
         Err(error) => return Err(format!("Failed to read OAuth token from keyring: {error}")),
     };
-    let token = serde_json::from_str::<StoredOAuthToken>(&payload)
+    let token = payload
+        .with_exposed(|bytes| serde_json::from_slice::<StoredOAuthToken>(bytes))
         .map_err(|error| format!("Stored OAuth token was invalid JSON: {error}"))?;
     Ok(Some(token))
 }
 
-fn delete_stored_token(resource: &str) -> Result<(), String> {
-    let entry = keyring::Entry::new(KEYRING_SERVICE, &token_store_account(resource))
-        .map_err(|error| format!("Failed to open keyring entry: {error}"))?;
-    match entry.delete_credential() {
-        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-        Err(error) => Err(format!(
-            "Failed to delete OAuth token from keyring: {error}"
-        )),
-    }
+async fn delete_stored_token(resource: &str) -> Result<(), String> {
+    oauth_token_provider()
+        .delete(&token_secret_id(resource))
+        .await
+        .map_err(|error| format!("Failed to delete OAuth token from keyring: {error}"))
 }
 
 fn token_store_account(resource: &str) -> String {
@@ -796,6 +796,14 @@ fn token_store_account(resource: &str) -> String {
         "mcp-{}",
         base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(digest)
     )
+}
+
+fn oauth_token_provider() -> KeyringSecretProvider {
+    KeyringSecretProvider::new(KEYRING_SERVICE)
+}
+
+fn token_secret_id(resource: &str) -> SecretId {
+    SecretId::new("", token_store_account(resource))
 }
 
 fn format_expiry(unix: i64) -> String {

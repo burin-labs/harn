@@ -332,7 +332,8 @@ explicit.
 
 ## harn doctor
 
-Inspect the local environment and report the current Harn setup.
+Inspect the local environment and report the current Harn setup,
+including the resolved secret-provider chain and keyring health.
 
 ```bash
 harn doctor

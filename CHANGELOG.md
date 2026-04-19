@@ -7,6 +7,18 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
+## Unreleased
+
+### Added
+
+- **Secret-provider primitives for reactive runtime work (#194,
+  closes #154).** `harn_vm::secrets` now provides `SecretProvider`,
+  `ChainSecretProvider`, zeroizing `SecretBytes`, and concrete env +
+  keyring providers. MCP OAuth token storage now routes through the
+  shared keyring provider, and `harn doctor` reports the active
+  secret-provider chain plus per-provider health for env/keyring
+  setups. Foundation for upcoming connector + orchestrator work.
+
 ## v0.7.22
 
 ### Added
