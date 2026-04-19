@@ -26,6 +26,7 @@
 - [Workflow runtime](./workflow-runtime.md)
 - [Trigger manifests](./triggers/manifest.md)
 - [Trigger event schema](./triggers/event-schema.md)
+- [Trigger observability in the action graph](./observability/triggers-in-action-graph.md)
 - [Cookbook](./cookbook.md)
 - [Tutorial: code review agent](./tutorial-code-review-agent.md)
 - [Tutorial: MCP server](./tutorial-mcp-server.md)

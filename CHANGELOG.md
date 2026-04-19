@@ -11,6 +11,14 @@ granular archaeology.
 
 ### Added
 
+- **Action-graph observability extended with `trigger` and `predicate`
+  node kinds (#202, partial #163).** Persisted run records now
+  synthesize a `trigger` node from `trigger_event` metadata, render
+  workflow `condition` stages as `predicate` nodes, propagate
+  `trace_id` across the derived action graph, and stream updates onto
+  the shared `observability.action_graph` event-log topic.
+  Dispatch/A2A/worker/DLQ nodes deferred to the T-06 dispatcher
+  milestone.
 - **Secret-provider primitives for reactive runtime work (#194,
   closes #154).** `harn_vm::secrets` now provides `SecretProvider`,
   `ChainSecretProvider`, zeroizing `SecretBytes`, and concrete env +

@@ -77,7 +77,7 @@ pipeline test(task) {
   ],
   },
   )
-  println(run.observability?.schema_version == 3)
+  println(run.observability?.schema_version == 4)
   println(len(run.observability?.compaction_events) == 3)
   var saw_truncate = false
   var saw_mask = false
