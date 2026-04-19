@@ -3,7 +3,7 @@ set -e
 
 echo "=== Pre-push: running fast release-quality checks ==="
 make test
-cargo run --quiet --bin harn -- fmt --check conformance/tests/
+make fmt-harn
 
 if command -v npx >/dev/null 2>&1; then
   npx markdownlint-cli2 "**/*.md"
