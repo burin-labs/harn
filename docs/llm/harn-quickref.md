@@ -807,6 +807,20 @@ Use the daemon stdlib wrappers when you want a first-class handle around
 `watch_paths`, and `idle_watchdog_attempts`, plus
 `event_queue_capacity` (default `1024`).
 
+### Bridge-only builtins (IDE host integration)
+
+These builtins are only meaningful when a Harn script runs inside a host
+with a `HostCallBridge` attached (e.g. burin-code). Outside a bridge
+session they raise an error — don't call them from `harn run` in a
+plain terminal.
+
+- `host_tool_list()` returns `list<{name, description, schema}>` —
+  every tool the attached host has registered. Call once per script;
+  cache the result.
+- `host_tool_call(name, args)` invokes a host tool with a dict of
+  arguments. Returns an opaque value — narrow it yourself before
+  field access (strict types mode treats this as an untyped boundary).
+
 ### Trigger stdlib
 
 Use the trigger stdlib wrappers when a script needs to inspect or manually

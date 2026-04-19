@@ -550,6 +550,15 @@ pub fn local_fn(event: TriggerEvent) -> string {
 
 #[tokio::test(flavor = "current_thread")]
 async fn replay_dispatch_emits_replay_chain_edge_and_headers() {
+    // Every `dispatch_replay` call enters `ReplayEnvGuard`, which mutates the
+    // process-wide HARN_REPLAY env var. If two replay tests overlap, the
+    // guard's save/restore depth counter mishandles nested enters made
+    // concurrently by independent tests and the env var ends up set to
+    // whichever test dropped last rather than each test's own "previous"
+    // value. Hold the same `replay_env_lock` as
+    // `replay_dispatch_sets_harn_replay_env_and_restores_previous_value` to
+    // serialize every test that drives the replay path. See harn#244.
+    let _env_guard = replay_env_lock().lock().expect("env lock poisoned");
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {

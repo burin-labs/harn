@@ -19,7 +19,12 @@ use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
 const TRIGGER_EVENTS_TOPIC: &str = "triggers.events";
-const TRIGGER_DLQ_TOPIC: &str = "triggers.dlq";
+// Must match `crate::triggers::dispatcher::TRIGGER_DLQ_TOPIC` so that
+// `trigger_inspect_dlq()` sees entries appended by the dispatcher.
+// Previous value "triggers.dlq" silently diverged from the dispatcher's
+// "trigger.dlq" (plural vs singular family convention) and hid every
+// DLQ entry from stdlib inspectors.
+const TRIGGER_DLQ_TOPIC: &str = "trigger.dlq";
 const TRIGGER_EVENT_LOG_QUEUE_DEPTH: usize = 128;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

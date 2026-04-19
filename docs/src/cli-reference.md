@@ -407,6 +407,66 @@ harn eval evals/regression.json
 - a directory of run record JSON files
 - an eval suite manifest JSON file with grouped cases and optional baseline comparisons
 
+## harn orchestrator
+
+Long-running manifest-driven orchestrator for trigger ingestion and
+connector activation. See [Orchestrator](./orchestrator.md) for full
+detail.
+
+```bash
+# Start the orchestrator against a manifest. Binds HTTP(S) for
+# webhook/a2a-push triggers, activates connectors, writes a state
+# snapshot, drains cleanly on SIGTERM/SIGINT, reloads on SIGHUP.
+harn orchestrator serve \
+  --config harn.toml \
+  --state-dir .harn/orchestrator \
+  --bind 0.0.0.0:8080 \
+  --role single-tenant
+
+# Inspect the running orchestrator state snapshot + bindings.
+harn orchestrator inspect --state-dir .harn/orchestrator
+
+# Inject a synthetic TriggerEvent to exercise a specific binding.
+harn orchestrator fire <trigger-id> --payload event.json
+
+# Replay a historical event through the dispatcher.
+harn orchestrator replay <event-id>
+
+# Inspect the dead-letter queue.
+harn orchestrator dlq list
+harn orchestrator dlq --replay <event-id>
+
+# Inspect the pending-queue head.
+harn orchestrator queue
+```
+
+`harn orchestrator inspect/fire/replay/dlq/queue` are offline
+operations — they read the state snapshot + event log directly. To
+operate against a live `harn orchestrator serve`, use the same state
+directory. Environment variables `HARN_ORCHESTRATOR_MANIFEST`,
+`HARN_ORCHESTRATOR_LISTEN`, `HARN_ORCHESTRATOR_STATE_DIR`,
+`HARN_ORCHESTRATOR_API_KEYS`, and `HARN_ORCHESTRATOR_HMAC_SECRET`
+configure the serve entry point for container deployments.
+
+## harn trigger replay
+
+Replay a persisted `TriggerEvent` from a standalone EventLog snapshot
+through the dispatcher (no orchestrator needed).
+
+```bash
+# Replay an event, re-dispatch against the live binding.
+harn trigger replay <event-id>
+
+# Compare replay result vs. original (structured drift JSON).
+harn trigger replay <event-id> --diff
+
+# Replay against a historical binding version by timestamp.
+harn trigger replay <event-id> --as-of 2026-04-19T12:00:00Z
+```
+
+Sets `HARN_REPLAY=1` during dispatch so nondeterminism in handlers
+can fall back to recorded values when the handler cooperates.
+
 ## harn serve
 
 Start an A2A (Agent-to-Agent) HTTP server.

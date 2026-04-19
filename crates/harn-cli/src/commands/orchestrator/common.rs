@@ -16,7 +16,11 @@ pub(super) const STATE_SNAPSHOT_FILE: &str = "orchestrator-state.json";
 pub(super) const TRIGGER_INBOX_TOPIC: &str = "trigger.inbox";
 pub(super) const TRIGGER_OUTBOX_TOPIC: &str = "trigger.outbox";
 pub(super) const TRIGGER_ATTEMPTS_TOPIC: &str = "trigger.attempts";
-pub(super) const TRIGGER_DLQ_TOPIC: &str = "triggers.dlq";
+// Must match `harn_vm::triggers::dispatcher::TRIGGER_DLQ_TOPIC`. Previous
+// value "triggers.dlq" silently diverged and made `harn orchestrator dlq`
+// return zero results even when the dispatcher was actively writing DLQ
+// entries.
+pub(super) const TRIGGER_DLQ_TOPIC: &str = "trigger.dlq";
 
 pub(super) struct LoadedOrchestratorContext {
     pub vm: harn_vm::Vm,

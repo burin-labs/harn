@@ -29,6 +29,23 @@ granular archaeology.
   `run_tests_uses_file_parent_as_execution_cwd_and_restores_shell_cwd`
   no longer flake on CI.
 
+- **DLQ topic split-brain between dispatcher and CLI.** The trigger
+  dispatcher at `harn_vm::triggers::dispatcher::TRIGGER_DLQ_TOPIC`
+  writes to `trigger.dlq`, but the orchestrator CLI readers and the
+  `trigger_inspect_dlq()` stdlib entrypoint were reading from
+  `triggers.dlq` (trailing `s`). Both paths now agree on the
+  `trigger.dlq` topic name, so `harn orchestrator dlq` and the
+  stdlib-driven replay workflow actually surface DLQ entries the
+  dispatcher has written.
+
+- **Flaky `replay_dispatch_emits_replay_chain_edge_and_headers` test
+  under parallel `cargo test` (harn#244 band-aid).** The replay path
+  mutates the process-wide `HARN_REPLAY` env var via `ReplayEnvGuard`
+  and a sibling test manipulates the same var from test-level setup
+  under its own `replay_env_lock()`. Both replay-driving tests now
+  take the same lock; the structural task-local fix is still tracked
+  as harn#244.
+
 - **Structured-output schema contract for OpenRouter Gemini (#208,
   closes #206).** Schema-mode `llm_call(...)` no longer returns a
   success envelope with `data == nil` after prose-only or
@@ -57,9 +74,11 @@ granular archaeology.
   flake).
 
 - **Bridge-backed host tool discovery (#216).** Bridge sessions now
-  expose `host_tool_list()`, `host_tool_describe(name)`, and
-  `host_tool_call(name, args)` stdlib entry points plus matching
-  parser signatures. Harn programs running inside burin-code can
+  expose `host_tool_list()` and `host_tool_call(name, args)` stdlib
+  entry points plus matching parser signatures. `host_tool_list()`
+  returns the full catalog including per-tool schemas — scripts
+  call it once and consult the result instead of needing a separate
+  `describe` call. Harn programs running inside burin-code can
   enumerate the host's editor tools, read their schemas, and invoke
   them through the bridge without the host needing to pre-inject a
   static catalog.
@@ -334,9 +353,9 @@ granular archaeology.
   `TriggerConfig`, `DispatchHandle`, and `DlqEntry`. Scripts can now
   hot-install local triggers, inspect live binding metrics, fire
   synthetic events, perform shallow event-log replay, and inspect DLQ
-  retry history in-process. `trigger_replay` remains the explicit
-  `TODO(T-14)` shallow path; manual `a2a://` / `worker://` dispatch
-  remains deferred until the full trigger dispatcher lands.
+  retry history in-process. `trigger_replay` now routes through the
+  full dispatcher (see the #166 entry above); manual `worker://`
+  dispatch remains deferred to O-05.
 
 ## v0.7.22
 
