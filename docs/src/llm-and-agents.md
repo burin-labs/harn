@@ -12,7 +12,7 @@ environment variable to authenticate or point Harn at a local endpoint:
 |---|---|---|
 | Anthropic (default) | `ANTHROPIC_API_KEY` | `claude-sonnet-4-20250514` |
 | OpenAI | `OPENAI_API_KEY` | `gpt-4o` |
-| OpenRouter | `OPENROUTER_API_KEY` | `anthropic/claude-sonnet-4-20250514` |
+| OpenRouter | `OPENROUTER_API_KEY` | `anthropic/claude-sonnet-4.6` |
 | HuggingFace | `HF_TOKEN` or `HUGGINGFACE_API_KEY` | explicit `model` |
 | Ollama | `OLLAMA_HOST` (optional) | `llama3.2` |
 | Local server | `LOCAL_LLM_BASE_URL` | `LOCAL_LLM_MODEL` or explicit `model` |
