@@ -1,14 +1,15 @@
 pipeline default() {
   let unique = uuid()
-  let repo = project_root()
+  let repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+  let target_dir = env("CARGO_TARGET_DIR") ?? path_join(repo_root, "target")
   let base = path_join(temp_dir(), "harn-orchestrator-hot-reload-" + unique)
   let workspace = path_join(base, "workspace")
   let state_dir = path_join(base, "state")
-  let binary = env_or("HARN_CONFORMANCE_HARN_BIN", path_join(repo, "target/debug/harn"))
+  let binary = env_or("HARN_CONFORMANCE_HARN_BIN", path_join(target_dir, "debug/harn"))
+  assert(file_exists(binary), "missing built harn binary at " + binary)
   let script = """
     set -eu
 
-    repo="${repo}"
     base="${base}"
     workspace="${workspace}"
     state_dir="${state_dir}"

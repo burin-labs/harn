@@ -86,8 +86,8 @@ pub use triggers::{
     ProviderCatalogError, ProviderId, ProviderMetadata, ProviderOutboundMethod, ProviderPayload,
     ProviderRuntimeMetadata, ProviderSchema, ProviderSecretRequirement, RetryPolicy,
     SignatureStatus, SignatureVerificationMetadata, TenantId, TraceId, TriggerBindingSnapshot,
-    TriggerBindingSource, TriggerBindingSpec, TriggerDispatchOutcome, TriggerEvent,
-    TriggerEventId, TriggerHandlerSpec, TriggerHarnessResult, TriggerId, TriggerMetricsSnapshot,
+    TriggerBindingSource, TriggerBindingSpec, TriggerDispatchOutcome, TriggerEvent, TriggerEventId,
+    TriggerHandlerSpec, TriggerHarnessResult, TriggerId, TriggerMetricsSnapshot,
     TriggerPredicateSpec, TriggerRegistryError, TriggerRetryConfig, TriggerState,
     DEFAULT_INBOX_RETENTION_DAYS, TRIGGER_INBOX_TOPIC, TRIGGER_TEST_FIXTURES,
 };
