@@ -31,6 +31,7 @@ kind = "webhook"
 provider = "github"
 match = { events = ["issues.opened"] }
 handler = "handlers::on_issue"
+secrets = { signing_secret = "github/webhook-secret" }
 "#,
     );
 }
