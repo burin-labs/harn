@@ -62,37 +62,6 @@ Accepted deliveries are normalized into `TriggerEvent` records and
 appended to the shared `orchestrator.triggers.pending` queue in the
 event log for downstream dispatch.
 
-## Deployment
-
-Release tags publish a distroless container image to
-`ghcr.io/burin-labs/harn` for both `linux/amd64` and `linux/arm64`.
-
-```bash
-docker run \
-  -p 8080:8080 \
-  -v "$PWD/triggers.toml:/etc/harn/triggers.toml:ro" \
-  -e HARN_ORCHESTRATOR_API_KEYS=xxx \
-  -e RUST_LOG=info \
-  ghcr.io/burin-labs/harn
-```
-
-The image runs as UID `10001` and stores orchestrator state under
-`/var/lib/harn/state` by default. Override the startup contract with
-environment variables instead of replacing the entrypoint:
-
-- `HARN_ORCHESTRATOR_MANIFEST` defaults to `/etc/harn/triggers.toml`
-- `HARN_ORCHESTRATOR_LISTEN` defaults to `0.0.0.0:8080`
-- `HARN_ORCHESTRATOR_STATE_DIR` defaults to `/var/lib/harn/state`
-- `HARN_ORCHESTRATOR_API_KEYS` can inject listener auth keys when your
-  deployment enables them
-- `HARN_SECRET_*`, provider API-key env vars, and deployment-specific
-  `HARN_PROVIDER_*` values are passed through to connector/provider code
-- `RUST_LOG` controls runtime log verbosity
-
-The image healthcheck issues `GET /health` against the local listener, so
-it works with Docker, BuildKit smoke tests, and most container platforms
-without requiring curl inside the distroless runtime.
-
 ### Listener controls
 
 Listener-wide controls live under `[orchestrator]` in `harn.toml`.
@@ -113,14 +82,15 @@ max_body_bytes = 10485760
 
 Health probes stay public:
 
+- `GET /health`
 - `GET /healthz`
 - `GET /readyz`
 
 Webhook routes keep using their provider-specific signature checks.
-`a2a-push` routes now require either a bearer API key or a shared-secret
+`a2a-push` routes require either a bearer API key or a shared-secret
 HMAC authorization header.
 
-Configure the MVP auth material with environment variables:
+Configure the auth material with environment variables:
 
 ```bash
 export HARN_ORCHESTRATOR_API_KEYS="dev-key-1,dev-key-2"
@@ -152,6 +122,40 @@ SHA256(BODY)
 string, `TIMESTAMP` is a Unix epoch seconds value, and `SHA256(BODY)` is
 the lowercase hex digest of the raw request body. Timestamps outside the
 5-minute replay window are rejected with `401 Unauthorized`.
+
+## Deployment
+
+Release tags publish a distroless container image to
+`ghcr.io/burin-labs/harn` for both `linux/amd64` and `linux/arm64`.
+
+```bash
+docker run \
+  -p 8080:8080 \
+  -v "$PWD/triggers.toml:/etc/harn/triggers.toml:ro" \
+  -e HARN_ORCHESTRATOR_API_KEYS=xxx \
+  -e HARN_ORCHESTRATOR_HMAC_SECRET=replace-me \
+  -e RUST_LOG=info \
+  ghcr.io/burin-labs/harn
+```
+
+The image runs as UID `10001` and stores orchestrator state under
+`/var/lib/harn/state` by default. Override the startup contract with
+environment variables instead of replacing the entrypoint:
+
+- `HARN_ORCHESTRATOR_MANIFEST` defaults to `/etc/harn/triggers.toml`
+- `HARN_ORCHESTRATOR_LISTEN` defaults to `0.0.0.0:8080`
+- `HARN_ORCHESTRATOR_STATE_DIR` defaults to `/var/lib/harn/state`
+- `HARN_ORCHESTRATOR_API_KEYS` supplies bearer credentials for
+  authenticated `a2a-push` routes
+- `HARN_ORCHESTRATOR_HMAC_SECRET` supplies the shared secret for
+  canonical-request HMAC auth on `a2a-push` routes
+- `HARN_SECRET_*`, provider API-key env vars, and deployment-specific
+  `HARN_PROVIDER_*` values are passed through to connector/provider code
+- `RUST_LOG` controls runtime log verbosity
+
+The image healthcheck issues `GET /health` against the local listener, so
+it works with Docker, BuildKit smoke tests, and most container platforms
+without requiring curl inside the distroless runtime.
 
 ### Trigger examples
 

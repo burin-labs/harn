@@ -6,6 +6,12 @@ license.workspace = true
 repository.workspace = true
 description = "CLI for the Harn programming language — run, test, REPL, format, and lint"
 build = "build.rs"
+# Two bins ship in this crate: `harn` (the main CLI) and
+# `harn-container-probe` (a tiny tool used by the Dockerfile healthcheck,
+# introduced in #186). `default-run` makes plain `cargo run -p harn-cli`
+# invoke the main CLI so hooks and release scripts don't need to spell
+# out `--bin harn` everywhere.
+default-run = "harn"
 # portal-dist/ is a gitignored build artifact produced by `npm run build` in
 # crates/harn-cli/portal. It is embedded at compile time via include_dir! in
 # src/commands/portal/assets.rs, so it must ship with the published crate.
