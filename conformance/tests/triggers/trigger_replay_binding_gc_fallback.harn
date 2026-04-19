@@ -1,0 +1,7 @@
+pipeline test(task) {
+  let result = trigger_test_harness("replay_binding_gc_fallback")
+  println(result.ok)
+  println(result.details.trigger_id == "replay.gc.fixture")
+  println(result.details.recorded_version == 1)
+  println(result.details.resolved_version == 3)
+}

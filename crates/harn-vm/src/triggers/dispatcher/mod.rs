@@ -466,8 +466,12 @@ impl Dispatcher {
         let trigger_id = binding.id.as_str().to_string();
         let event_id = event.id.0.clone();
         self.state.in_flight.fetch_add(1, Ordering::Relaxed);
-        begin_in_flight(binding.id.as_str(), binding.version)
-            .map_err(|error| DispatchError::Registry(error.to_string()))?;
+        let begin = if replay_of_event_id.is_some() {
+            super::registry::begin_replay_in_flight(binding.id.as_str(), binding.version)
+        } else {
+            begin_in_flight(binding.id.as_str(), binding.version)
+        };
+        begin.map_err(|error| DispatchError::Registry(error.to_string()))?;
 
         let mut attempts = Vec::new();
         let mut source_node_id = format!("trigger:{}", event.id.0);

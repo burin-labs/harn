@@ -348,6 +348,12 @@ struct HistoricalLifecycleRecord {
     transition: LifecycleStateTransitionRecord,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RecordedTriggerBinding {
+    pub version: u32,
+    pub received_at: OffsetDateTime,
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 struct HistoricalVersionLookup {
     matching_version: Option<u32>,
@@ -385,13 +391,66 @@ pub fn resolve_trigger_binding_as_of(
     as_of: OffsetDateTime,
 ) -> Result<Arc<TriggerBinding>, TriggerRegistryError> {
     let version = binding_version_as_of(id, as_of)?;
-    resolve_live_trigger_binding(id, Some(version))
+    resolve_trigger_binding_version(id, version)
+}
+
+#[allow(clippy::arc_with_non_send_sync)]
+pub fn resolve_live_or_as_of(
+    id: &str,
+    recorded: RecordedTriggerBinding,
+) -> Result<Arc<TriggerBinding>, TriggerRegistryError> {
+    match resolve_live_trigger_binding(id, Some(recorded.version)) {
+        Ok(binding) => Ok(binding),
+        Err(TriggerRegistryError::UnknownBindingVersion { .. }) => {
+            let binding = resolve_trigger_binding_as_of(id, recorded.received_at)?;
+            let mut metadata = BTreeMap::new();
+            metadata.insert("trigger_id".to_string(), serde_json::json!(id));
+            metadata.insert(
+                "recorded_version".to_string(),
+                serde_json::json!(recorded.version),
+            );
+            metadata.insert(
+                "received_at".to_string(),
+                serde_json::json!(recorded
+                    .received_at
+                    .format(&time::format_description::well_known::Rfc3339)
+                    .unwrap_or_else(|_| recorded.received_at.to_string())),
+            );
+            metadata.insert(
+                "resolved_version".to_string(),
+                serde_json::json!(binding.version),
+            );
+            crate::events::log_warn_meta(
+                "replay.binding_version_gc_fallback",
+                "trigger replay fell back to lifecycle history after binding version GC",
+                metadata,
+            );
+            Ok(binding)
+        }
+        Err(error) => Err(error),
+    }
 }
 
 pub fn binding_version_as_of(id: &str, as_of: OffsetDateTime) -> Result<u32, TriggerRegistryError> {
     TRIGGER_REGISTRY.with(|slot| {
         let registry = slot.borrow();
         registry.binding_version_as_of(id, as_of)
+    })
+}
+
+#[allow(clippy::arc_with_non_send_sync)]
+fn resolve_trigger_binding_version(
+    id: &str,
+    version: u32,
+) -> Result<Arc<TriggerBinding>, TriggerRegistryError> {
+    TRIGGER_REGISTRY.with(|slot| {
+        let registry = slot.borrow();
+        registry
+            .binding(id, version)
+            .ok_or_else(|| TriggerRegistryError::UnknownBindingVersion {
+                id: id.to_string(),
+                version,
+            })
     })
 }
 
@@ -609,7 +668,11 @@ pub async fn drain(id: &str) -> Result<(), TriggerRegistryError> {
     append_lifecycle_events(event_log, events).await
 }
 
-pub fn pin_trigger_binding(id: &str, version: u32) -> Result<(), TriggerRegistryError> {
+fn pin_trigger_binding_inner(
+    id: &str,
+    version: u32,
+    allow_terminated: bool,
+) -> Result<(), TriggerRegistryError> {
     TRIGGER_REGISTRY.with(|slot| {
         let registry = slot.borrow();
         let binding = registry.binding(id, version).ok_or_else(|| {
@@ -619,16 +682,22 @@ pub fn pin_trigger_binding(id: &str, version: u32) -> Result<(), TriggerRegistry
             }
         })?;
         match binding.state_snapshot() {
-            TriggerState::Terminated => Err(TriggerRegistryError::InvalidSpec(format!(
-                "trigger binding '{}' version {} is terminated",
-                id, version
-            ))),
+            TriggerState::Terminated if !allow_terminated => {
+                Err(TriggerRegistryError::InvalidSpec(format!(
+                    "trigger binding '{}' version {} is terminated",
+                    id, version
+                )))
+            }
             _ => {
                 binding.in_flight.fetch_add(1, Ordering::Relaxed);
                 Ok(())
             }
         }
     })
+}
+
+pub fn pin_trigger_binding(id: &str, version: u32) -> Result<(), TriggerRegistryError> {
+    pin_trigger_binding_inner(id, version, false)
 }
 
 pub async fn unpin_trigger_binding(id: &str, version: u32) -> Result<(), TriggerRegistryError> {
@@ -659,7 +728,19 @@ pub async fn unpin_trigger_binding(id: &str, version: u32) -> Result<(), Trigger
 }
 
 pub fn begin_in_flight(id: &str, version: u32) -> Result<(), TriggerRegistryError> {
-    pin_trigger_binding(id, version)?;
+    begin_in_flight_inner(id, version, false)
+}
+
+pub(crate) fn begin_replay_in_flight(id: &str, version: u32) -> Result<(), TriggerRegistryError> {
+    begin_in_flight_inner(id, version, true)
+}
+
+fn begin_in_flight_inner(
+    id: &str,
+    version: u32,
+    allow_terminated: bool,
+) -> Result<(), TriggerRegistryError> {
+    pin_trigger_binding_inner(id, version, allow_terminated)?;
     TRIGGER_REGISTRY.with(|slot| {
         let registry = slot.borrow();
         let binding = registry.binding(id, version).ok_or_else(|| {
@@ -1010,6 +1091,8 @@ fn now_ms() -> i64 {
 mod tests {
     use super::*;
     use crate::event_log::{install_default_for_base_dir, reset_active_event_log};
+    use crate::events::{add_event_sink, clear_event_sinks, CollectorSink, EventLevel};
+    use std::rc::Rc;
     use time::OffsetDateTime;
 
     fn manifest_spec(id: &str, fingerprint: &str) -> TriggerBindingSpec {
@@ -1301,6 +1384,74 @@ mod tests {
             2
         );
 
+        reset_active_event_log();
+        clear_trigger_registry();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn resolve_live_or_as_of_logs_structured_gc_fallback() {
+        clear_trigger_registry();
+        reset_active_event_log();
+        let sink = Rc::new(CollectorSink::new());
+        clear_event_sinks();
+        add_event_sink(sink.clone());
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        install_default_for_base_dir(tempdir.path()).expect("install event log");
+
+        install_manifest_triggers(vec![manifest_spec("github-new-issue", "v1")])
+            .await
+            .expect("install v1");
+        install_manifest_triggers(vec![manifest_spec("github-new-issue", "v2")])
+            .await
+            .expect("install v2");
+        install_manifest_triggers(vec![manifest_spec("github-new-issue", "v3")])
+            .await
+            .expect("install v3");
+        let received_at = OffsetDateTime::now_utc();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        install_manifest_triggers(vec![manifest_spec("github-new-issue", "v4")])
+            .await
+            .expect("install v4");
+
+        let binding = resolve_live_or_as_of(
+            "github-new-issue",
+            RecordedTriggerBinding {
+                version: 1,
+                received_at,
+            },
+        )
+        .expect("resolve fallback binding");
+        assert_eq!(binding.version, 3);
+
+        let warning = sink
+            .logs
+            .borrow()
+            .iter()
+            .find(|log| log.category == "replay.binding_version_gc_fallback")
+            .cloned()
+            .expect("gc fallback warning");
+        assert_eq!(warning.level, EventLevel::Warn);
+        assert_eq!(
+            warning.metadata.get("trigger_id"),
+            Some(&serde_json::json!("github-new-issue"))
+        );
+        assert_eq!(
+            warning.metadata.get("recorded_version"),
+            Some(&serde_json::json!(1))
+        );
+        assert_eq!(
+            warning.metadata.get("received_at"),
+            Some(&serde_json::json!(received_at
+                .format(&time::format_description::well_known::Rfc3339)
+                .unwrap_or_else(|_| received_at.to_string())))
+        );
+        assert_eq!(
+            warning.metadata.get("resolved_version"),
+            Some(&serde_json::json!(3))
+        );
+
+        clear_event_sinks();
+        crate::events::reset_event_sinks();
         reset_active_event_log();
         clear_trigger_registry();
     }
