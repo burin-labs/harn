@@ -28,6 +28,7 @@ pub mod template;
 mod testing;
 pub(crate) mod tools;
 pub mod tracing;
+mod transcript_compact;
 mod types;
 
 use crate::http::register_http_builtins;
@@ -77,6 +78,7 @@ pub fn register_agent_stdlib(vm: &mut Vm) {
     agents_daemon::register_daemon_builtins(vm);
     agents::register_agent_builtins(vm);
     agent_sessions::register_agent_session_builtins(vm);
+    transcript_compact::register_transcript_compaction_builtins(vm);
     register_http_builtins(vm);
     register_llm_builtins(vm);
     register_mcp_builtins(vm);

@@ -784,7 +784,7 @@ llm_mock_clear()
 | `transcript_import(json_text)` | json_text: string | dict | Import transcript JSON |
 | `transcript_fork(transcript, options?)` | transcript: dict, options: dict | dict | Fork transcript, optionally dropping messages or summary |
 | `transcript_summarize(transcript, options?)` | transcript: dict, options: dict | dict | Summarize and compact a transcript via `llm_call` |
-| `transcript_compact(transcript, options?)` | transcript: dict, options: dict | dict | Compact a transcript locally, preserving summary and recent turns |
+| `transcript_compact(transcript, options?)` | transcript: dict, options: dict | dict | Compact a transcript with the runtime compaction engine, preserving durable artifacts and compaction events |
 | `transcript_auto_compact(messages, options?)` | messages: list, options: dict | list | Apply the agent-loop compaction pipeline to a message list using `llm`, `truncate`, or `custom` strategy |
 
 ### Provider configuration
@@ -1464,7 +1464,7 @@ and offline analysis.
 | `transcript_archive(transcript)` | transcript | transcript | Mark transcript archived and append an internal lifecycle event |
 | `transcript_abandon(transcript)` | transcript | transcript | Mark transcript abandoned and append an internal lifecycle event |
 | `transcript_resume(transcript)` | transcript | transcript | Mark transcript active again and append an internal lifecycle event |
-| `transcript_compact(transcript, options?)` | transcript, options | transcript | Locally compact transcript messages |
+| `transcript_compact(transcript, options?)` | transcript, options | transcript | Compact a transcript with the runtime compaction engine |
 | `transcript_summarize(transcript, options?)` | transcript, options | transcript | Compact via LLM-generated summary |
 | `transcript_auto_compact(messages, options?)` | messages, options | list | Apply the agent-loop compaction pipeline to a message list |
 | `transcript_render_visible(transcript)` | transcript | string | Render only public/human-visible messages |

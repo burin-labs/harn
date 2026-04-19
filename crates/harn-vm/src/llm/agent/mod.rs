@@ -44,7 +44,7 @@ thread_local! {
 /// future VM embedder runs the loop from a multi-thread runtime
 /// without a `LocalSet`, closure subscribers will silently decouple
 /// from their emit site.
-async fn emit_agent_event(event: &AgentEvent) {
+pub(crate) async fn emit_agent_event(event: &AgentEvent) {
     agent_events::emit_event(event);
 
     let subscribers = crate::agent_sessions::subscribers_for(event.session_id());

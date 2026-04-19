@@ -297,6 +297,7 @@ pub(crate) async fn maybe_auto_compact_agent_messages(
         if approx_tokens >= ac.token_threshold {
             let mut compact_opts = opts.clone();
             compact_opts.messages = visible_messages.clone();
+            let original_message_count = visible_messages.len();
             if let Some(summary) = crate::orchestration::auto_compact_messages(
                 visible_messages,
                 ac,
@@ -304,6 +305,28 @@ pub(crate) async fn maybe_auto_compact_agent_messages(
             )
             .await?
             {
+                let estimated_tokens_after =
+                    crate::orchestration::estimate_message_tokens(visible_messages);
+                let archived_messages = original_message_count
+                    .saturating_sub(visible_messages.len())
+                    .saturating_add(1);
+                if let Some(session_id) = super::current_agent_session_id() {
+                    super::emit_agent_event(
+                        &crate::agent_events::AgentEvent::TranscriptCompacted {
+                            session_id,
+                            mode: "auto".to_string(),
+                            strategy: crate::orchestration::compact_strategy_name(
+                                &ac.compact_strategy,
+                            )
+                            .to_string(),
+                            archived_messages,
+                            estimated_tokens_before: approx_tokens,
+                            estimated_tokens_after,
+                            snapshot_asset_id: None,
+                        },
+                    )
+                    .await;
+                }
                 let merged = match transcript_summary.take() {
                     Some(existing) if !existing.is_empty() => {
                         format!("{existing}\n\n{summary}")

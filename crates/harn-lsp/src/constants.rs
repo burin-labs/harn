@@ -681,7 +681,7 @@ pub(crate) fn builtin_doc(name: &str) -> Option<String> {
         "llm_config" => "**llm_config(provider?)** → dict — Get provider configuration",
         "llm_healthcheck" => "**llm_healthcheck(provider?)** → dict — Check provider health and connectivity",
         "transcript" => "**transcript(metadata?)** → dict — Create a new transcript",
-        "transcript_compact" => "**transcript_compact(transcript, options?)** → dict — Compact a transcript locally",
+        "transcript_compact" => "**transcript_compact(transcript, options?)** → dict — Compact a transcript with the runtime compaction engine",
         "transcript_summarize" => "**transcript_summarize(transcript, options?)** → dict — Summarize and compact a transcript with an LLM",
         "transcript_auto_compact" => "**transcript_auto_compact(messages, options?)** → list — Apply the agent-loop compaction pipeline to a message list",
         "schema_check" => "**schema_check(data, schema)** → Result — Validate data against an extended Harn schema without applying defaults",

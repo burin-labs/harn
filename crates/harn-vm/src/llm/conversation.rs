@@ -382,51 +382,6 @@ pub(crate) fn register_conversation_builtins(vm: &mut Vm) {
         Ok(VmValue::Dict(Rc::new(compacted)))
     });
 
-    vm.register_builtin("transcript_compact", |args, _out| {
-        let transcript = require_transcript(args, "transcript_compact")?;
-        let keep_last = args
-            .get(1)
-            .and_then(|v| v.as_dict())
-            .and_then(|d| d.get("keep_last"))
-            .and_then(|v| v.as_int())
-            .unwrap_or(6)
-            .max(0) as usize;
-        let messages = transcript_message_list(transcript)?;
-        let retained = messages
-            .into_iter()
-            .rev()
-            .take(keep_last)
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-            .collect::<Vec<_>>();
-        let archived_count = transcript_message_list(transcript)?
-            .len()
-            .saturating_sub(retained.len());
-        let summary = args
-            .get(1)
-            .and_then(|v| v.as_dict())
-            .and_then(|d| d.get("summary"))
-            .map(|v| v.display())
-            .or_else(|| transcript_summary_text(transcript));
-        let mut compacted = match rebuild_transcript(
-            transcript,
-            retained,
-            summary,
-            transcript_asset_list(transcript)?,
-            Vec::new(),
-            transcript_state(transcript),
-        ) {
-            VmValue::Dict(d) => (*d).clone(),
-            _ => BTreeMap::new(),
-        };
-        compacted.insert(
-            "archived_messages".to_string(),
-            VmValue::Int(archived_count as i64),
-        );
-        Ok(VmValue::Dict(Rc::new(compacted)))
-    });
-
     vm.register_builtin("add_message", |args, _out| match args.first() {
         Some(VmValue::List(list)) => {
             let role = args.get(1).map(|a| a.display()).unwrap_or_default();

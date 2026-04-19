@@ -241,6 +241,24 @@ pub struct RunTranscriptPointerRecord {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
+pub struct CompactionEventRecord {
+    pub id: String,
+    pub transcript_id: Option<String>,
+    pub stage_id: Option<String>,
+    pub node_id: Option<String>,
+    pub mode: String,
+    pub strategy: String,
+    pub archived_messages: usize,
+    pub estimated_tokens_before: usize,
+    pub estimated_tokens_after: usize,
+    pub snapshot_asset_id: Option<String>,
+    pub snapshot_location: String,
+    pub snapshot_path: Option<String>,
+    pub available: bool,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
 pub struct RunObservabilityRecord {
     pub schema_version: usize,
     pub planner_rounds: Vec<RunPlannerRoundRecord>,
@@ -250,6 +268,7 @@ pub struct RunObservabilityRecord {
     pub worker_lineage: Vec<RunWorkerLineageRecord>,
     pub verification_outcomes: Vec<RunVerificationOutcomeRecord>,
     pub transcript_pointers: Vec<RunTranscriptPointerRecord>,
+    pub compaction_events: Vec<CompactionEventRecord>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -512,6 +531,94 @@ fn task_ledger_summary_from_value(value: &serde_json::Value) -> Option<RunTaskLe
     })
 }
 
+fn compaction_events_from_transcript(
+    transcript: &serde_json::Value,
+    stage_id: Option<&str>,
+    node_id: Option<&str>,
+    location_prefix: &str,
+    persisted_path: Option<&Path>,
+) -> Vec<CompactionEventRecord> {
+    let transcript_id = transcript
+        .get("id")
+        .and_then(|value| value.as_str())
+        .map(str::to_string);
+    let asset_ids = transcript
+        .get("assets")
+        .and_then(|value| value.as_array())
+        .map(|assets| {
+            assets
+                .iter()
+                .filter_map(|asset| {
+                    asset
+                        .get("id")
+                        .and_then(|value| value.as_str())
+                        .map(str::to_string)
+                })
+                .collect::<BTreeSet<_>>()
+        })
+        .unwrap_or_default();
+    transcript
+        .get("events")
+        .and_then(|value| value.as_array())
+        .map(|events| {
+            events
+                .iter()
+                .filter(|event| {
+                    event.get("kind").and_then(|value| value.as_str()) == Some("compaction")
+                })
+                .map(|event| {
+                    let metadata = event.get("metadata");
+                    let snapshot_asset_id = metadata
+                        .and_then(|value| value.get("snapshot_asset_id"))
+                        .and_then(|value| value.as_str())
+                        .map(str::to_string);
+                    let available = snapshot_asset_id
+                        .as_ref()
+                        .is_some_and(|asset_id| asset_ids.contains(asset_id));
+                    let snapshot_location = snapshot_asset_id
+                        .as_ref()
+                        .map(|asset_id| format!("{location_prefix}.assets[{asset_id}]"))
+                        .unwrap_or_else(|| location_prefix.to_string());
+                    CompactionEventRecord {
+                        id: event
+                            .get("id")
+                            .and_then(|value| value.as_str())
+                            .unwrap_or_default()
+                            .to_string(),
+                        transcript_id: transcript_id.clone(),
+                        stage_id: stage_id.map(str::to_string),
+                        node_id: node_id.map(str::to_string),
+                        mode: metadata
+                            .and_then(|value| value.get("mode"))
+                            .and_then(|value| value.as_str())
+                            .unwrap_or_default()
+                            .to_string(),
+                        strategy: metadata
+                            .and_then(|value| value.get("strategy"))
+                            .and_then(|value| value.as_str())
+                            .unwrap_or_default()
+                            .to_string(),
+                        archived_messages: json_usize(
+                            metadata.and_then(|value| value.get("archived_messages")),
+                        ),
+                        estimated_tokens_before: json_usize(
+                            metadata.and_then(|value| value.get("estimated_tokens_before")),
+                        ),
+                        estimated_tokens_after: json_usize(
+                            metadata.and_then(|value| value.get("estimated_tokens_after")),
+                        ),
+                        snapshot_asset_id,
+                        snapshot_location,
+                        snapshot_path: persisted_path
+                            .map(|path| path.to_string_lossy().into_owned()),
+                        available,
+                    }
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 pub fn derive_run_observability(
     run: &RunRecord,
     persisted_path: Option<&Path>,
@@ -521,6 +628,7 @@ pub fn derive_run_observability(
     let mut verification_outcomes = Vec::new();
     let mut planner_rounds = Vec::new();
     let mut transcript_pointers = Vec::new();
+    let mut compaction_events = Vec::new();
     let mut research_fact_count = 0usize;
 
     let root_node_id = format!("run:{}", run.id);
@@ -639,6 +747,15 @@ pub fn derive_run_observability(
                 path: run.persisted_path.clone(),
                 available: true,
             });
+            if let Some(transcript) = stage.transcript.as_ref() {
+                compaction_events.extend(compaction_events_from_transcript(
+                    transcript,
+                    Some(&stage.id),
+                    Some(&stage.node_id),
+                    &format!("run.stages[{}].transcript", stage.node_id),
+                    persisted_path,
+                ));
+            }
         }
 
         if let Some(payload) = stage_result_payload(stage) {
@@ -768,6 +885,15 @@ pub fn derive_run_observability(
             path: run.persisted_path.clone(),
             available: true,
         });
+        if let Some(transcript) = run.transcript.as_ref() {
+            compaction_events.extend(compaction_events_from_transcript(
+                transcript,
+                None,
+                None,
+                "run.transcript",
+                persisted_path,
+            ));
+        }
     }
 
     if let Some(path) = persisted_path {
@@ -792,7 +918,7 @@ pub fn derive_run_observability(
     }
 
     RunObservabilityRecord {
-        schema_version: 1,
+        schema_version: 2,
         planner_rounds,
         research_fact_count,
         action_graph_nodes,
@@ -800,6 +926,7 @@ pub fn derive_run_observability(
         worker_lineage,
         verification_outcomes,
         transcript_pointers,
+        compaction_events,
     }
 }
 
@@ -1539,6 +1666,67 @@ pub fn diff_run_records(left: &RunRecord, right: &RunRecord) -> RunDiffReport {
                         "pointer: {:?} -> {:?}",
                         left_pointer, right_pointer
                     )],
+                });
+            }
+            _ => {}
+        }
+    }
+
+    let left_compactions = left_observability
+        .compaction_events
+        .iter()
+        .map(|event| {
+            (
+                event.id.clone(),
+                (
+                    event.strategy.clone(),
+                    event.archived_messages,
+                    event.snapshot_asset_id.clone(),
+                    event.available,
+                ),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    let right_compactions = right_observability
+        .compaction_events
+        .iter()
+        .map(|event| {
+            (
+                event.id.clone(),
+                (
+                    event.strategy.clone(),
+                    event.archived_messages,
+                    event.snapshot_asset_id.clone(),
+                    event.available,
+                ),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    let compaction_ids = left_compactions
+        .keys()
+        .chain(right_compactions.keys())
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    for compaction_id in compaction_ids {
+        match (
+            left_compactions.get(&compaction_id),
+            right_compactions.get(&compaction_id),
+        ) {
+            (Some(_), None) => observability_diffs.push(RunObservabilityDiffRecord {
+                section: "compaction_events".to_string(),
+                label: compaction_id,
+                details: vec!["compaction event missing from right run".to_string()],
+            }),
+            (None, Some(_)) => observability_diffs.push(RunObservabilityDiffRecord {
+                section: "compaction_events".to_string(),
+                label: compaction_id,
+                details: vec!["compaction event missing from left run".to_string()],
+            }),
+            (Some(left_event), Some(right_event)) if left_event != right_event => {
+                observability_diffs.push(RunObservabilityDiffRecord {
+                    section: "compaction_events".to_string(),
+                    label: compaction_id,
+                    details: vec![format!("event: {:?} -> {:?}", left_event, right_event)],
                 });
             }
             _ => {}

@@ -191,6 +191,15 @@ pub enum AgentEvent {
         strategy: String,
         mode: String,
     },
+    TranscriptCompacted {
+        session_id: String,
+        mode: String,
+        strategy: String,
+        archived_messages: usize,
+        estimated_tokens_before: usize,
+        estimated_tokens_after: usize,
+        snapshot_asset_id: Option<String>,
+    },
 }
 
 impl AgentEvent {
@@ -211,7 +220,8 @@ impl AgentEvent {
             | Self::SkillDeactivated { session_id, .. }
             | Self::SkillScopeTools { session_id, .. }
             | Self::ToolSearchQuery { session_id, .. }
-            | Self::ToolSearchResult { session_id, .. } => session_id,
+            | Self::ToolSearchResult { session_id, .. }
+            | Self::TranscriptCompacted { session_id, .. } => session_id,
         }
     }
 }
