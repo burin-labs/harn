@@ -35,7 +35,14 @@ pipeline default() {
     second_path="$base/second.json"
     old_path="$base/old.json"
 
+    # #224 made a2a-push routes require bearer+HMAC auth at startup; supply
+    # dummy credentials so the orchestrator can finish booting. This test
+    # doesn't exercise auth — the bearer credential just has to exist and
+    # the HMAC secret just has to be non-empty (the test uses the bearer
+    # path for all POSTs).
     HARN_ORCHESTRATOR_TEST_REQUEST_DELAY_MS=750 \
+    HARN_ORCHESTRATOR_API_KEYS="hot-reload-test-key" \
+    HARN_ORCHESTRATOR_HMAC_SECRET="hot-reload-test-hmac-secret" \
       "$binary" orchestrator serve \
         --config "$workspace/harn.toml" \
         --state-dir "$state_dir" \
@@ -95,7 +102,10 @@ pipeline default() {
     request = urllib.request.Request(
         url,
         data=payload,
-        headers={"Content-Type": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": "Bearer hot-reload-test-key",
+        },
         method="POST",
     )
     try:
@@ -129,7 +139,10 @@ pipeline default() {
     request = urllib.request.Request(
         url,
         data=payload,
-        headers={"Content-Type": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": "Bearer hot-reload-test-key",
+        },
         method="POST",
     )
     try:
@@ -149,7 +162,10 @@ pipeline default() {
     request = urllib.request.Request(
         url,
         data=payload,
-        headers={"Content-Type": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": "Bearer hot-reload-test-key",
+        },
         method="POST",
     )
     try:
