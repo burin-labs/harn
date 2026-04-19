@@ -1,4 +1,4 @@
-use harn_parser::{BindingPattern, Node, SNode};
+use harn_parser::{is_discard_name, BindingPattern, Node, SNode};
 
 use crate::chunk::{Constant, Op};
 
@@ -6,6 +6,15 @@ use super::error::CompileError;
 use super::Compiler;
 
 impl Compiler {
+    fn emit_binding_target(&mut self, name: &str, def_op: Op) {
+        if is_discard_name(name) {
+            self.chunk.emit(Op::Pop, self.line);
+            return;
+        }
+        let idx = self.chunk.add_constant(Constant::String(name.to_string()));
+        self.chunk.emit_u16(def_op, idx, self.line);
+    }
+
     /// Compile a destructuring binding pattern.
     /// Expects the RHS value to already be on the stack.
     /// After this, the value is consumed (popped) and each binding is defined.
@@ -17,8 +26,7 @@ impl Compiler {
         let def_op = if is_mutable { Op::DefVar } else { Op::DefLet };
         match pattern {
             BindingPattern::Identifier(name) => {
-                let idx = self.chunk.add_constant(Constant::String(name.clone()));
-                self.chunk.emit_u16(def_op, idx, self.line);
+                self.emit_binding_target(name, def_op);
             }
             BindingPattern::Dict(fields) => {
                 // Runtime `__assert_dict(value)` type check on the RHS.
@@ -54,10 +62,7 @@ impl Compiler {
                         self.chunk.patch_jump(end);
                     }
                     let binding_name = field.alias.as_deref().unwrap_or(&field.key);
-                    let name_idx = self
-                        .chunk
-                        .add_constant(Constant::String(binding_name.to_string()));
-                    self.chunk.emit_u16(def_op, name_idx, self.line);
+                    self.emit_binding_target(binding_name, def_op);
                 }
 
                 if let Some(rest) = rest_field {
@@ -75,8 +80,7 @@ impl Compiler {
                         .emit_u16(Op::BuildList, non_rest.len() as u16, self.line);
                     self.chunk.emit_u8(Op::Call, 2, self.line);
                     let rest_name = &rest.key;
-                    let rest_idx = self.chunk.add_constant(Constant::String(rest_name.clone()));
-                    self.chunk.emit_u16(def_op, rest_idx, self.line);
+                    self.emit_binding_target(rest_name, def_op);
                 } else {
                     self.chunk.emit(Op::Pop, self.line);
                 }
@@ -88,20 +92,14 @@ impl Compiler {
                     .add_constant(Constant::String("first".to_string()));
                 self.chunk
                     .emit_u16(Op::GetProperty, first_key_idx, self.line);
-                let first_name_idx = self
-                    .chunk
-                    .add_constant(Constant::String(first_name.clone()));
-                self.chunk.emit_u16(def_op, first_name_idx, self.line);
+                self.emit_binding_target(first_name, def_op);
 
                 let second_key_idx = self
                     .chunk
                     .add_constant(Constant::String("second".to_string()));
                 self.chunk
                     .emit_u16(Op::GetProperty, second_key_idx, self.line);
-                let second_name_idx = self
-                    .chunk
-                    .add_constant(Constant::String(second_name.clone()));
-                self.chunk.emit_u16(def_op, second_name_idx, self.line);
+                self.emit_binding_target(second_name, def_op);
                 // No trailing Pop: GetProperty consumed the source pair.
             }
             BindingPattern::List(elements) => {
@@ -137,8 +135,7 @@ impl Compiler {
                         self.chunk.emit(Op::Pop, self.line);
                         self.chunk.patch_jump(end);
                     }
-                    let name_idx = self.chunk.add_constant(Constant::String(elem.name.clone()));
-                    self.chunk.emit_u16(def_op, name_idx, self.line);
+                    self.emit_binding_target(&elem.name, def_op);
                 }
 
                 if let Some(rest) = rest_elem {
@@ -150,9 +147,7 @@ impl Compiler {
                     self.chunk.emit_u16(Op::Constant, start_idx, self.line);
                     self.chunk.emit(Op::Nil, self.line);
                     self.chunk.emit(Op::Slice, self.line);
-                    let rest_name_idx =
-                        self.chunk.add_constant(Constant::String(rest.name.clone()));
-                    self.chunk.emit_u16(def_op, rest_name_idx, self.line);
+                    self.emit_binding_target(&rest.name, def_op);
                 } else {
                     self.chunk.emit(Op::Pop, self.line);
                 }
@@ -226,10 +221,7 @@ impl Compiler {
                             let idx_const = self.chunk.add_constant(Constant::Int(i as i64));
                             self.chunk.emit_u16(Op::Constant, idx_const, self.line);
                             self.chunk.emit(Op::Subscript, self.line);
-                            let name_idx = self
-                                .chunk
-                                .add_constant(Constant::String(binding_name.clone()));
-                            self.chunk.emit_u16(Op::DefLet, name_idx, self.line);
+                            self.emit_binding_target(binding_name, Op::DefLet);
                         }
                     }
 
@@ -336,10 +328,7 @@ impl Compiler {
                             let idx_const = self.chunk.add_constant(Constant::Int(i as i64));
                             self.chunk.emit_u16(Op::Constant, idx_const, self.line);
                             self.chunk.emit(Op::Subscript, self.line);
-                            let name_idx = self
-                                .chunk
-                                .add_constant(Constant::String(binding_name.clone()));
-                            self.chunk.emit_u16(Op::DefLet, name_idx, self.line);
+                            self.emit_binding_target(binding_name, Op::DefLet);
                         }
                     }
 
@@ -368,8 +357,7 @@ impl Compiler {
                 Node::Identifier(name) => {
                     self.begin_scope();
                     self.chunk.emit(Op::Dup, self.line);
-                    let name_idx = self.chunk.add_constant(Constant::String(name.clone()));
-                    self.chunk.emit_u16(Op::DefLet, name_idx, self.line);
+                    self.emit_binding_target(name, Op::DefLet);
                     // Optional guard
                     if let Some(ref guard) = arm.guard {
                         self.compile_node(guard)?;
@@ -453,8 +441,7 @@ impl Compiler {
                         let key_idx = self.chunk.add_constant(Constant::String(key.clone()));
                         self.chunk.emit_u16(Op::Constant, key_idx, self.line);
                         self.chunk.emit(Op::Subscript, self.line);
-                        let name_idx = self.chunk.add_constant(Constant::String(binding.clone()));
-                        self.chunk.emit_u16(Op::DefLet, name_idx, self.line);
+                        self.emit_binding_target(binding, Op::DefLet);
                     }
 
                     // Optional guard

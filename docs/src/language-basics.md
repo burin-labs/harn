@@ -633,6 +633,8 @@ let long_value = some_function( \
 ## Destructuring
 
 Destructuring extracts values from dicts and lists into local variables.
+Use `_` when a position should be evaluated and ignored without creating a
+real variable.
 
 ### Dict destructuring
 
@@ -641,6 +643,9 @@ let person = {name: "Alice", age: 30}
 let {name, age} = person
 println(name)  // "Alice"
 println(age)   // 30
+
+let {name, debug: _} = {name: "Alice", debug: true}
+println(name)  // "Alice"
 ```
 
 ### List destructuring
@@ -650,6 +655,9 @@ let items = [1, 2, 3, 4, 5]
 let [first, ...rest] = items
 println(first)  // 1
 println(rest)   // [2, 3, 4, 5]
+
+let [_, second, _] = [10, 20, 30]
+println(second)  // 20
 ```
 
 ### Renaming
@@ -668,6 +676,10 @@ println(user_name)  // "Alice"
 let entries = [{key: "a", value: 1}, {key: "b", value: 2}]
 for {key, value} in entries {
   println("${key}: ${value}")
+}
+
+for [_, value] in [[0, "x"], [1, "y"]] {
+  println(value)
 }
 ```
 

@@ -505,6 +505,11 @@ pub enum BindingPattern {
     Pair(String, String),
 }
 
+/// `_` is the discard binding name in `let`/`var`/destructuring positions.
+pub fn is_discard_name(name: &str) -> bool {
+    name == "_"
+}
+
 /// A field in a dict destructuring pattern.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DictPatternField {

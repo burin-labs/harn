@@ -378,15 +378,24 @@ impl TypeScope {
     }
 
     pub(super) fn define_var(&mut self, name: &str, ty: InferredType) {
+        if is_discard_name(name) {
+            return;
+        }
         self.vars.insert(name.to_string(), ty);
     }
 
     pub(super) fn define_var_mutable(&mut self, name: &str, ty: InferredType) {
+        if is_discard_name(name) {
+            return;
+        }
         self.vars.insert(name.to_string(), ty);
         self.mutable_vars.insert(name.to_string());
     }
 
     pub(super) fn define_schema_binding(&mut self, name: &str, ty: InferredType) {
+        if is_discard_name(name) {
+            return;
+        }
         self.schema_bindings.insert(name.to_string(), ty);
     }
 
@@ -403,6 +412,9 @@ impl TypeScope {
     }
 
     pub(super) fn mark_untyped_source(&mut self, name: &str, source: &str) {
+        if is_discard_name(name) {
+            return;
+        }
         self.untyped_sources
             .insert(name.to_string(), source.to_string());
     }

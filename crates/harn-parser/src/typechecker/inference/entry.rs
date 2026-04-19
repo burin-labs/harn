@@ -219,7 +219,9 @@ impl TypeChecker {
                     // patterns are checked as statements and define
                     // their vars as they are walked.
                     if let BindingPattern::Identifier(name) = pattern {
-                        scope.define_var(name, None);
+                        if !crate::ast::is_discard_name(name) {
+                            scope.define_var(name, None);
+                        }
                     }
                 }
                 _ => {}

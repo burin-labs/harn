@@ -1,0 +1,23 @@
+pipeline default() {
+  let _ = 1
+  let _ = 2
+  println("simple")
+
+  let [_, _, keep_list] = [10, 20, 30]
+  println(keep_list)
+
+  let {drop_a: _, drop_b: _, keep_dict} = {drop_a: 1, drop_b: 2, keep_dict: 3}
+  println(keep_dict)
+
+  for [_, value] in [[1, "a"], [2, "b"]] {
+    println(value)
+  }
+
+  for {drop: _, keep} in [{drop: "x", keep: "dict"}] {
+    println(keep)
+  }
+
+  for (_, right) in [pair("left", "pair")] {
+    println(right)
+  }
+}
