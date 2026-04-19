@@ -27,9 +27,9 @@ pub(crate) async fn run(args: OrchestratorServeArgs) -> Result<(), String> {
     harn_vm::reset_thread_local_state();
 
     let tls = TlsFiles::from_args(args.cert.clone(), args.key.clone())?;
-    let config_path = absolutize_from_cwd(&args.config)?;
+    let config_path = absolutize_from_cwd(&args.local.config)?;
     let (manifest, manifest_dir) = load_manifest(&config_path)?;
-    let state_dir = absolutize_from_cwd(&args.state_dir)?;
+    let state_dir = absolutize_from_cwd(&args.local.state_dir)?;
     std::fs::create_dir_all(&state_dir).map_err(|error| {
         format!(
             "failed to create state dir {}: {error}",
