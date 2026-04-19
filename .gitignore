@@ -16,6 +16,10 @@ tree-sitter-harn/*.dll
 # blanket `.harn/` ignore above would drop them otherwise.
 !conformance/tests/**/.harn/
 !conformance/tests/**/.harn/**
+# …but per-run metadata shards from project_deep_scan tests (namespace
+# dirs under .harn/metadata/<UUID>/entries.json) are always ephemeral
+# and must stay ignored.
+conformance/tests/**/.harn/metadata/
 .cargo/config.toml
 # .claude/ is local-only except for shared skill definitions
 .claude/*

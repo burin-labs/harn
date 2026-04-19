@@ -7,7 +7,7 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
-## Unreleased
+## v0.7.21
 
 ### Added
 
@@ -27,15 +27,6 @@ granular archaeology.
   returns the base evidence with `budget_exceeded: true` instead of
   failing. Schema-retry exhaustion returns `validation_error` +
   `base_evidence` instead of raising.
-- **First-class action-graph planning helpers (#123).** `std/agents`
-  now exposes `action_graph(...)`, `action_graph_batches(...)`,
-  `action_graph_render(...)`, `action_graph_flow(...)`, and
-  `action_graph_run(...)` on top of the existing workflow runtime.
-  Planner output variants normalize into a canonical action-graph
-  envelope, missing research->execute / execute->verify dependencies
-  are repaired conservatively, ready work batches by phase and tool
-  class, and shared terminal verify/evaluate stages can be composed
-  without hand-wiring the workflow graph in every pipeline.
 - **`project_deep_scan` cached per-directory tree (#111, closes #103).**
   Namespace-scoped hierarchical cache built on top of the metadata
   store. Reuses cached directory-level structure + content hashes
@@ -45,18 +36,90 @@ granular archaeology.
   under `.harn/metadata/<namespace>/entries.json` while legacy
   root-metadata reads remain backward-compatible. `harn doctor`
   surfaces metadata cache state.
+- **First-class action-graph planning helpers (#134, closes #123).**
+  `std/agents` now exposes `action_graph(...)`,
+  `action_graph_batches(...)`, `action_graph_render(...)`,
+  `action_graph_flow(...)`, and `action_graph_run(...)` on top of the
+  existing workflow runtime. Planner output variants normalize into a
+  canonical action-graph envelope, missing research->execute /
+  execute->verify dependencies are repaired conservatively, ready work
+  batches by phase and tool class, and shared terminal verify/evaluate
+  stages can be composed without hand-wiring the workflow graph in
+  every pipeline.
 - **Worker request/provenance retention for delegated/background agents
-  (#124).** Worker handles, waited results, snapshots, child-run records,
-  and `worker_result` artifacts now preserve immutable original `request`
-  metadata plus normalized `provenance` fields. `std/agents` adds
-  `worker_request`, `worker_result`, `worker_provenance`,
-  `worker_research_questions`, `worker_action_items`,
-  `worker_workflow_stages`, and `worker_verification_steps` helpers so
-  parent orchestration can recover structured child metadata without
-  index-based rebinding.
+  (#133, closes #124).** Worker handles, waited results, snapshots,
+  child-run records, and `worker_result` artifacts now preserve
+  immutable original `request` metadata plus normalized `provenance`
+  fields. `std/agents` adds `worker_request`, `worker_result`,
+  `worker_provenance`, `worker_research_questions`,
+  `worker_action_items`, `worker_workflow_stages`, and
+  `worker_verification_steps` helpers so parent orchestration can
+  recover structured child metadata without index-based rebinding.
+- **`harn playground` + Burin Mini experiment checkpoint (#129).**
+  Fixture and recording coverage for the `harn playground` subcommand
+  plus a committed `experiments/burin-mini/` scaffold with a tiny
+  auth-demo workspace, deterministic fixtures, a live-suite runner,
+  and transcript-backed analysis notes. Tightens native-tool / Ollama
+  integration so local Qwen-class models can use structured tool
+  calls and JSON-mode responses reliably, and enforces native
+  action-loop behavior on tool-gated stages.
+- **Transcript-synthesized JSON results for `sub_agent_run(...)`
+  (#132, closes #122).** Parent sub-agent summaries and structured
+  `data` now derive from assistant transcript history, so JSON-mode
+  child runs are not lost when the final visible text is empty,
+  sentinel-only, or otherwise not parseable. `returns.schema`
+  validation remains anchored to the recovered transcript JSON.
+- **Verifier contracts as first-class workflow inputs (#135, closes
+  #126).** Workflow verifier metadata is normalized into structured
+  verification contracts that can carry exact identifiers, paths,
+  required text, and optional sidecar JSON contract files. Those
+  contracts are injected into stage prompts and run metadata
+  automatically so planning/execution stages see verifier-exact
+  requirements before editing, rather than having to rediscover them
+  from ad hoc prompts.
+- **Workspace path normalization across tool boundaries (#136, closes
+  #125).** New shared workspace-path classifier distinguishes
+  `workspace_relative`, `host_absolute`, and `invalid` paths.
+  Declared tool path arguments are normalized centrally before
+  dispatch so common leading-slash drift like `/packages/...` is
+  recovered to workspace-relative form when it safely maps into the
+  current workspace. New public `path_workspace_info(...)` and
+  `path_workspace_normalize(...)` builtins plus `std/path` wrappers
+  surface the classifier to scripts; declared-path metadata is
+  exposed to approval/permission flows while existing string
+  summaries are preserved.
+- **Action-graph observability on run records (#137).** Persisted run
+  records now carry a derived `observability` block that bundles
+  planner rounds, research facts, action-graph structure, worker
+  lineage, verification outcomes, and transcript pointers into a
+  single artifact. `harn runs inspect`, portal run detail, and portal
+  compare all surface it so regressions show up beyond coarse stage /
+  status drift.
+- **Manifest-backed runtime extension ABI (#138, closes #128).** New
+  `[exports]` package entry points let modules publish stable import
+  surfaces without core runtime edits, and new `[llm]` manifest
+  overlays let packages and projects register provider aliases,
+  inference rules, tiers, and model defaults declaratively. Runtime
+  and static import resolution consult ancestor `.harn/packages`
+  roots plus package export maps while preserving existing `lib.harn`
+  fallback behavior. Package and root manifest overlays are loaded at
+  runtime so approval policy, transcripts, replay, and eval tooling
+  continue to execute through the existing runtime trust boundary.
 
 ### Changed
 
+- **`project_deep_scan` enriched tier now reuses `project_enrich_native`
+  (#115).** The duplicate Harn-level deep-scan enrichment wrapper is
+  gone; deep-scan enriched refreshes share the native cache, budget
+  gate, schema-retry semantics, and option plumbing (including
+  `temperature`) with `project_enrich`. Namespace-scoped native cache
+  keys preserve per-namespace invalidation.
+- **`sub_agent_run(...)` honors workflow-level skill context (#118,
+  closes #116).** When a sub-agent call does not specify its own
+  `skills:` / `skill_match:` options, the workflow-level skill
+  context installed by `workflow_execute(...)` is now inherited.
+  Explicit per-call options keep higher priority; child tool schemas
+  narrow to the workflow-scoped read namespace as expected.
 - **Split `crates/harn-vm/src/llm/helpers/mod.rs` (#112, closes #60)**
   into topic-focused submodules (`blocks`, `messages`, `opt_get`,
   `provider`, `transcript`). `mod.rs` shrinks from 1266 lines to a 20-
@@ -65,6 +128,60 @@ granular archaeology.
   into `audit`, `bridge`, `config`, `execution`, `policy`, `tests`,
   `worktree` submodules plus an extracted `agents_sub_agent.rs`. Pure
   refactor; behavior unchanged.
+- **Split `crates/harn-vm/src/schema.rs` into `schema/` module tree
+  (#117).** Focused files for API entrypoints, validation, transforms,
+  type helpers, canonicalization/export, and result helpers; VM-facing
+  `crate::schema::*` entrypoints and `json_to_vm_value` remain intact.
+  Pure refactor; behavior unchanged.
+- **Split `crates/harn-fmt/src/formatter.rs` into `formatter/` modules
+  (#119, closes #53).** Core state, comments, declarations,
+  expressions, and statement/block helpers now live in focused
+  modules; the public `format_source` API stays in `lib.rs`. Pure
+  refactor; formatter behavior unchanged.
+- **Split `crates/harn-parser/src/builtin_signatures.rs` into focused
+  namespace-oriented groups (#120, closes #48).** Central
+  `all_signatures()` concatenates the group slices and keeps the
+  parser/runtime registry alignment guard. Pure refactor.
+- **Split `crates/harn-vm/src/stdlib/template.rs` into a `template/`
+  module tree (#121, closes #46).**
+  `crate::stdlib::template::render_template_result` remains the
+  single script/host entrypoint, preserving the single-source-of-
+  truth contract called out in CLAUDE.md. Pure refactor.
+- **Split `crates/harn-vm/src/vm/methods.rs` by receiver type (#130,
+  closes #55).** `Vm::call_method` stays the single entrypoint in
+  `dispatch.rs`; receiver-specific handlers now live in focused
+  modules for strings, lists, dicts, sets, ranges, iterators,
+  generators, struct instances, and number dispatch. Pure refactor.
+- **Split `crates/harn-vm/src/llm/tools/tests.rs` (#131, subsumed by
+  #140).** Initial subject-focused split of the `llm::tools` test
+  file into per-concern modules; the final file layout in-tree is
+  the one from #140 below.
+- **Refactor `crates/harn-vm/src/vm.rs` into smaller VM modules (#139,
+  closes #47).** The monolithic `vm.rs` splits into focused VM
+  modules with a minimal `vm/mod.rs`; import-loading code moves into
+  `vm/modules.rs`. The inline VM test module splits into dedicated
+  debug and runtime test modules. Public VM surface unchanged.
+- **Split `crates/harn-vm/src/llm/tools/mod.rs` into focused modules
+  (#140, closes #61).** Message shaping, schema collection, prompt
+  rendering, native tool conversion, and type/schema helpers live in
+  their own modules; oversized parser and test files split into
+  submodules so every file in the `llm/tools` area stays under the
+  target size. The public `tools` module stays a thin re-export hub.
+
+### Fixed
+
+- **Playground env-mutating tests now serialize.** `ScopedEnv::apply`
+  writes process-wide env vars; running the three playground tests
+  that exercise it concurrently under `cargo test` intermittently
+  tripped "Missing API key" failures once enough tests landed on
+  main. The affected tests now serialize on a shared
+  `tokio::sync::Mutex` (`playground_env_lock()`) so the env overlay
+  is seen consistently across the await points the tests hit.
+- **Post-merge compile fixes.** `LlmMock` literals in
+  `stdlib/workflow/tests.rs` now include the `consume_on_match`
+  field introduced by #132 (the struct literal from #135 missed it),
+  and `llm/helpers/transcript.rs` strips a trailing blank line that
+  failed `cargo fmt --check` after dead-code cleanup.
 
 ## v0.7.20
 
