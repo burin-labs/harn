@@ -5,7 +5,7 @@
 //! connector ecosystem grows enough to justify extraction, the module can be
 //! split into a dedicated crate later without changing the high-level contract.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration as StdDuration, Instant};
@@ -24,6 +24,7 @@ pub mod cron;
 pub mod hmac;
 #[cfg(test)]
 pub(crate) mod test_util;
+pub mod webhook;
 
 pub use cron::{CatchupMode, CronConnector};
 pub use hmac::{
@@ -31,6 +32,7 @@ pub use hmac::{
     DEFAULT_STANDARD_WEBHOOKS_SIGNATURE_HEADER, DEFAULT_STANDARD_WEBHOOKS_TIMESTAMP_HEADER,
     DEFAULT_STRIPE_SIGNATURE_HEADER, SIGNATURE_VERIFY_AUDIT_TOPIC,
 };
+pub use webhook::{GenericWebhookConnector, WebhookSignatureVariant};
 
 /// Shared owned handle to a connector instance registered with the runtime.
 pub type ConnectorHandle = Arc<AsyncMutex<Box<dyn Connector>>>;
@@ -97,6 +99,7 @@ impl std::error::Error for ClientError {}
 #[derive(Debug)]
 pub enum ConnectorError {
     DuplicateProvider(String),
+    DuplicateDelivery(String),
     UnknownProvider(String),
     MissingHeader(String),
     InvalidHeader {
@@ -129,6 +132,7 @@ impl fmt::Display for ConnectorError {
             Self::DuplicateProvider(provider) => {
                 write!(f, "connector provider `{provider}` is already registered")
             }
+            Self::DuplicateDelivery(message) => message.fmt(f),
             Self::UnknownProvider(provider) => {
                 write!(f, "connector provider `{provider}` is not registered")
             }
@@ -192,8 +196,19 @@ pub struct ConnectorCtx {
 }
 
 /// Placeholder inbox index until the durable trigger inbox lands.
-#[derive(Clone, Debug, Default)]
-pub struct InboxIndex;
+#[derive(Debug, Default)]
+pub struct InboxIndex {
+    seen: Mutex<HashSet<(String, String)>>,
+}
+
+impl InboxIndex {
+    pub fn insert_if_new(&self, binding_id: &str, dedupe_key: &str) -> bool {
+        // TODO(T-09): replace this process-local stub with the durable trigger
+        // inbox dedupe index once the inbox lands.
+        let mut seen = self.seen.lock().expect("inbox index mutex poisoned");
+        seen.insert((binding_id.to_string(), dedupe_key.to_string()))
+    }
+}
 
 /// Placeholder metrics surface for connector-local counters and timings.
 #[derive(Clone, Debug, Default)]
@@ -260,6 +275,8 @@ pub struct TriggerBinding {
     pub kind: TriggerKind,
     pub binding_id: String,
     #[serde(default)]
+    pub dedupe_key: Option<String>,
+    #[serde(default)]
     pub config: JsonValue,
 }
 
@@ -273,6 +290,7 @@ impl TriggerBinding {
             provider,
             kind: kind.into(),
             binding_id: binding_id.into(),
+            dedupe_key: None,
             config: JsonValue::Null,
         }
     }
@@ -486,12 +504,25 @@ impl<'a> ScopedRateLimiter<'a> {
 }
 
 /// Runtime connector registry keyed by provider id.
-#[derive(Default)]
 pub struct ConnectorRegistry {
     connectors: BTreeMap<ProviderId, ConnectorHandle>,
 }
 
 impl ConnectorRegistry {
+    pub fn empty() -> Self {
+        Self {
+            connectors: BTreeMap::new(),
+        }
+    }
+
+    pub fn with_defaults() -> Self {
+        let mut registry = Self::empty();
+        registry
+            .register(Box::new(GenericWebhookConnector::new()))
+            .expect("default connector registration should not fail");
+        registry
+    }
+
     pub fn register(&mut self, connector: Box<dyn Connector>) -> Result<(), ConnectorError> {
         let provider = connector.provider_id().clone();
         if self.connectors.contains_key(&provider) {
@@ -504,6 +535,10 @@ impl ConnectorRegistry {
 
     pub fn get(&self, id: &ProviderId) -> Option<ConnectorHandle> {
         self.connectors.get(id).cloned()
+    }
+
+    pub fn list(&self) -> Vec<ProviderId> {
+        self.connectors.keys().cloned().collect()
     }
 
     pub async fn activate_all(
@@ -520,6 +555,12 @@ impl ConnectorRegistry {
             handles.push(connector.activate(bindings).await?);
         }
         Ok(handles)
+    }
+}
+
+impl Default for ConnectorRegistry {
+    fn default() -> Self {
+        Self::with_defaults()
     }
 }
 
@@ -600,7 +641,7 @@ mod tests {
     #[tokio::test]
     async fn connector_registry_rejects_duplicate_providers() {
         let activate_calls = Arc::new(AtomicUsize::new(0));
-        let mut registry = ConnectorRegistry::default();
+        let mut registry = ConnectorRegistry::empty();
         registry
             .register(Box::new(FakeConnector::new(
                 "github",
@@ -621,7 +662,7 @@ mod tests {
     async fn connector_registry_activates_only_bound_connectors() {
         let github_calls = Arc::new(AtomicUsize::new(0));
         let slack_calls = Arc::new(AtomicUsize::new(0));
-        let mut registry = ConnectorRegistry::default();
+        let mut registry = ConnectorRegistry::empty();
         registry
             .register(Box::new(FakeConnector::new("github", github_calls.clone())))
             .unwrap();
@@ -672,5 +713,11 @@ mod tests {
         );
 
         assert_eq!(raw.json_body().unwrap(), json!({ "ok": true }));
+    }
+
+    #[test]
+    fn connector_registry_lists_builtin_webhook_connector() {
+        let registry = ConnectorRegistry::default();
+        assert_eq!(registry.list(), vec![ProviderId::from("webhook")]);
     }
 }

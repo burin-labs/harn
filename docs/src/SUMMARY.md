@@ -31,6 +31,7 @@
 - [Connector authoring](./connectors/authoring.md)
 - [Trigger registry](./triggers/registry.md)
 - [Cron connector](./connectors/cron.md)
+- [Generic webhook connector](./connectors/webhook.md)
 - [Cookbook](./cookbook.md)
 - [Tutorial: code review agent](./tutorial-code-review-agent.md)
 - [Tutorial: MCP server](./tutorial-mcp-server.md)
