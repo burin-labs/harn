@@ -1,0 +1,9 @@
+pipeline main() {
+  let same_worker = "delegate" \
+    == "delegate"
+  println(same_worker)
+  println(
+    "workflow" \
+      == "workflow",
+  )
+}

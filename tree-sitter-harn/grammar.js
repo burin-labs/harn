@@ -5,7 +5,7 @@ const KEYWORD_IDENTIFIERS = require("./grammar/keywords");
 module.exports = grammar({
   name: "harn",
 
-  extras: ($) => [/[ \t\r]/, $.comment],
+  extras: ($) => [/[ \t\r]/, /\\\r?\n[ \t]*/, $.comment],
 
   externals: ($) => [$._block_sep, $._line_sep],
 
