@@ -9,6 +9,19 @@ granular archaeology.
 
 ## Unreleased
 
+### Fixed
+
+- **Structured-output schema contract for OpenRouter Gemini (#208,
+  closes #206).** Schema-mode `llm_call(...)` no longer returns a
+  success envelope with `data == nil` after prose-only or
+  non-parseable responses. Missing parseable JSON now counts as a
+  schema failure and feeds `schema_retries`. Preserves bare retries
+  when `schema_retry_nudge: false`. Broadens JSON extraction to
+  recover structured output from tagged prose and canonical public
+  output blocks. Maps Harn's `thinking` option onto OpenRouter's
+  `reasoning` request surface (no more "thinking unsupported"
+  warnings there).
+
 ### Added
 
 - **Action-graph observability extended with `trigger` and `predicate`

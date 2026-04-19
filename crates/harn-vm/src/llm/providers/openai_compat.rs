@@ -2,7 +2,7 @@
 //! DeepSeek, Fireworks, HuggingFace, local vLLM/SGLang, and any server that
 //! speaks the `/v1/chat/completions` protocol.
 
-use crate::llm::api::{DeltaSender, LlmRequestPayload, LlmResult};
+use crate::llm::api::{DeltaSender, LlmRequestPayload, LlmResult, ThinkingConfig};
 use crate::llm::provider::{LlmProvider, LlmProviderChat};
 use crate::value::VmError;
 
@@ -159,6 +159,11 @@ impl OpenAiCompatibleProvider {
         if let Some(pp) = opts.presence_penalty {
             body["presence_penalty"] = serde_json::json!(pp);
         }
+        if opts.provider == "openrouter" {
+            if let Some(reasoning) = openrouter_reasoning_config(opts.thinking.as_ref()) {
+                body["reasoning"] = reasoning;
+            }
+        }
         if opts.response_format.as_deref() == Some("json") {
             if let Some(ref schema) = opts.json_schema {
                 body["response_format"] = serde_json::json!({
@@ -214,9 +219,24 @@ impl OpenAiCompatibleProvider {
     }
 }
 
+fn openrouter_reasoning_config(thinking: Option<&ThinkingConfig>) -> Option<serde_json::Value> {
+    match thinking {
+        Some(ThinkingConfig::Enabled) => Some(serde_json::json!({
+            "enabled": true
+        })),
+        Some(ThinkingConfig::WithBudget(max_tokens)) => Some(serde_json::json!({
+            "max_tokens": max_tokens
+        })),
+        None => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::llm::api::LlmRequestPayload;
+    use crate::llm::api::ThinkingConfig;
+    use serde_json::json;
 
     #[test]
     fn tool_search_supported_for_gpt_5_4_and_up() {
@@ -281,5 +301,57 @@ mod tests {
         let provider = OpenAiCompatibleProvider::new("openai".to_string());
         assert!(provider.supports_defer_loading("gpt-5.4"));
         assert!(!provider.supports_defer_loading("gpt-4o"));
+    }
+
+    #[test]
+    fn openrouter_thinking_enabled_maps_to_reasoning_enabled() {
+        let provider = OpenAiCompatibleProvider::new("openrouter".to_string());
+        let mut payload = base_request_payload();
+        payload.thinking = Some(ThinkingConfig::Enabled);
+        let mut body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+        provider.transform_request(&mut body);
+
+        assert_eq!(body["reasoning"]["enabled"], true);
+        assert!(body.get("chat_template_kwargs").is_none());
+    }
+
+    #[test]
+    fn openrouter_thinking_budget_maps_to_reasoning_max_tokens() {
+        let provider = OpenAiCompatibleProvider::new("openrouter".to_string());
+        let mut payload = base_request_payload();
+        payload.thinking = Some(ThinkingConfig::WithBudget(2048));
+        let mut body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+        provider.transform_request(&mut body);
+
+        assert_eq!(body["reasoning"]["max_tokens"], 2048);
+        assert!(body.get("chat_template_kwargs").is_none());
+    }
+
+    fn base_request_payload() -> LlmRequestPayload {
+        LlmRequestPayload {
+            provider: "openrouter".to_string(),
+            model: "google/gemini-2.5-pro".to_string(),
+            api_key: String::new(),
+            messages: vec![json!({"role": "user", "content": "hello"})],
+            system: None,
+            max_tokens: 64,
+            temperature: Some(0.0),
+            top_p: None,
+            top_k: None,
+            stop: None,
+            seed: None,
+            frequency_penalty: None,
+            presence_penalty: None,
+            response_format: None,
+            json_schema: None,
+            thinking: None,
+            native_tools: None,
+            tool_choice: None,
+            cache: false,
+            timeout: None,
+            stream: false,
+            provider_overrides: None,
+            prefill: None,
+        }
     }
 }

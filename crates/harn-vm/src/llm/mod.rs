@@ -201,6 +201,33 @@ fn compute_validation_errors(data: &VmValue, opts: &api::LlmCallOptions) -> Vec<
     schema_validation_errors(&validation)
 }
 
+fn structured_output_errors(result: &VmValue, opts: &api::LlmCallOptions) -> Vec<String> {
+    let Some(dict) = result.as_dict() else {
+        return vec!["structured output result was not a dict".to_string()];
+    };
+    if let Some(data) = dict.get("data") {
+        return compute_validation_errors(data, opts);
+    }
+
+    let mut errors = vec!["response did not contain parseable JSON".to_string()];
+    if let Some(VmValue::List(violations)) = dict.get("protocol_violations") {
+        let joined = violations
+            .iter()
+            .map(VmValue::display)
+            .collect::<Vec<_>>()
+            .join("; ");
+        if !joined.is_empty() {
+            errors.push(format!("protocol violations: {joined}"));
+        }
+    }
+    if let Some(stop_reason) = dict.get("stop_reason").map(VmValue::display) {
+        if matches!(stop_reason.as_str(), "length" | "max_tokens") {
+            errors.push("response hit the token limit before producing complete JSON".to_string());
+        }
+    }
+    errors
+}
+
 /// How `llm_call` should nudge the model when `output_schema` validation
 /// fails and `schema_retries > 0`.
 #[derive(Debug, Clone)]
@@ -366,26 +393,17 @@ pub(crate) async fn execute_llm_call(
 
         // Non-bridge path runs schema validation; bridge path
         // delegates validation to the host.
-        let mut vm_result = agent_config::build_llm_call_result(&result, &opts);
+        let vm_result = agent_config::build_llm_call_result(&result, &opts);
         if !helpers::expects_structured_output(&opts) {
             return Ok(vm_result);
         }
-        let VmValue::Dict(ref dict) = vm_result else {
-            return Ok(vm_result);
-        };
-        let Some(data) = dict.get("data") else {
-            return Ok(vm_result);
-        };
-        let errors = compute_validation_errors(data, &opts);
+        let errors = structured_output_errors(&vm_result, &opts);
         if errors.is_empty() {
-            let mut d = dict.as_ref().clone();
-            d.insert("data".to_string(), data.clone());
-            vm_result = VmValue::Dict(Rc::new(d));
             return Ok(vm_result);
         }
 
         let more_attempts = attempt < schema_retries;
-        let should_retry = more_attempts && !matches!(nudge_mode, SchemaNudge::Disabled);
+        let should_retry = more_attempts;
         if should_retry {
             let nudge = build_schema_nudge(&errors, opts.output_schema.as_ref(), &nudge_mode);
             emit_agent_event(AgentTraceEvent::SchemaRetry {
@@ -934,7 +952,10 @@ fn register_llm_stream(vm: &mut Vm) {
 #[cfg(test)]
 mod tests {
     use super::api::LlmCallOptions;
-    use super::compute_validation_errors;
+    use super::{
+        compute_validation_errors, execute_llm_call, reset_llm_state, structured_output_errors,
+    };
+    use crate::llm::mock;
     use crate::value::VmValue;
     use std::rc::Rc;
 
@@ -996,5 +1017,81 @@ mod tests {
         let errors = compute_validation_errors(&data, &opts);
         assert!(!errors.is_empty(), "schema should fail");
         assert!(errors.join(" ").contains("string"));
+    }
+
+    #[test]
+    fn structured_output_errors_report_missing_json() {
+        let result = VmValue::Dict(Rc::new(std::collections::BTreeMap::from([
+            (
+                "text".to_string(),
+                VmValue::String(Rc::from("Analyzing the task")),
+            ),
+            (
+                "protocol_violations".to_string(),
+                VmValue::List(Rc::new(vec![VmValue::String(Rc::from(
+                    "stray text outside response tags",
+                ))])),
+            ),
+            (
+                "stop_reason".to_string(),
+                VmValue::String(Rc::from("length")),
+            ),
+        ])));
+
+        let errors = structured_output_errors(&result, &base_opts());
+        assert!(errors.iter().any(|err| err.contains("parseable JSON")));
+        assert!(errors.iter().any(|err| err.contains("protocol violations")));
+        assert!(errors.iter().any(|err| err.contains("token limit")));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn execute_llm_call_retries_when_response_has_no_json_data() {
+        reset_llm_state();
+        mock::push_llm_mock(mock::LlmMock {
+            text: "Analyzing the task carefully".to_string(),
+            tool_calls: Vec::new(),
+            match_pattern: None,
+            consume_on_match: false,
+            input_tokens: None,
+            output_tokens: None,
+            cache_read_tokens: None,
+            cache_write_tokens: None,
+            thinking: None,
+            stop_reason: None,
+            model: "mock".to_string(),
+            provider: Some("mock".to_string()),
+            blocks: None,
+            error: None,
+        });
+        mock::push_llm_mock(mock::LlmMock {
+            text: "{\"name\":\"Ada\"}".to_string(),
+            tool_calls: Vec::new(),
+            match_pattern: None,
+            consume_on_match: false,
+            input_tokens: None,
+            output_tokens: None,
+            cache_read_tokens: None,
+            cache_write_tokens: None,
+            thinking: None,
+            stop_reason: None,
+            model: "mock".to_string(),
+            provider: Some("mock".to_string()),
+            blocks: None,
+            error: None,
+        });
+
+        let response = execute_llm_call(base_opts(), None)
+            .await
+            .expect("structured retry should recover");
+        let dict = response.as_dict().expect("dict response");
+        let data = dict
+            .get("data")
+            .and_then(VmValue::as_dict)
+            .expect("parsed data");
+        assert_eq!(
+            data.get("name").map(VmValue::display).as_deref(),
+            Some("Ada")
+        );
+        assert_eq!(mock::get_llm_mock_calls().len(), 2);
     }
 }
