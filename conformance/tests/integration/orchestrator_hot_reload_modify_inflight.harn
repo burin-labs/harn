@@ -57,21 +57,34 @@ pipeline default() {
     }
     trap cleanup EXIT
 
-    bind=$(python3 - "$snapshot_path" <<'PY'
+    bind=$(python3 - "$snapshot_path" "$log_path" <<'PY'
     import json, pathlib, sys, time
-    path = pathlib.Path(sys.argv[1])
-    # 60s deadline covers cold-cache CI runs where orchestrator startup
+    snapshot = pathlib.Path(sys.argv[1])
+    log = pathlib.Path(sys.argv[2])
+    # 120s deadline covers cold-cache CI runs where orchestrator startup
     # includes provider catalog init + async InboxIndex boot (post-#220/#221).
-    deadline = time.time() + 60
+    deadline = time.time() + 120
     while time.time() < deadline:
-        if path.exists():
-            data = json.loads(path.read_text())
+        if snapshot.exists():
+            data = json.loads(snapshot.read_text())
             bind = data.get("bind")
             if bind:
                 print(bind)
                 raise SystemExit(0)
         time.sleep(0.05)
-    raise SystemExit("timed out waiting for orchestrator snapshot")
+    # On timeout, dump the orchestrator's captured stderr so CI tells us *why*
+    # the snapshot never appeared instead of failing blindly.
+    tail = ""
+    if log.exists():
+        try:
+            tail = log.read_text()[-4000:]
+        except OSError as error:
+            tail = f"(could not read {log}: {error})"
+    else:
+        tail = f"(log file {log} did not exist)"
+    raise SystemExit(
+        f"timed out waiting for orchestrator snapshot; orchestrator stderr:\n{tail}"
+    )
     PY
     )
 
