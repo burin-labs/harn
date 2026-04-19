@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use serde::{Deserialize, Serialize};
+use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 use uuid::Uuid;
 
 use crate::event_log::{
@@ -11,9 +12,9 @@ use crate::triggers::dispatcher::DEFAULT_MAX_ATTEMPTS;
 use crate::triggers::test_util::{clock, run_trigger_harness_fixture};
 use crate::triggers::{
     dynamic_register, registered_provider_metadata, resolve_live_trigger_binding,
-    snapshot_trigger_bindings, RetryPolicy, TriggerBindingSnapshot, TriggerBindingSource,
-    TriggerBindingSpec, TriggerEvent, TriggerEventId, TriggerHandlerSpec, TriggerPredicateSpec,
-    TriggerRetryConfig,
+    resolve_trigger_binding_as_of, snapshot_trigger_bindings, RetryPolicy, TriggerBindingSnapshot,
+    TriggerBindingSource, TriggerBindingSpec, TriggerEvent, TriggerEventId, TriggerHandlerSpec,
+    TriggerPredicateSpec, TriggerRegistryError, TriggerRetryConfig,
 };
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
@@ -105,7 +106,7 @@ pub(crate) fn register_trigger_builtins(vm: &mut Vm) {
             .get(1)
             .ok_or_else(|| VmError::Runtime("trigger_fire: missing trigger event".to_string()))?;
         let event = parse_trigger_event(raw_event)?;
-        dispatch_trigger_event(binding_id, binding_version, event, None).await
+        dispatch_trigger_event(binding_id, binding_version, event, None, None).await
     });
 
     vm.register_async_builtin("trigger_replay", |args| async move {
@@ -159,9 +160,10 @@ async fn dispatch_trigger_event(
     binding_version: Option<u32>,
     event: TriggerEvent,
     replay_of_event_id: Option<String>,
+    replay_received_at: Option<OffsetDateTime>,
 ) -> Result<VmValue, VmError> {
     let log = ensure_trigger_event_log();
-    let binding = resolve_live_trigger_binding(&binding_id, binding_version)
+    let binding = resolve_dispatch_binding(&binding_id, binding_version, replay_received_at)
         .map_err(trigger_registry_error)?;
     let version = binding.version;
     let event_id = event.id.0.clone();
@@ -200,13 +202,48 @@ async fn dispatch_trigger_event(
 
 async fn replay_trigger_event(event_id: &str) -> Result<VmValue, VmError> {
     let record = find_recorded_event(event_id).await?;
+    let received_at = record.event.received_at;
     dispatch_trigger_event(
         record.binding_id,
         Some(record.binding_version),
         record.event,
         Some(event_id.to_string()),
+        Some(received_at),
     )
     .await
+}
+
+fn resolve_dispatch_binding(
+    binding_id: &str,
+    binding_version: Option<u32>,
+    replay_received_at: Option<OffsetDateTime>,
+) -> Result<std::sync::Arc<crate::triggers::registry::TriggerBinding>, TriggerRegistryError> {
+    match resolve_live_trigger_binding(binding_id, binding_version) {
+        Ok(binding) => Ok(binding),
+        Err(TriggerRegistryError::UnknownBindingVersion { version, .. }) => {
+            let Some(fallback_as_of) = replay_received_at else {
+                return Err(TriggerRegistryError::UnknownBindingVersion {
+                    id: binding_id.to_string(),
+                    version,
+                });
+            };
+            crate::events::log_warn(
+                "trigger.replay",
+                &format!(
+                    "recorded binding '{}@v{}' is unavailable; replay is falling back to the binding active at {}",
+                    binding_id,
+                    version,
+                    format_timestamp(fallback_as_of)
+                ),
+            );
+            resolve_trigger_binding_as_of(binding_id, fallback_as_of)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn format_timestamp(value: OffsetDateTime) -> String {
+    value.format(&Rfc3339).unwrap_or_else(|_| value.to_string())
 }
 
 async fn dispatch_binding_via_dispatcher(

@@ -99,8 +99,11 @@ granular archaeology.
   resolution via trigger lifecycle history. Sets `HARN_REPLAY=1`
   during replay dispatch so runtime nondeterminism (e.g. `uuid()`,
   timestamps) can fall back to recorded values when handlers
-  cooperate. Complements the in-process `trigger_replay(...)` stdlib
-  and the orchestrator-scoped `harn orchestrator replay`.
+  cooperate. Replay now also falls back automatically to the binding
+  active at the recorded event timestamp when the recorded binding
+  version is no longer resolvable. Complements the in-process
+  `trigger_replay(...)` stdlib and the orchestrator-scoped `harn
+  orchestrator replay`.
 
 - **Hardened orchestrator shutdown drain (#183).** SIGTERM/SIGINT now
   stops new HTTP traffic, drains pending/cron/inbox work, and waits
