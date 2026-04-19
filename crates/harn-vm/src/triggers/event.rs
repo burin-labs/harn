@@ -1282,9 +1282,10 @@ mod tests {
             .filter(|entry| matches!(entry.runtime, ProviderRuntimeMetadata::Builtin { .. }))
             .collect();
 
-        assert_eq!(builtin.len(), 3);
+        assert_eq!(builtin.len(), 4);
         assert!(builtin.iter().any(|entry| entry.provider == "cron"));
         assert!(builtin.iter().any(|entry| entry.provider == "github"));
+        assert!(builtin.iter().any(|entry| entry.provider == "slack"));
         assert!(builtin.iter().any(|entry| entry.provider == "webhook"));
     }
 

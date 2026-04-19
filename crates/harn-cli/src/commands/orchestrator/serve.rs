@@ -121,7 +121,7 @@ async fn run_local(args: OrchestratorServeArgs) -> Result<(), String> {
 
     let binding_versions = live_manifest_binding_versions();
     let route_configs = build_route_configs(&collected_triggers, &binding_versions)?;
-    let connector_runtime = initialize_connectors(
+    let mut connector_runtime = initialize_connectors(
         &collected_triggers,
         event_log.clone(),
         secret_provider.clone(),
@@ -160,6 +160,22 @@ async fn run_local(args: OrchestratorServeArgs) -> Result<(), String> {
     let mut live_manifest = manifest;
     let mut live_triggers = collected_triggers;
     eprintln!("[harn] HTTP listener ready on {}", listener.url());
+
+    connector_runtime.activations = connector_runtime
+        .registry
+        .activate_all(&connector_runtime.trigger_registry)
+        .await
+        .map_err(|error| error.to_string())?;
+    eprintln!(
+        "[harn] activated connectors: {}",
+        format_activation_summary(&connector_runtime.activations)
+    );
+
+    let dispatcher = harn_vm::Dispatcher::with_event_log(vm, event_log.clone());
+    let dispatcher_task = {
+        let dispatcher = dispatcher.clone();
+        tokio::task::spawn_local(async move { dispatcher.run().await })
+    };
 
     write_state_snapshot(
         &state_dir.join(STATE_SNAPSHOT_FILE),
@@ -272,7 +288,8 @@ async fn run_local(args: OrchestratorServeArgs) -> Result<(), String> {
 }
 
 struct ConnectorRuntime {
-    _registry: harn_vm::ConnectorRegistry,
+    registry: harn_vm::ConnectorRegistry,
+    trigger_registry: harn_vm::TriggerRegistry,
     handles: Vec<harn_vm::connectors::ConnectorHandle>,
     providers: Vec<String>,
     activations: Vec<harn_vm::ActivationHandle>,
@@ -352,16 +369,12 @@ async fn initialize_connectors(
         providers.push(provider_name);
     }
 
-    let activations = registry
-        .activate_all(&trigger_registry)
-        .await
-        .map_err(|error| error.to_string())?;
-
     Ok(ConnectorRuntime {
-        _registry: registry,
+        registry,
+        trigger_registry,
         handles,
         providers,
-        activations,
+        activations: Vec::new(),
     })
 }
 
