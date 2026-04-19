@@ -11,6 +11,17 @@ granular archaeology.
 
 ### Added
 
+- **`harn orchestrator serve` CLI scaffold (#178).** Added a new
+  `harn orchestrator` command family with a real `serve`
+  subcommand plus placeholder `inspect`, `replay`, `dlq`, and
+  `queue` subcommands. `serve` now loads `harn.toml`, boots a
+  single-tenant orchestrator VM, installs the shared EventLog under
+  `--state-dir`, resolves the active secret-provider chain, collects
+  manifest triggers, activates placeholder connectors per manifest
+  provider, writes an orchestrator state snapshot, and idles until
+  SIGTERM for scaffolded graceful shutdown. Multi-tenant remains an
+  explicit `O-12 #190` stub; the HTTP listener remains deferred to
+  `O-02 #179`.
 - **Action-graph observability extended with `trigger` and `predicate`
   node kinds (#202, partial #163).** Persisted run records now
   synthesize a `trigger` node from `trigger_event` metadata, render

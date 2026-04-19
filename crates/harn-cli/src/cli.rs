@@ -1,3 +1,6 @@
+use std::net::SocketAddr;
+use std::path::PathBuf;
+
 use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
 
 #[derive(Debug, Parser)]
@@ -73,6 +76,8 @@ SCRIPTING
     Watch(WatchArgs),
     /// Launch the local Harn observability portal.
     Portal(PortalArgs),
+    /// Start the orchestrator process that hosts triggers and connector dispatch.
+    Orchestrator(OrchestratorArgs),
     /// Run a pipeline against a Harn-native host module for fast iteration.
     Playground(PlaygroundArgs),
     /// Inspect persisted workflow run records.
@@ -449,6 +454,46 @@ pub(crate) struct PortalArgs {
 }
 
 #[derive(Debug, Args)]
+pub(crate) struct OrchestratorArgs {
+    #[command(subcommand)]
+    pub command: OrchestratorCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum OrchestratorCommand {
+    /// Load manifests, initialize registries, and idle until shutdown.
+    Serve(OrchestratorServeArgs),
+    /// Inspect orchestrator state.
+    Inspect,
+    /// Replay orchestrator events.
+    Replay,
+    /// Inspect the dead-letter queue.
+    Dlq,
+    /// Inspect trigger and dispatch queues.
+    Queue,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct OrchestratorServeArgs {
+    /// Path to the root `harn.toml` manifest to load.
+    #[arg(long, default_value = "harn.toml", value_name = "PATH")]
+    pub config: PathBuf,
+    /// Directory used for EventLog data and orchestrator state snapshots.
+    #[arg(
+        long = "state-dir",
+        default_value = ".harn/orchestrator",
+        value_name = "PATH"
+    )]
+    pub state_dir: PathBuf,
+    /// Socket address the future HTTP listener will bind to.
+    #[arg(long, default_value = "127.0.0.1:8080", value_name = "ADDR")]
+    pub bind: SocketAddr,
+    /// Runtime role to boot. Multi-tenant is a stub for now.
+    #[arg(long, value_enum, default_value_t = crate::commands::orchestrator::role::OrchestratorRole::SingleTenant)]
+    pub role: crate::commands::orchestrator::role::OrchestratorRole,
+}
+
+#[derive(Debug, Args)]
 pub(crate) struct PlaygroundArgs {
     /// Host module exporting the capabilities the script expects.
     #[arg(long, default_value = "host.harn")]
@@ -656,7 +701,11 @@ pub(crate) struct SkillsNewArgs {
 
 #[cfg(test)]
 mod tests {
-    use super::{Cli, Command, McpCommand, ProjectTemplate, RunsCommand, SkillsCommand};
+    use std::path::PathBuf;
+
+    use super::{
+        Cli, Command, McpCommand, OrchestratorCommand, ProjectTemplate, RunsCommand, SkillsCommand,
+    };
     use clap::Parser;
 
     #[test]
@@ -772,6 +821,37 @@ mod tests {
         assert_eq!(args.host, "0.0.0.0");
         assert_eq!(args.port, 4900);
         assert!(!args.open);
+    }
+
+    #[test]
+    fn test_parses_orchestrator_serve_args() {
+        let cli = Cli::parse_from([
+            "harn",
+            "orchestrator",
+            "serve",
+            "--config",
+            "workspace/harn.toml",
+            "--state-dir",
+            "state/orchestrator",
+            "--bind",
+            "0.0.0.0:8080",
+            "--role",
+            "single-tenant",
+        ]);
+
+        let Command::Orchestrator(args) = cli.command.unwrap() else {
+            panic!("expected orchestrator command");
+        };
+        let OrchestratorCommand::Serve(serve) = args.command else {
+            panic!("expected orchestrator serve");
+        };
+        assert_eq!(serve.config, PathBuf::from("workspace/harn.toml"));
+        assert_eq!(serve.state_dir, PathBuf::from("state/orchestrator"));
+        assert_eq!(serve.bind.to_string(), "0.0.0.0:8080");
+        assert_eq!(
+            serve.role,
+            crate::commands::orchestrator::role::OrchestratorRole::SingleTenant
+        );
     }
 
     #[test]

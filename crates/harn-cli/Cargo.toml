@@ -30,6 +30,7 @@ harn-vm = { path = "../harn-vm", version = "0.7" }
 harn-lint = { path = "../harn-lint", version = "0.7" }
 harn-modules = { path = "../harn-modules", version = "0.7" }
 harn-fmt = { path = "../harn-fmt", version = "0.7" }
+async-trait = "0.1"
 axum = "0.8"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "signal", "time"] }
 serde_json = "1"

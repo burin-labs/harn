@@ -5,6 +5,7 @@ pub(crate) mod doctor;
 pub(crate) mod dump_highlight_keywords;
 pub(crate) mod init;
 pub(crate) mod mcp;
+pub(crate) mod orchestrator;
 pub(crate) mod playground;
 pub(crate) mod portal;
 pub(crate) mod repl;

@@ -43,6 +43,7 @@
 - [Bridge protocol](./bridge-protocol.md)
 - [MCP and ACP integration](./mcp-and-acp.md)
 - [Harn portal](./portal.md)
+- [Orchestrator](./orchestrator.md)
 - [Orchestrator secrets](./orchestrator/secrets.md)
 
 # Reference

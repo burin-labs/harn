@@ -345,6 +345,12 @@ async fn main() {
         Command::Portal(args) => {
             commands::portal::run_portal(&args.dir, &args.host, args.port, args.open).await
         }
+        Command::Orchestrator(args) => {
+            if let Err(error) = commands::orchestrator::handle(args).await {
+                eprintln!("error: {error}");
+                process::exit(1);
+            }
+        }
         Command::Playground(args) => {
             let llm_mock_mode = if let Some(path) = args.llm_mock.as_ref() {
                 commands::run::CliLlmMockMode::Replay {
