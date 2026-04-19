@@ -66,8 +66,15 @@ fn vm_skill_catalog_entries(skills: &[VmValue]) -> Vec<VmValue> {
             continue;
         }
         let description = entry
-            .get("description")
+            .get("short")
             .map(|v| v.display())
+            .filter(|value| !value.is_empty())
+            .or_else(|| {
+                entry
+                    .get("description")
+                    .map(|v| v.display())
+                    .filter(|value| !value.is_empty())
+            })
             .unwrap_or_default();
         let when_to_use = entry
             .get("when_to_use")
@@ -95,8 +102,15 @@ fn render_catalog_entry(entry: &BTreeMap<String, VmValue>) -> Option<String> {
         return None;
     }
     let description = entry
-        .get("description")
+        .get("short")
         .map(|v| v.display())
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            entry
+                .get("description")
+                .map(|v| v.display())
+                .filter(|value| !value.is_empty())
+        })
         .unwrap_or_default();
     let when_to_use = entry
         .get("when_to_use")
@@ -235,6 +249,7 @@ pub(crate) fn register_skill_builtins(vm: &mut Vm) {
         // Light validation on known string keys: enforce stable error
         // messages when a user mis-types a value.
         for key in [
+            "short",
             "description",
             "when_to_use",
             "prompt",
@@ -287,7 +302,14 @@ pub(crate) fn register_skill_builtins(vm: &mut Vm) {
         // Keep `description` at the top level even if missing (empty string)
         // so `skill_describe` / transcript surfaces have a stable shape.
         if !config.contains_key("description") {
+            let fallback = config.get("short").map(|value| value.display()).unwrap_or_default();
             entry.insert("description".to_string(), VmValue::String(Rc::from("")));
+            if !fallback.is_empty() {
+                entry.insert(
+                    "description".to_string(),
+                    VmValue::String(Rc::from(fallback.as_str())),
+                );
+            }
         }
         for (k, v) in config.iter() {
             entry.insert(k.clone(), v.clone());
@@ -561,11 +583,23 @@ pub(crate) fn register_skill_builtins(vm: &mut Vm) {
             VmValue::String(s) => (s.to_string(), None),
             VmValue::Dict(map) => {
                 let body = map.get("body").map(|v| v.display()).unwrap_or_default();
-                let dir = map
-                    .get("skill_dir")
-                    .map(|v| v.display())
-                    .filter(|s| !s.is_empty());
-                (body, dir)
+                if !body.is_empty() {
+                    let dir = map
+                        .get("skill_dir")
+                        .map(|v| v.display())
+                        .filter(|s| !s.is_empty());
+                    (body, dir)
+                } else {
+                    let skill_id = crate::skills::skill_entry_id(map);
+                    let fetched = crate::skills::current_skill_registry()
+                        .and_then(|binding| (binding.fetcher)(&skill_id).ok());
+                    let dir = fetched
+                        .as_ref()
+                        .and_then(|skill| skill.skill_dir.as_ref())
+                        .map(|path| path.display().to_string());
+                    let body = fetched.map(|skill| skill.body).unwrap_or_default();
+                    (body, dir)
+                }
             }
             _ => {
                 return Err(VmError::Thrown(VmValue::String(Rc::from(
@@ -590,6 +624,30 @@ pub(crate) fn register_skill_builtins(vm: &mut Vm) {
         };
         let rendered = crate::skills::substitute_skill_body(&body, &ctx);
         Ok(VmValue::String(Rc::from(rendered.as_str())))
+    });
+
+    vm.register_async_builtin("load_skill", |args| async move {
+        let requested = match args.first() {
+            Some(VmValue::String(name)) if !name.is_empty() => name.to_string(),
+            Some(value) => {
+                let rendered = value.display();
+                if rendered.is_empty() {
+                    return Err(crate::skills::skill_vm_error(
+                        "load_skill: requires a non-empty skill name",
+                    ));
+                }
+                rendered
+            }
+            None => {
+                return Err(crate::skills::skill_vm_error(
+                    "load_skill: requires a non-empty skill name",
+                ));
+            }
+        };
+        let session_id = std::env::var("HARN_SESSION_ID").ok();
+        let loaded = crate::skills::load_bound_skill_by_name(&requested, session_id.as_deref())
+            .map_err(crate::skills::skill_vm_error)?;
+        Ok(VmValue::String(Rc::from(loaded.rendered_body.as_str())))
     });
 
     vm.register_builtin("skill_count", |args, _out| {

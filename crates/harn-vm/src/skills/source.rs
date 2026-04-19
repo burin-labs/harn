@@ -135,6 +135,7 @@ pub struct SkillManifestRef {
     pub layer: Layer,
     pub namespace: Option<String>,
     pub origin: String,
+    pub unknown_fields: Vec<String>,
 }
 
 /// Filesystem source — walks one root directory looking for
@@ -197,6 +198,54 @@ impl FsSkillSource {
         results
     }
 
+    fn finalize_manifest(
+        &self,
+        dir: &Path,
+        skill_file: &Path,
+        manifest: &mut SkillManifest,
+    ) -> Result<(), String> {
+        if manifest.name.is_empty() {
+            if let Some(name) = dir.file_name().and_then(|n| n.to_str()) {
+                manifest.name = name.to_string();
+            }
+        }
+        if manifest.name.is_empty() {
+            return Err(format!(
+                "{}: SKILL.md has no `name` field and directory has no basename",
+                skill_file.display()
+            ));
+        }
+        if manifest.short.trim().is_empty() {
+            return Err(format!(
+                "{}: SKILL.md requires a non-empty `short` field",
+                skill_file.display()
+            ));
+        }
+        Ok(())
+    }
+
+    fn load_manifest_from_dir(&self, dir: &Path) -> Result<SkillManifestRef, String> {
+        let skill_file = dir.join("SKILL.md");
+        let source = fs::read_to_string(&skill_file)
+            .map_err(|e| format!("failed to read {}: {e}", skill_file.display()))?;
+        let (fm, _) = split_frontmatter(&source);
+        let parsed = parse_frontmatter(fm).map_err(|e| format!("{}: {e}", skill_file.display()))?;
+        let mut manifest = parsed.manifest;
+        self.finalize_manifest(dir, &skill_file, &mut manifest)?;
+        let id = match &self.namespace {
+            Some(ns) if !ns.is_empty() => format!("{ns}/{}", manifest.name),
+            _ => manifest.name.clone(),
+        };
+        Ok(SkillManifestRef {
+            id,
+            manifest,
+            layer: self.layer,
+            namespace: self.namespace.clone(),
+            origin: dir.display().to_string(),
+            unknown_fields: parsed.unknown_fields,
+        })
+    }
+
     fn load_from_dir(&self, dir: &Path) -> Result<Skill, String> {
         let skill_file = dir.join("SKILL.md");
         let source = fs::read_to_string(&skill_file)
@@ -204,11 +253,7 @@ impl FsSkillSource {
         let (fm, body) = split_frontmatter(&source);
         let parsed = parse_frontmatter(fm).map_err(|e| format!("{}: {e}", skill_file.display()))?;
         let mut manifest = parsed.manifest;
-        if manifest.name.is_empty() {
-            if let Some(name) = dir.file_name().and_then(|n| n.to_str()) {
-                manifest.name = name.to_string();
-            }
-        }
+        self.finalize_manifest(dir, &skill_file, &mut manifest)?;
         let skill = Skill {
             body: body.to_string(),
             skill_dir: Some(dir.to_path_buf()),
@@ -217,12 +262,6 @@ impl FsSkillSource {
             unknown_fields: parsed.unknown_fields,
             manifest,
         };
-        if skill.manifest.name.is_empty() {
-            return Err(format!(
-                "{}: SKILL.md has no `name` field and directory has no basename",
-                skill_file.display()
-            ));
-        }
         Ok(skill)
     }
 }
@@ -231,16 +270,9 @@ impl SkillSource for FsSkillSource {
     fn list(&self) -> Vec<SkillManifestRef> {
         let mut out = Vec::new();
         for dir in self.iter_skill_dirs() {
-            match self.load_from_dir(&dir) {
+            match self.load_manifest_from_dir(&dir) {
                 Ok(skill) => {
-                    let id = skill.id();
-                    out.push(SkillManifestRef {
-                        id,
-                        manifest: skill.manifest,
-                        layer: skill.layer,
-                        namespace: skill.namespace,
-                        origin: dir.display().to_string(),
-                    });
+                    out.push(skill);
                 }
                 Err(err) => {
                     eprintln!("warning: skills: {err}");
@@ -345,8 +377,16 @@ pub fn skill_entry_to_vm(skill: &Skill) -> crate::value::VmValue {
         VmValue::String(Rc::from(skill.manifest.name.as_str())),
     );
     entry.insert(
+        "short".to_string(),
+        VmValue::String(Rc::from(skill.manifest.short.as_str())),
+    );
+    entry.insert(
         "description".to_string(),
-        VmValue::String(Rc::from(skill.manifest.description.as_str())),
+        VmValue::String(Rc::from(if skill.manifest.description.is_empty() {
+            skill.manifest.short.as_str()
+        } else {
+            skill.manifest.description.as_str()
+        })),
     );
     if let Some(when) = &skill.manifest.when_to_use {
         entry.insert(
@@ -452,6 +492,121 @@ pub fn skill_entry_to_vm(skill: &Skill) -> crate::value::VmValue {
     VmValue::Dict(Rc::new(entry))
 }
 
+pub fn skill_manifest_ref_to_vm(skill: &SkillManifestRef) -> crate::value::VmValue {
+    use crate::value::VmValue;
+    use std::rc::Rc;
+
+    let mut entry: BTreeMap<String, VmValue> = BTreeMap::new();
+    entry.insert(
+        "name".to_string(),
+        VmValue::String(Rc::from(skill.manifest.name.as_str())),
+    );
+    entry.insert(
+        "short".to_string(),
+        VmValue::String(Rc::from(skill.manifest.short.as_str())),
+    );
+    entry.insert(
+        "description".to_string(),
+        VmValue::String(Rc::from(if skill.manifest.description.is_empty() {
+            skill.manifest.short.as_str()
+        } else {
+            skill.manifest.description.as_str()
+        })),
+    );
+    if let Some(when) = &skill.manifest.when_to_use {
+        entry.insert(
+            "when_to_use".to_string(),
+            VmValue::String(Rc::from(when.as_str())),
+        );
+    }
+    if skill.manifest.disable_model_invocation {
+        entry.insert("disable_model_invocation".to_string(), VmValue::Bool(true));
+    }
+    if !skill.manifest.allowed_tools.is_empty() {
+        entry.insert(
+            "allowed_tools".to_string(),
+            VmValue::List(Rc::new(
+                skill
+                    .manifest
+                    .allowed_tools
+                    .iter()
+                    .map(|tool| VmValue::String(Rc::from(tool.as_str())))
+                    .collect(),
+            )),
+        );
+    }
+    if skill.manifest.user_invocable {
+        entry.insert("user_invocable".to_string(), VmValue::Bool(true));
+    }
+    if !skill.manifest.paths.is_empty() {
+        entry.insert(
+            "paths".to_string(),
+            VmValue::List(Rc::new(
+                skill
+                    .manifest
+                    .paths
+                    .iter()
+                    .map(|path| VmValue::String(Rc::from(path.as_str())))
+                    .collect(),
+            )),
+        );
+    }
+    if let Some(context) = &skill.manifest.context {
+        entry.insert(
+            "context".to_string(),
+            VmValue::String(Rc::from(context.as_str())),
+        );
+    }
+    if let Some(agent) = &skill.manifest.agent {
+        entry.insert(
+            "agent".to_string(),
+            VmValue::String(Rc::from(agent.as_str())),
+        );
+    }
+    if !skill.manifest.hooks.is_empty() {
+        let mut hooks: BTreeMap<String, VmValue> = BTreeMap::new();
+        for (key, value) in &skill.manifest.hooks {
+            hooks.insert(key.clone(), VmValue::String(Rc::from(value.as_str())));
+        }
+        entry.insert("hooks".to_string(), VmValue::Dict(Rc::new(hooks)));
+    }
+    if let Some(model) = &skill.manifest.model {
+        entry.insert(
+            "model".to_string(),
+            VmValue::String(Rc::from(model.as_str())),
+        );
+    }
+    if let Some(effort) = &skill.manifest.effort {
+        entry.insert(
+            "effort".to_string(),
+            VmValue::String(Rc::from(effort.as_str())),
+        );
+    }
+    if let Some(shell) = &skill.manifest.shell {
+        entry.insert(
+            "shell".to_string(),
+            VmValue::String(Rc::from(shell.as_str())),
+        );
+    }
+    if let Some(hint) = &skill.manifest.argument_hint {
+        entry.insert(
+            "argument_hint".to_string(),
+            VmValue::String(Rc::from(hint.as_str())),
+        );
+    }
+    entry.insert(
+        "source".to_string(),
+        VmValue::String(Rc::from(skill.layer.label())),
+    );
+    if let Some(ns) = &skill.namespace {
+        entry.insert(
+            "namespace".to_string(),
+            VmValue::String(Rc::from(ns.as_str())),
+        );
+    }
+    VmValue::Dict(Rc::new(entry))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -469,12 +624,12 @@ mod tests {
         write(
             tmp.path(),
             "deploy/SKILL.md",
-            "---\nname: deploy\ndescription: ship it\n---\nrun deploy",
+            "---\nname: deploy\nshort: deploy the service\ndescription: ship it\n---\nrun deploy",
         );
         write(
             tmp.path(),
             "review/SKILL.md",
-            "---\nname: review\n---\nbody",
+            "---\nname: review\nshort: review a pull request\n---\nbody",
         );
         write(tmp.path(), "not-a-skill.txt", "no");
 
@@ -486,6 +641,7 @@ mod tests {
         assert!(names.contains(&"review".to_string()));
 
         let skill = src.fetch("deploy").unwrap();
+        assert_eq!(skill.manifest.short, "deploy the service");
         assert_eq!(skill.manifest.description, "ship it");
         assert_eq!(skill.body, "run deploy");
     }
@@ -493,7 +649,11 @@ mod tests {
     #[test]
     fn fs_source_accepts_root_as_single_skill() {
         let tmp = tempfile::tempdir().unwrap();
-        write(tmp.path(), "SKILL.md", "---\nname: solo\n---\n(body)");
+        write(
+            tmp.path(),
+            "SKILL.md",
+            "---\nname: solo\nshort: single skill bundle\n---\n(body)",
+        );
         let src = FsSkillSource::new(tmp.path(), Layer::Cli);
         let listed = src.list();
         assert_eq!(listed.len(), 1);
@@ -503,7 +663,11 @@ mod tests {
     #[test]
     fn fs_source_defaults_name_to_directory() {
         let tmp = tempfile::tempdir().unwrap();
-        write(tmp.path(), "nameless/SKILL.md", "---\n---\nbody only");
+        write(
+            tmp.path(),
+            "nameless/SKILL.md",
+            "---\nshort: fallback to the directory name\n---\nbody only",
+        );
         let src = FsSkillSource::new(tmp.path(), Layer::User);
         let skill = src.fetch("nameless").unwrap();
         assert_eq!(skill.manifest.name, "nameless");
@@ -515,7 +679,7 @@ mod tests {
         write(
             tmp.path(),
             "deploy/SKILL.md",
-            "---\nname: deploy\n---\nbody",
+            "---\nname: deploy\nshort: deploy the service\n---\nbody",
         );
         let src = FsSkillSource::new(tmp.path(), Layer::Manifest).with_namespace("acme/ops");
         let listed = src.list();
@@ -532,6 +696,20 @@ mod tests {
     }
 
     #[test]
+    fn fs_source_requires_short_card() {
+        let tmp = tempfile::tempdir().unwrap();
+        write(
+            tmp.path(),
+            "broken/SKILL.md",
+            "---\nname: broken\n---\nbody",
+        );
+        let src = FsSkillSource::new(tmp.path(), Layer::Project);
+        assert!(src.list().is_empty());
+        let err = src.fetch("broken").unwrap_err();
+        assert!(err.contains("`short`"), "{err}");
+    }
+
+    #[test]
     fn host_source_wraps_closures() {
         let host = HostSkillSource::new(
             || {
@@ -539,17 +717,20 @@ mod tests {
                     id: "h1".into(),
                     manifest: SkillManifest {
                         name: "h1".into(),
+                        short: "host-provided skill".into(),
                         ..Default::default()
                     },
                     layer: Layer::Host,
                     namespace: None,
                     origin: "host".into(),
+                    unknown_fields: Vec::new(),
                 }]
             },
             |id| {
                 Ok(Skill {
                     manifest: SkillManifest {
                         name: id.to_string(),
+                        short: "host-provided skill".into(),
                         ..Default::default()
                     },
                     body: "host body".into(),

@@ -23,7 +23,12 @@ use serde_yaml::Value as YamlValue;
 pub struct SkillManifest {
     /// Required. Must match the enclosing `SKILL.md`'s directory name
     /// (case-sensitive) in a well-formed skill bundle.
+    #[serde(default)]
     pub name: String,
+    /// Required. Compact one-line card that says what the skill does
+    /// and when to load it.
+    #[serde(default)]
+    pub short: String,
     /// One-line description surfaced to the model for auto-activation.
     #[serde(default)]
     pub description: String,
@@ -81,6 +86,7 @@ pub struct ParsedFrontmatter {
 
 const KNOWN_CANONICAL_KEYS: &[&str] = &[
     "name",
+    "short",
     "description",
     "when_to_use",
     "disable_model_invocation",
@@ -215,6 +221,9 @@ pub fn parse_frontmatter(yaml: &str) -> Result<ParsedFrontmatter, String> {
                  shapes: {e}"
             )
         })?;
+    if !yaml.trim().is_empty() && manifest.short.trim().is_empty() {
+        return Err("SKILL.md frontmatter requires a non-empty `short` field".to_string());
+    }
 
     Ok(ParsedFrontmatter {
         manifest,
@@ -273,6 +282,7 @@ mod tests {
     #[test]
     fn parses_canonical_fields() {
         let yaml = "name: deploy\n\
+                   short: \"Deploys the service when the user asks for a release\"\n\
                    description: \"Ship it\"\n\
                    when-to-use: \"when the user says deploy\"\n\
                    disable-model-invocation: true\n\
@@ -284,6 +294,10 @@ mod tests {
                    argument-hint: \"<target-env>\"\n";
         let parsed = parse_frontmatter(yaml).expect("parse");
         assert_eq!(parsed.manifest.name, "deploy");
+        assert_eq!(
+            parsed.manifest.short,
+            "Deploys the service when the user asks for a release"
+        );
         assert_eq!(parsed.manifest.description, "Ship it");
         assert_eq!(
             parsed.manifest.when_to_use.as_deref(),
@@ -304,7 +318,7 @@ mod tests {
 
     #[test]
     fn unknown_fields_surface_as_warnings_not_errors() {
-        let yaml = "name: hi\nfuture_field: future_value\n";
+        let yaml = "name: hi\nshort: Quick card\nfuture_field: future_value\n";
         let parsed = parse_frontmatter(yaml).expect("parse");
         assert_eq!(parsed.manifest.name, "hi");
         assert_eq!(parsed.unknown_fields, vec!["future_field"]);
@@ -312,8 +326,7 @@ mod tests {
 
     #[test]
     fn hooks_as_mapping_or_sequence() {
-        let mapping =
-            "name: hi\nhooks:\n  on-activate: \"echo up\"\n  on-deactivate: \"echo down\"\n";
+        let mapping = "name: hi\nshort: Quick card\nhooks:\n  on-activate: \"echo up\"\n  on-deactivate: \"echo down\"\n";
         let parsed = parse_frontmatter(mapping).expect("parse mapping");
         assert_eq!(parsed.manifest.hooks.len(), 2);
         assert_eq!(
@@ -321,7 +334,7 @@ mod tests {
             Some("echo up"),
         );
 
-        let sequence = "name: hi\nhooks:\n  - event: on-activate\n    command: \"echo up\"\n  - name: on-deactivate\n    run: \"echo down\"\n";
+        let sequence = "name: hi\nshort: Quick card\nhooks:\n  - event: on-activate\n    command: \"echo up\"\n  - name: on-deactivate\n    run: \"echo down\"\n";
         let parsed = parse_frontmatter(sequence).expect("parse sequence");
         assert_eq!(
             parsed.manifest.hooks.get("on-activate").map(String::as_str),
@@ -341,5 +354,11 @@ mod tests {
     fn rejects_non_mapping_top_level() {
         let err = parse_frontmatter("- just\n- a list\n").unwrap_err();
         assert!(err.contains("mapping"), "{err}");
+    }
+
+    #[test]
+    fn rejects_missing_short_field() {
+        let err = parse_frontmatter("name: hi\n").unwrap_err();
+        assert!(err.contains("`short`"), "{err}");
     }
 }

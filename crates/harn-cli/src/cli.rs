@@ -807,7 +807,7 @@ pub(crate) struct SkillsInstallArgs {
 pub(crate) struct SkillsNewArgs {
     /// Skill identifier (used as the directory name and default `name:`).
     pub name: String,
-    /// One-line description for the SKILL.md frontmatter.
+    /// One-line `short:` card for the SKILL.md frontmatter.
     #[arg(long)]
     pub description: Option<String>,
     /// Override the destination directory. Defaults to `.harn/skills/<name>/`.

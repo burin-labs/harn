@@ -158,12 +158,9 @@ impl LayeredDiscovery {
         let mut winners: Vec<SkillManifestRef> = winners_by_id.into_values().collect();
         winners.sort_by(|a, b| a.id.cmp(&b.id));
 
-        // Pull through unknown-fields diagnostics by hydrating each winner.
         for winner in &winners {
-            if let Ok(skill) = self.fetch_impl(&winner.id, &winners) {
-                if !skill.unknown_fields.is_empty() {
-                    unknown_fields.push((winner.id.clone(), skill.unknown_fields));
-                }
+            if !winner.unknown_fields.is_empty() {
+                unknown_fields.push((winner.id.clone(), winner.unknown_fields.clone()));
             }
         }
 
@@ -219,7 +216,7 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         fs::write(
             dir.join("SKILL.md"),
-            format!("---\nname: {name}\ndescription: {desc}\n---\nbody of {name}"),
+            format!("---\nname: {name}\nshort: {desc}\ndescription: {desc}\n---\nbody of {name}"),
         )
         .unwrap();
     }
@@ -323,18 +320,21 @@ mod tests {
                     id: "gamma".into(),
                     manifest: SkillManifest {
                         name: "gamma".into(),
+                        short: "host-only".into(),
                         description: "host-only".into(),
                         ..Default::default()
                     },
                     layer: Layer::Host,
                     namespace: None,
                     origin: "host".into(),
+                    unknown_fields: Vec::new(),
                 }]
             },
             |id| {
                 Ok(Skill {
                     manifest: SkillManifest {
                         name: id.to_string(),
+                        short: "host-only".into(),
                         description: "host-only".into(),
                         ..Default::default()
                     },

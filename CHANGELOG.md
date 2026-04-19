@@ -19,6 +19,14 @@ granular archaeology.
   `trigger.inbox` records on startup so existing orchestrator event
   logs keep working while new writes land only on the split topics.
 
+- **Two-tier skill loading for large registries (#217).** Filesystem
+  `SKILL.md` discovery now requires a compact `short:` frontmatter card
+  and keeps only the always-loaded metadata in the startup `skills`
+  registry. Full skill bodies move behind lazy loading via the new
+  `load_skill("name")` builtin, while `agent_loop`'s runtime
+  `load_skill({ name })` tool now hydrates those bodies on demand from
+  the same registry.
+
 - **Primary Harn docs site moved from `harn.burincode.com` to
   `harnlang.com`.** The burin-code-subdomain was always a stopgap;
   `harnlang.com` reflects Harn's identity as a standalone programming

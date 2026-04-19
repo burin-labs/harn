@@ -69,7 +69,11 @@ pub(crate) fn run_list(args: &SkillsListArgs) {
         println!("Resolved skills ({}):", report.winners.len());
         let id_width = report.winners.iter().map(|w| w.id.len()).max().unwrap_or(4);
         for winner in &report.winners {
-            let desc = &winner.manifest.description;
+            let desc = if winner.manifest.short.is_empty() {
+                &winner.manifest.description
+            } else {
+                &winner.manifest.short
+            };
             let short = if desc.is_empty() {
                 "(no description)".to_string()
             } else {
@@ -142,6 +146,9 @@ pub(crate) fn run_inspect(args: &SkillsInspectArgs) {
     println!("layer:       {}", skill.layer.label());
     if let Some(ns) = &skill.namespace {
         println!("namespace:   {ns}");
+    }
+    if !skill.manifest.short.is_empty() {
+        println!("short:       {}", skill.manifest.short);
     }
     if !skill.manifest.description.is_empty() {
         println!("description: {}", skill.manifest.description);
@@ -370,14 +377,15 @@ pub(crate) fn run_new(args: &SkillsNewArgs) {
         process::exit(1);
     }
 
-    let description = args
+    let short = args
         .description
         .clone()
-        .unwrap_or_else(|| format!("{} skill", args.name));
+        .unwrap_or_else(|| format!("Use the {} skill when this task is relevant.", args.name));
     let skill_md = format!(
         "---\n\
 name: {name}\n\
-description: {description}\n\
+short: {short}\n\
+# description: <optional longer summary>\n\
 # when_to_use: <one-line trigger hint for the matcher>\n\
 # allowed_tools: []\n\
 # paths: []\n\
@@ -396,7 +404,7 @@ Substitutions like `$ARGUMENTS`, `$1`, and `${{HARN_SKILL_DIR}}` are\n\
 expanded when the skill is activated. See docs/src/skills.md for\n\
 the full reference.\n",
         name = args.name,
-        description = description,
+        short = short,
     );
     let skill_path = dest.join("SKILL.md");
     if let Err(error) = fs::write(&skill_path, skill_md) {
@@ -554,6 +562,7 @@ fn skill_to_json(skill: &Skill) -> serde_json::Value {
     serde_json::json!({
         "id": skill.id(),
         "name": skill.manifest.name,
+        "short": skill.manifest.short,
         "description": skill.manifest.description,
         "when_to_use": skill.manifest.when_to_use,
         "layer": skill.layer.label(),
@@ -722,7 +731,11 @@ fn rank_skills(skills: &[Skill], prompt: &str, working_files: &[String]) -> Vec<
     for skill in skills {
         let mut score = 0.0_f64;
         let mut reasons: Vec<String> = Vec::new();
-        let description = skill.manifest.description.as_str();
+        let description = if skill.manifest.short.is_empty() {
+            skill.manifest.description.as_str()
+        } else {
+            skill.manifest.short.as_str()
+        };
         let when = skill.manifest.when_to_use.as_deref().unwrap_or("");
         let keyword_hits = count_hits(&tokens, description) + count_hits(&tokens, when);
         if keyword_hits > 0 {
