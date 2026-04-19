@@ -393,6 +393,8 @@ mod tests {
 
     #[tokio::test]
     async fn run_tests_uses_file_parent_as_execution_cwd_and_restores_shell_cwd() {
+        let _cwd_guard = crate::tests::common::cwd_lock::lock_cwd_async().await;
+        let _env_guard = crate::tests::common::env_lock::lock_env().lock().await;
         let temp = TempTestDir::new();
         temp.write(
             "suite/test_cwd.harn",
