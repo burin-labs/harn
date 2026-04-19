@@ -24,7 +24,70 @@ type SignatureFailed = {
 
 type SignatureStatus = SignatureVerified | SignatureUnsigned | SignatureFailed
 
-type GitHubEventPayload = {
+type GitHubIssuesEventPayload = {
+  provider: "github",
+  event: "issues",
+  action: string | nil,
+  delivery_id: string | nil,
+  installation_id: int | nil,
+  issue: dict,
+  raw: dict,
+}
+
+type GitHubPullRequestEventPayload = {
+  provider: "github",
+  event: "pull_request",
+  action: string | nil,
+  delivery_id: string | nil,
+  installation_id: int | nil,
+  pull_request: dict,
+  raw: dict,
+}
+
+type GitHubIssueCommentEventPayload = {
+  provider: "github",
+  event: "issue_comment",
+  action: string | nil,
+  delivery_id: string | nil,
+  installation_id: int | nil,
+  issue: dict,
+  comment: dict,
+  raw: dict,
+}
+
+type GitHubPullRequestReviewEventPayload = {
+  provider: "github",
+  event: "pull_request_review",
+  action: string | nil,
+  delivery_id: string | nil,
+  installation_id: int | nil,
+  pull_request: dict,
+  review: dict,
+  raw: dict,
+}
+
+type GitHubPushEventPayload = {
+  provider: "github",
+  event: "push",
+  action: string | nil,
+  delivery_id: string | nil,
+  installation_id: int | nil,
+  commits: list<dict>,
+  distinct_size: int | nil,
+  raw: dict,
+}
+
+type GitHubWorkflowRunEventPayload = {
+  provider: "github",
+  event: "workflow_run",
+  action: string | nil,
+  delivery_id: string | nil,
+  installation_id: int | nil,
+  workflow_run: dict,
+  raw: dict,
+}
+
+type GitHubOtherEventPayload = {
   provider: "github",
   event: string,
   action: string | nil,
@@ -32,6 +95,8 @@ type GitHubEventPayload = {
   installation_id: int | nil,
   raw: dict,
 }
+
+type GitHubEventPayload = GitHubIssuesEventPayload | GitHubPullRequestEventPayload | GitHubIssueCommentEventPayload | GitHubPullRequestReviewEventPayload | GitHubPushEventPayload | GitHubWorkflowRunEventPayload | GitHubOtherEventPayload
 
 type SlackEventPayload = {
   provider: "slack",

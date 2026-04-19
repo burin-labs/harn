@@ -564,13 +564,18 @@ fn derive_run_observability_adds_replay_chain_for_replayed_trigger_runs() {
         headers: BTreeMap::new(),
         provider_payload: crate::triggers::ProviderPayload::Known(
             crate::triggers::event::KnownProviderPayload::GitHub(
-                crate::triggers::GitHubEventPayload {
-                    event: "issues".to_string(),
-                    action: Some("opened".to_string()),
-                    delivery_id: Some("delivery-replay".to_string()),
-                    installation_id: Some(7),
-                    raw: serde_json::json!({"action":"opened"}),
-                },
+                crate::triggers::GitHubEventPayload::Issues(
+                    crate::triggers::event::GitHubIssuesEventPayload {
+                        common: crate::triggers::event::GitHubEventCommon {
+                            event: "issues".to_string(),
+                            action: Some("opened".to_string()),
+                            delivery_id: Some("delivery-replay".to_string()),
+                            installation_id: Some(7),
+                            raw: serde_json::json!({"action":"opened"}),
+                        },
+                        issue: serde_json::json!({}),
+                    },
+                ),
             ),
         ),
         signature_status: crate::triggers::SignatureStatus::Verified,

@@ -83,6 +83,7 @@ pub fn is_untyped_boundary_source(name: &str) -> bool {
             | "http_delete"
             | "http_request"
             | "host_call"
+            | "connector_call"
             | "mcp_call"
     )
 }

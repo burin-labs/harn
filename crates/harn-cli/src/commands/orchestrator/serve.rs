@@ -233,9 +233,10 @@ async fn initialize_connectors(
 
     // `ConnectorRegistry::default()` pre-populates connectors for every
     // provider in the catalog (cron -> CronConnector, webhook-based ->
-    // GenericWebhookConnector, etc.). We only need to register a
-    // PlaceholderConnector for providers that are referenced by a trigger
-    // but *not* already in the catalog (skip-if-already-registered).
+    // GenericWebhookConnector, github -> GitHubConnector, etc.). We only
+    // need to register a PlaceholderConnector for providers that are
+    // referenced by a trigger but *not* already in the catalog
+    // (skip-if-already-registered).
     let mut providers = Vec::new();
     for (provider, kinds) in grouped_kinds {
         let provider_name = provider.as_str().to_string();

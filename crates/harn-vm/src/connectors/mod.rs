@@ -5,6 +5,7 @@
 //! connector ecosystem grows enough to justify extraction, the module can be
 //! split into a dedicated crate later without changing the high-level contract.
 
+use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -26,12 +27,14 @@ use crate::triggers::{
 };
 
 pub mod cron;
+pub mod github;
 pub mod hmac;
 #[cfg(test)]
 pub(crate) mod test_util;
 pub mod webhook;
 
 pub use cron::{CatchupMode, CronConnector};
+pub use github::GitHubConnector;
 pub use hmac::{
     verify_hmac_authorization, HmacSignatureStyle, DEFAULT_CANONICAL_AUTHORIZATION_HEADER,
     DEFAULT_CANONICAL_HMAC_SCHEME, DEFAULT_GITHUB_SIGNATURE_HEADER,
@@ -44,6 +47,11 @@ pub use webhook::{GenericWebhookConnector, WebhookSignatureVariant};
 
 /// Shared owned handle to a connector instance registered with the runtime.
 pub type ConnectorHandle = Arc<AsyncMutex<Box<dyn Connector>>>;
+
+thread_local! {
+    static ACTIVE_CONNECTOR_CLIENTS: RefCell<BTreeMap<String, Arc<dyn ConnectorClient>>> =
+        RefCell::new(BTreeMap::new());
+}
 
 /// Provider implementation contract for inbound connectors.
 #[async_trait]
@@ -362,6 +370,10 @@ impl TriggerRegistry {
             .push(binding);
     }
 
+    pub fn bindings(&self) -> &BTreeMap<ProviderId, Vec<TriggerBinding>> {
+        &self.bindings
+    }
+
     pub fn bindings_for(&self, provider: &ProviderId) -> &[TriggerBinding] {
         self.bindings
             .get(provider)
@@ -595,6 +607,22 @@ impl ConnectorRegistry {
         self.connectors.keys().cloned().collect()
     }
 
+    pub async fn init_all(&self, ctx: ConnectorCtx) -> Result<(), ConnectorError> {
+        for connector in self.connectors.values() {
+            connector.lock().await.init(ctx.clone()).await?;
+        }
+        Ok(())
+    }
+
+    pub async fn client_map(&self) -> BTreeMap<ProviderId, Arc<dyn ConnectorClient>> {
+        let mut clients = BTreeMap::new();
+        for (provider, connector) in &self.connectors {
+            let client = connector.lock().await.client();
+            clients.insert(provider.clone(), client);
+        }
+        clients
+    }
+
     pub async fn activate_all(
         &self,
         registry: &TriggerRegistry,
@@ -619,6 +647,18 @@ impl Default for ConnectorRegistry {
 }
 
 fn default_connector_for_provider(provider: &ProviderMetadata) -> Box<dyn Connector> {
+    // The provider catalog on main registers `github` with
+    // ProviderRuntimeMetadata::Builtin { connector: "webhook", ... } so that
+    // before a native connector existed the catalog auto-wired a
+    // GenericWebhookConnector. Now that #170 lands a first-class
+    // GitHubConnector (inbound HMAC + GitHub App outbound), we short-circuit
+    // provider_id "github" here and return the native connector instead of a
+    // webhook-backed fallback. This keeps manifests that say
+    // `provider = "github"` pointed at the new connector without requiring
+    // users to switch to a distinct provider_id.
+    if provider.provider == "github" {
+        return Box::new(GitHubConnector::new());
+    }
     match &provider.runtime {
         ProviderRuntimeMetadata::Builtin {
             connector,
@@ -714,6 +754,23 @@ impl Connector for PlaceholderConnector {
     fn client(&self) -> Arc<dyn ConnectorClient> {
         Arc::new(PlaceholderClient)
     }
+}
+
+pub fn install_active_connector_clients(clients: BTreeMap<ProviderId, Arc<dyn ConnectorClient>>) {
+    ACTIVE_CONNECTOR_CLIENTS.with(|slot| {
+        *slot.borrow_mut() = clients
+            .into_iter()
+            .map(|(provider, client)| (provider.as_str().to_string(), client))
+            .collect();
+    });
+}
+
+pub fn active_connector_client(provider: &str) -> Option<Arc<dyn ConnectorClient>> {
+    ACTIVE_CONNECTOR_CLIENTS.with(|slot| slot.borrow().get(provider).cloned())
+}
+
+pub fn clear_active_connector_clients() {
+    ACTIVE_CONNECTOR_CLIENTS.with(|slot| slot.borrow_mut().clear());
 }
 
 #[cfg(test)]

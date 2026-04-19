@@ -4,6 +4,10 @@ use super::{BuiltinReturn, BuiltinSig, UNION_STRING_NIL};
 
 pub(crate) const SIGNATURES: &[BuiltinSig] = &[
     BuiltinSig {
+        name: "connector_call",
+        return_type: None,
+    },
+    BuiltinSig {
         name: "exec",
         return_type: Some(BuiltinReturn::Named("dict")),
     },

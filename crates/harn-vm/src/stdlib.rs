@@ -5,6 +5,7 @@ pub mod agent_state;
 mod agents;
 mod agents_daemon;
 mod concurrency;
+mod connectors;
 mod crypto;
 mod datetime;
 mod fs;
@@ -74,6 +75,7 @@ pub fn register_io_stdlib(vm: &mut Vm) {
 /// Register agent builtins (requires network access and async runtime).
 pub fn register_agent_stdlib(vm: &mut Vm) {
     concurrency::register_concurrency_builtins(vm);
+    connectors::register_connector_builtins(vm);
     tools::register_tool_builtins(vm);
     skills::register_skill_builtins(vm);
     agents_daemon::register_daemon_builtins(vm);

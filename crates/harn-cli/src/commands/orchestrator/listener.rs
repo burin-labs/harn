@@ -714,7 +714,7 @@ fn infer_occurred_at(payload: &harn_vm::ProviderPayload) -> Option<OffsetDateTim
         return None;
     };
     let raw = match payload {
-        harn_vm::triggers::event::KnownProviderPayload::GitHub(payload) => &payload.raw,
+        harn_vm::triggers::event::KnownProviderPayload::GitHub(payload) => github_raw(payload),
         harn_vm::triggers::event::KnownProviderPayload::Webhook(payload) => &payload.raw,
         harn_vm::triggers::event::KnownProviderPayload::A2aPush(payload) => &payload.raw,
         _ => return None,
@@ -724,6 +724,18 @@ fn infer_occurred_at(payload: &harn_vm::ProviderPayload) -> Option<OffsetDateTim
         .and_then(|value| {
             OffsetDateTime::parse(value, &time::format_description::well_known::Rfc3339).ok()
         })
+}
+
+fn github_raw(payload: &harn_vm::triggers::event::GitHubEventPayload) -> &JsonValue {
+    match payload {
+        harn_vm::triggers::event::GitHubEventPayload::Issues(inner) => &inner.common.raw,
+        harn_vm::triggers::event::GitHubEventPayload::PullRequest(inner) => &inner.common.raw,
+        harn_vm::triggers::event::GitHubEventPayload::IssueComment(inner) => &inner.common.raw,
+        harn_vm::triggers::event::GitHubEventPayload::PullRequestReview(inner) => &inner.common.raw,
+        harn_vm::triggers::event::GitHubEventPayload::Push(inner) => &inner.common.raw,
+        harn_vm::triggers::event::GitHubEventPayload::WorkflowRun(inner) => &inner.common.raw,
+        harn_vm::triggers::event::GitHubEventPayload::Other(common) => &common.raw,
+    }
 }
 
 fn header_value<'a>(headers: &'a BTreeMap<String, String>, name: &str) -> Option<&'a str> {

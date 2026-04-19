@@ -1,0 +1,68 @@
+import {
+  add_labels,
+  comment,
+  configure,
+  create_issue,
+  get_pr_diff,
+  list_stale_prs,
+  merge_pr,
+  request_review,
+  reset,
+} from "std/connectors/github"
+import { process_exec } from "std/runtime"
+
+fn wait_for_file(path, attempts) {
+  var remaining = attempts
+  while !file_exists(path) && remaining > 0 {
+    sleep(50ms)
+    remaining = remaining - 1
+  }
+  assert(file_exists(path), "timed out waiting for " + path)
+}
+
+pipeline default() {
+  let root = project_root() ?? cwd()
+  let helper_dir = path_join(root, "conformance/helpers")
+  let server_script = path_join(helper_dir, "github_mock_server.py")
+  let key_path = path_join(helper_dir, "github_app_test_key.pem")
+  let state_dir = path_join(temp_dir(), "harn-github-connector-" + uuid())
+  let port_path = path_join(state_dir, "port")
+  let pid_path = path_join(state_dir, "server.pid")
+  let log_path = path_join(state_dir, "server.log")
+  mkdir(state_dir)
+  let start = process_exec(
+    "python3 \"" + server_script + "\" \"" + state_dir + "\" >\"" + log_path
+    + "\" 2>&1 & echo $! > \""
+    + pid_path
+    + "\"",
+  )
+  assert(start?.success, "github mock server started")
+  wait_for_file(port_path, 100)
+  let base = "http://127.0.0.1:" + read_file(port_path).trim()
+  configure(
+    {app_id: 123, installation_id: 77, api_base_url: base, private_key_pem: read_file(key_path)},
+  )
+  let comment_result = comment("https://github.com/octo/demo/issues/123", "hello from harn")
+  let labels_result = add_labels("https://github.com/octo/demo/issues/123", ["bug", "triage"])
+  let review_result = request_review("https://github.com/octo/demo/pull/123", ["alice"])
+  let merge_result = merge_pr("https://github.com/octo/demo/pull/123", {merge_method: "squash", admin_override: true})
+  let stale_result = list_stale_prs("octo/demo", 14)
+  let diff_result = get_pr_diff("https://github.com/octo/demo/pull/123")
+  let issue_result = create_issue("octo/demo", "new issue", "body", ["bug"])
+  let state = json_parse(http_get(base + "/__state").body)
+  let _stop = http_post(base + "/__shutdown", "")
+  process_exec("kill $(cat \"" + pid_path + "\") >/dev/null 2>&1 || true")
+  reset()
+  println(comment_result.id)
+  println(len(labels_result))
+  println(review_result.requested_reviewers[0])
+  println(merge_result.admin_override_requested)
+  println(stale_result.total_count)
+  println(diff_result.starts_with("diff --git"))
+  println(issue_result.number)
+  println(state.token_requests)
+  println(len(state.api_requests))
+  println(contains(state.api_requests[4].query.q, "repo:octo/demo"))
+  println(state.api_requests[3].body.merge_method)
+  println(state.api_requests[6].path)
+}

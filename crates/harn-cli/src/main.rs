@@ -11,6 +11,7 @@ mod tests;
 
 use clap::{error::ErrorKind, CommandFactory, Parser as ClapParser};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::{env, fs, process};
 
 use cli::{Cli, Command, RunsCommand, SkillsCommand};
@@ -1013,7 +1014,11 @@ pub(crate) async fn execute(source: &str, source_path: Option<&Path>) -> Result<
                     .await
                     .map_err(|error| format!("failed to install manifest hooks: {error}"))?;
             }
+            install_default_connector_clients(store_base)
+                .await
+                .map_err(|error| format!("failed to initialize connector clients: {error}"))?;
             let execution_result = vm.execute(&chunk).await.map_err(|e| e.to_string());
+            harn_vm::clear_active_connector_clients();
             harn_vm::stdlib::process::set_thread_execution_context(None);
             execution_result?;
             let mut output = String::new();
@@ -1025,4 +1030,49 @@ pub(crate) async fn execute(source: &str, source_path: Option<&Path>) -> Result<
             Ok(output)
         })
         .await
+}
+
+async fn install_default_connector_clients(base_dir: &Path) -> Result<(), String> {
+    let event_log = harn_vm::event_log::active_event_log()
+        .unwrap_or_else(|| harn_vm::event_log::install_memory_for_current_thread(64));
+    let secret_namespace = connector_secret_namespace(base_dir);
+    let secrets: Arc<dyn harn_vm::secrets::SecretProvider> = Arc::new(
+        harn_vm::secrets::configured_default_chain(secret_namespace)
+            .map_err(|error| format!("failed to configure secret providers: {error}"))?,
+    );
+
+    let registry = harn_vm::ConnectorRegistry::default();
+    let metrics = Arc::new(harn_vm::MetricsRegistry::default());
+    let inbox = Arc::new(
+        harn_vm::InboxIndex::new(event_log.clone(), metrics.clone())
+            .await
+            .map_err(|error| error.to_string())?,
+    );
+    registry
+        .init_all(harn_vm::ConnectorCtx {
+            event_log,
+            secrets,
+            inbox,
+            metrics,
+            rate_limiter: Arc::new(harn_vm::RateLimiterFactory::default()),
+        })
+        .await
+        .map_err(|error| error.to_string())?;
+    let clients = registry.client_map().await;
+    harn_vm::install_active_connector_clients(clients);
+    Ok(())
+}
+
+fn connector_secret_namespace(base_dir: &Path) -> String {
+    match std::env::var("HARN_SECRET_NAMESPACE") {
+        Ok(namespace) if !namespace.trim().is_empty() => namespace,
+        _ => {
+            let leaf = base_dir
+                .file_name()
+                .and_then(|name| name.to_str())
+                .filter(|name| !name.is_empty())
+                .unwrap_or("workspace");
+            format!("harn/{leaf}")
+        }
+    }
 }

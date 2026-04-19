@@ -21,6 +21,7 @@ pub fn get_stdlib_source(module: &str) -> Option<&'static str> {
         "worktree" => Some(include_str!("stdlib_worktree.harn")),
         "acp" => Some(include_str!("stdlib_acp.harn")),
         "triggers" => Some(include_str!("stdlib_triggers.harn")),
+        "connectors/github" => Some(include_str!("stdlib_connectors_github.harn")),
         _ => None,
     }
 }

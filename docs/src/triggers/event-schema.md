@@ -10,8 +10,8 @@ import "std/triggers"
 
 fn on_event(event: TriggerEvent) {
   let payload = event.provider_payload
-  if payload.provider == "github" {
-    println(payload.action ?? "unknown")
+  if payload.provider == "github" && payload.event == "issues" {
+    println(payload.issue.title ?? "unknown")
   }
 
   let signature = event.signature_status
@@ -51,7 +51,11 @@ still be logged for audit purposes even if the dispatcher rejects them.
 ## Provider payloads
 
 The initial `std/triggers` payload aliases are intentionally small. Each
-provider variant exposes a stable normalized surface plus `raw: dict`:
+provider variant exposes a stable normalized surface plus `raw: dict`. GitHub's
+payload is already narrowed into the six MVP event families (`issues`,
+`pull_request`, `issue_comment`, `pull_request_review`, `push`, and
+`workflow_run`) with event-specific top-level fields such as `issue`,
+`pull_request`, `comment`, `review`, `commits`, and `workflow_run`:
 
 - `GitHubEventPayload`
 - `SlackEventPayload`
