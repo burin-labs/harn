@@ -1036,6 +1036,55 @@ fn microcompact_artifact_snips_oversized() {
 }
 
 #[test]
+fn select_artifacts_adaptive_drops_stale_evidence_after_fresh_write() {
+    let selected = select_artifacts_adaptive(
+        vec![
+            ArtifactRecord {
+                id: "research-index".to_string(),
+                kind: "summary".to_string(),
+                text: Some("index.ts currently exports only authGuard".to_string()),
+                freshness: Some("normal".to_string()),
+                metadata: BTreeMap::from([(
+                    "evidence_paths".to_string(),
+                    serde_json::json!(["packages/server/src/middleware/index.ts"]),
+                )]),
+                ..Default::default()
+            },
+            ArtifactRecord {
+                id: "research-api".to_string(),
+                kind: "summary".to_string(),
+                text: Some("api.ts currently uses withMiddleware".to_string()),
+                freshness: Some("normal".to_string()),
+                metadata: BTreeMap::from([(
+                    "evidence_paths".to_string(),
+                    serde_json::json!(["packages/server/src/routes/api.ts"]),
+                )]),
+                ..Default::default()
+            },
+            ArtifactRecord {
+                id: "batch-2".to_string(),
+                kind: "summary".to_string(),
+                text: Some("Updated middleware/index.ts to export rateLimit".to_string()),
+                freshness: Some("fresh".to_string()),
+                metadata: BTreeMap::from([(
+                    "changed_paths".to_string(),
+                    serde_json::json!(["packages/server/src/middleware/index.ts"]),
+                )]),
+                ..Default::default()
+            },
+        ],
+        &ContextPolicy::default(),
+    );
+    let ids: Vec<_> = selected
+        .iter()
+        .map(|artifact| artifact.id.as_str())
+        .collect();
+    assert!(!ids.contains(&"research-index"), "ids={ids:?}");
+    assert!(ids.contains(&"research-api"), "ids={ids:?}");
+    assert!(ids.contains(&"batch-2"), "ids={ids:?}");
+}
+
+#[test]
 fn arg_constraint_allows_matching_pattern() {
     let policy = CapabilityPolicy {
         tool_arg_constraints: vec![ToolArgConstraint {

@@ -472,13 +472,21 @@ pub(super) async fn run_llm_call(
             .get("arguments")
             .cloned()
             .unwrap_or(serde_json::json!({}));
-        let result_text = match state.task_ledger.apply(&args) {
-            Ok(summary) => {
-                state.all_tools_used.push("ledger".to_string());
-                state.successful_tools_used.push("ledger".to_string());
-                format!("<tool_result>ledger: {summary}</tool_result>")
+        let result_text = if state.task_ledger.is_empty() {
+            if !state.rejected_tools.contains(&"ledger".to_string()) {
+                state.rejected_tools.push("ledger".to_string());
             }
-            Err(err) => format!("<tool_result>ledger error: {err}</tool_result>"),
+            "<tool_result>ledger unavailable: no task ledger is active in this turn</tool_result>"
+                .to_string()
+        } else {
+            match state.task_ledger.apply(&args) {
+                Ok(summary) => {
+                    state.all_tools_used.push("ledger".to_string());
+                    state.successful_tools_used.push("ledger".to_string());
+                    format!("<tool_result>ledger: {summary}</tool_result>")
+                }
+                Err(err) => format!("<tool_result>ledger error: {err}</tool_result>"),
+            }
         };
         ledger_tool_results.push(serde_json::json!({
             "role": "user",

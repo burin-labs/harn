@@ -7,6 +7,7 @@ import {
   generator_options,
   normalize_plan,
   normalize_research_fact,
+  parse_json_object,
   plan_to_action_graph,
   planner_schema,
   provider_name,
@@ -33,6 +34,7 @@ fn read_search_tools() {
     "search",
     "Search the workspace with ripgrep.",
     {
+    policy: {kind: "search"},
     parameters: {query: {type: "string"}},
     returns: {type: "string"},
     handler: { args -> search_workspace(args.query) },
@@ -43,6 +45,7 @@ fn read_search_tools() {
     "read",
     "Read one workspace file.",
     {
+    policy: {kind: "read", path_params: ["path"]},
     parameters: {path: {type: "string"}},
     returns: {type: "string"},
     handler: { args -> read_workspace(args.path) },
@@ -58,6 +61,7 @@ fn edit_tools() {
     "write",
     "Write one workspace file.",
     {
+    policy: {kind: "edit", path_params: ["path"]},
     parameters: {path: {type: "string"}, content: {type: "string"}},
     returns: {type: "string"},
     handler: { args -> write_workspace(args.path, args.content) },
@@ -68,6 +72,7 @@ fn edit_tools() {
     "run",
     "Run one shell command inside the workspace.",
     {
+    policy: {kind: "execute"},
     parameters: {command: {type: "string"}},
     returns: {type: "object"},
     handler: { args -> run_workspace(args.command) },
@@ -80,10 +85,10 @@ fn verify_tools() {
   return edit_tools()
 }
 
-fn planner_prompt(task, workspace_root, profile, facts, round_no) {
+fn planner_prompt(task, workspace_root, profile, facts, round_no, force_ready) {
   return "[planner][task_id=${profile?.id}][token=${round_no}]\n"
     + "Task: ${task}\n"
-    + "Workspace root: ${workspace_root}\n"
+    + "Workspace: current workspace only (use workspace-relative paths only; never emit absolute filesystem paths)\n"
     + "Mode: ${profile?.mode}\n"
     + "Target paths:\n${render_list(profile?.target_paths ?? [])}\n"
     + "Writable paths:\n${render_list(profile?.write_paths ?? [])}\n"
@@ -95,6 +100,14 @@ fn planner_prompt(task, workspace_root, profile, facts, round_no) {
     + "Current facts:\n${render_facts(facts)}\n"
     + "Research tool names may only be: read, search.\n"
     + "Action tool names may only be: read, search, write, run.\n"
+    + if force_ready {
+    "Research budget is exhausted for this task.\n"
+    + "Do not ask more research questions.\n"
+    + "Return the best concrete action list you can support from the current facts, target paths, verifier contract, and completion bar.\n"
+    + "If a write batch may need one supporting read later, encode that in the action via allowed_tools instead of requesting another planner research round.\n"
+  } else {
+    ""
+  }
     + "Return strict JSON only with exactly these keys:\n"
     + "- ready: bool\n"
     + "- plan_summary: string\n"
@@ -103,7 +116,7 @@ fn planner_prompt(task, workspace_root, profile, facts, round_no) {
     + "- actions: [{id, title, task, depends_on, allowed_tools, target_paths?, command?}]\n"
 }
 
-fn planner_system() {
+fn planner_system(force_ready) {
   return "You are the DFS planner for a coding-agent playground experiment.\n"
     + "Think like a cheap, disciplined harness engineer.\n"
     + "Rules:\n"
@@ -111,24 +124,35 @@ fn planner_system() {
     + "- Prefer the minimum research needed before concrete action.\n"
     + "- Before asking new research questions, treat target paths, writable paths, and the verifier contract as already-known context.\n"
     + "- Treat the current facts and verifier contract as authoritative.\n"
+    + "- Emit workspace-relative paths only. Never emit absolute filesystem paths or placeholder roots like `/workspace`.\n"
     + "- Ask at most 2 research questions per round, and only for facts that block a concrete write plan.\n"
     + "- If the current facts already support a concrete plan, stop researching and move to actions.\n"
+    + "- Do not block planning on local syntax or signature details that a scoped execute batch can read from an immediate sibling file later.\n"
+    + "- If the target file already shows the local composition point, prefer a local nested/composed edit over redesigning helper signatures or researching alternate architectures.\n"
     + "- When not ready, emit only the next research questions.\n"
     + "- When ready, emit a concrete action list with explicit dependencies.\n"
     + "- Every action.task must be a full executable instruction sentence, never just `write`, `edit`, or `run`.\n"
     + "- Every write action must name its exact target_paths.\n"
+    + "- Omit optional fields instead of emitting `null`. In particular, only include `command` on run actions.\n"
     + "- Route-wiring and verification actions must depend on the file-creation or export steps they rely on.\n"
     + "- Use the verifier-exact identifiers and text. Do not invent alternate names.\n"
     + "- Do not ask to inspect the verify script when the verifier contract already names the required identifiers, paths, and text.\n"
     + "- Do not keep researching files already covered by the current facts unless an exact missing fact still blocks implementation.\n"
     + "- Do not restate guesses as facts. If something is unknown, make it the next research question instead.\n"
+    + "- Do not treat a currently single-argument helper as a planning blocker when the requested change can be expressed by nesting or locally composing the existing helper in the target file.\n"
     + "- For read-only tasks, leave actions empty and put the user-facing answer in final_response.\n"
+    + if force_ready {
+    "- Research budget is exhausted. Return `ready: true` with the best concrete action graph you can justify from the existing facts.\n"
+    + "- Do not emit more research questions in this final planning pass.\n"
+  } else {
+    ""
+  }
     + "- Return strict JSON only."
 }
 
 fn research_prompt(workspace_root, profile, question) {
   return "[research][task_id=${profile?.id}][token=${question?.id}]\n"
-    + "Workspace root: ${workspace_root}\n"
+    + "Workspace: current workspace only (all paths must be workspace-relative)\n"
     + "Research question: ${question?.question}\n"
     + "Allowed tool names: ${render_csv(question?.tools ?? [])}\n"
     + "Return strict JSON only with keys: question, answer, evidence_paths, next_steps."
@@ -146,14 +170,19 @@ fn research_system() {
     + "If you have not yet gathered evidence for the question, use a tool before answering.\n"
     + "Ground every claim in tool results from this run. If the tool output does not show it, say you could not verify it.\n"
     + "Do not speculate from prior coding patterns or framework defaults.\n"
-    + "Never write. Return strict JSON only."
+    + "Do not recommend hypothetical redesigns, wrappers, or future edits. Report only what the current file shows.\n"
+    + "Do not say what the code 'would need' unless the tool output shows an explicit requirement.\n"
+    + "Never write.\n"
+    + "Before evidence is gathered, respond with tool calls only.\n"
+    + "Once the evidence is gathered, return the final answer as strict JSON only."
 }
 
 fn execute_system() {
   return "You are executing a scheduled DFS/queue action-graph batch.\n"
     + "Use the action instructions, research artifacts, and injected verifier contract as the source of truth.\n"
-    + "Stay oriented on both the current stage deliverable and the end-to-end task outcome.\n"
-    + "Read every existing file before you rewrite it.\n"
+    + "The scheduler owns queue order; your job is to complete only the current batch deliverable.\n"
+    + "Treat the end-to-end task outcome as a quality bar, not as permission to do later batches early.\n"
+    + "Read an existing target file before rewriting it only when the current batch instructions or carried evidence do not already show the required structure.\n"
     + "Keep the existing architecture intact; do not replace files with generic framework boilerplate.\n"
     + "Never edit files outside the action instructions or verifier-required paths.\n"
     + "Use verifier-exact identifiers and required text verbatim.\n"
@@ -169,14 +198,21 @@ fn execute_system() {
     + "Do not emit any additional visible prose after the final `<user_response>` block."
 }
 
-fn run_planner(task, workspace_root, profile, facts, round_no) {
+fn run_planner(task, workspace_root, profile, facts, round_no, force_ready) {
   let result = sub_agent_run(
-    planner_prompt(task, workspace_root, profile, facts, round_no),
-    generator_options(planner_system(), tool_registry(), [])
+    planner_prompt(task, workspace_root, profile, facts, round_no, force_ready),
+    generator_options(planner_system(force_ready), tool_registry(), [])
     + {response_format: "json", returns: {schema: planner_schema()}},
   )
   if result?.ok {
-    return {ok: true, error: nil, data: normalize_plan(profile, result?.data ?? {})}
+    let parsed = result?.data ?? parse_json_object(result?.summary ?? "")
+    return {ok: true, error: nil, data: normalize_plan(profile, parsed)}
+  }
+  let recovered = normalize_plan(profile, parse_json_object(result?.summary ?? ""))
+  if type_of(recovered?.ready) == "bool" || len(recovered?.questions ?? []) > 0
+    || len(recovered?.actions ?? []) > 0
+    || trim(recovered?.plan_summary ?? "") != "" {
+    return {ok: true, error: nil, data: recovered}
   }
   return {ok: false, error: result?.error ?? {message: result?.summary ?? "planner failed"}, data: {}}
 }
@@ -197,49 +233,10 @@ fn run_research(workspace_root, profile, question) {
   return {ok: false, error: result?.error ?? {message: result?.summary ?? "research failed"}, data: {}}
 }
 
-fn run_research_background(workspace_root, profile, question) {
-  return sub_agent_run(
-    research_prompt(workspace_root, profile, question),
-    {
-    provider: provider_name(),
-    model: generator_model(),
-    system: research_system(),
-    tools: read_search_tools(),
-    allowed_tools: question?.tools ?? [],
-    tool_format: "native",
-    response_format: "json",
-    returns: {schema: research_schema()},
-    temperature: 0,
-    turn_policy: {require_action_or_yield: true, allow_done_sentinel: true},
-    max_iterations: 6,
-    background: true,
-    name: "research-${question?.id}",
-    questions: [question],
-    request: {question_id: question?.id ?? ""},
-  },
-  )
-}
-
 fn collect_research_batch(workspace_root, profile, questions) {
-  if len(questions) == 0 {
-    return []
-  }
-  if len(questions) == 1 {
-    let result = run_research(workspace_root, profile, questions[0])
-    if result?.ok {
-      return [result?.data]
-    }
-    return []
-  }
-  let handles = parallel each questions with { max_concurrent: 4 } { question ->
-    run_research_background(workspace_root, profile, question)
-  }
-  let done = wait_agent(handles)
   var facts = []
-  for worker in done {
-    let request = worker_request(worker) ?? {}
-    let question = (request?.research_questions ?? [])[0] ?? {}
-    let result = worker_result(worker) ?? {}
+  for question in questions {
+    let result = run_research(workspace_root, profile, question)
     if result?.ok {
       facts = facts + [normalize_research_fact(question, result?.data ?? {})]
     }
@@ -264,31 +261,17 @@ fn bounded_questions(profile, questions) {
 
 fn research_artifacts(facts, profile) {
   var artifacts = []
-  if len(facts) > 0 {
+  for fact in facts {
     artifacts = artifacts
       + [
       artifact(
       {
       kind: "summary",
-      title: "Grounded research facts",
-      text: render_facts(facts),
-      data: {facts: facts},
+      title: "Grounded research fact",
+      text: render_facts([fact]),
+      data: {fact: fact},
       relevance: 1.0,
-    },
-    ),
-    ]
-  }
-  let contract_text = render_verification_contract(profile)
-  if contract_text != "(none)" {
-    artifacts = artifacts
-      + [
-      artifact(
-      {
-      kind: "summary",
-      title: "Verifier contract",
-      text: contract_text,
-      data: verification_contract(profile),
-      relevance: 1.0,
+      metadata: {evidence_paths: fact?.evidence_paths ?? []},
     },
     ),
     ]
@@ -326,7 +309,7 @@ fn graph_execute_template() {
     max_iterations: 8,
     turn_policy: {require_action_or_yield: true, allow_done_sentinel: true, max_prose_chars: 360},
   },
-    output_contract: {output_kinds: ["artifact"]},
+    output_contract: {output_kinds: ["summary"]},
   }
 }
 
@@ -387,7 +370,9 @@ fn run_read_only_evaluator(task, workspace_root, profile, plan, facts, final_res
     + {response_format: "json"},
   )
   if result?.ok {
-    return result?.data ?? {}
+    let data = result?.data ?? {}
+    return data
+      + {verdict: lowercase(trim(data?.verdict ?? "unknown"))}
   }
   return {verdict: "fail", reason: result?.error?.message ?? result?.summary ?? "evaluation failed"}
 }
@@ -500,7 +485,7 @@ pipeline default() {
   let root = workspace_root()
   let profile = profile_for_task(request)
   var facts = []
-  var planning = run_planner(request, root, profile, facts, 1)?.data ?? {}
+  var planning = run_planner(request, root, profile, facts, 1, false)?.data ?? {}
   var rounds = 0
   let max_rounds = profile?.max_rounds ?? 2
   while rounds < max_rounds {
@@ -515,10 +500,16 @@ pipeline default() {
       facts = facts + [fact]
     }
     rounds = rounds + 1
-    let plan_result = run_planner(request, root, profile, facts, rounds + 1)
+    let plan_result = run_planner(request, root, profile, facts, rounds + 1, false)
     planning = plan_result?.data ?? planning
     if !plan_result?.ok {
       break
+    }
+  }
+  if !planning?.ready && len(facts) > 0 && profile?.mode != "read_only" {
+    let commit_result = run_planner(request, root, profile, facts, rounds + 2, true)
+    if commit_result?.ok {
+      planning = commit_result?.data ?? planning
     }
   }
   var execution = nil

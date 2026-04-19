@@ -35,6 +35,29 @@ granular archaeology.
   events through both transcript observability and the live
   `agent_subscribe` stream.
 
+### Changed
+
+- **Burin Mini live-eval planner/batching stabilization (#193).**
+  Planner normalization now folds verify actions into a single
+  run-only verify batch instead of leaking them into execute/write
+  batches, tolerates recoverable planner JSON nulls, and forces a
+  final planner commit pass once the research budget is exhausted.
+  Research/planner prompts disambiguate local composition vs.
+  architecture redesign, and speculative research-worker advice is
+  dropped. Two transcript-derived `#[ignore]`'d regressions lock the
+  weak-verify-plan and over-researching-planner behaviors.
+- **`approval_policy.write_path_allowlist` no longer blocks read-only
+  tools (#193).** The allowlist now gates only write-class tools
+  (`edit`, `write`, `delete`, `move`); `read`/`look`/`search`/`run`
+  traffic is unaffected. Action batches also auto-inject the
+  allowlist from declared target paths so downstream pipelines don't
+  have to wire it by hand — downstream consumers should audit any
+  place they relied on the old (stricter) gate.
+- **`ledger` tool now fails fast when no task ledger is active
+  (#193).** Previously returned a silent empty result; now surfaces a
+  typed error so pipelines learn about the missing context instead
+  of silently producing empty plans.
+
 ## v0.7.21
 
 ### Added

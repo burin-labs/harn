@@ -484,6 +484,68 @@ async fn user_response_block_can_complete_persistent_loop_without_done_sentinel(
     reset_llm_mock_state();
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn ledger_tool_is_rejected_when_no_task_ledger_is_active() {
+    reset_llm_mock_state();
+    crate::llm::mock::push_llm_mock(crate::llm::mock::LlmMock {
+        text: "<tool_call>\nledger({ action: \"note\", text: \"hidden state\" })\n</tool_call>"
+            .to_string(),
+        tool_calls: Vec::new(),
+        match_pattern: None,
+        consume_on_match: true,
+        input_tokens: None,
+        output_tokens: None,
+        cache_read_tokens: None,
+        cache_write_tokens: None,
+        thinking: None,
+        stop_reason: None,
+        model: "mock".to_string(),
+        provider: None,
+        blocks: None,
+        error: None,
+    });
+
+    let mut opts = base_opts(vec![serde_json::json!({
+        "role": "user",
+        "content": "do one thing",
+    })]);
+    let mut tool_params = std::collections::BTreeMap::new();
+    tool_params.insert(
+        "path".to_string(),
+        VmValue::Dict(Rc::new(std::collections::BTreeMap::from([(
+            "type".to_string(),
+            VmValue::String(Rc::from("string")),
+        )]))),
+    );
+    let dummy_tool = VmValue::Dict(Rc::new(std::collections::BTreeMap::from([
+        ("name".to_string(), VmValue::String(Rc::from("read"))),
+        (
+            "description".to_string(),
+            VmValue::String(Rc::from("Read a file.")),
+        ),
+        (
+            "parameters".to_string(),
+            VmValue::Dict(Rc::new(tool_params)),
+        ),
+    ])));
+    opts.tools = Some(VmValue::Dict(Rc::new(std::collections::BTreeMap::from([
+        (
+            "tools".to_string(),
+            VmValue::List(Rc::new(vec![dummy_tool])),
+        ),
+    ]))));
+    let mut config = base_agent_config();
+    config.persistent = true;
+    config.max_iterations = 1;
+
+    let result = run_agent_loop_internal(&mut opts, config).await.unwrap();
+    assert_eq!(result["successful_tools"], json!([]));
+    assert_eq!(result["rejected_tools"], json!(["ledger"]));
+    let transcript = serde_json::to_string(&result["transcript"]).expect("transcript json");
+    assert!(transcript.contains("ledger unavailable"));
+    reset_llm_mock_state();
+}
+
 #[test]
 fn pending_feedback_drain_filters_by_session_and_preserves_order() {
     use crate::llm::agent::{drain_pending_feedback, push_pending_feedback};

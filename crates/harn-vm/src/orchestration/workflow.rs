@@ -15,6 +15,7 @@ use crate::tool_annotations::{SideEffectLevel, ToolAnnotations, ToolArgSchema, T
 use crate::value::{VmError, VmValue};
 
 pub const WORKFLOW_VERIFICATION_CONTRACTS_METADATA_KEY: &str = "workflow_verification_contracts";
+pub const WORKFLOW_VERIFICATION_SCOPE_METADATA_KEY: &str = "workflow_verification_scope";
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
@@ -417,6 +418,17 @@ pub fn stage_verification_contracts(
     node_id: &str,
     node: &WorkflowNode,
 ) -> Result<Vec<VerificationContract>, VmError> {
+    let local_contract = verification_contract_from_verify(node_id, node.verify.as_ref())?;
+    let local_only = matches!(
+        node.metadata
+            .get(WORKFLOW_VERIFICATION_SCOPE_METADATA_KEY)
+            .and_then(|value| value.as_str()),
+        Some("local_only")
+    );
+    if local_only {
+        return Ok(local_contract.into_iter().collect());
+    }
+
     let mut contracts = node
         .metadata
         .get(WORKFLOW_VERIFICATION_CONTRACTS_METADATA_KEY)
@@ -431,8 +443,7 @@ pub fn stage_verification_contracts(
         .transpose()?
         .unwrap_or_default();
 
-    if let Some(local_contract) = verification_contract_from_verify(node_id, node.verify.as_ref())?
-    {
+    if let Some(local_contract) = local_contract {
         push_unique_contract(&mut contracts, local_contract);
     }
     Ok(contracts)
@@ -1474,6 +1485,12 @@ pub async fn execute_stage_node(
             .collect::<Vec<_>>()),
     );
     metadata.insert("node_kind".to_string(), serde_json::json!(node.kind));
+    if !node.approval_policy.write_path_allowlist.is_empty() {
+        metadata.insert(
+            "changed_paths".to_string(),
+            serde_json::json!(node.approval_policy.write_path_allowlist),
+        );
+    }
     let artifact = ArtifactRecord {
         type_name: "artifact".to_string(),
         id: new_id("artifact"),

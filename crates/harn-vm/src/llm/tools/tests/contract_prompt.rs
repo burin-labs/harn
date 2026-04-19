@@ -6,7 +6,7 @@ use super::{
 #[test]
 fn contract_prompt_renders_edit_signature_with_enum_and_required_markers() {
     let tools = sample_tool_registry();
-    let prompt = build_tool_calling_contract_prompt(Some(&tools), None, "text", true, None);
+    let prompt = build_tool_calling_contract_prompt(Some(&tools), None, "text", true, None, false);
     // TypeScript declaration header.
     assert!(
         prompt.contains("declare function edit(args:"),
@@ -63,7 +63,8 @@ fn contract_prompt_native_mode_prefers_provider_channel_without_text_fallback() 
     // the text-mode response grammar or duplicate `declare function`
     // schemas that can confuse native-tool parsers.
     let tools = sample_tool_registry();
-    let prompt = build_tool_calling_contract_prompt(Some(&tools), None, "native", true, None);
+    let prompt =
+        build_tool_calling_contract_prompt(Some(&tools), None, "native", true, None, false);
     assert!(
         prompt.contains("native tool-calling channel"),
         "native preamble missing: {prompt}"
@@ -72,7 +73,7 @@ fn contract_prompt_native_mode_prefers_provider_channel_without_text_fallback() 
         prompt.contains("This turn is action-gated"),
         "action gate missing: {prompt}"
     );
-    assert!(prompt.contains("## Task ledger"));
+    assert!(!prompt.contains("## Task ledger"));
     assert!(!prompt.contains("## Response protocol"));
     assert!(!prompt.contains("declare function edit(args:"));
     assert!(!prompt.contains("## Available tools"));
@@ -80,9 +81,29 @@ fn contract_prompt_native_mode_prefers_provider_channel_without_text_fallback() 
 }
 
 #[test]
+fn contract_prompt_ledger_help_requires_visible_task_ledger_ids() {
+    let tools = sample_tool_registry();
+    let prompt = build_tool_calling_contract_prompt(Some(&tools), None, "native", true, None, true);
+    assert!(
+        prompt.contains(
+            "Only use the `ledger` tool if that `<task_ledger>` block is actually present"
+        ),
+        "missing guarded ledger guidance: {prompt}"
+    );
+    assert!(
+        prompt.contains("do not invent ids such as `deliverable-N`"),
+        "missing invented-id warning: {prompt}"
+    );
+    assert!(
+        prompt.contains("deliverable-id-from-task-ledger"),
+        "missing concrete id placeholder: {prompt}"
+    );
+}
+
+#[test]
 fn contract_prompt_text_mode_mentions_action_gate_before_examples() {
     let tools = sample_tool_registry();
-    let prompt = build_tool_calling_contract_prompt(Some(&tools), None, "text", true, None);
+    let prompt = build_tool_calling_contract_prompt(Some(&tools), None, "text", true, None, false);
     assert!(prompt.contains("This turn is action-gated."));
     assert!(prompt.contains("`<tool_call>...</tool_call>`"));
     assert!(prompt.contains("Do not emit raw source code"));
@@ -93,7 +114,7 @@ fn contract_prompt_includes_tool_examples_before_schemas() {
     let tools = sample_tool_registry();
     let examples = "read({ path: \"src/main.rs\" })\n\nedit({ action: \"create\", path: \"test.rs\", content: <<EOF\nfn main() {}\nEOF\n})";
     let prompt =
-        build_tool_calling_contract_prompt(Some(&tools), None, "text", true, Some(examples));
+        build_tool_calling_contract_prompt(Some(&tools), None, "text", true, Some(examples), false);
     // Examples section is present.
     assert!(
         prompt.contains("## Tool call examples"),
@@ -115,7 +136,7 @@ fn contract_prompt_includes_tool_examples_before_schemas() {
 #[test]
 fn contract_prompt_omits_examples_section_when_none() {
     let tools = sample_tool_registry();
-    let prompt = build_tool_calling_contract_prompt(Some(&tools), None, "text", true, None);
+    let prompt = build_tool_calling_contract_prompt(Some(&tools), None, "text", true, None, false);
     assert!(
         !prompt.contains("Tool call examples"),
         "should not have examples section when None"
@@ -154,7 +175,8 @@ fn native_schema_ref_resolves_to_component_alias() {
         "expected type alias for FilePath: {aliases}"
     );
     // The signature for `touch` should reference `FilePath` by name.
-    let prompt = build_tool_calling_contract_prompt(None, Some(&native_tools), "text", false, None);
+    let prompt =
+        build_tool_calling_contract_prompt(None, Some(&native_tools), "text", false, None, false);
     assert!(
         prompt.contains("type FilePath = string;"),
         "prompt missing alias: {prompt}"

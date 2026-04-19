@@ -389,6 +389,43 @@ fn __action_graph_merge_aliases(base, extra) {
   return merged
 }
 
+fn __action_graph_append_unique_strings(items, values) {
+  var result = items ?? []
+  for value in __action_graph_listify(values) {
+    let text = __action_graph_non_empty_string(value)
+    if text != nil && !contains(result, text) {
+      result = result + [text]
+    }
+  }
+  return result
+}
+
+fn __action_graph_batch_target_paths(batch) {
+  var target_paths = []
+  for action in batch.actions {
+    target_paths = __action_graph_append_unique_strings(
+      target_paths,
+      action?.target_paths ?? action?.metadata?.target_paths ?? [],
+    )
+  }
+  return target_paths
+}
+
+fn __action_graph_batch_verification(batch) {
+  let target_paths = __action_graph_batch_target_paths(batch)
+  if len(target_paths) == 0 {
+    return nil
+  }
+  return {
+    summary: "Current batch scope",
+    required_paths: target_paths,
+    notes: [
+    "Only the current batch paths are in scope for this stage.",
+    "Future verifier checks run in later stages; do not satisfy them early unless this batch explicitly names that work.",
+  ],
+  }
+}
+
 fn __action_graph_batch_prompt(batch) {
   var available_tools = []
   for action in batch.actions {
@@ -396,6 +433,18 @@ fn __action_graph_batch_prompt(batch) {
       if !contains(available_tools, tool_name) {
         available_tools = available_tools + [tool_name]
       }
+    }
+  }
+  let target_paths = __action_graph_batch_target_paths(batch)
+  var create_direct_write = false
+  var has_exact_command = false
+  for action in batch.actions {
+    let instruction = lowercase(trim(action?.instruction ?? action?.title ?? ""))
+    if starts_with(instruction, "create ") || starts_with(instruction, "write new ") {
+      create_direct_write = true
+    }
+    if __action_graph_non_empty_string(action?.command ?? action?.metadata?.command) != nil {
+      has_exact_command = true
     }
   }
   var lines = [
@@ -409,19 +458,58 @@ fn __action_graph_batch_prompt(batch) {
   } else {
     "(none declared)"
   },
+    "Target paths this batch: "
+    + if len(target_paths) > 0 {
+    join(target_paths, ", ")
+  } else {
+    "(none declared)"
+  },
     "",
     "Authority order: obey the current batch action list and the injected verifier contract before any broader workflow context.",
     "Complete every action in this batch before finishing.",
     "Scope boundary: perform only the action ids listed below for this batch.",
+    "If you write, keep writes inside the current batch target paths unless a tool result proves a listed path needs to move.",
+    "The runtime rejects mutating path-based tool calls outside the current batch target paths.",
+    "You may read supporting workspace files outside the current batch target paths only when that context is immediately necessary to complete this batch.",
+    "Do not inspect sibling files outside the current batch target paths just to prepare future batches.",
     "Treat broader plan/context artifacts as background evidence only, not as permission to continue with later actions.",
     "If workflow context mentions future batches or terminal verification, ignore that work until this batch explicitly names it.",
     "Do not preempt later batches, edit their target files early, or run final verification unless this batch explicitly lists those steps.",
+    "If a tool result rejects another path or scope, treat that as evidence you attempted future-batch work; return to the current batch instead of retrying adjacent files.",
+    "Do not issue a second write to the same target path unless a subsequent read or run result exposed a concrete problem with the first write.",
+    "After a successful write satisfies the current batch target paths, finish immediately unless this batch explicitly includes a verification command.",
     "Once the listed actions are satisfied, stop immediately instead of continuing with adjacent work from the overall plan.",
     "Actions:",
   ]
+  if create_direct_write {
+    lines = lines
+      + [
+      "If an action explicitly says to create a target file, write that file directly instead of reading unrelated files first.",
+      "After a successful write creates the target file, do not reread or rewrite that file unless a tool result exposes a concrete problem or this batch explicitly requires validation.",
+    ]
+  }
+  if has_exact_command {
+    lines = lines
+      + [
+      "If an action includes an exact command string, run that exact command before trying alternatives or discovery commands.",
+    ]
+    if batch.phase == "verify" && len(available_tools) == 1 && available_tools[0] == "run" {
+      lines = lines
+        + [
+        "This verify batch is observation-only.",
+        "After the exact command returns, report whether it passed or failed and stop.",
+        "Do not attempt repairs, shell edits, fallback commands, or extra discovery in this batch.",
+      ]
+    }
+  }
   for action in batch.actions {
     let title = action?.title ?? action?.instruction ?? action?.id
-    let detail = action?.instruction ?? title
+    let exact_command = __action_graph_non_empty_string(action?.command ?? action?.metadata?.command)
+    let detail = if exact_command != nil {
+      action?.instruction ?? title + " Run exactly `${exact_command}`."
+    } else {
+      action?.instruction ?? title
+    }
     lines = lines + ["- [" + action.id + "] " + title + ": " + detail]
   }
   return join(lines, "\n")
@@ -430,12 +518,10 @@ fn __action_graph_batch_prompt(batch) {
 fn __action_graph_batch(batch_index, phase, tool_class, actions) {
   var action_ids = []
   var titles = []
-  var deliverables = []
   var depends_on = []
   for action in actions {
     action_ids = action_ids + [action.id]
     titles = titles + [action?.title ?? action?.instruction ?? action.id]
-    deliverables = deliverables + [action?.instruction ?? action?.title ?? action.id]
     for dep in action?.depends_on ?? [] {
       if !contains(action_ids, dep) && !contains(depends_on, dep) {
         depends_on = depends_on + [dep]
@@ -453,11 +539,6 @@ fn __action_graph_batch(batch_index, phase, tool_class, actions) {
     depends_on: depends_on,
     count: len(actions),
     prompt: nil,
-    task_ledger: {
-    root_task: titles[0] ?? format("batch-{}", batch_index + 1),
-    deliverables: deliverables,
-    rationale: "Complete the scheduled batch before finishing the stage.",
-  },
   }
   return batch + {prompt: __action_graph_batch_prompt(batch)}
 }
@@ -469,7 +550,7 @@ fn __action_graph_batch_output_kind(phase) {
   if phase == "verify" {
     return "verification_result"
   }
-  return "artifact"
+  return "summary"
 }
 
 fn __action_graph_output_kind(template, default_output) {
@@ -540,14 +621,36 @@ fn __action_graph_batch_tools(batch, template) {
   return tool_select(registry, selected)
 }
 
+fn __action_graph_batch_context_kinds(batch, template) {
+  let explicit = template?.context_policy?.include_kinds ?? []
+  if len(explicit) > 0 {
+    return explicit
+  }
+  if batch.phase == "research" {
+    return ["summary"]
+  }
+  if batch.phase == "verify" {
+    return ["summary", "artifact", "verification_result"]
+  }
+  return ["summary"]
+}
+
 fn __action_graph_batch_node(batch, template) {
+  let local_verification = __action_graph_batch_verification(batch)
   let model_policy = template?.model_policy ?? {}
-    + {task_ledger: template?.model_policy?.task_ledger ?? batch.task_ledger}
   let output_kind = __action_graph_output_kind(template, __action_graph_batch_output_kind(batch.phase))
   let output_contract = template?.output_contract ?? {} + {output_kinds: [output_kind]}
+  let target_paths = __action_graph_batch_target_paths(batch)
   let context_policy = template?.context_policy ?? {}
-    + {
-    include_kinds: template?.context_policy?.include_kinds ?? ["summary", "artifact", "verification_result"],
+    + {include_kinds: __action_graph_batch_context_kinds(batch, template)}
+  var metadata = template?.metadata ?? {}
+  if local_verification != nil {
+    metadata = metadata + {workflow_verification_scope: "local_only"}
+  }
+  let approval_policy = if len(target_paths) > 0 {
+    template?.approval_policy ?? {} + {write_path_allowlist: target_paths}
+  } else {
+    template?.approval_policy ?? {}
   }
   return template ?? {}
     + {
@@ -556,8 +659,15 @@ fn __action_graph_batch_node(batch, template) {
     system: __action_graph_node_system(template?.system, batch.prompt),
     tools: __action_graph_batch_tools(batch, template),
     model_policy: model_policy,
+    approval_policy: approval_policy,
+    verify: if local_verification != nil {
+    local_verification
+  } else {
+    template?.verify
+  },
     output_contract: output_contract,
     context_policy: context_policy,
+    metadata: metadata,
   }
 }
 

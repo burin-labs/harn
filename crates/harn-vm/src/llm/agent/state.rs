@@ -754,6 +754,7 @@ impl AgentLoopState {
                 .as_ref()
                 .is_some_and(|policy| policy.require_action_or_yield),
             self.config.tool_examples.as_deref(),
+            !self.config.task_ledger.is_empty(),
         );
         if let Some(client_cfg) = opts.tool_search.as_ref().filter(|c| c.include_stub_listing) {
             let mut stub_lines = Vec::new();
@@ -1050,6 +1051,7 @@ impl AgentLoopState {
                     .as_ref()
                     .is_some_and(|policy| policy.require_action_or_yield),
                 tool_examples.as_deref(),
+                !config.task_ledger.is_empty(),
             );
             // Client-mode tool_search: when the user opted into stub
             // listings, append a short "also available via search"

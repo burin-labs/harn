@@ -139,6 +139,28 @@ fn burin_mini_comment_file_fixture_run_updates_workspace_copy() {
         .filter_map(|item| item["id"].as_str().map(ToOwned::to_owned))
         .collect();
     assert_eq!(action_ids, vec!["write_comment", "verify_comment"]);
+    let actions = report_json["action_graph"]["actions"]
+        .as_array()
+        .expect("action graph actions");
+    let write_action = actions
+        .iter()
+        .find(|item| item["id"] == "write_comment")
+        .expect("write action");
+    let verify_action = actions
+        .iter()
+        .find(|item| item["id"] == "verify_comment")
+        .expect("verify action");
+    let write_instruction = write_action["instruction"]
+        .as_str()
+        .expect("write instruction");
+    assert!(
+        write_instruction.contains("Auth guard middleware"),
+        "write_instruction={write_instruction}\nreport={report_json}"
+    );
+    assert_eq!(
+        verify_action["command"].as_str(),
+        Some("grep -n 'Auth guard middleware' packages/server/src/middleware/auth-guard.ts")
+    );
 
     let auth_guard = experiment_root.join("workspace/packages/server/src/middleware/auth-guard.ts");
     let contents = fs::read_to_string(auth_guard).unwrap();
@@ -172,6 +194,11 @@ fn burin_mini_rate_limit_fixture_run_wires_middleware() {
     let report_json = read_json(&report);
     assert_eq!(report_json["verdict"], "pass");
     assert_eq!(report_json["workflow_status"], "completed");
+    assert_eq!(
+        report_json["research"].as_array().map(Vec::len),
+        Some(2),
+        "report={report_json}"
+    );
     let action_ids: Vec<String> = report_json["action_graph"]["actions"]
         .as_array()
         .unwrap()
@@ -187,6 +214,59 @@ fn burin_mini_rate_limit_fixture_run_wires_middleware() {
             "verify_rate_limit",
         ]
     );
+    let actions = report_json["action_graph"]["actions"]
+        .as_array()
+        .expect("action graph actions");
+    let create_action = actions
+        .iter()
+        .find(|item| item["id"] == "create_rate_limit")
+        .expect("create action");
+    let export_action = actions
+        .iter()
+        .find(|item| item["id"] == "export_rate_limit")
+        .expect("export action");
+    let wire_action = actions
+        .iter()
+        .find(|item| item["id"] == "wire_routes")
+        .expect("wire action");
+    let verify_action = actions
+        .iter()
+        .find(|item| item["id"] == "verify_rate_limit")
+        .expect("verify action");
+    assert_eq!(
+        create_action["target_paths"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|value| value.as_str())
+            .collect::<Vec<_>>(),
+        vec!["packages/server/src/middleware/rate-limit.ts"]
+    );
+    assert_eq!(
+        export_action["target_paths"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|value| value.as_str())
+            .collect::<Vec<_>>(),
+        vec!["packages/server/src/middleware/index.ts"]
+    );
+    assert_eq!(
+        wire_action["target_paths"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|value| value.as_str())
+            .collect::<Vec<_>>(),
+        vec!["packages/server/src/routes/api.ts"]
+    );
+    assert_eq!(
+        verify_action["command"].as_str(),
+        Some("./scripts/verify-rate-limit.sh")
+    );
+    for action in [create_action, export_action, wire_action] {
+        assert_eq!(action["command"].as_str().unwrap_or(""), "");
+    }
 
     let rate_limit = experiment_root.join("workspace/packages/server/src/middleware/rate-limit.ts");
     let index = experiment_root.join("workspace/packages/server/src/middleware/index.ts");
@@ -236,6 +316,11 @@ fn burin_mini_rate_limit_liveish_fixture_ignores_redundant_read_actions() {
     let report_json = read_json(&report);
     assert_eq!(report_json["verdict"], "pass");
     assert_eq!(report_json["workflow_status"], "completed");
+    assert_eq!(
+        report_json["research"].as_array().map(Vec::len),
+        Some(2),
+        "report={report_json}"
+    );
     let action_ids: Vec<String> = report_json["action_graph"]["actions"]
         .as_array()
         .unwrap()
@@ -250,6 +335,124 @@ fn burin_mini_rate_limit_liveish_fixture_ignores_redundant_read_actions() {
         action_ids.last().map(String::as_str),
         Some("act_verify_rate_limit"),
         "action_ids={action_ids:?}\nreport={report_json}"
+    );
+}
+
+#[test]
+#[ignore]
+fn burin_mini_rate_limit_weak_verify_plan_normalizes_to_single_verify_action() {
+    let (_temp, experiment_root, output) = run_case(
+        "Add rate limiting middleware to the auth module",
+        "rate-limit-weak-verify-plan.jsonl",
+    );
+
+    assert!(
+        output.status.success(),
+        "status={:?}\nstderr={}",
+        output.status.code(),
+        stderr(&output)
+    );
+
+    let stdout = stdout(&output);
+    assert!(
+        stdout.contains("task_id=rate_limit_auth"),
+        "stdout={stdout}"
+    );
+    assert!(
+        !stdout.contains("tool_rejected"),
+        "stdout={stdout}\nstderr={}",
+        stderr(&output)
+    );
+    let report = experiment_root.join("evals/generated/rate_limit_auth-latest.json");
+    let report_json = read_json(&report);
+    assert_eq!(report_json["verdict"], "pass");
+    assert_eq!(report_json["workflow_status"], "completed");
+    let actions = report_json["action_graph"]["actions"]
+        .as_array()
+        .expect("action graph actions");
+    let action_ids: Vec<String> = actions
+        .iter()
+        .filter_map(|item| item["id"].as_str().map(ToOwned::to_owned))
+        .collect();
+    assert_eq!(
+        action_ids,
+        vec![
+            "create-rate-limit-middleware",
+            "update-middleware-index",
+            "wire-rate-limit-to-routes",
+            "run-verify-script",
+        ],
+        "report={report_json}"
+    );
+    let verify_action = actions
+        .iter()
+        .find(|item| item["id"] == "run-verify-script")
+        .expect("verify action");
+    assert_eq!(verify_action["phase"].as_str(), Some("verify"));
+    assert_eq!(verify_action["tool_class"].as_str(), Some("run"));
+    assert_eq!(
+        verify_action["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|value| value.as_str())
+            .collect::<Vec<_>>(),
+        vec!["run"]
+    );
+    assert_eq!(
+        verify_action["command"].as_str(),
+        Some("./scripts/verify-rate-limit.sh")
+    );
+    assert!(
+        !actions.iter().any(|item| item["id"] == "verify_output"),
+        "report={report_json}"
+    );
+}
+
+#[test]
+#[ignore]
+fn burin_mini_rate_limit_overresearch_planner_commits_final_action_graph() {
+    let (_temp, experiment_root, output) = run_case(
+        "Add rate limiting middleware to the auth module",
+        "rate-limit-overresearch-planner.jsonl",
+    );
+
+    assert!(
+        output.status.success(),
+        "status={:?}\nstderr={}",
+        output.status.code(),
+        stderr(&output)
+    );
+
+    let stdout = stdout(&output);
+    assert!(
+        stdout.contains("task_id=rate_limit_auth"),
+        "stdout={stdout}"
+    );
+    let report = experiment_root.join("evals/generated/rate_limit_auth-latest.json");
+    let report_json = read_json(&report);
+    assert_eq!(report_json["verdict"], "pass");
+    assert_eq!(report_json["workflow_status"], "completed");
+    assert_eq!(
+        report_json["research"].as_array().map(Vec::len),
+        Some(4),
+        "report={report_json}"
+    );
+    let action_ids: Vec<String> = report_json["action_graph"]["actions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|item| item["id"].as_str().map(ToOwned::to_owned))
+        .collect();
+    assert_eq!(
+        action_ids,
+        vec![
+            "create_rate_limit_impl",
+            "export_rate_limit",
+            "wire_rate_limit_in_api",
+            "run_verification",
+        ],
+        "report={report_json}"
     );
 }
 

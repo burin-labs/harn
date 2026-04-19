@@ -1,4 +1,5 @@
 import { safe_parse } from "std/json"
+import "std/schema"
 
 /** Resolve the LLM provider for Burin Mini runs. */
 pub fn provider_name() {
@@ -66,6 +67,26 @@ fn generic_action_task(value) {
   return normalized == "" || normalized == "write" || normalized == "edit" || normalized == "run"
     || normalized == "execute"
     || normalized == "verify"
+}
+
+fn action_is_verification_like(profile, title, task, command) {
+  if profile?.mode == "read_only" {
+    return false
+  }
+  let verify_command = effective_verify_command(profile)
+  if verify_command == "none" {
+    return false
+  }
+  let haystack = lowercase("${title}\n${task}\n${command}")
+  if command != "" && (command == verify_command || contains(haystack, lowercase(verify_command))) {
+    return true
+  }
+  let mentions_verify = contains(haystack, "verify") || contains(haystack, "verification")
+  let mentions_runner = contains(haystack, "script") || contains(haystack, "command")
+    || contains(haystack, "contract")
+    || contains(haystack, "success criteria")
+    || contains(haystack, "confirm")
+  return mentions_verify && mentions_runner
 }
 
 /** Return the verifier command string for prompts and runtime configs. */
@@ -161,6 +182,18 @@ fn tools_fit_within(requested, allowed) {
   return true
 }
 
+fn infer_target_paths_from_text(profile, task, title) {
+  let haystack = lowercase("${title}\n${task}")
+  var target_paths = []
+  for path in ensure_string_list(profile?.write_paths ?? []) {
+    let normalized = lowercase(path)
+    if contains(haystack, normalized) || contains(haystack, "/${normalized}") {
+      target_paths = append_unique_strings(target_paths, path)
+    }
+  }
+  return target_paths
+}
+
 fn normalize_question_entry(profile, item, index) {
   if type_of(item) == "string" {
     return {id: "q${index}", question: item, tools: default_research_tools(profile)}
@@ -184,9 +217,26 @@ fn normalize_action_entry(profile, item, index) {
   if len(depends_on) == 0 {
     depends_on = ensure_string_list(item?.dependencies)
   }
-  var allowed_tools = normalize_tool_names(item?.allowed_tools, default_action_tools(profile))
+  let title = trimmed_string(item?.title ?? item?.summary ?? "Action ${index}")
+  var task = trimmed_string(item?.task ?? item?.description ?? "")
+  let raw_command = trimmed_string(item?.command ?? "")
+  let verification_like = action_is_verification_like(profile, title, task, raw_command)
+  var allowed_tools = if verification_like {
+    ["run"]
+  } else {
+    normalize_tool_names(item?.allowed_tools, default_action_tools(profile))
+  }
   if list_contains(allowed_tools, "write") && !list_contains(allowed_tools, "read") {
     allowed_tools = ["read"] + allowed_tools
+  }
+  if list_contains(allowed_tools, "write") {
+    var scoped_tools = []
+    for tool_name in allowed_tools {
+      if tool_name != "run" {
+        scoped_tools = scoped_tools + [tool_name]
+      }
+    }
+    allowed_tools = scoped_tools
   }
   var target_paths = []
   target_paths = append_unique_strings(target_paths, item?.target_paths ?? [])
@@ -194,14 +244,23 @@ fn normalize_action_entry(profile, item, index) {
   target_paths = append_unique_strings(target_paths, item?.changed_paths ?? [])
   target_paths = append_unique_strings(target_paths, item?.required_paths ?? [])
   target_paths = append_unique_strings(target_paths, item?.path ?? item?.target_file ?? "")
-  let command = if list_contains(allowed_tools, "run") {
+  if verification_like {
+    target_paths = []
+  }
+  let command = if verification_like {
     trimmed_string(item?.command ?? profile?.verify_command ?? "")
   } else {
-    ""
+    if list_contains(allowed_tools, "run") {
+      if list_contains(allowed_tools, "write") {
+        trimmed_string(item?.command ?? "")
+      } else {
+        trimmed_string(item?.command ?? profile?.verify_command ?? "")
+      }
+    } else {
+      ""
+    }
   }
-  let title = trimmed_string(item?.title ?? item?.summary ?? "Action ${index}")
-  var task = trimmed_string(item?.task ?? item?.description ?? "")
-  if generic_action_task(task) {
+  if verification_like || generic_action_task(task) {
     if command {
       task = "Run `${command}` exactly and report whether it passed."
     } else if len(target_paths) > 0 {
@@ -210,9 +269,13 @@ fn normalize_action_entry(profile, item, index) {
       task = title
     }
   }
+  if len(target_paths) == 0 {
+    target_paths = infer_target_paths_from_text(profile, task, title)
+  }
   if len(target_paths) == 0 && list_contains(allowed_tools, "write") {
     target_paths = append_unique_strings(target_paths, profile?.write_paths ?? [])
   }
+  task = append_verifier_hints_to_task(profile, task, target_paths, allowed_tools)
   return {
     id: item?.id ?? "action_${index}",
     title: title,
@@ -222,6 +285,44 @@ fn normalize_action_entry(profile, item, index) {
     target_paths: target_paths,
     command: command,
   }
+}
+
+fn append_verifier_hints_to_task(profile, task, target_paths, allowed_tools) {
+  if !list_contains(allowed_tools, "write") {
+    return task
+  }
+  let contract = verification_contract(profile)
+  let required_paths = ensure_string_list(contract?.required_paths ?? [])
+  if len(required_paths) != 1 || len(target_paths) != 1 || required_paths[0] != target_paths[0] {
+    return task
+  }
+  var hints = []
+  let required_identifiers = ensure_string_list(contract?.required_identifiers ?? [])
+  let required_text = ensure_string_list(contract?.required_text ?? [])
+  let notes = ensure_string_list(contract?.notes ?? [])
+  if len(required_identifiers) > 0 {
+    hints = hints
+      + [
+      "Use the exact verifier-required identifiers: "
+      + join(required_identifiers, ", ")
+      + ".",
+    ]
+  }
+  if len(required_text) > 0 {
+    hints = hints
+      + [
+      "Include the exact verifier-required text verbatim: "
+      + join(required_text, " ; ")
+      + ".",
+    ]
+  }
+  if len(notes) > 0 {
+    hints = hints + ["Verifier notes: " + join(notes, " ")]
+  }
+  if len(hints) == 0 {
+    return task
+  }
+  return task + " " + join(hints, " ")
 }
 
 fn action_has_tool(action, name) {
@@ -271,10 +372,42 @@ fn infer_action_dependencies(actions) {
       task: action?.task ?? "",
       depends_on: depends_on,
       allowed_tools: action?.allowed_tools ?? [],
+      target_paths: action?.target_paths ?? [],
+      command: action?.command ?? "",
     },
     ]
   }
   return normalized
+}
+
+fn ensure_terminal_verify_action(profile, actions) {
+  let verify_command = effective_verify_command(profile)
+  if profile?.mode == "read_only" || verify_command == "none" || len(actions) == 0 {
+    return actions
+  }
+  for action in actions {
+    if action_has_tool(action, "run") {
+      return actions
+    }
+  }
+  var depends_on = []
+  for action in actions {
+    if action?.id ?? "" != "" {
+      depends_on = depends_on + [action.id]
+    }
+  }
+  return actions
+    + [
+    {
+    id: "verify_output",
+    title: "Run verification command",
+    task: "Run `${verify_command}` exactly and report whether it passed.",
+    depends_on: depends_on,
+    allowed_tools: ["run"],
+    target_paths: [],
+    command: verify_command,
+  },
+  ]
 }
 
 fn collect_normalized_questions(profile, src) {
@@ -380,6 +513,7 @@ pub fn normalize_plan(profile, plan) {
     questions = actions_as_questions(profile, actions)
     actions = []
   }
+  actions = ensure_terminal_verify_action(profile, actions)
   actions = infer_action_dependencies(actions)
   let final_response = src?.final_response ?? src?.answer ?? ""
   return {
@@ -535,14 +669,21 @@ pub fn planner_schema() {
     ready: {type: "boolean"},
     plan_summary: {type: "string"},
     final_response: {type: "string"},
-    questions: {
+    questions: schema_nullable(
+    {
     type: "array",
     items: {
     type: "object",
-    properties: {id: {type: "string"}, question: {type: "string"}, tools: {type: "array", items: {type: "string"}}},
+    properties: {
+    id: {type: "string"},
+    question: {type: "string"},
+    tools: schema_nullable({type: "array", items: {type: "string"}}),
   },
   },
-    actions: {
+  },
+  ),
+    actions: schema_nullable(
+    {
     type: "array",
     items: {
     type: "object",
@@ -550,13 +691,14 @@ pub fn planner_schema() {
     id: {type: "string"},
     title: {type: "string"},
     task: {type: "string"},
-    depends_on: {type: "array", items: {type: "string"}},
-    allowed_tools: {type: "array", items: {type: "string"}},
-    target_paths: {type: "array", items: {type: "string"}},
-    command: {type: "string"},
+    depends_on: schema_nullable({type: "array", items: {type: "string"}}),
+    allowed_tools: schema_nullable({type: "array", items: {type: "string"}}),
+    target_paths: schema_nullable({type: "array", items: {type: "string"}}),
+    command: schema_nullable({type: "string"}),
   },
   },
   },
+  ),
   },
   }
 }

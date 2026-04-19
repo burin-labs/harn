@@ -142,6 +142,7 @@ pub fn task_reference(task_id) {
       "Reward verifier-exact identifier usage, especially the export name rateLimit.",
       "Reward keeping edits inside the intended middleware and route files.",
       "Reward preserving the withMiddleware structure instead of replacing the file with generic framework boilerplate.",
+      "Reward a dedicated final verify batch that runs once after implementation; do not require verification to be folded into the final write batch.",
       "Penalize verify rediscovery loops, broad rewrites, or architecture drift.",
     ],
       anti_patterns: [
@@ -218,7 +219,8 @@ fn batch_output_lines(run) {
   for artifact in run?.artifacts ?? [] {
     let source = artifact?.source ?? ""
     let cleaned = strip_done_sentinel(artifact?.text ?? "")
-    if artifact?.kind == "artifact" && starts_with(source, "batch_") && cleaned != "" {
+    if (artifact?.kind == "artifact" || artifact?.kind == "summary") && starts_with(source, "batch_")
+      && cleaned != "" {
       lines = lines + ["- ${source}: ${cleaned}"]
     }
   }
