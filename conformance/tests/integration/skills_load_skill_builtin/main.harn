@@ -1,12 +1,13 @@
 pipeline test(task) {
   let registry_json = json_stringify(skills)
   assert(!contains(registry_json, "Long-form runbook"), "startup registry stays compact")
-
   let card = skill_find(skills, "triage")
   assert(card != nil, "skill card is discoverable")
-  assert(card.short == "Load the triage runbook when release investigation is needed", "short card is always loaded")
+  assert(
+    card.short == "Load the triage runbook when release investigation is needed",
+    "short card is always loaded",
+  )
   assert(card.body == nil, "full body is not eager")
-
   let loaded = load_skill("triage")
   assert(contains(loaded, "Long-form runbook"), "load_skill returns the full SKILL.md body")
   assert(contains(loaded, "check queues and alerts"), "long body content is preserved")
