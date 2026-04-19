@@ -632,12 +632,20 @@ fn validate_options(opts: &crate::llm::api::LlmCallOptions) {
                 warn("presence_penalty");
             }
         }
-        "openai" | "openrouter" | "huggingface" | "local" => {
+        "openai" | "huggingface" | "local" => {
             if opts.top_k.is_some() {
                 warn("top_k");
             }
             if opts.thinking.is_some() {
                 warn("thinking");
+            }
+            if opts.cache {
+                warn("cache");
+            }
+        }
+        "openrouter" => {
+            if opts.top_k.is_some() {
+                warn("top_k");
             }
             if opts.cache {
                 warn("cache");

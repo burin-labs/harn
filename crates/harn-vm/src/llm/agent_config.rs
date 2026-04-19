@@ -208,14 +208,54 @@ pub(crate) fn build_llm_call_result(
     );
 
     if expects_structured_output(opts) {
-        let json_str = extract_json(&result.text);
-        let parsed = serde_json::from_str::<serde_json::Value>(&json_str)
-            .ok()
-            .map(|jv| json_to_vm_value(&jv));
+        let parsed = structured_output_candidates(result, opts.tools.as_ref())
+            .into_iter()
+            .find_map(|candidate| {
+                let json_str = extract_json(&candidate);
+                serde_json::from_str::<serde_json::Value>(&json_str)
+                    .ok()
+                    .map(|jv| json_to_vm_value(&jv))
+            });
         return vm_build_llm_result(result, parsed, Some(transcript), opts.tools.as_ref());
     }
 
     vm_build_llm_result(result, None, Some(transcript), opts.tools.as_ref())
+}
+
+fn structured_output_candidates(
+    result: &super::api::LlmResult,
+    tools: Option<&crate::value::VmValue>,
+) -> Vec<String> {
+    let mut candidates = Vec::new();
+    push_structured_output_candidate(&mut candidates, result.text.trim().to_string());
+
+    let public_blocks = result
+        .blocks
+        .iter()
+        .filter(|block| {
+            block.get("type").and_then(|value| value.as_str()) == Some("output_text")
+                && block.get("visibility").and_then(|value| value.as_str()) != Some("private")
+        })
+        .filter_map(|block| block.get("text").and_then(|value| value.as_str()))
+        .collect::<String>();
+    push_structured_output_candidate(&mut candidates, public_blocks.trim().to_string());
+
+    let derived = candidates.clone();
+    for candidate in derived {
+        let parsed = crate::llm::tools::parse_text_tool_calls_with_tools(&candidate, tools);
+        if !parsed.prose.is_empty() {
+            push_structured_output_candidate(&mut candidates, parsed.prose.trim().to_string());
+        }
+    }
+
+    candidates
+}
+
+fn push_structured_output_candidate(candidates: &mut Vec<String>, candidate: String) {
+    if candidate.is_empty() || candidates.iter().any(|existing| existing == &candidate) {
+        return;
+    }
+    candidates.push(candidate);
 }
 
 pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::HostBridge>) {

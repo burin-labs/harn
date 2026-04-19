@@ -46,4 +46,46 @@ pipeline default() {
   }
   println(contains(unwrap_err(err), "schema"))
   println(len(llm_mock_calls()))
+
+  // `schema_retry_nudge: false` still retries; it just omits the
+  // corrective user message.
+  llm_mock_clear()
+  llm_mock({text: "Analyzing the task carefully"})
+  llm_mock({text: "{\"verdict\": \"YES\", \"improvement\": \"\"}"})
+  let bare = llm_call(
+    "Grade with bare retry",
+    nil,
+    {
+    provider: "mock",
+    output_schema: schema,
+    output_validation: "error",
+    schema_retries: 1,
+    schema_retry_nudge: false,
+    response_format: "json",
+  },
+  )
+  println(bare.data.verdict)
+  let bare_calls = llm_mock_calls()
+  println(len(bare_calls))
+  let bare_second = bare_calls[1].messages
+  println(bare_second[len(bare_second) - 1].role)
+
+  // Exhausted prose-only retries surface as hard schema failures.
+  llm_mock_clear()
+  llm_mock({text: "Analyzing the user task"})
+  llm_mock({text: "Examining the failed run"})
+  let prose_err = try {
+    llm_call(
+    "Grade prose-only output",
+    nil,
+    {
+    provider: "mock",
+    output_schema: schema,
+    output_validation: "error",
+    schema_retries: 1,
+    response_format: "json",
+  },
+  )
+  }
+  println(contains(unwrap_err(prose_err), "parseable JSON"))
 }

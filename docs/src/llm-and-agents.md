@@ -107,7 +107,7 @@ println(result.text)
 | `presence_penalty` | float | nil | Presence penalty (OpenAI only) |
 | `response_format` | string | `"text"` | `"text"` or `"json"` |
 | `schema` | dict | nil | JSON Schema, OpenAPI Schema Object, or canonical Harn schema dict for structured output |
-| `thinking` | bool/dict | nil | Enable extended reasoning. `true` or `{budget_tokens: N}` |
+| `thinking` | bool/dict | nil | Enable provider reasoning. `true` or `{budget_tokens: N}`. Anthropic maps this to thinking/adaptive thinking, OpenRouter maps it to `reasoning`, and Ollama maps it to `think`. |
 | `tools` | list | nil | Tool definitions |
 | `tool_choice` | string/dict | `"auto"` | `"auto"`, `"none"`, `"required"`, or `{name: "tool"}` |
 | `tool_search` | bool/string/dict | nil | Progressive tool disclosure. See [Tool Vault](#tool-vault) |
