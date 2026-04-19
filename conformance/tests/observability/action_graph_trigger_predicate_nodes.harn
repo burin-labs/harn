@@ -8,10 +8,7 @@ pipeline main() {
     act: {kind: "stage", mode: "llm", model_policy: {provider: "mock"}},
     skip: {kind: "stage", mode: "llm", model_policy: {provider: "mock"}},
   },
-    edges: [
-    {from: "gate", to: "act", branch: "true"},
-    {from: "gate", to: "skip", branch: "false"},
-  ],
+    edges: [{from: "gate", to: "act", branch: "true"}, {from: "gate", to: "skip", branch: "false"}],
   },
   )
   let trigger = {
@@ -25,12 +22,12 @@ pipeline main() {
     tenant_id: nil,
     headers: {},
     provider_payload: {
-      provider: "cron",
-      cron_id: "conformance",
-      schedule: "0 * * * *",
-      tick_at: "2026-04-19T16:00:00Z",
-      raw: {},
-    },
+    provider: "cron",
+    cron_id: "conformance",
+    schedule: "0 * * * *",
+    tick_at: "2026-04-19T16:00:00Z",
+    raw: {},
+  },
     signature_status: {state: "unsigned"},
   }
   let result = workflow_execute(
@@ -38,10 +35,10 @@ pipeline main() {
     flow,
     [artifact({kind: "plan", text: "go inspect the repo"})],
     {
-      max_steps: 4,
-      persist_path: "/tmp/harn-observability-trigger-predicate.json",
-      trigger_event: trigger,
-    },
+    max_steps: 4,
+    persist_path: "/tmp/harn-observability-trigger-predicate.json",
+    trigger_event: trigger,
+  },
   )
   let loaded = run_record_load(result?.path)
   let nodes = loaded?.observability?.action_graph_nodes ?? []
