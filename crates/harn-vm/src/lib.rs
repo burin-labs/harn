@@ -72,10 +72,14 @@ pub use stdlib::{
 };
 pub use store::register_store_builtins;
 pub use triggers::{
-    redact_headers, register_provider_schema, registered_provider_schema_names,
-    reset_provider_catalog, HeaderRedactionPolicy, ProviderCatalog, ProviderCatalogError,
-    ProviderId, ProviderPayload, ProviderSchema, SignatureStatus, TenantId, TraceId, TriggerEvent,
-    TriggerEventId,
+    begin_in_flight, clear_trigger_registry, drain, dynamic_deregister, dynamic_register,
+    finish_in_flight, install_manifest_triggers, redact_headers, register_provider_schema,
+    registered_provider_schema_names, reset_provider_catalog, snapshot_trigger_bindings,
+    HeaderRedactionPolicy, ProviderCatalog, ProviderCatalogError, ProviderId, ProviderPayload,
+    ProviderSchema, SignatureStatus, TenantId, TraceId, TriggerBindingSnapshot,
+    TriggerBindingSource, TriggerBindingSpec, TriggerDispatchOutcome, TriggerEvent, TriggerEventId,
+    TriggerHandlerSpec, TriggerId, TriggerMetricsSnapshot, TriggerPredicateSpec,
+    TriggerRegistryError, TriggerState,
 };
 pub use value::*;
 pub use vm::*;
@@ -97,6 +101,7 @@ pub fn reset_thread_local_state() {
     event_log::reset_active_event_log();
     stdlib::reset_stdlib_state();
     orchestration::clear_runtime_hooks();
+    triggers::clear_trigger_registry();
     events::reset_event_sinks();
     agent_events::reset_all_sinks();
     agent_sessions::reset_session_store();

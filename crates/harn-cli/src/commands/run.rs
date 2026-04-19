@@ -549,8 +549,8 @@ pub(crate) async fn run_file_with_skill_dirs(
             connect_mcp_servers(&manifest.mcp, &mut vm).await;
         }
     }
-    if let Err(error) = package::collect_manifest_triggers(&mut vm, &extensions).await {
-        eprintln!("error: failed to validate manifest triggers: {error}");
+    if let Err(error) = package::install_manifest_triggers(&mut vm, &extensions).await {
+        eprintln!("error: failed to install manifest triggers: {error}");
         process::exit(1);
     }
     if let Err(error) = package::install_manifest_hooks(&mut vm, &extensions).await {
@@ -818,8 +818,8 @@ pub(crate) async fn run_file_mcp_serve(path: &str, card_source: Option<&str>) {
             connect_mcp_servers(&manifest.mcp, &mut vm).await;
         }
     }
-    if let Err(error) = package::collect_manifest_triggers(&mut vm, &extensions).await {
-        eprintln!("error: failed to validate manifest triggers: {error}");
+    if let Err(error) = package::install_manifest_triggers(&mut vm, &extensions).await {
+        eprintln!("error: failed to install manifest triggers: {error}");
         process::exit(1);
     }
     if let Err(error) = package::install_manifest_hooks(&mut vm, &extensions).await {
