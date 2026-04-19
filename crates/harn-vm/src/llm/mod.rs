@@ -108,6 +108,14 @@ use self::stream::vm_stream_llm;
 use self::trace::emit_agent_event;
 use self::trace::trace_llm_call;
 
+pub fn install_current_host_bridge(bridge: Rc<crate::bridge::HostBridge>) {
+    agent::install_current_host_bridge(bridge);
+}
+
+pub fn clear_current_host_bridge() {
+    agent::clear_current_host_bridge();
+}
+
 fn output_validation_mode(opts: &api::LlmCallOptions) -> &str {
     opts.output_validation.as_deref().unwrap_or("off")
 }
@@ -748,6 +756,7 @@ fn register_llm_mock_builtins(vm: &mut Vm) {
                 Some(v.display())
             }
         });
+        let consume_on_match = matches!(config.get("consume_match"), Some(VmValue::Bool(true)));
 
         let input_tokens = config.get("input_tokens").and_then(|v| v.as_int());
         let output_tokens = config.get("output_tokens").and_then(|v| v.as_int());
@@ -813,6 +822,7 @@ fn register_llm_mock_builtins(vm: &mut Vm) {
             text,
             tool_calls,
             match_pattern,
+            consume_on_match,
             input_tokens,
             output_tokens,
             cache_read_tokens: None,

@@ -21,8 +21,8 @@ pub(crate) use provider::{vm_resolve_model, vm_resolve_provider, ResolvedProvide
 pub(crate) use transcript::{
     is_transcript_value, new_transcript_with, new_transcript_with_events,
     normalize_transcript_asset, transcript_asset_list, transcript_event,
-    transcript_events_from_messages, transcript_id, transcript_message_list,
-    transcript_summary_text, transcript_to_vm_with_events,
+    transcript_events_from_messages, transcript_id, transcript_last_assistant_text,
+    transcript_message_list, transcript_summary_text, transcript_to_vm_with_events,
 };
 
 pub(super) const TRANSCRIPT_TYPE: &str = "transcript";

@@ -75,15 +75,20 @@ lint-harn:
 	fi; \
 	rm -rf "$$tmp"; \
 	if [ "$$status" -ne 0 ]; then echo "Lint issues found in conformance tests"; exit 1; fi
+	@echo "=== Checking Harn experiment support modules ==="
+	@cargo run --quiet --bin harn -- check $(EXPERIMENT_HARN_CHECK)
 	@echo "    Harn lint OK."
 
 # Check harn formatting on conformance tests (CI, not pre-commit).
 # Skip tests that exercise syntax the formatter intentionally normalizes
 # (triple-quoted multiline strings → single-line escaped strings).
 FMT_HARN_SKIP := multiline_strings.harn multiline_string_interpolation.harn
+EXPERIMENT_HARN_CHECK := experiments/burin-mini/host.harn experiments/burin-mini/lib/common.harn experiments/burin-mini/lib/profiles.harn
 fmt-harn:
 	@echo "=== Checking Harn formatting ==="
 	@find conformance/tests -name '*.harn' $(foreach s,$(FMT_HARN_SKIP),-not -name $(s)) -print0 \
+		| xargs -0 cargo run --quiet --bin harn -- fmt --check
+	@find experiments -name '*.harn' -print0 \
 		| xargs -0 cargo run --quiet --bin harn -- fmt --check
 	@echo "    Harn formatting OK."
 

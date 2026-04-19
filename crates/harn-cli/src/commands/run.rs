@@ -133,6 +133,10 @@ fn parse_cli_llm_mock_value(value: &serde_json::Value) -> Result<harn_vm::llm::L
         .ok_or_else(|| "fixture line must be a JSON object".to_string())?;
 
     let match_pattern = optional_string_field(object, "match")?;
+    let consume_on_match = object
+        .get("consume_match")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
     let text = optional_string_field(object, "text")?.unwrap_or_default();
     let input_tokens = optional_i64_field(object, "input_tokens")?;
     let output_tokens = optional_i64_field(object, "output_tokens")?;
@@ -150,6 +154,7 @@ fn parse_cli_llm_mock_value(value: &serde_json::Value) -> Result<harn_vm::llm::L
         text,
         tool_calls,
         match_pattern,
+        consume_on_match,
         input_tokens,
         output_tokens,
         cache_read_tokens,
@@ -279,7 +284,7 @@ pub(crate) fn install_cli_llm_mock_mode(mode: &CliLlmMockMode) -> Result<(), Str
     }
 }
 
-fn persist_cli_llm_mock_recording(mode: &CliLlmMockMode) -> Result<(), String> {
+pub(crate) fn persist_cli_llm_mock_recording(mode: &CliLlmMockMode) -> Result<(), String> {
     let CliLlmMockMode::Record { fixture_path } = mode else {
         return Ok(());
     };

@@ -361,6 +361,25 @@ fn summarize_sub_agent_result(result: &serde_json::Value) -> String {
     }
 }
 
+fn sub_agent_expects_json(spec: &SubAgentRunSpec) -> bool {
+    matches!(
+        spec.options.get("response_format"),
+        Some(VmValue::String(text)) if text.as_ref() == "json"
+    )
+}
+
+fn summary_has_parseable_json(summary: &str) -> bool {
+    let candidate = crate::stdlib::json::extract_json_from_text(summary);
+    serde_json::from_str::<serde_json::Value>(&candidate).is_ok()
+}
+
+fn transcript_summary_fallback(transcript: &VmValue) -> Option<String> {
+    let dict = transcript.as_dict()?;
+    crate::llm::helpers::transcript_summary_text(dict)
+        .filter(|text| !text.trim().is_empty())
+        .or_else(|| crate::llm::helpers::transcript_last_assistant_text(dict))
+}
+
 fn parse_structured_sub_agent_data(summary: &str, schema: &VmValue) -> Result<VmValue, VmError> {
     let json = crate::stdlib::json::extract_json_from_text(summary);
     let parsed = serde_json::from_str::<serde_json::Value>(&json).map_err(|error| {
@@ -479,11 +498,7 @@ pub(super) async fn execute_sub_agent(
         VmValue::Dict(Rc::new(spec.options.clone())),
     ];
     let mut llm_opts = crate::llm::helpers::extract_llm_options(&args)?;
-    let mut config = sub_agent_loop_options(&spec)?;
-    if config.tool_format == "text" {
-        config.tool_format =
-            crate::llm_config::default_tool_format(&llm_opts.model, &llm_opts.provider);
-    }
+    let config = sub_agent_loop_options(&spec)?;
     let result = crate::llm::run_agent_loop_internal(&mut llm_opts, config).await;
 
     let (result, transcript) = match result {
@@ -525,7 +540,14 @@ pub(super) async fn execute_sub_agent(
     };
     let tokens_used = transcript_tokens_used(&transcript);
 
-    let summary = summarize_sub_agent_result(&result);
+    let mut summary = summarize_sub_agent_result(&result);
+    let needs_transcript_summary = summary.trim().is_empty()
+        || (sub_agent_expects_json(&spec) && !summary_has_parseable_json(&summary));
+    if needs_transcript_summary {
+        if let Some(transcript_summary) = transcript_summary_fallback(&transcript) {
+            summary = transcript_summary;
+        }
+    }
     let artifacts = transcript
         .as_dict()
         .and_then(|dict| dict.get("assets"))

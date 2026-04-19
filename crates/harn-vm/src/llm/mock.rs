@@ -42,6 +42,7 @@ pub struct LlmMock {
     pub text: String,
     pub tool_calls: Vec<serde_json::Value>,
     pub match_pattern: Option<String>, // None = FIFO (consumed), Some = glob (reusable)
+    pub consume_on_match: bool,
     pub input_tokens: Option<i64>,
     pub output_tokens: Option<i64>,
     pub cache_read_tokens: Option<i64>,
@@ -223,6 +224,47 @@ fn mock_glob_match(pattern: &str, text: &str) -> bool {
     true
 }
 
+fn collect_mock_match_strings(value: &serde_json::Value, out: &mut Vec<String>) {
+    match value {
+        serde_json::Value::String(text) if !text.is_empty() => out.push(text.clone()),
+        serde_json::Value::String(_) => {}
+        serde_json::Value::Array(items) => {
+            for item in items {
+                collect_mock_match_strings(item, out);
+            }
+        }
+        serde_json::Value::Object(map) => {
+            for value in map.values() {
+                collect_mock_match_strings(value, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn mock_match_text(messages: &[serde_json::Value]) -> String {
+    let mut parts = Vec::new();
+    for message in messages {
+        collect_mock_match_strings(message, &mut parts);
+    }
+    parts.join("\n")
+}
+
+fn mock_last_prompt_text(messages: &[serde_json::Value]) -> String {
+    for message in messages.iter().rev() {
+        let Some(content) = message.get("content") else {
+            continue;
+        };
+        let mut parts = Vec::new();
+        collect_mock_match_strings(content, &mut parts);
+        let text = parts.join("\n");
+        if !text.trim().is_empty() {
+            return text;
+        }
+    }
+    String::new()
+}
+
 /// Convert a mock's `error` payload into the `VmError` that the
 /// provider path would have raised, so classification, retry, and
 /// `error_category` all behave identically to a real failure.
@@ -238,22 +280,30 @@ fn mock_error_to_vm_error(err: &MockError) -> VmError {
 /// on an error-mock match, and `None` to fall through to default.
 fn try_match_mock_queue(
     mocks: &mut Vec<LlmMock>,
-    last_msg: &str,
+    match_text: &str,
 ) -> Option<Result<LlmResult, VmError>> {
     if let Some(idx) = mocks.iter().position(|m| m.match_pattern.is_none()) {
         let mock = mocks.remove(idx);
         return Some(match &mock.error {
             Some(err) => Err(mock_error_to_vm_error(err)),
-            None => Ok(build_mock_result(&mock, last_msg.len())),
+            None => Ok(build_mock_result(&mock, match_text.len())),
         });
     }
 
-    for mock in mocks.iter().rev() {
+    for idx in 0..mocks.len() {
+        let mock = &mocks[idx];
         if let Some(ref pattern) = mock.match_pattern {
-            if mock_glob_match(pattern, last_msg) {
+            if mock_glob_match(pattern, match_text) {
+                if mock.consume_on_match {
+                    let mock = mocks.remove(idx);
+                    return Some(match &mock.error {
+                        Some(err) => Err(mock_error_to_vm_error(err)),
+                        None => Ok(build_mock_result(&mock, match_text.len())),
+                    });
+                }
                 return Some(match &mock.error {
                     Some(err) => Err(mock_error_to_vm_error(err)),
-                    None => Ok(build_mock_result(mock, last_msg.len())),
+                    None => Ok(build_mock_result(mock, match_text.len())),
                 });
             }
         }
@@ -262,12 +312,12 @@ fn try_match_mock_queue(
     None
 }
 
-fn try_match_builtin_mock(last_msg: &str) -> Option<Result<LlmResult, VmError>> {
-    LLM_MOCKS.with(|mocks| try_match_mock_queue(&mut mocks.borrow_mut(), last_msg))
+fn try_match_builtin_mock(match_text: &str) -> Option<Result<LlmResult, VmError>> {
+    LLM_MOCKS.with(|mocks| try_match_mock_queue(&mut mocks.borrow_mut(), match_text))
 }
 
-fn try_match_cli_mock(last_msg: &str) -> Option<Result<LlmResult, VmError>> {
-    CLI_LLM_MOCKS.with(|mocks| try_match_mock_queue(&mut mocks.borrow_mut(), last_msg))
+fn try_match_cli_mock(match_text: &str) -> Option<Result<LlmResult, VmError>> {
+    CLI_LLM_MOCKS.with(|mocks| try_match_mock_queue(&mut mocks.borrow_mut(), match_text))
 }
 
 pub(crate) fn record_cli_llm_result(result: &LlmResult) {
@@ -279,6 +329,7 @@ pub(crate) fn record_cli_llm_result(result: &LlmResult) {
             text: result.text.clone(),
             tool_calls: result.tool_calls.clone(),
             match_pattern: None,
+            consume_on_match: false,
             input_tokens: Some(result.input_tokens),
             output_tokens: Some(result.output_tokens),
             cache_read_tokens: Some(result.cache_read_tokens),
@@ -293,9 +344,9 @@ pub(crate) fn record_cli_llm_result(result: &LlmResult) {
     });
 }
 
-fn unmatched_cli_prompt_error(last_msg: &str) -> VmError {
-    let mut snippet: String = last_msg.chars().take(200).collect();
-    if last_msg.chars().count() > 200 {
+fn unmatched_cli_prompt_error(match_text: &str) -> VmError {
+    let mut snippet: String = match_text.chars().take(200).collect();
+    if match_text.chars().count() > 200 {
         snippet.push_str("...");
     }
     VmError::Runtime(format!("No --llm-mock fixture matched prompt: {snippet:?}"))
@@ -440,22 +491,19 @@ pub(crate) fn mock_llm_response(
 ) -> Result<LlmResult, VmError> {
     record_llm_mock_call(messages, system, native_tools);
 
-    let last_msg = messages
-        .last()
-        .and_then(|m| m.get("content"))
-        .and_then(|c| c.as_str())
-        .unwrap_or("");
+    let match_text = mock_match_text(messages);
+    let prompt_text = mock_last_prompt_text(messages);
 
-    if let Some(matched) = try_match_cli_mock(last_msg) {
+    if let Some(matched) = try_match_cli_mock(&match_text) {
         return matched;
     }
 
-    if let Some(matched) = try_match_builtin_mock(last_msg) {
+    if let Some(matched) = try_match_builtin_mock(&match_text) {
         return matched;
     }
 
     if cli_llm_mock_replay_active() {
-        return Err(unmatched_cli_prompt_error(last_msg));
+        return Err(unmatched_cli_prompt_error(&match_text));
     }
 
     // Generate a mock tool call for the first tool, filling required
@@ -471,12 +519,12 @@ pub(crate) fn mock_llm_response(
             return Ok(LlmResult {
                 text: String::new(),
                 tool_calls: vec![serde_json::json!({
-                    "id": "mock_call_1",
-                    "type": "tool_call",
-                    "name": tool_name,
-                    "arguments": mock_args
+                        "id": "mock_call_1",
+                        "type": "tool_call",
+                        "name": tool_name,
+                "arguments": mock_args
                 })],
-                input_tokens: last_msg.len() as i64,
+                input_tokens: prompt_text.len() as i64,
                 output_tokens: 20,
                 cache_read_tokens: 0,
                 cache_write_tokens: 0,
@@ -503,13 +551,13 @@ pub(crate) fn mock_llm_response(
         ""
     };
 
-    let prose_body = if last_msg.is_empty() {
+    let prose_body = if prompt_text.is_empty() {
         "Mock LLM response".to_string()
     } else {
-        let word_count = last_msg.split_whitespace().count();
+        let word_count = prompt_text.split_whitespace().count();
         format!(
             "Mock response to {word_count}-word prompt: {}",
-            last_msg.chars().take(100).collect::<String>()
+            prompt_text.chars().take(100).collect::<String>()
         )
     };
     let response = format!("<assistant_prose>{prose_body}</assistant_prose>{done_block}");
@@ -517,7 +565,7 @@ pub(crate) fn mock_llm_response(
     Ok(LlmResult {
         text: response.clone(),
         tool_calls: vec![],
-        input_tokens: last_msg.len() as i64,
+        input_tokens: prompt_text.len() as i64,
         output_tokens: 30,
         cache_read_tokens: 0,
         cache_write_tokens: 0,

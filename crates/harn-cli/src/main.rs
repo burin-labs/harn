@@ -346,7 +346,18 @@ async fn main() {
             commands::portal::run_portal(&args.dir, &args.host, args.port, args.open).await
         }
         Command::Playground(args) => {
-            if let Err(error) = commands::playground::run_command(args).await {
+            let llm_mock_mode = if let Some(path) = args.llm_mock.as_ref() {
+                commands::run::CliLlmMockMode::Replay {
+                    fixture_path: PathBuf::from(path),
+                }
+            } else if let Some(path) = args.llm_mock_record.as_ref() {
+                commands::run::CliLlmMockMode::Record {
+                    fixture_path: PathBuf::from(path),
+                }
+            } else {
+                commands::run::CliLlmMockMode::Off
+            };
+            if let Err(error) = commands::playground::run_command(args, llm_mock_mode).await {
                 eprint!("{error}");
                 process::exit(1);
             }

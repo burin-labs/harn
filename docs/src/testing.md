@@ -128,7 +128,7 @@ log(result)
 
 This queues a canned response that the next LLM call consumes.
 
-For end-to-end CLI runs, `harn run` can preload the same mock
+For end-to-end CLI runs, `harn run` and `harn playground` can preload the same mock
 infrastructure from a JSONL fixture file:
 
 ```jsonl
@@ -139,11 +139,15 @@ infrastructure from a JSONL fixture file:
 
 ```bash
 harn run script.harn --llm-mock fixtures.jsonl
+harn playground --script pipeline.harn --llm-mock fixtures.jsonl
 ```
 
 - A line without `match` is FIFO and is consumed on use.
-- A line with `match` is a reusable glob against the prompt text.
-- When no fixture matches, `harn run --llm-mock ...` fails with the
+- A line with `match` is checked in file order as a glob against the request transcript text.
+- Add `"consume_match": true` when repeated matching prompts should advance
+  through a scripted sequence instead of reusing the same line forever.
+- When no fixture matches, `harn run --llm-mock ...` and
+  `harn playground --llm-mock ...` fail with the
   first prompt snippet so you can add the missing case directly.
 
 To capture a replayable fixture from a run, record once and then replay
@@ -152,6 +156,9 @@ the saved JSONL:
 ```bash
 harn run script.harn --llm-mock-record fixtures.jsonl
 harn run script.harn --llm-mock fixtures.jsonl
+
+harn playground --script pipeline.harn --llm-mock-record fixtures.jsonl
+harn playground --script pipeline.harn --llm-mock fixtures.jsonl
 ```
 
 ## Built-in assertions

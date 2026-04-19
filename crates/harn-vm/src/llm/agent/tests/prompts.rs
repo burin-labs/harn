@@ -107,3 +107,43 @@ async fn persistent_prompt_omits_done_sentinel_when_stage_disallows_it() {
     assert!(!system.contains("##DONE##"));
     reset_llm_mock_state();
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn native_persistent_prompt_stays_on_native_tool_contract() {
+    reset_llm_mock_state();
+    let mut opts = base_opts(vec![serde_json::json!({
+        "role": "user",
+        "content": "inspect the workspace",
+    })]);
+    opts.native_tools = Some(vec![serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "read",
+            "description": "Read a file",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"}
+                },
+                "required": ["path"]
+            }
+        }
+    })]);
+
+    let mut config = base_agent_config();
+    config.persistent = true;
+    config.tool_format = "native".to_string();
+
+    let _ = run_agent_loop_internal(&mut opts, config).await.unwrap();
+    let calls = get_llm_mock_calls();
+    let system = calls
+        .last()
+        .and_then(|call| call.system.as_ref())
+        .expect("mock call system prompt");
+    assert!(system.contains("## Native tool protocol"));
+    assert!(system.contains("## Task ledger"));
+    assert!(!system.contains("## Response protocol"));
+    assert!(!system.contains("declare function read(args:"));
+    assert!(!system.contains("<tool_call>"));
+    reset_llm_mock_state();
+}

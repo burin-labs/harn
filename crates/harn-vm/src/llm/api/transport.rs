@@ -16,6 +16,74 @@ use super::response::{extract_cache_read_tokens, extract_cache_write_tokens, par
 use super::result::LlmResult;
 use super::thinking::ThinkingStreamSplitter;
 
+fn parse_ollama_tool_arguments(arguments: &serde_json::Value) -> serde_json::Value {
+    match arguments {
+        serde_json::Value::Object(_) | serde_json::Value::Array(_) | serde_json::Value::Null => {
+            arguments.clone()
+        }
+        serde_json::Value::String(text) => serde_json::from_str(text).unwrap_or_else(|err| {
+            serde_json::json!({
+                "__parse_error": format!(
+                    "Could not parse tool arguments as JSON: {}. Raw input: {}",
+                    err,
+                    &text[..text.len().min(200)]
+                )
+            })
+        }),
+        other => other.clone(),
+    }
+}
+
+fn append_ollama_tool_calls(
+    message: &serde_json::Value,
+    tool_calls: &mut Vec<serde_json::Value>,
+    blocks: &mut Vec<serde_json::Value>,
+) {
+    let Some(calls) = message.get("tool_calls").and_then(|value| value.as_array()) else {
+        return;
+    };
+
+    for (idx, call) in calls.iter().enumerate() {
+        let function = call.get("function").unwrap_or(call);
+        let name = function
+            .get("name")
+            .and_then(|value| value.as_str())
+            .unwrap_or("")
+            .to_string();
+        if name.is_empty() {
+            continue;
+        }
+        let arguments = parse_ollama_tool_arguments(
+            function
+                .get("arguments")
+                .unwrap_or(&serde_json::Value::Object(Default::default())),
+        );
+        let id = call
+            .get("id")
+            .and_then(|value| value.as_str())
+            .map(str::to_string)
+            .or_else(|| {
+                function
+                    .get("index")
+                    .and_then(|value| value.as_i64())
+                    .map(|index| format!("ollama_tool_{index}"))
+            })
+            .unwrap_or_else(|| format!("ollama_tool_{}", tool_calls.len() + idx));
+        tool_calls.push(serde_json::json!({
+            "id": id,
+            "name": name,
+            "arguments": arguments,
+        }));
+        blocks.push(serde_json::json!({
+            "type": "tool_call",
+            "id": id,
+            "name": function.get("name").cloned().unwrap_or(serde_json::json!("")),
+            "arguments": arguments,
+            "visibility": "internal",
+        }));
+    }
+}
+
 /// Dispatch an LLM API call to the appropriate provider. This is the main
 /// entry point that routes to provider-specific implementations via the
 /// provider plugin architecture.
@@ -619,6 +687,7 @@ async fn vm_call_llm_api_ndjson_from_response(
     let mut result_model = model.to_string();
 
     let mut thinking_text = String::new();
+    let mut tool_calls = Vec::new();
     let mut blocks = Vec::new();
 
     while let Ok(Some(line)) = lines.next_line().await {
@@ -648,6 +717,7 @@ async fn vm_call_llm_api_ndjson_from_response(
                 serde_json::json!({"type": "reasoning", "text": thinking, "visibility": "private"}),
             );
         }
+        append_ollama_tool_calls(&json["message"], &mut tool_calls, &mut blocks);
 
         if let Some(m) = json["model"].as_str() {
             result_model = m.to_string();
@@ -679,7 +749,7 @@ async fn vm_call_llm_api_ndjson_from_response(
     // nonzero but every delta and the done chunk are empty strings.
     // Silently returning empty text would make the agent loop burn
     // iterations on a no-op.
-    if text.is_empty() && output_tokens > 0 {
+    if text.is_empty() && tool_calls.is_empty() && output_tokens > 0 {
         return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
             "ollama model {model} reported eval_count={output_tokens} but delivered no content or thinking — likely a server-side parser bug; try a different model"
         )))));
@@ -687,7 +757,7 @@ async fn vm_call_llm_api_ndjson_from_response(
 
     Ok(LlmResult {
         text,
-        tool_calls: Vec::new(),
+        tool_calls,
         input_tokens,
         output_tokens,
         cache_read_tokens: 0,
@@ -698,4 +768,46 @@ async fn vm_call_llm_api_ndjson_from_response(
         stop_reason: None,
         blocks,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{append_ollama_tool_calls, parse_ollama_tool_arguments};
+
+    #[test]
+    fn ollama_tool_arguments_accept_object_shape() {
+        let arguments = serde_json::json!({"path": "README.md"});
+        assert_eq!(parse_ollama_tool_arguments(&arguments), arguments);
+    }
+
+    #[test]
+    fn ollama_tool_arguments_parse_json_strings() {
+        let parsed = parse_ollama_tool_arguments(&serde_json::json!("{\"path\":\"README.md\"}"));
+        assert_eq!(parsed["path"], "README.md");
+    }
+
+    #[test]
+    fn ollama_stream_chunks_surface_tool_calls() {
+        let message = serde_json::json!({
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{
+                "function": {
+                    "name": "read_file",
+                    "arguments": {
+                        "path": "README.md"
+                    }
+                }
+            }]
+        });
+        let mut tool_calls = Vec::new();
+        let mut blocks = Vec::new();
+        append_ollama_tool_calls(&message, &mut tool_calls, &mut blocks);
+
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(tool_calls[0]["name"], "read_file");
+        assert_eq!(tool_calls[0]["arguments"]["path"], "README.md");
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0]["type"], "tool_call");
+    }
 }

@@ -50,6 +50,8 @@ harn playground --llm ollama:qwen2.5-coder:latest --task "Use a local model"
 | `--script <file>` | Pipeline entrypoint to execute (default: `pipeline.harn`) |
 | `--task <text>` | Task string exposed as `HARN_TASK` during the run |
 | `--llm <provider:model>` | Override the provider/model selection for this invocation |
+| `--llm-mock <path>` | Replay LLM responses from a JSONL fixture file instead of calling the provider |
+| `--llm-mock-record <path>` | Record executed LLM responses into a JSONL fixture file |
 | `--watch` | Re-run when the host module or script changes |
 
 `harn playground` type-checks the host module, merges its exported function

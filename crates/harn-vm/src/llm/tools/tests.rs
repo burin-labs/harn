@@ -10,10 +10,11 @@
 
 use super::{
     apply_tool_search_native_injection, build_assistant_response_message,
-    build_assistant_tool_message, build_tool_calling_contract_prompt, collect_tool_schemas,
-    collect_tool_schemas_with_registry, extract_deferred_tool_names, normalize_tool_args,
-    parse_bare_calls_in_body, parse_native_json_tool_calls, parse_text_tool_calls_with_tools,
-    validate_tool_args, vm_tools_to_native, ComponentRegistry, TS_CALL_CONTRACT_HELP,
+    build_assistant_tool_message, build_tool_calling_contract_prompt, build_tool_result_message,
+    collect_tool_schemas, collect_tool_schemas_with_registry, extract_deferred_tool_names,
+    normalize_tool_args, parse_bare_calls_in_body, parse_native_json_tool_calls,
+    parse_text_tool_calls_with_tools, validate_tool_args, vm_tools_to_native, ComponentRegistry,
+    TEXT_RESPONSE_PROTOCOL_HELP,
 };
 use crate::value::VmValue;
 use serde_json::json;
@@ -603,26 +604,24 @@ fn contract_prompt_renders_edit_signature_with_enum_and_required_markers() {
 fn contract_prompt_help_block_documents_tagged_protocol() {
     // The help constant teaches the three top-level tags, the call shape
     // inside <tool_call>, and the done-block grammar.
-    assert!(TS_CALL_CONTRACT_HELP.contains("Response protocol"));
-    assert!(TS_CALL_CONTRACT_HELP.contains("<tool_call>"));
-    assert!(TS_CALL_CONTRACT_HELP.contains("</tool_call>"));
-    assert!(TS_CALL_CONTRACT_HELP.contains("<assistant_prose>"));
-    assert!(TS_CALL_CONTRACT_HELP.contains("<done>##DONE##</done>"));
-    assert!(TS_CALL_CONTRACT_HELP.contains("name({ key: value })"));
-    assert!(TS_CALL_CONTRACT_HELP.contains("heredoc"));
+    assert!(TEXT_RESPONSE_PROTOCOL_HELP.contains("Response protocol"));
+    assert!(TEXT_RESPONSE_PROTOCOL_HELP.contains("<tool_call>"));
+    assert!(TEXT_RESPONSE_PROTOCOL_HELP.contains("</tool_call>"));
+    assert!(TEXT_RESPONSE_PROTOCOL_HELP.contains("<assistant_prose>"));
+    assert!(TEXT_RESPONSE_PROTOCOL_HELP.contains("<done>##DONE##</done>"));
+    assert!(TEXT_RESPONSE_PROTOCOL_HELP.contains("name({ key: value })"));
+    assert!(TEXT_RESPONSE_PROTOCOL_HELP.contains("heredoc"));
     // Legacy bare-call phrasing must not regress.
-    assert!(!TS_CALL_CONTRACT_HELP.contains("contains no tool calls"));
-    assert!(!TS_CALL_CONTRACT_HELP.contains("```call"));
+    assert!(!TEXT_RESPONSE_PROTOCOL_HELP.contains("contains no tool calls"));
+    assert!(!TEXT_RESPONSE_PROTOCOL_HELP.contains("```call"));
 }
 
 #[test]
-fn contract_prompt_native_mode_includes_text_fallback() {
-    // Pre-v0.5.82 native mode emitted a four-line "use the native channel"
-    // preamble and stripped all schemas/examples. That broke for hosts
-    // (Ollama with bare templates, some OpenAI-compat servers) that drop
-    // the `tools` parameter — the model would receive zero tool guidance.
-    // Native mode now keeps the preamble preferring the native channel
-    // AND includes the text-mode protocol + schemas as a fallback.
+fn contract_prompt_native_mode_prefers_provider_channel_without_text_fallback() {
+    // Native mode should stay lean: the provider already receives the
+    // structured `tools` payload, so the system prompt must not inject
+    // the text-mode response grammar or duplicate `declare function`
+    // schemas that can confuse native-tool parsers.
     let tools = sample_tool_registry();
     let prompt = build_tool_calling_contract_prompt(Some(&tools), None, "native", true, None);
     assert!(
@@ -630,16 +629,14 @@ fn contract_prompt_native_mode_includes_text_fallback() {
         "native preamble missing: {prompt}"
     );
     assert!(
-        prompt.contains("strip the tools parameter"),
-        "fallback rationale missing: {prompt}"
-    );
-    assert!(
         prompt.contains("This turn is action-gated"),
         "action gate missing: {prompt}"
     );
-    // Text-mode help and schemas are now present in native mode too.
-    assert!(prompt.contains("declare function edit(args:"));
-    assert!(prompt.contains("## Available tools"));
+    assert!(prompt.contains("## Task ledger"));
+    assert!(!prompt.contains("## Response protocol"));
+    assert!(!prompt.contains("declare function edit(args:"));
+    assert!(!prompt.contains("## Available tools"));
+    assert!(!prompt.contains("<tool_call>"));
 }
 
 #[test]
@@ -647,7 +644,7 @@ fn contract_prompt_text_mode_mentions_action_gate_before_examples() {
     let tools = sample_tool_registry();
     let prompt = build_tool_calling_contract_prompt(Some(&tools), None, "text", true, None);
     assert!(prompt.contains("This turn is action-gated."));
-    assert!(prompt.contains("native channel or `<tool_call>` block"));
+    assert!(prompt.contains("`<tool_call>...</tool_call>`"));
     assert!(prompt.contains("Do not emit raw source code"));
 }
 
@@ -1460,6 +1457,38 @@ fn assistant_tool_message_includes_empty_content_for_openai_style() {
     assert_eq!(message["role"], "assistant");
     assert_eq!(message["content"], "");
     assert_eq!(message["tool_calls"][0]["id"], "call_001");
+}
+
+#[test]
+fn assistant_tool_message_uses_ollama_native_shape() {
+    let message = build_assistant_tool_message(
+        "",
+        &[json!({
+            "id": "call_001",
+            "name": "read",
+            "arguments": {"path": "main.rs"},
+        })],
+        "ollama",
+    );
+
+    assert_eq!(message["role"], "assistant");
+    assert!(message.get("content").is_none());
+    assert_eq!(message["tool_calls"][0]["type"], "function");
+    assert_eq!(message["tool_calls"][0]["function"]["name"], "read");
+    assert_eq!(
+        message["tool_calls"][0]["function"]["arguments"]["path"],
+        "main.rs"
+    );
+}
+
+#[test]
+fn tool_result_message_uses_ollama_tool_name() {
+    let message = build_tool_result_message("call_001", "read", "contents", "ollama");
+
+    assert_eq!(message["role"], "tool");
+    assert_eq!(message["tool_name"], "read");
+    assert_eq!(message["content"], "contents");
+    assert!(message.get("tool_call_id").is_none());
 }
 
 #[test]

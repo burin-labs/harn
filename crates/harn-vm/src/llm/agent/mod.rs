@@ -133,6 +133,12 @@ pub(crate) fn install_current_host_bridge(bridge: Rc<crate::bridge::HostBridge>)
     });
 }
 
+pub(crate) fn clear_current_host_bridge() {
+    CURRENT_HOST_BRIDGE.with(|slot| {
+        *slot.borrow_mut() = None;
+    });
+}
+
 pub(crate) fn current_host_bridge() -> Option<Rc<crate::bridge::HostBridge>> {
     CURRENT_HOST_BRIDGE.with(|slot| slot.borrow().clone())
 }

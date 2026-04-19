@@ -199,11 +199,12 @@ pub(super) fn normalize_native_tools_for_format(
 }
 
 pub(super) fn normalize_tool_examples_for_format(
-    _tool_format: &str,
+    tool_format: &str,
     tool_examples: Option<String>,
 ) -> Option<String> {
-    // Native mode still shows text-mode examples: they're a fallback
-    // when the host's chat template strips the native `tools` param.
+    if tool_format == "native" {
+        return None;
+    }
     tool_examples.and_then(|examples| {
         let trimmed = examples.trim();
         if trimmed.is_empty() {
@@ -269,6 +270,7 @@ pub(super) async fn dispatch_tool_execution(
                 });
             };
             let args_vm = crate::stdlib::json_to_vm_value(tool_args);
+            let _trusted_bridge_guard = crate::orchestration::allow_trusted_bridge_calls();
             match vm.call_closure_pub(&handler, &[args_vm], &[]).await {
                 Ok(val) => Ok(serde_json::Value::String(val.display())),
                 Err(VmError::CategorizedError {

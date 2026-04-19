@@ -28,6 +28,20 @@ harn playground \
   --llm mock:mock
 ```
 
+For deterministic end-to-end iteration, `harn playground` also accepts the
+same JSONL fixture flags as `harn run`:
+
+```bash
+harn playground \
+  --host examples/playground/host.harn \
+  --script examples/playground/echo.harn \
+  --task "Explain this repository" \
+  --llm-mock fixtures/playground.jsonl
+```
+
+Use `--llm-mock-record <path>` once to capture a replayable fixture, then
+switch back to `--llm-mock <path>` while you iterate on control flow.
+
 ## Host modules
 
 A playground host is just a `.harn` file that exports the functions your
