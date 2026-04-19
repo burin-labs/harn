@@ -980,6 +980,13 @@ pub(crate) async fn execute(source: &str, source_path: Option<&Path>) -> Result<
             });
             skill_loader::emit_loader_warnings(&loaded.loader_warnings);
             skill_loader::install_skills_global(&mut vm, &loaded);
+            if let Some(path) = source_path {
+                let extensions = package::load_runtime_extensions(path);
+                package::install_runtime_extensions(&extensions);
+                package::install_manifest_hooks(&mut vm, &extensions)
+                    .await
+                    .map_err(|error| format!("failed to install manifest hooks: {error}"))?;
+            }
             let execution_result = vm.execute(&chunk).await.map_err(|e| e.to_string());
             harn_vm::stdlib::process::set_thread_execution_context(None);
             execution_result?;

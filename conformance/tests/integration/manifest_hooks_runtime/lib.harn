@@ -1,0 +1,11 @@
+pub fn deny_write_like_tools(event) {
+  let name = event?.tool?.name ?? ""
+  if contains(name, "write") || contains(name, "edit") {
+    return {deny: "manifest denied " + name}
+  }
+  return nil
+}
+
+pub fn rewrite_read_results(event) {
+  return "HOOKED:" + event?.result?.text ?? ""
+}

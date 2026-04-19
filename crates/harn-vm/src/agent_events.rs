@@ -25,6 +25,38 @@ use serde::{Deserialize, Serialize};
 
 use crate::tool_annotations::ToolKind;
 
+/// Typed worker lifecycle events emitted by delegated/background agent
+/// execution. Bridge-facing worker updates still derive a string status
+/// from these variants, but the runtime no longer passes raw status
+/// strings around internally.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+pub enum WorkerEvent {
+    WorkerSpawned,
+    WorkerCompleted,
+    WorkerFailed,
+    WorkerCancelled,
+}
+
+impl WorkerEvent {
+    pub fn as_status(self) -> &'static str {
+        match self {
+            Self::WorkerSpawned => "running",
+            Self::WorkerCompleted => "completed",
+            Self::WorkerFailed => "failed",
+            Self::WorkerCancelled => "cancelled",
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::WorkerSpawned => "WorkerSpawned",
+            Self::WorkerCompleted => "WorkerCompleted",
+            Self::WorkerFailed => "WorkerFailed",
+            Self::WorkerCancelled => "WorkerCancelled",
+        }
+    }
+}
+
 /// Status of a tool call. Mirrors ACP's `toolCallStatus`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

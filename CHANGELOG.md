@@ -7,9 +7,30 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
+## Unreleased
+
+### Added
+
+- **Declarative runtime hooks via `[[hooks]]` manifests (#141, builds on
+  #138).** `harn.toml` can now register process-scoped `PreToolUse`,
+  `PostToolUse`, `PreAgentTurn`, `PostAgentTurn`, and worker lifecycle
+  hooks from exported Harn functions before execution starts. Tool hooks
+  support manifest-driven deny/argument-rewrite/result-rewrite behavior,
+  worker lifecycle moved off raw status strings onto a typed
+  `WorkerEvent` enum, and conformance now covers manifest registration,
+  pre-tool short-circuit, and post-tool rewrite behavior end-to-end.
+
 ## v0.7.21
 
 ### Added
+
+- **Daemon stdlib wrapper builtins for runtime-owned daemon mode (#143).**
+  `daemon_spawn`, `daemon_trigger`, `daemon_snapshot`, `daemon_stop`,
+  and `daemon_resume` now expose the existing agent-loop daemon
+  runtime through a first-class stdlib handle. The wrapper stores
+  daemon metadata alongside the persisted runtime snapshot so
+  resumable state dirs can be reopened ergonomically without changing
+  daemon semantics.
 
 - **Manifest-backed runtime extension ABI (#128).** `harn.toml` now
   supports `[exports]` for stable package module entry points and

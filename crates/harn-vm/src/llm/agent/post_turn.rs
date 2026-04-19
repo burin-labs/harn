@@ -77,6 +77,24 @@ pub(super) struct PostTurnContext<'a> {
     pub iteration: usize,
 }
 
+async fn emit_post_agent_turn_hook(
+    session_id: &str,
+    _iteration: usize,
+    turn: serde_json::Value,
+) -> Result<(), VmError> {
+    crate::orchestration::run_lifecycle_hooks(
+        crate::orchestration::HookEvent::PostAgentTurn,
+        &serde_json::json!({
+            "event": crate::orchestration::HookEvent::PostAgentTurn.as_str(),
+            "session": {
+                "id": session_id,
+            },
+            "turn": turn,
+        }),
+    )
+    .await
+}
+
 pub(super) async fn run_post_turn(
     state: &mut AgentLoopState,
     opts: &mut super::super::api::LlmCallOptions,
@@ -146,10 +164,16 @@ pub(super) async fn run_post_turn(
             "successful_tool_names": successful_tool_names,
             "tool_count": call_result.tool_calls.len(),
             "iteration": iteration,
+            "failed": dispatch
+                .tool_results_this_iter
+                .iter()
+                .any(|result| result["status"].as_str() != Some("ok"))
+                || !call_result.tool_parse_errors.is_empty(),
             "consecutive_single_tool_turns": state.consecutive_single_tool_turns,
             "session_tools_used": state.all_tools_used,
             "session_successful_tools": state.successful_tools_used,
         });
+        emit_post_agent_turn_hook(ctx.session_id, iteration, turn_info.clone()).await?;
         super::emit_agent_event(&AgentEvent::TurnEnd {
             session_id: ctx.session_id.to_string(),
             iteration,
@@ -277,6 +301,17 @@ pub(super) async fn run_post_turn(
                 "content": assistant_content_for_history,
             }),
         );
+        emit_post_agent_turn_hook(
+            ctx.session_id,
+            iteration,
+            serde_json::json!({
+                "iteration": iteration,
+                "failed": false,
+                "sentinel_hit": true,
+                "text": call_result.text.clone(),
+            }),
+        )
+        .await?;
         return Ok(IterationOutcome::Break);
     }
 
@@ -291,6 +326,17 @@ pub(super) async fn run_post_turn(
         );
         call_result.tool_parse_errors.clear();
         state.consecutive_text_only = 0;
+        emit_post_agent_turn_hook(
+            ctx.session_id,
+            iteration,
+            serde_json::json!({
+                "iteration": iteration,
+                "failed": true,
+                "parse_error": true,
+                "text": call_result.text.clone(),
+            }),
+        )
+        .await?;
         return Ok(IterationOutcome::Continue);
     }
 
@@ -319,6 +365,17 @@ pub(super) async fn run_post_turn(
                 tail_excerpt,
             })
             .await;
+            emit_post_agent_turn_hook(
+                ctx.session_id,
+                iteration,
+                serde_json::json!({
+                    "iteration": iteration,
+                    "failed": true,
+                    "status": "stuck",
+                    "text": call_result.text.clone(),
+                }),
+            )
+            .await?;
             return Ok(IterationOutcome::Break);
         }
         let guidance =
@@ -336,6 +393,17 @@ pub(super) async fn run_post_turn(
                 ),
             ),
         );
+        emit_post_agent_turn_hook(
+            ctx.session_id,
+            iteration,
+            serde_json::json!({
+                "iteration": iteration,
+                "failed": true,
+                "action_required": true,
+                "text": call_result.text.clone(),
+            }),
+        )
+        .await?;
         return Ok(IterationOutcome::Continue);
     }
 
@@ -355,6 +423,16 @@ pub(super) async fn run_post_turn(
     );
 
     if !ctx.persistent && !ctx.daemon {
+        emit_post_agent_turn_hook(
+            ctx.session_id,
+            iteration,
+            serde_json::json!({
+                "iteration": iteration,
+                "failed": false,
+                "text": call_result.text.clone(),
+            }),
+        )
+        .await?;
         return Ok(IterationOutcome::Break);
     }
 
@@ -391,6 +469,17 @@ pub(super) async fn run_post_turn(
                 .or(state.daemon_snapshot_path.take());
         if !ctx.daemon_config.has_wake_source(ctx.bridge.is_some()) {
             state.final_status = "idle";
+            emit_post_agent_turn_hook(
+                ctx.session_id,
+                iteration,
+                serde_json::json!({
+                    "iteration": iteration,
+                    "failed": false,
+                    "status": "idle",
+                    "text": call_result.text.clone(),
+                }),
+            )
+            .await?;
             return Ok(IterationOutcome::Break);
         }
         let watchdog_limit = ctx.daemon_config.idle_watchdog_attempts;
@@ -498,12 +587,34 @@ pub(super) async fn run_post_turn(
                     })
                     .await;
                     state.final_status = "watchdog";
+                    emit_post_agent_turn_hook(
+                        ctx.session_id,
+                        iteration,
+                        serde_json::json!({
+                            "iteration": iteration,
+                            "failed": true,
+                            "status": "watchdog",
+                            "text": call_result.text.clone(),
+                        }),
+                    )
+                    .await?;
                     return Ok(IterationOutcome::Break);
                 }
             }
             ctx.daemon_config
                 .update_idle_backoff(&mut state.idle_backoff_ms);
         }
+        emit_post_agent_turn_hook(
+            ctx.session_id,
+            iteration,
+            serde_json::json!({
+                "iteration": iteration,
+                "failed": false,
+                "status": "daemon_wake",
+                "text": call_result.text.clone(),
+            }),
+        )
+        .await?;
         return Ok(IterationOutcome::Continue);
     }
 
@@ -526,6 +637,17 @@ pub(super) async fn run_post_turn(
     if !finish_step_messages.is_empty() {
         state.consecutive_text_only = 0;
         state.idle_backoff_ms = 100;
+        emit_post_agent_turn_hook(
+            ctx.session_id,
+            iteration,
+            serde_json::json!({
+                "iteration": iteration,
+                "failed": false,
+                "status": "host_input",
+                "text": call_result.text.clone(),
+            }),
+        )
+        .await?;
         return Ok(IterationOutcome::Continue);
     }
 
@@ -548,6 +670,17 @@ pub(super) async fn run_post_turn(
             tail_excerpt,
         })
         .await;
+        emit_post_agent_turn_hook(
+            ctx.session_id,
+            iteration,
+            serde_json::json!({
+                "iteration": iteration,
+                "failed": true,
+                "status": "stuck",
+                "text": call_result.text.clone(),
+            }),
+        )
+        .await?;
         return Ok(IterationOutcome::Break);
     }
 
@@ -559,5 +692,16 @@ pub(super) async fn run_post_turn(
         &mut state.recorded_messages,
         runtime_feedback_message("nudge", nudge),
     );
+    emit_post_agent_turn_hook(
+        ctx.session_id,
+        iteration,
+        serde_json::json!({
+            "iteration": iteration,
+            "failed": false,
+            "status": "continue",
+            "text": call_result.text.clone(),
+        }),
+    )
+    .await?;
     Ok(IterationOutcome::Continue)
 }

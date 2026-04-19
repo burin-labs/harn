@@ -49,6 +49,24 @@ pub struct Manifest {
     /// instead of replacing the global config file.
     #[serde(default)]
     pub llm: harn_vm::llm_config::ProvidersConfig,
+    /// `[[hooks]]` array-of-tables — declarative runtime hooks installed
+    /// once per process/thread before execution starts. Matches the
+    /// manifest-extension ABI shape added by `[exports]` / `[llm]`, but
+    /// the handlers themselves live in Harn modules.
+    #[serde(default)]
+    pub hooks: Vec<HookConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct HookConfig {
+    pub event: harn_vm::orchestration::HookEvent,
+    #[serde(default = "default_hook_pattern")]
+    pub pattern: String,
+    pub handler: String,
+}
+
+fn default_hook_pattern() -> String {
+    "*".to_string()
 }
 
 /// `[skills]` table body.
@@ -266,7 +284,26 @@ pub struct RuntimeExtensions {
     pub root_manifest: Option<Manifest>,
     pub llm: Option<harn_vm::llm_config::ProvidersConfig>,
     pub capabilities: Option<harn_vm::llm::capabilities::CapabilitiesFile>,
+    pub hooks: Vec<ResolvedHookConfig>,
 }
+
+#[derive(Debug, Clone)]
+pub struct ResolvedHookConfig {
+    pub event: harn_vm::orchestration::HookEvent,
+    pub pattern: String,
+    pub handler: String,
+    pub manifest_dir: PathBuf,
+    pub package_name: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct LocatedManifest {
+    manifest: Manifest,
+    dir: PathBuf,
+}
+
+type HookModuleCacheKey = (PathBuf, Option<String>, String);
+type HookModuleExports = std::collections::BTreeMap<String, std::rc::Rc<harn_vm::VmClosure>>;
 
 #[derive(Debug, Default)]
 struct LockFile {
@@ -392,7 +429,7 @@ fn merge_capability_overrides(
         .extend(source.provider_family.clone());
 }
 
-fn collect_package_manifests(packages_dir: &Path) -> Vec<Manifest> {
+fn collect_package_manifests(packages_dir: &Path) -> Vec<LocatedManifest> {
     let mut manifests = Vec::new();
     let Ok(entries) = fs::read_dir(packages_dir) else {
         return manifests;
@@ -408,11 +445,28 @@ fn collect_package_manifests(packages_dir: &Path) -> Vec<Manifest> {
             continue;
         };
         match toml::from_str::<Manifest>(&content) {
-            Ok(manifest) => manifests.push(manifest),
+            Ok(manifest) => manifests.push(LocatedManifest { manifest, dir }),
             Err(e) => eprintln!("warning: failed to parse {}: {e}", manifest_path.display()),
         }
     }
     manifests
+}
+
+fn resolved_hooks_from_manifest(
+    manifest: &Manifest,
+    manifest_dir: &Path,
+) -> Vec<ResolvedHookConfig> {
+    manifest
+        .hooks
+        .iter()
+        .map(|hook| ResolvedHookConfig {
+            event: hook.event,
+            pattern: hook.pattern.clone(),
+            handler: hook.handler.clone(),
+            manifest_dir: manifest_dir.to_path_buf(),
+            package_name: manifest.package.as_ref().and_then(|pkg| pkg.name.clone()),
+        })
+        .collect()
 }
 
 fn manifest_capabilities(
@@ -435,23 +489,30 @@ pub fn load_runtime_extensions(anchor: &Path) -> RuntimeExtensions {
 
     let mut llm = harn_vm::llm_config::ProvidersConfig::default();
     let mut capabilities = harn_vm::llm::capabilities::CapabilitiesFile::default();
+    let mut hooks = Vec::new();
 
-    for manifest in collect_package_manifests(&manifest_dir.join(PKG_DIR)) {
-        llm.merge_from(&manifest.llm);
-        if let Some(file) = manifest_capabilities(&manifest) {
+    for located in collect_package_manifests(&manifest_dir.join(PKG_DIR)) {
+        llm.merge_from(&located.manifest.llm);
+        if let Some(file) = manifest_capabilities(&located.manifest) {
             merge_capability_overrides(&mut capabilities, file);
         }
+        hooks.extend(resolved_hooks_from_manifest(
+            &located.manifest,
+            &located.dir,
+        ));
     }
 
     llm.merge_from(&root_manifest.llm);
     if let Some(file) = manifest_capabilities(&root_manifest) {
         merge_capability_overrides(&mut capabilities, file);
     }
+    hooks.extend(resolved_hooks_from_manifest(&root_manifest, &manifest_dir));
 
     RuntimeExtensions {
         root_manifest: Some(root_manifest),
         llm: (!llm.is_empty()).then_some(llm),
         capabilities: (!is_empty_capabilities(&capabilities)).then_some(capabilities),
+        hooks,
     }
 }
 
@@ -459,6 +520,71 @@ pub fn load_runtime_extensions(anchor: &Path) -> RuntimeExtensions {
 pub fn install_runtime_extensions(extensions: &RuntimeExtensions) {
     harn_vm::llm_config::set_user_overrides(extensions.llm.clone());
     harn_vm::llm::capabilities::set_user_overrides(extensions.capabilities.clone());
+}
+
+async fn resolve_hook_exports(
+    vm: &mut harn_vm::Vm,
+    hook: &ResolvedHookConfig,
+    module_name: &str,
+) -> Result<HookModuleExports, String> {
+    let self_name_matches = hook
+        .package_name
+        .as_deref()
+        .is_some_and(|name| name == module_name);
+    if self_name_matches {
+        let lib_path = hook.manifest_dir.join("lib.harn");
+        if lib_path.exists() {
+            return vm
+                .load_module_exports(&lib_path)
+                .await
+                .map_err(|error| error.to_string());
+        }
+    }
+
+    vm.load_module_exports_from_import(module_name)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+pub async fn install_manifest_hooks(
+    vm: &mut harn_vm::Vm,
+    extensions: &RuntimeExtensions,
+) -> Result<(), String> {
+    harn_vm::orchestration::clear_runtime_hooks();
+    let mut loaded_exports: HashMap<HookModuleCacheKey, HookModuleExports> = HashMap::new();
+    for hook in &extensions.hooks {
+        let Some((module_name, function_name)) = hook.handler.rsplit_once("::") else {
+            return Err(format!(
+                "invalid hook handler '{}': expected <module>::<function>",
+                hook.handler
+            ));
+        };
+        let cache_key = (
+            hook.manifest_dir.clone(),
+            hook.package_name.clone(),
+            module_name.to_string(),
+        );
+        if !loaded_exports.contains_key(&cache_key) {
+            let exports = resolve_hook_exports(vm, hook, module_name).await?;
+            loaded_exports.insert(cache_key.clone(), exports);
+        }
+        let exports = loaded_exports
+            .get(&cache_key)
+            .expect("manifest hook exports cached");
+        let Some(closure) = exports.get(function_name) else {
+            return Err(format!(
+                "hook handler '{}' is not exported by module '{}'",
+                function_name, module_name
+            ));
+        };
+        harn_vm::orchestration::register_vm_hook(
+            hook.event,
+            hook.pattern.clone(),
+            hook.handler.clone(),
+            closure.clone(),
+        );
+    }
+    Ok(())
 }
 
 fn absolutize_check_config_paths(mut config: CheckConfig, manifest_dir: &Path) -> CheckConfig {
@@ -1163,5 +1289,46 @@ chat_endpoint = "/chat/completions"
         assert!(llm.providers.contains_key("project"));
         assert!(llm.aliases.contains_key("acme-fast"));
         assert!(llm.aliases.contains_key("project-fast"));
+    }
+
+    #[test]
+    fn load_runtime_extensions_collects_manifest_hooks_in_order() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        std::fs::create_dir_all(root.join(".harn/packages/acme")).unwrap();
+        fs::write(
+            root.join(MANIFEST),
+            r#"
+[package]
+name = "workspace"
+
+[[hooks]]
+event = "PostToolUse"
+pattern = "tool.name =~ \"read\""
+handler = "workspace::after_read"
+"#,
+        )
+        .unwrap();
+        fs::write(
+            root.join(".harn/packages/acme/harn.toml"),
+            r#"
+[package]
+name = "acme"
+
+[[hooks]]
+event = "PreToolUse"
+pattern = "tool.name =~ \"edit|write\""
+handler = "acme::audit_edit"
+"#,
+        )
+        .unwrap();
+        let harn_file = root.join("main.harn");
+        fs::write(&harn_file, "pipeline main() {}\n").unwrap();
+
+        let extensions = load_runtime_extensions(&harn_file);
+        assert_eq!(extensions.hooks.len(), 2);
+        assert_eq!(extensions.hooks[0].handler, "acme::audit_edit");
+        assert_eq!(extensions.hooks[1].handler, "workspace::after_read");
     }
 }

@@ -1,0 +1,13 @@
+[package]
+name = "manifest_hooks"
+version = "0.1.0"
+
+[[hooks]]
+event = "PreToolUse"
+pattern = "tool.name =~ \"write|edit\""
+handler = "manifest_hooks::deny_write_like_tools"
+
+[[hooks]]
+event = "PostToolUse"
+pattern = "tool.name =~ \"read\""
+handler = "manifest_hooks::rewrite_read_results"
