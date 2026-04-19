@@ -1,5 +1,5 @@
-import "../_common"
 import "std/triggers"
+import "../_common"
 
 fn wait_for_log_line(log_path, needle) {
   var attempts = 0
