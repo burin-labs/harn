@@ -659,3 +659,64 @@ async fn stage_prompt_loads_contract_file_relative_to_execution_context() {
     crate::reset_thread_local_state();
     let _ = std::fs::remove_dir_all(&temp_dir);
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn stage_prompt_can_scope_verification_to_local_contract_only() {
+    crate::reset_thread_local_state();
+    crate::llm::mock::push_llm_mock(crate::llm::mock::LlmMock {
+        text: "done".to_string(),
+        tool_calls: Vec::new(),
+        match_pattern: None,
+        consume_on_match: false,
+        input_tokens: None,
+        output_tokens: None,
+        cache_read_tokens: None,
+        cache_write_tokens: None,
+        thinking: None,
+        stop_reason: None,
+        model: "mock-model".to_string(),
+        provider: Some("mock".to_string()),
+        blocks: None,
+        error: None,
+    });
+
+    let mut node = WorkflowNode {
+        id: Some("act".to_string()),
+        kind: "stage".to_string(),
+        mode: Some("llm".to_string()),
+        model_policy: crate::orchestration::ModelPolicy {
+            provider: Some("mock".to_string()),
+            ..Default::default()
+        },
+        verify: Some(serde_json::json!({
+            "required_paths": ["src/current.ts"],
+            "notes": ["Only the current batch path is in scope."],
+        })),
+        metadata: BTreeMap::from([(
+            crate::orchestration::WORKFLOW_VERIFICATION_SCOPE_METADATA_KEY.to_string(),
+            serde_json::json!("local_only"),
+        )]),
+        ..Default::default()
+    };
+    inject_workflow_verification_contracts(
+        &mut node,
+        &[VerificationContract {
+            source_node: Some("final_verify".to_string()),
+            required_paths: vec!["src/future.ts".to_string()],
+            required_text: vec!["futureOnly".to_string()],
+            ..Default::default()
+        }],
+    );
+
+    let executed = execute_stage_attempts("Only update src/current.ts.", "act", &node, &[], None)
+        .await
+        .expect("stage executes");
+    let prompt = executed
+        .result
+        .get("prompt")
+        .and_then(|value| value.as_str())
+        .expect("prompt");
+    assert!(prompt.contains("src/current.ts"));
+    assert!(!prompt.contains("src/future.ts"));
+    assert!(!prompt.contains("futureOnly"));
+}

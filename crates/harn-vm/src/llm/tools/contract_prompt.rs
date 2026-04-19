@@ -26,6 +26,7 @@ pub(crate) fn build_tool_calling_contract_prompt(
     mode: &str,
     require_action: bool,
     tool_examples: Option<&str>,
+    include_task_ledger_help: bool,
 ) -> String {
     let mut prompt = String::from("\n\n## Tool Calling Contract\n");
     prompt.push_str(&format!(
@@ -41,7 +42,9 @@ pub(crate) fn build_tool_calling_contract_prompt(
                  JSON, or `##DONE##` before the first successful tool action.\n",
             );
         }
-        prompt.push_str(TASK_LEDGER_HELP);
+        if include_task_ledger_help {
+            prompt.push_str(TASK_LEDGER_HELP);
+        }
     } else {
         // Front-load format + examples before schemas so weaker models
         // see the calling convention while attention is strongest.
@@ -61,7 +64,9 @@ pub(crate) fn build_tool_calling_contract_prompt(
                 prompt.push_str("\n\n");
             }
         }
-        prompt.push_str(TASK_LEDGER_HELP);
+        if include_task_ledger_help {
+            prompt.push_str(TASK_LEDGER_HELP);
+        }
 
         let (schemas, registry) = collect_tool_schemas_with_registry(tools_val, native_tools);
 
@@ -217,11 +222,11 @@ The provider exposes tool definitions outside this prompt.
 pub(crate) const TASK_LEDGER_HELP: &str = "
 ## Task ledger
 
-The runtime maintains a durable `<task_ledger>` of the user's deliverables (injected into each turn above this prompt). The `##DONE##` sentinel is rejected while any deliverable is `open` or `blocked`. Use the always-available `ledger` tool to mutate it:
+The runtime may inject a durable `<task_ledger>` of the user's deliverables above this prompt. Only use the `ledger` tool if that `<task_ledger>` block is actually present in the current turn. If no `<task_ledger>` block is present, ignore this section entirely and do not call `ledger(...)`. When a task ledger is present, the `##DONE##` sentinel is rejected while any deliverable is `open` or `blocked`. Use the ledger ids shown in that block; do not invent ids such as `deliverable-N`.
 
 - `ledger({ action: \"add\", text: \"what needs to happen\" })` — declare a new sub-deliverable.
-- `ledger({ action: \"mark\", id: \"deliverable-N\", status: \"done\" })` — mark a deliverable complete after a real tool call satisfied it.
-- `ledger({ action: \"mark\", id: \"deliverable-N\", status: \"dropped\", note: \"why\" })` — escape hatch when scope truly changed; the note is required.
+- `ledger({ action: \"mark\", id: \"deliverable-id-from-task-ledger\", status: \"done\" })` — mark a deliverable complete after a real tool call satisfied it.
+- `ledger({ action: \"mark\", id: \"deliverable-id-from-task-ledger\", status: \"dropped\", note: \"why\" })` — escape hatch when scope truly changed; the note is required.
 - `ledger({ action: \"rationale\", text: \"one-sentence answer to why the user will call this done\" })` — commit to an interpretation of the success criterion.
 - `ledger({ action: \"note\", text: \"observation worth remembering across turns\" })` — durable cross-stage memory.
 

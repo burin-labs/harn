@@ -5,9 +5,17 @@ pub fn workspace_root() {
   return path_join(source_dir(), "..", "workspace")
 }
 
+fn workspace_alias_path(path) {
+  let raw = (path ?? "").trim()
+  if starts_with(raw, "/workspace/") {
+    return raw.replace("/workspace/", "")
+  }
+  return raw
+}
+
 /** Normalize a model-provided path into a workspace-relative path. */
 pub fn workspace_path(path) {
-  let normalized = workspace_normalize(path ?? "", workspace_root())
+  let normalized = workspace_normalize(workspace_alias_path(path), workspace_root())
   guard normalized else {
     throw "Path is outside the experiment workspace: ${path ?? ""}"
   }

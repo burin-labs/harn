@@ -59,6 +59,12 @@ pub fn current_tool_annotations(tool: &str) -> Option<ToolAnnotations> {
     current_execution_policy().and_then(|policy| policy.tool_annotations.get(tool).cloned())
 }
 
+fn tool_kind_participates_in_write_allowlist(tool_name: &str) -> bool {
+    current_tool_annotations(tool_name)
+        .map(|annotations| !annotations.kind.is_read_only())
+        .unwrap_or(true)
+}
+
 pub struct TrustedBridgeCallGuard;
 
 pub fn allow_trusted_bridge_calls() -> TrustedBridgeCallGuard {
@@ -428,7 +434,9 @@ impl ToolApprovalPolicy {
             }
         }
 
-        if !self.write_path_allowlist.is_empty() {
+        if !self.write_path_allowlist.is_empty()
+            && tool_kind_participates_in_write_allowlist(tool_name)
+        {
             let paths = super::current_tool_declared_path_entries(tool_name, args);
             for path in &paths {
                 let allowed = self.write_path_allowlist.iter().any(|pattern| {
@@ -439,7 +447,7 @@ impl ToolApprovalPolicy {
                 if !allowed {
                     return ToolApprovalDecision::AutoDenied {
                         reason: format!(
-                            "tool '{tool_name}' writes to '{}' which is not in the write-path allowlist",
+                            "tool '{tool_name}' targets '{}' which is not in the write-path allowlist",
                             path.display_path()
                         ),
                     };
@@ -648,6 +656,56 @@ mod approval_policy_tests {
         let decision = policy.evaluate(
             "write_file",
             &serde_json::json!({"path": "/packages/demo/file.txt"}),
+        );
+        assert_eq!(decision, ToolApprovalDecision::AutoApproved);
+
+        pop_execution_policy();
+        crate::stdlib::process::set_thread_execution_context(None);
+    }
+
+    #[test]
+    fn write_path_allowlist_does_not_block_read_only_tools() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(temp.path().join("packages/demo")).unwrap();
+        std::fs::write(temp.path().join("packages/demo/context.txt"), "ok").unwrap();
+        crate::stdlib::process::set_thread_execution_context(Some(
+            crate::orchestration::RunExecutionRecord {
+                cwd: Some(temp.path().to_string_lossy().into_owned()),
+                source_dir: Some(temp.path().to_string_lossy().into_owned()),
+                env: BTreeMap::new(),
+                adapter: None,
+                repo_path: None,
+                worktree_path: None,
+                branch: None,
+                base_ref: None,
+                cleanup: None,
+            },
+        ));
+
+        let mut tool_annotations = BTreeMap::new();
+        tool_annotations.insert(
+            "read_file".to_string(),
+            ToolAnnotations {
+                kind: ToolKind::Read,
+                arg_schema: ToolArgSchema {
+                    path_params: vec!["path".to_string()],
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+        );
+        push_execution_policy(CapabilityPolicy {
+            tool_annotations,
+            ..Default::default()
+        });
+
+        let policy = ToolApprovalPolicy {
+            write_path_allowlist: vec!["packages/demo/file.txt".to_string()],
+            ..Default::default()
+        };
+        let decision = policy.evaluate(
+            "read_file",
+            &serde_json::json!({"path": "/packages/demo/context.txt"}),
         );
         assert_eq!(decision, ToolApprovalDecision::AutoApproved);
 

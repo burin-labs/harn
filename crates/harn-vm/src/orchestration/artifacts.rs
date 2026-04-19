@@ -42,6 +42,7 @@ pub fn select_artifacts_adaptive(
     mut artifacts: Vec<ArtifactRecord>,
     policy: &ContextPolicy,
 ) -> Vec<ArtifactRecord> {
+    drop_stale_evidence_artifacts(&mut artifacts);
     dedup_artifacts(&mut artifacts);
 
     // Cap individual artifacts to a fraction of the total budget, with a 500-token
@@ -59,6 +60,47 @@ pub fn select_artifacts_adaptive(
     }
 
     select_artifacts(artifacts, policy)
+}
+
+fn metadata_string_list(artifact: &ArtifactRecord, key: &str) -> Vec<String> {
+    artifact
+        .metadata
+        .get(key)
+        .and_then(|value| value.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToOwned::to_owned)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default()
+}
+
+fn drop_stale_evidence_artifacts(artifacts: &mut Vec<ArtifactRecord>) {
+    let fresh_changed_paths: BTreeSet<String> = artifacts
+        .iter()
+        .filter(|artifact| freshness_rank(artifact.freshness.as_deref()) >= 2)
+        .flat_map(|artifact| metadata_string_list(artifact, "changed_paths"))
+        .collect();
+    if fresh_changed_paths.is_empty() {
+        return;
+    }
+
+    artifacts.retain(|artifact| {
+        let evidence_paths = metadata_string_list(artifact, "evidence_paths");
+        if evidence_paths.is_empty() {
+            return true;
+        }
+        if freshness_rank(artifact.freshness.as_deref()) >= 2 {
+            return true;
+        }
+        !evidence_paths
+            .iter()
+            .any(|path| fresh_changed_paths.contains(path))
+    });
 }
 
 fn normalize_artifact_kind(kind: &str) -> String {

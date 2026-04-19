@@ -52,6 +52,7 @@ fn semantic_eval_system() {
     + "Grade on behavioral delta, not literal wording.\n"
     + "Use the actual run trace, raw inference transcripts, verification outcomes, and ideal reference together.\n"
     + "Reward equivalent high-quality behavior even if wording differs.\n"
+    + "Do not penalize a dedicated final verify batch when the harness intentionally isolates verification after implementation.\n"
     + "Penalize failed stages, useless tool churn, verifier misses, architecture drift, and generic rewrites.\n"
     + "When transcripts reveal a problem that the summary hides, trust the transcript.\n"
     + "Return strict JSON only."
