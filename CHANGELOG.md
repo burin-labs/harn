@@ -57,13 +57,15 @@ granular archaeology.
   the trigger id, recorded version, event timestamp, and resolved
   version.
 
-- **Webhook inbound dedupe is back on for generic-webhook bindings
-  (#223).** `GenericWebhookConnector::normalize_inbound` now bridges
-  its sync trait surface to the async inbox index using the same
-  `block_on` pattern already used by the cron/GitHub connector layer,
-  so duplicate deliveries are rejected again by binding + delivery
-  key. Re-enabled the previously ignored webhook dedupe regression
-  test.
+- **Webhook inbox dedupe is active again (#223).** The async inbox-claim
+  step now runs after inbound webhook normalization but before the
+  event is appended to the pending log, so duplicate GitHub-style
+  deliveries are dropped instead of being enqueued twice. This
+  replaces the temporary `block_on` bridge inside
+  `GenericWebhookConnector::normalize_inbound` with a proper async
+  post-processing step on the dispatch path, keeping the connector
+  trait sync. The cron connector keeps its existing async dedupe path
+  and explicitly avoids double-claiming the same inbox key.
 
 - **Replay-scoped `HARN_REPLAY` no longer races across concurrent
   dispatches (harn#244).** Replay handlers still observe

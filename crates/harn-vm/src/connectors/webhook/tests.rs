@@ -361,8 +361,8 @@ async fn webhook_variants_cover_valid_and_failure_cases() {
     }
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn normalize_inbound_dedupes_on_binding_delivery_key() {
+#[tokio::test]
+async fn postprocess_drops_duplicate_delivery_key() {
     let harness = TestHarness::new(
         binding(WebhookSignatureVariant::Standard, Some("event.dedupe_key")),
         "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw",
@@ -388,9 +388,37 @@ async fn normalize_inbound_dedupes_on_binding_delivery_key() {
 
     let first = harness.connector.normalize_inbound(raw.clone()).unwrap();
     assert_eq!(first.dedupe_key, "msg_p5jXN8AQM9LWM0D4loKWxJek");
+    let first = crate::connectors::postprocess_normalized_event(
+        harness.connector.ctx().unwrap().inbox.as_ref(),
+        "webhook.test",
+        true,
+        std::time::Duration::from_secs(
+            u64::from(crate::DEFAULT_INBOX_RETENTION_DAYS) * 24 * 60 * 60,
+        ),
+        first,
+    )
+    .await
+    .unwrap();
+    assert!(matches!(
+        first,
+        crate::connectors::PostNormalizeOutcome::Ready(_)
+    ));
 
-    let duplicate = harness.connector.normalize_inbound(raw).unwrap_err();
-    assert!(matches!(duplicate, ConnectorError::DuplicateDelivery(_)));
+    let duplicate = crate::connectors::postprocess_normalized_event(
+        harness.connector.ctx().unwrap().inbox.as_ref(),
+        "webhook.test",
+        true,
+        std::time::Duration::from_secs(
+            u64::from(crate::DEFAULT_INBOX_RETENTION_DAYS) * 24 * 60 * 60,
+        ),
+        harness.connector.normalize_inbound(raw).unwrap(),
+    )
+    .await
+    .unwrap();
+    assert!(matches!(
+        duplicate,
+        crate::connectors::PostNormalizeOutcome::DuplicateDropped
+    ));
 }
 
 #[tokio::test]

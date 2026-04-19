@@ -55,6 +55,12 @@ impl ListenerRuntime {
     pub(crate) async fn start(config: ListenerConfig) -> Result<Self, String> {
         let pending_topic =
             Topic::new(PENDING_TOPIC).map_err(|error| format!("invalid pending topic: {error}"))?;
+        let inbox_metrics = Arc::new(harn_vm::MetricsRegistry::default());
+        let inbox = Arc::new(
+            harn_vm::InboxIndex::new(config.event_log.clone(), inbox_metrics)
+                .await
+                .map_err(|error| format!("failed to initialize inbox index: {error}"))?,
+        );
         let requires_auth = config
             .routes
             .iter()
@@ -69,6 +75,7 @@ impl ListenerRuntime {
         let routes = Arc::new(RouteRegistry::new(
             config.routes,
             config.event_log.clone(),
+            inbox,
             config.secrets.clone(),
             auth.clone(),
             pending_topic.clone(),
@@ -147,6 +154,8 @@ pub(crate) struct RouteConfig {
     pub(crate) auth_mode: AuthMode,
     pub(crate) signature_mode: SignatureMode,
     pub(crate) signing_secret: Option<SecretId>,
+    pub(crate) dedupe_key_template: Option<String>,
+    pub(crate) dedupe_retention_days: u32,
 }
 
 impl RouteConfig {
@@ -180,6 +189,8 @@ impl RouteConfig {
                             .get("signing_secret")
                             .map(String::as_str),
                     ),
+                    dedupe_key_template: trigger.config.dedupe_key.clone(),
+                    dedupe_retention_days: trigger.config.retry.retention_days,
                 }))
             }
             TriggerKind::A2aPush => Ok(Some(Self {
@@ -190,6 +201,8 @@ impl RouteConfig {
                 auth_mode: AuthMode::BearerOrHmac,
                 signature_mode: SignatureMode::Unsigned,
                 signing_secret: None,
+                dedupe_key_template: trigger.config.dedupe_key.clone(),
+                dedupe_retention_days: trigger.config.retry.retention_days,
             })),
             _ => Ok(None),
         }
@@ -200,6 +213,7 @@ impl RouteConfig {
 struct RouteContext {
     route: RouteConfig,
     event_log: Arc<AnyEventLog>,
+    inbox: Arc<harn_vm::InboxIndex>,
     secrets: Arc<dyn SecretProvider>,
     auth: Arc<ListenerAuth>,
     pending_topic: Topic,
@@ -223,6 +237,7 @@ struct RouteRegistry {
     routes_by_path: RwLock<BTreeMap<String, Arc<RouteContext>>>,
     metrics_by_trigger_id: Mutex<BTreeMap<String, Arc<RouteRuntimeMetrics>>>,
     event_log: Arc<AnyEventLog>,
+    inbox: Arc<harn_vm::InboxIndex>,
     secrets: Arc<dyn SecretProvider>,
     auth: Arc<ListenerAuth>,
     pending_topic: Topic,
@@ -233,6 +248,7 @@ impl RouteRegistry {
     fn new(
         routes: Vec<RouteConfig>,
         event_log: Arc<AnyEventLog>,
+        inbox: Arc<harn_vm::InboxIndex>,
         secrets: Arc<dyn SecretProvider>,
         auth: Arc<ListenerAuth>,
         pending_topic: Topic,
@@ -242,6 +258,7 @@ impl RouteRegistry {
             routes_by_path: RwLock::new(BTreeMap::new()),
             metrics_by_trigger_id: Mutex::new(BTreeMap::new()),
             event_log,
+            inbox,
             secrets,
             auth,
             pending_topic,
@@ -268,6 +285,7 @@ impl RouteRegistry {
                 Arc::new(RouteContext {
                     route,
                     event_log: self.event_log.clone(),
+                    inbox: self.inbox.clone(),
                     secrets: self.secrets.clone(),
                     auth: self.auth.clone(),
                     pending_topic: self.pending_topic.clone(),
@@ -382,40 +400,72 @@ async fn ingest_trigger(
     let result = normalize_request(&context, &normalized_headers, &query, body.as_ref()).await;
     let response = match result {
         Ok(event) => {
-            let payload = json!({
-                "trigger_id": context.route.trigger_id,
-                "binding_version": context.route.binding_version,
-                "event": event,
-            });
-            match context
-                .event_log
-                .append(
-                    &context.pending_topic,
-                    LogEvent::new("trigger_event", payload),
-                )
-                .await
-            {
-                Ok(event_id) => {
-                    context.metrics.dispatched.fetch_add(1, Ordering::Relaxed);
+            let dedupe_ttl = Duration::from_secs(
+                u64::from(context.route.dedupe_retention_days.max(1)) * 24 * 60 * 60,
+            );
+            let postprocess = harn_vm::postprocess_normalized_event(
+                context.inbox.as_ref(),
+                &context.route.trigger_id,
+                context.route.dedupe_key_template.is_some(),
+                dedupe_ttl,
+                event,
+            )
+            .await;
+            match postprocess {
+                Ok(harn_vm::PostNormalizeOutcome::DuplicateDropped) => {
                     context.metrics.in_flight.fetch_sub(1, Ordering::Relaxed);
                     (
                         StatusCode::OK,
                         axum::Json(json!({
-                            "status": "accepted",
-                            "event_id": event_id,
+                            "status": "duplicate_dropped",
                             "trigger_id": context.route.trigger_id,
                         })),
                     )
                         .into_response()
                 }
+                Ok(harn_vm::PostNormalizeOutcome::Ready(event)) => {
+                    let event = *event;
+                    let payload = json!({
+                        "trigger_id": context.route.trigger_id,
+                        "binding_version": context.route.binding_version,
+                        "event": event,
+                    });
+                    match context
+                        .event_log
+                        .append(
+                            &context.pending_topic,
+                            LogEvent::new("trigger_event", payload),
+                        )
+                        .await
+                    {
+                        Ok(event_id) => {
+                            context.metrics.dispatched.fetch_add(1, Ordering::Relaxed);
+                            context.metrics.in_flight.fetch_sub(1, Ordering::Relaxed);
+                            (
+                                StatusCode::OK,
+                                axum::Json(json!({
+                                    "status": "accepted",
+                                    "event_id": event_id,
+                                    "trigger_id": context.route.trigger_id,
+                                })),
+                            )
+                                .into_response()
+                        }
+                        Err(error) => {
+                            context.metrics.failed.fetch_add(1, Ordering::Relaxed);
+                            context.metrics.in_flight.fetch_sub(1, Ordering::Relaxed);
+                            (
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                format!("failed to append trigger event to pending log: {error}"),
+                            )
+                                .into_response()
+                        }
+                    }
+                }
                 Err(error) => {
                     context.metrics.failed.fetch_add(1, Ordering::Relaxed);
                     context.metrics.in_flight.fetch_sub(1, Ordering::Relaxed);
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        format!("failed to append trigger event to pending log: {error}"),
-                    )
-                        .into_response()
+                    HttpError::from_connector(error).into_response()
                 }
             }
         }
@@ -523,6 +573,7 @@ async fn normalize_request(
         ),
         provider_payload,
         signature_status,
+        dedupe_claimed: false,
     })
 }
 
@@ -900,10 +951,14 @@ mod tests {
     use harn_vm::event_log::{
         install_default_for_base_dir, reset_active_event_log, EventLog, Topic,
     };
+    use harn_vm::secrets::{
+        RotationHandle, SecretBytes, SecretError, SecretId, SecretMeta, SecretProvider,
+    };
     use harn_vm::{
         ProviderId, TriggerBindingSource, TriggerBindingSpec, TriggerHandlerSpec,
         TriggerRetryConfig,
     };
+    use sha2::{Digest, Sha256};
     use tempfile::tempdir;
 
     static REQUEST_DELAY_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -940,7 +995,103 @@ mod tests {
             auth_mode: AuthMode::Public,
             signature_mode: SignatureMode::Unsigned,
             signing_secret: None,
+            dedupe_key_template: None,
+            dedupe_retention_days: harn_vm::DEFAULT_INBOX_RETENTION_DAYS,
         }
+    }
+
+    #[derive(Clone)]
+    struct StaticSecretProvider {
+        secret_id: SecretId,
+        secret: String,
+    }
+
+    #[async_trait::async_trait]
+    impl SecretProvider for StaticSecretProvider {
+        async fn get(&self, id: &SecretId) -> Result<SecretBytes, SecretError> {
+            if id == &self.secret_id {
+                Ok(SecretBytes::from(self.secret.clone()))
+            } else {
+                Err(SecretError::NotFound {
+                    provider: self.namespace().to_string(),
+                    id: id.clone(),
+                })
+            }
+        }
+
+        async fn put(&self, _id: &SecretId, _value: SecretBytes) -> Result<(), SecretError> {
+            Ok(())
+        }
+
+        async fn rotate(&self, id: &SecretId) -> Result<RotationHandle, SecretError> {
+            Ok(RotationHandle {
+                provider: self.namespace().to_string(),
+                id: id.clone(),
+                from_version: None,
+                to_version: None,
+            })
+        }
+
+        async fn list(&self, _prefix: &SecretId) -> Result<Vec<SecretMeta>, SecretError> {
+            Ok(Vec::new())
+        }
+
+        fn namespace(&self) -> &str {
+            "listener-test"
+        }
+
+        fn supports_versions(&self) -> bool {
+            false
+        }
+    }
+
+    fn webhook_route(path: &str) -> RouteConfig {
+        RouteConfig {
+            trigger_id: "github-webhook".to_string(),
+            binding_version: 1,
+            provider: ProviderId::from("github"),
+            path: path.to_string(),
+            auth_mode: AuthMode::Public,
+            signature_mode: SignatureMode::GitHub,
+            signing_secret: Some(SecretId::new("github", "test-signing-secret")),
+            dedupe_key_template: Some("event.dedupe_key".to_string()),
+            dedupe_retention_days: harn_vm::DEFAULT_INBOX_RETENTION_DAYS,
+        }
+    }
+
+    fn github_signature(secret: &str, body: &[u8]) -> String {
+        const BLOCK: usize = 64;
+        let mut key = secret.as_bytes().to_vec();
+        if key.len() > BLOCK {
+            key = Sha256::digest(&key).to_vec();
+        }
+        key.resize(BLOCK, 0);
+        let mut inner_pad = vec![0x36; BLOCK];
+        let mut outer_pad = vec![0x5c; BLOCK];
+        for i in 0..BLOCK {
+            inner_pad[i] ^= key[i];
+            outer_pad[i] ^= key[i];
+        }
+        let mut inner = Sha256::new();
+        inner.update(&inner_pad);
+        inner.update(body);
+        let inner_digest = inner.finalize();
+
+        let mut outer = Sha256::new();
+        outer.update(&outer_pad);
+        outer.update(inner_digest);
+        let digest = outer.finalize();
+        let encoded = digest
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        format!("sha256={encoded}")
+    }
+
+    async fn pending_events(log: &Arc<AnyEventLog>) -> Vec<(u64, harn_vm::event_log::LogEvent)> {
+        log.read_range(&Topic::new(PENDING_TOPIC).expect("pending topic"), None, 16)
+            .await
+            .expect("read pending events")
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -1063,5 +1214,128 @@ mod tests {
         std::env::remove_var(REQUEST_DELAY_ENV);
         reset_active_event_log();
         harn_vm::clear_trigger_registry();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn webhook_first_delivery_is_appended() {
+        reset_active_event_log();
+        let dir = tempdir().expect("tempdir");
+        let log = install_default_for_base_dir(dir.path()).expect("install event log");
+        let listener = ListenerRuntime::start(ListenerConfig {
+            bind: "127.0.0.1:0".parse().expect("bind addr"),
+            tls: None,
+            event_log: log.clone(),
+            secrets: Arc::new(StaticSecretProvider {
+                secret_id: SecretId::new("github", "test-signing-secret"),
+                secret: "topsecret".to_string(),
+            }),
+            allowed_origins: OriginAllowList::wildcard(),
+            max_body_bytes: DEFAULT_MAX_BODY_BYTES,
+            routes: vec![webhook_route("/hooks/github")],
+        })
+        .await
+        .expect("start listener");
+
+        let body = br#"{"action":"opened","issue":{"number":1}}"#;
+        let response = reqwest::Client::new()
+            .post(format!("http://{}/hooks/github", listener.local_addr()))
+            .header("X-GitHub-Event", "issues")
+            .header("X-GitHub-Delivery", "delivery-1")
+            .header("X-Hub-Signature-256", github_signature("topsecret", body))
+            .header("Content-Type", "application/json")
+            .body(body.to_vec())
+            .send()
+            .await
+            .expect("send webhook");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let payload: JsonValue = response.json().await.expect("response json");
+        assert_eq!(
+            payload.get("status"),
+            Some(&JsonValue::String("accepted".to_string()))
+        );
+
+        let events = pending_events(&log).await;
+        assert_eq!(events.len(), 1);
+        assert_eq!(
+            events[0]
+                .1
+                .payload
+                .get("event")
+                .and_then(|value| value.get("dedupe_key"))
+                .and_then(JsonValue::as_str),
+            Some("delivery-1")
+        );
+
+        listener
+            .shutdown(Duration::from_secs(5))
+            .await
+            .expect("shutdown listener");
+        reset_active_event_log();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn webhook_duplicate_delivery_is_dropped() {
+        reset_active_event_log();
+        let dir = tempdir().expect("tempdir");
+        let log = install_default_for_base_dir(dir.path()).expect("install event log");
+        let listener = ListenerRuntime::start(ListenerConfig {
+            bind: "127.0.0.1:0".parse().expect("bind addr"),
+            tls: None,
+            event_log: log.clone(),
+            secrets: Arc::new(StaticSecretProvider {
+                secret_id: SecretId::new("github", "test-signing-secret"),
+                secret: "topsecret".to_string(),
+            }),
+            allowed_origins: OriginAllowList::wildcard(),
+            max_body_bytes: DEFAULT_MAX_BODY_BYTES,
+            routes: vec![webhook_route("/hooks/github")],
+        })
+        .await
+        .expect("start listener");
+
+        let body = br#"{"action":"opened","issue":{"number":1}}"#;
+        let signature = github_signature("topsecret", body);
+        let client = reqwest::Client::new();
+        let url = format!("http://{}/hooks/github", listener.local_addr());
+
+        let first = client
+            .post(&url)
+            .header("X-GitHub-Event", "issues")
+            .header("X-GitHub-Delivery", "delivery-1")
+            .header("X-Hub-Signature-256", &signature)
+            .header("Content-Type", "application/json")
+            .body(body.to_vec())
+            .send()
+            .await
+            .expect("send first webhook");
+        assert_eq!(first.status(), StatusCode::OK);
+
+        let duplicate = client
+            .post(&url)
+            .header("X-GitHub-Event", "issues")
+            .header("X-GitHub-Delivery", "delivery-1")
+            .header("X-Hub-Signature-256", &signature)
+            .header("Content-Type", "application/json")
+            .body(body.to_vec())
+            .send()
+            .await
+            .expect("send duplicate webhook");
+
+        assert_eq!(duplicate.status(), StatusCode::OK);
+        let payload: JsonValue = duplicate.json().await.expect("duplicate response json");
+        assert_eq!(
+            payload.get("status"),
+            Some(&JsonValue::String("duplicate_dropped".to_string()))
+        );
+
+        let events = pending_events(&log).await;
+        assert_eq!(events.len(), 1);
+
+        listener
+            .shutdown(Duration::from_secs(5))
+            .await
+            .expect("shutdown listener");
+        reset_active_event_log();
     }
 }

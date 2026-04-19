@@ -284,6 +284,8 @@ pub struct TriggerEvent {
     pub headers: BTreeMap<String, String>,
     pub provider_payload: ProviderPayload,
     pub signature_status: SignatureStatus,
+    #[serde(skip)]
+    pub dedupe_claimed: bool,
 }
 
 impl TriggerEvent {
@@ -310,7 +312,16 @@ impl TriggerEvent {
             headers,
             provider_payload,
             signature_status,
+            dedupe_claimed: false,
         }
+    }
+
+    pub fn dedupe_claimed(&self) -> bool {
+        self.dedupe_claimed
+    }
+
+    pub fn mark_dedupe_claimed(&mut self) {
+        self.dedupe_claimed = true;
     }
 }
 
@@ -1112,6 +1123,7 @@ mod tests {
             headers,
             provider_payload: payload,
             signature_status: SignatureStatus::Verified,
+            dedupe_claimed: false,
         };
 
         let once = serde_json::to_value(&event).unwrap();

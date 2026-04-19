@@ -445,6 +445,7 @@ impl Connector for GitHubConnector {
             headers: redact_headers(&headers, &HeaderRedactionPolicy::default()),
             provider_payload,
             signature_status: SignatureStatus::Verified,
+            dedupe_claimed: false,
         })
     }
 

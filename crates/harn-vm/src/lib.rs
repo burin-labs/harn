@@ -42,11 +42,11 @@ pub use connectors::{
     active_connector_client, clear_active_connector_clients,
     cron::{CatchupMode, CronConnector},
     hmac::verify_hmac_signed,
-    install_active_connector_clients, ActivationHandle, ClientError, Connector, ConnectorClient,
-    ConnectorCtx, ConnectorError, ConnectorMetricsSnapshot, ConnectorRegistry,
-    GenericWebhookConnector, GitHubConnector, MetricsRegistry, ProviderPayloadSchema,
-    RateLimitConfig, RateLimiterFactory, RawInbound, TriggerBinding, TriggerKind, TriggerRegistry,
-    WebhookSignatureVariant,
+    install_active_connector_clients, postprocess_normalized_event, ActivationHandle, ClientError,
+    Connector, ConnectorClient, ConnectorCtx, ConnectorError, ConnectorMetricsSnapshot,
+    ConnectorRegistry, GenericWebhookConnector, GitHubConnector, MetricsRegistry,
+    PostNormalizeOutcome, ProviderPayloadSchema, RateLimitConfig, RateLimiterFactory, RawInbound,
+    TriggerBinding, TriggerKind, TriggerRegistry, WebhookSignatureVariant,
 };
 pub use http::{register_http_builtins, reset_http_state};
 pub use llm::register_llm_builtins;
