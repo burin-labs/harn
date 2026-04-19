@@ -46,6 +46,12 @@ const messages = defineMessages({
     id: "portal.detail.workflowFlowCopy",
     defaultMessage: "The path this run took through transitions and checkpoints.",
   },
+  actionGraph: { id: "portal.detail.actionGraph", defaultMessage: "Action graph" },
+  actionGraphCopy: {
+    id: "portal.detail.actionGraphCopy",
+    defaultMessage:
+      "One derived debugging artifact that rolls planner rounds, worker lineage, verification, and transcript pointers into the same view.",
+  },
   runComparison: { id: "portal.detail.runComparison", defaultMessage: "Run comparison" },
   runComparisonCopy: {
     id: "portal.detail.runComparisonCopy",
@@ -97,6 +103,10 @@ const messages = defineMessages({
     id: "portal.detail.noStageDiffs",
     defaultMessage: "No stage-level differences were detected.",
   },
+  noObservabilityDiffs: {
+    id: "portal.detail.noObservabilityDiffs",
+    defaultMessage: "No observability differences were detected.",
+  },
   noReplayFixture: {
     id: "portal.detail.noReplayFixture",
     defaultMessage: "No replay fixture was saved with this run yet.",
@@ -125,6 +135,18 @@ const messages = defineMessages({
   noChildren: {
     id: "portal.detail.noChildren",
     defaultMessage: "No delegated child runs for this run.",
+  },
+  noPlannerRounds: {
+    id: "portal.detail.noPlannerRounds",
+    defaultMessage: "No planner-round summaries were persisted for this run.",
+  },
+  noTranscriptPointers: {
+    id: "portal.detail.noTranscriptPointers",
+    defaultMessage: "No transcript pointers were available for this run.",
+  },
+  noWorkerLineage: {
+    id: "portal.detail.noWorkerLineage",
+    defaultMessage: "No delegated worker lineage was captured for this run.",
   },
   noActivity: {
     id: "portal.detail.noActivity",
@@ -321,6 +343,50 @@ export function RunDetail({ detail, runs, onSelectRun }: RunDetailProps) {
       : detail.policy_summary.validation_valid
         ? intl.formatMessage(messages.validationPassed)
         : intl.formatMessage(messages.validationFailed)
+  const graphNodeLabels = new Map(detail.observability.action_graph_nodes.map((node) => [node.id, node.label]))
+  const compareRows = compareDiff
+    ? [
+        ...compareDiff.stage_diffs.map((item) => (
+          <div className="compare-row" key={`${item.node_id}-${item.change}`}>
+            <div>
+              <strong>{item.node_id}</strong>
+              <div className="meta">{item.change}</div>
+            </div>
+            <div className="meta">
+              {item.details.map((detailLine) => (
+                <div key={detailLine}>{detailLine}</div>
+              ))}
+            </div>
+          </div>
+        )),
+        ...compareDiff.tool_diffs.map((item) => (
+          <div className="compare-row" key={`${item.tool_name}-${item.args_hash}`}>
+            <div>
+              <strong>{item.tool_name}</strong>
+              <div className="meta">tool result changed</div>
+            </div>
+            <div className="meta">
+              <div>args {item.args_hash}</div>
+              <div>left {item.left_result ?? "none"}</div>
+              <div>right {item.right_result ?? "none"}</div>
+            </div>
+          </div>
+        )),
+        ...compareDiff.observability_diffs.map((item, index) => (
+          <div className="compare-row" key={`${item.section}-${item.label}-${index}`}>
+            <div>
+              <strong>{item.label}</strong>
+              <div className="meta">{item.section}</div>
+            </div>
+            <div className="meta">
+              {item.details.map((detailLine) => (
+                <div key={detailLine}>{detailLine}</div>
+              ))}
+            </div>
+          </div>
+        )),
+      ]
+    : []
 
   return (
     <section className="detail">
@@ -446,6 +512,129 @@ export function RunDetail({ detail, runs, onSelectRun }: RunDetailProps) {
         matches={detail.skill_match_events}
         toolLoads={detail.tool_load_events}
       />
+
+      <section className="panel">
+        <div className="panel-header">
+          <div>
+            <h3>{intl.formatMessage(messages.actionGraph)}</h3>
+            <p>{intl.formatMessage(messages.actionGraphCopy)}</p>
+          </div>
+        </div>
+        <div className="policy-grid">
+          <div className="policy-item">
+            <div className="row">
+              <strong>Derived artifact</strong>
+              <span className="turn-chip">schema v{detail.observability.schema_version}</span>
+            </div>
+            <div className="policy-list">
+              <div className="meta">{detail.observability.planner_rounds.length} planner rounds</div>
+              <div className="meta">{detail.observability.research_fact_count} research facts</div>
+              <div className="meta">
+                {detail.observability.action_graph_nodes.length} nodes • {detail.observability.action_graph_edges.length} edges
+              </div>
+              <div className="meta">{detail.observability.worker_lineage.length} workers</div>
+              <div className="meta">{detail.observability.transcript_pointers.length} transcript pointers</div>
+            </div>
+          </div>
+          <div className="policy-item">
+            <div className="row">
+              <strong>Planner rounds</strong>
+              <span className="turn-chip">{detail.observability.planner_rounds.length}</span>
+            </div>
+            <div className="policy-list">
+              {detail.observability.planner_rounds.length ? (
+                detail.observability.planner_rounds.map((round) => {
+                  const deliverableSummary = round.task_ledger?.deliverables.length
+                    ? round.task_ledger.deliverables.map((item) => `${item.id}:${item.status}`).join(", ")
+                    : "no deliverables"
+                  return (
+                    <div className="meta" key={round.stage_id}>
+                      {round.node_id} • {round.iteration_count} iterations • {round.llm_call_count} llm calls
+                      {round.tool_execution_count ? ` • ${round.tool_execution_count} tool executions` : ""}
+                      {round.research_facts.length ? ` • facts ${round.research_facts.join(" | ")}` : ""}
+                      {deliverableSummary ? ` • ${deliverableSummary}` : ""}
+                    </div>
+                  )
+                })
+              ) : (
+                <div className="muted">{intl.formatMessage(messages.noPlannerRounds)}</div>
+              )}
+            </div>
+          </div>
+          <div className="policy-item">
+            <div className="row">
+              <strong>Worker lineage</strong>
+              <span className="turn-chip">{detail.observability.worker_lineage.length}</span>
+            </div>
+            <div className="policy-list">
+              {detail.observability.worker_lineage.length ? (
+                detail.observability.worker_lineage.map((worker) => (
+                  <div className="meta" key={worker.worker_id}>
+                    {worker.worker_name} • {worker.status}
+                    {worker.parent_stage_id ? ` • parent ${worker.parent_stage_id}` : ""}
+                    {worker.run_path ?? worker.run_id ? ` • ${worker.run_path ?? worker.run_id}` : ""}
+                  </div>
+                ))
+              ) : (
+                <div className="muted">{intl.formatMessage(messages.noWorkerLineage)}</div>
+              )}
+            </div>
+          </div>
+          <div className="policy-item">
+            <div className="row">
+              <strong>Transcript pointers</strong>
+              <span className="turn-chip">{detail.observability.transcript_pointers.length}</span>
+            </div>
+            <div className="policy-list">
+              {detail.observability.transcript_pointers.length ? (
+                detail.observability.transcript_pointers.map((pointer) => (
+                  <div className="meta" key={pointer.id}>
+                    {pointer.label} • {pointer.kind} • {pointer.available ? "available" : "missing"}
+                    {pointer.path ? ` • ${pointer.path}` : ` • ${pointer.location}`}
+                  </div>
+                ))
+              ) : (
+                <div className="muted">{intl.formatMessage(messages.noTranscriptPointers)}</div>
+              )}
+            </div>
+          </div>
+        </div>
+        <div className="flow-grid">
+          <div className="flow-item">
+            <div className="row">
+              <strong>Graph edges</strong>
+              <span className="turn-chip">{detail.observability.action_graph_edges.length}</span>
+            </div>
+            {detail.observability.action_graph_edges.length ? (
+              detail.observability.action_graph_edges.slice(0, 16).map((edge, index) => (
+                <div className="meta" key={`${edge.from_id}-${edge.to_id}-${index}`}>
+                  {graphNodeLabels.get(edge.from_id) ?? edge.from_id} → {graphNodeLabels.get(edge.to_id) ?? edge.to_id}
+                  {edge.label ? ` • ${edge.label}` : ""}
+                  {edge.kind ? ` • ${edge.kind}` : ""}
+                </div>
+              ))
+            ) : (
+              <div className="muted">{intl.formatMessage(messages.noTransitions)}</div>
+            )}
+          </div>
+          <div className="flow-item">
+            <div className="row">
+              <strong>Verification outcomes</strong>
+              <span className="turn-chip">{detail.observability.verification_outcomes.length}</span>
+            </div>
+            {detail.observability.verification_outcomes.length ? (
+              detail.observability.verification_outcomes.map((item) => (
+                <div className="meta" key={item.stage_id}>
+                  {item.node_id} • {item.passed == null ? item.status : item.passed ? "passed" : "failed"}
+                  {item.summary ? ` • ${item.summary}` : ""}
+                </div>
+              ))
+            ) : (
+              <div className="muted">{intl.formatMessage(messages.noValidationReport)}</div>
+            )}
+          </div>
+        </div>
+      </section>
 
       <section className="panel">
         <div className="panel-header">
@@ -617,6 +806,9 @@ export function RunDetail({ detail, runs, onSelectRun }: RunDetailProps) {
                     <span className="turn-chip">
                       {compareDiff.left_status} → {compareDiff.right_status}
                     </span>
+                    <span className="turn-chip">{compareDiff.stage_diffs.length} stage diffs</span>
+                    <span className="turn-chip">{compareDiff.tool_diffs.length} tool diffs</span>
+                    <span className="turn-chip">{compareDiff.observability_diffs.length} observability diffs</span>
                     <span className="turn-chip">
                       {compareDiff.transition_count_delta >= 0 ? "+" : ""}
                       {compareDiff.transition_count_delta} transitions
@@ -637,22 +829,14 @@ export function RunDetail({ detail, runs, onSelectRun }: RunDetailProps) {
               <div className="muted">
                 {intl.formatMessage(messages.comparisonFailed, { message: compareError })}
               </div>
-            ) : compareDiff?.stage_diffs.length ? (
-              compareDiff.stage_diffs.map((item) => (
-                <div className="compare-row" key={`${item.node_id}-${item.change}`}>
-                  <div>
-                    <strong>{item.node_id}</strong>
-                    <div className="meta">{item.change}</div>
-                  </div>
-                  <div className="meta">
-                    {item.details.map((detailLine) => (
-                      <div key={detailLine}>{detailLine}</div>
-                    ))}
-                  </div>
-                </div>
-              ))
+            ) : compareRows.length ? (
+              compareRows
             ) : (
-              <div className="muted">{intl.formatMessage(messages.noStageDiffs)}</div>
+              <div className="muted">
+                {compareDiff && !compareDiff.stage_diffs.length && !compareDiff.tool_diffs.length && !compareDiff.observability_diffs.length
+                  ? intl.formatMessage(messages.noObservabilityDiffs)
+                  : intl.formatMessage(messages.noStageDiffs)}
+              </div>
             )}
           </div>
         )}

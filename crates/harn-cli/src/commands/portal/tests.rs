@@ -16,8 +16,8 @@ use super::launch::{
 use super::query::ListRunsQuery;
 use super::router::build_router;
 use super::run_analysis::{
-    build_policy_summary, build_replay_summary, build_run_summary, filter_and_sort_runs,
-    resolve_run_path, scan_runs,
+    build_policy_summary, build_replay_summary, build_run_detail, build_run_summary,
+    filter_and_sort_runs, resolve_run_path, scan_runs,
 };
 use super::state::PortalState;
 use super::transcript::discover_transcript_steps;
@@ -110,6 +110,54 @@ fn build_run_summary_includes_failure_context() {
         summary.failure_summary.as_deref(),
         Some("verify failed: assertion failed")
     );
+}
+
+#[test]
+fn build_run_detail_exposes_observability_summary() {
+    let temp = tempfile::tempdir().unwrap();
+    let run_path = temp.path().join("run.json");
+    fs::write(&run_path, "{}").unwrap();
+    fs::create_dir_all(temp.path().join("run-llm")).unwrap();
+    fs::write(temp.path().join("run-llm/llm_transcript.jsonl"), "").unwrap();
+
+    let run = harn_vm::orchestration::RunRecord {
+        id: "run-obs".to_string(),
+        workflow_id: "wf".to_string(),
+        workflow_name: Some("demo".to_string()),
+        task: "task".to_string(),
+        status: "failed".to_string(),
+        persisted_path: Some(run_path.to_string_lossy().into_owned()),
+        stages: vec![harn_vm::orchestration::RunStageRecord {
+            id: "stage-1".to_string(),
+            node_id: "plan".to_string(),
+            kind: "stage".to_string(),
+            status: "failed".to_string(),
+            outcome: "error".to_string(),
+            verification: Some(serde_json::json!({"pass": false})),
+            artifacts: vec![harn_vm::orchestration::ArtifactRecord {
+                data: Some(serde_json::json!({
+                    "trace": {"iterations": 2, "llm_calls": 1, "tool_executions": 1},
+                    "task_ledger": {
+                        "root_task": "task",
+                        "deliverables": [{"id": "deliverable-1", "text": "debug", "status": "open"}],
+                        "observations": ["fact one"]
+                    }
+                })),
+                ..Default::default()
+            }],
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+
+    let detail = build_run_detail(temp.path(), "run.json", &run);
+    assert_eq!(detail.observability.planner_rounds.len(), 1);
+    assert_eq!(detail.observability.research_fact_count, 1);
+    assert!(detail
+        .observability
+        .transcript_pointers
+        .iter()
+        .any(|pointer| pointer.kind == "llm_jsonl"));
 }
 
 #[test]
@@ -500,6 +548,8 @@ async fn api_compare_returns_stage_diffs() {
     assert_eq!(diff.left_status, "completed");
     assert_eq!(diff.right_status, "failed");
     assert!(!diff.stage_diffs.is_empty());
+    assert!(diff.tool_diffs.is_empty());
+    assert!(!diff.observability_diffs.is_empty());
     assert_eq!(diff.transition_count_delta, 1);
     assert_eq!(diff.artifact_count_delta, 1);
     assert_eq!(diff.checkpoint_count_delta, 1);
