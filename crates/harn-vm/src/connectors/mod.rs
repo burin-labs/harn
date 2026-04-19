@@ -5,8 +5,9 @@
 //! connector ecosystem grows enough to justify extraction, the module can be
 //! split into a dedicated crate later without changing the high-level contract.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 use std::fmt;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration as StdDuration, Instant};
 
@@ -19,8 +20,8 @@ use tokio::sync::Mutex as AsyncMutex;
 use crate::event_log::AnyEventLog;
 use crate::secrets::SecretProvider;
 use crate::triggers::{
-    registered_provider_metadata, ProviderId, ProviderMetadata, ProviderRuntimeMetadata, TenantId,
-    TriggerEvent,
+    registered_provider_metadata, InboxIndex, ProviderId, ProviderMetadata, ProviderRuntimeMetadata,
+    TenantId, TriggerEvent,
 };
 
 pub mod cron;
@@ -199,24 +200,68 @@ pub struct ConnectorCtx {
     pub rate_limiter: Arc<RateLimiterFactory>,
 }
 
-/// Placeholder inbox index until the durable trigger inbox lands.
-#[derive(Debug, Default)]
-pub struct InboxIndex {
-    seen: Mutex<HashSet<(String, String)>>,
+/// Snapshot of connector-local metrics surfaced for tests and diagnostics.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ConnectorMetricsSnapshot {
+    pub inbox_claims_written: u64,
+    pub inbox_duplicates_rejected: u64,
+    pub inbox_fast_path_hits: u64,
+    pub inbox_durable_hits: u64,
+    pub inbox_expired_entries: u64,
+    pub inbox_active_entries: u64,
 }
 
-impl InboxIndex {
-    pub fn insert_if_new(&self, binding_id: &str, dedupe_key: &str) -> bool {
-        // TODO(T-09): replace this process-local stub with the durable trigger
-        // inbox dedupe index once the inbox lands.
-        let mut seen = self.seen.lock().expect("inbox index mutex poisoned");
-        seen.insert((binding_id.to_string(), dedupe_key.to_string()))
+/// Shared metrics surface for connector-local counters and timings.
+#[derive(Debug, Default)]
+pub struct MetricsRegistry {
+    inbox_claims_written: AtomicU64,
+    inbox_duplicates_rejected: AtomicU64,
+    inbox_fast_path_hits: AtomicU64,
+    inbox_durable_hits: AtomicU64,
+    inbox_expired_entries: AtomicU64,
+    inbox_active_entries: AtomicU64,
+}
+
+impl MetricsRegistry {
+    pub fn snapshot(&self) -> ConnectorMetricsSnapshot {
+        ConnectorMetricsSnapshot {
+            inbox_claims_written: self.inbox_claims_written.load(Ordering::Relaxed),
+            inbox_duplicates_rejected: self.inbox_duplicates_rejected.load(Ordering::Relaxed),
+            inbox_fast_path_hits: self.inbox_fast_path_hits.load(Ordering::Relaxed),
+            inbox_durable_hits: self.inbox_durable_hits.load(Ordering::Relaxed),
+            inbox_expired_entries: self.inbox_expired_entries.load(Ordering::Relaxed),
+            inbox_active_entries: self.inbox_active_entries.load(Ordering::Relaxed),
+        }
+    }
+
+    pub(crate) fn record_inbox_claim(&self) {
+        self.inbox_claims_written.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub(crate) fn record_inbox_duplicate_fast_path(&self) {
+        self.inbox_duplicates_rejected
+            .fetch_add(1, Ordering::Relaxed);
+        self.inbox_fast_path_hits.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub(crate) fn record_inbox_duplicate_durable(&self) {
+        self.inbox_duplicates_rejected
+            .fetch_add(1, Ordering::Relaxed);
+        self.inbox_durable_hits.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub(crate) fn record_inbox_expired_entries(&self, count: u64) {
+        if count > 0 {
+            self.inbox_expired_entries
+                .fetch_add(count, Ordering::Relaxed);
+        }
+    }
+
+    pub(crate) fn set_inbox_active_entries(&self, count: usize) {
+        self.inbox_active_entries
+            .store(count as u64, Ordering::Relaxed);
     }
 }
-
-/// Placeholder metrics surface for connector-local counters and timings.
-#[derive(Clone, Debug, Default)]
-pub struct MetricsRegistry;
 
 /// Provider payload schema metadata exposed by a connector.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

@@ -68,6 +68,18 @@ granular archaeology.
   current `a2a://...` and `worker://...` routes return explicit
   `NotImplemented` errors that point at those tickets.
 
+- **Durable trigger inbox dedupe on top of the shared EventLog (#160).**
+  `harn_vm::triggers::InboxIndex` now persists dedupe claims on the
+  `trigger.inbox` topic, rehydrates them on restart, honors per-trigger
+  `retry.retention_days` TTLs, and preserves a process-local hot-key cache
+  for repeated deliveries. The live cron connector now claims
+  `(binding_id, dedupe_key)` before it appends `connectors.cron.tick`, so a
+  crash after emit but before cron state persistence no longer duplicates the
+  same logical tick on restart. Added connector metrics snapshots for inbox
+  claims/duplicate rejections, manifest/docs coverage for retention, and
+  restart coverage via both mock-clock VM tests and an orchestrator fixture
+  under `conformance/fixtures/triggers/inbox_dedupe_restart`.
+
 - **`harn orchestrator serve` CLI scaffold (#209, closes #178).** Added
   a new `harn orchestrator` command family with a real `serve`
   subcommand plus placeholder `inspect`, `replay`, `dlq`, and

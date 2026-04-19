@@ -136,12 +136,14 @@ pub struct TriggerMatchExpr {
     pub extra: BTreeMap<String, toml::Value>,
 }
 
-#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TriggerRetrySpec {
     #[serde(default)]
     pub max: u32,
     #[serde(default)]
     pub backoff: TriggerRetryBackoff,
+    #[serde(default = "default_trigger_retention_days")]
+    pub retention_days: u32,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -150,6 +152,20 @@ pub enum TriggerRetryBackoff {
     #[default]
     Immediate,
     Svix,
+}
+
+fn default_trigger_retention_days() -> u32 {
+    harn_vm::DEFAULT_INBOX_RETENTION_DAYS
+}
+
+impl Default for TriggerRetrySpec {
+    fn default() -> Self {
+        Self {
+            max: 0,
+            backoff: TriggerRetryBackoff::default(),
+            retention_days: default_trigger_retention_days(),
+        }
+    }
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -895,6 +911,12 @@ fn validate_static_trigger_config(trigger: &ResolvedTriggerConfig) -> Result<(),
             format!("retry.max must be less than or equal to {TRIGGER_RETRY_MAX_LIMIT}"),
         ));
     }
+    if trigger.retry.retention_days == 0 {
+        return Err(trigger_error(
+            trigger,
+            "retry.retention_days must be greater than or equal to 1",
+        ));
+    }
     for (name, secret_ref) in &trigger.secrets {
         let Some(secret_id) = parse_secret_id(secret_ref) else {
             return Err(trigger_error(
@@ -1435,6 +1457,7 @@ pub fn manifest_trigger_binding_spec(
         },
     );
     let filter = config.filter.clone();
+    let dedupe_retention_days = config.retry.retention_days;
     let daily_cost_usd = config.budget.daily_cost_usd;
     let max_concurrent = config.budget.max_concurrent;
     let manifest_path = Some(config.manifest_path.clone());
@@ -1470,6 +1493,7 @@ pub fn manifest_trigger_binding_spec(
         match_events,
         dedupe_key,
         filter,
+        dedupe_retention_days,
         daily_cost_usd,
         max_concurrent,
         manifest_path,
@@ -2279,7 +2303,7 @@ match = { events = ["issues.opened"] }
 when = "handlers::should_handle"
 handler = "handlers::on_new_issue"
 dedupe_key = "event.dedupe_key"
-retry = { max = 7, backoff = "svix" }
+retry = { max = 7, backoff = "svix", retention_days = 7 }
 priority = "high"
 budget = { daily_cost_usd = 5.0, max_concurrent = 10 }
 secrets = { signing_secret = "github/webhook-secret" }
@@ -2367,7 +2391,7 @@ match = { events = ["issues.opened"] }
 when = "handlers::should_handle"
 handler = "handlers::on_new_issue"
 dedupe_key = "event.dedupe_key"
-retry = { max = 7, backoff = "svix" }
+retry = { max = 7, backoff = "svix", retention_days = 7 }
 priority = "normal"
 budget = { daily_cost_usd = 5.0, max_concurrent = 10 }
 secrets = { signing_secret = "github/webhook-secret" }
@@ -2608,6 +2632,29 @@ secrets = { signing_secret = "github/webhook-secret" }
             .await
             .unwrap_err();
         assert!(error.contains("dedupe_key"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn collect_manifest_triggers_rejects_zero_retention_days() {
+        let tmp = tempfile::tempdir().unwrap();
+        let harn_file = write_trigger_project(
+            tmp.path(),
+            r#"
+[[triggers]]
+id = "bad-retention"
+kind = "webhook"
+provider = "github"
+match = { events = ["issues.opened"] }
+handler = "worker://queue"
+retry = { retention_days = 0 }
+"#,
+            None,
+        );
+        let mut vm = test_vm();
+        let error = collect_manifest_triggers(&mut vm, &load_runtime_extensions(&harn_file))
+            .await
+            .unwrap_err();
+        assert!(error.contains("retry.retention_days"));
     }
 
     #[tokio::test(flavor = "current_thread")]

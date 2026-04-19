@@ -546,6 +546,7 @@ fn parse_trigger_config(config: &BTreeMap<String, VmValue>) -> Result<TriggerBin
         retry,
         match_events,
         dedupe_key,
+        dedupe_retention_days: crate::triggers::DEFAULT_INBOX_RETENTION_DAYS,
         filter,
         daily_cost_usd,
         max_concurrent,

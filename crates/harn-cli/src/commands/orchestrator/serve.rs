@@ -218,11 +218,16 @@ async fn initialize_connectors(
         trigger_registry.register(binding);
     }
 
+    let metrics = Arc::new(harn_vm::MetricsRegistry::default());
     let ctx = harn_vm::ConnectorCtx {
+        inbox: Arc::new(
+            harn_vm::InboxIndex::new(event_log.clone(), metrics.clone())
+                .await
+                .map_err(|error| error.to_string())?,
+        ),
         event_log,
         secrets,
-        inbox: Arc::new(harn_vm::InboxIndex::default()),
-        metrics: Arc::new(harn_vm::MetricsRegistry),
+        metrics,
         rate_limiter: Arc::new(harn_vm::RateLimiterFactory::default()),
     };
 
@@ -235,8 +240,7 @@ async fn initialize_connectors(
     for (provider, kinds) in grouped_kinds {
         let provider_name = provider.as_str().to_string();
         if registry.get(&provider).is_none() {
-            let connector: Box<dyn harn_vm::Connector> =
-                Box::new(PlaceholderConnector::new(provider.clone(), kinds));
+            let connector = connector_for(&provider, kinds);
             registry
                 .register(connector)
                 .map_err(|error| error.to_string())?;
@@ -291,6 +295,21 @@ fn connector_binding_config(config: &ResolvedTriggerConfig) -> Result<JsonValue,
             "webhook": config.kind_specific,
         })),
         _ => Ok(JsonValue::Null),
+    }
+    // Note: #220's earlier approach inserted `retention_days` into the JSON
+    // binding config. Post-#221, dedupe retention is carried on the
+    // TriggerBinding struct field `dedupe_retention_days` (see
+    // triggers/registry.rs) rather than in the connector-specific JSON,
+    // so no insertion is needed here.
+}
+
+fn connector_for(
+    provider: &harn_vm::ProviderId,
+    kinds: BTreeSet<String>,
+) -> Box<dyn harn_vm::Connector> {
+    match provider.as_str() {
+        "cron" => Box::new(harn_vm::CronConnector::new()),
+        _ => Box::new(PlaceholderConnector::new(provider.clone(), kinds)),
     }
 }
 

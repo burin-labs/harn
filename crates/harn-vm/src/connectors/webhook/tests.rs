@@ -93,11 +93,17 @@ impl TestHarness {
                 secret.to_string(),
             )]),
         ));
+        let metrics = Arc::new(MetricsRegistry::default());
+        let inbox = Arc::new(
+            InboxIndex::new(log.clone(), metrics.clone())
+                .await
+                .expect("inbox init"),
+        );
         let ctx = ConnectorCtx {
             event_log: log.clone(),
             secrets,
-            inbox: Arc::new(InboxIndex::default()),
-            metrics: Arc::new(MetricsRegistry),
+            inbox,
+            metrics,
             rate_limiter: Arc::new(RateLimiterFactory::default()),
         };
 

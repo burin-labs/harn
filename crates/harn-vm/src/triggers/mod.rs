@@ -1,5 +1,6 @@
 pub mod dispatcher;
 pub mod event;
+pub mod inbox;
 pub mod registry;
 
 pub use dispatcher::{
@@ -15,6 +16,7 @@ pub use event::{
     ProviderSchema, ProviderSecretRequirement, SignatureStatus, SignatureVerificationMetadata,
     SlackEventPayload, TenantId, TraceId, TriggerEvent, TriggerEventId,
 };
+pub use inbox::{InboxIndex, DEFAULT_INBOX_RETENTION_DAYS, TRIGGER_INBOX_TOPIC};
 pub use registry::{
     begin_in_flight, clear_trigger_registry, drain, dynamic_deregister, dynamic_register,
     finish_in_flight, install_manifest_triggers, resolve_live_trigger_binding,

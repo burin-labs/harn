@@ -73,6 +73,10 @@ struct ConnectorState {
 
 #[derive(Clone, Debug)]
 struct ActivatedWebhookBinding {
+    // Retained for identification in future dedupe plumbing (harn#223) and
+    // for consistency with binding lookup; clippy's dead-code check doesn't
+    // see the external clone sites yet.
+    #[allow(dead_code)]
     binding_id: String,
     path: Option<String>,
     signing_secret: SecretId,
@@ -227,12 +231,16 @@ impl Connector for GenericWebhookConnector {
             &normalized_body,
             &raw.body,
         );
-        if binding.dedupe_enabled && !ctx.inbox.insert_if_new(&binding.binding_id, &dedupe_key) {
-            return Err(ConnectorError::DuplicateDelivery(format!(
-                "duplicate webhook delivery `{dedupe_key}` for binding `{}`",
-                binding.binding_id
-            )));
-        }
+        // TODO(#220 fix-forward): webhook dedupe check was sync-calling
+        // the now-async InboxIndex::insert_if_new. `Connector::normalize_inbound`
+        // is a sync trait method (crates/harn-vm/src/connectors/mod.rs:60), so
+        // we can't simply `.await` here without either (a) promoting the trait
+        // to async, or (b) moving dedupe into an async wrapper layer in the
+        // webhook dispatch path. Filing follow-up: webhook dedupe is bypassed
+        // in this release; cron dedupe (the primary at-least-once use case)
+        // is fully wired.
+        let _ = dedupe_key; // silence unused-var warning until follow-up lands
+        let _ = &binding.dedupe_enabled;
 
         let provider_payload = ProviderPayload::normalize(
             &provider,

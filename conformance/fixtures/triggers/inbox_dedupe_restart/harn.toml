@@ -1,0 +1,16 @@
+[package]
+name = "inbox-dedupe-restart"
+
+[exports]
+handlers = "lib.harn"
+
+[[triggers]]
+id = "cron-dedupe"
+kind = "cron"
+provider = "cron"
+match = { events = ["cron.tick"] }
+handler = "handlers::on_tick"
+retry = { retention_days = 7 }
+schedule = "*/2 * * * * *"
+timezone = "UTC"
+catchup_mode = "latest"

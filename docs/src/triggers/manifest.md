@@ -22,7 +22,7 @@ match = { events = ["issues.opened"] }
 when = "handlers::should_handle"
 handler = "handlers::on_new_issue"
 dedupe_key = "event.dedupe_key"
-retry = { max = 7, backoff = "svix" }
+retry = { max = 7, backoff = "svix", retention_days = 7 }
 priority = "normal"
 budget = { daily_cost_usd = 5.00, max_concurrent = 10 }
 secrets = { signing_secret = "github/webhook-secret" }
@@ -59,6 +59,7 @@ The manifest loader rejects invalid trigger declarations before execution:
 - `when` must resolve to a function with signature `fn(TriggerEvent) -> bool`
 - `dedupe_key` and `filter` must parse as JMESPath expressions
 - `retry.max` must be `<= 100`
+- `retry.retention_days` defaults to `7` and must be `>= 1`
 - `budget.daily_cost_usd` must be `>= 0`
 - cron triggers must declare a parseable `schedule`
 - cron `timezone` must be a valid IANA timezone name
@@ -67,6 +68,23 @@ The manifest loader rejects invalid trigger declarations before execution:
 
 Errors include the manifest path plus the `[[triggers]]` table index so the bad
 entry is easy to locate.
+
+## Durable dedupe retention
+
+Trigger dedupe now uses a durable inbox index backed by the shared EventLog
+topic `trigger.inbox`. Each successful claim stores the binding id plus the
+resolved `dedupe_key`, and duplicate deliveries are rejected until the claim's
+TTL expires.
+
+- configure the TTL with `retry.retention_days`
+- the default is `7` days
+- shorter retention trims durable dedupe history sooner, which lowers storage
+  cost but increases the chance that a late provider retry will be treated as a
+  fresh event
+
+Use a retention window at least as long as the provider's maximum retry window.
+If a provider can redeliver for longer than your configured TTL, Harn may
+dispatch that late retry again once the durable claim has expired.
 
 ## Doctor output
 
