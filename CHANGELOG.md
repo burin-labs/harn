@@ -19,18 +19,17 @@ granular archaeology.
   worker lifecycle moved off raw status strings onto a typed
   `WorkerEvent` enum, and conformance now covers manifest registration,
   pre-tool short-circuit, and post-tool rewrite behavior end-to-end.
+- **Daemon stdlib wrapper builtins for runtime-owned daemon mode
+  (#143 part (a)).** `daemon_spawn`, `daemon_trigger`,
+  `daemon_snapshot`, `daemon_stop`, and `daemon_resume` now expose the
+  existing agent-loop daemon runtime through a first-class stdlib
+  handle. The wrapper stores daemon metadata alongside the persisted
+  runtime snapshot so resumable state dirs can be reopened
+  ergonomically without changing daemon semantics.
 
 ## v0.7.21
 
 ### Added
-
-- **Daemon stdlib wrapper builtins for runtime-owned daemon mode (#143).**
-  `daemon_spawn`, `daemon_trigger`, `daemon_snapshot`, `daemon_stop`,
-  and `daemon_resume` now expose the existing agent-loop daemon
-  runtime through a first-class stdlib handle. The wrapper stores
-  daemon metadata alongside the persisted runtime snapshot so
-  resumable state dirs can be reopened ergonomically without changing
-  daemon semantics.
 
 - **Manifest-backed runtime extension ABI (#128).** `harn.toml` now
   supports `[exports]` for stable package module entry points and
