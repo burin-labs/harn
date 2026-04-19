@@ -10,11 +10,12 @@ use std::time::{Duration, Instant};
 
 use hmac::{Hmac, Mac};
 use rcgen::generate_simple_self_signed;
-use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE, ORIGIN};
+use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE, ORIGIN};
 use reqwest::Certificate;
 use reqwest::StatusCode;
 use sha2_10::Sha256;
 use tempfile::TempDir;
+use time::OffsetDateTime;
 
 const STARTUP_PREFIX: &str = "[harn] HTTP listener ready on ";
 const SHUTDOWN_NEEDLE: &str = "graceful shutdown complete";
@@ -67,6 +68,41 @@ fn handler_module() -> &'static str {
 import "std/triggers"
 
 pub fn on_issue(event: TriggerEvent) {
+  log(event.kind)
+}
+"#
+}
+
+fn a2a_manifest(orchestrator_block: Option<&str>) -> String {
+    let mut manifest = r#"
+[package]
+name = "fixture"
+
+[exports]
+handlers = "lib.harn"
+
+[[triggers]]
+id = "incoming-review-task"
+kind = "a2a-push"
+provider = "a2a-push"
+path = "/a2a/review"
+match = { events = ["a2a.task.received"] }
+handler = "handlers::on_task"
+"#
+    .to_string();
+    if let Some(block) = orchestrator_block {
+        manifest.push('\n');
+        manifest.push_str(block);
+        manifest.push('\n');
+    }
+    manifest
+}
+
+fn a2a_handler_module() -> &'static str {
+    r#"
+import "std/triggers"
+
+pub fn on_task(event: TriggerEvent) {
   log(event.kind)
 }
 "#
@@ -227,6 +263,12 @@ async fn assert_status(response: reqwest::Response, expected: StatusCode) {
     assert_eq!(status, expected, "status={status} body={body}");
 }
 
+fn json_headers() -> HeaderMap {
+    let mut headers = HeaderMap::new();
+    headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+    headers
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn github_webhook_delivery_is_accepted_and_persisted() {
     let temp = TempDir::new().unwrap();
@@ -262,6 +304,75 @@ async fn github_webhook_delivery_is_accepted_and_persisted() {
         "snapshot={snapshot}"
     );
     assert!(snapshot.contains("\"received\": 1"), "snapshot={snapshot}");
+    assert!(
+        snapshot.contains("\"dispatched\": 1"),
+        "snapshot={snapshot}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a2a_push_route_requires_bearer_or_valid_hmac() {
+    let temp = TempDir::new().unwrap();
+    write_file(temp.path(), "harn.toml", &a2a_manifest(None));
+    write_file(temp.path(), "lib.harn", a2a_handler_module());
+
+    let envs = [
+        ("HARN_SECRET_PROVIDERS", "env"),
+        ("HARN_ORCHESTRATOR_API_KEYS", "test-key-1,test-key-2"),
+        ("HARN_ORCHESTRATOR_HMAC_SECRET", "shared-secret"),
+    ];
+    let mut process = spawn_orchestrator(&temp, &[], &envs);
+    let base_url = process.wait_for_listener_url();
+
+    let client = reqwest::Client::new();
+    let body = br#"{"kind":"a2a.task.received","task":{"id":"task-123"}}"#;
+
+    let response = client
+        .post(format!("{base_url}/a2a/review"))
+        .headers(json_headers())
+        .body(body.to_vec())
+        .send()
+        .await
+        .unwrap();
+    assert_status(response, StatusCode::UNAUTHORIZED).await;
+
+    let timestamp = OffsetDateTime::now_utc().unix_timestamp();
+    let mut wrong_hmac_headers = json_headers();
+    wrong_hmac_headers.insert(
+        AUTHORIZATION,
+        HeaderValue::from_str(&format!(
+            "HMAC-SHA256 timestamp={timestamp},signature=AAAAAAAAAAAAAAAAAAAAAA=="
+        ))
+        .unwrap(),
+    );
+    let response = client
+        .post(format!("{base_url}/a2a/review"))
+        .headers(wrong_hmac_headers)
+        .body(body.to_vec())
+        .send()
+        .await
+        .unwrap();
+    assert_status(response, StatusCode::UNAUTHORIZED).await;
+
+    let mut bearer_headers = json_headers();
+    bearer_headers.insert(AUTHORIZATION, HeaderValue::from_static("Bearer test-key-2"));
+    let response = client
+        .post(format!("{base_url}/a2a/review"))
+        .headers(bearer_headers)
+        .body(body.to_vec())
+        .send()
+        .await
+        .unwrap();
+    assert_status(response, StatusCode::OK).await;
+
+    send_sigterm(&process.child);
+    wait_for_exit(&mut process.child);
+    let stderr = process.join_stderr();
+    assert!(stderr.contains(SHUTDOWN_NEEDLE), "stderr={stderr}");
+
+    let snapshot = state_snapshot(&temp);
+    assert!(snapshot.contains("\"received\": 3"), "snapshot={snapshot}");
+    assert!(snapshot.contains("\"failed\": 2"), "snapshot={snapshot}");
     assert!(
         snapshot.contains("\"dispatched\": 1"),
         "snapshot={snapshot}"

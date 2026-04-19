@@ -1,0 +1,96 @@
+fn wait_for_listener_url(log_path) {
+  var attempts = 0
+  var url = nil
+  while attempts < 200 && !url {
+    if file_exists(log_path) {
+      let log = exec("cat", log_path).stdout
+      let matches = regex_captures("\\[harn\\] HTTP listener ready on (\\S+)", log)
+      if len(matches) > 0 {
+        url = matches[0].groups[0]
+      }
+    }
+    if !url {
+      sleep(50ms)
+      attempts = attempts + 1
+    }
+  }
+  return url
+}
+
+fn wait_for_exit(pid) {
+  var attempts = 0
+  while attempts < 100 {
+    let probe = shell("kill -0 " + pid + " >/dev/null 2>&1")
+    if !probe.success {
+      return true
+    }
+    sleep(50ms)
+    attempts = attempts + 1
+  }
+  return false
+}
+
+pipeline test(task) {
+  let root = path_join(temp_dir(), "harn-orchestrator-auth-" + uuid())
+  mkdir(root)
+  write_file(
+    path_join(root, "harn.toml"),
+    "[package]\nname = \"fixture\"\n\n[exports]\nhandlers = \"lib.harn\"\n\n[[triggers]]\nid = \"incoming-review-task\"\nkind = \"a2a-push\"\nprovider = \"a2a-push\"\npath = \"/a2a/review\"\nmatch = { events = [\"a2a.task.received\"] }\nhandler = \"handlers::on_task\"\n",
+  )
+  write_file(
+    path_join(root, "lib.harn"),
+    "import \"std/triggers\"\n\npub fn on_task(event: TriggerEvent) {\n  log(event.kind)\n}\n",
+  )
+
+  let repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+  let target_dir = env("CARGO_TARGET_DIR") ?? path_join(repo_root, "target")
+  let harn_bin = path_join(target_dir, "debug/harn")
+  assert(file_exists(harn_bin), "missing built harn binary at " + harn_bin)
+
+  let start = shell_at(
+    root,
+    "nohup env HARN_SECRET_PROVIDERS=env HARN_ORCHESTRATOR_API_KEYS=test-key-1,test-key-2 HARN_ORCHESTRATOR_HMAC_SECRET=shared-secret " + harn_bin + " orchestrator serve --config harn.toml --state-dir ./state --role single-tenant --bind 127.0.0.1:0 >/dev/null 2>orchestrator.log </dev/null & echo $!",
+  )
+  let pid = start.stdout.trim()
+  assert(start.success, "failed to start orchestrator")
+  assert(pid != "", "missing orchestrator pid")
+
+  let url = wait_for_listener_url(path_join(root, "orchestrator.log"))
+  assert(url != nil, "listener URL did not appear in log")
+
+  let body = "{\"kind\":\"a2a.task.received\",\"task\":{\"id\":\"task-123\"}}"
+  let json_headers = {"Content-Type": "application/json"}
+  let unauth = http_request("POST", url + "/a2a/review", {body: body, headers: json_headers})
+  println(unauth.status == 401)
+
+  let ts = to_string(to_int(timestamp()))
+  let wrong_hmac = http_request(
+    "POST",
+    url + "/a2a/review",
+    {
+    body: body,
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": "HMAC-SHA256 timestamp=" + ts + ",signature=AAAAAAAAAAAAAAAAAAAAAA==",
+    },
+  },
+  )
+  println(wrong_hmac.status == 401)
+
+  let bearer = http_request(
+    "POST",
+    url + "/a2a/review",
+    {
+    body: body,
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer test-key-2",
+    },
+  },
+  )
+  println(bearer.status == 200)
+
+  let _ = shell("kill -TERM " + pid)
+  wait_for_exit(pid)
+  delete_file(root)
+}

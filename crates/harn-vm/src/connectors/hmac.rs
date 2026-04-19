@@ -18,6 +18,8 @@ pub const DEFAULT_STRIPE_SIGNATURE_HEADER: &str = "stripe-signature";
 pub const DEFAULT_STANDARD_WEBHOOKS_ID_HEADER: &str = "webhook-id";
 pub const DEFAULT_STANDARD_WEBHOOKS_SIGNATURE_HEADER: &str = "webhook-signature";
 pub const DEFAULT_STANDARD_WEBHOOKS_TIMESTAMP_HEADER: &str = "webhook-timestamp";
+pub const DEFAULT_CANONICAL_AUTHORIZATION_HEADER: &str = "authorization";
+pub const DEFAULT_CANONICAL_HMAC_SCHEME: &str = "HMAC-SHA256";
 
 /// Supported HMAC signature header conventions for inbound webhook providers.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -35,6 +37,10 @@ pub enum HmacSignatureStyle<'a> {
         signature_header: &'a str,
         timestamp_header: &'a str,
         version: &'a str,
+    },
+    CanonicalRequest {
+        authorization_header: &'a str,
+        scheme: &'a str,
     },
 }
 
@@ -62,11 +68,19 @@ impl<'a> HmacSignatureStyle<'a> {
         }
     }
 
+    pub fn canonical_request() -> Self {
+        Self::CanonicalRequest {
+            authorization_header: DEFAULT_CANONICAL_AUTHORIZATION_HEADER,
+            scheme: DEFAULT_CANONICAL_HMAC_SCHEME,
+        }
+    }
+
     fn label(self) -> &'static str {
         match self {
             Self::GitHub { .. } => "github",
             Self::Stripe { .. } => "stripe",
             Self::StandardWebhooks { .. } => "standard_webhooks",
+            Self::CanonicalRequest { .. } => "canonical_request",
         }
     }
 }
@@ -141,7 +155,61 @@ pub async fn verify_hmac_signed<L: EventLog + ?Sized>(
             )
             .await
         }
+        HmacSignatureStyle::CanonicalRequest { .. } => {
+            let error = ConnectorError::Unsupported(
+                "canonical-request verification requires method + path context".to_string(),
+            );
+            reject(
+                event_log,
+                provider,
+                style,
+                &error,
+                now,
+                None,
+                timestamp_window,
+            )
+            .await
+        }
     }
+}
+
+/// Verify an `Authorization: HMAC-SHA256 ...` header against a canonical
+/// request string built from method, path, timestamp, and a SHA-256 body hash.
+#[allow(clippy::too_many_arguments)]
+pub async fn verify_hmac_authorization<L: EventLog + ?Sized>(
+    event_log: &L,
+    provider: &ProviderId,
+    method: &str,
+    path: &str,
+    body: &[u8],
+    headers: &BTreeMap<String, String>,
+    secret: &str,
+    timestamp_window: Duration,
+    now: OffsetDateTime,
+) -> Result<(), ConnectorError> {
+    let style = HmacSignatureStyle::canonical_request();
+    let HmacSignatureStyle::CanonicalRequest {
+        authorization_header,
+        scheme,
+    } = style
+    else {
+        unreachable!("canonical_request constructor must return CanonicalRequest");
+    };
+    verify_canonical_request(
+        event_log,
+        provider,
+        style,
+        authorization_header,
+        scheme,
+        method,
+        path,
+        body,
+        headers,
+        secret,
+        timestamp_window,
+        now,
+    )
+    .await
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -469,6 +537,204 @@ async fn verify_standard_webhooks<L: EventLog + ?Sized>(
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
+async fn verify_canonical_request<L: EventLog + ?Sized>(
+    event_log: &L,
+    provider: &ProviderId,
+    style: HmacSignatureStyle<'_>,
+    authorization_header: &str,
+    scheme: &str,
+    method: &str,
+    path: &str,
+    body: &[u8],
+    headers: &BTreeMap<String, String>,
+    secret: &str,
+    timestamp_window: Duration,
+    now: OffsetDateTime,
+) -> Result<(), ConnectorError> {
+    let authorization = match required_header(headers, authorization_header) {
+        Ok(value) => value,
+        Err(error) => {
+            return reject(
+                event_log,
+                provider,
+                style,
+                &error,
+                now,
+                None,
+                Some(timestamp_window),
+            )
+            .await
+        }
+    };
+
+    let params = authorization
+        .strip_prefix(scheme)
+        .map(str::trim_start)
+        .ok_or_else(|| ConnectorError::InvalidHeader {
+            name: authorization_header.to_string(),
+            detail: format!("expected `{scheme}` authorization scheme"),
+        });
+    let params = match params {
+        Ok(value) if !value.is_empty() => value,
+        Ok(_) => {
+            let error = ConnectorError::InvalidHeader {
+                name: authorization_header.to_string(),
+                detail: "missing signature parameters".to_string(),
+            };
+            return reject(
+                event_log,
+                provider,
+                style,
+                &error,
+                now,
+                None,
+                Some(timestamp_window),
+            )
+            .await;
+        }
+        Err(error) => {
+            return reject(
+                event_log,
+                provider,
+                style,
+                &error,
+                now,
+                None,
+                Some(timestamp_window),
+            )
+            .await
+        }
+    };
+
+    let mut timestamp_raw = None;
+    let mut signature = None;
+    for part in params.split(',') {
+        let Some((key, value)) = part.trim().split_once('=') else {
+            continue;
+        };
+        match key.trim() {
+            "timestamp" => timestamp_raw = Some(value.trim()),
+            "signature" => signature = Some(value.trim()),
+            "key-id" => {}
+            _ => {}
+        }
+    }
+
+    let timestamp_raw = match timestamp_raw {
+        Some(value) if !value.is_empty() => value,
+        _ => {
+            let error = ConnectorError::InvalidHeader {
+                name: authorization_header.to_string(),
+                detail: "missing `timestamp=` parameter".to_string(),
+            };
+            return reject(
+                event_log,
+                provider,
+                style,
+                &error,
+                now,
+                None,
+                Some(timestamp_window),
+            )
+            .await;
+        }
+    };
+    let timestamp = match timestamp_raw.parse::<i64>() {
+        Ok(raw) => match OffsetDateTime::from_unix_timestamp(raw) {
+            Ok(parsed) => parsed,
+            Err(error) => {
+                let error = ConnectorError::InvalidHeader {
+                    name: authorization_header.to_string(),
+                    detail: error.to_string(),
+                };
+                return reject(
+                    event_log,
+                    provider,
+                    style,
+                    &error,
+                    now,
+                    None,
+                    Some(timestamp_window),
+                )
+                .await;
+            }
+        },
+        Err(error) => {
+            let error = ConnectorError::InvalidHeader {
+                name: authorization_header.to_string(),
+                detail: error.to_string(),
+            };
+            return reject(
+                event_log,
+                provider,
+                style,
+                &error,
+                now,
+                None,
+                Some(timestamp_window),
+            )
+            .await;
+        }
+    };
+    ensure_timestamp_within_window(event_log, provider, style, timestamp, timestamp_window, now)
+        .await?;
+
+    let signature = match signature {
+        Some(value) if !value.is_empty() => value,
+        _ => {
+            let error = ConnectorError::InvalidHeader {
+                name: authorization_header.to_string(),
+                detail: "missing `signature=` parameter".to_string(),
+            };
+            return reject(
+                event_log,
+                provider,
+                style,
+                &error,
+                now,
+                Some(timestamp),
+                Some(timestamp_window),
+            )
+            .await;
+        }
+    };
+    let provided = match decode_base64(signature, authorization_header) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            return reject(
+                event_log,
+                provider,
+                style,
+                &error,
+                now,
+                Some(timestamp),
+                Some(timestamp_window),
+            )
+            .await
+        }
+    };
+
+    let signed = canonical_request_message(method, path, timestamp_raw, body);
+    let expected = hmac_sha256(secret.as_bytes(), signed.as_bytes());
+    if secure_eq(&expected, &provided) {
+        Ok(())
+    } else {
+        let error =
+            ConnectorError::invalid_signature("signature did not match the canonical request");
+        reject(
+            event_log,
+            provider,
+            style,
+            &error,
+            now,
+            Some(timestamp),
+            Some(timestamp_window),
+        )
+        .await
+    }
+}
+
 async fn ensure_timestamp_within_window<L: EventLog + ?Sized>(
     event_log: &L,
     provider: &ProviderId,
@@ -524,6 +790,39 @@ fn decode_standard_webhooks_secret(secret: &str) -> Result<Vec<u8>, ConnectorErr
             name: "webhook-secret".to_string(),
             detail: error.to_string(),
         })
+}
+
+fn decode_base64(value: &str, header_name: &str) -> Result<Vec<u8>, ConnectorError> {
+    let mut padded = value.trim().to_string();
+    let remainder = padded.len() % 4;
+    if remainder != 0 {
+        padded.push_str(&"=".repeat(4 - remainder));
+    }
+    BASE64_STANDARD
+        .decode(padded)
+        .map_err(|error| ConnectorError::InvalidHeader {
+            name: header_name.to_string(),
+            detail: error.to_string(),
+        })
+}
+
+fn canonical_request_message(method: &str, path: &str, timestamp: &str, body: &[u8]) -> String {
+    format!(
+        "{}\n{}\n{}\n{}",
+        method.trim().to_ascii_uppercase(),
+        path.trim(),
+        timestamp.trim(),
+        sha256_hex(body)
+    )
+}
+
+fn sha256_hex(data: &[u8]) -> String {
+    let digest = Sha256::digest(data);
+    let mut encoded = String::with_capacity(digest.len() * 2);
+    for byte in digest {
+        encoded.push_str(&format!("{byte:02x}"));
+    }
+    encoded
 }
 
 fn hmac_sha256(secret: &[u8], data: &[u8]) -> Vec<u8> {
@@ -854,6 +1153,78 @@ mod tests {
         assert!(
             matches!(error, ConnectorError::MissingHeader(header) if header == DEFAULT_GITHUB_SIGNATURE_HEADER)
         );
+        assert_eq!(audit_events(&log).await.len(), 1);
+    }
+
+    fn canonical_authorization(
+        secret: &str,
+        method: &str,
+        path: &str,
+        timestamp: i64,
+        body: &[u8],
+    ) -> String {
+        let signed = canonical_request_message(method, path, &timestamp.to_string(), body);
+        let signature = hmac_sha256(secret.as_bytes(), signed.as_bytes());
+        format!(
+            "{} timestamp={},signature={}",
+            DEFAULT_CANONICAL_HMAC_SCHEME,
+            timestamp,
+            BASE64_STANDARD.encode(signature)
+        )
+    }
+
+    #[tokio::test]
+    async fn verifies_canonical_request_authorization() {
+        let log = log();
+        let body = br#"{"task":"review"}"#;
+        let timestamp = 1_700_000_000;
+        let headers = BTreeMap::from([(
+            "Authorization".to_string(),
+            canonical_authorization("shared-secret", "POST", "/a2a/review", timestamp, body),
+        )]);
+
+        verify_hmac_authorization(
+            log.as_ref(),
+            &ProviderId::from("orchestrator"),
+            "POST",
+            "/a2a/review",
+            body,
+            &headers,
+            "shared-secret",
+            Duration::minutes(5),
+            OffsetDateTime::from_unix_timestamp(timestamp).unwrap(),
+        )
+        .await
+        .unwrap();
+
+        assert!(audit_events(&log).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn rejects_canonical_request_authorization_with_wrong_path() {
+        let log = log();
+        let body = br#"{"task":"review"}"#;
+        let timestamp = 1_700_000_000;
+        let headers = BTreeMap::from([(
+            "authorization".to_string(),
+            canonical_authorization("shared-secret", "POST", "/a2a/review", timestamp, body),
+        )]);
+
+        let error = verify_hmac_authorization(
+            log.as_ref(),
+            &ProviderId::from("orchestrator"),
+            "POST",
+            "/a2a/other",
+            body,
+            &headers,
+            "shared-secret",
+            Duration::minutes(5),
+            OffsetDateTime::from_unix_timestamp(timestamp).unwrap(),
+        )
+        .await
+        .unwrap_err();
+
+        assert!(matches!(error, ConnectorError::InvalidSignature(_)));
         assert_eq!(audit_events(&log).await.len(), 1);
     }
 }
