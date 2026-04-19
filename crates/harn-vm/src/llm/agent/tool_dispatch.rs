@@ -335,7 +335,7 @@ pub(super) async fn run_tool_dispatch(
                 append_message_to_contexts(
                     &mut state.visible_messages,
                     &mut state.recorded_messages,
-                    build_tool_result_message(tool_id, &result_text, &opts.provider),
+                    build_tool_result_message(tool_id, tool_name, &result_text, &opts.provider),
                 );
             } else {
                 observations.push_str(&format!(
@@ -386,7 +386,7 @@ pub(super) async fn run_tool_dispatch(
                 append_message_to_contexts(
                     &mut state.visible_messages,
                     &mut state.recorded_messages,
-                    build_tool_result_message(tool_id, &result_text, &opts.provider),
+                    build_tool_result_message(tool_id, tool_name, &result_text, &opts.provider),
                 );
             } else {
                 observations.push_str(&format!(
@@ -413,7 +413,7 @@ pub(super) async fn run_tool_dispatch(
                 append_message_to_contexts(
                     &mut state.visible_messages,
                     &mut state.recorded_messages,
-                    build_tool_result_message(tool_id, &result_text, &opts.provider),
+                    build_tool_result_message(tool_id, tool_name, &result_text, &opts.provider),
                 );
             } else {
                 observations.push_str(&format!(
@@ -457,7 +457,7 @@ pub(super) async fn run_tool_dispatch(
                 append_message_to_contexts(
                     &mut state.visible_messages,
                     &mut state.recorded_messages,
-                    build_tool_result_message(tool_id, &result_text, &opts.provider),
+                    build_tool_result_message(tool_id, tool_name, &result_text, &opts.provider),
                 );
             } else {
                 observations.push_str(&format!(
@@ -553,7 +553,7 @@ pub(super) async fn run_tool_dispatch(
                 append_message_to_contexts(
                     &mut state.visible_messages,
                     &mut state.recorded_messages,
-                    build_tool_result_message(tool_id, &result_text, &opts.provider),
+                    build_tool_result_message(tool_id, tool_name, &result_text, &opts.provider),
                 );
             } else {
                 observations.push_str(&format!(
@@ -597,7 +597,7 @@ pub(super) async fn run_tool_dispatch(
                     append_message_to_contexts(
                         &mut state.visible_messages,
                         &mut state.recorded_messages,
-                        build_tool_result_message(tool_id, &result_text, &opts.provider),
+                        build_tool_result_message(tool_id, tool_name, &result_text, &opts.provider),
                     );
                 } else {
                     observations.push_str(&format!(
@@ -629,7 +629,7 @@ pub(super) async fn run_tool_dispatch(
                 append_message_to_contexts(
                     &mut state.visible_messages,
                     &mut state.recorded_messages,
-                    build_tool_result_message(tool_id, &result_text, &opts.provider),
+                    build_tool_result_message(tool_id, tool_name, &result_text, &opts.provider),
                 );
             } else {
                 observations.push_str(&format!(
@@ -722,7 +722,7 @@ pub(super) async fn run_tool_dispatch(
                     append_message_to_contexts(
                         &mut state.visible_messages,
                         &mut state.recorded_messages,
-                        build_tool_result_message(tool_id, &skip_msg, &opts.provider),
+                        build_tool_result_message(tool_id, tool_name, &skip_msg, &opts.provider),
                     );
                 } else {
                     observations.push_str(&format!(
@@ -968,7 +968,7 @@ pub(super) async fn run_tool_dispatch(
             append_message_to_contexts(
                 &mut state.visible_messages,
                 &mut state.recorded_messages,
-                build_tool_result_message(tool_id, &result_text, &opts.provider),
+                build_tool_result_message(tool_id, tool_name, &result_text, &opts.provider),
             );
         } else {
             observations.push_str(&format!(

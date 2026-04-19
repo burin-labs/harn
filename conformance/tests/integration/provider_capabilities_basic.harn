@@ -36,6 +36,9 @@ pipeline test(task) {
   let gpt4o = provider_capabilities("openai", "gpt-4o")
   assert(gpt4o.native_tools == true, "gpt-4o has native tools")
   assert(gpt4o.defer_loading == false, "gpt-4o has no defer_loading")
+  // Ollama Qwen 3.5 advertises native tools on the official model page.
+  let qwen35 = provider_capabilities("ollama", "qwen3.5:35b-a3b-coding-nvfp4")
+  assert(qwen35.native_tools == true, "qwen3.5 on ollama has native tools")
   // OpenRouter inherits the openai family.
   let routed = provider_capabilities("openrouter", "gpt-5.4")
   assert(routed.defer_loading == true, "openrouter inherits openai defer_loading")

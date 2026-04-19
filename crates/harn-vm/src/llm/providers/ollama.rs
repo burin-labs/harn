@@ -34,6 +34,16 @@ impl OllamaProvider {
         let mut body =
             crate::llm::providers::OpenAiCompatibleProvider::build_request_body(opts, true);
 
+        if opts.response_format.as_deref() == Some("json") {
+            body.as_object_mut()
+                .map(|obj| obj.remove("response_format"));
+            if let Some(schema) = opts.json_schema.clone() {
+                body["format"] = schema;
+            } else {
+                body["format"] = serde_json::json!("json");
+            }
+        }
+
         if body["options"].get("num_ctx").is_none() {
             if let Some(num_ctx) = crate::llm::api::ollama_num_ctx_override() {
                 body["options"]["num_ctx"] = serde_json::json!(num_ctx);
@@ -78,5 +88,54 @@ impl OllamaProvider {
             true,  // is_ollama
         )
         .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn base_payload() -> LlmRequestPayload {
+        LlmRequestPayload {
+            provider: "ollama".to_string(),
+            model: "qwen3.5:35b-a3b-coding-nvfp4".to_string(),
+            api_key: String::new(),
+            messages: vec![serde_json::json!({"role": "user", "content": "hello"})],
+            system: None,
+            max_tokens: 64,
+            temperature: Some(0.0),
+            top_p: None,
+            top_k: None,
+            stop: None,
+            seed: None,
+            frequency_penalty: None,
+            presence_penalty: None,
+            response_format: Some("json".to_string()),
+            json_schema: Some(serde_json::json!({"type": "object"})),
+            thinking: None,
+            native_tools: None,
+            tool_choice: None,
+            cache: false,
+            timeout: None,
+            stream: true,
+            provider_overrides: None,
+            prefill: None,
+        }
+    }
+
+    #[test]
+    fn json_response_format_maps_to_ollama_format_field() {
+        let body = OllamaProvider::build_request_body(&base_payload());
+        assert_eq!(body["format"], serde_json::json!({"type": "object"}));
+        assert!(body.get("response_format").is_none());
+    }
+
+    #[test]
+    fn plain_requests_do_not_emit_format_field() {
+        let mut payload = base_payload();
+        payload.response_format = None;
+        payload.json_schema = None;
+        let body = OllamaProvider::build_request_body(&payload);
+        assert!(body.get("format").is_none());
     }
 }

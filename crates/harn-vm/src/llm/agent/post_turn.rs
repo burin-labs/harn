@@ -262,22 +262,21 @@ pub(super) async fn run_post_turn(
         return Ok(IterationOutcome::Continue);
     }
 
-    let assistant_content_for_history = assistant_history_text(
-        call_result.canonical_history.as_deref(),
-        &call_result.text,
-        call_result.tool_parse_errors.len(),
-        &call_result.tool_calls,
-    );
-    append_message_to_contexts(
-        &mut state.visible_messages,
-        &mut state.recorded_messages,
-        serde_json::json!({
-            "role": "assistant",
-            "content": assistant_content_for_history,
-        }),
-    );
-
     if call_result.sentinel_hit {
+        let assistant_content_for_history = assistant_history_text(
+            call_result.canonical_history.as_deref(),
+            &call_result.text,
+            call_result.tool_parse_errors.len(),
+            &call_result.tool_calls,
+        );
+        append_message_to_contexts(
+            &mut state.visible_messages,
+            &mut state.recorded_messages,
+            serde_json::json!({
+                "role": "assistant",
+                "content": assistant_content_for_history,
+            }),
+        );
         return Ok(IterationOutcome::Break);
     }
 
@@ -294,6 +293,66 @@ pub(super) async fn run_post_turn(
         state.consecutive_text_only = 0;
         return Ok(IterationOutcome::Continue);
     }
+
+    let action_required_before_answer = ctx.tool_format == "native"
+        && ctx
+            .turn_policy
+            .is_some_and(|policy| policy.require_action_or_yield)
+        && state.all_tools_used.is_empty();
+    if action_required_before_answer {
+        state.consecutive_text_only += 1;
+        if state.consecutive_text_only > ctx.max_nudges {
+            state.final_status = "stuck";
+            let tail_excerpt = {
+                let raw = call_result.text.trim();
+                if raw.chars().count() > 240 {
+                    let truncated: String = raw.chars().take(240).collect();
+                    format!("{truncated}…")
+                } else {
+                    raw.to_string()
+                }
+            };
+            super::emit_agent_event(&AgentEvent::LoopStuck {
+                session_id: ctx.session_id.to_string(),
+                max_nudges: ctx.max_nudges,
+                last_iteration: iteration,
+                tail_excerpt,
+            })
+            .await;
+            return Ok(IterationOutcome::Break);
+        }
+        let guidance =
+            action_turn_nudge(ctx.tool_format, ctx.turn_policy, call_result.prose_too_long)
+                .unwrap_or_else(|| "Use a tool call to make progress.".to_string());
+        append_message_to_contexts(
+            &mut state.visible_messages,
+            &mut state.recorded_messages,
+            runtime_feedback_message(
+                "action_required",
+                format!(
+                    "You returned assistant text/JSON before using any tool. \
+                     This stage requires at least one tool action before an answer counts. \
+                     That response was not accepted. {guidance}"
+                ),
+            ),
+        );
+        return Ok(IterationOutcome::Continue);
+    }
+
+    let assistant_content_for_history = assistant_history_text(
+        call_result.canonical_history.as_deref(),
+        &call_result.text,
+        call_result.tool_parse_errors.len(),
+        &call_result.tool_calls,
+    );
+    append_message_to_contexts(
+        &mut state.visible_messages,
+        &mut state.recorded_messages,
+        serde_json::json!({
+            "role": "assistant",
+            "content": assistant_content_for_history,
+        }),
+    );
 
     if !ctx.persistent && !ctx.daemon {
         return Ok(IterationOutcome::Break);

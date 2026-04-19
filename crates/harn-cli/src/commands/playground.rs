@@ -6,7 +6,9 @@ use std::rc::Rc;
 use harn_parser::{DiagnosticSeverity, Node, SNode, TypeChecker};
 
 use crate::cli::PlaygroundArgs;
-use crate::commands::run::connect_mcp_servers;
+use crate::commands::run::{
+    connect_mcp_servers, install_cli_llm_mock_mode, persist_cli_llm_mock_recording, CliLlmMockMode,
+};
 use crate::package;
 use crate::skill_loader::{
     emit_loader_warnings, install_skills_global, load_skills, SkillLoaderInputs,
@@ -24,14 +26,19 @@ struct PlaygroundConfig {
     script: PathBuf,
     task: String,
     llm: Option<LlmOverride>,
+    llm_mock_mode: CliLlmMockMode,
 }
 
-pub(crate) async fn run_command(args: PlaygroundArgs) -> Result<(), String> {
+pub(crate) async fn run_command(
+    args: PlaygroundArgs,
+    llm_mock_mode: CliLlmMockMode,
+) -> Result<(), String> {
     let config = PlaygroundConfig {
         host: canonicalize_or_err(&args.host)?,
         script: canonicalize_or_err(&args.script)?,
         task: args.task.unwrap_or_default(),
         llm: args.llm.as_deref().map(parse_llm_override).transpose()?,
+        llm_mock_mode,
     };
 
     if args.watch {
@@ -156,6 +163,8 @@ async fn execute_playground(config: &PlaygroundConfig) -> Result<String, String>
     let local = tokio::task::LocalSet::new();
     let result = local
         .run_until(async {
+            install_cli_llm_mock_mode(&config.llm_mock_mode)
+                .map_err(|error| format!("error: {error}\n"))?;
             let host_vm = configured_vm(
                 &config.host,
                 &host_source,
@@ -177,8 +186,7 @@ async fn execute_playground(config: &PlaygroundConfig) -> Result<String, String>
             )
             .await?;
             vm.set_bridge(bridge.clone());
-            harn_vm::llm::register_agent_loop_with_bridge(&mut vm, bridge.clone());
-            harn_vm::llm::register_llm_call_with_bridge(&mut vm, bridge);
+            harn_vm::llm::install_current_host_bridge(bridge.clone());
             harn_vm::stdlib::process::set_thread_execution_context(Some(
                 harn_vm::orchestration::RunExecutionRecord {
                     cwd: Some(execution_cwd),
@@ -196,7 +204,10 @@ async fn execute_playground(config: &PlaygroundConfig) -> Result<String, String>
                 Ok(_) => Ok(vm.output().to_string()),
                 Err(error) => Err(vm.format_runtime_error(&error)),
             };
+            harn_vm::llm::clear_current_host_bridge();
             harn_vm::stdlib::process::set_thread_execution_context(None);
+            persist_cli_llm_mock_recording(&config.llm_mock_mode)
+                .map_err(|error| format!("error: {error}\n"))?;
             execution_result
         })
         .await;
@@ -461,6 +472,7 @@ pipeline default(task) {
                 provider: "mock".to_string(),
                 model: "mock".to_string(),
             }),
+            llm_mock_mode: CliLlmMockMode::Off,
         })
         .await
         .unwrap();
@@ -495,11 +507,59 @@ pipeline default(task) {
             script,
             task: String::new(),
             llm: None,
+            llm_mock_mode: CliLlmMockMode::Off,
         })
         .await
         .unwrap_err();
 
         assert!(error.contains("run_shell"));
         assert!(error.contains("pipeline.harn:3:3"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn playground_replays_cli_llm_mock_fixtures() {
+        let temp = tempfile::tempdir().unwrap();
+        let host = temp.path().join("host.harn");
+        let script = temp.path().join("pipeline.harn");
+        let fixtures = temp.path().join("fixtures.jsonl");
+        write_file(
+            &host,
+            r#"
+pub fn build_prompt(task) {
+  return "prompt: " + task
+}
+"#,
+        );
+        write_file(
+            &script,
+            r#"
+pipeline default(task) {
+  let result = llm_call(build_prompt(env_or("HARN_TASK", "")), "You are concise.")
+  println(result.text)
+}
+"#,
+        );
+        write_file(
+            &fixtures,
+            r#"{"text":"fixture replay","model":"fixture-model"}
+"#,
+        );
+
+        let output = execute_playground(&PlaygroundConfig {
+            host,
+            script,
+            task: "ship it".to_string(),
+            llm: Some(LlmOverride {
+                provider: "anthropic".to_string(),
+                model: "claude-sonnet".to_string(),
+            }),
+            llm_mock_mode: CliLlmMockMode::Replay {
+                fixture_path: fixtures,
+            },
+        })
+        .await
+        .unwrap();
+
+        assert!(output.contains("fixture replay"));
     }
 }

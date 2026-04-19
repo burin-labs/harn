@@ -1,0 +1,3 @@
+generated/*
+live/*
+!README.md

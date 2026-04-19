@@ -1058,8 +1058,10 @@ llm_mock({
   tool_calls: [{name: "read_file", arguments: {path: "src/main.rs"}}],
 })
 
-// Pattern-matched mocks (reusable, not consumed)
+// Pattern-matched mocks (reusable by default, matched in declaration order)
 llm_mock({text: "I don't know.", match: "*unknown*"})
+llm_mock({text: "step 1", match: "*planner*", consume_match: true})
+llm_mock({text: "step 2", match: "*planner*", consume_match: true})
 
 // Inspect what was sent to the mock provider
 let calls = llm_mock_calls()

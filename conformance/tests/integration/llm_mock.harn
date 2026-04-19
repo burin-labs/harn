@@ -25,6 +25,11 @@ pipeline default() {
   llm_mock({text: "matched!", match: "*hello*"})
   println(llm_call("say hello please", nil, {provider: "mock"}).text)
   println(llm_call("say hello again", nil, {provider: "mock"}).text)
+  // Pattern matching (consumed in match order)
+  llm_mock({text: "first matched", match: "*step*", consume_match: true})
+  llm_mock({text: "second matched", match: "*step*", consume_match: true})
+  println(llm_call("step once", nil, {provider: "mock"}).text)
+  println(llm_call("step twice", nil, {provider: "mock"}).text)
   // Call inspection
   let calls = llm_mock_calls()
   println(len(calls) > 0)

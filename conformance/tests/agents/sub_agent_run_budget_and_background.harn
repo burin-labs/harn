@@ -41,4 +41,22 @@ pipeline main() {
   println(done?.status == "completed")
   println(done?.result?.ok)
   println(contains(done?.result?.summary ?? "", "background summary"))
+  llm_mock({tool_calls: [{id: "bg_search_1", name: "search", arguments: {query: "background tool"}}]})
+  llm_mock({text: "background tool summary"})
+  let tool_handle = sub_agent_run(
+    "Search in the background with a Harn-owned tool.",
+    {
+    provider: "mock",
+    background: true,
+    tools: search_tools(),
+    allowed_tools: ["search"],
+    tool_format: "native",
+    max_iterations: 3,
+  },
+  )
+  println(tool_handle?.mode == "sub_agent")
+  let tool_done = wait_agent(tool_handle)
+  println(tool_done?.status == "completed")
+  println(tool_done?.result?.ok)
+  println(contains(tool_done?.result?.summary ?? "", "background tool summary"))
 }

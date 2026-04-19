@@ -153,8 +153,14 @@ native_tools = true
 # ---------- Local / Ollama ----------------------------------------------------
 #
 # Local providers don't advertise native tool_search or prompt caching.
-# Native-tools coverage depends on the specific model; leave conservative
-# (unset) at the default so users must opt in via a harn.toml override.
+# Native-tools coverage depends on the specific model. Qwen 3 / 3.5
+# packages on Ollama expose native tool calling and thinking on the
+# official docs + model pages.
+
+[[provider.ollama]]
+model_match = "qwen3*"
+native_tools = true
+thinking = true
 
 # ---------- Mock --------------------------------------------------------------
 #

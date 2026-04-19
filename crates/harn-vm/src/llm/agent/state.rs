@@ -1082,13 +1082,18 @@ impl AgentLoopState {
             .as_ref()
             .map(|policy| policy.allow_done_sentinel)
             .unwrap_or(true);
+        let done_instruction = if tool_format == "native" {
+            format!("include `{done_sentinel}` exactly once in assistant text")
+        } else {
+            format!("emit `<done>{done_sentinel}</done>` as its own top-level block")
+        };
         let persistent_system_prompt = if persistent {
             if exit_when_verified {
                 if allow_done_sentinel {
                     Some(format!(
                         "\n\nKeep working until the task is complete. Take action with tool calls — \
-                         do not stop to explain. Emit `<done>{done_sentinel}</done>` only after a \
-                         passing verification run."
+                         do not stop to explain. {} only after a passing verification run.",
+                        done_instruction
                     ))
                 } else {
                     Some(
@@ -1101,8 +1106,8 @@ impl AgentLoopState {
                 Some(format!(
                     "\n\nIMPORTANT: You MUST keep working until the task is complete. \
                      Do NOT stop to explain or summarize — take action with tool calls. \
-                     When the requested work is complete, emit `<done>{done_sentinel}</done>` \
-                     as its own top-level block."
+                     When the requested work is complete, {}.",
+                    done_instruction
                 ))
             } else {
                 Some(

@@ -23,6 +23,7 @@ pub use types::{
 thread_local! {
     static EXECUTION_POLICY_STACK: RefCell<Vec<CapabilityPolicy>> = const { RefCell::new(Vec::new()) };
     static EXECUTION_APPROVAL_POLICY_STACK: RefCell<Vec<ToolApprovalPolicy>> = const { RefCell::new(Vec::new()) };
+    static TRUSTED_BRIDGE_CALL_DEPTH: RefCell<usize> = const { RefCell::new(0) };
 }
 
 pub fn push_execution_policy(policy: CapabilityPolicy) {
@@ -55,6 +56,24 @@ pub fn current_approval_policy() -> Option<ToolApprovalPolicy> {
 
 pub fn current_tool_annotations(tool: &str) -> Option<ToolAnnotations> {
     current_execution_policy().and_then(|policy| policy.tool_annotations.get(tool).cloned())
+}
+
+pub struct TrustedBridgeCallGuard;
+
+pub fn allow_trusted_bridge_calls() -> TrustedBridgeCallGuard {
+    TRUSTED_BRIDGE_CALL_DEPTH.with(|depth| {
+        *depth.borrow_mut() += 1;
+    });
+    TrustedBridgeCallGuard
+}
+
+impl Drop for TrustedBridgeCallGuard {
+    fn drop(&mut self) {
+        TRUSTED_BRIDGE_CALL_DEPTH.with(|depth| {
+            let mut depth = depth.borrow_mut();
+            *depth = depth.saturating_sub(1);
+        });
+    }
 }
 
 fn policy_allows_tool(policy: &CapabilityPolicy, tool: &str) -> bool {
@@ -229,6 +248,10 @@ pub fn enforce_current_policy_for_builtin(name: &str, args: &[VmValue]) -> Resul
 }
 
 pub fn enforce_current_policy_for_bridge_builtin(name: &str) -> Result<(), VmError> {
+    let trusted = TRUSTED_BRIDGE_CALL_DEPTH.with(|depth| *depth.borrow() > 0);
+    if trusted {
+        return Ok(());
+    }
     if current_execution_policy().is_some() {
         return reject_policy(format!(
             "bridged builtin '{name}' exceeds execution policy; declare an explicit capability/tool surface instead"

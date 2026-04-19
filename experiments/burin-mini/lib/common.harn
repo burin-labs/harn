@@ -1,0 +1,449 @@
+import { safe_parse } from "std/json"
+
+/** Resolve the LLM provider for Burin Mini runs. */
+pub fn provider_name() {
+  return env_or("BURIN_MINI_PROVIDER", env_or("HARN_LLM_PROVIDER", "mock"))
+}
+
+/** Resolve the generator model for Burin Mini runs. */
+pub fn generator_model() {
+  return env_or("BURIN_MINI_GENERATOR_MODEL", env_or("HARN_LLM_MODEL", "mock"))
+}
+
+/** Resolve the evaluator model for Burin Mini runs. */
+pub fn evaluator_model() {
+  return env_or("BURIN_MINI_EVALUATOR_MODEL", generator_model())
+}
+
+/** Return true when a list contains the given value. */
+pub fn list_contains(items, needle) {
+  for item in items {
+    if item == needle {
+      return true
+    }
+  }
+  return false
+}
+
+fn ensure_string_list(items) {
+  if type_of(items) == "string" {
+    if items == "" {
+      return []
+    }
+    return [items]
+  }
+  if type_of(items) != "list" {
+    return []
+  }
+  var result = []
+  for item in items {
+    if type_of(item) == "string" && item != "" {
+      result = result + [item]
+    }
+  }
+  return result
+}
+
+fn canonical_tool_name(name) {
+  if name == "read_file" || name == "open_file" || name == "cat_file" {
+    return "read"
+  }
+  if name == "grep" || name == "search_file" || name == "list_directory" || name == "ls" {
+    return "search"
+  }
+  if name == "write_file" || name == "edit_file" || name == "edit" {
+    return "write"
+  }
+  if name == "shell" || name == "exec" || name == "execute" {
+    return "run"
+  }
+  return name
+}
+
+fn normalize_tool_names(requested, fallback) {
+  let allowed = ensure_string_list(fallback)
+  if len(allowed) == 0 {
+    return []
+  }
+  var picked = []
+  for name in ensure_string_list(requested) {
+    let canonical = canonical_tool_name(name)
+    if list_contains(allowed, canonical) && !list_contains(picked, canonical) {
+      picked = picked + [canonical]
+    }
+  }
+  if len(picked) > 0 {
+    return picked
+  }
+  return allowed
+}
+
+fn default_research_tools(profile) {
+  if profile?.mode == "read_only" {
+    return ["search", "read"]
+  }
+  return ["read", "search"]
+}
+
+fn default_action_tools(profile) {
+  if profile?.mode == "read_only" {
+    return ["read", "search"]
+  }
+  return ["read", "write", "run"]
+}
+
+fn tools_fit_within(requested, allowed) {
+  for name in ensure_string_list(requested) {
+    if !list_contains(allowed, name) {
+      return false
+    }
+  }
+  return true
+}
+
+fn normalize_question_entry(profile, item, index) {
+  if type_of(item) == "string" {
+    return {id: "q${index}", question: item, tools: default_research_tools(profile)}
+  }
+  if type_of(item) != "dict" {
+    return nil
+  }
+  let tools = normalize_tool_names(item?.tools, default_research_tools(profile))
+  return {
+    id: item?.id ?? "q${index}",
+    question: item?.question ?? item?.prompt ?? item?.text ?? "",
+    tools: tools,
+  }
+}
+
+fn normalize_action_entry(profile, item, index) {
+  if type_of(item) != "dict" {
+    return nil
+  }
+  var depends_on = ensure_string_list(item?.depends_on)
+  if len(depends_on) == 0 {
+    depends_on = ensure_string_list(item?.dependencies)
+  }
+  let allowed_tools = normalize_tool_names(item?.allowed_tools, default_action_tools(profile))
+  return {
+    id: item?.id ?? "action_${index}",
+    title: item?.title ?? item?.summary ?? "Action ${index}",
+    task: item?.task ?? item?.description ?? "",
+    depends_on: depends_on,
+    allowed_tools: allowed_tools,
+  }
+}
+
+fn action_has_tool(action, name) {
+  return list_contains(action?.allowed_tools ?? [], name)
+}
+
+fn action_is_research_like(profile, action) {
+  let tools = action?.allowed_tools ?? []
+  if len(tools) == 0 {
+    return false
+  }
+  return tools_fit_within(tools, default_research_tools(profile))
+}
+
+fn action_as_question(profile, action) {
+  return {
+    id: action?.id ?? "",
+    question: action?.task ?? action?.title ?? "",
+    tools: normalize_tool_names(action?.allowed_tools ?? [], default_research_tools(profile)),
+  }
+}
+
+fn infer_action_dependencies(actions) {
+  var write_ids = []
+  for action in actions {
+    if action_has_tool(action, "write") {
+      write_ids = write_ids + [action?.id ?? ""]
+    }
+  }
+  var normalized = []
+  for action in actions {
+    var depends_on = action?.depends_on ?? []
+    if len(depends_on) == 0 && action_has_tool(action, "run") && len(write_ids) > 0 {
+      var inferred = []
+      for dep in write_ids {
+        if dep != action?.id {
+          inferred = inferred + [dep]
+        }
+      }
+      depends_on = inferred
+    }
+    normalized = normalized
+      + [
+      {
+      id: action?.id ?? "",
+      title: action?.title ?? "",
+      task: action?.task ?? "",
+      depends_on: depends_on,
+      allowed_tools: action?.allowed_tools ?? [],
+    },
+    ]
+  }
+  return normalized
+}
+
+fn collect_normalized_questions(profile, src) {
+  var questions = []
+  let raw_questions = src?.questions ?? src?.research_questions ?? []
+  if type_of(raw_questions) != "list" {
+    return questions
+  }
+  for (index, item) in iter(raw_questions).enumerate() {
+    let normalized = normalize_question_entry(profile, item, index + 1)
+    if normalized != nil && normalized?.question ?? "" != "" {
+      questions = questions + [normalized]
+    }
+  }
+  return questions
+}
+
+fn collect_normalized_actions(profile, src) {
+  var actions = []
+  let raw_actions = src?.actions ?? src?.action_list ?? []
+  if type_of(raw_actions) != "list" {
+    return actions
+  }
+  for (index, item) in iter(raw_actions).enumerate() {
+    let normalized = normalize_action_entry(profile, item, index + 1)
+    if normalized != nil && normalized?.task ?? "" != "" {
+      actions = actions + [normalized]
+    }
+  }
+  return actions
+}
+
+fn split_actions_for_stage(profile, actions, explicit_ready) {
+  if profile?.mode == "read_only" || len(actions) == 0 {
+    return {actions: actions, questions: []}
+  }
+  var research_like = []
+  var executable = []
+  for action in actions {
+    if action_is_research_like(profile, action) {
+      research_like = research_like + [action]
+    } else {
+      executable = executable + [action]
+    }
+  }
+  if len(executable) == 0 {
+    return {actions: [], questions: research_like}
+  }
+  if explicit_ready {
+    return {actions: executable, questions: []}
+  }
+  return {actions: executable, questions: research_like}
+}
+
+fn actions_are_preparatory(profile, actions, explicit_ready) {
+  if len(actions) == 0 || explicit_ready ?? true {
+    return false
+  }
+  for action in actions {
+    if !tools_fit_within(action?.allowed_tools ?? [], default_research_tools(profile)) {
+      return false
+    }
+  }
+  return true
+}
+
+fn actions_as_questions(profile, actions) {
+  var questions = []
+  for action in actions {
+    questions = questions + [action_as_question(profile, action)]
+  }
+  return questions
+}
+
+fn normalize_ready_value(explicit_ready, actions, final_response) {
+  if type_of(explicit_ready) == "bool" {
+    return explicit_ready
+  }
+  if len(actions) > 0 {
+    return true
+  }
+  return type_of(final_response) == "string" && final_response.trim() != ""
+}
+
+/** Normalize planner output from cheap models onto the experiment schema. */
+pub fn normalize_plan(profile, plan) {
+  let src = plan ?? {}
+  var questions = collect_normalized_questions(profile, src)
+  var actions = collect_normalized_actions(profile, src)
+  let explicit_ready = if type_of(src?.ready) == "bool" {
+    src?.ready
+  } else {
+    nil
+  }
+  let stage_split = split_actions_for_stage(profile, actions, explicit_ready)
+  questions = questions + actions_as_questions(profile, stage_split?.questions ?? [])
+  actions = stage_split?.actions ?? []
+  if actions_are_preparatory(profile, actions, explicit_ready) {
+    questions = questions + actions_as_questions(profile, actions)
+    actions = []
+  }
+  if profile?.mode == "read_only" && len(questions) == 0 && len(actions) > 0 {
+    questions = actions_as_questions(profile, actions)
+    actions = []
+  }
+  actions = infer_action_dependencies(actions)
+  let final_response = src?.final_response ?? src?.answer ?? ""
+  return {
+    ready: normalize_ready_value(explicit_ready, actions, final_response),
+    plan_summary: src?.plan_summary ?? src?.summary ?? src?.reason ?? "",
+    success_criteria: ensure_string_list(src?.success_criteria ?? profile?.success_criteria ?? []),
+    final_response: final_response,
+    questions: questions,
+    actions: actions,
+  }
+}
+
+/** Return the effective success criteria for evaluator prompts. */
+pub fn plan_success_criteria(profile, plan) {
+  let criteria = ensure_string_list(plan?.success_criteria ?? profile?.success_criteria ?? [])
+  if len(criteria) > 0 {
+    return criteria
+  }
+  return ["Produce a correct, grounded result for the requested task."]
+}
+
+/** Normalize research-worker output onto a stable fact schema. */
+pub fn normalize_research_fact(question, fact) {
+  let src = fact ?? {}
+  return {
+    question: src?.question ?? question?.question ?? "",
+    answer: src?.answer ?? src?.summary ?? src?.fact ?? "",
+    evidence_paths: ensure_string_list(src?.evidence_paths ?? src?.paths ?? []),
+    next_steps: ensure_string_list(src?.next_steps ?? []),
+  }
+}
+
+/** Normalize executor output onto a stable action-result schema. */
+pub fn normalize_action_result(action, result) {
+  let src = result ?? {}
+  return {
+    id: action?.id ?? src?.id ?? "",
+    title: action?.title ?? src?.title ?? "",
+    summary: src?.summary ?? src?.result ?? src?.message ?? "",
+    changed_paths: ensure_string_list(src?.changed_paths ?? src?.paths ?? []),
+    notes: ensure_string_list(src?.notes ?? []),
+  }
+}
+
+/** Render a string list for prompts. */
+pub fn render_list(items) {
+  if len(items) == 0 {
+    return "(none)"
+  }
+  var lines = []
+  for item in items {
+    lines = lines + ["- ${item}"]
+  }
+  return join(lines, "\n")
+}
+
+/** Render a compact comma-separated string list for inline prompt fields. */
+pub fn render_csv(items) {
+  if len(items) == 0 {
+    return "(none)"
+  }
+  return join(items, ", ")
+}
+
+/** Render gathered research facts for planner and evaluator prompts. */
+pub fn render_facts(facts) {
+  if len(facts) == 0 {
+    return "- no research yet"
+  }
+  var lines = []
+  for fact in facts {
+    lines = lines + ["- ${fact?.question}: ${fact?.answer}"]
+    if len(fact?.evidence_paths ?? []) > 0 {
+      lines = lines + ["  evidence: ${render_csv(fact?.evidence_paths ?? [])}"]
+    }
+  }
+  return join(lines, "\n")
+}
+
+/** Render executor outcomes for evaluator prompts and user-facing output. */
+pub fn render_action_results(results) {
+  if len(results) == 0 {
+    return "- no executor actions ran"
+  }
+  var lines = []
+  for result in results {
+    if result?.ok {
+      lines = lines
+        + [
+        "- ${result?.data?.id}: ${result?.data?.summary} (changed: ${render_csv(result?.data?.changed_paths ?? [])})",
+      ]
+    } else {
+      lines = lines + ["- action failed: ${result?.error?.message ?? \"unknown failure\"}"]
+    }
+  }
+  return join(lines, "\n")
+}
+
+/** Build common generator sub-agent options. */
+pub fn generator_options(system, tools, allowed_tools) {
+  return {
+    provider: provider_name(),
+    model: generator_model(),
+    system: system,
+    tools: tools,
+    allowed_tools: allowed_tools,
+    tool_format: "native",
+    response_format: "json",
+    temperature: 0,
+    max_iterations: 6,
+  }
+}
+
+/** Build common evaluator sub-agent options. */
+pub fn evaluator_options(system, tools) {
+  return {
+    provider: provider_name(),
+    model: evaluator_model(),
+    system: system,
+    tools: tools,
+    allowed_tools: ["read", "search", "run"],
+    tool_format: "native",
+    response_format: "json",
+    temperature: 0,
+    max_iterations: 4,
+  }
+}
+
+/** Safely parse a JSON object from model output. */
+pub fn parse_json_object(text) {
+  let raw = text ?? ""
+  let parsed = safe_parse(raw)
+  if parsed == nil {
+    let trimmed = raw.trim()
+    let unfenced = regex_replace("^```[A-Za-z0-9_-]*\\n", "", trimmed)
+    let unwrapped = regex_replace("\\n```$", "", unfenced)
+    let retried = safe_parse(unwrapped)
+    if retried == nil {
+      return {}
+    }
+    return retried
+  }
+  return parsed
+}
+
+/** Decode a direct `sub_agent_run` result into `{ok, error, data}`. */
+pub fn decode_sub_agent_result(result) {
+  if !(result?.ok ?? true) {
+    return {ok: false, error: result?.error ?? {message: result?.summary ?? "sub-agent failed"}, data: {}}
+  }
+  return {ok: true, error: nil, data: parse_json_object(result?.summary ?? "")}
+}
+
+/** Decode a waited background worker result into `{ok, error, data}`. */
+pub fn decode_worker_result(worker) {
+  return decode_sub_agent_result(worker?.result ?? {})
+}

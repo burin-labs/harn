@@ -1,0 +1,7 @@
+{
+  "name": "burin-mini-auth-demo",
+  "private": true,
+  "scripts": {
+    "verify:rate-limit": "./scripts/verify-rate-limit.sh"
+  }
+}

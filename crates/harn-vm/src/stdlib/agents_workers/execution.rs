@@ -148,6 +148,7 @@ async fn execute_worker_config(
 }
 
 pub(in super::super) fn spawn_worker_task(state: Rc<RefCell<WorkerState>>) {
+    let child_vm = crate::vm::clone_async_builtin_child_vm();
     let (worker_id, task, config, execution, cancel_token, worker_policy, audit) = {
         let worker = state.borrow();
         if worker.carry_policy.persist_state {
@@ -167,6 +168,7 @@ pub(in super::super) fn spawn_worker_task(state: Rc<RefCell<WorkerState>>) {
 
     let state_for_task = state.clone();
     let handle = tokio::task::spawn_local(async move {
+        let _child_vm_guard = child_vm.map(crate::vm::install_async_builtin_child_vm);
         if cancel_token.load(Ordering::SeqCst) {
             return Err(VmError::CategorizedError {
                 message: "worker cancelled before start".to_string(),

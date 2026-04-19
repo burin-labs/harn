@@ -1670,6 +1670,23 @@ pub fn clone_async_builtin_child_vm() -> Option<Vm> {
     CURRENT_ASYNC_BUILTIN_CHILD_VM.with(|slot| slot.borrow().last().map(|vm| vm.child_vm()))
 }
 
+pub struct AsyncBuiltinChildVmGuard;
+
+pub fn install_async_builtin_child_vm(vm: Vm) -> AsyncBuiltinChildVmGuard {
+    CURRENT_ASYNC_BUILTIN_CHILD_VM.with(|slot| {
+        slot.borrow_mut().push(vm);
+    });
+    AsyncBuiltinChildVmGuard
+}
+
+impl Drop for AsyncBuiltinChildVmGuard {
+    fn drop(&mut self) {
+        CURRENT_ASYNC_BUILTIN_CHILD_VM.with(|slot| {
+            slot.borrow_mut().pop();
+        });
+    }
+}
+
 /// Legacy API preserved for out-of-tree callers; new code should use
 /// `clone_async_builtin_child_vm()`. `take/restore` serialized concurrent
 /// callers because only one could hold the popped value at a time.

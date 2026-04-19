@@ -21,7 +21,9 @@ pub(crate) fn build_assistant_tool_message(
     tool_calls: &[serde_json::Value],
     provider: &str,
 ) -> serde_json::Value {
-    let is_anthropic = super::helpers::ResolvedProvider::resolve(provider).is_anthropic_style;
+    let resolved = super::helpers::ResolvedProvider::resolve(provider);
+    let is_anthropic = resolved.is_anthropic_style;
+    let is_ollama = provider == "ollama" || resolved.endpoint.contains("/api/chat");
     if is_anthropic {
         // Anthropic format: content blocks with text and tool_use
         let mut content = Vec::new();
@@ -37,6 +39,31 @@ pub(crate) fn build_assistant_tool_message(
             }));
         }
         serde_json::json!({"role": "assistant", "content": content})
+    } else if is_ollama {
+        // Ollama `/api/chat` expects native tool-call history with
+        // object arguments instead of OpenAI-style JSON strings.
+        let calls: Vec<serde_json::Value> = tool_calls
+            .iter()
+            .enumerate()
+            .map(|(idx, tc)| {
+                serde_json::json!({
+                    "type": "function",
+                    "function": {
+                        "index": idx,
+                        "name": tc["name"],
+                        "arguments": tc["arguments"],
+                    }
+                })
+            })
+            .collect();
+        let mut msg = serde_json::json!({
+            "role": "assistant",
+            "tool_calls": calls,
+        });
+        if !text.is_empty() {
+            msg["content"] = serde_json::json!(text);
+        }
+        msg
     } else {
         // OpenAI-compatible format: assistant message with tool_calls array
         let calls: Vec<serde_json::Value> = tool_calls
@@ -93,10 +120,13 @@ pub(crate) fn build_assistant_response_message(
 /// Build a tool result message for the conversation history.
 pub(crate) fn build_tool_result_message(
     tool_call_id: &str,
+    tool_name: &str,
     result: &str,
     provider: &str,
 ) -> serde_json::Value {
-    let is_anthropic = super::helpers::ResolvedProvider::resolve(provider).is_anthropic_style;
+    let resolved = super::helpers::ResolvedProvider::resolve(provider);
+    let is_anthropic = resolved.is_anthropic_style;
+    let is_ollama = provider == "ollama" || resolved.endpoint.contains("/api/chat");
     if is_anthropic {
         // Anthropic: tool_result inside a user message
         serde_json::json!({
@@ -106,6 +136,12 @@ pub(crate) fn build_tool_result_message(
                 "tool_use_id": tool_call_id,
                 "content": result,
             }]
+        })
+    } else if is_ollama {
+        serde_json::json!({
+            "role": "tool",
+            "tool_name": tool_name,
+            "content": result,
         })
     } else {
         // OpenAI-compatible: distinct "tool" role
@@ -938,61 +974,61 @@ pub(crate) fn build_tool_calling_contract_prompt(
     ));
 
     if mode == "native" {
-        // Include the text-mode protocol + schemas inline as a fallback:
-        // Ollama with bare `{{ .Prompt }}` templates silently drops the
-        // `tools` parameter, leaving the model with zero guidance.
-        prompt.push_str(
-            "Prefer the provider's native tool-calling channel when it is available. \
-             If the channel does not surface to you (some local OpenAI-compatible \
-             servers strip the tools parameter), emit a `<tool_call>name({ ... })</tool_call>` \
-             block in the assistant message and the runtime will execute it from there.\n\n",
-        );
+        prompt.push_str(NATIVE_CALL_CONTRACT_HELP);
+        if require_action {
+            prompt.push_str(
+                "\nThis turn is action-gated. If tools are available, open your response \
+                 with a native tool call, not prose. Do not emit raw source code, diffs, \
+                 JSON, or `##DONE##` before the first successful tool action.\n",
+            );
+        }
+        prompt.push_str(TASK_LEDGER_HELP);
     } else {
         // Front-load format + examples before schemas so weaker models
         // see the calling convention while attention is strongest.
-    }
-    prompt.push_str(TS_CALL_CONTRACT_HELP);
-    if require_action {
-        prompt.push_str(
-            "\nThis turn is action-gated. If tools are available, open your response \
-             with a tool call (native channel or `<tool_call>` block), not prose. Do not \
-             emit raw source code, diffs, JSON, or a <done> block before the first tool \
-             call.\n",
-        );
-    }
-    if let Some(examples) = tool_examples {
-        let trimmed = examples.trim();
-        if !trimmed.is_empty() {
-            prompt.push_str("\n## Tool call examples\n\n");
-            prompt.push_str(trimmed);
-            prompt.push_str("\n\n");
+        prompt.push_str(TEXT_RESPONSE_PROTOCOL_HELP);
+        if require_action {
+            prompt.push_str(
+                "\nThis turn is action-gated. If tools are available, open your response \
+                 with a tool call (`<tool_call>...</tool_call>`), not prose. Do not emit \
+                 raw source code, diffs, JSON, or a <done> block before the first tool call.\n",
+            );
         }
-    }
-
-    let (schemas, registry) = collect_tool_schemas_with_registry(tools_val, native_tools);
-
-    let aliases = registry.render_aliases();
-    if !aliases.is_empty() {
-        prompt.push_str("## Shared types\n\n");
-        prompt.push_str(&aliases);
-        prompt.push('\n');
-    }
-
-    let (expanded, compact): (Vec<_>, Vec<_>) = schemas.iter().partition(|s| !s.compact);
-
-    prompt.push_str("## Available tools\n\n");
-    for schema in &expanded {
-        prompt.push_str(&render_text_tool_schema(schema));
-    }
-
-    if !compact.is_empty() {
-        prompt.push_str(
-            "## Other tools (call directly — parameters are intuitive, or call tool_schema for details)\n\n",
-        );
-        for schema in &compact {
-            prompt.push_str(&render_compact_text_tool_schema(schema));
+        if let Some(examples) = tool_examples {
+            let trimmed = examples.trim();
+            if !trimmed.is_empty() {
+                prompt.push_str("\n## Tool call examples\n\n");
+                prompt.push_str(trimmed);
+                prompt.push_str("\n\n");
+            }
         }
-        prompt.push('\n');
+        prompt.push_str(TASK_LEDGER_HELP);
+
+        let (schemas, registry) = collect_tool_schemas_with_registry(tools_val, native_tools);
+
+        let aliases = registry.render_aliases();
+        if !aliases.is_empty() {
+            prompt.push_str("## Shared types\n\n");
+            prompt.push_str(&aliases);
+            prompt.push('\n');
+        }
+
+        let (expanded, compact): (Vec<_>, Vec<_>) = schemas.iter().partition(|s| !s.compact);
+
+        prompt.push_str("## Available tools\n\n");
+        for schema in &expanded {
+            prompt.push_str(&render_text_tool_schema(schema));
+        }
+
+        if !compact.is_empty() {
+            prompt.push_str(
+                "## Other tools (call directly — parameters are intuitive, or call tool_schema for details)\n\n",
+            );
+            for schema in &compact {
+                prompt.push_str(&render_compact_text_tool_schema(schema));
+            }
+            prompt.push('\n');
+        }
     }
 
     prompt
@@ -1065,7 +1101,7 @@ fn build_tool_args_type(params: &[ToolParamSchema]) -> TypeExpr {
 /// paragraph without any wrapping fence. Wrapping the example in a Markdown
 /// fenced code block caused confusion because models had to balance several
 /// levels of backticks at once.
-pub(crate) const TS_CALL_CONTRACT_HELP: &str = "
+pub(crate) const TEXT_RESPONSE_PROTOCOL_HELP: &str = "
 ## Response protocol
 
 Every response must be a sequence of these tags, with only whitespace between them:
@@ -1099,10 +1135,22 @@ def test_foo():
 EOF
 })
 </tool_call>
+";
 
+pub(crate) const NATIVE_CALL_CONTRACT_HELP: &str = "
+## Native tool protocol
+
+The provider exposes tool definitions outside this prompt.
+
+- Invoke tools only through the provider's native tool-calling channel.
+- Do not write text-mode tool tags, bare `name({ ... })` calls, Markdown code fences, or JSON tool-call envelopes in assistant text.
+- Keep assistant prose short and operational. When the task is complete and no more tool calls are needed, include `##DONE##` exactly once in assistant text.
+";
+
+pub(crate) const TASK_LEDGER_HELP: &str = "
 ## Task ledger
 
-The runtime maintains a durable `<task_ledger>` of the user's deliverables (injected into each turn above this prompt). The `<done>` block is REJECTED while any deliverable is `open` or `blocked`. Use the always-available `ledger` tool to mutate it:
+The runtime maintains a durable `<task_ledger>` of the user's deliverables (injected into each turn above this prompt). The `##DONE##` sentinel is rejected while any deliverable is `open` or `blocked`. Use the always-available `ledger` tool to mutate it:
 
 - `ledger({ action: \"add\", text: \"what needs to happen\" })` — declare a new sub-deliverable.
 - `ledger({ action: \"mark\", id: \"deliverable-N\", status: \"done\" })` — mark a deliverable complete after a real tool call satisfied it.

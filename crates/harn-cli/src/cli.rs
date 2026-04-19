@@ -462,6 +462,21 @@ pub(crate) struct PlaygroundArgs {
     /// Provider/model override as `provider:model`.
     #[arg(long)]
     pub llm: Option<String>,
+    /// Replay LLM responses from a JSONL fixture file instead of
+    /// calling the configured provider.
+    #[arg(
+        long = "llm-mock",
+        value_name = "PATH",
+        conflicts_with = "llm_mock_record"
+    )]
+    pub llm_mock: Option<String>,
+    /// Record executed LLM responses into a JSONL fixture file.
+    #[arg(
+        long = "llm-mock-record",
+        value_name = "PATH",
+        conflicts_with = "llm_mock"
+    )]
+    pub llm_mock_record: Option<String>,
     /// Re-run when the script or host module changes.
     #[arg(long)]
     pub watch: bool,
@@ -809,7 +824,35 @@ mod tests {
         assert_eq!(args.script, "examples/playground/echo.harn");
         assert_eq!(args.task.as_deref(), Some("hi"));
         assert_eq!(args.llm.as_deref(), Some("ollama:qwen2.5-coder:latest"));
+        assert_eq!(args.llm_mock, None);
+        assert_eq!(args.llm_mock_record, None);
         assert!(args.watch);
+    }
+
+    #[test]
+    fn test_parses_playground_llm_mock_flags() {
+        let cli = Cli::parse_from([
+            "harn",
+            "playground",
+            "--llm-mock",
+            "fixtures.jsonl",
+            "--host",
+            "host.harn",
+        ]);
+
+        let Command::Playground(args) = cli.command.unwrap() else {
+            panic!("expected playground command");
+        };
+        assert_eq!(args.llm_mock.as_deref(), Some("fixtures.jsonl"));
+        assert_eq!(args.llm_mock_record, None);
+
+        let cli = Cli::parse_from(["harn", "playground", "--llm-mock-record", "recorded.jsonl"]);
+
+        let Command::Playground(args) = cli.command.unwrap() else {
+            panic!("expected playground command");
+        };
+        assert_eq!(args.llm_mock, None);
+        assert_eq!(args.llm_mock_record.as_deref(), Some("recorded.jsonl"));
     }
 
     #[test]
