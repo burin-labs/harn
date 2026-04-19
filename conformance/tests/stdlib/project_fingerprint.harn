@@ -15,11 +15,7 @@ pipeline test(task) {
   )
   write_file("project_fingerprint_repo/frontend/next.config.ts", "export default {}\n")
   write_file("project_fingerprint_repo/frontend/pnpm-lock.yaml", "lockfileVersion: '9.0'\n")
-  write_file(
-    "project_fingerprint_repo/.github/workflows/ci.yml",
-    "name: ci\non: push\n",
-  )
-
+  write_file("project_fingerprint_repo/.github/workflows/ci.yml", "name: ci\non: push\n")
   let fingerprint: ProjectFingerprint = project_fingerprint("project_fingerprint_repo")
   println(fingerprint.primary_language == "mixed")
   println(fingerprint.languages[0] == "rust")
