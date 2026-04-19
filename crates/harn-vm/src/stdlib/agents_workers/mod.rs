@@ -13,7 +13,7 @@ mod policy;
 mod worktree;
 
 pub(super) use audit::inherited_worker_audit;
-pub(super) use bridge::{emit_worker_event, worker_snapshot_path};
+pub(super) use bridge::{emit_worker_event, worker_event_snapshot, worker_snapshot_path};
 pub(super) use config::{
     load_worker_state_snapshot, parse_worker_config, parse_worker_execution_profile,
     persist_worker_state_snapshot,

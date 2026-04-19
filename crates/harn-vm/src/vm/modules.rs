@@ -81,6 +81,22 @@ fn finalize_package_target(path: &Path) -> Option<PathBuf> {
     None
 }
 
+fn resolve_import_target(base: &Path, path: &str) -> PathBuf {
+    let mut file_path = base.join(path);
+
+    if !file_path.exists() && file_path.extension().is_none() {
+        file_path.set_extension("harn");
+    }
+
+    if !file_path.exists() {
+        if let Some(resolved) = resolve_package_import(base, path) {
+            file_path = resolved;
+        }
+    }
+
+    file_path
+}
+
 impl Vm {
     fn export_loaded_module(
         &mut self,
@@ -159,17 +175,7 @@ impl Vm {
                 .source_dir
                 .clone()
                 .unwrap_or_else(|| PathBuf::from("."));
-            let mut file_path = base.join(path);
-
-            if !file_path.exists() && file_path.extension().is_none() {
-                file_path.set_extension("harn");
-            }
-
-            if !file_path.exists() {
-                if let Some(resolved) = resolve_package_import(&base, path) {
-                    file_path = resolved;
-                }
-            }
+            let file_path = resolve_import_target(&base, path);
 
             let canonical = file_path
                 .canonicalize()
@@ -397,5 +403,48 @@ impl Vm {
         }
 
         Ok(exports)
+    }
+
+    /// Load a module by import path (`std/foo`, relative module path, or
+    /// package import) and return the exported function closures that a
+    /// wildcard import would expose.
+    pub async fn load_module_exports_from_import(
+        &mut self,
+        import_path: &str,
+    ) -> Result<BTreeMap<String, Rc<VmClosure>>, VmError> {
+        self.execute_import(import_path, None).await?;
+
+        if let Some(module) = import_path.strip_prefix("std/") {
+            let synthetic = PathBuf::from(format!("<stdlib>/{module}.harn"));
+            let loaded = self.module_cache.get(&synthetic).cloned().ok_or_else(|| {
+                VmError::Runtime(format!(
+                    "Import error: failed to cache loaded module '{}'",
+                    synthetic.display()
+                ))
+            })?;
+            let mut exports = BTreeMap::new();
+            let export_names: Vec<String> = if loaded.public_names.is_empty() {
+                loaded.functions.keys().cloned().collect()
+            } else {
+                loaded.public_names.iter().cloned().collect()
+            };
+            for name in export_names {
+                let Some(closure) = loaded.functions.get(&name) else {
+                    return Err(VmError::Runtime(format!(
+                        "Import error: exported function '{name}' is missing from {}",
+                        synthetic.display()
+                    )));
+                };
+                exports.insert(name, Rc::clone(closure));
+            }
+            return Ok(exports);
+        }
+
+        let base = self
+            .source_dir
+            .clone()
+            .unwrap_or_else(|| PathBuf::from("."));
+        let file_path = resolve_import_target(&base, import_path);
+        self.load_module_exports(&file_path).await
     }
 }

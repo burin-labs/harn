@@ -79,6 +79,7 @@ pub fn reset_thread_local_state() {
     llm_config::clear_user_overrides();
     http::reset_http_state();
     stdlib::reset_stdlib_state();
+    orchestration::clear_runtime_hooks();
     events::reset_event_sinks();
     agent_events::reset_all_sinks();
     agent_sessions::reset_session_store();

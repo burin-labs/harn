@@ -3295,6 +3295,62 @@ When Harn starts from a file inside a workspace, it merges:
 Later layers win on key collisions; rule lists are prepended so package
 and project inference/tier overrides run before the built-in defaults.
 
+### `[[hooks]]` — declarative runtime hooks
+
+```toml
+[[hooks]]
+event = "PreToolUse"
+pattern = "tool.name =~ \"edit|write\""
+handler = "my_package::audit_edit"
+
+[[hooks]]
+event = "PostToolUse"
+pattern = "tool.name =~ \"read\""
+handler = "my_package::rewrite_read_result"
+```
+
+`[[hooks]]` installs runtime-owned lifecycle hooks from `harn.toml`
+before execution starts. Supported events today are:
+
+- `PreToolUse`
+- `PostToolUse`
+- `PreAgentTurn`
+- `PostAgentTurn`
+- `WorkerSpawned`
+- `WorkerCompleted`
+- `WorkerFailed`
+- `WorkerCancelled`
+
+The `handler` string uses `"<module>::<function>"`. For package-style
+handlers such as `my_package::audit_edit`, Harn resolves `my_package`
+to that manifest's `lib.harn`. Other module import paths may also be
+used when they resolve from the current source root.
+
+Pattern matching is payload-based:
+
+- `tool.name =~ "edit|write"` regex-matches a dotted field path
+- `turn.failed` checks the truthiness of a dotted field path
+- plain glob strings keep the legacy tool-name behavior (`"read_*"`)
+
+Handler payloads are dictionaries shaped by the event. Tool hooks always
+receive a `tool` object; post-tool hooks also receive `result.text`;
+agent-turn hooks receive `session.id` plus `turn`; worker hooks receive
+`worker`.
+
+Hook return values are event-specific:
+
+- `PreToolUse`: return `nil` / `{}` to allow, `{deny: "reason"}` to
+  reject, or `{args: <json>}` to replace tool arguments
+- `PostToolUse`: return `nil` to pass through, a string to replace the
+  result text, or `{result: "..."}` for the same replacement
+- other events: return value is ignored; handlers are for side effects
+
+Manifest-declared hooks are **process-scoped** on the current execution
+thread. Harn installs them once before the run starts, shares them
+across all agent sessions in that process, and clears them when the
+process/thread-local runtime state resets. They do not hot-reload in the
+middle of a session.
+
 ### `[lint]` — lint configuration
 
 ```toml

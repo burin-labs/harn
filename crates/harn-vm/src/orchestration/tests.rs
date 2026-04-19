@@ -661,8 +661,8 @@ fn normalize_run_record_preserves_trace_spans() {
     );
 }
 
-#[test]
-fn pre_tool_hook_deny_blocks_execution() {
+#[tokio::test(flavor = "current_thread")]
+async fn pre_tool_hook_deny_blocks_execution() {
     clear_tool_hooks();
     register_tool_hook(ToolHook {
         pattern: "dangerous_*".to_string(),
@@ -671,26 +671,30 @@ fn pre_tool_hook_deny_blocks_execution() {
         })),
         post: None,
     });
-    let result = run_pre_tool_hooks("dangerous_delete", &serde_json::json!({}));
+    let result = run_pre_tool_hooks("dangerous_delete", &serde_json::json!({}))
+        .await
+        .expect("hook result");
     clear_tool_hooks();
     assert!(matches!(result, PreToolAction::Deny(_)));
 }
 
-#[test]
-fn pre_tool_hook_allow_passes_through() {
+#[tokio::test(flavor = "current_thread")]
+async fn pre_tool_hook_allow_passes_through() {
     clear_tool_hooks();
     register_tool_hook(ToolHook {
         pattern: "safe_*".to_string(),
         pre: Some(Rc::new(|_name, _args| PreToolAction::Allow)),
         post: None,
     });
-    let result = run_pre_tool_hooks("safe_read", &serde_json::json!({}));
+    let result = run_pre_tool_hooks("safe_read", &serde_json::json!({}))
+        .await
+        .expect("hook result");
     clear_tool_hooks();
     assert!(matches!(result, PreToolAction::Allow));
 }
 
-#[test]
-fn pre_tool_hook_modify_rewrites_args() {
+#[tokio::test(flavor = "current_thread")]
+async fn pre_tool_hook_modify_rewrites_args() {
     clear_tool_hooks();
     register_tool_hook(ToolHook {
         pattern: "*".to_string(),
@@ -699,7 +703,9 @@ fn pre_tool_hook_modify_rewrites_args() {
         })),
         post: None,
     });
-    let result = run_pre_tool_hooks("read_file", &serde_json::json!({"path": "/etc/passwd"}));
+    let result = run_pre_tool_hooks("read_file", &serde_json::json!({"path": "/etc/passwd"}))
+        .await
+        .expect("hook result");
     clear_tool_hooks();
     match result {
         PreToolAction::Modify(args) => assert_eq!(args["path"], "/sanitized"),
@@ -707,8 +713,8 @@ fn pre_tool_hook_modify_rewrites_args() {
     }
 }
 
-#[test]
-fn post_tool_hook_modifies_result() {
+#[tokio::test(flavor = "current_thread")]
+async fn post_tool_hook_modifies_result() {
     clear_tool_hooks();
     register_tool_hook(ToolHook {
         pattern: "exec".to_string(),
@@ -721,15 +727,19 @@ fn post_tool_hook_modifies_result() {
             }
         })),
     });
-    let result = run_post_tool_hooks("exec", "output with SECRET data");
-    let clean = run_post_tool_hooks("exec", "clean output");
+    let result = run_post_tool_hooks("exec", &serde_json::json!({}), "output with SECRET data")
+        .await
+        .expect("hook result");
+    let clean = run_post_tool_hooks("exec", &serde_json::json!({}), "clean output")
+        .await
+        .expect("hook result");
     clear_tool_hooks();
     assert_eq!(result, "[REDACTED]");
     assert_eq!(clean, "clean output");
 }
 
-#[test]
-fn unmatched_hook_pattern_does_not_fire() {
+#[tokio::test(flavor = "current_thread")]
+async fn unmatched_hook_pattern_does_not_fire() {
     clear_tool_hooks();
     register_tool_hook(ToolHook {
         pattern: "exec".to_string(),
@@ -738,7 +748,9 @@ fn unmatched_hook_pattern_does_not_fire() {
         })),
         post: None,
     });
-    let result = run_pre_tool_hooks("read_file", &serde_json::json!({}));
+    let result = run_pre_tool_hooks("read_file", &serde_json::json!({}))
+        .await
+        .expect("hook result");
     clear_tool_hooks();
     assert!(matches!(result, PreToolAction::Allow));
 }

@@ -122,6 +122,21 @@ pub(super) async fn run_turn_preflight(
     let mut call_messages = state.visible_messages.clone();
     let call_system = default_system;
 
+    crate::orchestration::run_lifecycle_hooks(
+        crate::orchestration::HookEvent::PreAgentTurn,
+        &serde_json::json!({
+            "event": crate::orchestration::HookEvent::PreAgentTurn.as_str(),
+            "session": {
+                "id": ctx.session_id,
+            },
+            "turn": {
+                "iteration": ctx.iteration,
+                "total_iterations": state.total_iterations,
+            },
+        }),
+    )
+    .await?;
+
     // Emit TurnStart before draining pending feedback so subscribers
     // see the boundary before any drain-generated injections land.
     emit_agent_event(&AgentEvent::TurnStart {

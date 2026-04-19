@@ -53,6 +53,9 @@ pub(super) async fn execute_chunk(
     if let Some(path) = source_path {
         let extensions = package::load_runtime_extensions(path);
         package::install_runtime_extensions(&extensions);
+        package::install_manifest_hooks(&mut vm, &extensions)
+            .await
+            .map_err(|error| format!("failed to install manifest hooks: {error}"))?;
     }
 
     vm.set_global("prompt", harn_vm::VmValue::String(Rc::from(prompt_text)));

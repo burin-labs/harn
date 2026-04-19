@@ -1,5 +1,8 @@
 use std::path::PathBuf;
 
+use crate::agent_events::WorkerEvent;
+use crate::orchestration::MutationSessionRecord;
+
 use super::{worker_provenance, WorkerState};
 
 fn worker_bridge_metadata(state: &WorkerState) -> serde_json::Value {
@@ -24,28 +27,67 @@ fn worker_bridge_metadata(state: &WorkerState) -> serde_json::Value {
     })
 }
 
-pub(in super::super) fn emit_worker_event(state: &WorkerState, status: &str) {
+pub(in super::super) struct WorkerEventSnapshot {
+    pub(in super::super) worker_id: String,
+    pub(in super::super) worker_name: String,
+    pub(in super::super) worker_task: String,
+    pub(in super::super) worker_mode: String,
+    pub(in super::super) metadata: serde_json::Value,
+    pub(in super::super) audit: MutationSessionRecord,
+}
+
+pub(in super::super) async fn emit_worker_event(
+    snapshot: &WorkerEventSnapshot,
+    event: WorkerEvent,
+) -> Result<(), crate::value::VmError> {
+    let status = event.as_status();
+    crate::orchestration::run_lifecycle_hooks(
+        crate::orchestration::HookEvent::from_worker_event(event),
+        &serde_json::json!({
+            "event": event.as_str(),
+            "worker": {
+                "id": snapshot.worker_id,
+                "name": snapshot.worker_name,
+                "task": snapshot.worker_task,
+                "mode": snapshot.worker_mode,
+                "status": status,
+                "metadata": snapshot.metadata.clone(),
+            },
+        }),
+    )
+    .await?;
     if let Some(bridge) = crate::llm::current_host_bridge() {
-        let metadata = worker_bridge_metadata(state);
         bridge.send_worker_update(
-            &state.id,
-            &state.name,
+            &snapshot.worker_id,
+            &snapshot.worker_name,
             status,
-            metadata.clone(),
-            Some(&state.audit),
+            snapshot.metadata.clone(),
+            Some(&snapshot.audit),
         );
         bridge.send_progress(
             "worker",
-            &format!("{} {}", state.name, status),
+            &format!("{} {}", snapshot.worker_name, status),
             None,
             None,
             Some(serde_json::json!({
-                "worker_id": state.id,
-                "worker_name": state.name,
+                "worker_id": snapshot.worker_id,
+                "worker_name": snapshot.worker_name,
                 "status": status,
-                "metadata": metadata,
+                "metadata": snapshot.metadata,
             })),
         );
+    }
+    Ok(())
+}
+
+pub(in super::super) fn worker_event_snapshot(state: &WorkerState) -> WorkerEventSnapshot {
+    WorkerEventSnapshot {
+        worker_id: state.id.clone(),
+        worker_name: state.name.clone(),
+        worker_task: state.task.clone(),
+        worker_mode: state.mode.clone(),
+        metadata: worker_bridge_metadata(state),
+        audit: state.audit.clone(),
     }
 }
 

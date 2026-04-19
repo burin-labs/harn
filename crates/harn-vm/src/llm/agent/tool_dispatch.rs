@@ -578,7 +578,7 @@ pub(super) async fn run_tool_dispatch(
         }
 
         // PreToolUse hooks: in-process hooks first, then bridge gate
-        match crate::orchestration::run_pre_tool_hooks(tool_name, &tool_args) {
+        match crate::orchestration::run_pre_tool_hooks(tool_name, &tool_args).await? {
             crate::orchestration::PreToolAction::Allow => {}
             crate::orchestration::PreToolAction::Deny(reason) => {
                 let result_text = render_tool_result(&denied_tool_result(tool_name, reason));
@@ -849,7 +849,8 @@ pub(super) async fn run_tool_dispatch(
             serde_json::json!(result_text.len()),
         );
 
-        let result_text = crate::orchestration::run_post_tool_hooks(tool_name, &result_text);
+        let result_text =
+            crate::orchestration::run_post_tool_hooks(tool_name, &tool_args, &result_text).await?;
 
         super::emit_agent_event(&AgentEvent::ToolCallUpdate {
             session_id: ctx.session_id.to_string(),

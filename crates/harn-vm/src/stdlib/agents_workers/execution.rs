@@ -4,7 +4,7 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use super::bridge::{emit_worker_event, worker_snapshot_path};
+use super::bridge::{emit_worker_event, worker_event_snapshot, worker_snapshot_path};
 use super::config::{parse_execution_profile_json, persist_worker_state_snapshot};
 use super::worktree::{
     cleanup_worker_execution, ensure_worker_worktree, WorkerMutationSessionResetGuard,
@@ -14,6 +14,7 @@ use super::{
     WorkerCarryPolicy, WorkerConfig, WorkerExecutionProfile, WorkerExecutionResult, WorkerState,
     WORKER_REGISTRY,
 };
+use crate::agent_events::WorkerEvent;
 use crate::orchestration::{
     current_approval_policy, current_execution_policy, pop_execution_policy, push_execution_policy,
     ArtifactRecord, ContextPolicy, MutationSessionRecord,
@@ -155,7 +156,6 @@ pub(in super::super) fn spawn_worker_task(state: Rc<RefCell<WorkerState>>) {
         if worker.carry_policy.persist_state {
             persist_worker_state_snapshot(&worker).ok();
         }
-        emit_worker_event(&worker, "running");
         (
             worker.id.clone(),
             worker.task.clone(),
@@ -176,6 +176,11 @@ pub(in super::super) fn spawn_worker_task(state: Rc<RefCell<WorkerState>>) {
                 category: crate::value::ErrorCategory::Cancelled,
             });
         }
+        let spawned_snapshot = {
+            let worker = state_for_task.borrow();
+            worker_event_snapshot(&worker)
+        };
+        emit_worker_event(&spawned_snapshot, WorkerEvent::WorkerSpawned).await?;
 
         if let Some(ref policy) = worker_policy {
             push_execution_policy(policy.clone());
@@ -192,54 +197,64 @@ pub(in super::super) fn spawn_worker_task(state: Rc<RefCell<WorkerState>>) {
             pop_execution_policy();
         }
         {
-            let mut worker = state_for_task.borrow_mut();
-            worker.finished_at = Some(uuid::Uuid::now_v7().to_string());
-            match &result {
-                Ok(executed) => {
-                    worker.status = "completed".to_string();
-                    worker.latest_payload = Some(executed.payload.clone());
-                    worker.latest_error = None;
-                    worker.transcript = executed.transcript.clone();
-                    worker.artifacts = executed.artifacts.clone();
-                    worker.execution = executed.execution.clone();
-                    worker.child_run_id = executed
-                        .payload
-                        .get("run")
-                        .and_then(|run| run.get("id"))
-                        .and_then(|value| value.as_str())
-                        .map(|value| value.to_string());
-                    worker.child_run_path = executed
-                        .payload
-                        .get("path")
-                        .and_then(|value| value.as_str())
-                        .map(|value| value.to_string());
-                    if let Some(run_id) = &worker.child_run_id {
-                        worker.audit.run_id = Some(run_id.clone());
-                    }
-                    if worker.carry_policy.persist_state {
-                        persist_worker_state_snapshot(&worker).ok();
-                    }
-                    emit_worker_event(&worker, "completed");
-                }
-                Err(error) => {
-                    if matches!(
-                        error,
-                        VmError::CategorizedError {
-                            category: crate::value::ErrorCategory::Cancelled,
-                            ..
+            let completion_snapshot = {
+                let mut worker = state_for_task.borrow_mut();
+                worker.finished_at = Some(uuid::Uuid::now_v7().to_string());
+                match &result {
+                    Ok(executed) => {
+                        worker.status = "completed".to_string();
+                        worker.latest_payload = Some(executed.payload.clone());
+                        worker.latest_error = None;
+                        worker.transcript = executed.transcript.clone();
+                        worker.artifacts = executed.artifacts.clone();
+                        worker.execution = executed.execution.clone();
+                        worker.child_run_id = executed
+                            .payload
+                            .get("run")
+                            .and_then(|run| run.get("id"))
+                            .and_then(|value| value.as_str())
+                            .map(|value| value.to_string());
+                        worker.child_run_path = executed
+                            .payload
+                            .get("path")
+                            .and_then(|value| value.as_str())
+                            .map(|value| value.to_string());
+                        if let Some(run_id) = &worker.child_run_id {
+                            worker.audit.run_id = Some(run_id.clone());
                         }
-                    ) {
-                        worker.status = "cancelled".to_string();
-                    } else {
-                        worker.status = "failed".to_string();
+                        if worker.carry_policy.persist_state {
+                            persist_worker_state_snapshot(&worker).ok();
+                        }
                     }
-                    worker.latest_error = Some(error.to_string());
-                    if worker.carry_policy.persist_state {
-                        persist_worker_state_snapshot(&worker).ok();
+                    Err(error) => {
+                        if matches!(
+                            error,
+                            VmError::CategorizedError {
+                                category: crate::value::ErrorCategory::Cancelled,
+                                ..
+                            }
+                        ) {
+                            worker.status = "cancelled".to_string();
+                        } else {
+                            worker.status = "failed".to_string();
+                        }
+                        worker.latest_error = Some(error.to_string());
+                        if worker.carry_policy.persist_state {
+                            persist_worker_state_snapshot(&worker).ok();
+                        }
                     }
-                    emit_worker_event(&worker, &worker.status.clone());
                 }
-            }
+                worker_event_snapshot(&worker)
+            };
+            let event = match &result {
+                Ok(_) => WorkerEvent::WorkerCompleted,
+                Err(VmError::CategorizedError {
+                    category: crate::value::ErrorCategory::Cancelled,
+                    ..
+                }) => WorkerEvent::WorkerCancelled,
+                Err(_) => WorkerEvent::WorkerFailed,
+            };
+            emit_worker_event(&completion_snapshot, event).await?;
         }
         result
     });

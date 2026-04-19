@@ -1,0 +1,50 @@
+pipeline default() {
+  llm_mock_clear()
+  var registry = tool_registry()
+  registry = tool_define(
+    registry,
+    "write_note",
+    "Write a note to disk",
+    {parameters: {path: {type: "string"}}, handler: { args -> "SHOULD_NOT_RUN " + args.path }},
+  )
+  registry = tool_define(
+    registry,
+    "read_note",
+    "Read a note from disk",
+    {parameters: {path: {type: "string"}}, handler: { args -> "original result " + args.path }},
+  )
+  llm_mock({tool_calls: [{id: "write_1", name: "write_note", arguments: {path: "notes.txt"}}]})
+  llm_mock({tool_calls: [{id: "read_1", name: "read_note", arguments: {path: "notes.txt"}}]})
+  llm_mock({text: "<done>##DONE##</done>"})
+  let result = agent_loop(
+    "Exercise manifest hooks",
+    nil,
+    {
+    provider: "mock",
+    tools: registry,
+    persistent: true,
+    max_iterations: 4,
+    session_id: "manifest-hooks-runtime",
+  },
+  )
+  assert(result?.status == "done", "loop completes")
+  let calls = llm_mock_calls()
+  assert(len(calls) == 3, "three model turns happened")
+  var saw_deny = false
+  for message in calls[1].messages {
+    let content = message?.content
+    if content != nil && contains(content, "manifest denied write_note") {
+      saw_deny = true
+    }
+  }
+  assert(saw_deny, "pre-tool hook denied write_note before execution")
+  var saw_post_hook = false
+  for message in calls[2].messages {
+    let content = message?.content
+    if content != nil && contains(content, "HOOKED:original result notes.txt") {
+      saw_post_hook = true
+    }
+  }
+  assert(saw_post_hook, "post-tool hook rewrote the successful result")
+  log("manifest_hooks_runtime tests passed")
+}

@@ -22,8 +22,8 @@ use std::sync::Arc;
 use self::agents_workers::{
     apply_worker_artifact_policy, emit_worker_event, load_worker_state_snapshot, next_worker_id,
     parse_worker_config, persist_worker_state_snapshot, spawn_worker_task, with_worker_state,
-    worker_id_from_value, worker_request_for_config, worker_snapshot_path, worker_summary,
-    WorkerConfig, WorkerState, WORKER_REGISTRY,
+    worker_event_snapshot, worker_id_from_value, worker_request_for_config, worker_snapshot_path,
+    worker_summary, WorkerConfig, WorkerState, WORKER_REGISTRY,
 };
 use self::sub_agent::{execute_sub_agent, parse_sub_agent_request};
 use crate::orchestration::{
@@ -413,12 +413,13 @@ pub(crate) fn register_agent_builtins(vm: &mut Vm) {
         Ok(summary)
     });
 
-    vm.register_builtin("close_agent", |args, _out| {
+    vm.register_async_builtin("close_agent", |args| async move {
         let target = args
             .first()
             .ok_or_else(|| VmError::Runtime("close_agent: missing worker handle".to_string()))?;
         let worker_id = worker_id_from_value(target)?;
-        with_worker_state(&worker_id, |state| {
+        let state = with_worker_state(&worker_id, |state| Ok(state.clone()))?;
+        let (snapshot, summary) = {
             let mut worker = state.borrow_mut();
             worker.cancel_token.store(true, Ordering::SeqCst);
             if let Some(handle) = worker.handle.take() {
@@ -430,10 +431,12 @@ pub(crate) fn register_agent_builtins(vm: &mut Vm) {
             if worker.carry_policy.persist_state {
                 persist_worker_state_snapshot(&worker)?;
             }
-            emit_worker_event(&worker, "cancelled");
+            let snapshot = worker_event_snapshot(&worker);
             let summary = worker_summary(&worker)?;
-            Ok(summary)
-        })
+            (snapshot, summary)
+        };
+        emit_worker_event(&snapshot, crate::agent_events::WorkerEvent::WorkerCancelled).await?;
+        Ok(summary)
     });
 
     vm.register_builtin("list_agents", |_args, _out| {

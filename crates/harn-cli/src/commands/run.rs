@@ -546,6 +546,10 @@ pub(crate) async fn run_file_with_skill_dirs(
             connect_mcp_servers(&manifest.mcp, &mut vm).await;
         }
     }
+    if let Err(error) = package::install_manifest_hooks(&mut vm, &extensions).await {
+        eprintln!("error: failed to install manifest hooks: {error}");
+        process::exit(1);
+    }
 
     // Graceful shutdown: flush run records before exit on SIGINT/SIGTERM.
     let cancelled = Arc::new(AtomicBool::new(false));
@@ -806,6 +810,10 @@ pub(crate) async fn run_file_mcp_serve(path: &str, card_source: Option<&str>) {
         if !manifest.mcp.is_empty() {
             connect_mcp_servers(&manifest.mcp, &mut vm).await;
         }
+    }
+    if let Err(error) = package::install_manifest_hooks(&mut vm, &extensions).await {
+        eprintln!("error: failed to install manifest hooks: {error}");
+        process::exit(1);
     }
 
     let local = tokio::task::LocalSet::new();
