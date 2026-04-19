@@ -14,6 +14,9 @@ otel = ["opentelemetry", "opentelemetry_sdk", "opentelemetry-otlp"]
 harn-lexer = { path = "../harn-lexer", version = "0.7" }
 harn-parser = { path = "../harn-parser", version = "0.7" }
 async-trait = "0.1"
+chrono = "0.4"
+chrono-tz = "0.10.4"
+croner = "3.0.1"
 regex = "1"
 serde_json = "1"
 rand = "0.10"

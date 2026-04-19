@@ -798,6 +798,25 @@ fn extract_kind_field<'a>(
     trigger.kind_specific.get(field)
 }
 
+fn looks_like_utc_offset_timezone(raw: &str) -> bool {
+    let value = raw.trim();
+    if let Some(rest) = value
+        .strip_prefix("UTC")
+        .or_else(|| value.strip_prefix("utc"))
+        .or_else(|| value.strip_prefix("GMT"))
+        .or_else(|| value.strip_prefix("gmt"))
+    {
+        return rest.starts_with('+') || rest.starts_with('-');
+    }
+    let chars: Vec<char> = value.chars().collect();
+    if chars.len() < 3 || !matches!(chars[0], '+' | '-') {
+        return false;
+    }
+    chars[1..]
+        .iter()
+        .all(|ch| ch.is_ascii_digit() || *ch == ':')
+}
+
 fn parse_jmespath_expression(
     trigger: &ResolvedTriggerConfig,
     field_name: &str,
@@ -877,6 +896,14 @@ fn validate_static_trigger_config(trigger: &ResolvedTriggerConfig) -> Result<(),
         if let Some(timezone) =
             extract_kind_field(trigger, "timezone").and_then(toml::Value::as_str)
         {
+            if looks_like_utc_offset_timezone(timezone) {
+                return Err(trigger_error(
+                    trigger,
+                    format!(
+                        "invalid cron timezone '{timezone}': use an IANA timezone name like 'America/New_York', not a UTC offset"
+                    ),
+                ));
+            }
             timezone.parse::<Tz>().map_err(|error| {
                 trigger_error(
                     trigger,
@@ -2432,6 +2459,30 @@ timezone = "America/Los_Angeles"
             .await
             .unwrap_err();
         assert!(error.contains("invalid cron schedule"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn collect_manifest_triggers_rejects_utc_offset_timezone() {
+        let tmp = tempfile::tempdir().unwrap();
+        let harn_file = write_trigger_project(
+            tmp.path(),
+            r#"
+[[triggers]]
+id = "bad-cron-timezone"
+kind = "cron"
+provider = "cron"
+match = { events = ["cron.tick"] }
+handler = "worker://queue"
+schedule = "0 9 * * *"
+timezone = "+02:00"
+"#,
+            None,
+        );
+        let mut vm = test_vm();
+        let error = collect_manifest_triggers(&mut vm, &load_runtime_extensions(&harn_file))
+            .await
+            .unwrap_err();
+        assert!(error.contains("use an IANA timezone name"));
     }
 
     #[tokio::test(flavor = "current_thread")]
