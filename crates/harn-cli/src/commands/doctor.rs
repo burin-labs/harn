@@ -285,6 +285,15 @@ async fn check_manifest() -> Vec<DoctorCheck> {
                         ),
                     });
                 }
+                let dispatcher = harn_vm::snapshot_dispatcher_stats();
+                checks.push(DoctorCheck {
+                    status: DoctorStatus::Ok,
+                    label: "dispatcher".to_string(),
+                    detail: format!(
+                        "in_flight={} retry_queue_depth={} dlq_depth={}",
+                        dispatcher.in_flight, dispatcher.retry_queue_depth, dispatcher.dlq_depth,
+                    ),
+                });
                 harn_vm::clear_trigger_registry();
             }
             Err(error) => checks.push(DoctorCheck {
@@ -826,5 +835,15 @@ pub fn on_new_issue(event: TriggerEvent) {
         assert!(trigger.detail.contains("state=active"));
         assert!(trigger.detail.contains("version=1"));
         assert!(trigger.detail.contains("metrics=received=0"));
+
+        let dispatcher = checks
+            .iter()
+            .find(|check| check.label == "dispatcher")
+            .expect("dispatcher check");
+        assert_eq!(dispatcher.status, DoctorStatus::Ok);
+        assert_eq!(
+            dispatcher.detail,
+            "in_flight=0 retry_queue_depth=0 dlq_depth=0"
+        );
     }
 }

@@ -1,6 +1,11 @@
+pub mod dispatcher;
 pub mod event;
 pub mod registry;
 
+pub use dispatcher::{
+    clear_dispatcher_state, snapshot_dispatcher_stats, DispatchError, DispatchOutcome,
+    DispatchStatus, Dispatcher, DispatcherStatsSnapshot, RetryPolicy, TriggerRetryConfig,
+};
 pub use event::{
     redact_headers, register_provider_schema, registered_provider_schema_names,
     reset_provider_catalog, A2aPushPayload, CronEventPayload, ExtensionProviderPayload,

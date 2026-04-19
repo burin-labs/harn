@@ -30,6 +30,21 @@ granular archaeology.
 
 ### Added
 
+- **Handler dispatcher with URI routing, retries, cancellation, and
+  streaming trigger action-graph updates (#159).** Added
+  `harn_vm::triggers::Dispatcher` with EventLog-backed
+  `trigger.inbox` / `trigger.outbox` / `trigger.attempts` / `trigger.dlq`
+  topics, local handler execution against the live trigger registry,
+  manifest-driven retry policy normalization (`Svix`, `Linear`,
+  `Exponential`), cooperative shutdown propagation into in-flight local
+  handler VMs, and new dispatcher lifecycle records on
+  `triggers.lifecycle`. Closes the T-10 deferral for
+  `dispatch` / `retry` / `dlq` action-graph nodes and
+  `retry` / `dlq_move` edges on the local-handler path.
+  `a2a_hop` / `worker_enqueue` remain deferred to O-04 / O-05; the
+  current `a2a://...` and `worker://...` routes return explicit
+  `NotImplemented` errors that point at those tickets.
+
 - **`harn orchestrator serve` CLI scaffold (#209, closes #178).** Added
   a new `harn orchestrator` command family with a real `serve`
   subcommand plus placeholder `inspect`, `replay`, `dlq`, and

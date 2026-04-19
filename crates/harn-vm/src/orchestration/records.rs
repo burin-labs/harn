@@ -14,6 +14,23 @@ use crate::llm::vm_value_to_json;
 use crate::triggers::{SignatureStatus, TriggerEvent};
 use crate::value::{VmError, VmValue};
 
+pub const ACTION_GRAPH_NODE_KIND_RUN: &str = "run";
+pub const ACTION_GRAPH_NODE_KIND_TRIGGER: &str = "trigger";
+pub const ACTION_GRAPH_NODE_KIND_PREDICATE: &str = "predicate";
+pub const ACTION_GRAPH_NODE_KIND_STAGE: &str = "stage";
+pub const ACTION_GRAPH_NODE_KIND_WORKER: &str = "worker";
+pub const ACTION_GRAPH_NODE_KIND_DISPATCH: &str = "dispatch";
+pub const ACTION_GRAPH_NODE_KIND_RETRY: &str = "retry";
+pub const ACTION_GRAPH_NODE_KIND_DLQ: &str = "dlq";
+
+pub const ACTION_GRAPH_EDGE_KIND_ENTRY: &str = "entry";
+pub const ACTION_GRAPH_EDGE_KIND_TRIGGER_DISPATCH: &str = "trigger_dispatch";
+pub const ACTION_GRAPH_EDGE_KIND_PREDICATE_GATE: &str = "predicate_gate";
+pub const ACTION_GRAPH_EDGE_KIND_TRANSITION: &str = "transition";
+pub const ACTION_GRAPH_EDGE_KIND_DELEGATES: &str = "delegates";
+pub const ACTION_GRAPH_EDGE_KIND_RETRY: &str = "retry";
+pub const ACTION_GRAPH_EDGE_KIND_DLQ_MOVE: &str = "dlq_move";
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct LlmUsageRecord {
@@ -496,9 +513,9 @@ fn run_trace_id(run: &RunRecord, trigger_event: Option<&TriggerEvent>) -> Option
 
 fn action_graph_kind_for_stage(stage: &RunStageRecord) -> &'static str {
     if stage.kind == "condition" {
-        "predicate"
+        ACTION_GRAPH_NODE_KIND_PREDICATE
     } else {
-        "stage"
+        ACTION_GRAPH_NODE_KIND_STAGE
     }
 }
 
@@ -509,17 +526,24 @@ fn append_action_graph_node(
     nodes.push(record);
 }
 
+pub async fn append_action_graph_update(
+    headers: BTreeMap<String, String>,
+    payload: serde_json::Value,
+) -> Result<(), crate::event_log::LogError> {
+    let Some(log) = active_event_log() else {
+        return Ok(());
+    };
+    let topic = Topic::new("observability.action_graph")
+        .expect("static observability.action_graph topic should always be valid");
+    let record = EventLogRecord::new("action_graph_update", payload).with_headers(headers);
+    log.append(&topic, record).await.map(|_| ())
+}
+
 fn publish_action_graph_event(
     run: &RunRecord,
     observability: &RunObservabilityRecord,
     path: &Path,
 ) {
-    let Some(log) = active_event_log() else {
-        return;
-    };
-    let Ok(topic) = Topic::new("observability.action_graph") else {
-        return;
-    };
     let trigger_event = trigger_event_from_run(run);
     let mut headers = BTreeMap::new();
     headers.insert("run_id".to_string(), run.id.clone());
@@ -527,23 +551,19 @@ fn publish_action_graph_event(
     if let Some(trace_id) = run_trace_id(run, trigger_event.as_ref()) {
         headers.insert("trace_id".to_string(), trace_id);
     }
-    let record = EventLogRecord::new(
-        "action_graph_update",
-        serde_json::json!({
-            "run_id": run.id,
-            "workflow_id": run.workflow_id,
-            "persisted_path": path.to_string_lossy(),
-            "status": run.status,
-            "observability": observability,
-        }),
-    )
-    .with_headers(headers);
+    let payload = serde_json::json!({
+        "run_id": run.id,
+        "workflow_id": run.workflow_id,
+        "persisted_path": path.to_string_lossy(),
+        "status": run.status,
+        "observability": observability,
+    });
     if let Ok(handle) = tokio::runtime::Handle::try_current() {
         handle.spawn(async move {
-            let _ = log.append(&topic, record).await;
+            let _ = append_action_graph_update(headers, payload).await;
         });
     } else {
-        let _ = futures::executor::block_on(log.append(&topic, record));
+        let _ = futures::executor::block_on(append_action_graph_update(headers, payload));
     }
 }
 
@@ -771,7 +791,7 @@ pub fn derive_run_observability(
                 .workflow_name
                 .clone()
                 .unwrap_or_else(|| run.workflow_id.clone()),
-            kind: "run".to_string(),
+            kind: ACTION_GRAPH_NODE_KIND_RUN.to_string(),
             status: run.status.clone(),
             outcome: run.status.clone(),
             trace_id: propagated_trace_id.clone(),
@@ -790,7 +810,7 @@ pub fn derive_run_observability(
             RunActionGraphNodeRecord {
                 id: trigger_node_id.clone(),
                 label: format!("{}:{}", trigger_event.provider.as_str(), trigger_event.kind),
-                kind: "trigger".to_string(),
+                kind: ACTION_GRAPH_NODE_KIND_TRIGGER.to_string(),
                 status: "received".to_string(),
                 outcome: signature_status_label(&trigger_event.signature_status).to_string(),
                 trace_id: Some(trigger_event.trace_id.0.clone()),
@@ -804,7 +824,7 @@ pub fn derive_run_observability(
         action_graph_edges.push(RunActionGraphEdgeRecord {
             from_id: root_node_id.clone(),
             to_id: trigger_node_id.clone(),
-            kind: "entry".to_string(),
+            kind: ACTION_GRAPH_EDGE_KIND_ENTRY.to_string(),
             label: Some(trigger_event.id.0.clone()),
         });
         entry_node_id = trigger_node_id;
@@ -862,9 +882,9 @@ pub fn derive_run_observability(
                 from_id: entry_node_id.clone(),
                 to_id: graph_node_id.clone(),
                 kind: if trigger_event.is_some() {
-                    "trigger_dispatch".to_string()
+                    ACTION_GRAPH_EDGE_KIND_TRIGGER_DISPATCH.to_string()
                 } else {
-                    "entry".to_string()
+                    ACTION_GRAPH_EDGE_KIND_ENTRY.to_string()
                 },
                 label: None,
             });
@@ -1009,9 +1029,9 @@ pub fn derive_run_observability(
             from_id,
             to_id,
             kind: if from_stage.is_some_and(|stage| stage.kind == "condition") {
-                "predicate_gate".to_string()
+                ACTION_GRAPH_EDGE_KIND_PREDICATE_GATE.to_string()
             } else {
-                "transition".to_string()
+                ACTION_GRAPH_EDGE_KIND_TRANSITION.to_string()
             },
             label: transition.branch.clone(),
         });
@@ -1027,7 +1047,7 @@ pub fn derive_run_observability(
                 RunActionGraphNodeRecord {
                     id: worker_node_id.clone(),
                     label: child.worker_name.clone(),
-                    kind: "worker".to_string(),
+                    kind: ACTION_GRAPH_NODE_KIND_WORKER.to_string(),
                     status: child.status.clone(),
                     outcome: child.status.clone(),
                     trace_id: propagated_trace_id.clone(),
@@ -1043,7 +1063,7 @@ pub fn derive_run_observability(
                     action_graph_edges.push(RunActionGraphEdgeRecord {
                         from_id: stage_node_id.clone(),
                         to_id: worker_node_id,
-                        kind: "delegates".to_string(),
+                        kind: ACTION_GRAPH_EDGE_KIND_DELEGATES.to_string(),
                         label: Some(child.worker_name.clone()),
                     });
                 }
