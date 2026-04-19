@@ -26,6 +26,122 @@ const STANDARD_VENDOR_DIRS: &[&str] = &[
     "venv",
 ];
 
+const FINGERPRINT_SKIP_DIRS: &[&str] = &[
+    ".git",
+    ".hg",
+    ".next",
+    ".svn",
+    ".venv",
+    "__pycache__",
+    "build",
+    "coverage",
+    "dist",
+    "node_modules",
+    "target",
+    "venv",
+];
+const PROJECT_FINGERPRINT_MAX_DEPTH: usize = 4;
+const PROJECT_LANGUAGE_ORDER: &[&str] = &["rust", "typescript", "python", "go", "swift"];
+const PROJECT_FRAMEWORK_ORDER: &[&str] = &["axum", "next", "react", "django", "fastapi", "rails"];
+const PROJECT_PACKAGE_MANAGER_ORDER: &[&str] =
+    &["cargo", "npm", "pnpm", "yarn", "pip", "poetry", "uv", "go"];
+const PROJECT_LOCKFILES: &[(&str, Option<&str>)] = &[
+    ("Cargo.lock", Some("cargo")),
+    ("package-lock.json", Some("npm")),
+    ("pnpm-lock.yaml", Some("pnpm")),
+    ("yarn.lock", Some("yarn")),
+    ("uv.lock", Some("uv")),
+    ("poetry.lock", Some("poetry")),
+    ("Pipfile.lock", Some("pip")),
+    ("requirements.lock", Some("pip")),
+    ("go.sum", Some("go")),
+    ("Gemfile.lock", None),
+    ("Package.resolved", None),
+];
+const TEST_DIR_NAMES: &[&str] = &["tests", "test", "__tests__", "spec", "e2e", "cypress"];
+const NEXT_CONFIG_NAMES: &[&str] = &["next.config.js", "next.config.mjs", "next.config.ts"];
+const CI_FILE_NAMES: &[&str] = &[
+    ".gitlab-ci.yml",
+    "azure-pipelines.yml",
+    "bitrise.yml",
+    "circle.yml",
+];
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct ProjectFingerprint {
+    primary_language: String,
+    languages: Vec<String>,
+    frameworks: Vec<String>,
+    package_managers: Vec<String>,
+    has_tests: bool,
+    has_ci: bool,
+    lockfile_paths: Vec<String>,
+}
+
+impl ProjectFingerprint {
+    fn into_vm_value(self) -> VmValue {
+        let mut value = BTreeMap::new();
+        value.insert(
+            "primary_language".to_string(),
+            VmValue::String(Rc::from(self.primary_language)),
+        );
+        value.insert(
+            "languages".to_string(),
+            VmValue::List(Rc::new(
+                self.languages
+                    .into_iter()
+                    .map(|item| VmValue::String(Rc::from(item)))
+                    .collect(),
+            )),
+        );
+        value.insert(
+            "frameworks".to_string(),
+            VmValue::List(Rc::new(
+                self.frameworks
+                    .into_iter()
+                    .map(|item| VmValue::String(Rc::from(item)))
+                    .collect(),
+            )),
+        );
+        value.insert(
+            "package_managers".to_string(),
+            VmValue::List(Rc::new(
+                self.package_managers
+                    .into_iter()
+                    .map(|item| VmValue::String(Rc::from(item)))
+                    .collect(),
+            )),
+        );
+        value.insert("has_tests".to_string(), VmValue::Bool(self.has_tests));
+        value.insert("has_ci".to_string(), VmValue::Bool(self.has_ci));
+        value.insert(
+            "lockfile_paths".to_string(),
+            VmValue::List(Rc::new(
+                self.lockfile_paths
+                    .into_iter()
+                    .map(|item| VmValue::String(Rc::from(item)))
+                    .collect(),
+            )),
+        );
+        VmValue::Dict(Rc::new(value))
+    }
+}
+
+#[derive(Debug, Default)]
+struct FingerprintSignals {
+    languages: BTreeSet<String>,
+    frameworks: BTreeSet<String>,
+    package_managers: BTreeSet<String>,
+    lockfile_paths: BTreeSet<String>,
+    has_tests: bool,
+    has_ci: bool,
+    node_project: bool,
+    python_project: bool,
+    python_needs_pip: bool,
+    has_next_dep: bool,
+    has_next_config: bool,
+}
+
 #[derive(Debug, Clone, Copy, Default, Eq, Ord, PartialEq, PartialOrd)]
 enum ScanTier {
     #[default]
@@ -218,6 +334,20 @@ impl ProjectEvidence {
 }
 
 pub(crate) fn register_project_builtins(vm: &mut Vm) {
+    vm.register_builtin("project_fingerprint", |args, _out| {
+        if args.len() > 1 {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(
+                "project_fingerprint: expected at most 1 argument",
+            ))));
+        }
+        let path = args
+            .first()
+            .map(|value| value.display())
+            .unwrap_or_else(|| ".".to_string());
+        let root = resolve_existing_directory(&path)?;
+        Ok(detect_project_fingerprint(&root).into_vm_value())
+    });
+
     vm.register_builtin("project_scan_native", |args, _out| {
         let path = args
             .first()
@@ -348,6 +478,341 @@ fn resolve_existing_directory(path: &str) -> Result<PathBuf, VmError> {
     } else {
         Err(path_missing_error(&target))
     }
+}
+
+fn detect_project_fingerprint(dir: &Path) -> ProjectFingerprint {
+    let mut signals = FingerprintSignals::default();
+    walk_project_fingerprint(dir, dir, 0, &mut signals);
+
+    if signals.has_next_dep && signals.has_next_config {
+        signals.frameworks.insert("next".to_string());
+        signals.languages.insert("typescript".to_string());
+    }
+    if signals.node_project
+        && !signals.package_managers.contains("npm")
+        && !signals.package_managers.contains("pnpm")
+        && !signals.package_managers.contains("yarn")
+    {
+        signals.package_managers.insert("npm".to_string());
+    }
+    if signals.python_project
+        && !signals.package_managers.contains("poetry")
+        && !signals.package_managers.contains("uv")
+        && signals.python_needs_pip
+    {
+        signals.package_managers.insert("pip".to_string());
+    }
+
+    let languages = ordered_values(&signals.languages, PROJECT_LANGUAGE_ORDER);
+    let frameworks = ordered_values(&signals.frameworks, PROJECT_FRAMEWORK_ORDER);
+    let package_managers = ordered_values(&signals.package_managers, PROJECT_PACKAGE_MANAGER_ORDER);
+    let primary_language = match languages.as_slice() {
+        [] => "unknown".to_string(),
+        [only] => only.clone(),
+        _ => "mixed".to_string(),
+    };
+
+    ProjectFingerprint {
+        primary_language,
+        languages,
+        frameworks,
+        package_managers,
+        has_tests: signals.has_tests,
+        has_ci: signals.has_ci,
+        lockfile_paths: signals.lockfile_paths.into_iter().collect(),
+    }
+}
+
+fn walk_project_fingerprint(
+    base: &Path,
+    dir: &Path,
+    depth: usize,
+    signals: &mut FingerprintSignals,
+) {
+    let Ok(read_dir) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let mut entries = read_dir.flatten().collect::<Vec<_>>();
+    entries.sort_by_key(|entry| entry.file_name());
+
+    for entry in entries {
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let path = entry.path();
+        let rel = relative_posix(base, &path);
+
+        if file_type.is_dir() {
+            inspect_fingerprint_dir(&rel, &name, signals);
+            if depth < PROJECT_FINGERPRINT_MAX_DEPTH
+                && !FINGERPRINT_SKIP_DIRS.contains(&name.as_str())
+            {
+                walk_project_fingerprint(base, &path, depth + 1, signals);
+            }
+            continue;
+        }
+
+        if file_type.is_file() {
+            inspect_fingerprint_file(&path, &rel, &name, signals);
+        }
+    }
+}
+
+fn inspect_fingerprint_dir(rel: &str, name: &str, signals: &mut FingerprintSignals) {
+    if TEST_DIR_NAMES.contains(&name) {
+        signals.has_tests = true;
+    }
+    if rel == ".github"
+        || rel.ends_with("/.github")
+        || rel == ".github/workflows"
+        || name == ".circleci"
+        || name == ".buildkite"
+    {
+        signals.has_ci = true;
+    }
+    match name {
+        "crates" => {
+            signals.languages.insert("rust".to_string());
+        }
+        "cmd" | "pkg" => {
+            signals.languages.insert("go".to_string());
+        }
+        _ => {}
+    }
+}
+
+fn inspect_fingerprint_file(path: &Path, rel: &str, name: &str, signals: &mut FingerprintSignals) {
+    if let Some((_lockfile, manager)) = PROJECT_LOCKFILES
+        .iter()
+        .find(|(lockfile, _manager)| *lockfile == name)
+    {
+        signals.lockfile_paths.insert(rel.to_string());
+        if let Some(manager) = manager {
+            signals.package_managers.insert((*manager).to_string());
+        }
+    }
+    if CI_FILE_NAMES.contains(&name)
+        || rel.starts_with(".github/workflows/")
+        || rel == ".github/workflows"
+    {
+        signals.has_ci = true;
+    }
+
+    match name {
+        "Cargo.toml" => inspect_cargo_manifest(path, signals),
+        "package.json" => inspect_package_json(path, signals),
+        "pyproject.toml" => inspect_pyproject(path, signals),
+        "requirements.txt" | "requirements-dev.txt" | "requirements-test.txt" => {
+            inspect_python_requirements(path, signals);
+        }
+        "setup.py" => {
+            signals.languages.insert("python".to_string());
+            signals.python_project = true;
+            signals.python_needs_pip = true;
+            inspect_python_text(read_text_if_exists(path.to_path_buf()).as_deref(), signals);
+        }
+        "go.mod" => {
+            signals.languages.insert("go".to_string());
+            signals.package_managers.insert("go".to_string());
+        }
+        "Package.swift" => {
+            signals.languages.insert("swift".to_string());
+        }
+        "Gemfile" => inspect_gemfile(path, signals),
+        _ => {}
+    }
+
+    if NEXT_CONFIG_NAMES.contains(&name) {
+        signals.has_next_config = true;
+        signals.languages.insert("typescript".to_string());
+    }
+
+    match path.extension().and_then(|ext| ext.to_str()) {
+        Some("rs") => {
+            signals.languages.insert("rust".to_string());
+        }
+        Some("ts") | Some("tsx") | Some("js") | Some("jsx") | Some("mjs") | Some("cjs") => {
+            signals.languages.insert("typescript".to_string());
+            signals.node_project = true;
+        }
+        Some("py") => {
+            signals.languages.insert("python".to_string());
+            signals.python_project = true;
+        }
+        Some("go") => {
+            signals.languages.insert("go".to_string());
+        }
+        Some("swift") => {
+            signals.languages.insert("swift".to_string());
+        }
+        _ => {}
+    }
+}
+
+fn inspect_cargo_manifest(path: &Path, signals: &mut FingerprintSignals) {
+    signals.languages.insert("rust".to_string());
+    signals.package_managers.insert("cargo".to_string());
+    let Some(text) = read_text_if_exists(path.to_path_buf()) else {
+        return;
+    };
+    let Ok(parsed) = toml::from_str::<toml::Value>(&text) else {
+        return;
+    };
+    let deps = collect_toml_keys(
+        &parsed,
+        &[
+            &["dependencies"],
+            &["dev-dependencies"],
+            &["build-dependencies"],
+            &["workspace", "dependencies"],
+        ],
+    );
+    if deps.contains("axum") {
+        signals.frameworks.insert("axum".to_string());
+    }
+}
+
+fn inspect_package_json(path: &Path, signals: &mut FingerprintSignals) {
+    let Some(parsed) = read_json_object(path.to_path_buf()) else {
+        return;
+    };
+    signals.node_project = true;
+
+    let deps = collect_json_dependency_names(&parsed);
+    if deps.contains("next") {
+        signals.has_next_dep = true;
+    }
+    if deps.contains("react") {
+        signals.frameworks.insert("react".to_string());
+        signals.languages.insert("typescript".to_string());
+    }
+    if deps.contains("typescript") {
+        signals.languages.insert("typescript".to_string());
+    }
+
+    if let Some(package_manager) = parsed
+        .get("packageManager")
+        .and_then(|value| value.as_str())
+    {
+        if package_manager.starts_with("pnpm@") {
+            signals.package_managers.insert("pnpm".to_string());
+        } else if package_manager.starts_with("yarn@") {
+            signals.package_managers.insert("yarn".to_string());
+        } else if package_manager.starts_with("npm@") {
+            signals.package_managers.insert("npm".to_string());
+        }
+    }
+}
+
+fn inspect_pyproject(path: &Path, signals: &mut FingerprintSignals) {
+    let Some(text) = read_text_if_exists(path.to_path_buf()) else {
+        return;
+    };
+    signals.languages.insert("python".to_string());
+    signals.python_project = true;
+    inspect_python_text(Some(&text), signals);
+
+    let Ok(parsed) = toml::from_str::<toml::Value>(&text) else {
+        signals.python_needs_pip = true;
+        return;
+    };
+    let has_poetry = table_path_exists(&parsed, &["tool", "poetry"]);
+    let has_uv = table_path_exists(&parsed, &["tool", "uv"]);
+    if has_poetry {
+        signals.package_managers.insert("poetry".to_string());
+    }
+    if has_uv {
+        signals.package_managers.insert("uv".to_string());
+    }
+    if !has_poetry && !has_uv {
+        signals.python_needs_pip = true;
+    }
+}
+
+fn inspect_python_requirements(path: &Path, signals: &mut FingerprintSignals) {
+    signals.languages.insert("python".to_string());
+    signals.python_project = true;
+    signals.python_needs_pip = true;
+    inspect_python_text(read_text_if_exists(path.to_path_buf()).as_deref(), signals);
+}
+
+fn inspect_python_text(text: Option<&str>, signals: &mut FingerprintSignals) {
+    let Some(text) = text else {
+        return;
+    };
+    let lower = text.to_ascii_lowercase();
+    if lower.contains("fastapi") {
+        signals.frameworks.insert("fastapi".to_string());
+    }
+    if lower.contains("django") {
+        signals.frameworks.insert("django".to_string());
+    }
+}
+
+fn inspect_gemfile(path: &Path, signals: &mut FingerprintSignals) {
+    let Some(text) = read_text_if_exists(path.to_path_buf()) else {
+        return;
+    };
+    if text.contains("gem \"rails\"") || text.contains("gem 'rails'") {
+        signals.frameworks.insert("rails".to_string());
+    }
+}
+
+fn collect_json_dependency_names(
+    parsed: &serde_json::Map<String, serde_json::Value>,
+) -> BTreeSet<String> {
+    let mut names = BTreeSet::new();
+    for key in [
+        "dependencies",
+        "devDependencies",
+        "peerDependencies",
+        "optionalDependencies",
+    ] {
+        let Some(entries) = parsed.get(key).and_then(|value| value.as_object()) else {
+            continue;
+        };
+        names.extend(entries.keys().cloned());
+    }
+    names
+}
+
+fn collect_toml_keys(parsed: &toml::Value, paths: &[&[&str]]) -> BTreeSet<String> {
+    let mut names = BTreeSet::new();
+    for path in paths {
+        let Some(table) = lookup_toml_path(parsed, path).and_then(toml::Value::as_table) else {
+            continue;
+        };
+        names.extend(table.keys().cloned());
+    }
+    names
+}
+
+fn table_path_exists(parsed: &toml::Value, path: &[&str]) -> bool {
+    lookup_toml_path(parsed, path).is_some()
+}
+
+fn lookup_toml_path<'a>(value: &'a toml::Value, path: &[&str]) -> Option<&'a toml::Value> {
+    let mut current = value;
+    for segment in path {
+        current = current.get(*segment)?;
+    }
+    Some(current)
+}
+
+fn ordered_values(values: &BTreeSet<String>, order: &[&str]) -> Vec<String> {
+    let mut ordered = Vec::new();
+    for wanted in order {
+        if values.contains(*wanted) {
+            ordered.push((*wanted).to_string());
+        }
+    }
+    for value in values {
+        if !order.iter().any(|candidate| candidate == &value.as_str()) {
+            ordered.push(value.clone());
+        }
+    }
+    ordered
 }
 
 fn path_error(error: std::io::Error) -> VmError {
@@ -1253,5 +1718,84 @@ mod tests {
 
         assert_eq!(src.content_hash, src_after.content_hash);
         assert_ne!(auth.content_hash, auth_after.content_hash);
+    }
+
+    #[test]
+    fn project_fingerprint_detects_polyglot_repo_shape() {
+        let dir = temp_dir("fingerprint-polyglot");
+        std::fs::create_dir_all(dir.path().join("backend")).unwrap();
+        std::fs::create_dir_all(dir.path().join("portal/tests")).unwrap();
+        std::fs::create_dir_all(dir.path().join(".github/workflows")).unwrap();
+        std::fs::write(
+            dir.path().join("backend/Cargo.toml"),
+            "[package]\nname = \"backend\"\nversion = \"0.1.0\"\n[dependencies]\naxum = \"0.8\"\n",
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("backend/Cargo.lock"), "# lock\n").unwrap();
+        std::fs::write(
+            dir.path().join("portal/package.json"),
+            "{\n  \"name\": \"portal\",\n  \"packageManager\": \"pnpm@9.0.0\",\n  \"dependencies\": {\n    \"next\": \"15.0.0\",\n    \"react\": \"19.0.0\"\n  }\n}\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("portal/next.config.ts"),
+            "export default {}\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("portal/pnpm-lock.yaml"),
+            "lockfileVersion: '9.0'\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join(".github/workflows/ci.yml"),
+            "name: ci\non: push\n",
+        )
+        .unwrap();
+
+        let fingerprint = detect_project_fingerprint(dir.path());
+        assert_eq!(fingerprint.primary_language, "mixed");
+        assert_eq!(
+            fingerprint.languages,
+            vec!["rust".to_string(), "typescript".to_string()]
+        );
+        assert_eq!(
+            fingerprint.frameworks,
+            vec!["axum".to_string(), "next".to_string(), "react".to_string()]
+        );
+        assert_eq!(
+            fingerprint.package_managers,
+            vec!["cargo".to_string(), "pnpm".to_string()]
+        );
+        assert!(fingerprint.has_tests);
+        assert!(fingerprint.has_ci);
+        assert_eq!(
+            fingerprint.lockfile_paths,
+            vec![
+                "backend/Cargo.lock".to_string(),
+                "portal/pnpm-lock.yaml".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn project_fingerprint_detects_python_package_managers() {
+        let dir = temp_dir("fingerprint-python");
+        std::fs::write(
+            dir.path().join("pyproject.toml"),
+            "[project]\nname = \"api\"\ndependencies = [\"fastapi>=0.110\"]\n[tool.uv]\n",
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("uv.lock"), "# lock\n").unwrap();
+        std::fs::create_dir_all(dir.path().join("tests")).unwrap();
+
+        let fingerprint = detect_project_fingerprint(dir.path());
+        assert_eq!(fingerprint.primary_language, "python");
+        assert_eq!(fingerprint.languages, vec!["python".to_string()]);
+        assert!(fingerprint.frameworks.contains(&"fastapi".to_string()));
+        assert_eq!(fingerprint.package_managers, vec!["uv".to_string()]);
+        assert!(fingerprint.has_tests);
+        assert!(!fingerprint.has_ci);
+        assert_eq!(fingerprint.lockfile_paths, vec!["uv.lock".to_string()]);
     }
 }
