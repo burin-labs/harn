@@ -226,17 +226,21 @@ async fn initialize_connectors(
         rate_limiter: Arc::new(harn_vm::RateLimiterFactory::default()),
     };
 
+    // `ConnectorRegistry::default()` pre-populates connectors for every
+    // provider in the catalog (cron -> CronConnector, webhook-based ->
+    // GenericWebhookConnector, etc.). We only need to register a
+    // PlaceholderConnector for providers that are referenced by a trigger
+    // but *not* already in the catalog (skip-if-already-registered).
     let mut providers = Vec::new();
     for (provider, kinds) in grouped_kinds {
         let provider_name = provider.as_str().to_string();
-        let connector: Box<dyn harn_vm::Connector> = if provider.as_str() == "cron" {
-            Box::new(harn_vm::CronConnector::new())
-        } else {
-            Box::new(PlaceholderConnector::new(provider.clone(), kinds))
-        };
-        registry
-            .register(connector)
-            .map_err(|error| error.to_string())?;
+        if registry.get(&provider).is_none() {
+            let connector: Box<dyn harn_vm::Connector> =
+                Box::new(PlaceholderConnector::new(provider.clone(), kinds));
+            registry
+                .register(connector)
+                .map_err(|error| error.to_string())?;
+        }
         let handle = registry
             .get(&provider)
             .ok_or_else(|| format!("connector registry lost provider '{}'", provider.as_str()))?;
