@@ -171,12 +171,6 @@ async fn run_local(args: OrchestratorServeArgs) -> Result<(), String> {
         format_activation_summary(&connector_runtime.activations)
     );
 
-    let dispatcher = harn_vm::Dispatcher::with_event_log(vm, event_log.clone());
-    let dispatcher_task = {
-        let dispatcher = dispatcher.clone();
-        tokio::task::spawn_local(async move { dispatcher.run().await })
-    };
-
     write_state_snapshot(
         &state_dir.join(STATE_SNAPSHOT_FILE),
         &ServeStateSnapshot {
@@ -279,12 +273,7 @@ async fn run_local(args: OrchestratorServeArgs) -> Result<(), String> {
         inbox_pump,
     )
     .await;
-    let dispatcher_result = dispatcher_task
-        .await
-        .map_err(|error| format!("dispatcher task join failed: {error}"))?
-        .map_err(|error| format!("dispatcher failed during shutdown: {error}"));
-    shutdown?;
-    dispatcher_result
+    shutdown
 }
 
 struct ConnectorRuntime {

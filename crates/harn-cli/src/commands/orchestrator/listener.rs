@@ -15,13 +15,15 @@ use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 use time::OffsetDateTime;
 
-use harn_vm::event_log::AnyEventLog;
+use harn_vm::event_log::{AnyEventLog, EventLog, LogEvent, Topic};
+use harn_vm::secrets::{SecretId, SecretProvider, SecretVersion};
 
 use crate::commands::orchestrator::origin_guard::{enforce_allowed_origin, OriginAllowList};
 use crate::commands::orchestrator::tls::{ServerRuntime, TlsFiles};
 use crate::package::{CollectedManifestTrigger, TriggerKind};
 
 const DEFAULT_MAX_BODY_BYTES: usize = 10 * 1024 * 1024;
+const PENDING_TOPIC: &str = "orchestrator.triggers.pending";
 const REQUEST_DELAY_ENV: &str = "HARN_ORCHESTRATOR_TEST_REQUEST_DELAY_MS";
 const API_KEYS_ENV: &str = "HARN_ORCHESTRATOR_API_KEYS";
 const HMAC_SECRET_ENV: &str = "HARN_ORCHESTRATOR_HMAC_SECRET";
@@ -218,6 +220,7 @@ struct RouteContext {
     inbox: Arc<harn_vm::InboxIndex>,
     secrets: Arc<dyn SecretProvider>,
     auth: Arc<ListenerAuth>,
+    pending_topic: Topic,
     request_delay: Option<Duration>,
     metrics: Arc<RouteRuntimeMetrics>,
 }
