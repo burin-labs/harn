@@ -46,7 +46,7 @@ pub use connectors::{
     Connector, ConnectorClient, ConnectorCtx, ConnectorError, ConnectorMetricsSnapshot,
     ConnectorRegistry, GenericWebhookConnector, GitHubConnector, MetricsRegistry,
     PostNormalizeOutcome, ProviderPayloadSchema, RateLimitConfig, RateLimiterFactory, RawInbound,
-    TriggerBinding, TriggerKind, TriggerRegistry, WebhookSignatureVariant,
+    SlackConnector, TriggerBinding, TriggerKind, TriggerRegistry, WebhookSignatureVariant,
 };
 pub use http::{register_http_builtins, reset_http_state};
 pub use llm::register_llm_builtins;

@@ -89,6 +89,45 @@ pub fn on_issue(event: TriggerEvent) {
 "#
 }
 
+fn slack_manifest(orchestrator_block: Option<&str>) -> String {
+    let mut manifest = r#"
+[package]
+name = "fixture"
+
+[exports]
+handlers = "lib.harn"
+
+[[triggers]]
+id = "slack-mentions"
+kind = "webhook"
+provider = "slack"
+match = { events = ["app_mention"] }
+handler = "handlers::on_slack"
+secrets = { signing_secret = "slack/signing-secret" }
+"#
+    .to_string();
+    if let Some(block) = orchestrator_block {
+        manifest.push('\n');
+        manifest.push_str(block);
+        manifest.push('\n');
+    }
+    manifest
+}
+
+fn slack_handler_module(marker_path: &Path) -> String {
+    format!(
+        r#"
+import "std/triggers"
+
+pub fn on_slack(event: TriggerEvent) {{
+  sleep(4100ms)
+  write_file({marker:?}, event.kind)
+}}
+"#,
+        marker = marker_path.display().to_string()
+    )
+}
+
 fn a2a_manifest(orchestrator_block: Option<&str>) -> String {
     let mut manifest = r#"
 [package]
@@ -251,6 +290,17 @@ fn github_signature(secret: &str, body: &[u8]) -> String {
     format!("sha256={encoded}")
 }
 
+fn slack_signature(secret: &str, timestamp: i64, body: &[u8]) -> String {
+    let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).unwrap();
+    mac.update(format!("v0:{timestamp}:").as_bytes());
+    mac.update(body);
+    let mut encoded = String::new();
+    for byte in mac.finalize().into_bytes() {
+        encoded.push_str(&format!("{byte:02x}"));
+    }
+    format!("v0={encoded}")
+}
+
 fn github_headers(secret: &str, body: &[u8], origin: Option<&str>) -> HeaderMap {
     let mut headers = HeaderMap::new();
     headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
@@ -269,6 +319,20 @@ fn github_headers(secret: &str, body: &[u8], origin: Option<&str>) -> HeaderMap 
     headers
 }
 
+fn slack_headers(secret: &str, timestamp: i64, body: &[u8]) -> HeaderMap {
+    let mut headers = HeaderMap::new();
+    headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+    headers.insert(
+        "X-Slack-Request-Timestamp",
+        HeaderValue::from_str(&timestamp.to_string()).unwrap(),
+    );
+    headers.insert(
+        "X-Slack-Signature",
+        HeaderValue::from_str(&slack_signature(secret, timestamp, body)).unwrap(),
+    );
+    headers
+}
+
 fn state_snapshot(temp: &TempDir) -> String {
     fs::read_to_string(temp.path().join("state/orchestrator-state.json")).unwrap()
 }
@@ -283,6 +347,17 @@ fn json_headers() -> HeaderMap {
     let mut headers = HeaderMap::new();
     headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
     headers
+}
+
+fn wait_for_path(path: &Path, timeout: Duration) {
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        if path.exists() {
+            return;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+    panic!("timed out waiting for {}", path.display());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -328,6 +403,111 @@ async fn github_webhook_delivery_is_accepted_and_persisted() {
         snapshot.contains("\"dispatched\": 1"),
         "snapshot={snapshot}"
     );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn slack_webhook_acknowledges_before_handler_finishes() {
+    let _lock = lock_orchestrator_tests();
+    let temp = TempDir::new().unwrap();
+    let marker_path = temp.path().join("slack-handler.txt");
+    write_file(temp.path(), "harn.toml", &slack_manifest(None));
+    write_file(temp.path(), "lib.harn", &slack_handler_module(&marker_path));
+
+    let secret = "slack-signing-secret";
+    let envs = [
+        ("HARN_SECRET_PROVIDERS", "env"),
+        ("HARN_SECRET_SLACK_SIGNING_SECRET", secret),
+    ];
+    let mut process = spawn_orchestrator(&temp, &[], &envs);
+    let base_url = process.wait_for_listener_url();
+
+    let timestamp = OffsetDateTime::now_utc().unix_timestamp();
+    let body = serde_json::to_vec(&serde_json::json!({
+        "token": "ZZZZZZWSxiZZZ2yIvs3peJ",
+        "team_id": "T123ABC456",
+        "api_app_id": "A123ABC456",
+        "event": {
+            "type": "app_mention",
+            "user": "U123ABC456",
+            "text": "What is the hour of the pearl, <@U0LAN0Z89>?",
+            "ts": "1515449522.000016",
+            "channel": "C123ABC456",
+            "event_ts": "1515449522000016"
+        },
+        "type": "event_callback",
+        "event_id": "Ev123ABC456",
+        "event_time": 1515449522000016i64
+    }))
+    .unwrap();
+
+    let started = Instant::now();
+    let response = reqwest::Client::new()
+        .post(format!("{base_url}/triggers/slack-mentions"))
+        .headers(slack_headers(secret, timestamp, &body))
+        .body(body)
+        .send()
+        .await
+        .unwrap();
+    assert_status(response, StatusCode::OK).await;
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "slack ack path took too long: {:?}",
+        started.elapsed()
+    );
+    assert!(
+        !marker_path.exists(),
+        "handler should not have completed before the HTTP ack"
+    );
+    wait_for_path(&marker_path, Duration::from_secs(10));
+    let marker = fs::read_to_string(&marker_path).unwrap();
+    assert_eq!(marker, "app_mention");
+
+    send_sigterm(&process.child);
+    wait_for_exit(&mut process.child);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn slack_url_verification_returns_plaintext_challenge() {
+    let _lock = lock_orchestrator_tests();
+    let temp = TempDir::new().unwrap();
+    write_file(temp.path(), "harn.toml", &slack_manifest(None));
+    write_file(
+        temp.path(),
+        "lib.harn",
+        &slack_handler_module(&temp.path().join("unused-slack-marker.txt")),
+    );
+
+    let secret = "slack-signing-secret";
+    let envs = [
+        ("HARN_SECRET_PROVIDERS", "env"),
+        ("HARN_SECRET_SLACK_SIGNING_SECRET", secret),
+    ];
+    let mut process = spawn_orchestrator(&temp, &[], &envs);
+    let base_url = process.wait_for_listener_url();
+
+    let timestamp = OffsetDateTime::now_utc().unix_timestamp();
+    let body = serde_json::to_vec(&serde_json::json!({
+        "token": "legacy-token",
+        "challenge": "3eZbrw1aBm2rZgRNFdxV2595E9CY3gmdALWMmHkvFXO7tYXAYM8P",
+        "type": "url_verification"
+    }))
+    .unwrap();
+    let response = reqwest::Client::new()
+        .post(format!("{base_url}/triggers/slack-mentions"))
+        .headers(slack_headers(secret, timestamp, &body))
+        .body(body)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_body = response.text().await.unwrap();
+    assert_eq!(
+        response_body,
+        "3eZbrw1aBm2rZgRNFdxV2595E9CY3gmdALWMmHkvFXO7tYXAYM8P"
+    );
+
+    send_sigterm(&process.child);
+    wait_for_exit(&mut process.child);
 }
 
 #[tokio::test(flavor = "multi_thread")]

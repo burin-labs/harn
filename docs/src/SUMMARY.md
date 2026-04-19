@@ -35,6 +35,7 @@
 - [Trigger registry](./triggers/registry.md)
 - [Cron connector](./connectors/cron.md)
 - [GitHub App connector](./connectors/github.md)
+- [Slack Events connector](./connectors/slack.md)
 - [Generic webhook connector](./connectors/webhook.md)
 - [Cookbook](./cookbook.md)
 - [Tutorial: code review agent](./tutorial-code-review-agent.md)

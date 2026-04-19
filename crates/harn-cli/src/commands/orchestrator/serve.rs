@@ -127,6 +127,7 @@ async fn run_local(args: OrchestratorServeArgs) -> Result<(), String> {
         secret_provider.clone(),
     )
     .await?;
+    let route_configs = attach_route_connectors(route_configs, &connector_runtime.registry)?;
     eprintln!(
         "[harn] registered connectors ({}): {}",
         connector_runtime.providers.len(),
@@ -239,7 +240,8 @@ async fn run_local(args: OrchestratorServeArgs) -> Result<(), String> {
     })
     .await?;
 
-    graceful_shutdown(
+    dispatcher.shutdown();
+    let shutdown = graceful_shutdown(
         GracefulShutdownCtx {
             role: args.role,
             bind: local_bind,
@@ -260,7 +262,13 @@ async fn run_local(args: OrchestratorServeArgs) -> Result<(), String> {
         cron_pump,
         inbox_pump,
     )
-    .await
+    .await;
+    let dispatcher_result = dispatcher_task
+        .await
+        .map_err(|error| format!("dispatcher task join failed: {error}"))?
+        .map_err(|error| format!("dispatcher failed during shutdown: {error}"));
+    shutdown?;
+    dispatcher_result
 }
 
 struct ConnectorRuntime {
@@ -423,6 +431,35 @@ fn build_route_configs(
         }
     }
     Ok(routes)
+}
+
+fn attach_route_connectors(
+    routes: Vec<RouteConfig>,
+    registry: &harn_vm::ConnectorRegistry,
+) -> Result<Vec<RouteConfig>, String> {
+    routes
+        .into_iter()
+        .map(|mut route| {
+            // Only providers whose `normalize_inbound` owns HMAC verification
+            // and URL-challenge handling need the connector handle on the
+            // HTTP listener path. Webhook/github routes stay on the
+            // signature-based `normalize_request` flow in the listener so
+            // their existing Option-2 post-processing dedupe keeps working.
+            if connector_owns_ingress(route.provider.as_str()) {
+                route.connector = Some(registry.get(&route.provider).ok_or_else(|| {
+                    format!(
+                        "connector registry is missing provider '{}'",
+                        route.provider.as_str()
+                    )
+                })?);
+            }
+            Ok(route)
+        })
+        .collect()
+}
+
+fn connector_owns_ingress(provider: &str) -> bool {
+    matches!(provider, "slack")
 }
 
 fn live_manifest_binding_versions() -> BTreeMap<String, u32> {

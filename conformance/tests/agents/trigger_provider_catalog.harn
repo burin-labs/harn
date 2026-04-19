@@ -3,7 +3,7 @@ import "std/triggers"
 pipeline test(task) {
   let providers: list<ProviderCatalogEntry> = list_providers()
   let builtin = providers.filter({ provider -> provider.runtime.kind == "builtin" })
-  assert(len(builtin) == 3, "expected exactly three builtin trigger providers")
+  assert(len(builtin) == 4, "expected exactly four builtin trigger providers")
   let cron = builtin.find({ provider -> provider.provider == "cron" })
   assert(cron?.schema_name == "CronEventPayload", "cron schema should be cataloged")
   assert(cron?.runtime?.connector == "cron", "cron should use the cron connector")
@@ -73,5 +73,34 @@ pipeline test(task) {
   assert(github_secret.name == "signing_secret", "github should require signing_secret")
   assert(github_secret.namespace == "github", "github secrets should stay namespaced to github")
   assert(len(github?.outbound_methods ?? []) == 0, "github should not publish outbound methods yet")
+  let slack = builtin.find({ provider -> provider.provider == "slack" })
+  assert(slack?.schema_name == "SlackEventPayload", "slack schema should be cataloged")
+  assert(slack?.runtime?.connector == "slack", "slack should use the slack connector")
+  assert(
+    slack?.runtime?.default_signature_variant == "slack",
+    "slack should default to slack signatures",
+  )
+  assert(
+    slack?.signature_verification?.kind == "hmac",
+    "slack should publish HMAC verification metadata",
+  )
+  assert(
+    slack?.signature_verification?.variant == "slack",
+    "slack should publish the slack signature variant",
+  )
+  assert(
+    slack?.signature_verification?.signature_header == "X-Slack-Signature",
+    "slack should expose the signature header",
+  )
+  assert(
+    slack?.signature_verification?.timestamp_header == "X-Slack-Request-Timestamp",
+    "slack should expose the timestamp header",
+  )
+  let slack_secrets = slack?.secret_requirements ?? []
+  assert(len(slack_secrets) == 1, "slack should require one secret")
+  let slack_secret = slack_secrets[0]
+  assert(slack_secret.name == "signing_secret", "slack should require signing_secret")
+  assert(slack_secret.namespace == "slack", "slack secrets should stay namespaced to slack")
+  assert(len(slack?.outbound_methods ?? []) == 0, "slack should not publish outbound methods yet")
   log("trigger_provider_catalog tests passed")
 }

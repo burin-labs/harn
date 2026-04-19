@@ -150,6 +150,7 @@ fn binding(variant: WebhookSignatureVariant, dedupe_key: Option<&str>) -> Trigge
                 WebhookSignatureVariant::Standard => "standard",
                 WebhookSignatureVariant::Stripe => "stripe",
                 WebhookSignatureVariant::GitHub => "github",
+                WebhookSignatureVariant::Slack => "slack",
             },
             "source": "fixtures",
         }
@@ -465,12 +466,15 @@ async fn github_profile_normalizes_events_under_the_github_provider() {
 }
 
 #[test]
-fn connector_registry_default_lists_github_and_webhook_connectors() {
+fn connector_registry_default_lists_github_slack_and_webhook_connectors() {
     let registry = ConnectorRegistry::default();
     let providers = registry.list();
     assert!(providers
         .iter()
         .any(|provider| provider.as_str() == "github"));
+    assert!(providers
+        .iter()
+        .any(|provider| provider.as_str() == "slack"));
     assert!(providers
         .iter()
         .any(|provider| provider.as_str() == "webhook"));

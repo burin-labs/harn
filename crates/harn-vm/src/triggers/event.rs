@@ -154,12 +154,72 @@ pub enum GitHubEventPayload {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct SlackEventPayload {
+pub struct SlackEventCommon {
     pub event: String,
-    pub subtype: Option<String>,
+    pub event_id: Option<String>,
+    pub api_app_id: Option<String>,
     pub team_id: Option<String>,
     pub channel_id: Option<String>,
+    pub user_id: Option<String>,
+    pub event_ts: Option<String>,
     pub raw: JsonValue,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SlackMessageChannelsEventPayload {
+    #[serde(flatten)]
+    pub common: SlackEventCommon,
+    pub subtype: Option<String>,
+    pub channel: Option<String>,
+    pub user: Option<String>,
+    pub text: Option<String>,
+    pub ts: Option<String>,
+    pub thread_ts: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SlackAppMentionEventPayload {
+    #[serde(flatten)]
+    pub common: SlackEventCommon,
+    pub channel: Option<String>,
+    pub user: Option<String>,
+    pub text: Option<String>,
+    pub ts: Option<String>,
+    pub thread_ts: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SlackReactionAddedEventPayload {
+    #[serde(flatten)]
+    pub common: SlackEventCommon,
+    pub reaction: Option<String>,
+    pub item_user: Option<String>,
+    pub item: JsonValue,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SlackTeamJoinEventPayload {
+    #[serde(flatten)]
+    pub common: SlackEventCommon,
+    pub user: JsonValue,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SlackChannelCreatedEventPayload {
+    #[serde(flatten)]
+    pub common: SlackEventCommon,
+    pub channel: JsonValue,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum SlackEventPayload {
+    MessageChannels(SlackMessageChannelsEventPayload),
+    AppMention(SlackAppMentionEventPayload),
+    ReactionAdded(SlackReactionAddedEventPayload),
+    TeamJoin(SlackTeamJoinEventPayload),
+    ChannelCreated(SlackChannelCreatedEventPayload),
+    Other(SlackEventCommon),
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -242,7 +302,7 @@ pub enum KnownProviderPayload {
     #[serde(rename = "github")]
     GitHub(GitHubEventPayload),
     #[serde(rename = "slack")]
-    Slack(SlackEventPayload),
+    Slack(Box<SlackEventPayload>),
     #[serde(rename = "linear")]
     Linear(LinearEventPayload),
     #[serde(rename = "notion")]
@@ -737,9 +797,19 @@ fn default_provider_schemas() -> Vec<Arc<dyn ProviderSchema>> {
                 "slack",
                 &["webhook"],
                 "SlackEventPayload",
-                SignatureVerificationMetadata::None,
-                Vec::new(),
-                ProviderRuntimeMetadata::Placeholder,
+                hmac_signature_metadata(
+                    "slack",
+                    "X-Slack-Signature",
+                    Some("X-Slack-Request-Timestamp"),
+                    None,
+                    Some(300),
+                    "hex",
+                ),
+                vec![required_secret("signing_secret", "slack")],
+                ProviderRuntimeMetadata::Builtin {
+                    connector: "slack".to_string(),
+                    default_signature_variant: Some("slack".to_string()),
+                },
             ),
             normalize: slack_payload,
         }),
@@ -886,27 +956,149 @@ fn slack_payload(
     _headers: &BTreeMap<String, String>,
     raw: JsonValue,
 ) -> ProviderPayload {
-    let subtype = raw
-        .get("event")
-        .and_then(|value| value.get("subtype"))
-        .and_then(JsonValue::as_str)
-        .map(ToString::to_string);
-    let team_id = raw
-        .get("team_id")
-        .and_then(JsonValue::as_str)
-        .map(ToString::to_string);
-    let channel_id = raw
-        .get("event")
+    let event = raw.get("event");
+    let common = SlackEventCommon {
+        event: kind.to_string(),
+        event_id: raw
+            .get("event_id")
+            .and_then(JsonValue::as_str)
+            .map(ToString::to_string),
+        api_app_id: raw
+            .get("api_app_id")
+            .and_then(JsonValue::as_str)
+            .map(ToString::to_string),
+        team_id: raw
+            .get("team_id")
+            .and_then(JsonValue::as_str)
+            .map(ToString::to_string),
+        channel_id: slack_channel_id(event),
+        user_id: slack_user_id(event),
+        event_ts: event
+            .and_then(|value| value.get("event_ts"))
+            .and_then(JsonValue::as_str)
+            .map(ToString::to_string),
+        raw: raw.clone(),
+    };
+    let payload = match kind {
+        "message.channels" => {
+            SlackEventPayload::MessageChannels(SlackMessageChannelsEventPayload {
+                subtype: event
+                    .and_then(|value| value.get("subtype"))
+                    .and_then(JsonValue::as_str)
+                    .map(ToString::to_string),
+                channel: event
+                    .and_then(|value| value.get("channel"))
+                    .and_then(JsonValue::as_str)
+                    .map(ToString::to_string),
+                user: event
+                    .and_then(|value| value.get("user"))
+                    .and_then(JsonValue::as_str)
+                    .map(ToString::to_string),
+                text: event
+                    .and_then(|value| value.get("text"))
+                    .and_then(JsonValue::as_str)
+                    .map(ToString::to_string),
+                ts: event
+                    .and_then(|value| value.get("ts"))
+                    .and_then(JsonValue::as_str)
+                    .map(ToString::to_string),
+                thread_ts: event
+                    .and_then(|value| value.get("thread_ts"))
+                    .and_then(JsonValue::as_str)
+                    .map(ToString::to_string),
+                common,
+            })
+        }
+        "app_mention" => SlackEventPayload::AppMention(SlackAppMentionEventPayload {
+            channel: event
+                .and_then(|value| value.get("channel"))
+                .and_then(JsonValue::as_str)
+                .map(ToString::to_string),
+            user: event
+                .and_then(|value| value.get("user"))
+                .and_then(JsonValue::as_str)
+                .map(ToString::to_string),
+            text: event
+                .and_then(|value| value.get("text"))
+                .and_then(JsonValue::as_str)
+                .map(ToString::to_string),
+            ts: event
+                .and_then(|value| value.get("ts"))
+                .and_then(JsonValue::as_str)
+                .map(ToString::to_string),
+            thread_ts: event
+                .and_then(|value| value.get("thread_ts"))
+                .and_then(JsonValue::as_str)
+                .map(ToString::to_string),
+            common,
+        }),
+        "reaction_added" => SlackEventPayload::ReactionAdded(SlackReactionAddedEventPayload {
+            reaction: event
+                .and_then(|value| value.get("reaction"))
+                .and_then(JsonValue::as_str)
+                .map(ToString::to_string),
+            item_user: event
+                .and_then(|value| value.get("item_user"))
+                .and_then(JsonValue::as_str)
+                .map(ToString::to_string),
+            item: event
+                .and_then(|value| value.get("item"))
+                .cloned()
+                .unwrap_or(JsonValue::Null),
+            common,
+        }),
+        "team_join" => SlackEventPayload::TeamJoin(SlackTeamJoinEventPayload {
+            user: event
+                .and_then(|value| value.get("user"))
+                .cloned()
+                .unwrap_or(JsonValue::Null),
+            common,
+        }),
+        "channel_created" => SlackEventPayload::ChannelCreated(SlackChannelCreatedEventPayload {
+            channel: event
+                .and_then(|value| value.get("channel"))
+                .cloned()
+                .unwrap_or(JsonValue::Null),
+            common,
+        }),
+        _ => SlackEventPayload::Other(common),
+    };
+    ProviderPayload::Known(KnownProviderPayload::Slack(Box::new(payload)))
+}
+
+fn slack_channel_id(event: Option<&JsonValue>) -> Option<String> {
+    event
         .and_then(|value| value.get("channel"))
         .and_then(JsonValue::as_str)
-        .map(ToString::to_string);
-    ProviderPayload::Known(KnownProviderPayload::Slack(SlackEventPayload {
-        event: kind.to_string(),
-        subtype,
-        team_id,
-        channel_id,
-        raw,
-    }))
+        .map(ToString::to_string)
+        .or_else(|| {
+            event
+                .and_then(|value| value.get("item"))
+                .and_then(|value| value.get("channel"))
+                .and_then(JsonValue::as_str)
+                .map(ToString::to_string)
+        })
+        .or_else(|| {
+            event
+                .and_then(|value| value.get("channel"))
+                .and_then(|value| value.get("id"))
+                .and_then(JsonValue::as_str)
+                .map(ToString::to_string)
+        })
+}
+
+fn slack_user_id(event: Option<&JsonValue>) -> Option<String> {
+    event
+        .and_then(|value| value.get("user"))
+        .and_then(JsonValue::as_str)
+        .map(ToString::to_string)
+        .or_else(|| {
+            event
+                .and_then(|value| value.get("user"))
+                .and_then(|value| value.get("id"))
+                .and_then(JsonValue::as_str)
+                .map(ToString::to_string)
+        })
 }
 
 fn linear_payload(
