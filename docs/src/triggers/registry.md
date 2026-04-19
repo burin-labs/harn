@@ -79,3 +79,11 @@ payload includes:
 `harn doctor` uses the installed registry snapshot to report the live
 bindings it sees after manifest load, including state, version, and
 zeroed metrics for newly installed triggers.
+
+The trigger stdlib’s manual replay path also depends on the registry:
+
+- `trigger_fire(...)` records the synthetic event on `triggers.events`
+- `trigger_replay(...)` looks up that recorded envelope plus any pending
+  stdlib DLQ summary entry on `triggers.dlq`
+- the wrapper then re-enters the dispatcher against the resolved live binding
+  version and threads `replay_of_event_id` through dispatch observability

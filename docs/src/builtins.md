@@ -728,8 +728,8 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 | `daemon_resume(path)` | path: string | dict | Resume a daemon from its persisted state directory |
 | `trigger_list()` | — | list | Return the live trigger registry snapshot as `list<TriggerBinding>` |
 | `trigger_register(config)` | config: dict | dict | Dynamically register a trigger and return its `TriggerHandle` |
-| `trigger_fire(handle, event)` | handle: dict or string, event: dict | dict | Fire a synthetic event into a trigger and return a `DispatchHandle`; local handlers run in-process |
-| `trigger_replay(event_id)` | event_id: string | dict | Fetch a historical event from `triggers.events` and re-dispatch it through the shallow replay path |
+| `trigger_fire(handle, event)` | handle: dict or string, event: dict | dict | Fire a synthetic event into a trigger and return a `DispatchHandle`; execution routes through the trigger dispatcher |
+| `trigger_replay(event_id)` | event_id: string | dict | Fetch a historical event from `triggers.events`, re-dispatch it through the trigger dispatcher, and thread `replay_of_event_id` through the returned `DispatchHandle` |
 | `trigger_inspect_dlq()` | — | list | Return the current DLQ snapshot as `list<DlqEntry>` with retry history |
 | `llm_info()` | — | dict | Current LLM config: `{provider, model, api_key_set}` |
 | `llm_usage()` | — | dict | Cumulative usage: `{input_tokens, output_tokens, total_duration_ms, call_count, total_calls}` |

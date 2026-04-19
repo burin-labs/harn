@@ -550,6 +550,57 @@ fn derive_run_observability_adds_trigger_and_predicate_nodes_with_shared_trace_i
         .any(|edge| edge.kind == "predicate_gate" && edge.label.as_deref() == Some("true")));
 }
 
+#[test]
+fn derive_run_observability_adds_replay_chain_for_replayed_trigger_runs() {
+    let trigger_event = crate::triggers::TriggerEvent {
+        id: crate::triggers::TriggerEventId("trigger_evt_replay".to_string()),
+        provider: crate::triggers::ProviderId("github".to_string()),
+        kind: "issue.opened".to_string(),
+        received_at: time::OffsetDateTime::from_unix_timestamp(1_710_000_000).unwrap(),
+        occurred_at: None,
+        dedupe_key: "github:replay".to_string(),
+        trace_id: crate::triggers::TraceId("trace_replay".to_string()),
+        tenant_id: None,
+        headers: BTreeMap::new(),
+        provider_payload: crate::triggers::ProviderPayload::Known(
+            crate::triggers::event::KnownProviderPayload::GitHub(
+                crate::triggers::GitHubEventPayload {
+                    event: "issues".to_string(),
+                    action: Some("opened".to_string()),
+                    delivery_id: Some("delivery-replay".to_string()),
+                    installation_id: Some(7),
+                    raw: serde_json::json!({"action":"opened"}),
+                },
+            ),
+        ),
+        signature_status: crate::triggers::SignatureStatus::Verified,
+    };
+    let run = RunRecord {
+        id: "run_replay_chain".to_string(),
+        workflow_id: "wf".to_string(),
+        status: "completed".to_string(),
+        metadata: BTreeMap::from([
+            (
+                "trigger_event".to_string(),
+                serde_json::to_value(&trigger_event).unwrap(),
+            ),
+            (
+                "replay_of_event_id".to_string(),
+                serde_json::json!("trigger_evt_original"),
+            ),
+        ]),
+        ..Default::default()
+    };
+
+    let observability = derive_run_observability(&run, None);
+    assert!(observability.action_graph_nodes.iter().any(|node| {
+        node.kind == "trigger" && node.label.contains("original trigger_evt_original")
+    }));
+    assert!(observability.action_graph_edges.iter().any(|edge| {
+        edge.kind == "replay_chain" && edge.label.as_deref() == Some("replay chain")
+    }));
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn save_run_record_publishes_action_graph_updates_to_event_log() {
     crate::reset_thread_local_state();

@@ -106,8 +106,13 @@ const detailPayload = {
     schema_version: 4,
     planner_rounds: [],
     research_fact_count: 0,
-    action_graph_nodes: [],
-    action_graph_edges: [],
+    action_graph_nodes: [
+      { id: "trigger:original", label: "github:issue.opened (original trigger_evt_original)", kind: "trigger", status: "historical", outcome: "replayed_from", trace_id: "trace", stage_id: null, node_id: null, worker_id: null, run_id: null, run_path: null },
+      { id: "trigger:current", label: "github:issue.opened", kind: "trigger", status: "received", outcome: "received", trace_id: "trace", stage_id: null, node_id: null, worker_id: null, run_id: null, run_path: null },
+    ],
+    action_graph_edges: [
+      { from_id: "trigger:original", to_id: "trigger:current", kind: "replay_chain", label: "replay chain" },
+    ],
     worker_lineage: [],
     verification_outcomes: [],
     transcript_pointers: [],
@@ -215,5 +220,6 @@ describe("App", () => {
     })
     expect(screen.getByText("harn replay .harn-runs/failed.json")).toBeInTheDocument()
     expect(screen.getByText(/reviewer • Spawned • 1710000000.100/)).toBeInTheDocument()
+    expect(screen.getByText(/github:issue\.opened \(original trigger_evt_original\) → github:issue\.opened • replay chain • replay_chain/)).toBeInTheDocument()
   })
 })

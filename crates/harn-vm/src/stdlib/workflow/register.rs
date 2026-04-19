@@ -270,7 +270,13 @@ pub(in crate::stdlib) async fn execute_workflow(
             serde_json::to_value(&graph.metadata).unwrap_or_default(),
         );
     }
-    if let Some(trigger_event) = parse_trigger_event_option(options.get("trigger_event"))? {
+    let dispatch_context = crate::triggers::dispatcher::current_dispatch_context();
+    let trigger_event = parse_trigger_event_option(options.get("trigger_event"))?.or_else(|| {
+        dispatch_context
+            .as_ref()
+            .map(|context| context.trigger_event.clone())
+    });
+    if let Some(trigger_event) = trigger_event {
         run.metadata.insert(
             "trigger_event".to_string(),
             serde_json::to_value(&trigger_event).unwrap_or_default(),
@@ -278,6 +284,15 @@ pub(in crate::stdlib) async fn execute_workflow(
         run.metadata.insert(
             "trace_id".to_string(),
             serde_json::json!(trigger_event.trace_id.0),
+        );
+    }
+    if let Some(replay_of_event_id) = dispatch_context
+        .as_ref()
+        .and_then(|context| context.replay_of_event_id.as_ref())
+    {
+        run.metadata.insert(
+            "replay_of_event_id".to_string(),
+            serde_json::json!(replay_of_event_id),
         );
     }
 

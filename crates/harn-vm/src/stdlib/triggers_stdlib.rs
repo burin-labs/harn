@@ -8,11 +8,11 @@ use uuid::Uuid;
 use crate::event_log::{
     active_event_log, install_memory_for_current_thread, EventLog, LogEvent, Topic,
 };
+use crate::triggers::dispatcher::DEFAULT_MAX_ATTEMPTS;
 use crate::triggers::{
-    begin_in_flight, dynamic_register, finish_in_flight, resolve_live_trigger_binding,
-    snapshot_trigger_bindings, TriggerBindingSnapshot, TriggerBindingSource, TriggerBindingSpec,
-    TriggerDispatchOutcome, TriggerEvent, TriggerEventId, TriggerHandlerSpec, TriggerPredicateSpec,
-    TriggerRetryConfig,
+    dynamic_register, resolve_live_trigger_binding, snapshot_trigger_bindings, RetryPolicy,
+    TriggerBindingSnapshot, TriggerBindingSource, TriggerBindingSpec, TriggerEvent, TriggerEventId,
+    TriggerHandlerSpec, TriggerPredicateSpec, TriggerRetryConfig,
 };
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
@@ -103,16 +103,7 @@ pub(crate) fn register_trigger_builtins(vm: &mut Vm) {
             .ok_or_else(|| {
                 VmError::Runtime("trigger_replay: expected event id string".to_string())
             })?;
-        let record = find_recorded_event(&event_id).await?;
-        // TODO(T-14): replace this shallow event-log fetch + redispatch path
-        // with the deterministic replay engine once the full dispatcher lands.
-        dispatch_trigger_event(
-            record.binding_id,
-            Some(record.binding_version),
-            record.event,
-            Some(event_id),
-        )
-        .await
+        replay_trigger_event(&event_id).await
     });
 
     vm.register_async_builtin("trigger_inspect_dlq", |_args| async move {
@@ -153,113 +144,130 @@ async fn dispatch_trigger_event(
         ),
     )
     .await?;
-
-    begin_in_flight(binding.id.as_str(), version).map_err(trigger_registry_error)?;
-
-    let dispatch_result = dispatch_binding(&binding, &event, replay_of_event_id.clone()).await;
-    let handle = match dispatch_result {
-        Ok(result) => {
-            finish_in_flight(
-                binding.id.as_str(),
-                version,
-                TriggerDispatchOutcome::Dispatched,
-            )
-            .await
-            .map_err(trigger_registry_error)?;
-            DispatchHandleRecord {
-                event_id,
-                binding_id: binding.id.as_str().to_string(),
-                binding_version: version,
-                status: "dispatched".to_string(),
-                replay_of_event_id,
-                dlq_entry_id: None,
-                error: None,
-                result,
-            }
-        }
-        Err(error) => {
-            let dlq_entry = upsert_dlq_entry(
-                &log,
-                &binding.snapshot(),
-                &event,
-                &error,
-                replay_of_event_id.clone(),
-            )
-            .await?;
-            finish_in_flight(binding.id.as_str(), version, TriggerDispatchOutcome::Dlq)
-                .await
-                .map_err(trigger_registry_error)?;
-            DispatchHandleRecord {
-                event_id,
-                binding_id: binding.id.as_str().to_string(),
-                binding_version: version,
-                status: "dlq".to_string(),
-                replay_of_event_id,
-                dlq_entry_id: Some(dlq_entry.id),
-                error: Some(error),
-                result: None,
-            }
-        }
-    };
+    let existing_dlq_entry = find_pending_dlq_entry_for_event(&event_id).await?;
+    let dispatch_outcome =
+        dispatch_binding_via_dispatcher(&binding, &event, replay_of_event_id.clone()).await?;
+    let handle = dispatch_handle_from_outcome(
+        &binding.snapshot(),
+        &event_id,
+        dispatch_outcome,
+        existing_dlq_entry,
+        &log,
+        &event,
+        replay_of_event_id,
+    )
+    .await?;
 
     Ok(value_from_serde(&handle))
 }
 
-async fn dispatch_binding(
+async fn replay_trigger_event(event_id: &str) -> Result<VmValue, VmError> {
+    let record = find_recorded_event(event_id).await?;
+    dispatch_trigger_event(
+        record.binding_id,
+        Some(record.binding_version),
+        record.event,
+        Some(event_id.to_string()),
+    )
+    .await
+}
+
+async fn dispatch_binding_via_dispatcher(
     binding: &crate::triggers::registry::TriggerBinding,
     event: &TriggerEvent,
     replay_of_event_id: Option<String>,
-) -> Result<Option<serde_json::Value>, String> {
-    if let Some(predicate) = &binding.when {
-        let outcome = call_trigger_closure(&predicate.closure, event)
-            .await
-            .map_err(|error| format!("trigger predicate failed: {error}"))?;
-        match outcome {
-            VmValue::Bool(true) => {}
-            VmValue::Bool(false) => {
-                return Ok(Some(serde_json::json!({
-                    "skipped": true,
-                    "predicate": predicate.raw,
-                    "replay_of_event_id": replay_of_event_id,
-                })));
-            }
-            other => {
-                return Err(format!(
-                    "trigger predicate '{}' returned {}, expected bool",
-                    predicate.raw,
-                    other.type_name()
-                ));
-            }
-        }
-    }
-
-    match &binding.handler {
-        TriggerHandlerSpec::Local { closure, .. } => {
-            let value = call_trigger_closure(closure, event)
-                .await
-                .map_err(|error| format!("trigger handler failed: {error}"))?;
-            Ok(Some(crate::llm::vm_value_to_json(&value)))
-        }
-        TriggerHandlerSpec::A2a { target } => Err(format!(
-            "trigger dispatch to a2a target '{}' is not implemented in the shallow stdlib path",
-            target
-        )),
-        TriggerHandlerSpec::Worker { queue } => Err(format!(
-            "trigger dispatch to worker queue '{}' is not implemented in the shallow stdlib path",
-            queue
-        )),
-    }
-}
-
-async fn call_trigger_closure(
-    closure: &crate::value::VmClosure,
-    event: &TriggerEvent,
-) -> Result<VmValue, VmError> {
-    let mut vm = crate::vm::clone_async_builtin_child_vm().ok_or_else(|| {
+) -> Result<crate::triggers::DispatchOutcome, VmError> {
+    let base_vm = crate::vm::clone_async_builtin_child_vm().ok_or_else(|| {
         VmError::Runtime("trigger stdlib builtins require an async builtin VM context".to_string())
     })?;
-    let event_arg = value_from_serde(event);
-    vm.call_closure_pub(closure, &[event_arg], &[]).await
+    let dispatcher =
+        crate::triggers::Dispatcher::with_event_log(base_vm, ensure_trigger_event_log());
+    let dispatch_result = if let Some(replay_of_event_id) = replay_of_event_id {
+        dispatcher
+            .dispatch_replay(binding, event.clone(), replay_of_event_id)
+            .await
+    } else {
+        dispatcher.dispatch(binding, event.clone()).await
+    };
+    dispatch_result.map_err(|error| VmError::Runtime(format!("trigger stdlib: {error}")))
+}
+
+async fn dispatch_handle_from_outcome(
+    binding: &TriggerBindingSnapshot,
+    event_id: &str,
+    outcome: crate::triggers::DispatchOutcome,
+    existing_dlq_entry: Option<DlqEntryRecord>,
+    log: &std::sync::Arc<crate::event_log::AnyEventLog>,
+    event: &TriggerEvent,
+    replay_of_event_id: Option<String>,
+) -> Result<DispatchHandleRecord, VmError> {
+    let prior_dlq_entry_id = existing_dlq_entry.as_ref().map(|entry| entry.id.clone());
+    let prior_retry_history = existing_dlq_entry
+        .as_ref()
+        .map(|entry| entry.retry_history.clone())
+        .unwrap_or_default();
+    match outcome.status {
+        crate::triggers::DispatchStatus::Succeeded | crate::triggers::DispatchStatus::Skipped => {
+            if let Some(existing) = existing_dlq_entry {
+                resolve_dlq_entry(log, existing, replay_of_event_id.clone()).await?;
+            }
+            Ok(DispatchHandleRecord {
+                event_id: event_id.to_string(),
+                binding_id: binding.id.clone(),
+                binding_version: binding.version,
+                status: "dispatched".to_string(),
+                replay_of_event_id,
+                dlq_entry_id: None,
+                error: None,
+                result: outcome.result,
+            })
+        }
+        crate::triggers::DispatchStatus::Dlq => {
+            let dlq_entry = upsert_dlq_entry(
+                log,
+                binding,
+                event,
+                outcome
+                    .error
+                    .as_deref()
+                    .unwrap_or("trigger dispatch failed"),
+                replay_of_event_id.clone(),
+                prior_dlq_entry_id,
+                prior_retry_history,
+            )
+            .await?;
+            Ok(DispatchHandleRecord {
+                event_id: event_id.to_string(),
+                binding_id: binding.id.clone(),
+                binding_version: binding.version,
+                status: "dlq".to_string(),
+                replay_of_event_id,
+                dlq_entry_id: Some(dlq_entry.id),
+                error: outcome.error,
+                result: None,
+            })
+        }
+        crate::triggers::DispatchStatus::Failed => Ok(DispatchHandleRecord {
+            event_id: event_id.to_string(),
+            binding_id: binding.id.clone(),
+            binding_version: binding.version,
+            status: "failed".to_string(),
+            replay_of_event_id,
+            dlq_entry_id: None,
+            error: outcome.error,
+            result: None,
+        }),
+        crate::triggers::DispatchStatus::Cancelled => Ok(DispatchHandleRecord {
+            event_id: event_id.to_string(),
+            binding_id: binding.id.clone(),
+            binding_version: binding.version,
+            status: "cancelled".to_string(),
+            replay_of_event_id,
+            dlq_entry_id: None,
+            error: outcome.error,
+            result: None,
+        }),
+    }
 }
 
 async fn find_recorded_event(event_id: &str) -> Result<TriggerEventRecord, VmError> {
@@ -319,26 +327,24 @@ async fn upsert_dlq_entry(
     event: &TriggerEvent,
     error: &str,
     replay_of_event_id: Option<String>,
+    existing_entry_id: Option<String>,
+    mut retry_history: Vec<DlqAttemptRecord>,
 ) -> Result<DlqEntryRecord, VmError> {
-    let mut entry = if let Some(existing) = find_pending_dlq_entry_for_event(&event.id.0).await? {
-        existing
-    } else {
-        DlqEntryRecord {
-            id: format!("dlq_{}", Uuid::now_v7()),
-            event_id: event.id.0.clone(),
-            binding_id: binding.id.clone(),
-            binding_version: binding.version,
-            provider: event.provider.as_str().to_string(),
-            kind: event.kind.clone(),
-            state: "pending".to_string(),
-            error: error.to_string(),
-            event: event.clone(),
-            retry_history: Vec::new(),
-        }
+    let mut entry = DlqEntryRecord {
+        id: existing_entry_id.unwrap_or_else(|| format!("dlq_{}", Uuid::now_v7())),
+        event_id: event.id.0.clone(),
+        binding_id: binding.id.clone(),
+        binding_version: binding.version,
+        provider: event.provider.as_str().to_string(),
+        kind: event.kind.clone(),
+        state: "pending".to_string(),
+        error: error.to_string(),
+        event: event.clone(),
+        retry_history: Vec::new(),
     };
     entry.error = error.to_string();
-    entry.retry_history.push(DlqAttemptRecord {
-        attempt: (entry.retry_history.len() + 1) as u32,
+    retry_history.push(DlqAttemptRecord {
+        attempt: (retry_history.len() + 1) as u32,
         at: OffsetDateTime::now_utc()
             .format(&time::format_description::well_known::Rfc3339)
             .unwrap_or_default(),
@@ -348,6 +354,7 @@ async fn upsert_dlq_entry(
         },
         error: Some(error.to_string()),
     });
+    entry.retry_history = retry_history;
     append_log(
         log,
         TRIGGER_DLQ_TOPIC,
@@ -358,6 +365,34 @@ async fn upsert_dlq_entry(
     )
     .await?;
     Ok(entry)
+}
+
+async fn resolve_dlq_entry(
+    log: &std::sync::Arc<crate::event_log::AnyEventLog>,
+    mut entry: DlqEntryRecord,
+    replay_of_event_id: Option<String>,
+) -> Result<(), VmError> {
+    entry.state = "resolved".to_string();
+    entry.retry_history.push(DlqAttemptRecord {
+        attempt: (entry.retry_history.len() + 1) as u32,
+        at: OffsetDateTime::now_utc()
+            .format(&time::format_description::well_known::Rfc3339)
+            .unwrap_or_default(),
+        status: match replay_of_event_id {
+            Some(_) => "replay_succeeded".to_string(),
+            None => "resolved".to_string(),
+        },
+        error: None,
+    });
+    append_log(
+        log,
+        TRIGGER_DLQ_TOPIC,
+        LogEvent::new(
+            "dlq_entry",
+            serde_json::to_value(&entry).unwrap_or_default(),
+        ),
+    )
+    .await
 }
 
 fn ensure_trigger_event_log() -> std::sync::Arc<crate::event_log::AnyEventLog> {
@@ -454,6 +489,11 @@ fn parse_trigger_config(config: &BTreeMap<String, VmValue>) -> Result<TriggerBin
         VmValue::Dict(map) => Some(map),
         _ => None,
     });
+    let retry = config.get("retry").and_then(|value| match value {
+        VmValue::Dict(map) => Some(map),
+        VmValue::Nil => None,
+        _ => None,
+    });
     let dedupe_key = optional_string(config, "dedupe_key");
     let filter = optional_string(config, "filter");
     let daily_cost_usd = budget
@@ -465,12 +505,17 @@ fn parse_trigger_config(config: &BTreeMap<String, VmValue>) -> Result<TriggerBin
         .map(|value| value as u32);
     let manifest_path = optional_string(config, "manifest_path").map(std::path::PathBuf::from);
     let package_name = optional_string(config, "package_name");
+    let retry = parse_retry_config(retry.map(|value| &**value), "trigger_register")?;
     let fingerprint = serde_json::to_string(&serde_json::json!({
         "id": id,
         "kind": kind,
         "provider": provider.as_str(),
         "handler": handler_descriptor,
         "when": when.as_ref().map(|predicate| predicate.raw.clone()),
+        "retry": {
+            "max": retry.max_attempts(),
+            "policy": format!("{:?}", retry.policy),
+        },
         "match_events": match_events,
         "dedupe_key": dedupe_key,
         "filter": filter,
@@ -488,7 +533,7 @@ fn parse_trigger_config(config: &BTreeMap<String, VmValue>) -> Result<TriggerBin
         provider,
         handler,
         when,
-        retry: TriggerRetryConfig::default(),
+        retry,
         match_events,
         dedupe_key,
         filter,
@@ -498,6 +543,30 @@ fn parse_trigger_config(config: &BTreeMap<String, VmValue>) -> Result<TriggerBin
         package_name,
         definition_fingerprint: fingerprint,
     })
+}
+
+fn parse_retry_config(
+    retry: Option<&BTreeMap<String, VmValue>>,
+    builtin: &str,
+) -> Result<TriggerRetryConfig, VmError> {
+    let Some(retry) = retry else {
+        return Ok(TriggerRetryConfig::default());
+    };
+    let max = retry
+        .get("max")
+        .and_then(VmValue::as_int)
+        .unwrap_or(DEFAULT_MAX_ATTEMPTS as i64)
+        .max(1) as u32;
+    let policy = match optional_string(retry, "backoff").as_deref() {
+        None | Some("svix") => RetryPolicy::Svix,
+        Some("immediate") => RetryPolicy::Linear { delay_ms: 0 },
+        Some(other) => {
+            return Err(VmError::Runtime(format!(
+                "{builtin}: unsupported retry.backoff '{other}', expected 'svix' or 'immediate'"
+            )))
+        }
+    };
+    Ok(TriggerRetryConfig::new(max, policy))
 }
 
 fn parse_handler_value(

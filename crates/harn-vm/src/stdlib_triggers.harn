@@ -119,12 +119,20 @@ type TriggerBudget = {
   max_concurrent: int | nil,
 }
 
+type TriggerRetryBackoff = "svix" | "immediate"
+
+type TriggerRetry = {
+  max: int | nil,
+  backoff: TriggerRetryBackoff | nil,
+}
+
 type TriggerConfig = {
   id: string | nil,
   kind: string,
   provider: ProviderId,
   handler: TriggerHandler,
   when: TriggerPredicate | nil,
+  retry: TriggerRetry | nil,
   match: TriggerMatch | nil,
   events: list<string> | nil,
   dedupe_key: string | nil,

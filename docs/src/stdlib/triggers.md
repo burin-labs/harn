@@ -43,6 +43,7 @@ Register a trigger dynamically and return its `TriggerHandle`.
 - `provider`
 - `handler`
 - `when`
+- `retry`
 - `match` or `events`
 - `dedupe_key`
 - `filter`
@@ -54,6 +55,11 @@ The runtime currently accepts two handler forms:
 
 - Local Harn closures / function references
 - Remote URI strings with `a2a://...` or `worker://...`
+
+`retry` is optional. The current stdlib surface accepts:
+
+- `{max: N, backoff: "svix"}`
+- `{max: N, backoff: "immediate"}`
 
 Example:
 
@@ -94,26 +100,30 @@ If the `event` dict omits low-level envelope fields such as `id`,
 `received_at`, `trace_id`, or `provider_payload`, the runtime fills them with
 synthetic defaults.
 
-Current shallow-path behavior:
+Current behavior:
 
-- Local handlers execute immediately in-process.
-- `when` predicates execute before the handler and can return a skipped result.
-- `a2a://...` and `worker://...` handlers are not dispatched yet from this
-  manual stdlib path; they currently surface a DLQ-style failure until the
-  full dispatcher lands.
+- Execution routes through the trigger dispatcher, so local handlers inherit
+  dispatcher retries, lifecycle events, action-graph updates, and DLQ moves.
+- `when` predicates execute before the handler and can still short-circuit a
+  dispatch.
+- `a2a://...` and `worker://...` handlers still return the dispatcher’s
+  explicit `NotImplemented` failure path.
 
 ### `trigger_replay(event_id)`
 
 Replay a previously recorded event from the EventLog by id and return a
 `DispatchHandle`.
 
-This is intentionally the shallow path for now:
+Current replay behavior:
 
 - Fetch the prior event from the `triggers.events` topic
-- Re-dispatch it through the current binding
+- Re-dispatch it through the trigger dispatcher using the recorded binding
+- Preserve `replay_of_event_id` on the returned `DispatchHandle`
+- Resolve the pending stdlib DLQ entry when a replay succeeds
 
-`trigger_replay(...)` is not the full deterministic T-14 replay engine yet.
-The implementation is marked `TODO(T-14)` accordingly.
+`trigger_replay(...)` is still not the full deterministic T-14 replay engine.
+It replays the recorded trigger event through the current dispatcher/runtime
+state rather than a sandboxed drift-detecting environment.
 
 ### `trigger_inspect_dlq()`
 
@@ -144,6 +154,7 @@ let handle = trigger_register({
   provider: "github",
   handler: fail_handler,
   when: nil,
+  retry: {max: 1, backoff: "immediate"},
   match: nil,
   events: ["issue.opened"],
   dedupe_key: nil,
@@ -170,3 +181,6 @@ println(replay.replay_of_event_id)     // original event id
   persist `triggers.events` and `triggers.dlq`. If the runtime did not already
   install one, the stdlib wrapper falls back to an in-memory log for the
   current thread.
+- When `workflow_execute(...)` runs inside a replayed trigger dispatch, the
+  runtime carries the replay pointer into run metadata so derived
+  observability can render a `replay_chain` edge back to the original event.
