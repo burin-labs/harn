@@ -1,5 +1,6 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::time::Duration as StdDuration;
 
 use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
 
@@ -521,6 +522,8 @@ pub(crate) enum OrchestratorCommand {
     Dlq(OrchestratorDlqArgs),
     /// Inspect trigger and dispatch queues.
     Queue(OrchestratorQueueArgs),
+    /// Replay stranded inbox envelopes explicitly.
+    Recover(OrchestratorRecoverArgs),
 }
 
 #[derive(Debug, Args)]
@@ -619,6 +622,21 @@ pub(crate) struct OrchestratorQueueArgs {
 }
 
 #[derive(Debug, Args)]
+pub(crate) struct OrchestratorRecoverArgs {
+    #[command(flatten)]
+    pub local: OrchestratorLocalArgs,
+    /// Minimum stranded-envelope age required before replay/listing.
+    #[arg(long = "envelope-age", value_name = "DURATION", value_parser = parse_duration_arg)]
+    pub envelope_age: StdDuration,
+    /// List stranded envelopes without replaying them.
+    #[arg(long, default_value_t = false, action = ArgAction::SetTrue)]
+    pub dry_run: bool,
+    /// Confirm that stranded envelopes should actually be replayed.
+    #[arg(long, default_value_t = false, action = ArgAction::SetTrue)]
+    pub yes: bool,
+}
+
+#[derive(Debug, Args)]
 pub(crate) struct PlaygroundArgs {
     /// Host module exporting the capabilities the script expects.
     #[arg(long, default_value = "host.harn")]
@@ -650,6 +668,41 @@ pub(crate) struct PlaygroundArgs {
     /// Re-run when the script or host module changes.
     #[arg(long)]
     pub watch: bool,
+}
+
+fn parse_duration_arg(raw: &str) -> Result<StdDuration, String> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return Err("duration cannot be empty".to_string());
+    }
+
+    let (digits, unit) = raw
+        .chars()
+        .position(|ch| !ch.is_ascii_digit())
+        .map(|index| raw.split_at(index))
+        .ok_or_else(|| {
+            "duration must include a unit suffix like ms, s, m, h, d, or w".to_string()
+        })?;
+    if digits.is_empty() || unit.is_empty() {
+        return Err("duration must be formatted like 30s, 5m, 2h, or 7d".to_string());
+    }
+
+    let value = digits
+        .parse::<u64>()
+        .map_err(|error| format!("invalid duration '{raw}': {error}"))?;
+    match unit {
+        "ms" => Ok(StdDuration::from_millis(value)),
+        "s" => Ok(StdDuration::from_secs(value)),
+        "m" => Ok(StdDuration::from_secs(value.saturating_mul(60))),
+        "h" => Ok(StdDuration::from_secs(value.saturating_mul(60 * 60))),
+        "d" => Ok(StdDuration::from_secs(value.saturating_mul(60 * 60 * 24))),
+        "w" => Ok(StdDuration::from_secs(
+            value.saturating_mul(60 * 60 * 24 * 7),
+        )),
+        _ => Err(format!(
+            "unsupported duration unit '{unit}'; expected ms, s, m, h, d, or w"
+        )),
+    }
 }
 
 #[derive(Debug, Args)]
@@ -827,6 +880,7 @@ pub(crate) struct SkillsNewArgs {
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
+    use std::time::Duration as StdDuration;
 
     use super::{
         Cli, Command, McpCommand, OrchestratorCommand, ProjectTemplate, RunsCommand, SkillsCommand,
@@ -1186,6 +1240,34 @@ mod tests {
             panic!("expected orchestrator queue");
         };
         assert_eq!(queue.local.state_dir, PathBuf::from("state/orchestrator"));
+    }
+
+    #[test]
+    fn test_parses_orchestrator_recover_args() {
+        let cli = Cli::parse_from([
+            "harn",
+            "orchestrator",
+            "recover",
+            "--config",
+            "workspace/harn.toml",
+            "--state-dir",
+            "state/orchestrator",
+            "--envelope-age",
+            "15m",
+            "--dry-run",
+        ]);
+
+        let Command::Orchestrator(args) = cli.command.unwrap() else {
+            panic!("expected orchestrator command");
+        };
+        let OrchestratorCommand::Recover(recover) = args.command else {
+            panic!("expected orchestrator recover");
+        };
+        assert_eq!(recover.local.config, PathBuf::from("workspace/harn.toml"));
+        assert_eq!(recover.local.state_dir, PathBuf::from("state/orchestrator"));
+        assert_eq!(recover.envelope_age, StdDuration::from_secs(15 * 60));
+        assert!(recover.dry_run);
+        assert!(!recover.yes);
     }
 
     #[test]

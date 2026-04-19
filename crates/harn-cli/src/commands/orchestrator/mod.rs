@@ -5,6 +5,7 @@ mod inspect;
 mod listener;
 mod origin_guard;
 mod queue;
+mod recover;
 mod replay;
 pub(crate) mod role;
 mod serve;
@@ -20,5 +21,6 @@ pub(crate) async fn handle(args: OrchestratorArgs) -> Result<(), String> {
         OrchestratorCommand::Replay(replay_args) => replay::run(replay_args).await,
         OrchestratorCommand::Dlq(dlq_args) => dlq::run(dlq_args).await,
         OrchestratorCommand::Queue(queue_args) => queue::run(queue_args).await,
+        OrchestratorCommand::Recover(recover_args) => recover::run(recover_args).await,
     }
 }

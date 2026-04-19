@@ -14,6 +14,7 @@ use tokio::sync::watch;
 
 use harn_vm::event_log::{ConsumerId, EventLog};
 
+use super::common::stranded_envelopes;
 use super::listener::{ListenerConfig, ListenerRuntime, RouteConfig, TriggerMetricSnapshot};
 use super::origin_guard::OriginAllowList;
 use super::role::OrchestratorRole;
@@ -202,6 +203,22 @@ async fn run_local(args: OrchestratorServeArgs) -> Result<(), String> {
             "shutdown_timeout_secs": shutdown_timeout.as_secs(),
             "drain_max_items": drain_config.max_items,
             "drain_deadline_secs": drain_config.deadline.as_secs(),
+        }),
+    )
+    .await?;
+
+    let stranded = stranded_envelopes(&event_log, Duration::ZERO).await?;
+    if !stranded.is_empty() {
+        eprintln!(
+            "[harn] startup found {} stranded inbox envelope(s); inspect with `harn orchestrator queue` and recover explicitly with `harn orchestrator recover --dry-run --envelope-age ...`",
+            stranded.len()
+        );
+    }
+    append_lifecycle_event(
+        &event_log,
+        "startup_stranded_envelopes",
+        json!({
+            "count": stranded.len(),
         }),
     )
     .await?;

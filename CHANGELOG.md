@@ -37,6 +37,16 @@ granular archaeology.
   `load_skill({ name })` tool now hydrates those bodies on demand from
   the same registry.
 
+- **Orchestrator restart no longer auto-replays stranded inbox envelopes
+  (harn#242, backward-incompatible).** `harn orchestrator serve` used to
+  silently re-dispatch historical `trigger.inbox` entries that had no
+  matching `trigger.outbox` history, which could re-fire webhook/a2a
+  handlers users never intended to replay. Restart now leaves those
+  envelopes stranded, surfaces them via `harn orchestrator queue`, emits
+  `orchestrator.lifecycle/startup_stranded_envelopes` with a count, and
+  requires an explicit `harn orchestrator recover --envelope-age <duration>`
+  flow (`--dry-run` to inspect, `--yes` to actually replay).
+
 - **Primary Harn docs site moved from `harn.burincode.com` to
   `harnlang.com`.** The burin-code-subdomain was always a stopgap;
   `harnlang.com` reflects Harn's identity as a standalone programming

@@ -196,7 +196,7 @@ async fn dispatch_trigger_event(
 }
 
 async fn replay_trigger_event(event_id: &str) -> Result<VmValue, VmError> {
-    let record = find_recorded_event(event_id).await?;
+    let record = find_replayable_event(event_id).await?;
     let received_at = record.event.received_at;
     dispatch_trigger_event(
         record.binding_id,
@@ -323,7 +323,14 @@ async fn dispatch_handle_from_outcome(
     }
 }
 
-async fn find_recorded_event(event_id: &str) -> Result<TriggerEventRecord, VmError> {
+async fn find_replayable_event(event_id: &str) -> Result<TriggerEventRecord, VmError> {
+    if let Some(record) = find_recorded_event(event_id).await? {
+        return Ok(record);
+    }
+    find_ingested_event(event_id).await
+}
+
+async fn find_recorded_event(event_id: &str) -> Result<Option<TriggerEventRecord>, VmError> {
     let log = ensure_trigger_event_log();
     let topic = Topic::new(TRIGGER_EVENTS_TOPIC)
         .map_err(|error| VmError::Runtime(format!("trigger_replay: {error}")))?;
@@ -331,11 +338,47 @@ async fn find_recorded_event(event_id: &str) -> Result<TriggerEventRecord, VmErr
         .read_range(&topic, None, usize::MAX)
         .await
         .map_err(|error| VmError::Runtime(format!("trigger_replay: {error}")))?;
-    events
+    Ok(events
         .into_iter()
         .filter_map(|(_, event)| serde_json::from_value::<TriggerEventRecord>(event.payload).ok())
+        .find(|record| record.event.id.0 == event_id))
+}
+
+async fn find_ingested_event(event_id: &str) -> Result<TriggerEventRecord, VmError> {
+    let log = ensure_trigger_event_log();
+    let envelopes_topic = Topic::new(crate::triggers::TRIGGER_INBOX_ENVELOPES_TOPIC)
+        .map_err(|error| VmError::Runtime(format!("trigger_replay: {error}")))?;
+    let legacy_topic = Topic::new(crate::triggers::TRIGGER_INBOX_LEGACY_TOPIC)
+        .map_err(|error| VmError::Runtime(format!("trigger_replay: {error}")))?;
+    let mut events = log
+        .read_range(&envelopes_topic, None, usize::MAX)
+        .await
+        .map_err(|error| VmError::Runtime(format!("trigger_replay: {error}")))?;
+    let legacy_events = log
+        .read_range(&legacy_topic, None, usize::MAX)
+        .await
+        .map_err(|error| VmError::Runtime(format!("trigger_replay: {error}")))?;
+    events.extend(legacy_events);
+    events
+        .into_iter()
+        .filter_map(|(_, event)| {
+            if event.kind != "event_ingested" {
+                return None;
+            }
+            let envelope =
+                serde_json::from_value::<crate::triggers::dispatcher::InboxEnvelope>(event.payload)
+                    .ok()?;
+            let binding_id = envelope.trigger_id?;
+            let binding_version = envelope.binding_version?;
+            Some(TriggerEventRecord {
+                binding_id,
+                binding_version,
+                replay_of_event_id: None,
+                event: envelope.event,
+            })
+        })
         .find(|record| record.event.id.0 == event_id)
-        .ok_or_else(|| VmError::Runtime(format!("trigger_replay: unknown event id '{}'", event_id)))
+        .ok_or_else(|| VmError::Runtime(format!("trigger_replay: unknown event id '{event_id}'")))
 }
 
 async fn inspect_dlq_entries() -> Result<Vec<DlqEntryRecord>, VmError> {

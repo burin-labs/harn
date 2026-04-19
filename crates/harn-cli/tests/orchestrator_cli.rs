@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Command, Output, Stdio};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::Arc;
 use std::thread;
@@ -127,6 +127,22 @@ fn send_sigterm(child: &Child) {
     assert!(status.success(), "kill exited with {status}");
 }
 
+fn wait_for_exit_code(child: &mut Child, expected: i32) {
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while Instant::now() < deadline {
+        if let Some(status) = child.try_wait().unwrap() {
+            assert_eq!(
+                status.code(),
+                Some(expected),
+                "unexpected exit status: {status}"
+            );
+            return;
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+    panic!("timed out waiting for orchestrator exit");
+}
+
 fn wait_for_exit(child: &mut Child) {
     let deadline = Instant::now() + Duration::from_secs(15);
     while Instant::now() < deadline {
@@ -160,6 +176,23 @@ fn bearer_headers() -> HeaderMap {
     let mut headers = json_headers();
     headers.insert(AUTHORIZATION, HeaderValue::from_static("Bearer test-key"));
     headers
+}
+
+fn run_harn_with_env(temp: &TempDir, args: &[&str], envs: &[(&str, &str)]) -> Output {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_harn"));
+    command.current_dir(temp.path()).args(args);
+    for (key, value) in envs {
+        command.env(key, value);
+    }
+    command.output().unwrap()
+}
+
+fn stdout(output: &Output) -> String {
+    String::from_utf8_lossy(&output.stdout).into_owned()
+}
+
+fn stderr(output: &Output) -> String {
+    String::from_utf8_lossy(&output.stderr).into_owned()
 }
 
 fn read_topic_events(
@@ -618,5 +651,199 @@ pub fn on_task(event: TriggerEvent) -> string {
     assert_eq!(
         sqlite_event_count(&state_dir, "trigger.outbox", "dispatch_succeeded"),
         5000
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn restart_surfaces_stranded_envelopes_and_recover_replays_them_explicitly() {
+    let temp = TempDir::new().unwrap();
+    write_file(
+        temp.path(),
+        "harn.toml",
+        r#"
+[package]
+name = "fixture"
+
+[exports]
+handlers = "lib.harn"
+
+[[triggers]]
+id = "incoming-review-task"
+kind = "a2a-push"
+provider = "a2a-push"
+path = "/a2a/review"
+match = { events = ["a2a.task.received"] }
+handler = "handlers::on_task"
+"#,
+    );
+    write_file(
+        temp.path(),
+        "lib.harn",
+        r#"
+import "std/triggers"
+
+pub fn on_task(event: TriggerEvent) -> string {
+  return event.kind
+}
+"#,
+    );
+
+    let envs = [
+        ("HARN_EVENT_LOG_BACKEND", "file"),
+        ("HARN_ORCHESTRATOR_API_KEYS", "test-key"),
+        ("HARN_ORCHESTRATOR_HMAC_SECRET", "unused-shared-secret"),
+        ("HARN_TEST_DISPATCHER_FAIL_BEFORE_OUTBOX", "1"),
+    ];
+    let (mut crashing_child, crashing_rx, crashing_handle) =
+        spawn_orchestrator_with(&temp, &[], &envs);
+    let base_url = wait_for_listener_url(&mut crashing_child, &crashing_rx);
+
+    let body = br#"{"kind":"a2a.task.received","task":{"id":"task-242"}}"#;
+    let response = reqwest::Client::new()
+        .post(format!("{base_url}/a2a/review"))
+        .headers(bearer_headers())
+        .body(body.to_vec())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+
+    wait_for_exit_code(&mut crashing_child, 86);
+    let crashing_stderr = crashing_handle.join().expect("stderr collector thread");
+    assert!(
+        crashing_stderr.contains("registered connectors (1): a2a-push"),
+        "stderr={crashing_stderr}"
+    );
+
+    let restart_envs = [
+        ("HARN_EVENT_LOG_BACKEND", "file"),
+        ("HARN_ORCHESTRATOR_API_KEYS", "test-key"),
+        ("HARN_ORCHESTRATOR_HMAC_SECRET", "unused-shared-secret"),
+    ];
+    let (mut restarted_child, restarted_rx, restarted_handle) =
+        spawn_orchestrator_with(&temp, &[], &restart_envs);
+    wait_for_listener_url(&mut restarted_child, &restarted_rx);
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    let state_dir = temp.path().join("state");
+    let lifecycle = read_topic_events(&state_dir, "orchestrator.lifecycle");
+    assert!(lifecycle.iter().any(|(_, event)| {
+        event.kind == "startup_stranded_envelopes" && event.payload["count"] == serde_json::json!(1)
+    }));
+
+    let queue = run_harn_with_env(
+        &temp,
+        &[
+            "orchestrator",
+            "queue",
+            "--config",
+            "harn.toml",
+            "--state-dir",
+            "./state",
+        ],
+        &[("HARN_EVENT_LOG_BACKEND", "file")],
+    );
+    assert!(
+        queue.status.success(),
+        "status={:?}\nstdout={}\nstderr={}",
+        queue.status.code(),
+        stdout(&queue),
+        stderr(&queue)
+    );
+    assert!(stdout(&queue).contains("stranded_envelopes=1"));
+
+    let recover_without_yes = run_harn_with_env(
+        &temp,
+        &[
+            "orchestrator",
+            "recover",
+            "--config",
+            "harn.toml",
+            "--state-dir",
+            "./state",
+            "--envelope-age",
+            "0s",
+        ],
+        &[("HARN_EVENT_LOG_BACKEND", "file")],
+    );
+    assert!(!recover_without_yes.status.success());
+    assert!(stderr(&recover_without_yes).contains("without --yes"));
+
+    let dry_run = run_harn_with_env(
+        &temp,
+        &[
+            "orchestrator",
+            "recover",
+            "--config",
+            "harn.toml",
+            "--state-dir",
+            "./state",
+            "--envelope-age",
+            "0s",
+            "--dry-run",
+        ],
+        &[("HARN_EVENT_LOG_BACKEND", "file")],
+    );
+    assert!(
+        dry_run.status.success(),
+        "status={:?}\nstdout={}\nstderr={}",
+        dry_run.status.code(),
+        stdout(&dry_run),
+        stderr(&dry_run)
+    );
+    assert!(stdout(&dry_run).contains("stranded_envelopes=1"));
+    assert!(stdout(&dry_run).contains("event_id=trigger_evt_"));
+
+    let recover = run_harn_with_env(
+        &temp,
+        &[
+            "orchestrator",
+            "recover",
+            "--config",
+            "harn.toml",
+            "--state-dir",
+            "./state",
+            "--envelope-age",
+            "0s",
+            "--yes",
+        ],
+        &[("HARN_EVENT_LOG_BACKEND", "file")],
+    );
+    assert!(
+        recover.status.success(),
+        "status={:?}\nstdout={}\nstderr={}",
+        recover.status.code(),
+        stdout(&recover),
+        stderr(&recover)
+    );
+    assert!(stdout(&recover).contains("status=dispatched"));
+
+    let queue_after = run_harn_with_env(
+        &temp,
+        &[
+            "orchestrator",
+            "queue",
+            "--config",
+            "harn.toml",
+            "--state-dir",
+            "./state",
+        ],
+        &[("HARN_EVENT_LOG_BACKEND", "file")],
+    );
+    assert!(
+        queue_after.status.success(),
+        "status={:?}\nstdout={}\nstderr={}",
+        queue_after.status.code(),
+        stdout(&queue_after),
+        stderr(&queue_after)
+    );
+    assert!(stdout(&queue_after).contains("stranded_envelopes=0"));
+
+    send_sigterm(&restarted_child);
+    wait_for_exit(&mut restarted_child);
+    let restarted_stderr = restarted_handle.join().expect("stderr collector thread");
+    assert!(
+        restarted_stderr.contains(SHUTDOWN_NEEDLE),
+        "stderr={restarted_stderr}"
     );
 }

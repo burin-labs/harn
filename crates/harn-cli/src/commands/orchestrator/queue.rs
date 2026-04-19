@@ -4,8 +4,9 @@ use std::sync::Arc;
 use crate::cli::OrchestratorQueueArgs;
 
 use super::common::{
-    load_local_runtime, read_topic, TRIGGER_ATTEMPTS_TOPIC, TRIGGER_INBOX_CLAIMS_TOPIC,
-    TRIGGER_INBOX_ENVELOPES_TOPIC, TRIGGER_INBOX_LEGACY_TOPIC, TRIGGER_OUTBOX_TOPIC,
+    format_duration, format_timestamp, load_local_runtime, read_topic, stranded_envelopes,
+    TRIGGER_ATTEMPTS_TOPIC, TRIGGER_INBOX_CLAIMS_TOPIC, TRIGGER_INBOX_ENVELOPES_TOPIC,
+    TRIGGER_INBOX_LEGACY_TOPIC, TRIGGER_OUTBOX_TOPIC,
 };
 
 pub(super) async fn run(args: OrchestratorQueueArgs) -> Result<(), String> {
@@ -16,6 +17,7 @@ pub(super) async fn run(args: OrchestratorQueueArgs) -> Result<(), String> {
     let claim_events = read_topic(&ctx.event_log, TRIGGER_INBOX_CLAIMS_TOPIC).await?;
     let envelope_events = read_topic(&ctx.event_log, TRIGGER_INBOX_ENVELOPES_TOPIC).await?;
     let legacy_inbox_events = read_topic(&ctx.event_log, TRIGGER_INBOX_LEGACY_TOPIC).await?;
+    let stranded = stranded_envelopes(&ctx.event_log, std::time::Duration::ZERO).await?;
 
     let mut started = BTreeSet::new();
     let mut finished = BTreeSet::new();
@@ -70,6 +72,7 @@ pub(super) async fn run(args: OrchestratorQueueArgs) -> Result<(), String> {
     );
     println!("- inferred_in_flight={}", in_flight.len());
     println!("- inferred_pending_retries={}", pending_retries.len());
+    println!("- stranded_envelopes={}", stranded.len());
     println!("- inbox_claims_written={}", inbox_claims_written);
     println!("- inbox_envelopes_written={}", inbox_envelopes_written);
     println!(
@@ -107,6 +110,29 @@ pub(super) async fn run(args: OrchestratorQueueArgs) -> Result<(), String> {
     } else {
         for key in pending_retries {
             println!("- {key}");
+        }
+    }
+
+    println!();
+    println!("Stranded envelopes:");
+    if stranded.is_empty() {
+        println!("- none");
+    } else {
+        for envelope in stranded {
+            println!(
+                "- event_id={} trigger_id={} binding_version={} provider={} kind={} age={} received_at={} inbox_offset={}",
+                envelope.event_id,
+                envelope.trigger_id.as_deref().unwrap_or("-"),
+                envelope
+                    .binding_version
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| "-".to_string()),
+                envelope.provider,
+                envelope.kind,
+                format_duration(envelope.age),
+                format_timestamp(envelope.received_at),
+                envelope.inbox_offset,
+            );
         }
     }
 
