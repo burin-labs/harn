@@ -807,6 +807,31 @@ Use the daemon stdlib wrappers when you want a first-class handle around
 `watch_paths`, and `idle_watchdog_attempts`, plus
 `event_queue_capacity` (default `1024`).
 
+### Trigger stdlib
+
+Use the trigger stdlib wrappers when a script needs to inspect or manually
+exercise the live trigger registry:
+
+- `trigger_list()` returns `list<TriggerBinding>`.
+- `trigger_register(config)` hot-installs a dynamic trigger and returns a
+  `TriggerHandle`.
+- `trigger_fire(handle, event)` injects a synthetic `TriggerEvent` and returns a
+  `DispatchHandle`.
+- `trigger_replay(event_id)` fetches an event from `triggers.events` and
+  re-dispatches it through the current shallow replay path.
+- `trigger_inspect_dlq()` returns `list<DlqEntry>` with retry history.
+
+Shared types live in `std/triggers`: `TriggerConfig`, `TriggerBinding`,
+`TriggerHandle`, `DispatchHandle`, `DlqEntry`, and `TriggerEvent`.
+
+Current caveats:
+
+- `trigger_fire` executes local handlers in-process. Manual dispatch to
+  `a2a://...` and `worker://...` handlers is still deferred until the full
+  dispatcher lands.
+- `trigger_replay` is the shallow stub for now, not the full deterministic
+  T-14 replay engine.
+
 Workflow stages pick up a session id from `model_policy.session_id`;
 two stages sharing an id share their conversation automatically. The
 pre-0.7 `transcript_policy` dict (with `mode: "reset" | "fork"`) was

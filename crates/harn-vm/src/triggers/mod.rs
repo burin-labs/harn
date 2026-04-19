@@ -11,7 +11,8 @@ pub use event::{
 };
 pub use registry::{
     begin_in_flight, clear_trigger_registry, drain, dynamic_deregister, dynamic_register,
-    finish_in_flight, install_manifest_triggers, snapshot_trigger_bindings, TriggerBindingSnapshot,
-    TriggerBindingSource, TriggerBindingSpec, TriggerDispatchOutcome, TriggerHandlerSpec,
-    TriggerId, TriggerMetricsSnapshot, TriggerPredicateSpec, TriggerRegistryError, TriggerState,
+    finish_in_flight, install_manifest_triggers, resolve_live_trigger_binding,
+    snapshot_trigger_bindings, TriggerBindingSnapshot, TriggerBindingSource, TriggerBindingSpec,
+    TriggerDispatchOutcome, TriggerHandlerSpec, TriggerId, TriggerMetricsSnapshot,
+    TriggerPredicateSpec, TriggerRegistryError, TriggerState,
 };

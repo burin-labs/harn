@@ -203,6 +203,19 @@ impl std::fmt::Debug for TriggerBinding {
 }
 
 impl TriggerBinding {
+    pub fn snapshot(&self) -> TriggerBindingSnapshot {
+        TriggerBindingSnapshot {
+            id: self.id.as_str().to_string(),
+            version: self.version,
+            source: self.source,
+            kind: self.kind.clone(),
+            provider: self.provider.as_str().to_string(),
+            handler_kind: self.handler.kind().to_string(),
+            state: self.state_snapshot(),
+            metrics: self.metrics_snapshot(),
+        }
+    }
+
     fn new(spec: TriggerBindingSpec, version: u32) -> Self {
         Self {
             id: TriggerId::new(spec.id),
@@ -320,16 +333,7 @@ pub fn snapshot_trigger_bindings() -> Vec<TriggerBindingSnapshot> {
         let mut snapshots = Vec::new();
         for bindings in registry.bindings.values() {
             for binding in bindings {
-                snapshots.push(TriggerBindingSnapshot {
-                    id: binding.id.as_str().to_string(),
-                    version: binding.version,
-                    source: binding.source,
-                    kind: binding.kind.clone(),
-                    provider: binding.provider.as_str().to_string(),
-                    handler_kind: binding.handler.kind().to_string(),
-                    state: binding.state_snapshot(),
-                    metrics: binding.metrics_snapshot(),
-                });
+                snapshots.push(binding.snapshot());
             }
         }
         snapshots.sort_by(|left, right| {
@@ -339,6 +343,37 @@ pub fn snapshot_trigger_bindings() -> Vec<TriggerBindingSnapshot> {
                 .then(left.state.as_str().cmp(right.state.as_str()))
         });
         snapshots
+    })
+}
+
+#[allow(clippy::arc_with_non_send_sync)]
+pub fn resolve_live_trigger_binding(
+    id: &str,
+    version: Option<u32>,
+) -> Result<Arc<TriggerBinding>, TriggerRegistryError> {
+    TRIGGER_REGISTRY.with(|slot| {
+        let registry = slot.borrow();
+        if let Some(version) = version {
+            let binding = registry.binding(id, version).ok_or_else(|| {
+                TriggerRegistryError::UnknownBindingVersion {
+                    id: id.to_string(),
+                    version,
+                }
+            })?;
+            if binding.state_snapshot() == TriggerState::Terminated {
+                return Err(TriggerRegistryError::UnknownBindingVersion {
+                    id: id.to_string(),
+                    version,
+                });
+            }
+            return Ok(binding);
+        }
+
+        registry
+            .live_bindings_any_source(id)
+            .into_iter()
+            .max_by_key(|binding| binding.version)
+            .ok_or_else(|| TriggerRegistryError::UnknownId(id.to_string()))
     })
 }
 

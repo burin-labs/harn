@@ -101,3 +101,90 @@ type TriggerEvent = {
   provider_payload: ProviderPayload,
   signature_status: SignatureStatus,
 }
+
+type TriggerState = "registering" | "active" | "draining" | "terminated"
+
+type TriggerBindingSource = "manifest" | "dynamic"
+
+type TriggerHandler = fn(TriggerEvent) -> any | string
+
+type TriggerPredicate = fn(TriggerEvent) -> bool
+
+type TriggerMatch = {
+  events: list<string> | nil,
+}
+
+type TriggerBudget = {
+  daily_cost_usd: float | nil,
+  max_concurrent: int | nil,
+}
+
+type TriggerConfig = {
+  id: string | nil,
+  kind: string,
+  provider: ProviderId,
+  handler: TriggerHandler,
+  when: TriggerPredicate | nil,
+  match: TriggerMatch | nil,
+  events: list<string> | nil,
+  dedupe_key: string | nil,
+  filter: string | nil,
+  budget: TriggerBudget | nil,
+  manifest_path: string | nil,
+  package_name: string | nil,
+}
+
+type TriggerMetrics = {
+  received: int,
+  dispatched: int,
+  failed: int,
+  dlq: int,
+  in_flight: int,
+  last_received_ms: int | nil,
+  cost_total_usd_micros: int,
+  cost_today_usd_micros: int,
+}
+
+type TriggerBinding = {
+  id: string,
+  version: int,
+  source: TriggerBindingSource,
+  kind: string,
+  provider: string,
+  handler_kind: string,
+  state: TriggerState,
+  metrics: TriggerMetrics,
+}
+
+type TriggerHandle = TriggerBinding
+
+type DispatchHandle = {
+  event_id: string,
+  binding_id: string,
+  binding_version: int,
+  status: string,
+  replay_of_event_id: string | nil,
+  dlq_entry_id: string | nil,
+  error: string | nil,
+  result: any | nil,
+}
+
+type DlqAttempt = {
+  attempt: int,
+  at: string,
+  status: string,
+  error: string | nil,
+}
+
+type DlqEntry = {
+  id: string,
+  event_id: string,
+  binding_id: string,
+  binding_version: int,
+  provider: string,
+  kind: string,
+  state: string,
+  error: string,
+  event: TriggerEvent,
+  retry_history: list<DlqAttempt>,
+}

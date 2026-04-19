@@ -9,6 +9,11 @@ pub(crate) fn lookup_generic_builtin_sig(name: &str) -> Option<BuiltinGenericSig
         "llm_call" | "llm_completion" => Some(llm_call_generic_sig()),
         "schema_parse" | "schema_check" => Some(schema_parse_generic_sig()),
         "schema_expect" => Some(schema_expect_generic_sig()),
+        "trigger_fire" => Some(trigger_fire_builtin_sig()),
+        "trigger_inspect_dlq" => Some(trigger_inspect_dlq_builtin_sig()),
+        "trigger_list" => Some(trigger_list_builtin_sig()),
+        "trigger_register" => Some(trigger_register_builtin_sig()),
+        "trigger_replay" => Some(trigger_replay_builtin_sig()),
         _ => None,
     }
 }
@@ -116,5 +121,48 @@ fn schema_expect_generic_sig() -> BuiltinGenericSig {
         type_params: vec!["T".into()],
         params: vec![TypeExpr::Named("unknown".into()), schema_of_t()],
         return_type: TypeExpr::Named("T".into()),
+    }
+}
+
+fn trigger_list_builtin_sig() -> BuiltinGenericSig {
+    BuiltinGenericSig {
+        type_params: vec![],
+        params: vec![],
+        return_type: TypeExpr::List(Box::new(TypeExpr::Named("TriggerBinding".into()))),
+    }
+}
+
+fn trigger_register_builtin_sig() -> BuiltinGenericSig {
+    BuiltinGenericSig {
+        type_params: vec![],
+        params: vec![TypeExpr::Named("TriggerConfig".into())],
+        return_type: TypeExpr::Named("TriggerHandle".into()),
+    }
+}
+
+fn trigger_fire_builtin_sig() -> BuiltinGenericSig {
+    BuiltinGenericSig {
+        type_params: vec![],
+        params: vec![
+            TypeExpr::Named("TriggerHandle".into()),
+            TypeExpr::Named("TriggerEvent".into()),
+        ],
+        return_type: TypeExpr::Named("DispatchHandle".into()),
+    }
+}
+
+fn trigger_replay_builtin_sig() -> BuiltinGenericSig {
+    BuiltinGenericSig {
+        type_params: vec![],
+        params: vec![TypeExpr::Named("string".into())],
+        return_type: TypeExpr::Named("DispatchHandle".into()),
+    }
+}
+
+fn trigger_inspect_dlq_builtin_sig() -> BuiltinGenericSig {
+    BuiltinGenericSig {
+        type_params: vec![],
+        params: vec![],
+        return_type: TypeExpr::List(Box::new(TypeExpr::Named("DlqEntry".into()))),
     }
 }
