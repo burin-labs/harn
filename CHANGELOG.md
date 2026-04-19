@@ -181,6 +181,19 @@ granular archaeology.
   failures open a five-minute circuit breaker with operator-visible
   warnings.
 
+- **OpenTelemetry tracing and metrics for orchestrator dispatch flow (#184).**
+  Added orchestrator observability bootstrap in `harn orchestrator serve` with
+  `HARN_OTEL_ENDPOINT`, `HARN_OTEL_SERVICE_NAME`, and `HARN_OTEL_HEADERS`
+  propagation, plus OTel-enabled `ingest` and `dispatch` spans that share an
+  end-to-end trace id and include dispatch outcome attributes (`result.status`,
+  `result.duration_ms`). Listener ingest now records a `trace_id` on each pending
+  trigger payload and propagates ingest span context into dispatcher via
+  `otel_parent_span_id`, so pending work is linked end-to-end. Added Prometheus
+  counters (`dispatch_succeeded_total`, `dispatch_failed_total`, `inbox_duplicates_total`,
+  `retry_scheduled_total`) and `GET /metrics` on the listener. Added an
+  integration test asserting OTLP span emission with shared trace ids across ingress
+  and dispatch hops.
+
 - **`harn orchestrator {inspect, fire, replay, dlq, queue}` CLI
   commands (#185).** Implemented the placeholder orchestrator
   subcommands that used to error with `not implemented`. `inspect`

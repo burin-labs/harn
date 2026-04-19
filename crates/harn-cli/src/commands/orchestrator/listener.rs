@@ -17,6 +17,7 @@ use time::OffsetDateTime;
 
 use harn_vm::event_log::{AnyEventLog, EventLog, LogEvent, Topic};
 use harn_vm::secrets::{SecretId, SecretProvider, SecretVersion};
+use tracing::Instrument as _;
 
 use crate::commands::orchestrator::origin_guard::{enforce_allowed_origin, OriginAllowList};
 use crate::commands::orchestrator::tls::{ServerRuntime, TlsFiles};
@@ -37,6 +38,7 @@ pub(crate) struct ListenerConfig {
     pub(crate) secrets: Arc<dyn SecretProvider>,
     pub(crate) allowed_origins: OriginAllowList,
     pub(crate) max_body_bytes: usize,
+    pub(crate) metrics_registry: Arc<harn_vm::MetricsRegistry>,
     pub(crate) routes: Vec<RouteConfig>,
 }
 
@@ -93,6 +95,10 @@ impl ListenerRuntime {
             .route(
                 "/readyz",
                 get(|| async move { (StatusCode::OK, "ready").into_response() }),
+            )
+            .route(
+                "/metrics",
+                get(metrics_endpoint).layer(Extension(config.metrics_registry.clone())),
             )
             .route(
                 "/{*path}",
@@ -382,110 +388,158 @@ async fn ingest_trigger(
     context.metrics.received.fetch_add(1, Ordering::Relaxed);
     context.metrics.in_flight.fetch_add(1, Ordering::Relaxed);
 
-    let normalized_headers = normalize_headers(&headers);
-    if let Err(error) = authorize_request(
-        &context,
-        method.as_str(),
-        uri.path(),
-        &normalized_headers,
-        body.as_ref(),
-    )
-    .await
-    {
-        context.metrics.failed.fetch_add(1, Ordering::Relaxed);
-        context.metrics.in_flight.fetch_sub(1, Ordering::Relaxed);
-        return error.into_response();
-    }
+    let trace_id = harn_vm::TraceId::new();
+    let span = tracing::info_span!(
+        "ingest",
+        trigger_id = %context.route.trigger_id,
+        binding_version = context.route.binding_version,
+        trace_id = %trace_id.0
+    );
+    let _ = harn_vm::observability::otel::set_span_parent(&span, &trace_id, None);
 
-    if let Some(delay) = context.request_delay {
-        tokio::time::sleep(delay).await;
-    }
-
-    let result = normalize_request(&context, &normalized_headers, &query, body.as_ref()).await;
-    let response = match result {
-        Ok(NormalizedRequest::Event(event)) => {
-            let dedupe_ttl = Duration::from_secs(
-                u64::from(context.route.dedupe_retention_days.max(1)) * 24 * 60 * 60,
-            );
-            let postprocess = harn_vm::postprocess_normalized_event(
-                context.inbox.as_ref(),
-                &context.route.trigger_id,
-                context.route.dedupe_key_template.is_some(),
-                dedupe_ttl,
-                *event,
-            )
-            .await;
-            match postprocess {
-                Ok(harn_vm::PostNormalizeOutcome::DuplicateDropped) => {
-                    context.metrics.in_flight.fetch_sub(1, Ordering::Relaxed);
-                    (
-                        StatusCode::OK,
-                        axum::Json(json!({
-                            "status": "duplicate_dropped",
-                            "trigger_id": context.route.trigger_id,
-                        })),
-                    )
-                        .into_response()
-                }
-                Ok(harn_vm::PostNormalizeOutcome::Ready(event)) => {
-                    let event = *event;
-                    let payload = json!({
-                        "trigger_id": context.route.trigger_id,
-                        "binding_version": context.route.binding_version,
-                        "event": event,
-                    });
-                    match context
-                        .event_log
-                        .append(
-                            &context.pending_topic,
-                            LogEvent::new("trigger_event", payload),
-                        )
-                        .await
-                    {
-                        Ok(event_id) => {
-                            context.metrics.dispatched.fetch_add(1, Ordering::Relaxed);
-                            context.metrics.in_flight.fetch_sub(1, Ordering::Relaxed);
-                            (
-                                StatusCode::OK,
-                                axum::Json(json!({
-                                    "status": "accepted",
-                                    "event_id": event_id,
-                                    "trigger_id": context.route.trigger_id,
-                                })),
-                            )
-                                .into_response()
-                        }
-                        Err(error) => {
-                            context.metrics.failed.fetch_add(1, Ordering::Relaxed);
-                            context.metrics.in_flight.fetch_sub(1, Ordering::Relaxed);
-                            (
-                                StatusCode::INTERNAL_SERVER_ERROR,
-                                format!("failed to append trigger event to pending log: {error}"),
-                            )
-                                .into_response()
-                        }
-                    }
-                }
-                Err(error) => {
-                    context.metrics.failed.fetch_add(1, Ordering::Relaxed);
-                    context.metrics.in_flight.fetch_sub(1, Ordering::Relaxed);
-                    HttpError::from_connector(error).into_response()
-                }
-            }
-        }
-        Ok(NormalizedRequest::Immediate(response)) => {
-            context.metrics.dispatched.fetch_add(1, Ordering::Relaxed);
-            context.metrics.in_flight.fetch_sub(1, Ordering::Relaxed);
-            response
-        }
-        Err(error) => {
+    async move {
+        let normalized_headers = normalize_headers(&headers);
+        if let Err(error) = authorize_request(
+            &context,
+            method.as_str(),
+            uri.path(),
+            &normalized_headers,
+            body.as_ref(),
+        )
+        .await
+        {
             context.metrics.failed.fetch_add(1, Ordering::Relaxed);
             context.metrics.in_flight.fetch_sub(1, Ordering::Relaxed);
-            error.into_response()
+            return error.into_response();
         }
-    };
 
-    response
+        if let Some(delay) = context.request_delay {
+            tokio::time::sleep(delay).await;
+        }
+
+        let result = normalize_request(
+            &context,
+            &normalized_headers,
+            &query,
+            body.as_ref(),
+            trace_id,
+        )
+        .await;
+        match result {
+            Ok(NormalizedRequest::Event(event)) => {
+                let dedupe_ttl = Duration::from_secs(
+                    u64::from(context.route.dedupe_retention_days.max(1)) * 24 * 60 * 60,
+                );
+                let postprocess = harn_vm::postprocess_normalized_event(
+                    context.inbox.as_ref(),
+                    &context.route.trigger_id,
+                    context.route.dedupe_key_template.is_some(),
+                    dedupe_ttl,
+                    *event,
+                )
+                .await;
+                match postprocess {
+                    Ok(harn_vm::PostNormalizeOutcome::DuplicateDropped) => {
+                        context.metrics.in_flight.fetch_sub(1, Ordering::Relaxed);
+                        (
+                            StatusCode::OK,
+                            axum::Json(json!({
+                                "status": "duplicate_dropped",
+                                "trigger_id": context.route.trigger_id,
+                            })),
+                        )
+                            .into_response()
+                    }
+                    Ok(harn_vm::PostNormalizeOutcome::Ready(event)) => {
+                        let event = *event;
+                        let payload = json!({
+                            "trigger_id": context.route.trigger_id,
+                            "binding_version": context.route.binding_version,
+                            "event": event,
+                        });
+                        let mut pending_headers = BTreeMap::new();
+                        pending_headers.insert("trace_id".to_string(), event.trace_id.0.clone());
+                        if let Some(parent_span_id) =
+                            harn_vm::observability::otel::current_span_id_hex(
+                                &tracing::Span::current(),
+                            )
+                        {
+                            pending_headers.insert(
+                                harn_vm::observability::otel::OTEL_PARENT_SPAN_ID_HEADER
+                                    .to_string(),
+                                parent_span_id,
+                            );
+                        }
+
+                        match context
+                            .event_log
+                            .append(
+                                &context.pending_topic,
+                                LogEvent::new("trigger_event", payload)
+                                    .with_headers(pending_headers),
+                            )
+                            .await
+                        {
+                            Ok(event_id) => {
+                                context.metrics.dispatched.fetch_add(1, Ordering::Relaxed);
+                                context.metrics.in_flight.fetch_sub(1, Ordering::Relaxed);
+                                (
+                                    StatusCode::OK,
+                                    axum::Json(json!({
+                                        "status": "accepted",
+                                        "event_id": event_id,
+                                        "trigger_id": context.route.trigger_id,
+                                    })),
+                                )
+                                    .into_response()
+                            }
+                            Err(error) => {
+                                context.metrics.failed.fetch_add(1, Ordering::Relaxed);
+                                context.metrics.in_flight.fetch_sub(1, Ordering::Relaxed);
+                                (
+                                    StatusCode::INTERNAL_SERVER_ERROR,
+                                    format!(
+                                        "failed to append trigger event to pending log: {error}"
+                                    ),
+                                )
+                                    .into_response()
+                            }
+                        }
+                    }
+                    Err(error) => {
+                        context.metrics.failed.fetch_add(1, Ordering::Relaxed);
+                        context.metrics.in_flight.fetch_sub(1, Ordering::Relaxed);
+                        HttpError::from_connector(error).into_response()
+                    }
+                }
+            }
+            Ok(NormalizedRequest::Immediate(response)) => {
+                context.metrics.dispatched.fetch_add(1, Ordering::Relaxed);
+                context.metrics.in_flight.fetch_sub(1, Ordering::Relaxed);
+                response
+            }
+            Err(error) => {
+                context.metrics.failed.fetch_add(1, Ordering::Relaxed);
+                context.metrics.in_flight.fetch_sub(1, Ordering::Relaxed);
+                error.into_response()
+            }
+        }
+    }
+    .instrument(span)
+    .await
+}
+
+async fn metrics_endpoint(
+    Extension(metrics): Extension<Arc<harn_vm::MetricsRegistry>>,
+) -> impl IntoResponse {
+    (
+        StatusCode::OK,
+        [(
+            axum::http::header::CONTENT_TYPE,
+            "text/plain; version=0.0.4; charset=utf-8",
+        )],
+        metrics.render_prometheus(),
+    )
 }
 
 async fn authorize_request(
@@ -510,6 +564,7 @@ async fn normalize_request(
     normalized_headers: &BTreeMap<String, String>,
     query: &BTreeMap<String, String>,
     body: &[u8],
+    trace_id: harn_vm::TraceId,
 ) -> Result<NormalizedRequest, HttpError> {
     let received_at = OffsetDateTime::now_utc();
     if let Some(connector) = context.route.connector.as_ref() {
@@ -521,7 +576,7 @@ async fn normalize_request(
             "binding_version": context.route.binding_version,
             "path": context.route.path,
         });
-        let event = connector
+        let mut event = connector
             .lock()
             .await
             .normalize_inbound(raw)
@@ -536,6 +591,7 @@ async fn normalize_request(
                     .into_response(),
             ));
         }
+        event.trace_id = trace_id.clone();
         return Ok(NormalizedRequest::Event(Box::new(event)));
     }
 
@@ -596,7 +652,7 @@ async fn normalize_request(
         received_at,
         occurred_at: infer_occurred_at(&provider_payload),
         dedupe_key,
-        trace_id: harn_vm::TraceId::new(),
+        trace_id,
         tenant_id: None,
         headers: harn_vm::redact_headers(
             normalized_headers,
