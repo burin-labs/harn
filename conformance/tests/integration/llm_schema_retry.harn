@@ -46,7 +46,6 @@ pipeline default() {
   }
   println(contains(unwrap_err(err), "schema"))
   println(len(llm_mock_calls()))
-
   // `schema_retry_nudge: false` still retries; it just omits the
   // corrective user message.
   llm_mock_clear()
@@ -69,7 +68,6 @@ pipeline default() {
   println(len(bare_calls))
   let bare_second = bare_calls[1].messages
   println(bare_second[len(bare_second) - 1].role)
-
   // Exhausted prose-only retries surface as hard schema failures.
   llm_mock_clear()
   llm_mock({text: "Analyzing the user task"})
