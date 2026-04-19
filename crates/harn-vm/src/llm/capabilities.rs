@@ -68,6 +68,14 @@ pub struct ProviderRule {
     pub prompt_caching: Option<bool>,
     #[serde(default)]
     pub thinking: Option<bool>,
+    /// Carry `<think>...</think>` blocks in assistant history across turns.
+    /// Qwen3.6 exposes this as `chat_template_kwargs.preserve_thinking`;
+    /// Alibaba recommends enabling it for long-horizon coding agents so the
+    /// model doesn't re-derive context it already worked out in prior turns.
+    /// Anthropic's adaptive-thinking signature contract is stricter but plays
+    /// the same role there.
+    #[serde(default)]
+    pub preserve_thinking: Option<bool>,
 }
 
 /// Resolved capabilities for a `(provider, model)` pair. Unset rule
@@ -81,6 +89,7 @@ pub struct Capabilities {
     pub max_tools: Option<u32>,
     pub prompt_caching: bool,
     pub thinking: bool,
+    pub preserve_thinking: bool,
 }
 
 thread_local! {
@@ -234,6 +243,7 @@ fn rule_to_caps(rule: &ProviderRule) -> Capabilities {
         max_tools: rule.max_tools,
         prompt_caching: rule.prompt_caching.unwrap_or(false),
         thinking: rule.thinking.unwrap_or(false),
+        preserve_thinking: rule.preserve_thinking.unwrap_or(false),
     }
 }
 
@@ -388,6 +398,63 @@ mod tests {
         let caps = lookup("mock", "gpt-5.4-preview");
         assert!(caps.defer_loading);
         assert_eq!(caps.tool_search, vec!["hosted", "client"]);
+    }
+
+    #[test]
+    fn qwen36_ollama_preserves_thinking() {
+        reset();
+        let caps = lookup("ollama", "qwen3.6:35b-a3b-coding-nvfp4");
+        assert!(caps.native_tools);
+        assert!(caps.thinking);
+        assert!(
+            caps.preserve_thinking,
+            "Qwen3.6 should enable preserve_thinking by default for coding agents"
+        );
+    }
+
+    #[test]
+    fn qwen35_ollama_does_not_preserve_thinking() {
+        reset();
+        let caps = lookup("ollama", "qwen3.5:35b-a3b-coding-nvfp4");
+        assert!(caps.native_tools);
+        assert!(caps.thinking);
+        assert!(
+            !caps.preserve_thinking,
+            "Qwen3.5 lacks the preserve_thinking kwarg — rely on the chat template's rolling checkpoint instead"
+        );
+    }
+
+    #[test]
+    fn qwen36_routed_providers_all_preserve_thinking() {
+        reset();
+        for (provider, model) in [
+            ("openrouter", "qwen/qwen3.6-plus"),
+            ("together", "Qwen/Qwen3.6-35B-A3B"),
+            ("huggingface", "Qwen/Qwen3.6-35B-A3B"),
+            ("fireworks", "accounts/fireworks/models/qwen3p6-plus"),
+            ("dashscope", "qwen3.6-plus"),
+            ("llamacpp", "unsloth/Qwen3.6-35B-A3B-GGUF"),
+            ("local", "Qwen3.6-35B-A3B"),
+        ] {
+            let caps = lookup(provider, model);
+            assert!(caps.thinking, "{provider}/{model}: thinking");
+            assert!(
+                caps.preserve_thinking,
+                "{provider}/{model}: preserve_thinking must be on for Qwen3.6"
+            );
+            assert!(caps.native_tools, "{provider}/{model}: native_tools");
+        }
+    }
+
+    #[test]
+    fn dashscope_and_llamacpp_resolve_capabilities() {
+        reset();
+        // New sibling providers should fall through to `openai` for
+        // gpt-*  models even without dedicated rules.
+        let caps = lookup("dashscope", "gpt-5.4-preview");
+        assert!(caps.defer_loading);
+        let caps = lookup("llamacpp", "gpt-5.4-preview");
+        assert!(caps.defer_loading);
     }
 
     #[test]
