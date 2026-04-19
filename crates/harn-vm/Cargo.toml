@@ -50,7 +50,7 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt", "registry"] }
 opentelemetry = { version = "0.31", optional = true }
-opentelemetry_sdk = { version = "0.31", optional = true, features = ["rt-tokio"] }
+opentelemetry_sdk = { version = "0.31", optional = true, features = ["rt-tokio", "experimental_trace_batch_span_processor_with_async_runtime"] }
 opentelemetry-otlp = { version = "0.31", default-features = false, features = ["http-json", "reqwest-rustls"], optional = true }
 tracing-opentelemetry = { version = "0.32", optional = true }
 zeroize = "1"

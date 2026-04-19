@@ -4,7 +4,9 @@ use std::collections::HashMap;
 #[cfg(feature = "otel")]
 use sha2::{Digest, Sha256};
 use tracing::level_filters::LevelFilter;
+use tracing_subscriber::filter::filter_fn;
 use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::Layer as _;
 
 use crate::TraceId;
 
@@ -32,7 +34,11 @@ impl ObservabilityGuard {
                 use opentelemetry::trace::TracerProvider as _;
 
                 let tracer = provider.tracer("harn.orchestrator");
-                let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
+                let telemetry = tracing_opentelemetry::layer()
+                    .with_tracer(tracer)
+                    .with_filter(filter_fn(|metadata| {
+                        metadata.is_span() && metadata.target().starts_with("harn")
+                    }));
                 let subscriber = tracing_subscriber::registry()
                     .with(LevelFilter::INFO)
                     .with(fmt_layer())
@@ -144,6 +150,8 @@ fn build_tracer_provider_from_env(
 ) -> Result<Option<opentelemetry_sdk::trace::SdkTracerProvider>, String> {
     use opentelemetry::global;
     use opentelemetry_otlp::{Protocol, WithExportConfig as _, WithHttpConfig as _};
+    use opentelemetry_sdk::runtime;
+    use opentelemetry_sdk::trace::span_processor_with_async_runtime::BatchSpanProcessor;
     use opentelemetry_sdk::Resource;
 
     let Some(raw_endpoint) = std::env::var("HARN_OTEL_ENDPOINT")
@@ -175,9 +183,10 @@ fn build_tracer_provider_from_env(
         .build()
         .map_err(|error| format!("failed to build OTel span exporter: {error}"))?;
 
+    let batch = BatchSpanProcessor::builder(exporter, runtime::Tokio).build();
     let provider = opentelemetry_sdk::trace::SdkTracerProvider::builder()
         .with_resource(Resource::builder().with_service_name(service_name).build())
-        .with_simple_exporter(exporter)
+        .with_span_processor(batch)
         .build();
     global::set_tracer_provider(provider.clone());
     Ok(Some(provider))

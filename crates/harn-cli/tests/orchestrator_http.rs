@@ -29,6 +29,7 @@ use sha2::Sha256;
 use tempfile::TempDir;
 use time::OffsetDateTime;
 use tokio::net::TcpListener;
+use tokio::sync::oneshot;
 
 const STARTUP_PREFIX: &str = "[harn] HTTP listener ready on ";
 const STARTUP_NEEDLE: &str = "HTTP listener ready";
@@ -244,13 +245,19 @@ impl OrchestratorProcess {
                     }
                 }
                 Err(mpsc::RecvTimeoutError::Disconnected) => {
-                    let stderr = self.join_stderr();
+                    let stderr = self.shutdown_and_join_stderr();
                     panic!("stderr stream closed before listener became ready\nstderr={stderr}");
                 }
             }
         }
-        let stderr = self.join_stderr();
+        let stderr = self.shutdown_and_join_stderr();
         panic!("timed out waiting for listener startup\nstderr={stderr}");
+    }
+
+    fn shutdown_and_join_stderr(&mut self) -> String {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+        self.join_stderr()
     }
 
     fn join_stderr(&mut self) -> String {
@@ -298,6 +305,17 @@ fn wait_for_exit(child: &mut Child) {
             return;
         }
         thread::sleep(Duration::from_millis(100));
+    }
+    panic!("timed out waiting for orchestrator exit");
+}
+
+async fn wait_for_exit_async(child: &mut Child) -> std::process::ExitStatus {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while Instant::now() < deadline {
+        if let Some(status) = child.try_wait().unwrap() {
+            return status;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
     }
     panic!("timed out waiting for orchestrator exit");
 }
@@ -386,7 +404,7 @@ fn wait_for_path(path: &Path, timeout: Duration) {
 #[derive(Clone, Debug)]
 struct OtlpRequest {
     headers: Vec<(String, String)>,
-    body: JsonValue,
+    body: Vec<u8>,
 }
 
 #[derive(Clone)]
@@ -397,28 +415,44 @@ struct MockOtelCollectorState {
 struct MockOtelCollector {
     url: String,
     requests: Arc<Mutex<Vec<OtlpRequest>>>,
-    task: tokio::task::JoinHandle<()>,
+    shutdown: Option<oneshot::Sender<()>>,
+    thread: Option<thread::JoinHandle<()>>,
 }
 
 impl MockOtelCollector {
-    async fn start() -> Self {
+    fn start() -> Self {
         let requests = Arc::new(Mutex::new(Vec::new()));
         let state = MockOtelCollectorState {
             requests: requests.clone(),
         };
-        let app = Router::new()
-            .route("/v1/traces", post(record_otlp_traces))
-            .with_state(state);
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        let task = tokio::spawn(async move {
-            axum::serve(listener, app).await.unwrap();
+        let (url_tx, url_rx) = mpsc::channel();
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        let thread = thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            runtime.block_on(async move {
+                let app = Router::new()
+                    .route("/v1/traces", post(record_otlp_traces))
+                    .with_state(state);
+                let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+                let addr = listener.local_addr().unwrap();
+                url_tx.send(format!("http://{addr}")).unwrap();
+                axum::serve(listener, app)
+                    .with_graceful_shutdown(async {
+                        let _ = shutdown_rx.await;
+                    })
+                    .await
+                    .unwrap();
+            });
         });
 
         Self {
-            url: format!("http://{addr}"),
+            url: url_rx.recv().unwrap(),
             requests,
-            task,
+            shutdown: Some(shutdown_tx),
+            thread: Some(thread),
         }
     }
 
@@ -426,14 +460,23 @@ impl MockOtelCollector {
         let requests = self.requests.lock().unwrap().clone();
         requests
             .into_iter()
-            .flat_map(|request| collect_spans_from_body(&request.body))
+            .flat_map(|request| {
+                serde_json::from_slice::<JsonValue>(&request.body)
+                    .map(|body| collect_spans_from_body(&body))
+                    .unwrap_or_default()
+            })
             .collect()
     }
 }
 
 impl Drop for MockOtelCollector {
     fn drop(&mut self) {
-        self.task.abort();
+        if let Some(shutdown) = self.shutdown.take() {
+            let _ = shutdown.send(());
+        }
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
     }
 }
 
@@ -451,7 +494,6 @@ async fn record_otlp_traces(
     headers: HeaderMap,
     body: Bytes,
 ) -> StatusCode {
-    let json: JsonValue = serde_json::from_slice(&body).unwrap();
     let captured_headers = headers
         .iter()
         .filter_map(|(name, value)| {
@@ -463,7 +505,7 @@ async fn record_otlp_traces(
         .collect::<Vec<_>>();
     state.requests.lock().unwrap().push(OtlpRequest {
         headers: captured_headers,
-        body: json,
+        body: body.to_vec(),
     });
     StatusCode::OK
 }
@@ -582,7 +624,7 @@ async fn github_webhook_delivery_is_accepted_and_persisted() {
     assert_status(response, StatusCode::OK).await;
 
     send_sigterm(&process.child);
-    let status = process.child.wait().unwrap();
+    let status = wait_for_exit_async(&mut process.child).await;
     let stderr = process.join_stderr();
     assert!(status.success(), "status={status} stderr={stderr}");
     assert!(stderr.contains(SHUTDOWN_NEEDLE), "stderr={stderr}");
@@ -761,7 +803,7 @@ async fn a2a_push_route_requires_bearer_or_valid_hmac() {
     assert_status(response, StatusCode::OK).await;
 
     send_sigterm(&process.child);
-    let status = process.child.wait().unwrap();
+    let status = wait_for_exit_async(&mut process.child).await;
     let stderr = process.join_stderr();
     assert!(status.success(), "status={status} stderr={stderr}");
     assert!(stderr.contains(SHUTDOWN_NEEDLE), "stderr={stderr}");
@@ -933,14 +975,14 @@ async fn graceful_shutdown_waits_for_in_flight_request() {
     assert!(snapshot.contains("\"in_flight\": 0"), "snapshot={snapshot}");
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn otel_exports_ingest_and_dispatch_spans_with_shared_trace_id() {
     let _lock = lock_orchestrator_tests();
     let temp = TempDir::new().unwrap();
     write_file(temp.path(), "harn.toml", &base_manifest(None));
     write_file(temp.path(), "lib.harn", handler_module());
 
-    let collector = MockOtelCollector::start().await;
+    let collector = MockOtelCollector::start();
     let secret = "otel-secret";
     let envs = [
         ("HARN_SECRET_PROVIDERS", "env"),
@@ -956,17 +998,18 @@ async fn otel_exports_ingest_and_dispatch_spans_with_shared_trace_id() {
     let base_url = process.wait_for_listener_url();
 
     let body = br#"{"action":"opened","issue":{"number":5}}"#;
-    let response = reqwest::Client::new()
+    let client = reqwest::Client::new();
+    let request = client
         .post(format!("{base_url}/triggers/github-new-issue"))
         .headers(github_headers(secret, body, None))
         .body(body.to_vec())
-        .send()
-        .await
+        .build()
         .unwrap();
+    let response = client.execute(request).await.unwrap();
     assert_status(response, StatusCode::OK).await;
 
     send_sigterm(&process.child);
-    let status = process.child.wait().unwrap();
+    let status = wait_for_exit_async(&mut process.child).await;
     let stderr = process.join_stderr();
     assert!(status.success(), "status={status} stderr={stderr}");
     assert!(stderr.contains(SHUTDOWN_NEEDLE), "stderr={stderr}");
@@ -979,10 +1022,16 @@ async fn otel_exports_ingest_and_dispatch_spans_with_shared_trace_id() {
         if has_ingest && has_dispatch {
             break spans;
         }
-        assert!(
-            Instant::now() < deadline,
-            "timed out waiting for OTel spans"
-        );
+        if Instant::now() >= deadline {
+            let requests = collector.requests.lock().unwrap().clone();
+            panic!(
+                "timed out waiting for OTel spans\ncollector_headers={:#?}",
+                requests
+                    .iter()
+                    .map(|request| request.headers.clone())
+                    .collect::<Vec<_>>()
+            );
+        }
         tokio::time::sleep(Duration::from_millis(100)).await;
     };
 
