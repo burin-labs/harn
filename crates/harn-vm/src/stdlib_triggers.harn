@@ -96,14 +96,7 @@ type GitHubOtherEventPayload = {
   raw: dict,
 }
 
-type GitHubEventPayload =
-  GitHubIssuesEventPayload
-  | GitHubPullRequestEventPayload
-  | GitHubIssueCommentEventPayload
-  | GitHubPullRequestReviewEventPayload
-  | GitHubPushEventPayload
-  | GitHubWorkflowRunEventPayload
-  | GitHubOtherEventPayload
+type GitHubEventPayload = GitHubIssuesEventPayload | GitHubPullRequestEventPayload | GitHubIssueCommentEventPayload | GitHubPullRequestReviewEventPayload | GitHubPushEventPayload | GitHubWorkflowRunEventPayload | GitHubOtherEventPayload
 
 type SlackEventPayload = {
   provider: "slack",
