@@ -750,7 +750,6 @@ dependencies = [
  "harn-parser",
  "harn-vm",
  "include_dir",
- "keyring",
  "notify",
  "nu-ansi-term",
  "rand 0.10.1",
@@ -841,12 +840,14 @@ dependencies = [
 name = "harn-vm"
 version = "0.7.22"
 dependencies = [
+ "async-trait",
  "base64",
  "futures",
  "harn-lexer",
  "harn-parser",
  "httpdate",
  "ignore",
+ "keyring",
  "md-5",
  "opentelemetry",
  "opentelemetry-otlp",
@@ -866,6 +867,7 @@ dependencies = [
  "tokio-util",
  "toml",
  "uuid",
+ "zeroize",
 ]
 
 [[package]]
