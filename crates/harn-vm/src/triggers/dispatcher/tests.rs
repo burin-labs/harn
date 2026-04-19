@@ -8,6 +8,7 @@
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::net::TcpListener;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::Arc;
 use std::sync::{Mutex, Once, OnceLock};
@@ -199,30 +200,54 @@ fn flatten_action_graph(
 struct MockA2aServer {
     authority: String,
     requests: Receiver<serde_json::Value>,
+    stop: Arc<AtomicBool>,
     join: thread::JoinHandle<()>,
 }
 
 impl MockA2aServer {
     fn next_request(&self) -> serde_json::Value {
-        self.requests
-            .recv_timeout(Duration::from_secs(5))
+        self.request_within(Duration::from_secs(5))
             .expect("mock A2A request")
     }
 
+    fn request_within(&self, timeout: Duration) -> Option<serde_json::Value> {
+        self.requests.recv_timeout(timeout).ok()
+    }
+
     fn finish(self) {
+        self.stop.store(true, Ordering::SeqCst);
         self.join.join().expect("mock A2A thread");
     }
 }
 
 fn spawn_mock_a2a_server(task_result: serde_json::Value) -> MockA2aServer {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock A2A listener");
+    listener
+        .set_nonblocking(true)
+        .expect("set mock A2A listener nonblocking");
     let addr = listener.local_addr().expect("mock A2A addr");
     let authority = format!("127.0.0.1:{}", addr.port());
     let (tx, rx) = mpsc::channel();
+    let stop = Arc::new(AtomicBool::new(false));
+    let stop_thread = stop.clone();
     let tls_config = mock_a2a_tls_config();
     let join = thread::spawn(move || {
-        for _ in 0..2 {
-            let (stream, _) = listener.accept().expect("accept mock A2A request");
+        let mut handled_requests = 0;
+        while handled_requests < 2 {
+            if stop_thread.load(Ordering::SeqCst) {
+                break;
+            }
+            let (stream, _) = match listener.accept() {
+                Ok(connection) => connection,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    thread::sleep(Duration::from_millis(10));
+                    continue;
+                }
+                Err(error) => panic!("accept mock A2A request: {error}"),
+            };
+            stream
+                .set_nonblocking(false)
+                .expect("set mock A2A stream blocking");
             stream
                 .set_read_timeout(Some(Duration::from_secs(5)))
                 .expect("set read timeout");
@@ -233,11 +258,13 @@ fn spawn_mock_a2a_server(task_result: serde_json::Value) -> MockA2aServer {
                 .expect("construct mock A2A TLS connection");
             let mut stream = StreamOwned::new(connection, stream);
             handle_mock_a2a_connection(&mut stream, addr.port(), &tx, &task_result);
+            handled_requests += 1;
         }
     });
     MockA2aServer {
         authority,
         requests: rx,
+        stop,
         join,
     }
 }
@@ -523,6 +550,54 @@ async fn a2a_handler_returns_pending_task_handle() {
 
             let request = server.next_request();
             assert_eq!(request["method"], "a2a.SendMessage");
+            server.finish();
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn shutdown_cancels_a2a_dispatch_started_after_shutdown() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let server = spawn_mock_a2a_server(serde_json::json!({
+                "id": "task-inline",
+                "status": {"state": "completed"},
+                "history": [
+                    {"id": "msg-user", "role": "user", "parts": [{"type": "text", "text": "ignored"}]},
+                    {"id": "msg-agent", "role": "agent", "parts": [{"type": "text", "text": "\"unexpected\""}]},
+                ],
+                "artifacts": [],
+            }));
+            let (_dir, _log, dispatcher) = a2a_dispatcher_fixture(
+                format!("{}/triage", server.authority),
+                TriggerRetryConfig::default(),
+            )
+            .await;
+
+            let dispatcher_for_task = dispatcher.clone();
+            let handle = tokio::task::spawn_local(async move {
+                dispatcher_for_task
+                    .dispatch_event(trigger_event("issues.opened", "delivery-a2a-shutdown"))
+                    .await
+                    .expect("dispatch finishes")
+            });
+
+            dispatcher.shutdown();
+
+            let outcomes = handle.await.expect("join A2A dispatch");
+            assert_eq!(outcomes.len(), 1);
+            assert_eq!(outcomes[0].status, DispatchStatus::Cancelled);
+            assert_eq!(outcomes[0].result, None);
+            assert!(outcomes[0]
+                .error
+                .as_deref()
+                .is_some_and(|message| message.contains("cancelled")));
+            assert!(
+                server.request_within(Duration::from_millis(100)).is_none(),
+                "A2A dispatch should not reach the remote after shutdown"
+            );
+
             server.finish();
         })
         .await;

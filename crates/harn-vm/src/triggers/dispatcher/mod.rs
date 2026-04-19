@@ -1080,6 +1080,11 @@ impl Dispatcher {
                 Ok(vm_value_to_json(&value))
             }
             DispatchUri::A2a { target } => {
+                if self.state.shutting_down.load(Ordering::SeqCst) {
+                    return Err(DispatchError::Cancelled(
+                        "dispatcher shutdown cancelled A2A dispatch".to_string(),
+                    ));
+                }
                 let (_endpoint, ack) = crate::a2a::dispatch_trigger_event(
                     target,
                     binding.id.as_str(),
