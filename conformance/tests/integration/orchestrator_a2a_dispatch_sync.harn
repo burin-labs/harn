@@ -1,3 +1,4 @@
+import "../_common"
 import "std/triggers"
 
 fn wait_for_log_line(log_path, needle) {
@@ -38,8 +39,7 @@ pipeline test(task) {
     "pipeline default(task) {\n  let envelope = json_parse(task)\n  println(json_stringify({trace_id: envelope.event.trace_id, target_agent: envelope.target_agent}))\n}\n",
   )
   let repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
-  let target_dir = env("CARGO_TARGET_DIR") ?? path_join(repo_root, "target")
-  let harn_bin = path_join(target_dir, "debug/harn")
+  let harn_bin = resolve_harn_bin(repo_root)
   assert(file_exists(harn_bin), "missing built harn binary at " + harn_bin)
   let start = shell_at(
     root,
