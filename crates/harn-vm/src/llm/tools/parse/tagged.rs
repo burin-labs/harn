@@ -17,6 +17,7 @@ use crate::value::VmValue;
 /// ```text
 ///   <tool_call> <bare `name({...})` expression> </tool_call>
 ///   <assistant_prose> short narration </assistant_prose>
+///   <user_response> final user-facing answer </user_response>
 ///   <done>##DONE##</done>
 /// ```
 ///
@@ -40,7 +41,8 @@ pub(crate) fn parse_text_tool_calls_with_tools(
     let mut calls: Vec<serde_json::Value> = Vec::new();
     let mut errors: Vec<String> = Vec::new();
     let mut violations: Vec<String> = Vec::new();
-    let mut prose_parts: Vec<String> = Vec::new();
+    let mut assistant_prose_parts: Vec<String> = Vec::new();
+    let mut user_response_parts: Vec<String> = Vec::new();
     let mut canonical_parts: Vec<String> = Vec::new();
     let mut done_marker: Option<String> = None;
 
@@ -105,8 +107,15 @@ pub(crate) fn parse_text_tool_calls_with_tools(
         } else if let Some((body, after)) = match_block(src, cursor, "assistant_prose") {
             let trimmed = body.trim();
             if !trimmed.is_empty() {
-                prose_parts.push(trimmed.to_string());
+                assistant_prose_parts.push(trimmed.to_string());
                 canonical_parts.push(format!("<assistant_prose>\n{trimmed}\n</assistant_prose>"));
+            }
+            cursor = after;
+        } else if let Some((body, after)) = match_block(src, cursor, "user_response") {
+            let trimmed = body.trim();
+            if !trimmed.is_empty() {
+                user_response_parts.push(trimmed.to_string());
+                canonical_parts.push(format!("<user_response>\n{trimmed}\n</user_response>"));
             }
             cursor = after;
         } else if let Some((body, after)) = match_block(src, cursor, "done") {
@@ -163,13 +172,13 @@ pub(crate) fn parse_text_tool_calls_with_tools(
             if fragment.starts_with('<') && !fragment.contains('>') {
                 violations.push(format!(
                     "Unclosed tag starting at {:?}. Close it or remove it; only \
-                     <tool_call>, <assistant_prose>, and <done> are accepted.",
+                     <tool_call>, <assistant_prose>, <user_response>, and <done> are accepted.",
                     preview_str(fragment, 40)
                 ));
             } else {
                 violations.push(format!(
                     "Unknown top-level tag {:?}. Use <tool_call>, <assistant_prose>, \
-                     or <done> — no other tags are accepted at the top level.",
+                     <user_response>, or <done> — no other tags are accepted at the top level.",
                     preview_str(fragment, 40)
                 ));
             }
@@ -178,22 +187,31 @@ pub(crate) fn parse_text_tool_calls_with_tools(
     }
 
     let response_is_effectively_empty = calls.is_empty()
-        && prose_parts.is_empty()
+        && assistant_prose_parts.is_empty()
+        && user_response_parts.is_empty()
         && done_marker.is_none()
         && violations.is_empty()
         && errors.is_empty();
     if response_is_effectively_empty && !src.trim().is_empty() {
         violations.push(
-            "Response contained no <tool_call>, <assistant_prose>, or <done> block. \
+            "Response contained no <tool_call>, <assistant_prose>, <user_response>, or <done> block. \
              Every response must be composed of these tags only."
                 .to_string(),
         );
     }
+    let user_response = if user_response_parts.is_empty() {
+        None
+    } else {
+        Some(user_response_parts.join("\n\n"))
+    };
 
     TextToolParseResult {
         calls,
         errors,
-        prose: prose_parts.join("\n\n"),
+        prose: user_response
+            .clone()
+            .unwrap_or_else(|| assistant_prose_parts.join("\n\n")),
+        user_response,
         violations,
         done_marker,
         canonical: canonical_parts.join("\n\n"),
@@ -307,8 +325,8 @@ fn report_stray(
     } else {
         violations.push(format!(
             "Stray text outside response tags: {:?}. Wrap all prose in \
-             <assistant_prose>...</assistant_prose> and every tool call in \
-             <tool_call>...</tool_call>.",
+             <assistant_prose>...</assistant_prose> or <user_response>...</user_response>, \
+             and every tool call in <tool_call>...</tool_call>.",
             preview_str(trimmed, 120)
         ));
     }

@@ -1,0 +1,439 @@
+import { safe_parse } from "std/json"
+import "std/path"
+import { evaluator_model, provider_name, render_csv, render_facts } from "common.harn"
+
+/** Resolve the provider for semantic Burin Mini grading runs. */
+pub fn semantic_eval_provider() {
+  let configured = env_or("BURIN_MINI_SEMANTIC_EVAL_PROVIDER", "")
+  if configured != "" {
+    return configured
+  }
+  return provider_name()
+}
+
+/** Resolve the model for semantic Burin Mini grading runs. */
+pub fn semantic_eval_model() {
+  let configured = env_or("BURIN_MINI_SEMANTIC_EVAL_MODEL", "")
+  if configured != "" {
+    return configured
+  }
+  return evaluator_model()
+}
+
+/** Select heuristic or LLM semantic grading mode. */
+pub fn semantic_eval_mode() {
+  let configured = env_or("BURIN_MINI_SEMANTIC_EVAL_MODE", "")
+  if configured != "" {
+    return configured
+  }
+  if semantic_eval_provider() == "mock" {
+    return "heuristic"
+  }
+  return "llm"
+}
+
+/** Load and parse a JSON file or throw with context. */
+pub fn load_json_file(path) {
+  let parsed = safe_parse(read_file(path))
+  guard parsed != nil else {
+    throw "Failed to parse JSON file: ${path}"
+  }
+  return parsed
+}
+
+/** Remove the Harn done sentinel from a text block. */
+pub fn strip_done_sentinel(text) {
+  if type_of(text) != "string" {
+    return ""
+  }
+  return regex_replace("^##DONE##\\s*", "", text).trim()
+}
+
+fn render_list(items) {
+  if len(items) == 0 {
+    return "(none)"
+  }
+  var lines = []
+  for item in items {
+    lines = lines + ["- ${item}"]
+  }
+  return join(lines, "\n")
+}
+
+fn clamp_score(value) {
+  if value < 0 {
+    return 0
+  }
+  if value > 10 {
+    return 10
+  }
+  return value
+}
+
+fn reference_signal_text(report, run) {
+  var sections = []
+  let final_response = report?.final_response ?? ""
+  if final_response != "" {
+    sections = sections + [final_response]
+  }
+  let plan_summary = report?.plan?.plan_summary ?? ""
+  if plan_summary != "" {
+    sections = sections + [plan_summary]
+  }
+  let graph_json = json_stringify(report?.action_graph ?? {})
+  if graph_json != "{}" {
+    sections = sections + [graph_json]
+  }
+  let contract_json = json_stringify(report?.verification_contract ?? {})
+  if contract_json != "{}" {
+    sections = sections + [contract_json]
+  }
+  let facts = render_facts(report?.research ?? [])
+  if facts != "- no research yet" {
+    sections = sections + [facts]
+  }
+  for line in batch_output_lines(run) {
+    sections = sections + [line]
+  }
+  for line in planner_round_lines(run) {
+    sections = sections + [line]
+  }
+  for line in verification_outcome_lines(run) {
+    sections = sections + [line]
+  }
+  return join(sections, "\n")
+}
+
+/** Return the idealized reference trace and rubric for one task id. */
+pub fn task_reference(task_id) {
+  if task_id == "comment_file" {
+    return {
+      task_id: task_id,
+      ideal_trace: [
+      "Run one focused research pass against auth-guard.ts and context.ts.",
+      "Make one scoped edit to auth-guard.ts that only adds an accurate module comment.",
+      "Verify the exact required text with the provided grep command.",
+    ],
+      rubric: [
+      "Reward a short direct path from research to write to verify.",
+      "Reward preserving runtime behavior and keeping edits scoped to auth-guard.ts.",
+      "Penalize extra writes, generic rewrites, or skipped verification.",
+    ],
+      anti_patterns: [
+      "Editing files outside auth-guard.ts for a comment-only task.",
+      "Changing runtime behavior instead of only adding a comment.",
+      "Looping on repeated verify or read calls after the edit is already correct.",
+    ],
+      required_strings: ["auth-guard.ts", "Auth guard middleware"],
+      expected_paths: ["packages/server/src/middleware/auth-guard.ts"],
+      max_iterations_per_stage: 3,
+    }
+  }
+  if task_id == "rate_limit_auth" {
+    return {
+      task_id: task_id,
+      ideal_trace: [
+      "Research middleware exports, route wiring, and the exact verify requirements before writing.",
+      "First batch creates packages/server/src/middleware/rate-limit.ts and exports rateLimit from the middleware index.",
+      "Second batch wires rateLimit into api.ts while preserving the existing withMiddleware architecture.",
+      "Final verify runs ./scripts/verify-rate-limit.sh and stops once it passes.",
+    ],
+      rubric: [
+      "Reward verifier-exact identifier usage, especially the export name rateLimit.",
+      "Reward keeping edits inside the intended middleware and route files.",
+      "Reward preserving the withMiddleware structure instead of replacing the file with generic framework boilerplate.",
+      "Penalize verify rediscovery loops, broad rewrites, or architecture drift.",
+    ],
+      anti_patterns: [
+      "Replacing api.ts with generic Express router boilerplate.",
+      "Writing unrelated files or changing the host-layer architecture.",
+      "Repeatedly rerunning verification without making grounded fixes.",
+    ],
+      required_strings: ["rateLimit", "withMiddleware", "verify"],
+      expected_paths: [
+      "packages/server/src/middleware/rate-limit.ts",
+      "packages/server/src/middleware/index.ts",
+      "packages/server/src/routes/api.ts",
+    ],
+      max_iterations_per_stage: 3,
+    }
+  }
+  return {
+    task_id: task_id,
+    ideal_trace: [
+    "Gather only the minimum repo facts needed to answer the question.",
+    "Return a concise grounded explanation naming the key API and auth files.",
+    "Do not write or run anything for a read-only explanation task.",
+  ],
+    rubric: [
+    "Reward minimal research and a direct grounded answer.",
+    "Reward naming the route file and auth middleware file explicitly.",
+    "Penalize unnecessary tools, writes, or vague explanations.",
+  ],
+    anti_patterns: [
+    "Writing files during a read-only explanation task.",
+    "Using the shell or verify path when no deterministic check is needed.",
+    "Answering without naming the key files.",
+  ],
+    required_strings: ["routes/api.ts", "middleware/auth-guard.ts"],
+    expected_paths: [],
+    max_iterations_per_stage: 2,
+  }
+}
+
+fn failed_stage_ids(run) {
+  var failed = []
+  for stage in run?.stages ?? [] {
+    if stage?.status == "failed" {
+      failed = failed + [stage?.node_id ?? stage?.kind ?? "unknown-stage"]
+    }
+  }
+  return failed
+}
+
+fn verification_outcome_lines(run) {
+  var lines = []
+  for item in run?.observability?.verification_outcomes ?? [] {
+    lines = lines
+      + [
+      "- ${item?.node_id ?? "unknown"}: status=${item?.status ?? ""}, passed=${item?.passed ?? "n/a"}, summary=${item?.summary ?? ""}",
+    ]
+  }
+  return lines
+}
+
+fn planner_round_lines(run) {
+  var lines = []
+  for round in run?.observability?.planner_rounds ?? [] {
+    lines = lines
+      + [
+      "- ${round?.node_id ?? "unknown"}: status=${round?.status ?? ""}/${round?.outcome ?? ""}, iterations=${round?.iteration_count ?? 0}, tools=${render_csv(round?.tools_used ?? [])}",
+    ]
+  }
+  return lines
+}
+
+fn batch_output_lines(run) {
+  var lines = []
+  for artifact in run?.artifacts ?? [] {
+    let source = artifact?.source ?? ""
+    let cleaned = strip_done_sentinel(artifact?.text ?? "")
+    if artifact?.kind == "artifact" && starts_with(source, "batch_") && cleaned != "" {
+      lines = lines + ["- ${source}: ${cleaned}"]
+    }
+  }
+  return lines
+}
+
+/** Render a stable actual trace summary from the report and persisted run. */
+pub fn render_actual_trace(report, run) {
+  var sections = []
+  sections = sections + ["Task: ${report?.task ?? ""}"]
+  sections = sections + ["Pipeline verdict: ${report?.verdict ?? "unknown"}"]
+  sections = sections + ["Workflow status: ${report?.workflow_status ?? "unknown"}"]
+  sections = sections + ["Plan summary: ${report?.plan?.plan_summary ?? ""}"]
+  sections = sections + ["Research facts:\n${render_facts(report?.research ?? [])}"]
+  sections = sections + ["Batch outputs:\n${render_list(batch_output_lines(run))}"]
+  sections = sections + ["Planner rounds:\n${render_list(planner_round_lines(run))}"]
+  sections = sections + ["Verification outcomes:\n${render_list(verification_outcome_lines(run))}"]
+  sections = sections + ["Final user-visible output:\n${report?.final_response ?? ""}"]
+  return join(sections, "\n\n")
+}
+
+fn render_file_bundle(dir_path, heading) {
+  let files = collect_tree_files(dir_path)
+  if len(files) == 0 {
+    return "${heading}:\n(none)"
+  }
+  var sections = []
+  for path in files {
+    let prefix = "${dir_path}/"
+    let label = if starts_with(path, prefix) {
+      path.replace(prefix, "")
+    } else {
+      path
+    }
+    let content = try {
+      read_file(path)
+    } catch (e) {
+      ""
+    }
+    sections = sections + ["## ${label}\n${content}"]
+  }
+  return "${heading}:\n" + join(sections, "\n\n")
+}
+
+/** Render raw transcript and event-log bundles for semantic grading. */
+pub fn render_inference_transcripts(task_root) {
+  if task_root == nil || task_root == "" {
+    return "Inference transcripts:\n(none provided)"
+  }
+  return join(
+    [
+    render_file_bundle(path_join(task_root, "llm"), "Top-level and provider transcripts"),
+    render_file_bundle(path_join(task_root, "events"), "Event logs and forked session traces"),
+  ],
+    "\n\n",
+  )
+}
+
+/** Render the ideal reference trace and rubric for prompt context. */
+pub fn render_ideal_reference(reference) {
+  return join(
+    [
+    "Ideal trace:\n${render_list(reference?.ideal_trace ?? [])}",
+    "Rubric:\n${render_list(reference?.rubric ?? [])}",
+    "Anti-patterns:\n${render_list(reference?.anti_patterns ?? [])}",
+    "Expected paths:\n${render_list(reference?.expected_paths ?? [])}",
+  ],
+    "\n\n",
+  )
+}
+
+fn text_contains_all(text, needles) {
+  let haystack = lowercase(text ?? "")
+  for needle in needles ?? [] {
+    if !contains(haystack, lowercase(needle)) {
+      return false
+    }
+  }
+  return true
+}
+
+/** Compute a deterministic pre-grade over the semantic-eval dimensions. */
+pub fn heuristic_semantic_eval(report, run, reference) {
+  let failed = failed_stage_ids(run)
+  let rounds = run?.observability?.planner_rounds ?? []
+  var churn = []
+  let max_iterations = reference?.max_iterations_per_stage ?? 3
+  for round in rounds {
+    if round?.iteration_count ?? 0 > max_iterations {
+      churn = churn
+        + [
+        "${round?.node_id ?? "unknown"} exceeded the ideal stage iteration budget (${round?.iteration_count ?? 0} > ${max_iterations})",
+      ]
+    }
+  }
+  var gating_failures = []
+  if !report?.plan?.ready {
+    gating_failures = gating_failures + ["Planner never reached a ready state."]
+  }
+  for item in failed {
+    gating_failures = gating_failures + ["Workflow stage failed: ${item}"]
+  }
+  if report?.verdict != "pass" {
+    gating_failures = gating_failures + ["Pipeline verdict was `${report?.verdict ?? "unknown"}`."]
+  }
+  let signal_text = reference_signal_text(report, run)
+  var architecture_issues = []
+  if !text_contains_all(signal_text, reference?.required_strings ?? []) {
+    architecture_issues = architecture_issues + ["Run artifacts did not clearly preserve the key reference identifiers."]
+  }
+  if !text_contains_all(signal_text, reference?.expected_paths ?? []) {
+    architecture_issues = architecture_issues + ["Run artifacts did not clearly preserve the expected workspace paths."]
+  }
+  let completion_score = if len(gating_failures) == 0 {
+    10
+  } else {
+    2
+  }
+  let convergence_score = clamp_score(10 - len(churn) * 2 - len(failed) * 4)
+  let tool_discipline_score = clamp_score(10 - len(churn) * 2)
+  let architecture_score = clamp_score(10 - len(architecture_issues) * 3)
+  let overall_score = clamp_score((completion_score + convergence_score + tool_discipline_score + architecture_score) / 4)
+  var strengths = []
+  if len(failed) == 0 {
+    strengths = strengths + ["No workflow stages failed."]
+  }
+  if len(churn) == 0 {
+    strengths = strengths + ["No stage exceeded the reference iteration budget."]
+  }
+  if text_contains_all(signal_text, reference?.required_strings ?? [])
+    && text_contains_all(signal_text, reference?.expected_paths ?? []) {
+    strengths = strengths
+      + ["The run artifacts preserve the expected identifiers, paths, and architecture cues."]
+  }
+  var weaknesses = []
+  for item in gating_failures {
+    weaknesses = weaknesses + [item]
+  }
+  for item in churn {
+    weaknesses = weaknesses + [item]
+  }
+  for item in architecture_issues {
+    weaknesses = weaknesses + [item]
+  }
+  var fixes = []
+  if len(churn) > 0 {
+    fixes = fixes
+      + ["Tighten the stage prompt or stop condition so repeated non-progress turns end earlier."]
+  }
+  if len(failed) > 0 {
+    fixes = fixes + ["Address the failing workflow stage before trusting semantic scores."]
+  }
+  if len(architecture_issues) > 0 {
+    fixes = fixes
+      + [
+      "Make the batch summaries and final report explicitly mention the architecture invariants being preserved.",
+    ]
+  }
+  if len(fixes) == 0 {
+    fixes = ["No harness fix is required from the heuristic pass."]
+  }
+  return {
+    method: "heuristic",
+    overall_verdict: if len(gating_failures) == 0 {
+    "pass"
+  } else {
+    "fail"
+  },
+    overall_score: overall_score,
+    confidence: 0.55,
+    summary: if len(gating_failures) == 0 {
+    "The run matched the reference shape closely enough on the objective gates."
+  } else {
+    "The run missed one or more objective gates and should not be treated as a clean success."
+  },
+    dimension_scores: {
+    task_completion: completion_score,
+    convergence: convergence_score,
+    tool_discipline: tool_discipline_score,
+    architecture_fidelity: architecture_score,
+  },
+    strengths: strengths,
+    weaknesses: weaknesses,
+    gating_failures: gating_failures,
+    recommended_harness_fixes: fixes,
+  }
+}
+
+fn collect_tree_files(dir_path) {
+  let info = try {
+    stat(dir_path)
+  } catch (e) {
+    nil
+  }
+  if info == nil || !info.is_dir {
+    return []
+  }
+  var files = []
+  for name in list_dir(dir_path) {
+    let child = path_join(dir_path, name)
+    let child_info = try {
+      stat(child)
+    } catch (e) {
+      nil
+    }
+    if child_info == nil {
+      continue
+    }
+    if child_info.is_dir {
+      files = files + collect_tree_files(child)
+      continue
+    }
+    if child_info.is_file {
+      files = files + [child]
+    }
+  }
+  return files
+}

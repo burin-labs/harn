@@ -316,6 +316,174 @@ async fn daemon_resume_path_restores_prior_session_state() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn persisted_session_keeps_compacted_prompt_surface_on_resume() {
+    reset_llm_mock_state();
+    crate::agent_sessions::reset_session_store();
+    crate::llm::mock::push_llm_mock(crate::llm::mock::LlmMock {
+        text: "first answer".to_string(),
+        tool_calls: Vec::new(),
+        match_pattern: None,
+        consume_on_match: true,
+        input_tokens: None,
+        output_tokens: None,
+        cache_read_tokens: None,
+        cache_write_tokens: None,
+        thinking: None,
+        stop_reason: None,
+        model: "mock".to_string(),
+        provider: None,
+        blocks: None,
+        error: None,
+    });
+
+    let session_id = "persisted_compaction_resume".to_string();
+    let mut opts = base_opts(vec![serde_json::json!({
+        "role": "user",
+        "content": "very old task context",
+    })]);
+    let mut config = base_agent_config();
+    config.session_id = session_id.clone();
+    config.daemon = true;
+    config.daemon_config = DaemonLoopConfig {
+        consolidate_on_idle: true,
+        ..Default::default()
+    };
+    config.auto_compact = Some(crate::orchestration::AutoCompactConfig {
+        token_threshold: 1,
+        keep_last: 1,
+        ..Default::default()
+    });
+
+    let result = run_agent_loop_internal(&mut opts, config).await.unwrap();
+    assert_eq!(result["status"], "idle");
+
+    let prompt_state = crate::agent_sessions::prompt_state_json(&session_id);
+    assert_eq!(prompt_state.messages[0]["role"].as_str(), Some("user"));
+    assert!(
+        prompt_state.messages[0]["content"]
+            .as_str()
+            .unwrap_or("")
+            .contains("[auto-compacted"),
+        "compacted prompt surface should be persisted for resume: {:?}",
+        prompt_state.messages
+    );
+    assert!(
+        !prompt_state.messages.iter().any(|message| {
+            message.get("role").and_then(|value| value.as_str()) == Some("user")
+                && message.get("content").and_then(|value| value.as_str())
+                    == Some("very old task context")
+        }),
+        "stale pre-compaction user turn should not survive in the resume surface: {:?}",
+        prompt_state.messages
+    );
+
+    reset_llm_mock_state();
+    crate::llm::mock::push_llm_mock(crate::llm::mock::LlmMock {
+        text: "second answer".to_string(),
+        tool_calls: Vec::new(),
+        match_pattern: None,
+        consume_on_match: true,
+        input_tokens: None,
+        output_tokens: None,
+        cache_read_tokens: None,
+        cache_write_tokens: None,
+        thinking: None,
+        stop_reason: None,
+        model: "mock".to_string(),
+        provider: None,
+        blocks: None,
+        error: None,
+    });
+
+    let mut resume_opts = base_opts(vec![serde_json::json!({
+        "role": "user",
+        "content": "follow-up task",
+    })]);
+    let mut resume_config = base_agent_config();
+    resume_config.session_id = session_id.clone();
+    let _ = run_agent_loop_internal(&mut resume_opts, resume_config)
+        .await
+        .unwrap();
+
+    let calls = get_llm_mock_calls();
+    assert_eq!(calls.len(), 1);
+    assert!(
+        calls[0].messages[0]["content"]
+            .as_str()
+            .unwrap_or("")
+            .contains("[auto-compacted"),
+        "resume call should start from compacted summary, not the stale pre-compaction transcript: {:?}",
+        calls[0].messages
+    );
+
+    crate::agent_sessions::reset_session_store();
+    reset_llm_mock_state();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn user_response_block_can_complete_persistent_loop_without_done_sentinel() {
+    reset_llm_mock_state();
+    let response_text = "<tool_call>\nledger({ action: \"note\", text: \"verified completion\" })\n</tool_call>\n<user_response>Completed cleanly.</user_response>";
+    let parsed = crate::llm::tools::parse_text_tool_calls_with_tools(response_text, None);
+    assert_eq!(parsed.calls.len(), 1, "parsed: {:?}", parsed.errors);
+    assert_eq!(parsed.user_response.as_deref(), Some("Completed cleanly."));
+    crate::llm::mock::push_llm_mock(crate::llm::mock::LlmMock {
+        text: response_text.to_string(),
+        tool_calls: Vec::new(),
+        match_pattern: None,
+        consume_on_match: true,
+        input_tokens: None,
+        output_tokens: None,
+        cache_read_tokens: None,
+        cache_write_tokens: None,
+        thinking: None,
+        stop_reason: None,
+        model: "mock".to_string(),
+        provider: None,
+        blocks: None,
+        error: None,
+    });
+
+    let mut opts = base_opts(vec![serde_json::json!({
+        "role": "user",
+        "content": "finish the task",
+    })]);
+    let mut tool_params = std::collections::BTreeMap::new();
+    tool_params.insert(
+        "path".to_string(),
+        VmValue::Dict(Rc::new(std::collections::BTreeMap::from([(
+            "type".to_string(),
+            VmValue::String(Rc::from("string")),
+        )]))),
+    );
+    let dummy_tool = VmValue::Dict(Rc::new(std::collections::BTreeMap::from([
+        ("name".to_string(), VmValue::String(Rc::from("read"))),
+        (
+            "description".to_string(),
+            VmValue::String(Rc::from("Read a file.")),
+        ),
+        (
+            "parameters".to_string(),
+            VmValue::Dict(Rc::new(tool_params)),
+        ),
+    ])));
+    opts.tools = Some(VmValue::Dict(Rc::new(std::collections::BTreeMap::from([
+        (
+            "tools".to_string(),
+            VmValue::List(Rc::new(vec![dummy_tool])),
+        ),
+    ]))));
+    let mut config = base_agent_config();
+    config.persistent = true;
+    config.max_iterations = 2;
+
+    let result = run_agent_loop_internal(&mut opts, config).await.unwrap();
+    assert_eq!(result["status"], "done");
+    assert_eq!(result["visible_text"].as_str(), Some("Completed cleanly."));
+    reset_llm_mock_state();
+}
+
 #[test]
 fn pending_feedback_drain_filters_by_session_and_preserves_order() {
     use crate::llm::agent::{drain_pending_feedback, push_pending_feedback};

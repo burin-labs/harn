@@ -174,6 +174,10 @@ name({ key: value })
 Short narration. Optional.
 </assistant_prose>
 
+<user_response>
+Final user-facing answer. Optional.
+</user_response>
+
 <done>##DONE##</done>
 
 Rules the runtime enforces:
@@ -181,6 +185,7 @@ Rules the runtime enforces:
 - No text, code, diffs, JSON, or reasoning outside these tags. Any stray content is rejected with structured feedback.
 - `<tool_call>` wraps exactly one bare call `name({ key: value })`. Do not quote or JSON-encode the call. Use heredoc `<<TAG` ... `TAG` for multiline string fields — raw content, no escaping. Place TAG at the start of the closing line; closing punctuation like `},` may follow on that same line.
 - `<assistant_prose>` is optional and must be brief. Never paste source code, file contents, command transcripts, or long plans here — wrap those in the relevant tool call instead.
+- `<user_response>` is optional and reserved for the final user-facing answer that hosts should surface. When present, keep it concise and grounded.
 - `<done>##DONE##</done>` signals task completion. Emit it only after a successful verifying tool call; the runtime rejects it otherwise.
 - Do not prefix calls with labels like `tool_code:`, `python:`, `shell:`, or any language tag, and do not wrap tool calls in Markdown fences.
 - Prefer `<tool_call>` over `<assistant_prose>`. If you have nothing concrete to say, omit prose entirely.
@@ -188,6 +193,7 @@ Rules the runtime enforces:
 Example of a well-formed response:
 
 <assistant_prose>Creating the test file.</assistant_prose>
+<user_response>Created the test file.</user_response>
 <tool_call>
 edit({ action: \"create\", path: \"tests/test_foo.py\", content: <<EOF
 def test_foo():
@@ -203,8 +209,9 @@ pub(crate) const NATIVE_CALL_CONTRACT_HELP: &str = "
 The provider exposes tool definitions outside this prompt.
 
 - Invoke tools only through the provider's native tool-calling channel.
+- The current workflow/system prompt may mention only the tool names available for this stage; do not assume tools from earlier stages remain available.
 - Do not write text-mode tool tags, bare `name({ ... })` calls, Markdown code fences, or JSON tool-call envelopes in assistant text.
-- Keep assistant prose short and operational. When the task is complete and no more tool calls are needed, include `##DONE##` exactly once in assistant text.
+- Keep assistant prose short and operational. If you emit a final user-facing answer, wrap it in `<user_response>...</user_response>`. When the task is complete and no more tool calls are needed, include `##DONE##` exactly once in assistant text.
 ";
 
 pub(crate) const TASK_LEDGER_HELP: &str = "

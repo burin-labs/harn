@@ -226,16 +226,14 @@ impl AnthropicProvider {
             "messages": messages,
             "max_tokens": anthropic_max,
         });
+        if opts.cache {
+            // Anthropic automatic prompt caching now applies at the
+            // top-level request and caches the stable prefix across
+            // tools, system, and messages for multi-turn conversations.
+            body["cache_control"] = serde_json::json!({"type": "ephemeral"});
+        }
         if let Some(ref sys) = opts.system {
-            if opts.cache {
-                body["system"] = serde_json::json!([{
-                    "type": "text",
-                    "text": sys,
-                    "cache_control": {"type": "ephemeral"},
-                }]);
-            } else {
-                body["system"] = serde_json::json!(sys);
-            }
+            body["system"] = serde_json::json!(sys);
         }
         // Claude Opus 4.7+ rejects non-default sampling parameters with
         // HTTP 400. We strip them transparently and warn once per model
@@ -325,6 +323,39 @@ impl AnthropicProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::llm::api::LlmRequestPayload;
+
+    fn base_payload() -> LlmRequestPayload {
+        LlmRequestPayload {
+            provider: "anthropic".to_string(),
+            model: "claude-sonnet-4-6".to_string(),
+            api_key: String::new(),
+            messages: vec![serde_json::json!({"role": "user", "content": "hello"})],
+            system: Some("system prompt".to_string()),
+            max_tokens: 64,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop: None,
+            seed: None,
+            frequency_penalty: None,
+            presence_penalty: None,
+            response_format: None,
+            json_schema: None,
+            thinking: None,
+            native_tools: Some(vec![serde_json::json!({
+                "name": "read_file",
+                "description": "Read a file",
+                "input_schema": {"type": "object"},
+            })]),
+            tool_choice: None,
+            cache: false,
+            timeout: None,
+            stream: true,
+            provider_overrides: None,
+            prefill: None,
+        }
+    }
 
     #[test]
     fn tool_search_supported_for_claude_4_opus_and_up() {
@@ -385,5 +416,23 @@ mod tests {
         let provider = AnthropicProvider;
         assert!(provider.supports_defer_loading("claude-opus-4-7"));
         assert!(!provider.supports_defer_loading("claude-opus-3-5"));
+    }
+
+    #[test]
+    fn cache_uses_top_level_automatic_prompt_caching() {
+        let mut payload = base_payload();
+        payload.cache = true;
+
+        let body = AnthropicProvider::build_request_body(&payload);
+        assert_eq!(
+            body["cache_control"],
+            serde_json::json!({"type": "ephemeral"})
+        );
+        assert_eq!(body["system"].as_str(), Some("system prompt"));
+        assert_eq!(
+            body["tools"].as_array().map(Vec::len),
+            Some(1),
+            "tool definitions remain in the top-level cached prefix"
+        );
     }
 }

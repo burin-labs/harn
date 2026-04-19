@@ -4,10 +4,12 @@ pub fn explain_profile() {
     id: "explain_repo",
     mode: "read_only",
     max_rounds: 2,
+    max_research_questions_per_round: 3,
     target_paths: ["README.md", "packages/server/src/routes/api.ts", "packages/server/src/middleware/auth-guard.ts"],
     success_criteria: ["Explain the repo in simple terms.", "Name the key auth and API files."],
     write_paths: [],
     verify_command: "",
+    verification_contract: {},
     research_focus: "Explain the repository in simple terms. Identify the API route layer, the middleware layer, and the auth path.",
     completion_bar: "Ready only when you can explain what the repo does, how requests reach the API, and where auth happens.",
   }
@@ -19,10 +21,16 @@ pub fn comment_profile() {
     id: "comment_file",
     mode: "scoped_write",
     max_rounds: 2,
+    max_research_questions_per_round: 1,
     target_paths: ["packages/server/src/middleware/auth-guard.ts"],
     success_criteria: ["Add a short, accurate module comment.", "Do not change runtime behavior."],
     write_paths: ["packages/server/src/middleware/auth-guard.ts"],
     verify_command: "grep -n 'Auth guard middleware' packages/server/src/middleware/auth-guard.ts",
+    verification_contract: {
+    required_paths: ["packages/server/src/middleware/auth-guard.ts"],
+    required_text: ["Auth guard middleware"],
+    notes: ["Preserve runtime behavior. Only add the module comment."],
+  },
     research_focus: "Understand what auth-guard.ts does, what request data it reads, and where the user context gets attached.",
     completion_bar: "Ready only when you know the file's responsibility and can add one short module comment without changing behavior.",
   }
@@ -34,26 +42,35 @@ pub fn rate_limit_profile() {
     id: "rate_limit_auth",
     mode: "multi_write",
     max_rounds: 2,
+    max_research_questions_per_round: 2,
     success_criteria: [
     "Add a simple in-memory per-IP rate limiter.",
     "Export it from the middleware index.",
     "Wire it into the API route stack.",
     "Pass the verify script.",
   ],
-    target_paths: [
-    "packages/server/src/middleware/auth-guard.ts",
-    "packages/server/src/middleware/index.ts",
-    "packages/server/src/routes/api.ts",
-    "scripts/verify-rate-limit.sh",
-  ],
+    target_paths: ["packages/server/src/middleware/index.ts", "packages/server/src/routes/api.ts"],
     write_paths: [
     "packages/server/src/middleware/rate-limit.ts",
     "packages/server/src/middleware/index.ts",
     "packages/server/src/routes/api.ts",
   ],
     verify_command: "./scripts/verify-rate-limit.sh",
-    research_focus: "Find how auth middleware is exported, how routes wire middleware, where a simple in-memory per-IP rate limiter belongs, and what exact identifier and wiring checks the verify script expects.",
-    completion_bar: "Ready only when you know the exact export name and route wiring expected by the verify script, and can add a simple in-memory rate limiter, export it, wire it into the API route stack, and run the verify script.",
+    verification_contract: {
+    required_identifiers: ["rateLimit"],
+    required_paths: [
+    "packages/server/src/middleware/rate-limit.ts",
+    "packages/server/src/middleware/index.ts",
+    "packages/server/src/routes/api.ts",
+  ],
+    required_text: ["export { rateLimit }", "rateLimit"],
+    notes: [
+    "Use the verifier-exact export name `rateLimit`.",
+    "Preserve the existing withMiddleware route architecture instead of replacing files with framework boilerplate.",
+  ],
+  },
+    research_focus: "Find the current middleware export surface, the existing route-wiring pattern, and the exact identifier and file-path constraints implied by the verifier contract.",
+    completion_bar: "Ready once you can create rateLimit, export it from the middleware index, wire it before authGuard in the existing withMiddleware route stack, and run the verify script.",
   }
 }
 

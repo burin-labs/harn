@@ -390,13 +390,33 @@ fn __action_graph_merge_aliases(base, extra) {
 }
 
 fn __action_graph_batch_prompt(batch) {
+  var available_tools = []
+  for action in batch.actions {
+    for tool_name in action?.tools ?? [] {
+      if !contains(available_tools, tool_name) {
+        available_tools = available_tools + [tool_name]
+      }
+    }
+  }
   var lines = [
     "You are executing a scheduled action-graph batch.",
     "",
     "Phase: " + batch.phase,
     "Tool class: " + batch.tool_class,
+    "Available tools this batch: "
+    + if len(available_tools) > 0 {
+    join(available_tools, ", ")
+  } else {
+    "(none declared)"
+  },
     "",
+    "Authority order: obey the current batch action list and the injected verifier contract before any broader workflow context.",
     "Complete every action in this batch before finishing.",
+    "Scope boundary: perform only the action ids listed below for this batch.",
+    "Treat broader plan/context artifacts as background evidence only, not as permission to continue with later actions.",
+    "If workflow context mentions future batches or terminal verification, ignore that work until this batch explicitly names it.",
+    "Do not preempt later batches, edit their target files early, or run final verification unless this batch explicitly lists those steps.",
+    "Once the listed actions are satisfied, stop immediately instead of continuing with adjacent work from the overall plan.",
     "Actions:",
   ]
   for action in batch.actions {
@@ -498,6 +518,28 @@ fn __action_graph_node_system(base_system, prompt) {
   return prefix + "\n\n" + prompt
 }
 
+fn __action_graph_batch_tools(batch, template) {
+  let registry = template?.tools
+  if registry == nil {
+    return nil
+  }
+  var selected = []
+  for action in batch.actions {
+    for tool_name in action?.tools ?? [] {
+      if !contains(selected, tool_name) {
+        selected = selected + [tool_name]
+      }
+    }
+  }
+  if contains(selected, "write") && !contains(selected, "read") {
+    selected = ["read"] + selected
+  }
+  if len(selected) == 0 {
+    return registry
+  }
+  return tool_select(registry, selected)
+}
+
 fn __action_graph_batch_node(batch, template) {
   let model_policy = template?.model_policy ?? {}
     + {task_ledger: template?.model_policy?.task_ledger ?? batch.task_ledger}
@@ -505,13 +547,14 @@ fn __action_graph_batch_node(batch, template) {
   let output_contract = template?.output_contract ?? {} + {output_kinds: [output_kind]}
   let context_policy = template?.context_policy ?? {}
     + {
-    include_kinds: template?.context_policy?.include_kinds ?? ["plan", "summary", "artifact", "verification_result"],
+    include_kinds: template?.context_policy?.include_kinds ?? ["summary", "artifact", "verification_result"],
   }
   return template ?? {}
     + {
     kind: "stage",
     task_label: format("{} batch {}", uppercase(batch.phase), batch.id),
     system: __action_graph_node_system(template?.system, batch.prompt),
+    tools: __action_graph_batch_tools(batch, template),
     model_policy: model_policy,
     output_contract: output_contract,
     context_policy: context_policy,

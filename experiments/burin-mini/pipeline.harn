@@ -1,22 +1,30 @@
+import "std/agents"
 import {
-  decode_sub_agent_result,
-  decode_worker_result,
+  effective_verify_command,
   evaluator_model,
   evaluator_options,
   generator_model,
   generator_options,
-  list_contains,
-  normalize_action_result,
   normalize_plan,
   normalize_research_fact,
-  plan_success_criteria,
+  plan_to_action_graph,
+  planner_schema,
   provider_name,
-  render_action_results,
   render_csv,
   render_facts,
   render_list,
+  render_verification_contract,
+  research_schema,
+  verification_contract,
 } from "lib/common.harn"
 import { profile_for_task } from "lib/profiles.harn"
+import {
+  read_workspace,
+  run_workspace,
+  search_workspace,
+  workspace_root,
+  write_workspace,
+} from "lib/workspace.harn"
 
 fn read_search_tools() {
   var tools = tool_registry()
@@ -79,7 +87,8 @@ fn planner_prompt(task, workspace_root, profile, facts, round_no) {
     + "Mode: ${profile?.mode}\n"
     + "Target paths:\n${render_list(profile?.target_paths ?? [])}\n"
     + "Writable paths:\n${render_list(profile?.write_paths ?? [])}\n"
-    + "Verify command: ${profile?.verify_command ?? \"none\"}\n"
+    + "Verify command: ${effective_verify_command(profile)}\n"
+    + "Verification contract:\n${render_verification_contract(profile)}\n"
     + "Success criteria:\n${render_list(profile?.success_criteria ?? [])}\n"
     + "Research focus: ${profile?.research_focus}\n"
     + "Completion bar: ${profile?.completion_bar}\n"
@@ -91,21 +100,28 @@ fn planner_prompt(task, workspace_root, profile, facts, round_no) {
     + "- plan_summary: string\n"
     + "- final_response: string\n"
     + "- questions: [{id, question, tools}]\n"
-    + "- actions: [{id, title, task, depends_on, allowed_tools}]\n"
-    + "Use `questions`, not `research_questions`. Use `actions`, not `action_list`."
+    + "- actions: [{id, title, task, depends_on, allowed_tools, target_paths?, command?}]\n"
 }
 
 fn planner_system() {
   return "You are the DFS planner for a coding-agent playground experiment.\n"
     + "Think like a cheap, disciplined harness engineer.\n"
     + "Rules:\n"
+    + "- Stay clear on both the immediate next stage and the end-to-end user task.\n"
     + "- Prefer the minimum research needed before concrete action.\n"
-    + "- Treat the current facts as authoritative. Do not ask to reread a file or recover exact wording if the existing facts already identify the implementation path.\n"
-    + "- If a verify command or verification script exists, gather enough facts to satisfy its exact checks before planning writes.\n"
+    + "- Before asking new research questions, treat target paths, writable paths, and the verifier contract as already-known context.\n"
+    + "- Treat the current facts and verifier contract as authoritative.\n"
+    + "- Ask at most 2 research questions per round, and only for facts that block a concrete write plan.\n"
+    + "- If the current facts already support a concrete plan, stop researching and move to actions.\n"
     + "- When not ready, emit only the next research questions.\n"
     + "- When ready, emit a concrete action list with explicit dependencies.\n"
-    + "- Independent actions should share an empty dependency set so the parent can fan them out in parallel.\n"
-    + "- For write tasks, once you know the target files, wiring shape, and verification checks, stop researching and emit actions.\n"
+    + "- Every action.task must be a full executable instruction sentence, never just `write`, `edit`, or `run`.\n"
+    + "- Every write action must name its exact target_paths.\n"
+    + "- Route-wiring and verification actions must depend on the file-creation or export steps they rely on.\n"
+    + "- Use the verifier-exact identifiers and text. Do not invent alternate names.\n"
+    + "- Do not ask to inspect the verify script when the verifier contract already names the required identifiers, paths, and text.\n"
+    + "- Do not keep researching files already covered by the current facts unless an exact missing fact still blocks implementation.\n"
+    + "- Do not restate guesses as facts. If something is unknown, make it the next research question instead.\n"
     + "- For read-only tasks, leave actions empty and put the user-facing answer in final_response.\n"
     + "- Return strict JSON only."
 }
@@ -122,101 +138,63 @@ fn research_system() {
   return "You are a context-firewall research worker.\n"
     + "Use tools sparingly, read only the minimum files, and answer tersely.\n"
     + "Use workspace-relative paths exactly as shown by the parent; do not invent absolute filesystem roots.\n"
+    + "When tools are available, your first response must be a tool call, not JSON prose.\n"
+    + "If the question names a concrete file path and `read` is allowed, call `read` on that path immediately.\n"
+    + "Prefer hidden reasoning over visible prose; keep any assistant-visible text extremely sparse.\n"
+    + "Your job is to unblock the parent planner, not to solve the whole task yourself.\n"
+    + "Gather exactly enough evidence to answer the stated question, then stop.\n"
     + "If you have not yet gathered evidence for the question, use a tool before answering.\n"
     + "Ground every claim in tool results from this run. If the tool output does not show it, say you could not verify it.\n"
+    + "Do not speculate from prior coding patterns or framework defaults.\n"
     + "Never write. Return strict JSON only."
 }
 
-fn execute_prompt(task, workspace_root, profile, action) {
-  return "[executor][task_id=${profile?.id}][token=${action?.id}]\n"
-    + "Original task: ${task}\n"
-    + "Workspace root: ${workspace_root}\n"
-    + "Action title: ${action?.title}\n"
-    + "Action task: ${action?.task}\n"
-    + "Allowed tool names: ${render_csv(action?.allowed_tools ?? [])}\n"
-    + "Writable paths:\n${render_list(profile?.write_paths ?? [])}\n"
-    + "Verify command: ${profile?.verify_command ?? \"none\"}\n"
-    + "Return strict JSON only with keys: id, title, summary, changed_paths, notes."
-}
-
 fn execute_system() {
-  return "You are one executor worker.\n"
-    + "Carry out exactly one concrete action.\n"
-    + "Use the allowed tools only.\n"
-    + "Use workspace-relative paths exactly as shown by the parent; do not invent absolute filesystem roots.\n"
-    + "When you return JSON, copy the given action id exactly.\n"
-    + "Make the smallest change that satisfies the action.\n"
-    + "Summarize only changes and checks that actually happened in this run.\n"
-    + "Return strict JSON only."
-}
-
-fn evaluator_prompt(task, workspace_root, profile, plan, facts, action_results, final_response) {
-  return "[evaluator][task_id=${profile?.id}][token=final]\n"
-    + "Original task: ${task}\n"
-    + "Workspace root: ${workspace_root}\n"
-    + "Plan summary: ${plan?.plan_summary}\n"
-    + "Success criteria:\n${render_list(plan_success_criteria(profile, plan))}\n"
-    + "Research facts:\n${render_facts(facts)}\n"
-    + "Executor results:\n${render_action_results(action_results)}\n"
-    + "User-facing response draft:\n${final_response}\n"
-    + "Verify command: ${profile?.verify_command ?? \"none\"}\n"
-    + "Return strict JSON only with keys: verdict, reason, strengths, gaps."
-}
-
-fn evaluator_system() {
-  return "You are a separate evaluator model.\n"
-    + "Grade the execution against the success criteria.\n"
-    + "Use read/search/run only if needed.\n"
-    + "Pass only if the draft is supported by the research facts or by your own tool results from this run.\n"
-    + "If any major claim looks invented or unverified, fail it.\n"
-    + "Return a strict JSON verdict with concise strengths and gaps."
-}
-
-fn compose_prompt(task, workspace_root, profile, plan, facts, action_results) {
-  return "[composer][task_id=${profile?.id}][token=final]\n"
-    + "Original task: ${task}\n"
-    + "Workspace root: ${workspace_root}\n"
-    + "Plan summary: ${plan?.plan_summary}\n"
-    + "Success criteria:\n${render_list(plan_success_criteria(profile, plan))}\n"
-    + "Research facts:\n${render_facts(facts)}\n"
-    + "Executor results:\n${render_action_results(action_results)}\n"
-    + "Write the final user-facing response now.\n"
-    + "Return strict JSON only with key: final_response."
-}
-
-fn compose_system() {
-  return "You are the final response composer for a coding-agent playground experiment.\n"
-    + "Write a concise, user-facing answer.\n"
-    + "Use only the grounded facts and executor results from this run.\n"
-    + "Do not mention internal planner state, evaluation, or missing steps unless the task actually failed.\n"
-    + "Return strict JSON only."
+  return "You are executing a scheduled DFS/queue action-graph batch.\n"
+    + "Use the action instructions, research artifacts, and injected verifier contract as the source of truth.\n"
+    + "Stay oriented on both the current stage deliverable and the end-to-end task outcome.\n"
+    + "Read every existing file before you rewrite it.\n"
+    + "Keep the existing architecture intact; do not replace files with generic framework boilerplate.\n"
+    + "Never edit files outside the action instructions or verifier-required paths.\n"
+    + "Use verifier-exact identifiers and required text verbatim.\n"
+    + "Preserve unrelated formatting and indentation when editing existing files.\n"
+    + "Do not narrate pending actions to the user.\n"
+    + "Only perform the files and commands that belong to the current batch.\n"
+    + "Do not preempt later batches or run the final verification command unless this batch explicitly requires it.\n"
+    + "Prefer hidden reasoning over visible prose; bias toward immediate tool calls.\n"
+    + "After each tool result, decide the next blocking action immediately instead of circling in prose.\n"
+    + "Do not claim success until the actual edits or verification command prove it.\n"
+    + "Make the smallest coherent set of changes that completes the entire batch.\n"
+    + "When the batch is complete, return exactly one `<user_response>...</user_response>` block with the grounded user-visible summary, then `##DONE##`.\n"
+    + "Do not emit any additional visible prose after the final `<user_response>` block."
 }
 
 fn run_planner(task, workspace_root, profile, facts, round_no) {
-  let result = decode_sub_agent_result(
-    sub_agent_run(
+  let result = sub_agent_run(
     planner_prompt(task, workspace_root, profile, facts, round_no),
-    generator_options(planner_system(), tool_registry(), []),
-  ),
+    generator_options(planner_system(), tool_registry(), [])
+    + {response_format: "json", returns: {schema: planner_schema()}},
   )
   if result?.ok {
     return {ok: true, error: nil, data: normalize_plan(profile, result?.data ?? {})}
   }
-  return result
+  return {ok: false, error: result?.error ?? {message: result?.summary ?? "planner failed"}, data: {}}
 }
 
 fn run_research(workspace_root, profile, question) {
-  let result = decode_sub_agent_result(
-    sub_agent_run(
+  let result = sub_agent_run(
     research_prompt(workspace_root, profile, question),
     generator_options(research_system(), read_search_tools(), question?.tools ?? [])
-    + {turn_policy: {require_action_or_yield: true, allow_done_sentinel: true}},
-  ),
+    + {
+    response_format: "json",
+    returns: {schema: research_schema()},
+    turn_policy: {require_action_or_yield: true, allow_done_sentinel: true},
+  },
   )
   if result?.ok {
     return {ok: true, error: nil, data: normalize_research_fact(question, result?.data ?? {})}
   }
-  return result
+  return {ok: false, error: result?.error ?? {message: result?.summary ?? "research failed"}, data: {}}
 }
 
 fn run_research_background(workspace_root, profile, question) {
@@ -230,77 +208,16 @@ fn run_research_background(workspace_root, profile, question) {
     allowed_tools: question?.tools ?? [],
     tool_format: "native",
     response_format: "json",
+    returns: {schema: research_schema()},
     temperature: 0,
     turn_policy: {require_action_or_yield: true, allow_done_sentinel: true},
     max_iterations: 6,
     background: true,
     name: "research-${question?.id}",
+    questions: [question],
+    request: {question_id: question?.id ?? ""},
   },
   )
-}
-
-fn run_action(task, workspace_root, profile, action) {
-  let result = decode_sub_agent_result(
-    sub_agent_run(
-    execute_prompt(task, workspace_root, profile, action),
-    generator_options(execute_system(), edit_tools(), action?.allowed_tools ?? [])
-    + {turn_policy: {require_action_or_yield: true, allow_done_sentinel: true}},
-  ),
-  )
-  if result?.ok {
-    return {ok: true, error: nil, data: normalize_action_result(action, result?.data ?? {})}
-  }
-  return result
-}
-
-fn run_action_background(task, workspace_root, profile, action) {
-  return sub_agent_run(
-    execute_prompt(task, workspace_root, profile, action),
-    {
-    provider: provider_name(),
-    model: generator_model(),
-    system: execute_system(),
-    tools: edit_tools(),
-    allowed_tools: action?.allowed_tools ?? [],
-    tool_format: "native",
-    response_format: "json",
-    temperature: 0,
-    turn_policy: {require_action_or_yield: true, allow_done_sentinel: true},
-    max_iterations: 6,
-    background: true,
-    name: "action-${action?.id}",
-  },
-  )
-}
-
-fn run_evaluator(task, workspace_root, profile, plan, facts, action_results, final_response) {
-  return decode_sub_agent_result(
-    sub_agent_run(
-    evaluator_prompt(task, workspace_root, profile, plan, facts, action_results, final_response),
-    evaluator_options(evaluator_system(), verify_tools()),
-  ),
-  )
-}
-
-fn run_composer(task, workspace_root, profile, plan, facts, action_results) {
-  let result = decode_sub_agent_result(
-    sub_agent_run(
-    compose_prompt(task, workspace_root, profile, plan, facts, action_results),
-    {
-    provider: provider_name(),
-    model: generator_model(),
-    system: compose_system(),
-    tool_format: "native",
-    response_format: "json",
-    temperature: 0,
-    max_iterations: 3,
-  },
-  ),
-  )
-  if result?.ok {
-    return result?.data?.final_response ?? result?.data?.answer ?? ""
-  }
-  return ""
 }
 
 fn collect_research_batch(workspace_root, profile, questions) {
@@ -319,126 +236,236 @@ fn collect_research_batch(workspace_root, profile, questions) {
   }
   let done = wait_agent(handles)
   var facts = []
-  for (index, worker) in iter(done).enumerate() {
-    let result = decode_worker_result(worker)
+  for worker in done {
+    let request = worker_request(worker) ?? {}
+    let question = (request?.research_questions ?? [])[0] ?? {}
+    let result = worker_result(worker) ?? {}
     if result?.ok {
-      facts = facts + [normalize_research_fact(questions[index] ?? {}, result?.data ?? {})]
+      facts = facts + [normalize_research_fact(question, result?.data ?? {})]
     }
   }
   return facts
 }
 
-fn action_ready(action, completed_ids) {
-  for dep in action?.depends_on ?? [] {
-    if !list_contains(completed_ids, dep) {
-      return false
-    }
+fn bounded_questions(profile, questions) {
+  let limit = profile?.max_research_questions_per_round ?? 2
+  if len(questions) <= limit {
+    return questions
   }
-  return true
+  var selected = []
+  for (index, question) in iter(questions).enumerate() {
+    if index >= limit {
+      break
+    }
+    selected = selected + [question]
+  }
+  return selected
 }
 
-fn action_has_tool(action, name) {
-  return list_contains(action?.allowed_tools ?? [], name)
+fn research_artifacts(facts, profile) {
+  var artifacts = []
+  if len(facts) > 0 {
+    artifacts = artifacts
+      + [
+      artifact(
+      {
+      kind: "summary",
+      title: "Grounded research facts",
+      text: render_facts(facts),
+      data: {facts: facts},
+      relevance: 1.0,
+    },
+    ),
+    ]
+  }
+  let contract_text = render_verification_contract(profile)
+  if contract_text != "(none)" {
+    artifacts = artifacts
+      + [
+      artifact(
+      {
+      kind: "summary",
+      title: "Verifier contract",
+      text: contract_text,
+      data: verification_contract(profile),
+      relevance: 1.0,
+    },
+    ),
+    ]
+  }
+  return artifacts
 }
 
-fn select_action_batch(ready) {
-  var write_actions = []
-  var read_actions = []
-  var run_actions = []
-  for action in ready {
-    if action_has_tool(action, "write") {
-      write_actions = write_actions + [action]
-    } else if action_has_tool(action, "run") {
-      run_actions = run_actions + [action]
-    } else {
-      read_actions = read_actions + [action]
-    }
+fn graph_research_template() {
+  return {
+    mode: "agent",
+    tools: read_search_tools(),
+    system: research_system(),
+    model_policy: {
+    provider: provider_name(),
+    model: generator_model(),
+    tool_format: "native",
+    temperature: 0,
+    max_iterations: 6,
+    turn_policy: {require_action_or_yield: true, allow_done_sentinel: true, max_prose_chars: 280},
+  },
+    output_contract: {output_kinds: ["summary"]},
   }
-  if len(write_actions) > 0 {
-    return write_actions
-  }
-  if len(read_actions) > 0 {
-    return read_actions
-  }
-  return run_actions
 }
 
-fn exclude_selected_actions(actions, selected) {
-  var selected_ids = []
-  for action in selected {
-    selected_ids = selected_ids + [action?.id ?? ""]
+fn graph_execute_template() {
+  return {
+    mode: "agent",
+    tools: edit_tools(),
+    system: execute_system(),
+    model_policy: {
+    provider: provider_name(),
+    model: generator_model(),
+    tool_format: "native",
+    temperature: 0,
+    max_iterations: 8,
+    turn_policy: {require_action_or_yield: true, allow_done_sentinel: true, max_prose_chars: 360},
+  },
+    output_contract: {output_kinds: ["artifact"]},
   }
-  var remaining = []
-  for action in actions {
-    if !list_contains(selected_ids, action?.id ?? "") {
-      remaining = remaining + [action]
-    }
-  }
-  return remaining
 }
 
-fn collect_action_batch(task, workspace_root, profile, actions) {
-  if len(actions) == 0 {
-    return []
+fn graph_verify_template(profile) {
+  let command = effective_verify_command(profile)
+  let contract = verification_contract(profile)
+  if command == "none" && len(keys(contract ?? {})) == 0 {
+    return {}
   }
-  if len(actions) == 1 {
-    return [run_action(task, workspace_root, profile, actions[0])]
+  return {
+    command: if command == "none" {
+    nil
+  } else {
+    command
+  },
+    expect_status: 0,
+    verify: contract,
   }
-  let handles = parallel each actions with { max_concurrent: 4 } { action ->
-    run_action_background(task, workspace_root, profile, action)
-  }
-  let done = wait_agent(handles)
-  var results = []
-  for (index, worker) in iter(done).enumerate() {
-    let result = decode_worker_result(worker)
-    if result?.ok {
-      results = results
-        + [{ok: true, error: nil, data: normalize_action_result(actions[index] ?? {}, result?.data ?? {})}]
-    } else {
-      results = results + [result]
-    }
-  }
-  return results
 }
 
-fn execute_plan(task, workspace_root, profile, plan) {
-  var remaining = plan?.actions ?? []
-  var completed_ids = []
-  var results = []
-  while len(remaining) > 0 {
-    var ready = []
-    var blocked = []
-    for action in remaining {
-      if action_ready(action, completed_ids) {
-        ready = ready + [action]
-      } else {
-        blocked = blocked + [action]
-      }
-    }
-    if len(ready) == 0 {
-      return {ok: false, message: "planner returned only blocked actions", results: results}
-    }
-    let batch = select_action_batch(ready)
-    let deferred = exclude_selected_actions(ready, batch)
-    let batch_results = collect_action_batch(task, workspace_root, profile, batch)
-    var batch_error = ""
-    for result in batch_results {
-      results = results + [result]
-      if result?.ok {
-        completed_ids = completed_ids + [result?.data?.id]
-      } else if batch_error == "" {
-        batch_error = result?.error?.message ?? "executor failed"
-      }
-    }
-    if batch_error != "" {
-      return {ok: false, message: batch_error, results: results}
-    }
-    remaining = blocked + deferred
-  }
-  return {ok: true, message: "", results: results}
+fn execute_graph(task, profile, facts, plan) {
+  let graph = plan_to_action_graph(task, plan)
+  return action_graph_run(
+    task,
+    graph,
+    {
+    name: "burin_mini_${profile?.id}",
+    research: graph_research_template(),
+    execute: graph_execute_template(),
+    verify: graph_verify_template(profile),
+  },
+    {
+    artifacts: research_artifacts(facts, profile),
+    max_steps: 8,
+    persist_path: path_join(source_dir(), "evals", "generated", "${profile?.id}-run.json"),
+  },
+  )
 }
 
-fn write_report(workspace_root, profile, task, plan, facts, execution, evaluator, final_response) {
+fn run_read_only_evaluator(task, workspace_root, profile, plan, facts, final_response) {
+  let result = sub_agent_run(
+    "[evaluator][task_id=${profile?.id}][token=final]\n"
+    + "Original task: ${task}\n"
+    + "Workspace root: ${workspace_root}\n"
+    + "Plan summary: ${plan?.plan_summary}\n"
+    + "Success criteria:\n${render_list(plan?.success_criteria ?? profile?.success_criteria ?? [])}\n"
+    + "Research facts:\n${render_facts(facts)}\n"
+    + "User-facing response draft:\n${final_response}\n"
+    + "Return strict JSON only with keys: verdict, reason, strengths, gaps.",
+    evaluator_options(
+    "You are a separate evaluator model.\n"
+    + "Grade the read-only answer against the success criteria.\n"
+    + "Use read/search/run only if needed.\n"
+    + "Pass only if the draft is grounded in the research facts or your own tool results.\n"
+    + "Return a strict JSON verdict with concise strengths and gaps.",
+    verify_tools(),
+  )
+    + {response_format: "json"},
+  )
+  if result?.ok {
+    return result?.data ?? {}
+  }
+  return {verdict: "fail", reason: result?.error?.message ?? result?.summary ?? "evaluation failed"}
+}
+
+fn failed_stage_ids(execution) {
+  var failed = []
+  for stage in execution?.run?.stages ?? [] {
+    if stage?.status == "failed" {
+      failed = failed + [stage?.node_id ?? stage?.kind ?? "unknown-stage"]
+    }
+  }
+  return failed
+}
+
+fn execution_completed_cleanly(execution) {
+  return execution?.runtime?.status == "completed" && len(failed_stage_ids(execution)) == 0
+}
+
+fn strip_done_sentinel(text) {
+  if type_of(text) != "string" {
+    return ""
+  }
+  return regex_replace("\\s*##DONE##\\s*", "\n", text).trim()
+}
+
+fn extract_user_response_text(text) {
+  let cleaned = strip_done_sentinel(text)
+  let matches = regex_captures("(?s)<user_response>(.*?)</user_response>", cleaned)
+  if len(matches) > 0 {
+    let tagged = (matches[0]?.groups ?? [])[0] ?? ""
+    if type_of(tagged) == "string" && tagged.trim() != "" {
+      return tagged.trim()
+    }
+  }
+  return cleaned
+}
+
+fn stage_visible_outputs(execution) {
+  var outputs = []
+  for stage in execution?.run?.stages ?? [] {
+    let cleaned = extract_user_response_text(stage?.visible_text ?? "")
+    if cleaned == "" {
+      continue
+    }
+    outputs = outputs
+      + [{node_id: stage?.node_id ?? stage?.kind ?? "", text: cleaned, status: stage?.status ?? ""}]
+  }
+  return outputs
+}
+
+fn execution_visible_text(execution) {
+  let stage_outputs = stage_visible_outputs(execution)
+  if len(stage_outputs) > 0 {
+    var summaries = []
+    for item in stage_outputs {
+      summaries = summaries + [item?.text ?? ""]
+    }
+    return join(summaries, "\n")
+  }
+  let direct = extract_user_response_text(workflow_result_text(execution))
+  if direct != "" {
+    return direct
+  }
+  let runtime_text = extract_user_response_text(workflow_result_text(execution?.runtime))
+  if runtime_text != "" {
+    return runtime_text
+  }
+  var latest = ""
+  for artifact in execution?.artifacts ?? [] {
+    let cleaned = extract_user_response_text(artifact?.text ?? "")
+    if cleaned != "" {
+      latest = cleaned
+    }
+  }
+  return latest
+}
+
+fn write_report(workspace_root, profile, task, plan, facts, execution, verdict, final_response) {
   let generated_dir = path_join(source_dir(), "evals", "generated")
   mkdir(generated_dir)
   let report_path = path_join(generated_dir, "${profile?.id}-latest.json")
@@ -450,10 +477,18 @@ fn write_report(workspace_root, profile, task, plan, facts, execution, evaluator
     generator_model: generator_model(),
     evaluator_model: evaluator_model(),
     timestamp: date_iso(),
+    verify_command: effective_verify_command(profile),
+    verification_contract: verification_contract(profile),
     plan: plan,
+    action_graph: execution?.plan ?? {},
+    batches: execution?.batches ?? [],
     research: facts,
-    execution: execution,
-    evaluator: evaluator,
+    execution_status: execution?.status ?? "",
+    workflow_status: execution?.runtime?.status ?? "",
+    run_path: execution?.run?.persisted_path ?? "",
+    visible_outputs: stage_visible_outputs(execution),
+    observability: execution?.run?.observability ?? {},
+    verdict: verdict,
     final_response: final_response,
   }
   write_file(report_path, json_stringify(report))
@@ -475,7 +510,7 @@ pipeline default() {
     if len(planning?.questions ?? []) == 0 {
       break
     }
-    let research_results = collect_research_batch(root, profile, planning?.questions ?? [])
+    let research_results = collect_research_batch(root, profile, bounded_questions(profile, planning?.questions ?? []))
     for fact in research_results {
       facts = facts + [fact]
     }
@@ -486,40 +521,37 @@ pipeline default() {
       break
     }
   }
-  var execution = {ok: true, message: "", results: []}
+  var execution = nil
   var final_response = planning?.final_response ?? ""
+  var verdict = "unknown"
   if planning?.ready && len(planning?.actions ?? []) > 0 {
-    execution = execute_plan(request, root, profile, planning)
-    final_response = render_action_results(execution?.results ?? [])
-    if profile?.mode == "read_only" {
-      let composed = run_composer(request, root, profile, planning, facts, execution?.results ?? [])
-      if composed.trim() != "" {
-        final_response = composed
-      }
+    execution = execute_graph(request, profile, facts, planning)
+    let visible = execution_visible_text(execution)
+    if visible.trim() != "" {
+      final_response = visible
     }
-  } else if !planning?.ready {
-    final_response = "Planner never reached a concrete action list.\n\nLatest plan summary: ${planning?.plan_summary ?? \"none\"}"
+    let failed = failed_stage_ids(execution)
+    verdict = if execution_completed_cleanly(execution) {
+      "pass"
+    } else {
+      "fail"
+    }
+    if verdict != "pass" && final_response.trim() == "" && len(failed) > 0 {
+      final_response = "Workflow finished with failed stages: ${join(failed, ", ")}"
+    }
+  } else if planning?.ready {
+    let evaluation = run_read_only_evaluator(request, root, profile, planning, facts, final_response)
+    verdict = evaluation?.verdict ?? "unknown"
+  } else {
+    verdict = "fail"
+    final_response = "Planner never reached a concrete action list.\n\nLatest plan summary: ${planning?.plan_summary ?? "none"}"
   }
-  let evaluator = run_evaluator(request, root, profile, planning, facts, execution?.results ?? [], final_response)
-  let report_path = write_report(
-    root,
-    profile,
-    request,
-    planning,
-    facts,
-    execution,
-    evaluator?.data ?? {},
-    final_response,
-  )
-  var verdict = evaluator?.data?.verdict ?? ""
-  if verdict == "" {
-    verdict = evaluator?.error?.message ?? "unknown"
-  }
+  let report_path = write_report(root, profile, request, planning, facts, execution, verdict, final_response)
   println("task_id=${profile?.id}")
   println("plan_ready=${planning?.ready}")
   println("research_items=${len(facts)}")
-  println("action_items=${len(execution?.results ?? [])}")
-  println("evaluator_ok=${evaluator?.ok}")
+  println("action_items=${len(planning?.actions ?? [])}")
+  println("workflow_status=${execution?.runtime?.status ?? "skipped"}")
   println("verdict=${verdict}")
   println("report=${report_path}")
   println("")

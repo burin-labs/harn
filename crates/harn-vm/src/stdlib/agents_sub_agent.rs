@@ -276,6 +276,57 @@ fn wrap_sub_agent_error(
     VmValue::Dict(Rc::new(envelope))
 }
 
+fn append_parent_sub_agent_event(parent_session_id: Option<&str>, event: VmValue) {
+    let Some(parent_session_id) = parent_session_id else {
+        return;
+    };
+    if let Err(err) = crate::agent_sessions::append_event(parent_session_id, event) {
+        crate::events::log_warn(
+            "sub_agent_run.parent_event",
+            &format!("parent_session_id={parent_session_id} child event append failed: {err}"),
+        );
+    }
+}
+
+fn sub_agent_start_event(spec: &SubAgentRunSpec) -> VmValue {
+    crate::llm::helpers::transcript_event(
+        "sub_agent_start",
+        "system",
+        "internal",
+        &spec.task,
+        Some(serde_json::json!({
+            "name": spec.name,
+            "child_session_id": spec.session_id,
+            "task": spec.task,
+        })),
+    )
+}
+
+fn sub_agent_result_event(
+    spec: &SubAgentRunSpec,
+    ok: bool,
+    summary: &str,
+    evidence_added: i64,
+    budget_exceeded: bool,
+    error: Option<serde_json::Value>,
+) -> VmValue {
+    crate::llm::helpers::transcript_event(
+        "sub_agent_result",
+        "system",
+        "internal",
+        summary,
+        Some(serde_json::json!({
+            "name": spec.name,
+            "child_session_id": spec.session_id,
+            "ok": ok,
+            "summary": summary,
+            "evidence_added": evidence_added,
+            "budget_exceeded": budget_exceeded,
+            "error": error,
+        })),
+    )
+}
+
 fn permission_denied_from_transcript(transcript: &VmValue) -> Option<(String, String)> {
     let events = transcript
         .as_dict()
@@ -638,6 +689,10 @@ pub(super) async fn execute_sub_agent(
     } else {
         crate::agent_sessions::open_or_create(Some(spec.session_id.clone()));
     }
+    append_parent_sub_agent_event(
+        spec.parent_session_id.as_deref(),
+        sub_agent_start_event(&spec),
+    );
 
     let args = vec![
         VmValue::String(Rc::from(spec.task.clone())),
@@ -680,7 +735,18 @@ pub(super) async fn execute_sub_agent(
                 tokens_used,
                 false,
                 &spec.session_id,
-                error_value,
+                error_value.clone(),
+            );
+            append_parent_sub_agent_event(
+                spec.parent_session_id.as_deref(),
+                sub_agent_result_event(
+                    &spec,
+                    false,
+                    "",
+                    0,
+                    false,
+                    Some(crate::llm::vm_value_to_json(&error_value)),
+                ),
             );
             return Ok(SubAgentExecutionResult {
                 payload: crate::llm::vm_value_to_json(&envelope),
@@ -735,6 +801,21 @@ pub(super) async fn execute_sub_agent(
             }
             Err(error) => {
                 let message = error.to_string();
+                append_parent_sub_agent_event(
+                    spec.parent_session_id.as_deref(),
+                    sub_agent_result_event(
+                        &spec,
+                        false,
+                        &summary,
+                        evidence_added,
+                        budget_exceeded,
+                        Some(crate::llm::vm_value_to_json(&sub_agent_error_dict(
+                            crate::value::error_to_category(&error).as_str(),
+                            message.clone(),
+                            None,
+                        ))),
+                    ),
+                );
                 return Ok(SubAgentExecutionResult {
                     payload: crate::llm::vm_value_to_json(&wrap_sub_agent_error(
                         summary,
@@ -756,6 +837,21 @@ pub(super) async fn execute_sub_agent(
     }
 
     if let Some((tool, reason)) = permission_denied_from_transcript(&transcript) {
+        append_parent_sub_agent_event(
+            spec.parent_session_id.as_deref(),
+            sub_agent_result_event(
+                &spec,
+                false,
+                &summary,
+                evidence_added,
+                budget_exceeded,
+                Some(crate::llm::vm_value_to_json(&sub_agent_error_dict(
+                    "permission_denied",
+                    reason.clone(),
+                    Some(tool.clone()),
+                ))),
+            ),
+        );
         return Ok(SubAgentExecutionResult {
             payload: crate::llm::vm_value_to_json(&wrap_sub_agent_error(
                 summary,
@@ -770,6 +866,18 @@ pub(super) async fn execute_sub_agent(
         });
     }
 
+    append_parent_sub_agent_event(
+        spec.parent_session_id.as_deref(),
+        sub_agent_result_event(
+            &spec,
+            true,
+            &synthesized.summary,
+            evidence_added,
+            budget_exceeded,
+            None,
+        ),
+    );
+
     Ok(SubAgentExecutionResult {
         payload: crate::llm::vm_value_to_json(&VmValue::Dict(Rc::new(envelope))),
         transcript,
@@ -779,6 +887,7 @@ pub(super) async fn execute_sub_agent(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::llm::mock::{push_llm_mock, reset_llm_mock_state, LlmMock};
 
     fn assistant_message(text: &str) -> VmValue {
         VmValue::Dict(Rc::new(BTreeMap::from([
@@ -850,5 +959,72 @@ mod tests {
                 .map(Vec::len),
             Some(1)
         );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn execute_sub_agent_forks_parent_context_and_appends_parent_events() {
+        crate::agent_sessions::reset_session_store();
+        reset_llm_mock_state();
+        let parent = crate::agent_sessions::open_or_create(Some("parent-subagent".into()));
+        crate::agent_sessions::inject_message(&parent, assistant_message("parent context"))
+            .unwrap();
+        push_llm_mock(LlmMock {
+            text: "child result".to_string(),
+            tool_calls: Vec::new(),
+            match_pattern: None,
+            consume_on_match: true,
+            input_tokens: None,
+            output_tokens: None,
+            cache_read_tokens: None,
+            cache_write_tokens: None,
+            thinking: None,
+            stop_reason: None,
+            model: "mock".to_string(),
+            provider: None,
+            blocks: None,
+            error: None,
+        });
+
+        let spec = SubAgentRunSpec {
+            name: "research-worker".to_string(),
+            task: "inspect the repo".to_string(),
+            system: None,
+            options: BTreeMap::from([
+                ("provider".to_string(), VmValue::String(Rc::from("mock"))),
+                ("model".to_string(), VmValue::String(Rc::from("mock"))),
+                ("max_iterations".to_string(), VmValue::Int(1)),
+            ]),
+            returns_schema: None,
+            session_id: "child-subagent".to_string(),
+            parent_session_id: Some(parent.clone()),
+        };
+
+        let result = execute_sub_agent(spec).await.unwrap();
+        assert_eq!(result.payload["ok"].as_bool(), Some(true));
+
+        let child_messages = crate::agent_sessions::messages_json("child-subagent");
+        assert_eq!(
+            child_messages[0]["content"].as_str(),
+            Some("parent context")
+        );
+
+        let parent_events = crate::agent_sessions::snapshot(&parent)
+            .and_then(|value| value.as_dict().cloned())
+            .and_then(|dict| dict.get("events").cloned())
+            .and_then(|value| match value {
+                VmValue::List(list) => Some((*list).clone()),
+                _ => None,
+            })
+            .expect("parent events");
+        let event_kinds: Vec<String> = parent_events
+            .iter()
+            .filter_map(|event| event.as_dict())
+            .filter_map(|dict| dict.get("kind").map(VmValue::display))
+            .collect();
+        assert!(event_kinds.iter().any(|kind| kind == "sub_agent_start"));
+        assert!(event_kinds.iter().any(|kind| kind == "sub_agent_result"));
+
+        reset_llm_mock_state();
+        crate::agent_sessions::reset_session_store();
     }
 }

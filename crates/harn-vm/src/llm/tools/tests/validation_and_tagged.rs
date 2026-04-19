@@ -86,6 +86,7 @@ fn text_parser_reports_unknown_tool_in_native_json_fallback() {
 fn tagged_parser_accepts_well_formed_response() {
     let tools = sample_tool_registry();
     let text = "<assistant_prose>Creating the file.</assistant_prose>\n\
+                <user_response>Created the file.</user_response>\n\
                 <tool_call>\n\
                 edit({ action: \"create\", path: \"a.rs\", content: \"fn a() {}\" })\n\
                 </tool_call>\n\
@@ -99,7 +100,8 @@ fn tagged_parser_accepts_well_formed_response() {
     assert!(result.errors.is_empty(), "no errors: {:?}", result.errors);
     assert_eq!(result.calls.len(), 1);
     assert_eq!(result.calls[0]["name"], json!("edit"));
-    assert_eq!(result.prose, "Creating the file.");
+    assert_eq!(result.prose, "Created the file.");
+    assert_eq!(result.user_response.as_deref(), Some("Created the file."));
     assert_eq!(result.done_marker.as_deref(), Some("##DONE##"));
     assert!(
         !result.canonical.is_empty(),
@@ -214,6 +216,25 @@ fn tagged_parser_flags_unknown_top_level_tag() {
         result.violations
     );
     assert_eq!(result.calls.len(), 1, "known <tool_call> still executes");
+}
+
+#[test]
+fn tagged_parser_accepts_user_response_tag() {
+    let tools = sample_tool_registry();
+    let text = "<user_response>Visible answer.</user_response>";
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert!(result.errors.is_empty(), "no errors: {:?}", result.errors);
+    assert!(
+        result.violations.is_empty(),
+        "no violations: {:?}",
+        result.violations
+    );
+    assert_eq!(result.prose, "Visible answer.");
+    assert_eq!(result.user_response.as_deref(), Some("Visible answer."));
+    assert_eq!(
+        result.canonical.trim(),
+        "<user_response>\nVisible answer.\n</user_response>"
+    );
 }
 
 #[test]

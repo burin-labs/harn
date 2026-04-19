@@ -49,17 +49,44 @@ fn internal_block_patterns() -> &'static [Regex] {
     })
 }
 
-/// Strip the wrapper tags around `<assistant_prose>` blocks so the
-/// surfaced visible text reads as plain narration. Matched tags that
-/// are unclosed (model still streaming) are held back until the next
-/// chunk resolves them.
-fn unwrap_assistant_prose(text: &str) -> String {
+fn assistant_prose_regex() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    let re = RE.get_or_init(|| {
+    RE.get_or_init(|| {
         Regex::new(r"(?s)<assistant_prose>\s*(.*?)\s*</assistant_prose>")
             .expect("valid assistant_prose regex")
-    });
-    re.replace_all(text, "$1").to_string()
+    })
+}
+
+fn user_response_regex() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"(?s)<user_response>\s*(.*?)\s*</user_response>")
+            .expect("valid user_response regex")
+    })
+}
+
+fn extract_user_response(text: &str) -> Option<String> {
+    let sections: Vec<String> = user_response_regex()
+        .captures_iter(text)
+        .filter_map(|caps| caps.get(1).map(|m| m.as_str().trim().to_string()))
+        .filter(|section| !section.is_empty())
+        .collect();
+    if sections.is_empty() {
+        None
+    } else {
+        Some(sections.join("\n\n"))
+    }
+}
+
+/// Strip the wrapper tags around `<assistant_prose>` blocks so the
+/// surfaced visible text reads as plain narration. When a
+/// `<user_response>` block is present, it becomes the authoritative
+/// host-facing surface and supersedes generic assistant prose.
+fn extract_visible_prose(text: &str) -> String {
+    if let Some(user_response) = extract_user_response(text) {
+        return user_response;
+    }
+    assistant_prose_regex().replace_all(text, "$1").to_string()
 }
 
 fn json_fence_regex() -> &'static Regex {
@@ -183,6 +210,13 @@ fn strip_unclosed_internal_blocks(text: &str) -> String {
         }
     }
 
+    if let Some(open_idx) = text.rfind("<user_response>") {
+        let close_idx = text.rfind("</user_response>");
+        if close_idx.is_none_or(|idx| idx < open_idx) {
+            return text[..open_idx].to_string();
+        }
+    }
+
     if let Some(open_idx) = text.rfind("[result of ") {
         let close_idx = text.rfind("[end of ");
         if close_idx.is_none_or(|idx| idx < open_idx) {
@@ -213,10 +247,11 @@ fn strip_inline_internal_planning_json(text: &str, partial: bool) -> String {
 }
 
 fn strip_partial_marker_suffix(text: &str) -> String {
-    const MARKERS: [&str; 9] = [
+    const MARKERS: [&str; 10] = [
         "<|tool_call|>",
         "<tool_call>",
         "<assistant_prose>",
+        "<user_response>",
         "<done>",
         "<tool_result",
         "[result of ",
@@ -247,9 +282,10 @@ pub fn sanitize_visible_assistant_text(text: &str, partial: bool) -> String {
     for pattern in internal_block_patterns() {
         sanitized = pattern.replace_all(&sanitized, "").to_string();
     }
-    // After runtime tags are stripped, unwrap the <assistant_prose> wrapper
-    // so the user-visible stream reads as plain narration.
-    sanitized = unwrap_assistant_prose(&sanitized);
+    // After runtime tags are stripped, surface only the explicit
+    // user-facing response when one exists; otherwise unwrap
+    // <assistant_prose> into plain narration.
+    sanitized = extract_visible_prose(&sanitized);
     sanitized = strip_internal_json_fences(&sanitized);
     sanitized = strip_inline_internal_planning_json(&sanitized, partial);
     if partial {
@@ -327,5 +363,14 @@ mod tests {
         assert_eq!(sanitize_visible_assistant_text(raw, false), "");
         let raw = r#"{"status":"ok","message":"hello"}"#;
         assert_eq!(sanitize_visible_assistant_text(raw, false), raw);
+    }
+
+    #[test]
+    fn sanitize_prefers_user_response_blocks_over_other_prose() {
+        let raw = "Working...\n<assistant_prose>internal narration</assistant_prose>\n<user_response>Visible answer.</user_response>\n##DONE##";
+        assert_eq!(
+            sanitize_visible_assistant_text(raw, false),
+            "Visible answer."
+        );
     }
 }
