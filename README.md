@@ -31,6 +31,22 @@ cd harn
 cargo install --path crates/harn-cli
 ```
 
+Container image:
+
+```bash
+docker run -p 8080:8080 -v $PWD/triggers.toml:/etc/harn/triggers.toml -e HARN_ORCHESTRATOR_API_KEYS=xxx ghcr.io/burin-labs/harn
+```
+
+Release tags publish multi-arch `linux/amd64` and `linux/arm64` images to
+GHCR. The container defaults to `harn orchestrator serve` with
+`HARN_ORCHESTRATOR_MANIFEST=/etc/harn/triggers.toml` and
+`HARN_ORCHESTRATOR_LISTEN=0.0.0.0:8080`; set
+`HARN_ORCHESTRATOR_API_KEYS` and `HARN_ORCHESTRATOR_HMAC_SECRET` when
+you expose authenticated `a2a-push` routes, and inject provider secrets
+with the usual environment variables such as `OPENAI_API_KEY`,
+`ANTHROPIC_API_KEY`, or your deployment's `HARN_PROVIDER_*` /
+`HARN_SECRET_*` values.
+
 ## Quick Start
 
 ```bash

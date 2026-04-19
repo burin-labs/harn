@@ -69,6 +69,10 @@ impl ListenerRuntime {
         let mut route_metrics = BTreeMap::new();
         let mut app = Router::new()
             .route(
+                "/health",
+                get(|| async move { (StatusCode::OK, "ok").into_response() }),
+            )
+            .route(
                 "/healthz",
                 get(|| async move { (StatusCode::OK, "ok").into_response() }),
             )

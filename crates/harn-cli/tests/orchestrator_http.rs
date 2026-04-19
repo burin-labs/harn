@@ -1,10 +1,17 @@
 #![cfg(unix)]
+// Orchestrator HTTP tests serialize against a std::sync::Mutex to prevent
+// parallel binds of the same port. Each test holds the guard across .await
+// boundaries (spawn orchestrator, make requests, drain); that's the correct
+// pattern for this serialization. The clippy lint against await-holding-lock
+// is overly strict for this use case, so allow it at the module level.
+#![allow(clippy::await_holding_lock)]
 
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{self, Receiver};
+use std::sync::{Mutex, MutexGuard, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -21,6 +28,15 @@ const STARTUP_PREFIX: &str = "[harn] HTTP listener ready on ";
 const SHUTDOWN_NEEDLE: &str = "graceful shutdown complete";
 
 type HmacSha256 = Hmac<Sha256>;
+
+static ORCHESTRATOR_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+fn lock_orchestrator_tests() -> MutexGuard<'static, ()> {
+    ORCHESTRATOR_TEST_LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap()
+}
 
 fn write_file(dir: &Path, relative: &str, contents: &str) {
     let path = dir.join(relative);
@@ -271,6 +287,7 @@ fn json_headers() -> HeaderMap {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn github_webhook_delivery_is_accepted_and_persisted() {
+    let _lock = lock_orchestrator_tests();
     let temp = TempDir::new().unwrap();
     write_file(temp.path(), "harn.toml", &base_manifest(None));
     write_file(temp.path(), "lib.harn", handler_module());
@@ -282,6 +299,9 @@ async fn github_webhook_delivery_is_accepted_and_persisted() {
     ];
     let mut process = spawn_orchestrator(&temp, &[], &envs);
     let base_url = process.wait_for_listener_url();
+
+    let health = reqwest::get(format!("{base_url}/health")).await.unwrap();
+    assert_status(health, StatusCode::OK).await;
 
     let body = br#"{"action":"opened","issue":{"number":1}}"#;
     let response = reqwest::Client::new()
@@ -312,6 +332,7 @@ async fn github_webhook_delivery_is_accepted_and_persisted() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a2a_push_route_requires_bearer_or_valid_hmac() {
+    let _lock = lock_orchestrator_tests();
     let temp = TempDir::new().unwrap();
     write_file(temp.path(), "harn.toml", &a2a_manifest(None));
     write_file(temp.path(), "lib.harn", a2a_handler_module());
@@ -381,6 +402,7 @@ async fn a2a_push_route_requires_bearer_or_valid_hmac() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn tls_listener_serves_https_with_supplied_cert_and_key() {
+    let _lock = lock_orchestrator_tests();
     let temp = TempDir::new().unwrap();
     write_file(temp.path(), "harn.toml", &base_manifest(None));
     write_file(temp.path(), "lib.harn", handler_module());
@@ -423,6 +445,7 @@ async fn tls_listener_serves_https_with_supplied_cert_and_key() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn disallowed_origin_is_rejected() {
+    let _lock = lock_orchestrator_tests();
     let temp = TempDir::new().unwrap();
     write_file(
         temp.path(),
@@ -464,6 +487,7 @@ allowed_origins = ["https://allowed.example"]"#,
 
 #[tokio::test(flavor = "multi_thread")]
 async fn oversized_request_body_is_rejected() {
+    let _lock = lock_orchestrator_tests();
     let temp = TempDir::new().unwrap();
     write_file(temp.path(), "harn.toml", &base_manifest(None));
     write_file(temp.path(), "lib.harn", handler_module());
@@ -494,6 +518,7 @@ async fn oversized_request_body_is_rejected() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn graceful_shutdown_waits_for_in_flight_request() {
+    let _lock = lock_orchestrator_tests();
     let temp = TempDir::new().unwrap();
     write_file(temp.path(), "harn.toml", &base_manifest(None));
     write_file(temp.path(), "lib.harn", handler_module());

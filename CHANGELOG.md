@@ -42,6 +42,18 @@ granular archaeology.
 
 ### Added
 
+- **Distroless multi-arch orchestrator container (#186).** Added a root
+  `Dockerfile` for `harn orchestrator serve` with a Rust 1.95 builder,
+  distroless `cc` runtime, non-root UID `10001`, and a Docker healthcheck
+  that probes `GET /health`. `harn orchestrator serve` now accepts
+  container-friendly `--manifest` / `--listen` aliases plus
+  `HARN_ORCHESTRATOR_*` env defaults, `.dockerignore` prunes bulky build
+  outputs from the image context, `a2a-push` listener routes can enforce
+  bearer API keys or canonical-request HMAC auth via
+  `HARN_ORCHESTRATOR_API_KEYS` and `HARN_ORCHESTRATOR_HMAC_SECRET`, and
+  the release-tag workflow now builds and pushes `linux/amd64` +
+  `linux/arm64` images to `ghcr.io/burin-labs/harn`.
+
 - **Trigger event replay now routes through the dispatcher (#166).**
   `trigger_replay(...)` no longer uses the local shallow stub. The
   stdlib now looks up historical events from `triggers.events`,
