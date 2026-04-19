@@ -38,6 +38,9 @@ pub(super) async fn run_finalize(
     tool_format: &str,
     loop_start: Instant,
 ) -> Result<serde_json::Value, VmError> {
+    if let Some(bridge) = bridge.as_ref() {
+        bridge.set_daemon_idle(false);
+    }
     state.deferred_user_messages.extend(
         inject_queued_user_messages(
             bridge.as_ref(),

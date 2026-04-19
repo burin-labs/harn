@@ -50,6 +50,8 @@ pub struct HostBridge {
     /// between runs (watch mode, long-running agents) to rebuild the
     /// layered skill catalog from its current filesystem + host state.
     skills_reload_requested: Arc<AtomicBool>,
+    /// Whether the current daemon-mode agent loop is blocked in idle wait.
+    daemon_idle: Arc<AtomicBool>,
     /// Per-call visible assistant text state for call_progress notifications.
     visible_call_states: std::sync::Mutex<HashMap<String, VisibleTextState>>,
     /// Whether an LLM call's deltas should be exposed to end users while streaming.
@@ -217,6 +219,7 @@ impl HostBridge {
             Arc::new(Mutex::new(VecDeque::new()));
         let resume_requested = Arc::new(AtomicBool::new(false));
         let skills_reload_requested = Arc::new(AtomicBool::new(false));
+        let daemon_idle = Arc::new(AtomicBool::new(false));
 
         // Stdin reader: reads JSON-RPC lines and dispatches responses
         let pending_clone = pending.clone();
@@ -299,6 +302,7 @@ impl HostBridge {
             queued_user_messages,
             resume_requested,
             skills_reload_requested,
+            daemon_idle,
             visible_call_states: std::sync::Mutex::new(HashMap::new()),
             visible_call_streams: std::sync::Mutex::new(HashMap::new()),
             in_process: None,
@@ -328,6 +332,7 @@ impl HostBridge {
             queued_user_messages: Arc::new(Mutex::new(VecDeque::new())),
             resume_requested: Arc::new(AtomicBool::new(false)),
             skills_reload_requested: Arc::new(AtomicBool::new(false)),
+            daemon_idle: Arc::new(AtomicBool::new(false)),
             visible_call_states: std::sync::Mutex::new(HashMap::new()),
             visible_call_streams: std::sync::Mutex::new(HashMap::new()),
             in_process: None,
@@ -350,6 +355,7 @@ impl HostBridge {
             queued_user_messages: Arc::new(Mutex::new(VecDeque::new())),
             resume_requested: Arc::new(AtomicBool::new(false)),
             skills_reload_requested: Arc::new(AtomicBool::new(false)),
+            daemon_idle: Arc::new(AtomicBool::new(false)),
             visible_call_states: std::sync::Mutex::new(HashMap::new()),
             visible_call_streams: std::sync::Mutex::new(HashMap::new()),
             in_process: Some(InProcessHost {
@@ -507,6 +513,14 @@ impl HostBridge {
 
     pub fn signal_resume(&self) {
         self.resume_requested.store(true, Ordering::SeqCst);
+    }
+
+    pub fn set_daemon_idle(&self, idle: bool) {
+        self.daemon_idle.store(idle, Ordering::SeqCst);
+    }
+
+    pub fn is_daemon_idle(&self) -> bool {
+        self.daemon_idle.load(Ordering::SeqCst)
     }
 
     /// Consume any pending `skills/update` signal the host has sent.

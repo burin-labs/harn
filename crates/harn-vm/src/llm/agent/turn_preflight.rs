@@ -54,6 +54,9 @@ pub(super) async fn run_turn_preflight(
     opts: &mut super::super::api::LlmCallOptions,
     ctx: PreflightContext<'_>,
 ) -> Result<(), VmError> {
+    if let Some(bridge) = ctx.bridge.as_ref() {
+        bridge.set_daemon_idle(false);
+    }
     state.total_iterations = ctx.resumed_iterations + ctx.iteration + 1;
     crate::llm::agent_observe::set_current_iteration(Some(state.total_iterations));
     state.daemon_state = "active".to_string();

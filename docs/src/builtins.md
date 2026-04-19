@@ -721,6 +721,11 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 | `with_rate_limit(provider, fn, options?)` | provider: string, fn: closure, options: dict | whatever `fn` returns | Acquire a permit from the provider's sliding-window rate limiter, invoke `fn`, and retry with exponential backoff on retryable errors (`rate_limit`, `overloaded`, `transient_network`, `timeout`). Options: `max_retries` (default 5), `backoff_ms` (default 1000, capped at 30s after doubling) |
 | `llm_completion(prefix, suffix?, system?, options?)` | prefix: string, suffix: string, system: string, options: dict | dict | Text completion / fill-in-the-middle request. Returns `{text, model, input_tokens, output_tokens}` |
 | `agent_loop(prompt, system?, options?)` | prompt: string, system: string, options: dict | dict | Multi-turn agent loop with `##DONE##` sentinel, daemon/idling support, and optional per-turn context filtering. Returns `{status, text, iterations, duration_ms, tools_used}` |
+| `daemon_spawn(config)` | config: dict | dict | Start a daemon-mode agent and return a daemon handle with persisted state + queue metadata |
+| `daemon_trigger(handle, event)` | handle: dict or string, event: any | dict | Enqueue a durable FIFO trigger event for a running daemon; throws `VmError::DaemonQueueFull` on overflow |
+| `daemon_snapshot(handle)` | handle: dict or string | dict | Return the latest daemon snapshot plus live queue state (`pending_events`, `inflight_event`, counts, capacity) |
+| `daemon_stop(handle)` | handle: dict or string | dict | Stop a daemon and preserve queued trigger state for resume |
+| `daemon_resume(path)` | path: string | dict | Resume a daemon from its persisted state directory |
 | `llm_info()` | — | dict | Current LLM config: `{provider, model, api_key_set}` |
 | `llm_usage()` | — | dict | Cumulative usage: `{input_tokens, output_tokens, total_duration_ms, call_count, total_calls}` |
 | `llm_resolve_model(alias)` | alias: string | dict | Resolve model alias to `{id, provider}` via providers.toml |

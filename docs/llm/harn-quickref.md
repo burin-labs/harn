@@ -790,6 +790,23 @@ Lifecycle builtins (all hard-error on unknown ids except `exists`,
 - `agent_session_compact(id, opts)` — unknown keys in `opts` error.
 - `agent_session_length(id)` / `_snapshot(id)` for read-only inspection.
 
+### Daemon wrappers
+
+Use the daemon stdlib wrappers when you want a first-class handle around
+`agent_loop(..., {daemon: true})`:
+
+- `daemon_spawn(config)` starts a persistent daemon and returns `{id, status, persist_path, ...}`.
+- `daemon_trigger(handle, event)` appends a durable FIFO trigger event.
+- `daemon_snapshot(handle)` returns the persisted daemon snapshot plus queue
+  fields such as `pending_event_count`, `queued_event_count`,
+  `inflight_event`, and `event_queue_capacity`.
+- `daemon_stop(handle)` preserves state and re-queues any in-flight trigger.
+- `daemon_resume(path)` resumes from the daemon state directory.
+
+`daemon_spawn` accepts daemon-loop options like `wake_interval_ms`,
+`watch_paths`, and `idle_watchdog_attempts`, plus
+`event_queue_capacity` (default `1024`).
+
 Workflow stages pick up a session id from `model_policy.session_id`;
 two stages sharing an id share their conversation automatically. The
 pre-0.7 `transcript_policy` dict (with `mode: "reset" | "fork"`) was
