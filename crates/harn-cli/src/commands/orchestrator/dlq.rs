@@ -1,8 +1,28 @@
 use crate::cli::OrchestratorDlqArgs;
+use serde::Serialize;
 
 use super::common::{
-    append_dlq_entry, discard_dlq_entry, load_local_runtime, trigger_inspect_dlq, trigger_replay,
+    append_dlq_entry, discard_dlq_entry, load_local_runtime, print_json, trigger_inspect_dlq,
+    trigger_replay,
 };
+
+#[derive(Debug, Serialize)]
+struct DlqListPayload {
+    dispatcher_dlq_depth: u64,
+    pending_entries: usize,
+    entries: Vec<super::common::DlqEntryRecord>,
+}
+
+#[derive(Debug, Serialize)]
+struct DlqReplayPayload {
+    entry_id: String,
+    handle: super::common::DispatchHandleRecord,
+}
+
+#[derive(Debug, Serialize)]
+struct DlqDiscardPayload {
+    entry: super::common::DlqEntryRecord,
+}
 
 pub(super) async fn run(args: OrchestratorDlqArgs) -> Result<(), String> {
     let mut ctx = load_local_runtime(&args.local).await?;
@@ -14,6 +34,12 @@ pub(super) async fn run(args: OrchestratorDlqArgs) -> Result<(), String> {
             .find(|entry| entry.id == entry_id)
             .ok_or_else(|| format!("unknown pending DLQ entry '{entry_id}'"))?;
         let handle = trigger_replay(&mut ctx, &entry.event_id).await?;
+        if args.json {
+            return print_json(&DlqReplayPayload {
+                entry_id: entry.id.clone(),
+                handle,
+            });
+        }
         println!("DLQ replay:");
         println!("- entry_id={}", entry.id);
         println!("- event_id={}", handle.event_id);
@@ -33,6 +59,9 @@ pub(super) async fn run(args: OrchestratorDlqArgs) -> Result<(), String> {
             .ok_or_else(|| format!("unknown pending DLQ entry '{entry_id}'"))?;
         let discarded = discard_dlq_entry(entry)?;
         append_dlq_entry(&ctx.event_log, &discarded).await?;
+        if args.json {
+            return print_json(&DlqDiscardPayload { entry: discarded });
+        }
         println!("DLQ entry discarded:");
         println!("- entry_id={}", discarded.id);
         println!("- event_id={}", discarded.event_id);
@@ -41,6 +70,13 @@ pub(super) async fn run(args: OrchestratorDlqArgs) -> Result<(), String> {
     }
 
     let stats = harn_vm::snapshot_dispatcher_stats();
+    if args.json {
+        return print_json(&DlqListPayload {
+            dispatcher_dlq_depth: stats.dlq_depth,
+            pending_entries: entries.len(),
+            entries,
+        });
+    }
     println!("DLQ:");
     println!("- dispatcher_dlq_depth={}", stats.dlq_depth);
     println!("- pending_entries={}", entries.len());

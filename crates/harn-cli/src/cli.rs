@@ -559,6 +559,9 @@ pub(crate) struct OrchestratorServeArgs {
 pub(crate) struct OrchestratorInspectArgs {
     #[command(flatten)]
     pub local: OrchestratorLocalArgs,
+    /// Emit JSON instead of human-readable output.
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Debug, Args)]
@@ -575,12 +578,18 @@ pub(crate) struct OrchestratorReplayArgs {
     pub local: OrchestratorLocalArgs,
     /// Previously recorded event id to replay.
     pub event_id: String,
+    /// Emit JSON instead of human-readable output.
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Debug, Args)]
 pub(crate) struct OrchestratorDlqArgs {
     #[command(flatten)]
     pub local: OrchestratorLocalArgs,
+    /// Emit JSON instead of human-readable output.
+    #[arg(long)]
+    pub json: bool,
     /// List pending DLQ entries.
     #[arg(
         long,
@@ -1040,6 +1049,7 @@ mod tests {
         };
         assert_eq!(inspect.local.config, PathBuf::from("workspace/harn.toml"));
         assert_eq!(inspect.local.state_dir, PathBuf::from("state/orchestrator"));
+        assert!(!inspect.json);
     }
 
     #[test]
@@ -1082,6 +1092,7 @@ mod tests {
         };
         assert_eq!(replay.event_id, "trigger_evt_123");
         assert_eq!(replay.local.state_dir, PathBuf::from("state/orchestrator"));
+        assert!(!replay.json);
     }
 
     #[test]
@@ -1106,6 +1117,44 @@ mod tests {
         assert!(dlq.discard.is_none());
         assert!(!dlq.list);
         assert_eq!(dlq.local.config, PathBuf::from("workspace/harn.toml"));
+        assert!(!dlq.json);
+    }
+
+    #[test]
+    fn test_parses_orchestrator_json_flags() {
+        let inspect_cli = Cli::parse_from(["harn", "orchestrator", "inspect", "--json"]);
+        let Command::Orchestrator(inspect_args) = inspect_cli.command.unwrap() else {
+            panic!("expected orchestrator command");
+        };
+        let OrchestratorCommand::Inspect(inspect) = inspect_args.command else {
+            panic!("expected orchestrator inspect");
+        };
+        assert!(inspect.json);
+
+        let replay_cli = Cli::parse_from([
+            "harn",
+            "orchestrator",
+            "replay",
+            "trigger_evt_123",
+            "--json",
+        ]);
+        let Command::Orchestrator(replay_args) = replay_cli.command.unwrap() else {
+            panic!("expected orchestrator command");
+        };
+        let OrchestratorCommand::Replay(replay) = replay_args.command else {
+            panic!("expected orchestrator replay");
+        };
+        assert!(replay.json);
+
+        let dlq_cli = Cli::parse_from(["harn", "orchestrator", "dlq", "--json", "--list"]);
+        let Command::Orchestrator(dlq_args) = dlq_cli.command.unwrap() else {
+            panic!("expected orchestrator command");
+        };
+        let OrchestratorCommand::Dlq(dlq) = dlq_args.command else {
+            panic!("expected orchestrator dlq");
+        };
+        assert!(dlq.json);
+        assert!(dlq.list);
     }
 
     #[test]

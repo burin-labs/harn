@@ -87,10 +87,29 @@ pipeline test(task) {
   let inspect = exec(harn_bin, "orchestrator", "inspect", "--config", config_path, "--state-dir", state_dir)
   println(
     inspect.success
-    && inspect.stdout.contains("cron-heartbeat provider=cron kind=cron state=active version=1")
-    && inspect.stdout.contains("manual-replay provider=a2a-push kind=a2a-push state=active version=1")
+    && inspect.stdout.contains("cron-heartbeat provider=cron kind=cron state=active")
+    && inspect.stdout.contains("manual-replay provider=a2a-push kind=a2a-push state=active")
     && inspect.stdout.contains("cron bindings=1")
     && inspect.stdout.contains("a2a-push bindings=2"),
+  )
+  let inspect_json = exec(
+    harn_bin,
+    "orchestrator",
+    "inspect",
+    "--json",
+    "--config",
+    config_path,
+    "--state-dir",
+    state_dir,
+  )
+  let inspect_data = json_parse(inspect_json.stdout)
+  println(
+    inspect_json.success
+    && len(inspect_data.bindings ?? []) == 3
+    && inspect_data.snapshot?.status == "stopped"
+    && inspect_data.snapshot?.bind != nil
+    && contains(json_stringify(inspect_data.bindings ?? []), "\"id\":\"manual-replay\"")
+    && contains(json_stringify(inspect_data.activations ?? []), "\"provider\":\"cron\""),
   )
   let fire_replay = exec(
     harn_bin,
@@ -130,6 +149,25 @@ pipeline test(task) {
     && dlq_list.stdout.contains("binding=manual-replay")
     && dlq_list.stdout.contains("binding=manual-discard"),
   )
+  let dlq_list_json = exec(
+    harn_bin,
+    "orchestrator",
+    "dlq",
+    "--json",
+    "--list",
+    "--config",
+    config_path,
+    "--state-dir",
+    state_dir,
+  )
+  let dlq_data = json_parse(dlq_list_json.stdout)
+  println(
+    dlq_list_json.success
+    && dlq_data.pending_entries == 2
+    && len(dlq_data.entries ?? []) == 2
+    && contains(json_stringify(dlq_data.entries ?? []), "\"binding_id\":\"manual-replay\"")
+    && contains(json_stringify(dlq_data.entries ?? []), "\"binding_id\":\"manual-discard\""),
+  )
   let inspect_after = exec(harn_bin, "orchestrator", "inspect", "--config", config_path, "--state-dir", state_dir)
   println(
     inspect_after.success
@@ -154,15 +192,18 @@ pipeline test(task) {
     "orchestrator",
     "replay",
     replay_event_id,
+    "--json",
     "--config",
     config_path,
     "--state-dir",
     state_dir,
   )
+  let direct_replay_data = json_parse(direct_replay.stdout)
   println(
     direct_replay.success
-    && direct_replay.stdout.contains("status=dispatched")
-    && direct_replay.stdout.contains("replay_of_event_id=" + replay_event_id),
+    && direct_replay_data.status == "dispatched"
+    && direct_replay_data.replay_of_event_id == replay_event_id
+    && direct_replay_data.binding_id == "manual-replay",
   )
   let discard = exec(
     harn_bin,

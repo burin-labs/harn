@@ -29,7 +29,7 @@ pub(super) struct LoadedOrchestratorContext {
     pub snapshot: Option<PersistedStateSnapshot>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub(super) struct PersistedStateSnapshot {
     pub status: String,
     pub bind: String,
@@ -39,13 +39,13 @@ pub(super) struct PersistedStateSnapshot {
     pub activations: Vec<ConnectorActivationSnapshot>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub(super) struct ConnectorActivationSnapshot {
     pub provider: String,
     pub binding_count: usize,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub(super) struct DispatchHandleRecord {
     pub event_id: String,
     pub binding_id: String,
@@ -216,6 +216,15 @@ pub(super) fn discard_dlq_entry(entry: &DlqEntryRecord) -> Result<DlqEntryRecord
         error: None,
     });
     Ok(next)
+}
+
+pub(super) fn print_json<T>(value: &T) -> Result<(), String>
+where
+    T: Serialize,
+{
+    let encoded = serde_json::to_string_pretty(value).map_err(|error| error.to_string())?;
+    println!("{encoded}");
+    Ok(())
 }
 
 fn read_state_snapshot(path: &Path) -> Result<Option<PersistedStateSnapshot>, String> {

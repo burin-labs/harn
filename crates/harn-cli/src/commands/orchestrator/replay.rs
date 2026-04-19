@@ -1,10 +1,13 @@
 use crate::cli::OrchestratorReplayArgs;
 
-use super::common::{load_local_runtime, trigger_replay};
+use super::common::{load_local_runtime, print_json, trigger_replay};
 
 pub(super) async fn run(args: OrchestratorReplayArgs) -> Result<(), String> {
     let mut ctx = load_local_runtime(&args.local).await?;
     let handle = trigger_replay(&mut ctx, &args.event_id).await?;
+    if args.json {
+        return print_json(&handle);
+    }
 
     println!("Replay result:");
     println!("- binding_id={}", handle.binding_id);
