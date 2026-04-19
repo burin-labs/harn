@@ -41,28 +41,25 @@ pipeline test(task) {
     path_join(root, "lib.harn"),
     "import \"std/triggers\"\n\npub fn on_task(event: TriggerEvent) {\n  log(event.kind)\n}\n",
   )
-
   let repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
   let target_dir = env("CARGO_TARGET_DIR") ?? path_join(repo_root, "target")
   let harn_bin = path_join(target_dir, "debug/harn")
   assert(file_exists(harn_bin), "missing built harn binary at " + harn_bin)
-
   let start = shell_at(
     root,
-    "nohup env HARN_SECRET_PROVIDERS=env HARN_ORCHESTRATOR_API_KEYS=test-key-1,test-key-2 HARN_ORCHESTRATOR_HMAC_SECRET=shared-secret " + harn_bin + " orchestrator serve --config harn.toml --state-dir ./state --role single-tenant --bind 127.0.0.1:0 >/dev/null 2>orchestrator.log </dev/null & echo $!",
+    "nohup env HARN_SECRET_PROVIDERS=env HARN_ORCHESTRATOR_API_KEYS=test-key-1,test-key-2 HARN_ORCHESTRATOR_HMAC_SECRET=shared-secret "
+    + harn_bin
+    + " orchestrator serve --config harn.toml --state-dir ./state --role single-tenant --bind 127.0.0.1:0 >/dev/null 2>orchestrator.log </dev/null & echo $!",
   )
   let pid = start.stdout.trim()
   assert(start.success, "failed to start orchestrator")
   assert(pid != "", "missing orchestrator pid")
-
   let url = wait_for_listener_url(path_join(root, "orchestrator.log"))
   assert(url != nil, "listener URL did not appear in log")
-
   let body = "{\"kind\":\"a2a.task.received\",\"task\":{\"id\":\"task-123\"}}"
-  let json_headers = {"Content-Type": "application/json"}
+  let json_headers = {["Content-Type"]: "application/json"}
   let unauth = http_request("POST", url + "/a2a/review", {body: body, headers: json_headers})
   println(unauth.status == 401)
-
   let ts = to_string(to_int(timestamp()))
   let wrong_hmac = http_request(
     "POST",
@@ -70,26 +67,18 @@ pipeline test(task) {
     {
     body: body,
     headers: {
-      "Content-Type": "application/json",
-      "Authorization": "HMAC-SHA256 timestamp=" + ts + ",signature=AAAAAAAAAAAAAAAAAAAAAA==",
-    },
+    ["Content-Type"]: "application/json",
+    Authorization: "HMAC-SHA256 timestamp=" + ts + ",signature=AAAAAAAAAAAAAAAAAAAAAA==",
+  },
   },
   )
   println(wrong_hmac.status == 401)
-
   let bearer = http_request(
     "POST",
     url + "/a2a/review",
-    {
-    body: body,
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": "Bearer test-key-2",
-    },
-  },
+    {body: body, headers: {["Content-Type"]: "application/json", Authorization: "Bearer test-key-2"}},
   )
   println(bearer.status == 200)
-
   let _ = shell("kill -TERM " + pid)
   wait_for_exit(pid)
   delete_file(root)
