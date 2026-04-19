@@ -26,6 +26,14 @@ granular archaeology.
   session transcript + per-session agent-event sinks migrate onto
   the shared abstraction, `harn doctor` surfaces the active backend
   and on-disk footprint, and SQLite is the default when persisting.
+- **`TriggerEvent` schema and `std/triggers` stdlib types (#196,
+  closes #155).** New `harn_vm::triggers::event` module defines the
+  typed `TriggerEvent` envelope with a provider-payload union and
+  signature-status field, plus the `std/triggers` stdlib type
+  surface scripts use to construct and inspect trigger events.
+  Lays the type foundation that upcoming EventLog-backed trigger
+  registry, LLM predicate gate, and handler dispatcher work will
+  consume.
 
 ## v0.7.22
 

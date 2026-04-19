@@ -19,6 +19,7 @@ impl TypeChecker {
         mut self,
         program: &[SNode],
     ) -> (Vec<TypeDiagnostic>, Vec<InlayHintInfo>) {
+        Self::register_declarations_into(&mut self.scope, &self.imported_type_decls);
         // First pass: collect declarations (type/enum/struct/interface) into scope
         // before type-checking bodies so forward references resolve.
         Self::register_declarations_into(&mut self.scope, program);

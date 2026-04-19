@@ -90,6 +90,10 @@ pub struct TypeChecker {
     /// conservative pre-v0.7.12 behavior (no cross-module undefined-name
     /// diagnostics).
     imported_names: Option<HashSet<String>>,
+    /// Type-like declarations imported from other modules. These are registered
+    /// into the scope before local checking so imported type aliases and tagged
+    /// unions participate in normal field access and narrowing.
+    imported_type_decls: Vec<SNode>,
 }
 
 impl TypeChecker {
@@ -119,6 +123,7 @@ impl TypeChecker {
             fn_depth: 0,
             deprecated_fns: std::collections::HashMap::new(),
             imported_names: None,
+            imported_type_decls: Vec::new(),
         }
     }
 
@@ -134,6 +139,7 @@ impl TypeChecker {
             fn_depth: 0,
             deprecated_fns: std::collections::HashMap::new(),
             imported_names: None,
+            imported_type_decls: Vec::new(),
         }
     }
 
@@ -149,6 +155,14 @@ impl TypeChecker {
     /// — see `harn_modules::ModuleGraph::imported_names_for_file`.
     pub fn with_imported_names(mut self, imported: HashSet<String>) -> Self {
         self.imported_names = Some(imported);
+        self
+    }
+
+    /// Attach imported type / struct / enum / interface declarations. The
+    /// caller is responsible for resolving module imports and filtering the
+    /// visible declarations before passing them in.
+    pub fn with_imported_type_decls(mut self, imported: Vec<SNode>) -> Self {
+        self.imported_type_decls = imported;
         self
     }
 

@@ -69,6 +69,9 @@ struct ModuleInfo {
     fn_names: Vec<String>,
     /// True when at least one `pub fn` appeared at module scope.
     has_pub_fn: bool,
+    /// Top-level type-like declarations that can be imported into a caller's
+    /// static type environment.
+    type_declarations: Vec<SNode>,
 }
 
 #[derive(Debug, Clone)]
@@ -316,6 +319,47 @@ impl ModuleGraph {
         Some(names)
     }
 
+    /// Collect type / struct / enum / interface declarations made visible to
+    /// `file` by its imports. Returns `None` when any import is unresolved so
+    /// callers can fall back to conservative behavior.
+    pub fn imported_type_declarations_for_file(&self, file: &Path) -> Option<Vec<SNode>> {
+        let file = normalize_path(file);
+        let module = self.modules.get(&file)?;
+        if module.has_unresolved_wildcard_import || module.has_unresolved_selective_import {
+            return None;
+        }
+
+        let mut decls = Vec::new();
+        for import in &module.imports {
+            let import_path = import.path.as_ref()?;
+            let imported = self
+                .modules
+                .get(import_path)
+                .or_else(|| self.modules.get(&normalize_path(import_path)))?;
+            match &import.selective_names {
+                None => {
+                    for decl in &imported.type_declarations {
+                        if let Some(name) = type_decl_name(decl) {
+                            if imported.exports.contains(name) {
+                                decls.push(decl.clone());
+                            }
+                        }
+                    }
+                }
+                Some(selective) => {
+                    for decl in &imported.type_declarations {
+                        if let Some(name) = type_decl_name(decl) {
+                            if selective.contains(name) {
+                                decls.push(decl.clone());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Some(decls)
+    }
+
     /// Find the definition of `name` visible from `file`.
     pub fn definition_of(&self, file: &Path, name: &str) -> Option<DefSite> {
         let file = normalize_path(file);
@@ -394,6 +438,7 @@ fn load_module(path: &Path) -> ModuleInfo {
     let mut module = ModuleInfo::default();
     for node in &program {
         collect_module_info(path, node, &mut module);
+        collect_type_declarations(node, &mut module.type_declarations);
     }
     // Fallback matching the VM loader: if the module declares no
     // `pub fn`, every fn is implicitly exported.
@@ -532,6 +577,27 @@ fn collect_module_info(file: &Path, snode: &SNode, module: &mut ModuleInfo) {
     }
 }
 
+fn collect_type_declarations(snode: &SNode, decls: &mut Vec<SNode>) {
+    match &snode.node {
+        Node::TypeDecl { .. }
+        | Node::StructDecl { .. }
+        | Node::EnumDecl { .. }
+        | Node::InterfaceDecl { .. } => decls.push(snode.clone()),
+        Node::AttributedDecl { inner, .. } => collect_type_declarations(inner, decls),
+        _ => {}
+    }
+}
+
+fn type_decl_name(snode: &SNode) -> Option<&str> {
+    match &snode.node {
+        Node::TypeDecl { name, .. }
+        | Node::StructDecl { name, .. }
+        | Node::EnumDecl { name, .. }
+        | Node::InterfaceDecl { name, .. } => Some(name.as_str()),
+        _ => None,
+    }
+}
+
 fn decl_site(file: &Path, span: Span, name: &str, kind: DefKind) -> DefSite {
     DefSite {
         name: name.to_string(),
@@ -637,6 +703,30 @@ mod tests {
             .expect("std/math should resolve");
         // `clamp` is defined in stdlib_math.harn as `pub fn clamp(...)`.
         assert!(imported.contains("clamp"));
+    }
+
+    #[test]
+    fn stdlib_imports_expose_type_declarations() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let entry = write_file(
+            root,
+            "entry.harn",
+            "import \"std/triggers\"\nlet provider = \"github\"\n",
+        );
+
+        let graph = build(std::slice::from_ref(&entry));
+        let decls = graph
+            .imported_type_declarations_for_file(&entry)
+            .expect("std/triggers type declarations should resolve");
+        let names: HashSet<String> = decls
+            .iter()
+            .filter_map(type_decl_name)
+            .map(ToString::to_string)
+            .collect();
+        assert!(names.contains("TriggerEvent"));
+        assert!(names.contains("ProviderPayload"));
+        assert!(names.contains("SignatureStatus"));
     }
 
     #[test]

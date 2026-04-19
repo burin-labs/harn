@@ -27,6 +27,7 @@ pub mod stdlib_modules;
 pub mod store;
 pub mod tool_annotations;
 pub mod tracing;
+pub mod triggers;
 pub mod value;
 pub mod visible_text;
 mod vm;
@@ -63,6 +64,11 @@ pub use stdlib::{
     register_agent_stdlib, register_core_stdlib, register_io_stdlib, register_vm_stdlib,
 };
 pub use store::register_store_builtins;
+pub use triggers::{
+    redact_headers, register_provider_schema, reset_provider_catalog, HeaderRedactionPolicy,
+    ProviderCatalog, ProviderCatalogError, ProviderId, ProviderPayload, ProviderSchema,
+    SignatureStatus, TenantId, TraceId, TriggerEvent, TriggerEventId,
+};
 pub use value::*;
 pub use vm::*;
 

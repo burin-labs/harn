@@ -272,6 +272,9 @@ fn typecheck_program(
     if !imported.is_empty() {
         checker = checker.with_imported_names(imported);
     }
+    if let Some(imported) = graph.imported_type_declarations_for_file(path) {
+        checker = checker.with_imported_type_decls(imported);
+    }
 
     let diagnostics = checker.check(program);
     let mut rendered = String::new();

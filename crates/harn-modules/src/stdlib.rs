@@ -29,6 +29,7 @@ pub(crate) fn get_stdlib_source(module: &str) -> Option<&'static str> {
         "checkpoint" => Some(include_str!("../../harn-vm/src/stdlib_checkpoint.harn")),
         "worktree" => Some(include_str!("../../harn-vm/src/stdlib_worktree.harn")),
         "acp" => Some(include_str!("../../harn-vm/src/stdlib_acp.harn")),
+        "triggers" => Some(include_str!("../../harn-vm/src/stdlib_triggers.harn")),
         _ => None,
     }
 }
