@@ -2646,6 +2646,7 @@ kind = "webhook"
 provider = "github"
 match = { events = ["issues.opened"] }
 handler = "worker://queue"
+secrets = { signing_secret = "github/webhook-secret" }
 retry = { retention_days = 0 }
 "#,
             None,
@@ -2654,7 +2655,10 @@ retry = { retention_days = 0 }
         let error = collect_manifest_triggers(&mut vm, &load_runtime_extensions(&harn_file))
             .await
             .unwrap_err();
-        assert!(error.contains("retry.retention_days"));
+        assert!(
+            error.contains("retry.retention_days"),
+            "actual error: {error}"
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]
