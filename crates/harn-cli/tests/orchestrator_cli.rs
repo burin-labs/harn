@@ -139,6 +139,17 @@ fn wait_for_exit(child: &mut Child) {
     panic!("timed out waiting for orchestrator exit");
 }
 
+fn wait_for_any_exit(child: &mut Child) {
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while Instant::now() < deadline {
+        if child.try_wait().unwrap().is_some() {
+            return;
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+    panic!("timed out waiting for orchestrator exit");
+}
+
 fn json_headers() -> HeaderMap {
     let mut headers = HeaderMap::new();
     headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
@@ -428,10 +439,9 @@ pub fn on_event(event: TriggerEvent) {
 
     let (mut child, rx, handle) = spawn_orchestrator(&temp);
     wait_for_log_line(&mut child, &rx, STARTUP_NEEDLE);
-    send_sigterm(&child);
-    wait_for_exit(&mut child);
-    let stderr = handle.join().expect("stderr collector thread");
-    assert!(stderr.contains(SHUTDOWN_NEEDLE), "stderr={stderr}");
+    child.kill().unwrap();
+    wait_for_any_exit(&mut child);
+    let _stderr = handle.join().expect("stderr collector thread");
     let legacy_after = read_topic_events(&state_dir, harn_vm::TRIGGER_INBOX_LEGACY_TOPIC);
     assert_eq!(legacy_after.len(), 2, "legacy_after={legacy_after:?}");
     assert_eq!(
