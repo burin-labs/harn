@@ -305,6 +305,12 @@ per-worktree temp `target-dir` into `.cargo/config.toml` so parallel Codex
 worktrees do not fight over one shared Cargo target. `make portal` launches the
 built-in observability UI for persisted runs under `.harn-runs/`.
 
+The repo-root portal scripts (`npm run portal:lint`, `portal:test`,
+`portal:build`, and `portal:dev`) now self-bootstrap
+`crates/harn-cli/portal/node_modules` from the checked-in lockfile when those
+dependencies are missing, and the git hooks call the same bootstrap path before
+portal lint runs.
+
 ## Why This Matters
 
 Without a runtime boundary like Harn, application code tends to accumulate:

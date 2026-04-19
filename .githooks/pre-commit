@@ -26,6 +26,7 @@ fi
 
 if command -v npm >/dev/null 2>&1; then
   echo "=== Pre-commit: linting portal frontend ==="
+  ./scripts/ensure_portal_deps.sh
   npm run portal:lint
   echo "    Portal lint OK."
 else

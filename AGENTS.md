@@ -15,6 +15,9 @@ This repository implements Harn, a programming language and runtime for orchestr
 - Use `cargo run --quiet --bin harn -- --help` to inspect the current CLI surface.
 - The root `package.json` is only for repo tooling. The portal UI, tree-sitter grammar, and VS Code
   extension each have their own package manifests.
+- The repo-root portal scripts self-bootstrap `crates/harn-cli/portal/node_modules` when needed, so
+  `npm run portal:lint`, `portal:test`, `portal:build`, and the git hooks should not fail just
+  because portal deps have not been installed in a fresh worktree yet.
 - `crates/harn-wasm` is excluded from the Cargo workspace. Build it separately with
   `cd crates/harn-wasm && wasm-pack build`.
 - Installed hooks are worth keeping on: pre-commit runs `cargo fmt`, clippy, markdown lint, and
