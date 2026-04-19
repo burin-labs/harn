@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 use tempfile::TempDir;
 
-const STARTUP_NEEDLE: &str = "HTTP listener not yet implemented (see O-02 #179)";
+const STARTUP_NEEDLE: &str = "HTTP listener ready on";
 const SHUTDOWN_NEEDLE: &str = "graceful shutdown complete";
 
 fn write_file(dir: &Path, relative: &str, contents: &str) {
