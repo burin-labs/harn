@@ -20,8 +20,18 @@ granular archaeology.
   Dispatch/A2A/worker/DLQ nodes deferred to the T-06 dispatcher
   milestone.
 - **Connector trait + registry + shared HMAC-signature verification
-  (PR pending, closes #167).** Foundation for upcoming MVP connectors
-  (cron, webhooks, GitHub, Slack, Linear, Notion, A2A push).
+  (#203, closes #167).** New `harn_vm::connectors` module defines
+  the async `Connector` + `ConnectorClient` traits,
+  `ConnectorRegistry` with activation fan-out, a provider-scoped
+  token-bucket rate limiter, and a shared `verify_hmac_signed(...)`
+  helper covering GitHub-style, Stripe-style, and Standard Webhooks
+  HMAC conventions. The HMAC helper operates on raw request-body
+  bytes, uses constant-time comparison, enforces timestamp-window
+  limits, and routes signature-verify failures through the
+  `audit.signature_verify` EventLog topic. Ships with authoring
+  docs at `docs/src/connectors/authoring.md`. Foundation for
+  upcoming MVP connectors (cron, webhooks, GitHub, Slack, Linear,
+  Notion, A2A push).
 - **Secret-provider primitives for reactive runtime work (#194,
   closes #154).** `harn_vm::secrets` now provides `SecretProvider`,
   `ChainSecretProvider`, zeroizing `SecretBytes`, and concrete env +
