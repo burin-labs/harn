@@ -408,6 +408,17 @@ impl Drop for ScopedEnv {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, OnceLock};
+
+    /// Serialize `execute_playground` tests so the process-wide env vars
+    /// `HARN_LLM_PROVIDER` / `HARN_LLM_MODEL` / `HARN_TASK` written by
+    /// `ScopedEnv::apply` don't race between parallel test threads — the
+    /// symptom was `playground_executes_host_backed_script` seeing an
+    /// anthropic default instead of the per-test `mock` override.
+    fn playground_env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
 
     fn write_file(path: &Path, contents: &str) {
         if let Some(parent) = path.parent() {
@@ -442,6 +453,7 @@ pub fn request_permission(tool_name, request_args) { return true }
 
     #[tokio::test(flavor = "current_thread")]
     async fn playground_executes_host_backed_script() {
+        let _guard = playground_env_lock().lock().expect("env lock");
         let temp = tempfile::tempdir().unwrap();
         let host = temp.path().join("host.harn");
         let script = temp.path().join("pipeline.harn");
@@ -482,6 +494,7 @@ pipeline default(task) {
 
     #[tokio::test(flavor = "current_thread")]
     async fn playground_reports_missing_capability_with_caller_context() {
+        let _guard = playground_env_lock().lock().expect("env lock");
         let temp = tempfile::tempdir().unwrap();
         let host = temp.path().join("host.harn");
         let script = temp.path().join("pipeline.harn");
@@ -518,6 +531,7 @@ pipeline default(task) {
 
     #[tokio::test(flavor = "current_thread")]
     async fn playground_replays_cli_llm_mock_fixtures() {
+        let _guard = playground_env_lock().lock().expect("env lock");
         let temp = tempfile::tempdir().unwrap();
         let host = temp.path().join("host.harn");
         let script = temp.path().join("pipeline.harn");
