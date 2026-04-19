@@ -17,7 +17,10 @@ use crate::connectors::{
     Connector, ConnectorCtx, ConnectorError, MetricsRegistry, RateLimitConfig, RateLimiterFactory,
     RawInbound, TriggerBinding as ConnectorTriggerBinding,
 };
-use crate::event_log::{AnyEventLog, EventLog, FileEventLog, LogEvent, MemoryEventLog, Topic};
+use crate::event_log::{
+    install_memory_for_current_thread, AnyEventLog, EventLog, FileEventLog, LogEvent,
+    MemoryEventLog, Topic,
+};
 use crate::secrets::{
     RotationHandle, SecretBytes, SecretError, SecretId, SecretMeta, SecretProvider,
 };
@@ -45,6 +48,7 @@ pub const TRIGGER_TEST_FIXTURES: &[&str] = &[
     "manifest_hot_reload_preserves_in_flight",
     "multi_tenant_isolation_stub",
     "rate_limit_throttles",
+    "replay_binding_gc_fallback",
     "replay_refires_from_dlq",
     "webhook_verifies_hmac",
 ];
@@ -216,6 +220,7 @@ impl TriggerTestHarness {
             }
             "multi_tenant_isolation_stub" => self.multi_tenant_isolation_stub().await,
             "rate_limit_throttles" => self.rate_limit_throttles().await,
+            "replay_binding_gc_fallback" => self.replay_binding_gc_fallback().await,
             "replay_refires_from_dlq" => self.replay_refires_from_dlq().await,
             "webhook_verifies_hmac" => self.webhook_verifies_hmac().await,
             _ => Err(format!(
@@ -766,6 +771,58 @@ impl TriggerTestHarness {
             bindings: after,
             notes: Vec::new(),
             details: JsonValue::Null,
+        })
+    }
+
+    async fn replay_binding_gc_fallback(self) -> Result<TriggerHarnessResult, String> {
+        clear_trigger_registry();
+        let _log = install_memory_for_current_thread(64);
+        let result = async {
+            install_manifest_triggers(vec![manifest_spec("replay.gc.fixture", "v1")])
+                .await
+                .map_err(|error| error.to_string())?;
+            install_manifest_triggers(vec![manifest_spec("replay.gc.fixture", "v2")])
+                .await
+                .map_err(|error| error.to_string())?;
+            install_manifest_triggers(vec![manifest_spec("replay.gc.fixture", "v3")])
+                .await
+                .map_err(|error| error.to_string())?;
+            let received_at = OffsetDateTime::now_utc();
+            std::thread::sleep(StdDuration::from_millis(10));
+            install_manifest_triggers(vec![manifest_spec("replay.gc.fixture", "v4")])
+                .await
+                .map_err(|error| error.to_string())?;
+            let binding = crate::resolve_live_or_as_of(
+                "replay.gc.fixture",
+                crate::RecordedTriggerBinding {
+                    version: 1,
+                    received_at,
+                },
+            )
+            .map_err(|error| error.to_string())?;
+            Ok::<_, String>((received_at, binding.version))
+        }
+        .await;
+        clear_trigger_registry();
+
+        let (received_at, resolved_version) = result?;
+        Ok(TriggerHarnessResult {
+            fixture: "replay_binding_gc_fallback".to_string(),
+            ok: resolved_version == 3,
+            stub: false,
+            summary: "replay falls back to lifecycle-history binding selection after old versions are GC'd".to_string(),
+            emitted: Vec::new(),
+            attempts: Vec::new(),
+            dlq: Vec::new(),
+            alerts: Vec::new(),
+            bindings: Vec::new(),
+            notes: Vec::new(),
+            details: json!({
+                "trigger_id": "replay.gc.fixture",
+                "recorded_version": 1,
+                "received_at": format_rfc3339(received_at),
+                "resolved_version": resolved_version,
+            }),
         })
     }
 

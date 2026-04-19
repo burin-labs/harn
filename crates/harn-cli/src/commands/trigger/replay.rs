@@ -195,39 +195,19 @@ fn resolve_binding(
         );
     }
 
-    match harn_vm::resolve_live_trigger_binding(
+    harn_vm::resolve_live_or_as_of(
         &recorded.binding_id,
-        Some(recorded.binding_version),
-    ) {
-        Ok(binding) => Ok(binding),
-        Err(harn_vm::TriggerRegistryError::UnknownBindingVersion { .. }) => {
-            let fallback_as_of = recorded.event.received_at;
-            harn_vm::events::log_warn(
-                "trigger.replay",
-                &format!(
-                    "recorded binding '{}@v{}' is unavailable; replay is falling back to the binding active at {}",
-                    recorded.binding_id,
-                    recorded.binding_version,
-                    format_timestamp(fallback_as_of)
-                ),
-            );
-            harn_vm::resolve_trigger_binding_as_of(&recorded.binding_id, fallback_as_of).map_err(
-                |error| {
-                    format!(
-                        "failed to resolve recorded binding '{}@v{}' or fall back to {}: {}",
-                        recorded.binding_id,
-                        recorded.binding_version,
-                        format_timestamp(fallback_as_of),
-                        error
-                    )
-                },
-            )
-        }
-        Err(error) => Err(format!(
-            "failed to resolve recorded binding '{}@v{}': {}",
+        harn_vm::RecordedTriggerBinding {
+            version: recorded.binding_version,
+            received_at: recorded.event.received_at,
+        },
+    )
+    .map_err(|error| {
+        format!(
+            "failed to resolve recorded binding '{}@v{}' for replay: {}",
             recorded.binding_id, recorded.binding_version, error
-        )),
-    }
+        )
+    })
 }
 
 async fn append_replay_record(
@@ -594,10 +574,10 @@ mod tests {
         }));
         assert!(sink.logs.borrow().iter().any(|log| {
             log.level == EventLevel::Warn
-                && log.category == "trigger.replay"
-                && log
-                    .message
-                    .contains("falling back to the binding active at")
+                && log.category == "replay.binding_version_gc_fallback"
+                && log.metadata.get("trigger_id") == Some(&serde_json::json!(TEST_TRIGGER_ID))
+                && log.metadata.get("recorded_version") == Some(&serde_json::json!(1))
+                && log.metadata.get("resolved_version") == Some(&serde_json::json!(3))
         }));
 
         harn_vm::reset_thread_local_state();

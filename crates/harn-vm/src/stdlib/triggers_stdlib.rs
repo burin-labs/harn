@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use serde::{Deserialize, Serialize};
-use time::{format_description::well_known::Rfc3339, OffsetDateTime};
+use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::event_log::{
@@ -11,10 +11,11 @@ use crate::event_log::{
 use crate::triggers::dispatcher::DEFAULT_MAX_ATTEMPTS;
 use crate::triggers::test_util::{clock, run_trigger_harness_fixture};
 use crate::triggers::{
-    dynamic_register, registered_provider_metadata, resolve_live_trigger_binding,
-    resolve_trigger_binding_as_of, snapshot_trigger_bindings, RetryPolicy, TriggerBindingSnapshot,
-    TriggerBindingSource, TriggerBindingSpec, TriggerEvent, TriggerEventId, TriggerHandlerSpec,
-    TriggerPredicateSpec, TriggerRegistryError, TriggerRetryConfig, TRIGGER_DLQ_TOPIC,
+    dynamic_register, registered_provider_metadata, resolve_live_or_as_of,
+    resolve_live_trigger_binding, snapshot_trigger_bindings, RecordedTriggerBinding, RetryPolicy,
+    TriggerBindingSnapshot, TriggerBindingSource, TriggerBindingSpec, TriggerEvent, TriggerEventId,
+    TriggerHandlerSpec, TriggerPredicateSpec, TriggerRegistryError, TriggerRetryConfig,
+    TRIGGER_DLQ_TOPIC,
 };
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
@@ -212,32 +213,16 @@ fn resolve_dispatch_binding(
     binding_version: Option<u32>,
     replay_received_at: Option<OffsetDateTime>,
 ) -> Result<std::sync::Arc<crate::triggers::registry::TriggerBinding>, TriggerRegistryError> {
-    match resolve_live_trigger_binding(binding_id, binding_version) {
-        Ok(binding) => Ok(binding),
-        Err(TriggerRegistryError::UnknownBindingVersion { version, .. }) => {
-            let Some(fallback_as_of) = replay_received_at else {
-                return Err(TriggerRegistryError::UnknownBindingVersion {
-                    id: binding_id.to_string(),
-                    version,
-                });
-            };
-            crate::events::log_warn(
-                "trigger.replay",
-                &format!(
-                    "recorded binding '{}@v{}' is unavailable; replay is falling back to the binding active at {}",
-                    binding_id,
-                    version,
-                    format_timestamp(fallback_as_of)
-                ),
-            );
-            resolve_trigger_binding_as_of(binding_id, fallback_as_of)
-        }
-        Err(error) => Err(error),
+    match (binding_version, replay_received_at) {
+        (Some(version), Some(received_at)) => resolve_live_or_as_of(
+            binding_id,
+            RecordedTriggerBinding {
+                version,
+                received_at,
+            },
+        ),
+        _ => resolve_live_trigger_binding(binding_id, binding_version),
     }
-}
-
-fn format_timestamp(value: OffsetDateTime) -> String {
-    value.format(&Rfc3339).unwrap_or_else(|_| value.to_string())
 }
 
 async fn dispatch_binding_via_dispatcher(
@@ -889,5 +874,210 @@ fn default_provider_payload(
             "schema_name": "TriggerEvent",
             "raw": raw_event,
         }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::rc::Rc;
+
+    use crate::event_log::{install_default_for_base_dir, EventLog};
+    use crate::events::{add_event_sink, clear_event_sinks, CollectorSink, EventLevel};
+    use crate::triggers::event::{CronEventPayload, KnownProviderPayload};
+    use crate::{install_manifest_triggers, register_vm_stdlib, ProviderId, ProviderPayload};
+
+    fn manifest_binding(
+        id: &str,
+        fingerprint: &str,
+        handler_name: &str,
+        closure: Rc<crate::value::VmClosure>,
+    ) -> TriggerBindingSpec {
+        TriggerBindingSpec {
+            id: id.to_string(),
+            source: TriggerBindingSource::Manifest,
+            kind: "cron".to_string(),
+            provider: ProviderId::from("cron"),
+            handler: TriggerHandlerSpec::Local {
+                raw: handler_name.to_string(),
+                closure,
+            },
+            when: None,
+            retry: TriggerRetryConfig::default(),
+            match_events: vec!["cron.tick".to_string()],
+            dedupe_key: None,
+            dedupe_retention_days: crate::triggers::DEFAULT_INBOX_RETENTION_DAYS,
+            filter: None,
+            daily_cost_usd: None,
+            max_concurrent: None,
+            manifest_path: None,
+            package_name: Some("workspace".to_string()),
+            definition_fingerprint: fingerprint.to_string(),
+        }
+    }
+
+    fn recorded_cron_event(event_id: &str, received_at: OffsetDateTime) -> TriggerEvent {
+        TriggerEvent {
+            id: TriggerEventId(event_id.to_string()),
+            provider: ProviderId::from("cron"),
+            kind: "cron.tick".to_string(),
+            received_at,
+            occurred_at: None,
+            dedupe_key: format!("delivery-{event_id}"),
+            trace_id: crate::TraceId(format!("trace-{event_id}")),
+            tenant_id: None,
+            headers: BTreeMap::new(),
+            provider_payload: ProviderPayload::Known(KnownProviderPayload::Cron(
+                CronEventPayload {
+                    cron_id: Some("test-cron".to_string()),
+                    schedule: Some("* * * * *".to_string()),
+                    tick_at: received_at,
+                    raw: serde_json::json!({ "event_id": event_id }),
+                },
+            )),
+            signature_status: crate::SignatureStatus::Verified,
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn trigger_replay_falls_back_after_binding_version_gc() {
+        crate::reset_thread_local_state();
+        let sink = Rc::new(CollectorSink::new());
+        clear_event_sinks();
+        add_event_sink(sink.clone());
+
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let event_log = install_default_for_base_dir(tempdir.path()).expect("install event log");
+        let lib_path = tempdir.path().join("lib.harn");
+        fs::write(
+            &lib_path,
+            r#"
+import "std/triggers"
+
+pub fn on_tick_v1(event: TriggerEvent) -> dict {
+  return {version: "v1", kind: event.kind}
+}
+
+pub fn on_tick_v2(event: TriggerEvent) -> dict {
+  return {version: "v2", kind: event.kind}
+}
+
+pub fn on_tick_v3(event: TriggerEvent) -> dict {
+  return {version: "v3", kind: event.kind}
+}
+
+pub fn on_tick_v4(event: TriggerEvent) -> dict {
+  return {version: "v4", kind: event.kind}
+}
+"#,
+        )
+        .expect("write lib");
+
+        let mut vm = Vm::new();
+        register_vm_stdlib(&mut vm);
+        vm.set_project_root(tempdir.path());
+        vm.set_source_dir(tempdir.path());
+        let exports = vm
+            .load_module_exports(&lib_path)
+            .await
+            .expect("load handler exports");
+
+        install_manifest_triggers(vec![manifest_binding(
+            "replay-cron",
+            "v1",
+            "on_tick_v1",
+            exports["on_tick_v1"].clone(),
+        )])
+        .await
+        .expect("install v1");
+        install_manifest_triggers(vec![manifest_binding(
+            "replay-cron",
+            "v2",
+            "on_tick_v2",
+            exports["on_tick_v2"].clone(),
+        )])
+        .await
+        .expect("install v2");
+        install_manifest_triggers(vec![manifest_binding(
+            "replay-cron",
+            "v3",
+            "on_tick_v3",
+            exports["on_tick_v3"].clone(),
+        )])
+        .await
+        .expect("install v3");
+        let received_at = OffsetDateTime::now_utc();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        install_manifest_triggers(vec![manifest_binding(
+            "replay-cron",
+            "v4",
+            "on_tick_v4",
+            exports["on_tick_v4"].clone(),
+        )])
+        .await
+        .expect("install v4");
+
+        assert!(matches!(
+            crate::resolve_live_trigger_binding("replay-cron", Some(1)),
+            Err(TriggerRegistryError::UnknownBindingVersion { .. })
+        ));
+
+        event_log
+            .append(
+                &Topic::new(TRIGGER_EVENTS_TOPIC).expect("valid trigger events topic"),
+                LogEvent::new(
+                    "trigger_event",
+                    serde_json::to_value(TriggerEventRecord {
+                        binding_id: "replay-cron".to_string(),
+                        binding_version: 1,
+                        replay_of_event_id: None,
+                        event: recorded_cron_event("evt-stale", received_at),
+                    })
+                    .expect("encode trigger event"),
+                ),
+            )
+            .await
+            .expect("append recorded event");
+
+        let replay = vm
+            .call_named_builtin(
+                "trigger_replay",
+                vec![VmValue::String(Rc::from("evt-stale"))],
+            )
+            .await
+            .expect("trigger replay succeeds");
+        let replay: DispatchHandleRecord =
+            serde_json::from_value(crate::llm::vm_value_to_json(&replay))
+                .expect("decode replay handle");
+        assert_eq!(replay.status, "dispatched");
+        assert_eq!(replay.binding_id, "replay-cron");
+        assert_eq!(replay.binding_version, 3);
+        assert_eq!(replay.replay_of_event_id.as_deref(), Some("evt-stale"));
+
+        let warning = sink
+            .logs
+            .borrow()
+            .iter()
+            .find(|log| log.category == "replay.binding_version_gc_fallback")
+            .cloned()
+            .expect("gc fallback warning");
+        assert_eq!(warning.level, EventLevel::Warn);
+        assert_eq!(
+            warning.metadata.get("trigger_id"),
+            Some(&serde_json::json!("replay-cron"))
+        );
+        assert_eq!(
+            warning.metadata.get("recorded_version"),
+            Some(&serde_json::json!(1))
+        );
+        assert_eq!(
+            warning.metadata.get("resolved_version"),
+            Some(&serde_json::json!(3))
+        );
+
+        clear_event_sinks();
+        crate::events::reset_event_sinks();
+        crate::reset_thread_local_state();
     }
 }

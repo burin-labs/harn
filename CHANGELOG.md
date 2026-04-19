@@ -31,6 +31,14 @@ granular archaeology.
 
 ### Fixed
 
+- **`trigger_replay` now recovers when the recorded binding version has
+  already been GC'd after manifest hot-reloads (harn#248).**
+  Both the stdlib replay path and `harn trigger replay` now share a
+  registry helper that falls back to lifecycle-history resolution and
+  emits a structured `replay.binding_version_gc_fallback` warning with
+  the trigger id, recorded version, event timestamp, and resolved
+  version.
+
 - **Webhook inbound dedupe is back on for generic-webhook bindings
   (#223).** `GenericWebhookConnector::normalize_inbound` now bridges
   its sync trait surface to the async inbox index using the same
