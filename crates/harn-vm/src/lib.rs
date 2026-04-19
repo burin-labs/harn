@@ -75,12 +75,12 @@ pub use store::register_store_builtins;
 pub use triggers::{
     begin_in_flight, clear_trigger_registry, drain, dynamic_deregister, dynamic_register,
     finish_in_flight, install_manifest_triggers, redact_headers, register_provider_schema,
-    registered_provider_schema_names, reset_provider_catalog, snapshot_trigger_bindings,
-    HeaderRedactionPolicy, ProviderCatalog, ProviderCatalogError, ProviderId, ProviderPayload,
-    ProviderSchema, SignatureStatus, TenantId, TraceId, TriggerBindingSnapshot,
-    TriggerBindingSource, TriggerBindingSpec, TriggerDispatchOutcome, TriggerEvent, TriggerEventId,
-    TriggerHandlerSpec, TriggerId, TriggerMetricsSnapshot, TriggerPredicateSpec,
-    TriggerRegistryError, TriggerState,
+    registered_provider_schema_names, reset_provider_catalog, resolve_live_trigger_binding,
+    snapshot_trigger_bindings, HeaderRedactionPolicy, ProviderCatalog, ProviderCatalogError,
+    ProviderId, ProviderPayload, ProviderSchema, SignatureStatus, TenantId, TraceId,
+    TriggerBindingSnapshot, TriggerBindingSource, TriggerBindingSpec, TriggerDispatchOutcome,
+    TriggerEvent, TriggerEventId, TriggerHandlerSpec, TriggerId, TriggerMetricsSnapshot,
+    TriggerPredicateSpec, TriggerRegistryError, TriggerState,
 };
 pub use value::*;
 pub use vm::*;

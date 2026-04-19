@@ -137,6 +137,16 @@ granular archaeology.
   them. `harn doctor` surfaces the live binding view including
   provider, state, version, and metrics snapshot. Foundation for
   hot-reload (T-13) and the handler dispatcher (T-06).
+- **Trigger stdlib wrappers for registry inspection and manual dispatch
+  (#164).** Added `trigger_list`, `trigger_register`, `trigger_fire`,
+  `trigger_replay`, and `trigger_inspect_dlq` as first-class builtins,
+  plus typed `std/triggers` aliases for `TriggerBinding`,
+  `TriggerConfig`, `DispatchHandle`, and `DlqEntry`. Scripts can now
+  hot-install local triggers, inspect live binding metrics, fire
+  synthetic events, perform shallow event-log replay, and inspect DLQ
+  retry history in-process. `trigger_replay` remains the explicit
+  `TODO(T-14)` shallow path; manual `a2a://` / `worker://` dispatch
+  remains deferred until the full trigger dispatcher lands.
 
 ## v0.7.22
 

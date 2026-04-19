@@ -20,6 +20,7 @@
 
 - [LLM calls and agent loops](./llm-and-agents.md)
 - [Daemon stdlib](./stdlib/daemon.md)
+- [Trigger stdlib](./stdlib/triggers.md)
 - [Skills](./skills.md)
 - [Sessions](./sessions.md)
 - [Agent state](./agent-state.md)

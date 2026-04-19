@@ -280,6 +280,14 @@ pub fn install_default_for_base_dir(base_dir: &Path) -> Result<Arc<AnyEventLog>,
     Ok(log)
 }
 
+pub fn install_memory_for_current_thread(queue_depth: usize) -> Arc<AnyEventLog> {
+    let log = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(queue_depth.max(1))));
+    ACTIVE_EVENT_LOG.with(|slot| {
+        *slot.borrow_mut() = Some(log.clone());
+    });
+    log
+}
+
 pub fn active_event_log() -> Option<Arc<AnyEventLog>> {
     ACTIVE_EVENT_LOG.with(|slot| slot.borrow().clone())
 }
