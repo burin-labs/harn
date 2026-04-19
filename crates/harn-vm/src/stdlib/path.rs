@@ -11,6 +11,7 @@ use std::rc::Rc;
 
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
+use crate::workspace_path::{classify_workspace_path, normalize_workspace_path, WorkspacePathInfo};
 
 /// Convert all backslashes to forward slashes.
 fn to_posix(s: &str) -> String {
@@ -198,6 +199,46 @@ fn relative_to(p: &str, base: &str) -> Option<String> {
     }
 }
 
+fn workspace_path_info_to_vm(info: WorkspacePathInfo) -> VmValue {
+    let mut map: BTreeMap<String, VmValue> = BTreeMap::new();
+    map.insert("input".into(), VmValue::String(Rc::from(info.input)));
+    map.insert(
+        "kind".into(),
+        VmValue::String(Rc::from(match info.kind {
+            crate::workspace_path::WorkspacePathKind::WorkspaceRelative => "workspace_relative",
+            crate::workspace_path::WorkspacePathKind::HostAbsolute => "host_absolute",
+            crate::workspace_path::WorkspacePathKind::Invalid => "invalid",
+        })),
+    );
+    map.insert(
+        "normalized".into(),
+        VmValue::String(Rc::from(info.normalized)),
+    );
+    map.insert(
+        "workspace_path".into(),
+        info.workspace_path
+            .map(|value| VmValue::String(Rc::from(value)))
+            .unwrap_or(VmValue::Nil),
+    );
+    map.insert(
+        "host_path".into(),
+        info.host_path
+            .map(|value| VmValue::String(Rc::from(value)))
+            .unwrap_or(VmValue::Nil),
+    );
+    map.insert(
+        "recovered_root_drift".into(),
+        VmValue::Bool(info.recovered_root_drift),
+    );
+    map.insert(
+        "reason".into(),
+        info.reason
+            .map(|value| VmValue::String(Rc::from(value)))
+            .unwrap_or(VmValue::Nil),
+    );
+    VmValue::Dict(Rc::new(map))
+}
+
 pub(crate) fn register_path_helper_builtins(vm: &mut Vm) {
     vm.register_builtin("path_parts", |args, _out| {
         let p = args.first().map(|a| a.display()).unwrap_or_default();
@@ -285,6 +326,33 @@ pub(crate) fn register_path_helper_builtins(vm: &mut Vm) {
         // path_to_posix. Reserved for future Windows-host specialisation.
         let p = args.first().map(|a| a.display()).unwrap_or_default();
         Ok(VmValue::String(Rc::from(to_posix(&p))))
+    });
+
+    vm.register_builtin("path_workspace_info", |args, _out| {
+        let path = args.first().map(|a| a.display()).unwrap_or_default();
+        let workspace_root = args
+            .get(1)
+            .map(|value| value.display())
+            .filter(|value| !value.is_empty())
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(crate::stdlib::process::execution_root_path);
+        Ok(workspace_path_info_to_vm(classify_workspace_path(
+            &path,
+            Some(&workspace_root),
+        )))
+    });
+
+    vm.register_builtin("path_workspace_normalize", |args, _out| {
+        let path = args.first().map(|a| a.display()).unwrap_or_default();
+        let workspace_root = args
+            .get(1)
+            .map(|value| value.display())
+            .filter(|value| !value.is_empty())
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(crate::stdlib::process::execution_root_path);
+        Ok(normalize_workspace_path(&path, Some(&workspace_root))
+            .map(|value| VmValue::String(Rc::from(value)))
+            .unwrap_or(VmValue::Nil))
     });
 
     vm.register_builtin("path_segments", |args, _out| {

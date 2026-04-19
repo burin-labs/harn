@@ -36,6 +36,14 @@ pub(crate) const BUILTINS: &[(&str, &str)] = &[
     ("copy_file", "copy_file(src, dst) -> nil"),
     ("append_file", "append_file(path, content) -> nil"),
     ("path_join", "path_join(parts...) -> string"),
+    (
+        "path_workspace_info",
+        "path_workspace_info(path, workspace_root?) -> dict",
+    ),
+    (
+        "path_workspace_normalize",
+        "path_workspace_normalize(path, workspace_root?) -> string | nil",
+    ),
     ("temp_dir", "temp_dir() -> string"),
     ("asset_root", "asset_root() -> string"),
     ("execution_root", "execution_root() -> string"),
@@ -589,6 +597,8 @@ pub(crate) fn builtin_doc(name: &str) -> Option<String> {
         "list_dir" => "**list_dir(path?)** → list — List directory entries (sorted)",
         "mkdir" => "**mkdir(path)** → nil — Create directory (and parents)",
         "path_join" => "**path_join(parts...)** → string — Join path segments",
+        "path_workspace_info" => "**path_workspace_info(path, workspace_root?)** → dict — Classify a path as workspace-relative, host-absolute, or invalid",
+        "path_workspace_normalize" => "**path_workspace_normalize(path, workspace_root?)** → string | nil — Project a path into workspace-relative form when safe",
         "copy_file" => "**copy_file(src, dst)** → nil — Copy a file",
         "append_file" => "**append_file(path, content)** → nil — Append to a file",
         "temp_dir" => "**temp_dir()** → string — System temp directory path",

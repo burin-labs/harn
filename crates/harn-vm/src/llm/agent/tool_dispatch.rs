@@ -488,6 +488,7 @@ pub(super) async fn run_tool_dispatch(
                         },
                         "mutation": mutation,
                         "declaredPaths": declared_paths(tool_name, &tool_args),
+                        "declaredPathEntries": crate::orchestration::current_tool_declared_path_entries(tool_name, &tool_args),
                     });
                     match bridge.call("session/request_permission", payload).await {
                         Ok(response) => {

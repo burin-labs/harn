@@ -28,6 +28,7 @@ pub mod tracing;
 pub mod value;
 pub mod visible_text;
 mod vm;
+pub mod workspace_path;
 
 pub use checkpoint::register_checkpoint_builtins;
 pub use chunk::*;

@@ -197,6 +197,8 @@ Path manipulation utilities:
 | `stem(path)` | Get the filename without extension |
 | `normalize(path)` | Normalize path separators (backslash to forward slash) |
 | `is_absolute(path)` | Check if a path is absolute |
+| `workspace_info(path, workspace_root?)` | Classify a path at the workspace boundary |
+| `workspace_normalize(path, workspace_root?)` | Normalize a path into workspace-relative form when safe |
 | `list_files(dir)` | List files in a directory (one level) |
 | `list_dirs(dir)` | List subdirectories in a directory |
 
@@ -206,6 +208,7 @@ import "std/path"
 println(ext("main.harn"))          // "harn"
 println(stem("/src/main.harn"))    // "main"
 println(is_absolute("/usr/bin"))   // true
+println(workspace_normalize("/packages/app/SKILL.md", cwd())) // "packages/app/SKILL.md"
 
 let files = list_files("src")
 let dirs = list_dirs(".")
