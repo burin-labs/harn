@@ -640,20 +640,34 @@ async fn score_via_bridge(
 
 /// Parse the `skills:` / `skill_match:` / `working_files:` options off
 /// the agent_loop options dict into concrete typed state. Called from
-/// `AgentLoopConfig` parsing.
+/// `AgentLoopConfig` parsing. When the caller does not provide
+/// `skills:` / `skill_match:`, fall back to the workflow-level context
+/// installed by `workflow_execute(...)` so nested delegation keeps the
+/// same skill firewall unless it opts out explicitly.
 pub fn parse_skill_config(
     options: &Option<BTreeMap<String, VmValue>>,
 ) -> (Option<VmValue>, SkillMatchConfig, Vec<String>) {
-    let Some(opts) = options else {
-        return (None, SkillMatchConfig::default(), Vec::new());
+    let opts = options.as_ref();
+    let workflow_context = crate::orchestration::current_workflow_skill_context();
+    let skill_registry = match opts.and_then(|opts| opts.get("skills")) {
+        Some(value) => normalize_skill_registry(value),
+        None => workflow_context
+            .as_ref()
+            .and_then(|ctx| ctx.registry.clone()),
     };
-    let skill_registry = opts.get("skills").and_then(normalize_skill_registry);
-    let skill_match = opts
-        .get("skill_match")
-        .and_then(|v| v.as_dict())
-        .map(parse_skill_match_config)
-        .unwrap_or_default();
-    let working_files = match opts.get("working_files") {
+    let skill_match = match opts.and_then(|opts| opts.get("skill_match")) {
+        Some(value) => value
+            .as_dict()
+            .map(parse_skill_match_config)
+            .unwrap_or_default(),
+        None => workflow_context
+            .as_ref()
+            .and_then(|ctx| ctx.match_config.as_ref())
+            .and_then(|value| value.as_dict())
+            .map(parse_skill_match_config)
+            .unwrap_or_default(),
+    };
+    let working_files = match opts.and_then(|opts| opts.get("working_files")) {
         Some(VmValue::List(list)) => list.iter().map(|v| v.display()).collect(),
         Some(VmValue::String(s)) => vec![s.to_string()],
         _ => Vec::new(),
@@ -719,6 +733,39 @@ fn parse_skill_match_config(dict: &BTreeMap<String, VmValue>) -> SkillMatchConfi
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::orchestration::{
+        install_workflow_skill_context, WorkflowSkillContext, WorkflowSkillContextGuard,
+    };
+
+    fn test_skill_registry(name: &str) -> VmValue {
+        VmValue::Dict(Rc::new(BTreeMap::from([
+            (
+                "_type".to_string(),
+                VmValue::String(Rc::from("skill_registry")),
+            ),
+            (
+                "skills".to_string(),
+                VmValue::List(Rc::new(vec![VmValue::Dict(Rc::new(BTreeMap::from([(
+                    "name".to_string(),
+                    VmValue::String(Rc::from(name.to_string())),
+                )])))])),
+            ),
+        ])))
+    }
+
+    fn first_skill_name(registry: &VmValue) -> Option<String> {
+        registry
+            .as_dict()
+            .and_then(|dict| dict.get("skills"))
+            .and_then(|skills| match skills {
+                VmValue::List(list) => Some(list),
+                _ => None,
+            })
+            .and_then(|skills| skills.first())
+            .and_then(|skill| skill.as_dict())
+            .and_then(|skill| skill.get("name"))
+            .map(VmValue::display)
+    }
 
     #[test]
     fn glob_basic_match() {
@@ -803,5 +850,74 @@ mod tests {
         ])));
         let ranked = score_metadata(&[skill], "private secret thing", &[]);
         assert!(ranked.is_empty());
+    }
+
+    #[test]
+    fn parse_skill_config_falls_back_to_workflow_context() {
+        install_workflow_skill_context(Some(WorkflowSkillContext {
+            registry: Some(test_skill_registry("workflow-skill")),
+            match_config: Some(VmValue::Dict(Rc::new(BTreeMap::from([
+                ("strategy".to_string(), VmValue::String(Rc::from("host"))),
+                ("top_n".to_string(), VmValue::Int(2)),
+                ("sticky".to_string(), VmValue::Bool(false)),
+            ])))),
+        }));
+        let _guard = WorkflowSkillContextGuard;
+
+        let (skill_registry, skill_match, working_files) =
+            parse_skill_config(&Some(BTreeMap::new()));
+
+        let skill_registry = skill_registry.expect("workflow registry should be inherited");
+        assert_eq!(
+            first_skill_name(&skill_registry).as_deref(),
+            Some("workflow-skill")
+        );
+        assert!(matches!(skill_match.strategy, SkillMatchStrategy::Host));
+        assert_eq!(skill_match.top_n, 2);
+        assert!(!skill_match.sticky);
+        assert!(working_files.is_empty());
+    }
+
+    #[test]
+    fn parse_skill_config_prefers_explicit_options() {
+        install_workflow_skill_context(Some(WorkflowSkillContext {
+            registry: Some(test_skill_registry("workflow-skill")),
+            match_config: Some(VmValue::Dict(Rc::new(BTreeMap::from([(
+                "strategy".to_string(),
+                VmValue::String(Rc::from("host")),
+            )])))),
+        }));
+        let _guard = WorkflowSkillContextGuard;
+
+        let options = Some(BTreeMap::from([
+            ("skills".to_string(), test_skill_registry("explicit-skill")),
+            (
+                "skill_match".to_string(),
+                VmValue::Dict(Rc::new(BTreeMap::from([
+                    (
+                        "strategy".to_string(),
+                        VmValue::String(Rc::from("metadata")),
+                    ),
+                    ("top_n".to_string(), VmValue::Int(3)),
+                    ("sticky".to_string(), VmValue::Bool(true)),
+                ]))),
+            ),
+            (
+                "working_files".to_string(),
+                VmValue::List(Rc::new(vec![VmValue::String(Rc::from("src/lib.rs"))])),
+            ),
+        ]));
+
+        let (skill_registry, skill_match, working_files) = parse_skill_config(&options);
+
+        let skill_registry = skill_registry.expect("explicit registry should win");
+        assert_eq!(
+            first_skill_name(&skill_registry).as_deref(),
+            Some("explicit-skill")
+        );
+        assert!(matches!(skill_match.strategy, SkillMatchStrategy::Metadata));
+        assert_eq!(skill_match.top_n, 3);
+        assert!(skill_match.sticky);
+        assert_eq!(working_files, vec!["src/lib.rs".to_string()]);
     }
 }

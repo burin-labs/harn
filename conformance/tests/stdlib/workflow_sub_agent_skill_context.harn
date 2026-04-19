@@ -1,0 +1,94 @@
+fn child_tools() {
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "read_file",
+    "Read a file",
+    {parameters: {path: {type: "string"}}, namespace: "read", handler: { args -> "read " + args.path }},
+  )
+  tools = tool_define(
+    tools,
+    "write_file",
+    "Write a file",
+    {
+    parameters: {path: {type: "string"}, content: {type: "string"}},
+    namespace: "write",
+    handler: { args -> "wrote " + args.path },
+  },
+  )
+  return tools
+}
+
+fn workflow_tools() {
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "delegate_readonly",
+    "Delegate a read-only investigation",
+    {
+    parameters: {task: {type: "string"}},
+    handler: { args -> sub_agent_run(
+    args.task,
+    {provider: "mock", tools: child_tools(), tool_format: "native", max_iterations: 1},
+  ) },
+  },
+  )
+  return tools
+}
+
+pipeline test(task) {
+  llm_mock_clear()
+  skill only_look {
+    description "Investigate the codebase safely"
+    when_to_use "User asks to inspect or read files"
+    prompt "Stay read only and inspect the code carefully."
+    allowed_tools ["delegate_readonly", "namespace:read"]
+  }
+  let flow = workflow_graph(
+    {
+    name: "workflow-sub-agent-skill-context",
+    entry: "delegate",
+    nodes: {
+    delegate: {
+    kind: "stage",
+    mode: "agent",
+    model_policy: {provider: "mock", tool_format: "native", max_iterations: 2},
+    tools: workflow_tools(),
+  },
+  },
+    edges: [],
+  },
+  )
+  llm_mock(
+    {
+    tool_calls: [{id: "stage_1", name: "delegate_readonly", arguments: {task: "Inspect the config file"}}],
+  },
+  )
+  llm_mock({text: "I inspected the config path."})
+  llm_mock({text: "Delegation finished."})
+  let result = workflow_execute(
+    "Inspect the config file",
+    flow,
+    [],
+    {max_steps: 2, skills: only_look, skill_match: {strategy: "metadata"}},
+  )
+  let calls = llm_mock_calls()
+  let child_tool_schemas = calls[1].tools
+  var seen_read = false
+  var seen_write = false
+  if child_tool_schemas != nil {
+    for t in child_tool_schemas {
+      if t?.function?.name == "read_file" {
+        seen_read = true
+      }
+      if t?.function?.name == "write_file" {
+        seen_write = true
+      }
+    }
+  }
+  println(result?.status == "completed")
+  println(len(calls) == 3)
+  println(contains(calls[1].system, "## Active skills"))
+  println(seen_read)
+  println(!seen_write)
+}
