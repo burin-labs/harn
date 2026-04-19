@@ -238,4 +238,3 @@ pub(crate) fn is_transcript_value(value: &VmValue) -> bool {
         .as_deref()
         == Some(TRANSCRIPT_TYPE)
 }
-
