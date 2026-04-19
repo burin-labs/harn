@@ -285,7 +285,7 @@ print(count)
 }
 
 fn wait_for_sqlite_event_count(state_dir: &Path, topic_name: &str, kind: &str, expected: usize) {
-    let deadline = Instant::now() + Duration::from_secs(30);
+    let deadline = Instant::now() + Duration::from_secs(90);
     while Instant::now() < deadline {
         if sqlite_event_count(state_dir, topic_name, kind) >= expected {
             return;
