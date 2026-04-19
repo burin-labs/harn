@@ -1,14 +1,16 @@
 #![cfg(unix)]
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{self, Receiver};
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use harn_vm::event_log::{EventLog, EventLogBackendKind, EventLogConfig, Topic};
+use harn_vm::event_log::{EventLog, EventLogBackendKind, EventLogConfig, LogEvent, Topic};
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
 use tempfile::TempDir;
 
@@ -164,6 +166,65 @@ fn read_topic_events(
     futures::executor::block_on(log.read_range(&topic, None, usize::MAX)).unwrap()
 }
 
+fn seed_legacy_inbox_records(temp: &TempDir) {
+    let state_dir = temp.path().join("state");
+    fs::create_dir_all(&state_dir).unwrap();
+    let config = EventLogConfig::for_base_dir(&state_dir).unwrap();
+    let log = harn_vm::event_log::open_event_log(&config).unwrap();
+
+    let legacy_topic = Topic::new(harn_vm::TRIGGER_INBOX_LEGACY_TOPIC).unwrap();
+    let future_expiry_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64
+        + 60_000;
+    futures::executor::block_on(log.append(
+        &legacy_topic,
+        LogEvent::new(
+            "dedupe_claim",
+            serde_json::json!({
+                "binding_id": "github-new-issue",
+                "dedupe_key": "delivery-123",
+                "expires_at_ms": future_expiry_ms,
+            }),
+        ),
+    ))
+    .unwrap();
+
+    let event = harn_vm::TriggerEvent::new(
+        harn_vm::ProviderId::from("webhook"),
+        "webhook.received",
+        None,
+        "delivery-123",
+        None,
+        BTreeMap::new(),
+        harn_vm::ProviderPayload::Known(harn_vm::triggers::event::KnownProviderPayload::Webhook(
+            harn_vm::triggers::GenericWebhookPayload {
+                source: Some("legacy-fixture".to_string()),
+                content_type: Some("application/json".to_string()),
+                raw: serde_json::json!({"legacy": true}),
+            },
+        )),
+        harn_vm::SignatureStatus::Unsigned,
+    );
+    futures::executor::block_on(
+        log.append(
+            &legacy_topic,
+            LogEvent::new(
+                "event_ingested",
+                serde_json::to_value(harn_vm::triggers::dispatcher::InboxEnvelope {
+                    trigger_id: Some("github-new-issue".to_string()),
+                    binding_version: Some(1),
+                    event,
+                })
+                .unwrap(),
+            ),
+        ),
+    )
+    .unwrap();
+    futures::executor::block_on(log.flush()).unwrap();
+}
+
 fn wait_for_topic_kind(state_dir: &Path, topic_name: &str, kind: &str) {
     let deadline = Instant::now() + Duration::from_secs(30);
     while Instant::now() < deadline {
@@ -303,13 +364,15 @@ pub fn on_task(event: TriggerEvent) -> string {
         event.kind == "stopped" && event.payload["timed_out"] == serde_json::json!(false)
     }));
 
-    let inbox = read_topic_events(&state_dir, "trigger.inbox");
+    let inbox = read_topic_events(&state_dir, harn_vm::TRIGGER_INBOX_ENVELOPES_TOPIC);
     assert!(
         inbox
             .iter()
             .any(|(_, event)| event.kind == "event_ingested"),
         "inbox={inbox:?}"
     );
+    let legacy_inbox = read_topic_events(&state_dir, harn_vm::TRIGGER_INBOX_LEGACY_TOPIC);
+    assert!(legacy_inbox.is_empty(), "legacy_inbox={legacy_inbox:?}");
 
     let outbox = read_topic_events(&state_dir, "trigger.outbox");
     assert!(outbox.iter().any(|(_, event)| {
@@ -323,4 +386,78 @@ pub fn on_task(event: TriggerEvent) -> string {
         snapshot_contents.contains("\"in_flight\": 0"),
         "snapshot={snapshot_contents}"
     );
+}
+
+#[test]
+fn orchestrator_queue_soft_migrates_legacy_inbox_topics() {
+    let temp = TempDir::new().unwrap();
+    write_file(
+        temp.path(),
+        "harn.toml",
+        r#"
+[package]
+name = "fixture"
+
+[exports]
+handlers = "lib.harn"
+
+[[triggers]]
+id = "github-new-issue"
+kind = "webhook"
+provider = "github"
+match = { events = ["issues.opened"] }
+handler = "handlers::on_event"
+secrets = { signing_secret = "github/webhook-secret" }
+"#,
+    );
+    write_file(
+        temp.path(),
+        "lib.harn",
+        r#"
+import "std/triggers"
+
+pub fn on_event(event: TriggerEvent) {
+  log(event.kind)
+}
+"#,
+    );
+    seed_legacy_inbox_records(&temp);
+    let state_dir = temp.path().join("state");
+    let legacy_before = read_topic_events(&state_dir, harn_vm::TRIGGER_INBOX_LEGACY_TOPIC);
+    assert_eq!(legacy_before.len(), 2, "legacy_before={legacy_before:?}");
+
+    let (mut child, rx, handle) = spawn_orchestrator(&temp);
+    wait_for_log_line(&mut child, &rx, STARTUP_NEEDLE);
+    send_sigterm(&child);
+    wait_for_exit(&mut child);
+    let stderr = handle.join().expect("stderr collector thread");
+    assert!(stderr.contains(SHUTDOWN_NEEDLE), "stderr={stderr}");
+    let legacy_after = read_topic_events(&state_dir, harn_vm::TRIGGER_INBOX_LEGACY_TOPIC);
+    assert_eq!(legacy_after.len(), 2, "legacy_after={legacy_after:?}");
+    assert_eq!(
+        legacy_after
+            .iter()
+            .filter(|(_, event)| event.kind == "dedupe_claim")
+            .count(),
+        1,
+        "legacy_after={legacy_after:?}"
+    );
+    assert!(
+        legacy_after
+            .iter()
+            .any(|(_, event)| event.kind == "event_ingested"),
+        "legacy_after={legacy_after:?}"
+    );
+
+    let config = EventLogConfig::for_base_dir(&state_dir).unwrap();
+    let log = harn_vm::event_log::open_event_log(&config).unwrap();
+    let metrics = Arc::new(harn_vm::MetricsRegistry::default());
+    let inbox =
+        futures::executor::block_on(harn_vm::InboxIndex::new(log.clone(), metrics)).unwrap();
+    assert!(!futures::executor::block_on(inbox.insert_if_new(
+        "github-new-issue",
+        "delivery-123",
+        Duration::from_secs(60),
+    ))
+    .unwrap());
 }

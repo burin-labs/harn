@@ -4,8 +4,8 @@ use std::sync::Arc;
 use crate::cli::OrchestratorQueueArgs;
 
 use super::common::{
-    load_local_runtime, read_topic, TRIGGER_ATTEMPTS_TOPIC, TRIGGER_INBOX_TOPIC,
-    TRIGGER_OUTBOX_TOPIC,
+    load_local_runtime, read_topic, TRIGGER_ATTEMPTS_TOPIC, TRIGGER_INBOX_CLAIMS_TOPIC,
+    TRIGGER_INBOX_ENVELOPES_TOPIC, TRIGGER_INBOX_LEGACY_TOPIC, TRIGGER_OUTBOX_TOPIC,
 };
 
 pub(super) async fn run(args: OrchestratorQueueArgs) -> Result<(), String> {
@@ -13,7 +13,9 @@ pub(super) async fn run(args: OrchestratorQueueArgs) -> Result<(), String> {
     let dispatcher = harn_vm::snapshot_dispatcher_stats();
     let outbox = read_topic(&ctx.event_log, TRIGGER_OUTBOX_TOPIC).await?;
     let attempts = read_topic(&ctx.event_log, TRIGGER_ATTEMPTS_TOPIC).await?;
-    let inbox_events = read_topic(&ctx.event_log, TRIGGER_INBOX_TOPIC).await?;
+    let claim_events = read_topic(&ctx.event_log, TRIGGER_INBOX_CLAIMS_TOPIC).await?;
+    let envelope_events = read_topic(&ctx.event_log, TRIGGER_INBOX_ENVELOPES_TOPIC).await?;
+    let legacy_inbox_events = read_topic(&ctx.event_log, TRIGGER_INBOX_LEGACY_TOPIC).await?;
 
     let mut started = BTreeSet::new();
     let mut finished = BTreeSet::new();
@@ -49,9 +51,15 @@ pub(super) async fn run(args: OrchestratorQueueArgs) -> Result<(), String> {
         .await
         .map_err(|error| error.to_string())?;
     let inbox_snapshot = inbox_metrics.snapshot();
-    let inbox_claims_written = inbox_events
+    let inbox_claims_written = claim_events
         .iter()
+        .chain(legacy_inbox_events.iter())
         .filter(|(_, event)| event.kind == "dedupe_claim")
+        .count();
+    let inbox_envelopes_written = envelope_events
+        .iter()
+        .chain(legacy_inbox_events.iter())
+        .filter(|(_, event)| event.kind == "event_ingested")
         .count();
 
     println!("Queue:");
@@ -63,6 +71,7 @@ pub(super) async fn run(args: OrchestratorQueueArgs) -> Result<(), String> {
     println!("- inferred_in_flight={}", in_flight.len());
     println!("- inferred_pending_retries={}", pending_retries.len());
     println!("- inbox_claims_written={}", inbox_claims_written);
+    println!("- inbox_envelopes_written={}", inbox_envelopes_written);
     println!(
         "- inbox_duplicates_rejected={}",
         inbox_snapshot.inbox_duplicates_rejected

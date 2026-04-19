@@ -91,7 +91,9 @@ pub use triggers::{
     TriggerBindingSpec, TriggerDispatchOutcome, TriggerEvent, TriggerEventId, TriggerHandlerSpec,
     TriggerHarnessResult, TriggerId, TriggerMetricsSnapshot, TriggerPredicateSpec,
     TriggerRegistryError, TriggerRetryConfig, TriggerState, DEFAULT_INBOX_RETENTION_DAYS,
-    TRIGGER_INBOX_TOPIC, TRIGGER_TEST_FIXTURES,
+    TRIGGERS_LIFECYCLE_TOPIC, TRIGGER_ATTEMPTS_TOPIC, TRIGGER_DLQ_TOPIC,
+    TRIGGER_INBOX_CLAIMS_TOPIC, TRIGGER_INBOX_ENVELOPES_TOPIC, TRIGGER_INBOX_LEGACY_TOPIC,
+    TRIGGER_OUTBOX_TOPIC, TRIGGER_TEST_FIXTURES,
 };
 pub use value::*;
 pub use vm::*;
