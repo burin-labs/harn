@@ -7,6 +7,8 @@ use crate::orchestration::RunExecutionRecord;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
+const HARN_REPLAY_ENV: &str = "HARN_REPLAY";
+
 thread_local! {
     pub(crate) static VM_SOURCE_DIR: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
     static VM_EXECUTION_CONTEXT: RefCell<Option<RunExecutionRecord>> = const { RefCell::new(None) };
@@ -53,6 +55,17 @@ pub fn asset_root_path() -> PathBuf {
     source_root_path()
 }
 
+fn env_override(name: &str) -> Option<String> {
+    (name == HARN_REPLAY_ENV && crate::triggers::dispatcher::current_dispatch_is_replay())
+        .then(|| "1".to_string())
+}
+
+fn read_env_value(name: &str) -> Option<String> {
+    env_override(name)
+        .or_else(|| current_execution_context().and_then(|context| context.env.get(name).cloned()))
+        .or_else(|| std::env::var(name).ok())
+}
+
 pub fn runtime_root_base() -> PathBuf {
     find_project_root(&execution_root_path())
         .or_else(|| find_project_root(&source_root_path()))
@@ -78,29 +91,19 @@ pub fn resolve_source_asset_path(path: &str) -> PathBuf {
 pub(crate) fn register_process_builtins(vm: &mut Vm) {
     vm.register_builtin("env", |args, _out| {
         let name = args.first().map(|a| a.display()).unwrap_or_default();
-        if let Some(value) =
-            current_execution_context().and_then(|context| context.env.get(&name).cloned())
-        {
+        if let Some(value) = read_env_value(&name) {
             return Ok(VmValue::String(Rc::from(value)));
         }
-        match std::env::var(&name) {
-            Ok(val) => Ok(VmValue::String(Rc::from(val))),
-            Err(_) => Ok(VmValue::Nil),
-        }
+        Ok(VmValue::Nil)
     });
 
     vm.register_builtin("env_or", |args, _out| {
         let name = args.first().map(|a| a.display()).unwrap_or_default();
         let default = args.get(1).cloned().unwrap_or(VmValue::Nil);
-        if let Some(value) =
-            current_execution_context().and_then(|context| context.env.get(&name).cloned())
-        {
+        if let Some(value) = read_env_value(&name) {
             return Ok(VmValue::String(Rc::from(value)));
         }
-        match std::env::var(&name) {
-            Ok(val) => Ok(VmValue::String(Rc::from(val))),
-            Err(_) => Ok(default),
-        }
+        Ok(default)
     });
 
     vm.register_builtin("timestamp", |_args, _out| {
@@ -428,6 +431,9 @@ fn apply_execution_context(command: &mut std::process::Command, dir: Option<&str
         if !context.env.is_empty() {
             command.envs(context.env);
         }
+    }
+    if let Some(value) = env_override(HARN_REPLAY_ENV) {
+        command.env(HARN_REPLAY_ENV, value);
     }
 }
 

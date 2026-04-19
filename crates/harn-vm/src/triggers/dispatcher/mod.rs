@@ -1,9 +1,7 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::ffi::OsString;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::OnceLock;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -40,11 +38,13 @@ pub mod uri;
 
 pub use retry::{RetryPolicy, TriggerRetryConfig, DEFAULT_MAX_ATTEMPTS};
 
-const HARN_REPLAY_ENV: &str = "HARN_REPLAY";
-
 thread_local! {
     static ACTIVE_DISPATCHER_STATE: RefCell<Option<Arc<DispatcherRuntimeState>>> = const { RefCell::new(None) };
     static ACTIVE_DISPATCH_CONTEXT: RefCell<Option<DispatchContext>> = const { RefCell::new(None) };
+}
+
+tokio::task_local! {
+    static ACTIVE_DISPATCH_IS_REPLAY: bool;
 }
 
 #[derive(Clone, Debug)]
@@ -55,6 +55,12 @@ pub(crate) struct DispatchContext {
 
 pub(crate) fn current_dispatch_context() -> Option<DispatchContext> {
     ACTIVE_DISPATCH_CONTEXT.with(|slot| slot.borrow().clone())
+}
+
+pub(crate) fn current_dispatch_is_replay() -> bool {
+    ACTIVE_DISPATCH_IS_REPLAY
+        .try_with(|is_replay| *is_replay)
+        .unwrap_or(false)
 }
 
 #[derive(Clone)]
@@ -441,8 +447,11 @@ impl Dispatcher {
         event: TriggerEvent,
         replay_of_event_id: Option<String>,
     ) -> Result<DispatchOutcome, DispatchError> {
-        let _replay_guard = ReplayEnvGuard::enter(replay_of_event_id.is_some());
-        self.dispatch_with_replay_inner(binding, event, replay_of_event_id)
+        ACTIVE_DISPATCH_IS_REPLAY
+            .scope(
+                replay_of_event_id.is_some(),
+                self.dispatch_with_replay_inner(binding, event, replay_of_event_id),
+            )
             .await
     }
 
@@ -1382,65 +1391,6 @@ fn now_rfc3339() -> String {
     time::OffsetDateTime::now_utc()
         .format(&time::format_description::well_known::Rfc3339)
         .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())
-}
-
-#[derive(Default)]
-struct ReplayEnvState {
-    depth: usize,
-    previous: Option<OsString>,
-}
-
-struct ReplayEnvGuard {
-    active: bool,
-}
-
-impl ReplayEnvGuard {
-    fn enter(active: bool) -> Self {
-        if !active {
-            return Self { active: false };
-        }
-
-        let lock = replay_env_state()
-            .lock()
-            .expect("replay env state mutex poisoned");
-        let mut state = lock;
-        if state.depth == 0 {
-            state.previous = std::env::var_os(HARN_REPLAY_ENV);
-            std::env::set_var(HARN_REPLAY_ENV, "1");
-        }
-        state.depth += 1;
-        drop(state);
-
-        Self { active: true }
-    }
-}
-
-impl Drop for ReplayEnvGuard {
-    fn drop(&mut self) {
-        if !self.active {
-            return;
-        }
-
-        let lock = replay_env_state()
-            .lock()
-            .expect("replay env state mutex poisoned");
-        let mut state = lock;
-        if state.depth > 0 {
-            state.depth -= 1;
-        }
-        if state.depth == 0 {
-            if let Some(previous) = state.previous.take() {
-                std::env::set_var(HARN_REPLAY_ENV, previous);
-            } else {
-                std::env::remove_var(HARN_REPLAY_ENV);
-            }
-        }
-    }
-}
-
-fn replay_env_state() -> &'static Mutex<ReplayEnvState> {
-    static STATE: OnceLock<Mutex<ReplayEnvState>> = OnceLock::new();
-    STATE.get_or_init(|| Mutex::new(ReplayEnvState::default()))
 }
 
 async fn sleep_or_cancel(

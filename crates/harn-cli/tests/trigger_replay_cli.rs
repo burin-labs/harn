@@ -108,6 +108,7 @@ pub fn on_issue(event: TriggerEvent) -> dict {
   return {
     event_id: event.id,
     replay_env: env("HARN_REPLAY"),
+    child_replay_env: shell("printf '%s' \"$HARN_REPLAY\"").stdout,
   }
 }
 "#,
@@ -136,6 +137,14 @@ pub fn on_issue(event: TriggerEvent) -> dict {
     );
     assert_eq!(
         report["drift"]["fields"]["result"]["replayed"]["replay_env"],
+        serde_json::json!("1")
+    );
+    assert_eq!(
+        report["drift"]["fields"]["result"]["original"]["child_replay_env"],
+        serde_json::Value::String(String::new())
+    );
+    assert_eq!(
+        report["drift"]["fields"]["result"]["replayed"]["child_replay_env"],
         serde_json::json!("1")
     );
 }
