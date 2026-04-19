@@ -42,6 +42,48 @@ granular archaeology.
 
 ### Added
 
+- **`harn orchestrator {inspect, fire, replay, dlq, queue}` CLI
+  commands (#185).** Implemented the placeholder orchestrator
+  subcommands that used to error with `not implemented`. `inspect`
+  dumps the orchestrator state snapshot + trigger bindings, `fire`
+  enqueues a synthetic `TriggerEvent` for a given trigger id, `replay`
+  re-dispatches a historical event through the trigger dispatcher
+  (complementary to `harn trigger replay`, which works against a
+  standalone EventLog), `dlq` lists dead-letter entries, and `queue`
+  shows the pending-queue head. Orchestrator run fixtures cover each
+  command against a live `harn orchestrator serve`. Also stabilized
+  `orchestrator_inbox_dedupe` by awaiting `activated connectors:
+  cron(1)` instead of the HTTP listener ready line (closes harn#230
+  flake).
+
+- **Bridge-backed host tool discovery (#216).** Bridge sessions now
+  expose `host_tool_list()`, `host_tool_describe(name)`, and
+  `host_tool_call(name, args)` stdlib entry points plus matching
+  parser signatures. Harn programs running inside burin-code can
+  enumerate the host's editor tools, read their schemas, and invoke
+  them through the bridge without the host needing to pre-inject a
+  static catalog.
+
+- **`harn trigger replay <event-id>` CLI command (#222).** Added a
+  top-level replay CLI that works directly against an EventLog
+  snapshot without requiring an orchestrator to be running. Supports
+  `--diff` drift reporting (structured JSON comparing original vs.
+  replay result) and `--as-of <timestamp>` historical binding
+  resolution via trigger lifecycle history. Sets `HARN_REPLAY=1`
+  during replay dispatch so runtime nondeterminism (e.g. `uuid()`,
+  timestamps) can fall back to recorded values when handlers
+  cooperate. Complements the in-process `trigger_replay(...)` stdlib
+  and the orchestrator-scoped `harn orchestrator replay`.
+
+- **Hardened orchestrator shutdown drain (#183).** SIGTERM/SIGINT now
+  stops new HTTP traffic, drains pending/cron/inbox work, and waits
+  for in-flight dispatcher tasks up to a configurable deadline. Added
+  connector + event-log flush hooks so persisted connector boundaries
+  and durable event-log state land before exit, plus
+  `orchestrator.lifecycle` `draining` / `stopped` events with drain
+  counts. Extends orchestrator integration coverage for mid-dispatch
+  SIGTERM handling.
+
 - **Distroless multi-arch orchestrator container (#186).** Added a root
   `Dockerfile` for `harn orchestrator serve` with a Rust 1.95 builder,
   distroless `cc` runtime, non-root UID `10001`, and a Docker healthcheck
