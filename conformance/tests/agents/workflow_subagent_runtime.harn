@@ -23,9 +23,8 @@ pipeline main() {
   println(result?.run?.stages[0]?.artifacts[0]?.metadata?.delegated)
   println(result?.run?.stages[0]?.artifacts[1]?.kind == "worker_result")
   println(result?.run?.stages[0]?.artifacts[1]?.data?.request?.workflow_stages[0] == "delegate")
-  println(
-    result?.run?.stages[0]?.artifacts[1]?.data?.provenance?.worker_id \
-    == result?.run?.stages[0]?.metadata?.worker?.id,
-  )
+  let artifact_worker_id = result?.run?.stages[0]?.artifacts[1]?.data?.provenance?.worker_id
+  let stage_worker_id = result?.run?.stages[0]?.metadata?.worker?.id
+  println(artifact_worker_id == stage_worker_id)
   println(result?.run?.stages[0]?.metadata?.worker_id != nil)
 }
