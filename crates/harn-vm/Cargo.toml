@@ -22,12 +22,14 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 reqwest-eventsource = "0.6"
 tokio-stream = "0.1"
 base64 = "0.22"
+hex = "0.4"
 sha2 = "0.11"
 md-5 = "0.11"
 toml = "1.1"
 serde_yaml = "0.9"
 serde = { version = "1", features = ["derive"] }
 serde_path_to_error = "0.1"
+subtle = "2.6"
 time = { version = "0.3", features = ["formatting", "parsing", "serde"] }
 uuid = { version = "1", features = ["v4", "v7"] }
 tokio-util = { version = "0.7", features = ["io"] }
