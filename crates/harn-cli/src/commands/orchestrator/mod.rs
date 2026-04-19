@@ -1,27 +1,24 @@
+mod common;
+mod dlq;
+mod fire;
+mod inspect;
 mod listener;
 mod origin_guard;
+mod queue;
+mod replay;
 pub(crate) mod role;
 mod serve;
 mod tls;
 
 use crate::cli::{OrchestratorArgs, OrchestratorCommand};
 
-const O08_NOT_IMPLEMENTED: &str = "not yet implemented (see O-08 #185)";
-
 pub(crate) async fn handle(args: OrchestratorArgs) -> Result<(), String> {
     match args.command {
         OrchestratorCommand::Serve(serve_args) => serve::run(serve_args).await,
-        OrchestratorCommand::Inspect => Err(format!(
-            "`harn orchestrator inspect` is {O08_NOT_IMPLEMENTED}"
-        )),
-        OrchestratorCommand::Replay => Err(format!(
-            "`harn orchestrator replay` is {O08_NOT_IMPLEMENTED}"
-        )),
-        OrchestratorCommand::Dlq => {
-            Err(format!("`harn orchestrator dlq` is {O08_NOT_IMPLEMENTED}"))
-        }
-        OrchestratorCommand::Queue => Err(format!(
-            "`harn orchestrator queue` is {O08_NOT_IMPLEMENTED}"
-        )),
+        OrchestratorCommand::Inspect(inspect_args) => inspect::run(inspect_args).await,
+        OrchestratorCommand::Fire(fire_args) => fire::run(fire_args).await,
+        OrchestratorCommand::Replay(replay_args) => replay::run(replay_args).await,
+        OrchestratorCommand::Dlq(dlq_args) => dlq::run(dlq_args).await,
+        OrchestratorCommand::Queue(queue_args) => queue::run(queue_args).await,
     }
 }

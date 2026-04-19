@@ -459,22 +459,8 @@ pub(crate) struct OrchestratorArgs {
     pub command: OrchestratorCommand,
 }
 
-#[derive(Debug, Subcommand)]
-pub(crate) enum OrchestratorCommand {
-    /// Load manifests, initialize registries, and idle until shutdown.
-    Serve(OrchestratorServeArgs),
-    /// Inspect orchestrator state.
-    Inspect,
-    /// Replay orchestrator events.
-    Replay,
-    /// Inspect the dead-letter queue.
-    Dlq,
-    /// Inspect trigger and dispatch queues.
-    Queue,
-}
-
-#[derive(Debug, Args)]
-pub(crate) struct OrchestratorServeArgs {
+#[derive(Debug, Args, Clone)]
+pub(crate) struct OrchestratorLocalArgs {
     /// Path to the root manifest to load. Container deployments often mount
     /// this as `/etc/harn/triggers.toml`.
     #[arg(
@@ -493,6 +479,28 @@ pub(crate) struct OrchestratorServeArgs {
         value_name = "PATH"
     )]
     pub state_dir: PathBuf,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum OrchestratorCommand {
+    /// Load manifests, initialize registries, and idle until shutdown.
+    Serve(OrchestratorServeArgs),
+    /// Inspect orchestrator state.
+    Inspect(OrchestratorInspectArgs),
+    /// Inject a synthetic event for a specific binding.
+    Fire(OrchestratorFireArgs),
+    /// Replay orchestrator events.
+    Replay(OrchestratorReplayArgs),
+    /// Inspect the dead-letter queue.
+    Dlq(OrchestratorDlqArgs),
+    /// Inspect trigger and dispatch queues.
+    Queue(OrchestratorQueueArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct OrchestratorServeArgs {
+    #[command(flatten)]
+    pub local: OrchestratorLocalArgs,
     /// Socket address the HTTP listener will bind to.
     #[arg(
         long,
@@ -516,6 +524,54 @@ pub(crate) struct OrchestratorServeArgs {
         default_value_t = crate::commands::orchestrator::role::OrchestratorRole::SingleTenant
     )]
     pub role: crate::commands::orchestrator::role::OrchestratorRole,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct OrchestratorInspectArgs {
+    #[command(flatten)]
+    pub local: OrchestratorLocalArgs,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct OrchestratorFireArgs {
+    #[command(flatten)]
+    pub local: OrchestratorLocalArgs,
+    /// Binding id to fire.
+    pub binding_id: String,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct OrchestratorReplayArgs {
+    #[command(flatten)]
+    pub local: OrchestratorLocalArgs,
+    /// Previously recorded event id to replay.
+    pub event_id: String,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct OrchestratorDlqArgs {
+    #[command(flatten)]
+    pub local: OrchestratorLocalArgs,
+    /// List pending DLQ entries.
+    #[arg(
+        long,
+        default_value_t = false,
+        action = ArgAction::SetTrue,
+        conflicts_with_all = ["replay", "discard"]
+    )]
+    pub list: bool,
+    /// Replay the DLQ entry identified by id.
+    #[arg(long, value_name = "ID", conflicts_with = "discard")]
+    pub replay: Option<String>,
+    /// Discard the DLQ entry identified by id.
+    #[arg(long, value_name = "ID", conflicts_with = "replay")]
+    pub discard: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct OrchestratorQueueArgs {
+    #[command(flatten)]
+    pub local: OrchestratorLocalArgs,
 }
 
 #[derive(Debug, Args)]
@@ -874,8 +930,8 @@ mod tests {
         let OrchestratorCommand::Serve(serve) = args.command else {
             panic!("expected orchestrator serve");
         };
-        assert_eq!(serve.config, PathBuf::from("workspace/harn.toml"));
-        assert_eq!(serve.state_dir, PathBuf::from("state/orchestrator"));
+        assert_eq!(serve.local.config, PathBuf::from("workspace/harn.toml"));
+        assert_eq!(serve.local.state_dir, PathBuf::from("state/orchestrator"));
         assert_eq!(serve.bind.to_string(), "0.0.0.0:8080");
         assert_eq!(serve.cert, Some(PathBuf::from("tls/cert.pem")));
         assert_eq!(serve.key, Some(PathBuf::from("tls/key.pem")));
@@ -905,9 +961,116 @@ mod tests {
         let OrchestratorCommand::Serve(serve) = args.command else {
             panic!("expected orchestrator serve");
         };
-        assert_eq!(serve.config, PathBuf::from("/etc/harn/triggers.toml"));
-        assert_eq!(serve.state_dir, PathBuf::from("/var/lib/harn/state"));
+        assert_eq!(serve.local.config, PathBuf::from("/etc/harn/triggers.toml"));
+        assert_eq!(serve.local.state_dir, PathBuf::from("/var/lib/harn/state"));
         assert_eq!(serve.bind.to_string(), "0.0.0.0:8080");
+    }
+
+    #[test]
+    fn test_parses_orchestrator_inspect_args() {
+        let cli = Cli::parse_from([
+            "harn",
+            "orchestrator",
+            "inspect",
+            "--config",
+            "workspace/harn.toml",
+            "--state-dir",
+            "state/orchestrator",
+        ]);
+
+        let Command::Orchestrator(args) = cli.command.unwrap() else {
+            panic!("expected orchestrator command");
+        };
+        let OrchestratorCommand::Inspect(inspect) = args.command else {
+            panic!("expected orchestrator inspect");
+        };
+        assert_eq!(inspect.local.config, PathBuf::from("workspace/harn.toml"));
+        assert_eq!(inspect.local.state_dir, PathBuf::from("state/orchestrator"));
+    }
+
+    #[test]
+    fn test_parses_orchestrator_fire_args() {
+        let cli = Cli::parse_from([
+            "harn",
+            "orchestrator",
+            "fire",
+            "github-new-issue",
+            "--config",
+            "workspace/harn.toml",
+        ]);
+
+        let Command::Orchestrator(args) = cli.command.unwrap() else {
+            panic!("expected orchestrator command");
+        };
+        let OrchestratorCommand::Fire(fire) = args.command else {
+            panic!("expected orchestrator fire");
+        };
+        assert_eq!(fire.binding_id, "github-new-issue");
+        assert_eq!(fire.local.config, PathBuf::from("workspace/harn.toml"));
+    }
+
+    #[test]
+    fn test_parses_orchestrator_replay_args() {
+        let cli = Cli::parse_from([
+            "harn",
+            "orchestrator",
+            "replay",
+            "trigger_evt_123",
+            "--state-dir",
+            "state/orchestrator",
+        ]);
+
+        let Command::Orchestrator(args) = cli.command.unwrap() else {
+            panic!("expected orchestrator command");
+        };
+        let OrchestratorCommand::Replay(replay) = args.command else {
+            panic!("expected orchestrator replay");
+        };
+        assert_eq!(replay.event_id, "trigger_evt_123");
+        assert_eq!(replay.local.state_dir, PathBuf::from("state/orchestrator"));
+    }
+
+    #[test]
+    fn test_parses_orchestrator_dlq_replay_args() {
+        let cli = Cli::parse_from([
+            "harn",
+            "orchestrator",
+            "dlq",
+            "--replay",
+            "dlq_123",
+            "--config",
+            "workspace/harn.toml",
+        ]);
+
+        let Command::Orchestrator(args) = cli.command.unwrap() else {
+            panic!("expected orchestrator command");
+        };
+        let OrchestratorCommand::Dlq(dlq) = args.command else {
+            panic!("expected orchestrator dlq");
+        };
+        assert_eq!(dlq.replay.as_deref(), Some("dlq_123"));
+        assert!(dlq.discard.is_none());
+        assert!(!dlq.list);
+        assert_eq!(dlq.local.config, PathBuf::from("workspace/harn.toml"));
+    }
+
+    #[test]
+    fn test_parses_orchestrator_queue_args() {
+        let cli = Cli::parse_from([
+            "harn",
+            "orchestrator",
+            "queue",
+            "--state-dir",
+            "state/orchestrator",
+        ]);
+
+        let Command::Orchestrator(args) = cli.command.unwrap() else {
+            panic!("expected orchestrator command");
+        };
+        let OrchestratorCommand::Queue(queue) = args.command else {
+            panic!("expected orchestrator queue");
+        };
+        assert_eq!(queue.local.state_dir, PathBuf::from("state/orchestrator"));
     }
 
     #[test]
