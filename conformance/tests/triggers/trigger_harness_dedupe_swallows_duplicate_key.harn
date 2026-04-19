@@ -3,5 +3,5 @@ pipeline test(task) {
   println(result.ok)
   println(len(result.emitted) == 1)
   println(result.emitted[0].note == "first_delivery")
-  println(result.details.first_claim && !result.details.second_claim)
+  println(contains(result.details.duplicate_error, "duplicate"))
 }

@@ -23,6 +23,14 @@ granular archaeology.
 
 ### Fixed
 
+- **Webhook inbound dedupe is back on for generic-webhook bindings
+  (#223).** `GenericWebhookConnector::normalize_inbound` now bridges
+  its sync trait surface to the async inbox index using the same
+  `block_on` pattern already used by the cron/GitHub connector layer,
+  so duplicate deliveries are rejected again by binding + delivery
+  key. Re-enabled the previously ignored webhook dedupe regression
+  test.
+
 - **Flaky cwd-mutating test collisions (#204).** Added a shared-process
   cwd mutex so parallel `cargo test` no longer observes mid-test cwd
   swaps. `check_manifest_reports_loaded_triggers` and

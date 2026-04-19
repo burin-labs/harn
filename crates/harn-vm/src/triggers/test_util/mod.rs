@@ -506,50 +506,18 @@ impl TriggerTestHarness {
         let first = connector
             .normalize_inbound(raw.clone())
             .map_err(|error| error.to_string())?;
-        let binding_id = "webhook.fixture";
-        let retention =
-            StdDuration::from_secs(u64::from(DEFAULT_INBOX_RETENTION_DAYS) * 24 * 60 * 60);
-        // Simulate the dispatch layer's inbox dedupe claim. The sync
-        // `Connector::normalize_inbound` intentionally no longer calls
-        // InboxIndex::insert_if_new inline (see #220 fix-forward comment in
-        // crates/harn-vm/src/connectors/webhook/mod.rs); dedupe is the
-        // responsibility of the async dispatch wrapper.
-        let first_claim = inbox
-            .insert_if_new(binding_id, &first.dedupe_key, retention)
-            .await
-            .map_err(|error| error.to_string())?;
-        if first_claim {
-            self.connector_registry.record_event(
-                binding_id,
-                1,
-                &first,
-                Some("first_delivery"),
-                None,
-            );
-        }
-        let second = connector
-            .normalize_inbound(raw)
-            .map_err(|error| error.to_string())?;
-        let second_claim = inbox
-            .insert_if_new(binding_id, &second.dedupe_key, retention)
-            .await
-            .map_err(|error| error.to_string())?;
-        if second_claim {
-            self.connector_registry.record_event(
-                binding_id,
-                1,
-                &second,
-                Some("duplicate_delivery"),
-                None,
-            );
-        }
+        self.connector_registry.record_event(
+            "webhook.fixture",
+            1,
+            &first,
+            Some("first_delivery"),
+            None,
+        );
+        let duplicate = connector.normalize_inbound(raw).unwrap_err();
         let emitted = self.connector_registry.emitted();
         Ok(TriggerHarnessResult {
             fixture: "dedupe_swallows_duplicate_key".to_string(),
-            ok: emitted.len() == 1
-                && first_claim
-                && !second_claim
-                && first.dedupe_key == second.dedupe_key,
+            ok: emitted.len() == 1 && matches!(duplicate, ConnectorError::DuplicateDelivery(_)),
             stub: false,
             summary: "duplicate inbound deliveries are swallowed by the dedupe guard".to_string(),
             emitted,
@@ -559,9 +527,8 @@ impl TriggerTestHarness {
             bindings: Vec::new(),
             notes: Vec::new(),
             details: json!({
-                "first_claim": first_claim,
-                "second_claim": second_claim,
                 "dedupe_key": first.dedupe_key,
+                "duplicate_error": duplicate.to_string(),
             }),
         })
     }
