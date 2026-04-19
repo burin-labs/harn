@@ -1,17 +1,10 @@
-// Replay tests serialize HARN_REPLAY env-var manipulation with a `Mutex<()>`
-// so parallel test runs don't race. That guard is intentionally held across
-// `.await` points while driving the dispatcher; silence clippy rather than
-// introduce an async-aware mutex whose only purpose is to guard env state.
-// Same pattern as `crates/harn-cli/tests/orchestrator_http.rs`.
-#![allow(clippy::await_holding_lock)]
-
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::Arc;
-use std::sync::{Mutex, Once, OnceLock};
+use std::sync::Once;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -383,11 +376,6 @@ fn write_json_response<T: Write>(stream: &mut T, body: &serde_json::Value) {
     stream.flush().expect("flush mock A2A response");
 }
 
-fn replay_env_lock() -> &'static Mutex<()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-}
-
 #[tokio::test(flavor = "current_thread")]
 async fn local_handler_round_trip_logs_outbox_lifecycle_and_action_graph() {
     let local = tokio::task::LocalSet::new();
@@ -664,15 +652,6 @@ pub fn local_fn(event: TriggerEvent) -> string {
 
 #[tokio::test(flavor = "current_thread")]
 async fn replay_dispatch_emits_replay_chain_edge_and_headers() {
-    // Every `dispatch_replay` call enters `ReplayEnvGuard`, which mutates the
-    // process-wide HARN_REPLAY env var. If two replay tests overlap, the
-    // guard's save/restore depth counter mishandles nested enters made
-    // concurrently by independent tests and the env var ends up set to
-    // whichever test dropped last rather than each test's own "previous"
-    // value. Hold the same `replay_env_lock` as
-    // `replay_dispatch_sets_harn_replay_env_and_restores_previous_value` to
-    // serialize every test that drives the replay path. See harn#244.
-    let _env_guard = replay_env_lock().lock().expect("env lock poisoned");
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
@@ -729,8 +708,7 @@ pub fn local_fn(event: TriggerEvent) -> dict {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn replay_dispatch_sets_harn_replay_env_and_restores_previous_value() {
-    let _env_guard = replay_env_lock().lock().expect("env lock poisoned");
+async fn replay_dispatch_scopes_harn_replay_per_dispatch_and_child_process() {
     std::env::set_var("HARN_REPLAY", "outer");
 
     let local = tokio::task::LocalSet::new();
@@ -740,8 +718,13 @@ async fn replay_dispatch_sets_harn_replay_env_and_restores_previous_value() {
                 r#"
 import "std/triggers"
 
-pub fn local_fn(event: TriggerEvent) -> string {
-  return env_or("HARN_REPLAY", "missing")
+pub fn local_fn(event: TriggerEvent) -> dict {
+  let child = shell("printf '%s' \"$HARN_REPLAY\"")
+  return {
+    replay_env: env_or("HARN_REPLAY", "missing"),
+    child_replay_env: child.stdout,
+    dedupe_key: event.dedupe_key,
+  }
 }
 "#,
                 "local_fn",
@@ -752,16 +735,52 @@ pub fn local_fn(event: TriggerEvent) -> string {
 
             let binding =
                 resolve_live_trigger_binding("github-new-issue", None).expect("resolve binding");
-            let outcome = dispatcher
-                .dispatch_replay(
-                    &binding,
-                    trigger_event("issues.opened", "delivery-env"),
-                    "event-original".to_string(),
-                )
-                .await
-                .expect("replay succeeds");
 
-            assert_eq!(outcome.result, Some(serde_json::json!("1")));
+            let first_dispatcher = dispatcher.clone();
+            let first_binding = binding.clone();
+            let first = tokio::task::spawn_local(async move {
+                first_dispatcher
+                    .dispatch_replay(
+                        &first_binding,
+                        trigger_event("issues.opened", "delivery-env-a"),
+                        "event-original-a".to_string(),
+                    )
+                    .await
+                    .expect("first replay succeeds")
+            });
+
+            let second_dispatcher = dispatcher.clone();
+            let second_binding = binding.clone();
+            let second = tokio::task::spawn_local(async move {
+                second_dispatcher
+                    .dispatch_replay(
+                        &second_binding,
+                        trigger_event("issues.opened", "delivery-env-b"),
+                        "event-original-b".to_string(),
+                    )
+                    .await
+                    .expect("second replay succeeds")
+            });
+
+            let first = first.await.expect("join first replay");
+            let second = second.await.expect("join second replay");
+
+            let mut dedupe_keys = Vec::new();
+            for outcome in [first, second] {
+                assert_eq!(outcome.status, DispatchStatus::Succeeded);
+                let result = outcome.result.expect("replay result");
+                assert_eq!(result["replay_env"], serde_json::json!("1"));
+                assert_eq!(result["child_replay_env"], serde_json::json!("1"));
+                dedupe_keys.push(
+                    result["dedupe_key"]
+                        .as_str()
+                        .expect("dedupe key")
+                        .to_string(),
+                );
+            }
+            dedupe_keys.sort();
+            assert_eq!(dedupe_keys, vec!["delivery-env-a", "delivery-env-b"]);
+
             assert_eq!(std::env::var("HARN_REPLAY").ok().as_deref(), Some("outer"));
         })
         .await;

@@ -39,6 +39,15 @@ granular archaeology.
   key. Re-enabled the previously ignored webhook dedupe regression
   test.
 
+- **Replay-scoped `HARN_REPLAY` no longer races across concurrent
+  dispatches (harn#244).** Replay handlers still observe
+  `env_or("HARN_REPLAY", ...) == "1"` and replay-spawned subprocesses
+  still inherit `HARN_REPLAY=1`, but the runtime no longer flips the
+  process-global env var for the full async dispatch lifetime. Replay
+  detection is now scoped to the specific in-flight dispatch, so
+  overlapping replays and tests that pre-set `HARN_REPLAY` no longer
+  corrupt each other’s value restoration.
+
 - **Flaky cwd-mutating test collisions (#204).** Added a shared-process
   cwd mutex so parallel `cargo test` no longer observes mid-test cwd
   swaps. `check_manifest_reports_loaded_triggers` and
