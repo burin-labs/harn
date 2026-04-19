@@ -39,6 +39,8 @@ pub(crate) async fn compare_runs_handler(
         left_status: diff.left_status,
         right_status: diff.right_status,
         stage_diffs: diff.stage_diffs,
+        tool_diffs: diff.tool_diffs,
+        observability_diffs: diff.observability_diffs,
         transition_count_delta: diff.transition_count_delta,
         artifact_count_delta: diff.artifact_count_delta,
         checkpoint_count_delta: diff.checkpoint_count_delta,

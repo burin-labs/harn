@@ -140,6 +140,7 @@ pub(in crate::stdlib) async fn execute_workflow(
         transcript: None,
         usage: None,
         replay_fixture: None,
+        observability: None,
         trace_spans: Vec::new(),
         tool_recordings: Vec::new(),
         metadata: BTreeMap::new(),

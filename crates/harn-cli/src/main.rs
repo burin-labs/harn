@@ -504,12 +504,25 @@ fn print_run_diff(diff: &harn_vm::orchestration::RunDiffReport) {
     );
     println!("Identical: {}", diff.identical);
     println!("Stage diffs: {}", diff.stage_diffs.len());
+    println!("Tool diffs: {}", diff.tool_diffs.len());
+    println!("Observability diffs: {}", diff.observability_diffs.len());
     println!("Transition delta: {}", diff.transition_count_delta);
     println!("Artifact delta: {}", diff.artifact_count_delta);
     println!("Checkpoint delta: {}", diff.checkpoint_count_delta);
     for stage in &diff.stage_diffs {
         println!("- {} [{}]", stage.node_id, stage.change);
         for detail in &stage.details {
+            println!("  {}", detail);
+        }
+    }
+    for tool in &diff.tool_diffs {
+        println!("- tool {} [{}]", tool.tool_name, tool.args_hash);
+        println!("  left: {:?}", tool.left_result);
+        println!("  right: {:?}", tool.right_result);
+    }
+    for item in &diff.observability_diffs {
+        println!("- {} [{}]", item.label, item.section);
+        for detail in &item.details {
             println!("  {}", detail);
         }
     }
@@ -530,6 +543,20 @@ fn inspect_run_record(path: &str, compare: Option<&str>) {
     println!("Artifacts: {}", run.artifacts.len());
     println!("Transitions: {}", run.transitions.len());
     println!("Checkpoints: {}", run.checkpoints.len());
+    if let Some(observability) = &run.observability {
+        println!("Planner rounds: {}", observability.planner_rounds.len());
+        println!("Research facts: {}", observability.research_fact_count);
+        println!("Workers: {}", observability.worker_lineage.len());
+        println!(
+            "Action graph: {} nodes / {} edges",
+            observability.action_graph_nodes.len(),
+            observability.action_graph_edges.len()
+        );
+        println!(
+            "Transcript pointers: {}",
+            observability.transcript_pointers.len()
+        );
+    }
     if let Some(parent_worker_id) = run
         .metadata
         .get("parent_worker_id")
@@ -598,6 +625,30 @@ fn inspect_run_record(path: &str, compare: Option<&str>) {
             {
                 println!("  child_run_path: {}", child_run_path);
             }
+        }
+    }
+    if let Some(observability) = &run.observability {
+        for round in &observability.planner_rounds {
+            println!(
+                "- planner {} iterations={} llm_calls={} tools={} research_facts={}",
+                round.node_id,
+                round.iteration_count,
+                round.llm_call_count,
+                round.tool_execution_count,
+                round.research_facts.len()
+            );
+        }
+        for pointer in &observability.transcript_pointers {
+            println!(
+                "- transcript {} [{}] available={} {}",
+                pointer.label,
+                pointer.kind,
+                pointer.available,
+                pointer
+                    .path
+                    .clone()
+                    .unwrap_or_else(|| pointer.location.clone())
+            );
         }
     }
     if let Some(compare_path) = compare {

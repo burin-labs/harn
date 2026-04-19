@@ -141,6 +141,119 @@ pub struct ReplayEvalSuiteReport {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
+pub struct RunDeliverableSummaryRecord {
+    pub id: String,
+    pub text: String,
+    pub status: String,
+    pub note: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RunTaskLedgerSummaryRecord {
+    pub root_task: String,
+    pub rationale: String,
+    pub deliverables: Vec<RunDeliverableSummaryRecord>,
+    pub observations: Vec<String>,
+    pub blocking_count: usize,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RunPlannerRoundRecord {
+    pub stage_id: String,
+    pub node_id: String,
+    pub stage_kind: String,
+    pub status: String,
+    pub outcome: String,
+    pub iteration_count: usize,
+    pub llm_call_count: usize,
+    pub tool_execution_count: usize,
+    pub tool_rejection_count: usize,
+    pub intervention_count: usize,
+    pub compaction_count: usize,
+    pub tools_used: Vec<String>,
+    pub successful_tools: Vec<String>,
+    pub ledger_done_rejections: usize,
+    pub task_ledger: Option<RunTaskLedgerSummaryRecord>,
+    pub research_facts: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RunWorkerLineageRecord {
+    pub worker_id: String,
+    pub worker_name: String,
+    pub parent_stage_id: Option<String>,
+    pub task: String,
+    pub status: String,
+    pub session_id: Option<String>,
+    pub parent_session_id: Option<String>,
+    pub run_id: Option<String>,
+    pub run_path: Option<String>,
+    pub snapshot_path: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RunActionGraphNodeRecord {
+    pub id: String,
+    pub label: String,
+    pub kind: String,
+    pub status: String,
+    pub outcome: String,
+    pub stage_id: Option<String>,
+    pub node_id: Option<String>,
+    pub worker_id: Option<String>,
+    pub run_id: Option<String>,
+    pub run_path: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RunActionGraphEdgeRecord {
+    pub from_id: String,
+    pub to_id: String,
+    pub kind: String,
+    pub label: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RunVerificationOutcomeRecord {
+    pub stage_id: String,
+    pub node_id: String,
+    pub status: String,
+    pub passed: Option<bool>,
+    pub summary: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RunTranscriptPointerRecord {
+    pub id: String,
+    pub label: String,
+    pub kind: String,
+    pub location: String,
+    pub path: Option<String>,
+    pub available: bool,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RunObservabilityRecord {
+    pub schema_version: usize,
+    pub planner_rounds: Vec<RunPlannerRoundRecord>,
+    pub research_fact_count: usize,
+    pub action_graph_nodes: Vec<RunActionGraphNodeRecord>,
+    pub action_graph_edges: Vec<RunActionGraphEdgeRecord>,
+    pub worker_lineage: Vec<RunWorkerLineageRecord>,
+    pub verification_outcomes: Vec<RunVerificationOutcomeRecord>,
+    pub transcript_pointers: Vec<RunTranscriptPointerRecord>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
 pub struct RunStageDiffRecord {
     pub node_id: String,
     pub change: String,
@@ -159,6 +272,14 @@ pub struct ToolCallDiffRecord {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
+pub struct RunObservabilityDiffRecord {
+    pub section: String,
+    pub label: String,
+    pub details: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
 pub struct RunDiffReport {
     pub left_run_id: String,
     pub right_run_id: String,
@@ -168,6 +289,7 @@ pub struct RunDiffReport {
     pub right_status: String,
     pub stage_diffs: Vec<RunStageDiffRecord>,
     pub tool_diffs: Vec<ToolCallDiffRecord>,
+    pub observability_diffs: Vec<RunObservabilityDiffRecord>,
     pub transition_count_delta: isize,
     pub artifact_count_delta: isize,
     pub checkpoint_count_delta: isize,
@@ -219,6 +341,7 @@ pub struct RunRecord {
     pub transcript: Option<serde_json::Value>,
     pub usage: Option<LlmUsageRecord>,
     pub replay_fixture: Option<ReplayFixture>,
+    pub observability: Option<RunObservabilityRecord>,
     pub trace_spans: Vec<RunTraceSpanRecord>,
     pub tool_recordings: Vec<ToolCallRecord>,
     pub metadata: BTreeMap<String, serde_json::Value>,
@@ -296,6 +419,394 @@ pub struct RunExecutionRecord {
     pub cleanup: Option<String>,
 }
 
+fn compact_json_value(value: &serde_json::Value) -> String {
+    serde_json::to_string(value).unwrap_or_else(|_| value.to_string())
+}
+
+fn json_string_array(value: Option<&serde_json::Value>) -> Vec<String> {
+    value
+        .and_then(|value| value.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_str().map(str::to_string))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default()
+}
+
+fn json_usize(value: Option<&serde_json::Value>) -> usize {
+    value.and_then(|value| value.as_u64()).unwrap_or_default() as usize
+}
+
+fn json_bool(value: Option<&serde_json::Value>) -> Option<bool> {
+    value.and_then(|value| value.as_bool())
+}
+
+fn stage_result_payload(stage: &RunStageRecord) -> Option<&serde_json::Value> {
+    stage
+        .artifacts
+        .iter()
+        .find_map(|artifact| artifact.data.as_ref())
+}
+
+fn task_ledger_summary_from_value(value: &serde_json::Value) -> Option<RunTaskLedgerSummaryRecord> {
+    let deliverables = value
+        .get("deliverables")
+        .and_then(|raw| raw.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .map(|item| RunDeliverableSummaryRecord {
+                    id: item
+                        .get("id")
+                        .and_then(|value| value.as_str())
+                        .unwrap_or_default()
+                        .to_string(),
+                    text: item
+                        .get("text")
+                        .and_then(|value| value.as_str())
+                        .unwrap_or_default()
+                        .to_string(),
+                    status: item
+                        .get("status")
+                        .and_then(|value| value.as_str())
+                        .unwrap_or_default()
+                        .to_string(),
+                    note: item
+                        .get("note")
+                        .and_then(|value| value.as_str())
+                        .map(str::to_string),
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let observations = json_string_array(value.get("observations"));
+    let root_task = value
+        .get("root_task")
+        .and_then(|value| value.as_str())
+        .unwrap_or_default()
+        .to_string();
+    let rationale = value
+        .get("rationale")
+        .and_then(|value| value.as_str())
+        .unwrap_or_default()
+        .to_string();
+    if root_task.is_empty()
+        && rationale.is_empty()
+        && deliverables.is_empty()
+        && observations.is_empty()
+    {
+        return None;
+    }
+    let blocking_count = deliverables
+        .iter()
+        .filter(|deliverable| matches!(deliverable.status.as_str(), "open" | "blocked"))
+        .count();
+    Some(RunTaskLedgerSummaryRecord {
+        root_task,
+        rationale,
+        deliverables,
+        observations,
+        blocking_count,
+    })
+}
+
+pub fn derive_run_observability(
+    run: &RunRecord,
+    persisted_path: Option<&Path>,
+) -> RunObservabilityRecord {
+    let mut action_graph_nodes = Vec::new();
+    let mut action_graph_edges = Vec::new();
+    let mut verification_outcomes = Vec::new();
+    let mut planner_rounds = Vec::new();
+    let mut transcript_pointers = Vec::new();
+    let mut research_fact_count = 0usize;
+
+    let root_node_id = format!("run:{}", run.id);
+    action_graph_nodes.push(RunActionGraphNodeRecord {
+        id: root_node_id.clone(),
+        label: run
+            .workflow_name
+            .clone()
+            .unwrap_or_else(|| run.workflow_id.clone()),
+        kind: "run".to_string(),
+        status: run.status.clone(),
+        outcome: run.status.clone(),
+        stage_id: None,
+        node_id: None,
+        worker_id: None,
+        run_id: Some(run.id.clone()),
+        run_path: run.persisted_path.clone(),
+    });
+
+    let stage_node_ids = run
+        .stages
+        .iter()
+        .map(|stage| (stage.id.clone(), format!("stage:{}", stage.id)))
+        .collect::<BTreeMap<_, _>>();
+    let stage_by_node_id = run
+        .stages
+        .iter()
+        .map(|stage| (stage.node_id.clone(), format!("stage:{}", stage.id)))
+        .collect::<BTreeMap<_, _>>();
+
+    let incoming_nodes = run
+        .transitions
+        .iter()
+        .map(|transition| transition.to_node_id.clone())
+        .collect::<BTreeSet<_>>();
+
+    for stage in &run.stages {
+        let graph_node_id = stage_node_ids
+            .get(&stage.id)
+            .cloned()
+            .unwrap_or_else(|| format!("stage:{}", stage.id));
+        action_graph_nodes.push(RunActionGraphNodeRecord {
+            id: graph_node_id.clone(),
+            label: stage.node_id.clone(),
+            kind: "stage".to_string(),
+            status: stage.status.clone(),
+            outcome: stage.outcome.clone(),
+            stage_id: Some(stage.id.clone()),
+            node_id: Some(stage.node_id.clone()),
+            worker_id: stage
+                .metadata
+                .get("worker_id")
+                .and_then(|value| value.as_str())
+                .map(str::to_string),
+            run_id: None,
+            run_path: None,
+        });
+        if !incoming_nodes.contains(&stage.node_id) {
+            action_graph_edges.push(RunActionGraphEdgeRecord {
+                from_id: root_node_id.clone(),
+                to_id: graph_node_id.clone(),
+                kind: "entry".to_string(),
+                label: None,
+            });
+        }
+
+        if stage.kind == "verify" || stage.verification.is_some() {
+            let passed = json_bool(
+                stage
+                    .verification
+                    .as_ref()
+                    .and_then(|value| value.get("pass")),
+            )
+            .or_else(|| {
+                json_bool(
+                    stage
+                        .verification
+                        .as_ref()
+                        .and_then(|value| value.get("success")),
+                )
+            })
+            .or_else(|| {
+                if stage.status == "completed" && stage.outcome == "success" {
+                    Some(true)
+                } else if stage.status == "failed" || stage.outcome == "failed" {
+                    Some(false)
+                } else {
+                    None
+                }
+            });
+            verification_outcomes.push(RunVerificationOutcomeRecord {
+                stage_id: stage.id.clone(),
+                node_id: stage.node_id.clone(),
+                status: stage.status.clone(),
+                passed,
+                summary: stage
+                    .verification
+                    .as_ref()
+                    .map(compact_json_value)
+                    .or_else(|| {
+                        stage
+                            .visible_text
+                            .as_ref()
+                            .filter(|value| !value.trim().is_empty())
+                            .cloned()
+                    }),
+            });
+        }
+
+        if stage.transcript.is_some() {
+            transcript_pointers.push(RunTranscriptPointerRecord {
+                id: format!("stage:{}:transcript", stage.id),
+                label: format!("Stage {} transcript", stage.node_id),
+                kind: "embedded_transcript".to_string(),
+                location: format!("run.stages[{}].transcript", stage.node_id),
+                path: run.persisted_path.clone(),
+                available: true,
+            });
+        }
+
+        if let Some(payload) = stage_result_payload(stage) {
+            let trace = payload.get("trace");
+            let task_ledger = payload
+                .get("task_ledger")
+                .and_then(task_ledger_summary_from_value);
+            let research_facts = task_ledger
+                .as_ref()
+                .map(|ledger| ledger.observations.clone())
+                .unwrap_or_default();
+            research_fact_count += research_facts.len();
+            let tools_used = json_string_array(
+                payload
+                    .get("tools_used")
+                    .or_else(|| trace.and_then(|trace| trace.get("tools_used"))),
+            );
+            let successful_tools = json_string_array(payload.get("successful_tools"));
+            let planner_round = RunPlannerRoundRecord {
+                stage_id: stage.id.clone(),
+                node_id: stage.node_id.clone(),
+                stage_kind: stage.kind.clone(),
+                status: stage.status.clone(),
+                outcome: stage.outcome.clone(),
+                iteration_count: json_usize(trace.and_then(|trace| trace.get("iterations"))),
+                llm_call_count: json_usize(trace.and_then(|trace| trace.get("llm_calls"))),
+                tool_execution_count: json_usize(
+                    trace.and_then(|trace| trace.get("tool_executions")),
+                ),
+                tool_rejection_count: json_usize(
+                    trace.and_then(|trace| trace.get("tool_rejections")),
+                ),
+                intervention_count: json_usize(trace.and_then(|trace| trace.get("interventions"))),
+                compaction_count: json_usize(trace.and_then(|trace| trace.get("compactions"))),
+                tools_used,
+                successful_tools,
+                ledger_done_rejections: json_usize(payload.get("ledger_done_rejections")),
+                task_ledger,
+                research_facts,
+            };
+            let has_agentic_detail = planner_round.iteration_count > 0
+                || planner_round.llm_call_count > 0
+                || planner_round.tool_execution_count > 0
+                || planner_round.ledger_done_rejections > 0
+                || planner_round.task_ledger.is_some()
+                || !planner_round.tools_used.is_empty()
+                || !planner_round.successful_tools.is_empty();
+            if has_agentic_detail {
+                planner_rounds.push(planner_round);
+            }
+        }
+    }
+
+    for transition in &run.transitions {
+        let Some(to_id) = stage_by_node_id.get(&transition.to_node_id).cloned() else {
+            continue;
+        };
+        let from_id = transition
+            .from_stage_id
+            .as_ref()
+            .and_then(|stage_id| stage_node_ids.get(stage_id))
+            .cloned()
+            .or_else(|| {
+                transition
+                    .from_node_id
+                    .as_ref()
+                    .and_then(|node_id| stage_by_node_id.get(node_id))
+                    .cloned()
+            })
+            .unwrap_or_else(|| root_node_id.clone());
+        action_graph_edges.push(RunActionGraphEdgeRecord {
+            from_id,
+            to_id,
+            kind: "transition".to_string(),
+            label: transition.branch.clone(),
+        });
+    }
+
+    let worker_lineage = run
+        .child_runs
+        .iter()
+        .map(|child| {
+            let worker_node_id = format!("worker:{}", child.worker_id);
+            action_graph_nodes.push(RunActionGraphNodeRecord {
+                id: worker_node_id.clone(),
+                label: child.worker_name.clone(),
+                kind: "worker".to_string(),
+                status: child.status.clone(),
+                outcome: child.status.clone(),
+                stage_id: child.parent_stage_id.clone(),
+                node_id: None,
+                worker_id: Some(child.worker_id.clone()),
+                run_id: child.run_id.clone(),
+                run_path: child.run_path.clone(),
+            });
+            if let Some(parent_stage_id) = child.parent_stage_id.as_ref() {
+                if let Some(stage_node_id) = stage_node_ids.get(parent_stage_id) {
+                    action_graph_edges.push(RunActionGraphEdgeRecord {
+                        from_id: stage_node_id.clone(),
+                        to_id: worker_node_id,
+                        kind: "delegates".to_string(),
+                        label: Some(child.worker_name.clone()),
+                    });
+                }
+            }
+            RunWorkerLineageRecord {
+                worker_id: child.worker_id.clone(),
+                worker_name: child.worker_name.clone(),
+                parent_stage_id: child.parent_stage_id.clone(),
+                task: child.task.clone(),
+                status: child.status.clone(),
+                session_id: child.session_id.clone(),
+                parent_session_id: child.parent_session_id.clone(),
+                run_id: child.run_id.clone(),
+                run_path: child.run_path.clone(),
+                snapshot_path: child.snapshot_path.clone(),
+            }
+        })
+        .collect::<Vec<_>>();
+
+    if run.transcript.is_some() {
+        transcript_pointers.push(RunTranscriptPointerRecord {
+            id: "run:transcript".to_string(),
+            label: "Run transcript".to_string(),
+            kind: "embedded_transcript".to_string(),
+            location: "run.transcript".to_string(),
+            path: run.persisted_path.clone(),
+            available: true,
+        });
+    }
+
+    if let Some(path) = persisted_path {
+        let stem = path
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default();
+        if !stem.is_empty() {
+            let sidecar_path = path
+                .parent()
+                .unwrap_or_else(|| Path::new("."))
+                .join(format!("{stem}-llm/llm_transcript.jsonl"));
+            transcript_pointers.push(RunTranscriptPointerRecord {
+                id: "run:llm_transcript".to_string(),
+                label: "LLM transcript sidecar".to_string(),
+                kind: "llm_jsonl".to_string(),
+                location: "run sidecar".to_string(),
+                path: Some(sidecar_path.to_string_lossy().into_owned()),
+                available: sidecar_path.exists(),
+            });
+        }
+    }
+
+    RunObservabilityRecord {
+        schema_version: 1,
+        planner_rounds,
+        research_fact_count,
+        action_graph_nodes,
+        action_graph_edges,
+        worker_lineage,
+        verification_outcomes,
+        transcript_pointers,
+    }
+}
+
+fn refresh_run_observability(run: &mut RunRecord, persisted_path: Option<&Path>) {
+    run.observability = Some(derive_run_observability(run, persisted_path));
+}
+
 pub fn normalize_run_record(value: &VmValue) -> Result<RunRecord, VmError> {
     let mut run: RunRecord = parse_json_payload(vm_value_to_json(value), "run_record")?;
     if run.type_name.is_empty() {
@@ -315,6 +826,11 @@ pub fn normalize_run_record(value: &VmValue) -> Result<RunRecord, VmError> {
     }
     if run.replay_fixture.is_none() {
         run.replay_fixture = Some(replay_fixture_from_run(&run));
+    }
+    if run.observability.is_none() {
+        let persisted_path = run.persisted_path.clone();
+        let persisted = persisted_path.as_deref().map(Path::new);
+        refresh_run_observability(&mut run, persisted);
     }
     Ok(run)
 }
@@ -521,11 +1037,17 @@ pub fn save_run_record(run: &RunRecord, path: Option<&str>) -> Result<String, Vm
     let path = path
         .map(PathBuf::from)
         .unwrap_or_else(|| default_run_dir().join(format!("{}.json", run.id)));
+    let mut materialized = run.clone();
+    if materialized.replay_fixture.is_none() {
+        materialized.replay_fixture = Some(replay_fixture_from_run(&materialized));
+    }
+    materialized.persisted_path = Some(path.to_string_lossy().into_owned());
+    refresh_run_observability(&mut materialized, Some(&path));
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|e| VmError::Runtime(format!("failed to create run directory: {e}")))?;
     }
-    let json = serde_json::to_string_pretty(run)
+    let json = serde_json::to_string_pretty(&materialized)
         .map_err(|e| VmError::Runtime(format!("failed to encode run record: {e}")))?;
     // Atomic write: .tmp then rename guards against partial writes on kill.
     let tmp_path = path.with_extension("json.tmp");
@@ -542,8 +1064,15 @@ pub fn save_run_record(run: &RunRecord, path: Option<&str>) -> Result<String, Vm
 pub fn load_run_record(path: &Path) -> Result<RunRecord, VmError> {
     let content = std::fs::read_to_string(path)
         .map_err(|e| VmError::Runtime(format!("failed to read run record: {e}")))?;
-    serde_json::from_str(&content)
-        .map_err(|e| VmError::Runtime(format!("failed to parse run record: {e}")))
+    let mut run: RunRecord = serde_json::from_str(&content)
+        .map_err(|e| VmError::Runtime(format!("failed to parse run record: {e}")))?;
+    if run.replay_fixture.is_none() {
+        run.replay_fixture = Some(replay_fixture_from_run(&run));
+    }
+    run.persisted_path
+        .get_or_insert_with(|| path.to_string_lossy().into_owned());
+    refresh_run_observability(&mut run, Some(path));
+    Ok(run)
 }
 
 pub fn replay_fixture_from_run(run: &RunRecord) -> ReplayFixture {
@@ -781,10 +1310,319 @@ pub fn diff_run_records(left: &RunRecord, right: &RunRecord) -> RunDiffReport {
         }
     }
 
+    let left_observability = left.observability.clone().unwrap_or_else(|| {
+        derive_run_observability(left, left.persisted_path.as_deref().map(Path::new))
+    });
+    let right_observability = right.observability.clone().unwrap_or_else(|| {
+        derive_run_observability(right, right.persisted_path.as_deref().map(Path::new))
+    });
+    let mut observability_diffs = Vec::new();
+
+    let left_workers = left_observability
+        .worker_lineage
+        .iter()
+        .map(|worker| {
+            (
+                worker.worker_id.clone(),
+                (
+                    worker.status.clone(),
+                    worker.run_id.clone(),
+                    worker.run_path.clone(),
+                ),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    let right_workers = right_observability
+        .worker_lineage
+        .iter()
+        .map(|worker| {
+            (
+                worker.worker_id.clone(),
+                (
+                    worker.status.clone(),
+                    worker.run_id.clone(),
+                    worker.run_path.clone(),
+                ),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    let worker_ids = left_workers
+        .keys()
+        .chain(right_workers.keys())
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    for worker_id in worker_ids {
+        match (left_workers.get(&worker_id), right_workers.get(&worker_id)) {
+            (Some(_), None) => observability_diffs.push(RunObservabilityDiffRecord {
+                section: "worker_lineage".to_string(),
+                label: worker_id,
+                details: vec!["worker missing from right run".to_string()],
+            }),
+            (None, Some(_)) => observability_diffs.push(RunObservabilityDiffRecord {
+                section: "worker_lineage".to_string(),
+                label: worker_id,
+                details: vec!["worker missing from left run".to_string()],
+            }),
+            (Some(left_worker), Some(right_worker)) if left_worker != right_worker => {
+                let mut details = Vec::new();
+                if left_worker.0 != right_worker.0 {
+                    details.push(format!("status: {} -> {}", left_worker.0, right_worker.0));
+                }
+                if left_worker.1 != right_worker.1 {
+                    details.push(format!(
+                        "run_id: {:?} -> {:?}",
+                        left_worker.1, right_worker.1
+                    ));
+                }
+                if left_worker.2 != right_worker.2 {
+                    details.push(format!(
+                        "run_path: {:?} -> {:?}",
+                        left_worker.2, right_worker.2
+                    ));
+                }
+                observability_diffs.push(RunObservabilityDiffRecord {
+                    section: "worker_lineage".to_string(),
+                    label: worker_id,
+                    details,
+                });
+            }
+            _ => {}
+        }
+    }
+
+    let left_rounds = left_observability
+        .planner_rounds
+        .iter()
+        .map(|round| (round.stage_id.clone(), round))
+        .collect::<BTreeMap<_, _>>();
+    let right_rounds = right_observability
+        .planner_rounds
+        .iter()
+        .map(|round| (round.stage_id.clone(), round))
+        .collect::<BTreeMap<_, _>>();
+    let round_ids = left_rounds
+        .keys()
+        .chain(right_rounds.keys())
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    for stage_id in round_ids {
+        match (left_rounds.get(&stage_id), right_rounds.get(&stage_id)) {
+            (Some(_), None) => observability_diffs.push(RunObservabilityDiffRecord {
+                section: "planner_rounds".to_string(),
+                label: stage_id,
+                details: vec!["planner summary missing from right run".to_string()],
+            }),
+            (None, Some(_)) => observability_diffs.push(RunObservabilityDiffRecord {
+                section: "planner_rounds".to_string(),
+                label: stage_id,
+                details: vec!["planner summary missing from left run".to_string()],
+            }),
+            (Some(left_round), Some(right_round)) => {
+                let mut details = Vec::new();
+                if left_round.iteration_count != right_round.iteration_count {
+                    details.push(format!(
+                        "iterations: {} -> {}",
+                        left_round.iteration_count, right_round.iteration_count
+                    ));
+                }
+                if left_round.tool_execution_count != right_round.tool_execution_count {
+                    details.push(format!(
+                        "tool_executions: {} -> {}",
+                        left_round.tool_execution_count, right_round.tool_execution_count
+                    ));
+                }
+                if left_round.research_facts != right_round.research_facts {
+                    details.push(format!(
+                        "research_facts: {:?} -> {:?}",
+                        left_round.research_facts, right_round.research_facts
+                    ));
+                }
+                let left_deliverables = left_round
+                    .task_ledger
+                    .as_ref()
+                    .map(|ledger| {
+                        ledger
+                            .deliverables
+                            .iter()
+                            .map(|item| format!("{}:{}", item.id, item.status))
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+                let right_deliverables = right_round
+                    .task_ledger
+                    .as_ref()
+                    .map(|ledger| {
+                        ledger
+                            .deliverables
+                            .iter()
+                            .map(|item| format!("{}:{}", item.id, item.status))
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+                if left_deliverables != right_deliverables {
+                    details.push(format!(
+                        "deliverables: {:?} -> {:?}",
+                        left_deliverables, right_deliverables
+                    ));
+                }
+                if left_round.successful_tools != right_round.successful_tools {
+                    details.push(format!(
+                        "successful_tools: {:?} -> {:?}",
+                        left_round.successful_tools, right_round.successful_tools
+                    ));
+                }
+                if !details.is_empty() {
+                    observability_diffs.push(RunObservabilityDiffRecord {
+                        section: "planner_rounds".to_string(),
+                        label: left_round.node_id.clone(),
+                        details,
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let left_pointers = left_observability
+        .transcript_pointers
+        .iter()
+        .map(|pointer| {
+            (
+                pointer.id.clone(),
+                (
+                    pointer.available,
+                    pointer.path.clone(),
+                    pointer.location.clone(),
+                ),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    let right_pointers = right_observability
+        .transcript_pointers
+        .iter()
+        .map(|pointer| {
+            (
+                pointer.id.clone(),
+                (
+                    pointer.available,
+                    pointer.path.clone(),
+                    pointer.location.clone(),
+                ),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    let pointer_ids = left_pointers
+        .keys()
+        .chain(right_pointers.keys())
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    for pointer_id in pointer_ids {
+        match (
+            left_pointers.get(&pointer_id),
+            right_pointers.get(&pointer_id),
+        ) {
+            (Some(_), None) => observability_diffs.push(RunObservabilityDiffRecord {
+                section: "transcript_pointers".to_string(),
+                label: pointer_id,
+                details: vec!["pointer missing from right run".to_string()],
+            }),
+            (None, Some(_)) => observability_diffs.push(RunObservabilityDiffRecord {
+                section: "transcript_pointers".to_string(),
+                label: pointer_id,
+                details: vec!["pointer missing from left run".to_string()],
+            }),
+            (Some(left_pointer), Some(right_pointer)) if left_pointer != right_pointer => {
+                observability_diffs.push(RunObservabilityDiffRecord {
+                    section: "transcript_pointers".to_string(),
+                    label: pointer_id,
+                    details: vec![format!(
+                        "pointer: {:?} -> {:?}",
+                        left_pointer, right_pointer
+                    )],
+                });
+            }
+            _ => {}
+        }
+    }
+
+    let left_verification = left_observability
+        .verification_outcomes
+        .iter()
+        .map(|item| (item.stage_id.clone(), item))
+        .collect::<BTreeMap<_, _>>();
+    let right_verification = right_observability
+        .verification_outcomes
+        .iter()
+        .map(|item| (item.stage_id.clone(), item))
+        .collect::<BTreeMap<_, _>>();
+    let verification_ids = left_verification
+        .keys()
+        .chain(right_verification.keys())
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    for stage_id in verification_ids {
+        match (
+            left_verification.get(&stage_id),
+            right_verification.get(&stage_id),
+        ) {
+            (Some(_), None) => observability_diffs.push(RunObservabilityDiffRecord {
+                section: "verification".to_string(),
+                label: stage_id,
+                details: vec!["verification missing from right run".to_string()],
+            }),
+            (None, Some(_)) => observability_diffs.push(RunObservabilityDiffRecord {
+                section: "verification".to_string(),
+                label: stage_id,
+                details: vec!["verification missing from left run".to_string()],
+            }),
+            (Some(left_item), Some(right_item)) if left_item != right_item => {
+                let mut details = Vec::new();
+                if left_item.passed != right_item.passed {
+                    details.push(format!(
+                        "passed: {:?} -> {:?}",
+                        left_item.passed, right_item.passed
+                    ));
+                }
+                if left_item.summary != right_item.summary {
+                    details.push(format!(
+                        "summary: {:?} -> {:?}",
+                        left_item.summary, right_item.summary
+                    ));
+                }
+                observability_diffs.push(RunObservabilityDiffRecord {
+                    section: "verification".to_string(),
+                    label: left_item.node_id.clone(),
+                    details,
+                });
+            }
+            _ => {}
+        }
+    }
+
+    let left_graph = (
+        left_observability.action_graph_nodes.len(),
+        left_observability.action_graph_edges.len(),
+    );
+    let right_graph = (
+        right_observability.action_graph_nodes.len(),
+        right_observability.action_graph_edges.len(),
+    );
+    if left_graph != right_graph {
+        observability_diffs.push(RunObservabilityDiffRecord {
+            section: "action_graph".to_string(),
+            label: "shape".to_string(),
+            details: vec![format!(
+                "nodes/edges: {}/{} -> {}/{}",
+                left_graph.0, left_graph.1, right_graph.0, right_graph.1
+            )],
+        });
+    }
+
     let status_changed = left.status != right.status;
     let identical = !status_changed
         && stage_diffs.is_empty()
         && tool_diffs.is_empty()
+        && observability_diffs.is_empty()
         && left.transitions.len() == right.transitions.len()
         && left.artifacts.len() == right.artifacts.len()
         && left.checkpoints.len() == right.checkpoints.len();
@@ -798,6 +1636,7 @@ pub fn diff_run_records(left: &RunRecord, right: &RunRecord) -> RunDiffReport {
         right_status: right.status.clone(),
         stage_diffs,
         tool_diffs,
+        observability_diffs,
         transition_count_delta: right.transitions.len() as isize - left.transitions.len() as isize,
         artifact_count_delta: right.artifacts.len() as isize - left.artifacts.len() as isize,
         checkpoint_count_delta: right.checkpoints.len() as isize - left.checkpoints.len() as isize,

@@ -41,6 +41,7 @@ const runsPayload = {
       output_tokens: 40,
       models: ["gpt-5"],
       updated_at_ms: 1,
+      skills: [],
     },
     {
       path: "ok.json",
@@ -59,6 +60,7 @@ const runsPayload = {
       output_tokens: 10,
       models: ["gpt-5"],
       updated_at_ms: 2,
+      skills: [],
     },
   ],
 }
@@ -100,6 +102,20 @@ const detailPayload = {
   transcript_steps: [],
   story: [],
   child_runs: [],
+  observability: {
+    schema_version: 1,
+    planner_rounds: [],
+    research_fact_count: 0,
+    action_graph_nodes: [],
+    action_graph_edges: [],
+    worker_lineage: [],
+    verification_outcomes: [],
+    transcript_pointers: [],
+  },
+  skill_timeline: [],
+  skill_match_events: [],
+  tool_load_events: [],
+  active_skills: [],
 }
 
 afterEach(() => {
@@ -159,6 +175,8 @@ describe("App", () => {
             left_status: "completed",
             right_status: "failed",
             stage_diffs: [],
+            tool_diffs: [],
+            observability_diffs: [],
             transition_count_delta: 1,
             artifact_count_delta: 0,
             checkpoint_count_delta: 0,

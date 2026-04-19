@@ -241,6 +241,101 @@ export type PortalChildRun = {
   task: string
 }
 
+export type RunDeliverableSummary = {
+  id: string
+  text: string
+  status: string
+  note: string | null
+}
+
+export type RunTaskLedgerSummary = {
+  root_task: string
+  rationale: string
+  deliverables: RunDeliverableSummary[]
+  observations: string[]
+  blocking_count: number
+}
+
+export type RunPlannerRound = {
+  stage_id: string
+  node_id: string
+  stage_kind: string
+  status: string
+  outcome: string
+  iteration_count: number
+  llm_call_count: number
+  tool_execution_count: number
+  tool_rejection_count: number
+  intervention_count: number
+  compaction_count: number
+  tools_used: string[]
+  successful_tools: string[]
+  ledger_done_rejections: number
+  task_ledger: RunTaskLedgerSummary | null
+  research_facts: string[]
+}
+
+export type RunWorkerLineage = {
+  worker_id: string
+  worker_name: string
+  parent_stage_id: string | null
+  task: string
+  status: string
+  session_id: string | null
+  parent_session_id: string | null
+  run_id: string | null
+  run_path: string | null
+  snapshot_path: string | null
+}
+
+export type RunActionGraphNode = {
+  id: string
+  label: string
+  kind: string
+  status: string
+  outcome: string
+  stage_id: string | null
+  node_id: string | null
+  worker_id: string | null
+  run_id: string | null
+  run_path: string | null
+}
+
+export type RunActionGraphEdge = {
+  from_id: string
+  to_id: string
+  kind: string
+  label: string | null
+}
+
+export type RunVerificationOutcome = {
+  stage_id: string
+  node_id: string
+  status: string
+  passed: boolean | null
+  summary: string | null
+}
+
+export type RunTranscriptPointer = {
+  id: string
+  label: string
+  kind: string
+  location: string
+  path: string | null
+  available: boolean
+}
+
+export type RunObservability = {
+  schema_version: number
+  planner_rounds: RunPlannerRound[]
+  research_fact_count: number
+  action_graph_nodes: RunActionGraphNode[]
+  action_graph_edges: RunActionGraphEdge[]
+  worker_lineage: RunWorkerLineage[]
+  verification_outcomes: RunVerificationOutcome[]
+  transcript_pointers: RunTranscriptPointer[]
+}
+
 export type PortalExecutionSummary = {
   cwd: string | null
   repo_path: string | null
@@ -306,6 +401,7 @@ export type PortalRunDetail = {
   transcript_steps: PortalTranscriptStep[]
   story: PortalStorySection[]
   child_runs: PortalChildRun[]
+  observability: RunObservability
   skill_timeline: PortalSkillTimelineEntry[]
   skill_match_events: PortalSkillMatchEvent[]
   tool_load_events: PortalToolLoadEvent[]
@@ -322,6 +418,18 @@ export type PortalRunDiff = {
   stage_diffs: Array<{
     node_id: string
     change: string
+    details: string[]
+  }>
+  tool_diffs: Array<{
+    tool_name: string
+    args_hash: string
+    result_changed: boolean
+    left_result: string | null
+    right_result: string | null
+  }>
+  observability_diffs: Array<{
+    section: string
+    label: string
     details: string[]
   }>
   transition_count_delta: number

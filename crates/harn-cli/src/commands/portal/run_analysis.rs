@@ -355,6 +355,10 @@ pub(super) fn build_run_detail(
         transcript_steps,
         story,
         child_runs,
+        observability: run.observability.clone().unwrap_or_else(|| {
+            let run_path = run_dir.join(relative_path);
+            harn_vm::orchestration::derive_run_observability(run, Some(&run_path))
+        }),
         skill_timeline,
         skill_match_events: skill_matches,
         tool_load_events: tool_loads,

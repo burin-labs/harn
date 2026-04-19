@@ -11,6 +11,7 @@ The portal treats `.harn-runs/` as the source of truth and gives you one place
 to inspect:
 
 - run history
+- the derived action-graph / planner observability artifact
 - workflow stages
 - nested trace spans
 - transcript/story sections
@@ -89,6 +90,9 @@ The UI is organized around a few simple ideas:
 - `Runs` is a dedicated paginated library for persisted run records
 - `Run detail` is a separate inspector page for one run at a time
 - the top of the detail view is the quick read
+- the action-graph panel is the "debug this run from one artifact" view:
+  planner rounds, research facts, worker lineage, verification outcomes, and
+  transcript pointers all come from the same derived block in the saved run
 - the policy panel shows the effective run ceiling plus saved validation output
 - the replay panel shows whether a run already carries replay/eval assertions
 - the flamegraph shows where time went
@@ -115,6 +119,8 @@ The portal also supports:
 - manual refresh without waiting for the poll interval
 - comparing a run against any other run of the same workflow, not just the
   latest earlier one
+- surfacing action-graph, worker-lineage, transcript-pointer, and tool-result
+  diffs alongside stage-level drift
 
 ## Launch and playground
 

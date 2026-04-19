@@ -257,6 +257,7 @@ fn replay_fixture_round_trip_passes() {
         transcript: None,
         usage: None,
         replay_fixture: None,
+        observability: None,
         trace_spans: vec![],
         tool_recordings: vec![],
         metadata: BTreeMap::new(),
@@ -342,6 +343,84 @@ fn run_diff_reports_changed_stage() {
     assert!(diff.status_changed);
     assert!(!diff.identical);
     assert_eq!(diff.stage_diffs.len(), 1);
+}
+
+#[test]
+fn save_and_load_run_record_materializes_observability_summary() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let run_path = temp_dir.path().join("run.json");
+    let sidecar_dir = temp_dir.path().join("run-llm");
+    std::fs::create_dir_all(&sidecar_dir).unwrap();
+    std::fs::write(sidecar_dir.join("llm_transcript.jsonl"), "").unwrap();
+
+    let run = RunRecord {
+        id: "run_obs".to_string(),
+        workflow_id: "wf".to_string(),
+        workflow_name: Some("demo".to_string()),
+        task: "debug a failing run".to_string(),
+        status: "failed".to_string(),
+        stages: vec![RunStageRecord {
+            id: "stage_1".to_string(),
+            node_id: "plan".to_string(),
+            kind: "stage".to_string(),
+            status: "failed".to_string(),
+            outcome: "error".to_string(),
+            verification: Some(serde_json::json!({"pass": false, "reason": "assertion failed"})),
+            artifacts: vec![ArtifactRecord {
+                data: Some(serde_json::json!({
+                    "trace": {
+                        "iterations": 3,
+                        "llm_calls": 2,
+                        "tool_executions": 1,
+                        "tool_rejections": 0,
+                        "interventions": 1,
+                        "compactions": 0,
+                        "tools_used": ["read"]
+                    },
+                    "tools_used": ["read"],
+                    "successful_tools": ["read"],
+                    "ledger_done_rejections": 1,
+                    "task_ledger": {
+                        "root_task": "debug a failing run",
+                        "rationale": "explain the regression",
+                        "deliverables": [
+                            {"id": "deliverable-1", "text": "find the root cause", "status": "blocked", "note": "verification failed"}
+                        ],
+                        "observations": ["verify stage failed after read"]
+                    }
+                })),
+                ..Default::default()
+            }],
+            ..Default::default()
+        }],
+        child_runs: vec![RunChildRecord {
+            worker_id: "worker-1".to_string(),
+            worker_name: "researcher".to_string(),
+            parent_stage_id: Some("stage_1".to_string()),
+            run_id: Some("child-run".to_string()),
+            run_path: Some("child.json".to_string()),
+            status: "completed".to_string(),
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+
+    save_run_record(&run, Some(run_path.to_str().unwrap())).unwrap();
+    let loaded = load_run_record(&run_path).unwrap();
+    let observability = loaded.observability.expect("observability summary");
+    assert_eq!(observability.schema_version, 1);
+    assert_eq!(observability.planner_rounds.len(), 1);
+    assert_eq!(observability.research_fact_count, 1);
+    assert_eq!(observability.worker_lineage.len(), 1);
+    assert_eq!(observability.verification_outcomes.len(), 1);
+    assert!(observability
+        .transcript_pointers
+        .iter()
+        .any(|pointer| pointer.kind == "llm_jsonl" && pointer.available));
+    assert_eq!(
+        observability.planner_rounds[0].research_facts,
+        vec!["verify stage failed after read".to_string()]
+    );
 }
 
 #[test]
