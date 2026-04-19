@@ -626,6 +626,8 @@ assert_eq(resp.status, 200)
 | `host_call(name, args)` | name: string, args: any | any | Call a host capability operation using `capability.operation` naming |
 | `host_capabilities()` | — | dict | Typed host capability manifest |
 | `host_has(capability, op?)` | capability: string, op: string | bool | Check whether a typed host capability/operation exists |
+| `host_tool_list()` | — | list | List host-exposed bridge tools as `{name, description, schema, deprecated}` |
+| `host_tool_call(name, args)` | name: string, args: any | any | Invoke a bridge-exposed host tool by name using the existing `builtin_call` path |
 | `host_mock(capability, op, response_or_config, params?)` | capability: string, op: string, response_or_config: any or dict, params: dict | nil | Register a runtime mock for a typed host operation |
 | `host_mock_clear()` | — | nil | Clear registered typed host mocks and recorded mock invocations |
 | `host_mock_calls()` | — | list | Return recorded typed host mock invocations |
@@ -638,6 +640,14 @@ host bridge. The local runtime exposes generic `process`, `template`, and
 Prefer `host_call("capability.operation", args)` in shared wrappers and
 host-owned `.harn` modules so capability names stay consistent across the
 runtime, host manifest, and preflight validation.
+
+`host_tool_list()` is the discovery surface for host-native tools such as
+`Read`, `Edit`, `Bash`, or IDE actions exposed by the active bridge host.
+Without a bridge it returns `[]`. `host_tool_call(name, args)` uses that same
+bridge host's existing dynamic builtin dispatch path, so scripts can discover a
+tool at runtime and then call it by name without hard-coding it into the
+initial prompt. Import `std/host` when you want small helpers such as
+`host_tool_lookup(name)` or `host_tool_available(name)`.
 
 `host_mock(...)` is intended for tests and local conformance runs. The third
 argument may be either a direct result value or a config dict containing

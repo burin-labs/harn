@@ -148,6 +148,70 @@ model as a `tool_names: []` result with a diagnostic that includes the
 host error message. The loop continues — the model can retry with a
 different query.
 
+## Host tool discovery
+
+Hosts can expose their own dynamic tool surface to scripts without
+pre-registering every tool in the initial prompt. Harn discovers that
+surface through one bridge RPC and then invokes individual tools
+through the existing `builtin_call` request path.
+
+### `host/tools/list`
+
+VM-issued request. No parameters (or an empty object). The host
+responds with a list of tool descriptors. Canonical response shape:
+
+```json
+{
+  "tools": [
+    {
+      "name": "Read",
+      "description": "Read a file from the active workspace",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "path": {"type": "string", "description": "File path to read"}
+        },
+        "required": ["path"]
+      },
+      "deprecated": false
+    },
+    {
+      "name": "open_file",
+      "description": "Reveal a file in the editor",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "path": {"type": "string"}
+        },
+        "required": ["path"]
+      },
+      "deprecated": true
+    }
+  ]
+}
+```
+
+Accepted variants:
+
+- a bare array `[{...}, {...}]`
+- an ACP-style wrapper `{ "result": { "tools": [...] } }`
+- compatibility field names `short_description`, `parameters`, or
+  `input_schema`; Harn normalizes them to `description` and `schema`
+
+Each normalized descriptor surfaced to scripts has exactly these keys:
+
+- `name`: string, required
+- `description`: string, defaults to `""`
+- `schema`: JSON Schema object or `null`
+- `deprecated`: boolean, defaults to `false`
+
+Invocation:
+
+- `host_tool_list()` returns the normalized list directly.
+- `host_tool_call(name, args)` then dispatches that tool through the
+  existing `builtin_call` bridge request using `name` as the builtin
+  name and `args` as the single argument payload.
+
 ## Skill registry (issue #73)
 
 Hosts expose their own managed skill store to the VM through three RPCs.
