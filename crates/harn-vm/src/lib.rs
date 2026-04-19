@@ -1,5 +1,6 @@
 #![allow(clippy::result_large_err, clippy::cloned_ref_to_slice_refs)]
 
+pub mod a2a;
 pub mod agent_events;
 pub mod agent_sessions;
 pub mod bridge;

@@ -54,6 +54,19 @@ granular archaeology.
   the release-tag workflow now builds and pushes `linux/amd64` +
   `linux/arm64` images to `ghcr.io/burin-labs/harn`.
 
+- **Real `a2a://...` trigger dispatch in the runtime (#181).** The
+  dispatcher now resolves `a2a://host[:port]/path` handlers through the
+  target agent card, requires a confirmed-unique JSON-RPC endpoint,
+  posts the `TriggerEvent` envelope over `a2a.SendMessage`, and returns
+  either the inline remote result or a pending task handle payload.
+  Dispatcher retries / DLQ behavior now apply to remote A2A attempts the
+  same way they already applied to local handlers. Persisted
+  observability adds `a2a_hop` nodes and `a2a_dispatch` edges with
+  propagated `trace_id` and `target_agent` context. Adds dispatcher unit
+  coverage for inline + pending A2A responses and a conformance fixture
+  that exercises `trigger_register(...)` / `trigger_fire(...)` against a
+  live `harn serve` receiver.
+
 - **Trigger event replay now routes through the dispatcher (#166).**
   `trigger_replay(...)` no longer uses the local shallow stub. The
   stdlib now looks up historical events from `triggers.events`,
@@ -75,10 +88,9 @@ granular archaeology.
   handler VMs, and new dispatcher lifecycle records on
   `triggers.lifecycle`. Closes the T-10 deferral for
   `dispatch` / `retry` / `dlq` action-graph nodes and
-  `retry` / `dlq_move` edges on the local-handler path.
-  `a2a_hop` / `worker_enqueue` remain deferred to O-04 / O-05; the
-  current `a2a://...` and `worker://...` routes return explicit
-  `NotImplemented` errors that point at those tickets.
+  `retry` / `dlq_move` edges on the local-handler path. Follow-up work
+  since extended the remote side with `a2a_hop` / `a2a_dispatch`; only
+  `worker://...` remains deferred to O-05.
 
 - **Durable trigger inbox dedupe on top of the shared EventLog (#160).**
   `harn_vm::triggers::InboxIndex` now persists dedupe claims on the

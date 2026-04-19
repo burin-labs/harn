@@ -1,9 +1,9 @@
 # Trigger Observability In The Action Graph
 
-Harn now projects dispatcher-independent trigger activity into persisted run
-observability. This lands the first half of issue #163: `trigger` and
-`predicate` nodes, plus the matching `trigger_dispatch` and `predicate_gate`
-edges.
+Harn now projects trigger activity into persisted run observability across both
+workflow-derived nodes and dispatcher hops. The current surface includes
+`trigger`, `predicate`, `dispatch`, and `a2a_hop` nodes, plus the matching
+`trigger_dispatch`, `predicate_gate`, and `a2a_dispatch` edges.
 
 ## What lands in this change
 
@@ -11,11 +11,17 @@ edges.
   envelope in `run.metadata`.
 - Workflow `condition` stages render as `predicate` nodes in
   `observability.action_graph_nodes`.
+- Local dispatch attempts render as `dispatch` nodes.
+- Remote A2A dispatch attempts render as `a2a_hop` nodes labelled with the
+  resolved `target_agent`.
 - Entry edges from the trigger node into the workflow render as
   `trigger_dispatch`.
-- Transitions leaving a predicate render as `predicate_gate`.
+- Trigger or predicate edges into a remote A2A hop render as `a2a_dispatch`.
+- Transitions leaving a predicate on the workflow path render as
+  `predicate_gate`.
 - `trace_id` propagates from the `TriggerEvent` onto the synthetic trigger
-  node and every downstream action-graph node derived from that run.
+  node and every downstream action-graph node derived from that run,
+  including A2A hops.
 
 The runtime also streams the derived graph onto the shared event-log topic
 `observability.action_graph` whenever a run record is persisted. This reuses
@@ -24,13 +30,11 @@ bus.
 
 ## Current shape
 
-This scoped change is intentionally limited to the dispatcher-independent
-surface:
+This scoped change still leaves some portal/runtime work deferred:
 
-- Landed here: `trigger` and `predicate` node kinds.
-- Deferred to T-06: `dispatch`, `a2a_hop`, `worker_enqueue`, and `dlq`.
-- Deferred to T-06: portal replay controls and dispatcher-coupled UI work.
-- Deferred to T-06: A2A `trace_id` header propagation.
+- Landed here: `trigger`, `predicate`, `dispatch`, and `a2a_hop` node kinds.
+- Deferred: `worker_enqueue` specialized nodes and richer DLQ/A2A UI.
+- Deferred: portal replay controls and dispatcher-coupled UI work.
 
 ## Example
 
@@ -60,6 +64,7 @@ with edges such as:
 ```json
 {"kind": "trigger_dispatch", "from_id": "trigger:...", "to_id": "stage:..."}
 {"kind": "predicate_gate", "label": "true"}
+{"kind": "a2a_dispatch", "from_id": "predicate:...", "to_id": "a2a:..."}
 ```
 
 The portal does not yet render specialized UI for these nodes in this PR; it
