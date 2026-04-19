@@ -14,10 +14,11 @@ use crate::event_log::{active_event_log, AnyEventLog, EventLog, LogError, LogEve
 use crate::llm::vm_value_to_json;
 use crate::orchestration::{
     append_action_graph_update, RunActionGraphEdgeRecord, RunActionGraphNodeRecord,
-    RunObservabilityRecord, ACTION_GRAPH_EDGE_KIND_DLQ_MOVE, ACTION_GRAPH_EDGE_KIND_PREDICATE_GATE,
-    ACTION_GRAPH_EDGE_KIND_REPLAY_CHAIN, ACTION_GRAPH_EDGE_KIND_RETRY,
-    ACTION_GRAPH_EDGE_KIND_TRIGGER_DISPATCH, ACTION_GRAPH_NODE_KIND_DISPATCH,
-    ACTION_GRAPH_NODE_KIND_DLQ, ACTION_GRAPH_NODE_KIND_RETRY, ACTION_GRAPH_NODE_KIND_TRIGGER,
+    RunObservabilityRecord, ACTION_GRAPH_EDGE_KIND_A2A_DISPATCH, ACTION_GRAPH_EDGE_KIND_DLQ_MOVE,
+    ACTION_GRAPH_EDGE_KIND_PREDICATE_GATE, ACTION_GRAPH_EDGE_KIND_REPLAY_CHAIN,
+    ACTION_GRAPH_EDGE_KIND_RETRY, ACTION_GRAPH_EDGE_KIND_TRIGGER_DISPATCH,
+    ACTION_GRAPH_NODE_KIND_A2A_HOP, ACTION_GRAPH_NODE_KIND_DISPATCH, ACTION_GRAPH_NODE_KIND_DLQ,
+    ACTION_GRAPH_NODE_KIND_RETRY, ACTION_GRAPH_NODE_KIND_TRIGGER,
 };
 use crate::stdlib::json_to_vm_value;
 use crate::value::{error_to_category, ErrorCategory, VmError, VmValue};
@@ -181,6 +182,7 @@ pub enum DispatchError {
     Registry(String),
     Serde(String),
     Local(String),
+    A2a(String),
     Cancelled(String),
     NotImplemented(String),
 }
@@ -192,6 +194,7 @@ impl std::fmt::Display for DispatchError {
             | Self::Registry(message)
             | Self::Serde(message)
             | Self::Local(message)
+            | Self::A2a(message)
             | Self::Cancelled(message)
             | Self::NotImplemented(message) => f.write_str(message),
         }
@@ -576,7 +579,7 @@ impl Dispatcher {
         let max_attempts = binding.retry.max_attempts();
         for attempt in 1..=max_attempts {
             let started_at = now_rfc3339();
-            let dispatch_node_id = format!("dispatch:{binding_key}:{}:{attempt}", event.id.0);
+            let attempt_node_id = dispatch_node_id(&route, &binding_key, &event.id.0, attempt);
             self.append_lifecycle_event(
                 "DispatchStarted",
                 &event,
@@ -614,18 +617,14 @@ impl Dispatcher {
             if attempt == 1 {
                 dispatch_edges.push(RunActionGraphEdgeRecord {
                     from_id: source_node_id.clone(),
-                    to_id: dispatch_node_id.clone(),
-                    kind: if binding.when.is_some() {
-                        ACTION_GRAPH_EDGE_KIND_PREDICATE_GATE.to_string()
-                    } else {
-                        ACTION_GRAPH_EDGE_KIND_TRIGGER_DISPATCH.to_string()
-                    },
+                    to_id: attempt_node_id.clone(),
+                    kind: dispatch_entry_edge_kind(&route, binding.when.is_some()).to_string(),
                     label: binding.when.as_ref().map(|_| "true".to_string()),
                 });
             } else if let Some(retry_node_id) = previous_retry_node.take() {
                 dispatch_edges.push(RunActionGraphEdgeRecord {
                     from_id: retry_node_id,
-                    to_id: dispatch_node_id.clone(),
+                    to_id: attempt_node_id.clone(),
                     kind: ACTION_GRAPH_EDGE_KIND_RETRY.to_string(),
                     label: Some(format!("attempt {attempt}")),
                 });
@@ -634,9 +633,9 @@ impl Dispatcher {
             self.emit_action_graph(
                 &event,
                 vec![RunActionGraphNodeRecord {
-                    id: dispatch_node_id.clone(),
-                    label: route.target_uri(),
-                    kind: ACTION_GRAPH_NODE_KIND_DISPATCH.to_string(),
+                    id: attempt_node_id.clone(),
+                    label: dispatch_node_label(&route),
+                    kind: dispatch_node_kind(&route).to_string(),
                     status: "running".to_string(),
                     outcome: format!("attempt_{attempt}"),
                     trace_id: Some(event.trace_id.0.clone()),
@@ -655,6 +654,7 @@ impl Dispatcher {
                     "attempt": attempt,
                     "handler_kind": route.kind(),
                     "target_uri": route.target_uri(),
+                    "target_agent": dispatch_target_agent(&route),
                     "replay_of_event_id": replay_of_event_id,
                 }),
             )
@@ -848,7 +848,7 @@ impl Dispatcher {
                                 run_path: None,
                             }],
                             vec![RunActionGraphEdgeRecord {
-                                from_id: dispatch_node_id,
+                                from_id: attempt_node_id,
                                 to_id: retry_node_id.clone(),
                                 kind: ACTION_GRAPH_EDGE_KIND_RETRY.to_string(),
                                 label: Some(format!("attempt {}", attempt + 1)),
@@ -957,7 +957,7 @@ impl Dispatcher {
                             run_path: None,
                         }],
                         vec![RunActionGraphEdgeRecord {
-                            from_id: format!("dispatch:{binding_key}:{}:{attempt}", event.id.0),
+                            from_id: dispatch_node_id(&route, &binding_key, &event.id.0, attempt),
                             to_id: format!("dlq:{binding_key}:{}", event.id.0),
                             kind: ACTION_GRAPH_EDGE_KIND_DLQ_MOVE.to_string(),
                             label: Some(format!("{attempt} attempts")),
@@ -1065,9 +1065,26 @@ impl Dispatcher {
                     .await?;
                 Ok(vm_value_to_json(&value))
             }
-            DispatchUri::A2a { target } => Err(DispatchError::NotImplemented(format!(
-                "a2a:// dispatch to '{target}' is not implemented yet; see O-04 #181"
-            ))),
+            DispatchUri::A2a { target } => {
+                let (_endpoint, ack) = crate::a2a::dispatch_trigger_event(
+                    target,
+                    binding.id.as_str(),
+                    &binding.binding_key(),
+                    event,
+                    cancel_rx,
+                )
+                .await
+                .map_err(|error| match error {
+                    crate::a2a::A2aClientError::Cancelled(message) => {
+                        DispatchError::Cancelled(message)
+                    }
+                    other => DispatchError::A2a(other.to_string()),
+                })?;
+                match ack {
+                    crate::a2a::DispatchAck::InlineResult { result, .. } => Ok(result),
+                    crate::a2a::DispatchAck::PendingTask { handle, .. } => Ok(handle),
+                }
+            }
             DispatchUri::Worker { queue } => Err(DispatchError::NotImplemented(format!(
                 "worker:// dispatch to '{queue}' is not implemented yet; see O-05 #182"
             ))),
@@ -1260,6 +1277,48 @@ fn dispatch_error_from_vm_error(error: VmError) -> DispatchError {
             DispatchError::Cancelled("dispatcher shutdown cancelled local handler".to_string())
         }
         _ => DispatchError::Local(error.to_string()),
+    }
+}
+
+fn dispatch_node_id(
+    route: &DispatchUri,
+    binding_key: &str,
+    event_id: &str,
+    attempt: u32,
+) -> String {
+    let prefix = match route {
+        DispatchUri::A2a { .. } => "a2a",
+        _ => "dispatch",
+    };
+    format!("{prefix}:{binding_key}:{event_id}:{attempt}")
+}
+
+fn dispatch_node_kind(route: &DispatchUri) -> &'static str {
+    match route {
+        DispatchUri::A2a { .. } => ACTION_GRAPH_NODE_KIND_A2A_HOP,
+        _ => ACTION_GRAPH_NODE_KIND_DISPATCH,
+    }
+}
+
+fn dispatch_node_label(route: &DispatchUri) -> String {
+    match route {
+        DispatchUri::A2a { target } => crate::a2a::target_agent_label(target),
+        _ => route.target_uri(),
+    }
+}
+
+fn dispatch_target_agent(route: &DispatchUri) -> Option<String> {
+    match route {
+        DispatchUri::A2a { target } => Some(crate::a2a::target_agent_label(target)),
+        _ => None,
+    }
+}
+
+fn dispatch_entry_edge_kind(route: &DispatchUri, has_predicate: bool) -> &'static str {
+    match route {
+        DispatchUri::A2a { .. } => ACTION_GRAPH_EDGE_KIND_A2A_DISPATCH,
+        _ if has_predicate => ACTION_GRAPH_EDGE_KIND_PREDICATE_GATE,
+        _ => ACTION_GRAPH_EDGE_KIND_TRIGGER_DISPATCH,
     }
 }
 

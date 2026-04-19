@@ -20,11 +20,13 @@ pub const ACTION_GRAPH_NODE_KIND_PREDICATE: &str = "predicate";
 pub const ACTION_GRAPH_NODE_KIND_STAGE: &str = "stage";
 pub const ACTION_GRAPH_NODE_KIND_WORKER: &str = "worker";
 pub const ACTION_GRAPH_NODE_KIND_DISPATCH: &str = "dispatch";
+pub const ACTION_GRAPH_NODE_KIND_A2A_HOP: &str = "a2a_hop";
 pub const ACTION_GRAPH_NODE_KIND_RETRY: &str = "retry";
 pub const ACTION_GRAPH_NODE_KIND_DLQ: &str = "dlq";
 
 pub const ACTION_GRAPH_EDGE_KIND_ENTRY: &str = "entry";
 pub const ACTION_GRAPH_EDGE_KIND_TRIGGER_DISPATCH: &str = "trigger_dispatch";
+pub const ACTION_GRAPH_EDGE_KIND_A2A_DISPATCH: &str = "a2a_dispatch";
 pub const ACTION_GRAPH_EDGE_KIND_PREDICATE_GATE: &str = "predicate_gate";
 pub const ACTION_GRAPH_EDGE_KIND_REPLAY_CHAIN: &str = "replay_chain";
 pub const ACTION_GRAPH_EDGE_KIND_TRANSITION: &str = "transition";

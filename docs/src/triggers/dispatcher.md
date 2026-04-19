@@ -3,9 +3,9 @@
 The trigger dispatcher is the runtime path that turns a normalized
 `TriggerEvent` plus a live registry binding into actual handler work.
 
-At MVP, the dispatcher fully wires the local-function path and keeps the
-remote handler schemes (`a2a://...`, `worker://...`) as explicit stubs with
-clear error messages pointing at their follow-up tickets.
+At MVP, the dispatcher fully wires the local-function path plus synchronous
+and pending-handle `a2a://...` dispatch. The `worker://...` scheme remains an
+explicit stub with a clear follow-up ticket.
 
 ## Dispatch shape
 
@@ -47,6 +47,17 @@ same export-loading path used by manifest hooks and trigger predicates.
 
 The dispatcher still re-normalizes those shapes internally so it can emit a
 stable handler kind and target URI in lifecycle logs and action-graph nodes.
+
+For `a2a://host[:port]/path` routes, the dispatcher:
+
+- fetches `/.well-known/a2a-agent` from the target host
+- requires exactly one JSON-RPC interface in the agent card before it will
+  dispatch
+- treats the URI path as the `target_agent` label that propagates into the
+  outbound envelope and the action graph
+- sends the `TriggerEvent` envelope over `a2a.SendMessage`
+- returns either the inline agent result (when the peer completes
+  synchronously) or a pending task handle payload for the caller
 
 ## Retry policy
 
@@ -98,11 +109,11 @@ The dispatcher uses the shared `EventLog` instead of a parallel queue layer:
 
 ## Action-graph updates
 
-Dispatcher streaming closes the local-handler portion of the trigger
-action-graph deferral:
+Dispatcher streaming now covers the local-handler path plus the first A2A hop:
 
-- node kinds: `trigger`, `predicate`, `dispatch`, `retry`, `dlq`
-- edge kinds: `trigger_dispatch`, `predicate_gate`, `retry`, `dlq_move`
+- node kinds: `trigger`, `predicate`, `dispatch`, `a2a_hop`, `retry`, `dlq`
+- edge kinds: `trigger_dispatch`, `a2a_dispatch`, `predicate_gate`, `retry`,
+  `dlq_move`
 
 Each update is appended to `observability.action_graph` using the shared
 `RunActionGraphNodeRecord` / `RunActionGraphEdgeRecord` schema so the portal
@@ -118,6 +129,10 @@ event back to the original event id.
 
 ## Current MVP limits
 
-- `a2a://...` returns `DispatchError::NotImplemented` and points at `O-04 #181`
-- `worker://...` returns `DispatchError::NotImplemented` and points at `O-05 #182`
-- DLQ storage is in-memory plus event-log append; durable replay remains follow-up work
+- `a2a://...` currently uses the single-shot `a2a.SendMessage` path only; push
+  callbacks, streaming chunk accumulation, and remote cancel/resubscribe stay
+  deferred
+- `worker://...` still returns `DispatchError::NotImplemented` and points at
+  `O-05 #182`
+- DLQ storage is in-memory plus event-log append; durable replay remains
+  follow-up work

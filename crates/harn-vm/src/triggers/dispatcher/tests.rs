@@ -1,5 +1,9 @@
 use std::collections::BTreeMap;
+use std::io::{Read, Write};
+use std::net::{TcpListener, TcpStream};
+use std::sync::mpsc::{self, Receiver};
 use std::sync::Arc;
+use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::event_log::{install_default_for_base_dir, EventLog, Topic};
@@ -9,7 +13,7 @@ use crate::triggers::registry::{
     install_manifest_triggers, resolve_live_trigger_binding, TriggerBindingSource,
     TriggerBindingSpec, TriggerHandlerSpec, TriggerPredicateSpec,
 };
-use crate::triggers::{ProviderId, ProviderPayload, SignatureStatus, TriggerEvent};
+use crate::triggers::{ProviderId, ProviderPayload, SignatureStatus, TraceId, TriggerEvent};
 use crate::Vm;
 
 use super::retry::TriggerRetryConfig;
@@ -103,6 +107,48 @@ async fn dispatcher_fixture(
     (dir, log.clone(), Dispatcher::with_event_log(vm, log))
 }
 
+async fn a2a_dispatcher_fixture(
+    target: String,
+    retry: TriggerRetryConfig,
+) -> (
+    tempfile::TempDir,
+    Arc<crate::event_log::AnyEventLog>,
+    Dispatcher,
+) {
+    crate::reset_thread_local_state();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let log = install_default_for_base_dir(dir.path()).expect("install event log");
+
+    let mut vm = Vm::new();
+    register_vm_stdlib(&mut vm);
+    vm.set_source_dir(dir.path());
+
+    install_manifest_triggers(vec![TriggerBindingSpec {
+        id: "github-a2a-review".to_string(),
+        source: TriggerBindingSource::Manifest,
+        kind: "webhook".to_string(),
+        provider: ProviderId::from("github"),
+        handler: TriggerHandlerSpec::A2a {
+            target: target.clone(),
+        },
+        when: None,
+        retry,
+        match_events: vec!["issues.opened".to_string()],
+        dedupe_key: Some("event.dedupe_key".to_string()),
+        dedupe_retention_days: crate::triggers::DEFAULT_INBOX_RETENTION_DAYS,
+        filter: None,
+        daily_cost_usd: None,
+        max_concurrent: None,
+        manifest_path: None,
+        package_name: Some("workspace".to_string()),
+        definition_fingerprint: format!("fp:{target}"),
+    }])
+    .await
+    .expect("install test trigger binding");
+
+    (dir, log.clone(), Dispatcher::with_event_log(vm, log))
+}
+
 async fn read_topic(
     log: Arc<crate::event_log::AnyEventLog>,
     topic: &str,
@@ -136,6 +182,131 @@ fn flatten_action_graph(
         }
     }
     (node_kinds, edge_kinds)
+}
+
+struct MockA2aServer {
+    authority: String,
+    requests: Receiver<serde_json::Value>,
+    join: thread::JoinHandle<()>,
+}
+
+impl MockA2aServer {
+    fn next_request(&self) -> serde_json::Value {
+        self.requests
+            .recv_timeout(Duration::from_secs(5))
+            .expect("mock A2A request")
+    }
+
+    fn finish(self) {
+        self.join.join().expect("mock A2A thread");
+    }
+}
+
+fn spawn_mock_a2a_server(task_result: serde_json::Value) -> MockA2aServer {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock A2A listener");
+    let addr = listener.local_addr().expect("mock A2A addr");
+    let authority = format!("127.0.0.1:{}", addr.port());
+    let (tx, rx) = mpsc::channel();
+    let join = thread::spawn(move || {
+        for _ in 0..2 {
+            let (mut stream, _) = listener.accept().expect("accept mock A2A request");
+            let (request_line, body) = read_http_request(&mut stream);
+            if request_line.starts_with("GET /.well-known/a2a-agent ") {
+                write_json_response(
+                    &mut stream,
+                    &serde_json::json!({
+                        "id": "mock-a2a",
+                        "url": format!("http://127.0.0.1:{}", addr.port()),
+                        "interfaces": [{"protocol": "jsonrpc", "url": "/rpc"}],
+                    }),
+                );
+                continue;
+            }
+            assert!(
+                request_line.starts_with("POST /rpc "),
+                "unexpected request line: {request_line}"
+            );
+            tx.send(
+                serde_json::from_slice::<serde_json::Value>(&body).expect("mock A2A request json"),
+            )
+            .expect("capture mock A2A request");
+            let rpc_id = serde_json::from_slice::<serde_json::Value>(&body)
+                .expect("mock A2A request json")["id"]
+                .clone();
+            write_json_response(
+                &mut stream,
+                &crate::jsonrpc::response(rpc_id, task_result.clone()),
+            );
+        }
+    });
+    MockA2aServer {
+        authority,
+        requests: rx,
+        join,
+    }
+}
+
+fn read_http_request(stream: &mut TcpStream) -> (String, Vec<u8>) {
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .expect("set read timeout");
+    let mut buffer = Vec::new();
+    let mut chunk = [0u8; 4096];
+    let header_end;
+    let content_length;
+    loop {
+        let read = stream.read(&mut chunk).expect("read mock A2A request");
+        assert!(read > 0, "mock A2A request closed before headers");
+        buffer.extend_from_slice(&chunk[..read]);
+        if let Some(end) = find_header_end(&buffer) {
+            header_end = end;
+            content_length = parse_content_length(&buffer[..header_end]);
+            break;
+        }
+    }
+    while buffer.len() < header_end + content_length {
+        let read = stream.read(&mut chunk).expect("read mock A2A body");
+        assert!(read > 0, "mock A2A request closed before body");
+        buffer.extend_from_slice(&chunk[..read]);
+    }
+    let headers = String::from_utf8_lossy(&buffer[..header_end]);
+    let request_line = headers.lines().next().unwrap_or_default().to_string();
+    let body = buffer[header_end..header_end + content_length].to_vec();
+    (request_line, body)
+}
+
+fn find_header_end(buffer: &[u8]) -> Option<usize> {
+    buffer
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .map(|index| index + 4)
+}
+
+fn parse_content_length(headers: &[u8]) -> usize {
+    let text = String::from_utf8_lossy(headers);
+    text.lines()
+        .find_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            if name.eq_ignore_ascii_case("content-length") {
+                value.trim().parse::<usize>().ok()
+            } else {
+                None
+            }
+        })
+        .unwrap_or(0)
+}
+
+fn write_json_response(stream: &mut TcpStream, body: &serde_json::Value) {
+    let payload = serde_json::to_vec(body).expect("serialize mock A2A response");
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n",
+        payload.len()
+    );
+    stream
+        .write_all(response.as_bytes())
+        .expect("write mock A2A headers");
+    stream.write_all(&payload).expect("write mock A2A body");
+    stream.flush().expect("flush mock A2A response");
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -194,6 +365,113 @@ pub fn should_handle(event: TriggerEvent) -> bool {
             assert!(node_kinds.iter().any(|kind| kind == "dispatch"));
             assert!(edge_kinds.iter().any(|kind| kind == "trigger_dispatch"));
             assert!(edge_kinds.iter().any(|kind| kind == "predicate_gate"));
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a2a_handler_returns_inline_result_and_emits_a2a_action_graph() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let server = spawn_mock_a2a_server(serde_json::json!({
+                "id": "task-inline",
+                "status": {"state": "completed"},
+                "history": [
+                    {"id": "msg-user", "role": "user", "parts": [{"type": "text", "text": "ignored"}]},
+                    {"id": "msg-agent", "role": "agent", "parts": [{"type": "text", "text": "{\"trace_id\":\"trace_inline\",\"target_agent\":\"triage\"}"}]},
+                ],
+                "artifacts": [],
+            }));
+            let (_dir, log, dispatcher) = a2a_dispatcher_fixture(
+                format!("{}/triage", server.authority),
+                TriggerRetryConfig::default(),
+            )
+            .await;
+
+            let mut event = trigger_event("issues.opened", "delivery-a2a-inline");
+            event.trace_id = TraceId("trace_inline".to_string());
+
+            let outcomes = dispatcher
+                .dispatch_event(event.clone())
+                .await
+                .expect("A2A dispatch succeeds");
+            assert_eq!(outcomes.len(), 1);
+            assert_eq!(outcomes[0].status, DispatchStatus::Succeeded);
+            assert_eq!(
+                outcomes[0].result,
+                Some(serde_json::json!({
+                    "trace_id": "trace_inline",
+                    "target_agent": "triage",
+                }))
+            );
+
+            let request = server.next_request();
+            assert_eq!(request["method"], "a2a.SendMessage");
+            let envelope_text = request["params"]["message"]["parts"][0]["text"]
+                .as_str()
+                .expect("A2A text part");
+            let envelope: serde_json::Value =
+                serde_json::from_str(envelope_text).expect("A2A envelope JSON");
+            assert_eq!(envelope["trace_id"], "trace_inline");
+            assert_eq!(envelope["target_agent"], "triage");
+            assert_eq!(envelope["event"]["trace_id"], "trace_inline");
+
+            let graph = read_topic(log.clone(), "observability.action_graph").await;
+            let (node_kinds, edge_kinds) = flatten_action_graph(&graph);
+            assert!(node_kinds.iter().any(|kind| kind == "a2a_hop"));
+            assert!(edge_kinds.iter().any(|kind| kind == "a2a_dispatch"));
+            assert!(graph.iter().any(|(_, logged)| {
+                logged.headers.get("trace_id").map(String::as_str) == Some("trace_inline")
+                    && logged.payload["context"]["target_agent"] == serde_json::json!("triage")
+            }));
+
+            server.finish();
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a2a_handler_returns_pending_task_handle() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let server = spawn_mock_a2a_server(serde_json::json!({
+                "id": "task-pending",
+                "status": {"state": "working"},
+                "history": [
+                    {"id": "msg-user", "role": "user", "parts": [{"type": "text", "text": "ignored"}]},
+                ],
+                "artifacts": [],
+            }));
+            let (_dir, _log, dispatcher) = a2a_dispatcher_fixture(
+                format!("{}/triage", server.authority),
+                TriggerRetryConfig::default(),
+            )
+            .await;
+
+            let outcomes = dispatcher
+                .dispatch_event(trigger_event("issues.opened", "delivery-a2a-pending"))
+                .await
+                .expect("A2A dispatch returns pending handle");
+            assert_eq!(outcomes.len(), 1);
+            assert_eq!(outcomes[0].status, DispatchStatus::Succeeded);
+            assert_eq!(
+                outcomes[0].result,
+                Some(serde_json::json!({
+                    "kind": "a2a_task_handle",
+                    "task_id": "task-pending",
+                    "state": "working",
+                    "target_agent": "triage",
+                    "rpc_url": format!("http://{}/rpc", server.authority),
+                    "card_url": format!("http://{}/.well-known/a2a-agent", server.authority),
+                    "agent_id": "mock-a2a",
+                }))
+            );
+
+            let request = server.next_request();
+            assert_eq!(request["method"], "a2a.SendMessage");
+            server.finish();
         })
         .await;
 }
