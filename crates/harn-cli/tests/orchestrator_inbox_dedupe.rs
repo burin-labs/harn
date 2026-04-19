@@ -57,6 +57,8 @@ fn spawn_orchestrator(
         .arg("harn.toml")
         .arg("--state-dir")
         .arg("./state")
+        .arg("--bind")
+        .arg("127.0.0.1:0")
         .arg("--role")
         .arg("single-tenant")
         .stderr(Stdio::piped())
