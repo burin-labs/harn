@@ -6,6 +6,8 @@ mod config;
 mod package;
 mod skill_loader;
 mod test_runner;
+#[cfg(test)]
+mod tests;
 
 use clap::{error::ErrorKind, CommandFactory, Parser as ClapParser};
 use std::path::{Path, PathBuf};

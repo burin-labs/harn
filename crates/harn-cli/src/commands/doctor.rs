@@ -745,6 +745,7 @@ mod tests {
 
     #[test]
     fn event_log_check_reports_backend_and_location() {
+        let _cwd_guard = crate::tests::common::cwd_lock::lock_cwd();
         let dir = tempfile::tempdir().expect("tempdir");
         let previous = std::env::current_dir().expect("cwd");
         std::env::set_current_dir(dir.path()).expect("set current dir");
@@ -776,6 +777,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn check_manifest_reports_loaded_triggers() {
+        let _cwd_guard = crate::tests::common::cwd_lock::lock_cwd_async().await;
         let dir = tempfile::tempdir().expect("tempdir");
         std::fs::create_dir_all(dir.path().join(".git")).expect("git dir");
         std::fs::write(

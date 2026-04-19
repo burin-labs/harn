@@ -11,6 +11,12 @@ granular archaeology.
 
 ### Fixed
 
+- **Flaky cwd-mutating test collisions (#204).** Added a shared-process
+  cwd mutex so parallel `cargo test` no longer observes mid-test cwd
+  swaps. `check_manifest_reports_loaded_triggers` and
+  `run_tests_uses_file_parent_as_execution_cwd_and_restores_shell_cwd`
+  no longer flake on CI.
+
 - **Structured-output schema contract for OpenRouter Gemini (#208,
   closes #206).** Schema-mode `llm_call(...)` no longer returns a
   success envelope with `data == nil` after prose-only or
