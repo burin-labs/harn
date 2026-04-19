@@ -31,6 +31,11 @@ pub(crate) struct TextToolParseResult {
     pub calls: Vec<serde_json::Value>,
     pub errors: Vec<String>,
     pub prose: String,
+    /// Explicit host-facing response content emitted inside one or more
+    /// `<user_response>...</user_response>` blocks. When present, this is the
+    /// preferred public answer surface and supersedes generic
+    /// `<assistant_prose>` for `prose` rendering.
+    pub user_response: Option<String>,
     /// Protocol-level grammar violations (stray text outside tags, unknown
     /// tags, unclosed tags, malformed `<done>` contents). Distinct from
     /// `errors`, which carry per-call parse diagnostics. The agent loop

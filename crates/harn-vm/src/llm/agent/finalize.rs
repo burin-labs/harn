@@ -109,7 +109,7 @@ pub(super) async fn run_finalize(
         Some(state.session_id.clone()),
         state.transcript_summary.clone(),
         None,
-        &state.recorded_messages,
+        &state.visible_messages,
         state.transcript_events.clone(),
         Vec::new(),
         Some(if state.final_status == "done" {
@@ -129,12 +129,15 @@ pub(super) async fn run_finalize(
     }
     let transcript_json = crate::llm::helpers::vm_value_to_json(&transcript_vm);
 
+    let final_visible_text =
+        crate::visible_text::sanitize_visible_assistant_text(&state.last_iteration_text, false);
+
     Ok(serde_json::json!({
         "status": state.final_status,
         "daemon_state": state.daemon_state,
         "daemon_snapshot_path": state.daemon_snapshot_path,
         "text": state.total_text,
-        "visible_text": state.last_iteration_text,
+        "visible_text": final_visible_text,
         "iterations": state.total_iterations,
         "duration_ms": loop_start.elapsed().as_millis() as i64,
         "tools_used": state.all_tools_used,

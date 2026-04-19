@@ -284,6 +284,7 @@ pub async fn run_agent_loop_internal(
             },
         )
         .await?;
+        state.sync_session_store();
 
         let mut call_result = llm_call::run_llm_call(
             &mut state,
@@ -352,6 +353,7 @@ pub async fn run_agent_loop_internal(
             dispatch,
         )
         .await?;
+        state.sync_session_store();
 
         if let Some(token_budget) = token_budget {
             loop_tokens_used = loop_tokens_used

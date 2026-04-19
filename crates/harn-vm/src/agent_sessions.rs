@@ -161,7 +161,7 @@ pub fn open_or_create(id: Option<String>) -> String {
 }
 
 pub fn open_child_session(parent_id: &str, id: Option<String>) -> String {
-    let resolved = open_or_create(id);
+    let resolved = fork(parent_id, id.clone()).unwrap_or_else(|| open_or_create(id));
     link_child_session(parent_id, &resolved);
     resolved
 }
@@ -408,6 +408,62 @@ pub fn messages_json(id: &str) -> Vec<serde_json::Value> {
     })
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct SessionPromptState {
+    pub messages: Vec<serde_json::Value>,
+    pub summary: Option<String>,
+}
+
+fn summary_message_json(summary: &str) -> serde_json::Value {
+    serde_json::json!({
+        "role": "user",
+        "content": summary,
+    })
+}
+
+fn messages_begin_with_summary(messages: &[serde_json::Value], summary: &str) -> bool {
+    messages.first().is_some_and(|message| {
+        message.get("role").and_then(|value| value.as_str()) == Some("user")
+            && message.get("content").and_then(|value| value.as_str()) == Some(summary)
+    })
+}
+
+/// Prompt-surface resume state for a persisted session.
+///
+/// Returns the compacted/rehydratable message list plus the transcript's
+/// summary field. When the transcript carries a summary field but its
+/// message list does not already begin with the compacted summary
+/// message, this helper prepends one so session re-entry preserves the
+/// same prompt surface the previous loop was actually using.
+pub fn prompt_state_json(id: &str) -> SessionPromptState {
+    SESSIONS.with(|s| {
+        let map = s.borrow();
+        let Some(state) = map.get(id) else {
+            return SessionPromptState::default();
+        };
+        let Some(dict) = state.transcript.as_dict() else {
+            return SessionPromptState::default();
+        };
+        let mut messages = match dict.get("messages") {
+            Some(VmValue::List(list)) => list
+                .iter()
+                .map(crate::llm::helpers::vm_value_to_json)
+                .collect::<Vec<_>>(),
+            _ => Vec::new(),
+        };
+        let summary = dict.get("summary").and_then(|value| match value {
+            VmValue::String(text) if !text.trim().is_empty() => Some(text.to_string()),
+            _ => None,
+        });
+        if let Some(summary_text) = summary.as_deref() {
+            if !messages_begin_with_summary(&messages, summary_text) {
+                messages.insert(0, summary_message_json(summary_text));
+            }
+        }
+        SessionPromptState { messages, summary }
+    })
+}
+
 /// Overwrite the transcript for this session. Used by `agent_loop` on
 /// exit to persist the synthesized transcript.
 pub fn store_transcript(id: &str, transcript: VmValue) {
@@ -417,6 +473,51 @@ pub fn store_transcript(id: &str, transcript: VmValue) {
             state.last_accessed = Instant::now();
         }
     });
+}
+
+/// Append a transcript event to the session without mutating its
+/// message list. Used for orchestration-side lineage events (sub-agent
+/// spawn/completion, workflow hooks, etc.) that should survive
+/// persistence/replay without being replayed back into the model as
+/// conversational messages.
+pub fn append_event(id: &str, event: VmValue) -> Result<(), String> {
+    let Some(event_dict) = event.as_dict() else {
+        return Err("agent_session_append_event: event must be a dict".into());
+    };
+    let kind_ok = matches!(event_dict.get("kind"), Some(VmValue::String(_)));
+    if !kind_ok {
+        return Err("agent_session_append_event: event must have a string `kind`".into());
+    }
+    SESSIONS.with(|s| {
+        let mut map = s.borrow_mut();
+        let Some(state) = map.get_mut(id) else {
+            return Err(format!(
+                "agent_session_append_event: unknown session id '{id}'"
+            ));
+        };
+        let dict = state
+            .transcript
+            .as_dict()
+            .cloned()
+            .unwrap_or_else(BTreeMap::new);
+        let mut events: Vec<VmValue> = match dict.get("events") {
+            Some(VmValue::List(list)) => list.iter().cloned().collect(),
+            _ => dict
+                .get("messages")
+                .and_then(|value| match value {
+                    VmValue::List(list) => Some(list.iter().cloned().collect::<Vec<_>>()),
+                    _ => None,
+                })
+                .map(|messages| crate::llm::helpers::transcript_events_from_messages(&messages))
+                .unwrap_or_default(),
+        };
+        events.push(event);
+        let mut next = dict;
+        next.insert("events".to_string(), VmValue::List(Rc::new(events)));
+        state.transcript = VmValue::Dict(Rc::new(next));
+        state.last_accessed = Instant::now();
+        Ok(())
+    })
 }
 
 /// Replace the transcript's message list wholesale. Used by the
@@ -611,5 +712,51 @@ mod tests {
             metadata.get("parent_session_id"),
             Some(VmValue::String(value)) if value.as_ref() == "parent-session"
         ));
+    }
+
+    #[test]
+    fn child_session_forks_parent_transcript() {
+        reset_session_store();
+        let parent = open_or_create(Some("parent-fork-parent".into()));
+        inject_message(&parent, make_msg("user", "parent context")).unwrap();
+
+        let child = open_child_session(&parent, Some("parent-fork-child".into()));
+        assert_eq!(message_count(&parent), 1);
+        assert_eq!(message_count(&child), 1);
+
+        let child_messages = messages_json(&child);
+        assert_eq!(
+            child_messages[0]["content"].as_str(),
+            Some("parent context"),
+        );
+    }
+
+    #[test]
+    fn prompt_state_prepends_summary_message_when_missing_from_messages() {
+        reset_session_store();
+        let session = open_or_create(Some("prompt-state-summary".into()));
+        let transcript = crate::llm::helpers::new_transcript_with_events(
+            Some(session.clone()),
+            vec![make_msg("assistant", "latest answer")],
+            Some("[auto-compacted 2 older messages]\nsummary".to_string()),
+            None,
+            Vec::new(),
+            Vec::new(),
+            Some("active"),
+        );
+        store_transcript(&session, transcript);
+
+        let prompt = prompt_state_json(&session);
+        assert_eq!(
+            prompt.summary.as_deref(),
+            Some("[auto-compacted 2 older messages]\nsummary")
+        );
+        assert_eq!(prompt.messages.len(), 2);
+        assert_eq!(prompt.messages[0]["role"].as_str(), Some("user"));
+        assert_eq!(
+            prompt.messages[0]["content"].as_str(),
+            Some("[auto-compacted 2 older messages]\nsummary"),
+        );
+        assert_eq!(prompt.messages[1]["role"].as_str(), Some("assistant"));
     }
 }

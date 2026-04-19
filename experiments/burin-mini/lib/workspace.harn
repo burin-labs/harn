@@ -1,0 +1,56 @@
+import "std/path"
+
+/** Return the sample workspace root for the experiment. */
+pub fn workspace_root() {
+  return path_join(source_dir(), "..", "workspace")
+}
+
+/** Normalize a model-provided path into a workspace-relative path. */
+pub fn workspace_path(path) {
+  let normalized = workspace_normalize(path ?? "", workspace_root())
+  guard normalized else {
+    throw "Path is outside the experiment workspace: ${path ?? ""}"
+  }
+  return normalized
+}
+
+/** Resolve a workspace-relative path to an on-disk host path. */
+pub fn resolve_workspace_path(path) {
+  return path_join(workspace_root(), workspace_path(path))
+}
+
+/** Read one file from the sample workspace. */
+pub fn read_workspace(path) {
+  return read_file(resolve_workspace_path(path))
+}
+
+/** Write one file inside the sample workspace. */
+pub fn write_workspace(path, content) {
+  let resolved = resolve_workspace_path(path)
+  write_file(resolved, content)
+  return resolved
+}
+
+/** Search the sample workspace with ripgrep. */
+pub fn search_workspace(query) {
+  let result = exec_at(
+    workspace_root(),
+    "rg",
+    "-n",
+    "--hidden",
+    "--glob",
+    "!node_modules",
+    "--glob",
+    "!coverage",
+    "--glob",
+    "!dist",
+    query,
+    ".",
+  )
+  return result?.stdout ?? result?.stderr ?? ""
+}
+
+/** Run one shell command from the sample workspace root. */
+pub fn run_workspace(command) {
+  return shell_at(workspace_root(), command)
+}

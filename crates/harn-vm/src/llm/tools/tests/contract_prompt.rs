@@ -41,12 +41,13 @@ fn contract_prompt_renders_edit_signature_with_enum_and_required_markers() {
 
 #[test]
 fn contract_prompt_help_block_documents_tagged_protocol() {
-    // The help constant teaches the three top-level tags, the call shape
+    // The help constant teaches the top-level tags, the call shape
     // inside <tool_call>, and the done-block grammar.
     assert!(TEXT_RESPONSE_PROTOCOL_HELP.contains("Response protocol"));
     assert!(TEXT_RESPONSE_PROTOCOL_HELP.contains("<tool_call>"));
     assert!(TEXT_RESPONSE_PROTOCOL_HELP.contains("</tool_call>"));
     assert!(TEXT_RESPONSE_PROTOCOL_HELP.contains("<assistant_prose>"));
+    assert!(TEXT_RESPONSE_PROTOCOL_HELP.contains("<user_response>"));
     assert!(TEXT_RESPONSE_PROTOCOL_HELP.contains("<done>##DONE##</done>"));
     assert!(TEXT_RESPONSE_PROTOCOL_HELP.contains("name({ key: value })"));
     assert!(TEXT_RESPONSE_PROTOCOL_HELP.contains("heredoc"));

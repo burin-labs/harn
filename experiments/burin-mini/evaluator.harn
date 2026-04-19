@@ -1,0 +1,171 @@
+import "std/path"
+import {
+  heuristic_semantic_eval,
+  load_json_file,
+  render_actual_trace,
+  render_ideal_reference,
+  render_inference_transcripts,
+  semantic_eval_mode,
+  semantic_eval_model,
+  semantic_eval_provider,
+  task_reference,
+} from "lib/eval_common.harn"
+
+fn semantic_eval_schema() {
+  return {
+    type: "object",
+    properties: {
+    overall_verdict: {type: "string"},
+    overall_score: {type: "number"},
+    confidence: {type: "number"},
+    summary: {type: "string"},
+    dimension_scores: {
+    type: "object",
+    properties: {
+    task_completion: {type: "number"},
+    convergence: {type: "number"},
+    tool_discipline: {type: "number"},
+    architecture_fidelity: {type: "number"},
+  },
+  },
+    strengths: {type: "array", items: {type: "string"}},
+    weaknesses: {type: "array", items: {type: "string"}},
+    gating_failures: {type: "array", items: {type: "string"}},
+    recommended_harness_fixes: {type: "array", items: {type: "string"}},
+  },
+    required: [
+    "overall_verdict",
+    "overall_score",
+    "confidence",
+    "summary",
+    "dimension_scores",
+    "strengths",
+    "weaknesses",
+    "gating_failures",
+    "recommended_harness_fixes",
+  ],
+  }
+}
+
+fn semantic_eval_system() {
+  return "You are grading an agent-harness run against an ideal reference trace.\n"
+    + "Grade on behavioral delta, not literal wording.\n"
+    + "Use the actual run trace, raw inference transcripts, verification outcomes, and ideal reference together.\n"
+    + "Reward equivalent high-quality behavior even if wording differs.\n"
+    + "Penalize failed stages, useless tool churn, verifier misses, architecture drift, and generic rewrites.\n"
+    + "When transcripts reveal a problem that the summary hides, trust the transcript.\n"
+    + "Return strict JSON only."
+}
+
+fn semantic_eval_prompt(report, run, reference, heuristic, task_root) {
+  return "[semantic_eval][task_id=${report?.task_id ?? ""}]\n"
+    + "Task: ${report?.task ?? ""}\n\n"
+    + "Ideal reference:\n${render_ideal_reference(reference)}\n\n"
+    + "Actual run trace:\n${render_actual_trace(report, run)}\n\n"
+    + "Objective heuristic pre-check:\n${json_stringify(heuristic)}\n\n"
+    + "${render_inference_transcripts(task_root)}\n\n"
+    + "Return strict JSON with keys:\n"
+    + "- overall_verdict\n"
+    + "- overall_score\n"
+    + "- confidence\n"
+    + "- summary\n"
+    + "- dimension_scores {task_completion, convergence, tool_discipline, architecture_fidelity}\n"
+    + "- strengths\n"
+    + "- weaknesses\n"
+    + "- gating_failures\n"
+    + "- recommended_harness_fixes\n"
+}
+
+fn semantic_eval_with_llm(report, run, reference, heuristic, task_root) {
+  let response = llm_call(
+    semantic_eval_prompt(report, run, reference, heuristic, task_root),
+    semantic_eval_system(),
+    {
+    provider: semantic_eval_provider(),
+    model: semantic_eval_model(),
+    output_schema: semantic_eval_schema(),
+    output_validation: "error",
+    schema_retries: 2,
+    response_format: "json",
+    temperature: 0,
+  },
+  )
+  let data = response?.data ?? {}
+  let gated_verdict = if len(heuristic?.gating_failures ?? []) > 0 {
+    "fail"
+  } else {
+    data?.overall_verdict ?? "unknown"
+  }
+  return data
+    + {
+    method: "semantic_llm",
+    objective_summary: heuristic?.summary ?? "",
+    objective_gating_failures: heuristic?.gating_failures ?? [],
+    overall_verdict: gated_verdict,
+  }
+}
+
+fn load_run_record(report, task_root) {
+  let reported = report?.run_path ?? ""
+  if reported != "" {
+    let loaded = try {
+      load_json_file(reported)
+    } catch (e) {
+      nil
+    }
+    if loaded != nil {
+      return loaded
+    }
+  }
+  if task_root != "" {
+    let fallback = path_join(task_root, "run_record.json")
+    let loaded = try {
+      load_json_file(fallback)
+    } catch (e) {
+      nil
+    }
+    if loaded != nil {
+      return loaded
+    }
+  }
+  return {}
+}
+
+fn output_path(default_report_path) {
+  if len(argv) > 1 && argv[1] != "" {
+    return argv[1]
+  }
+  return default_report_path.replace(".json", ".semantic.json")
+}
+
+pipeline default() {
+  guard len(argv) > 0 else {
+    throw "Usage: harn run experiments/burin-mini/evaluator.harn -- <report.json> [output.json] [task-root]"
+  }
+  let report_path = argv[0]
+  let report = load_json_file(report_path)
+  let task_root = if len(argv) > 2 {
+    argv[2]
+  } else {
+    ""
+  }
+  let run = load_run_record(report, task_root)
+  let reference = task_reference(report?.task_id ?? "")
+  let heuristic = heuristic_semantic_eval(report, run, reference)
+  let result = if semantic_eval_mode() == "heuristic" {
+    heuristic
+  } else {
+    semantic_eval_with_llm(report, run, reference, heuristic, task_root)
+  }
+  let destination = output_path(report_path)
+  write_file(destination, json_stringify(result))
+  println("task_id=${report?.task_id ?? ""}")
+  println("semantic_eval_mode=${semantic_eval_mode()}")
+  println("semantic_eval_provider=${semantic_eval_provider()}")
+  println("semantic_eval_model=${semantic_eval_model()}")
+  println("overall_verdict=${result?.overall_verdict ?? "unknown"}")
+  println("overall_score=${result?.overall_score ?? 0}")
+  println("output=${destination}")
+  println("")
+  println(result?.summary ?? "")
+}

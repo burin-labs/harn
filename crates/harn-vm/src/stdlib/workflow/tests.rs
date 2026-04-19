@@ -152,6 +152,20 @@ fn render_workflow_prompt_places_verification_before_context() {
 }
 
 #[test]
+fn render_workflow_prompt_makes_current_stage_scope_authoritative() {
+    let prompt = render_workflow_prompt(
+        "Only update src/current.ts.",
+        Some("Execute Current Batch"),
+        "",
+        "<artifact>\n<title>Action graph</title>\n<body>\nFuture step: run final verification\n</body>\n</artifact>",
+    );
+
+    assert!(prompt.contains("Treat `<workflow_context>` as supporting evidence"));
+    assert!(prompt.contains("do only what the current workflow task and system prompt authorize"));
+    assert!(prompt.contains("When the current stage is complete, stop"));
+}
+
+#[test]
 fn render_artifacts_context_uses_structured_artifact_blocks() {
     let artifacts = vec![crate::orchestration::ArtifactRecord {
         kind: "workspace_file".to_string(),

@@ -551,6 +551,26 @@ pub(super) struct AgentLoopState {
 }
 
 impl AgentLoopState {
+    /// Mirror the current prompt-facing transcript into the persisted
+    /// session store. This keeps session forks/resumes aligned with the
+    /// actual compacted prompt surface, while the append-only event list
+    /// retains the richer audit trail.
+    pub(super) fn sync_session_store(&self) {
+        if self.anonymous_session {
+            return;
+        }
+        let transcript_vm = crate::llm::helpers::transcript_to_vm_with_events(
+            Some(self.session_id.clone()),
+            self.transcript_summary.clone(),
+            None,
+            &self.visible_messages,
+            self.transcript_events.clone(),
+            Vec::new(),
+            Some("active"),
+        );
+        crate::agent_sessions::store_transcript(&self.session_id, transcript_vm);
+    }
+
     /// Union of `allowed_tools` across every active skill. Empty when
     /// no skill narrows the tool surface — callers should fall through
     /// to the unfiltered registry and native_tools list.
@@ -862,6 +882,7 @@ impl AgentLoopState {
         let tool_retries = config.tool_retries;
         let tool_backoff_ms = config.tool_backoff_ms;
         let tool_format = config.tool_format.clone();
+        let mut transcript_summary = opts.transcript_summary.clone();
         let (session_id, anonymous_session) = if config.session_id.trim().is_empty() {
             (format!("agent_session_{}", uuid::Uuid::now_v7()), true)
         } else {
@@ -869,10 +890,13 @@ impl AgentLoopState {
             (resolved, false)
         };
         if !anonymous_session {
-            let prior = crate::agent_sessions::messages_json(&session_id);
-            if !prior.is_empty() {
+            let prior = crate::agent_sessions::prompt_state_json(&session_id);
+            if transcript_summary.is_none() {
+                transcript_summary = prior.summary.clone();
+            }
+            if !prior.messages.is_empty() {
                 let caller_msgs = std::mem::take(&mut opts.messages);
-                opts.messages = prior;
+                opts.messages = prior.messages;
                 opts.messages.extend(caller_msgs);
             }
         }
@@ -1091,27 +1115,27 @@ impl AgentLoopState {
             if exit_when_verified {
                 if allow_done_sentinel {
                     Some(format!(
-                        "\n\nKeep working until the task is complete. Take action with tool calls — \
-                         do not stop to explain. {} only after a passing verification run.",
+                        "\n\nKeep working until the current request is complete. Take action with tool \
+                         calls — do not stop to explain. {} only after the current request passes verification.",
                         done_instruction
                     ))
                 } else {
                     Some(
-                        "\n\nKeep working until the task is complete. Take action with tool calls — \
+                        "\n\nKeep working until the current request is complete. Take action with tool calls — \
                          do not stop to explain."
                             .to_string(),
                     )
                 }
             } else if allow_done_sentinel {
                 Some(format!(
-                    "\n\nIMPORTANT: You MUST keep working until the task is complete. \
+                    "\n\nIMPORTANT: You MUST keep working until the current request is complete. \
                      Do NOT stop to explain or summarize — take action with tool calls. \
                      When the requested work is complete, {}.",
                     done_instruction
                 ))
             } else {
                 Some(
-                    "\n\nIMPORTANT: You MUST keep working until the task is complete. \
+                    "\n\nIMPORTANT: You MUST keep working until the current request is complete. \
                      Do NOT stop to explain or summarize — take action with tool calls."
                         .to_string(),
                 )
@@ -1139,7 +1163,6 @@ impl AgentLoopState {
         let mut deferred_user_messages: Vec<String> = Vec::new();
         let mut total_iterations = 0usize;
         let final_status = "done";
-        let mut transcript_summary = opts.transcript_summary.clone();
         let loop_start = std::time::Instant::now();
         let mut transcript_events: Vec<crate::value::VmValue> = Vec::new();
         let mut idle_backoff_ms = 100u64;

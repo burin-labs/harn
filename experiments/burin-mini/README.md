@@ -54,8 +54,9 @@ harn playground \
 
 ## Live Ollama Runs
 
-`harn playground --llm ollama:<model>` sets the generator model. The evaluator
-defaults to the same model unless you override `BURIN_MINI_EVALUATOR_MODEL`.
+`harn playground --llm ollama:<model>` sets the generator model. The semantic
+evaluator defaults to the same provider/model unless you override
+`BURIN_MINI_SEMANTIC_EVAL_PROVIDER` or `BURIN_MINI_SEMANTIC_EVAL_MODEL`.
 
 ```bash
 HARN_LLM_TRANSCRIPT_DIR=$PWD/experiments/burin-mini/evals/live/explain/llm \
@@ -78,9 +79,35 @@ post-run workspaces under `evals/live/`:
 ./experiments/burin-mini/run_live_suite.sh qwen3.5:35b-a3b-coding-nvfp4
 ```
 
+Each live task directory now contains:
+
+- `report.json`: pipeline report emitted by `pipeline.harn`
+- `run_record.json`: persisted action-graph run record when the task executed writes
+- `semantic_eval.json`: separate semantic grading result from [evaluator.harn](/Users/ksinder/.codex/worktrees/e04d/harn/experiments/burin-mini/evaluator.harn)
+- `llm/` and `events/`: raw top-level transcripts plus sub-agent event logs used by the semantic grader
+- `workspace_after/`: final sandbox workspace snapshot
+
+For downstream consumers, treat `report.json` as the stable experiment API:
+
+- `final_response`: the cleaned user-facing summary
+- `visible_outputs`: per-stage user-facing summaries derived from Harn stage `visible_text`
+- `research`: grounded fact records gathered through the queue
+
+Treat the raw transcript files as chronology/debugging data instead:
+
+- `llm/*.jsonl` includes wall-clock `timestamp`
+- `events/*.jsonl` includes wall-clock `emitted_at_ms`
+
+Set `BURIN_MINI_SEMANTIC_EVAL_MODE=heuristic` when you want a deterministic
+local harness grade without spending an evaluator model call.
+
 ## Notes
 
 - Reports are written to `experiments/burin-mini/evals/generated/<task-id>-latest.json`.
+- Semantic evaluator helpers live in
+  [lib/eval_common.harn](/Users/ksinder/.codex/worktrees/e04d/harn/experiments/burin-mini/lib/eval_common.harn),
+  and the grader entrypoint is
+  [evaluator.harn](/Users/ksinder/.codex/worktrees/e04d/harn/experiments/burin-mini/evaluator.harn).
 - The verify script for the rate-limit task lives at
   [workspace/scripts/verify-rate-limit.sh](/Users/ksinder/.codex/worktrees/7fc6/harn/experiments/burin-mini/workspace/scripts/verify-rate-limit.sh).
 - Repo integration:

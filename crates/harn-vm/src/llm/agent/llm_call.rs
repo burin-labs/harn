@@ -239,7 +239,7 @@ pub(super) async fn run_llm_call(
     // Always run the tagged parser so `<assistant_prose>`/`<done>` tags
     // never leak to callers. The tool-call gate below controls only
     // whether parsed TS-expression calls are promoted into `tool_calls`.
-    let (text_prose, protocol_violations, tagged_done_marker, canonical_history) = {
+    let (text_prose, user_response, protocol_violations, tagged_done_marker, canonical_history) = {
         let parse_result = parse_text_tool_calls_with_tools(&text, ctx.tools_val);
         let prose = if parse_result.prose.is_empty() {
             text.clone()
@@ -253,6 +253,7 @@ pub(super) async fn run_llm_call(
         };
         (
             prose,
+            parse_result.user_response,
             parse_result.violations,
             parse_result.done_marker,
             canonical,
@@ -360,6 +361,7 @@ pub(super) async fn run_llm_call(
             "Your response violated the tagged response protocol. Each issue:\n- {}\n\n\
              Re-emit using only these top-level tags, separated by whitespace:\n\n\
              <assistant_prose>short narration (optional)</assistant_prose>\n\
+             <user_response>final user-facing answer (optional)</user_response>\n\
              <tool_call>\nname({{ key: value }})\n</tool_call>\n\
              <done>{done_sentinel}</done>\n\n\
              Nothing outside these tags is accepted. Do not paste source code, \
@@ -404,16 +406,22 @@ pub(super) async fn run_llm_call(
             );
         }
     }
+    let allow_done_sentinel = ctx
+        .turn_policy
+        .map(|policy| policy.allow_done_sentinel)
+        .unwrap_or(true);
     // exit_when_verified: honor sentinel only if the last run() exit 0.
     let verified = !ctx.exit_when_verified || state.last_run_exit_code == Some(0);
     // Guard against premature exit where the model emits done without acting.
     let has_acted = !state.all_tools_used.is_empty() || !tool_calls.is_empty();
     // Ledger gate: reject done while open/blocked deliverables remain.
     let ledger_blocks_done = state.task_ledger.gates_done();
+    let completion_requested =
+        sentinel_in_text || (allow_done_sentinel && user_response.as_deref().is_some());
     let sentinel_hit = ctx.persistent
-        && ((sentinel_in_text && verified && has_acted && !ledger_blocks_done) || phase_change);
+        && ((completion_requested && verified && has_acted && !ledger_blocks_done) || phase_change);
 
-    if sentinel_in_text && ledger_blocks_done && ctx.persistent {
+    if completion_requested && ledger_blocks_done && ctx.persistent {
         let corrective = state.task_ledger.done_gate_feedback();
         append_message_to_contexts(
             &mut state.visible_messages,
@@ -423,12 +431,12 @@ pub(super) async fn run_llm_call(
         state.ledger_done_rejections += 1;
     }
 
-    if sentinel_in_text && !verified && ctx.persistent {
+    if completion_requested && !verified && ctx.persistent {
         let code_str = state
             .last_run_exit_code
             .map_or("none".to_string(), |c| c.to_string());
         let corrective = format!(
-            "You emitted the done sentinel but verification has not passed \
+            "You emitted a completion signal but verification has not passed \
              (last run exit code: {code_str}). The loop will continue. \
              Run the verification command and fix any failures before finishing."
         );
@@ -438,7 +446,7 @@ pub(super) async fn run_llm_call(
             runtime_feedback_message("verification_gate", corrective),
         );
     }
-    if sentinel_in_text && !has_acted && ctx.persistent && ctx.has_tools {
+    if completion_requested && !has_acted && ctx.persistent && ctx.has_tools {
         let corrective = sentinel_without_action_nudge(ctx.tool_format, ctx.turn_policy);
         append_message_to_contexts(
             &mut state.visible_messages,

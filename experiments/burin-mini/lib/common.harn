@@ -44,6 +44,66 @@ fn ensure_string_list(items) {
   return result
 }
 
+fn append_unique_strings(items, values) {
+  var result = ensure_string_list(items)
+  for value in ensure_string_list(values) {
+    if !list_contains(result, value) {
+      result = result + [value]
+    }
+  }
+  return result
+}
+
+fn trimmed_string(value) {
+  if type_of(value) != "string" {
+    return ""
+  }
+  return value.trim()
+}
+
+fn generic_action_task(value) {
+  let normalized = trimmed_string(value).lower()
+  return normalized == "" || normalized == "write" || normalized == "edit" || normalized == "run"
+    || normalized == "execute"
+    || normalized == "verify"
+}
+
+/** Return the verifier command string for prompts and runtime configs. */
+pub fn effective_verify_command(profile) {
+  let command = trimmed_string(profile?.verify_command ?? "")
+  if command {
+    return command
+  }
+  return "none"
+}
+
+/** Return the structured verification contract for a profile. */
+pub fn verification_contract(profile) {
+  return profile?.verification_contract ?? {}
+}
+
+/** Render the verification contract as markdown bullets for prompt context. */
+pub fn render_verification_contract(profile) {
+  let contract = verification_contract(profile)
+  var lines = []
+  for value in ensure_string_list(contract?.required_identifiers ?? []) {
+    lines = lines + ["- required identifier: ${value}"]
+  }
+  for value in ensure_string_list(contract?.required_paths ?? []) {
+    lines = lines + ["- required path: ${value}"]
+  }
+  for value in ensure_string_list(contract?.required_text ?? []) {
+    lines = lines + ["- required text: ${value}"]
+  }
+  for value in ensure_string_list(contract?.notes ?? []) {
+    lines = lines + ["- verifier note: ${value}"]
+  }
+  if len(lines) == 0 {
+    return "(none)"
+  }
+  return join(lines, "\n")
+}
+
 fn canonical_tool_name(name) {
   if name == "read_file" || name == "open_file" || name == "cat_file" {
     return "read"
@@ -124,13 +184,43 @@ fn normalize_action_entry(profile, item, index) {
   if len(depends_on) == 0 {
     depends_on = ensure_string_list(item?.dependencies)
   }
-  let allowed_tools = normalize_tool_names(item?.allowed_tools, default_action_tools(profile))
+  var allowed_tools = normalize_tool_names(item?.allowed_tools, default_action_tools(profile))
+  if list_contains(allowed_tools, "write") && !list_contains(allowed_tools, "read") {
+    allowed_tools = ["read"] + allowed_tools
+  }
+  var target_paths = []
+  target_paths = append_unique_strings(target_paths, item?.target_paths ?? [])
+  target_paths = append_unique_strings(target_paths, item?.paths ?? [])
+  target_paths = append_unique_strings(target_paths, item?.changed_paths ?? [])
+  target_paths = append_unique_strings(target_paths, item?.required_paths ?? [])
+  target_paths = append_unique_strings(target_paths, item?.path ?? item?.target_file ?? "")
+  let command = if list_contains(allowed_tools, "run") {
+    trimmed_string(item?.command ?? profile?.verify_command ?? "")
+  } else {
+    ""
+  }
+  let title = trimmed_string(item?.title ?? item?.summary ?? "Action ${index}")
+  var task = trimmed_string(item?.task ?? item?.description ?? "")
+  if generic_action_task(task) {
+    if command {
+      task = "Run `${command}` exactly and report whether it passed."
+    } else if len(target_paths) > 0 {
+      task = "${title}. Scope this work to ${join(target_paths, ", ")}."
+    } else {
+      task = title
+    }
+  }
+  if len(target_paths) == 0 && list_contains(allowed_tools, "write") {
+    target_paths = append_unique_strings(target_paths, profile?.write_paths ?? [])
+  }
   return {
     id: item?.id ?? "action_${index}",
-    title: item?.title ?? item?.summary ?? "Action ${index}",
-    task: item?.task ?? item?.description ?? "",
+    title: title,
+    task: task,
     depends_on: depends_on,
     allowed_tools: allowed_tools,
+    target_paths: target_paths,
+    command: command,
   }
 }
 
@@ -302,6 +392,55 @@ pub fn normalize_plan(profile, plan) {
   }
 }
 
+fn action_phase(action) {
+  let tools = action?.allowed_tools ?? []
+  if tools_fit_within(tools, default_research_tools({mode: "scoped_write"})) {
+    return "research"
+  }
+  if list_contains(tools, "run") && !list_contains(tools, "write") {
+    return "verify"
+  }
+  return "execute"
+}
+
+fn action_tool_class(action) {
+  let phase = action_phase(action)
+  if phase == "research" {
+    return "read"
+  }
+  if phase == "verify" {
+    return "run"
+  }
+  if list_contains(action?.allowed_tools ?? [], "write") {
+    return "write"
+  }
+  return "generic"
+}
+
+/** Convert a normalized plan into a canonical action graph with rich metadata. */
+pub fn plan_to_action_graph(task, plan) {
+  var actions = []
+  for action in plan?.actions ?? [] {
+    actions = actions
+      + [
+      {
+      _type: "action_item",
+      id: action?.id ?? "",
+      title: action?.title ?? "",
+      instruction: action?.task ?? action?.title ?? "",
+      phase: action_phase(action),
+      depends_on: action?.depends_on ?? [],
+      tools: action?.allowed_tools ?? [],
+      tool_class: action_tool_class(action),
+      target_paths: action?.target_paths ?? [],
+      command: action?.command ?? "",
+      metadata: {target_paths: action?.target_paths ?? [], command: action?.command ?? ""},
+    },
+    ]
+  }
+  return {_type: "action_graph", task: task, summary: plan?.plan_summary ?? "", actions: actions}
+}
+
 /** Return the effective success criteria for evaluator prompts. */
 pub fn plan_success_criteria(profile, plan) {
   let criteria = ensure_string_list(plan?.success_criteria ?? profile?.success_criteria ?? [])
@@ -386,6 +525,53 @@ pub fn render_action_results(results) {
     }
   }
   return join(lines, "\n")
+}
+
+/** Structured planner output schema for `sub_agent_run(... returns.schema)`. */
+pub fn planner_schema() {
+  return {
+    type: "object",
+    properties: {
+    ready: {type: "boolean"},
+    plan_summary: {type: "string"},
+    final_response: {type: "string"},
+    questions: {
+    type: "array",
+    items: {
+    type: "object",
+    properties: {id: {type: "string"}, question: {type: "string"}, tools: {type: "array", items: {type: "string"}}},
+  },
+  },
+    actions: {
+    type: "array",
+    items: {
+    type: "object",
+    properties: {
+    id: {type: "string"},
+    title: {type: "string"},
+    task: {type: "string"},
+    depends_on: {type: "array", items: {type: "string"}},
+    allowed_tools: {type: "array", items: {type: "string"}},
+    target_paths: {type: "array", items: {type: "string"}},
+    command: {type: "string"},
+  },
+  },
+  },
+  },
+  }
+}
+
+/** Structured research output schema for `sub_agent_run(... returns.schema)`. */
+pub fn research_schema() {
+  return {
+    type: "object",
+    properties: {
+    question: {type: "string"},
+    answer: {type: "string"},
+    evidence_paths: {type: "array", items: {type: "string"}},
+    next_steps: {type: "array", items: {type: "string"}},
+  },
+  }
 }
 
 /** Build common generator sub-agent options. */
