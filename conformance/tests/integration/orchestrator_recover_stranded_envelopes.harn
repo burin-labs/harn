@@ -62,11 +62,9 @@ pipeline test(task) {
     path_join(root, "lib.harn"),
     "import \"std/triggers\"\n\npub fn on_task(event: TriggerEvent) -> string {\n  return event.kind\n}\n",
   )
-
   let repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
   let harn_bin = resolve_harn_bin(repo_root)
   assert(file_exists(harn_bin), "missing built harn binary at " + harn_bin)
-
   let crash_start = shell_at(
     root,
     "nohup env HARN_SECRET_PROVIDERS=env HARN_EVENT_LOG_BACKEND=file HARN_ORCHESTRATOR_API_KEYS=test-key HARN_ORCHESTRATOR_HMAC_SECRET=shared-secret HARN_TEST_DISPATCHER_FAIL_BEFORE_OUTBOX=1 "
@@ -86,7 +84,6 @@ pipeline test(task) {
   },
   )
   println(response.status == 200 && wait_for_exit(crash_pid))
-
   let restart = shell_at(
     root,
     "nohup env HARN_SECRET_PROVIDERS=env HARN_EVENT_LOG_BACKEND=file HARN_ORCHESTRATOR_API_KEYS=test-key HARN_ORCHESTRATOR_HMAC_SECRET=shared-secret "
@@ -98,7 +95,6 @@ pipeline test(task) {
   let restart_url = wait_for_listener_url(path_join(root, "orchestrator-restart.log"))
   assert(restart_url != nil, "restart listener URL did not appear in log")
   sleep(500ms)
-
   let state_dir = path_join(root, "state")
   let config_path = path_join(root, "harn.toml")
   let queue = shell_at(
@@ -116,7 +112,6 @@ pipeline test(task) {
     && queue.stdout.contains("Stranded envelopes:")
     && !queue.stdout.contains("dispatch_succeeded"),
   )
-
   let recover = shell_at(
     root,
     "env HARN_EVENT_LOG_BACKEND=file "
@@ -133,7 +128,6 @@ pipeline test(task) {
     && recover.stdout.contains("Candidates:")
     && recover.stdout.contains("event_id=trigger_evt_"),
   )
-
   let _ = shell("kill -TERM " + restart_pid)
   wait_for_exit(restart_pid)
   delete_file(root)
