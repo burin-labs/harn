@@ -327,6 +327,8 @@ thread_local! {
     static TRIGGER_REGISTRY: RefCell<TriggerRegistry> = RefCell::new(TriggerRegistry::default());
 }
 
+const TERMINATED_VERSION_RETENTION_LIMIT: usize = 2;
+
 pub fn clear_trigger_registry() {
     TRIGGER_REGISTRY.with(|slot| {
         *slot.borrow_mut() = TriggerRegistry::default();
@@ -424,6 +426,7 @@ pub async fn install_manifest_triggers(
     let (event_log, events) = TRIGGER_REGISTRY.with(|slot| {
         let registry = &mut *slot.borrow_mut();
         registry.refresh_runtime_context();
+        let mut touched_ids = BTreeSet::new();
 
         let mut incoming = BTreeMap::new();
         for spec in specs {
@@ -463,6 +466,7 @@ pub async fn install_manifest_triggers(
                 for binding in live_manifest {
                     registry.transition_binding_to_draining(&binding, &mut lifecycle);
                 }
+                touched_ids.insert(id.clone());
                 continue;
             };
 
@@ -483,11 +487,17 @@ pub async fn install_manifest_triggers(
 
             let version = registry.next_version_for_id(&id);
             registry.register_binding(spec, version, &mut lifecycle);
+            touched_ids.insert(id.clone());
         }
 
         for spec in incoming.into_values() {
+            touched_ids.insert(spec.id.clone());
             let version = registry.next_version_for_id(&spec.id);
             registry.register_binding(spec, version, &mut lifecycle);
+        }
+
+        for id in touched_ids {
+            registry.gc_terminated_versions(&id);
         }
 
         Ok((registry.event_log.clone(), lifecycle))
@@ -557,7 +567,7 @@ pub async fn drain(id: &str) -> Result<(), TriggerRegistryError> {
     append_lifecycle_events(event_log, events).await
 }
 
-pub fn begin_in_flight(id: &str, version: u32) -> Result<(), TriggerRegistryError> {
+pub fn pin_trigger_binding(id: &str, version: u32) -> Result<(), TriggerRegistryError> {
     TRIGGER_REGISTRY.with(|slot| {
         let registry = slot.borrow();
         let binding = registry.binding(id, version).ok_or_else(|| {
@@ -573,23 +583,13 @@ pub fn begin_in_flight(id: &str, version: u32) -> Result<(), TriggerRegistryErro
             ))),
             _ => {
                 binding.in_flight.fetch_add(1, Ordering::Relaxed);
-                binding.metrics.received.fetch_add(1, Ordering::Relaxed);
-                *binding
-                    .metrics
-                    .last_received_ms
-                    .lock()
-                    .expect("trigger metrics poisoned") = Some(now_ms());
                 Ok(())
             }
         }
     })
 }
 
-pub async fn finish_in_flight(
-    id: &str,
-    version: u32,
-    outcome: TriggerDispatchOutcome,
-) -> Result<(), TriggerRegistryError> {
+pub async fn unpin_trigger_binding(id: &str, version: u32) -> Result<(), TriggerRegistryError> {
     let (event_log, events) = TRIGGER_REGISTRY.with(|slot| {
         let registry = &mut *slot.borrow_mut();
         let binding = registry.binding(id, version).ok_or_else(|| {
@@ -606,6 +606,56 @@ pub async fn finish_in_flight(
             )));
         }
         binding.in_flight.fetch_sub(1, Ordering::Relaxed);
+
+        let mut lifecycle = Vec::new();
+        registry.maybe_finalize_draining(&binding, &mut lifecycle);
+        registry.gc_terminated_versions(binding.id.as_str());
+        Ok((registry.event_log.clone(), lifecycle))
+    })?;
+
+    append_lifecycle_events(event_log, events).await
+}
+
+pub fn begin_in_flight(id: &str, version: u32) -> Result<(), TriggerRegistryError> {
+    pin_trigger_binding(id, version)?;
+    TRIGGER_REGISTRY.with(|slot| {
+        let registry = slot.borrow();
+        let binding = registry.binding(id, version).ok_or_else(|| {
+            TriggerRegistryError::UnknownBindingVersion {
+                id: id.to_string(),
+                version,
+            }
+        })?;
+        binding.metrics.received.fetch_add(1, Ordering::Relaxed);
+        *binding
+            .metrics
+            .last_received_ms
+            .lock()
+            .expect("trigger metrics poisoned") = Some(now_ms());
+        Ok(())
+    })
+}
+
+pub async fn finish_in_flight(
+    id: &str,
+    version: u32,
+    outcome: TriggerDispatchOutcome,
+) -> Result<(), TriggerRegistryError> {
+    TRIGGER_REGISTRY.with(|slot| {
+        let registry = &mut *slot.borrow_mut();
+        let binding = registry.binding(id, version).ok_or_else(|| {
+            TriggerRegistryError::UnknownBindingVersion {
+                id: id.to_string(),
+                version,
+            }
+        })?;
+        let current = binding.in_flight.load(Ordering::Relaxed);
+        if current == 0 {
+            return Err(TriggerRegistryError::InvalidSpec(format!(
+                "trigger binding '{}' version {} has no in-flight events",
+                id, version
+            )));
+        }
         match outcome {
             TriggerDispatchOutcome::Dispatched => {
                 binding.metrics.dispatched.fetch_add(1, Ordering::Relaxed);
@@ -617,13 +667,10 @@ pub async fn finish_in_flight(
                 binding.metrics.dlq.fetch_add(1, Ordering::Relaxed);
             }
         }
-
-        let mut lifecycle = Vec::new();
-        registry.maybe_finalize_draining(&binding, &mut lifecycle);
-        Ok((registry.event_log.clone(), lifecycle))
+        Ok(())
     })?;
 
-    append_lifecycle_events(event_log, events).await
+    unpin_trigger_binding(id, version).await
 }
 
 impl TriggerRegistry {
@@ -674,6 +721,27 @@ impl TriggerRegistry {
             .max()
             .unwrap_or(0)
             + 1
+    }
+
+    fn gc_terminated_versions(&mut self, id: &str) {
+        let Some(bindings) = self.bindings.get_mut(id) else {
+            return;
+        };
+
+        let mut newest_versions: Vec<u32> =
+            bindings.iter().map(|binding| binding.version).collect();
+        newest_versions.sort_unstable_by(|left, right| right.cmp(left));
+        newest_versions.truncate(TERMINATED_VERSION_RETENTION_LIMIT);
+        let retained_versions: BTreeSet<u32> = newest_versions.into_iter().collect();
+
+        bindings.retain(|binding| {
+            binding.state_snapshot() != TriggerState::Terminated
+                || retained_versions.contains(&binding.version)
+        });
+
+        if bindings.is_empty() {
+            self.bindings.remove(id);
+        }
     }
 
     #[allow(clippy::arc_with_non_send_sync)]
@@ -961,6 +1029,37 @@ mod tests {
             .find(|binding| binding.id == "github-new-issue" && binding.version == 1)
             .expect("old binding");
         assert_eq!(old.state, TriggerState::Terminated);
+
+        clear_trigger_registry();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn gc_drops_terminated_versions_beyond_retention_limit() {
+        clear_trigger_registry();
+
+        install_manifest_triggers(vec![manifest_spec("github-new-issue", "v1")])
+            .await
+            .expect("install v1");
+        begin_in_flight("github-new-issue", 1).expect("pin v1");
+
+        install_manifest_triggers(vec![manifest_spec("github-new-issue", "v2")])
+            .await
+            .expect("install v2");
+        finish_in_flight("github-new-issue", 1, TriggerDispatchOutcome::Dispatched)
+            .await
+            .expect("finish v1");
+
+        install_manifest_triggers(vec![manifest_spec("github-new-issue", "v3")])
+            .await
+            .expect("install v3");
+
+        let snapshots = snapshot_trigger_bindings();
+        let versions: Vec<u32> = snapshots
+            .into_iter()
+            .filter(|binding| binding.id == "github-new-issue")
+            .map(|binding| binding.version)
+            .collect();
+        assert_eq!(versions, vec![2, 3]);
 
         clear_trigger_registry();
     }

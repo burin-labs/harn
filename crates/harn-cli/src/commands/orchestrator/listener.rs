@@ -1,11 +1,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
 use axum::body::Bytes;
-use axum::extract::{DefaultBodyLimit, Extension, Query};
-use axum::http::{HeaderMap, Method, StatusCode, Uri};
+use axum::extract::{DefaultBodyLimit, Extension, OriginalUri, Query};
+use axum::http::{HeaderMap, Method, StatusCode};
 use axum::middleware;
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
@@ -48,7 +48,7 @@ impl ListenerConfig {
 
 pub(crate) struct ListenerRuntime {
     server: ServerRuntime,
-    metrics: Arc<BTreeMap<String, Arc<RouteRuntimeMetrics>>>,
+    routes: Arc<RouteRegistry>,
 }
 
 impl ListenerRuntime {
@@ -66,8 +66,15 @@ impl ListenerRuntime {
             .filter(|value| *value > 0)
             .map(Duration::from_millis);
         let origin_state = Arc::new(config.allowed_origins.clone());
-        let mut route_metrics = BTreeMap::new();
-        let mut app = Router::new()
+        let routes = Arc::new(RouteRegistry::new(
+            config.routes,
+            config.event_log.clone(),
+            config.secrets.clone(),
+            auth.clone(),
+            pending_topic.clone(),
+            request_delay,
+        )?);
+        let app = Router::new()
             .route(
                 "/health",
                 get(|| async move { (StatusCode::OK, "ok").into_response() }),
@@ -79,31 +86,11 @@ impl ListenerRuntime {
             .route(
                 "/readyz",
                 get(|| async move { (StatusCode::OK, "ready").into_response() }),
+            )
+            .route(
+                "/{*path}",
+                post(ingest_trigger).layer(Extension(routes.clone())),
             );
-
-        let mut seen_paths = BTreeSet::new();
-        for route in &config.routes {
-            if !seen_paths.insert(route.path.clone()) {
-                return Err(format!(
-                    "trigger route '{}' is configured more than once",
-                    route.path
-                ));
-            }
-            let context = Arc::new(RouteContext {
-                route: route.clone(),
-                event_log: config.event_log.clone(),
-                secrets: config.secrets.clone(),
-                auth: auth.clone(),
-                pending_topic: pending_topic.clone(),
-                request_delay,
-                metrics: Arc::new(RouteRuntimeMetrics::default()),
-            });
-            route_metrics.insert(route.trigger_id.clone(), context.metrics.clone());
-            app = app.route(
-                &route.path,
-                post(ingest_trigger).layer(Extension(context.clone())),
-            );
-        }
 
         let app = app
             .layer(DefaultBodyLimit::max(config.max_body_bytes))
@@ -114,10 +101,7 @@ impl ListenerRuntime {
             .with_state(origin_state);
 
         let server = ServerRuntime::start(config.bind, app, config.tls.as_ref()).await?;
-        Ok(Self {
-            server,
-            metrics: Arc::new(route_metrics),
-        })
+        Ok(Self { server, routes })
     }
 
     pub(crate) fn local_addr(&self) -> std::net::SocketAddr {
@@ -137,13 +121,17 @@ impl ListenerRuntime {
     }
 
     pub(crate) fn trigger_metrics(&self) -> BTreeMap<String, TriggerMetricSnapshot> {
-        snapshot_metrics(self.metrics.as_ref())
+        self.routes.snapshot_metrics()
+    }
+
+    pub(crate) fn reload_routes(&self, routes: Vec<RouteConfig>) -> Result<(), String> {
+        self.routes.reload(routes)
     }
 
     pub(crate) async fn shutdown(self) -> Result<BTreeMap<String, TriggerMetricSnapshot>, String> {
-        let Self { server, metrics } = self;
+        let Self { server, routes } = self;
         server.shutdown().await?;
-        Ok(snapshot_metrics(metrics.as_ref()))
+        Ok(routes.snapshot_metrics())
     }
 }
 
@@ -228,6 +216,85 @@ impl AuthMode {
     }
 }
 
+struct RouteRegistry {
+    routes_by_path: RwLock<BTreeMap<String, Arc<RouteContext>>>,
+    metrics_by_trigger_id: Mutex<BTreeMap<String, Arc<RouteRuntimeMetrics>>>,
+    event_log: Arc<AnyEventLog>,
+    secrets: Arc<dyn SecretProvider>,
+    auth: Arc<ListenerAuth>,
+    pending_topic: Topic,
+    request_delay: Option<Duration>,
+}
+
+impl RouteRegistry {
+    fn new(
+        routes: Vec<RouteConfig>,
+        event_log: Arc<AnyEventLog>,
+        secrets: Arc<dyn SecretProvider>,
+        auth: Arc<ListenerAuth>,
+        pending_topic: Topic,
+        request_delay: Option<Duration>,
+    ) -> Result<Self, String> {
+        let registry = Self {
+            routes_by_path: RwLock::new(BTreeMap::new()),
+            metrics_by_trigger_id: Mutex::new(BTreeMap::new()),
+            event_log,
+            secrets,
+            auth,
+            pending_topic,
+            request_delay,
+        };
+        registry.reload(routes)?;
+        Ok(registry)
+    }
+
+    fn reload(&self, routes: Vec<RouteConfig>) -> Result<(), String> {
+        validate_unique_route_paths(&routes)?;
+        let mut next_routes = BTreeMap::new();
+        let mut metrics_by_trigger_id = self
+            .metrics_by_trigger_id
+            .lock()
+            .expect("route metrics poisoned");
+        for route in routes {
+            let metrics = metrics_by_trigger_id
+                .entry(route.trigger_id.clone())
+                .or_insert_with(|| Arc::new(RouteRuntimeMetrics::default()))
+                .clone();
+            next_routes.insert(
+                route.path.clone(),
+                Arc::new(RouteContext {
+                    route,
+                    event_log: self.event_log.clone(),
+                    secrets: self.secrets.clone(),
+                    auth: self.auth.clone(),
+                    pending_topic: self.pending_topic.clone(),
+                    request_delay: self.request_delay,
+                    metrics,
+                }),
+            );
+        }
+        *self.routes_by_path.write().expect("route table poisoned") = next_routes;
+        Ok(())
+    }
+
+    fn resolve(&self, path: &str) -> Option<Arc<RouteContext>> {
+        self.routes_by_path
+            .read()
+            .expect("route table poisoned")
+            .get(path)
+            .cloned()
+    }
+
+    fn snapshot_metrics(&self) -> BTreeMap<String, TriggerMetricSnapshot> {
+        self.metrics_by_trigger_id
+            .lock()
+            .expect("route metrics poisoned")
+            .iter()
+            .map(|(trigger_id, metrics)| (trigger_id.clone(), metrics.snapshot()))
+            .collect()
+    }
+}
+
 #[derive(Clone, Copy)]
 pub(crate) enum SignatureMode {
     GitHub,
@@ -262,23 +329,31 @@ impl RouteRuntimeMetrics {
     }
 }
 
-fn snapshot_metrics(
-    metrics: &BTreeMap<String, Arc<RouteRuntimeMetrics>>,
-) -> BTreeMap<String, TriggerMetricSnapshot> {
-    metrics
-        .iter()
-        .map(|(trigger_id, metrics)| (trigger_id.clone(), metrics.snapshot()))
-        .collect()
+fn validate_unique_route_paths(routes: &[RouteConfig]) -> Result<(), String> {
+    let mut seen_paths = BTreeSet::new();
+    for route in routes {
+        if !seen_paths.insert(route.path.clone()) {
+            return Err(format!(
+                "trigger route '{}' is configured more than once",
+                route.path
+            ));
+        }
+    }
+    Ok(())
 }
 
 async fn ingest_trigger(
-    Extension(context): Extension<Arc<RouteContext>>,
+    Extension(routes): Extension<Arc<RouteRegistry>>,
     method: Method,
-    uri: Uri,
+    OriginalUri(uri): OriginalUri,
     headers: HeaderMap,
     Query(query): Query<BTreeMap<String, String>>,
     body: Bytes,
 ) -> impl IntoResponse {
+    let Some(context) = routes.resolve(uri.path()) else {
+        return (StatusCode::NOT_FOUND, "trigger route not configured").into_response();
+    };
+
     context.metrics.received.fetch_add(1, Ordering::Relaxed);
     context.metrics.in_flight.fetch_add(1, Ordering::Relaxed);
 
@@ -302,8 +377,7 @@ async fn ingest_trigger(
     }
 
     let result = normalize_request(&context, &normalized_headers, &query, body.as_ref()).await;
-
-    match result {
+    let response = match result {
         Ok(event) => {
             let payload = json!({
                 "trigger_id": context.route.trigger_id,
@@ -347,7 +421,9 @@ async fn ingest_trigger(
             context.metrics.in_flight.fetch_sub(1, Ordering::Relaxed);
             error.into_response()
         }
-    }
+    };
+
+    response
 }
 
 async fn authorize_request(
@@ -812,5 +888,174 @@ impl HttpError {
 impl IntoResponse for HttpError {
     fn into_response(self) -> axum::response::Response {
         (self.status, self.message).into_response()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use harn_vm::event_log::{
+        install_default_for_base_dir, reset_active_event_log, EventLog, Topic,
+    };
+    use harn_vm::{
+        ProviderId, TriggerBindingSource, TriggerBindingSpec, TriggerHandlerSpec,
+        TriggerRetryConfig,
+    };
+    use tempfile::tempdir;
+
+    static REQUEST_DELAY_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn manifest_binding_spec(id: &str, fingerprint: &str) -> TriggerBindingSpec {
+        TriggerBindingSpec {
+            id: id.to_string(),
+            source: TriggerBindingSource::Manifest,
+            kind: "a2a-push".to_string(),
+            provider: ProviderId::from("a2a-push"),
+            handler: TriggerHandlerSpec::Worker {
+                queue: "triage".to_string(),
+            },
+            when: None,
+            retry: TriggerRetryConfig::default(),
+            match_events: vec!["a2a.task.received".to_string()],
+            dedupe_key: None,
+            dedupe_retention_days: harn_vm::DEFAULT_INBOX_RETENTION_DAYS,
+            filter: None,
+            daily_cost_usd: None,
+            max_concurrent: None,
+            manifest_path: None,
+            package_name: Some("listener-test".to_string()),
+            definition_fingerprint: fingerprint.to_string(),
+        }
+    }
+
+    fn route(path: &str, version: u32) -> RouteConfig {
+        RouteConfig {
+            trigger_id: "incoming-review-task".to_string(),
+            binding_version: version,
+            provider: ProviderId::from("a2a-push"),
+            path: path.to_string(),
+            auth_mode: AuthMode::Public,
+            signature_mode: SignatureMode::Unsigned,
+            signing_secret: None,
+        }
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test(flavor = "current_thread")]
+    async fn reload_swaps_routes_without_losing_inflight_request() {
+        let _env_guard = REQUEST_DELAY_LOCK.lock().expect("request delay lock");
+        reset_active_event_log();
+        harn_vm::clear_trigger_registry();
+
+        let dir = tempdir().expect("tempdir");
+        let log = install_default_for_base_dir(dir.path()).expect("install event log");
+        harn_vm::install_manifest_triggers(vec![manifest_binding_spec(
+            "incoming-review-task",
+            "v1",
+        )])
+        .await
+        .expect("install v1 binding");
+
+        std::env::set_var(REQUEST_DELAY_ENV, "200");
+        let listener = ListenerRuntime::start(ListenerConfig {
+            bind: "127.0.0.1:0".parse().expect("bind addr"),
+            tls: None,
+            event_log: log.clone(),
+            secrets: Arc::new(harn_vm::secrets::EnvSecretProvider::new(
+                "harn/listener-test",
+            )),
+            allowed_origins: OriginAllowList::wildcard(),
+            max_body_bytes: DEFAULT_MAX_BODY_BYTES,
+            routes: vec![route("/a2a/v1", 1)],
+        })
+        .await
+        .expect("start listener");
+
+        let client = reqwest::Client::new();
+        let first_url = format!("http://{}/a2a/v1", listener.local_addr());
+        let second_url = format!("http://{}/a2a/v2", listener.local_addr());
+
+        let first_request = {
+            let client = client.clone();
+            tokio::spawn(async move {
+                client
+                    .post(first_url)
+                    .json(&json!({"task_id": "task-1", "sender": "alpha"}))
+                    .send()
+                    .await
+                    .expect("first request")
+                    .status()
+            })
+        };
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        harn_vm::install_manifest_triggers(vec![manifest_binding_spec(
+            "incoming-review-task",
+            "v2",
+        )])
+        .await
+        .expect("install v2 binding");
+        listener
+            .reload_routes(vec![route("/a2a/v2", 2)])
+            .expect("reload listener routes");
+
+        assert_eq!(
+            first_request.await.expect("join first request"),
+            StatusCode::OK
+        );
+        assert_eq!(
+            client
+                .post(&second_url)
+                .json(&json!({"task_id": "task-2", "sender": "beta"}))
+                .send()
+                .await
+                .expect("second request")
+                .status(),
+            StatusCode::OK
+        );
+        assert_eq!(
+            client
+                .post(format!("http://{}/a2a/v1", listener.local_addr()))
+                .json(&json!({"task_id": "task-old", "sender": "gamma"}))
+                .send()
+                .await
+                .expect("old route request")
+                .status(),
+            StatusCode::NOT_FOUND
+        );
+
+        let pending_topic = Topic::new(PENDING_TOPIC).expect("pending topic");
+        let events = log
+            .read_range(&pending_topic, None, 16)
+            .await
+            .expect("read pending events");
+        let versions: Vec<u64> = events
+            .iter()
+            .filter_map(|(_, event)| {
+                event
+                    .payload
+                    .get("binding_version")
+                    .and_then(JsonValue::as_u64)
+            })
+            .collect();
+        let task_ids: Vec<String> = events
+            .iter()
+            .filter_map(|(_, event)| {
+                event
+                    .payload
+                    .get("event")
+                    .and_then(|value| value.get("provider_payload"))
+                    .and_then(|value| value.get("task_id"))
+                    .and_then(JsonValue::as_str)
+                    .map(|value| value.to_string())
+            })
+            .collect();
+        assert_eq!(versions, vec![1, 2]);
+        assert_eq!(task_ids, vec!["task-1".to_string(), "task-2".to_string()]);
+
+        listener.shutdown().await.expect("shutdown listener");
+        std::env::remove_var(REQUEST_DELAY_ENV);
+        reset_active_event_log();
+        harn_vm::clear_trigger_registry();
     }
 }
