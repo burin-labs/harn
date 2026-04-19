@@ -805,6 +805,7 @@ provider = "github"
 match = { events = ["issues.opened"] }
 handler = "handlers::on_new_issue"
 budget = { daily_cost_usd = 5.0, max_concurrent = 10 }
+secrets = { signing_secret = "github/webhook-secret" }
 "#,
         )
         .expect("write manifest");

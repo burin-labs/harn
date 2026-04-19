@@ -88,6 +88,56 @@ type ExtensionProviderPayload = {
 
 type ProviderPayload = GitHubEventPayload | SlackEventPayload | LinearEventPayload | NotionEventPayload | CronEventPayload | GenericWebhookPayload | A2aPushPayload | ExtensionProviderPayload
 
+type ProviderSecretRequirement = {
+  name: string,
+  required: bool,
+  namespace: string,
+}
+
+type ProviderOutboundMethod = {
+  name: string,
+}
+
+type ProviderSignatureVerificationNone = {
+  kind: "none",
+}
+
+type ProviderSignatureVerificationHmac = {
+  kind: "hmac",
+  variant: string,
+  raw_body: bool,
+  signature_header: string,
+  timestamp_header: string | nil,
+  id_header: string | nil,
+  default_tolerance_secs: int | nil,
+  digest: string,
+  encoding: string,
+}
+
+type ProviderSignatureVerification = ProviderSignatureVerificationNone | ProviderSignatureVerificationHmac
+
+type ProviderRuntimeBuiltin = {
+  kind: "builtin",
+  connector: string,
+  default_signature_variant: string | nil,
+}
+
+type ProviderRuntimePlaceholder = {
+  kind: "placeholder",
+}
+
+type ProviderRuntime = ProviderRuntimeBuiltin | ProviderRuntimePlaceholder
+
+type ProviderCatalogEntry = {
+  provider: string,
+  kinds: list<string>,
+  schema_name: string,
+  outbound_methods: list<ProviderOutboundMethod>,
+  secret_requirements: list<ProviderSecretRequirement>,
+  signature_verification: ProviderSignatureVerification,
+  runtime: ProviderRuntime,
+}
+
 type TriggerEvent = {
   id: string,
   provider: ProviderId,
@@ -195,4 +245,9 @@ type DlqEntry = {
   error: string,
   event: TriggerEvent,
   retry_history: list<DlqAttempt>,
+}
+
+/** list_providers. */
+pub fn list_providers() -> list<ProviderCatalogEntry> {
+  return list_providers_native()
 }

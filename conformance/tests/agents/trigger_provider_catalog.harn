@@ -1,0 +1,77 @@
+import "std/triggers"
+
+pipeline test(task) {
+  let providers: list<ProviderCatalogEntry> = list_providers()
+  let builtin = providers.filter({ provider -> provider.runtime.kind == "builtin" })
+  assert(len(builtin) == 3, "expected exactly three builtin trigger providers")
+  let cron = builtin.find({ provider -> provider.provider == "cron" })
+  assert(cron?.schema_name == "CronEventPayload", "cron schema should be cataloged")
+  assert(cron?.runtime?.connector == "cron", "cron should use the cron connector")
+  assert(
+    cron?.signature_verification?.kind == "none",
+    "cron should not require signature verification",
+  )
+  assert(len(cron?.secret_requirements ?? []) == 0, "cron should not require secrets")
+  assert(len(cron?.outbound_methods ?? []) == 0, "cron should not publish outbound methods yet")
+  let webhook = builtin.find({ provider -> provider.provider == "webhook" })
+  assert(webhook?.schema_name == "GenericWebhookPayload", "webhook schema should be cataloged")
+  assert(webhook?.runtime?.connector == "webhook", "webhook should use the webhook connector")
+  assert(
+    webhook?.runtime?.default_signature_variant == "standard",
+    "webhook should default to standard signatures",
+  )
+  assert(
+    webhook?.signature_verification?.kind == "hmac",
+    "webhook should publish HMAC verification metadata",
+  )
+  assert(
+    webhook?.signature_verification?.variant == "standard",
+    "webhook should publish the standard variant",
+  )
+  assert(
+    webhook?.signature_verification?.signature_header == "webhook-signature",
+    "webhook should expose the signature header",
+  )
+  assert(
+    webhook?.signature_verification?.timestamp_header == "webhook-timestamp",
+    "webhook should expose the timestamp header",
+  )
+  let webhook_secrets = webhook?.secret_requirements ?? []
+  assert(len(webhook_secrets) == 1, "webhook should require one secret")
+  let webhook_secret = webhook_secrets[0]
+  assert(webhook_secret.name == "signing_secret", "webhook should require signing_secret")
+  assert(webhook_secret.namespace == "webhook", "webhook secrets should stay namespaced to webhook")
+  let github = builtin.find({ provider -> provider.provider == "github" })
+  assert(github?.schema_name == "GitHubEventPayload", "github schema should be cataloged")
+  assert(
+    github?.runtime?.connector == "webhook",
+    "github should currently reuse the webhook connector transport",
+  )
+  assert(
+    github?.runtime?.default_signature_variant == "github",
+    "github should default to GitHub signatures",
+  )
+  assert(
+    github?.signature_verification?.kind == "hmac",
+    "github should publish HMAC verification metadata",
+  )
+  assert(
+    github?.signature_verification?.variant == "github",
+    "github should publish the github signature variant",
+  )
+  assert(
+    github?.signature_verification?.signature_header == "X-Hub-Signature-256",
+    "github should expose the signature header",
+  )
+  assert(
+    github?.signature_verification?.id_header == "X-GitHub-Delivery",
+    "github should expose the delivery header",
+  )
+  let github_secrets = github?.secret_requirements ?? []
+  assert(len(github_secrets) == 1, "github should require one secret")
+  let github_secret = github_secrets[0]
+  assert(github_secret.name == "signing_secret", "github should require signing_secret")
+  assert(github_secret.namespace == "github", "github secrets should stay namespaced to github")
+  assert(len(github?.outbound_methods ?? []) == 0, "github should not publish outbound methods yet")
+  log("trigger_provider_catalog tests passed")
+}

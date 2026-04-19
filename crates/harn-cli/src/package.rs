@@ -846,12 +846,34 @@ fn validate_static_trigger_config(trigger: &ResolvedTriggerConfig) -> Result<(),
     if trigger.id.trim().is_empty() {
         return Err(trigger_error(trigger, "id cannot be empty"));
     }
-    let provider_schemas = harn_vm::registered_provider_schema_names();
-    if !provider_schemas.contains_key(trigger.provider.as_str()) {
+    let Some(provider_metadata) = harn_vm::provider_metadata(trigger.provider.as_str()) else {
         return Err(trigger_error(
             trigger,
             format!("provider '{}' is not registered", trigger.provider.as_str()),
         ));
+    };
+    let kind_name = trigger_kind_label(trigger.kind);
+    if !provider_metadata.supports_kind(kind_name) {
+        return Err(trigger_error(
+            trigger,
+            format!(
+                "provider '{}' does not support trigger kind '{}'",
+                trigger.provider.as_str(),
+                kind_name
+            ),
+        ));
+    }
+    for secret_name in provider_metadata.required_secret_names() {
+        if !trigger.secrets.contains_key(secret_name) {
+            return Err(trigger_error(
+                trigger,
+                format!(
+                    "provider '{}' requires secret '{}'",
+                    trigger.provider.as_str(),
+                    secret_name
+                ),
+            ));
+        }
     }
     if let Some(dedupe_key) = &trigger.dedupe_key {
         parse_jmespath_expression(trigger, "dedupe_key", dedupe_key)?;
@@ -2391,6 +2413,7 @@ kind = "webhook"
 provider = "github"
 match = { events = ["issues.opened"] }
 handler = "worker://queue-a"
+secrets = { signing_secret = "github/webhook-secret" }
 
 [[triggers]]
 id = "duplicate"
@@ -2398,6 +2421,7 @@ kind = "webhook"
 provider = "github"
 match = { events = ["issues.edited"] }
 handler = "worker://queue-b"
+secrets = { signing_secret = "github/webhook-secret" }
 "#,
             None,
         );
@@ -2431,6 +2455,53 @@ handler = "worker://queue"
     }
 
     #[tokio::test(flavor = "current_thread")]
+    async fn collect_manifest_triggers_rejects_unsupported_provider_kind() {
+        let tmp = tempfile::tempdir().unwrap();
+        let harn_file = write_trigger_project(
+            tmp.path(),
+            r#"
+[[triggers]]
+id = "bad-kind"
+kind = "cron"
+provider = "github"
+match = { events = ["cron.tick"] }
+handler = "worker://queue"
+schedule = "0 9 * * *"
+timezone = "UTC"
+secrets = { signing_secret = "github/webhook-secret" }
+"#,
+            None,
+        );
+        let mut vm = test_vm();
+        let error = collect_manifest_triggers(&mut vm, &load_runtime_extensions(&harn_file))
+            .await
+            .unwrap_err();
+        assert!(error.contains("does not support trigger kind 'cron'"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn collect_manifest_triggers_rejects_missing_required_provider_secret() {
+        let tmp = tempfile::tempdir().unwrap();
+        let harn_file = write_trigger_project(
+            tmp.path(),
+            r#"
+[[triggers]]
+id = "missing-secret"
+kind = "webhook"
+provider = "github"
+match = { events = ["issues.opened"] }
+handler = "worker://queue"
+"#,
+            None,
+        );
+        let mut vm = test_vm();
+        let error = collect_manifest_triggers(&mut vm, &load_runtime_extensions(&harn_file))
+            .await
+            .unwrap_err();
+        assert!(error.contains("requires secret 'signing_secret'"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
     async fn collect_manifest_triggers_rejects_unresolved_handler() {
         let tmp = tempfile::tempdir().unwrap();
         let harn_file = write_trigger_project(
@@ -2448,6 +2519,7 @@ kind = "webhook"
 provider = "github"
 match = { events = ["issues.opened"] }
 handler = "handlers::missing"
+secrets = { signing_secret = "github/webhook-secret" }
 "#,
             Some(
                 r#"
@@ -2527,6 +2599,7 @@ provider = "github"
 match = { events = ["issues.opened"] }
 handler = "worker://queue"
 dedupe_key = "["
+secrets = { signing_secret = "github/webhook-secret" }
 "#,
             None,
         );
@@ -2579,6 +2652,7 @@ provider = "github"
 match = { events = ["issues.opened"] }
 when = "handlers::should_handle"
 handler = "worker://queue"
+secrets = { signing_secret = "github/webhook-secret" }
 "#,
             Some(
                 r#"
