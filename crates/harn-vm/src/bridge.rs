@@ -90,6 +90,10 @@ impl InProcessHost {
                     .collect::<Vec<_>>();
                 self.invoke_export(name, &args).await
             }
+            "host/tools/list" => self
+                .invoke_optional_export("host_tools_list", &[])
+                .await
+                .map(|value| value.unwrap_or_else(|| serde_json::json!({ "tools": [] }))),
             "session/request_permission" => self.request_permission(params).await,
             other => Err(VmError::Runtime(format!(
                 "playground host backend does not implement bridge method '{other}'"
@@ -112,6 +116,17 @@ impl InProcessHost {
         let mut vm = self.vm.child_vm_for_host();
         let result = vm.call_closure_pub(closure, args, &[]).await?;
         Ok(crate::llm::vm_value_to_json(&result))
+    }
+
+    async fn invoke_optional_export(
+        &self,
+        name: &str,
+        args: &[VmValue],
+    ) -> Result<Option<serde_json::Value>, VmError> {
+        if !self.exported_functions.contains_key(name) {
+            return Ok(None);
+        }
+        self.invoke_export(name, args).await.map(Some)
     }
 
     async fn request_permission(
@@ -559,6 +574,16 @@ impl HostBridge {
         }
     }
 
+    /// Call the host's `host/tools/list` RPC and return normalized tool
+    /// descriptors. Shape:
+    /// `[{ "name": "...", "description": "...", "schema": {...}, "deprecated": false }, ...]`.
+    /// The bridge also accepts `{ "tools": [...] }` and
+    /// `{ "result": { "tools": [...] } }` wrappers for lenient hosts.
+    pub async fn list_host_tools(&self) -> Result<Vec<serde_json::Value>, VmError> {
+        let result = self.call("host/tools/list", serde_json::json!({})).await?;
+        parse_host_tools_list_response(result)
+    }
+
     /// Call the host's `skills/fetch` RPC for one skill id. Returns the
     /// raw JSON body so the CLI can inspect both the frontmatter fields
     /// and the skill markdown body in whatever shape the host sends.
@@ -830,6 +855,70 @@ pub fn json_result_to_vm_value(val: &serde_json::Value) -> VmValue {
     crate::stdlib::json_to_vm_value(val)
 }
 
+fn parse_host_tools_list_response(
+    result: serde_json::Value,
+) -> Result<Vec<serde_json::Value>, VmError> {
+    let tools = match result {
+        serde_json::Value::Array(items) => items,
+        serde_json::Value::Object(map) => match map.get("tools").cloned().or_else(|| {
+            map.get("result")
+                .and_then(|value| value.get("tools"))
+                .cloned()
+        }) {
+            Some(serde_json::Value::Array(items)) => items,
+            _ => {
+                return Err(VmError::Runtime(
+                    "host/tools/list: host response must be an array or { tools: [...] }".into(),
+                ));
+            }
+        },
+        _ => {
+            return Err(VmError::Runtime(
+                "host/tools/list: unexpected response shape".into(),
+            ));
+        }
+    };
+
+    let mut normalized = Vec::with_capacity(tools.len());
+    for tool in tools {
+        let serde_json::Value::Object(map) = tool else {
+            return Err(VmError::Runtime(
+                "host/tools/list: every tool must be an object".into(),
+            ));
+        };
+        let Some(name) = map.get("name").and_then(|value| value.as_str()) else {
+            return Err(VmError::Runtime(
+                "host/tools/list: every tool must include a string `name`".into(),
+            ));
+        };
+        let description = map
+            .get("description")
+            .and_then(|value| value.as_str())
+            .or_else(|| {
+                map.get("short_description")
+                    .and_then(|value| value.as_str())
+            })
+            .unwrap_or_default();
+        let schema = map
+            .get("schema")
+            .cloned()
+            .or_else(|| map.get("parameters").cloned())
+            .or_else(|| map.get("input_schema").cloned())
+            .unwrap_or(serde_json::Value::Null);
+        let deprecated = map
+            .get("deprecated")
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false);
+        normalized.push(serde_json::json!({
+            "name": name,
+            "description": description,
+            "schema": schema,
+            "deprecated": deprecated,
+        }));
+    }
+    Ok(normalized)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -965,6 +1054,58 @@ mod tests {
             unreachable!("Expected List for tool_calls");
         };
         assert_eq!(list.len(), 1);
+    }
+
+    #[test]
+    fn parse_host_tools_list_accepts_object_wrapper() {
+        let tools = parse_host_tools_list_response(serde_json::json!({
+            "tools": [
+                {
+                    "name": "Read",
+                    "description": "Read a file",
+                    "schema": {"type": "object"},
+                }
+            ]
+        }))
+        .expect("tool list");
+
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0]["name"], "Read");
+        assert_eq!(tools[0]["deprecated"], false);
+    }
+
+    #[test]
+    fn parse_host_tools_list_accepts_compat_fields() {
+        let tools = parse_host_tools_list_response(serde_json::json!({
+            "result": {
+                "tools": [
+                    {
+                        "name": "Edit",
+                        "short_description": "Apply an edit",
+                        "input_schema": {"type": "object"},
+                        "deprecated": true,
+                    }
+                ]
+            }
+        }))
+        .expect("tool list");
+
+        assert_eq!(tools[0]["description"], "Apply an edit");
+        assert_eq!(tools[0]["schema"]["type"], "object");
+        assert_eq!(tools[0]["deprecated"], true);
+    }
+
+    #[test]
+    fn parse_host_tools_list_requires_tool_names() {
+        let err = parse_host_tools_list_response(serde_json::json!({
+            "tools": [
+                {"description": "missing name"}
+            ]
+        }))
+        .expect_err("expected error");
+        assert!(err
+            .to_string()
+            .contains("host/tools/list: every tool must include a string `name`"));
     }
 
     #[test]

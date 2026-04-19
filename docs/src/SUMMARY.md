@@ -46,6 +46,7 @@
 - [Playground](./playground.md)
 - [Host boundary](./host-boundary.md)
 - [Bridge protocol](./bridge-protocol.md)
+- [Host tools over the bridge](./bridge/host-tools.md)
 - [MCP and ACP integration](./mcp-and-acp.md)
 - [Harn portal](./portal.md)
 - [Orchestrator](./orchestrator.md)

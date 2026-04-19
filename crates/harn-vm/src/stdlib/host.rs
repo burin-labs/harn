@@ -3,7 +3,10 @@ use std::collections::BTreeMap;
 use std::process::Stdio;
 use std::rc::Rc;
 
+use serde_json::Value as JsonValue;
+
 use crate::value::{values_equal, VmError, VmValue};
+use crate::vm::clone_async_builtin_child_vm;
 use crate::vm::Vm;
 
 #[derive(Clone)]
@@ -316,6 +319,14 @@ pub trait HostCallBridge {
         operation: &str,
         params: &BTreeMap<String, VmValue>,
     ) -> Result<Option<VmValue>, VmError>;
+
+    fn list_tools(&self) -> Result<Option<VmValue>, VmError> {
+        Ok(None)
+    }
+
+    fn call_tool(&self, _name: &str, _args: &VmValue) -> Result<Option<VmValue>, VmError> {
+        Ok(None)
+    }
 }
 
 thread_local! {
@@ -333,6 +344,57 @@ pub fn set_host_call_bridge(bridge: Rc<dyn HostCallBridge>) {
 /// Remove the current thread's bridge. Idempotent.
 pub fn clear_host_call_bridge() {
     HOST_CALL_BRIDGE.with(|b| *b.borrow_mut() = None);
+}
+
+fn empty_tool_list_value() -> VmValue {
+    VmValue::List(Rc::new(Vec::new()))
+}
+
+fn current_vm_host_bridge() -> Option<Rc<crate::bridge::HostBridge>> {
+    clone_async_builtin_child_vm().and_then(|vm| vm.bridge.clone())
+}
+
+async fn dispatch_host_tool_list() -> Result<VmValue, VmError> {
+    let bridge = HOST_CALL_BRIDGE.with(|b| b.borrow().clone());
+    if let Some(bridge) = bridge {
+        if let Some(value) = bridge.list_tools()? {
+            return Ok(value);
+        }
+    }
+
+    let Some(bridge) = current_vm_host_bridge() else {
+        return Ok(empty_tool_list_value());
+    };
+    let tools = bridge.list_host_tools().await?;
+    Ok(crate::bridge::json_result_to_vm_value(&JsonValue::Array(
+        tools.into_iter().collect(),
+    )))
+}
+
+async fn dispatch_host_tool_call(name: &str, args: &VmValue) -> Result<VmValue, VmError> {
+    let bridge = HOST_CALL_BRIDGE.with(|b| b.borrow().clone());
+    if let Some(bridge) = bridge {
+        if let Some(value) = bridge.call_tool(name, args)? {
+            return Ok(value);
+        }
+    }
+
+    let Some(bridge) = current_vm_host_bridge() else {
+        return Err(VmError::Thrown(VmValue::String(Rc::from(
+            "host_tool_call: no host bridge is attached",
+        ))));
+    };
+
+    let result = bridge
+        .call(
+            "builtin_call",
+            serde_json::json!({
+                "name": name,
+                "args": [crate::llm::vm_value_to_json(args)],
+            }),
+        )
+        .await?;
+    Ok(crate::bridge::json_result_to_vm_value(&result))
 }
 
 async fn dispatch_host_operation(
@@ -502,12 +564,29 @@ pub(crate) fn register_host_builtins(vm: &mut Vm) {
         };
         dispatch_host_operation(capability, operation, &params).await
     });
+
+    vm.register_async_builtin("host_tool_list", |_args| async move {
+        dispatch_host_tool_list().await
+    });
+
+    vm.register_async_builtin("host_tool_call", |args| async move {
+        let name = args.first().map(|a| a.display()).unwrap_or_default();
+        if name.is_empty() {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(
+                "host_tool_call: tool name is required",
+            ))));
+        }
+        let call_args = args.get(1).cloned().unwrap_or(VmValue::Nil);
+        dispatch_host_tool_call(&name, &call_args).await
+    });
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        capability_manifest_with_mocks, mock_host_call, push_host_mock, reset_host_state, HostMock,
+        capability_manifest_with_mocks, clear_host_call_bridge, dispatch_host_tool_call,
+        dispatch_host_tool_list, mock_host_call, push_host_mock, reset_host_state,
+        set_host_call_bridge, HostCallBridge, HostMock,
     };
     use std::collections::BTreeMap;
     use std::rc::Rc;
@@ -611,5 +690,114 @@ mod tests {
             other => panic!("unexpected result: {other:?}"),
         }
         reset_host_state();
+    }
+
+    #[derive(Default)]
+    struct TestHostToolBridge;
+
+    impl HostCallBridge for TestHostToolBridge {
+        fn dispatch(
+            &self,
+            _capability: &str,
+            _operation: &str,
+            _params: &BTreeMap<String, VmValue>,
+        ) -> Result<Option<VmValue>, VmError> {
+            Ok(None)
+        }
+
+        fn list_tools(&self) -> Result<Option<VmValue>, VmError> {
+            let tool = VmValue::Dict(Rc::new(BTreeMap::from([
+                (
+                    "name".to_string(),
+                    VmValue::String(Rc::from("Read".to_string())),
+                ),
+                (
+                    "description".to_string(),
+                    VmValue::String(Rc::from("Read a file from the host".to_string())),
+                ),
+                (
+                    "schema".to_string(),
+                    VmValue::Dict(Rc::new(BTreeMap::from([(
+                        "type".to_string(),
+                        VmValue::String(Rc::from("object".to_string())),
+                    )]))),
+                ),
+                ("deprecated".to_string(), VmValue::Bool(false)),
+            ])));
+            Ok(Some(VmValue::List(Rc::new(vec![tool]))))
+        }
+
+        fn call_tool(&self, name: &str, args: &VmValue) -> Result<Option<VmValue>, VmError> {
+            if name != "Read" {
+                return Ok(None);
+            }
+            let path = args
+                .as_dict()
+                .and_then(|dict| dict.get("path"))
+                .map(|value| value.display())
+                .unwrap_or_default();
+            Ok(Some(VmValue::String(Rc::from(format!("read:{path}")))))
+        }
+    }
+
+    fn run_host_async_test<F, Fut>(test: F)
+    where
+        F: FnOnce() -> Fut,
+        Fut: std::future::Future<Output = ()>,
+    {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        rt.block_on(async {
+            let local = tokio::task::LocalSet::new();
+            local.run_until(test()).await;
+        });
+    }
+
+    #[test]
+    fn host_tool_list_uses_installed_host_call_bridge() {
+        run_host_async_test(|| async {
+            reset_host_state();
+            set_host_call_bridge(Rc::new(TestHostToolBridge));
+            let tools = dispatch_host_tool_list().await.expect("tool list");
+            clear_host_call_bridge();
+
+            let VmValue::List(items) = tools else {
+                panic!("expected tool list");
+            };
+            assert_eq!(items.len(), 1);
+            let tool = items[0].as_dict().expect("tool dict");
+            assert_eq!(tool.get("name").unwrap().display(), "Read");
+            assert_eq!(tool.get("deprecated").unwrap().display(), "false");
+        });
+    }
+
+    #[test]
+    fn host_tool_call_uses_installed_host_call_bridge() {
+        run_host_async_test(|| async {
+            set_host_call_bridge(Rc::new(TestHostToolBridge));
+            let args = VmValue::Dict(Rc::new(BTreeMap::from([(
+                "path".to_string(),
+                VmValue::String(Rc::from("README.md".to_string())),
+            )])));
+            let value = dispatch_host_tool_call("Read", &args)
+                .await
+                .expect("tool call");
+            clear_host_call_bridge();
+            assert_eq!(value.display(), "read:README.md");
+        });
+    }
+
+    #[test]
+    fn host_tool_list_is_empty_without_bridge() {
+        run_host_async_test(|| async {
+            clear_host_call_bridge();
+            let tools = dispatch_host_tool_list().await.expect("tool list");
+            let VmValue::List(items) = tools else {
+                panic!("expected tool list");
+            };
+            assert!(items.is_empty());
+        });
     }
 }

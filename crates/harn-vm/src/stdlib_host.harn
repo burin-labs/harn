@@ -1,0 +1,19 @@
+/** host_tools. */
+pub fn host_tools() {
+  return host_tool_list()
+}
+
+/** host_tool_lookup. */
+pub fn host_tool_lookup(name: string) {
+  for tool in host_tool_list() {
+    if tool?.name == name {
+      return tool
+    }
+  }
+  return nil
+}
+
+/** host_tool_available. */
+pub fn host_tool_available(name: string) -> bool {
+  return host_tool_lookup(name) != nil
+}
