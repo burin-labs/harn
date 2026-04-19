@@ -1,3 +1,5 @@
+use std::error::Error as _;
+
 use reqwest::Url;
 use serde_json::Value;
 use tokio::sync::broadcast;
@@ -48,6 +50,13 @@ impl std::fmt::Display for A2aClientError {
 }
 
 impl std::error::Error for A2aClientError {}
+
+#[derive(Debug)]
+enum AgentCardFetchError {
+    Cancelled(String),
+    Discovery(String),
+    ConnectRefused(String),
+}
 
 pub async fn dispatch_trigger_event(
     raw_target: &str,
@@ -194,14 +203,28 @@ async fn resolve_endpoint(
     cancel_rx: &mut broadcast::Receiver<()>,
 ) -> Result<ResolvedA2aEndpoint, A2aClientError> {
     let mut last_error = None;
-    for scheme in ["http", "https"] {
+    for scheme in card_resolution_schemes() {
         let card_url = format!("{scheme}://{}/{A2A_AGENT_CARD_PATH}", target.authority);
         match fetch_agent_card(&card_url, cancel_rx).await {
-            Ok(card) => return endpoint_from_card(card_url, target.target_agent.clone(), &card),
-            Err(A2aClientError::Cancelled(message)) => {
+            Ok(card) => {
+                return endpoint_from_card(
+                    card_url,
+                    &target.authority,
+                    target.target_agent.clone(),
+                    &card,
+                );
+            }
+            Err(AgentCardFetchError::Cancelled(message)) => {
                 return Err(A2aClientError::Cancelled(message));
             }
-            Err(error) => last_error = Some(error.to_string()),
+            Err(error) => {
+                let message = agent_card_fetch_error_message(&error);
+                last_error = Some(message);
+                if should_try_cleartext_fallback(scheme, &error) {
+                    continue;
+                }
+                break;
+            }
         }
     }
     Err(A2aClientError::Discovery(format!(
@@ -214,15 +237,25 @@ async fn resolve_endpoint(
 async fn fetch_agent_card(
     card_url: &str,
     cancel_rx: &mut broadcast::Receiver<()>,
-) -> Result<Value, A2aClientError> {
-    let response = send_http(
-        crate::llm::shared_utility_client().get(card_url),
-        cancel_rx,
-        "A2A agent-card fetch cancelled",
-    )
-    .await?;
+) -> Result<Value, AgentCardFetchError> {
+    let response = tokio::select! {
+        response = crate::llm::shared_utility_client().get(card_url).send() => {
+            match response {
+                Ok(response) => Ok(response),
+                Err(error) if is_connect_refused(&error) => Err(AgentCardFetchError::ConnectRefused(
+                    format!("A2A HTTP request failed: {error}")
+                )),
+                Err(error) => Err(AgentCardFetchError::Discovery(
+                    format!("A2A HTTP request failed: {error}")
+                )),
+            }
+        }
+        _ = recv_cancel(cancel_rx) => Err(AgentCardFetchError::Cancelled(
+            "A2A agent-card fetch cancelled".to_string()
+        )),
+    }?;
     if !response.status().is_success() {
-        return Err(A2aClientError::Discovery(format!(
+        return Err(AgentCardFetchError::Discovery(format!(
             "GET {card_url} returned HTTP {}",
             response.status()
         )));
@@ -230,11 +263,12 @@ async fn fetch_agent_card(
     response
         .json::<Value>()
         .await
-        .map_err(|error| A2aClientError::Discovery(format!("parse {card_url}: {error}")))
+        .map_err(|error| AgentCardFetchError::Discovery(format!("parse {card_url}: {error}")))
 }
 
 fn endpoint_from_card(
     card_url: String,
+    requested_authority: &str,
     target_agent: String,
     card: &Value,
 ) -> Result<ResolvedA2aEndpoint, A2aClientError> {
@@ -245,6 +279,12 @@ fn endpoint_from_card(
     let base_url = Url::parse(base_url).map_err(|error| {
         A2aClientError::Discovery(format!("invalid A2A card url '{base_url}': {error}"))
     })?;
+    let card_authority = url_authority(&base_url)?;
+    if card_authority != requested_authority {
+        return Err(A2aClientError::Discovery(format!(
+            "A2A agent card url authority mismatch: requested '{requested_authority}', card returned '{card_authority}'"
+        )));
+    }
     let interfaces = card
         .get("interfaces")
         .and_then(Value::as_array)
@@ -277,6 +317,54 @@ fn endpoint_from_card(
         rpc_url: rpc_url.to_string(),
         agent_id: card.get("id").and_then(Value::as_str).map(str::to_string),
         target_agent,
+    })
+}
+
+fn card_resolution_schemes() -> [&'static str; 2] {
+    [
+        "https",
+        // Cleartext fallback exists for dev-mode only; production should use TLS.
+        // TODO(harn#250): Require an explicit opt-in gate before trying cleartext A2A discovery.
+        "http",
+    ]
+}
+
+fn should_try_cleartext_fallback(scheme: &str, error: &AgentCardFetchError) -> bool {
+    scheme == "https" && matches!(error, AgentCardFetchError::ConnectRefused(_))
+}
+
+fn agent_card_fetch_error_message(error: &AgentCardFetchError) -> String {
+    match error {
+        AgentCardFetchError::Cancelled(message)
+        | AgentCardFetchError::Discovery(message)
+        | AgentCardFetchError::ConnectRefused(message) => message.clone(),
+    }
+}
+
+fn is_connect_refused(error: &reqwest::Error) -> bool {
+    if !error.is_connect() {
+        return false;
+    }
+    let mut source = error.source();
+    while let Some(cause) = source {
+        if let Some(io_error) = cause.downcast_ref::<std::io::Error>() {
+            if io_error.kind() == std::io::ErrorKind::ConnectionRefused {
+                return true;
+            }
+        }
+        source = cause.source();
+    }
+    false
+}
+
+fn url_authority(url: &Url) -> Result<String, A2aClientError> {
+    let host = url
+        .host_str()
+        .ok_or_else(|| A2aClientError::Discovery(format!("A2A card url '{url}' missing host")))?;
+    Ok(if let Some(port) = url.port() {
+        format!("{host}:{port}")
+    } else {
+        host.to_string()
     })
 }
 
@@ -385,6 +473,45 @@ mod tests {
         assert_eq!(
             extract_inline_result(&task),
             serde_json::json!({"trace_id": "trace_123"})
+        );
+    }
+
+    #[test]
+    fn discovery_prefers_https_before_http() {
+        assert_eq!(card_resolution_schemes(), ["https", "http"]);
+    }
+
+    #[test]
+    fn cleartext_fallback_only_after_https_connect_refused() {
+        assert!(should_try_cleartext_fallback(
+            "https",
+            &AgentCardFetchError::ConnectRefused("connect refused".to_string())
+        ));
+        assert!(!should_try_cleartext_fallback(
+            "http",
+            &AgentCardFetchError::ConnectRefused("connect refused".to_string())
+        ));
+        assert!(!should_try_cleartext_fallback(
+            "https",
+            &AgentCardFetchError::Discovery("tls handshake failed".to_string())
+        ));
+    }
+
+    #[test]
+    fn endpoint_from_card_rejects_card_url_authority_mismatch() {
+        let error = endpoint_from_card(
+            "https://trusted.example/.well-known/a2a-agent".to_string(),
+            "trusted.example",
+            "triage".to_string(),
+            &serde_json::json!({
+                "url": "https://evil.example",
+                "interfaces": [{"protocol": "jsonrpc", "url": "/rpc"}],
+            }),
+        )
+        .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "A2A agent card url authority mismatch: requested 'trusted.example', card returned 'evil.example'"
         );
     }
 }

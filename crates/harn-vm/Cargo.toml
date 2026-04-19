@@ -48,4 +48,6 @@ opentelemetry-otlp = { version = "0.31", optional = true }
 zeroize = "1"
 
 [dev-dependencies]
+rcgen = "0.13"
+rustls = { version = "0.23", features = ["aws-lc-rs"] }
 tempfile = "3"

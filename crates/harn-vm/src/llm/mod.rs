@@ -34,11 +34,13 @@ use std::sync::OnceLock;
 pub(crate) fn shared_streaming_client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
     CLIENT.get_or_init(|| {
-        reqwest::Client::builder()
-            .connect_timeout(std::time::Duration::from_secs(30))
-            .pool_max_idle_per_host(4)
-            .build()
-            .unwrap_or_else(|_| reqwest::Client::new())
+        client_builder_for_tests(
+            reqwest::Client::builder()
+                .connect_timeout(std::time::Duration::from_secs(30))
+                .pool_max_idle_per_host(4),
+        )
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new())
     })
 }
 
@@ -46,12 +48,14 @@ pub(crate) fn shared_streaming_client() -> &'static reqwest::Client {
 pub(crate) fn shared_blocking_client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
     CLIENT.get_or_init(|| {
-        reqwest::Client::builder()
-            .connect_timeout(std::time::Duration::from_secs(30))
-            .timeout(std::time::Duration::from_secs(120))
-            .pool_max_idle_per_host(4)
-            .build()
-            .unwrap_or_else(|_| reqwest::Client::new())
+        client_builder_for_tests(
+            reqwest::Client::builder()
+                .connect_timeout(std::time::Duration::from_secs(30))
+                .timeout(std::time::Duration::from_secs(120))
+                .pool_max_idle_per_host(4),
+        )
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new())
     })
 }
 
@@ -60,13 +64,25 @@ pub(crate) fn shared_blocking_client() -> &'static reqwest::Client {
 pub(crate) fn shared_utility_client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
     CLIENT.get_or_init(|| {
-        reqwest::Client::builder()
-            .connect_timeout(std::time::Duration::from_secs(10))
-            .timeout(std::time::Duration::from_secs(15))
-            .pool_max_idle_per_host(2)
-            .build()
-            .unwrap_or_else(|_| reqwest::Client::new())
+        client_builder_for_tests(
+            reqwest::Client::builder()
+                .connect_timeout(std::time::Duration::from_secs(10))
+                .timeout(std::time::Duration::from_secs(15))
+                .pool_max_idle_per_host(2),
+        )
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new())
     })
+}
+
+#[cfg(test)]
+fn client_builder_for_tests(builder: reqwest::ClientBuilder) -> reqwest::ClientBuilder {
+    builder.danger_accept_invalid_certs(true)
+}
+
+#[cfg(not(test))]
+fn client_builder_for_tests(builder: reqwest::ClientBuilder) -> reqwest::ClientBuilder {
+    builder
 }
 
 pub use mock::{
