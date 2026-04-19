@@ -1,4 +1,4 @@
-use super::*;
+use crate::value::VmError;
 
 impl super::Vm {
     pub fn format_runtime_error(&self, error: &VmError) -> String {

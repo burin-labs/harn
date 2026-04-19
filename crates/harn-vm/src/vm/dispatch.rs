@@ -1,0 +1,204 @@
+use std::future::Future;
+use std::pin::Pin;
+use std::rc::Rc;
+
+use crate::chunk::CompiledFunction;
+use crate::value::{ErrorCategory, VmClosure, VmError, VmValue};
+
+use super::async_builtin::CURRENT_ASYNC_BUILTIN_CHILD_VM;
+use super::{ScopeSpan, Vm};
+
+impl Vm {
+    /// Register a sync builtin function.
+    pub fn register_builtin<F>(&mut self, name: &str, f: F)
+    where
+        F: Fn(&[VmValue], &mut String) -> Result<VmValue, VmError> + 'static,
+    {
+        self.builtins.insert(name.to_string(), Rc::new(f));
+    }
+
+    /// Remove a sync builtin (so an async version can take precedence).
+    pub fn unregister_builtin(&mut self, name: &str) {
+        self.builtins.remove(name);
+    }
+
+    /// Register an async builtin function.
+    pub fn register_async_builtin<F, Fut>(&mut self, name: &str, f: F)
+    where
+        F: Fn(Vec<VmValue>) -> Fut + 'static,
+        Fut: Future<Output = Result<VmValue, VmError>> + 'static,
+    {
+        self.async_builtins
+            .insert(name.to_string(), Rc::new(move |args| Box::pin(f(args))));
+    }
+
+    /// Call a closure (used by method calls like .map/.filter etc.)
+    /// Uses recursive execution for simplicity in method dispatch.
+    pub(crate) fn call_closure<'a>(
+        &'a mut self,
+        closure: &'a VmClosure,
+        args: &'a [VmValue],
+        _parent_functions: &'a [CompiledFunction],
+    ) -> Pin<Box<dyn Future<Output = Result<VmValue, VmError>> + 'a>> {
+        Box::pin(async move {
+            let saved_env = self.env.clone();
+            let saved_frames = std::mem::take(&mut self.frames);
+            let saved_handlers = std::mem::take(&mut self.exception_handlers);
+            let saved_iterators = std::mem::take(&mut self.iterators);
+            let saved_deadlines = std::mem::take(&mut self.deadlines);
+
+            let mut call_env = Self::closure_call_env(&saved_env, closure);
+            call_env.push_scope();
+
+            let default_start = closure
+                .func
+                .default_start
+                .unwrap_or(closure.func.params.len());
+            let param_count = closure.func.params.len();
+            for (i, param) in closure.func.params.iter().enumerate() {
+                if closure.func.has_rest_param && i == param_count - 1 {
+                    let rest_args = if i < args.len() {
+                        args[i..].to_vec()
+                    } else {
+                        Vec::new()
+                    };
+                    let _ =
+                        call_env.define(param, VmValue::List(std::rc::Rc::new(rest_args)), false);
+                } else if i < args.len() {
+                    let _ = call_env.define(param, args[i].clone(), false);
+                } else if i < default_start {
+                    let _ = call_env.define(param, VmValue::Nil, false);
+                }
+            }
+
+            self.env = call_env;
+            let argc = args.len();
+            let saved_source_dir = if let Some(ref dir) = closure.source_dir {
+                let prev = crate::stdlib::process::VM_SOURCE_DIR.with(|sd| sd.borrow().clone());
+                crate::stdlib::set_thread_source_dir(dir);
+                prev
+            } else {
+                None
+            };
+            let result = self
+                .run_chunk_entry(
+                    &closure.func.chunk,
+                    argc,
+                    saved_source_dir,
+                    closure.module_functions.clone(),
+                    closure.module_state.clone(),
+                )
+                .await;
+
+            self.env = saved_env;
+            self.frames = saved_frames;
+            self.exception_handlers = saved_handlers;
+            self.iterators = saved_iterators;
+            self.deadlines = saved_deadlines;
+
+            result
+        })
+    }
+
+    /// Invoke a value as a callable. Supports `VmValue::Closure` and
+    /// `VmValue::BuiltinRef`, so builtin names passed by reference (e.g.
+    /// `dict.rekey(snake_to_camel)`) dispatch through the same code path as
+    /// user-defined closures.
+    #[allow(clippy::manual_async_fn)]
+    pub(crate) fn call_callable_value<'a>(
+        &'a mut self,
+        callable: &'a VmValue,
+        args: &'a [VmValue],
+        functions: &'a [CompiledFunction],
+    ) -> Pin<Box<dyn Future<Output = Result<VmValue, VmError>> + 'a>> {
+        Box::pin(async move {
+            match callable {
+                VmValue::Closure(closure) => self.call_closure(closure, args, functions).await,
+                VmValue::BuiltinRef(name) => {
+                    let name_owned = name.to_string();
+                    self.call_named_builtin(&name_owned, args.to_vec()).await
+                }
+                other => Err(VmError::TypeError(format!(
+                    "expected callable, got {}",
+                    other.type_name()
+                ))),
+            }
+        })
+    }
+
+    /// Returns true if `v` is callable via `call_callable_value`.
+    pub(crate) fn is_callable_value(v: &VmValue) -> bool {
+        matches!(v, VmValue::Closure(_) | VmValue::BuiltinRef(_))
+    }
+
+    /// Public wrapper for `call_closure`, used by the MCP server to invoke
+    /// tool handler closures from outside the VM execution loop.
+    pub async fn call_closure_pub(
+        &mut self,
+        closure: &VmClosure,
+        args: &[VmValue],
+        functions: &[CompiledFunction],
+    ) -> Result<VmValue, VmError> {
+        self.call_closure(closure, args, functions).await
+    }
+
+    /// Resolve a named builtin: sync builtins → async builtins → bridge → error.
+    /// Used by Call, TailCall, and Pipe handlers to avoid duplicating this lookup.
+    pub(crate) async fn call_named_builtin(
+        &mut self,
+        name: &str,
+        args: Vec<VmValue>,
+    ) -> Result<VmValue, VmError> {
+        // Auto-trace LLM calls and tool calls.
+        let span_kind = match name {
+            "llm_call" | "llm_stream" | "agent_loop" => Some(crate::tracing::SpanKind::LlmCall),
+            "mcp_call" => Some(crate::tracing::SpanKind::ToolCall),
+            _ => None,
+        };
+        let _span = span_kind.map(|kind| ScopeSpan::new(kind, name.to_string()));
+
+        // Sandbox check: deny builtins blocked by --deny/--allow flags.
+        if self.denied_builtins.contains(name) {
+            return Err(VmError::CategorizedError {
+                message: format!("Tool '{}' is not permitted.", name),
+                category: ErrorCategory::ToolRejected,
+            });
+        }
+        crate::orchestration::enforce_current_policy_for_builtin(name, &args)?;
+        if let Some(builtin) = self.builtins.get(name).cloned() {
+            builtin(&args, &mut self.output)
+        } else if let Some(async_builtin) = self.async_builtins.get(name).cloned() {
+            CURRENT_ASYNC_BUILTIN_CHILD_VM.with(|slot| {
+                slot.borrow_mut().push(self.child_vm());
+            });
+            let result = async_builtin(args).await;
+            CURRENT_ASYNC_BUILTIN_CHILD_VM.with(|slot| {
+                slot.borrow_mut().pop();
+            });
+            result
+        } else if let Some(bridge) = &self.bridge {
+            crate::orchestration::enforce_current_policy_for_bridge_builtin(name)?;
+            let args_json: Vec<serde_json::Value> =
+                args.iter().map(crate::llm::vm_value_to_json).collect();
+            let result = bridge
+                .call(
+                    "builtin_call",
+                    serde_json::json!({"name": name, "args": args_json}),
+                )
+                .await?;
+            Ok(crate::bridge::json_result_to_vm_value(&result))
+        } else {
+            let all_builtins = self
+                .builtins
+                .keys()
+                .chain(self.async_builtins.keys())
+                .map(|s| s.as_str());
+            if let Some(suggestion) = crate::value::closest_match(name, all_builtins) {
+                return Err(VmError::Runtime(format!(
+                    "Undefined builtin: {name} (did you mean `{suggestion}`?)"
+                )));
+            }
+            Err(VmError::UndefinedBuiltin(name.to_string()))
+        }
+    }
+}

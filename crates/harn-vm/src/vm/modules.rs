@@ -7,7 +7,13 @@ use std::rc::Rc;
 
 use crate::value::{ModuleFunctionRegistry, VmClosure, VmEnv, VmError, VmValue};
 
-use super::{LoadedModule, ScopeSpan, Vm};
+use super::{ScopeSpan, Vm};
+
+#[derive(Clone)]
+pub(crate) struct LoadedModule {
+    pub(crate) functions: BTreeMap<String, Rc<VmClosure>>,
+    pub(crate) public_names: HashSet<String>,
+}
 
 impl Vm {
     fn export_loaded_module(
