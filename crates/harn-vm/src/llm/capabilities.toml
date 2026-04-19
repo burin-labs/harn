@@ -155,12 +155,176 @@ native_tools = true
 # Local providers don't advertise native tool_search or prompt caching.
 # Native-tools coverage depends on the specific model. Qwen 3 / 3.5
 # packages on Ollama expose native tool calling and thinking on the
-# official docs + model pages.
+# official docs + model pages. Qwen 3.6 adds `preserve_thinking` which
+# Alibaba recommends for multi-turn agentic / coding workflows (the
+# flagship use case we're building for) — keep it on by default.
+
+[[provider.ollama]]
+model_match = "qwen3.6*"
+native_tools = true
+thinking = true
+preserve_thinking = true
 
 [[provider.ollama]]
 model_match = "qwen3*"
 native_tools = true
 thinking = true
+
+# llama.cpp / llama-server speaks OpenAI-compat but is a separate surface
+# in Burin's providers.toml. Give it the same Qwen3.6 wiring so the local
+# GGUF path gets `preserve_thinking` by default too.
+[[provider.llamacpp]]
+model_match = "*qwen3.6*"
+native_tools = true
+thinking = true
+preserve_thinking = true
+
+[[provider.llamacpp]]
+model_match = "*qwen3*"
+native_tools = true
+thinking = true
+
+# Local vLLM / SGLang — same story. The capability rules here gate
+# chat_template_kwargs emission in openai_compat; the actual model has
+# to have been launched with the matching --chat-template.
+[[provider.local]]
+model_match = "*qwen3.6*"
+native_tools = true
+thinking = true
+preserve_thinking = true
+
+[[provider.local]]
+model_match = "*qwen3*"
+native_tools = true
+thinking = true
+
+# ---------- Qwen3.6 family (routed providers) --------------------------------
+#
+# DashScope is the authoritative Qwen host; Fireworks and OpenRouter
+# carry the closed Plus variant. They all speak OpenAI-compat + honour
+# the Qwen `chat_template_kwargs`, so the wiring is identical to local
+# vLLM. The sibling fallthrough to `[[provider.openai]]` would match the
+# gpt-* rules (which don't apply) so we declare Qwen explicitly here to
+# prevent a silent fallthrough to empty capabilities.
+
+[[provider.dashscope]]
+model_match = "qwen3.6*"
+native_tools = true
+thinking = true
+preserve_thinking = true
+
+[[provider.dashscope]]
+model_match = "qwen*"
+native_tools = true
+thinking = true
+
+[[provider.fireworks]]
+model_match = "*qwen3.6*"
+native_tools = true
+thinking = true
+preserve_thinking = true
+
+# Fireworks's own model IDs squash dots to `p` (`qwen3p6`, `qwen3p5`),
+# so we need a second rule to catch their canonical naming.
+[[provider.fireworks]]
+model_match = "*qwen3p6*"
+native_tools = true
+thinking = true
+preserve_thinking = true
+
+[[provider.fireworks]]
+model_match = "*qwen*"
+native_tools = true
+thinking = true
+
+# OpenRouter: forwards Qwen thinking via its `reasoning` field (not
+# chat_template_kwargs — transform_request strips that). Preservation
+# works transparently since thinking blocks round-trip as assistant
+# content; the reasoning enablement lives in `openrouter_reasoning_config`.
+[[provider.openrouter]]
+model_match = "qwen/qwen3.6*"
+native_tools = true
+thinking = true
+preserve_thinking = true
+
+[[provider.openrouter]]
+model_match = "qwen/*"
+native_tools = true
+thinking = true
+
+# HuggingFace router + Together pass Qwen chat_template_kwargs through
+# unchanged. Match the qwen3.6 model card shape (`Qwen/Qwen3.6-*`).
+[[provider.huggingface]]
+model_match = "qwen/qwen3.6*"
+native_tools = true
+thinking = true
+preserve_thinking = true
+
+[[provider.huggingface]]
+model_match = "qwen/*"
+native_tools = true
+thinking = true
+
+[[provider.together]]
+model_match = "qwen/qwen3.6*"
+native_tools = true
+thinking = true
+preserve_thinking = true
+
+[[provider.together]]
+model_match = "qwen/*"
+native_tools = true
+thinking = true
+
+# ---------- DeepSeek reasoning (across host providers) -----------------------
+#
+# DeepSeek V3.1+ exposes reasoning via `chat_template_kwargs.enable_thinking`
+# when routed through vLLM-style hosts (HuggingFace router, Together). On
+# OpenRouter it surfaces as the `reasoning` field like other models on
+# that platform. Prompt caching is DeepSeek-native (automatic, billed as
+# cache_read tokens) so declare it wherever the host forwards the usage.
+
+[[provider.together]]
+model_match = "deepseek-ai/deepseek-v3*"
+native_tools = true
+thinking = true
+prompt_caching = true
+
+[[provider.huggingface]]
+model_match = "deepseek-ai/deepseek-v3*"
+native_tools = true
+thinking = true
+prompt_caching = true
+
+[[provider.openrouter]]
+model_match = "deepseek/deepseek-v3*"
+native_tools = true
+thinking = true
+prompt_caching = true
+
+# ---------- Google Gemini + Gemma 4 (via OpenRouter) -------------------------
+#
+# Gemini 2.5 exposes thinking budgets through OpenRouter's `reasoning`
+# field. Gemma 4 does not; it's a plain instruction-tuned dense / MoE
+# model with native tool calling.
+
+[[provider.openrouter]]
+model_match = "google/gemini-2.5*"
+native_tools = true
+thinking = true
+prompt_caching = true
+
+[[provider.openrouter]]
+model_match = "google/gemma-4*"
+native_tools = true
+
+# ---------- Moonshot Kimi K2.5 (via Together) --------------------------------
+#
+# Kimi K2.5 does OpenAI-compatible native tool calls; no thinking surface.
+
+[[provider.together]]
+model_match = "moonshotai/*"
+native_tools = true
 
 # ---------- Mock --------------------------------------------------------------
 #
@@ -179,3 +343,6 @@ deepseek = "openai"
 fireworks = "openai"
 huggingface = "openai"
 local = "openai"
+# New April 2026 routes for Qwen3.6:
+dashscope = "openai"
+llamacpp = "openai"

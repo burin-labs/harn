@@ -199,6 +199,16 @@ impl OpenAiCompatibleProvider {
             chat_template_kwargs["add_generation_prompt"] = serde_json::json!(false);
             chat_template_kwargs["continue_final_message"] = serde_json::json!(true);
         }
+        // Qwen3.6 introduced `preserve_thinking`. When the capability
+        // matrix says the current (provider, model) pair honours it,
+        // emit the flag so the chat template carries `<think>` blocks
+        // across turns. Alibaba recommends it for agentic workloads
+        // (coding agents, long-horizon tool loops — our primary use
+        // case). Providers that don't understand the kwarg ignore it.
+        let caps = crate::llm::capabilities::lookup(&opts.provider, &opts.model);
+        if caps.preserve_thinking {
+            chat_template_kwargs["preserve_thinking"] = serde_json::json!(true);
+        }
         body["chat_template_kwargs"] = chat_template_kwargs;
         body
     }
@@ -325,6 +335,36 @@ mod tests {
 
         assert_eq!(body["reasoning"]["max_tokens"], 2048);
         assert!(body.get("chat_template_kwargs").is_none());
+    }
+
+    #[test]
+    fn qwen36_emits_preserve_thinking_in_chat_template_kwargs() {
+        let mut payload = base_request_payload();
+        payload.provider = "local".to_string();
+        payload.model = "Qwen/Qwen3.6-35B-A3B".to_string();
+        payload.thinking = Some(ThinkingConfig::Enabled);
+        let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+        assert_eq!(
+            body["chat_template_kwargs"]["preserve_thinking"], true,
+            "Qwen3.6 should request preserve_thinking so <think> blocks survive across agentic turns"
+        );
+        assert_eq!(body["chat_template_kwargs"]["enable_thinking"], true);
+    }
+
+    #[test]
+    fn qwen35_does_not_emit_preserve_thinking() {
+        let mut payload = base_request_payload();
+        payload.provider = "ollama".to_string();
+        payload.model = "qwen3.5:35b-a3b-coding-nvfp4".to_string();
+        payload.thinking = Some(ThinkingConfig::Enabled);
+        let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+        assert!(
+            body["chat_template_kwargs"]
+                .get("preserve_thinking")
+                .is_none(),
+            "Qwen3.5 lacks the kwarg — we shouldn't send it"
+        );
+        assert_eq!(body["chat_template_kwargs"]["enable_thinking"], true);
     }
 
     fn base_request_payload() -> LlmRequestPayload {
