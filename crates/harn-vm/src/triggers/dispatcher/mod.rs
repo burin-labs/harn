@@ -14,9 +14,9 @@ use crate::llm::vm_value_to_json;
 use crate::orchestration::{
     append_action_graph_update, RunActionGraphEdgeRecord, RunActionGraphNodeRecord,
     RunObservabilityRecord, ACTION_GRAPH_EDGE_KIND_DLQ_MOVE, ACTION_GRAPH_EDGE_KIND_PREDICATE_GATE,
-    ACTION_GRAPH_EDGE_KIND_RETRY, ACTION_GRAPH_EDGE_KIND_TRIGGER_DISPATCH,
-    ACTION_GRAPH_NODE_KIND_DISPATCH, ACTION_GRAPH_NODE_KIND_DLQ, ACTION_GRAPH_NODE_KIND_RETRY,
-    ACTION_GRAPH_NODE_KIND_TRIGGER,
+    ACTION_GRAPH_EDGE_KIND_REPLAY_CHAIN, ACTION_GRAPH_EDGE_KIND_RETRY,
+    ACTION_GRAPH_EDGE_KIND_TRIGGER_DISPATCH, ACTION_GRAPH_NODE_KIND_DISPATCH,
+    ACTION_GRAPH_NODE_KIND_DLQ, ACTION_GRAPH_NODE_KIND_RETRY, ACTION_GRAPH_NODE_KIND_TRIGGER,
 };
 use crate::stdlib::json_to_vm_value;
 use crate::value::{error_to_category, ErrorCategory, VmError, VmValue};
@@ -40,6 +40,17 @@ const TRIGGERS_LIFECYCLE_TOPIC: &str = "triggers.lifecycle";
 
 thread_local! {
     static ACTIVE_DISPATCHER_STATE: RefCell<Option<Arc<DispatcherRuntimeState>>> = const { RefCell::new(None) };
+    static ACTIVE_DISPATCH_CONTEXT: RefCell<Option<DispatchContext>> = const { RefCell::new(None) };
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct DispatchContext {
+    pub trigger_event: TriggerEvent,
+    pub replay_of_event_id: Option<String>,
+}
+
+pub(crate) fn current_dispatch_context() -> Option<DispatchContext> {
+    ACTIVE_DISPATCH_CONTEXT.with(|slot| slot.borrow().clone())
 }
 
 #[derive(Clone)]
@@ -99,6 +110,7 @@ pub struct DispatchOutcome {
     pub status: DispatchStatus,
     pub handler_kind: String,
     pub target_uri: String,
+    pub replay_of_event_id: Option<String>,
     pub result: Option<serde_json::Value>,
     pub error: Option<String>,
 }
@@ -113,6 +125,7 @@ impl Default for DispatchOutcome {
             status: DispatchStatus::Failed,
             handler_kind: String::new(),
             target_uri: String::new(),
+            replay_of_event_id: None,
             result: None,
             error: None,
         }
@@ -239,7 +252,7 @@ impl Dispatcher {
 
     pub async fn enqueue(&self, event: TriggerEvent) -> Result<u64, DispatchError> {
         let topic = Topic::new(TRIGGER_INBOX_TOPIC).expect("static trigger.inbox topic is valid");
-        let headers = event_headers(&event, None, None);
+        let headers = event_headers(&event, None, None, None);
         let payload = serde_json::to_value(&event)
             .map_err(|error| DispatchError::Serde(error.to_string()))?;
         self.event_log
@@ -298,6 +311,25 @@ impl Dispatcher {
         binding: &TriggerBinding,
         event: TriggerEvent,
     ) -> Result<DispatchOutcome, DispatchError> {
+        self.dispatch_with_replay(binding, event, None).await
+    }
+
+    pub async fn dispatch_replay(
+        &self,
+        binding: &TriggerBinding,
+        event: TriggerEvent,
+        replay_of_event_id: String,
+    ) -> Result<DispatchOutcome, DispatchError> {
+        self.dispatch_with_replay(binding, event, Some(replay_of_event_id))
+            .await
+    }
+
+    async fn dispatch_with_replay(
+        &self,
+        binding: &TriggerBinding,
+        event: TriggerEvent,
+        replay_of_event_id: Option<String>,
+    ) -> Result<DispatchOutcome, DispatchError> {
         let binding_key = binding.binding_key();
         let route = DispatchUri::from(&binding.handler);
         let trigger_id = binding.id.as_str().to_string();
@@ -308,27 +340,58 @@ impl Dispatcher {
 
         let mut attempts = Vec::new();
         let mut source_node_id = format!("trigger:{}", event.id.0);
-        self.emit_action_graph(
-            &event,
-            vec![RunActionGraphNodeRecord {
-                id: source_node_id.clone(),
-                label: format!("{}:{}", event.provider.as_str(), event.kind),
+        let mut initial_nodes = Vec::new();
+        let mut initial_edges = Vec::new();
+        if let Some(original_event_id) = replay_of_event_id.as_ref() {
+            let original_node_id = format!("trigger:{original_event_id}");
+            initial_nodes.push(RunActionGraphNodeRecord {
+                id: original_node_id.clone(),
+                label: format!(
+                    "{}:{} (original {})",
+                    event.provider.as_str(),
+                    event.kind,
+                    original_event_id
+                ),
                 kind: ACTION_GRAPH_NODE_KIND_TRIGGER.to_string(),
-                status: "received".to_string(),
-                outcome: "received".to_string(),
+                status: "historical".to_string(),
+                outcome: "replayed_from".to_string(),
                 trace_id: Some(event.trace_id.0.clone()),
                 stage_id: None,
                 node_id: None,
                 worker_id: None,
                 run_id: None,
                 run_path: None,
-            }],
-            Vec::new(),
+            });
+            initial_edges.push(RunActionGraphEdgeRecord {
+                from_id: original_node_id,
+                to_id: source_node_id.clone(),
+                kind: ACTION_GRAPH_EDGE_KIND_REPLAY_CHAIN.to_string(),
+                label: Some("replay chain".to_string()),
+            });
+        }
+        initial_nodes.push(RunActionGraphNodeRecord {
+            id: source_node_id.clone(),
+            label: format!("{}:{}", event.provider.as_str(), event.kind),
+            kind: ACTION_GRAPH_NODE_KIND_TRIGGER.to_string(),
+            status: "received".to_string(),
+            outcome: "received".to_string(),
+            trace_id: Some(event.trace_id.0.clone()),
+            stage_id: None,
+            node_id: None,
+            worker_id: None,
+            run_id: None,
+            run_path: None,
+        });
+        self.emit_action_graph(
+            &event,
+            initial_nodes,
+            initial_edges,
             serde_json::json!({
                 "source": "dispatcher",
                 "trigger_id": trigger_id,
                 "binding_key": binding_key,
                 "event_id": event_id,
+                "replay_of_event_id": replay_of_event_id,
             }),
         )
         .await?;
@@ -336,7 +399,12 @@ impl Dispatcher {
         if let Some(predicate) = binding.when.as_ref() {
             let predicate_node_id = format!("predicate:{binding_key}:{}", event.id.0);
             let predicate_result = self
-                .invoke_vm_callable(&predicate.closure, &event, &mut self.cancel_tx.subscribe())
+                .invoke_vm_callable(
+                    &predicate.closure,
+                    &event,
+                    replay_of_event_id.as_ref(),
+                    &mut self.cancel_tx.subscribe(),
+                )
                 .await?;
             let passed = matches!(predicate_result, VmValue::Bool(true));
             self.emit_action_graph(
@@ -366,6 +434,7 @@ impl Dispatcher {
                     "binding_key": binding.binding_key(),
                     "event_id": event.id.0,
                     "predicate": predicate.raw,
+                    "replay_of_event_id": replay_of_event_id,
                 }),
             )
             .await?;
@@ -387,7 +456,11 @@ impl Dispatcher {
                     status: DispatchStatus::Skipped,
                     handler_kind: route.kind().to_string(),
                     target_uri: route.target_uri(),
-                    result: None,
+                    replay_of_event_id,
+                    result: Some(serde_json::json!({
+                        "skipped": true,
+                        "predicate": predicate.raw,
+                    })),
                     error: None,
                 });
             }
@@ -409,7 +482,9 @@ impl Dispatcher {
                     "attempt": attempt,
                     "handler_kind": route.kind(),
                     "target_uri": route.target_uri(),
+                    "replay_of_event_id": replay_of_event_id,
                 }),
+                replay_of_event_id.as_ref(),
             )
             .await?;
             self.append_topic_event(
@@ -425,7 +500,9 @@ impl Dispatcher {
                     "binding_key": binding.binding_key(),
                     "handler_kind": route.kind(),
                     "target_uri": route.target_uri(),
+                    "replay_of_event_id": replay_of_event_id,
                 }),
+                replay_of_event_id.as_ref(),
             )
             .await?;
 
@@ -474,6 +551,7 @@ impl Dispatcher {
                     "attempt": attempt,
                     "handler_kind": route.kind(),
                     "target_uri": route.target_uri(),
+                    "replay_of_event_id": replay_of_event_id,
                 }),
             )
             .await?;
@@ -497,8 +575,13 @@ impl Dispatcher {
                         error_msg: None,
                     };
                     attempts.push(attempt_record.clone());
-                    self.append_attempt_record(&event, binding, &attempt_record)
-                        .await?;
+                    self.append_attempt_record(
+                        &event,
+                        binding,
+                        &attempt_record,
+                        replay_of_event_id.as_ref(),
+                    )
+                    .await?;
                     self.append_lifecycle_event(
                         "DispatchSucceeded",
                         &event,
@@ -509,7 +592,9 @@ impl Dispatcher {
                             "handler_kind": route.kind(),
                             "target_uri": route.target_uri(),
                             "result": result,
+                            "replay_of_event_id": replay_of_event_id,
                         }),
+                        replay_of_event_id.as_ref(),
                     )
                     .await?;
                     self.append_topic_event(
@@ -526,7 +611,9 @@ impl Dispatcher {
                             "handler_kind": route.kind(),
                             "target_uri": route.target_uri(),
                             "result": result,
+                            "replay_of_event_id": replay_of_event_id,
                         }),
+                        replay_of_event_id.as_ref(),
                     )
                     .await?;
                     finish_in_flight(
@@ -545,6 +632,7 @@ impl Dispatcher {
                         status: DispatchStatus::Succeeded,
                         handler_kind: route.kind().to_string(),
                         target_uri: route.target_uri(),
+                        replay_of_event_id,
                         result: Some(result),
                         error: None,
                     });
@@ -566,8 +654,13 @@ impl Dispatcher {
                         error_msg: Some(error.to_string()),
                     };
                     attempts.push(attempt_record.clone());
-                    self.append_attempt_record(&event, binding, &attempt_record)
-                        .await?;
+                    self.append_attempt_record(
+                        &event,
+                        binding,
+                        &attempt_record,
+                        replay_of_event_id.as_ref(),
+                    )
+                    .await?;
                     self.append_lifecycle_event(
                         "DispatchFailed",
                         &event,
@@ -578,7 +671,9 @@ impl Dispatcher {
                             "handler_kind": route.kind(),
                             "target_uri": route.target_uri(),
                             "error": error.to_string(),
+                            "replay_of_event_id": replay_of_event_id,
                         }),
+                        replay_of_event_id.as_ref(),
                     )
                     .await?;
                     self.append_topic_event(
@@ -595,7 +690,9 @@ impl Dispatcher {
                             "handler_kind": route.kind(),
                             "target_uri": route.target_uri(),
                             "error": error.to_string(),
+                            "replay_of_event_id": replay_of_event_id,
                         }),
+                        replay_of_event_id.as_ref(),
                     )
                     .await?;
 
@@ -622,6 +719,7 @@ impl Dispatcher {
                             },
                             handler_kind: route.kind().to_string(),
                             target_uri: route.target_uri(),
+                            replay_of_event_id,
                             result: None,
                             error: Some(error.to_string()),
                         });
@@ -658,6 +756,7 @@ impl Dispatcher {
                                 "event_id": event.id.0,
                                 "attempt": attempt + 1,
                                 "delay_ms": delay.as_millis(),
+                                "replay_of_event_id": replay_of_event_id,
                             }),
                         )
                         .await?;
@@ -670,7 +769,9 @@ impl Dispatcher {
                                 "attempt": attempt + 1,
                                 "delay_ms": delay.as_millis(),
                                 "error": error.to_string(),
+                                "replay_of_event_id": replay_of_event_id,
                             }),
+                            replay_of_event_id.as_ref(),
                         )
                         .await?;
                         self.append_topic_event(
@@ -686,7 +787,9 @@ impl Dispatcher {
                                 "binding_key": binding.binding_key(),
                                 "delay_ms": delay.as_millis(),
                                 "error": error.to_string(),
+                                "replay_of_event_id": replay_of_event_id,
                             }),
+                            replay_of_event_id.as_ref(),
                         )
                         .await?;
                         self.state.retry_queue_depth.fetch_add(1, Ordering::Relaxed);
@@ -712,6 +815,7 @@ impl Dispatcher {
                                 status: DispatchStatus::Cancelled,
                                 handler_kind: route.kind().to_string(),
                                 target_uri: route.target_uri(),
+                                replay_of_event_id,
                                 result: None,
                                 error: Some("dispatcher shutdown cancelled retry wait".to_string()),
                             });
@@ -761,6 +865,7 @@ impl Dispatcher {
                             "event_id": event.id.0,
                             "attempt_count": attempt,
                             "final_error": final_error,
+                            "replay_of_event_id": replay_of_event_id,
                         }),
                     )
                     .await?;
@@ -772,7 +877,9 @@ impl Dispatcher {
                             "event_id": event.id.0,
                             "attempt_count": attempt,
                             "final_error": dlq_entry.final_error,
+                            "replay_of_event_id": replay_of_event_id,
                         }),
+                        replay_of_event_id.as_ref(),
                     )
                     .await?;
                     self.append_topic_event(
@@ -783,6 +890,7 @@ impl Dispatcher {
                         Some(attempt),
                         serde_json::to_value(&dlq_entry)
                             .map_err(|serde_error| DispatchError::Serde(serde_error.to_string()))?,
+                        replay_of_event_id.as_ref(),
                     )
                     .await?;
                     finish_in_flight(
@@ -803,6 +911,7 @@ impl Dispatcher {
                         status: DispatchStatus::Dlq,
                         handler_kind: route.kind().to_string(),
                         target_uri: route.target_uri(),
+                        replay_of_event_id,
                         result: None,
                         error: Some(error.to_string()),
                     });
@@ -826,6 +935,7 @@ impl Dispatcher {
             status: DispatchStatus::Failed,
             handler_kind: route.kind().to_string(),
             target_uri: route.target_uri(),
+            replay_of_event_id,
             result: None,
             error: Some("dispatch exhausted without terminal outcome".to_string()),
         })
@@ -846,7 +956,9 @@ impl Dispatcher {
                         binding.id.as_str()
                     )));
                 };
-                let value = self.invoke_vm_callable(closure, event, cancel_rx).await?;
+                let value = self
+                    .invoke_vm_callable(closure, event, None, cancel_rx)
+                    .await?;
                 Ok(vm_value_to_json(&value))
             }
             DispatchUri::A2a { target } => Err(DispatchError::NotImplemented(format!(
@@ -862,6 +974,7 @@ impl Dispatcher {
         &self,
         closure: &crate::value::VmClosure,
         event: &TriggerEvent,
+        replay_of_event_id: Option<&String>,
         _cancel_rx: &mut broadcast::Receiver<()>,
     ) -> Result<VmValue, DispatchError> {
         let mut vm = self.base_vm.child_vm();
@@ -882,7 +995,16 @@ impl Dispatcher {
         let args = [arg];
         let future = vm.call_closure_pub(closure, &args, &[]);
         pin_mut!(future);
+        let prior_context = ACTIVE_DISPATCH_CONTEXT.with(|slot| {
+            slot.borrow_mut().replace(DispatchContext {
+                trigger_event: event.clone(),
+                replay_of_event_id: replay_of_event_id.cloned(),
+            })
+        });
         let result = future.await;
+        ACTIVE_DISPATCH_CONTEXT.with(|slot| {
+            *slot.borrow_mut() = prior_context;
+        });
         let mut tokens = self
             .state
             .cancel_tokens
@@ -903,6 +1025,7 @@ impl Dispatcher {
         event: &TriggerEvent,
         binding: &TriggerBinding,
         attempt: &DispatchAttemptRecord,
+        replay_of_event_id: Option<&String>,
     ) -> Result<(), DispatchError> {
         self.append_topic_event(
             TRIGGER_ATTEMPTS_TOPIC,
@@ -912,6 +1035,7 @@ impl Dispatcher {
             Some(attempt.attempt),
             serde_json::to_value(attempt)
                 .map_err(|error| DispatchError::Serde(error.to_string()))?,
+            replay_of_event_id,
         )
         .await
     }
@@ -922,6 +1046,7 @@ impl Dispatcher {
         event: &TriggerEvent,
         binding: &TriggerBinding,
         payload: serde_json::Value,
+        replay_of_event_id: Option<&String>,
     ) -> Result<(), DispatchError> {
         self.append_topic_event(
             TRIGGERS_LIFECYCLE_TOPIC,
@@ -930,6 +1055,7 @@ impl Dispatcher {
             Some(binding),
             None,
             payload,
+            replay_of_event_id,
         )
         .await
     }
@@ -942,10 +1068,11 @@ impl Dispatcher {
         binding: Option<&TriggerBinding>,
         attempt: Option<u32>,
         payload: serde_json::Value,
+        replay_of_event_id: Option<&String>,
     ) -> Result<(), DispatchError> {
         let topic = Topic::new(topic_name)
             .expect("static trigger dispatcher topic names should always be valid");
-        let headers = event_headers(event, binding, attempt);
+        let headers = event_headers(event, binding, attempt, replay_of_event_id);
         self.event_log
             .append(&topic, LogEvent::new(kind, payload).with_headers(headers))
             .await
@@ -1030,12 +1157,16 @@ fn event_headers(
     event: &TriggerEvent,
     binding: Option<&TriggerBinding>,
     attempt: Option<u32>,
+    replay_of_event_id: Option<&String>,
 ) -> BTreeMap<String, String> {
     let mut headers = BTreeMap::new();
     headers.insert("event_id".to_string(), event.id.0.clone());
     headers.insert("trace_id".to_string(), event.trace_id.0.clone());
     headers.insert("provider".to_string(), event.provider.as_str().to_string());
     headers.insert("kind".to_string(), event.kind.clone());
+    if let Some(replay_of_event_id) = replay_of_event_id {
+        headers.insert("replay_of_event_id".to_string(), replay_of_event_id.clone());
+    }
     if let Some(binding) = binding {
         headers.insert("trigger_id".to_string(), binding.id.as_str().to_string());
         headers.insert("binding_key".to_string(), binding.binding_key());

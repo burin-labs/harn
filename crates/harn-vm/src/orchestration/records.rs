@@ -26,6 +26,7 @@ pub const ACTION_GRAPH_NODE_KIND_DLQ: &str = "dlq";
 pub const ACTION_GRAPH_EDGE_KIND_ENTRY: &str = "entry";
 pub const ACTION_GRAPH_EDGE_KIND_TRIGGER_DISPATCH: &str = "trigger_dispatch";
 pub const ACTION_GRAPH_EDGE_KIND_PREDICATE_GATE: &str = "predicate_gate";
+pub const ACTION_GRAPH_EDGE_KIND_REPLAY_CHAIN: &str = "replay_chain";
 pub const ACTION_GRAPH_EDGE_KIND_TRANSITION: &str = "transition";
 pub const ACTION_GRAPH_EDGE_KIND_DELEGATES: &str = "delegates";
 pub const ACTION_GRAPH_EDGE_KIND_RETRY: &str = "retry";
@@ -511,6 +512,13 @@ fn run_trace_id(run: &RunRecord, trigger_event: Option<&TriggerEvent>) -> Option
         })
 }
 
+fn replay_of_event_id_from_run(run: &RunRecord) -> Option<String> {
+    run.metadata
+        .get("replay_of_event_id")
+        .and_then(|value| value.as_str())
+        .map(str::to_string)
+}
+
 fn action_graph_kind_for_stage(stage: &RunStageRecord) -> &'static str {
     if stage.kind == "condition" {
         ACTION_GRAPH_NODE_KIND_PREDICATE
@@ -804,6 +812,36 @@ pub fn derive_run_observability(
     );
     let mut entry_node_id = root_node_id.clone();
     if let Some(trigger_event) = trigger_event.as_ref() {
+        if let Some(replay_of_event_id) = replay_of_event_id_from_run(run) {
+            let replay_source_node_id = format!("trigger:{replay_of_event_id}");
+            append_action_graph_node(
+                &mut action_graph_nodes,
+                RunActionGraphNodeRecord {
+                    id: replay_source_node_id.clone(),
+                    label: format!(
+                        "{}:{} (original {})",
+                        trigger_event.provider.as_str(),
+                        trigger_event.kind,
+                        replay_of_event_id
+                    ),
+                    kind: ACTION_GRAPH_NODE_KIND_TRIGGER.to_string(),
+                    status: "historical".to_string(),
+                    outcome: "replayed_from".to_string(),
+                    trace_id: Some(trigger_event.trace_id.0.clone()),
+                    stage_id: None,
+                    node_id: None,
+                    worker_id: None,
+                    run_id: Some(run.id.clone()),
+                    run_path: run.persisted_path.clone(),
+                },
+            );
+            action_graph_edges.push(RunActionGraphEdgeRecord {
+                from_id: replay_source_node_id,
+                to_id: format!("trigger:{}", trigger_event.id.0),
+                kind: ACTION_GRAPH_EDGE_KIND_REPLAY_CHAIN.to_string(),
+                label: Some("replay chain".to_string()),
+            });
+        }
         let trigger_node_id = format!("trigger:{}", trigger_event.id.0);
         append_action_graph_node(
             &mut action_graph_nodes,

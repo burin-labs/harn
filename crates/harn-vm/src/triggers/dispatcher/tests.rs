@@ -6,8 +6,8 @@ use crate::event_log::{install_default_for_base_dir, EventLog, Topic};
 use crate::register_vm_stdlib;
 use crate::triggers::event::{GitHubEventPayload, KnownProviderPayload};
 use crate::triggers::registry::{
-    install_manifest_triggers, TriggerBindingSource, TriggerBindingSpec, TriggerHandlerSpec,
-    TriggerPredicateSpec,
+    install_manifest_triggers, resolve_live_trigger_binding, TriggerBindingSource,
+    TriggerBindingSpec, TriggerHandlerSpec, TriggerPredicateSpec,
 };
 use crate::triggers::{ProviderId, ProviderPayload, SignatureStatus, TriggerEvent};
 use crate::Vm;
@@ -247,6 +247,63 @@ pub fn local_fn(event: TriggerEvent) -> string {
             assert!(node_kinds.iter().any(|kind| kind == "dlq"));
             assert!(edge_kinds.iter().any(|kind| kind == "retry"));
             assert!(edge_kinds.iter().any(|kind| kind == "dlq_move"));
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn replay_dispatch_emits_replay_chain_edge_and_headers() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (_dir, log, dispatcher) = dispatcher_fixture(
+                r#"
+import "std/triggers"
+
+pub fn local_fn(event: TriggerEvent) -> dict {
+  return {kind: event.kind, id: event.id}
+}
+"#,
+                "local_fn",
+                None,
+                TriggerRetryConfig::default(),
+            )
+            .await;
+
+            let binding =
+                resolve_live_trigger_binding("github-new-issue", None).expect("resolve binding");
+            let event = trigger_event("issues.opened", "delivery-replay");
+            let outcome = dispatcher
+                .dispatch_replay(&binding, event.clone(), "event-original".to_string())
+                .await
+                .expect("replay succeeds");
+
+            assert_eq!(outcome.status, DispatchStatus::Succeeded);
+            assert_eq!(
+                outcome.replay_of_event_id.as_deref(),
+                Some("event-original")
+            );
+
+            let outbox = read_topic(log.clone(), "trigger.outbox").await;
+            assert!(outbox.iter().any(|(_, logged)| {
+                logged.kind == "dispatch_succeeded"
+                    && logged.headers.get("replay_of_event_id").map(String::as_str)
+                        == Some("event-original")
+            }));
+
+            let graph = read_topic(log.clone(), "observability.action_graph").await;
+            assert!(graph.iter().any(|(_, logged)| {
+                logged.payload["observability"]["action_graph_edges"]
+                    .as_array()
+                    .is_some_and(|edges| {
+                        edges.iter().any(|edge| {
+                            edge.get("kind").and_then(|value| value.as_str())
+                                == Some("replay_chain")
+                                && edge.get("label").and_then(|value| value.as_str())
+                                    == Some("replay chain")
+                        })
+                    })
+            }));
         })
         .await;
 }

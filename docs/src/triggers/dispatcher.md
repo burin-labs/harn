@@ -22,6 +22,8 @@ Each dispatch goes through the same sequence:
 7. Schedule retries from the manifest retry policy.
 8. Move exhausted deliveries into the in-memory DLQ and append a copy to
    `trigger.dlq`.
+9. When the dispatch is a replay, emit a `replay_chain` action-graph edge
+   linking the new trigger node back to the original event id.
 
 The dispatcher keeps per-thread stats for:
 
@@ -106,6 +108,13 @@ Each update is appended to `observability.action_graph` using the shared
 `RunActionGraphNodeRecord` / `RunActionGraphEdgeRecord` schema so the portal
 and any other subscriber can consume dispatcher traces without special-casing a
 separate payload format.
+
+Replay dispatches add one more edge kind:
+
+- `replay_chain`
+
+The portal renders that edge as the visible link from the replayed trigger
+event back to the original event id.
 
 ## Current MVP limits
 

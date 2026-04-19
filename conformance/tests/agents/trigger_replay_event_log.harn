@@ -1,0 +1,57 @@
+import "std/triggers"
+
+let replay_marker_path = path_join(temp_dir(), "harn-trigger-replay-event-log.marker")
+
+fn flaky_handler(event: TriggerEvent) -> dict {
+  if !file_exists(replay_marker_path) {
+    write_file(replay_marker_path, "seen")
+    throw "replay-fail:" + event.kind
+  }
+  return {kind: event.kind, provider: event.provider, replayed: event.id}
+}
+
+pipeline test(task) {
+  if file_exists(replay_marker_path) {
+    delete_file(replay_marker_path)
+  }
+  let unique = to_string(to_int(timestamp())) + "-" + to_string(random_int(100000, 999999))
+  let trigger_id = "replay-trigger-" + unique
+  let handle: TriggerHandle = trigger_register(
+    {
+    id: trigger_id,
+    kind: "issue.opened",
+    provider: "github",
+    handler: flaky_handler,
+    retry: {max: 1, backoff: "immediate"},
+    when: nil,
+    match: nil,
+    events: ["issue.opened"],
+    dedupe_key: nil,
+    filter: nil,
+    budget: nil,
+    manifest_path: nil,
+    package_name: nil,
+  },
+  )
+  let fired: DispatchHandle = trigger_fire(
+    handle,
+    {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-replay"}},
+  )
+  println(fired.status == "dlq" && contains(fired.error ?? "", "replay-fail:issue.opened"))
+  let before: list<DlqEntry> = trigger_inspect_dlq()
+  let pending_before = before.filter({ entry -> entry.binding_id == handle.id })
+  println(len(pending_before) == 1 && pending_before[0].event_id == fired.event_id)
+  println(
+    len(pending_before[0].retry_history) == 1 && pending_before[0].retry_history[0].status == "dlq",
+  )
+  let replay: DispatchHandle = trigger_replay(fired.event_id)
+  println(replay.status == "dispatched" && replay.replay_of_event_id == fired.event_id)
+  println(contains(json_stringify(replay.result ?? {}), "\"kind\":\"issue.opened\""))
+  let after: list<DlqEntry> = trigger_inspect_dlq()
+  let pending_after = after.filter({ entry -> entry.binding_id == handle.id })
+  println(len(pending_after) == 0)
+  let bindings_after: list<TriggerBinding> = trigger_list()
+  let live = bindings_after.find({ binding -> binding.id == handle.id })
+  println(live?.metrics?.dlq == 1)
+  println(live?.metrics?.dispatched == 1)
+}

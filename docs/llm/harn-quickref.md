@@ -814,11 +814,13 @@ exercise the live trigger registry:
 
 - `trigger_list()` returns `list<TriggerBinding>`.
 - `trigger_register(config)` hot-installs a dynamic trigger and returns a
-  `TriggerHandle`.
+  `TriggerHandle`. `config.retry` accepts `{max, backoff}` with
+  `backoff: "svix" | "immediate"`.
 - `trigger_fire(handle, event)` injects a synthetic `TriggerEvent` and returns a
   `DispatchHandle`.
 - `trigger_replay(event_id)` fetches an event from `triggers.events` and
-  re-dispatches it through the current shallow replay path.
+  re-dispatches it through the trigger dispatcher, preserving
+  `replay_of_event_id`.
 - `trigger_inspect_dlq()` returns `list<DlqEntry>` with retry history.
 
 Shared types live in `std/triggers`: `TriggerConfig`, `TriggerBinding`,
@@ -826,11 +828,13 @@ Shared types live in `std/triggers`: `TriggerConfig`, `TriggerBinding`,
 
 Current caveats:
 
-- `trigger_fire` executes local handlers in-process. Manual dispatch to
-  `a2a://...` and `worker://...` handlers is still deferred until the full
-  dispatcher lands.
-- `trigger_replay` is the shallow stub for now, not the full deterministic
-  T-14 replay engine.
+- `trigger_fire` / `trigger_replay` now reuse the dispatcher for local
+  handlers, retries, and DLQ transitions, but `a2a://...` and
+  `worker://...` still return the dispatcher’s explicit
+  `NotImplemented` path.
+- `trigger_replay` is not the full deterministic T-14 replay engine yet:
+  it replays the recorded trigger event through today’s dispatcher/runtime
+  state rather than a sandboxed drift-detecting environment.
 
 Workflow stages pick up a session id from `model_policy.session_id`;
 two stages sharing an id share their conversation automatically. The

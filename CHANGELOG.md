@@ -42,6 +42,17 @@ granular archaeology.
 
 ### Added
 
+- **Trigger event replay now routes through the dispatcher (#166).**
+  `trigger_replay(...)` no longer uses the local shallow stub. The
+  stdlib now looks up historical events from `triggers.events`,
+  re-dispatches them through `harn_vm::triggers::Dispatcher`, preserves
+  `replay_of_event_id` on the returned `DispatchHandle`, resolves the
+  pending stdlib DLQ summary entry when a replay succeeds, and carries
+  replay metadata into derived run observability so the portal can show
+  a `replay_chain` link back to the original event. Dynamic
+  `trigger_register(...)` configs now accept a minimal stdlib retry
+  override surface: `{max, backoff: "svix" | "immediate"}`.
+
 - **Handler dispatcher with URI routing, retries, cancellation, and
   streaming trigger action-graph updates (#159).** Added
   `harn_vm::triggers::Dispatcher` with EventLog-backed
