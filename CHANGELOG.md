@@ -20,6 +20,15 @@ granular archaeology.
   returns the base evidence with `budget_exceeded: true` instead of
   failing. Schema-retry exhaustion returns `validation_error` +
   `base_evidence` instead of raising.
+- **First-class action-graph planning helpers (#123).** `std/agents`
+  now exposes `action_graph(...)`, `action_graph_batches(...)`,
+  `action_graph_render(...)`, `action_graph_flow(...)`, and
+  `action_graph_run(...)` on top of the existing workflow runtime.
+  Planner output variants normalize into a canonical action-graph
+  envelope, missing research->execute / execute->verify dependencies
+  are repaired conservatively, ready work batches by phase and tool
+  class, and shared terminal verify/evaluate stages can be composed
+  without hand-wiring the workflow graph in every pipeline.
 - **`project_deep_scan` cached per-directory tree (#111, closes #103).**
   Namespace-scoped hierarchical cache built on top of the metadata
   store. Reuses cached directory-level structure + content hashes

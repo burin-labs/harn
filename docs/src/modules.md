@@ -312,6 +312,11 @@ Workflow helpers built on transcripts and `agent_loop`:
 | Function | Description |
 |---|---|
 | `workflow(config)` | Create a workflow config |
+| `action_graph(raw, options?)` | Normalize planner output into a canonical action-graph envelope |
+| `action_graph_batches(graph, completed?)` | Compute dependency-ready action batches grouped by phase and tool class |
+| `action_graph_render(graph)` | Render a human-readable markdown summary of an action graph |
+| `action_graph_flow(graph, config?)` | Convert an action graph into a typed workflow graph |
+| `action_graph_run(task, graph, config?, overrides?)` | Execute an action graph through the shared workflow runtime |
 | `task_run(task, flow, overrides?)` | Run an act/verify/repair workflow |
 | `workflow_result_text(result)` | Extract a visible text result from an LLM call, workflow wrapper, or ad hoc payload |
 | `workflow_result_run(task, workflow_name, result, artifacts?, options?)` | Normalize an ad hoc result into a reusable run record |

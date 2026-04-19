@@ -91,6 +91,46 @@ validation and execution automatically. That keeps the registry itself as the
 source of truth for capability requirements instead of forcing products to
 repeat the same information in both tool definitions and node policy blocks.
 
+### Action graphs
+
+`std/agents` now exposes an action-graph layer above raw workflow graphs for
+planner-driven orchestration:
+
+- `action_graph(raw, options?)` canonicalizes planner output variants into a
+  stable `{_type: "action_graph", actions: [...]}` envelope.
+- `action_graph_batches(graph, completed?)` repairs missing cross-phase
+  dependencies and groups ready work by phase plus tool class.
+- `action_graph_flow(graph, config?)` turns that plan envelope into a typed
+  workflow graph with one scheduled batch stage per ready batch.
+- `action_graph_run(task, graph, config?, overrides?)` attaches a durable
+  `plan` artifact and executes the generated workflow via `workflow_execute`.
+
+This is the intended shared substrate for "research -> plan -> execute ->
+verify" style pipelines when the planner output is unstable but the executor
+should still see a canonical schedule.
+
+```harn
+import "std/agents"
+
+let raw_plan = {
+  steps: [
+    {id: "inspect", kind: "research", title: "Inspect parser", tools: ["read", "search"]},
+    {id: "patch", title: "Patch diagnostics", tools: ["edit"]},
+    {id: "docs", title: "Update release notes", tools: ["edit"]}
+  ]
+}
+
+let plan = action_graph(raw_plan, {task: "Fix parser diagnostics"})
+let run = action_graph_run("Fix parser diagnostics", plan, {
+  research: {mode: "llm", model_policy: {provider: "mock"}},
+  execute: {mode: "llm", model_policy: {provider: "mock"}},
+  verify: {command: "cargo test --workspace --quiet", expect_status: 0}
+})
+
+println(run.status)
+println(len(run.batches))
+```
+
 ### Artifacts and resources
 
 Artifacts are the real context boundary. Instead of building context mostly

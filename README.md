@@ -106,6 +106,11 @@ enforcement.
 - Typed workflow graphs via `workflow_graph(...)` and `workflow_execute(...)`
   with explicit nodes, edges, validation, policy attachment, map/join style
   stages, and resumable execution.
+- Planner-oriented action graphs via `import "std/agents"`:
+  `action_graph(...)`, `action_graph_batches(...)`, `action_graph_flow(...)`,
+  and `action_graph_run(...)` normalize planner schema variants into a shared
+  executable schedule instead of leaving dependency repair and batch grouping
+  to leaf pipelines.
 - Delegated worker lifecycle builtins via `spawn_agent(...)`, `send_input(...)`,
   `resume_agent(...)`, `wait_agent(...)`, `close_agent(...)`, and `list_agents()`,
   with child run lineage, persisted worker snapshots, and host-visible worker
