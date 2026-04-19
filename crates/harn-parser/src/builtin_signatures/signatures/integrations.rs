@@ -72,6 +72,10 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("dict")),
     },
     BuiltinSig {
+        name: "list_providers_native",
+        return_type: Some(BuiltinReturn::Named("list")),
+    },
+    BuiltinSig {
         name: "mcp_call",
         return_type: None,
     },

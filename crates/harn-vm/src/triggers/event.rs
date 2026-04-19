@@ -349,9 +349,85 @@ pub fn redact_headers(
         .collect()
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderSecretRequirement {
+    pub name: String,
+    pub required: bool,
+    pub namespace: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderOutboundMethod {
+    pub name: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SignatureVerificationMetadata {
+    #[default]
+    None,
+    Hmac {
+        variant: String,
+        raw_body: bool,
+        signature_header: String,
+        timestamp_header: Option<String>,
+        id_header: Option<String>,
+        default_tolerance_secs: Option<i64>,
+        digest: String,
+        encoding: String,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ProviderRuntimeMetadata {
+    Builtin {
+        connector: String,
+        default_signature_variant: Option<String>,
+    },
+    #[default]
+    Placeholder,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
+pub struct ProviderMetadata {
+    pub provider: String,
+    #[serde(default)]
+    pub kinds: Vec<String>,
+    pub schema_name: String,
+    #[serde(default)]
+    pub outbound_methods: Vec<ProviderOutboundMethod>,
+    #[serde(default)]
+    pub secret_requirements: Vec<ProviderSecretRequirement>,
+    #[serde(default)]
+    pub signature_verification: SignatureVerificationMetadata,
+    #[serde(default)]
+    pub runtime: ProviderRuntimeMetadata,
+}
+
+impl ProviderMetadata {
+    pub fn supports_kind(&self, kind: &str) -> bool {
+        self.kinds.iter().any(|candidate| candidate == kind)
+    }
+
+    pub fn required_secret_names(&self) -> impl Iterator<Item = &str> {
+        self.secret_requirements
+            .iter()
+            .filter(|requirement| requirement.required)
+            .map(|requirement| requirement.name.as_str())
+    }
+}
+
 pub trait ProviderSchema: Send + Sync {
     fn provider_id(&self) -> &'static str;
     fn harn_schema_name(&self) -> &'static str;
+    fn metadata(&self) -> ProviderMetadata {
+        ProviderMetadata {
+            provider: self.provider_id().to_string(),
+            schema_name: self.harn_schema_name().to_string(),
+            ..ProviderMetadata::default()
+        }
+    }
     fn normalize(
         &self,
         kind: &str,
@@ -427,6 +503,17 @@ impl ProviderCatalog {
             .map(|(provider, schema)| (provider.clone(), schema.harn_schema_name().to_string()))
             .collect()
     }
+
+    pub fn entries(&self) -> Vec<ProviderMetadata> {
+        self.providers
+            .values()
+            .map(|schema| schema.metadata())
+            .collect()
+    }
+
+    pub fn metadata_for(&self, provider: &str) -> Option<ProviderMetadata> {
+        self.providers.get(provider).map(|schema| schema.metadata())
+    }
 }
 
 pub fn register_provider_schema(
@@ -451,6 +538,20 @@ pub fn registered_provider_schema_names() -> BTreeMap<String, String> {
         .schema_names()
 }
 
+pub fn registered_provider_metadata() -> Vec<ProviderMetadata> {
+    provider_catalog()
+        .read()
+        .expect("provider catalog poisoned")
+        .entries()
+}
+
+pub fn provider_metadata(provider: &str) -> Option<ProviderMetadata> {
+    provider_catalog()
+        .read()
+        .expect("provider catalog poisoned")
+        .metadata_for(provider)
+}
+
 fn provider_catalog() -> &'static RwLock<ProviderCatalog> {
     static PROVIDER_CATALOG: OnceLock<RwLock<ProviderCatalog>> = OnceLock::new();
     PROVIDER_CATALOG.get_or_init(|| RwLock::new(ProviderCatalog::with_defaults()))
@@ -459,6 +560,7 @@ fn provider_catalog() -> &'static RwLock<ProviderCatalog> {
 struct BuiltinProviderSchema {
     provider_id: &'static str,
     harn_schema_name: &'static str,
+    metadata: ProviderMetadata,
     normalize: fn(&str, &BTreeMap<String, String>, JsonValue) -> ProviderPayload,
 }
 
@@ -471,6 +573,10 @@ impl ProviderSchema for BuiltinProviderSchema {
         self.harn_schema_name
     }
 
+    fn metadata(&self) -> ProviderMetadata {
+        self.metadata.clone()
+    }
+
     fn normalize(
         &self,
         kind: &str,
@@ -481,41 +587,167 @@ impl ProviderSchema for BuiltinProviderSchema {
     }
 }
 
+fn provider_metadata_entry(
+    provider: &str,
+    kinds: &[&str],
+    schema_name: &str,
+    signature_verification: SignatureVerificationMetadata,
+    secret_requirements: Vec<ProviderSecretRequirement>,
+    runtime: ProviderRuntimeMetadata,
+) -> ProviderMetadata {
+    ProviderMetadata {
+        provider: provider.to_string(),
+        kinds: kinds.iter().map(|kind| kind.to_string()).collect(),
+        schema_name: schema_name.to_string(),
+        outbound_methods: Vec::new(),
+        secret_requirements,
+        signature_verification,
+        runtime,
+    }
+}
+
+fn hmac_signature_metadata(
+    variant: &str,
+    signature_header: &str,
+    timestamp_header: Option<&str>,
+    id_header: Option<&str>,
+    default_tolerance_secs: Option<i64>,
+    encoding: &str,
+) -> SignatureVerificationMetadata {
+    SignatureVerificationMetadata::Hmac {
+        variant: variant.to_string(),
+        raw_body: true,
+        signature_header: signature_header.to_string(),
+        timestamp_header: timestamp_header.map(ToString::to_string),
+        id_header: id_header.map(ToString::to_string),
+        default_tolerance_secs,
+        digest: "sha256".to_string(),
+        encoding: encoding.to_string(),
+    }
+}
+
+fn required_secret(name: &str, namespace: &str) -> ProviderSecretRequirement {
+    ProviderSecretRequirement {
+        name: name.to_string(),
+        required: true,
+        namespace: namespace.to_string(),
+    }
+}
+
 fn default_provider_schemas() -> Vec<Arc<dyn ProviderSchema>> {
     vec![
         Arc::new(BuiltinProviderSchema {
             provider_id: "github",
             harn_schema_name: "GitHubEventPayload",
+            metadata: provider_metadata_entry(
+                "github",
+                &["webhook"],
+                "GitHubEventPayload",
+                hmac_signature_metadata(
+                    "github",
+                    "X-Hub-Signature-256",
+                    None,
+                    Some("X-GitHub-Delivery"),
+                    None,
+                    "hex",
+                ),
+                vec![required_secret("signing_secret", "github")],
+                ProviderRuntimeMetadata::Builtin {
+                    connector: "webhook".to_string(),
+                    default_signature_variant: Some("github".to_string()),
+                },
+            ),
             normalize: github_payload,
         }),
         Arc::new(BuiltinProviderSchema {
             provider_id: "slack",
             harn_schema_name: "SlackEventPayload",
+            metadata: provider_metadata_entry(
+                "slack",
+                &["webhook"],
+                "SlackEventPayload",
+                SignatureVerificationMetadata::None,
+                Vec::new(),
+                ProviderRuntimeMetadata::Placeholder,
+            ),
             normalize: slack_payload,
         }),
         Arc::new(BuiltinProviderSchema {
             provider_id: "linear",
             harn_schema_name: "LinearEventPayload",
+            metadata: provider_metadata_entry(
+                "linear",
+                &["webhook"],
+                "LinearEventPayload",
+                SignatureVerificationMetadata::None,
+                Vec::new(),
+                ProviderRuntimeMetadata::Placeholder,
+            ),
             normalize: linear_payload,
         }),
         Arc::new(BuiltinProviderSchema {
             provider_id: "notion",
             harn_schema_name: "NotionEventPayload",
+            metadata: provider_metadata_entry(
+                "notion",
+                &["webhook"],
+                "NotionEventPayload",
+                SignatureVerificationMetadata::None,
+                Vec::new(),
+                ProviderRuntimeMetadata::Placeholder,
+            ),
             normalize: notion_payload,
         }),
         Arc::new(BuiltinProviderSchema {
             provider_id: "cron",
             harn_schema_name: "CronEventPayload",
+            metadata: provider_metadata_entry(
+                "cron",
+                &["cron"],
+                "CronEventPayload",
+                SignatureVerificationMetadata::None,
+                Vec::new(),
+                ProviderRuntimeMetadata::Builtin {
+                    connector: "cron".to_string(),
+                    default_signature_variant: None,
+                },
+            ),
             normalize: cron_payload,
         }),
         Arc::new(BuiltinProviderSchema {
             provider_id: "webhook",
             harn_schema_name: "GenericWebhookPayload",
+            metadata: provider_metadata_entry(
+                "webhook",
+                &["webhook"],
+                "GenericWebhookPayload",
+                hmac_signature_metadata(
+                    "standard",
+                    "webhook-signature",
+                    Some("webhook-timestamp"),
+                    Some("webhook-id"),
+                    Some(300),
+                    "base64",
+                ),
+                vec![required_secret("signing_secret", "webhook")],
+                ProviderRuntimeMetadata::Builtin {
+                    connector: "webhook".to_string(),
+                    default_signature_variant: Some("standard".to_string()),
+                },
+            ),
             normalize: webhook_payload,
         }),
         Arc::new(BuiltinProviderSchema {
             provider_id: "a2a-push",
             harn_schema_name: "A2aPushPayload",
+            metadata: provider_metadata_entry(
+                "a2a-push",
+                &["a2a-push"],
+                "A2aPushPayload",
+                SignatureVerificationMetadata::None,
+                Vec::new(),
+                ProviderRuntimeMetadata::Placeholder,
+            ),
             normalize: a2a_push_payload,
         }),
     ]
@@ -712,6 +944,14 @@ mod tests {
             .register(Arc::new(BuiltinProviderSchema {
                 provider_id: "github",
                 harn_schema_name: "GitHubEventPayload",
+                metadata: provider_metadata_entry(
+                    "github",
+                    &["webhook"],
+                    "GitHubEventPayload",
+                    SignatureVerificationMetadata::None,
+                    Vec::new(),
+                    ProviderRuntimeMetadata::Placeholder,
+                ),
                 normalize: github_payload,
             }))
             .unwrap();
@@ -719,6 +959,14 @@ mod tests {
             .register(Arc::new(BuiltinProviderSchema {
                 provider_id: "github",
                 harn_schema_name: "GitHubEventPayload",
+                metadata: provider_metadata_entry(
+                    "github",
+                    &["webhook"],
+                    "GitHubEventPayload",
+                    SignatureVerificationMetadata::None,
+                    Vec::new(),
+                    ProviderRuntimeMetadata::Placeholder,
+                ),
                 normalize: github_payload,
             }))
             .unwrap_err();
@@ -726,6 +974,20 @@ mod tests {
             error,
             ProviderCatalogError::DuplicateProvider("github".to_string())
         );
+    }
+
+    #[test]
+    fn registered_provider_metadata_marks_builtin_connectors() {
+        let entries = registered_provider_metadata();
+        let builtin: Vec<&ProviderMetadata> = entries
+            .iter()
+            .filter(|entry| matches!(entry.runtime, ProviderRuntimeMetadata::Builtin { .. }))
+            .collect();
+
+        assert_eq!(builtin.len(), 3);
+        assert!(builtin.iter().any(|entry| entry.provider == "cron"));
+        assert!(builtin.iter().any(|entry| entry.provider == "github"));
+        assert!(builtin.iter().any(|entry| entry.provider == "webhook"));
     }
 
     #[test]

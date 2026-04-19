@@ -210,7 +210,7 @@ async fn initialize_connectors(
     let mut grouped_kinds: BTreeMap<harn_vm::ProviderId, BTreeSet<String>> = BTreeMap::new();
 
     for trigger in triggers {
-        let binding = trigger_binding_for(&trigger.config);
+        let binding = trigger_binding_for(&trigger.config)?;
         grouped_kinds
             .entry(binding.provider.clone())
             .or_default()
@@ -261,29 +261,33 @@ async fn initialize_connectors(
     })
 }
 
-fn trigger_binding_for(config: &ResolvedTriggerConfig) -> harn_vm::TriggerBinding {
-    let mut binding = harn_vm::TriggerBinding::new(
-        config.provider.clone(),
-        trigger_kind_name(config.kind),
-        config.id.clone(),
-    );
-    let mut binding_config = serde_json::Map::new();
-    binding_config.insert(
-        "match".to_string(),
-        serde_json::to_value(&config.match_).unwrap_or(JsonValue::Null),
-    );
-    binding_config.insert(
-        "secrets".to_string(),
-        serde_json::to_value(&config.secrets).unwrap_or(JsonValue::Null),
-    );
-    for (key, value) in &config.kind_specific {
-        binding_config.insert(
-            key.clone(),
-            serde_json::to_value(value).unwrap_or(JsonValue::Null),
-        );
+fn trigger_binding_for(config: &ResolvedTriggerConfig) -> Result<harn_vm::TriggerBinding, String> {
+    Ok(harn_vm::TriggerBinding {
+        provider: config.provider.clone(),
+        kind: harn_vm::TriggerKind::from(trigger_kind_name(config.kind)),
+        binding_id: config.id.clone(),
+        dedupe_key: config.dedupe_key.clone(),
+        config: connector_binding_config(config)?,
+    })
+}
+
+fn connector_binding_config(config: &ResolvedTriggerConfig) -> Result<JsonValue, String> {
+    match config.kind {
+        crate::package::TriggerKind::Cron => {
+            serde_json::to_value(&config.kind_specific).map_err(|error| {
+                format!(
+                    "failed to encode cron trigger config '{}': {error}",
+                    config.id
+                )
+            })
+        }
+        crate::package::TriggerKind::Webhook => Ok(serde_json::json!({
+            "match": config.match_,
+            "secrets": config.secrets,
+            "webhook": config.kind_specific,
+        })),
+        _ => Ok(JsonValue::Null),
     }
-    binding.config = JsonValue::Object(binding_config);
-    binding
 }
 
 fn build_route_configs(

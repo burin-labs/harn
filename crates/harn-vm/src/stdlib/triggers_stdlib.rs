@@ -10,9 +10,10 @@ use crate::event_log::{
 };
 use crate::triggers::dispatcher::DEFAULT_MAX_ATTEMPTS;
 use crate::triggers::{
-    dynamic_register, resolve_live_trigger_binding, snapshot_trigger_bindings, RetryPolicy,
-    TriggerBindingSnapshot, TriggerBindingSource, TriggerBindingSpec, TriggerEvent, TriggerEventId,
-    TriggerHandlerSpec, TriggerPredicateSpec, TriggerRetryConfig,
+    dynamic_register, registered_provider_metadata, resolve_live_trigger_binding,
+    snapshot_trigger_bindings, RetryPolicy, TriggerBindingSnapshot, TriggerBindingSource,
+    TriggerBindingSpec, TriggerEvent, TriggerEventId, TriggerHandlerSpec, TriggerPredicateSpec,
+    TriggerRetryConfig,
 };
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
@@ -64,6 +65,15 @@ struct DlqEntryRecord {
 }
 
 pub(crate) fn register_trigger_builtins(vm: &mut Vm) {
+    vm.register_builtin("list_providers_native", |_args, _out| {
+        Ok(VmValue::List(Rc::new(
+            registered_provider_metadata()
+                .into_iter()
+                .map(|provider| value_from_serde(&provider))
+                .collect(),
+        )))
+    });
+
     vm.register_builtin("trigger_list", |_args, _out| {
         Ok(VmValue::List(Rc::new(
             snapshot_trigger_bindings()

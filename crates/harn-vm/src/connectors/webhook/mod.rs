@@ -29,8 +29,37 @@ mod tests;
 pub const WEBHOOK_PROVIDER_ID: &str = "webhook";
 const DEFAULT_EVENT_KIND: &str = "webhook";
 
-pub struct GenericWebhookConnector {
+#[derive(Clone, Debug)]
+pub(crate) struct WebhookProviderProfile {
     provider_id: ProviderId,
+    payload_schema_name: String,
+    default_signature_variant: WebhookSignatureVariant,
+}
+
+impl WebhookProviderProfile {
+    pub(crate) fn webhook() -> Self {
+        Self::new(
+            ProviderId::from(WEBHOOK_PROVIDER_ID),
+            "GenericWebhookPayload",
+            WebhookSignatureVariant::Standard,
+        )
+    }
+
+    pub(crate) fn new(
+        provider_id: ProviderId,
+        payload_schema_name: impl Into<String>,
+        default_signature_variant: WebhookSignatureVariant,
+    ) -> Self {
+        Self {
+            provider_id,
+            payload_schema_name: payload_schema_name.into(),
+            default_signature_variant,
+        }
+    }
+}
+
+pub struct GenericWebhookConnector {
+    profile: WebhookProviderProfile,
     kinds: Vec<TriggerKind>,
     client: Arc<GenericWebhookClient>,
     state: RwLock<ConnectorState>,
@@ -67,8 +96,12 @@ impl ConnectorClient for GenericWebhookClient {
 
 impl GenericWebhookConnector {
     pub fn new() -> Self {
+        Self::with_profile(WebhookProviderProfile::webhook())
+    }
+
+    pub(crate) fn with_profile(profile: WebhookProviderProfile) -> Self {
         Self {
-            provider_id: ProviderId::from(WEBHOOK_PROVIDER_ID),
+            profile,
             kinds: vec![TriggerKind::from("webhook")],
             client: Arc::new(GenericWebhookClient),
             state: RwLock::new(ConnectorState::default()),
@@ -123,7 +156,7 @@ impl Default for GenericWebhookConnector {
 #[async_trait]
 impl Connector for GenericWebhookConnector {
     fn provider_id(&self) -> &ProviderId {
-        &self.provider_id
+        &self.profile.provider_id
     }
 
     fn kinds(&self) -> &[TriggerKind] {
@@ -145,7 +178,10 @@ impl Connector for GenericWebhookConnector {
         let mut configured = HashMap::new();
         let mut paths = BTreeSet::new();
         for binding in bindings {
-            let activated = ActivatedWebhookBinding::from_binding(binding)?;
+            let activated = ActivatedWebhookBinding::from_binding(
+                binding,
+                self.profile.default_signature_variant,
+            )?;
             if let Some(path) = &activated.path {
                 if !paths.insert(path.clone()) {
                     return Err(ConnectorError::Activation(format!(
@@ -161,7 +197,7 @@ impl Connector for GenericWebhookConnector {
             .expect("webhook connector state poisoned")
             .bindings = configured;
         Ok(ActivationHandle::new(
-            self.provider_id.clone(),
+            self.provider_id().clone(),
             bindings.len(),
         ))
     }
@@ -169,7 +205,7 @@ impl Connector for GenericWebhookConnector {
     fn normalize_inbound(&self, raw: RawInbound) -> Result<TriggerEvent, ConnectorError> {
         let ctx = self.ctx()?;
         let binding = self.binding_for_raw(&raw)?;
-        let provider = self.provider_id.clone();
+        let provider = self.profile.provider_id.clone();
         let received_at = raw.received_at;
         let effective_headers = effective_headers(&raw.headers, binding.source.as_deref());
         let secret = load_secret(&ctx, &binding.signing_secret)?;
@@ -224,7 +260,7 @@ impl Connector for GenericWebhookConnector {
     }
 
     fn payload_schema(&self) -> ProviderPayloadSchema {
-        ProviderPayloadSchema::named("GenericWebhookPayload")
+        ProviderPayloadSchema::named(self.profile.payload_schema_name.clone())
     }
 
     fn client(&self) -> Arc<dyn ConnectorClient> {
@@ -233,7 +269,10 @@ impl Connector for GenericWebhookConnector {
 }
 
 impl ActivatedWebhookBinding {
-    fn from_binding(binding: &TriggerBinding) -> Result<Self, ConnectorError> {
+    fn from_binding(
+        binding: &TriggerBinding,
+        default_signature_variant: WebhookSignatureVariant,
+    ) -> Result<Self, ConnectorError> {
         let config: WebhookBindingConfig =
             serde_json::from_value(binding.config.clone()).map_err(|error| {
                 ConnectorError::Activation(format!(
@@ -248,8 +287,10 @@ impl ActivatedWebhookBinding {
                     binding.binding_id
                 ))
             })?;
-        let signature_variant =
-            WebhookSignatureVariant::parse(config.webhook.signature_scheme.as_deref())?;
+        let signature_variant = match config.webhook.signature_scheme.as_deref() {
+            Some(raw) => WebhookSignatureVariant::parse(Some(raw))?,
+            None => default_signature_variant,
+        };
         let timestamp_tolerance = match config.webhook.timestamp_tolerance_secs {
             Some(seconds) if seconds < 0 => {
                 return Err(ConnectorError::Activation(format!(

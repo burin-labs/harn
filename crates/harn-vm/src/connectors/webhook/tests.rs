@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use serde_json::json;
 use time::OffsetDateTime;
 
-use super::{GenericWebhookConnector, WebhookSignatureVariant};
+use super::{GenericWebhookConnector, WebhookProviderProfile, WebhookSignatureVariant};
 use crate::connectors::{
     Connector, ConnectorCtx, ConnectorError, ConnectorRegistry, InboxIndex, MetricsRegistry,
     RateLimiterFactory, RawInbound, TriggerBinding,
@@ -76,11 +76,20 @@ struct TestHarness {
 
 impl TestHarness {
     async fn new(binding: TriggerBinding, secret: &str) -> Self {
+        Self::with_connector(binding, "webhook", secret, GenericWebhookConnector::new()).await
+    }
+
+    async fn with_connector(
+        binding: TriggerBinding,
+        namespace: &str,
+        secret: &str,
+        mut connector: GenericWebhookConnector,
+    ) -> Self {
         let log = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(32)));
         let secrets = Arc::new(StaticSecretProvider::new(
-            "webhook",
+            namespace,
             BTreeMap::from([(
-                SecretId::new("webhook", "test-signing-secret"),
+                SecretId::new(namespace, "test-signing-secret"),
                 secret.to_string(),
             )]),
         ));
@@ -92,7 +101,6 @@ impl TestHarness {
             rate_limiter: Arc::new(RateLimiterFactory::default()),
         };
 
-        let mut connector = GenericWebhookConnector::new();
         connector.init(ctx).await.unwrap();
         connector.activate(&[binding]).await.unwrap();
 
@@ -379,11 +387,57 @@ async fn normalize_inbound_dedupes_on_binding_delivery_key() {
     assert!(matches!(duplicate, ConnectorError::DuplicateDelivery(_)));
 }
 
+#[tokio::test]
+async fn github_profile_normalizes_events_under_the_github_provider() {
+    let mut binding = TriggerBinding::new(ProviderId::from("github"), "webhook", "github.test");
+    binding.config = json!({
+        "match": { "path": "/hooks/github" },
+        "secrets": { "signing_secret": "github/test-signing-secret" },
+        "webhook": {}
+    });
+
+    let harness = TestHarness::with_connector(
+        binding,
+        "github",
+        "It's a Secret to Everybody",
+        GenericWebhookConnector::with_profile(WebhookProviderProfile::new(
+            ProviderId::from("github"),
+            "GitHubEventPayload",
+            WebhookSignatureVariant::GitHub,
+        )),
+    )
+    .await;
+
+    let event = harness
+        .connector
+        .normalize_inbound(raw_inbound(
+            BTreeMap::from([
+                (
+                    "X-Hub-Signature-256".to_string(),
+                    "sha256=757107ea0eb2509fc211221cce984b8a37570b6d7586c22c46f4379c8b043e17"
+                        .to_string(),
+                ),
+                ("X-GitHub-Delivery".to_string(), "delivery-123".to_string()),
+                ("X-GitHub-Event".to_string(), "ping".to_string()),
+                ("Content-Type".to_string(), "application/json".to_string()),
+            ]),
+            b"Hello, World!",
+            OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap(),
+        ))
+        .unwrap();
+
+    assert_eq!(event.provider.as_str(), "github");
+    assert_eq!(event.provider_payload.provider(), "github");
+}
+
 #[test]
-fn connector_registry_default_lists_generic_webhook_connector() {
+fn connector_registry_default_lists_github_and_webhook_connectors() {
     let registry = ConnectorRegistry::default();
-    assert!(registry
-        .list()
+    let providers = registry.list();
+    assert!(providers
+        .iter()
+        .any(|provider| provider.as_str() == "github"));
+    assert!(providers
         .iter()
         .any(|provider| provider.as_str() == "webhook"));
 }

@@ -18,7 +18,10 @@ use tokio::sync::Mutex as AsyncMutex;
 
 use crate::event_log::AnyEventLog;
 use crate::secrets::SecretProvider;
-use crate::triggers::{ProviderId, TenantId, TriggerEvent};
+use crate::triggers::{
+    registered_provider_metadata, ProviderId, ProviderMetadata, ProviderRuntimeMetadata, TenantId,
+    TriggerEvent,
+};
 
 pub mod cron;
 pub mod hmac;
@@ -32,6 +35,7 @@ pub use hmac::{
     DEFAULT_STANDARD_WEBHOOKS_SIGNATURE_HEADER, DEFAULT_STANDARD_WEBHOOKS_TIMESTAMP_HEADER,
     DEFAULT_STRIPE_SIGNATURE_HEADER, SIGNATURE_VERIFY_AUDIT_TOPIC,
 };
+use webhook::WebhookProviderProfile;
 pub use webhook::{GenericWebhookConnector, WebhookSignatureVariant};
 
 /// Shared owned handle to a connector instance registered with the runtime.
@@ -517,9 +521,11 @@ impl ConnectorRegistry {
 
     pub fn with_defaults() -> Self {
         let mut registry = Self::empty();
-        registry
-            .register(Box::new(GenericWebhookConnector::new()))
-            .expect("default connector registration should not fail");
+        for provider in registered_provider_metadata() {
+            registry
+                .register(default_connector_for_provider(&provider))
+                .expect("default connector registration should not fail");
+        }
         registry
     }
 
@@ -561,6 +567,104 @@ impl ConnectorRegistry {
 impl Default for ConnectorRegistry {
     fn default() -> Self {
         Self::with_defaults()
+    }
+}
+
+fn default_connector_for_provider(provider: &ProviderMetadata) -> Box<dyn Connector> {
+    match &provider.runtime {
+        ProviderRuntimeMetadata::Builtin {
+            connector,
+            default_signature_variant,
+        } => match connector.as_str() {
+            "cron" => Box::new(CronConnector::new()),
+            "webhook" => {
+                let variant = WebhookSignatureVariant::parse(default_signature_variant.as_deref())
+                    .expect("catalog webhook signature variant must be valid");
+                Box::new(GenericWebhookConnector::with_profile(
+                    WebhookProviderProfile::new(
+                        ProviderId::from(provider.provider.clone()),
+                        provider.schema_name.clone(),
+                        variant,
+                    ),
+                ))
+            }
+            _ => Box::new(PlaceholderConnector::from_metadata(provider)),
+        },
+        ProviderRuntimeMetadata::Placeholder => {
+            Box::new(PlaceholderConnector::from_metadata(provider))
+        }
+    }
+}
+
+struct PlaceholderConnector {
+    provider_id: ProviderId,
+    kinds: Vec<TriggerKind>,
+    schema_name: String,
+}
+
+impl PlaceholderConnector {
+    fn from_metadata(metadata: &ProviderMetadata) -> Self {
+        Self {
+            provider_id: ProviderId::from(metadata.provider.clone()),
+            kinds: metadata
+                .kinds
+                .iter()
+                .cloned()
+                .map(TriggerKind::from)
+                .collect(),
+            schema_name: metadata.schema_name.clone(),
+        }
+    }
+}
+
+struct PlaceholderClient;
+
+#[async_trait]
+impl ConnectorClient for PlaceholderClient {
+    async fn call(&self, method: &str, _args: JsonValue) -> Result<JsonValue, ClientError> {
+        Err(ClientError::Other(format!(
+            "connector client method '{method}' is not implemented for this provider"
+        )))
+    }
+}
+
+#[async_trait]
+impl Connector for PlaceholderConnector {
+    fn provider_id(&self) -> &ProviderId {
+        &self.provider_id
+    }
+
+    fn kinds(&self) -> &[TriggerKind] {
+        &self.kinds
+    }
+
+    async fn init(&mut self, _ctx: ConnectorCtx) -> Result<(), ConnectorError> {
+        Ok(())
+    }
+
+    async fn activate(
+        &self,
+        bindings: &[TriggerBinding],
+    ) -> Result<ActivationHandle, ConnectorError> {
+        Ok(ActivationHandle::new(
+            self.provider_id.clone(),
+            bindings.len(),
+        ))
+    }
+
+    fn normalize_inbound(&self, _raw: RawInbound) -> Result<TriggerEvent, ConnectorError> {
+        Err(ConnectorError::Unsupported(format!(
+            "provider '{}' is cataloged but does not have a concrete inbound connector yet",
+            self.provider_id.as_str()
+        )))
+    }
+
+    fn payload_schema(&self) -> ProviderPayloadSchema {
+        ProviderPayloadSchema::named(self.schema_name.clone())
+    }
+
+    fn client(&self) -> Arc<dyn ConnectorClient> {
+        Arc::new(PlaceholderClient)
     }
 }
 
@@ -716,8 +820,11 @@ mod tests {
     }
 
     #[test]
-    fn connector_registry_lists_builtin_webhook_connector() {
+    fn connector_registry_lists_catalog_providers() {
         let registry = ConnectorRegistry::default();
-        assert_eq!(registry.list(), vec![ProviderId::from("webhook")]);
+        let providers = registry.list();
+        assert!(providers.contains(&ProviderId::from("cron")));
+        assert!(providers.contains(&ProviderId::from("github")));
+        assert!(providers.contains(&ProviderId::from("webhook")));
     }
 }

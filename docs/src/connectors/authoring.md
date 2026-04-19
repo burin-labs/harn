@@ -12,6 +12,23 @@ it depends on today already live in `harn-vm`:
 If the connector ecosystem grows large enough, the module can be extracted into
 a dedicated crate later without changing the core trait contract.
 
+## Provider catalog
+
+Connectors should treat the runtime `ProviderCatalog` as the authoritative
+discovery surface for provider metadata. Each provider entry carries:
+
+- the normalized payload schema name exposed through `std/triggers`
+- supported trigger kinds such as `webhook` or `cron`
+- outbound method names (empty today for the built-in providers)
+- required secrets, including the namespace each secret must live under
+- signature verification strategy metadata
+- runtime connector metadata indicating whether the provider is backed by a
+  built-in connector or a placeholder implementation
+
+Harn also exposes that same catalog to scripts through
+`import "std/triggers"` and `list_providers()`, so connector metadata has one
+runtime-facing source instead of separate registry and docs tables.
+
 ## Implementing a connector
 
 A connector implementation owns two concerns:
@@ -120,9 +137,8 @@ enforce per-installation or per-tenant quotas.
 
 This foundation PR does not define:
 
-- concrete provider connectors
-- stdlib bindings that expose connector clients to Harn code
+- outbound stdlib client wrappers for connector-specific APIs
 - third-party manifest ABI for external connector packages
 
-Those land in follow-up tickets once the shared trait, registry, audit, and
-verification primitives are in place.
+Those land in follow-up tickets once the shared trait, provider catalog,
+runtime registry, audit, and verification primitives are in place.
