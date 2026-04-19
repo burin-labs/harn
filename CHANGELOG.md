@@ -54,8 +54,16 @@ granular archaeology.
   manifest triggers, activates placeholder connectors per manifest
   provider, writes an orchestrator state snapshot, and idles until
   SIGTERM for scaffolded graceful shutdown. Multi-tenant remains an
-  explicit `O-12 #190` stub; the HTTP listener remains deferred to
-  `O-02 #179`.
+  explicit `O-12 #190` stub.
+- **Axum-based orchestrator HTTP listener with TLS, origin guards,
+  and body limits (#179).** `harn orchestrator serve` now binds a
+  real Axum listener on `--bind`, optionally serves HTTPS with
+  `--cert` + `--key`, enforces `[orchestrator].allowed_origins`
+  and `[orchestrator].max_body_bytes`, registers HTTP routes for
+  manifest `webhook` and `a2a-push` triggers, normalizes inbound
+  deliveries into `TriggerEvent` envelopes, appends accepted
+  payloads onto `orchestrator.triggers.pending`, and drains
+  in-flight requests during shutdown.
 - **DST-safe cron connector with durable tick state and catch-up modes
   (#210, closes #169).** `harn_vm::connectors::CronConnector` now schedules
   named IANA time zones through `croner` + `chrono-tz`, persists the

@@ -65,6 +65,18 @@ pub struct Manifest {
     /// dispatcher work.
     #[serde(default)]
     pub triggers: Vec<TriggerManifestEntry>,
+    /// `[orchestrator]` table — listener-level controls shared by
+    /// manifest-driven ingress surfaces.
+    #[serde(default)]
+    pub orchestrator: OrchestratorConfig,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct OrchestratorConfig {
+    #[serde(default, alias = "allowed-origins")]
+    pub allowed_origins: Vec<String>,
+    #[serde(default, alias = "max-body-bytes")]
+    pub max_body_bytes: Option<usize>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1345,7 +1357,9 @@ fn trigger_kind_label(kind: TriggerKind) -> &'static str {
     }
 }
 
-fn manifest_trigger_binding_spec(trigger: CollectedManifestTrigger) -> harn_vm::TriggerBindingSpec {
+pub fn manifest_trigger_binding_spec(
+    trigger: CollectedManifestTrigger,
+) -> harn_vm::TriggerBindingSpec {
     let config = trigger.config;
     let (handler, handler_descriptor) = match trigger.handler {
         CollectedTriggerHandler::Local { reference, closure } => (
@@ -1447,8 +1461,15 @@ pub async fn install_manifest_triggers(
     extensions: &RuntimeExtensions,
 ) -> Result<(), String> {
     let collected = collect_manifest_triggers(vm, extensions).await?;
+    install_collected_manifest_triggers(&collected).await
+}
+
+pub async fn install_collected_manifest_triggers(
+    collected: &[CollectedManifestTrigger],
+) -> Result<(), String> {
     let bindings = collected
-        .into_iter()
+        .iter()
+        .cloned()
         .map(manifest_trigger_binding_spec)
         .collect();
     harn_vm::install_manifest_triggers(bindings)

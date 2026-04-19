@@ -488,6 +488,12 @@ pub(crate) struct OrchestratorServeArgs {
     /// Socket address the future HTTP listener will bind to.
     #[arg(long, default_value = "127.0.0.1:8080", value_name = "ADDR")]
     pub bind: SocketAddr,
+    /// PEM-encoded certificate chain for HTTPS termination.
+    #[arg(long, value_name = "PATH")]
+    pub cert: Option<PathBuf>,
+    /// PEM-encoded private key for HTTPS termination.
+    #[arg(long, value_name = "PATH")]
+    pub key: Option<PathBuf>,
     /// Runtime role to boot. Multi-tenant is a stub for now.
     #[arg(long, value_enum, default_value_t = crate::commands::orchestrator::role::OrchestratorRole::SingleTenant)]
     pub role: crate::commands::orchestrator::role::OrchestratorRole,
@@ -835,6 +841,10 @@ mod tests {
             "state/orchestrator",
             "--bind",
             "0.0.0.0:8080",
+            "--cert",
+            "tls/cert.pem",
+            "--key",
+            "tls/key.pem",
             "--role",
             "single-tenant",
         ]);
@@ -848,6 +858,8 @@ mod tests {
         assert_eq!(serve.config, PathBuf::from("workspace/harn.toml"));
         assert_eq!(serve.state_dir, PathBuf::from("state/orchestrator"));
         assert_eq!(serve.bind.to_string(), "0.0.0.0:8080");
+        assert_eq!(serve.cert, Some(PathBuf::from("tls/cert.pem")));
+        assert_eq!(serve.key, Some(PathBuf::from("tls/key.pem")));
         assert_eq!(
             serve.role,
             crate::commands::orchestrator::role::OrchestratorRole::SingleTenant

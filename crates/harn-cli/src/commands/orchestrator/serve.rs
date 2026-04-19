@@ -11,19 +11,22 @@ use time::OffsetDateTime;
 
 use harn_vm::event_log::EventLog;
 
+use super::listener::{ListenerConfig, ListenerRuntime, RouteConfig, TriggerMetricSnapshot};
+use super::origin_guard::OriginAllowList;
+use super::role::OrchestratorRole;
+use super::tls::TlsFiles;
 use crate::cli::OrchestratorServeArgs;
-use crate::commands::orchestrator::role::OrchestratorRole;
 use crate::package::{
     self, CollectedManifestTrigger, CollectedTriggerHandler, Manifest, ResolvedTriggerConfig,
 };
 
-const HTTP_LISTENER_STUB: &str = "HTTP listener not yet implemented (see O-02 #179)";
 const LIFECYCLE_TOPIC: &str = "orchestrator.lifecycle";
 const STATE_SNAPSHOT_FILE: &str = "orchestrator-state.json";
 
 pub(crate) async fn run(args: OrchestratorServeArgs) -> Result<(), String> {
     harn_vm::reset_thread_local_state();
 
+    let tls = TlsFiles::from_args(args.cert.clone(), args.key.clone())?;
     let config_path = absolutize_from_cwd(&args.config)?;
     let (manifest, manifest_dir) = load_manifest(&config_path)?;
     let state_dir = absolutize_from_cwd(&args.state_dir)?;
@@ -86,12 +89,15 @@ pub(crate) async fn run(args: OrchestratorServeArgs) -> Result<(), String> {
     let collected_triggers = package::collect_manifest_triggers(&mut vm, &extensions)
         .await
         .map_err(|error| format!("failed to collect manifest triggers: {error}"))?;
+    package::install_collected_manifest_triggers(&collected_triggers).await?;
     eprintln!(
         "[harn] registered triggers ({}): {}",
         collected_triggers.len(),
         format_trigger_summary(&collected_triggers)
     );
 
+    let binding_versions = live_manifest_binding_versions();
+    let route_configs = build_route_configs(&collected_triggers, &binding_versions)?;
     let connector_runtime = initialize_connectors(
         &collected_triggers,
         event_log.clone(),
@@ -108,12 +114,28 @@ pub(crate) async fn run(args: OrchestratorServeArgs) -> Result<(), String> {
         format_activation_summary(&connector_runtime.activations)
     );
 
+    let listener = ListenerRuntime::start(ListenerConfig {
+        bind: args.bind,
+        tls,
+        event_log: event_log.clone(),
+        secrets: secret_provider.clone(),
+        allowed_origins: OriginAllowList::from_manifest(&manifest.orchestrator.allowed_origins),
+        max_body_bytes: ListenerConfig::max_body_bytes_or_default(
+            manifest.orchestrator.max_body_bytes,
+        ),
+        routes: route_configs,
+    })
+    .await?;
+    let local_bind = listener.local_addr();
+    let listener_metrics = listener.trigger_metrics();
+    eprintln!("[harn] HTTP listener ready on {}", listener.url());
+
     write_state_snapshot(
         &state_dir.join(STATE_SNAPSHOT_FILE),
         &ServeStateSnapshot {
             status: "running".to_string(),
             role: args.role.as_str().to_string(),
-            bind: args.bind.to_string(),
+            bind: local_bind.to_string(),
             manifest_path: config_path.display().to_string(),
             state_dir: state_dir.display().to_string(),
             started_at: startup_started_at.clone(),
@@ -124,15 +146,7 @@ pub(crate) async fn run(args: OrchestratorServeArgs) -> Result<(), String> {
                 .location
                 .as_ref()
                 .map(|path| path.display().to_string()),
-            triggers: collected_triggers
-                .iter()
-                .map(|trigger| TriggerStateSnapshot {
-                    id: trigger.config.id.clone(),
-                    provider: trigger.config.provider.as_str().to_string(),
-                    kind: trigger_kind_name(trigger.config.kind).to_string(),
-                    handler: handler_kind(&trigger.handler).to_string(),
-                })
-                .collect(),
+            triggers: trigger_state_snapshots(&collected_triggers, &listener_metrics),
             connectors: connector_runtime.providers.clone(),
             activations: connector_runtime
                 .activations
@@ -149,31 +163,34 @@ pub(crate) async fn run(args: OrchestratorServeArgs) -> Result<(), String> {
         &event_log,
         "startup",
         json!({
-            "bind": args.bind.to_string(),
+            "bind": local_bind.to_string(),
             "manifest": config_path.display().to_string(),
             "role": args.role.as_str(),
             "state_dir": state_dir.display().to_string(),
             "trigger_count": collected_triggers.len(),
             "connector_count": connector_runtime.providers.len(),
+            "tls_enabled": listener.scheme() == "https",
         }),
     )
     .await?;
 
-    eprintln!("[harn] {HTTP_LISTENER_STUB}; requested bind {}", args.bind);
     wait_for_termination_signal().await?;
 
-    graceful_shutdown(GracefulShutdownCtx {
-        role: args.role,
-        bind: args.bind,
-        config_path: &config_path,
-        state_dir: &state_dir,
-        startup_started_at: &startup_started_at,
-        event_log: &event_log,
-        event_log_description: &event_log_description,
-        secret_chain_display: &secret_chain_display,
-        triggers: &collected_triggers,
-        connectors: &connector_runtime,
-    })
+    graceful_shutdown(
+        GracefulShutdownCtx {
+            role: args.role,
+            bind: local_bind,
+            config_path: &config_path,
+            state_dir: &state_dir,
+            startup_started_at: &startup_started_at,
+            event_log: &event_log,
+            event_log_description: &event_log_description,
+            secret_chain_display: &secret_chain_display,
+            triggers: &collected_triggers,
+            connectors: &connector_runtime,
+        },
+        listener,
+    )
     .await
 }
 
@@ -212,9 +229,13 @@ async fn initialize_connectors(
     let mut providers = Vec::new();
     for (provider, kinds) in grouped_kinds {
         let provider_name = provider.as_str().to_string();
-        let connector = PlaceholderConnector::new(provider.clone(), kinds);
+        let connector: Box<dyn harn_vm::Connector> = if provider.as_str() == "cron" {
+            Box::new(harn_vm::CronConnector::new())
+        } else {
+            Box::new(PlaceholderConnector::new(provider.clone(), kinds))
+        };
         registry
-            .register(Box::new(connector))
+            .register(connector)
             .map_err(|error| error.to_string())?;
         let handle = registry
             .get(&provider)
@@ -241,13 +262,105 @@ async fn initialize_connectors(
 }
 
 fn trigger_binding_for(config: &ResolvedTriggerConfig) -> harn_vm::TriggerBinding {
-    harn_vm::TriggerBinding {
-        provider: config.provider.clone(),
-        kind: harn_vm::TriggerKind::from(trigger_kind_name(config.kind)),
-        binding_id: config.id.clone(),
-        dedupe_key: None,
-        config: JsonValue::Null,
+    let mut binding = harn_vm::TriggerBinding::new(
+        config.provider.clone(),
+        trigger_kind_name(config.kind),
+        config.id.clone(),
+    );
+    let mut binding_config = serde_json::Map::new();
+    binding_config.insert(
+        "match".to_string(),
+        serde_json::to_value(&config.match_).unwrap_or(JsonValue::Null),
+    );
+    binding_config.insert(
+        "secrets".to_string(),
+        serde_json::to_value(&config.secrets).unwrap_or(JsonValue::Null),
+    );
+    for (key, value) in &config.kind_specific {
+        binding_config.insert(
+            key.clone(),
+            serde_json::to_value(value).unwrap_or(JsonValue::Null),
+        );
     }
+    binding.config = JsonValue::Object(binding_config);
+    binding
+}
+
+fn build_route_configs(
+    triggers: &[CollectedManifestTrigger],
+    binding_versions: &BTreeMap<String, u32>,
+) -> Result<Vec<RouteConfig>, String> {
+    let mut routes = Vec::new();
+    for trigger in triggers {
+        let Some(binding_version) = binding_versions.get(&trigger.config.id).copied() else {
+            return Err(format!(
+                "trigger registry is missing active manifest binding '{}'",
+                trigger.config.id
+            ));
+        };
+        if let Some(route) = RouteConfig::from_trigger(trigger, binding_version)? {
+            routes.push(route);
+        }
+    }
+    Ok(routes)
+}
+
+fn live_manifest_binding_versions() -> BTreeMap<String, u32> {
+    let mut versions = BTreeMap::new();
+    for binding in harn_vm::snapshot_trigger_bindings() {
+        if binding.source != harn_vm::TriggerBindingSource::Manifest {
+            continue;
+        }
+        if binding.state == harn_vm::TriggerState::Terminated {
+            continue;
+        }
+        versions
+            .entry(binding.id)
+            .and_modify(|current: &mut u32| *current = (*current).max(binding.version))
+            .or_insert(binding.version);
+    }
+    versions
+}
+
+fn trigger_state_snapshots(
+    triggers: &[CollectedManifestTrigger],
+    listener_metrics: &BTreeMap<String, TriggerMetricSnapshot>,
+) -> Vec<TriggerStateSnapshot> {
+    let bindings_by_id = harn_vm::snapshot_trigger_bindings()
+        .into_iter()
+        .filter(|binding| binding.source == harn_vm::TriggerBindingSource::Manifest)
+        .fold(
+            BTreeMap::<String, harn_vm::TriggerBindingSnapshot>::new(),
+            |mut acc, binding| {
+                match acc.get(&binding.id) {
+                    Some(current) if current.version >= binding.version => {}
+                    _ => {
+                        acc.insert(binding.id.clone(), binding);
+                    }
+                }
+                acc
+            },
+        );
+
+    triggers
+        .iter()
+        .map(|trigger| {
+            let runtime = bindings_by_id.get(&trigger.config.id);
+            let metrics = listener_metrics.get(&trigger.config.id);
+            TriggerStateSnapshot {
+                id: trigger.config.id.clone(),
+                provider: trigger.config.provider.as_str().to_string(),
+                kind: trigger_kind_name(trigger.config.kind).to_string(),
+                handler: handler_kind(&trigger.handler).to_string(),
+                version: runtime.map(|binding| binding.version),
+                state: runtime.map(|binding| binding.state.as_str().to_string()),
+                received: metrics.map(|value| value.received).unwrap_or(0),
+                dispatched: metrics.map(|value| value.dispatched).unwrap_or(0),
+                failed: metrics.map(|value| value.failed).unwrap_or(0),
+                in_flight: metrics.map(|value| value.in_flight).unwrap_or(0),
+            }
+        })
+        .collect()
 }
 
 fn format_trigger_summary(triggers: &[CollectedManifestTrigger]) -> String {
@@ -305,9 +418,19 @@ fn trigger_kind_name(kind: crate::package::TriggerKind) -> &'static str {
     }
 }
 
-async fn graceful_shutdown(ctx: GracefulShutdownCtx<'_>) -> Result<(), String> {
+async fn graceful_shutdown(
+    ctx: GracefulShutdownCtx<'_>,
+    listener: ListenerRuntime,
+) -> Result<(), String> {
     eprintln!("[harn] signal received, starting graceful shutdown...");
-    eprintln!("[harn] draining in-flight events (scaffold): 0");
+    // TODO(O-06): replace this listener-local scan with the shared
+    // orchestrator drain coordinator when that lands on the main branch.
+    let drained_events = listener
+        .trigger_metrics()
+        .into_values()
+        .map(|metrics| metrics.in_flight)
+        .sum::<u64>();
+    let listener_metrics = listener.shutdown().await?;
 
     let stopped_at = now_rfc3339()?;
     append_lifecycle_event(
@@ -315,7 +438,7 @@ async fn graceful_shutdown(ctx: GracefulShutdownCtx<'_>) -> Result<(), String> {
         "shutdown",
         json!({
             "bind": ctx.bind.to_string(),
-            "drained_events": 0,
+            "drained_events": drained_events,
             "role": ctx.role.as_str(),
             "status": "stopped",
         }),
@@ -339,16 +462,7 @@ async fn graceful_shutdown(ctx: GracefulShutdownCtx<'_>) -> Result<(), String> {
                 .location
                 .as_ref()
                 .map(|path| path.display().to_string()),
-            triggers: ctx
-                .triggers
-                .iter()
-                .map(|trigger| TriggerStateSnapshot {
-                    id: trigger.config.id.clone(),
-                    provider: trigger.config.provider.as_str().to_string(),
-                    kind: trigger_kind_name(trigger.config.kind).to_string(),
-                    handler: handler_kind(&trigger.handler).to_string(),
-                })
-                .collect(),
+            triggers: trigger_state_snapshots(ctx.triggers, &listener_metrics),
             connectors: ctx.connectors.providers.clone(),
             activations: ctx
                 .connectors
@@ -371,8 +485,6 @@ async fn append_lifecycle_event(
     kind: &str,
     payload: JsonValue,
 ) -> Result<(), String> {
-    use harn_vm::event_log::EventLog;
-
     let topic =
         harn_vm::event_log::Topic::new(LIFECYCLE_TOPIC).map_err(|error| error.to_string())?;
     log.append(&topic, harn_vm::event_log::LogEvent::new(kind, payload))
@@ -509,6 +621,12 @@ struct TriggerStateSnapshot {
     provider: String,
     kind: String,
     handler: String,
+    version: Option<u32>,
+    state: Option<String>,
+    received: u64,
+    dispatched: u64,
+    failed: u64,
+    in_flight: u64,
 }
 
 #[derive(Debug, Serialize)]
