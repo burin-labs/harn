@@ -140,6 +140,9 @@ fn json_to_vm(jv: &serde_json::Value) -> VmValue {
 /// on first mutation. In bridge mode, register these **before** bridge
 /// builtins so the host can override them.
 pub fn register_store_builtins(vm: &mut Vm, base_dir: &Path) {
+    if let Err(error) = crate::event_log::install_default_for_base_dir(base_dir) {
+        crate::events::log_warn("event_log.init", &error.to_string());
+    }
     let state = Rc::new(RefCell::new(StoreState::new(base_dir)));
 
     let s = Rc::clone(&state);

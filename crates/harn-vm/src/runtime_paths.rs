@@ -52,6 +52,14 @@ pub fn metadata_dir(base_dir: &Path) -> PathBuf {
     state_root(base_dir).join("metadata")
 }
 
+pub fn event_log_dir(base_dir: &Path) -> PathBuf {
+    state_root(base_dir).join("events")
+}
+
+pub fn event_log_sqlite_path(base_dir: &Path) -> PathBuf {
+    state_root(base_dir).join("events.sqlite")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -62,5 +70,10 @@ mod tests {
         assert_eq!(state_root(base), base.join(".harn"));
         assert_eq!(run_root(base), base.join(".harn-runs"));
         assert_eq!(worktree_root(base), base.join(".harn").join("worktrees"));
+        assert_eq!(event_log_dir(base), base.join(".harn").join("events"));
+        assert_eq!(
+            event_log_sqlite_path(base),
+            base.join(".harn").join("events.sqlite")
+        );
     }
 }

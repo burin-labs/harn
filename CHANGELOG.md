@@ -18,6 +18,14 @@ granular archaeology.
   shared keyring provider, and `harn doctor` reports the active
   secret-provider chain plus per-provider health for env/keyring
   setups. Foundation for upcoming connector + orchestrator work.
+- **Generalized `EventLog` primitive (#195, closes #153).** New
+  `harn_vm::event_log` module provides a reusable append-only event
+  log with pluggable backends (Memory, File/JSONL, SQLite) — the
+  substrate for durable trigger state, connector inbox/outbox
+  dedupe, and the orchestrator's event-sourced core. Existing
+  session transcript + per-session agent-event sinks migrate onto
+  the shared abstraction, `harn doctor` surfaces the active backend
+  and on-disk footprint, and SQLite is the default when persisting.
 
 ## v0.7.22
 

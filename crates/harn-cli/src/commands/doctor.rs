@@ -47,6 +47,7 @@ pub(crate) async fn run_doctor(network: bool) {
     checks.extend(check_provider_selection());
     checks.extend(check_secret_providers());
     checks.extend(check_manifest());
+    checks.extend(check_event_log());
     checks.extend(check_metadata_cache());
     checks.extend(check_skills());
     checks.extend(check_provider_health(network).await);
@@ -404,6 +405,33 @@ fn check_metadata_cache() -> Vec<DoctorCheck> {
     }]
 }
 
+fn check_event_log() -> Vec<DoctorCheck> {
+    let cwd = std::env::current_dir().unwrap_or_default();
+    match harn_vm::event_log::describe_for_base_dir(&cwd) {
+        Ok(description) => {
+            let detail = match description.location {
+                Some(path) => format!(
+                    "{} ({}, {} B)",
+                    description.backend,
+                    path.display(),
+                    description.size_bytes.unwrap_or(0)
+                ),
+                None => format!("{} (in-memory)", description.backend),
+            };
+            vec![DoctorCheck {
+                status: DoctorStatus::Ok,
+                label: "event log".to_string(),
+                detail,
+            }]
+        }
+        Err(error) => vec![DoctorCheck {
+            status: DoctorStatus::Fail,
+            label: "event log".to_string(),
+            detail: error.to_string(),
+        }],
+    }
+}
+
 async fn check_provider_health(network: bool) -> Vec<DoctorCheck> {
     let mut providers = llm_config::provider_names();
     providers.sort();
@@ -614,7 +642,7 @@ fn read_manifest(path: &Path) -> Result<package::Manifest, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_healthcheck_url, find_nearest_manifest, read_manifest};
+    use super::{build_healthcheck_url, check_event_log, find_nearest_manifest, read_manifest};
     use harn_vm::llm_config::{AuthEnv, HealthcheckDef, ProviderDef};
 
     #[test]
@@ -671,5 +699,18 @@ mod tests {
             panic!("expected multiple auth envs");
         };
         assert_eq!(names, vec!["FIRST".to_string(), "SECOND".to_string()]);
+    }
+
+    #[test]
+    fn event_log_check_reports_backend_and_location() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let previous = std::env::current_dir().expect("cwd");
+        std::env::set_current_dir(dir.path()).expect("set current dir");
+        let checks = check_event_log();
+        std::env::set_current_dir(previous).expect("restore current dir");
+        assert_eq!(checks.len(), 1);
+        assert_eq!(checks[0].status, super::DoctorStatus::Ok);
+        assert!(checks[0].detail.contains("sqlite"));
+        assert!(checks[0].detail.contains(".harn/events.sqlite"));
     }
 }

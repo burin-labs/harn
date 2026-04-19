@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
+use crate::event_log::EventLog;
 use serde::{Deserialize, Serialize};
 
 use crate::value::{VmError, VmValue};
@@ -136,6 +137,7 @@ pub(crate) fn persist_snapshot(path: &str, snapshot: &DaemonSnapshot) -> Result<
         .map_err(|error| VmError::Runtime(format!("daemon snapshot write error: {error}")))?;
     std::fs::rename(&tmp, path_buf)
         .map_err(|error| VmError::Runtime(format!("daemon snapshot finalize error: {error}")))?;
+    append_daemon_state_event(path, "snapshot_persisted", &snapshot.clone().normalize());
     Ok(path.to_string())
 }
 
@@ -144,7 +146,9 @@ pub(crate) fn load_snapshot(path: &str) -> Result<DaemonSnapshot, VmError> {
         .map_err(|error| VmError::Runtime(format!("daemon snapshot read error: {error}")))?;
     let snapshot: DaemonSnapshot = serde_json::from_str(&content)
         .map_err(|error| VmError::Runtime(format!("daemon snapshot parse error: {error}")))?;
-    Ok(snapshot.normalize())
+    let snapshot = snapshot.normalize();
+    append_daemon_state_event(path, "snapshot_loaded", &snapshot);
+    Ok(snapshot)
 }
 
 pub(crate) fn parse_daemon_loop_config(
@@ -200,3 +204,28 @@ pub(crate) fn parse_daemon_loop_config(
 #[cfg(test)]
 #[path = "daemon_tests.rs"]
 mod tests;
+
+fn append_daemon_state_event(path: &str, kind: &str, snapshot: &DaemonSnapshot) {
+    let Some(log) = crate::event_log::active_event_log() else {
+        return;
+    };
+    let stem = Path::new(path)
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .map(crate::event_log::sanitize_topic_component)
+        .unwrap_or_else(|| "snapshot".to_string());
+    let Ok(topic) = crate::event_log::Topic::new(format!("daemon.{stem}.state")) else {
+        return;
+    };
+    let mut headers = BTreeMap::new();
+    headers.insert("path".to_string(), path.to_string());
+    let payload = serde_json::to_value(snapshot).unwrap_or(serde_json::Value::Null);
+    let event = crate::event_log::LogEvent::new(kind, payload).with_headers(headers);
+    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+        handle.spawn(async move {
+            let _ = log.append(&topic, event).await;
+        });
+    } else {
+        let _ = futures::executor::block_on(log.append(&topic, event));
+    }
+}

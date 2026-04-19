@@ -6,6 +6,7 @@ pub mod bridge;
 pub mod checkpoint;
 mod chunk;
 mod compiler;
+pub mod event_log;
 pub mod events;
 mod http;
 pub mod jsonrpc;
@@ -79,6 +80,7 @@ pub fn reset_thread_local_state() {
     llm::reset_llm_state();
     llm_config::clear_user_overrides();
     http::reset_http_state();
+    event_log::reset_active_event_log();
     stdlib::reset_stdlib_state();
     orchestration::clear_runtime_hooks();
     events::reset_event_sinks();

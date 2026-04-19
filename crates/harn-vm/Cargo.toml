@@ -34,6 +34,7 @@ futures = "0.3"
 httpdate = "1"
 ignore = "0.4"
 keyring = { version = "3", features = ["apple-native", "windows-native", "linux-native"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
 opentelemetry = { version = "0.31", optional = true }
 opentelemetry_sdk = { version = "0.31", optional = true, features = ["rt-tokio"] }
 opentelemetry-otlp = { version = "0.31", optional = true }

@@ -126,12 +126,12 @@ pub fn snapshot(id: &str) -> Option<VmValue> {
 
 /// Open a session, or create it if missing. Returns the resolved id.
 ///
-/// When the `HARN_EVENT_LOG_DIR` environment variable points at an
-/// existing (or creatable) directory, a [`JsonlEventSink`] is
-/// auto-registered against the newly-created session so the agent
-/// loop's AgentEvent stream persists to `event_log-<session_id>.jsonl`.
-/// Re-opening an existing session does not re-register — sinks are
-/// per-session, owned by the first opener.
+/// Newly-created sessions auto-register an event-log-backed sink when a
+/// generalized [`crate::event_log::EventLog`] has been installed for the
+/// current VM thread. For legacy env-driven workflows that still point
+/// `HARN_EVENT_LOG_DIR` at a directory, we preserve the older JSONL sink
+/// as a compatibility fallback. Re-opening an existing session does not
+/// re-register — sinks are per-session, owned by the first opener.
 pub fn open_or_create(id: Option<String>) -> String {
     let resolved = id.unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
     let mut was_new = false;
@@ -155,7 +155,7 @@ pub fn open_or_create(id: Option<String>) -> String {
         map.insert(resolved.clone(), SessionState::new(resolved.clone()));
     });
     if was_new {
-        try_register_jsonl_event_log(&resolved);
+        try_register_event_log(&resolved);
     }
     resolved
 }
@@ -201,11 +201,17 @@ pub fn child_ids(id: &str) -> Vec<String> {
     })
 }
 
-/// Auto-register a [`JsonlEventSink`] for a newly-created session
-/// when `HARN_EVENT_LOG_DIR` is set. Silent no-op when the env var
-/// is missing or the file can't be opened — a broken log sink must
-/// never prevent a session from starting.
-fn try_register_jsonl_event_log(session_id: &str) {
+/// Auto-register a persistent sink for a newly-created session.
+/// Silent no-op on failure — a broken observability sink must never
+/// prevent a session from starting.
+fn try_register_event_log(session_id: &str) {
+    if let Some(log) = crate::event_log::active_event_log() {
+        crate::agent_events::register_sink(
+            session_id,
+            crate::agent_events::EventLogSink::new(log, session_id),
+        );
+        return;
+    }
     let Ok(dir) = std::env::var("HARN_EVENT_LOG_DIR") else {
         return;
     };
@@ -645,6 +651,10 @@ fn clone_transcript_with_parent(transcript: &VmValue, parent_id: &str) -> VmValu
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agent_events::{
+        emit_event, reset_all_sinks, session_external_sink_count, AgentEvent,
+    };
+    use crate::event_log::{active_event_log, EventLog, Topic};
     use std::collections::BTreeMap;
 
     fn make_msg(role: &str, content: &str) -> VmValue {
@@ -758,5 +768,31 @@ mod tests {
             Some("[auto-compacted 2 older messages]\nsummary"),
         );
         assert_eq!(prompt.messages[1]["role"].as_str(), Some("assistant"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn open_or_create_registers_event_log_sink_when_active_log_is_installed() {
+        reset_all_sinks();
+        crate::event_log::reset_active_event_log();
+        let dir = tempfile::tempdir().expect("tempdir");
+        crate::event_log::install_default_for_base_dir(dir.path()).expect("install event log");
+
+        let session = open_or_create(Some("event-log-session".into()));
+        assert_eq!(session_external_sink_count(&session), 1);
+
+        emit_event(&AgentEvent::TurnStart {
+            session_id: session.clone(),
+            iteration: 0,
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+
+        let topic = Topic::new("observability.agent_events.event-log-session").unwrap();
+        let log = active_event_log().expect("active event log");
+        let events = log.read_range(&topic, None, usize::MAX).await.unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].1.kind, "turn_start");
+
+        crate::event_log::reset_active_event_log();
+        reset_all_sinks();
     }
 }
