@@ -1,0 +1,103 @@
+// std/triggers — typed trigger envelopes shared across inbound providers.
+//
+// Import with: `import "std/triggers"`.
+//
+// The runtime persists RFC3339 timestamps, typed signature status, and a
+// provider-tagged payload union. Connector-specific payloads intentionally
+// start with a small normalized surface plus `raw: dict`; provider tickets can
+// refine these aliases later without changing the top-level TriggerEvent shape.
+
+type ProviderId = "github" | "slack" | "linear" | "notion" | "cron" | "webhook" | "a2a-push" | string
+
+type SignatureVerified = {
+  state: "verified",
+}
+
+type SignatureUnsigned = {
+  state: "unsigned",
+}
+
+type SignatureFailed = {
+  state: "failed",
+  reason: string,
+}
+
+type SignatureStatus = SignatureVerified | SignatureUnsigned | SignatureFailed
+
+type GitHubEventPayload = {
+  provider: "github",
+  event: string,
+  action: string | nil,
+  delivery_id: string | nil,
+  installation_id: int | nil,
+  raw: dict,
+}
+
+type SlackEventPayload = {
+  provider: "slack",
+  event: string,
+  subtype: string | nil,
+  team_id: string | nil,
+  channel_id: string | nil,
+  raw: dict,
+}
+
+type LinearEventPayload = {
+  provider: "linear",
+  action: string | nil,
+  organization_id: string | nil,
+  webhook_timestamp: string | nil,
+  raw: dict,
+}
+
+type NotionEventPayload = {
+  provider: "notion",
+  event: string,
+  workspace_id: string | nil,
+  request_id: string | nil,
+  raw: dict,
+}
+
+type CronEventPayload = {
+  provider: "cron",
+  cron_id: string | nil,
+  schedule: string | nil,
+  tick_at: string,
+  raw: dict,
+}
+
+type GenericWebhookPayload = {
+  provider: "webhook",
+  source: string | nil,
+  content_type: string | nil,
+  raw: dict,
+}
+
+type A2aPushPayload = {
+  provider: "a2a-push",
+  task_id: string | nil,
+  sender: string | nil,
+  raw: dict,
+}
+
+type ExtensionProviderPayload = {
+  provider: string,
+  schema_name: string,
+  raw: dict,
+}
+
+type ProviderPayload = GitHubEventPayload | SlackEventPayload | LinearEventPayload | NotionEventPayload | CronEventPayload | GenericWebhookPayload | A2aPushPayload | ExtensionProviderPayload
+
+type TriggerEvent = {
+  id: string,
+  provider: ProviderId,
+  kind: string,
+  received_at: string,
+  occurred_at: string | nil,
+  dedupe_key: string,
+  trace_id: string,
+  tenant_id: string | nil,
+  headers: dict,
+  provider_payload: ProviderPayload,
+  signature_status: SignatureStatus,
+}

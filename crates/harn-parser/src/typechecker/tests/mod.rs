@@ -11,6 +11,7 @@ use harn_lexer::Lexer;
 use super::{DiagnosticSeverity, TypeChecker, TypeDiagnostic};
 
 mod exhaustiveness;
+mod imports;
 mod interfaces;
 mod narrowing;
 mod reachability;

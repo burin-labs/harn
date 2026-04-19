@@ -20,6 +20,7 @@ pub fn get_stdlib_source(module: &str) -> Option<&'static str> {
         "checkpoint" => Some(include_str!("stdlib_checkpoint.harn")),
         "worktree" => Some(include_str!("stdlib_worktree.harn")),
         "acp" => Some(include_str!("stdlib_acp.harn")),
+        "triggers" => Some(include_str!("stdlib_triggers.harn")),
         _ => None,
     }
 }

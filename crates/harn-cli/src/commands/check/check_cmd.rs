@@ -26,6 +26,9 @@ pub(crate) fn check_file_inner(
     if let Some(imported) = module_graph.imported_names_for_file(path) {
         checker = checker.with_imported_names(imported);
     }
+    if let Some(imported) = module_graph.imported_type_declarations_for_file(path) {
+        checker = checker.with_imported_type_decls(imported);
+    }
     let type_diagnostics = checker.check(&program);
     for diag in &type_diagnostics {
         let severity = match diag.severity {
