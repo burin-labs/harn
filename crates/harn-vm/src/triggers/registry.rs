@@ -5,6 +5,8 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+
+use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::event_log::{active_event_log, AnyEventLog, EventLog, LogEvent, Topic};
@@ -329,6 +331,29 @@ thread_local! {
 
 const TERMINATED_VERSION_RETENTION_LIMIT: usize = 2;
 
+const TRIGGERS_LIFECYCLE_TOPIC: &str = "triggers.lifecycle";
+
+#[derive(Clone, Debug, Deserialize)]
+struct LifecycleStateTransitionRecord {
+    id: String,
+    version: u32,
+    #[serde(default)]
+    definition_fingerprint: Option<String>,
+    to_state: TriggerState,
+}
+
+#[derive(Clone, Debug)]
+struct HistoricalLifecycleRecord {
+    occurred_at_ms: i64,
+    transition: LifecycleStateTransitionRecord,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct HistoricalVersionLookup {
+    matching_version: Option<u32>,
+    max_version: Option<u32>,
+}
+
 pub fn clear_trigger_registry() {
     TRIGGER_REGISTRY.with(|slot| {
         *slot.borrow_mut() = TriggerRegistry::default();
@@ -351,6 +376,22 @@ pub fn snapshot_trigger_bindings() -> Vec<TriggerBindingSnapshot> {
                 .then(left.state.as_str().cmp(right.state.as_str()))
         });
         snapshots
+    })
+}
+
+#[allow(clippy::arc_with_non_send_sync)]
+pub fn resolve_trigger_binding_as_of(
+    id: &str,
+    as_of: OffsetDateTime,
+) -> Result<Arc<TriggerBinding>, TriggerRegistryError> {
+    let version = binding_version_as_of(id, as_of)?;
+    resolve_live_trigger_binding(id, Some(version))
+}
+
+pub fn binding_version_as_of(id: &str, as_of: OffsetDateTime) -> Result<u32, TriggerRegistryError> {
+    TRIGGER_REGISTRY.with(|slot| {
+        let registry = slot.borrow();
+        registry.binding_version_as_of(id, as_of)
     })
 }
 
@@ -485,14 +526,14 @@ pub async fn install_manifest_triggers(
                 registry.transition_binding_to_draining(&binding, &mut lifecycle);
             }
 
-            let version = registry.next_version_for_id(&id);
+            let version = registry.next_version_for_spec(&spec);
             registry.register_binding(spec, version, &mut lifecycle);
             touched_ids.insert(id.clone());
         }
 
         for spec in incoming.into_values() {
             touched_ids.insert(spec.id.clone());
-            let version = registry.next_version_for_id(&spec.id);
+            let version = registry.next_version_for_spec(&spec);
             registry.register_binding(spec, version, &mut lifecycle);
         }
 
@@ -523,7 +564,8 @@ pub async fn dynamic_register(
         }
 
         let mut lifecycle = Vec::new();
-        registry.register_binding(spec, 1, &mut lifecycle);
+        let version = registry.next_version_for_spec(&spec);
+        registry.register_binding(spec, version, &mut lifecycle);
         Ok((registry.event_log.clone(), lifecycle))
     })?;
 
@@ -712,12 +754,30 @@ impl TriggerRegistry {
             .collect()
     }
 
-    fn next_version_for_id(&self, id: &str) -> u32 {
+    fn next_version_for_spec(&self, spec: &TriggerBindingSpec) -> u32 {
+        if let Some(version) = self
+            .bindings
+            .get(spec.id.as_str())
+            .into_iter()
+            .flat_map(|bindings| bindings.iter())
+            .find(|binding| binding.definition_fingerprint == spec.definition_fingerprint)
+            .map(|binding| binding.version)
+        {
+            return version;
+        }
+
+        let historical =
+            self.historical_versions_for(spec.id.as_str(), spec.definition_fingerprint.as_str());
+        if let Some(version) = historical.matching_version {
+            return version;
+        }
+
         self.bindings
-            .get(id)
+            .get(spec.id.as_str())
             .into_iter()
             .flat_map(|bindings| bindings.iter())
             .map(|binding| binding.version)
+            .chain(historical.max_version)
             .max()
             .unwrap_or(0)
             + 1
@@ -742,6 +802,76 @@ impl TriggerRegistry {
         if bindings.is_empty() {
             self.bindings.remove(id);
         }
+    }
+
+    fn historical_versions_for(&self, id: &str, fingerprint: &str) -> HistoricalVersionLookup {
+        let mut lookup = HistoricalVersionLookup::default();
+        for record in self.lifecycle_records_for(id) {
+            lookup.max_version = Some(
+                lookup
+                    .max_version
+                    .unwrap_or(0)
+                    .max(record.transition.version),
+            );
+            if record.transition.definition_fingerprint.as_deref() == Some(fingerprint) {
+                lookup.matching_version = Some(record.transition.version);
+            }
+        }
+        lookup
+    }
+
+    fn binding_version_as_of(
+        &self,
+        id: &str,
+        as_of: OffsetDateTime,
+    ) -> Result<u32, TriggerRegistryError> {
+        let cutoff_ms = (as_of.unix_timestamp_nanos() / 1_000_000) as i64;
+        let mut active_version = None;
+        for record in self.lifecycle_records_for(id) {
+            if record.occurred_at_ms > cutoff_ms {
+                break;
+            }
+            match record.transition.to_state {
+                TriggerState::Active => active_version = Some(record.transition.version),
+                TriggerState::Draining | TriggerState::Terminated => {
+                    if active_version == Some(record.transition.version) {
+                        active_version = None;
+                    }
+                }
+                TriggerState::Registering => {}
+            }
+        }
+
+        active_version.ok_or_else(|| {
+            TriggerRegistryError::InvalidSpec(format!(
+                "no active trigger binding '{}' at {}",
+                id,
+                as_of
+                    .format(&time::format_description::well_known::Rfc3339)
+                    .unwrap_or_else(|_| as_of.to_string())
+            ))
+        })
+    }
+
+    fn lifecycle_records_for(&self, id: &str) -> Vec<HistoricalLifecycleRecord> {
+        let Some(event_log) = self.event_log.as_ref() else {
+            return Vec::new();
+        };
+        let topic = Topic::new(TRIGGERS_LIFECYCLE_TOPIC)
+            .expect("static triggers.lifecycle topic should always be valid");
+        futures::executor::block_on(event_log.read_range(&topic, None, usize::MAX))
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|(_, event)| {
+                let occurred_at_ms = event.occurred_at_ms;
+                let transition: LifecycleStateTransitionRecord =
+                    serde_json::from_value(event.payload).ok()?;
+                (transition.id == id).then_some(HistoricalLifecycleRecord {
+                    occurred_at_ms,
+                    transition,
+                })
+            })
+            .collect()
     }
 
     #[allow(clippy::arc_with_non_send_sync)]
@@ -821,6 +951,7 @@ fn lifecycle_event(
             "kind": &binding.kind,
             "source": binding.source.as_str(),
             "handler_kind": binding.handler.kind(),
+            "definition_fingerprint": &binding.definition_fingerprint,
             "from_state": from_state.map(TriggerState::as_str),
             "to_state": to_state.as_str(),
         }),
@@ -838,7 +969,7 @@ async fn append_lifecycle_events(
         return Ok(());
     }
 
-    let topic = Topic::new("triggers.lifecycle")
+    let topic = Topic::new(TRIGGERS_LIFECYCLE_TOPIC)
         .expect("static triggers.lifecycle topic should always be valid");
     for event in events {
         event_log
@@ -879,6 +1010,7 @@ fn now_ms() -> i64 {
 mod tests {
     use super::*;
     use crate::event_log::{install_default_for_base_dir, reset_active_event_log};
+    use time::OffsetDateTime;
 
     fn manifest_spec(id: &str, fingerprint: &str) -> TriggerBindingSpec {
         TriggerBindingSpec {
@@ -1103,6 +1235,70 @@ mod tests {
                 "draining".to_string(),
                 "terminated".to_string(),
             ]
+        );
+
+        reset_active_event_log();
+        clear_trigger_registry();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn version_history_reuses_historical_version_after_restart() {
+        clear_trigger_registry();
+        reset_active_event_log();
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        install_default_for_base_dir(tempdir.path()).expect("install event log");
+
+        install_manifest_triggers(vec![manifest_spec("github-new-issue", "v1")])
+            .await
+            .expect("initial manifest trigger installs");
+        install_manifest_triggers(vec![manifest_spec("github-new-issue", "v2")])
+            .await
+            .expect("updated manifest trigger installs");
+
+        clear_trigger_registry();
+        reset_active_event_log();
+        install_default_for_base_dir(tempdir.path()).expect("reopen event log");
+
+        install_manifest_triggers(vec![manifest_spec("github-new-issue", "v2")])
+            .await
+            .expect("manifest reload reuses historical version");
+
+        let binding = snapshot_trigger_bindings()
+            .into_iter()
+            .find(|binding| binding.id == "github-new-issue")
+            .expect("binding snapshot");
+        assert_eq!(binding.version, 2);
+
+        reset_active_event_log();
+        clear_trigger_registry();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn binding_version_as_of_reports_historical_active_version() {
+        clear_trigger_registry();
+        reset_active_event_log();
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        install_default_for_base_dir(tempdir.path()).expect("install event log");
+
+        install_manifest_triggers(vec![manifest_spec("github-new-issue", "v1")])
+            .await
+            .expect("initial manifest trigger installs");
+        let before_reload = OffsetDateTime::now_utc();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+
+        install_manifest_triggers(vec![manifest_spec("github-new-issue", "v2")])
+            .await
+            .expect("updated manifest trigger installs");
+        let after_reload = OffsetDateTime::now_utc();
+
+        assert_eq!(
+            binding_version_as_of("github-new-issue", before_reload)
+                .expect("version before reload"),
+            1
+        );
+        assert_eq!(
+            binding_version_as_of("github-new-issue", after_reload).expect("version after reload"),
+            2
         );
 
         reset_active_event_log();

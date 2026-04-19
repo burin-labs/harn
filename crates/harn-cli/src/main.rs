@@ -348,6 +348,12 @@ async fn main() {
         Command::Portal(args) => {
             commands::portal::run_portal(&args.dir, &args.host, args.port, args.open).await
         }
+        Command::Trigger(args) => {
+            if let Err(error) = commands::trigger::handle(args).await {
+                eprintln!("error: {error}");
+                process::exit(1);
+            }
+        }
         Command::Orchestrator(args) => {
             if let Err(error) = commands::orchestrator::handle(args).await {
                 eprintln!("error: {error}");

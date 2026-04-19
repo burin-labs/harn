@@ -20,10 +20,11 @@ pub use event::{
 };
 pub use inbox::{InboxIndex, DEFAULT_INBOX_RETENTION_DAYS, TRIGGER_INBOX_TOPIC};
 pub use registry::{
-    begin_in_flight, clear_trigger_registry, drain, dynamic_deregister, dynamic_register,
-    finish_in_flight, install_manifest_triggers, pin_trigger_binding, resolve_live_trigger_binding,
-    snapshot_trigger_bindings, unpin_trigger_binding, TriggerBindingSnapshot, TriggerBindingSource,
-    TriggerBindingSpec, TriggerDispatchOutcome, TriggerHandlerSpec, TriggerId,
-    TriggerMetricsSnapshot, TriggerPredicateSpec, TriggerRegistryError, TriggerState,
+    begin_in_flight, binding_version_as_of, clear_trigger_registry, drain, dynamic_deregister,
+    dynamic_register, finish_in_flight, install_manifest_triggers, pin_trigger_binding,
+    resolve_live_trigger_binding, resolve_trigger_binding_as_of, snapshot_trigger_bindings,
+    unpin_trigger_binding, TriggerBindingSnapshot, TriggerBindingSource, TriggerBindingSpec,
+    TriggerDispatchOutcome, TriggerHandlerSpec, TriggerId, TriggerMetricsSnapshot,
+    TriggerPredicateSpec, TriggerRegistryError, TriggerState,
 };
 pub use test_util::{run_trigger_harness_fixture, TriggerHarnessResult, TRIGGER_TEST_FIXTURES};
