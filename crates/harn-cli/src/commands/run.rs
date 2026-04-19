@@ -539,8 +539,9 @@ pub(crate) async fn run_file_with_skill_dirs(
         harn_vm::VmValue::List(std::rc::Rc::new(argv_values)),
     );
 
-    if let Some(manifest) = package::try_read_manifest_for(Path::new(path)) {
-        package::install_capability_overrides(&manifest);
+    let extensions = package::load_runtime_extensions(Path::new(path));
+    package::install_runtime_extensions(&extensions);
+    if let Some(manifest) = extensions.root_manifest.as_ref() {
         if !manifest.mcp.is_empty() {
             connect_mcp_servers(&manifest.mcp, &mut vm).await;
         }
@@ -799,8 +800,9 @@ pub(crate) async fn run_file_mcp_serve(path: &str, card_source: Option<&str>) {
     emit_loader_warnings(&loaded.loader_warnings);
     install_skills_global(&mut vm, &loaded);
 
-    if let Some(manifest) = package::try_read_manifest_for(Path::new(path)) {
-        package::install_capability_overrides(&manifest);
+    let extensions = package::load_runtime_extensions(Path::new(path));
+    package::install_runtime_extensions(&extensions);
+    if let Some(manifest) = extensions.root_manifest.as_ref() {
         if !manifest.mcp.is_empty() {
             connect_mcp_servers(&manifest.mcp, &mut vm).await;
         }

@@ -89,10 +89,8 @@ pub(crate) async fn run_bench(path: &str, iterations: usize) {
         .file_stem()
         .and_then(|segment| segment.to_str())
         .unwrap_or("default");
-    let manifest = package::try_read_manifest_for(Path::new(path));
-    if let Some(m) = manifest.as_ref() {
-        package::install_capability_overrides(m);
-    }
+    let extensions = package::load_runtime_extensions(Path::new(path));
+    package::install_runtime_extensions(&extensions);
 
     let mut runs = Vec::with_capacity(iterations);
     for iteration in 0..iterations {
@@ -112,7 +110,7 @@ pub(crate) async fn run_bench(path: &str, iterations: usize) {
             vm.set_source_dir(source_parent);
         }
 
-        if let Some(manifest) = manifest.as_ref() {
+        if let Some(manifest) = extensions.root_manifest.as_ref() {
             if !manifest.mcp.is_empty() {
                 connect_mcp_servers(&manifest.mcp, &mut vm).await;
             }

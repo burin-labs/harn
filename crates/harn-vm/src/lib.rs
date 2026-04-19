@@ -76,6 +76,7 @@ pub fn compile_source(source: &str) -> Result<Chunk, String> {
 /// Reset all thread-local state that can leak between test runs.
 pub fn reset_thread_local_state() {
     llm::reset_llm_state();
+    llm_config::clear_user_overrides();
     http::reset_http_state();
     stdlib::reset_stdlib_state();
     events::reset_event_sinks();

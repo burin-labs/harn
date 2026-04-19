@@ -305,7 +305,7 @@ pub(crate) async fn vm_call_llm_api_with_body(
 async fn vm_call_llm_api_sse_from_response(
     response: reqwest::Response,
     model: &str,
-    resolved: &crate::llm::helpers::ResolvedProvider<'_>,
+    resolved: &crate::llm::helpers::ResolvedProvider,
     delta_tx: DeltaSender,
 ) -> Result<LlmResult, VmError> {
     use tokio::io::AsyncBufReadExt;

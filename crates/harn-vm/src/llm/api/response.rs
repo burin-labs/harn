@@ -14,7 +14,7 @@ pub(super) fn parse_llm_response(
     json: &serde_json::Value,
     provider: &str,
     model: &str,
-    resolved: &crate::llm::helpers::ResolvedProvider<'_>,
+    resolved: &crate::llm::helpers::ResolvedProvider,
 ) -> Result<LlmResult, VmError> {
     if resolved.is_anthropic_style {
         let mut text = String::new();
@@ -321,7 +321,7 @@ mod tests {
     // Build a ResolvedProvider for the Anthropic path without going through
     // the thread-local provider registry — these parser tests only need the
     // is_anthropic_style flag set.
-    fn anthropic_resolved() -> crate::llm::helpers::ResolvedProvider<'static> {
+    fn anthropic_resolved() -> crate::llm::helpers::ResolvedProvider {
         crate::llm::helpers::ResolvedProvider::resolve("anthropic")
     }
 

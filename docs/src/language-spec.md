@@ -818,8 +818,23 @@ though this is mostly relevant for closures and parallel bodies.
 
 1. If path starts with `std/`, loads embedded stdlib module (e.g. `std/text`)
 2. Relative to current file's directory; auto-adds `.harn` extension
-3. `.harn/packages/<path>` directories
-4. Package directories with `lib.harn` entry point
+3. `.harn/packages/<path>` directories rooted at the nearest ancestor
+   package root (the search walks upward and stops at a `.git` boundary)
+4. Package manifest `[exports]` mappings under
+   `.harn/packages/<package>/harn.toml`
+5. Package directories with `lib.harn` entry point
+
+Package manifests can publish stable module entry points without forcing
+consumers to import the on-disk file layout directly:
+
+```toml
+[exports]
+capabilities = "runtime/capabilities.harn"
+providers = "runtime/providers.harn"
+```
+
+With the example above, `import "acme/capabilities"` resolves to the
+declared file inside the installed `acme` package.
 
 Selective imports: `import { name1, name2 } from "module"` imports only
 the specified functions. Functions marked `pub` are exported by default;
@@ -3234,6 +3249,51 @@ the manifest directory and recursively checks every `.harn` file under
 each. Positional targets remain additive. The manifest is discovered by
 walking upward from the first positional target (or the current working
 directory when none is supplied).
+
+### `[exports]` — stable package module entry points
+
+```toml
+[exports]
+capabilities = "runtime/capabilities.harn"
+providers = "runtime/providers.harn"
+```
+
+`[exports]` maps logical import suffixes to package-root-relative module
+paths. After `harn install`, consumers import them as
+`"<package>/<export>"` instead of coupling to the package's internal
+directory layout.
+
+Exports are resolved after the direct `.harn/packages/<path>` lookup, so
+packages can still expose raw file trees when they want that behavior.
+
+### `[llm]` — packaged provider extensions
+
+```toml
+[llm.providers.my_proxy]
+base_url = "https://llm.example.com/v1"
+chat_endpoint = "/chat/completions"
+completion_endpoint = "/completions"
+auth_style = "bearer"
+auth_env = "MY_PROXY_API_KEY"
+
+[llm.aliases]
+my-fast = { id = "vendor/model-fast", provider = "my_proxy" }
+```
+
+The `[llm]` table accepts the same schema as `providers.toml`
+(`providers`, `aliases`, `inference_rules`, `tier_rules`,
+`tier_defaults`, `model_defaults`) but scopes it to the current run.
+
+When Harn starts from a file inside a workspace, it merges:
+
+1. built-in defaults,
+2. the global provider file (`HARN_PROVIDERS_CONFIG` or
+   `~/.config/harn/providers.toml`),
+3. installed package `[llm]` tables from `.harn/packages/*/harn.toml`,
+4. the root project's `[llm]` table.
+
+Later layers win on key collisions; rule lists are prepended so package
+and project inference/tier overrides run before the built-in defaults.
 
 ### `[lint]` — lint configuration
 

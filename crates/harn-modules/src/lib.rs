@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 
 use harn_lexer::Span;
 use harn_parser::{BindingPattern, Node, Parser, SNode};
+use serde::Deserialize;
 
 mod stdlib;
 
@@ -74,6 +75,12 @@ struct ModuleInfo {
 struct ImportRef {
     path: Option<PathBuf>,
     selective_names: Option<HashSet<String>>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct PackageManifest {
+    #[serde(default)]
+    exports: HashMap<String, String>,
 }
 
 /// Build a module graph from a set of files.
@@ -154,23 +161,68 @@ pub fn resolve_import_path(current_file: &Path, import_path: &str) -> Option<Pat
         return Some(file_path);
     }
 
-    let pkg_path = base.join(".harn/packages").join(import_path);
-    if pkg_path.exists() {
-        if pkg_path.is_dir() {
-            let lib = pkg_path.join("lib.harn");
-            if lib.exists() {
-                return Some(lib);
+    if let Some(path) = resolve_package_import(base, import_path) {
+        return Some(path);
+    }
+
+    None
+}
+
+fn resolve_package_import(base: &Path, import_path: &str) -> Option<PathBuf> {
+    for anchor in base.ancestors() {
+        let packages_root = anchor.join(".harn/packages");
+        if !packages_root.is_dir() {
+            if anchor.join(".git").exists() {
+                break;
             }
+            continue;
         }
-        return Some(pkg_path);
+        if let Some(path) = resolve_from_packages_root(&packages_root, import_path) {
+            return Some(path);
+        }
+        if anchor.join(".git").exists() {
+            break;
+        }
+    }
+    None
+}
+
+fn resolve_from_packages_root(packages_root: &Path, import_path: &str) -> Option<PathBuf> {
+    let pkg_path = packages_root.join(import_path);
+    if let Some(path) = finalize_package_target(&pkg_path) {
+        return Some(path);
     }
 
-    let mut pkg_harn = pkg_path;
-    pkg_harn.set_extension("harn");
-    if pkg_harn.exists() {
-        return Some(pkg_harn);
-    }
+    let (package_name, export_name) = import_path.split_once('/')?;
+    let manifest_path = packages_root.join(package_name).join("harn.toml");
+    let manifest = read_package_manifest(&manifest_path)?;
+    let rel_path = manifest.exports.get(export_name)?;
+    finalize_package_target(&packages_root.join(package_name).join(rel_path))
+}
 
+fn read_package_manifest(path: &Path) -> Option<PackageManifest> {
+    let content = std::fs::read_to_string(path).ok()?;
+    toml::from_str::<PackageManifest>(&content).ok()
+}
+
+fn finalize_package_target(path: &Path) -> Option<PathBuf> {
+    if path.is_dir() {
+        let lib = path.join("lib.harn");
+        if lib.exists() {
+            return Some(lib);
+        }
+        return Some(path.to_path_buf());
+    }
+    if path.exists() {
+        return Some(path.to_path_buf());
+    }
+    if path.extension().is_none() {
+        let mut with_ext = path.to_path_buf();
+        with_ext.set_extension("harn");
+        if with_ext.exists() {
+            return Some(with_ext);
+        }
+    }
     None
 }
 
@@ -585,6 +637,66 @@ mod tests {
             .expect("std/math should resolve");
         // `clamp` is defined in stdlib_math.harn as `pub fn clamp(...)`.
         assert!(imported.contains("clamp"));
+    }
+
+    #[test]
+    fn package_export_map_resolves_declared_module() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let packages = root.join(".harn/packages/acme/runtime");
+        fs::create_dir_all(&packages).unwrap();
+        fs::write(
+            root.join(".harn/packages/acme/harn.toml"),
+            "[exports]\ncapabilities = \"runtime/capabilities.harn\"\n",
+        )
+        .unwrap();
+        fs::write(
+            packages.join("capabilities.harn"),
+            "pub fn exported_capability() { 1 }\n",
+        )
+        .unwrap();
+        let entry = write_file(
+            root,
+            "entry.harn",
+            "import \"acme/capabilities\"\nexported_capability()\n",
+        );
+
+        let graph = build(std::slice::from_ref(&entry));
+        let imported = graph
+            .imported_names_for_file(&entry)
+            .expect("package export should resolve");
+        assert!(imported.contains("exported_capability"));
+    }
+
+    #[test]
+    fn package_imports_resolve_from_nested_package_module() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join(".git")).unwrap();
+        fs::create_dir_all(root.join(".harn/packages/acme")).unwrap();
+        fs::create_dir_all(root.join(".harn/packages/shared")).unwrap();
+        fs::write(
+            root.join(".harn/packages/shared/lib.harn"),
+            "pub fn shared_helper() { 1 }\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join(".harn/packages/acme/lib.harn"),
+            "import \"shared\"\npub fn use_shared() { shared_helper() }\n",
+        )
+        .unwrap();
+        let entry = write_file(root, "entry.harn", "import \"acme\"\nuse_shared()\n");
+
+        let graph = build(std::slice::from_ref(&entry));
+        let imported = graph
+            .imported_names_for_file(&entry)
+            .expect("nested package import should resolve");
+        assert!(imported.contains("use_shared"));
+        let acme_path = root.join(".harn/packages/acme/lib.harn");
+        let acme_imports = graph
+            .imported_names_for_file(&acme_path)
+            .expect("package module imports should resolve");
+        assert!(acme_imports.contains("shared_helper"));
     }
 
     #[test]

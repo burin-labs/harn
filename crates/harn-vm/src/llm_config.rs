@@ -1,9 +1,18 @@
 use serde::Deserialize;
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
 
 static CONFIG: OnceLock<ProvidersConfig> = OnceLock::new();
 static CONFIG_PATH: OnceLock<String> = OnceLock::new();
+
+thread_local! {
+    /// Thread-local provider config overlays installed by the CLI after it
+    /// reads the nearest `harn.toml` plus any installed package manifests.
+    /// Kept thread-local so tests and multi-VM hosts can scope extensions to
+    /// the current run without mutating the process-wide default config.
+    static USER_OVERRIDES: RefCell<Option<ProvidersConfig>> = const { RefCell::new(None) };
+}
 
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct ProvidersConfig {
@@ -19,6 +28,45 @@ pub struct ProvidersConfig {
     pub tier_defaults: TierDefaults,
     #[serde(default)]
     pub model_defaults: BTreeMap<String, BTreeMap<String, toml::Value>>,
+}
+
+impl ProvidersConfig {
+    pub fn is_empty(&self) -> bool {
+        self.providers.is_empty()
+            && self.aliases.is_empty()
+            && self.inference_rules.is_empty()
+            && self.tier_rules.is_empty()
+            && self.model_defaults.is_empty()
+            && self.tier_defaults.default == default_mid()
+    }
+
+    pub fn merge_from(&mut self, overlay: &ProvidersConfig) {
+        self.providers.extend(overlay.providers.clone());
+        self.aliases.extend(overlay.aliases.clone());
+
+        if !overlay.inference_rules.is_empty() {
+            let mut merged = overlay.inference_rules.clone();
+            merged.extend(self.inference_rules.clone());
+            self.inference_rules = merged;
+        }
+
+        if !overlay.tier_rules.is_empty() {
+            let mut merged = overlay.tier_rules.clone();
+            merged.extend(self.tier_rules.clone());
+            self.tier_rules = merged;
+        }
+
+        if overlay.tier_defaults.default != default_mid() {
+            self.tier_defaults = overlay.tier_defaults.clone();
+        }
+
+        for (pattern, defaults) in &overlay.model_defaults {
+            self.model_defaults
+                .entry(pattern.clone())
+                .or_default()
+                .extend(defaults.clone());
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -206,9 +254,31 @@ pub fn loaded_config_path() -> Option<std::path::PathBuf> {
     CONFIG_PATH.get().map(std::path::PathBuf::from)
 }
 
+/// Install per-run provider config overlays. The overlay uses the same shape as
+/// `providers.toml`, but lives under `[llm]` in `harn.toml` and package
+/// manifests. Passing `None` clears the overlay.
+pub fn set_user_overrides(config: Option<ProvidersConfig>) {
+    USER_OVERRIDES.with(|cell| *cell.borrow_mut() = config);
+}
+
+/// Clear per-run provider config overlays.
+pub fn clear_user_overrides() {
+    set_user_overrides(None);
+}
+
+fn effective_config() -> ProvidersConfig {
+    let mut merged = load_config().clone();
+    USER_OVERRIDES.with(|cell| {
+        if let Some(overlay) = cell.borrow().as_ref() {
+            merged.merge_from(overlay);
+        }
+    });
+    merged
+}
+
 /// Resolve a model alias to (model_id, provider_name).
 pub fn resolve_model(alias: &str) -> (String, Option<String>) {
-    let config = load_config();
+    let config = effective_config();
     if let Some(a) = config.aliases.get(alias) {
         return (a.id.clone(), Some(a.provider.clone()));
     }
@@ -217,7 +287,7 @@ pub fn resolve_model(alias: &str) -> (String, Option<String>) {
 
 /// Infer provider from a model ID using inference rules.
 pub fn infer_provider(model_id: &str) -> String {
-    let config = load_config();
+    let config = effective_config();
     for rule in &config.inference_rules {
         if let Some(exact) = &rule.exact {
             if model_id == exact {
@@ -259,7 +329,7 @@ pub fn infer_provider(model_id: &str) -> String {
 
 /// Get model tier ("small", "mid", "frontier").
 pub fn model_tier(model_id: &str) -> String {
-    let config = load_config();
+    let config = effective_config();
     for rule in &config.tier_rules {
         if let Some(exact) = &rule.exact {
             if model_id == exact {
@@ -288,14 +358,14 @@ pub fn model_tier(model_id: &str) -> String {
 }
 
 /// Get provider config for resolving base_url, auth, etc.
-pub fn provider_config(name: &str) -> Option<&'static ProviderDef> {
-    load_config().providers.get(name)
+pub fn provider_config(name: &str) -> Option<ProviderDef> {
+    effective_config().providers.get(name).cloned()
 }
 
 /// Get model-specific default parameters (temperature, etc.).
 /// Matches glob patterns in model_defaults keys.
 pub fn model_params(model_id: &str) -> BTreeMap<String, toml::Value> {
-    let config = load_config();
+    let config = effective_config();
     let mut params = BTreeMap::new();
     for (pattern, defaults) in &config.model_defaults {
         if glob_match(pattern, model_id) {
@@ -309,7 +379,7 @@ pub fn model_params(model_id: &str) -> BTreeMap<String, toml::Value> {
 
 /// Get list of configured provider names.
 pub fn provider_names() -> Vec<String> {
-    load_config().providers.keys().cloned().collect()
+    effective_config().providers.keys().cloned().collect()
 }
 
 /// Check if a provider advertises a feature (e.g., "native_tools").
@@ -322,7 +392,7 @@ pub fn provider_has_feature(provider: &str, feature: &str) -> bool {
 /// Resolve the default tool format for a model+provider combination.
 /// Priority: alias `tool_format` (matched by model ID) > provider feature > "text".
 pub fn default_tool_format(model: &str, provider: &str) -> String {
-    let config = load_config();
+    let config = effective_config();
     // Aliases match by model ID + provider, or by alias name.
     for (name, alias) in &config.aliases {
         let matches = (alias.id == model && alias.provider == provider) || name == model;
@@ -344,7 +414,7 @@ pub fn resolve_tier_model(
     target: &str,
     preferred_provider: Option<&str>,
 ) -> Option<(String, String)> {
-    let config = load_config();
+    let config = effective_config();
 
     if let Some(alias) = config.aliases.get(target) {
         return Some((alias.id.clone(), alias.provider.clone()));
@@ -374,7 +444,7 @@ pub fn resolve_tier_model(
 /// model falls into the requested capability tier. The result is de-duplicated
 /// and sorted deterministically by provider then model id.
 pub fn tier_candidates(target: &str) -> Vec<(String, String)> {
-    let config = load_config();
+    let config = effective_config();
     let mut seen = std::collections::BTreeSet::new();
     let mut candidates = Vec::new();
 
@@ -799,6 +869,10 @@ fn default_config() -> ProvidersConfig {
 mod tests {
     use super::*;
 
+    fn reset_overrides() {
+        clear_user_overrides();
+    }
+
     #[test]
     fn test_glob_match_prefix() {
         assert!(glob_match("claude-*", "claude-sonnet-4-20250514"));
@@ -918,5 +992,56 @@ mod tests {
     fn test_model_params_empty() {
         let params = model_params("claude-sonnet-4-20250514");
         assert!(params.is_empty());
+    }
+
+    #[test]
+    fn test_user_overrides_add_provider_and_alias() {
+        reset_overrides();
+        let mut overlay = ProvidersConfig::default();
+        overlay.providers.insert(
+            "acme".to_string(),
+            ProviderDef {
+                base_url: "https://llm.acme.test/v1".to_string(),
+                chat_endpoint: "/chat/completions".to_string(),
+                ..Default::default()
+            },
+        );
+        overlay.aliases.insert(
+            "acme-fast".to_string(),
+            AliasDef {
+                id: "acme/model-fast".to_string(),
+                provider: "acme".to_string(),
+                tool_format: Some("native".to_string()),
+            },
+        );
+        set_user_overrides(Some(overlay));
+
+        let (model, provider) = resolve_model("acme-fast");
+        assert_eq!(model, "acme/model-fast");
+        assert_eq!(provider.as_deref(), Some("acme"));
+        assert!(provider_names().contains(&"acme".to_string()));
+        assert_eq!(
+            provider_config("acme").map(|provider| provider.base_url),
+            Some("https://llm.acme.test/v1".to_string())
+        );
+
+        reset_overrides();
+    }
+
+    #[test]
+    fn test_user_overrides_prepend_inference_rules() {
+        reset_overrides();
+        let mut overlay = ProvidersConfig::default();
+        overlay.inference_rules.push(InferenceRule {
+            pattern: Some("internal-*".to_string()),
+            contains: None,
+            exact: None,
+            provider: "openai".to_string(),
+        });
+        set_user_overrides(Some(overlay));
+
+        assert_eq!(infer_provider("internal-foo"), "openai");
+
+        reset_overrides();
     }
 }

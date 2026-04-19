@@ -350,17 +350,18 @@ pub fn resolve_api_key(provider: &str) -> Result<String, VmError> {
     })
 }
 
-pub(crate) struct ResolvedProvider<'a> {
-    pub pdef: Option<&'a crate::llm_config::ProviderDef>,
+pub(crate) struct ResolvedProvider {
+    pub pdef: Option<crate::llm_config::ProviderDef>,
     pub is_anthropic_style: bool,
     pub base_url: String,
-    pub endpoint: &'a str,
+    pub endpoint: String,
 }
 
-impl<'a> ResolvedProvider<'a> {
-    pub fn resolve(provider: &str) -> ResolvedProvider<'static> {
+impl ResolvedProvider {
+    pub fn resolve(provider: &str) -> ResolvedProvider {
         let pdef = crate::llm_config::provider_config(provider);
         let is_anthropic_style = pdef
+            .as_ref()
             .map(|p| p.chat_endpoint.contains("/messages"))
             .unwrap_or(provider == "anthropic");
         let (default_base, default_endpoint) = if is_anthropic_style {
@@ -369,11 +370,13 @@ impl<'a> ResolvedProvider<'a> {
             ("https://api.openai.com/v1", "/chat/completions")
         };
         let base_url = pdef
+            .as_ref()
             .map(crate::llm_config::resolve_base_url)
             .unwrap_or_else(|| default_base.to_string());
         let endpoint = pdef
-            .map(|p| p.chat_endpoint.as_str())
-            .unwrap_or(default_endpoint);
+            .as_ref()
+            .map(|p| p.chat_endpoint.clone())
+            .unwrap_or_else(|| default_endpoint.to_string());
         ResolvedProvider {
             pdef,
             is_anthropic_style,
@@ -391,8 +394,8 @@ impl<'a> ResolvedProvider<'a> {
         mut req: reqwest::RequestBuilder,
         api_key: &str,
     ) -> reqwest::RequestBuilder {
-        req = crate::llm::api::apply_auth_headers(req, api_key, self.pdef);
-        if let Some(p) = self.pdef {
+        req = crate::llm::api::apply_auth_headers(req, api_key, self.pdef.as_ref());
+        if let Some(p) = self.pdef.as_ref() {
             for (k, v) in &p.extra_headers {
                 req = req.header(k.as_str(), v.as_str());
             }

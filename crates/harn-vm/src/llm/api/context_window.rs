@@ -33,6 +33,7 @@ pub async fn fetch_provider_max_context(
 ) -> Option<usize> {
     let pdef = crate::llm_config::provider_config(provider);
     let base_url = pdef
+        .as_ref()
         .map(crate::llm_config::resolve_base_url)
         .unwrap_or_else(|| "https://api.openai.com/v1".to_string());
     let cache_key = (base_url.clone(), model.to_string());
@@ -137,7 +138,7 @@ async fn fetch_openai_compatible_context_window(
         .get(&url)
         .header("Content-Type", "application/json")
         .timeout(std::time::Duration::from_secs(10));
-    let req = apply_auth_headers(req, api_key, pdef);
+    let req = apply_auth_headers(req, api_key, pdef.as_ref());
     let response = req.send().await.ok()?;
     if !response.status().is_success() {
         return None;

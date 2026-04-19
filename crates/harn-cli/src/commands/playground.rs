@@ -248,8 +248,9 @@ async fn configured_vm(
     emit_loader_warnings(&loaded.loader_warnings);
     install_skills_global(&mut vm, &loaded);
 
-    if let Some(manifest) = package::try_read_manifest_for(path) {
-        package::install_capability_overrides(&manifest);
+    let extensions = package::load_runtime_extensions(path);
+    package::install_runtime_extensions(&extensions);
+    if let Some(manifest) = extensions.root_manifest.as_ref() {
         if !manifest.mcp.is_empty() {
             connect_mcp_servers(&manifest.mcp, &mut vm).await;
         }

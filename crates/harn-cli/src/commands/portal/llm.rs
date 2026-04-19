@@ -28,7 +28,7 @@ pub(super) async fn build_llm_options() -> PortalLlmOptions {
         let Some(def) = llm_config::provider_config(&name) else {
             continue;
         };
-        let base_url = llm_config::resolve_base_url(def);
+        let base_url = llm_config::resolve_base_url(&def);
         let auth_envs = auth_env_names(&def.auth_env);
         let auth_configured = auth_envs.iter().any(|env_name| {
             std::env::var(env_name)
@@ -44,7 +44,7 @@ pub(super) async fn build_llm_options() -> PortalLlmOptions {
             .map(|(alias_name, _)| alias_name.clone())
             .collect::<Vec<_>>();
         let mut models = if local {
-            discover_provider_models(&name, &base_url, def)
+            discover_provider_models(&name, &base_url, &def)
                 .await
                 .unwrap_or_default()
         } else {

@@ -824,7 +824,9 @@ version = "0.7.20"
 dependencies = [
  "harn-lexer",
  "harn-parser",
+ "serde",
  "tempfile",
+ "toml",
 ]
 
 [[package]]

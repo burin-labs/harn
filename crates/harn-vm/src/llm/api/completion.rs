@@ -24,9 +24,9 @@ pub(crate) async fn vm_call_completion_full(
     }
 
     let resolved = crate::llm_config::provider_config(&opts.provider);
-    let completion_endpoint = resolved.and_then(|p| p.completion_endpoint.as_deref());
+    let completion_endpoint = resolved.and_then(|p| p.completion_endpoint);
 
-    match completion_endpoint {
+    match completion_endpoint.as_deref() {
         Some("/api/generate") => vm_call_completion_ollama(opts, prefix, suffix).await,
         Some(_) => vm_call_completion_openai_style(opts, prefix, suffix).await,
         None => vm_call_completion_fallback(opts, prefix, suffix).await,
@@ -43,9 +43,11 @@ async fn vm_call_completion_openai_style(
 
     let pdef = crate::llm_config::provider_config(&opts.provider);
     let base_url = pdef
+        .as_ref()
         .map(crate::llm_config::resolve_base_url)
         .unwrap_or_else(|| "https://api.openai.com/v1".to_string());
     let endpoint = pdef
+        .as_ref()
         .and_then(|p| p.completion_endpoint.as_deref())
         .unwrap_or("/completions");
 
@@ -82,7 +84,7 @@ async fn vm_call_completion_openai_style(
         .header("Content-Type", "application/json")
         .timeout(std::time::Duration::from_secs(llm_timeout))
         .json(&body);
-    let req = apply_auth_headers(req, &opts.api_key, pdef);
+    let req = apply_auth_headers(req, &opts.api_key, pdef.as_ref());
 
     let response = req.send().await.map_err(|e| {
         VmError::Thrown(VmValue::String(Rc::from(format!(
@@ -138,9 +140,11 @@ async fn vm_call_completion_ollama(
     let client = crate::llm::shared_blocking_client().clone();
     let pdef = crate::llm_config::provider_config(&opts.provider);
     let base_url = pdef
+        .as_ref()
         .map(crate::llm_config::resolve_base_url)
         .unwrap_or_else(|| "http://localhost:11434".to_string());
     let endpoint = pdef
+        .as_ref()
         .and_then(|p| p.completion_endpoint.as_deref())
         .unwrap_or("/api/generate");
 
@@ -197,7 +201,7 @@ async fn vm_call_completion_ollama(
         .header("Content-Type", "application/json")
         .timeout(std::time::Duration::from_secs(llm_timeout))
         .json(&body);
-    let req = apply_auth_headers(req, &opts.api_key, pdef);
+    let req = apply_auth_headers(req, &opts.api_key, pdef.as_ref());
 
     let response = req.send().await.map_err(|e| {
         VmError::Thrown(VmValue::String(Rc::from(format!(

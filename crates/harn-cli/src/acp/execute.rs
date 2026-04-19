@@ -6,6 +6,7 @@ use std::rc::Rc;
 use std::time::Instant;
 
 use super::{builtins, AcpBridge};
+use crate::package;
 
 /// Execute a compiled chunk with ACP bridge builtins.
 pub(super) async fn execute_chunk(
@@ -47,6 +48,11 @@ pub(super) async fn execute_chunk(
         }
     } else {
         vm.set_source_dir(cwd);
+    }
+
+    if let Some(path) = source_path {
+        let extensions = package::load_runtime_extensions(path);
+        package::install_runtime_extensions(&extensions);
     }
 
     vm.set_global("prompt", harn_vm::VmValue::String(Rc::from(prompt_text)));

@@ -320,6 +320,35 @@ editing the manifest is awkward:
   script detects a proxied endpoint at runtime.
 - `provider_capabilities_clear()` — revert to shipped defaults.
 
+### Packaged provider adapters via `[llm]`
+
+Projects and installed packages can also contribute provider definitions,
+aliases, inference rules, and model defaults directly from `harn.toml`
+under `[llm]`. The schema matches `providers.toml`, but the merge is
+scoped to the current run:
+
+```toml
+[llm.providers.my_proxy]
+base_url = "https://llm.example.com/v1"
+chat_endpoint = "/chat/completions"
+completion_endpoint = "/completions"
+auth_style = "bearer"
+auth_env = "MY_PROXY_API_KEY"
+
+[llm.aliases]
+my-fast = { id = "vendor/model-fast", provider = "my_proxy" }
+```
+
+Load order is:
+
+1. built-in defaults
+2. `HARN_PROVIDERS_CONFIG` when set, otherwise `~/.config/harn/providers.toml`
+3. installed package `[llm]` tables from `.harn/packages/*/harn.toml`
+4. the root project's `[llm]` table
+
+That gives packages a stable, declarative way to ship provider adapters
+and model aliases without editing Rust-side registration code.
+
 ### Client-executed fallback
 
 On providers without native `defer_loading`, Harn falls back to an
