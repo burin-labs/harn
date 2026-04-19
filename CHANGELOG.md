@@ -24,8 +24,8 @@ granular archaeology.
 
 ### Added
 
-- **`harn orchestrator serve` CLI scaffold (#178).** Added a new
-  `harn orchestrator` command family with a real `serve`
+- **`harn orchestrator serve` CLI scaffold (#209, closes #178).** Added
+  a new `harn orchestrator` command family with a real `serve`
   subcommand plus placeholder `inspect`, `replay`, `dlq`, and
   `queue` subcommands. `serve` now loads `harn.toml`, boots a
   single-tenant orchestrator VM, installs the shared EventLog under
@@ -35,6 +35,16 @@ granular archaeology.
   SIGTERM for scaffolded graceful shutdown. Multi-tenant remains an
   explicit `O-12 #190` stub; the HTTP listener remains deferred to
   `O-02 #179`.
+- **DST-safe cron connector with durable tick state and catch-up modes
+  (#210, closes #169).** `harn_vm::connectors::CronConnector` now schedules
+  named IANA time zones through `croner` + `chrono-tz`, persists the
+  latest scheduled boundary per trigger on the `connectors.cron.state`
+  EventLog topic, and supports `catchup_mode = "skip" | "all" |
+  "latest"` when an orchestrator resumes after downtime. The scheduler
+  fires repeated fall-back hours once, skips missing spring-forward
+  hours instead of inventing wall-clock times, writes normalized cron
+  `TriggerEvent` envelopes to `connectors.cron.tick`, and ships with
+  docs at `docs/src/connectors/cron.md`.
 - **Action-graph observability extended with `trigger` and `predicate`
   node kinds (#202, partial #163).** Persisted run records now
   synthesize a `trigger` node from `trigger_event` metadata, render

@@ -38,10 +38,11 @@ pub use checkpoint::register_checkpoint_builtins;
 pub use chunk::*;
 pub use compiler::*;
 pub use connectors::{
-    hmac::verify_hmac_signed, ActivationHandle, ClientError, Connector, ConnectorClient,
-    ConnectorCtx, ConnectorError, ConnectorRegistry, InboxIndex, MetricsRegistry,
-    ProviderPayloadSchema, RateLimitConfig, RateLimiterFactory, RawInbound, TriggerBinding,
-    TriggerKind, TriggerRegistry,
+    cron::{CatchupMode, CronConnector},
+    hmac::verify_hmac_signed,
+    ActivationHandle, ClientError, Connector, ConnectorClient, ConnectorCtx, ConnectorError,
+    ConnectorRegistry, InboxIndex, MetricsRegistry, ProviderPayloadSchema, RateLimitConfig,
+    RateLimiterFactory, RawInbound, TriggerBinding, TriggerKind, TriggerRegistry,
 };
 pub use http::{register_http_builtins, reset_http_state};
 pub use llm::register_llm_builtins;

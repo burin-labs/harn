@@ -20,8 +20,12 @@ use crate::event_log::AnyEventLog;
 use crate::secrets::SecretProvider;
 use crate::triggers::{ProviderId, TenantId, TriggerEvent};
 
+pub mod cron;
 pub mod hmac;
+#[cfg(test)]
+pub(crate) mod test_util;
 
+pub use cron::{CatchupMode, CronConnector};
 pub use hmac::{
     HmacSignatureStyle, DEFAULT_GITHUB_SIGNATURE_HEADER, DEFAULT_STANDARD_WEBHOOKS_ID_HEADER,
     DEFAULT_STANDARD_WEBHOOKS_SIGNATURE_HEADER, DEFAULT_STANDARD_WEBHOOKS_TIMESTAMP_HEADER,
