@@ -831,7 +831,7 @@ lineage metadata.
 - `tokens_used`
 - `budget_exceeded`
 - `session_id`
-- `data` when `returns.schema` succeeds
+- `data` when the child requests JSON mode or `returns.schema` succeeds
 - `error: {category, message, tool?}` when the child fails or a narrowed tool
   policy rejects a call
 

@@ -1379,7 +1379,10 @@ Options mirror `agent_loop` where relevant (`provider`, `model`, `tools`,
 
 - `allowed_tools: ["name", ...]` to narrow the child tool registry and
   capability ceiling
-- `returns: {schema: ...}` to validate the child summary as structured output
+- `response_format: "json"` to parse structured child JSON into `data` from the
+  final successful transcript when possible
+- `returns: {schema: ...}` to validate that structured child JSON against a
+  schema
 
 ### Artifacts and context
 

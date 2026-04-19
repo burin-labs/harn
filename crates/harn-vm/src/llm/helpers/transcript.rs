@@ -44,29 +44,6 @@ pub(crate) fn transcript_summary_text(transcript: &BTreeMap<String, VmValue>) ->
     transcript_string_field(transcript, "summary")
 }
 
-pub(crate) fn transcript_last_assistant_text(
-    transcript: &BTreeMap<String, VmValue>,
-) -> Option<String> {
-    let messages = transcript_message_list(transcript).ok()?;
-    for message in messages.iter().rev() {
-        let dict = message.as_dict()?;
-        let role = dict
-            .get("role")
-            .map(|value| value.display())
-            .unwrap_or_default();
-        if role != "assistant" {
-            continue;
-        }
-        match dict.get("content") {
-            Some(VmValue::String(text)) if !text.trim().is_empty() => {
-                return Some(text.to_string());
-            }
-            _ => continue,
-        }
-    }
-    None
-}
-
 pub(crate) fn transcript_id(transcript: &BTreeMap<String, VmValue>) -> Option<String> {
     transcript_string_field(transcript, "id")
 }
@@ -262,25 +239,3 @@ pub(crate) fn is_transcript_value(value: &VmValue) -> bool {
         == Some(TRANSCRIPT_TYPE)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::llm::helpers::messages::vm_message;
-
-    #[test]
-    fn transcript_last_assistant_text_prefers_latest_nonempty_assistant_message() {
-        let transcript = BTreeMap::from([(
-            "messages".to_string(),
-            VmValue::List(Rc::new(vec![
-                vm_message("user", "first"),
-                vm_message("assistant", ""),
-                vm_message("assistant", "{\"ok\":true}"),
-            ])),
-        )]);
-
-        assert_eq!(
-            transcript_last_assistant_text(&transcript).as_deref(),
-            Some("{\"ok\":true}")
-        );
-    }
-}

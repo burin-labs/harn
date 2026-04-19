@@ -347,55 +347,205 @@ fn transcript_tokens_used(transcript: &VmValue) -> i64 {
         .unwrap_or(0)
 }
 
-fn summarize_sub_agent_result(result: &serde_json::Value) -> String {
+#[derive(Clone, Debug)]
+struct JsonCandidate {
+    text: String,
+    value: serde_json::Value,
+}
+
+#[derive(Clone, Debug, Default)]
+struct TranscriptFallbacks {
+    assistant_text: Option<String>,
+    structured_json: Option<JsonCandidate>,
+    summary: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+struct SynthesizedSubAgentResult {
+    summary: String,
+    structured_json: Option<JsonCandidate>,
+}
+
+fn extract_json_candidate(text: &str) -> Option<JsonCandidate> {
+    let json = crate::stdlib::json::extract_json_from_text(text);
+    let value = serde_json::from_str::<serde_json::Value>(&json).ok()?;
+    Some(JsonCandidate {
+        text: value.to_string(),
+        value,
+    })
+}
+
+fn transcript_assistant_message_text(message: &VmValue) -> Option<String> {
+    let dict = message.as_dict()?;
+    if dict.get("role").map(VmValue::display).as_deref() != Some("assistant") {
+        return None;
+    }
+    match dict.get("content")? {
+        VmValue::String(text) if !text.trim().is_empty() => Some(text.to_string()),
+        VmValue::Dict(_) => Some(crate::llm::vm_value_to_json(dict.get("content")?).to_string()),
+        _ => None,
+    }
+}
+
+fn transcript_assistant_event_text(event: &VmValue) -> Option<String> {
+    let dict = event.as_dict()?;
+    if dict.get("role").map(VmValue::display).as_deref() != Some("assistant") {
+        return None;
+    }
+    dict.get("text").and_then(|value| match value {
+        VmValue::String(text) if !text.trim().is_empty() => Some(text.to_string()),
+        _ => None,
+    })
+}
+
+fn normalized_assistant_text(text: &str) -> Option<String> {
+    let sanitized = crate::visible_text::sanitize_visible_assistant_text(text, false);
+    let trimmed = sanitized.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn collect_transcript_fallbacks(transcript: &VmValue) -> TranscriptFallbacks {
+    let mut fallbacks = TranscriptFallbacks::default();
+    let Some(dict) = transcript.as_dict() else {
+        return fallbacks;
+    };
+
+    if let Some(VmValue::List(messages)) = dict.get("messages") {
+        for message in messages.iter().rev() {
+            let Some(text) = transcript_assistant_message_text(message) else {
+                continue;
+            };
+            if fallbacks.structured_json.is_none() {
+                fallbacks.structured_json = extract_json_candidate(&text);
+            }
+            if fallbacks.assistant_text.is_none() {
+                fallbacks.assistant_text = normalized_assistant_text(&text);
+            }
+            if fallbacks.structured_json.is_some() && fallbacks.assistant_text.is_some() {
+                break;
+            }
+        }
+    }
+
+    if (fallbacks.structured_json.is_none() || fallbacks.assistant_text.is_none())
+        && matches!(dict.get("events"), Some(VmValue::List(_)))
+    {
+        if let Some(VmValue::List(events)) = dict.get("events") {
+            for event in events.iter().rev() {
+                let Some(text) = transcript_assistant_event_text(event) else {
+                    continue;
+                };
+                if fallbacks.structured_json.is_none() {
+                    fallbacks.structured_json = extract_json_candidate(&text);
+                }
+                if fallbacks.assistant_text.is_none() {
+                    fallbacks.assistant_text = normalized_assistant_text(&text);
+                }
+                if fallbacks.structured_json.is_some() && fallbacks.assistant_text.is_some() {
+                    break;
+                }
+            }
+        }
+    }
+
+    fallbacks.summary = dict.get("summary").and_then(|value| match value {
+        VmValue::String(text) if !text.trim().is_empty() => Some(text.to_string()),
+        _ => None,
+    });
+    if fallbacks.structured_json.is_none() {
+        fallbacks.structured_json = fallbacks
+            .summary
+            .as_deref()
+            .and_then(extract_json_candidate);
+    }
+
+    fallbacks
+}
+
+fn option_requests_structured_output(options: &BTreeMap<String, VmValue>) -> bool {
+    matches!(
+        options.get("response_format"),
+        Some(VmValue::String(value)) if value.as_ref() == "json"
+    ) || options.contains_key("json_schema")
+        || options.contains_key("output_schema")
+}
+
+fn synthesize_sub_agent_result(
+    result: &serde_json::Value,
+    transcript: &VmValue,
+    wants_structured_output: bool,
+) -> SynthesizedSubAgentResult {
     let raw = result
         .get("visible_text")
         .and_then(|value| value.as_str())
         .or_else(|| result.get("text").and_then(|value| value.as_str()))
         .unwrap_or_default();
-    let sanitized = crate::visible_text::sanitize_visible_assistant_text(raw, false);
-    if sanitized.trim().is_empty() {
-        raw.trim().to_string()
+    let visible_text = crate::visible_text::sanitize_visible_assistant_text(raw, false);
+    let visible_trimmed = visible_text.trim().to_string();
+    let raw_trimmed = raw.trim().to_string();
+    let direct_json = extract_json_candidate(if !visible_trimmed.is_empty() {
+        &visible_trimmed
     } else {
-        sanitized.trim().to_string()
+        &raw_trimmed
+    });
+
+    let fallbacks = collect_transcript_fallbacks(transcript);
+    let structured_json = direct_json.or_else(|| fallbacks.structured_json.clone());
+
+    let summary = if wants_structured_output {
+        structured_json
+            .as_ref()
+            .map(|candidate| candidate.text.clone())
+            .or_else(|| (!visible_trimmed.is_empty()).then(|| visible_trimmed.clone()))
+            .or_else(|| fallbacks.assistant_text.clone())
+            .or_else(|| fallbacks.summary.clone())
+            .unwrap_or(raw_trimmed)
+    } else {
+        (!visible_trimmed.is_empty())
+            .then_some(visible_trimmed)
+            .or_else(|| fallbacks.assistant_text.clone())
+            .or_else(|| {
+                fallbacks
+                    .structured_json
+                    .as_ref()
+                    .map(|candidate| candidate.text.clone())
+            })
+            .or_else(|| fallbacks.summary.clone())
+            .unwrap_or(raw_trimmed)
+    };
+
+    SynthesizedSubAgentResult {
+        summary,
+        structured_json,
     }
 }
 
-fn sub_agent_expects_json(spec: &SubAgentRunSpec) -> bool {
-    matches!(
-        spec.options.get("response_format"),
-        Some(VmValue::String(text)) if text.as_ref() == "json"
-    )
-}
-
-fn summary_has_parseable_json(summary: &str) -> bool {
-    let candidate = crate::stdlib::json::extract_json_from_text(summary);
-    serde_json::from_str::<serde_json::Value>(&candidate).is_ok()
-}
-
-fn transcript_summary_fallback(transcript: &VmValue) -> Option<String> {
-    let dict = transcript.as_dict()?;
-    crate::llm::helpers::transcript_summary_text(dict)
-        .filter(|text| !text.trim().is_empty())
-        .or_else(|| crate::llm::helpers::transcript_last_assistant_text(dict))
-}
-
-fn parse_structured_sub_agent_data(summary: &str, schema: &VmValue) -> Result<VmValue, VmError> {
-    let json = crate::stdlib::json::extract_json_from_text(summary);
-    let parsed = serde_json::from_str::<serde_json::Value>(&json).map_err(|error| {
-        VmError::CategorizedError {
-            message: format!("sub_agent_run: child summary was not valid JSON: {error}"),
+fn parse_structured_sub_agent_data(
+    candidate: Option<&JsonCandidate>,
+    schema: &VmValue,
+) -> Result<VmValue, VmError> {
+    let Some(candidate) = candidate else {
+        return Err(VmError::CategorizedError {
+            message: "sub_agent_run: child transcript did not contain valid JSON".to_string(),
             category: crate::value::ErrorCategory::SchemaValidation,
-        }
-    })?;
-    crate::schema::schema_expect_value(&crate::stdlib::json_to_vm_value(&parsed), schema, false)
-        .map_err(|error| match error {
-            VmError::Thrown(VmValue::String(message)) => VmError::CategorizedError {
-                message: format!("sub_agent_run: return schema validation failed: {message}"),
-                category: crate::value::ErrorCategory::SchemaValidation,
-            },
-            other => other,
-        })
+        });
+    };
+    crate::schema::schema_expect_value(
+        &crate::stdlib::json_to_vm_value(&candidate.value),
+        schema,
+        false,
+    )
+    .map_err(|error| match error {
+        VmError::Thrown(VmValue::String(message)) => VmError::CategorizedError {
+            message: format!("sub_agent_run: return schema validation failed: {message}"),
+            category: crate::value::ErrorCategory::SchemaValidation,
+        },
+        other => other,
+    })
 }
 
 fn sub_agent_loop_options(spec: &SubAgentRunSpec) -> Result<crate::llm::AgentLoopConfig, VmError> {
@@ -540,14 +690,10 @@ pub(super) async fn execute_sub_agent(
     };
     let tokens_used = transcript_tokens_used(&transcript);
 
-    let mut summary = summarize_sub_agent_result(&result);
-    let needs_transcript_summary = summary.trim().is_empty()
-        || (sub_agent_expects_json(&spec) && !summary_has_parseable_json(&summary));
-    if needs_transcript_summary {
-        if let Some(transcript_summary) = transcript_summary_fallback(&transcript) {
-            summary = transcript_summary;
-        }
-    }
+    let wants_structured_output =
+        spec.returns_schema.is_some() || option_requests_structured_output(&spec.options);
+    let synthesized = synthesize_sub_agent_result(&result, &transcript, wants_structured_output);
+    let summary = synthesized.summary.clone();
     let artifacts = transcript
         .as_dict()
         .and_then(|dict| dict.get("assets"))
@@ -573,8 +719,17 @@ pub(super) async fn execute_sub_agent(
         &spec.session_id,
     );
 
+    if spec.returns_schema.is_none() && option_requests_structured_output(&spec.options) {
+        if let Some(candidate) = synthesized.structured_json.as_ref() {
+            envelope.insert(
+                "data".to_string(),
+                crate::stdlib::json_to_vm_value(&candidate.value),
+            );
+        }
+    }
+
     if let Some(schema) = spec.returns_schema.as_ref() {
-        match parse_structured_sub_agent_data(&summary, schema) {
+        match parse_structured_sub_agent_data(synthesized.structured_json.as_ref(), schema) {
             Ok(data) => {
                 envelope.insert("data".to_string(), data);
             }
@@ -619,4 +774,81 @@ pub(super) async fn execute_sub_agent(
         payload: crate::llm::vm_value_to_json(&VmValue::Dict(Rc::new(envelope))),
         transcript,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn assistant_message(text: &str) -> VmValue {
+        VmValue::Dict(Rc::new(BTreeMap::from([
+            ("role".to_string(), VmValue::String(Rc::from("assistant"))),
+            ("content".to_string(), VmValue::String(Rc::from(text))),
+        ])))
+    }
+
+    #[test]
+    fn synthesize_summary_uses_prior_assistant_json_from_transcript() {
+        let transcript = crate::llm::helpers::new_transcript_with(
+            None,
+            vec![
+                assistant_message("{\"answer\":\"ok\"}"),
+                assistant_message("##DONE##"),
+            ],
+            None,
+            None,
+        );
+        let result = serde_json::json!({
+            "visible_text": "##DONE##",
+            "text": "##DONE##",
+        });
+
+        let synthesized = synthesize_sub_agent_result(&result, &transcript, true);
+
+        assert_eq!(synthesized.summary, "{\"answer\":\"ok\"}");
+        assert_eq!(
+            synthesized
+                .structured_json
+                .as_ref()
+                .and_then(|candidate| candidate.value.get("answer"))
+                .and_then(|value| value.as_str()),
+            Some("ok")
+        );
+    }
+
+    #[test]
+    fn synthesize_summary_falls_back_to_assistant_event_history() {
+        let transcript = crate::llm::helpers::new_transcript_with_events(
+            None,
+            Vec::new(),
+            None,
+            None,
+            vec![crate::llm::helpers::transcript_event(
+                "message",
+                "assistant",
+                "public",
+                "{\"paths\":[\"src/lib.rs\"]}",
+                None,
+            )],
+            Vec::new(),
+            Some("active"),
+        );
+        let result = serde_json::json!({
+            "visible_text": "",
+            "text": "",
+        });
+
+        let synthesized = synthesize_sub_agent_result(&result, &transcript, true);
+
+        assert_eq!(synthesized.summary, "{\"paths\":[\"src/lib.rs\"]}");
+        assert_eq!(
+            synthesized
+                .structured_json
+                .as_ref()
+                .and_then(|candidate| candidate.value.get("paths"))
+                .and_then(|value| value.as_array())
+                .map(Vec::len),
+            Some(1)
+        );
+    }
 }

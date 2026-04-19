@@ -1,0 +1,16 @@
+pipeline main() {
+  llm_mock({text: "{\"answer\":\"ok\"}"})
+  let direct = sub_agent_run("Return machine-readable JSON.", {provider: "mock", response_format: "json"})
+  println(direct?.ok)
+  println(direct?.summary == "{\"answer\":\"ok\"}")
+  println(direct?.data?.answer == "ok")
+  llm_mock({text: "{\"answer\":\"background\"}"})
+  let handle = sub_agent_run(
+    "Return machine-readable JSON in the background.",
+    {provider: "mock", response_format: "json", background: true},
+  )
+  let done = wait_agent(handle)
+  println(done?.status == "completed")
+  println(done?.result?.summary == "{\"answer\":\"background\"}")
+  println(done?.result?.data?.answer == "background")
+}
