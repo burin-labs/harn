@@ -1,0 +1,7 @@
+pipeline test(task) {
+  if true {
+    log("then")
+  }; else {
+    log("else")
+  }
+}

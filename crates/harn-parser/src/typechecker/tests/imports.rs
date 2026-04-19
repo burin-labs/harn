@@ -86,9 +86,12 @@ struct HeaderRecord {
     );
     let program = parse_program(
         r#"
-pipeline t(task) {
-  let header: HeaderRecord = HeaderRecord { name: "X-Test", value: "ok" }
+fn use_header(header: HeaderRecord) {
   let value: string = header.value
+}
+
+pipeline t(task) {
+  return
 }
 "#,
     );

@@ -89,6 +89,7 @@ pipeline test(task) {
     inspect.success
     && inspect.stdout.contains("cron-heartbeat provider=cron kind=cron state=active")
     && inspect.stdout.contains("manual-replay provider=a2a-push kind=a2a-push state=active")
+    && inspect.stdout.contains("manual-discard provider=a2a-push kind=a2a-push state=active")
     && inspect.stdout.contains("cron bindings=1")
     && inspect.stdout.contains("a2a-push bindings=2"),
   )

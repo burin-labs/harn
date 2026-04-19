@@ -152,6 +152,10 @@ harn fmt --line-width 80 main.harn    # custom line width
 The formatter enforces a **100-character line width** by default (overridable with `--line-width`). When a line exceeds
 this limit the formatter wraps it automatically:
 
+`harn fmt` also normalizes optional semicolon-separated statements back to the canonical
+newline-separated style. Semicolons are accepted as input syntax in statement-list
+contexts, but they are not preserved in formatter output.
+
 - **Comma-separated forms** — function call arguments, function declaration
   parameters, list literals, dict literals, struct construction fields,
   enum constructor payloads, selective import names, interface method

@@ -177,6 +177,36 @@ fn test_format_fn() {
 }
 
 #[test]
+fn test_format_semicolon_separated_statements_to_newlines() {
+    let source = r#"pipeline default(task) { let x = 1; let y = 2; return; }"#;
+    let result = format_source(source).unwrap();
+    assert_eq!(
+        result,
+        "pipeline default(task) {\n  let x = 1\n  let y = 2\n  return\n}\n"
+    );
+}
+
+#[test]
+fn test_format_semicolon_separated_skill_fields_to_newlines() {
+    let source = r#"skill deploy { description "Ship it"; prompt "Do the thing"; model "x" }"#;
+    let result = format_source(source).unwrap();
+    assert_eq!(
+        result,
+        "skill deploy {\n  description \"Ship it\"\n  prompt \"Do the thing\"\n  model \"x\"\n}\n"
+    );
+}
+
+#[test]
+fn test_format_tool_description_semicolon_body_to_newlines() {
+    let source = r#"tool read(path: string) { description "Read a file"; log(path) }"#;
+    let result = format_source(source).unwrap();
+    assert_eq!(
+        result,
+        "tool read(path: string) {\n  description \"Read a file\"\n  log(path)\n}\n"
+    );
+}
+
+#[test]
 fn test_single_newline_at_end() {
     let source = r#"pipeline default(task) {
   log("hello")
@@ -244,11 +274,17 @@ fn test_wraps_long_dict_literals() {
 
 #[test]
 fn test_wraps_long_struct_construction() {
-    let source = r#"pipeline default(task) {
+    let source = r#"struct BuildPlan {
+  first_really_long_key_name: string
+  second_really_long_key_name: string
+  third_really_long_key_name: string
+}
+
+pipeline default(task) {
   let x = BuildPlan {first_really_long_key_name: with_a_really_long_value_name_one, second_really_long_key_name: with_a_really_long_value_name_two, third_really_long_key_name: with_a_really_long_value_name_three}
 }"#;
     let result = format_source(source).unwrap();
-    assert!(result.contains("BuildPlan\n  {\n"));
+    assert!(result.contains("BuildPlan {\n"));
     assert!(result.contains("third_really_long_key_name: with_a_really_long_value_name_three,\n"));
 }
 

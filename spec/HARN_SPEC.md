@@ -19,6 +19,9 @@ This file is the canonical language specification. The hosted docs page
 Spaces (`' '`), tabs (`'\t'`), and carriage returns (`'\r'`) are insignificant and skipped
 between tokens. Newlines (`'\n'`) are significant tokens used as statement separators.
 The parser skips newlines between statements but they are preserved in the token stream.
+Semicolons (`';'`) are also accepted as optional statement separators in statement-list
+contexts (top-level items, block statements, tool bodies, and `skill` fields), but they
+are non-canonical input syntax. `harn fmt` normalizes them back to newline-separated form.
 
 ### Backslash line continuation
 
@@ -277,13 +280,16 @@ let doc = """
 ## Grammar
 
 The grammar is expressed in EBNF. Newlines between statements are implicit separators
-(the parser skips them with `skipNewlines()`). The `consume()` helper also skips newlines
+(the parser skips them with `skipNewlines()`). Semicolons are accepted as alternate
+separators in statement-list contexts only. The `consume()` helper also skips newlines
 before checking the expected token.
 
 ### Top-level
 
 ```ebnf
-program            ::= (top_level | NEWLINE)*
+program            ::= top_level_list
+top_level_list     ::= (NEWLINE)* [top_level (top_level_sep top_level)* [top_level_sep]] (NEWLINE)*
+top_level_sep      ::= NEWLINE+ | ';' NEWLINE*
 top_level          ::= import_decl
                      | attributed_decl
                      | pipeline_decl
@@ -307,7 +313,9 @@ pipeline_decl      ::= ['pub'] 'pipeline' IDENTIFIER '(' param_list ')'
                        ['extends' IDENTIFIER] '{' block '}'
 
 param_list         ::= (IDENTIFIER (',' IDENTIFIER)*)?
-block              ::= statement*
+block              ::= statement_list
+statement_list     ::= (NEWLINE)* [statement (statement_sep statement)* [statement_sep]] (NEWLINE)*
+statement_sep      ::= NEWLINE+ | ';' NEWLINE*
 
 fn_decl            ::= ['pub'] 'fn' IDENTIFIER [generic_params]
                        '(' fn_param_list ')' ['->' type_expr]
@@ -1548,7 +1556,7 @@ fragments, and auto-activation rules into a typed unit that hosts can
 enumerate, select, and invoke.
 
 Body entries are `<field_name> <expression>` pairs separated by
-newlines. The field name is an ordinary identifier (no keyword is
+newlines or semicolons. The field name is an ordinary identifier (no keyword is
 reserved), and the value is any expression — string literal, list
 literal, identifier reference, dict literal, or fn-literal (for
 lifecycle hooks). The compiler lowers the decl to:

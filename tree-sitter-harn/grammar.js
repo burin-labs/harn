@@ -28,6 +28,7 @@ module.exports = grammar({
     [$.impl_block],
     [$.interface_declaration],
     [$.match_statement],
+    [$.skill_declaration, $.pipe_expression, $.binary_expression, $.method_call, $.property_access],
     [$.pipe_expression, $.binary_expression, $.unary_expression, $.method_call, $.property_access],
     [$.pipe_expression, $.binary_expression, $.method_call, $.property_access],
     [$.pipe_expression, $.nil_coalescing_expression, $.binary_expression, $.method_call, $.property_access],
@@ -38,13 +39,7 @@ module.exports = grammar({
   word: ($) => $.identifier,
 
   rules: {
-    source_file: ($) => repeat($._top_level),
-
-    _top_level: ($) =>
-      choice(
-        $._top_level_item,
-        $._line_sep
-      ),
+    source_file: ($) => topLevelSeparated($, $._top_level_item),
 
     _top_level_item: ($) =>
       choice(
@@ -447,11 +442,12 @@ module.exports = grammar({
         ")",
         optional(seq("->", $.type_annotation)),
         "{",
-        repeat(choice($._block_sep, $._line_sep)),
-        optional(seq("description", $.string_literal, repeat(choice($._block_sep, $._line_sep)))),
-        layoutSeparated($, $._statement),
+        statementSeparated($, choice($.tool_description, $._statement)),
         "}"
       ),
+
+    tool_description: ($) =>
+      seq("description", $.string_literal),
 
     skill_declaration: ($) =>
       seq(
@@ -459,12 +455,13 @@ module.exports = grammar({
         "skill",
         field("name", $.identifier),
         "{",
-        repeat(choice($._block_sep, $._line_sep)),
-        repeat(seq(
-          field("field_name", $.identifier),
-          field("field_value", $._expression),
-          repeat(choice($._block_sep, $._line_sep))
-        )),
+        statementSeparated(
+          $,
+          seq(
+            field("field_name", $.identifier),
+            field("field_value", $._expression)
+          )
+        ),
         "}"
       ),
 
@@ -720,7 +717,7 @@ module.exports = grammar({
           "->",
           repeat(choice($._block_sep, $._line_sep))
         )),
-        layoutSeparated($, $._statement),
+        statementSeparated($, $._statement),
         "}"
       ),
 
@@ -737,7 +734,7 @@ module.exports = grammar({
           "->",
           repeat(choice($._block_sep, $._line_sep))
         )),
-        layoutSeparated($, $._statement),
+        statementSeparated($, $._statement),
         "}"
       ),
 
@@ -754,7 +751,7 @@ module.exports = grammar({
           "->",
           repeat(choice($._block_sep, $._line_sep))
         )),
-        layoutSeparated($, $._statement),
+        statementSeparated($, $._statement),
         "}"
       ),
 
@@ -873,7 +870,7 @@ module.exports = grammar({
         "{",
         optional($.parameter_list),
         "->",
-        layoutSeparated($, $._statement),
+        statementSeparated($, $._statement),
         "}"
       ),
 
@@ -891,7 +888,7 @@ module.exports = grammar({
     block: ($) =>
       seq(
         "{",
-        layoutSeparated($, $._statement),
+        statementSeparated($, $._statement),
         "}"
       ),
 
@@ -985,6 +982,42 @@ function commaSep1(rule) {
 
 function lineBreak($) {
   return choice($._line_sep, $._block_sep, $._newline);
+}
+
+function statementSeparator($) {
+  return choice(
+    seq(";", repeat(lineBreak($))),
+    repeat1(lineBreak($))
+  );
+}
+
+function sequenceNoLeading($, rule, separator) {
+  return optional(seq(
+    rule,
+    repeat(seq(separator($), rule)),
+    optional(separator($))
+  ));
+}
+
+function statementSeparated($, rule) {
+  return seq(
+    repeat(lineBreak($)),
+    sequenceNoLeading($, rule, statementSeparator)
+  );
+}
+
+function topLevelSeparator($) {
+  return choice(
+    seq(";", repeat(choice($._line_sep, $._newline))),
+    repeat1(choice($._line_sep, $._newline))
+  );
+}
+
+function topLevelSeparated($, rule) {
+  return seq(
+    repeat(choice($._line_sep, $._newline)),
+    sequenceNoLeading($, rule, topLevelSeparator)
+  );
 }
 
 function layoutSeparated($, rule) {
