@@ -1,3 +1,5 @@
+use std::error::Error as _;
+
 use reqwest::Url;
 use serde_json::Value;
 use tokio::sync::broadcast;
@@ -48,6 +50,13 @@ impl std::fmt::Display for A2aClientError {
 }
 
 impl std::error::Error for A2aClientError {}
+
+#[derive(Debug)]
+enum AgentCardFetchError {
+    Cancelled(String),
+    Discovery(String),
+    ConnectRefused(String),
+}
 
 pub async fn dispatch_trigger_event(
     raw_target: &str,
@@ -194,14 +203,28 @@ async fn resolve_endpoint(
     cancel_rx: &mut broadcast::Receiver<()>,
 ) -> Result<ResolvedA2aEndpoint, A2aClientError> {
     let mut last_error = None;
-    for scheme in ["http", "https"] {
+    for scheme in card_resolution_schemes() {
         let card_url = format!("{scheme}://{}/{A2A_AGENT_CARD_PATH}", target.authority);
         match fetch_agent_card(&card_url, cancel_rx).await {
-            Ok(card) => return endpoint_from_card(card_url, target.target_agent.clone(), &card),
-            Err(A2aClientError::Cancelled(message)) => {
+            Ok(card) => {
+                return endpoint_from_card(
+                    card_url,
+                    &target.authority,
+                    target.target_agent.clone(),
+                    &card,
+                );
+            }
+            Err(AgentCardFetchError::Cancelled(message)) => {
                 return Err(A2aClientError::Cancelled(message));
             }
-            Err(error) => last_error = Some(error.to_string()),
+            Err(error) => {
+                let message = agent_card_fetch_error_message(&error);
+                last_error = Some(message);
+                if should_try_cleartext_fallback(scheme, &error, &target.authority) {
+                    continue;
+                }
+                break;
+            }
         }
     }
     Err(A2aClientError::Discovery(format!(
@@ -214,15 +237,25 @@ async fn resolve_endpoint(
 async fn fetch_agent_card(
     card_url: &str,
     cancel_rx: &mut broadcast::Receiver<()>,
-) -> Result<Value, A2aClientError> {
-    let response = send_http(
-        crate::llm::shared_utility_client().get(card_url),
-        cancel_rx,
-        "A2A agent-card fetch cancelled",
-    )
-    .await?;
+) -> Result<Value, AgentCardFetchError> {
+    let response = tokio::select! {
+        response = crate::llm::shared_utility_client().get(card_url).send() => {
+            match response {
+                Ok(response) => Ok(response),
+                Err(error) if is_connect_refused(&error) => Err(AgentCardFetchError::ConnectRefused(
+                    format!("A2A HTTP request failed: {error}")
+                )),
+                Err(error) => Err(AgentCardFetchError::Discovery(
+                    format!("A2A HTTP request failed: {error}")
+                )),
+            }
+        }
+        _ = recv_cancel(cancel_rx) => Err(AgentCardFetchError::Cancelled(
+            "A2A agent-card fetch cancelled".to_string()
+        )),
+    }?;
     if !response.status().is_success() {
-        return Err(A2aClientError::Discovery(format!(
+        return Err(AgentCardFetchError::Discovery(format!(
             "GET {card_url} returned HTTP {}",
             response.status()
         )));
@@ -230,11 +263,12 @@ async fn fetch_agent_card(
     response
         .json::<Value>()
         .await
-        .map_err(|error| A2aClientError::Discovery(format!("parse {card_url}: {error}")))
+        .map_err(|error| AgentCardFetchError::Discovery(format!("parse {card_url}: {error}")))
 }
 
 fn endpoint_from_card(
     card_url: String,
+    requested_authority: &str,
     target_agent: String,
     card: &Value,
 ) -> Result<ResolvedA2aEndpoint, A2aClientError> {
@@ -245,6 +279,12 @@ fn endpoint_from_card(
     let base_url = Url::parse(base_url).map_err(|error| {
         A2aClientError::Discovery(format!("invalid A2A card url '{base_url}': {error}"))
     })?;
+    let card_authority = url_authority(&base_url)?;
+    if !authorities_equivalent(&card_authority, requested_authority) {
+        return Err(A2aClientError::Discovery(format!(
+            "A2A agent card url authority mismatch: requested '{requested_authority}', card returned '{card_authority}'"
+        )));
+    }
     let interfaces = card
         .get("interfaces")
         .and_then(Value::as_array)
@@ -277,6 +317,133 @@ fn endpoint_from_card(
         rpc_url: rpc_url.to_string(),
         agent_id: card.get("id").and_then(Value::as_str).map(str::to_string),
         target_agent,
+    })
+}
+
+fn card_resolution_schemes() -> [&'static str; 2] {
+    [
+        "https",
+        // Cleartext fallback exists for dev-mode only; production should use TLS.
+        // TODO(harn#250): Require an explicit opt-in gate before trying cleartext A2A discovery.
+        "http",
+    ]
+}
+
+/// Decide whether an HTTPS discovery failure should fall through to cleartext.
+///
+/// External targets only fall back on `ConnectionRefused` — the common "HTTPS
+/// port isn't listening" case. TLS handshake failures to an external host MUST
+/// NOT silently downgrade to HTTP, because an active network attacker can
+/// forge TLS errors to trigger a downgrade.
+///
+/// Loopback targets (`127.0.0.0/8`, `::1`, `localhost`) fall back on any
+/// discovery-style error. They cover the standard local-dev case where
+/// `harn serve` binds HTTP-only on `127.0.0.1:PORT`, and the SSRF threat
+/// model for loopback is already bounded — any attacker who can reach the
+/// local loopback already has code execution on the box.
+fn should_try_cleartext_fallback(
+    scheme: &str,
+    error: &AgentCardFetchError,
+    authority: &str,
+) -> bool {
+    if scheme != "https" {
+        return false;
+    }
+    match error {
+        AgentCardFetchError::Cancelled(_) => false,
+        AgentCardFetchError::ConnectRefused(_) => true,
+        AgentCardFetchError::Discovery(_) => is_loopback_authority(authority),
+    }
+}
+
+fn is_loopback_authority(authority: &str) -> bool {
+    let (host, _) = split_authority(authority);
+    if host.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+        return ip.is_loopback();
+    }
+    false
+}
+
+/// Return true when two authority strings refer to the same A2A endpoint.
+///
+/// Exact string equality is the default — an agent card that reports a
+/// different host than the one the client asked for is a security-relevant
+/// discrepancy (see harn#248 SSRF hardening). The one well-defined exception
+/// is loopback: `localhost`, `127.0.0.1`, `::1`, and the rest of
+/// `127.0.0.0/8` are all the same socket on this machine, and `harn serve`
+/// hardcodes `http://localhost:PORT` in its agent card even when a caller
+/// dials `127.0.0.1:PORT`. Treating both sides as loopback avoids a spurious
+/// mismatch in that case without widening the external-host trust boundary.
+fn authorities_equivalent(card_authority: &str, requested_authority: &str) -> bool {
+    if card_authority == requested_authority {
+        return true;
+    }
+    let (_, card_port) = split_authority(card_authority);
+    let (_, requested_port) = split_authority(requested_authority);
+    if card_port != requested_port {
+        return false;
+    }
+    is_loopback_authority(card_authority) && is_loopback_authority(requested_authority)
+}
+
+/// Split an authority into `(host, port_or_empty)`. Strips IPv6 brackets so
+/// `[::1]:8080` becomes `("::1", "8080")`.
+fn split_authority(authority: &str) -> (&str, &str) {
+    let (host_raw, port) = if authority.starts_with('[') {
+        // IPv6 bracketed form: "[addr]:port" or "[addr]".
+        if let Some(end) = authority.rfind(']') {
+            let host = &authority[..=end];
+            let rest = &authority[end + 1..];
+            let port = rest.strip_prefix(':').unwrap_or("");
+            (host, port)
+        } else {
+            (authority, "")
+        }
+    } else {
+        match authority.rsplit_once(':') {
+            Some((host, port)) => (host, port),
+            None => (authority, ""),
+        }
+    };
+    let host = host_raw.trim_start_matches('[').trim_end_matches(']');
+    (host, port)
+}
+
+fn agent_card_fetch_error_message(error: &AgentCardFetchError) -> String {
+    match error {
+        AgentCardFetchError::Cancelled(message)
+        | AgentCardFetchError::Discovery(message)
+        | AgentCardFetchError::ConnectRefused(message) => message.clone(),
+    }
+}
+
+fn is_connect_refused(error: &reqwest::Error) -> bool {
+    if !error.is_connect() {
+        return false;
+    }
+    let mut source = error.source();
+    while let Some(cause) = source {
+        if let Some(io_error) = cause.downcast_ref::<std::io::Error>() {
+            if io_error.kind() == std::io::ErrorKind::ConnectionRefused {
+                return true;
+            }
+        }
+        source = cause.source();
+    }
+    false
+}
+
+fn url_authority(url: &Url) -> Result<String, A2aClientError> {
+    let host = url
+        .host_str()
+        .ok_or_else(|| A2aClientError::Discovery(format!("A2A card url '{url}' missing host")))?;
+    Ok(if let Some(port) = url.port() {
+        format!("{host}:{port}")
+    } else {
+        host.to_string()
     })
 }
 
@@ -386,5 +553,164 @@ mod tests {
             extract_inline_result(&task),
             serde_json::json!({"trace_id": "trace_123"})
         );
+    }
+
+    #[test]
+    fn discovery_prefers_https_before_http() {
+        assert_eq!(card_resolution_schemes(), ["https", "http"]);
+    }
+
+    #[test]
+    fn cleartext_fallback_only_after_https_connect_refused() {
+        assert!(should_try_cleartext_fallback(
+            "https",
+            &AgentCardFetchError::ConnectRefused("connect refused".to_string()),
+            "reviewer.example:443",
+        ));
+        assert!(!should_try_cleartext_fallback(
+            "http",
+            &AgentCardFetchError::ConnectRefused("connect refused".to_string()),
+            "reviewer.example:443",
+        ));
+        assert!(!should_try_cleartext_fallback(
+            "https",
+            &AgentCardFetchError::Discovery("tls handshake failed".to_string()),
+            "reviewer.example:443",
+        ));
+    }
+
+    #[test]
+    fn cleartext_fallback_auto_allowed_for_loopback_authorities() {
+        // Local dev: harn serve is HTTP-only, so TLS handshake fails but we
+        // still need the HTTP fallback to succeed.
+        for authority in [
+            "127.0.0.1:8080",
+            "localhost:8080",
+            "[::1]:8080",
+            "127.1.2.3:9000",
+        ] {
+            assert!(
+                should_try_cleartext_fallback(
+                    "https",
+                    &AgentCardFetchError::Discovery("tls handshake failed".to_string()),
+                    authority,
+                ),
+                "expected cleartext fallback for loopback authority '{authority}'"
+            );
+        }
+    }
+
+    #[test]
+    fn cleartext_fallback_denies_external_tls_failures() {
+        // External target + TLS handshake failure must not downgrade — an
+        // attacker able to forge TLS errors shouldn't force cleartext.
+        for authority in [
+            "reviewer.example:443",
+            "8.8.8.8:443",
+            "192.168.1.10:8080",
+            "10.0.0.5:8443",
+        ] {
+            assert!(
+                !should_try_cleartext_fallback(
+                    "https",
+                    &AgentCardFetchError::Discovery("tls handshake failed".to_string()),
+                    authority,
+                ),
+                "cleartext fallback must be denied for external authority '{authority}'"
+            );
+        }
+    }
+
+    #[test]
+    fn is_loopback_authority_recognises_loopback_forms() {
+        assert!(is_loopback_authority("127.0.0.1:8080"));
+        assert!(is_loopback_authority("localhost:8080"));
+        assert!(is_loopback_authority("LOCALHOST:9000"));
+        assert!(is_loopback_authority("[::1]:8080"));
+        assert!(is_loopback_authority("127.5.5.5:1234"));
+        assert!(!is_loopback_authority("8.8.8.8:443"));
+        assert!(!is_loopback_authority("192.168.1.10:8080"));
+        assert!(!is_loopback_authority("example.com:443"));
+        assert!(!is_loopback_authority("reviewer.prod"));
+    }
+
+    #[test]
+    fn endpoint_from_card_rejects_card_url_authority_mismatch() {
+        let error = endpoint_from_card(
+            "https://trusted.example/.well-known/a2a-agent".to_string(),
+            "trusted.example",
+            "triage".to_string(),
+            &serde_json::json!({
+                "url": "https://evil.example",
+                "interfaces": [{"protocol": "jsonrpc", "url": "/rpc"}],
+            }),
+        )
+        .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "A2A agent card url authority mismatch: requested 'trusted.example', card returned 'evil.example'"
+        );
+    }
+
+    #[test]
+    fn endpoint_from_card_accepts_loopback_alias_pairs() {
+        // harn serve reports `http://localhost:PORT` in its card, but clients
+        // commonly dial `127.0.0.1:PORT`. Both refer to the same socket, so
+        // the authority check must not spuriously reject the pair.
+        let card = serde_json::json!({
+            "url": "http://localhost:8080",
+            "interfaces": [{"protocol": "jsonrpc", "url": "/rpc"}],
+        });
+        let endpoint = endpoint_from_card(
+            "http://127.0.0.1:8080/.well-known/a2a-agent".to_string(),
+            "127.0.0.1:8080",
+            "triage".to_string(),
+            &card,
+        )
+        .expect("loopback alias pair should be accepted");
+        assert_eq!(endpoint.rpc_url, "http://localhost:8080/rpc");
+
+        // IPv6 loopback `[::1]` also aliases to `127.0.0.1` / `localhost`.
+        let card_v6 = serde_json::json!({
+            "url": "http://[::1]:8080",
+            "interfaces": [{"protocol": "jsonrpc", "url": "/rpc"}],
+        });
+        let endpoint_v6 = endpoint_from_card(
+            "http://localhost:8080/.well-known/a2a-agent".to_string(),
+            "localhost:8080",
+            "triage".to_string(),
+            &card_v6,
+        )
+        .expect("IPv6 loopback alias should be accepted");
+        assert_eq!(endpoint_v6.rpc_url, "http://[::1]:8080/rpc");
+
+        // Port mismatch is still rejected even on loopback.
+        let card_wrong_port = serde_json::json!({
+            "url": "http://localhost:9000",
+            "interfaces": [{"protocol": "jsonrpc", "url": "/rpc"}],
+        });
+        let error = endpoint_from_card(
+            "http://127.0.0.1:8080/.well-known/a2a-agent".to_string(),
+            "127.0.0.1:8080",
+            "triage".to_string(),
+            &card_wrong_port,
+        )
+        .expect_err("mismatched ports must still be rejected even on loopback");
+        assert!(error
+            .to_string()
+            .contains("A2A agent card url authority mismatch"));
+    }
+
+    #[test]
+    fn authorities_equivalent_rejects_non_loopback_host_mismatch() {
+        assert!(!authorities_equivalent(
+            "internal.corp.example:443",
+            "trusted.example:443",
+        ));
+        assert!(!authorities_equivalent("10.0.0.5:8080", "127.0.0.1:8080",));
+        assert!(authorities_equivalent(
+            "trusted.example:443",
+            "trusted.example:443",
+        ));
     }
 }

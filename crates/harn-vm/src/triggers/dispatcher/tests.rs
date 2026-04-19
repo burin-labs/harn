@@ -7,12 +7,16 @@
 
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
-use std::net::{TcpListener, TcpStream};
+use std::net::TcpListener;
 use std::sync::mpsc::{self, Receiver};
 use std::sync::Arc;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Mutex, Once, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
+
+use rcgen::generate_simple_self_signed;
+use rustls::pki_types::{CertificateDer, PrivatePkcs8KeyDer};
+use rustls::{ServerConfig, ServerConnection, StreamOwned};
 
 use crate::event_log::{install_default_for_base_dir, EventLog, Topic};
 use crate::register_vm_stdlib;
@@ -215,36 +219,20 @@ fn spawn_mock_a2a_server(task_result: serde_json::Value) -> MockA2aServer {
     let addr = listener.local_addr().expect("mock A2A addr");
     let authority = format!("127.0.0.1:{}", addr.port());
     let (tx, rx) = mpsc::channel();
+    let tls_config = mock_a2a_tls_config();
     let join = thread::spawn(move || {
         for _ in 0..2 {
-            let (mut stream, _) = listener.accept().expect("accept mock A2A request");
-            let (request_line, body) = read_http_request(&mut stream);
-            if request_line.starts_with("GET /.well-known/a2a-agent ") {
-                write_json_response(
-                    &mut stream,
-                    &serde_json::json!({
-                        "id": "mock-a2a",
-                        "url": format!("http://127.0.0.1:{}", addr.port()),
-                        "interfaces": [{"protocol": "jsonrpc", "url": "/rpc"}],
-                    }),
-                );
-                continue;
-            }
-            assert!(
-                request_line.starts_with("POST /rpc "),
-                "unexpected request line: {request_line}"
-            );
-            tx.send(
-                serde_json::from_slice::<serde_json::Value>(&body).expect("mock A2A request json"),
-            )
-            .expect("capture mock A2A request");
-            let rpc_id = serde_json::from_slice::<serde_json::Value>(&body)
-                .expect("mock A2A request json")["id"]
-                .clone();
-            write_json_response(
-                &mut stream,
-                &crate::jsonrpc::response(rpc_id, task_result.clone()),
-            );
+            let (stream, _) = listener.accept().expect("accept mock A2A request");
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .expect("set read timeout");
+            stream
+                .set_write_timeout(Some(Duration::from_secs(5)))
+                .expect("set write timeout");
+            let connection = ServerConnection::new(tls_config.clone())
+                .expect("construct mock A2A TLS connection");
+            let mut stream = StreamOwned::new(connection, stream);
+            handle_mock_a2a_connection(&mut stream, addr.port(), &tx, &task_result);
         }
     });
     MockA2aServer {
@@ -254,10 +242,61 @@ fn spawn_mock_a2a_server(task_result: serde_json::Value) -> MockA2aServer {
     }
 }
 
-fn read_http_request(stream: &mut TcpStream) -> (String, Vec<u8>) {
-    stream
-        .set_read_timeout(Some(Duration::from_secs(5)))
-        .expect("set read timeout");
+fn handle_mock_a2a_connection<T: Read + Write>(
+    stream: &mut T,
+    port: u16,
+    tx: &mpsc::Sender<serde_json::Value>,
+    task_result: &serde_json::Value,
+) {
+    let (request_line, body) = read_http_request(stream);
+    if request_line.starts_with("GET /.well-known/a2a-agent ") {
+        write_json_response(
+            stream,
+            &serde_json::json!({
+                "id": "mock-a2a",
+                "url": format!("https://127.0.0.1:{port}"),
+                "interfaces": [{"protocol": "jsonrpc", "url": "/rpc"}],
+            }),
+        );
+        return;
+    }
+    assert!(
+        request_line.starts_with("POST /rpc "),
+        "unexpected request line: {request_line}"
+    );
+    tx.send(serde_json::from_slice::<serde_json::Value>(&body).expect("mock A2A request json"))
+        .expect("capture mock A2A request");
+    let rpc_id = serde_json::from_slice::<serde_json::Value>(&body).expect("mock A2A request json")
+        ["id"]
+        .clone();
+    write_json_response(
+        stream,
+        &crate::jsonrpc::response(rpc_id, task_result.clone()),
+    );
+}
+
+fn mock_a2a_tls_config() -> Arc<ServerConfig> {
+    install_rustls_provider();
+    let cert = generate_simple_self_signed(vec!["127.0.0.1".to_string(), "localhost".to_string()])
+        .expect("generate mock A2A certificate");
+    let cert_der: CertificateDer<'static> = cert.cert.der().clone();
+    let key_der = PrivatePkcs8KeyDer::from(cert.key_pair.serialize_der());
+    Arc::new(
+        ServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(vec![cert_der], key_der.into())
+            .expect("build mock A2A TLS server config"),
+    )
+}
+
+fn install_rustls_provider() {
+    static INSTALL: Once = Once::new();
+    INSTALL.call_once(|| {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+    });
+}
+
+fn read_http_request<T: Read>(stream: &mut T) -> (String, Vec<u8>) {
     let mut buffer = Vec::new();
     let mut chunk = [0u8; 4096];
     let header_end;
@@ -304,7 +343,7 @@ fn parse_content_length(headers: &[u8]) -> usize {
         .unwrap_or(0)
 }
 
-fn write_json_response(stream: &mut TcpStream, body: &serde_json::Value) {
+fn write_json_response<T: Write>(stream: &mut T, body: &serde_json::Value) {
     let payload = serde_json::to_vec(body).expect("serialize mock A2A response");
     let response = format!(
         "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n",
@@ -476,8 +515,8 @@ async fn a2a_handler_returns_pending_task_handle() {
                     "task_id": "task-pending",
                     "state": "working",
                     "target_agent": "triage",
-                    "rpc_url": format!("http://{}/rpc", server.authority),
-                    "card_url": format!("http://{}/.well-known/a2a-agent", server.authority),
+                    "rpc_url": format!("https://{}/rpc", server.authority),
+                    "card_url": format!("https://{}/.well-known/a2a-agent", server.authority),
                     "agent_id": "mock-a2a",
                 }))
             );
