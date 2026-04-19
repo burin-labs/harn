@@ -229,6 +229,7 @@ pub(super) async fn run_post_turn(
             if est > ac.token_threshold {
                 let mut compact_opts = opts.clone();
                 compact_opts.messages = state.visible_messages.clone();
+                let original_message_count = state.visible_messages.len();
                 if let Some(summary) = crate::orchestration::auto_compact_messages(
                     &mut state.visible_messages,
                     ac,
@@ -236,17 +237,46 @@ pub(super) async fn run_post_turn(
                 )
                 .await?
                 {
+                    let estimated_tokens_after =
+                        crate::orchestration::estimate_message_tokens(&state.visible_messages);
+                    let archived_messages = original_message_count
+                        .saturating_sub(state.visible_messages.len())
+                        .saturating_add(1);
                     super::super::trace::emit_agent_event(
                         super::super::trace::AgentTraceEvent::ContextCompaction {
-                            archived_messages: est.saturating_sub(
-                                crate::orchestration::estimate_message_tokens(
-                                    &state.visible_messages,
-                                ),
-                            ),
+                            archived_messages,
                             new_summary_len: summary.len(),
                             iteration,
                         },
                     );
+                    state.transcript_events.push(crate::llm::helpers::transcript_event(
+                        "compaction",
+                        "system",
+                        "internal",
+                        "Transcript compacted during agent loop",
+                        Some(serde_json::json!({
+                            "mode": "auto",
+                            "strategy": crate::orchestration::compact_strategy_name(&ac.compact_strategy),
+                            "archived_messages": archived_messages,
+                            "estimated_tokens_before": est,
+                            "estimated_tokens_after": estimated_tokens_after,
+                        })),
+                    ));
+                    super::emit_agent_event(
+                        &crate::agent_events::AgentEvent::TranscriptCompacted {
+                            session_id: ctx.session_id.to_string(),
+                            mode: "auto".to_string(),
+                            strategy: crate::orchestration::compact_strategy_name(
+                                &ac.compact_strategy,
+                            )
+                            .to_string(),
+                            archived_messages,
+                            estimated_tokens_before: est,
+                            estimated_tokens_after,
+                            snapshot_asset_id: None,
+                        },
+                    )
+                    .await;
                     let merged = match state.transcript_summary.take() {
                         Some(existing)
                             if !existing.trim().is_empty() && existing.trim() != summary.trim() =>

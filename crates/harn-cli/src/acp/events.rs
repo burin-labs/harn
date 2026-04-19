@@ -220,6 +220,28 @@ impl AgentEventSink for AcpAgentEventSink {
                     },
                 }));
             }
+            AgentEvent::TranscriptCompacted {
+                session_id,
+                mode,
+                strategy,
+                archived_messages,
+                estimated_tokens_before,
+                estimated_tokens_after,
+                snapshot_asset_id,
+            } => {
+                self.write_notification(serde_json::json!({
+                    "sessionId": session_id,
+                    "update": {
+                        "sessionUpdate": "transcript_compacted",
+                        "mode": mode,
+                        "strategy": strategy,
+                        "archivedMessages": archived_messages,
+                        "estimatedTokensBefore": estimated_tokens_before,
+                        "estimatedTokensAfter": estimated_tokens_after,
+                        "snapshotAssetId": snapshot_asset_id,
+                    },
+                }));
+            }
             // Pipeline-loop milestones with no canonical ACP session/update
             // mapping; deliberately not forwarded.
             AgentEvent::TurnStart { .. }

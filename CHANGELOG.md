@@ -26,6 +26,14 @@ granular archaeology.
   handle. The wrapper stores daemon metadata alongside the persisted
   runtime snapshot so resumable state dirs can be reopened
   ergonomically without changing daemon semantics.
+- **`transcript_compact(...)` now wraps the runtime-owned transcript
+  compaction engine (#142 part (a)).** The manual transcript
+  compaction surface now reuses `AutoCompactConfig` with `llm`,
+  `truncate`, and `observation_mask` strategies, supports prompt-
+  template overrides for LLM summaries, preserves pre-compaction
+  transcripts as durable embedded artifacts, and exposes compaction
+  events through both transcript observability and the live
+  `agent_subscribe` stream.
 
 ## v0.7.21
 

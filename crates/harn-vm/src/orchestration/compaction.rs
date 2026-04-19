@@ -1,5 +1,6 @@
 //! Auto-compaction — transcript size management strategies.
 
+use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use crate::llm::{vm_call_llm_full, vm_value_to_json};
@@ -22,6 +23,15 @@ pub fn parse_compact_strategy(value: &str) -> Result<CompactStrategy, VmError> {
         other => Err(VmError::Runtime(format!(
             "unknown compact_strategy '{other}' (expected 'llm', 'truncate', 'custom', or 'observation_mask')"
         ))),
+    }
+}
+
+pub fn compact_strategy_name(strategy: &CompactStrategy) -> &'static str {
+    match strategy {
+        CompactStrategy::Llm => "llm",
+        CompactStrategy::Truncate => "truncate",
+        CompactStrategy::Custom => "custom",
+        CompactStrategy::ObservationMask => "observation_mask",
     }
 }
 
@@ -65,6 +75,10 @@ pub struct AutoCompactConfig {
     /// This allows the pipeline to use LLM-based compression rather than
     /// keyword heuristics.
     pub compress_callback: Option<VmValue>,
+    /// Optional prompt-template asset path used when LLM compaction is
+    /// selected. The rendered template becomes the user message sent to
+    /// the summarizer.
+    pub summarize_prompt: Option<String>,
 }
 
 impl Default for AutoCompactConfig {
@@ -79,6 +93,7 @@ impl Default for AutoCompactConfig {
             custom_compactor: None,
             mask_callback: None,
             compress_callback: None,
+            summarize_prompt: None,
         }
     }
 }
@@ -341,6 +356,7 @@ async fn llm_compaction_summary(
     old_messages: &[serde_json::Value],
     archived_count: usize,
     llm_opts: &crate::llm::api::LlmCallOptions,
+    summarize_prompt: Option<&str>,
 ) -> Result<String, VmError> {
     let mut compact_opts = llm_opts.clone();
     let formatted = format_compaction_messages(old_messages);
@@ -350,11 +366,10 @@ async fn llm_compaction_summary(
     compact_opts.tool_choice = None;
     compact_opts.response_format = None;
     compact_opts.json_schema = None;
+    let prompt = render_llm_compaction_prompt(summarize_prompt, &formatted, archived_count)?;
     compact_opts.messages = vec![serde_json::json!({
         "role": "user",
-        "content": format!(
-            "Summarize these archived conversation messages for a follow-on coding agent. Preserve goals, constraints, decisions, completed tool work, unresolved issues, and next actions. Output only the summary text.\n\nArchived message count: {archived_count}\n\nConversation:\n{formatted}"
-        ),
+        "content": prompt,
     })];
     let result = vm_call_llm_full(&compact_opts).await?;
     let summary = result.text.trim();
@@ -369,6 +384,46 @@ async fn llm_compaction_summary(
             "[auto-compacted {archived_count} older messages]\n{summary}"
         ))
     }
+}
+
+fn render_llm_compaction_prompt(
+    summarize_prompt: Option<&str>,
+    formatted: &str,
+    archived_count: usize,
+) -> Result<String, VmError> {
+    let Some(path) = summarize_prompt.filter(|path| !path.trim().is_empty()) else {
+        return Ok(format!(
+            "Summarize these archived conversation messages for a follow-on coding agent. Preserve goals, constraints, decisions, completed tool work, unresolved issues, and next actions. Output only the summary text.\n\nArchived message count: {archived_count}\n\nConversation:\n{formatted}"
+        ));
+    };
+
+    let resolved = crate::stdlib::process::resolve_source_asset_path(path);
+    let template = std::fs::read_to_string(&resolved).map_err(|error| {
+        VmError::Runtime(format!(
+            "failed to read compaction summarize_prompt {}: {error}",
+            resolved.display()
+        ))
+    })?;
+    let mut bindings = BTreeMap::new();
+    bindings.insert(
+        "formatted_messages".to_string(),
+        VmValue::String(Rc::from(formatted.to_string())),
+    );
+    bindings.insert(
+        "archived_count".to_string(),
+        VmValue::Int(archived_count as i64),
+    );
+    crate::stdlib::template::render_template_result(
+        &template,
+        Some(&bindings),
+        resolved.parent(),
+        Some(&resolved),
+    )
+    .map_err(|error| {
+        VmError::Runtime(format!(
+            "compaction summarize_prompt render error: {error:?}"
+        ))
+    })
 }
 
 async fn custom_compaction_summary(
@@ -509,6 +564,7 @@ async fn apply_compaction_strategy(
     llm_opts: Option<&crate::llm::api::LlmCallOptions>,
     custom_compactor: Option<&VmValue>,
     mask_callback: Option<&VmValue>,
+    summarize_prompt: Option<&str>,
 ) -> Result<String, VmError> {
     match strategy {
         CompactStrategy::Truncate => Ok(truncate_compaction_summary(old_messages, archived_count)),
@@ -521,6 +577,7 @@ async fn apply_compaction_strategy(
                         "LLM transcript compaction requires active LLM call options".to_string(),
                     )
                 })?,
+                summarize_prompt,
             )
             .await
         }
@@ -605,6 +662,7 @@ pub(crate) async fn auto_compact_messages(
         llm_opts,
         config.custom_compactor.as_ref(),
         config.mask_callback.as_ref(),
+        config.summarize_prompt.as_deref(),
     )
     .await?;
 
@@ -625,6 +683,7 @@ pub(crate) async fn auto_compact_messages(
                 llm_opts,
                 config.custom_compactor.as_ref(),
                 None,
+                config.summarize_prompt.as_deref(),
             )
             .await?;
         }

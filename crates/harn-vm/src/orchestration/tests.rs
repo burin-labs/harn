@@ -408,11 +408,12 @@ fn save_and_load_run_record_materializes_observability_summary() {
     save_run_record(&run, Some(run_path.to_str().unwrap())).unwrap();
     let loaded = load_run_record(&run_path).unwrap();
     let observability = loaded.observability.expect("observability summary");
-    assert_eq!(observability.schema_version, 1);
+    assert_eq!(observability.schema_version, 2);
     assert_eq!(observability.planner_rounds.len(), 1);
     assert_eq!(observability.research_fact_count, 1);
     assert_eq!(observability.worker_lineage.len(), 1);
     assert_eq!(observability.verification_outcomes.len(), 1);
+    assert!(observability.compaction_events.is_empty());
     assert!(observability
         .transcript_pointers
         .iter()
@@ -421,6 +422,71 @@ fn save_and_load_run_record_materializes_observability_summary() {
         observability.planner_rounds[0].research_facts,
         vec!["verify stage failed after read".to_string()]
     );
+}
+
+#[test]
+fn derive_run_observability_collects_compaction_events() {
+    let transcript = serde_json::json!({
+        "_type": "transcript",
+        "id": "session-compaction",
+        "messages": [
+            {"role": "user", "content": "summary"}
+        ],
+        "events": [
+            {
+                "id": "compaction-event-1",
+                "kind": "compaction",
+                "role": "system",
+                "visibility": "internal",
+                "text": "Transcript compacted via truncate",
+                "metadata": {
+                    "mode": "manual",
+                    "strategy": "truncate",
+                    "archived_messages": 3,
+                    "estimated_tokens_before": 120,
+                    "estimated_tokens_after": 48,
+                    "snapshot_asset_id": "snapshot-1"
+                }
+            }
+        ],
+        "assets": [
+            {
+                "id": "snapshot-1",
+                "kind": "compaction_source_transcript",
+                "visibility": "internal",
+                "data": {
+                    "_type": "transcript",
+                    "id": "session-compaction",
+                    "messages": [
+                        {"role": "user", "content": "first"},
+                        {"role": "assistant", "content": "second"},
+                        {"role": "user", "content": "third"},
+                        {"role": "assistant", "content": "fourth"}
+                    ]
+                }
+            }
+        ]
+    });
+    let run = RunRecord {
+        id: "run_compaction".to_string(),
+        workflow_id: "wf".to_string(),
+        status: "completed".to_string(),
+        transcript: Some(transcript),
+        ..Default::default()
+    };
+
+    let observability = derive_run_observability(&run, None);
+    assert_eq!(observability.compaction_events.len(), 1);
+    let event = &observability.compaction_events[0];
+    assert_eq!(event.id, "compaction-event-1");
+    assert_eq!(event.mode, "manual");
+    assert_eq!(event.strategy, "truncate");
+    assert_eq!(event.archived_messages, 3);
+    assert_eq!(event.estimated_tokens_before, 120);
+    assert_eq!(event.estimated_tokens_after, 48);
+    assert_eq!(event.snapshot_asset_id.as_deref(), Some("snapshot-1"));
+    assert_eq!(event.snapshot_location, "run.transcript.assets[snapshot-1]");
+    assert!(event.available);
 }
 
 #[test]
