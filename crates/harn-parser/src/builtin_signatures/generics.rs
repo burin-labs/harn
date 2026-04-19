@@ -7,6 +7,7 @@ use super::BuiltinGenericSig;
 pub(crate) fn lookup_generic_builtin_sig(name: &str) -> Option<BuiltinGenericSig> {
     match name {
         "llm_call" | "llm_completion" => Some(llm_call_generic_sig()),
+        "project_fingerprint" => Some(project_fingerprint_builtin_sig()),
         "schema_parse" | "schema_check" => Some(schema_parse_generic_sig()),
         "schema_expect" => Some(schema_expect_generic_sig()),
         "trigger_fire" => Some(trigger_fire_builtin_sig()),
@@ -121,6 +122,50 @@ fn schema_expect_generic_sig() -> BuiltinGenericSig {
         type_params: vec!["T".into()],
         params: vec![TypeExpr::Named("unknown".into()), schema_of_t()],
         return_type: TypeExpr::Named("T".into()),
+    }
+}
+
+fn project_fingerprint_builtin_sig() -> BuiltinGenericSig {
+    BuiltinGenericSig {
+        type_params: vec![],
+        params: vec![TypeExpr::Named("string".into())],
+        return_type: TypeExpr::Shape(vec![
+            ShapeField {
+                name: "primary_language".into(),
+                type_expr: TypeExpr::Named("string".into()),
+                optional: false,
+            },
+            ShapeField {
+                name: "languages".into(),
+                type_expr: TypeExpr::List(Box::new(TypeExpr::Named("string".into()))),
+                optional: false,
+            },
+            ShapeField {
+                name: "frameworks".into(),
+                type_expr: TypeExpr::List(Box::new(TypeExpr::Named("string".into()))),
+                optional: false,
+            },
+            ShapeField {
+                name: "package_managers".into(),
+                type_expr: TypeExpr::List(Box::new(TypeExpr::Named("string".into()))),
+                optional: false,
+            },
+            ShapeField {
+                name: "has_tests".into(),
+                type_expr: TypeExpr::Named("bool".into()),
+                optional: false,
+            },
+            ShapeField {
+                name: "has_ci".into(),
+                type_expr: TypeExpr::Named("bool".into()),
+                optional: false,
+            },
+            ShapeField {
+                name: "lockfile_paths".into(),
+                type_expr: TypeExpr::List(Box::new(TypeExpr::Named("string".into()))),
+                optional: false,
+            },
+        ]),
     }
 }
 

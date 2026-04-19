@@ -76,6 +76,10 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("dict")),
     },
     BuiltinSig {
+        name: "project_fingerprint",
+        return_type: None,
+    },
+    BuiltinSig {
         name: "project_root",
         return_type: Some(BuiltinReturn::Named("string")),
     },

@@ -1008,6 +1008,24 @@ monolithic `root.json` shard.
 | `invalidate_facts(dir)` | dir: string | nil | Mark cached facts as stale |
 | `scan_directory(path?, pattern_or_options?, options?)` | path: string, pattern: string or options: dict | list | Enumerate files and directories with optional `pattern`, `max_depth`, `include_hidden`, `include_dirs`, `include_files` |
 
+## Project introspection
+
+| Function | Parameters | Returns | Description |
+|---|---|---|---|
+| `project_fingerprint(path?)` | path: string | `ProjectFingerprint` | Return a normalized shallow project profile for the current working directory or the supplied path |
+
+`ProjectFingerprint` has these fields:
+
+- `primary_language`: `"rust"`, `"typescript"`, `"python"`, `"go"`, `"swift"`, `"mixed"`, or `"unknown"`
+- `languages`: all detected top-level languages in stable order
+- `frameworks`: shallow framework signals such as `"axum"`, `"next"`, `"react"`, `"django"`, `"fastapi"`, or `"rails"`
+- `package_managers`: detected package managers such as `"cargo"`, `"npm"`,
+  `"pnpm"`, `"yarn"`, `"pip"`, `"poetry"`, `"uv"`, or `"go"`
+- `has_tests`: `true` when a standard test directory such as `tests/`, `test/`, `__tests__/`, or `spec/` is present
+- `has_ci`: `true` when CI config such as `.github/workflows/` or `.gitlab-ci.yml` is present
+- `lockfile_paths`: relative paths to detected lockfiles such as `Cargo.lock`,
+  `package-lock.json`, `pnpm-lock.yaml`, `uv.lock`, or `go.sum`
+
 ## MCP (Model Context Protocol)
 
 Connect to external tool servers using the
