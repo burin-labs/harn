@@ -109,7 +109,10 @@ enforcement.
 - Delegated worker lifecycle builtins via `spawn_agent(...)`, `send_input(...)`,
   `resume_agent(...)`, `wait_agent(...)`, `close_agent(...)`, and `list_agents()`,
   with child run lineage, persisted worker snapshots, and host-visible worker
-  lifecycle events.
+  lifecycle events. Worker handles now retain immutable original `request`
+  metadata plus normalized `provenance` so parent orchestration can recover
+  research questions, action items, workflow stages, and verification steps
+  without positional rebinding.
 - Per-worker execution scoping on `spawn_agent(...)`: delegated workers inherit
   the current execution ceiling by default and can narrow it further with a
   `policy` dict or `tools: ["name", ...]` shorthand, with permission denials

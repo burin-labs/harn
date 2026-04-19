@@ -22,8 +22,8 @@ use std::sync::Arc;
 use self::agents_workers::{
     apply_worker_artifact_policy, emit_worker_event, load_worker_state_snapshot, next_worker_id,
     parse_worker_config, persist_worker_state_snapshot, spawn_worker_task, with_worker_state,
-    worker_id_from_value, worker_snapshot_path, worker_summary, WorkerConfig, WorkerState,
-    WORKER_REGISTRY,
+    worker_id_from_value, worker_request_for_config, worker_snapshot_path, worker_summary,
+    WorkerConfig, WorkerState, WORKER_REGISTRY,
 };
 use self::sub_agent::{execute_sub_agent, parse_sub_agent_request};
 use crate::orchestration::{
@@ -151,21 +151,29 @@ pub(crate) fn register_agent_builtins(vm: &mut Vm) {
         let created_at = uuid::Uuid::now_v7().to_string();
         let mut audit = agents_workers::inherited_worker_audit("sub_agent");
         audit.worker_id = Some(worker_id.clone());
+        let execution = request.execution;
+        let worker_policy = request.worker_policy;
+        let spec = request.spec;
+        let worker_name = spec.name.clone();
+        let worker_task = spec.task.clone();
+        let config = WorkerConfig::SubAgent {
+            spec: Box::new(spec),
+        };
+        let original_request = worker_request_for_config(&worker_task, &config);
         let state = Rc::new(RefCell::new(WorkerState {
             id: worker_id.clone(),
-            name: request.spec.name.clone(),
-            task: request.spec.task.clone(),
+            name: worker_name,
+            task: worker_task.clone(),
             status: "running".to_string(),
             created_at: created_at.clone(),
             started_at: created_at,
             finished_at: None,
             mode: "sub_agent".to_string(),
-            history: vec![request.spec.task.clone()],
-            config: WorkerConfig::SubAgent {
-                spec: Box::new(request.spec),
-            },
+            history: vec![worker_task],
+            config,
             handle: None,
             cancel_token: Arc::new(AtomicBool::new(false)),
+            request: original_request,
             latest_payload: None,
             latest_error: None,
             transcript: None,
@@ -179,9 +187,9 @@ pub(crate) fn register_agent_builtins(vm: &mut Vm) {
                 context_policy: ContextPolicy::default(),
                 resume_workflow: false,
                 persist_state: true,
-                policy: request.worker_policy,
+                policy: worker_policy,
             },
-            execution: request.execution,
+            execution,
             snapshot_path: worker_snapshot_path(&worker_id),
             audit,
         }));
@@ -217,6 +225,7 @@ pub(crate) fn register_agent_builtins(vm: &mut Vm) {
         let mut audit = init.audit.clone().normalize();
         audit.worker_id = Some(worker_id.clone());
         audit.execution_kind = Some(mode.clone());
+        let original_request = worker_request_for_config(&init.task, &init.config);
         let state = Rc::new(RefCell::new(WorkerState {
             id: worker_id.clone(),
             name: init.name,
@@ -230,6 +239,7 @@ pub(crate) fn register_agent_builtins(vm: &mut Vm) {
             config: init.config,
             handle: None,
             cancel_token: Arc::new(AtomicBool::new(false)),
+            request: original_request,
             latest_payload: None,
             latest_error: None,
             transcript: None,

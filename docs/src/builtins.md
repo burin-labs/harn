@@ -1359,7 +1359,11 @@ the call if you want a fresh run with the same id.
 
 Workers return handle dicts with an `id`, lifecycle timestamps, `status`,
 `mode`, result/error fields, transcript presence, produced artifact count,
-snapshot/child-run paths, and `audit` mutation-session metadata when available.
+snapshot/child-run paths, immutable original `request` metadata, normalized
+`provenance`, and `audit` mutation-session metadata when available.
+The `request` object preserves canonical `research_questions`,
+`action_items`, `workflow_stages`, and `verification_steps` arrays when the
+caller supplied them.
 When a worker-scoped policy denies a tool call, the agent receives a structured
 tool result payload: `{error: "permission_denied", tool: "...", reason: "..."}`.
 

@@ -271,6 +271,8 @@ pub struct RunChildRecord {
     pub mutation_scope: Option<String>,
     pub approval_policy: Option<super::ToolApprovalPolicy>,
     pub task: String,
+    pub request: Option<serde_json::Value>,
+    pub provenance: Option<serde_json::Value>,
     pub status: String,
     pub started_at: String,
     pub finished_at: Option<String>,

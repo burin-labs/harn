@@ -35,6 +35,23 @@ fn worker_snapshot_round_trip_preserves_resume_fields() {
         },
         handle: None,
         cancel_token: Arc::new(AtomicBool::new(false)),
+        request: WorkerRequestRecord {
+            task: "task".to_string(),
+            system: Some("system".to_string()),
+            payload: Some(serde_json::json!({
+                "research_questions": ["question one"],
+                "action_items": [{"id": "action_1", "title": "do the thing"}],
+                "workflow_stages": ["research", "implement"],
+                "verification_steps": ["cargo test -p harn-vm"],
+            })),
+            research_questions: vec![serde_json::json!("question one")],
+            action_items: vec![serde_json::json!({"id": "action_1", "title": "do the thing"})],
+            workflow_stages: vec![
+                serde_json::json!("research"),
+                serde_json::json!("implement"),
+            ],
+            verification_steps: vec![serde_json::json!("cargo test -p harn-vm")],
+        },
         latest_payload: Some(serde_json::json!({"status": "completed"})),
         latest_error: None,
         transcript: Some(VmValue::Dict(Rc::new(BTreeMap::from([(
@@ -98,6 +115,19 @@ fn worker_snapshot_round_trip_preserves_resume_fields() {
     assert_eq!(loaded.carry_policy.artifact_mode, "none");
     assert!(!loaded.carry_policy.resume_workflow);
     assert_eq!(
+        loaded.request.payload,
+        Some(serde_json::json!({
+            "research_questions": ["question one"],
+            "action_items": [{"id": "action_1", "title": "do the thing"}],
+            "workflow_stages": ["research", "implement"],
+            "verification_steps": ["cargo test -p harn-vm"],
+        }))
+    );
+    assert_eq!(
+        loaded.request.action_items,
+        vec![serde_json::json!({"id": "action_1", "title": "do the thing"})]
+    );
+    assert_eq!(
         loaded.carry_policy.policy,
         Some(CapabilityPolicy {
             tools: vec!["read".to_string()],
@@ -110,6 +140,81 @@ fn worker_snapshot_round_trip_preserves_resume_fields() {
 
     let _ = std::fs::remove_dir_all(&dir);
     unsafe { std::env::remove_var("HARN_WORKER_STATE_DIR") };
+}
+
+#[test]
+fn worker_summary_exposes_request_and_provenance() {
+    let state = WorkerState {
+        id: "worker_123".to_string(),
+        name: "worker".to_string(),
+        task: "latest task".to_string(),
+        status: "completed".to_string(),
+        created_at: "created".to_string(),
+        started_at: "started".to_string(),
+        finished_at: Some("finished".to_string()),
+        mode: "sub_agent".to_string(),
+        history: vec!["original task".to_string(), "latest task".to_string()],
+        config: WorkerConfig::SubAgent {
+            spec: Box::new(SubAgentRunSpec {
+                name: "worker".to_string(),
+                task: "latest task".to_string(),
+                system: Some("system".to_string()),
+                options: BTreeMap::new(),
+                returns_schema: None,
+                session_id: "session_worker".to_string(),
+                parent_session_id: Some("session_parent".to_string()),
+            }),
+        },
+        handle: None,
+        cancel_token: Arc::new(AtomicBool::new(false)),
+        request: WorkerRequestRecord {
+            task: "original task".to_string(),
+            system: Some("system".to_string()),
+            payload: Some(serde_json::json!({
+                "research_questions": ["What changed?"],
+            })),
+            research_questions: vec![serde_json::json!("What changed?")],
+            action_items: Vec::new(),
+            workflow_stages: Vec::new(),
+            verification_steps: Vec::new(),
+        },
+        latest_payload: Some(serde_json::json!({"ok": true})),
+        latest_error: None,
+        transcript: None,
+        artifacts: Vec::new(),
+        parent_worker_id: Some("parent_worker".to_string()),
+        parent_stage_id: Some("stage_1".to_string()),
+        child_run_id: Some("run_123".to_string()),
+        child_run_path: Some(".harn-runs/run_123.json".to_string()),
+        carry_policy: WorkerCarryPolicy::default(),
+        execution: WorkerExecutionProfile::default(),
+        snapshot_path: ".harn/workers/worker_123.json".to_string(),
+        audit: MutationSessionRecord {
+            session_id: "session_worker".to_string(),
+            parent_session_id: Some("session_parent".to_string()),
+            ..Default::default()
+        }
+        .normalize(),
+    };
+
+    let summary = clone_worker_state(&state);
+    assert_eq!(
+        summary["request"]["task"],
+        serde_json::json!("original task")
+    );
+    assert_eq!(
+        summary["request"]["research_questions"][0],
+        serde_json::json!("What changed?")
+    );
+    assert_eq!(
+        summary["provenance"]["worker_id"],
+        serde_json::json!("worker_123")
+    );
+    assert_eq!(
+        summary["provenance"]["parent_session_id"],
+        serde_json::json!("session_parent")
+    );
+    assert_eq!(summary["task"], serde_json::json!("latest task"));
 }
 
 #[test]

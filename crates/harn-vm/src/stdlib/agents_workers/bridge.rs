@@ -1,11 +1,13 @@
 use std::path::PathBuf;
 
-use super::WorkerState;
+use super::{worker_provenance, WorkerState};
 
 fn worker_bridge_metadata(state: &WorkerState) -> serde_json::Value {
     serde_json::json!({
         "task": state.task,
         "mode": state.mode,
+        "request": state.request,
+        "provenance": worker_provenance(state),
         "created_at": state.created_at,
         "started_at": state.started_at,
         "finished_at": state.finished_at,
