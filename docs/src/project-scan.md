@@ -106,6 +106,59 @@ Bindings available to the template:
 - every top-level key from `base_evidence`
 - `files`: deterministic bounded file context as `{path, content, truncated}`
 
+`project_enrich(...)` now also augments the evidence with a deterministic `ci`
+block unless `include_operator_meta: false` is set in the options. This is
+intended to surface the "operator meta-knowledge" a human reviewer picks up
+quickly in a new repo:
+
+- `ci.workflows`: `.github/workflows/*.yml` / `.yaml` with per-job
+  classifications such as `lint`, `test`, `build`, and `release`
+- `ci.hooks`: `.githooks/*`, `.pre-commit-config.yaml`, `lefthook.yml`, and
+  `.husky/*` collapsed into stage → command summaries
+- `ci.package_manifests`: detected manifests + lockfiles with CI cache/tooling
+  hints such as `rust-cache action` or `cargo-nextest installed`
+- `ci.merge_policy`: CODEOWNERS, CONTRIBUTING merge-method hints, and GitHub
+  branch-protection data when `gh` is installed and authenticated
+
+Typical shape:
+
+```json
+{
+  "ci": {
+    "workflows": [
+      {
+        "path": ".github/workflows/ci.yml",
+        "name": "CI",
+        "jobs": [
+          {
+            "name": "Rust (lint + test + conformance)",
+            "classifications": ["lint", "test"],
+            "required_check": true
+          }
+        ]
+      }
+    ],
+    "hooks": {
+      "stages": {
+        "pre-commit": ["cargo fmt --all", "cargo clippy --workspace -- -D warnings"]
+      }
+    },
+    "package_manifests": [
+      {
+        "ecosystem": "cargo",
+        "manifests": ["Cargo.toml"],
+        "lockfiles": ["Cargo.lock"],
+        "ci_hints": ["rust-cache action"]
+      }
+    ],
+    "merge_policy": {
+      "required_checks": ["Format check", "Rust (lint + test + conformance)"],
+      "squash_only": true
+    }
+  }
+}
+```
+
 Behavior:
 
 - cache key includes `cache_key`, path, schema, rendered prompt, and the content
@@ -115,6 +168,9 @@ Behavior:
   base evidence with `budget_exceeded: true` instead of failing
 - schema-retry exhaustion returns an envelope with `validation_error` and
   `base_evidence` instead of raising
+- workflow/hook/policy files are prioritized in the bounded `files` context so
+  operator-facing enrichment prompts see CI + merge-policy inputs before generic
+  source snippets
 
 By default, cache entries live under `.harn/cache/enrichment/` inside the
 project root. Override that with `cache_dir` when a caller wants a different

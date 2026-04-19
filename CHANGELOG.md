@@ -11,6 +11,16 @@ granular archaeology.
 
 ### Changed
 
+- **`project_enrich(...)` now surfaces repo operator metadata (#219).**
+  The deterministic enrichment evidence now includes a `ci` block with
+  parsed GitHub Actions workflows, hook stage summaries
+  (`.githooks`/`pre-commit`/`lefthook`/`husky`), package manifest + lockfile
+  presence, CI cache/tooling hints, and merge-policy signals from
+  CODEOWNERS/CONTRIBUTING plus GitHub branch protection when `gh` is
+  authenticated. Workflow/hook/policy files are also prioritized in the
+  bounded prompt context so merge-captain / deploy-captain style personas
+  see operator conventions without guessing.
+
 - **Split trigger inbox envelopes from durable dedupe claims (#243).**
   Dispatcher envelopes now append to `trigger.inbox.envelopes` while
   `InboxIndex` persists TTL-bound claim records under
