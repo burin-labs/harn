@@ -1,99 +1,45 @@
-use super::*;
+use super::{
+    apply_tool_search_native_injection, defer_loading_registry, extract_deferred_tool_names, json,
+    vm_bool, vm_dict, vm_list, vm_str, vm_tools_to_native,
+};
 use std::collections::BTreeMap;
 use std::rc::Rc;
-
-#[test]
-fn native_schema_ref_resolves_to_component_alias() {
-    let native_tools = vec![json!({
-        "type": "function",
-        "function": {
-            "name": "touch",
-            "description": "Touch a file path.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": { "$ref": "#/components/schemas/FilePath" }
-                },
-                "required": ["path"]
-            }
-        },
-        "components": {
-            "schemas": {
-                "FilePath": {
-                    "type": "string",
-                    "description": "Repo-relative path"
-                }
-            }
-        }
-    })];
-    let (schemas, registry) = collect_tool_schemas_with_registry(None, Some(&native_tools));
-    assert_eq!(schemas.len(), 1);
-    let aliases = registry.render_aliases();
-    assert!(
-        aliases.contains("type FilePath = string;"),
-        "expected type alias for FilePath: {aliases}"
-    );
-    let prompt = build_tool_calling_contract_prompt(None, Some(&native_tools), "text", false, None);
-    assert!(
-        prompt.contains("type FilePath = string;"),
-        "prompt missing alias: {prompt}"
-    );
-    assert!(
-        prompt.contains("path: FilePath"),
-        "signature should reference alias: {prompt}"
-    );
-}
-
-#[test]
-fn component_registry_handles_recursive_refs_without_looping() {
-    let mut registry = ComponentRegistry::default();
-    let root = json!({
-        "components": {
-            "schemas": {
-                "Node": {
-                    "type": "object",
-                    "properties": {
-                        "children": {
-                            "type": "array",
-                            "items": { "$ref": "#/components/schemas/Node" }
-                        }
-                    }
-                }
-            }
-        }
-    });
-    let node_schema = root["components"]["schemas"]["Node"].clone();
-    let _ty = json_schema_to_type_expr(&node_schema, &root, &mut registry);
-    let _ = registry.render_aliases();
-}
 
 #[test]
 fn vm_tools_to_native_emits_defer_loading_for_anthropic() {
     let registry = defer_loading_registry();
     let tools = vm_tools_to_native(&registry, "anthropic").expect("anthropic native tools");
+    // Eager `look` tool has no defer_loading key.
     let look = tools
         .iter()
-        .find(|t| t.get("name").and_then(|v| v.as_str()) == Some("look"))
+        .find(|tool| tool.get("name").and_then(|value| value.as_str()) == Some("look"))
         .expect("look tool present");
     assert!(look.get("defer_loading").is_none());
+    // Deferred `deploy` tool carries `defer_loading: true`.
     let deploy = tools
         .iter()
-        .find(|t| t.get("name").and_then(|v| v.as_str()) == Some("deploy"))
+        .find(|tool| tool.get("name").and_then(|value| value.as_str()) == Some("deploy"))
         .expect("deploy tool present");
     assert_eq!(
-        deploy.get("defer_loading").and_then(|v| v.as_bool()),
+        deploy
+            .get("defer_loading")
+            .and_then(|value| value.as_bool()),
         Some(true)
     );
 }
 
 #[test]
 fn vm_tools_to_native_emits_namespace_for_openai_compat() {
+    // `namespace` on a tool entry (harn#71) flows through to the
+    // OpenAI-shape wrapper alongside `defer_loading`. Anthropic
+    // receives it too — the field is harmless there (ignored by the
+    // API) and keeps replay fidelity.
     let mut deferred_params = BTreeMap::new();
     deferred_params.insert("env".to_string(), vm_str("string"));
     let deferred = vm_dict(&[
         ("name", vm_str("deploy")),
         ("description", vm_str("Deploy the app")),
-        ("parameters", VmValue::Dict(Rc::new(deferred_params))),
+        ("parameters", super::VmValue::Dict(Rc::new(deferred_params))),
         ("defer_loading", vm_bool(true)),
         ("namespace", vm_str("ops")),
     ]);
@@ -113,19 +59,26 @@ fn vm_tools_to_native_emits_namespace_for_openai_compat() {
 
 #[test]
 fn vm_tools_to_native_emits_defer_loading_for_openai_compat() {
+    // OpenAI-shape tools place the flag at the wrapper level (not inside
+    // `function`) so harn#71's Responses-API path can read it uniformly
+    // without re-walking. Non-Anthropic providers that don't understand
+    // the flag will never actually see it — the capability gate in
+    // options.rs blocks them before the request leaves the VM.
     let registry = defer_loading_registry();
     let tools = vm_tools_to_native(&registry, "openai").expect("openai native tools");
     let deploy = tools
         .iter()
-        .find(|t| {
-            t.get("function")
-                .and_then(|f| f.get("name"))
-                .and_then(|v| v.as_str())
+        .find(|tool| {
+            tool.get("function")
+                .and_then(|function| function.get("name"))
+                .and_then(|value| value.as_str())
                 == Some("deploy")
         })
         .expect("deploy tool present");
     assert_eq!(
-        deploy.get("defer_loading").and_then(|v| v.as_bool()),
+        deploy
+            .get("defer_loading")
+            .and_then(|value| value.as_bool()),
         Some(true)
     );
 }
@@ -184,6 +137,9 @@ fn apply_tool_search_native_injection_regex_variant() {
 
 #[test]
 fn apply_tool_search_native_injection_emits_openai_shape_for_non_anthropic() {
+    // OpenAI's native `tool_search` meta-tool (harn#71) uses a flat
+    // `{"type": "tool_search", "mode": "hosted"}` shape, distinct from
+    // Anthropic's versioned `tool_search_tool_*_20251119` block.
     let mut tools: Option<Vec<serde_json::Value>> = Some(vec![json!({"name": "look"})]);
     apply_tool_search_native_injection(&mut tools, "openai", "bm25");
     let tools = tools.unwrap();
@@ -199,6 +155,8 @@ fn apply_tool_search_native_injection_emits_openai_shape_for_non_anthropic() {
 
 #[test]
 fn apply_tool_search_native_injection_openai_collects_namespaces() {
+    // When deferred tools declare a `namespace`, OpenAI's meta-tool
+    // carries the distinct set so the server can group them.
     let mut tools: Option<Vec<serde_json::Value>> = Some(vec![
         json!({
             "type": "function",
@@ -221,7 +179,10 @@ fn apply_tool_search_native_injection_openai_collects_namespaces() {
     let namespaces = tools[0]["namespaces"]
         .as_array()
         .expect("namespaces present");
-    let names: Vec<&str> = namespaces.iter().filter_map(|v| v.as_str()).collect();
+    let names: Vec<&str> = namespaces
+        .iter()
+        .filter_map(|value| value.as_str())
+        .collect();
     assert_eq!(names, vec!["crm", "ops"], "sorted + deduped");
 }
 
