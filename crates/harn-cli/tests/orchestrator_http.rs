@@ -283,6 +283,9 @@ async fn github_webhook_delivery_is_accepted_and_persisted() {
     let mut process = spawn_orchestrator(&temp, &[], &envs);
     let base_url = process.wait_for_listener_url();
 
+    let health = reqwest::get(format!("{base_url}/health")).await.unwrap();
+    assert_status(health, StatusCode::OK).await;
+
     let body = br#"{"action":"opened","issue":{"number":1}}"#;
     let response = reqwest::Client::new()
         .post(format!("{base_url}/triggers/github-new-issue"))

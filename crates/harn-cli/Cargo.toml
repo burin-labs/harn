@@ -48,7 +48,7 @@ url = "2"
 webbrowser = "1"
 rand = "0.10"
 regex = "1"
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive", "env"] }
 tower = { version = "0.5", features = ["util"] }
 time = { version = "0.3", features = ["formatting", "parsing"] }
 tempfile = "3"

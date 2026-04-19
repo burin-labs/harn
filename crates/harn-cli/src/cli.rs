@@ -475,27 +475,46 @@ pub(crate) enum OrchestratorCommand {
 
 #[derive(Debug, Args)]
 pub(crate) struct OrchestratorServeArgs {
-    /// Path to the root `harn.toml` manifest to load.
-    #[arg(long, default_value = "harn.toml", value_name = "PATH")]
+    /// Path to the root manifest to load. Container deployments often mount
+    /// this as `/etc/harn/triggers.toml`.
+    #[arg(
+        long,
+        visible_alias = "manifest",
+        env = "HARN_ORCHESTRATOR_MANIFEST",
+        default_value = "harn.toml",
+        value_name = "PATH"
+    )]
     pub config: PathBuf,
     /// Directory used for EventLog data and orchestrator state snapshots.
     #[arg(
         long = "state-dir",
+        env = "HARN_ORCHESTRATOR_STATE_DIR",
         default_value = ".harn/orchestrator",
         value_name = "PATH"
     )]
     pub state_dir: PathBuf,
-    /// Socket address the future HTTP listener will bind to.
-    #[arg(long, default_value = "127.0.0.1:8080", value_name = "ADDR")]
+    /// Socket address the HTTP listener will bind to.
+    #[arg(
+        long,
+        visible_alias = "listen",
+        env = "HARN_ORCHESTRATOR_LISTEN",
+        default_value = "127.0.0.1:8080",
+        value_name = "ADDR"
+    )]
     pub bind: SocketAddr,
     /// PEM-encoded certificate chain for HTTPS termination.
-    #[arg(long, value_name = "PATH")]
+    #[arg(long, env = "HARN_ORCHESTRATOR_CERT", value_name = "PATH")]
     pub cert: Option<PathBuf>,
     /// PEM-encoded private key for HTTPS termination.
-    #[arg(long, value_name = "PATH")]
+    #[arg(long, env = "HARN_ORCHESTRATOR_KEY", value_name = "PATH")]
     pub key: Option<PathBuf>,
     /// Runtime role to boot. Multi-tenant is a stub for now.
-    #[arg(long, value_enum, default_value_t = crate::commands::orchestrator::role::OrchestratorRole::SingleTenant)]
+    #[arg(
+        long,
+        env = "HARN_ORCHESTRATOR_ROLE",
+        value_enum,
+        default_value_t = crate::commands::orchestrator::role::OrchestratorRole::SingleTenant
+    )]
     pub role: crate::commands::orchestrator::role::OrchestratorRole,
 }
 
@@ -864,6 +883,31 @@ mod tests {
             serve.role,
             crate::commands::orchestrator::role::OrchestratorRole::SingleTenant
         );
+    }
+
+    #[test]
+    fn test_parses_orchestrator_serve_container_aliases() {
+        let cli = Cli::parse_from([
+            "harn",
+            "orchestrator",
+            "serve",
+            "--manifest",
+            "/etc/harn/triggers.toml",
+            "--state-dir",
+            "/var/lib/harn/state",
+            "--listen",
+            "0.0.0.0:8080",
+        ]);
+
+        let Command::Orchestrator(args) = cli.command.unwrap() else {
+            panic!("expected orchestrator command");
+        };
+        let OrchestratorCommand::Serve(serve) = args.command else {
+            panic!("expected orchestrator serve");
+        };
+        assert_eq!(serve.config, PathBuf::from("/etc/harn/triggers.toml"));
+        assert_eq!(serve.state_dir, PathBuf::from("/var/lib/harn/state"));
+        assert_eq!(serve.bind.to_string(), "0.0.0.0:8080");
     }
 
     #[test]
