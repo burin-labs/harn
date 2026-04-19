@@ -21,9 +21,10 @@ fn main() {
             &index,
             "<!doctype html><html><head><title>Harn portal not built</title></head>\
              <body><h1>Harn portal not built</h1>\
-             <p>Run <code>npm --prefix crates/harn-cli/portal install</code> then \
-             <code>npm --prefix crates/harn-cli/portal run build</code>, \
-             or <code>make portal-check</code>, to populate \
+             <p>Run <code>./scripts/dev_setup.sh</code> or <code>make setup</code> \
+             to install portal dependencies and build the frontend, or run \
+             <code>npm --prefix crates/harn-cli/portal run build</code> directly, \
+             to populate \
              <code>crates/harn-cli/portal-dist</code>.</p></body></html>",
         )
         .expect("write placeholder portal index.html");

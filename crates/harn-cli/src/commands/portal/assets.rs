@@ -9,7 +9,7 @@ pub(super) static PORTAL_DIST: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/porta
 pub(super) async fn index() -> Response {
     match PORTAL_DIST.get_file("index.html") {
         Some(file) => Html(String::from_utf8_lossy(file.contents()).into_owned()).into_response(),
-        None => internal_error("portal frontend is not built; run npm install && npm run build in crates/harn-cli/portal")
+        None => internal_error("portal frontend is not built; run ./scripts/dev_setup.sh or npm --prefix crates/harn-cli/portal run build")
             .into_response(),
     }
 }

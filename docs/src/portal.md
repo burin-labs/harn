@@ -38,10 +38,13 @@ For a fresh source checkout, the simplest local setup is:
 make portal
 ```
 
+`./scripts/dev_setup.sh` also installs the portal's Node dependencies and
+builds `crates/harn-cli/portal-dist` up front, so the git hooks and
+`harn portal` start from a ready state.
+
 For portal frontend work specifically:
 
 ```bash
-npm --prefix crates/harn-cli/portal install
 npm run portal:build
 npm run portal:test
 ```

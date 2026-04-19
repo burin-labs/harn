@@ -21,7 +21,7 @@ cargo install harn-cli
 ```bash
 git clone https://github.com/burin-labs/harn
 cd harn
-./scripts/dev_setup.sh   # installs dev tooling, git hooks, sccache
+./scripts/dev_setup.sh   # installs dev tooling, portal deps/build, git hooks, sccache
 cargo build --release
 cp target/release/harn ~/.local/bin/
 ```

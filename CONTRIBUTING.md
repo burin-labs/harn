@@ -15,8 +15,11 @@ This script:
 - configures `.githooks` as the repo hook path
 - installs `cargo-nextest` and `sccache` (for faster tests and cached builds)
 - enables the sccache rustc wrapper via a local `.cargo/config.toml`
-- installs repo-local markdown tooling plus Node dependencies for
-  `tree-sitter-harn/` and `editors/vscode/` when `npm` is available
+- writes a per-worktree temp Cargo `target-dir` when `CODEX_WORKTREE_PATH` is
+  set so parallel Codex worktrees stay isolated
+- installs repo-local markdown tooling plus Node dependencies for the portal,
+  `tree-sitter-harn/`, and `editors/vscode/` when `npm` is available
+- builds `crates/harn-cli/portal-dist` when `npm` is available
 - runs `cargo check --workspace`
 
 ## Running checks
@@ -92,9 +95,10 @@ This runs:
 - `make test` -- Rust workspace tests (`cargo nextest` when available)
 - `harn test conformance` -- Conformance test suite
 
-Pre-commit hooks (`.githooks/pre-commit`) run fmt + clippy + markdown lint
-automatically. Pre-push hooks (`.githooks/pre-push`) run workspace tests,
-Harn formatting checks, and markdown lint before code leaves your machine.
+Pre-commit hooks (`.githooks/pre-commit`) run fmt + clippy + highlight keyword
+regeneration + markdown lint automatically. Pre-push hooks
+(`.githooks/pre-push`) run workspace tests, Harn formatting checks, and
+markdown lint before code leaves your machine.
 
 ## Project structure
 

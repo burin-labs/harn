@@ -282,9 +282,12 @@ make portal
 ```
 
 `dev_setup.sh` configures git hooks, installs `cargo-nextest` and `sccache`,
-installs repo-local Node tooling, enables the sccache rustc wrapper, and runs
-a workspace `cargo check`. `make portal` launches the built-in observability UI
-for persisted runs under `.harn-runs/`.
+installs repo-local Node tooling including the portal frontend, builds
+`crates/harn-cli/portal-dist`, enables the sccache rustc wrapper, and runs a
+workspace `cargo check`. When `CODEX_WORKTREE_PATH` is set, it also writes a
+per-worktree temp `target-dir` into `.cargo/config.toml` so parallel Codex
+worktrees do not fight over one shared Cargo target. `make portal` launches the
+built-in observability UI for persisted runs under `.harn-runs/`.
 
 ## Why This Matters
 

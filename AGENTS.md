@@ -5,8 +5,9 @@ This repository implements Harn, a programming language and runtime for orchestr
 ## Dev Environment Tips
 
 - Run `make setup` on a fresh clone. It configures `.githooks/`, installs `cargo-nextest` and
-  `sccache`, installs repo-local Node tooling when `npm` is available, enables the sccache rustc
-  wrapper, and runs `cargo check --workspace`.
+  `sccache`, installs repo-local Node tooling including the portal frontend when `npm` is
+  available, enables the sccache rustc wrapper, writes a per-worktree temp Cargo `target-dir`
+  when `CODEX_WORKTREE_PATH` is set, and runs `cargo check --workspace`.
 - Use `make test` for workspace Rust tests. It runs `cargo nextest` when available and falls back
   to `cargo test --workspace`. Use `make test-cargo` when you explicitly need baseline Cargo
   behavior.
@@ -63,7 +64,8 @@ This repository implements Harn, a programming language and runtime for orchestr
   `make conformance`, `make lint-harn`, `make fmt-harn`, and the relevant tree-sitter tests.
 - If you change docs code blocks under `docs/src/`, run `make check-docs-snippets`.
 - If you change builtins or keyword sets, run `make gen-highlight` and commit the updated
-  `docs/theme/harn-keywords.js`.
+  `docs/theme/harn-keywords.js`. The pre-commit hook regenerates and re-stages this file
+  automatically as a consistency fixup.
 - If you change the portal frontend, run `npm run portal:lint`, `npm run portal:test`, and
   `npm run portal:build`.
 - If you change the VS Code extension, run `(cd editors/vscode && npm run compile)`.

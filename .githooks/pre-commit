@@ -11,6 +11,11 @@ echo "=== Pre-commit: running clippy ==="
 cargo clippy --workspace -- -D warnings
 echo "    Clippy OK."
 
+echo "=== Pre-commit: syncing generated highlight keywords ==="
+cargo run --quiet -p harn-cli -- dump-highlight-keywords
+git add docs/theme/harn-keywords.js
+echo "    Highlight keywords OK."
+
 if command -v npx >/dev/null 2>&1; then
   echo "=== Pre-commit: checking markdown ==="
   npx markdownlint-cli2 "**/*.md"
