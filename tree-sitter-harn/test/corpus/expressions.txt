@@ -31,3 +31,27 @@ pipeline test(task) {
               (identifier)
               (identifier)))
           (identifier))))))
+
+==================
+Backslash Continued Expression
+==================
+
+pipeline test(task) {
+  let ok = left \
+    == right
+}
+
+---
+
+(source_file
+  (pipeline_declaration
+    name: (identifier)
+    (parameter_list
+      (typed_parameter
+        name: (identifier)))
+    (block
+      (let_binding
+        name: (identifier)
+        value: (binary_expression
+          (identifier)
+          (identifier))))))

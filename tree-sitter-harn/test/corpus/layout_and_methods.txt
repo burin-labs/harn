@@ -25,6 +25,33 @@ fn collect() {
             (identifier)))))))
 
 ==================
+Backslash Continued Argument Expression
+==================
+
+fn collect() {
+  capture(
+    first \
+      == second,
+    third,
+  )
+}
+
+---
+
+(source_file
+  (fn_declaration
+    name: (identifier)
+    body: (block
+      (expression_statement
+        (call_expression
+          function: (identifier)
+          (argument_list
+            (binary_expression
+              (identifier)
+              (identifier))
+            (identifier)))))))
+
+==================
 Property Call Chains
 ==================
 

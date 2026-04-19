@@ -6712,6 +6712,10 @@
       "value": "[ \\t\\r]"
     },
     {
+      "type": "PATTERN",
+      "value": "\\\\\\r?\\n[ \\t]*"
+    },
+    {
       "type": "SYMBOL",
       "name": "comment"
     }
