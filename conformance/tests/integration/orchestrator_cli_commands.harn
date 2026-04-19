@@ -62,19 +62,17 @@ pipeline test(task) {
   write_file(
     path_join(root, "lib.harn"),
     "import \"std/triggers\"\n\nlet replay_marker = \""
-      + replay_marker
-      + "\"\n\npub fn on_tick(event: TriggerEvent) {\n  log(event.kind)\n}\n\npub fn flaky_issue(event: TriggerEvent) -> dict {\n  if !file_exists(replay_marker) {\n    throw \"replay-me:\" + event.kind\n  }\n  return {kind: event.kind, event_id: event.id}\n}\n\npub fn always_fail(event: TriggerEvent) -> any {\n  throw \"discard-me:\" + event.kind\n}\n",
+    + replay_marker
+    + "\"\n\npub fn on_tick(event: TriggerEvent) {\n  log(event.kind)\n}\n\npub fn flaky_issue(event: TriggerEvent) -> dict {\n  if !file_exists(replay_marker) {\n    throw \"replay-me:\" + event.kind\n  }\n  return {kind: event.kind, event_id: event.id}\n}\n\npub fn always_fail(event: TriggerEvent) -> any {\n  throw \"discard-me:\" + event.kind\n}\n",
   )
-
   let repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
   let harn_bin = resolve_harn_bin(repo_root)
   assert(file_exists(harn_bin), "missing built harn binary at " + harn_bin)
-
   let start = shell_at(
     root,
     "nohup env HARN_SECRET_PROVIDERS=env HARN_ORCHESTRATOR_API_KEYS=test-key HARN_ORCHESTRATOR_HMAC_SECRET=shared-secret "
-      + harn_bin
-      + " orchestrator serve --config harn.toml --state-dir ./state --role single-tenant --bind 127.0.0.1:0 >/dev/null 2>orchestrator.log </dev/null & echo $!",
+    + harn_bin
+    + " orchestrator serve --config harn.toml --state-dir ./state --role single-tenant --bind 127.0.0.1:0 >/dev/null 2>orchestrator.log </dev/null & echo $!",
   )
   let pid = start.stdout.trim()
   assert(start.success, "failed to start orchestrator")
@@ -84,27 +82,16 @@ pipeline test(task) {
   sleep(2500ms)
   let _ = shell("kill -TERM " + pid)
   assert(wait_for_exit(pid), "orchestrator did not exit")
-
   let state_dir = path_join(root, "state")
   let config_path = path_join(root, "harn.toml")
-
-  let inspect = exec(
-    harn_bin,
-    "orchestrator",
-    "inspect",
-    "--config",
-    config_path,
-    "--state-dir",
-    state_dir,
-  )
+  let inspect = exec(harn_bin, "orchestrator", "inspect", "--config", config_path, "--state-dir", state_dir)
   println(
     inspect.success
-      && inspect.stdout.contains("cron-heartbeat provider=cron kind=cron state=active version=1")
-      && inspect.stdout.contains("manual-replay provider=a2a-push kind=a2a-push state=active version=1")
-      && inspect.stdout.contains("cron bindings=1")
-      && inspect.stdout.contains("a2a-push bindings=2"),
+    && inspect.stdout.contains("cron-heartbeat provider=cron kind=cron state=active version=1")
+    && inspect.stdout.contains("manual-replay provider=a2a-push kind=a2a-push state=active version=1")
+    && inspect.stdout.contains("cron bindings=1")
+    && inspect.stdout.contains("a2a-push bindings=2"),
   )
-
   let fire_replay = exec(
     harn_bin,
     "orchestrator",
@@ -129,46 +116,26 @@ pipeline test(task) {
   assert(replay_event_id != nil, "missing replay event id")
   println(
     fire_replay.success
-      && fire_replay.stdout.contains("status=dlq")
-      && fire_discard.success
-      && fire_discard.stdout.contains("status=dlq"),
+    && fire_replay.stdout.contains("status=dlq")
+    && fire_discard.success
+    && fire_discard.stdout.contains("status=dlq"),
   )
-
-  let dlq_list = exec(
-    harn_bin,
-    "orchestrator",
-    "dlq",
-    "--list",
-    "--config",
-    config_path,
-    "--state-dir",
-    state_dir,
-  )
+  let dlq_list = exec(harn_bin, "orchestrator", "dlq", "--list", "--config", config_path, "--state-dir", state_dir)
   let replay_entry_id = first_group("(?m)^- (dlq_\\S+) binding=manual-replay", dlq_list.stdout)
   let discard_entry_id = first_group("(?m)^- (dlq_\\S+) binding=manual-discard", dlq_list.stdout)
   assert(replay_entry_id != nil, "missing replay dlq entry id")
   assert(discard_entry_id != nil, "missing discard dlq entry id")
   println(
     dlq_list.success
-      && dlq_list.stdout.contains("binding=manual-replay")
-      && dlq_list.stdout.contains("binding=manual-discard"),
+    && dlq_list.stdout.contains("binding=manual-replay")
+    && dlq_list.stdout.contains("binding=manual-discard"),
   )
-
-  let inspect_after = exec(
-    harn_bin,
-    "orchestrator",
-    "inspect",
-    "--config",
-    config_path,
-    "--state-dir",
-    state_dir,
-  )
+  let inspect_after = exec(harn_bin, "orchestrator", "inspect", "--config", config_path, "--state-dir", state_dir)
   println(
     inspect_after.success
-      && inspect_after.stdout.contains("dispatch_failed trigger=manual-replay")
-      && inspect_after.stdout.contains("dispatch_failed trigger=manual-discard"),
+    && inspect_after.stdout.contains("dispatch_failed trigger=manual-replay")
+    && inspect_after.stdout.contains("dispatch_failed trigger=manual-discard"),
   )
-
   write_file(replay_marker, "ready")
   let dlq_replay = exec(
     harn_bin,
@@ -182,7 +149,6 @@ pipeline test(task) {
     state_dir,
   )
   println(dlq_replay.success && dlq_replay.stdout.contains("status=dispatched"))
-
   let direct_replay = exec(
     harn_bin,
     "orchestrator",
@@ -195,10 +161,9 @@ pipeline test(task) {
   )
   println(
     direct_replay.success
-      && direct_replay.stdout.contains("status=dispatched")
-      && direct_replay.stdout.contains("replay_of_event_id=" + replay_event_id),
+    && direct_replay.stdout.contains("status=dispatched")
+    && direct_replay.stdout.contains("replay_of_event_id=" + replay_event_id),
   )
-
   let discard = exec(
     harn_bin,
     "orchestrator",
@@ -211,32 +176,13 @@ pipeline test(task) {
     state_dir,
   )
   println(discard.success && discard.stdout.contains("state=discarded"))
-
-  let dlq_after = exec(
-    harn_bin,
-    "orchestrator",
-    "dlq",
-    "--list",
-    "--config",
-    config_path,
-    "--state-dir",
-    state_dir,
-  )
+  let dlq_after = exec(harn_bin, "orchestrator", "dlq", "--list", "--config", config_path, "--state-dir", state_dir)
   println(dlq_after.success && dlq_after.stdout.contains("pending_entries=0"))
-
-  let queue = exec(
-    harn_bin,
-    "orchestrator",
-    "queue",
-    "--config",
-    config_path,
-    "--state-dir",
-    state_dir,
-  )
+  let queue = exec(harn_bin, "orchestrator", "queue", "--config", config_path, "--state-dir", state_dir)
   println(
     queue.success
-      && queue.stdout.contains("dispatcher_in_flight=0")
-      && queue.stdout.contains("inferred_pending_retries=0"),
+    && queue.stdout.contains("dispatcher_in_flight=0")
+    && queue.stdout.contains("inferred_pending_retries=0"),
   )
   println(len(regex_captures("inbox_claims_written=([1-9][0-9]*)", queue.stdout)) == 1)
   println(len(regex_captures("inbox_active_entries=([1-9][0-9]*)", queue.stdout)) == 1)
