@@ -29,18 +29,17 @@ use crate::vm::Vm;
 use self::uri::DispatchUri;
 use super::registry::matching_bindings;
 use super::registry::{TriggerBinding, TriggerHandlerSpec};
-use super::{begin_in_flight, finish_in_flight, TriggerDispatchOutcome, TriggerEvent};
+use super::{
+    begin_in_flight, finish_in_flight, TriggerDispatchOutcome, TriggerEvent,
+    TRIGGERS_LIFECYCLE_TOPIC, TRIGGER_ATTEMPTS_TOPIC, TRIGGER_DLQ_TOPIC,
+    TRIGGER_INBOX_ENVELOPES_TOPIC, TRIGGER_OUTBOX_TOPIC,
+};
 
 pub mod retry;
 pub mod uri;
 
 pub use retry::{RetryPolicy, TriggerRetryConfig, DEFAULT_MAX_ATTEMPTS};
 
-const TRIGGER_INBOX_TOPIC: &str = "trigger.inbox";
-const TRIGGER_OUTBOX_TOPIC: &str = "trigger.outbox";
-const TRIGGER_ATTEMPTS_TOPIC: &str = "trigger.attempts";
-const TRIGGER_DLQ_TOPIC: &str = "trigger.dlq";
-const TRIGGERS_LIFECYCLE_TOPIC: &str = "triggers.lifecycle";
 const HARN_REPLAY_ENV: &str = "HARN_REPLAY";
 
 thread_local! {
@@ -285,7 +284,8 @@ impl Dispatcher {
         binding_version: Option<u32>,
         event: TriggerEvent,
     ) -> Result<u64, DispatchError> {
-        let topic = Topic::new(TRIGGER_INBOX_TOPIC).expect("static trigger.inbox topic is valid");
+        let topic = Topic::new(TRIGGER_INBOX_ENVELOPES_TOPIC)
+            .expect("static trigger inbox envelopes topic is valid");
         let headers = event_headers(&event, None, None, None);
         let payload = serde_json::to_value(InboxEnvelope {
             trigger_id,
@@ -303,7 +303,8 @@ impl Dispatcher {
     }
 
     pub async fn run(&self) -> Result<(), DispatchError> {
-        let topic = Topic::new(TRIGGER_INBOX_TOPIC).expect("static trigger.inbox topic is valid");
+        let topic = Topic::new(TRIGGER_INBOX_ENVELOPES_TOPIC)
+            .expect("static trigger inbox envelopes topic is valid");
         let stream = self.event_log.clone().subscribe(&topic, None).await?;
         pin_mut!(stream);
         let mut cancel_rx = self.cancel_tx.subscribe();

@@ -7,9 +7,10 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex as AsyncMutex;
 
 use crate::connectors::{ConnectorError, MetricsRegistry};
-use crate::event_log::{AnyEventLog, EventLog, Topic};
+use crate::event_log::{AnyEventLog, EventLog, LogEvent, Topic};
 
-pub const TRIGGER_INBOX_TOPIC: &str = "trigger.inbox";
+use super::{TRIGGER_INBOX_CLAIMS_TOPIC, TRIGGER_INBOX_LEGACY_TOPIC};
+
 pub const DEFAULT_INBOX_RETENTION_DAYS: u32 = 7;
 const CLAIM_EVENT_KIND: &str = "dedupe_claim";
 const HOT_CACHE_LIMIT: usize = 4096;
@@ -29,32 +30,25 @@ impl InboxIndex {
         event_log: Arc<AnyEventLog>,
         metrics: Arc<MetricsRegistry>,
     ) -> Result<Self, ConnectorError> {
-        let topic = Topic::new(TRIGGER_INBOX_TOPIC).expect("trigger inbox topic is valid");
+        let topic =
+            Topic::new(TRIGGER_INBOX_CLAIMS_TOPIC).expect("trigger inbox claims topic is valid");
         let records = event_log
             .read_range(&topic, None, usize::MAX)
+            .await
+            .map_err(ConnectorError::from)?;
+        let legacy_topic =
+            Topic::new(TRIGGER_INBOX_LEGACY_TOPIC).expect("legacy trigger inbox topic is valid");
+        let legacy_records = event_log
+            .read_range(&legacy_topic, None, usize::MAX)
             .await
             .map_err(ConnectorError::from)?;
         let now_ms = now_ms();
         let mut entries = HashMap::new();
         let mut expired = 0u64;
-        for (_, record) in records {
-            if record.kind != CLAIM_EVENT_KIND {
-                continue;
-            }
-            let claim: InboxClaimRecord =
-                serde_json::from_value(record.payload).map_err(ConnectorError::from)?;
-            let key = InboxKey::new(claim.binding_id, claim.dedupe_key);
-            if claim.expires_at_ms <= now_ms {
-                expired += 1;
-                continue;
-            }
-            entries.insert(
-                key,
-                InboxEntry {
-                    expires_at_ms: claim.expires_at_ms,
-                },
-            );
-        }
+        rehydrate_claims(records, now_ms, &mut entries, &mut expired)?;
+        // Soft migration for pre-split logs that still hold claim records in
+        // the legacy mixed inbox topic.
+        rehydrate_claims(legacy_records, now_ms, &mut entries, &mut expired)?;
         metrics.record_inbox_expired_entries(expired);
         metrics.set_inbox_active_entries(entries.len());
         Ok(Self {
@@ -163,6 +157,33 @@ impl InboxIndex {
             .retain_active(now_ms);
         self.metrics.record_inbox_expired_entries(expired);
     }
+}
+
+fn rehydrate_claims(
+    records: Vec<(u64, LogEvent)>,
+    now_ms: i64,
+    entries: &mut HashMap<InboxKey, InboxEntry>,
+    expired: &mut u64,
+) -> Result<(), ConnectorError> {
+    for (_, record) in records {
+        if record.kind != CLAIM_EVENT_KIND {
+            continue;
+        }
+        let claim: InboxClaimRecord =
+            serde_json::from_value(record.payload).map_err(ConnectorError::from)?;
+        let key = InboxKey::new(claim.binding_id, claim.dedupe_key);
+        if claim.expires_at_ms <= now_ms {
+            *expired += 1;
+            continue;
+        }
+        entries.insert(
+            key,
+            InboxEntry {
+                expires_at_ms: claim.expires_at_ms,
+            },
+        );
+    }
+    Ok(())
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -314,9 +335,44 @@ mod tests {
             .await
             .unwrap());
 
-        let topic = Topic::new(TRIGGER_INBOX_TOPIC).unwrap();
+        let topic = Topic::new(TRIGGER_INBOX_CLAIMS_TOPIC).unwrap();
         let events = log.read_range(&topic, None, usize::MAX).await.unwrap();
         assert_eq!(events.len(), 1);
         assert_eq!(metrics.snapshot().inbox_fast_path_hits, 1);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn restart_rehydrates_legacy_claims_from_mixed_topic() {
+        let log = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(32)));
+        let metrics = Arc::new(MetricsRegistry::default());
+        let legacy_topic = Topic::new(TRIGGER_INBOX_LEGACY_TOPIC).unwrap();
+        let now_ms = now_ms();
+        log.append(
+            &legacy_topic,
+            LogEvent::new(
+                CLAIM_EVENT_KIND,
+                serde_json::json!({
+                    "binding_id": "binding",
+                    "dedupe_key": "delivery-1",
+                    "expires_at_ms": now_ms + 60_000,
+                }),
+            ),
+        )
+        .await
+        .unwrap();
+
+        let index = InboxIndex::new(log.clone(), metrics.clone()).await.unwrap();
+        assert!(!index
+            .insert_if_new("binding", "delivery-1", StdDuration::from_secs(60))
+            .await
+            .unwrap());
+
+        let new_claims_topic = Topic::new(TRIGGER_INBOX_CLAIMS_TOPIC).unwrap();
+        let new_claims = log
+            .read_range(&new_claims_topic, None, usize::MAX)
+            .await
+            .unwrap();
+        assert!(new_claims.is_empty());
+        assert_eq!(metrics.snapshot().inbox_duplicates_rejected, 1);
     }
 }

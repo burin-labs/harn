@@ -11,7 +11,7 @@ explicit stub with a clear follow-up ticket.
 
 Each dispatch goes through the same sequence:
 
-1. Append the inbound event to `trigger.inbox`.
+1. Append the inbound event to `trigger.inbox.envelopes`.
 2. Match the event against active registry bindings for the provider +
    event kind.
 3. Evaluate the optional `when` predicate in the same VM/runtime surface as
@@ -92,12 +92,19 @@ without inventing a second cancellation mechanism.
 
 The dispatcher uses the shared `EventLog` instead of a parallel queue layer:
 
-- `trigger.inbox`
+- `trigger.inbox.envelopes`
+- `trigger.inbox.claims`
 - `trigger.outbox`
 - `trigger.attempts`
 - `trigger.dlq`
 - `triggers.lifecycle`
 - `observability.action_graph`
+
+`trigger.inbox.envelopes` is the dispatcher's durable ingress stream.
+`trigger.inbox.claims` stores TTL-bound dedupe claims for `InboxIndex`.
+Harn v0.7.23 also soft-reads the legacy mixed `trigger.inbox` topic on
+startup so older event logs keep working while new writes go only to the
+split topics.
 
 `triggers.lifecycle` now includes dispatcher-specific lifecycle records:
 

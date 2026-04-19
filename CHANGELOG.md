@@ -11,6 +11,14 @@ granular archaeology.
 
 ### Changed
 
+- **Split trigger inbox envelopes from durable dedupe claims (#243).**
+  Dispatcher envelopes now append to `trigger.inbox.envelopes` while
+  `InboxIndex` persists TTL-bound claim records under
+  `trigger.inbox.claims`, which removes the steady-state startup scan
+  over all historical envelopes. Harn v0.7.23 soft-reads legacy
+  `trigger.inbox` records on startup so existing orchestrator event
+  logs keep working while new writes land only on the split topics.
+
 - **Primary Harn docs site moved from `harn.burincode.com` to
   `harnlang.com`.** The burin-code-subdomain was always a stopgap;
   `harnlang.com` reflects Harn's identity as a standalone programming

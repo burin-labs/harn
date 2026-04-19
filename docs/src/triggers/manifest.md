@@ -72,7 +72,7 @@ entry is easy to locate.
 ## Durable dedupe retention
 
 Trigger dedupe now uses a durable inbox index backed by the shared EventLog
-topic `trigger.inbox`. Each successful claim stores the binding id plus the
+topic `trigger.inbox.claims`. Each successful claim stores the binding id plus the
 resolved `dedupe_key`, and duplicate deliveries are rejected until the claim's
 TTL expires.
 
@@ -85,6 +85,10 @@ TTL expires.
 Use a retention window at least as long as the provider's maximum retry window.
 If a provider can redeliver for longer than your configured TTL, Harn may
 dispatch that late retry again once the durable claim has expired.
+
+Harn v0.7.23 still soft-reads legacy claim records from the old mixed
+`trigger.inbox` topic on startup, but all new claim writes land under
+`trigger.inbox.claims`.
 
 ## Doctor output
 

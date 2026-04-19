@@ -592,7 +592,7 @@ fn spawn_inbox_pump(
     event_log: Arc<harn_vm::event_log::AnyEventLog>,
     dispatcher: harn_vm::Dispatcher,
 ) -> Result<PumpHandle, String> {
-    let topic = harn_vm::event_log::Topic::new(harn_vm::TRIGGER_INBOX_TOPIC)
+    let topic = harn_vm::event_log::Topic::new(harn_vm::TRIGGER_INBOX_ENVELOPES_TOPIC)
         .map_err(|error| error.to_string())?;
     spawn_topic_pump(event_log, topic, move |logged| {
         let dispatcher = dispatcher.clone();
@@ -726,7 +726,7 @@ async fn graceful_shutdown(
         .drain(topic_latest_id(ctx.event_log, CRON_TICK_TOPIC).await?)
         .await?;
     let inbox_stats = inbox_pump
-        .drain(topic_latest_id(ctx.event_log, harn_vm::TRIGGER_INBOX_TOPIC).await?)
+        .drain(topic_latest_id(ctx.event_log, harn_vm::TRIGGER_INBOX_ENVELOPES_TOPIC).await?)
         .await?;
     let drain_report = dispatcher
         .drain(remaining_budget(deadline))

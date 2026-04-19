@@ -3,6 +3,7 @@ pub mod event;
 pub mod inbox;
 pub mod registry;
 pub mod test_util;
+pub mod topics;
 
 pub use dispatcher::{
     clear_dispatcher_state, snapshot_dispatcher_stats, DispatchError, DispatchOutcome,
@@ -18,7 +19,7 @@ pub use event::{
     ProviderSchema, ProviderSecretRequirement, SignatureStatus, SignatureVerificationMetadata,
     SlackEventPayload, TenantId, TraceId, TriggerEvent, TriggerEventId,
 };
-pub use inbox::{InboxIndex, DEFAULT_INBOX_RETENTION_DAYS, TRIGGER_INBOX_TOPIC};
+pub use inbox::{InboxIndex, DEFAULT_INBOX_RETENTION_DAYS};
 pub use registry::{
     begin_in_flight, binding_version_as_of, clear_trigger_registry, drain, dynamic_deregister,
     dynamic_register, finish_in_flight, install_manifest_triggers, pin_trigger_binding,
@@ -28,3 +29,8 @@ pub use registry::{
     TriggerPredicateSpec, TriggerRegistryError, TriggerState,
 };
 pub use test_util::{run_trigger_harness_fixture, TriggerHarnessResult, TRIGGER_TEST_FIXTURES};
+pub use topics::{
+    TRIGGERS_LIFECYCLE_TOPIC, TRIGGER_ATTEMPTS_TOPIC, TRIGGER_DLQ_TOPIC,
+    TRIGGER_INBOX_CLAIMS_TOPIC, TRIGGER_INBOX_ENVELOPES_TOPIC, TRIGGER_INBOX_LEGACY_TOPIC,
+    TRIGGER_OUTBOX_TOPIC,
+};
