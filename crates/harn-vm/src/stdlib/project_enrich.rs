@@ -1182,15 +1182,25 @@ fn gh_command_path() -> String {
 }
 
 fn run_command(root: &Path, cmd: &str, args: &[&str]) -> Option<String> {
-    let output = Command::new(cmd)
-        .args(args)
-        .current_dir(root)
-        .output()
-        .ok()?;
+    let mut command = Command::new(cmd);
+    command.args(args).current_dir(root);
+    if cmd == "git" {
+        clear_git_env(&mut command);
+    }
+    let output = command.output().ok()?;
     if !output.status.success() {
         return None;
     }
     String::from_utf8(output.stdout).ok()
+}
+
+fn clear_git_env(command: &mut Command) {
+    command
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .env_remove("GIT_COMMON_DIR")
+        .env_remove("GIT_INDEX_FILE")
+        .env_remove("GIT_PREFIX");
 }
 
 fn parse_github_remote(remote: &str) -> Option<(String, String)> {
@@ -1782,11 +1792,10 @@ mod tests {
     }
 
     fn run_git(root: &Path, args: &[&str]) {
-        let status = Command::new("git")
-            .args(args)
-            .current_dir(root)
-            .status()
-            .expect("run git");
+        let mut command = Command::new("git");
+        command.args(args).current_dir(root);
+        clear_git_env(&mut command);
+        let status = command.status().expect("run git");
         assert!(status.success(), "git {:?} should succeed", args);
     }
 
