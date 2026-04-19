@@ -626,6 +626,9 @@ Returns `nil` (which becomes `.nilValue`) if not found anywhere.
 
 - `let name = value` -- defines `name` as immutable in the current scope.
 - `var name = value` -- defines `name` as mutable in the current scope.
+- `let _ = value` / `var _ = value` -- evaluate `value` and discard it
+  without introducing a variable into scope. `_` can be reused any number
+  of times in the same scope.
 
 ### Variable assignment
 
@@ -661,6 +664,12 @@ let {name, age} = {name: "Alice", age: 30}
 
 Each field name in the pattern extracts the value for the matching key.
 If the key is missing from the dict, the variable is bound to `nil`.
+Use `_` as a discard binding when you want to ignore an extracted field:
+
+```harn
+let {name, debug: _} = {name: "Alice", debug: true}
+// name == "Alice"; `_` is not bound
+```
 
 ### Default values
 
@@ -698,6 +707,12 @@ let [first, second, third] = [10, 20, 30]
 Elements are bound positionally. If there are more bindings than elements
 in the list, the excess bindings receive `nil` (unless a default value is
 specified).
+Use `_` to discard positions without creating a binding:
+
+```harn
+let [_, second, _] = [10, 20, 30]
+// second == 20; `_` is not bound
+```
 
 ### Field renaming
 
@@ -740,6 +755,9 @@ for [a, b] in pairs {
 }
 ```
 
+`_` is also a discard binding in loop patterns, so `for [_, value] in ...`
+or `for (_, value) in ...` drops the ignored element instead of binding it.
+
 ### Var destructuring
 
 `var` destructuring creates mutable bindings that can be reassigned:
@@ -749,6 +767,9 @@ var {x, y} = {x: 1, y: 2}
 x = 10
 y = 20
 ```
+
+Discard bindings remain non-bindings under `var` as well: `var [_, value] =`
+still only introduces `value`.
 
 ### Type errors
 

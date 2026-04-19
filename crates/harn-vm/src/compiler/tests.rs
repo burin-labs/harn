@@ -72,3 +72,27 @@ fn test_disassemble() {
     assert!(disasm.contains("ADD"));
     assert!(disasm.contains("CALL"));
 }
+
+#[test]
+fn test_compile_discard_bindings_do_not_define_underscore() {
+    let chunk = compile_source(
+        r#"
+pipeline test(task) {
+  let _ = 1
+  let [_, keep, _] = [10, 20, 30]
+  let {drop: _, keep_dict} = {drop: 1, keep_dict: 2}
+  for (_, value) in [pair("left", "right")] {
+    log(value)
+  }
+  log(keep)
+  log(keep_dict)
+}
+"#,
+    );
+
+    assert!(
+        !chunk.constants.contains(&Constant::String("_".to_string())),
+        "discard bindings should not emit a named `_` slot: {:?}",
+        chunk.constants
+    );
+}

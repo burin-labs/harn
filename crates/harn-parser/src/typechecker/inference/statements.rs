@@ -129,7 +129,7 @@ impl TypeChecker {
                         }
                     }
                     // Collect inlay hint when type is inferred (no annotation)
-                    if type_ann.is_none() {
+                    if type_ann.is_none() && !is_discard_name(name) {
                         if let Some(ref ty) = inferred {
                             if !is_obvious_type(value, ty) {
                                 self.hints.push(InlayHintInfo {
@@ -183,7 +183,7 @@ impl TypeChecker {
                             }
                         }
                     }
-                    if type_ann.is_none() {
+                    if type_ann.is_none() && !is_discard_name(name) {
                         if let Some(ref ty) = inferred {
                             if !is_obvious_type(value, ty) {
                                 self.hints.push(InlayHintInfo {

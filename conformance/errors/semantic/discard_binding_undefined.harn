@@ -1,0 +1,4 @@
+pipeline default(task) {
+  let _ = 1
+  log(_)
+}
