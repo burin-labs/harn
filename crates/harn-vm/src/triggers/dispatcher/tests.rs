@@ -371,6 +371,50 @@ pub fn wait_for_cancel(event: TriggerEvent) -> string {
         .await;
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn drain_waits_for_in_flight_local_handlers_without_cancelling() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (_dir, _log, dispatcher) = dispatcher_fixture(
+                r#"
+import "std/triggers"
+
+pub fn slow_handler(event: TriggerEvent) -> string {
+  sleep(50)
+  return event.kind
+}
+"#,
+                "slow_handler",
+                None,
+                TriggerRetryConfig::default(),
+            )
+            .await;
+
+            let dispatcher_for_task = dispatcher.clone();
+            let handle = tokio::task::spawn_local(async move {
+                dispatcher_for_task
+                    .dispatch_event(trigger_event("issues.opened", "delivery-drain"))
+                    .await
+                    .expect("dispatch finishes")
+            });
+
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            let report = dispatcher
+                .drain(Duration::from_secs(1))
+                .await
+                .expect("drain completes");
+            assert!(report.drained, "{report:?}");
+            assert_eq!(report.in_flight, 0);
+            assert_eq!(report.retry_queue_depth, 0);
+
+            let outcomes = handle.await.expect("join local dispatch");
+            assert_eq!(outcomes.len(), 1);
+            assert_eq!(outcomes[0].status, DispatchStatus::Succeeded);
+        })
+        .await;
+}
+
 #[test]
 fn uri_parser_rejects_invalid_and_unknown_handler_schemes() {
     assert_eq!(DispatchUri::parse("").unwrap_err(), DispatchUriError::Empty);

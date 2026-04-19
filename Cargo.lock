@@ -1027,6 +1027,7 @@ dependencies = [
  "chrono-tz",
  "clap",
  "croner",
+ "futures",
  "harn-fmt",
  "harn-lexer",
  "harn-lint",

@@ -82,8 +82,8 @@ impl ServerRuntime {
         self.tls_enabled
     }
 
-    pub(crate) async fn shutdown(self) -> Result<(), String> {
-        self.handle.graceful_shutdown(Some(Duration::from_secs(30)));
+    pub(crate) async fn shutdown(self, timeout: Duration) -> Result<(), String> {
+        self.handle.graceful_shutdown(Some(timeout));
         match self.task.await {
             Ok(result) => result,
             Err(error) => Err(format!("listener task join failed: {error}")),

@@ -128,9 +128,12 @@ impl ListenerRuntime {
         self.routes.reload(routes)
     }
 
-    pub(crate) async fn shutdown(self) -> Result<BTreeMap<String, TriggerMetricSnapshot>, String> {
+    pub(crate) async fn shutdown(
+        self,
+        timeout: Duration,
+    ) -> Result<BTreeMap<String, TriggerMetricSnapshot>, String> {
         let Self { server, routes } = self;
-        server.shutdown().await?;
+        server.shutdown(timeout).await?;
         Ok(routes.snapshot_metrics())
     }
 }

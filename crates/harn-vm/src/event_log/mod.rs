@@ -191,6 +191,8 @@ pub trait EventLog: Send + Sync {
 
     async fn append(&self, topic: &Topic, event: LogEvent) -> Result<EventId, LogError>;
 
+    async fn flush(&self) -> Result<(), LogError>;
+
     /// Read events strictly after `from`. `None` starts from the
     /// beginning of the topic.
     async fn read_range(
@@ -359,6 +361,14 @@ impl EventLog for AnyEventLog {
             Self::Memory(log) => log.append(topic, event).await,
             Self::File(log) => log.append(topic, event).await,
             Self::Sqlite(log) => log.append(topic, event).await,
+        }
+    }
+
+    async fn flush(&self) -> Result<(), LogError> {
+        match self {
+            Self::Memory(log) => log.flush().await,
+            Self::File(log) => log.flush().await,
+            Self::Sqlite(log) => log.flush().await,
         }
     }
 
@@ -553,6 +563,10 @@ impl EventLog for MemoryEventLog {
         self.broadcasts
             .publish(topic, self.queue_depth, (event_id, event));
         Ok(event_id)
+    }
+
+    async fn flush(&self) -> Result<(), LogError> {
+        Ok(())
     }
 
     async fn read_range(
@@ -778,6 +792,10 @@ impl EventLog for FileEventLog {
         Ok(next_id)
     }
 
+    async fn flush(&self) -> Result<(), LogError> {
+        sync_tree(&self.root)
+    }
+
     async fn read_range(
         &self,
         topic: &Topic,
@@ -991,6 +1009,17 @@ impl EventLog for SqliteEventLog {
         self.broadcasts
             .publish(topic, self.queue_depth, (event_id, event.clone()));
         Ok(event_id)
+    }
+
+    async fn flush(&self) -> Result<(), LogError> {
+        let connection = self
+            .connection
+            .lock()
+            .expect("sqlite event log connection poisoned");
+        connection
+            .execute_batch("PRAGMA wal_checkpoint(FULL);")
+            .map_err(|error| LogError::Sqlite(format!("event log checkpoint error: {error}")))?;
+        Ok(())
     }
 
     async fn read_range(
@@ -1213,6 +1242,26 @@ fn file_size(path: &Path) -> u64 {
     std::fs::metadata(path)
         .map(|metadata| metadata.len())
         .unwrap_or(0)
+}
+
+fn sync_tree(root: &Path) -> Result<(), LogError> {
+    if !root.exists() {
+        return Ok(());
+    }
+    for entry in std::fs::read_dir(root)
+        .map_err(|error| LogError::Io(format!("event log read_dir error: {error}")))?
+    {
+        let entry = entry.map_err(|error| LogError::Io(format!("event log dir error: {error}")))?;
+        let path = entry.path();
+        if path.is_dir() {
+            sync_tree(&path)?;
+            continue;
+        }
+        std::fs::File::open(&path)
+            .and_then(|file| file.sync_all())
+            .map_err(|error| LogError::Io(format!("event log sync error: {error}")))?;
+    }
+    Ok(())
 }
 
 fn now_ms() -> i64 {

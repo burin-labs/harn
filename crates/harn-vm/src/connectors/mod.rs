@@ -71,6 +71,11 @@ pub trait Connector: Send + Sync {
         bindings: &[TriggerBinding],
     ) -> Result<ActivationHandle, ConnectorError>;
 
+    /// Stop connector-owned background work and flush any connector-local state.
+    async fn shutdown(&self, _deadline: StdDuration) -> Result<(), ConnectorError> {
+        Ok(())
+    }
+
     /// Verify + normalize a provider-native inbound request into `TriggerEvent`.
     fn normalize_inbound(&self, raw: RawInbound) -> Result<TriggerEvent, ConnectorError>;
 

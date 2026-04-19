@@ -82,6 +82,7 @@ pub use triggers::{
     registered_provider_schema_names, reset_provider_catalog, resolve_live_trigger_binding,
     run_trigger_harness_fixture, snapshot_dispatcher_stats, snapshot_trigger_bindings,
     unpin_trigger_binding, DispatchError, DispatchOutcome, DispatchStatus, Dispatcher,
+    DispatcherDrainReport,
     DispatcherStatsSnapshot, HeaderRedactionPolicy, InboxIndex, ProviderCatalog,
     ProviderCatalogError, ProviderId, ProviderMetadata, ProviderOutboundMethod, ProviderPayload,
     ProviderRuntimeMetadata, ProviderSchema, ProviderSecretRequirement, RetryPolicy,
