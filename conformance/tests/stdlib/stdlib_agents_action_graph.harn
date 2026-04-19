@@ -1,0 +1,63 @@
+import "std/agents"
+
+pipeline default() {
+  let normalized = action_graph(
+    {
+    task: "Fix parser diagnostics",
+    summary: "Inspect first, then patch, then verify.",
+    steps: [
+    {id: "inspect", kind: "research", title: "Inspect parser and tests", tools: ["read", "search"]},
+    {id: "patch", title: "Patch parser error text", tools: ["edit"]},
+    {id: "docs", title: "Update release notes", tools: ["edit"]},
+    {id: "qa", kind: "verify", title: "Run verification", dependsOn: ["patch"], tools: ["run"]},
+  ],
+  },
+  )
+  println(normalized?._type == "action_graph")
+  println(len(normalized.actions) == 4)
+  println(normalized.actions[1].phase == "execute")
+  println(normalized.actions[1].depends_on[0] == "action-1")
+  println(normalized.actions[3].depends_on[0] == "action-2")
+  let batches = action_graph_batches(normalized)
+  println(len(batches) == 3)
+  println(batches[1].count == 2)
+  println(batches[1].tool_class == "write")
+  let rendered = action_graph_render(normalized)
+  println(contains(rendered, "## RESEARCH"))
+  println(contains(rendered, "depends on: action-1"))
+  let execution_plan = action_graph(
+    {
+    task: "Fix parser diagnostics",
+    steps: [
+    {id: "inspect", kind: "research", title: "Inspect parser and tests", tools: ["read", "search"]},
+    {id: "patch", title: "Patch parser error text", tools: ["edit"]},
+    {id: "docs", title: "Update release notes", tools: ["edit"]},
+  ],
+  },
+  )
+  let config = {
+    name: "action_graph_runtime",
+    research: {mode: "llm", model_policy: {provider: "mock"}},
+    execute: {mode: "llm", model_policy: {provider: "mock"}},
+    verify: {command: "printf verified", assert_text: "verified"},
+    evaluate: {mode: "llm", model_policy: {provider: "mock"}},
+  }
+  let flow = action_graph_flow(execution_plan, config)
+  let report = workflow_validate(flow)
+  println(report.valid)
+  llm_mock_clear()
+  llm_mock({text: "Research complete."})
+  llm_mock({text: "Implementation batch complete."})
+  llm_mock({text: "Evaluation complete."})
+  let result = action_graph_run(
+    "Fix parser diagnostics",
+    execution_plan,
+    config,
+    {max_steps: 8, persist_path: "/tmp/harn-action-graph-runtime.json"},
+  )
+  println(result.status == "completed")
+  println(result.run?._type == "run_record")
+  println(len(result.run.stages) == 4)
+  println(result.run.stages[2].kind == "verify")
+  println(result.batches[1].count == 2)
+}
