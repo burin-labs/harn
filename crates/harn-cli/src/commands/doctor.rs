@@ -46,7 +46,7 @@ pub(crate) async fn run_doctor(network: bool) {
     checks.push(check_binary("cargo"));
     checks.extend(check_provider_selection());
     checks.extend(check_secret_providers());
-    checks.extend(check_manifest());
+    checks.extend(check_manifest().await);
     checks.extend(check_event_log());
     checks.extend(check_metadata_cache());
     checks.extend(check_skills());
@@ -200,7 +200,7 @@ fn check_secret_providers() -> Vec<DoctorCheck> {
     checks
 }
 
-fn check_manifest() -> Vec<DoctorCheck> {
+async fn check_manifest() -> Vec<DoctorCheck> {
     let Some(path) = find_nearest_manifest(&std::env::current_dir().unwrap_or_default()) else {
         return vec![DoctorCheck {
             status: DoctorStatus::Warn,
@@ -263,7 +263,66 @@ fn check_manifest() -> Vec<DoctorCheck> {
         }
     }
 
+    let extensions = package::load_runtime_extensions(&path);
+    if !extensions.triggers.is_empty() {
+        let mut vm = harn_vm::Vm::new();
+        harn_vm::register_vm_stdlib(&mut vm);
+        match package::collect_manifest_triggers(&mut vm, &extensions).await {
+            Ok(triggers) => {
+                for trigger in triggers {
+                    checks.push(DoctorCheck {
+                        status: DoctorStatus::Ok,
+                        label: format!("trigger:{}", trigger.config.id),
+                        detail: format!(
+                            "{} via {} handler={} budget={}",
+                            trigger_kind_label(trigger.config.kind),
+                            trigger.config.provider.as_str(),
+                            collected_handler_kind(&trigger.handler),
+                            format_trigger_budget(&trigger.config.budget),
+                        ),
+                    });
+                }
+            }
+            Err(error) => checks.push(DoctorCheck {
+                status: DoctorStatus::Fail,
+                label: "triggers".to_string(),
+                detail: error,
+            }),
+        }
+    }
+
     checks
+}
+
+fn trigger_kind_label(kind: package::TriggerKind) -> &'static str {
+    match kind {
+        package::TriggerKind::Webhook => "webhook",
+        package::TriggerKind::Cron => "cron",
+        package::TriggerKind::Poll => "poll",
+        package::TriggerKind::Stream => "stream",
+        package::TriggerKind::Predicate => "predicate",
+        package::TriggerKind::A2aPush => "a2a-push",
+    }
+}
+
+fn collected_handler_kind(handler: &package::CollectedTriggerHandler) -> &'static str {
+    match handler {
+        package::CollectedTriggerHandler::Local { .. } => "local",
+        package::CollectedTriggerHandler::A2a { .. } => "a2a",
+        package::CollectedTriggerHandler::Worker { .. } => "worker",
+    }
+}
+
+fn format_trigger_budget(budget: &package::TriggerBudgetSpec) -> String {
+    let daily = budget
+        .daily_cost_usd
+        .map(|value| format!("${value:.2}/day"))
+        .unwrap_or_else(|| "unbounded".to_string());
+    let concurrency = budget
+        .max_concurrent
+        .map(|value| format!("max {value} concurrent"))
+        .unwrap_or_else(|| "default concurrency".to_string());
+    format!("{daily}, {concurrency}")
 }
 
 fn check_skills() -> Vec<DoctorCheck> {
@@ -642,7 +701,10 @@ fn read_manifest(path: &Path) -> Result<package::Manifest, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_healthcheck_url, check_event_log, find_nearest_manifest, read_manifest};
+    use super::{
+        build_healthcheck_url, check_event_log, check_manifest, find_nearest_manifest,
+        format_trigger_budget, read_manifest, DoctorStatus,
+    };
     use harn_vm::llm_config::{AuthEnv, HealthcheckDef, ProviderDef};
 
     #[test]
@@ -712,5 +774,64 @@ mod tests {
         assert_eq!(checks[0].status, super::DoctorStatus::Ok);
         assert!(checks[0].detail.contains("sqlite"));
         assert!(checks[0].detail.contains(".harn/events.sqlite"));
+    }
+
+    #[test]
+    fn format_trigger_budget_renders_limits() {
+        let rendered = format_trigger_budget(&crate::package::TriggerBudgetSpec {
+            daily_cost_usd: Some(5.0),
+            max_concurrent: Some(10),
+        });
+        assert_eq!(rendered, "$5.00/day, max 10 concurrent");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn check_manifest_reports_loaded_triggers() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir_all(dir.path().join(".git")).expect("git dir");
+        std::fs::write(
+            dir.path().join("harn.toml"),
+            r#"
+[package]
+name = "workspace"
+
+[exports]
+handlers = "lib.harn"
+
+[[triggers]]
+id = "github-new-issue"
+kind = "webhook"
+provider = "github"
+match = { events = ["issues.opened"] }
+handler = "handlers::on_new_issue"
+budget = { daily_cost_usd = 5.0, max_concurrent = 10 }
+"#,
+        )
+        .expect("write manifest");
+        std::fs::write(
+            dir.path().join("lib.harn"),
+            r#"
+import "std/triggers"
+
+pub fn on_new_issue(event: TriggerEvent) {
+  log(event.kind)
+}
+"#,
+        )
+        .expect("write lib");
+
+        let previous = std::env::current_dir().expect("cwd");
+        std::env::set_current_dir(dir.path()).expect("set cwd");
+        let checks = check_manifest().await;
+        std::env::set_current_dir(previous).expect("restore cwd");
+
+        let trigger = checks
+            .iter()
+            .find(|check| check.label == "trigger:github-new-issue")
+            .expect("trigger check");
+        assert_eq!(trigger.status, DoctorStatus::Ok);
+        assert!(trigger.detail.contains("webhook via github"));
+        assert!(trigger.detail.contains("handler=local"));
+        assert!(trigger.detail.contains("$5.00/day"));
     }
 }

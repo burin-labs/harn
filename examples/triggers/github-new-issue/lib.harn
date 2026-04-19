@@ -1,0 +1,9 @@
+import "std/triggers"
+
+pub fn should_handle(event: TriggerEvent) -> bool {
+  return event.provider == "github"
+}
+
+pub fn on_new_issue(event: TriggerEvent) {
+  log("triaging ${event.kind}")
+}

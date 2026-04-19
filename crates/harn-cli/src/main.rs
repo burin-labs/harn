@@ -998,6 +998,9 @@ pub(crate) async fn execute(source: &str, source_path: Option<&Path>) -> Result<
             if let Some(path) = source_path {
                 let extensions = package::load_runtime_extensions(path);
                 package::install_runtime_extensions(&extensions);
+                package::collect_manifest_triggers(&mut vm, &extensions)
+                    .await
+                    .map_err(|error| format!("failed to validate manifest triggers: {error}"))?;
                 package::install_manifest_hooks(&mut vm, &extensions)
                     .await
                     .map_err(|error| format!("failed to install manifest hooks: {error}"))?;

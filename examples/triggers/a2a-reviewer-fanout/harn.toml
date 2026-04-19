@@ -1,0 +1,15 @@
+[package]
+name = "a2a-reviewer-fanout"
+
+[exports]
+handlers = "lib.harn"
+
+[[triggers]]
+id = "incoming-review-task"
+kind = "a2a-push"
+provider = "a2a-push"
+match = { events = ["a2a.task.received"] }
+when = "handlers::should_forward"
+handler = "a2a://reviewer.prod/triage"
+dedupe_key = "event.dedupe_key"
+budget = { max_concurrent = 8 }

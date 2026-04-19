@@ -24,6 +24,7 @@
 - [Agent state](./agent-state.md)
 - [Transcript architecture](./transcript-architecture.md)
 - [Workflow runtime](./workflow-runtime.md)
+- [Trigger manifests](./triggers/manifest.md)
 - [Trigger event schema](./triggers/event-schema.md)
 - [Cookbook](./cookbook.md)
 - [Tutorial: code review agent](./tutorial-code-review-agent.md)

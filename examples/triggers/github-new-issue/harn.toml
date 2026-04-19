@@ -1,0 +1,18 @@
+[package]
+name = "github-new-issue"
+
+[exports]
+handlers = "lib.harn"
+
+[[triggers]]
+id = "github-new-issue"
+kind = "webhook"
+provider = "github"
+match = { events = ["issues.opened"] }
+when = "handlers::should_handle"
+handler = "handlers::on_new_issue"
+dedupe_key = "event.dedupe_key"
+retry = { max = 7, backoff = "svix" }
+budget = { daily_cost_usd = 5.00, max_concurrent = 4 }
+secrets = { signing_secret = "github/webhook-secret" }
+filter = "event.kind"

@@ -65,9 +65,10 @@ pub use stdlib::{
 };
 pub use store::register_store_builtins;
 pub use triggers::{
-    redact_headers, register_provider_schema, reset_provider_catalog, HeaderRedactionPolicy,
-    ProviderCatalog, ProviderCatalogError, ProviderId, ProviderPayload, ProviderSchema,
-    SignatureStatus, TenantId, TraceId, TriggerEvent, TriggerEventId,
+    redact_headers, register_provider_schema, registered_provider_schema_names,
+    reset_provider_catalog, HeaderRedactionPolicy, ProviderCatalog, ProviderCatalogError,
+    ProviderId, ProviderPayload, ProviderSchema, SignatureStatus, TenantId, TraceId, TriggerEvent,
+    TriggerEventId,
 };
 pub use value::*;
 pub use vm::*;
