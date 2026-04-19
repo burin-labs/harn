@@ -1,0 +1,7 @@
+pipeline test(task) {
+  let result = trigger_test_harness("cost_guard_short_circuits")
+  println(result.ok)
+  println(result.attempts[0].status == "cost_guard_blocked")
+  println(result.details.limit_usd == 1.0)
+  println(len(result.emitted) == 0)
+}

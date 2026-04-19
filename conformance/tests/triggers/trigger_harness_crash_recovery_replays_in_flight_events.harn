@@ -1,0 +1,7 @@
+pipeline test(task) {
+  let result = trigger_test_harness("crash_recovery_replays_in_flight_events")
+  println(result.ok)
+  println(len(result.emitted) == 1)
+  println(result.emitted[0].note == "recovered")
+  println(len(result.details.recovered_event_ids) == 1)
+}

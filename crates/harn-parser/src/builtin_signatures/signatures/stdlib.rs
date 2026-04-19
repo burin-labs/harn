@@ -208,6 +208,10 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("dict")),
     },
     BuiltinSig {
+        name: "trigger_test_harness",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
         name: "date_format",
         return_type: Some(BuiltinReturn::Named("string")),
     },

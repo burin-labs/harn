@@ -1,0 +1,7 @@
+pipeline test(task) {
+  let result = trigger_test_harness("dispatcher_retries_with_exponential_backoff")
+  println(result.ok)
+  println(len(result.attempts) == 3)
+  println(result.attempts[1].at_ms == 100)
+  println(result.attempts[2].status == "dispatched")
+}

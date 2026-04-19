@@ -1,0 +1,7 @@
+pipeline test(task) {
+  let result = trigger_test_harness("multi_tenant_isolation_stub")
+  println(result.ok)
+  println(result.stub)
+  println(len(result.emitted) == 2)
+  println(!result.details.cross_tenant_leak)
+}

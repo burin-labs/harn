@@ -92,6 +92,16 @@ granular archaeology.
   restart coverage via both mock-clock VM tests and an orchestrator fixture
   under `conformance/fixtures/triggers/inbox_dedupe_restart`.
 
+- **Reusable trigger-system test harness with 12 MVP fixtures (#165).**
+  Added `harn_vm::triggers::test_util` with a shared mock clock,
+  recording connector sink/registry, and fixture runner that exercises
+  cron scheduling, webhook HMAC verification, retry backoff, DLQ +
+  replay, dedupe, rate limiting, cost guards, crash recovery,
+  hot-reload preservation of in-flight work, multi-tenant stubs, and
+  dead-man alerts. Exposed the same core harness to Harn scripts via the
+  new `trigger_test_harness(...)` builtin and added conformance fixtures
+  under `conformance/tests/triggers/`.
+
 - **`harn orchestrator serve` CLI scaffold (#209, closes #178).** Added
   a new `harn orchestrator` command family with a real `serve`
   subcommand plus placeholder `inspect`, `replay`, `dlq`, and

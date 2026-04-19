@@ -9,7 +9,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration as StdDuration, Instant};
+use std::time::Duration as StdDuration;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -19,6 +19,7 @@ use tokio::sync::Mutex as AsyncMutex;
 
 use crate::event_log::AnyEventLog;
 use crate::secrets::SecretProvider;
+use crate::triggers::test_util::clock::{self, ClockInstant};
 use crate::triggers::{
     registered_provider_metadata, InboxIndex, ProviderId, ProviderMetadata,
     ProviderRuntimeMetadata, TenantId, TriggerEvent,
@@ -405,7 +406,7 @@ impl RawInbound {
             headers,
             query: BTreeMap::new(),
             body,
-            received_at: OffsetDateTime::now_utc(),
+            received_at: clock::now_utc(),
             occurred_at: None,
             tenant_id: None,
             metadata: JsonValue::Null,
@@ -438,18 +439,18 @@ impl Default for RateLimitConfig {
 #[derive(Clone, Debug)]
 struct TokenBucket {
     tokens: f64,
-    last_refill: Instant,
+    last_refill: ClockInstant,
 }
 
 impl TokenBucket {
     fn full(config: RateLimitConfig) -> Self {
         Self {
             tokens: config.capacity as f64,
-            last_refill: Instant::now(),
+            last_refill: clock::instant_now(),
         }
     }
 
-    fn refill(&mut self, config: RateLimitConfig, now: Instant) {
+    fn refill(&mut self, config: RateLimitConfig, now: ClockInstant) {
         let interval = config.refill_interval.as_secs_f64().max(f64::EPSILON);
         let rate = config.refill_tokens.max(1) as f64 / interval;
         let elapsed = now.duration_since(self.last_refill).as_secs_f64();
@@ -457,7 +458,7 @@ impl TokenBucket {
         self.last_refill = now;
     }
 
-    fn try_acquire(&mut self, config: RateLimitConfig, now: Instant) -> bool {
+    fn try_acquire(&mut self, config: RateLimitConfig, now: ClockInstant) -> bool {
         self.refill(config, now);
         if self.tokens >= 1.0 {
             self.tokens -= 1.0;
@@ -510,7 +511,7 @@ impl RateLimiterFactory {
         let bucket = buckets
             .entry((provider.as_str().to_string(), key.to_string()))
             .or_insert_with(|| TokenBucket::full(self.config));
-        bucket.try_acquire(self.config, Instant::now())
+        bucket.try_acquire(self.config, clock::instant_now())
     }
 
     pub async fn acquire(&self, provider: &ProviderId, key: &str) {
@@ -520,7 +521,7 @@ impl RateLimiterFactory {
                 let bucket = buckets
                     .entry((provider.as_str().to_string(), key.to_string()))
                     .or_insert_with(|| TokenBucket::full(self.config));
-                if bucket.try_acquire(self.config, Instant::now()) {
+                if bucket.try_acquire(self.config, clock::instant_now()) {
                     return;
                 }
                 bucket.wait_duration(self.config)

@@ -1,0 +1,7 @@
+pipeline test(task) {
+  let result = trigger_test_harness("rate_limit_throttles")
+  println(result.ok)
+  println(len(result.emitted) == 2)
+  println(result.attempts[1].backoff_ms == 60000)
+  println(result.details.throttled_for_ms == 60000)
+}

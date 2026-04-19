@@ -1,0 +1,7 @@
+pipeline test(task) {
+  let result = trigger_test_harness("webhook_verifies_hmac")
+  println(result.ok)
+  println(len(result.emitted) == 1)
+  println(result.emitted[0].signature_state == "verified")
+  println(result.emitted[0].kind == "ping")
+}

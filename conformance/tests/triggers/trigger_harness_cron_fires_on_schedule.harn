@@ -1,0 +1,7 @@
+pipeline test(task) {
+  let result = trigger_test_harness("cron_fires_on_schedule")
+  println(result.ok)
+  println(len(result.emitted) == 1)
+  println(result.emitted[0].provider == "cron")
+  println(result.emitted[0].occurred_at == "2026-04-19T00:01:00Z")
+}

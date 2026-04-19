@@ -1,16 +1,15 @@
+use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
-
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::event_log::{active_event_log, AnyEventLog, EventLog, LogEvent, Topic};
 use crate::secrets::{configured_default_chain, SecretProvider};
+use crate::triggers::test_util::clock;
 use crate::value::VmClosure;
 
 use super::dispatcher::TriggerRetryConfig;
@@ -805,10 +804,7 @@ fn default_secret_namespace() -> String {
 }
 
 fn now_ms() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_millis() as i64)
-        .unwrap_or(0)
+    clock::now_ms()
 }
 
 #[cfg(test)]
