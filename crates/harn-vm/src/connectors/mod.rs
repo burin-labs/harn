@@ -20,8 +20,8 @@ use tokio::sync::Mutex as AsyncMutex;
 use crate::event_log::AnyEventLog;
 use crate::secrets::SecretProvider;
 use crate::triggers::{
-    registered_provider_metadata, InboxIndex, ProviderId, ProviderMetadata, ProviderRuntimeMetadata,
-    TenantId, TriggerEvent,
+    registered_provider_metadata, InboxIndex, ProviderId, ProviderMetadata,
+    ProviderRuntimeMetadata, TenantId, TriggerEvent,
 };
 
 pub mod cron;
