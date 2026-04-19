@@ -28,6 +28,7 @@
 - [Workflow runtime](./workflow-runtime.md)
 - [Trigger manifests](./triggers/manifest.md)
 - [Trigger event schema](./triggers/event-schema.md)
+- [Trigger dispatcher](./triggers/dispatcher.md)
 - [Trigger observability in the action graph](./observability/triggers-in-action-graph.md)
 - [Connector authoring](./connectors/authoring.md)
 - [Trigger registry](./triggers/registry.md)

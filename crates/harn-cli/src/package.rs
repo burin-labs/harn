@@ -1391,6 +1391,13 @@ fn manifest_trigger_binding_spec(trigger: CollectedManifestTrigger) -> harn_vm::
     let provider = config.provider.clone();
     let match_events = config.match_.events.clone();
     let dedupe_key = config.dedupe_key.clone();
+    let retry = harn_vm::TriggerRetryConfig::new(
+        config.retry.max,
+        match config.retry.backoff {
+            TriggerRetryBackoff::Immediate => harn_vm::RetryPolicy::Linear { delay_ms: 0 },
+            TriggerRetryBackoff::Svix => harn_vm::RetryPolicy::Svix,
+        },
+    );
     let filter = config.filter.clone();
     let daily_cost_usd = config.budget.daily_cost_usd;
     let max_concurrent = config.budget.max_concurrent;
@@ -1423,6 +1430,7 @@ fn manifest_trigger_binding_spec(trigger: CollectedManifestTrigger) -> harn_vm::
         provider,
         handler,
         when,
+        retry,
         match_events,
         dedupe_key,
         filter,

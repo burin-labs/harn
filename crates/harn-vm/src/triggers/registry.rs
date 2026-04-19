@@ -13,6 +13,7 @@ use crate::event_log::{active_event_log, AnyEventLog, EventLog, LogEvent, Topic}
 use crate::secrets::{configured_default_chain, SecretProvider};
 use crate::value::VmClosure;
 
+use super::dispatcher::TriggerRetryConfig;
 use super::ProviderId;
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -119,6 +120,7 @@ pub struct TriggerBindingSpec {
     pub provider: ProviderId,
     pub handler: TriggerHandlerSpec,
     pub when: Option<TriggerPredicateSpec>,
+    pub retry: TriggerRetryConfig,
     pub match_events: Vec<String>,
     pub dedupe_key: Option<String>,
     pub filter: Option<String>,
@@ -174,6 +176,7 @@ pub struct TriggerBinding {
     pub provider: ProviderId,
     pub handler: TriggerHandlerSpec,
     pub when: Option<TriggerPredicateSpec>,
+    pub retry: TriggerRetryConfig,
     pub match_events: Vec<String>,
     pub dedupe_key: Option<String>,
     pub filter: Option<String>,
@@ -225,6 +228,7 @@ impl TriggerBinding {
             provider: spec.provider,
             handler: spec.handler,
             when: spec.when,
+            retry: spec.retry,
             match_events: spec.match_events,
             dedupe_key: spec.dedupe_key,
             filter: spec.filter,
@@ -374,6 +378,41 @@ pub fn resolve_live_trigger_binding(
             .into_iter()
             .max_by_key(|binding| binding.version)
             .ok_or_else(|| TriggerRegistryError::UnknownId(id.to_string()))
+    })
+}
+
+pub(crate) fn matching_bindings(event: &super::TriggerEvent) -> Vec<Arc<TriggerBinding>> {
+    TRIGGER_REGISTRY.with(|slot| {
+        let registry = slot.borrow();
+        let Some(binding_ids) = registry.by_provider.get(event.provider.as_str()) else {
+            return Vec::new();
+        };
+
+        let mut bindings = Vec::new();
+        for id in binding_ids {
+            let Some(versions) = registry.bindings.get(id) else {
+                continue;
+            };
+            for binding in versions {
+                if binding.state_snapshot() != TriggerState::Active {
+                    continue;
+                }
+                if !binding.match_events.is_empty()
+                    && !binding.match_events.iter().any(|kind| kind == &event.kind)
+                {
+                    continue;
+                }
+                bindings.push(binding.clone());
+            }
+        }
+
+        bindings.sort_by(|left, right| {
+            left.id
+                .as_str()
+                .cmp(right.id.as_str())
+                .then(left.version.cmp(&right.version))
+        });
+        bindings
     })
 }
 
@@ -784,6 +823,7 @@ mod tests {
                 queue: format!("{id}-queue"),
             },
             when: None,
+            retry: TriggerRetryConfig::default(),
             match_events: vec!["issues.opened".to_string()],
             dedupe_key: Some("event.dedupe_key".to_string()),
             filter: Some("event.kind".to_string()),
@@ -805,6 +845,7 @@ mod tests {
                 queue: format!("{id}-queue"),
             },
             when: None,
+            retry: TriggerRetryConfig::default(),
             match_events: vec!["issues.opened".to_string()],
             dedupe_key: None,
             filter: None,

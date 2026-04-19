@@ -12,6 +12,7 @@ use crate::triggers::{
     begin_in_flight, dynamic_register, finish_in_flight, resolve_live_trigger_binding,
     snapshot_trigger_bindings, TriggerBindingSnapshot, TriggerBindingSource, TriggerBindingSpec,
     TriggerDispatchOutcome, TriggerEvent, TriggerEventId, TriggerHandlerSpec, TriggerPredicateSpec,
+    TriggerRetryConfig,
 };
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
@@ -487,6 +488,7 @@ fn parse_trigger_config(config: &BTreeMap<String, VmValue>) -> Result<TriggerBin
         provider,
         handler,
         when,
+        retry: TriggerRetryConfig::default(),
         match_events,
         dedupe_key,
         filter,

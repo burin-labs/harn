@@ -74,14 +74,16 @@ pub use stdlib::{
 };
 pub use store::register_store_builtins;
 pub use triggers::{
-    begin_in_flight, clear_trigger_registry, drain, dynamic_deregister, dynamic_register,
-    finish_in_flight, install_manifest_triggers, redact_headers, register_provider_schema,
-    registered_provider_schema_names, reset_provider_catalog, resolve_live_trigger_binding,
-    snapshot_trigger_bindings, HeaderRedactionPolicy, ProviderCatalog, ProviderCatalogError,
-    ProviderId, ProviderPayload, ProviderSchema, SignatureStatus, TenantId, TraceId,
-    TriggerBindingSnapshot, TriggerBindingSource, TriggerBindingSpec, TriggerDispatchOutcome,
-    TriggerEvent, TriggerEventId, TriggerHandlerSpec, TriggerId, TriggerMetricsSnapshot,
-    TriggerPredicateSpec, TriggerRegistryError, TriggerState,
+    begin_in_flight, clear_dispatcher_state, clear_trigger_registry, drain, dynamic_deregister,
+    dynamic_register, finish_in_flight, install_manifest_triggers, redact_headers,
+    register_provider_schema, registered_provider_schema_names, reset_provider_catalog,
+    resolve_live_trigger_binding, snapshot_dispatcher_stats, snapshot_trigger_bindings,
+    DispatchError, DispatchOutcome, DispatchStatus, Dispatcher, DispatcherStatsSnapshot,
+    HeaderRedactionPolicy, ProviderCatalog, ProviderCatalogError, ProviderId, ProviderPayload,
+    ProviderSchema, RetryPolicy, SignatureStatus, TenantId, TraceId, TriggerBindingSnapshot,
+    TriggerBindingSource, TriggerBindingSpec, TriggerDispatchOutcome, TriggerEvent, TriggerEventId,
+    TriggerHandlerSpec, TriggerId, TriggerMetricsSnapshot, TriggerPredicateSpec,
+    TriggerRegistryError, TriggerRetryConfig, TriggerState,
 };
 pub use value::*;
 pub use vm::*;
@@ -103,6 +105,7 @@ pub fn reset_thread_local_state() {
     event_log::reset_active_event_log();
     stdlib::reset_stdlib_state();
     orchestration::clear_runtime_hooks();
+    triggers::clear_dispatcher_state();
     triggers::clear_trigger_registry();
     events::reset_event_sinks();
     agent_events::reset_all_sinks();
