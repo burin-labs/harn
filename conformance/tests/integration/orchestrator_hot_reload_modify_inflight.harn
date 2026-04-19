@@ -53,7 +53,9 @@ pipeline default() {
     bind=$(python3 - "$snapshot_path" <<'PY'
     import json, pathlib, sys, time
     path = pathlib.Path(sys.argv[1])
-    deadline = time.time() + 15
+    # 60s deadline covers cold-cache CI runs where orchestrator startup
+    # includes provider catalog init + async InboxIndex boot (post-#220/#221).
+    deadline = time.time() + 60
     while time.time() < deadline:
         if path.exists():
             data = json.loads(path.read_text())
