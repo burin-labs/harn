@@ -9,6 +9,18 @@ granular archaeology.
 
 ## Unreleased
 
+### Changed
+
+- **Primary Harn docs site moved from `harn.burincode.com` to
+  `harnlang.com`.** The burin-code-subdomain was always a stopgap;
+  `harnlang.com` reflects Harn's identity as a standalone programming
+  language + runtime (precedent: `rust-lang.org`, `elixir-lang.org`).
+  `harn.burincode.com` continues to 301 → `harnlang.com` for 12+
+  months to preserve external links (crates.io metadata, blog posts,
+  cached search results). References in CLI help text, README, docs,
+  skill registry examples, CLAUDE.md, and conformance fixtures all
+  point at the new domain.
+
 ### Fixed
 
 - **Flaky cwd-mutating test collisions (#204).** Added a shared-process

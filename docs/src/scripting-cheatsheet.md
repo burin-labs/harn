@@ -2,7 +2,7 @@
 
 A compact, prose-friendly tour of everything you need to write real
 Harn scripts. The companion one-page LLM reference is at
-[`docs/llm/harn-quickref.md`](https://harn.burincode.com/docs/llm/harn-quickref.md)
+[`docs/llm/harn-quickref.md`](https://harnlang.com/docs/llm/harn-quickref.md)
 (outside the mdBook; served as raw Markdown) — they cover the same
 ground with different shapes, and should stay in lockstep. Agents that
 can fetch URLs should prefer the quickref.

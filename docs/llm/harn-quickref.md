@@ -1,6 +1,6 @@
 # Harn Quick Reference (LLM-friendly)
 
-**Canonical URL:** <https://harn.burincode.com/docs/llm/harn-quickref.md>
+**Canonical URL:** <https://harnlang.com/docs/llm/harn-quickref.md>
 
 This file is a one-pass reference optimized for LLM consumption and
 grep. It covers the syntax, stdlib highlights, concurrency, and the

@@ -11,7 +11,7 @@ table (including `schema_retries` + `provider: "auto"`), and the
 gotchas that repeatedly trip up first-time scripters.
 
 - In-repo: `docs/llm/harn-quickref.md`
-- Canonical URL: <https://harn.burincode.com/docs/llm/harn-quickref.md>
+- Canonical URL: <https://harnlang.com/docs/llm/harn-quickref.md>
 
 Claude Code users get this autoloaded via the `harn-scripting` skill
 at `.claude/skills/harn-scripting/SKILL.md`.

@@ -35,7 +35,7 @@ CONCURRENCY
       - parallel N            — N-way fan-out
       - with { max_concurrent: N }  — cap in-flight workers
       - channels, retry, select
-    https://harn.burincode.com/concurrency.html
+    https://harnlang.com/concurrency.html
 
 LLM THROTTLING
     Providers can be rate-limited via `rpm:` in harn.toml / providers.toml
@@ -43,9 +43,9 @@ LLM THROTTLING
     (RPM); `max_concurrent` on `parallel` caps simultaneous in-flight jobs.
 
 SCRIPTING
-    LLM-readable one-pager: https://harn.burincode.com/docs/llm/harn-quickref.md
-    Human cheatsheet:       https://harn.burincode.com/scripting-cheatsheet.html
-    Full docs:              https://harn.burincode.com/
+    LLM-readable one-pager: https://harnlang.com/docs/llm/harn-quickref.md
+    Human cheatsheet:       https://harnlang.com/scripting-cheatsheet.html
+    Full docs:              https://harnlang.com/
 ")]
     Run(RunArgs),
     /// Type-check .harn files or directories without executing them.
