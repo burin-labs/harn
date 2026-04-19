@@ -25,7 +25,6 @@ pipeline test(task) {
   log(parts["ext"])
   log(parts["file"])
   log(len(path_segments("a/b/c")))
-
   let root = path_join(temp_dir(), "harn_stdlib_path_workspace")
   let nested = path_join(root, "packages/demo")
   mkdir(nested)
