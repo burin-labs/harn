@@ -148,6 +148,10 @@ const messages = defineMessages({
     id: "portal.detail.noWorkerLineage",
     defaultMessage: "No delegated worker lineage was captured for this run.",
   },
+  noDaemonEvents: {
+    id: "portal.detail.noDaemonEvents",
+    defaultMessage: "No daemon lifecycle events were captured for this run.",
+  },
   noActivity: {
     id: "portal.detail.noActivity",
     defaultMessage: "No span activity captured for this run.",
@@ -217,6 +221,23 @@ function compareCandidates(current: RunSummary, runs: RunSummary[]) {
 
 function findBaselineRun(current: RunSummary, runs: RunSummary[]) {
   return compareCandidates(current, runs).find((run) => run.started_at <= current.started_at) ?? null
+}
+
+function daemonKindLabel(kind: PortalRunDetail["observability"]["daemon_events"][number]["kind"]) {
+  switch (kind) {
+    case "spawned":
+      return "Spawned"
+    case "triggered":
+      return "Triggered"
+    case "snapshotted":
+      return "Snapshotted"
+    case "resumed":
+      return "Resumed"
+    case "stopped":
+      return "Stopped"
+    default:
+      return kind
+  }
 }
 
 function StageDetail({ label, value, open = false }: { label: string; value: string | null; open?: boolean }) {
@@ -534,6 +555,7 @@ export function RunDetail({ detail, runs, onSelectRun }: RunDetailProps) {
               </div>
               <div className="meta">{detail.observability.worker_lineage.length} workers</div>
               <div className="meta">{detail.observability.transcript_pointers.length} transcript pointers</div>
+              <div className="meta">{detail.observability.daemon_events.length} daemon events</div>
             </div>
           </div>
           <div className="policy-item">
@@ -595,6 +617,25 @@ export function RunDetail({ detail, runs, onSelectRun }: RunDetailProps) {
                 ))
               ) : (
                 <div className="muted">{intl.formatMessage(messages.noTranscriptPointers)}</div>
+              )}
+            </div>
+          </div>
+          <div className="policy-item">
+            <div className="row">
+              <strong>Daemons</strong>
+              <span className="turn-chip">{detail.observability.daemon_events.length}</span>
+            </div>
+            <div className="policy-list">
+              {detail.observability.daemon_events.length ? (
+                detail.observability.daemon_events.map((event, index) => (
+                  <div className="meta" key={`${event.daemon_id}-${event.kind}-${event.timestamp}-${index}`}>
+                    {event.name} • {daemonKindLabel(event.kind)} • {event.timestamp}
+                    {event.persist_path ? ` • ${event.persist_path}` : ""}
+                    {event.payload_summary ? ` • ${event.payload_summary}` : ""}
+                  </div>
+                ))
+              ) : (
+                <div className="muted">{intl.formatMessage(messages.noDaemonEvents)}</div>
               )}
             </div>
           </div>

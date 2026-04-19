@@ -556,6 +556,7 @@ fn inspect_run_record(path: &str, compare: Option<&str>) {
             "Transcript pointers: {}",
             observability.transcript_pointers.len()
         );
+        println!("Daemon events: {}", observability.daemon_events.len());
     }
     if let Some(parent_worker_id) = run
         .metadata
@@ -649,6 +650,17 @@ fn inspect_run_record(path: &str, compare: Option<&str>) {
                     .clone()
                     .unwrap_or_else(|| pointer.location.clone())
             );
+        }
+        for event in &observability.daemon_events {
+            println!(
+                "- daemon {} [{:?}] at {}",
+                event.name, event.kind, event.timestamp
+            );
+            println!("  id: {}", event.daemon_id);
+            println!("  persist_path: {}", event.persist_path);
+            if let Some(summary) = &event.payload_summary {
+                println!("  payload: {}", summary);
+            }
         }
     }
     if let Some(compare_path) = compare {

@@ -408,7 +408,7 @@ fn save_and_load_run_record_materializes_observability_summary() {
     save_run_record(&run, Some(run_path.to_str().unwrap())).unwrap();
     let loaded = load_run_record(&run_path).unwrap();
     let observability = loaded.observability.expect("observability summary");
-    assert_eq!(observability.schema_version, 2);
+    assert_eq!(observability.schema_version, 3);
     assert_eq!(observability.planner_rounds.len(), 1);
     assert_eq!(observability.research_fact_count, 1);
     assert_eq!(observability.worker_lineage.len(), 1);
@@ -421,6 +421,44 @@ fn save_and_load_run_record_materializes_observability_summary() {
     assert_eq!(
         observability.planner_rounds[0].research_facts,
         vec!["verify stage failed after read".to_string()]
+    );
+}
+
+#[test]
+fn save_and_load_run_record_materializes_daemon_events_from_sidecar() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let run_path = temp_dir.path().join("run.json");
+    let sidecar_dir = temp_dir.path().join("run-llm");
+    std::fs::create_dir_all(&sidecar_dir).unwrap();
+    std::fs::write(
+        sidecar_dir.join("llm_transcript.jsonl"),
+        concat!(
+            "{\"type\":\"daemon_event\",\"timestamp\":\"1710000000.100\",\"daemon_id\":\"daemon-1\",\"name\":\"reviewer\",\"kind\":\"spawned\",\"persist_path\":\"/tmp/reviewer\",\"payload_summary\":\"always-on reviewer\"}\n",
+            "{\"type\":\"daemon_event\",\"timestamp\":\"1710000001.200\",\"daemon_id\":\"daemon-1\",\"name\":\"reviewer\",\"kind\":\"triggered\",\"persist_path\":\"/tmp/reviewer\",\"payload_summary\":\"new review requested\"}\n"
+        ),
+    )
+    .unwrap();
+
+    let run = RunRecord {
+        id: "run_daemon_obs".to_string(),
+        workflow_id: "wf".to_string(),
+        status: "completed".to_string(),
+        ..Default::default()
+    };
+
+    save_run_record(&run, Some(run_path.to_str().unwrap())).unwrap();
+    let loaded = load_run_record(&run_path).unwrap();
+    let observability = loaded.observability.expect("observability summary");
+    assert_eq!(observability.daemon_events.len(), 2);
+    assert_eq!(observability.daemon_events[0].daemon_id, "daemon-1");
+    assert_eq!(observability.daemon_events[0].name, "reviewer");
+    assert_eq!(
+        observability.daemon_events[0].kind,
+        super::DaemonEventKindRecord::Spawned
+    );
+    assert_eq!(
+        observability.daemon_events[1].payload_summary.as_deref(),
+        Some("new review requested")
     );
 }
 

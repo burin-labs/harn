@@ -325,6 +325,15 @@ export type RunTranscriptPointer = {
   available: boolean
 }
 
+export type DaemonEvent = {
+  daemon_id: string
+  name: string
+  kind: "spawned" | "triggered" | "snapshotted" | "resumed" | "stopped"
+  timestamp: string
+  persist_path: string
+  payload_summary: string | null
+}
+
 export type RunObservability = {
   schema_version: number
   planner_rounds: RunPlannerRound[]
@@ -334,6 +343,7 @@ export type RunObservability = {
   worker_lineage: RunWorkerLineage[]
   verification_outcomes: RunVerificationOutcome[]
   transcript_pointers: RunTranscriptPointer[]
+  daemon_events: DaemonEvent[]
 }
 
 export type PortalExecutionSummary = {

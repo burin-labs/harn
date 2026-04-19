@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use crate::bridge::HostBridge;
 use crate::llm::daemon::{load_snapshot, DaemonSnapshot};
+use crate::orchestration::DaemonEventKindRecord;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -97,6 +98,13 @@ pub fn register_daemon_builtins(vm: &mut Vm) {
         register_daemon(state.clone());
         spawn_daemon_task(state.clone(), child_vm);
         wait_for_snapshot(state.clone(), None, 500).await;
+        record_daemon_event(
+            &spec.id,
+            &spec.name,
+            DaemonEventKindRecord::Spawned,
+            &spec.persist_root,
+            summarize_text(&spec.prompt),
+        );
         let summary = {
             let daemon = state.borrow();
             daemon_summary(&daemon)?
@@ -123,11 +131,22 @@ pub fn register_daemon_builtins(vm: &mut Vm) {
             }
         }
         let message = trigger_payload_text(payload);
+        let payload_summary = summarize_text(&message);
         let bridge = state.borrow().bridge.clone();
         bridge
             .push_queued_user_message(message, "finish_step")
             .await;
         bridge.signal_resume();
+        {
+            let daemon = state.borrow();
+            record_daemon_event(
+                &daemon.id,
+                &daemon.name,
+                DaemonEventKindRecord::Triggered,
+                &daemon.persist_root,
+                payload_summary.clone(),
+            );
+        }
         let summary = {
             let daemon = state.borrow();
             daemon_summary(&daemon)?
@@ -143,6 +162,13 @@ pub fn register_daemon_builtins(vm: &mut Vm) {
         with_daemon_state(&daemon_id, |state| {
             let mut daemon = state.borrow_mut();
             let snapshot = refresh_snapshot(&mut daemon)?;
+            record_daemon_event(
+                &daemon.id,
+                &daemon.name,
+                DaemonEventKindRecord::Snapshotted,
+                &daemon.persist_root,
+                summarize_snapshot(snapshot.as_ref()),
+            );
             Ok(snapshot_to_vm(&snapshot.unwrap_or_default()))
         })
     });
@@ -163,6 +189,13 @@ pub fn register_daemon_builtins(vm: &mut Vm) {
             }
             daemon.status = "stopped".to_string();
             daemon.last_error = None;
+            record_daemon_event(
+                &daemon.id,
+                &daemon.name,
+                DaemonEventKindRecord::Stopped,
+                &daemon.persist_root,
+                summarize_snapshot(daemon.last_snapshot.as_ref()),
+            );
             daemon_summary(&daemon)
         })
     });
@@ -199,6 +232,16 @@ pub fn register_daemon_builtins(vm: &mut Vm) {
             }
             spawn_daemon_task(state.clone(), child_vm);
             wait_for_snapshot(state.clone(), Some(snapshot.saved_at.clone()), 500).await;
+            {
+                let daemon = state.borrow();
+                record_daemon_event(
+                    &daemon.id,
+                    &daemon.name,
+                    DaemonEventKindRecord::Resumed,
+                    &daemon.persist_root,
+                    summarize_snapshot(Some(&snapshot)),
+                );
+            }
             return daemon_summary(&state.borrow());
         }
 
@@ -275,7 +318,14 @@ pub fn register_daemon_builtins(vm: &mut Vm) {
         }));
         register_daemon(state.clone());
         spawn_daemon_task(state.clone(), child_vm);
-        wait_for_snapshot(state.clone(), Some(snapshot.saved_at), 500).await;
+        wait_for_snapshot(state.clone(), Some(snapshot.saved_at.clone()), 500).await;
+        record_daemon_event(
+            &spec.id,
+            &spec.name,
+            DaemonEventKindRecord::Resumed,
+            &spec.persist_root,
+            summarize_snapshot(Some(&snapshot)),
+        );
         let summary = {
             let daemon = state.borrow();
             daemon_summary(&daemon)?
@@ -509,6 +559,47 @@ fn trigger_payload_text(payload: &VmValue) -> String {
         _ => serde_json::to_string(&crate::llm::vm_value_to_json(payload))
             .unwrap_or_else(|_| payload.display()),
     }
+}
+
+fn summarize_text(text: &str) -> Option<String> {
+    let compact = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if compact.is_empty() {
+        return None;
+    }
+    const MAX_LEN: usize = 160;
+    if compact.len() <= MAX_LEN {
+        Some(compact)
+    } else {
+        Some(format!("{}...", &compact[..MAX_LEN]))
+    }
+}
+
+fn summarize_snapshot(snapshot: Option<&DaemonSnapshot>) -> Option<String> {
+    snapshot.map(|snapshot| {
+        format!(
+            "state={} saved_at={}",
+            snapshot.daemon_state, snapshot.saved_at
+        )
+    })
+}
+
+fn record_daemon_event(
+    daemon_id: &str,
+    name: &str,
+    kind: DaemonEventKindRecord,
+    persist_path: &str,
+    payload_summary: Option<String>,
+) {
+    let mut fields = serde_json::Map::new();
+    fields.insert("daemon_id".to_string(), serde_json::json!(daemon_id));
+    fields.insert("name".to_string(), serde_json::json!(name));
+    fields.insert("kind".to_string(), serde_json::json!(kind));
+    fields.insert("persist_path".to_string(), serde_json::json!(persist_path));
+    fields.insert(
+        "payload_summary".to_string(),
+        payload_summary.map_or(serde_json::Value::Null, serde_json::Value::String),
+    );
+    crate::llm::append_observability_sidecar_entry("daemon_event", fields);
 }
 
 fn write_meta(spec: &DaemonSpawnSpec) -> Result<(), VmError> {

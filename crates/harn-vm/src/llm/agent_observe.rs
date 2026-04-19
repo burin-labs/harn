@@ -229,6 +229,20 @@ fn append_llm_transcript_event_log(entry: &serde_json::Value) {
     }
 }
 
+pub(crate) fn append_llm_observability_entry(
+    event_type: &str,
+    mut fields: serde_json::Map<String, serde_json::Value>,
+) {
+    fields.insert("type".to_string(), serde_json::json!(event_type));
+    fields
+        .entry("timestamp".to_string())
+        .or_insert_with(|| serde_json::json!(chrono_now()));
+    fields
+        .entry("span_id".to_string())
+        .or_insert_with(|| serde_json::json!(crate::tracing::current_span_id()));
+    append_llm_transcript_entry(&serde_json::Value::Object(fields));
+}
+
 /// Emit a `message` event for an assistant/user/tool message that was just
 /// appended to the visible transcript. One row per message keeps the log
 /// append-only: reconstructing the prompt at turn N is a replay, not a

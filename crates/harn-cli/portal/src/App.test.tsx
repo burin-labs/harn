@@ -103,7 +103,7 @@ const detailPayload = {
   story: [],
   child_runs: [],
   observability: {
-    schema_version: 1,
+    schema_version: 3,
     planner_rounds: [],
     research_fact_count: 0,
     action_graph_nodes: [],
@@ -111,6 +111,16 @@ const detailPayload = {
     worker_lineage: [],
     verification_outcomes: [],
     transcript_pointers: [],
+    daemon_events: [
+      {
+        daemon_id: "daemon-1",
+        name: "reviewer",
+        kind: "spawned",
+        timestamp: "1710000000.100",
+        persist_path: "/tmp/reviewer",
+        payload_summary: "always-on reviewer",
+      },
+    ],
   },
   skill_timeline: [],
   skill_match_events: [],
@@ -204,5 +214,6 @@ describe("App", () => {
       expect(screen.getByText("Inspect persisted run")).toBeInTheDocument()
     })
     expect(screen.getByText("harn replay .harn-runs/failed.json")).toBeInTheDocument()
+    expect(screen.getByText(/reviewer • Spawned • 1710000000.100/)).toBeInTheDocument()
   })
 })
