@@ -107,19 +107,26 @@ struct MockScenario {
     rate_limit_once: HashSet<String>,
 }
 
-fn test_ctx(secrets: Arc<dyn SecretProvider>) -> ConnectorCtx {
+async fn test_ctx(secrets: Arc<dyn SecretProvider>) -> ConnectorCtx {
+    let event_log = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(32)));
+    let metrics = Arc::new(MetricsRegistry::default());
+    let inbox = Arc::new(
+        InboxIndex::new(event_log.clone(), metrics.clone())
+            .await
+            .expect("inbox init"),
+    );
     ConnectorCtx {
-        event_log: Arc::new(AnyEventLog::Memory(MemoryEventLog::new(32))),
+        event_log,
         secrets,
-        inbox: Arc::new(InboxIndex::default()),
-        metrics: Arc::new(MetricsRegistry),
+        inbox,
+        metrics,
         rate_limiter: Arc::new(RateLimiterFactory::default()),
     }
 }
 
 async fn initialized_client(secrets: Arc<dyn SecretProvider>) -> Arc<dyn ConnectorClient> {
     let mut connector = GitHubConnector::new();
-    connector.init(test_ctx(secrets)).await.unwrap();
+    connector.init(test_ctx(secrets).await).await.unwrap();
     connector.client()
 }
 
@@ -410,7 +417,7 @@ async fn normalizes_signed_github_webhook_events() {
         )]),
     });
     let mut connector = GitHubConnector::new();
-    connector.init(test_ctx(secrets)).await.unwrap();
+    connector.init(test_ctx(secrets).await).await.unwrap();
     let mut binding = TriggerBinding::new(ProviderId::from("github"), "webhook", "github.test");
     binding.dedupe_key = Some("event.dedupe_key".to_string());
     binding.config = json!({

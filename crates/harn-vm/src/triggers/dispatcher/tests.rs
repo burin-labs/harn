@@ -24,13 +24,18 @@ fn trigger_event(kind: &str, dedupe_key: &str) -> TriggerEvent {
         dedupe_key,
         None,
         BTreeMap::new(),
-        ProviderPayload::Known(KnownProviderPayload::GitHub(GitHubEventPayload {
-            event: "issues".to_string(),
-            action: Some("opened".to_string()),
-            delivery_id: Some(dedupe_key.to_string()),
-            installation_id: Some(42),
-            raw: serde_json::json!({"action":"opened"}),
-        })),
+        ProviderPayload::Known(KnownProviderPayload::GitHub(GitHubEventPayload::Issues(
+            crate::triggers::event::GitHubIssuesEventPayload {
+                common: crate::triggers::event::GitHubEventCommon {
+                    event: "issues".to_string(),
+                    action: Some("opened".to_string()),
+                    delivery_id: Some(dedupe_key.to_string()),
+                    installation_id: Some(42),
+                    raw: serde_json::json!({"action":"opened"}),
+                },
+                issue: serde_json::json!({}),
+            },
+        ))),
         SignatureStatus::Verified,
     )
 }

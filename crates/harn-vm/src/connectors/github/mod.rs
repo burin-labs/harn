@@ -48,6 +48,7 @@ struct ActivatedGitHubBinding {
     path: Option<String>,
     signing_secret: SecretId,
     dedupe_enabled: bool,
+    dedupe_ttl: std::time::Duration,
 }
 
 struct GitHubClient {
@@ -415,11 +416,18 @@ impl Connector for GitHubConnector {
         let dedupe_key = header_value(&headers, "x-github-delivery")
             .map(ToString::to_string)
             .unwrap_or_else(|| fallback_body_digest(&raw.body));
-        if binding.dedupe_enabled && !ctx.inbox.insert_if_new(&binding.binding_id, &dedupe_key) {
-            return Err(ConnectorError::DuplicateDelivery(format!(
-                "duplicate GitHub delivery `{dedupe_key}` for binding `{}`",
-                binding.binding_id
-            )));
+        if binding.dedupe_enabled {
+            let inserted = futures::executor::block_on(ctx.inbox.insert_if_new(
+                &binding.binding_id,
+                &dedupe_key,
+                binding.dedupe_ttl,
+            ))?;
+            if !inserted {
+                return Err(ConnectorError::DuplicateDelivery(format!(
+                    "duplicate GitHub delivery `{dedupe_key}` for binding `{}`",
+                    binding.binding_id
+                )));
+            }
         }
 
         let provider_payload =
@@ -913,6 +921,9 @@ impl ActivatedGitHubBinding {
             path: config.match_config.path,
             signing_secret,
             dedupe_enabled: binding.dedupe_key.is_some(),
+            dedupe_ttl: std::time::Duration::from_secs(
+                u64::from(crate::triggers::DEFAULT_INBOX_RETENTION_DAYS) * 24 * 60 * 60,
+            ),
         })
     }
 }

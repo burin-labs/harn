@@ -1042,12 +1042,18 @@ async fn install_default_connector_clients(base_dir: &Path) -> Result<(), String
     );
 
     let registry = harn_vm::ConnectorRegistry::default();
+    let metrics = Arc::new(harn_vm::MetricsRegistry::default());
+    let inbox = Arc::new(
+        harn_vm::InboxIndex::new(event_log.clone(), metrics.clone())
+            .await
+            .map_err(|error| error.to_string())?,
+    );
     registry
         .init_all(harn_vm::ConnectorCtx {
             event_log,
             secrets,
-            inbox: Arc::new(harn_vm::InboxIndex::default()),
-            metrics: Arc::new(harn_vm::MetricsRegistry),
+            inbox,
+            metrics,
             rate_limiter: Arc::new(harn_vm::RateLimiterFactory::default()),
         })
         .await
