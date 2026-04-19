@@ -28,6 +28,14 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("bool")),
     },
     BuiltinSig {
+        name: "host_tool_call",
+        return_type: None,
+    },
+    BuiltinSig {
+        name: "host_tool_list",
+        return_type: Some(BuiltinReturn::Named("list")),
+    },
+    BuiltinSig {
         name: "host_mock",
         return_type: Some(BuiltinReturn::Named("nil")),
     },
