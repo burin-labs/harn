@@ -103,7 +103,7 @@ const detailPayload = {
   story: [],
   child_runs: [],
   observability: {
-    schema_version: 3,
+    schema_version: 4,
     planner_rounds: [],
     research_fact_count: 0,
     action_graph_nodes: [],

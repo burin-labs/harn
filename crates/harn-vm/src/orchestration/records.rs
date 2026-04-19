@@ -9,7 +9,9 @@ use super::{
     default_run_dir, new_id, now_rfc3339, parse_json_payload, parse_json_value, ArtifactRecord,
     CapabilityPolicy,
 };
+use crate::event_log::{active_event_log, EventLog, LogEvent as EventLogRecord, Topic};
 use crate::llm::vm_value_to_json;
+use crate::triggers::{SignatureStatus, TriggerEvent};
 use crate::value::{VmError, VmValue};
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
@@ -202,6 +204,7 @@ pub struct RunActionGraphNodeRecord {
     pub kind: String,
     pub status: String,
     pub outcome: String,
+    pub trace_id: Option<String>,
     pub stage_id: Option<String>,
     pub node_id: Option<String>,
     pub worker_id: Option<String>,
@@ -465,6 +468,85 @@ fn compact_json_value(value: &serde_json::Value) -> String {
     serde_json::to_string(value).unwrap_or_else(|_| value.to_string())
 }
 
+fn signature_status_label(status: &SignatureStatus) -> &'static str {
+    match status {
+        SignatureStatus::Verified => "verified",
+        SignatureStatus::Unsigned => "unsigned",
+        SignatureStatus::Failed { .. } => "failed",
+    }
+}
+
+fn trigger_event_from_run(run: &RunRecord) -> Option<TriggerEvent> {
+    run.metadata
+        .get("trigger_event")
+        .cloned()
+        .and_then(|value| serde_json::from_value(value).ok())
+}
+
+fn run_trace_id(run: &RunRecord, trigger_event: Option<&TriggerEvent>) -> Option<String> {
+    trigger_event
+        .map(|event| event.trace_id.0.clone())
+        .or_else(|| {
+            run.metadata
+                .get("trace_id")
+                .and_then(|value| value.as_str())
+                .map(str::to_string)
+        })
+}
+
+fn action_graph_kind_for_stage(stage: &RunStageRecord) -> &'static str {
+    if stage.kind == "condition" {
+        "predicate"
+    } else {
+        "stage"
+    }
+}
+
+fn append_action_graph_node(
+    nodes: &mut Vec<RunActionGraphNodeRecord>,
+    record: RunActionGraphNodeRecord,
+) {
+    nodes.push(record);
+}
+
+fn publish_action_graph_event(
+    run: &RunRecord,
+    observability: &RunObservabilityRecord,
+    path: &Path,
+) {
+    let Some(log) = active_event_log() else {
+        return;
+    };
+    let Ok(topic) = Topic::new("observability.action_graph") else {
+        return;
+    };
+    let trigger_event = trigger_event_from_run(run);
+    let mut headers = BTreeMap::new();
+    headers.insert("run_id".to_string(), run.id.clone());
+    headers.insert("workflow_id".to_string(), run.workflow_id.clone());
+    if let Some(trace_id) = run_trace_id(run, trigger_event.as_ref()) {
+        headers.insert("trace_id".to_string(), trace_id);
+    }
+    let record = EventLogRecord::new(
+        "action_graph_update",
+        serde_json::json!({
+            "run_id": run.id,
+            "workflow_id": run.workflow_id,
+            "persisted_path": path.to_string_lossy(),
+            "status": run.status,
+            "observability": observability,
+        }),
+    )
+    .with_headers(headers);
+    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+        handle.spawn(async move {
+            let _ = log.append(&topic, record).await;
+        });
+    } else {
+        let _ = futures::executor::block_on(log.append(&topic, record));
+    }
+}
+
 fn llm_transcript_sidecar_path(run_path: &Path) -> Option<PathBuf> {
     let stem = run_path.file_stem()?.to_str()?;
     let parent = run_path.parent().unwrap_or_else(|| Path::new("."));
@@ -679,26 +761,64 @@ pub fn derive_run_observability(
     let mut research_fact_count = 0usize;
 
     let root_node_id = format!("run:{}", run.id);
-    action_graph_nodes.push(RunActionGraphNodeRecord {
-        id: root_node_id.clone(),
-        label: run
-            .workflow_name
-            .clone()
-            .unwrap_or_else(|| run.workflow_id.clone()),
-        kind: "run".to_string(),
-        status: run.status.clone(),
-        outcome: run.status.clone(),
-        stage_id: None,
-        node_id: None,
-        worker_id: None,
-        run_id: Some(run.id.clone()),
-        run_path: run.persisted_path.clone(),
-    });
+    let trigger_event = trigger_event_from_run(run);
+    let propagated_trace_id = run_trace_id(run, trigger_event.as_ref());
+    append_action_graph_node(
+        &mut action_graph_nodes,
+        RunActionGraphNodeRecord {
+            id: root_node_id.clone(),
+            label: run
+                .workflow_name
+                .clone()
+                .unwrap_or_else(|| run.workflow_id.clone()),
+            kind: "run".to_string(),
+            status: run.status.clone(),
+            outcome: run.status.clone(),
+            trace_id: propagated_trace_id.clone(),
+            stage_id: None,
+            node_id: None,
+            worker_id: None,
+            run_id: Some(run.id.clone()),
+            run_path: run.persisted_path.clone(),
+        },
+    );
+    let mut entry_node_id = root_node_id.clone();
+    if let Some(trigger_event) = trigger_event.as_ref() {
+        let trigger_node_id = format!("trigger:{}", trigger_event.id.0);
+        append_action_graph_node(
+            &mut action_graph_nodes,
+            RunActionGraphNodeRecord {
+                id: trigger_node_id.clone(),
+                label: format!("{}:{}", trigger_event.provider.as_str(), trigger_event.kind),
+                kind: "trigger".to_string(),
+                status: "received".to_string(),
+                outcome: signature_status_label(&trigger_event.signature_status).to_string(),
+                trace_id: Some(trigger_event.trace_id.0.clone()),
+                stage_id: None,
+                node_id: None,
+                worker_id: None,
+                run_id: Some(run.id.clone()),
+                run_path: run.persisted_path.clone(),
+            },
+        );
+        action_graph_edges.push(RunActionGraphEdgeRecord {
+            from_id: root_node_id.clone(),
+            to_id: trigger_node_id.clone(),
+            kind: "entry".to_string(),
+            label: Some(trigger_event.id.0.clone()),
+        });
+        entry_node_id = trigger_node_id;
+    }
 
     let stage_node_ids = run
         .stages
         .iter()
         .map(|stage| (stage.id.clone(), format!("stage:{}", stage.id)))
+        .collect::<BTreeMap<_, _>>();
+    let stage_by_id = run
+        .stages
+        .iter()
+        .map(|stage| (stage.id.as_str(), stage))
         .collect::<BTreeMap<_, _>>();
     let stage_by_node_id = run
         .stages
@@ -717,27 +837,35 @@ pub fn derive_run_observability(
             .get(&stage.id)
             .cloned()
             .unwrap_or_else(|| format!("stage:{}", stage.id));
-        action_graph_nodes.push(RunActionGraphNodeRecord {
-            id: graph_node_id.clone(),
-            label: stage.node_id.clone(),
-            kind: "stage".to_string(),
-            status: stage.status.clone(),
-            outcome: stage.outcome.clone(),
-            stage_id: Some(stage.id.clone()),
-            node_id: Some(stage.node_id.clone()),
-            worker_id: stage
-                .metadata
-                .get("worker_id")
-                .and_then(|value| value.as_str())
-                .map(str::to_string),
-            run_id: None,
-            run_path: None,
-        });
+        append_action_graph_node(
+            &mut action_graph_nodes,
+            RunActionGraphNodeRecord {
+                id: graph_node_id.clone(),
+                label: stage.node_id.clone(),
+                kind: action_graph_kind_for_stage(stage).to_string(),
+                status: stage.status.clone(),
+                outcome: stage.outcome.clone(),
+                trace_id: propagated_trace_id.clone(),
+                stage_id: Some(stage.id.clone()),
+                node_id: Some(stage.node_id.clone()),
+                worker_id: stage
+                    .metadata
+                    .get("worker_id")
+                    .and_then(|value| value.as_str())
+                    .map(str::to_string),
+                run_id: None,
+                run_path: None,
+            },
+        );
         if !incoming_nodes.contains(&stage.node_id) {
             action_graph_edges.push(RunActionGraphEdgeRecord {
-                from_id: root_node_id.clone(),
+                from_id: entry_node_id.clone(),
                 to_id: graph_node_id.clone(),
-                kind: "entry".to_string(),
+                kind: if trigger_event.is_some() {
+                    "trigger_dispatch".to_string()
+                } else {
+                    "entry".to_string()
+                },
                 label: None,
             });
         }
@@ -860,6 +988,10 @@ pub fn derive_run_observability(
         let Some(to_id) = stage_by_node_id.get(&transition.to_node_id).cloned() else {
             continue;
         };
+        let from_stage = transition
+            .from_stage_id
+            .as_deref()
+            .and_then(|stage_id| stage_by_id.get(stage_id).copied());
         let from_id = transition
             .from_stage_id
             .as_ref()
@@ -876,7 +1008,11 @@ pub fn derive_run_observability(
         action_graph_edges.push(RunActionGraphEdgeRecord {
             from_id,
             to_id,
-            kind: "transition".to_string(),
+            kind: if from_stage.is_some_and(|stage| stage.kind == "condition") {
+                "predicate_gate".to_string()
+            } else {
+                "transition".to_string()
+            },
             label: transition.branch.clone(),
         });
     }
@@ -886,18 +1022,22 @@ pub fn derive_run_observability(
         .iter()
         .map(|child| {
             let worker_node_id = format!("worker:{}", child.worker_id);
-            action_graph_nodes.push(RunActionGraphNodeRecord {
-                id: worker_node_id.clone(),
-                label: child.worker_name.clone(),
-                kind: "worker".to_string(),
-                status: child.status.clone(),
-                outcome: child.status.clone(),
-                stage_id: child.parent_stage_id.clone(),
-                node_id: None,
-                worker_id: Some(child.worker_id.clone()),
-                run_id: child.run_id.clone(),
-                run_path: child.run_path.clone(),
-            });
+            append_action_graph_node(
+                &mut action_graph_nodes,
+                RunActionGraphNodeRecord {
+                    id: worker_node_id.clone(),
+                    label: child.worker_name.clone(),
+                    kind: "worker".to_string(),
+                    status: child.status.clone(),
+                    outcome: child.status.clone(),
+                    trace_id: propagated_trace_id.clone(),
+                    stage_id: child.parent_stage_id.clone(),
+                    node_id: None,
+                    worker_id: Some(child.worker_id.clone()),
+                    run_id: child.run_id.clone(),
+                    run_path: child.run_path.clone(),
+                },
+            );
             if let Some(parent_stage_id) = child.parent_stage_id.as_ref() {
                 if let Some(stage_node_id) = stage_node_ids.get(parent_stage_id) {
                     action_graph_edges.push(RunActionGraphEdgeRecord {
@@ -958,7 +1098,7 @@ pub fn derive_run_observability(
     }
 
     RunObservabilityRecord {
-        schema_version: 3,
+        schema_version: 4,
         planner_rounds,
         research_fact_count,
         action_graph_nodes,
@@ -1226,6 +1366,9 @@ pub fn save_run_record(run: &RunRecord, path: Option<&str>) -> Result<String, Vm
         let _ = std::fs::write(&path, &json);
         VmError::Runtime(format!("failed to finalize run record: {e}"))
     })?;
+    if let Some(observability) = materialized.observability.as_ref() {
+        publish_action_graph_event(&materialized, observability, &path);
+    }
     Ok(path.to_string_lossy().into_owned())
 }
 

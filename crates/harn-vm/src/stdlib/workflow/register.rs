@@ -29,6 +29,24 @@ use super::policy::{
 use super::stage::{execute_stage_attempts, replay_stage};
 use super::usage::{llm_usage_delta, llm_usage_snapshot};
 
+fn parse_trigger_event_option(
+    value: Option<&VmValue>,
+) -> Result<Option<crate::TriggerEvent>, VmError> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    if matches!(value, VmValue::Nil) {
+        return Ok(None);
+    }
+    serde_json::from_value(crate::llm::vm_value_to_json(value))
+        .map(Some)
+        .map_err(|error| {
+            VmError::Runtime(format!(
+                "workflow_execute: trigger_event parse error: {error}"
+            ))
+        })
+}
+
 /// Accept a skill registry dict on `workflow_execute(task, graph,
 /// artifacts, {skills: ...})`. Mirrors the agent-loop normalizer: a
 /// raw registry dict passes through, a list of skill entries is
@@ -250,6 +268,16 @@ pub(in crate::stdlib) async fn execute_workflow(
         run.metadata.insert(
             "workflow_metadata".to_string(),
             serde_json::to_value(&graph.metadata).unwrap_or_default(),
+        );
+    }
+    if let Some(trigger_event) = parse_trigger_event_option(options.get("trigger_event"))? {
+        run.metadata.insert(
+            "trigger_event".to_string(),
+            serde_json::to_value(&trigger_event).unwrap_or_default(),
+        );
+        run.metadata.insert(
+            "trace_id".to_string(),
+            serde_json::json!(trigger_event.trace_id.0),
         );
     }
 

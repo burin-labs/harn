@@ -1,0 +1,73 @@
+pipeline main() {
+  let flow = workflow_graph(
+    {
+    name: "trigger_predicate_observability",
+    entry: "gate",
+    nodes: {
+    gate: {kind: "condition", context_policy: {include_kinds: ["plan"]}, metadata: {contains_text: "go"}},
+    act: {kind: "stage", mode: "llm", model_policy: {provider: "mock"}},
+    skip: {kind: "stage", mode: "llm", model_policy: {provider: "mock"}},
+  },
+    edges: [
+    {from: "gate", to: "act", branch: "true"},
+    {from: "gate", to: "skip", branch: "false"},
+  ],
+  },
+  )
+  let trigger = {
+    id: "trigger_evt_conformance",
+    provider: "cron",
+    kind: "tick",
+    received_at: "2026-04-19T16:00:00Z",
+    occurred_at: nil,
+    dedupe_key: "cron:conformance",
+    trace_id: "trace_conformance",
+    tenant_id: nil,
+    headers: {},
+    provider_payload: {
+      provider: "cron",
+      cron_id: "conformance",
+      schedule: "0 * * * *",
+      tick_at: "2026-04-19T16:00:00Z",
+      raw: {},
+    },
+    signature_status: {state: "unsigned"},
+  }
+  let result = workflow_execute(
+    "Handle a scheduled review",
+    flow,
+    [artifact({kind: "plan", text: "go inspect the repo"})],
+    {
+      max_steps: 4,
+      persist_path: "/tmp/harn-observability-trigger-predicate.json",
+      trigger_event: trigger,
+    },
+  )
+  let loaded = run_record_load(result?.path)
+  let nodes = loaded?.observability?.action_graph_nodes ?? []
+  let edges = loaded?.observability?.action_graph_edges ?? []
+  var trigger_trace = nil
+  var predicate_trace = nil
+  var saw_trigger_dispatch = false
+  var saw_predicate_gate = false
+  for node in nodes {
+    if node?.kind == "trigger" {
+      trigger_trace = node?.trace_id
+    }
+    if node?.kind == "predicate" {
+      predicate_trace = node?.trace_id
+    }
+  }
+  for edge in edges {
+    if edge?.kind == "trigger_dispatch" {
+      saw_trigger_dispatch = true
+    }
+    if edge?.kind == "predicate_gate" {
+      saw_predicate_gate = true
+    }
+  }
+  println(trigger_trace == "trace_conformance")
+  println(predicate_trace == "trace_conformance")
+  println(saw_trigger_dispatch)
+  println(saw_predicate_gate)
+}

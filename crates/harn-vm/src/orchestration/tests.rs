@@ -4,6 +4,8 @@ use super::*;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
+use crate::event_log::EventLog;
+
 #[test]
 fn capability_intersection_rejects_privilege_expansion() {
     let ceiling = CapabilityPolicy {
@@ -408,7 +410,7 @@ fn save_and_load_run_record_materializes_observability_summary() {
     save_run_record(&run, Some(run_path.to_str().unwrap())).unwrap();
     let loaded = load_run_record(&run_path).unwrap();
     let observability = loaded.observability.expect("observability summary");
-    assert_eq!(observability.schema_version, 3);
+    assert_eq!(observability.schema_version, 4);
     assert_eq!(observability.planner_rounds.len(), 1);
     assert_eq!(observability.research_fact_count, 1);
     assert_eq!(observability.worker_lineage.len(), 1);
@@ -460,6 +462,164 @@ fn save_and_load_run_record_materializes_daemon_events_from_sidecar() {
         observability.daemon_events[1].payload_summary.as_deref(),
         Some("new review requested")
     );
+}
+
+#[test]
+fn derive_run_observability_adds_trigger_and_predicate_nodes_with_shared_trace_id() {
+    let trigger_event = crate::triggers::TriggerEvent {
+        id: crate::triggers::TriggerEventId("trigger_evt_1".to_string()),
+        provider: crate::triggers::ProviderId("cron".to_string()),
+        kind: "tick".to_string(),
+        received_at: time::OffsetDateTime::from_unix_timestamp(1_710_000_000).unwrap(),
+        occurred_at: None,
+        dedupe_key: "cron:daily".to_string(),
+        trace_id: crate::triggers::TraceId("trace_123".to_string()),
+        tenant_id: None,
+        headers: BTreeMap::new(),
+        provider_payload: crate::triggers::ProviderPayload::Known(
+            crate::triggers::event::KnownProviderPayload::Cron(crate::triggers::CronEventPayload {
+                cron_id: Some("daily-review".to_string()),
+                schedule: Some("0 9 * * 1-5".to_string()),
+                tick_at: time::OffsetDateTime::from_unix_timestamp(1_710_000_000).unwrap(),
+                raw: serde_json::json!({"scheduled": true}),
+            }),
+        ),
+        signature_status: crate::triggers::SignatureStatus::Unsigned,
+    };
+    let run = RunRecord {
+        id: "run_trigger_obs".to_string(),
+        workflow_id: "wf".to_string(),
+        workflow_name: Some("triggered workflow".to_string()),
+        status: "completed".to_string(),
+        stages: vec![
+            RunStageRecord {
+                id: "stage_gate".to_string(),
+                node_id: "gate".to_string(),
+                kind: "condition".to_string(),
+                status: "completed".to_string(),
+                outcome: "condition_true".to_string(),
+                branch: Some("true".to_string()),
+                ..Default::default()
+            },
+            RunStageRecord {
+                id: "stage_act".to_string(),
+                node_id: "act".to_string(),
+                kind: "stage".to_string(),
+                status: "completed".to_string(),
+                outcome: "success".to_string(),
+                ..Default::default()
+            },
+        ],
+        transitions: vec![RunTransitionRecord {
+            id: "transition_gate_act".to_string(),
+            from_stage_id: Some("stage_gate".to_string()),
+            from_node_id: Some("gate".to_string()),
+            to_node_id: "act".to_string(),
+            branch: Some("true".to_string()),
+            timestamp: "transition".to_string(),
+            consumed_artifact_ids: Vec::new(),
+            produced_artifact_ids: Vec::new(),
+        }],
+        metadata: BTreeMap::from([(
+            "trigger_event".to_string(),
+            serde_json::to_value(&trigger_event).unwrap(),
+        )]),
+        ..Default::default()
+    };
+
+    let observability = derive_run_observability(&run, None);
+    let trigger_node = observability
+        .action_graph_nodes
+        .iter()
+        .find(|node| node.kind == "trigger")
+        .expect("trigger node");
+    let predicate_node = observability
+        .action_graph_nodes
+        .iter()
+        .find(|node| node.kind == "predicate")
+        .expect("predicate node");
+    assert_eq!(trigger_node.trace_id.as_deref(), Some("trace_123"));
+    assert_eq!(predicate_node.trace_id.as_deref(), Some("trace_123"));
+    assert!(observability
+        .action_graph_edges
+        .iter()
+        .any(|edge| edge.kind == "trigger_dispatch"));
+    assert!(observability
+        .action_graph_edges
+        .iter()
+        .any(|edge| edge.kind == "predicate_gate" && edge.label.as_deref() == Some("true")));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn save_run_record_publishes_action_graph_updates_to_event_log() {
+    crate::reset_thread_local_state();
+    let temp_dir = tempfile::tempdir().unwrap();
+    let run_path = temp_dir.path().join("run.json");
+    crate::event_log::install_default_for_base_dir(temp_dir.path()).expect("install event log");
+
+    let mut run = RunRecord {
+        id: "run_event_log".to_string(),
+        workflow_id: "wf".to_string(),
+        workflow_name: Some("event-log workflow".to_string()),
+        status: "running".to_string(),
+        stages: vec![RunStageRecord {
+            id: "stage_gate".to_string(),
+            node_id: "gate".to_string(),
+            kind: "condition".to_string(),
+            status: "completed".to_string(),
+            outcome: "condition_true".to_string(),
+            branch: Some("true".to_string()),
+            ..Default::default()
+        }],
+        metadata: BTreeMap::from([(
+            "trigger_event".to_string(),
+            serde_json::json!({
+                "id": "trigger_evt_stream",
+                "provider": "cron",
+                "kind": "tick",
+                "received_at": "2026-04-19T16:00:00Z",
+                "occurred_at": null,
+                "dedupe_key": "cron:stream",
+                "trace_id": "trace_stream",
+                "tenant_id": null,
+                "headers": {},
+                "provider_payload": {
+                    "provider": "cron",
+                    "cron_id": "stream",
+                    "schedule": "0 * * * *",
+                    "tick_at": "2026-04-19T16:00:00Z",
+                    "raw": {}
+                },
+                "signature_status": {"state": "unsigned"}
+            }),
+        )]),
+        ..Default::default()
+    };
+
+    save_run_record(&run, Some(run_path.to_str().unwrap())).unwrap();
+    run.status = "completed".to_string();
+    save_run_record(&run, Some(run_path.to_str().unwrap())).unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+
+    let topic = crate::event_log::Topic::new("observability.action_graph").unwrap();
+    let log = crate::event_log::active_event_log().expect("active event log");
+    let events = log.read_range(&topic, None, usize::MAX).await.unwrap();
+    assert_eq!(events.len(), 2);
+    assert!(events
+        .iter()
+        .all(|(_, event)| event.kind == "action_graph_update"));
+    assert!(events.iter().all(|(_, event)| {
+        event.headers.get("trace_id").map(String::as_str) == Some("trace_stream")
+    }));
+    assert!(events.iter().any(|(_, event)| {
+        event.payload["observability"]["action_graph_nodes"]
+            .as_array()
+            .is_some_and(|nodes| {
+                nodes.iter().any(|node| {
+                    node.get("kind").and_then(|value| value.as_str()) == Some("trigger")
+                })
+            })
+    }));
 }
 
 #[test]
