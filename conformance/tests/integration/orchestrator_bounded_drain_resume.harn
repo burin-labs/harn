@@ -194,7 +194,7 @@ pipeline default() {
         )
     )
     PY
-  """
+    """
   let result = shell(script)
   println(result.success)
   if !result.success {
