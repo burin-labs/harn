@@ -545,6 +545,12 @@ pub(crate) struct OrchestratorServeArgs {
     /// Seconds to wait for connector and dispatcher drain before forcing shutdown.
     #[arg(long = "shutdown-timeout", default_value_t = 30, value_name = "SECS")]
     pub shutdown_timeout: u64,
+    /// Maximum number of pump items to process during graceful shutdown.
+    #[arg(long = "drain-max-items", value_name = "COUNT")]
+    pub drain_max_items: Option<usize>,
+    /// Seconds to wait for each pump drain before truncating remaining backlog.
+    #[arg(long = "drain-deadline", value_name = "SECS")]
+    pub drain_deadline: Option<u64>,
     /// Runtime role to boot. Multi-tenant is a stub for now.
     #[arg(
         long,
@@ -982,6 +988,10 @@ mod tests {
             "tls/key.pem",
             "--shutdown-timeout",
             "45",
+            "--drain-max-items",
+            "256",
+            "--drain-deadline",
+            "9",
             "--role",
             "single-tenant",
         ]);
@@ -998,6 +1008,8 @@ mod tests {
         assert_eq!(serve.cert, Some(PathBuf::from("tls/cert.pem")));
         assert_eq!(serve.key, Some(PathBuf::from("tls/key.pem")));
         assert_eq!(serve.shutdown_timeout, 45);
+        assert_eq!(serve.drain_max_items, Some(256));
+        assert_eq!(serve.drain_deadline, Some(9));
         assert_eq!(
             serve.role,
             crate::commands::orchestrator::role::OrchestratorRole::SingleTenant

@@ -77,6 +77,36 @@ pub struct OrchestratorConfig {
     pub allowed_origins: Vec<String>,
     #[serde(default, alias = "max-body-bytes")]
     pub max_body_bytes: Option<usize>,
+    #[serde(default)]
+    pub drain: OrchestratorDrainConfig,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct OrchestratorDrainConfig {
+    #[serde(default = "default_orchestrator_drain_max_items", alias = "max-items")]
+    pub max_items: usize,
+    #[serde(
+        default = "default_orchestrator_drain_deadline_seconds",
+        alias = "deadline-seconds"
+    )]
+    pub deadline_seconds: u64,
+}
+
+impl Default for OrchestratorDrainConfig {
+    fn default() -> Self {
+        Self {
+            max_items: default_orchestrator_drain_max_items(),
+            deadline_seconds: default_orchestrator_drain_deadline_seconds(),
+        }
+    }
+}
+
+fn default_orchestrator_drain_max_items() -> usize {
+    1024
+}
+
+fn default_orchestrator_drain_deadline_seconds() -> u64 {
+    30
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -2144,6 +2174,33 @@ pipelines = ["pipelines", "scripts"]
         assert_eq!(workspace.pipelines, vec!["pipelines", "scripts"]);
         // Walk-up lands on the directory containing the harn.toml.
         assert_eq!(manifest_dir, root);
+    }
+
+    #[test]
+    fn orchestrator_drain_config_parses_defaults_and_overrides() {
+        let default_manifest: Manifest = toml::from_str(
+            r#"
+[package]
+name = "fixture"
+"#,
+        )
+        .unwrap();
+        assert_eq!(default_manifest.orchestrator.drain.max_items, 1024);
+        assert_eq!(default_manifest.orchestrator.drain.deadline_seconds, 30);
+
+        let configured: Manifest = toml::from_str(
+            r#"
+[package]
+name = "fixture"
+
+[orchestrator]
+drain.max_items = 77
+drain.deadline_seconds = 12
+"#,
+        )
+        .unwrap();
+        assert_eq!(configured.orchestrator.drain.max_items, 77);
+        assert_eq!(configured.orchestrator.drain.deadline_seconds, 12);
     }
 
     #[test]

@@ -1,0 +1,208 @@
+import "../_common"
+
+pipeline default() {
+  let unique = uuid()
+  let repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+  let base = path_join(temp_dir(), "harn-orchestrator-bounded-drain-" + unique)
+  let workspace = path_join(base, "workspace")
+  let state_dir = path_join(base, "state")
+  let binary = env_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(repo_root))
+  assert(file_exists(binary), "missing built harn binary at " + binary)
+  let script = """
+    set -eu
+
+    base="${base}"
+    workspace="${workspace}"
+    state_dir="${state_dir}"
+    binary="${binary}"
+
+    mkdir -p "$workspace" "$state_dir"
+
+    cat > "$workspace/harn.toml" <<'EOF'
+    [package]
+    name = "orchestrator_bounded_drain_resume"
+
+    [exports]
+    handlers = "lib.harn"
+
+    [[triggers]]
+    id = "incoming-review-task"
+    kind = "a2a-push"
+    provider = "a2a-push"
+    path = "/a2a/review"
+    match = { events = ["a2a.task.received"] }
+    handler = "handlers::on_task"
+    EOF
+
+    cat > "$workspace/lib.harn" <<'EOF'
+    import "std/triggers"
+
+    pub fn on_task(event: TriggerEvent) -> string {
+      return event.kind
+    }
+    EOF
+
+    python3 - "$workspace" "$state_dir" "$binary" <<'PY'
+    import glob
+    import http.client
+    import json
+    import os
+    import pathlib
+    import signal
+    import sqlite3
+    import subprocess
+    import sys
+    import time
+
+    workspace, state_dir, binary = sys.argv[1:]
+    base = pathlib.Path(workspace).parent
+    snapshot_path = pathlib.Path(state_dir) / "orchestrator-state.json"
+    sqlite_candidates = glob.glob(str(pathlib.Path(state_dir) / "**" / "*.sqlite"), recursive=True)
+    sqlite_path = pathlib.Path(sqlite_candidates[0]) if sqlite_candidates else pathlib.Path(state_dir) / "events.sqlite"
+
+    common_env = {
+        "HARN_ORCHESTRATOR_API_KEYS": "test-key",
+        "HARN_ORCHESTRATOR_HMAC_SECRET": "bounded-drain-secret",
+        "HARN_EVENT_LOG_QUEUE_DEPTH": "8192",
+    }
+    extra_args = [
+        "orchestrator",
+        "serve",
+        "--config",
+        "harn.toml",
+        "--state-dir",
+        str(pathlib.Path(state_dir)),
+        "--bind",
+        "127.0.0.1:0",
+        "--role",
+        "single-tenant",
+        "--shutdown-timeout",
+        "5",
+        "--drain-max-items",
+        "100",
+        "--drain-deadline",
+        "1",
+    ]
+
+    def start(delay_ms, log_name):
+        env = os.environ.copy()
+        env.update(common_env)
+        if delay_ms is not None:
+            env["HARN_TEST_ORCHESTRATOR_PUMP_DELAY_MS"] = str(delay_ms)
+        else:
+            env.pop("HARN_TEST_ORCHESTRATOR_PUMP_DELAY_MS", None)
+        log = open(base / log_name, "w", encoding="utf-8")
+        proc = subprocess.Popen(
+            [binary, *extra_args],
+            cwd=workspace,
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=log,
+        )
+        return proc, log
+
+    def wait_ready(log_name):
+        deadline = time.time() + 30
+        log_path = base / log_name
+        while time.time() < deadline:
+            if snapshot_path.exists():
+                data = json.loads(snapshot_path.read_text())
+                bind = data.get("bind")
+                if bind:
+                    return bind
+            time.sleep(0.05)
+        tail = log_path.read_text()[-4000:] if log_path.exists() else "(missing log)"
+        raise RuntimeError(f"timed out waiting for orchestrator readiness\\n{tail}")
+
+    def sqlite_conn():
+        return sqlite3.connect(sqlite_path)
+
+    def wait_outbox(expected):
+        deadline = time.time() + 30
+        while time.time() < deadline:
+            with sqlite_conn() as conn:
+                count = conn.execute(
+                    "SELECT COUNT(*) FROM events WHERE topic = ? AND kind = ?",
+                    ("trigger.outbox", "dispatch_succeeded"),
+                ).fetchone()[0]
+            if count >= expected:
+                return count
+            time.sleep(0.1)
+        raise RuntimeError(f"timed out waiting for {expected} dispatch_succeeded rows")
+
+    first_proc, first_log = start(50, "orchestrator-first.log")
+    try:
+        bind = wait_ready("orchestrator-first.log")
+        host, port = bind.split(":")
+        conn = http.client.HTTPConnection(host, int(port), timeout=10)
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer test-key",
+        }
+        for index in range(5000):
+            body = json.dumps(
+                {
+                    "kind": "a2a.task.received",
+                    "task": {"id": f"task-{index}"},
+                }
+            )
+            conn.request("POST", "/a2a/review", body=body, headers=headers)
+            response = conn.getresponse()
+            payload = response.read()
+            if response.status != 200:
+                raise RuntimeError(f"flood request {index} failed: {response.status} {payload!r}")
+        conn.close()
+
+        shutdown_start = time.monotonic()
+        first_proc.send_signal(signal.SIGTERM)
+        first_proc.wait(timeout=10)
+        shutdown_ms = int((time.monotonic() - shutdown_start) * 1000)
+        if first_proc.returncode != 0:
+            raise RuntimeError(f"first orchestrator exited with {first_proc.returncode}")
+    finally:
+        first_log.close()
+
+    with sqlite_conn() as conn:
+        row = conn.execute(
+            "SELECT payload FROM events WHERE topic = ? AND kind = ? ORDER BY event_id DESC LIMIT 1",
+            ("orchestrator.lifecycle", "drain_truncated"),
+        ).fetchone()
+    if row is None:
+        raise RuntimeError("missing drain_truncated lifecycle event")
+    truncated = json.loads(row[0])
+
+    second_proc, second_log = start(None, "orchestrator-second.log")
+    try:
+        wait_ready("orchestrator-second.log")
+        outbox_count = wait_outbox(5000)
+        second_proc.send_signal(signal.SIGTERM)
+        second_proc.wait(timeout=10)
+        if second_proc.returncode != 0:
+            raise RuntimeError(f"second orchestrator exited with {second_proc.returncode}")
+    finally:
+        second_log.close()
+
+    print(
+        json.dumps(
+            {
+                "shutdown_ms": shutdown_ms,
+                "truncated": True,
+                "remaining_queued": truncated.get("remaining_queued", 0),
+                "outbox_count": outbox_count,
+                "topic": truncated.get("topic"),
+            }
+        )
+    )
+    PY
+  """
+  let result = shell(script)
+  println(result.success)
+  if !result.success {
+    return
+  }
+  let summary = json_parse(result.stdout.trim())
+  println(summary.shutdown_ms <= 4000)
+  println(summary.truncated == true)
+  println(summary.remaining_queued > 0)
+  println(summary.outbox_count == 5000)
+}
