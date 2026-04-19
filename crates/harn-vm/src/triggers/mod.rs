@@ -2,6 +2,7 @@ pub mod dispatcher;
 pub mod event;
 pub mod inbox;
 pub mod registry;
+pub mod test_util;
 
 pub use dispatcher::{
     clear_dispatcher_state, snapshot_dispatcher_stats, DispatchError, DispatchOutcome,
@@ -24,3 +25,4 @@ pub use registry::{
     TriggerDispatchOutcome, TriggerHandlerSpec, TriggerId, TriggerMetricsSnapshot,
     TriggerPredicateSpec, TriggerRegistryError, TriggerState,
 };
+pub use test_util::{run_trigger_harness_fixture, TriggerHarnessResult, TRIGGER_TEST_FIXTURES};

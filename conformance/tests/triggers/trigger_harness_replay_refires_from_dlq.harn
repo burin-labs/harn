@@ -1,0 +1,7 @@
+pipeline test(task) {
+  let result = trigger_test_harness("replay_refires_from_dlq")
+  println(result.ok)
+  println(len(result.emitted) == 1)
+  println(result.dlq[0].replayed)
+  println(result.attempts[1].replay_of_event_id == result.details.replay_of_event_id)
+}

@@ -1,0 +1,7 @@
+pipeline test(task) {
+  let result = trigger_test_harness("dlq_on_permanent_failure")
+  println(result.ok)
+  println(len(result.dlq) == 1)
+  println(result.dlq[0].state == "pending")
+  println(result.attempts[0].status == "dlq")
+}

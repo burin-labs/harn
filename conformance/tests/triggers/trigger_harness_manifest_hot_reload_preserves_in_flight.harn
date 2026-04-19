@@ -1,0 +1,7 @@
+pipeline test(task) {
+  let result = trigger_test_harness("manifest_hot_reload_preserves_in_flight")
+  println(result.ok)
+  println(len(result.bindings) == 2)
+  println(result.bindings[0].id == "reload.fixture")
+  println(result.bindings[0].state == "terminated")
+}

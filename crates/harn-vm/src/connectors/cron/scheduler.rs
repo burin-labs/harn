@@ -7,6 +7,7 @@ use croner::Cron;
 use time::OffsetDateTime;
 
 use crate::connectors::ConnectorError;
+use crate::triggers::test_util::clock;
 
 #[derive(Clone, Debug)]
 pub(crate) struct CronSchedule {
@@ -122,7 +123,7 @@ pub(crate) struct RealClock;
 #[async_trait]
 impl Clock for RealClock {
     fn now(&self) -> OffsetDateTime {
-        OffsetDateTime::now_utc()
+        clock::now_utc()
     }
 
     async fn sleep_until(&self, deadline: OffsetDateTime) {

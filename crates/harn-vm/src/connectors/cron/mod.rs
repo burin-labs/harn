@@ -67,7 +67,6 @@ impl CronConnector {
         }
     }
 
-    #[cfg(test)]
     pub(crate) fn with_clock_and_sink(clock: Arc<dyn Clock>, sink: Arc<dyn CronEventSink>) -> Self {
         let mut connector = Self::with_clock(clock);
         connector.sink_override = Some(sink);

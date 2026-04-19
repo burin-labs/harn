@@ -87,3 +87,19 @@ The trigger stdlib’s manual replay path also depends on the registry:
   stdlib DLQ summary entry on `triggers.dlq`
 - the wrapper then re-enters the dispatcher against the resolved live binding
   version and threads `replay_of_event_id` through dispatch observability
+
+## Test Harness
+
+`harn_vm::triggers::test_util` now provides the shared trigger-system
+test harness used by both Rust unit tests and `.harn` conformance
+fixtures. The harness owns:
+
+- a reusable mock clock with wall-clock and monotonic hooks
+- a recording connector sink/registry for emitted normalized events
+- named fixture runners that cover cron, webhook verification,
+  retry/backoff, DLQ/replay, dedupe, rate limiting, cost guards, crash
+  recovery, hot reload, and dead-man alerts
+
+The script-facing entrypoint is the `trigger_test_harness(...)` builtin,
+which returns a structured report for the selected fixture instead of
+requiring each conformance script to rebuild connector state by hand.

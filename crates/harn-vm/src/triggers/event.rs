@@ -6,6 +6,8 @@ use serde_json::Value as JsonValue;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
+use crate::triggers::test_util::clock;
+
 const REDACTED_HEADER_VALUE: &str = "[redacted]";
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -242,7 +244,7 @@ impl TriggerEvent {
             id: TriggerEventId::new(),
             provider,
             kind: kind.into(),
-            received_at: OffsetDateTime::now_utc(),
+            received_at: clock::now_utc(),
             occurred_at,
             dedupe_key: dedupe_key.into(),
             trace_id: TraceId::new(),

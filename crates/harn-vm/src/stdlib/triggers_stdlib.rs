@@ -2,13 +2,13 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use serde::{Deserialize, Serialize};
-use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::event_log::{
     active_event_log, install_memory_for_current_thread, EventLog, LogEvent, Topic,
 };
 use crate::triggers::dispatcher::DEFAULT_MAX_ATTEMPTS;
+use crate::triggers::test_util::{clock, run_trigger_harness_fixture};
 use crate::triggers::{
     dynamic_register, registered_provider_metadata, resolve_live_trigger_binding,
     snapshot_trigger_bindings, RetryPolicy, TriggerBindingSnapshot, TriggerBindingSource,
@@ -124,6 +124,28 @@ pub(crate) fn register_trigger_builtins(vm: &mut Vm) {
                 .map(|entry| value_from_serde(&entry))
                 .collect(),
         )))
+    });
+
+    vm.register_async_builtin("trigger_test_harness", |args| async move {
+        let fixture = match args.first() {
+            Some(VmValue::String(text)) => text.to_string(),
+            Some(VmValue::Dict(map)) => required_string(map, "fixture", "trigger_test_harness")?,
+            Some(other) => {
+                return Err(VmError::Runtime(format!(
+                    "trigger_test_harness: expected fixture string or dict, got {}",
+                    other.type_name()
+                )))
+            }
+            None => {
+                return Err(VmError::Runtime(
+                    "trigger_test_harness: missing fixture name".to_string(),
+                ))
+            }
+        };
+        let result = run_trigger_harness_fixture(&fixture)
+            .await
+            .map_err(|error| VmError::Runtime(format!("trigger_test_harness: {error}")))?;
+        Ok(value_from_serde(&result))
     });
 }
 
@@ -355,7 +377,7 @@ async fn upsert_dlq_entry(
     entry.error = error.to_string();
     retry_history.push(DlqAttemptRecord {
         attempt: (retry_history.len() + 1) as u32,
-        at: OffsetDateTime::now_utc()
+        at: clock::now_utc()
             .format(&time::format_description::well_known::Rfc3339)
             .unwrap_or_default(),
         status: match replay_of_event_id {
@@ -385,7 +407,7 @@ async fn resolve_dlq_entry(
     entry.state = "resolved".to_string();
     entry.retry_history.push(DlqAttemptRecord {
         attempt: (entry.retry_history.len() + 1) as u32,
-        at: OffsetDateTime::now_utc()
+        at: clock::now_utc()
             .format(&time::format_description::well_known::Rfc3339)
             .unwrap_or_default(),
         status: match replay_of_event_id {
@@ -665,7 +687,7 @@ fn parse_trigger_event(value: &VmValue) -> Result<TriggerEvent, VmError> {
         .entry("id")
         .or_insert_with(|| serde_json::json!(TriggerEventId::new().0));
     object.entry("received_at").or_insert_with(|| {
-        serde_json::json!(OffsetDateTime::now_utc()
+        serde_json::json!(clock::now_utc()
             .format(&time::format_description::well_known::Rfc3339)
             .unwrap_or_default())
     });
@@ -809,7 +831,7 @@ fn default_provider_payload(
             "provider": "cron",
             "cron_id": serde_json::Value::Null,
             "schedule": serde_json::Value::Null,
-            "tick_at": OffsetDateTime::now_utc()
+            "tick_at": clock::now_utc()
                 .format(&time::format_description::well_known::Rfc3339)
                 .unwrap_or_default(),
             "raw": raw_event,
