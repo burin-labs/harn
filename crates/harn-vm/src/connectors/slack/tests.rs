@@ -316,7 +316,7 @@ async fn slack_connector_normalizes_docs_fixtures_into_typed_payloads() {
             }
             other => panic!("expected slack payload, got {other:?}"),
         };
-        match (case.expected_kind, payload) {
+        match (case.expected_kind, payload.as_ref()) {
             ("message.channels", SlackEventPayload::MessageChannels(inner)) => {
                 assert_eq!(inner.channel.as_deref(), Some("C123ABC456"));
             }
@@ -354,9 +354,10 @@ async fn slack_connector_accepts_url_verification_payloads() {
         .unwrap();
     assert_eq!(event.kind, "url_verification");
     match event.provider_payload {
-        crate::triggers::ProviderPayload::Known(KnownProviderPayload::Slack(
-            SlackEventPayload::Other(common),
-        )) => {
+        crate::triggers::ProviderPayload::Known(KnownProviderPayload::Slack(payload)) => {
+            let SlackEventPayload::Other(common) = *payload else {
+                panic!("expected slack other payload");
+            };
             assert_eq!(
                 common.raw.get("challenge").and_then(JsonValue::as_str),
                 Some("3eZbrw1aBm2rZgRNFdxV2595E9CY3gmdALWMmHkvFXO7tYXAYM8P")
