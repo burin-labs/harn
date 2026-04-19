@@ -36,6 +36,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use crate::event_log::EventLog;
 use crate::value::VmError;
 
 use super::api::{vm_call_llm_full_streaming, vm_call_llm_full_streaming_offthread, DeltaSender};
@@ -184,6 +185,7 @@ pub(crate) fn parse_retry_after(msg: &str) -> Option<u64> {
 
 /// Write the full LLM request payload to a JSONL transcript file.
 pub(super) fn append_llm_transcript_entry(entry: &serde_json::Value) {
+    append_llm_transcript_event_log(entry);
     let dir = match std::env::var("HARN_LLM_TRANSCRIPT_DIR") {
         Ok(d) if !d.is_empty() => d,
         _ => return,
@@ -199,6 +201,31 @@ pub(super) fn append_llm_transcript_entry(entry: &serde_json::Value) {
         {
             let _ = writeln!(f, "{line}");
         }
+    }
+}
+
+fn append_llm_transcript_event_log(entry: &serde_json::Value) {
+    let Some(log) = crate::event_log::active_event_log() else {
+        return;
+    };
+    let topic = crate::event_log::Topic::new("agent.transcript.llm")
+        .expect("static transcript topic should be valid");
+    let kind = entry
+        .get("type")
+        .and_then(|value| value.as_str())
+        .unwrap_or("transcript_event")
+        .to_string();
+    let mut headers = std::collections::BTreeMap::new();
+    if let Some(span_id) = entry.get("span_id").and_then(|value| value.as_u64()) {
+        headers.insert("span_id".to_string(), span_id.to_string());
+    }
+    let event = crate::event_log::LogEvent::new(kind, entry.clone()).with_headers(headers);
+    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+        handle.spawn(async move {
+            let _ = log.append(&topic, event).await;
+        });
+    } else {
+        let _ = futures::executor::block_on(log.append(&topic, event));
     }
 }
 

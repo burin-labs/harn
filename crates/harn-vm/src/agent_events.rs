@@ -23,6 +23,7 @@ use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
 use serde::{Deserialize, Serialize};
 
+use crate::event_log::{AnyEventLog, EventLog, LogEvent as EventLogRecord, Topic};
 use crate::tool_annotations::ToolKind;
 
 /// Typed worker lifecycle events emitted by delegated/background agent
@@ -352,6 +353,32 @@ impl JsonlEventSink {
     }
 }
 
+/// Event-log-backed sink for a single session's agent event stream.
+/// Uses the generalized append-only event log when one is installed for
+/// the current VM thread and falls back to `JsonlEventSink` only for
+/// older env-driven workflows.
+pub struct EventLogSink {
+    log: Arc<AnyEventLog>,
+    topic: Topic,
+    session_id: String,
+}
+
+impl EventLogSink {
+    pub fn new(log: Arc<AnyEventLog>, session_id: impl Into<String>) -> Arc<Self> {
+        let session_id = session_id.into();
+        let topic = Topic::new(format!(
+            "observability.agent_events.{}",
+            crate::event_log::sanitize_topic_component(&session_id)
+        ))
+        .expect("session id should sanitize to a valid topic");
+        Arc::new(Self {
+            log,
+            topic,
+            session_id,
+        })
+    }
+}
+
 impl AgentEventSink for JsonlEventSink {
     fn handle_event(&self, event: &AgentEvent) {
         use std::io::Write as _;
@@ -377,6 +404,37 @@ impl AgentEventSink for JsonlEventSink {
             let _ = state.writer.write_all(b"\n");
             state.bytes_written += line.len() as u64 + 1;
             let _ = self.rotate_if_needed(&mut state);
+        }
+    }
+}
+
+impl AgentEventSink for EventLogSink {
+    fn handle_event(&self, event: &AgentEvent) {
+        let event_json = match serde_json::to_value(event) {
+            Ok(value) => value,
+            Err(_) => return,
+        };
+        let event_kind = event_json
+            .get("type")
+            .and_then(|value| value.as_str())
+            .unwrap_or("agent_event")
+            .to_string();
+        let payload = serde_json::json!({
+            "index_hint": now_ms(),
+            "session_id": self.session_id,
+            "event": event_json,
+        });
+        let mut headers = std::collections::BTreeMap::new();
+        headers.insert("session_id".to_string(), self.session_id.clone());
+        let log = self.log.clone();
+        let topic = self.topic.clone();
+        let record = EventLogRecord::new(event_kind, payload).with_headers(headers);
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            handle.spawn(async move {
+                let _ = log.append(&topic, record).await;
+            });
+        } else {
+            let _ = futures::executor::block_on(log.append(&topic, record));
         }
     }
 }
@@ -474,6 +532,13 @@ pub fn emit_event(event: &AgentEvent) {
     for sink in sinks {
         sink.handle_event(event);
     }
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as i64)
+        .unwrap_or(0)
 }
 
 pub fn session_external_sink_count(session_id: &str) -> usize {
