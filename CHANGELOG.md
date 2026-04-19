@@ -19,6 +19,9 @@ granular archaeology.
   the shared `observability.action_graph` event-log topic.
   Dispatch/A2A/worker/DLQ nodes deferred to the T-06 dispatcher
   milestone.
+- **Connector trait + registry + shared HMAC-signature verification
+  (PR pending, closes #167).** Foundation for upcoming MVP connectors
+  (cron, webhooks, GitHub, Slack, Linear, Notion, A2A push).
 - **Secret-provider primitives for reactive runtime work (#194,
   closes #154).** `harn_vm::secrets` now provides `SecretProvider`,
   `ChainSecretProvider`, zeroizing `SecretBytes`, and concrete env +
