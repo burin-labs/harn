@@ -34,6 +34,11 @@ granular archaeology.
   Lays the type foundation that upcoming EventLog-backed trigger
   registry, LLM predicate gate, and handler dispatcher work will
   consume.
+- **Daemon lifecycle events flow into run observability (#197,
+  closes #143 part (c)).** Persisted runs derive `daemon_events`
+  from daemon stdlib wrapper activity, `harn runs inspect` prints
+  the lifecycle timeline, and the portal run detail view exposes a
+  dedicated Daemons section alongside the rest of observability.
 
 ## v0.7.22
 

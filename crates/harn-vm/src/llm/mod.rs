@@ -116,6 +116,13 @@ pub fn clear_current_host_bridge() {
     agent::clear_current_host_bridge();
 }
 
+pub(crate) fn append_observability_sidecar_entry(
+    event_type: &str,
+    fields: serde_json::Map<String, serde_json::Value>,
+) {
+    agent_observe::append_llm_observability_entry(event_type, fields);
+}
+
 fn output_validation_mode(opts: &api::LlmCallOptions) -> &str {
     opts.output_validation.as_deref().unwrap_or("off")
 }

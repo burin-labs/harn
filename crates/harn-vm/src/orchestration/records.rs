@@ -257,6 +257,28 @@ pub struct CompactionEventRecord {
     pub available: bool,
 }
 
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "snake_case")]
+pub enum DaemonEventKindRecord {
+    #[default]
+    Spawned,
+    Triggered,
+    Snapshotted,
+    Resumed,
+    Stopped,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct DaemonEventRecord {
+    pub daemon_id: String,
+    pub name: String,
+    pub kind: DaemonEventKindRecord,
+    pub timestamp: String,
+    pub persist_path: String,
+    pub payload_summary: Option<String>,
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct RunObservabilityRecord {
@@ -269,6 +291,7 @@ pub struct RunObservabilityRecord {
     pub verification_outcomes: Vec<RunVerificationOutcomeRecord>,
     pub transcript_pointers: Vec<RunTranscriptPointerRecord>,
     pub compaction_events: Vec<CompactionEventRecord>,
+    pub daemon_events: Vec<DaemonEventRecord>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -440,6 +463,12 @@ pub struct RunExecutionRecord {
 
 fn compact_json_value(value: &serde_json::Value) -> String {
     serde_json::to_string(value).unwrap_or_else(|_| value.to_string())
+}
+
+fn llm_transcript_sidecar_path(run_path: &Path) -> Option<PathBuf> {
+    let stem = run_path.file_stem()?.to_str()?;
+    let parent = run_path.parent().unwrap_or_else(|| Path::new("."));
+    Some(parent.join(format!("{stem}-llm/llm_transcript.jsonl")))
 }
 
 fn json_string_array(value: Option<&serde_json::Value>) -> Vec<String> {
@@ -619,6 +648,23 @@ fn compaction_events_from_transcript(
         .unwrap_or_default()
 }
 
+fn daemon_events_from_sidecar(run_path: &Path) -> Vec<DaemonEventRecord> {
+    let Some(sidecar_path) = llm_transcript_sidecar_path(run_path) else {
+        return Vec::new();
+    };
+    let Ok(content) = std::fs::read_to_string(sidecar_path) else {
+        return Vec::new();
+    };
+
+    content
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .filter(|event| event.get("type").and_then(|value| value.as_str()) == Some("daemon_event"))
+        .filter_map(|event| serde_json::from_value::<DaemonEventRecord>(event).ok())
+        .collect()
+}
+
 pub fn derive_run_observability(
     run: &RunRecord,
     persisted_path: Option<&Path>,
@@ -629,6 +675,7 @@ pub fn derive_run_observability(
     let mut planner_rounds = Vec::new();
     let mut transcript_pointers = Vec::new();
     let mut compaction_events = Vec::new();
+    let mut daemon_events = Vec::new();
     let mut research_fact_count = 0usize;
 
     let root_node_id = format!("run:{}", run.id);
@@ -897,15 +944,7 @@ pub fn derive_run_observability(
     }
 
     if let Some(path) = persisted_path {
-        let stem = path
-            .file_stem()
-            .and_then(|value| value.to_str())
-            .unwrap_or_default();
-        if !stem.is_empty() {
-            let sidecar_path = path
-                .parent()
-                .unwrap_or_else(|| Path::new("."))
-                .join(format!("{stem}-llm/llm_transcript.jsonl"));
+        if let Some(sidecar_path) = llm_transcript_sidecar_path(path) {
             transcript_pointers.push(RunTranscriptPointerRecord {
                 id: "run:llm_transcript".to_string(),
                 label: "LLM transcript sidecar".to_string(),
@@ -915,10 +954,11 @@ pub fn derive_run_observability(
                 available: sidecar_path.exists(),
             });
         }
+        daemon_events.extend(daemon_events_from_sidecar(path));
     }
 
     RunObservabilityRecord {
-        schema_version: 2,
+        schema_version: 3,
         planner_rounds,
         research_fact_count,
         action_graph_nodes,
@@ -927,6 +967,7 @@ pub fn derive_run_observability(
         verification_outcomes,
         transcript_pointers,
         compaction_events,
+        daemon_events,
     }
 }
 
@@ -1726,6 +1767,66 @@ pub fn diff_run_records(left: &RunRecord, right: &RunRecord) -> RunDiffReport {
                 observability_diffs.push(RunObservabilityDiffRecord {
                     section: "compaction_events".to_string(),
                     label: compaction_id,
+                    details: vec![format!("event: {:?} -> {:?}", left_event, right_event)],
+                });
+            }
+            _ => {}
+        }
+    }
+
+    let left_daemons = left_observability
+        .daemon_events
+        .iter()
+        .map(|event| {
+            (
+                (event.daemon_id.clone(), event.kind, event.timestamp.clone()),
+                (
+                    event.name.clone(),
+                    event.persist_path.clone(),
+                    event.payload_summary.clone(),
+                ),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    let right_daemons = right_observability
+        .daemon_events
+        .iter()
+        .map(|event| {
+            (
+                (event.daemon_id.clone(), event.kind, event.timestamp.clone()),
+                (
+                    event.name.clone(),
+                    event.persist_path.clone(),
+                    event.payload_summary.clone(),
+                ),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    let daemon_keys = left_daemons
+        .keys()
+        .chain(right_daemons.keys())
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    for daemon_key in daemon_keys {
+        let label = format!("{}:{:?}:{}", daemon_key.0, daemon_key.1, daemon_key.2);
+        match (
+            left_daemons.get(&daemon_key),
+            right_daemons.get(&daemon_key),
+        ) {
+            (Some(_), None) => observability_diffs.push(RunObservabilityDiffRecord {
+                section: "daemon_events".to_string(),
+                label,
+                details: vec!["daemon event missing from right run".to_string()],
+            }),
+            (None, Some(_)) => observability_diffs.push(RunObservabilityDiffRecord {
+                section: "daemon_events".to_string(),
+                label,
+                details: vec!["daemon event missing from left run".to_string()],
+            }),
+            (Some(left_event), Some(right_event)) if left_event != right_event => {
+                observability_diffs.push(RunObservabilityDiffRecord {
+                    section: "daemon_events".to_string(),
+                    label,
                     details: vec![format!("event: {:?} -> {:?}", left_event, right_event)],
                 });
             }
