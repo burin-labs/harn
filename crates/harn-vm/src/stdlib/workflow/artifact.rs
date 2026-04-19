@@ -175,6 +175,8 @@ pub(super) fn append_child_run_record(
             .and_then(|value| value.as_str())
             .unwrap_or_default()
             .to_string(),
+        request: worker.get("request").cloned(),
+        provenance: worker.get("provenance").cloned(),
         status: worker
             .get("status")
             .and_then(|value| value.as_str())

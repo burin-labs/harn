@@ -328,6 +328,13 @@ Workflow helpers built on transcripts and `agent_loop`:
 | `workflow_continue(prev, task, flow, overrides?)` | Continue from an existing transcript |
 | `workflow_compact(prev, options?)` | Summarize and compact a transcript |
 | `workflow_reset(prev, carry_summary)` | Reset or summarize-then-reset a workflow transcript |
+| `worker_request(worker)` | Return a worker handle's immutable original request payload |
+| `worker_result(worker)` | Return a worker handle/result payload or worker-result artifact payload |
+| `worker_provenance(worker)` | Return normalized worker provenance fields |
+| `worker_research_questions(worker)` | Return the worker's canonical `research_questions` list |
+| `worker_action_items(worker)` | Return the worker's canonical `action_items` list |
+| `worker_workflow_stages(worker)` | Return the worker's canonical `workflow_stages` list |
+| `worker_verification_steps(worker)` | Return the worker's canonical `verification_steps` list |
 
 `workflow_session(...)` returns a normalized session dict that includes the
 current transcript, message count, summary, persisted run metadata, and a
@@ -336,7 +343,8 @@ current transcript, message count, summary, persisted run metadata, and a
 
 For background or delegated execution, use the worker lifecycle builtins
 (`spawn_agent`, `send_input`, `resume_agent`, `wait_agent`, `close_agent`, `list_agents`)
-directly from the runtime.
+directly from the runtime, or the `worker_*` helpers above when you need the
+normalized request/provenance views.
 
 ### std/worktree
 

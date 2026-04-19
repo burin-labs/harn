@@ -10,8 +10,9 @@ use super::worktree::{
     cleanup_worker_execution, ensure_worker_worktree, WorkerMutationSessionResetGuard,
 };
 use super::{
-    clone_worker_state, next_worker_id, WorkerCarryPolicy, WorkerConfig, WorkerExecutionProfile,
-    WorkerExecutionResult, WorkerState, WORKER_REGISTRY,
+    clone_worker_state, next_worker_id, worker_provenance, worker_request_for_config,
+    WorkerCarryPolicy, WorkerConfig, WorkerExecutionProfile, WorkerExecutionResult, WorkerState,
+    WORKER_REGISTRY,
 };
 use crate::orchestration::{
     current_approval_policy, current_execution_policy, pop_execution_policy, push_execution_policy,
@@ -267,6 +268,8 @@ fn worker_result_artifact(
         data: Some(serde_json::json!({
             "worker_id": state.id,
             "worker_name": state.name,
+            "request": state.request,
+            "provenance": worker_provenance(state),
             "execution": state.execution,
             "payload": payload,
             "produced_artifact_ids": produced.iter().map(|artifact| artifact.id.clone()).collect::<Vec<_>>(),
@@ -305,6 +308,12 @@ pub(in super::super) async fn execute_delegated_stage(
     let mut stage_node = node.clone();
     stage_node.kind = "stage".to_string();
     let execution = parse_execution_profile_json(node.metadata.get("execution"))?;
+    let config = WorkerConfig::Stage {
+        node: Box::new(stage_node),
+        artifacts: artifacts.to_vec(),
+        transcript,
+    };
+    let original_request = worker_request_for_config(task, &config);
     let state = Rc::new(RefCell::new(WorkerState {
         id: worker_id.clone(),
         name: worker_name.clone(),
@@ -315,13 +324,10 @@ pub(in super::super) async fn execute_delegated_stage(
         finished_at: None,
         mode: "delegated_stage".to_string(),
         history: vec![task.to_string()],
-        config: WorkerConfig::Stage {
-            node: Box::new(stage_node),
-            artifacts: artifacts.to_vec(),
-            transcript,
-        },
+        config,
         handle: None,
         cancel_token: Arc::new(AtomicBool::new(false)),
+        request: original_request,
         latest_payload: None,
         latest_error: None,
         transcript: None,

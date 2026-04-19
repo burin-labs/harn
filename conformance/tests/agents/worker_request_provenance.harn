@@ -1,0 +1,29 @@
+import "std/agents"
+
+pipeline main() {
+  llm_mock({text: "background summary"})
+  let handle = sub_agent_run(
+    "Investigate worker provenance",
+    {
+    provider: "mock",
+    background: true,
+    request: {topic: "provenance", owner: "parent"},
+    research_questions: ["Which fields survive wait?"],
+    action_items: [{id: "action_1", title: "Read agents_workers"}],
+    workflow_stages: ["research", "implement"],
+    verification_steps: ["cargo test -p harn-vm agents_workers"],
+  },
+  )
+  println(worker_request(handle)?.payload?.topic == "provenance")
+  println(len(worker_research_questions(handle)) == 1)
+  println(worker_action_items(handle)[0]?.id == "action_1")
+  println(worker_workflow_stages(handle)[1] == "implement")
+  println(worker_verification_steps(handle)[0] == "cargo test -p harn-vm agents_workers")
+  let done = wait_agent(handle)
+  println(worker_request(done)?.task == "Investigate worker provenance")
+  println(worker_provenance(done)?.worker_id == done?.id)
+  println(contains(worker_result(done)?.summary ?? "", "background summary"))
+  let continued = send_input(done, "Follow up with implementation details")
+  println(continued?.task == "Follow up with implementation details")
+  println(worker_request(continued)?.task == "Investigate worker provenance")
+}

@@ -496,3 +496,38 @@ pub fn workflow_session_persist(prev, path) {
     },
   )
 }
+
+/** worker_request. */
+pub fn worker_request(worker) {
+  return worker?.request ?? worker?.worker?.request ?? worker?.data?.request
+}
+
+/** worker_result. */
+pub fn worker_result(worker) {
+  return worker?.result ?? worker?.data?.payload ?? worker?.worker?.result
+}
+
+/** worker_provenance. */
+pub fn worker_provenance(worker) {
+  return worker?.provenance ?? worker?.worker?.provenance ?? worker?.data?.provenance
+}
+
+/** worker_research_questions. */
+pub fn worker_research_questions(worker) {
+  return worker_request(worker)?.research_questions ?? []
+}
+
+/** worker_action_items. */
+pub fn worker_action_items(worker) {
+  return worker_request(worker)?.action_items ?? []
+}
+
+/** worker_workflow_stages. */
+pub fn worker_workflow_stages(worker) {
+  return worker_request(worker)?.workflow_stages ?? []
+}
+
+/** worker_verification_steps. */
+pub fn worker_verification_steps(worker) {
+  return worker_request(worker)?.verification_steps ?? []
+}

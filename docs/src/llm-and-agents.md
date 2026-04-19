@@ -838,6 +838,9 @@ lineage metadata.
 Set `background: true` to get a normal worker handle back instead of waiting
 inline. The resulting worker uses `mode: "sub_agent"` and can be resumed with
 `wait_agent(...)`, `send_input(...)`, and `close_agent(...)`.
+Background handles retain the original structured `request` plus a normalized
+`provenance` object, so parent pipelines can recover child questions, actions,
+workflow stages, and verification steps directly from the handle/result.
 
 Workers can persist state and child run paths between sessions. Use `carry`
 inside `spawn_agent(...)` when you want continuation to reset transcript state,
@@ -916,6 +919,11 @@ println(session?.usage?.output_tokens)
 println(session?.usage?.total_duration_ms)
 println(session?.usage?.call_count)
 ```
+
+`std/agents` also exposes worker helpers for delegated/background orchestration:
+`worker_request(worker)`, `worker_result(worker)`, `worker_provenance(worker)`,
+`worker_research_questions(worker)`, `worker_action_items(worker)`,
+`worker_workflow_stages(worker)`, and `worker_verification_steps(worker)`.
 
 This is the intended host integration boundary:
 

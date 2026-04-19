@@ -10,7 +10,10 @@ use super::policy::{
     parse_worker_carry_policy, parse_worker_policy_value, resolve_worker_policy,
     worker_policy_value,
 };
-use super::{WorkerCarryPolicy, WorkerConfig, WorkerExecutionProfile, WorkerInit, WorkerState};
+use super::{
+    WorkerCarryPolicy, WorkerConfig, WorkerExecutionProfile, WorkerInit, WorkerRequestRecord,
+    WorkerState,
+};
 use crate::orchestration::{ArtifactRecord, MutationSessionRecord, WorkflowGraph};
 use crate::value::{VmError, VmValue};
 
@@ -185,6 +188,7 @@ pub(in super::super) fn persist_worker_state_snapshot(state: &WorkerState) -> Re
         "mode": state.mode,
         "history": state.history,
         "config": worker_config_to_json(&state.config),
+        "request": state.request,
         "latest_payload": state.latest_payload,
         "latest_error": state.latest_error,
         "transcript": state.transcript.as_ref().map(crate::llm::vm_value_to_json),
@@ -254,6 +258,9 @@ pub(in super::super) fn load_worker_state_snapshot(target: &str) -> Result<Worke
     let execution: WorkerExecutionProfile =
         serde_json::from_value(payload.get("execution").cloned().unwrap_or_default())
             .map_err(|e| VmError::Runtime(format!("worker snapshot execution parse error: {e}")))?;
+    let request: WorkerRequestRecord =
+        serde_json::from_value(payload.get("request").cloned().unwrap_or_default())
+            .unwrap_or_else(|_| WorkerRequestRecord::default());
     let status = payload
         .get("status")
         .and_then(|value| value.as_str())
@@ -312,6 +319,7 @@ pub(in super::super) fn load_worker_state_snapshot(target: &str) -> Result<Worke
         config,
         handle: None,
         cancel_token: Arc::new(AtomicBool::new(false)),
+        request,
         latest_payload: payload.get("latest_payload").cloned(),
         latest_error: payload
             .get("latest_error")

@@ -29,6 +29,15 @@ granular archaeology.
   under `.harn/metadata/<namespace>/entries.json` while legacy
   root-metadata reads remain backward-compatible. `harn doctor`
   surfaces metadata cache state.
+- **Worker request/provenance retention for delegated/background agents
+  (#124).** Worker handles, waited results, snapshots, child-run records,
+  and `worker_result` artifacts now preserve immutable original `request`
+  metadata plus normalized `provenance` fields. `std/agents` adds
+  `worker_request`, `worker_result`, `worker_provenance`,
+  `worker_research_questions`, `worker_action_items`,
+  `worker_workflow_stages`, and `worker_verification_steps` helpers so
+  parent orchestration can recover structured child metadata without
+  index-based rebinding.
 
 ### Changed
 

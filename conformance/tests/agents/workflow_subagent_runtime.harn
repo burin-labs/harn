@@ -9,7 +9,7 @@ pipeline main() {
     mode: "llm",
     model_policy: {provider: "mock"},
     output_contract: {output_kinds: ["summary"]},
-    metadata: {worker_name: "delegate-1"},
+    metadata: {worker_name: "delegate-1", request: {source: "workflow"}, workflow_stages: ["delegate"]},
   },
   },
     edges: [],
@@ -19,7 +19,13 @@ pipeline main() {
   println(result?.status)
   println(result?.run?.stages[0]?.kind)
   println(result?.run?.stages[0]?.metadata?.worker?.name == "delegate-1")
+  println(result?.run?.stages[0]?.metadata?.worker?.request?.payload?.source == "workflow")
   println(result?.run?.stages[0]?.artifacts[0]?.metadata?.delegated)
   println(result?.run?.stages[0]?.artifacts[1]?.kind == "worker_result")
+  println(result?.run?.stages[0]?.artifacts[1]?.data?.request?.workflow_stages[0] == "delegate")
+  println(
+    result?.run?.stages[0]?.artifacts[1]?.data?.provenance?.worker_id \
+    == result?.run?.stages[0]?.metadata?.worker?.id,
+  )
   println(result?.run?.stages[0]?.metadata?.worker_id != nil)
 }
