@@ -866,6 +866,7 @@ dependencies = [
 name = "harn-cli"
 version = "0.7.22"
 dependencies = [
+ "async-trait",
  "axum",
  "base64",
  "chrono-tz",
