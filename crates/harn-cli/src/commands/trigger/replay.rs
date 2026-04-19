@@ -195,13 +195,39 @@ fn resolve_binding(
         );
     }
 
-    harn_vm::resolve_live_trigger_binding(&recorded.binding_id, Some(recorded.binding_version))
-        .map_err(|error| {
-            format!(
-                "failed to resolve recorded binding '{}@v{}': {}",
-                recorded.binding_id, recorded.binding_version, error
+    match harn_vm::resolve_live_trigger_binding(
+        &recorded.binding_id,
+        Some(recorded.binding_version),
+    ) {
+        Ok(binding) => Ok(binding),
+        Err(harn_vm::TriggerRegistryError::UnknownBindingVersion { .. }) => {
+            let fallback_as_of = recorded.event.received_at;
+            harn_vm::events::log_warn(
+                "trigger.replay",
+                &format!(
+                    "recorded binding '{}@v{}' is unavailable; replay is falling back to the binding active at {}",
+                    recorded.binding_id,
+                    recorded.binding_version,
+                    format_timestamp(fallback_as_of)
+                ),
+            );
+            harn_vm::resolve_trigger_binding_as_of(&recorded.binding_id, fallback_as_of).map_err(
+                |error| {
+                    format!(
+                        "failed to resolve recorded binding '{}@v{}' or fall back to {}: {}",
+                        recorded.binding_id,
+                        recorded.binding_version,
+                        format_timestamp(fallback_as_of),
+                        error
+                    )
+                },
             )
-        })
+        }
+        Err(error) => Err(format!(
+            "failed to resolve recorded binding '{}@v{}': {}",
+            recorded.binding_id, recorded.binding_version, error
+        )),
+    }
 }
 
 async fn append_replay_record(
@@ -468,5 +494,197 @@ fn diff_outcomes(
     DriftReport {
         changed: !fields.is_empty(),
         fields,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+    use std::fs;
+    use std::path::Path;
+    use std::rc::Rc;
+    use std::sync::Arc;
+
+    use harn_vm::event_log::{
+        install_default_for_base_dir, AnyEventLog, EventLog, LogEvent, Topic,
+    };
+    use harn_vm::events::{add_event_sink, clear_event_sinks, CollectorSink, EventLevel};
+    use harn_vm::triggers::event::{CronEventPayload, KnownProviderPayload};
+    use time::OffsetDateTime;
+
+    use super::{
+        append_replay_record, build_replay_vm, load_recorded_event, resolve_binding,
+        summarize_dispatch_outcome, TriggerEventRecord, TRIGGER_EVENTS_TOPIC,
+    };
+    use crate::package;
+
+    const TEST_TRIGGER_ID: &str = "replay-cron";
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn replay_falls_back_to_recorded_timestamp_when_version_lookup_is_stale() {
+        harn_vm::reset_thread_local_state();
+        let sink = Rc::new(CollectorSink::new());
+        clear_event_sinks();
+        add_event_sink(sink.clone());
+
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let workspace_root = tempdir.path();
+        let event_log = install_default_for_base_dir(workspace_root).expect("install event log");
+
+        install_local_manifest(workspace_root, "on_tick_v1");
+        install_workspace_manifest(workspace_root).await;
+        install_local_manifest(workspace_root, "on_tick_v2");
+        install_workspace_manifest(workspace_root).await;
+        install_local_manifest(workspace_root, "on_tick_v3");
+        install_workspace_manifest(workspace_root).await;
+
+        let current = harn_vm::resolve_live_trigger_binding(TEST_TRIGGER_ID, None)
+            .expect("resolve active binding");
+        assert_eq!(current.version, 3);
+        assert!(matches!(
+            harn_vm::resolve_live_trigger_binding(TEST_TRIGGER_ID, Some(1)),
+            Err(harn_vm::TriggerRegistryError::UnknownBindingVersion { .. })
+        ));
+
+        append_trigger_event(
+            &event_log,
+            TriggerEventRecord {
+                binding_id: TEST_TRIGGER_ID.to_string(),
+                binding_version: 1,
+                replay_of_event_id: None,
+                event: recorded_cron_event("evt-stale", OffsetDateTime::now_utc()),
+            },
+        )
+        .await;
+
+        let recorded = load_recorded_event(&event_log, "evt-stale")
+            .await
+            .expect("load recorded event");
+        let binding = resolve_binding(&recorded, None).expect("resolve fallback binding");
+        append_replay_record(&event_log, &binding, &recorded.event)
+            .await
+            .expect("append replay record");
+
+        let dispatcher =
+            harn_vm::Dispatcher::with_event_log(build_replay_vm(workspace_root), event_log.clone());
+        let outcome = dispatcher
+            .dispatch_replay(
+                &binding,
+                recorded.event.clone(),
+                recorded.event.id.0.clone(),
+            )
+            .await
+            .expect("dispatch replay succeeds");
+        let replay = summarize_dispatch_outcome(&outcome);
+        assert_eq!(replay.status, "succeeded");
+
+        let topic = Topic::new(TRIGGER_EVENTS_TOPIC).expect("valid trigger events topic");
+        let records: Vec<TriggerEventRecord> = event_log
+            .read_range(&topic, None, usize::MAX)
+            .await
+            .expect("read trigger events")
+            .into_iter()
+            .map(|(_, event)| serde_json::from_value(event.payload).expect("decode trigger event"))
+            .collect();
+
+        assert!(records.iter().any(|record| {
+            record.replay_of_event_id.as_deref() == Some("evt-stale")
+                && record.binding_id == TEST_TRIGGER_ID
+                && record.binding_version == 3
+        }));
+        assert!(sink.logs.borrow().iter().any(|log| {
+            log.level == EventLevel::Warn
+                && log.category == "trigger.replay"
+                && log
+                    .message
+                    .contains("falling back to the binding active at")
+        }));
+
+        harn_vm::reset_thread_local_state();
+    }
+
+    fn install_local_manifest(root: &Path, handler_name: &str) {
+        std::fs::create_dir_all(root.join(".git")).expect("create .git");
+        fs::write(
+            root.join("harn.toml"),
+            format!(
+                r#"
+[package]
+name = "workspace"
+
+[exports]
+handlers = "lib.harn"
+
+[[triggers]]
+id = "{TEST_TRIGGER_ID}"
+kind = "cron"
+provider = "cron"
+match = {{ events = ["cron.tick"] }}
+schedule = "* * * * *"
+timezone = "UTC"
+handler = "handlers::{handler_name}"
+"#
+            ),
+        )
+        .expect("write manifest");
+        fs::write(
+            root.join("lib.harn"),
+            format!(
+                r#"
+import "std/triggers"
+
+pub fn {handler_name}(event: TriggerEvent) -> string {{
+  return event.kind
+}}
+"#
+            ),
+        )
+        .expect("write lib");
+        fs::write(root.join("main.harn"), "pipeline main() {}\n").expect("write main");
+    }
+
+    async fn install_workspace_manifest(root: &Path) {
+        let mut vm = super::build_replay_vm(root);
+        let extensions = package::load_runtime_extensions(&root.join("main.harn"));
+        package::install_manifest_triggers(&mut vm, &extensions)
+            .await
+            .expect("install manifest triggers");
+    }
+
+    fn recorded_cron_event(event_id: &str, received_at: OffsetDateTime) -> harn_vm::TriggerEvent {
+        harn_vm::TriggerEvent {
+            id: harn_vm::TriggerEventId(event_id.to_string()),
+            provider: harn_vm::ProviderId::from("cron"),
+            kind: "cron.tick".to_string(),
+            received_at,
+            occurred_at: None,
+            dedupe_key: format!("delivery-{event_id}"),
+            trace_id: harn_vm::TraceId(format!("trace-{event_id}")),
+            tenant_id: None,
+            headers: BTreeMap::new(),
+            provider_payload: harn_vm::ProviderPayload::Known(KnownProviderPayload::Cron(
+                CronEventPayload {
+                    cron_id: Some("test-cron".to_string()),
+                    schedule: Some("* * * * *".to_string()),
+                    tick_at: received_at,
+                    raw: serde_json::json!({ "event_id": event_id }),
+                },
+            )),
+            signature_status: harn_vm::SignatureStatus::Verified,
+        }
+    }
+
+    async fn append_trigger_event(event_log: &Arc<AnyEventLog>, record: TriggerEventRecord) {
+        let topic = Topic::new(TRIGGER_EVENTS_TOPIC).expect("valid trigger events topic");
+        event_log
+            .append(
+                &topic,
+                LogEvent::new(
+                    "trigger_event",
+                    serde_json::to_value(record).expect("encode trigger event"),
+                ),
+            )
+            .await
+            .expect("append trigger event");
     }
 }
