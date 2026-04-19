@@ -29,6 +29,16 @@ fn is_absolute(path) {
   return path.starts_with("/") || (len(path) >= 3 && path.substring(1, 1) == ":")
 }
 
+/** Classify a path at the workspace boundary. */
+fn workspace_info(path, workspace_root = nil) {
+  return path_workspace_info(path, workspace_root)
+}
+
+/** Normalize a path into workspace-relative form when possible. */
+fn workspace_normalize(path, workspace_root = nil) {
+  return path_workspace_normalize(path, workspace_root)
+}
+
 /** List files in a directory recursively (one level). */
 fn list_files(dir) {
   let entries = list_dir(dir)

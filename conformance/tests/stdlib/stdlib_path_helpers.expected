@@ -23,3 +23,11 @@
 [harn] .rs
 [harn] main.rs
 [harn] 3
+[harn] workspace_relative
+[harn] packages/demo/file.txt
+[harn] true
+[harn] packages/demo/file.txt
+[harn] host_absolute
+[harn] packages/demo/file.txt
+[harn] invalid
+[harn] true

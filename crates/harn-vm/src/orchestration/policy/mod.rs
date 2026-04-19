@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use super::glob_match;
 use crate::tool_annotations::{SideEffectLevel, ToolAnnotations};
 use crate::value::{VmError, VmValue};
+use crate::workspace_path::{classify_workspace_path, WorkspacePathInfo};
 
 pub use crate::tool_annotations::{ToolArgSchema, ToolKind};
 pub use types::{
@@ -127,32 +128,48 @@ pub fn current_tool_mutation_classification(tool_name: &str) -> String {
 /// annotated `arg_schema.path_params`. Unannotated tools declare no
 /// paths — the VM no longer guesses by common argument names.
 pub fn current_tool_declared_paths(tool_name: &str, args: &serde_json::Value) -> Vec<String> {
+    current_tool_declared_path_entries(tool_name, args)
+        .into_iter()
+        .map(|entry| entry.display_path().to_string())
+        .collect()
+}
+
+/// Rich workspace-path descriptors declared by this tool call. Each
+/// entry preserves the original input while also projecting the path
+/// into workspace-relative and host-absolute forms when that mapping is
+/// known.
+pub fn current_tool_declared_path_entries(
+    tool_name: &str,
+    args: &serde_json::Value,
+) -> Vec<WorkspacePathInfo> {
     let Some(map) = args.as_object() else {
         return Vec::new();
     };
     let Some(annotations) = current_tool_annotations(tool_name) else {
         return Vec::new();
     };
-    let mut paths = Vec::new();
+    let workspace_root = crate::stdlib::process::execution_root_path();
+    let mut entries = Vec::new();
     for key in &annotations.arg_schema.path_params {
-        if let Some(value) = map.get(key).and_then(|value| value.as_str()) {
-            if !value.is_empty() {
-                paths.push(value.to_string());
-            }
-        }
-    }
-    if let Some(items) = map.get("paths").and_then(|value| value.as_array()) {
-        for item in items {
-            if let Some(value) = item.as_str() {
-                if !value.is_empty() {
-                    paths.push(value.to_string());
+        if let Some(value) = map.get(key) {
+            match value {
+                serde_json::Value::String(path) if !path.is_empty() => {
+                    entries.push(classify_workspace_path(path, Some(&workspace_root)));
                 }
+                serde_json::Value::Array(items) => {
+                    for item in items.iter().filter_map(|item| item.as_str()) {
+                        if !item.is_empty() {
+                            entries.push(classify_workspace_path(item, Some(&workspace_root)));
+                        }
+                    }
+                }
+                _ => {}
             }
         }
     }
-    paths.sort();
-    paths.dedup();
-    paths
+    entries.sort_by(|a, b| a.display_path().cmp(b.display_path()));
+    entries.dedup_by(|left, right| left.policy_candidates() == right.policy_candidates());
+    entries
 }
 
 pub fn enforce_current_policy_for_builtin(name: &str, args: &[VmValue]) -> Result<(), VmError> {
@@ -412,16 +429,18 @@ impl ToolApprovalPolicy {
         }
 
         if !self.write_path_allowlist.is_empty() {
-            let paths = super::current_tool_declared_paths(tool_name, args);
+            let paths = super::current_tool_declared_path_entries(tool_name, args);
             for path in &paths {
-                let allowed = self
-                    .write_path_allowlist
-                    .iter()
-                    .any(|pattern| glob_match(pattern, path));
+                let allowed = self.write_path_allowlist.iter().any(|pattern| {
+                    path.policy_candidates()
+                        .iter()
+                        .any(|candidate| glob_match(pattern, candidate))
+                });
                 if !allowed {
                     return ToolApprovalDecision::AutoDenied {
                         reason: format!(
-                            "tool '{tool_name}' writes to '{path}' which is not in the write-path allowlist"
+                            "tool '{tool_name}' writes to '{}' which is not in the write-path allowlist",
+                            path.display_path()
                         ),
                     };
                 }
@@ -487,6 +506,8 @@ impl ToolApprovalPolicy {
 #[cfg(test)]
 mod approval_policy_tests {
     use super::*;
+    use crate::orchestration::{pop_execution_policy, push_execution_policy, CapabilityPolicy};
+    use crate::tool_annotations::{ToolAnnotations, ToolArgSchema, ToolKind};
 
     #[test]
     fn auto_deny_takes_precedence_over_auto_approve() {
@@ -582,6 +603,56 @@ mod approval_policy_tests {
         let b = ToolApprovalPolicy::default();
         let merged = a.intersect(&b);
         assert_eq!(merged.auto_approve, vec!["read*".to_string()]);
+    }
+
+    #[test]
+    fn write_path_allowlist_matches_recovered_workspace_relative_path() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(temp.path().join("packages/demo")).unwrap();
+        std::fs::write(temp.path().join("packages/demo/file.txt"), "ok").unwrap();
+        crate::stdlib::process::set_thread_execution_context(Some(
+            crate::orchestration::RunExecutionRecord {
+                cwd: Some(temp.path().to_string_lossy().into_owned()),
+                source_dir: Some(temp.path().to_string_lossy().into_owned()),
+                env: BTreeMap::new(),
+                adapter: None,
+                repo_path: None,
+                worktree_path: None,
+                branch: None,
+                base_ref: None,
+                cleanup: None,
+            },
+        ));
+
+        let mut tool_annotations = BTreeMap::new();
+        tool_annotations.insert(
+            "write_file".to_string(),
+            ToolAnnotations {
+                kind: ToolKind::Edit,
+                arg_schema: ToolArgSchema {
+                    path_params: vec!["path".to_string()],
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+        );
+        push_execution_policy(CapabilityPolicy {
+            tool_annotations,
+            ..Default::default()
+        });
+
+        let policy = ToolApprovalPolicy {
+            write_path_allowlist: vec!["packages/demo/file.txt".to_string()],
+            ..Default::default()
+        };
+        let decision = policy.evaluate(
+            "write_file",
+            &serde_json::json!({"path": "/packages/demo/file.txt"}),
+        );
+        assert_eq!(decision, ToolApprovalDecision::AutoApproved);
+
+        pop_execution_policy();
+        crate::stdlib::process::set_thread_execution_context(None);
     }
 }
 

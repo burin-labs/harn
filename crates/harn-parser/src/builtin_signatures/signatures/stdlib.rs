@@ -488,6 +488,14 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("string")),
     },
     BuiltinSig {
+        name: "path_workspace_info",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
+        name: "path_workspace_normalize",
+        return_type: Some(BuiltinReturn::Union(UNION_STRING_NIL)),
+    },
+    BuiltinSig {
         name: "pi",
         return_type: Some(BuiltinReturn::Named("float")),
     },

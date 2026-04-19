@@ -46,6 +46,52 @@ fn normalize_tool_args_skips_unannotated_tool() {
 }
 
 #[test]
+fn normalize_tool_args_recovers_workspace_root_drift_for_declared_paths() {
+    use crate::orchestration::{pop_execution_policy, push_execution_policy, CapabilityPolicy};
+    use crate::tool_annotations::{ToolAnnotations, ToolArgSchema, ToolKind};
+
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(temp.path().join("packages/demo")).unwrap();
+    std::fs::write(temp.path().join("packages/demo/file.txt"), "ok").unwrap();
+    crate::stdlib::process::set_thread_execution_context(Some(
+        crate::orchestration::RunExecutionRecord {
+            cwd: Some(temp.path().to_string_lossy().into_owned()),
+            source_dir: Some(temp.path().to_string_lossy().into_owned()),
+            env: std::collections::BTreeMap::new(),
+            adapter: None,
+            repo_path: None,
+            worktree_path: None,
+            branch: None,
+            base_ref: None,
+            cleanup: None,
+        },
+    ));
+
+    let mut annotations = std::collections::BTreeMap::new();
+    annotations.insert(
+        "edit".to_string(),
+        ToolAnnotations {
+            kind: ToolKind::Edit,
+            arg_schema: ToolArgSchema {
+                path_params: vec!["path".to_string()],
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+    );
+    push_execution_policy(CapabilityPolicy {
+        tool_annotations: annotations,
+        ..Default::default()
+    });
+
+    let out = normalize_tool_args("edit", &json!({"path": "/packages/demo/file.txt"}));
+    assert_eq!(out["path"], json!("packages/demo/file.txt"));
+
+    pop_execution_policy();
+    crate::stdlib::process::set_thread_execution_context(None);
+}
+
+#[test]
 fn normalize_tool_args_coerces_integer_like_string_fields() {
     let normalized = normalize_tool_args(
         "edit",

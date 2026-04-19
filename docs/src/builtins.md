@@ -440,6 +440,8 @@ does **not** drain the iterator.
 | `basename(path)` | path: string | string | File name component of path |
 | `extname(path)` | path: string | string | File extension including dot (e.g., `.harn`) |
 | `path_join(parts...)` | parts: strings | string | Join path components |
+| `path_workspace_info(path, workspace_root?)` | path: string, workspace_root?: string | dict | Classify a path as `workspace_relative`, `host_absolute`, or `invalid`, and project both workspace-relative and host-absolute forms when known |
+| `path_workspace_normalize(path, workspace_root?)` | path: string, workspace_root?: string | string or nil | Normalize a path into workspace-relative form when it is safely inside the workspace (including common leading-slash drift like `/packages/...`) |
 
 ## File I/O
 

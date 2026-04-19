@@ -7,6 +7,7 @@ use std::rc::Rc;
 
 use super::vm_value_to_json;
 use crate::value::{VmError, VmValue};
+use crate::workspace_path::normalize_workspace_path;
 
 use handle_local::coerce_integer_like_tool_args;
 pub(crate) use handle_local::handle_tool_locally;
@@ -175,11 +176,41 @@ pub(crate) fn normalize_tool_args(name: &str, args: &serde_json::Value) -> serde
                 obj.insert(canonical.clone(), value);
             }
         }
+
+        let workspace_root = crate::stdlib::process::execution_root_path();
+        for key in &annotations.arg_schema.path_params {
+            if let Some(value) = obj.get_mut(key) {
+                normalize_declared_workspace_path_value(value, &workspace_root);
+            }
+        }
     }
 
     let mut normalized = serde_json::Value::Object(obj);
     coerce_integer_like_tool_args(&mut normalized);
     normalized
+}
+
+fn normalize_declared_workspace_path_value(
+    value: &mut serde_json::Value,
+    workspace_root: &std::path::Path,
+) {
+    match value {
+        serde_json::Value::String(path) => {
+            if let Some(normalized) = normalize_workspace_path(path, Some(workspace_root)) {
+                *path = normalized;
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                if let Some(path) = item.as_str() {
+                    if let Some(normalized) = normalize_workspace_path(path, Some(workspace_root)) {
+                        *item = serde_json::Value::String(normalized);
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
 }
 
 // TypeExpr is a structural representation of a JSON Schema / OAS 3.1 type
