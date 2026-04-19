@@ -12,6 +12,10 @@ pipeline test(task) {
   assert(deploy != nil, "deploy skill discovered")
   assert(deploy.name == "deploy", "name matches")
   assert(
+    deploy.short == "Deploy the application when the user asks for a release",
+    "short card parsed from frontmatter",
+  )
+  assert(
     deploy.description == "Deploy the application to production",
     "description parsed from frontmatter",
   )
@@ -30,9 +34,7 @@ pipeline test(task) {
   // layer skill is the expected landing spot when no higher layer
   // overrides it.
   assert(deploy.source == "project", "deploy came from the project layer (.harn/skills/)")
-  // Body is exposed intact, ready for `$ARGUMENTS` / `$N` substitution.
-  assert(contains(deploy.body, "Deploy runbook"), "body header")
-  assert(contains(deploy.body, "$1"), "body preserves raw placeholders")
+  assert(deploy.body == nil, "startup registry keeps only the compact card")
   let review = skill_find(skills, "review")
   assert(review != nil, "review skill discovered")
   assert(review.user_invocable == true, "user_invocable=true preserved")

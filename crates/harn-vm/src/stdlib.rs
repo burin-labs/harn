@@ -130,5 +130,6 @@ pub fn reset_stdlib_state() {
     host::reset_host_state();
     agents::records::reset_eval_metrics();
     tools::clear_current_tool_registry();
+    crate::skills::clear_current_skill_registry();
     template::reset_prompt_registry();
 }

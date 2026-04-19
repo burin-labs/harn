@@ -1,5 +1,6 @@
 ---
 name: deploy
+short: Deploy the application when the user asks for a release
 description: Deploy the application to production
 when-to-use: User says deploy / ship / release
 allowed-tools:

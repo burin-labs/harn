@@ -11,11 +11,12 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::Arc;
 
 use harn_vm::skills::{
-    build_fs_discovery, default_system_dirs, default_user_dir, parse_env_skills_path,
-    skill_entry_to_vm, DiscoveryOptions, DiscoveryReport, FsLayerConfig, Layer, LayeredDiscovery,
-    ManifestSource,
+    build_fs_discovery, default_system_dirs, default_user_dir, install_current_skill_registry,
+    parse_env_skills_path, skill_manifest_ref_to_vm, BoundSkillRegistry, DiscoveryOptions,
+    DiscoveryReport, FsLayerConfig, Layer, LayeredDiscovery, ManifestSource,
 };
 use harn_vm::value::VmValue;
 
@@ -45,7 +46,7 @@ pub struct LoadedSkills {
     /// rebuilding the layered discovery — hot-reload uses this to
     /// re-fetch a single SKILL.md after `skills/update` fires.
     #[allow(dead_code)]
-    pub discovery: LayeredDiscovery,
+    pub discovery: Arc<LayeredDiscovery>,
 }
 
 /// Build a [`LoadedSkills`] from CLI inputs. Does no I/O unless one of
@@ -83,27 +84,20 @@ pub fn load_skills(inputs: &SkillLoaderInputs) -> LoadedSkills {
     cfg.user_dir = default_user_dir();
     cfg.system_dirs = default_system_dirs();
 
-    let discovery = build_fs_discovery(&cfg, options);
+    let discovery = Arc::new(build_fs_discovery(&cfg, options));
     let report = discovery.build_report();
 
     let mut loader_warnings = Vec::new();
     let mut entries: Vec<VmValue> = Vec::new();
     for winner in &report.winners {
-        match discovery.fetch(&winner.id) {
-            Ok(skill) => {
-                if !skill.unknown_fields.is_empty() {
-                    loader_warnings.push(format!(
-                        "skills: {} has unknown frontmatter fields: {}",
-                        skill.id(),
-                        skill.unknown_fields.join(", "),
-                    ));
-                }
-                entries.push(skill_entry_to_vm(&skill));
-            }
-            Err(err) => {
-                loader_warnings.push(format!("skills: could not load '{}': {err}", winner.id));
-            }
+        if !winner.unknown_fields.is_empty() {
+            loader_warnings.push(format!(
+                "skills: {} has unknown frontmatter fields: {}",
+                winner.id,
+                winner.unknown_fields.join(", "),
+            ));
         }
+        entries.push(skill_manifest_ref_to_vm(winner));
     }
 
     let mut registry: BTreeMap<String, VmValue> = BTreeMap::new();
@@ -175,6 +169,11 @@ fn apply_option_overrides(options: &mut DiscoveryOptions, resolved: &ResolvedSki
 /// `skill_registry` so `skill_count(skills)` still returns `0`.
 pub fn install_skills_global(vm: &mut harn_vm::Vm, loaded: &LoadedSkills) {
     vm.set_global("skills", loaded.registry.clone());
+    let discovery = loaded.discovery.clone();
+    install_current_skill_registry(Some(BoundSkillRegistry {
+        registry: loaded.registry.clone(),
+        fetcher: Arc::new(move |id| discovery.fetch(id)),
+    }));
 }
 
 /// Print loader warnings to stderr. Non-fatal — a malformed SKILL.md
@@ -214,7 +213,7 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         fs::write(
             dir.join("SKILL.md"),
-            format!("---\nname: {name}\n---\n{body}"),
+            format!("---\nname: {name}\nshort: {name} short card\n---\n{body}"),
         )
         .unwrap();
     }
@@ -236,6 +235,15 @@ mod tests {
             panic!("skills should be a list");
         };
         assert_eq!(entries.len(), 1);
+        let entry = entries[0].as_dict().expect("skill entry should be a dict");
+        assert_eq!(
+            entry.get("short").map(|value| value.display()).as_deref(),
+            Some("deploy short card")
+        );
+        assert!(
+            !entry.contains_key("body"),
+            "startup registry should not eagerly include the full body"
+        );
     }
 
     #[test]
@@ -245,7 +253,7 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         fs::write(
             dir.join("SKILL.md"),
-            "---\nname: thing\nfuture_mystery_field: 42\n---\nbody",
+            "---\nname: thing\nshort: thing short card\nfuture_mystery_field: 42\n---\nbody",
         )
         .unwrap();
         let loaded = load_skills(&SkillLoaderInputs {

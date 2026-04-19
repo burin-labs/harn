@@ -88,6 +88,10 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("list")),
     },
     BuiltinSig {
+        name: "load_skill",
+        return_type: Some(BuiltinReturn::Named("string")),
+    },
+    BuiltinSig {
         name: "mcp_call",
         return_type: None,
     },

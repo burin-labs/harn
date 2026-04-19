@@ -70,18 +70,6 @@ pub(super) struct ToolDispatchResult {
     pub observations: String,
 }
 
-fn runtime_skill_entry_id(entry: &std::collections::BTreeMap<String, VmValue>) -> String {
-    let name = entry.get("name").map(|v| v.display()).unwrap_or_default();
-    let namespace = entry
-        .get("namespace")
-        .map(|v| v.display())
-        .filter(|value| !value.is_empty());
-    match namespace {
-        Some(ns) => format!("{ns}/{name}"),
-        None => name,
-    }
-}
-
 fn runtime_tool_error(error: &str, skill: &str, message: impl Into<String>) -> String {
     serde_json::to_string_pretty(&serde_json::json!({
         "error": error,
@@ -89,44 +77,6 @@ fn runtime_tool_error(error: &str, skill: &str, message: impl Into<String>) -> S
         "message": message.into(),
     }))
     .unwrap_or_else(|_| format!("{{\"error\":\"{error}\",\"skill\":\"{skill}\"}}"))
-}
-
-fn resolve_runtime_skill_entry(
-    registry: &VmValue,
-    target: &str,
-) -> Result<std::collections::BTreeMap<String, VmValue>, String> {
-    let dict = registry
-        .as_dict()
-        .ok_or_else(|| "load_skill: bound skill registry is not a dict".to_string())?;
-    let skills = match dict.get("skills") {
-        Some(VmValue::List(list)) => list,
-        _ => return Err("load_skill: bound skill registry is malformed".to_string()),
-    };
-
-    let mut bare_matches: Vec<std::collections::BTreeMap<String, VmValue>> = Vec::new();
-    for skill in skills.iter() {
-        let Some(entry) = skill.as_dict() else {
-            continue;
-        };
-        if runtime_skill_entry_id(entry) == target {
-            return Ok(entry.clone());
-        }
-        if entry
-            .get("name")
-            .map(|value| value.display())
-            .is_some_and(|name| name == target)
-        {
-            bare_matches.push(entry.clone());
-        }
-    }
-
-    match bare_matches.len() {
-        1 => Ok(bare_matches.remove(0)),
-        0 => Err(format!("skill '{target}' not found")),
-        _ => Err(format!(
-            "skill '{target}' is ambiguous; use the fully qualified id from the catalog"
-        )),
-    }
 }
 
 fn apply_loaded_skill_prompt(state: &mut AgentLoopState, entry: &VmValue, prompt: String) {
@@ -168,13 +118,13 @@ fn execute_runtime_load_skill(
         );
     };
 
-    let entry = match resolve_runtime_skill_entry(registry, requested) {
+    let entry = match crate::skills::resolve_skill_entry(registry, requested, "load_skill") {
         Ok(entry) => entry,
         Err(message) => return runtime_tool_error("skill_not_found", requested, message),
     };
     let entry_value = VmValue::Dict(Rc::new(entry.clone()));
     let active = super::state::ActiveSkill::from_entry(&entry_value);
-    let skill_id = runtime_skill_entry_id(&entry);
+    let skill_id = crate::skills::skill_entry_id(&entry);
 
     if active.disable_model_invocation {
         return runtime_tool_error(
@@ -184,32 +134,20 @@ fn execute_runtime_load_skill(
         );
     }
 
-    let body = entry
-        .get("body")
-        .map(|value| value.display())
-        .filter(|value| !value.is_empty())
-        .or_else(|| {
-            entry
-                .get("prompt")
-                .map(|value| value.display())
-                .filter(|value| !value.is_empty())
-        })
-        .unwrap_or_default();
-    let skill_dir = entry
-        .get("skill_dir")
-        .map(|value| value.display())
-        .filter(|value| !value.is_empty());
-    let rendered = crate::skills::substitute_skill_body(
-        &body,
-        &crate::skills::SubstitutionContext {
-            arguments: Vec::new(),
-            skill_dir,
-            session_id: Some(session_id.to_string()),
-            extra_env: Default::default(),
-        },
-    );
-    apply_loaded_skill_prompt(state, &entry_value, rendered.clone());
-    rendered
+    let binding = crate::skills::current_skill_registry();
+    let loaded = match crate::skills::load_skill_from_registry(
+        registry,
+        binding.as_ref().map(|bound| &bound.fetcher),
+        requested,
+        Some(session_id),
+        "load_skill",
+    ) {
+        Ok(loaded) => loaded,
+        Err(message) => return runtime_tool_error("skill_not_found", requested, message),
+    };
+    let entry_value = VmValue::Dict(Rc::new(loaded.entry));
+    apply_loaded_skill_prompt(state, &entry_value, loaded.rendered_body.clone());
+    loaded.rendered_body
 }
 
 pub(super) async fn run_tool_dispatch(

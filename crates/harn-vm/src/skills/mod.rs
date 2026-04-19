@@ -17,6 +17,7 @@
 
 pub mod discovery;
 pub mod frontmatter;
+pub mod runtime;
 pub mod source;
 pub mod substitute;
 
@@ -24,8 +25,14 @@ use std::path::{Path, PathBuf};
 
 pub use discovery::{DiscoveryOptions, DiscoveryReport, LayeredDiscovery, Shadowed};
 pub use frontmatter::{parse_frontmatter, split_frontmatter, ParsedFrontmatter, SkillManifest};
+pub use runtime::{
+    clear_current_skill_registry, current_skill_registry, install_current_skill_registry,
+    load_bound_skill_by_name, load_skill_from_registry, resolve_skill_entry, skill_entry_id,
+    vm_error as skill_vm_error, BoundSkillRegistry, LoadedSkill, SkillFetcher,
+};
 pub use source::{
-    skill_entry_to_vm, FsSkillSource, HostSkillSource, Layer, Skill, SkillManifestRef, SkillSource,
+    skill_entry_to_vm, skill_manifest_ref_to_vm, FsSkillSource, HostSkillSource, Layer, Skill,
+    SkillManifestRef, SkillSource,
 };
 pub use substitute::{substitute_skill_body, SubstitutionContext};
 

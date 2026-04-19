@@ -1,5 +1,6 @@
 ---
 name: ship
+short: Ship a release when deployment work is requested
 description: Ship a release
 ---
 # Ship

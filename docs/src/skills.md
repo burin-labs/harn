@@ -12,7 +12,8 @@ This page describes:
 
 - the **layered discovery** hierarchy (CLI > env > project > manifest >
   user > package > system > host),
-- the **SKILL.md frontmatter** Harn recognizes,
+- the **SKILL.md frontmatter** Harn recognizes, including the required
+  compact `short:` card,
 - the **body substitution** (`$ARGUMENTS`, `$N`, `${HARN_SKILL_DIR}`,
   `${HARN_SESSION_ID}`) that runs over SKILL.md before the model sees
   it,
@@ -23,15 +24,17 @@ This page describes:
 The companion language form — `skill NAME { ... }` — is documented in
 [Language basics](./language-basics.md) and the skill builtins
 (`skill_registry`, `skill_define`, `skill_find`, `skill_list`,
-`skill_render`, `skills_catalog_entries`, `render_always_on_catalog`,
-…) in [Builtin functions](./builtins.md).
+`skill_render`, `load_skill`, `skills_catalog_entries`,
+`render_always_on_catalog`, …) in [Builtin functions](./builtins.md).
 
 ## Layered discovery
 
 When `harn run` / `harn test` / `harn check` starts, every discovered
 skill is merged into a single registry and exposed as the pre-populated
-VM global `skills`. The layers — in order of highest to lowest
-priority — are:
+VM global `skills`. That startup registry is intentionally compact: it
+keeps the frontmatter card and activation metadata, but leaves the full
+Markdown body behind the lazy `load_skill(...)` path. The layers — in
+order of highest to lowest priority — are:
 
 | # | Layer | Source | When |
 |---|---|---|---|
@@ -59,6 +62,7 @@ them as warnings so newer spec fields roll out cleanly.
 ```markdown
 ---
 name: deploy
+short: Deploy the application when the user asks for a release
 description: Deploy the application to production
 when-to-use: User says deploy / ship / release
 disable-model-invocation: false
@@ -86,8 +90,9 @@ Ship it: `$ARGUMENTS`. Skill directory: `${HARN_SKILL_DIR}`.
 
 | Field | Type | Purpose |
 |---|---|---|
-| `name` | string | Required. Id the script looks up via `skill_find`. |
-| `description` | string | One-liner the model sees for auto-activation. |
+| `name` | string | Optional in frontmatter when the directory name already provides it; Harn falls back to the enclosing skill directory basename. |
+| `short` | string | Required. One-sentence compact card describing what the skill does and when to use it. Always loaded into the startup registry and catalogs. |
+| `description` | string | Optional longer summary. Useful for richer CLI output or custom matchers, but not required for lazy discovery. |
 | `when-to-use` | string | Longer activation trigger. |
 | `disable-model-invocation` | bool | If `true`, never auto-activate — explicit use only. |
 | `allowed-tools` | list of string | Restrict tool surface while the skill is active. Entries accept three shapes: an exact tool name (`"deploy_service"`), a namespace tag (`"namespace:read"` — matches every tool declared with `namespace: "read"`), or `"*"` (escape hatch that keeps the full surface, useful for skills that only carry prompt context). |
@@ -126,9 +131,9 @@ so authors don't silently scope to an empty set.
 
 ## Body substitution
 
-When a skill is rendered (via the `skill_render` builtin, or by a host
-before handing the body to the model), the following substitutions run
-over the Markdown body:
+When a skill body is rendered (via `skill_render`, `load_skill`, or by a
+host before handing the body to the model), the following substitutions
+run over the Markdown body:
 
 - `$ARGUMENTS` → all positional args joined with spaces
 - `$N` → the N-th positional arg (1-based). `$0` is reserved.
@@ -149,26 +154,39 @@ let rendered = skill_render(deploy, ["prod", "us-east-1"])
 
 ## Progressive disclosure with `load_skill`
 
-When an agent loop receives a skill registry through `skills:`,
-Harn automatically exposes a runtime-owned `load_skill({ name })` tool.
-The tool:
+Harn supports lazy skill loading in two places:
 
-- resolves the requested skill id against the loop's resolved skill
-  registry,
-- applies the same SKILL.md body substitution described above, and
-- returns the substituted body as the tool result so it lands in the
-  next turn's transcript naturally.
+- `load_skill("deploy")` is a stdlib builtin for Harn code. It resolves
+  the requested skill against the startup registry, lazily hydrates the
+  full `SKILL.md`, applies substitution, and returns the rendered body
+  as a string.
+- When an agent loop receives a skill registry through `skills:`, Harn
+  also exposes a runtime-owned `load_skill({ name })` tool for the
+  model. That tool calls the same lazy loader and returns the rendered
+  body in the next turn.
 
-If the target skill has `disable-model-invocation: true`,
-`load_skill` returns a typed error instead of leaking the body.
+Both paths resolve the requested skill id against the active registry
+and apply the same substitution rules described above.
+
+Builtin example:
+
+```harn
+let runbook = load_skill("deploy")
+assert(contains(runbook, "Deploy runbook"), "full body is fetched lazily")
+```
+
+If the target skill has `disable-model-invocation: true`, the runtime
+tool returns a typed error instead of leaking the body. Direct Harn-code
+`load_skill("name")` calls are explicit and are not blocked by that
+flag.
 
 ### Always-on catalog helper
 
 The recommended harness convention is:
 
 1. Keep a compact catalog of available skills in the system prompt.
-2. Let the model call `load_skill` only when one of those entries looks
-   relevant.
+2. Let the model call the runtime `load_skill({ name })` tool only when
+   one of those entries looks relevant.
 
 Harn ships two pure helpers for that pattern:
 
@@ -178,10 +196,11 @@ let catalog = render_always_on_catalog(entries, 2000)
 ```
 
 `skills_catalog_entries` projects the resolved registry into compact
-`{name, description, when_to_use}` cards (sorted deterministically by
-skill id, using `<namespace>/<name>` when present). `render_always_on_catalog`
-formats those cards into a stable prompt block and trims the list to the
-requested character budget.
+`{name, description, when_to_use}` cards, with `description` sourced
+from the required `short:` frontmatter (sorted deterministically by
+skill id, using `<namespace>/<name>` when present).
+`render_always_on_catalog` formats those cards into a stable prompt
+block and trims the list to the requested character budget.
 
 Copy-pasteable example:
 
@@ -302,9 +321,9 @@ Prints every resolved skill with the layer it came from. Pass
 ```text
 $ harn skills list
 Resolved skills (3):
-  deploy         [cli]       Deploy to production with rollback support
-  review         [project]   Review a pull request
-  helpers/utils  [package]   Shared helpers from the acme/ops package
+  deploy         [cli]       Deploy to production when release work is requested
+  review         [project]   Review a pull request when asked for code review help
+  helpers/utils  [package]   Shared helpers when the task needs the acme/ops package
 
 Shadowed skills (1):
   deploy   winner=[cli] hidden=[user] origin=/home/me/.harn/skills/deploy
@@ -321,6 +340,7 @@ $ harn skills inspect deploy
 id:          deploy
 name:        deploy
 layer:       cli
+short:       Deploy to production when release work is requested
 description: Deploy to production with rollback support
 skill_dir:   /repo/.harn/skills/deploy
 
@@ -345,7 +365,7 @@ Match results for: deploy the staging service
    2. review              score=0.400  [project]   1 keyword hit(s)
 ```
 
-Useful when authoring a SKILL.md to confirm its `description:` and
+Useful when authoring a SKILL.md to confirm its `short:` and
 `when_to_use:` frontmatter actually attracts the right prompts.
 
 ### `harn skills install <spec>`
@@ -382,7 +402,7 @@ Scaffolded skill 'deploy' at .harn/skills/deploy
   files/README.md
 
 Edit the SKILL.md frontmatter and body, then run `harn skills list`
-to verify it's picked up.
+to verify the compact card is picked up.
 ```
 
 Pass `--dir <path>` to target a different destination (for example
