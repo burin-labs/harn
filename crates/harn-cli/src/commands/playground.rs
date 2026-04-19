@@ -255,9 +255,9 @@ async fn configured_vm(
             connect_mcp_servers(&manifest.mcp, &mut vm).await;
         }
     }
-    package::collect_manifest_triggers(&mut vm, &extensions)
+    package::install_manifest_triggers(&mut vm, &extensions)
         .await
-        .map_err(|error| format!("failed to validate manifest triggers: {error}"))?;
+        .map_err(|error| format!("failed to install manifest triggers: {error}"))?;
 
     Ok(vm)
 }

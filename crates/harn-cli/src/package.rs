@@ -1307,6 +1307,120 @@ pub async fn collect_manifest_triggers(
     Ok(collected)
 }
 
+fn trigger_kind_label(kind: TriggerKind) -> &'static str {
+    match kind {
+        TriggerKind::Webhook => "webhook",
+        TriggerKind::Cron => "cron",
+        TriggerKind::Poll => "poll",
+        TriggerKind::Stream => "stream",
+        TriggerKind::Predicate => "predicate",
+        TriggerKind::A2aPush => "a2a-push",
+    }
+}
+
+fn manifest_trigger_binding_spec(trigger: CollectedManifestTrigger) -> harn_vm::TriggerBindingSpec {
+    let config = trigger.config;
+    let (handler, handler_descriptor) = match trigger.handler {
+        CollectedTriggerHandler::Local { reference, closure } => (
+            harn_vm::TriggerHandlerSpec::Local {
+                raw: reference.raw.clone(),
+                closure,
+            },
+            serde_json::json!({
+                "kind": "local",
+                "raw": reference.raw,
+            }),
+        ),
+        CollectedTriggerHandler::A2a { target } => (
+            harn_vm::TriggerHandlerSpec::A2a {
+                target: target.clone(),
+            },
+            serde_json::json!({
+                "kind": "a2a",
+                "target": target,
+            }),
+        ),
+        CollectedTriggerHandler::Worker { queue } => (
+            harn_vm::TriggerHandlerSpec::Worker {
+                queue: queue.clone(),
+            },
+            serde_json::json!({
+                "kind": "worker",
+                "queue": queue,
+            }),
+        ),
+    };
+
+    let when_raw = trigger
+        .when
+        .as_ref()
+        .map(|predicate| predicate.reference.raw.clone());
+    let when = trigger.when.map(|predicate| harn_vm::TriggerPredicateSpec {
+        raw: predicate.reference.raw,
+        closure: predicate.closure,
+    });
+    let id = config.id.clone();
+    let kind = trigger_kind_label(config.kind).to_string();
+    let provider = config.provider.clone();
+    let match_events = config.match_.events.clone();
+    let dedupe_key = config.dedupe_key.clone();
+    let filter = config.filter.clone();
+    let daily_cost_usd = config.budget.daily_cost_usd;
+    let max_concurrent = config.budget.max_concurrent;
+    let manifest_path = Some(config.manifest_path.clone());
+    let package_name = config.package_name.clone();
+
+    let fingerprint = serde_json::to_string(&serde_json::json!({
+        "id": &id,
+        "kind": &kind,
+        "provider": provider.as_str(),
+        "match": config.match_,
+        "when": when_raw,
+        "handler": handler_descriptor,
+        "dedupe_key": &dedupe_key,
+        "retry": config.retry,
+        "priority": config.priority,
+        "budget": config.budget,
+        "secrets": config.secrets,
+        "filter": &filter,
+        "kind_specific": config.kind_specific,
+        "manifest_path": &manifest_path,
+        "package_name": &package_name,
+    }))
+    .unwrap_or_else(|_| format!("{}:{}:{}", id, kind, provider.as_str()));
+
+    harn_vm::TriggerBindingSpec {
+        id,
+        source: harn_vm::TriggerBindingSource::Manifest,
+        kind,
+        provider,
+        handler,
+        when,
+        match_events,
+        dedupe_key,
+        filter,
+        daily_cost_usd,
+        max_concurrent,
+        manifest_path,
+        package_name,
+        definition_fingerprint: fingerprint,
+    }
+}
+
+pub async fn install_manifest_triggers(
+    vm: &mut harn_vm::Vm,
+    extensions: &RuntimeExtensions,
+) -> Result<(), String> {
+    let collected = collect_manifest_triggers(vm, extensions).await?;
+    let bindings = collected
+        .into_iter()
+        .map(manifest_trigger_binding_spec)
+        .collect();
+    harn_vm::install_manifest_triggers(bindings)
+        .await
+        .map_err(|error| error.to_string())
+}
+
 fn absolutize_check_config_paths(mut config: CheckConfig, manifest_dir: &Path) -> CheckConfig {
     if let Some(path) = config.host_capabilities_path.clone() {
         let candidate = PathBuf::from(&path);

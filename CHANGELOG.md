@@ -93,6 +93,16 @@ granular archaeology.
   quickref coverage. Daemon lifecycle events (Triggered, Snapshotted,
   Stopped, Resumed) continue to flow into run observability at
   enqueue/snapshot/stop/resume boundaries.
+- **Runtime-owned `TriggerRegistry` with lifecycle + versioning (#205,
+  closes #158).** Thread-local registry in `harn_vm::triggers::registry`
+  tracks per-binding state (`active`, `draining`, `removed`),
+  per-binding metrics, and in-flight event counts. Every lifecycle
+  transition logs to the shared `triggers.lifecycle` EventLog topic.
+  `run`, `bench`, ACP, playground, and test execution paths now install
+  manifest triggers into this live registry rather than only validating
+  them. `harn doctor` surfaces the live binding view including
+  provider, state, version, and metrics snapshot. Foundation for
+  hot-reload (T-13) and the handler dispatcher (T-06).
 
 ## v0.7.22
 

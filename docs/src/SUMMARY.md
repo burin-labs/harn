@@ -29,6 +29,7 @@
 - [Trigger event schema](./triggers/event-schema.md)
 - [Trigger observability in the action graph](./observability/triggers-in-action-graph.md)
 - [Connector authoring](./connectors/authoring.md)
+- [Trigger registry](./triggers/registry.md)
 - [Cookbook](./cookbook.md)
 - [Tutorial: code review agent](./tutorial-code-review-agent.md)
 - [Tutorial: MCP server](./tutorial-mcp-server.md)

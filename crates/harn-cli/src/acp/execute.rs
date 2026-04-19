@@ -53,9 +53,9 @@ pub(super) async fn execute_chunk(
     if let Some(path) = source_path {
         let extensions = package::load_runtime_extensions(path);
         package::install_runtime_extensions(&extensions);
-        package::collect_manifest_triggers(&mut vm, &extensions)
+        package::install_manifest_triggers(&mut vm, &extensions)
             .await
-            .map_err(|error| format!("failed to validate manifest triggers: {error}"))?;
+            .map_err(|error| format!("failed to install manifest triggers: {error}"))?;
         package::install_manifest_hooks(&mut vm, &extensions)
             .await
             .map_err(|error| format!("failed to install manifest hooks: {error}"))?;

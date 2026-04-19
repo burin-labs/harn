@@ -152,9 +152,9 @@ pub async fn run_test_file(
                 crate::skill_loader::install_skills_global(&mut vm, &loaded);
                 let extensions = crate::package::load_runtime_extensions(path);
                 crate::package::install_runtime_extensions(&extensions);
-                crate::package::collect_manifest_triggers(&mut vm, &extensions)
+                crate::package::install_manifest_triggers(&mut vm, &extensions)
                     .await
-                    .map_err(|error| format!("failed to validate manifest triggers: {error}"))?;
+                    .map_err(|error| format!("failed to install manifest triggers: {error}"))?;
                 crate::package::install_manifest_hooks(&mut vm, &extensions)
                     .await
                     .map_err(|error| format!("failed to install manifest hooks: {error}"))?;
