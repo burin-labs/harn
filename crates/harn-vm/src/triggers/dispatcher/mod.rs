@@ -41,6 +41,8 @@ pub use retry::{RetryPolicy, TriggerRetryConfig, DEFAULT_MAX_ATTEMPTS};
 thread_local! {
     static ACTIVE_DISPATCHER_STATE: RefCell<Option<Arc<DispatcherRuntimeState>>> = const { RefCell::new(None) };
     static ACTIVE_DISPATCH_CONTEXT: RefCell<Option<DispatchContext>> = const { RefCell::new(None) };
+    #[cfg(test)]
+    static TEST_INBOX_DEQUEUED_SIGNAL: RefCell<Option<tokio::sync::oneshot::Sender<()>>> = const { RefCell::new(None) };
 }
 
 tokio::task_local! {
@@ -327,10 +329,8 @@ impl Dispatcher {
                     }
                     let envelope: InboxEnvelope = serde_json::from_value(event.payload)
                         .map_err(|error| DispatchError::Serde(error.to_string()))?;
-                    let dispatcher = self.clone();
-                    tokio::task::spawn_local(async move {
-                        let _ = dispatcher.dispatch_inbox_envelope(envelope).await;
-                    });
+                    notify_test_inbox_dequeued();
+                    let _ = self.dispatch_inbox_envelope(envelope).await;
                 }
                 _ = recv_cancel(&mut cancel_rx) => break,
             }
@@ -1277,6 +1277,25 @@ fn decrement_retry_queue_depth(state: &DispatcherRuntimeState) {
     if previous == 1 && state.in_flight.load(Ordering::Relaxed) == 0 {
         state.idle_notify.notify_waiters();
     }
+}
+
+#[cfg(test)]
+fn install_test_inbox_dequeued_signal(tx: tokio::sync::oneshot::Sender<()>) {
+    TEST_INBOX_DEQUEUED_SIGNAL.with(|slot| {
+        *slot.borrow_mut() = Some(tx);
+    });
+}
+
+#[cfg(not(test))]
+fn notify_test_inbox_dequeued() {}
+
+#[cfg(test)]
+fn notify_test_inbox_dequeued() {
+    TEST_INBOX_DEQUEUED_SIGNAL.with(|slot| {
+        if let Some(tx) = slot.borrow_mut().take() {
+            let _ = tx.send(());
+        }
+    });
 }
 
 pub fn snapshot_dispatcher_stats() -> DispatcherStatsSnapshot {
