@@ -1,3 +1,10 @@
+// Replay tests serialize HARN_REPLAY env-var manipulation with a `Mutex<()>`
+// so parallel test runs don't race. That guard is intentionally held across
+// `.await` points while driving the dispatcher; silence clippy rather than
+// introduce an async-aware mutex whose only purpose is to guard env state.
+// Same pattern as `crates/harn-cli/tests/orchestrator_http.rs`.
+#![allow(clippy::await_holding_lock)]
+
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
