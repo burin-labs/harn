@@ -182,7 +182,7 @@ pub(crate) fn register_config_builtins(vm: &mut Vm) {
         match provider_name {
             Some(name) => {
                 if let Some(pdef) = llm_config::provider_config(&name) {
-                    Ok(provider_def_to_vm_value(pdef))
+                    Ok(provider_def_to_vm_value(&pdef))
                 } else {
                     Ok(VmValue::Nil)
                 }
@@ -192,7 +192,7 @@ pub(crate) fn register_config_builtins(vm: &mut Vm) {
                 let mut dict = BTreeMap::new();
                 for name in llm_config::provider_names() {
                     if let Some(pdef) = llm_config::provider_config(&name) {
-                        dict.insert(name, provider_def_to_vm_value(pdef));
+                        dict.insert(name, provider_def_to_vm_value(&pdef));
                     }
                 }
                 Ok(VmValue::Dict(Rc::new(dict)))
@@ -267,7 +267,7 @@ pub(crate) fn register_config_builtins(vm: &mut Vm) {
         let url = if let Some(absolute_url) = &hc.url {
             absolute_url.clone()
         } else {
-            let base = llm_config::resolve_base_url(pdef);
+            let base = llm_config::resolve_base_url(&pdef);
             let path = hc.path.as_deref().unwrap_or("");
             format!("{base}{path}")
         };
@@ -286,7 +286,7 @@ pub(crate) fn register_config_builtins(vm: &mut Vm) {
         };
 
         // Apply auth
-        req = apply_auth_headers(req, &api_key, Some(pdef));
+        req = apply_auth_headers(req, &api_key, Some(&pdef));
         if let Some(p) = llm_config::provider_config(&provider_name) {
             for (k, v) in &p.extra_headers {
                 req = req.header(k.as_str(), v.as_str());

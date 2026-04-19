@@ -11,6 +11,13 @@ granular archaeology.
 
 ### Added
 
+- **Manifest-backed runtime extension ABI (#128).** `harn.toml` now
+  supports `[exports]` for stable package module entry points and
+  `[llm]` for packaged provider definitions, aliases, inference rules,
+  and model defaults. Runtime imports and the static module graph both
+  resolve package exports and search the nearest ancestor
+  `.harn/packages/` root, so packages can ship capability modules and
+  provider adapters without Rust-side registration edits.
 - **`project_enrich` L2 enrichment primitive (#110, closes #102).** New
   native-backed stdlib fn that layers a caller-owned LLM enrichment
   pass on top of deterministic `project_scan` evidence. Caller supplies

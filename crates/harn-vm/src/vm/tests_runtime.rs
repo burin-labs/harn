@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::path::Path;
 
 use crate::compiler::Compiler;
 use crate::stdlib::register_vm_stdlib;
@@ -34,6 +35,34 @@ fn run_harn(source: &str) -> (String, VmValue) {
 
 fn run_output(source: &str) -> String {
     run_harn(source).0.trim_end().to_string()
+}
+
+fn run_harn_at(path: &Path, source: &str) -> Result<(String, VmValue), VmError> {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let mut lexer = Lexer::new(source);
+                let tokens = lexer.tokenize().unwrap();
+                let mut parser = Parser::new(tokens);
+                let program = parser.parse().unwrap();
+                let chunk = Compiler::new().compile(&program).unwrap();
+
+                let mut vm = Vm::new();
+                register_vm_stdlib(&mut vm);
+                vm.set_source_info(&path.display().to_string(), source);
+                if let Some(parent) = path.parent() {
+                    vm.set_source_dir(parent);
+                }
+                let result = vm.execute(&chunk).await?;
+                Ok((vm.output().to_string(), result))
+            })
+            .await
+    })
 }
 
 fn run_harn_result(source: &str) -> Result<(String, VmValue), VmError> {
@@ -835,4 +864,33 @@ log(label)
         out,
         "[harn] loop 1\n[harn] loop 2\n[harn] boom\n[harn] outer"
     );
+}
+
+#[test]
+fn package_export_import_executes_through_manifest_alias() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    std::fs::create_dir_all(root.join(".git")).unwrap();
+    std::fs::create_dir_all(root.join(".harn/packages/acme/runtime")).unwrap();
+    std::fs::write(
+        root.join(".harn/packages/acme/harn.toml"),
+        "[exports]\ncapabilities = \"runtime/capabilities.harn\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join(".harn/packages/acme/runtime/capabilities.harn"),
+        "pub fn exported_capability() { return 41 + 1 }\n",
+    )
+    .unwrap();
+    let entry = root.join("main.harn");
+    let source = r#"
+import "acme/capabilities"
+
+pipeline main(task) {
+  println(exported_capability())
+}
+"#;
+
+    let (out, _) = run_harn_at(&entry, source).unwrap();
+    assert_eq!(out.trim(), "42");
 }

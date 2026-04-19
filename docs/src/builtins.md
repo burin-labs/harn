@@ -792,39 +792,41 @@ llm_mock_clear()
 LLM provider endpoints, model aliases, inference rules, and default parameters
 are configured via a TOML file. The VM searches for config in this order:
 
-1. `HARN_PROVIDERS_CONFIG` env var (explicit path)
-2. `~/.config/harn/providers.toml`
-3. Built-in defaults (Anthropic, OpenAI, OpenRouter, HuggingFace, Ollama, Local)
+1. Built-in defaults (Anthropic, OpenAI, OpenRouter, HuggingFace, Ollama, Local)
+2. `HARN_PROVIDERS_CONFIG` if set, otherwise `~/.config/harn/providers.toml`
+3. Installed package `[llm]` tables in `.harn/packages/*/harn.toml`
+4. The nearest project `harn.toml` `[llm]` table
 
-See `harn init` to generate a default config file, or create one manually:
+The `[llm]` section uses the same schema as `providers.toml`, so project and
+package manifests can ship provider adapters declaratively:
 
 ```toml
-[providers.anthropic]
+[llm.providers.anthropic]
 base_url = "https://api.anthropic.com/v1"
 auth_style = "header"
 auth_header = "x-api-key"
 auth_env = "ANTHROPIC_API_KEY"
 chat_endpoint = "/messages"
 
-[providers.local]
+[llm.providers.local]
 base_url = "http://localhost:8000"
 base_url_env = "LOCAL_LLM_BASE_URL"
 auth_style = "none"
 chat_endpoint = "/v1/chat/completions"
 completion_endpoint = "/v1/completions"
 
-[aliases]
+[llm.aliases]
 sonnet = { id = "claude-sonnet-4-20250514", provider = "anthropic" }
 
-[[inference_rules]]
+[[llm.inference_rules]]
 pattern = "claude-*"
 provider = "anthropic"
 
-[[tier_rules]]
+[[llm.tier_rules]]
 pattern = "claude-*"
 tier = "frontier"
 
-[model_defaults."qwen/*"]
+[llm.model_defaults."qwen/*"]
 temperature = 0.3
 ```
 

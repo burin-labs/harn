@@ -132,6 +132,9 @@ enforcement.
   `schema_parse(...)`, `schema_is(...)`, JSON Schema/OpenAPI conversion, and
   schema composition helpers, plus a lazy `std/schema` builder module for
   ergonomic schema authoring when imported.
+- Manifest-backed extension ABI: packages can publish stable module entry
+  points via `[exports]` and ship provider/alias adapters declaratively via
+  `[llm]` in `harn.toml`, without editing core runtime registration code.
 - Design-by-contract and project/runtime helpers: `require ...`,
   metadata/scanner runtime builtins, `import "std/project"` for
   freshness-aware metadata and scan state, and `import "std/runtime"` for

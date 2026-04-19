@@ -371,7 +371,7 @@ async fn check_provider_health(network: bool) -> Vec<DoctorCheck> {
             continue;
         };
 
-        checks.push(run_healthcheck(&client, &provider_name, def, &auth, healthcheck).await);
+        checks.push(run_healthcheck(&client, &provider_name, &def, &auth, healthcheck).await);
     }
     checks
 }

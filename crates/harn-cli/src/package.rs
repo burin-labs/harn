@@ -8,7 +8,7 @@ const PKG_DIR: &str = ".harn/packages";
 const MANIFEST: &str = "harn.toml";
 const LOCK_FILE: &str = "harn.lock";
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct Manifest {
     #[allow(dead_code)]
     pub package: Option<PackageInfo>,
@@ -37,6 +37,18 @@ pub struct Manifest {
     /// `harn_vm::llm::capabilities` for the rule schema.
     #[serde(default)]
     pub capabilities: Option<harn_vm::llm::capabilities::CapabilitiesFile>,
+    /// Stable exported package modules. Keys are the logical import
+    /// suffixes (e.g. `providers/openai`) and values are package-root-
+    /// relative file paths. Consumers import them via `<package>/<key>`.
+    #[allow(dead_code)]
+    #[serde(default)]
+    pub exports: HashMap<String, String>,
+    /// `[llm]` section — packaged provider definitions, aliases,
+    /// inference rules, tier rules, and model defaults. Uses the same
+    /// schema as `providers.toml`, but merges into the current run
+    /// instead of replacing the global config file.
+    #[serde(default)]
+    pub llm: harn_vm::llm_config::ProvidersConfig,
 }
 
 /// `[skills]` table body.
@@ -205,7 +217,7 @@ pub struct McpServerConfig {
     pub keep_alive_ms: Option<u64>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[allow(dead_code)]
 pub struct PackageInfo {
     pub name: Option<String>,
@@ -247,6 +259,13 @@ impl Dependency {
             Dependency::Path(p) => Some(p.as_str()),
         }
     }
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct RuntimeExtensions {
+    pub root_manifest: Option<Manifest>,
+    pub llm: Option<harn_vm::llm_config::ProvidersConfig>,
+    pub capabilities: Option<harn_vm::llm::capabilities::CapabilitiesFile>,
 }
 
 #[derive(Debug, Default)]
@@ -357,30 +376,89 @@ pub fn read_manifest() -> Manifest {
     }
 }
 
-/// Try to read `harn.toml` from the directory containing the given file.
-/// Returns `None` if the file doesn't exist. Prints a warning and returns
-/// `None` on parse errors.
-pub fn try_read_manifest_for(harn_file: &std::path::Path) -> Option<Manifest> {
-    let dir = harn_file.parent().unwrap_or(std::path::Path::new("."));
-    let manifest_path = dir.join(MANIFEST);
-    let content = fs::read_to_string(&manifest_path).ok()?;
-    match toml::from_str::<Manifest>(&content) {
-        Ok(m) => Some(m),
-        Err(e) => {
-            eprintln!("warning: failed to parse {}: {e}", manifest_path.display());
-            None
+fn merge_capability_overrides(
+    target: &mut harn_vm::llm::capabilities::CapabilitiesFile,
+    source: &harn_vm::llm::capabilities::CapabilitiesFile,
+) {
+    for (provider, rules) in &source.provider {
+        target
+            .provider
+            .entry(provider.clone())
+            .or_default()
+            .extend(rules.clone());
+    }
+    target
+        .provider_family
+        .extend(source.provider_family.clone());
+}
+
+fn collect_package_manifests(packages_dir: &Path) -> Vec<Manifest> {
+    let mut manifests = Vec::new();
+    let Ok(entries) = fs::read_dir(packages_dir) else {
+        return manifests;
+    };
+    let mut dirs: Vec<PathBuf> = entries
+        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .filter(|path| path.is_dir())
+        .collect();
+    dirs.sort();
+    for dir in dirs {
+        let manifest_path = dir.join(MANIFEST);
+        let Ok(content) = fs::read_to_string(&manifest_path) else {
+            continue;
+        };
+        match toml::from_str::<Manifest>(&content) {
+            Ok(manifest) => manifests.push(manifest),
+            Err(e) => eprintln!("warning: failed to parse {}: {e}", manifest_path.display()),
         }
+    }
+    manifests
+}
+
+fn manifest_capabilities(
+    manifest: &Manifest,
+) -> Option<&harn_vm::llm::capabilities::CapabilitiesFile> {
+    manifest.capabilities.as_ref()
+}
+
+fn is_empty_capabilities(file: &harn_vm::llm::capabilities::CapabilitiesFile) -> bool {
+    file.provider.is_empty() && file.provider_family.is_empty()
+}
+
+/// Load the nearest project manifest plus any installed package manifests and
+/// merge their runtime extensions. Installed packages load first; the root
+/// project manifest wins on conflicts.
+pub fn load_runtime_extensions(anchor: &Path) -> RuntimeExtensions {
+    let Some((root_manifest, manifest_dir)) = find_nearest_manifest(anchor) else {
+        return RuntimeExtensions::default();
+    };
+
+    let mut llm = harn_vm::llm_config::ProvidersConfig::default();
+    let mut capabilities = harn_vm::llm::capabilities::CapabilitiesFile::default();
+
+    for manifest in collect_package_manifests(&manifest_dir.join(PKG_DIR)) {
+        llm.merge_from(&manifest.llm);
+        if let Some(file) = manifest_capabilities(&manifest) {
+            merge_capability_overrides(&mut capabilities, file);
+        }
+    }
+
+    llm.merge_from(&root_manifest.llm);
+    if let Some(file) = manifest_capabilities(&root_manifest) {
+        merge_capability_overrides(&mut capabilities, file);
+    }
+
+    RuntimeExtensions {
+        root_manifest: Some(root_manifest),
+        llm: (!llm.is_empty()).then_some(llm),
+        capabilities: (!is_empty_capabilities(&capabilities)).then_some(capabilities),
     }
 }
 
-/// Install this manifest's `[[capabilities.provider.<name>]]` overrides
-/// on the current thread so the VM's `capabilities::lookup` picks them
-/// up for the duration of the run. Called by each CLI entry point that
-/// constructs a VM after reading harn.toml. Safe to call with a
-/// manifest that omits the section — clears any prior override so the
-/// built-in rules apply cleanly.
-pub fn install_capability_overrides(manifest: &Manifest) {
-    harn_vm::llm::capabilities::set_user_overrides(manifest.capabilities.clone());
+/// Install merged runtime extensions on the current thread.
+pub fn install_runtime_extensions(extensions: &RuntimeExtensions) {
+    harn_vm::llm_config::set_user_overrides(extensions.llm.clone());
+    harn_vm::llm::capabilities::set_user_overrides(extensions.capabilities.clone());
 }
 
 fn absolutize_check_config_paths(mut config: CheckConfig, manifest_dir: &Path) -> CheckConfig {
@@ -1044,5 +1122,46 @@ name = "acme/ops"
             cfg.preflight_severity.is_none(),
             "must not inherit harn.toml from outside the .git boundary"
         );
+    }
+
+    #[test]
+    fn load_runtime_extensions_merges_package_and_root_llm_config() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        std::fs::create_dir_all(root.join(".harn/packages/acme")).unwrap();
+        fs::write(
+            root.join(MANIFEST),
+            r#"
+[llm.aliases]
+project-fast = { id = "project/model", provider = "project" }
+
+[llm.providers.project]
+base_url = "https://project.test/v1"
+chat_endpoint = "/chat/completions"
+"#,
+        )
+        .unwrap();
+        fs::write(
+            root.join(".harn/packages/acme/harn.toml"),
+            r#"
+[llm.aliases]
+acme-fast = { id = "acme/model", provider = "acme" }
+
+[llm.providers.acme]
+base_url = "https://acme.test/v1"
+chat_endpoint = "/chat/completions"
+"#,
+        )
+        .unwrap();
+        let harn_file = root.join("main.harn");
+        fs::write(&harn_file, "pipeline main() {}\n").unwrap();
+
+        let extensions = load_runtime_extensions(&harn_file);
+        let llm = extensions.llm.expect("merged llm config");
+        assert!(llm.providers.contains_key("acme"));
+        assert!(llm.providers.contains_key("project"));
+        assert!(llm.aliases.contains_key("acme-fast"));
+        assert!(llm.aliases.contains_key("project-fast"));
     }
 }

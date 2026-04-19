@@ -378,6 +378,27 @@ import { extract_paths, parse_cells } from "std/text"
 
 ## Import behavior
 
+Import paths resolve in this order:
+
+1. `std/<module>` from the embedded stdlib
+2. Relative to the importing file, with implicit `.harn`
+3. Installed packages under the nearest ancestor `.harn/packages/`
+4. Package manifest `[exports]` aliases
+5. Package directories with `lib.harn`
+
+Packages can publish stable module entry points in `harn.toml`:
+
+```toml
+[exports]
+capabilities = "runtime/capabilities.harn"
+providers = "runtime/providers.harn"
+```
+
+With that manifest, `import "acme/capabilities"` resolves to the
+declared file inside `.harn/packages/acme/`, and nested package modules
+can import sibling packages through the workspace-level `.harn/packages`
+root instead of relying on brittle relative paths.
+
 1. The imported file is parsed and executed
 2. Pipelines in the imported file are registered by name
 3. Non-pipeline top-level statements (fn declarations, let bindings) are executed, making their values available
