@@ -7,36 +7,71 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
-## Unreleased
+## v0.7.22
 
 ### Added
 
-- **Declarative runtime hooks via `[[hooks]]` manifests (#141, builds on
-  #138).** `harn.toml` can now register process-scoped `PreToolUse`,
-  `PostToolUse`, `PreAgentTurn`, `PostAgentTurn`, and worker lifecycle
-  hooks from exported Harn functions before execution starts. Tool hooks
-  support manifest-driven deny/argument-rewrite/result-rewrite behavior,
-  worker lifecycle moved off raw status strings onto a typed
-  `WorkerEvent` enum, and conformance now covers manifest registration,
-  pre-tool short-circuit, and post-tool rewrite behavior end-to-end.
+- **Declarative runtime hooks via `[[hooks]]` manifests (#146, closes
+  #141, builds on #138).** `harn.toml` can now register process-scoped
+  `PreToolUse`, `PostToolUse`, `PreAgentTurn`, `PostAgentTurn`, and
+  worker lifecycle hooks from exported Harn functions before execution
+  starts. Tool hooks support manifest-driven deny/argument-rewrite/
+  result-rewrite behavior, worker lifecycle moved off raw status
+  strings onto a typed `WorkerEvent` enum, and conformance now covers
+  manifest registration, pre-tool short-circuit, and post-tool rewrite
+  behavior end-to-end.
 - **Daemon stdlib wrapper builtins for runtime-owned daemon mode
-  (#143 part (a)).** `daemon_spawn`, `daemon_trigger`,
+  (#145, closes #143 part (a)).** `daemon_spawn`, `daemon_trigger`,
   `daemon_snapshot`, `daemon_stop`, and `daemon_resume` now expose the
   existing agent-loop daemon runtime through a first-class stdlib
   handle. The wrapper stores daemon metadata alongside the persisted
   runtime snapshot so resumable state dirs can be reopened
   ergonomically without changing daemon semantics.
 - **`transcript_compact(...)` now wraps the runtime-owned transcript
-  compaction engine (#142 part (a)).** The manual transcript
-  compaction surface now reuses `AutoCompactConfig` with `llm`,
-  `truncate`, and `observation_mask` strategies, supports prompt-
-  template overrides for LLM summaries, preserves pre-compaction
-  transcripts as durable embedded artifacts, and exposes compaction
-  events through both transcript observability and the live
-  `agent_subscribe` stream.
+  compaction engine (#147, closes #142 part (a)).** The manual
+  transcript compaction surface now reuses `AutoCompactConfig` with
+  `llm`, `truncate`, and `observation_mask` strategies, supports
+  prompt-template overrides for LLM summaries, preserves pre-
+  compaction transcripts as durable embedded artifacts, and exposes
+  compaction events through both transcript observability and the
+  live `agent_subscribe` stream.
+- **First-class `<user_response>` agent-protocol tag (#148).**
+  Assistant responses can now emit a structured `<user_response>`
+  block that the runtime surfaces separately from internal
+  `<assistant_prose>`. Parsing, visible-text sanitization, and
+  persistent-loop completion all honor the tag; the existing
+  `<assistant_prose>` + `##DONE##` sentinel remains the fallback for
+  uninstrumented prompts.
+- **LLM-based Burin Mini semantic evaluator (#148).** New
+  `experiments/burin-mini/evaluator.harn` grades an actual run
+  against the ideal trace using the full run record plus inference
+  transcript bundles. Four integration tests are `#[ignore]`'d while
+  the Linux-CI timing issue is being replaced by the v2 experiment.
 
 ### Changed
 
+- **Anthropic provider now caches at the request envelope (#148).**
+  `cache_control` moves from per-system-block to the top-level
+  request envelope (Anthropic's "automatic prompt caching" mode),
+  which caches the stable tools + system + messages prefix across
+  multi-turn loops. No semantic change to generations; just cheaper.
+- **Sub-agent + session lineage is now append-only and parent-
+  aware (#148).** Child sessions inherit parent context on spawn,
+  parent sessions record `sub_agent_start` / `sub_agent_result`
+  events against their own event lists, and resumed persistent
+  loops restore the prompt surface correctly. Reuses #133's
+  `WorkerProvenanceRecord` shape unchanged.
+- **Workflow prompt contract tightened (#148).** Current stage is
+  authoritative; `<workflow_context>` is now supporting evidence
+  rather than additional instructions. Execute batches default to
+  stage-local context instead of the full action-graph plan, and
+  action-graph batch tool exposure is narrowed to what the current
+  batch actually needs. Pipeline consumers that relied on cross-
+  stage prompt leakage should audit their stage prompts.
+- **Burin Mini replatform onto Harn workflow sessions (#148).** The
+  experiment now uses Harn-native workflow stages, shared workspace
+  helpers, profile-driven planning, and transcript-backed artifacts
+  instead of the removed Rust host capability layer.
 - **Burin Mini live-eval planner/batching stabilization (#193).**
   Planner normalization now folds verify actions into a single
   run-only verify batch instead of leaking them into execute/write
@@ -45,18 +80,30 @@ granular archaeology.
   Research/planner prompts disambiguate local composition vs.
   architecture redesign, and speculative research-worker advice is
   dropped. Two transcript-derived `#[ignore]`'d regressions lock the
-  weak-verify-plan and over-researching-planner behaviors.
-- **`approval_policy.write_path_allowlist` no longer blocks read-only
-  tools (#193).** The allowlist now gates only write-class tools
-  (`edit`, `write`, `delete`, `move`); `read`/`look`/`search`/`run`
-  traffic is unaffected. Action batches also auto-inject the
+  weak-verify-plan and over-researching-planner behaviors. Validated
+  across three back-to-back live runs with local
+  `qwen3.5:35b-a3b-coding-nvfp4`.
+- **`approval_policy.write_path_allowlist` no longer blocks read-
+  only tools (#193).** The allowlist now gates only write-class
+  tools (`edit`, `write`, `delete`, `move`); `read`/`look`/`search`/
+  `run` traffic is unaffected. Action batches also auto-inject the
   allowlist from declared target paths so downstream pipelines don't
   have to wire it by hand — downstream consumers should audit any
   place they relied on the old (stricter) gate.
 - **`ledger` tool now fails fast when no task ledger is active
-  (#193).** Previously returned a silent empty result; now surfaces a
-  typed error so pipelines learn about the missing context instead
-  of silently producing empty plans.
+  (#193).** Previously returned a silent empty result; now surfaces
+  a typed error so pipelines learn about the missing context
+  instead of silently producing empty plans.
+
+### Fixed
+
+- **Tree-sitter grammar recognizes backslash line continuation
+  (#149, closes #144).** The grammar's `extras` rule now treats
+  `\\\n` (optionally followed by indentation) as ignorable
+  whitespace, matching lexer/runtime behavior. Fixes the v0.7.21
+  release-audit blocker on
+  `conformance/tests/agents/workflow_subagent_runtime.harn` and
+  unblocks future `\` continuation usage in conformance fixtures.
 
 ## v0.7.21
 
