@@ -102,6 +102,22 @@ granular archaeology.
   new `trigger_test_harness(...)` builtin and added conformance fixtures
   under `conformance/tests/triggers/`.
 
+- **GitHub App connector with signed webhooks + installation-auth outbound
+  helpers (#170).** `harn_vm::connectors::GitHubConnector` now plugs into the
+  shared `Connector` + `ConnectorRegistry` runtime, verifies inbound
+  `X-Hub-Signature-256` webhook deliveries through the shared HMAC helper, and
+  narrows GitHub payloads into typed `GitHubEventPayload` variants for
+  `issues`, `pull_request`, `issue_comment`, `pull_request_review`, `push`, and
+  `workflow_run`. Outbound calls authenticate as a GitHub App installation with
+  cached installation tokens refreshed before the one-hour expiry and re-minted
+  on `401`, route through the shared `RateLimiterFactory`, and ship Harn
+  stdlib wrappers for `comment`, `add_labels`, `request_review`, `merge_pr`,
+  `list_stale_prs`, `get_pr_diff`, and `create_issue`. Includes conformance
+  coverage against a mock GitHub server plus manual-setup docs at
+  `docs/src/connectors/github.md`. Registered as the default connector for
+  provider `github` in `ConnectorRegistry::with_defaults()`, replacing the
+  generic webhook receiver previously wired up by the provider catalog.
+
 - **`harn orchestrator serve` CLI scaffold (#209, closes #178).** Added
   a new `harn orchestrator` command family with a real `serve`
   subcommand plus placeholder `inspect`, `replay`, `dlq`, and

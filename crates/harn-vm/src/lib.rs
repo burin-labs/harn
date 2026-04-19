@@ -38,12 +38,14 @@ pub use checkpoint::register_checkpoint_builtins;
 pub use chunk::*;
 pub use compiler::*;
 pub use connectors::{
+    active_connector_client, clear_active_connector_clients,
     cron::{CatchupMode, CronConnector},
     hmac::verify_hmac_signed,
-    ActivationHandle, ClientError, Connector, ConnectorClient, ConnectorCtx, ConnectorError,
-    ConnectorMetricsSnapshot, ConnectorRegistry, GenericWebhookConnector, MetricsRegistry,
-    ProviderPayloadSchema, RateLimitConfig, RateLimiterFactory, RawInbound, TriggerBinding,
-    TriggerKind, TriggerRegistry, WebhookSignatureVariant,
+    install_active_connector_clients, ActivationHandle, ClientError, Connector, ConnectorClient,
+    ConnectorCtx, ConnectorError, ConnectorMetricsSnapshot, ConnectorRegistry,
+    GenericWebhookConnector, GitHubConnector, MetricsRegistry, ProviderPayloadSchema,
+    RateLimitConfig, RateLimiterFactory, RawInbound, TriggerBinding, TriggerKind, TriggerRegistry,
+    WebhookSignatureVariant,
 };
 pub use http::{register_http_builtins, reset_http_state};
 pub use llm::register_llm_builtins;
@@ -108,6 +110,7 @@ pub fn reset_thread_local_state() {
     http::reset_http_state();
     event_log::reset_active_event_log();
     stdlib::reset_stdlib_state();
+    connectors::clear_active_connector_clients();
     orchestration::clear_runtime_hooks();
     triggers::clear_dispatcher_state();
     triggers::clear_trigger_registry();

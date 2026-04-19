@@ -87,12 +87,70 @@ pub enum SignatureStatus {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct GitHubEventPayload {
+pub struct GitHubEventCommon {
     pub event: String,
     pub action: Option<String>,
     pub delivery_id: Option<String>,
     pub installation_id: Option<i64>,
     pub raw: JsonValue,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct GitHubIssuesEventPayload {
+    #[serde(flatten)]
+    pub common: GitHubEventCommon,
+    pub issue: JsonValue,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct GitHubPullRequestEventPayload {
+    #[serde(flatten)]
+    pub common: GitHubEventCommon,
+    pub pull_request: JsonValue,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct GitHubIssueCommentEventPayload {
+    #[serde(flatten)]
+    pub common: GitHubEventCommon,
+    pub issue: JsonValue,
+    pub comment: JsonValue,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct GitHubPullRequestReviewEventPayload {
+    #[serde(flatten)]
+    pub common: GitHubEventCommon,
+    pub pull_request: JsonValue,
+    pub review: JsonValue,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct GitHubPushEventPayload {
+    #[serde(flatten)]
+    pub common: GitHubEventCommon,
+    #[serde(default)]
+    pub commits: Vec<JsonValue>,
+    pub distinct_size: Option<i64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct GitHubWorkflowRunEventPayload {
+    #[serde(flatten)]
+    pub common: GitHubEventCommon,
+    pub workflow_run: JsonValue,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum GitHubEventPayload {
+    Issues(GitHubIssuesEventPayload),
+    PullRequest(GitHubPullRequestEventPayload),
+    IssueComment(GitHubIssueCommentEventPayload),
+    PullRequestReview(GitHubPullRequestReviewEventPayload),
+    Push(GitHubPushEventPayload),
+    WorkflowRun(GitHubWorkflowRunEventPayload),
+    Other(GitHubEventCommon),
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -760,21 +818,56 @@ fn github_payload(
     headers: &BTreeMap<String, String>,
     raw: JsonValue,
 ) -> ProviderPayload {
-    let action = raw
-        .get("action")
-        .and_then(JsonValue::as_str)
-        .map(ToString::to_string);
-    let installation_id = raw
-        .get("installation")
-        .and_then(|value| value.get("id"))
-        .and_then(JsonValue::as_i64);
-    ProviderPayload::Known(KnownProviderPayload::GitHub(GitHubEventPayload {
+    let common = GitHubEventCommon {
         event: kind.to_string(),
-        action,
+        action: raw
+            .get("action")
+            .and_then(JsonValue::as_str)
+            .map(ToString::to_string),
         delivery_id: headers.get("X-GitHub-Delivery").cloned(),
-        installation_id,
-        raw,
-    }))
+        installation_id: raw
+            .get("installation")
+            .and_then(|value| value.get("id"))
+            .and_then(JsonValue::as_i64),
+        raw: raw.clone(),
+    };
+    let payload = match kind {
+        "issues" => GitHubEventPayload::Issues(GitHubIssuesEventPayload {
+            common,
+            issue: raw.get("issue").cloned().unwrap_or(JsonValue::Null),
+        }),
+        "pull_request" => GitHubEventPayload::PullRequest(GitHubPullRequestEventPayload {
+            common,
+            pull_request: raw.get("pull_request").cloned().unwrap_or(JsonValue::Null),
+        }),
+        "issue_comment" => GitHubEventPayload::IssueComment(GitHubIssueCommentEventPayload {
+            common,
+            issue: raw.get("issue").cloned().unwrap_or(JsonValue::Null),
+            comment: raw.get("comment").cloned().unwrap_or(JsonValue::Null),
+        }),
+        "pull_request_review" => {
+            GitHubEventPayload::PullRequestReview(GitHubPullRequestReviewEventPayload {
+                common,
+                pull_request: raw.get("pull_request").cloned().unwrap_or(JsonValue::Null),
+                review: raw.get("review").cloned().unwrap_or(JsonValue::Null),
+            })
+        }
+        "push" => GitHubEventPayload::Push(GitHubPushEventPayload {
+            common,
+            commits: raw
+                .get("commits")
+                .and_then(JsonValue::as_array)
+                .cloned()
+                .unwrap_or_default(),
+            distinct_size: raw.get("distinct_size").and_then(JsonValue::as_i64),
+        }),
+        "workflow_run" => GitHubEventPayload::WorkflowRun(GitHubWorkflowRunEventPayload {
+            common,
+            workflow_run: raw.get("workflow_run").cloned().unwrap_or(JsonValue::Null),
+        }),
+        _ => GitHubEventPayload::Other(common),
+    };
+    ProviderPayload::Known(KnownProviderPayload::GitHub(payload))
 }
 
 fn slack_payload(

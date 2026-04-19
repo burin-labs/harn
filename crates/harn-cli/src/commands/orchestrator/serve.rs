@@ -1,9 +1,7 @@
-use std::collections::{BTreeMap, BTreeSet};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use serde::Serialize;
 use serde_json::{json, Value as JsonValue};
 use time::format_description::well_known::Rfc3339;
@@ -233,9 +231,10 @@ async fn initialize_connectors(
 
     // `ConnectorRegistry::default()` pre-populates connectors for every
     // provider in the catalog (cron -> CronConnector, webhook-based ->
-    // GenericWebhookConnector, etc.). We only need to register a
-    // PlaceholderConnector for providers that are referenced by a trigger
-    // but *not* already in the catalog (skip-if-already-registered).
+    // GenericWebhookConnector, github -> GitHubConnector, etc.). We only
+    // need to register a PlaceholderConnector for providers that are
+    // referenced by a trigger but *not* already in the catalog
+    // (skip-if-already-registered).
     let mut providers = Vec::new();
     for (provider, kinds) in grouped_kinds {
         let provider_name = provider.as_str().to_string();
@@ -660,79 +659,4 @@ struct TriggerStateSnapshot {
 struct ConnectorActivationSnapshot {
     provider: String,
     binding_count: usize,
-}
-
-struct PlaceholderConnector {
-    provider_id: harn_vm::ProviderId,
-    kinds: Vec<harn_vm::TriggerKind>,
-    _ctx: Option<harn_vm::ConnectorCtx>,
-}
-
-impl PlaceholderConnector {
-    fn new(provider_id: harn_vm::ProviderId, kinds: BTreeSet<String>) -> Self {
-        Self {
-            provider_id,
-            kinds: kinds.into_iter().map(harn_vm::TriggerKind::from).collect(),
-            _ctx: None,
-        }
-    }
-}
-
-struct PlaceholderClient;
-
-#[async_trait]
-impl harn_vm::ConnectorClient for PlaceholderClient {
-    async fn call(
-        &self,
-        method: &str,
-        _args: JsonValue,
-    ) -> Result<JsonValue, harn_vm::ClientError> {
-        Err(harn_vm::ClientError::Other(format!(
-            "connector client method '{method}' is not implemented in the orchestrator scaffold"
-        )))
-    }
-}
-
-#[async_trait]
-impl harn_vm::Connector for PlaceholderConnector {
-    fn provider_id(&self) -> &harn_vm::ProviderId {
-        &self.provider_id
-    }
-
-    fn kinds(&self) -> &[harn_vm::TriggerKind] {
-        &self.kinds
-    }
-
-    async fn init(&mut self, ctx: harn_vm::ConnectorCtx) -> Result<(), harn_vm::ConnectorError> {
-        self._ctx = Some(ctx);
-        Ok(())
-    }
-
-    async fn activate(
-        &self,
-        bindings: &[harn_vm::TriggerBinding],
-    ) -> Result<harn_vm::ActivationHandle, harn_vm::ConnectorError> {
-        Ok(harn_vm::ActivationHandle::new(
-            self.provider_id.clone(),
-            bindings.len(),
-        ))
-    }
-
-    fn normalize_inbound(
-        &self,
-        _raw: harn_vm::RawInbound,
-    ) -> Result<harn_vm::TriggerEvent, harn_vm::ConnectorError> {
-        Err(harn_vm::ConnectorError::Unsupported(format!(
-            "connector '{}' inbound normalization is not implemented yet",
-            self.provider_id.as_str()
-        )))
-    }
-
-    fn payload_schema(&self) -> harn_vm::ProviderPayloadSchema {
-        harn_vm::ProviderPayloadSchema::named("TriggerEvent")
-    }
-
-    fn client(&self) -> Arc<dyn harn_vm::ConnectorClient> {
-        Arc::new(PlaceholderClient)
-    }
 }

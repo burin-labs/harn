@@ -1,0 +1,51 @@
+import { filter_nil } from "std/collections"
+import { merge } from "std/json"
+
+var github_connector_config = {}
+
+pub fn configure(config) {
+  github_connector_config = filter_nil(config ?? {})
+  return github_connector_config
+}
+
+pub fn reset() {
+  github_connector_config = {}
+}
+
+fn __call(method, params = {}) {
+  return connector_call("github", method, filter_nil(merge(github_connector_config, params ?? {})))
+}
+
+pub fn comment(issue_url, body, options = nil) {
+  return __call("comment", (options ?? {}) + {issue_url: issue_url, body: body})
+}
+
+pub fn add_labels(issue_url, labels, options = nil) {
+  return __call("add_labels", (options ?? {}) + {issue_url: issue_url, labels: labels})
+}
+
+pub fn request_review(pr_url, reviewers, options = nil) {
+  return __call(
+    "request_review",
+    (options ?? {}) + {pr_url: pr_url, reviewers: reviewers},
+  )
+}
+
+pub fn merge_pr(pr_url, options = nil) {
+  return __call("merge_pr", (options ?? {}) + {pr_url: pr_url})
+}
+
+pub fn list_stale_prs(repo, days, options = nil) {
+  return __call("list_stale_prs", (options ?? {}) + {repo: repo, days: days})
+}
+
+pub fn get_pr_diff(pr_url, options = nil) {
+  return __call("get_pr_diff", (options ?? {}) + {pr_url: pr_url})
+}
+
+pub fn create_issue(repo, title, body = nil, labels = nil, options = nil) {
+  return __call(
+    "create_issue",
+    filter_nil((options ?? {}) + {repo: repo, title: title, body: body, labels: labels}),
+  )
+}
