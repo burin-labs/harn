@@ -2091,7 +2091,7 @@ tag = "v1.2.0"
 
 [[skill.source]]
 type = "registry"
-url = "https://skills.harn.burincode.com"
+url = "https://skills.harnlang.com"
 name = "acme/ops"
 "#,
         )

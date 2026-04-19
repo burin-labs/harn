@@ -236,7 +236,7 @@ tag = "v1.2.0"
 
 [[skill.source]]
 type = "registry"   # reserved, inert until a marketplace exists
-url = "https://skills.harn.burincode.com"
+url = "https://skills.harnlang.com"
 name = "acme/ops"
 ```
 
