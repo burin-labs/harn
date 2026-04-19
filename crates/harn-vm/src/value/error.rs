@@ -16,6 +16,10 @@ pub enum VmError {
         message: String,
         category: ErrorCategory,
     },
+    DaemonQueueFull {
+        daemon_id: String,
+        capacity: usize,
+    },
     Return(VmValue),
     InvalidInstruction(u8),
 }
@@ -245,6 +249,13 @@ impl std::fmt::Display for VmError {
             VmError::CategorizedError { message, category } => {
                 write!(f, "Error [{}]: {}", category.as_str(), message)
             }
+            VmError::DaemonQueueFull {
+                daemon_id,
+                capacity,
+            } => write!(
+                f,
+                "Daemon queue full: daemon '{daemon_id}' reached its event_queue_capacity of {capacity}"
+            ),
             VmError::Return(_) => write!(f, "Return from function"),
             VmError::InvalidInstruction(op) => write!(f, "Invalid instruction: 0x{op:02x}"),
         }

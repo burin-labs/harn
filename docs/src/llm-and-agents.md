@@ -518,6 +518,43 @@ When `persistent: true`, the system prompt is automatically extended with:
 > Do NOT stop to explain or summarize — take action. Output ##DONE##
 > only when the task is fully complete and verified.
 
+## Daemon stdlib wrappers
+
+When you want a first-class daemon handle instead of wiring `agent_loop`
+options manually, use the daemon builtins:
+
+- `daemon_spawn(config)`
+- `daemon_trigger(handle, event)`
+- `daemon_snapshot(handle)`
+- `daemon_stop(handle)`
+- `daemon_resume(path)`
+
+`daemon_spawn` accepts the same daemon-related options that `agent_loop`
+understands (`wake_interval_ms`, `watch_paths`, `idle_watchdog_attempts`,
+etc.) plus `event_queue_capacity`, which bounds the durable FIFO trigger queue
+used by `daemon_trigger`.
+
+```harn
+let daemon = daemon_spawn({
+  name: "reviewer",
+  task: "Watch for trigger events and summarize the latest change.",
+  system: "You are a careful reviewer.",
+  provider: "mock",
+  persist_path: ".harn/daemons/reviewer",
+  event_queue_capacity: 256,
+})
+
+daemon_trigger(daemon, {kind: "file_changed", path: "src/lib.rs"})
+let snap = daemon_snapshot(daemon)
+println(snap.pending_event_count)
+daemon_stop(daemon)
+let resumed = daemon_resume(".harn/daemons/reviewer")
+```
+
+These wrappers preserve queued trigger events across stop/resume. If a daemon is
+stopped while a trigger is mid-flight, that trigger is re-queued and replayed on
+resume instead of being lost.
+
 ### Context callback
 
 `context_callback` lets you keep the full recorded transcript for replay and

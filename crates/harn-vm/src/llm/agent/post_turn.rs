@@ -469,6 +469,9 @@ pub(super) async fn run_post_turn(
     // Daemon idle: notify host and wait briefly for user messages.
     if ctx.daemon && !ctx.persistent {
         state.daemon_state = "idle".to_string();
+        if let Some(bridge) = ctx.bridge.as_ref() {
+            bridge.set_daemon_idle(true);
+        }
         if ctx.daemon_config.consolidate_on_idle {
             maybe_auto_compact_agent_messages(
                 opts,
@@ -510,6 +513,9 @@ pub(super) async fn run_post_turn(
                 }),
             )
             .await?;
+            if let Some(bridge) = ctx.bridge.as_ref() {
+                bridge.set_daemon_idle(false);
+            }
             return Ok(IterationOutcome::Break);
         }
         let watchdog_limit = ctx.daemon_config.idle_watchdog_attempts;
@@ -604,6 +610,9 @@ pub(super) async fn run_post_turn(
                 state.daemon_state = "active".to_string();
                 state.consecutive_text_only = 0;
                 state.idle_backoff_ms = 100;
+                if let Some(bridge) = ctx.bridge.as_ref() {
+                    bridge.set_daemon_idle(false);
+                }
                 break;
             }
             idle_null_attempts += 1;
@@ -628,6 +637,9 @@ pub(super) async fn run_post_turn(
                         }),
                     )
                     .await?;
+                    if let Some(bridge) = ctx.bridge.as_ref() {
+                        bridge.set_daemon_idle(false);
+                    }
                     return Ok(IterationOutcome::Break);
                 }
             }

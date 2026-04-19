@@ -68,6 +68,18 @@ granular archaeology.
   `harn doctor` now surfaces loaded triggers with id, kind, provider,
   handler kind, and budget. Ships with example manifests for
   github-new-issue, cron-daily-digest, and a2a-reviewer-fanout.
+- **Hardened daemon stdlib queue semantics (#200, closes #157).**
+  `daemon_trigger(...)` now pushes onto a bounded durable event
+  queue (`daemon.meta.json` with atomic write-rename persistence)
+  instead of pushing trigger payloads through the bridge as
+  ephemeral user messages. Explicit `VmError::DaemonQueueFull` on
+  overflow, idle-boundary-gated delivery so triggers only fire at
+  turn boundaries, in-flight event re-queue across `daemon_stop` /
+  `daemon_resume` for at-least-once delivery, queue metadata in
+  snapshot + daemon summary, `docs/src/stdlib/daemon.md` +
+  quickref coverage. Daemon lifecycle events (Triggered, Snapshotted,
+  Stopped, Resumed) continue to flow into run observability at
+  enqueue/snapshot/stop/resume boundaries.
 
 ## v0.7.22
 
