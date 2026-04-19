@@ -49,6 +49,21 @@ fn test_roundtrip_for_in() {
 }
 
 #[test]
+fn test_roundtrip_discard_bindings() {
+    let source = r#"pipeline default(task) {
+  let _ = 1
+  let _ = 2
+  let [_, keep, _] = [10, 20, 30]
+  println(keep)
+}"#;
+    let formatted = format_source(source).unwrap();
+    assert!(formatted.contains("let _ = 1\n"));
+    assert!(formatted.contains("let _ = 2\n"));
+    assert!(formatted.contains("let [_, keep, _] = [10, 20, 30]\n"));
+    assert_roundtrip(source);
+}
+
+#[test]
 fn test_roundtrip_match() {
     assert_roundtrip(
         r#"pipeline default(task) { match x { "a" -> { log(1) } "b" -> { log(2) } } }"#,
