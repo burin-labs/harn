@@ -12,6 +12,7 @@ pub(crate) mod repl;
 pub(crate) mod run;
 pub(crate) mod skills;
 pub(crate) mod test;
+pub(crate) mod trigger;
 pub(crate) mod viz;
 
 use std::path::{Path, PathBuf};

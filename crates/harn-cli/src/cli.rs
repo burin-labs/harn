@@ -76,6 +76,8 @@ SCRIPTING
     Watch(WatchArgs),
     /// Launch the local Harn observability portal.
     Portal(PortalArgs),
+    /// Replay and inspect historical trigger dispatches from the event log.
+    Trigger(TriggerArgs),
     /// Start the orchestrator process that hosts triggers and connector dispatch.
     Orchestrator(OrchestratorArgs),
     /// Run a pipeline against a Harn-native host module for fast iteration.
@@ -454,6 +456,30 @@ pub(crate) struct PortalArgs {
 }
 
 #[derive(Debug, Args)]
+pub(crate) struct TriggerArgs {
+    #[command(subcommand)]
+    pub command: TriggerCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum TriggerCommand {
+    /// Replay a recorded trigger event from the event log.
+    Replay(TriggerReplayArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct TriggerReplayArgs {
+    /// Trigger event id to replay.
+    pub event_id: String,
+    /// Compare the replay outcome to the original stored outcome and emit drift JSON.
+    #[arg(long)]
+    pub diff: bool,
+    /// Resolve the binding version that was active at this historical timestamp.
+    #[arg(long = "as-of", value_name = "TIMESTAMP")]
+    pub as_of: Option<String>,
+}
+
+#[derive(Debug, Args)]
 pub(crate) struct OrchestratorArgs {
     #[command(subcommand)]
     pub command: OrchestratorCommand,
@@ -789,6 +815,7 @@ mod tests {
 
     use super::{
         Cli, Command, McpCommand, OrchestratorCommand, ProjectTemplate, RunsCommand, SkillsCommand,
+        TriggerCommand,
     };
     use clap::Parser;
 
@@ -889,6 +916,27 @@ mod tests {
         let RunsCommand::Inspect(inspect) = args.command;
         assert_eq!(inspect.path, "run.json");
         assert_eq!(inspect.compare.as_deref(), Some("baseline.json"));
+    }
+
+    #[test]
+    fn test_parses_trigger_replay_flags() {
+        let cli = Cli::parse_from([
+            "harn",
+            "trigger",
+            "replay",
+            "trigger_evt_123",
+            "--diff",
+            "--as-of",
+            "2026-04-19T18:00:00Z",
+        ]);
+
+        let Command::Trigger(args) = cli.command.unwrap() else {
+            panic!("expected trigger command");
+        };
+        let TriggerCommand::Replay(replay) = args.command;
+        assert_eq!(replay.event_id, "trigger_evt_123");
+        assert!(replay.diff);
+        assert_eq!(replay.as_of.as_deref(), Some("2026-04-19T18:00:00Z"));
     }
 
     #[test]

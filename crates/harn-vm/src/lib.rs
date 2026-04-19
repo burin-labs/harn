@@ -77,20 +77,21 @@ pub use stdlib::{
 };
 pub use store::register_store_builtins;
 pub use triggers::{
-    begin_in_flight, clear_dispatcher_state, clear_trigger_registry, drain, dynamic_deregister,
-    dynamic_register, finish_in_flight, install_manifest_triggers, pin_trigger_binding,
-    provider_metadata, redact_headers, register_provider_schema, registered_provider_metadata,
-    registered_provider_schema_names, reset_provider_catalog, resolve_live_trigger_binding,
-    run_trigger_harness_fixture, snapshot_dispatcher_stats, snapshot_trigger_bindings,
-    unpin_trigger_binding, DispatchError, DispatchOutcome, DispatchStatus, Dispatcher,
-    DispatcherDrainReport, DispatcherStatsSnapshot, HeaderRedactionPolicy, InboxIndex,
-    ProviderCatalog, ProviderCatalogError, ProviderId, ProviderMetadata, ProviderOutboundMethod,
-    ProviderPayload, ProviderRuntimeMetadata, ProviderSchema, ProviderSecretRequirement,
-    RetryPolicy, SignatureStatus, SignatureVerificationMetadata, TenantId, TraceId,
-    TriggerBindingSnapshot, TriggerBindingSource, TriggerBindingSpec, TriggerDispatchOutcome,
-    TriggerEvent, TriggerEventId, TriggerHandlerSpec, TriggerHarnessResult, TriggerId,
-    TriggerMetricsSnapshot, TriggerPredicateSpec, TriggerRegistryError, TriggerRetryConfig,
-    TriggerState, DEFAULT_INBOX_RETENTION_DAYS, TRIGGER_INBOX_TOPIC, TRIGGER_TEST_FIXTURES,
+    begin_in_flight, binding_version_as_of, clear_dispatcher_state, clear_trigger_registry, drain,
+    dynamic_deregister, dynamic_register, finish_in_flight, install_manifest_triggers,
+    pin_trigger_binding, provider_metadata, redact_headers, register_provider_schema,
+    registered_provider_metadata, registered_provider_schema_names, reset_provider_catalog,
+    resolve_live_trigger_binding, resolve_trigger_binding_as_of, run_trigger_harness_fixture,
+    snapshot_dispatcher_stats, snapshot_trigger_bindings, unpin_trigger_binding, DispatchError,
+    DispatchOutcome, DispatchStatus, Dispatcher, DispatcherDrainReport, DispatcherStatsSnapshot,
+    HeaderRedactionPolicy, InboxIndex, ProviderCatalog, ProviderCatalogError, ProviderId,
+    ProviderMetadata, ProviderOutboundMethod, ProviderPayload, ProviderRuntimeMetadata,
+    ProviderSchema, ProviderSecretRequirement, RetryPolicy, SignatureStatus,
+    SignatureVerificationMetadata, TenantId, TraceId, TriggerBindingSnapshot, TriggerBindingSource,
+    TriggerBindingSpec, TriggerDispatchOutcome, TriggerEvent, TriggerEventId, TriggerHandlerSpec,
+    TriggerHarnessResult, TriggerId, TriggerMetricsSnapshot, TriggerPredicateSpec,
+    TriggerRegistryError, TriggerRetryConfig, TriggerState, DEFAULT_INBOX_RETENTION_DAYS,
+    TRIGGER_INBOX_TOPIC, TRIGGER_TEST_FIXTURES,
 };
 pub use value::*;
 pub use vm::*;

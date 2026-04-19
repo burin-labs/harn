@@ -3,6 +3,7 @@ use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::Arc;
+use std::sync::{Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -309,6 +310,11 @@ fn write_json_response(stream: &mut TcpStream, body: &serde_json::Value) {
     stream.flush().expect("flush mock A2A response");
 }
 
+fn replay_env_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn local_handler_round_trip_logs_outbox_lifecycle_and_action_graph() {
     let local = tokio::task::LocalSet::new();
@@ -590,6 +596,47 @@ pub fn local_fn(event: TriggerEvent) -> dict {
             }));
         })
         .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn replay_dispatch_sets_harn_replay_env_and_restores_previous_value() {
+    let _env_guard = replay_env_lock().lock().expect("env lock poisoned");
+    std::env::set_var("HARN_REPLAY", "outer");
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (_dir, _log, dispatcher) = dispatcher_fixture(
+                r#"
+import "std/triggers"
+
+pub fn local_fn(event: TriggerEvent) -> string {
+  return env_or("HARN_REPLAY", "missing")
+}
+"#,
+                "local_fn",
+                None,
+                TriggerRetryConfig::default(),
+            )
+            .await;
+
+            let binding =
+                resolve_live_trigger_binding("github-new-issue", None).expect("resolve binding");
+            let outcome = dispatcher
+                .dispatch_replay(
+                    &binding,
+                    trigger_event("issues.opened", "delivery-env"),
+                    "event-original".to_string(),
+                )
+                .await
+                .expect("replay succeeds");
+
+            assert_eq!(outcome.result, Some(serde_json::json!("1")));
+            assert_eq!(std::env::var("HARN_REPLAY").ok().as_deref(), Some("outer"));
+        })
+        .await;
+
+    std::env::remove_var("HARN_REPLAY");
 }
 
 #[tokio::test(flavor = "current_thread")]
