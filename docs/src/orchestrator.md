@@ -48,6 +48,20 @@ appends lifecycle events to the EventLog, and persists a final
 `HARN_ORCHESTRATOR_STATE_DIR`, `HARN_ORCHESTRATOR_CERT`, and
 `HARN_ORCHESTRATOR_KEY`.
 
+On Unix, `SIGHUP` reloads manifest-backed HTTP trigger bindings without
+rebinding the socket. The orchestrator reparses `harn.toml`,
+re-collects manifest triggers, installs a new manifest binding version
+for changed `webhook` / `a2a-push` entries, and swaps the live listener
+route table in place. Requests already in flight keep the binding
+version they started with; new requests route to the newest active
+binding version. The orchestrator records `reload_succeeded` /
+`reload_failed` events on `orchestrator.manifest` and refreshes
+`orchestrator-state.json` after a successful reload.
+
+Current reload scope is intentionally narrow: listener-wide settings
+such as `--bind`, TLS files, `allowed_origins`, `max_body_bytes`, and
+connector-managed trigger changes still require a full restart.
+
 ## HTTP Listener
 
 The orchestrator listener assembles routes from `[[triggers]]` entries
@@ -61,6 +75,12 @@ with `kind = "webhook"` or `kind = "a2a-push"`.
 Accepted deliveries are normalized into `TriggerEvent` records and
 appended to the shared `orchestrator.triggers.pending` queue in the
 event log for downstream dispatch.
+
+Hot reload uses the trigger registry's versioned manifest bindings. A
+modified trigger id drains the old binding version, activates a new
+version, and keeps terminated versions around for a short retention
+window so operators can inspect the handoff without the registry
+growing unbounded.
 
 ### Listener controls
 

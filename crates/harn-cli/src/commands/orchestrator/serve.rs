@@ -21,6 +21,7 @@ use crate::package::{
 };
 
 const LIFECYCLE_TOPIC: &str = "orchestrator.lifecycle";
+const MANIFEST_TOPIC: &str = "orchestrator.manifest";
 const STATE_SNAPSHOT_FILE: &str = "orchestrator-state.json";
 
 pub(crate) async fn run(args: OrchestratorServeArgs) -> Result<(), String> {
@@ -128,6 +129,8 @@ pub(crate) async fn run(args: OrchestratorServeArgs) -> Result<(), String> {
     .await?;
     let local_bind = listener.local_addr();
     let listener_metrics = listener.trigger_metrics();
+    let mut live_manifest = manifest;
+    let mut live_triggers = collected_triggers;
     eprintln!("[harn] HTTP listener ready on {}", listener.url());
 
     write_state_snapshot(
@@ -146,7 +149,7 @@ pub(crate) async fn run(args: OrchestratorServeArgs) -> Result<(), String> {
                 .location
                 .as_ref()
                 .map(|path| path.display().to_string()),
-            triggers: trigger_state_snapshots(&collected_triggers, &listener_metrics),
+            triggers: trigger_state_snapshots(&live_triggers, &listener_metrics),
             connectors: connector_runtime.providers.clone(),
             activations: connector_runtime
                 .activations
@@ -167,14 +170,28 @@ pub(crate) async fn run(args: OrchestratorServeArgs) -> Result<(), String> {
             "manifest": config_path.display().to_string(),
             "role": args.role.as_str(),
             "state_dir": state_dir.display().to_string(),
-            "trigger_count": collected_triggers.len(),
+            "trigger_count": live_triggers.len(),
             "connector_count": connector_runtime.providers.len(),
             "tls_enabled": listener.scheme() == "https",
         }),
     )
     .await?;
 
-    wait_for_termination_signal().await?;
+    wait_for_runtime_signal_loop(RuntimeSignalCtx {
+        role: args.role,
+        config_path: &config_path,
+        state_dir: &state_dir,
+        bind: local_bind,
+        startup_started_at: &startup_started_at,
+        event_log: &event_log,
+        event_log_description: &event_log_description,
+        secret_chain_display: &secret_chain_display,
+        listener: &listener,
+        connectors: &connector_runtime,
+        live_manifest: &mut live_manifest,
+        live_triggers: &mut live_triggers,
+    })
+    .await?;
 
     graceful_shutdown(
         GracefulShutdownCtx {
@@ -186,7 +203,7 @@ pub(crate) async fn run(args: OrchestratorServeArgs) -> Result<(), String> {
             event_log: &event_log,
             event_log_description: &event_log_description,
             secret_chain_display: &secret_chain_display,
-            triggers: &collected_triggers,
+            triggers: &live_triggers,
             connectors: &connector_runtime,
         },
         listener,
@@ -198,6 +215,20 @@ struct ConnectorRuntime {
     _registry: harn_vm::ConnectorRegistry,
     providers: Vec<String>,
     activations: Vec<harn_vm::ActivationHandle>,
+}
+
+struct PreparedManifestReload {
+    manifest: Manifest,
+    collected_triggers: Vec<CollectedManifestTrigger>,
+    summary: ManifestReloadSummary,
+}
+
+#[derive(Debug, Default, Serialize)]
+struct ManifestReloadSummary {
+    added: Vec<String>,
+    modified: Vec<String>,
+    removed: Vec<String>,
+    unchanged: Vec<String>,
 }
 
 async fn initialize_connectors(
@@ -318,6 +349,7 @@ fn build_route_configs(
     triggers: &[CollectedManifestTrigger],
     binding_versions: &BTreeMap<String, u32>,
 ) -> Result<Vec<RouteConfig>, String> {
+    let mut seen_paths = BTreeSet::new();
     let mut routes = Vec::new();
     for trigger in triggers {
         let Some(binding_version) = binding_versions.get(&trigger.config.id).copied() else {
@@ -327,6 +359,12 @@ fn build_route_configs(
             ));
         };
         if let Some(route) = RouteConfig::from_trigger(trigger, binding_version)? {
+            if !seen_paths.insert(route.path.clone()) {
+                return Err(format!(
+                    "trigger route '{}' is configured more than once",
+                    route.path
+                ));
+            }
             routes.push(route);
         }
     }
@@ -521,7 +559,35 @@ async fn append_lifecycle_event(
         .map_err(|error| format!("failed to append orchestrator lifecycle event: {error}"))
 }
 
-async fn wait_for_termination_signal() -> Result<(), String> {
+async fn append_manifest_event(
+    log: &Arc<harn_vm::event_log::AnyEventLog>,
+    kind: &str,
+    payload: JsonValue,
+) -> Result<(), String> {
+    let topic =
+        harn_vm::event_log::Topic::new(MANIFEST_TOPIC).map_err(|error| error.to_string())?;
+    log.append(&topic, harn_vm::event_log::LogEvent::new(kind, payload))
+        .await
+        .map(|_| ())
+        .map_err(|error| format!("failed to append orchestrator manifest event: {error}"))
+}
+
+struct RuntimeSignalCtx<'a> {
+    role: OrchestratorRole,
+    config_path: &'a Path,
+    state_dir: &'a Path,
+    bind: SocketAddr,
+    startup_started_at: &'a str,
+    event_log: &'a Arc<harn_vm::event_log::AnyEventLog>,
+    event_log_description: &'a harn_vm::event_log::EventLogDescription,
+    secret_chain_display: &'a str,
+    listener: &'a ListenerRuntime,
+    connectors: &'a ConnectorRuntime,
+    live_manifest: &'a mut Manifest,
+    live_triggers: &'a mut Vec<CollectedManifestTrigger>,
+}
+
+async fn wait_for_runtime_signal_loop(ctx: RuntimeSignalCtx<'_>) -> Result<(), String> {
     #[cfg(unix)]
     {
         use tokio::signal::unix::{signal, SignalKind};
@@ -530,9 +596,75 @@ async fn wait_for_termination_signal() -> Result<(), String> {
             .map_err(|error| format!("failed to register SIGTERM handler: {error}"))?;
         let mut sigint = signal(SignalKind::interrupt())
             .map_err(|error| format!("failed to register SIGINT handler: {error}"))?;
-        tokio::select! {
-            _ = sigterm.recv() => Ok(()),
-            _ = sigint.recv() => Ok(()),
+        let mut sighup = signal(SignalKind::hangup())
+            .map_err(|error| format!("failed to register SIGHUP handler: {error}"))?;
+        loop {
+            tokio::select! {
+                _ = sigterm.recv() => return Ok(()),
+                _ = sigint.recv() => return Ok(()),
+                _ = sighup.recv() => {
+                    match reload_manifest(&ctx).await {
+                        Ok(reload) => {
+                            *ctx.live_manifest = reload.manifest;
+                            *ctx.live_triggers = reload.collected_triggers;
+                            let listener_metrics = ctx.listener.trigger_metrics();
+                            write_state_snapshot(
+                                &ctx.state_dir.join(STATE_SNAPSHOT_FILE),
+                                &ServeStateSnapshot {
+                                    status: "running".to_string(),
+                                    role: ctx.role.as_str().to_string(),
+                                    bind: ctx.bind.to_string(),
+                                    manifest_path: ctx.config_path.display().to_string(),
+                                    state_dir: ctx.state_dir.display().to_string(),
+                                    started_at: ctx.startup_started_at.to_string(),
+                                    stopped_at: None,
+                                    secret_provider_chain: ctx.secret_chain_display.to_string(),
+                                    event_log_backend: ctx.event_log_description.backend.to_string(),
+                                    event_log_location: ctx
+                                        .event_log_description
+                                        .location
+                                        .as_ref()
+                                        .map(|path| path.display().to_string()),
+                                    triggers: trigger_state_snapshots(ctx.live_triggers, &listener_metrics),
+                                    connectors: ctx.connectors.providers.clone(),
+                                    activations: ctx
+                                        .connectors
+                                        .activations
+                                        .iter()
+                                        .map(|activation| ConnectorActivationSnapshot {
+                                            provider: activation.provider.as_str().to_string(),
+                                            binding_count: activation.binding_count,
+                                        })
+                                        .collect(),
+                                },
+                            )?;
+                            append_manifest_event(
+                                ctx.event_log,
+                                "reload_succeeded",
+                                serde_json::to_value(&reload.summary).unwrap_or_default(),
+                            )
+                            .await?;
+                            eprintln!(
+                                "[harn] manifest reload applied: +{} ~{} -{}",
+                                reload.summary.added.len(),
+                                reload.summary.modified.len(),
+                                reload.summary.removed.len()
+                            );
+                        }
+                        Err(error) => {
+                            eprintln!("[harn] manifest reload failed: {error}");
+                            append_manifest_event(
+                                ctx.event_log,
+                                "reload_failed",
+                                json!({
+                                    "error": error,
+                                }),
+                            )
+                            .await?;
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -542,6 +674,84 @@ async fn wait_for_termination_signal() -> Result<(), String> {
             .await
             .map_err(|error| format!("failed to wait for Ctrl-C: {error}"))
     }
+}
+
+async fn reload_manifest(ctx: &RuntimeSignalCtx<'_>) -> Result<PreparedManifestReload, String> {
+    let (manifest, manifest_dir) = load_manifest(ctx.config_path)?;
+    let mut vm = ctx
+        .role
+        .build_vm(&manifest_dir, &manifest_dir, ctx.state_dir)?;
+    let extensions = package::load_runtime_extensions(ctx.config_path);
+    let collected_triggers = package::collect_manifest_triggers(&mut vm, &extensions)
+        .await
+        .map_err(|error| format!("failed to collect manifest triggers: {error}"))?;
+    ensure_reloadable_trigger_changes(ctx.live_triggers, &collected_triggers)?;
+    let summary = summarize_manifest_reload(ctx.live_triggers, &collected_triggers);
+    package::install_collected_manifest_triggers(&collected_triggers).await?;
+    let binding_versions = live_manifest_binding_versions();
+    let route_configs = build_route_configs(&collected_triggers, &binding_versions)?;
+    ctx.listener.reload_routes(route_configs)?;
+    Ok(PreparedManifestReload {
+        manifest,
+        collected_triggers,
+        summary,
+    })
+}
+
+fn ensure_reloadable_trigger_changes(
+    current: &[CollectedManifestTrigger],
+    next: &[CollectedManifestTrigger],
+) -> Result<(), String> {
+    let current_non_http = trigger_fingerprint_map(current, false);
+    let next_non_http = trigger_fingerprint_map(next, false);
+    if current_non_http != next_non_http {
+        return Err(
+            "SIGHUP reload currently supports manifest-backed HTTP triggers only; connector-managed trigger changes still require restart"
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
+fn summarize_manifest_reload(
+    current: &[CollectedManifestTrigger],
+    next: &[CollectedManifestTrigger],
+) -> ManifestReloadSummary {
+    let current_map = trigger_fingerprint_map(current, true);
+    let next_map = trigger_fingerprint_map(next, true);
+    let mut summary = ManifestReloadSummary::default();
+    let ids: BTreeSet<String> = current_map.keys().chain(next_map.keys()).cloned().collect();
+    for id in ids {
+        match (current_map.get(&id), next_map.get(&id)) {
+            (None, Some(_)) => summary.added.push(id),
+            (Some(_), None) => summary.removed.push(id),
+            (Some(left), Some(right)) if left == right => summary.unchanged.push(id),
+            (Some(_), Some(_)) => summary.modified.push(id),
+            (None, None) => {}
+        }
+    }
+    summary
+}
+
+fn trigger_fingerprint_map(
+    triggers: &[CollectedManifestTrigger],
+    include_http_managed: bool,
+) -> BTreeMap<String, String> {
+    triggers
+        .iter()
+        .filter(|trigger| include_http_managed || !is_http_managed_trigger(trigger))
+        .map(|trigger| {
+            let spec = package::manifest_trigger_binding_spec(trigger.clone());
+            (trigger.config.id.clone(), spec.definition_fingerprint)
+        })
+        .collect()
+}
+
+fn is_http_managed_trigger(trigger: &CollectedManifestTrigger) -> bool {
+    matches!(
+        trigger.config.kind,
+        crate::package::TriggerKind::Webhook | crate::package::TriggerKind::A2aPush
+    )
 }
 
 fn load_manifest(config_path: &Path) -> Result<(Manifest, PathBuf), String> {

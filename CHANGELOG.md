@@ -149,6 +149,17 @@ granular archaeology.
   now returns `401 Unauthorized`, and the new listener coverage includes
   subprocess + conformance checks for unauthenticated, bad-HMAC, and
   valid-bearer requests.
+- **SIGHUP-driven orchestrator manifest hot reload with versioned HTTP
+  trigger swaps (#187).** `harn orchestrator serve` now handles Unix
+  `SIGHUP` by reparsing `harn.toml`, reconciling manifest trigger
+  bindings through the trigger registry, swapping `webhook` /
+  `a2a-push` listener routes in place, and preserving the binding
+  version that each in-flight request started with while new requests
+  move to the new version. Successful and failed reloads are recorded
+  on `orchestrator.manifest`, `orchestrator-state.json` is refreshed
+  after successful reloads, and the trigger registry now garbage
+  collects old terminated versions after a small retention window so
+  repeated reloads do not leak stale bindings.
 - **DST-safe cron connector with durable tick state and catch-up modes
   (#210, closes #169).** `harn_vm::connectors::CronConnector` now schedules
   named IANA time zones through `croner` + `chrono-tz`, persists the

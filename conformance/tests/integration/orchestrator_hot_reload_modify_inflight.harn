@@ -1,0 +1,217 @@
+pipeline default() {
+  let unique = uuid()
+  let repo = project_root()
+  let base = path_join(temp_dir(), "harn-orchestrator-hot-reload-" + unique)
+  let workspace = path_join(base, "workspace")
+  let state_dir = path_join(base, "state")
+  let binary = env_or("HARN_CONFORMANCE_HARN_BIN", path_join(repo, "target/debug/harn"))
+  let script = """
+    set -eu
+
+    repo="${repo}"
+    base="${base}"
+    workspace="${workspace}"
+    state_dir="${state_dir}"
+    binary="${binary}"
+
+    mkdir -p "$workspace" "$state_dir"
+
+    cat > "$workspace/harn.toml" <<'EOF'
+    [package]
+    name = "orchestrator_hot_reload"
+
+    [[triggers]]
+    id = "incoming-review-task"
+    kind = "a2a-push"
+    provider = "a2a-push"
+    path = "/a2a/v1"
+    match = { events = ["a2a.task.received"] }
+    handler = "worker://triage"
+    EOF
+
+    log_path="$base/orchestrator.log"
+    snapshot_path="$state_dir/orchestrator-state.json"
+    first_path="$base/first.json"
+    second_path="$base/second.json"
+    old_path="$base/old.json"
+
+    HARN_ORCHESTRATOR_TEST_REQUEST_DELAY_MS=750 \
+      "$binary" orchestrator serve \
+        --config "$workspace/harn.toml" \
+        --state-dir "$state_dir" \
+        --bind 127.0.0.1:0 \
+        --role single-tenant \
+        >"$log_path" 2>&1 &
+    pid=$!
+
+    cleanup() {
+      kill "$pid" 2>/dev/null || true
+      wait "$pid" 2>/dev/null || true
+    }
+    trap cleanup EXIT
+
+    bind=$(python3 - "$snapshot_path" <<'PY'
+    import json, pathlib, sys, time
+    path = pathlib.Path(sys.argv[1])
+    deadline = time.time() + 15
+    while time.time() < deadline:
+        if path.exists():
+            data = json.loads(path.read_text())
+            bind = data.get("bind")
+            if bind:
+                print(bind)
+                raise SystemExit(0)
+        time.sleep(0.05)
+    raise SystemExit("timed out waiting for orchestrator snapshot")
+    PY
+    )
+
+    base_url="http://$bind"
+
+    (
+      sleep 0.2
+      cat > "$workspace/harn.toml" <<'EOF'
+    [package]
+    name = "orchestrator_hot_reload"
+
+    [[triggers]]
+    id = "incoming-review-task"
+    kind = "a2a-push"
+    provider = "a2a-push"
+    path = "/a2a/v2"
+    match = { events = ["a2a.task.received"] }
+    handler = "worker://triage"
+    EOF
+      kill -HUP "$pid"
+    ) &
+
+    python3 - "$base_url/a2a/v1" "$first_path" <<'PY'
+    import json, pathlib, sys, urllib.error, urllib.request
+    url = sys.argv[1]
+    out = pathlib.Path(sys.argv[2])
+    payload = json.dumps({"task_id": "task-1", "sender": "alpha"}).encode()
+    request = urllib.request.Request(
+        url,
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            body = response.read().decode()
+            out.write_text(json.dumps({"status": response.status, "body": json.loads(body)}))
+    except urllib.error.HTTPError as error:
+        body = error.read().decode()
+        out.write_text(json.dumps({"status": error.code, "body": body}))
+    PY
+
+    python3 - "$snapshot_path" <<'PY'
+    import json, pathlib, sys, time
+    path = pathlib.Path(sys.argv[1])
+    deadline = time.time() + 15
+    while time.time() < deadline:
+        if path.exists():
+            data = json.loads(path.read_text())
+            triggers = data.get("triggers") or []
+            if triggers and triggers[0].get("version") == 2:
+                raise SystemExit(0)
+        time.sleep(0.05)
+    raise SystemExit("timed out waiting for manifest reload")
+    PY
+
+    python3 - "$base_url/a2a/v2" "$second_path" <<'PY'
+    import json, pathlib, sys, urllib.error, urllib.request
+    url = sys.argv[1]
+    out = pathlib.Path(sys.argv[2])
+    payload = json.dumps({"task_id": "task-2", "sender": "beta"}).encode()
+    request = urllib.request.Request(
+        url,
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            body = response.read().decode()
+            out.write_text(json.dumps({"status": response.status, "body": json.loads(body)}))
+    except urllib.error.HTTPError as error:
+        body = error.read().decode()
+        out.write_text(json.dumps({"status": error.code, "body": body}))
+    PY
+
+    python3 - "$base_url/a2a/v1" "$old_path" <<'PY'
+    import json, pathlib, sys, urllib.error, urllib.request
+    url = sys.argv[1]
+    out = pathlib.Path(sys.argv[2])
+    payload = json.dumps({"task_id": "task-old", "sender": "gamma"}).encode()
+    request = urllib.request.Request(
+        url,
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            body = response.read().decode()
+            out.write_text(json.dumps({"status": response.status, "body": json.loads(body)}))
+    except urllib.error.HTTPError as error:
+        body = error.read().decode()
+        out.write_text(json.dumps({"status": error.code, "body": body}))
+    PY
+
+    python3 - "$state_dir" "$snapshot_path" "$first_path" "$second_path" "$old_path" <<'PY'
+    import glob
+    import json
+    import pathlib
+    import sqlite3
+    import sys
+
+    state_dir, snapshot_path, first_path, second_path, old_path = sys.argv[1:]
+    first = json.loads(pathlib.Path(first_path).read_text())
+    second = json.loads(pathlib.Path(second_path).read_text())
+    old = json.loads(pathlib.Path(old_path).read_text())
+    snapshot = json.loads(pathlib.Path(snapshot_path).read_text())
+
+    dbs = glob.glob(str(pathlib.Path(state_dir) / "**" / "*.sqlite"), recursive=True)
+    assert dbs, "missing sqlite event log"
+    conn = sqlite3.connect(dbs[0])
+    rows = conn.execute(
+        "SELECT payload FROM events WHERE topic = ? ORDER BY event_id",
+        ("orchestrator.triggers.pending",),
+    ).fetchall()
+    events = [json.loads(row[0]) for row in rows]
+
+    assert first["status"] == 200, first
+    assert second["status"] == 200, second
+    assert old["status"] == 404, old
+    assert len(events) == 2, events
+
+    versions = [event["binding_version"] for event in events]
+    task_ids = [event["event"]["provider_payload"]["task_id"] for event in events]
+    assert versions == [1, 2], versions
+    assert task_ids == ["task-1", "task-2"], task_ids
+    assert snapshot["triggers"][0]["version"] == 2, snapshot
+
+    print(json.dumps({
+        "count": len(events),
+        "versions": versions,
+        "task_ids": task_ids,
+        "old_status": old["status"],
+        "state_version": snapshot["triggers"][0]["version"],
+    }))
+    PY
+
+    """
+  let result = shell(script)
+  assert(result?.success, result?.stderr)
+  let summary = json_parse(result?.stdout)
+  assert(summary.count == 2, "two events made it into the pending queue")
+  assert(summary.versions[0] == 1, "first request stayed on binding version 1")
+  assert(summary.versions[1] == 2, "new request switched to binding version 2")
+  assert(summary.old_status == 404, "old path is retired after reload")
+  assert(summary.state_version == 2, "state snapshot reflects reloaded binding version")
+  log(
+    "orchestrator hot reload versions: " + to_string(summary.versions[0]) + ","
+    + to_string(summary.versions[1]),
+  )
+}
