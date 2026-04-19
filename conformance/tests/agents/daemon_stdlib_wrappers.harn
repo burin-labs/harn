@@ -1,0 +1,49 @@
+fn wait_for_iterations(handle, min_iterations) {
+  var attempts = 0
+  var snap = daemon_snapshot(handle)
+  while attempts < 200 && snap?.total_iterations ?? 0 < min_iterations {
+    sleep(10ms)
+    snap = daemon_snapshot(handle)
+    attempts = attempts + 1
+  }
+  return snap
+}
+
+pipeline test(task) {
+  let unique = to_string(to_int(timestamp())) + "-" + to_string(random_int(100000, 999999))
+  let root = path_join(temp_dir(), "harn-daemon-stdlib-" + unique)
+  mkdir(root)
+  llm_mock({text: "daemon ready"})
+  llm_mock({text: "handled Foo.swift"})
+  llm_mock({text: "handled Bar.swift"})
+  let daemon = daemon_spawn(
+    {
+    name: "reviewer",
+    task: "Wait for daemon trigger messages and acknowledge the latest file path.",
+    system: "You are a daemon reviewer.",
+    provider: "mock",
+    persist_path: root,
+    max_iterations: 8,
+  },
+  )
+  let first = daemon_snapshot(daemon)
+  println(daemon?.status == "running")
+  println(first?.daemon_state == "idle")
+  daemon_trigger(daemon, {kind: "file_changed", path: "Foo.swift"})
+  let second = wait_for_iterations(daemon, first?.total_iterations ?? 0 + 1)
+  println(second?.total_iterations > first?.total_iterations)
+  println(contains(json_stringify(second?.recorded_messages ?? []), "Foo.swift"))
+  let stopped = daemon_stop(daemon)
+  println(stopped?.status == "stopped")
+  let resumed = daemon_resume(root)
+  let resumed_snap = daemon_snapshot(resumed)
+  println(resumed_snap?.total_iterations ?? 0 >= second?.total_iterations ?? 0)
+  daemon_trigger(resumed, {kind: "file_changed", path: "Bar.swift"})
+  let final_snap = wait_for_iterations(resumed, resumed_snap?.total_iterations ?? 0 + 1)
+  println(final_snap?.total_iterations > resumed_snap?.total_iterations)
+  let recorded = json_stringify(final_snap?.recorded_messages ?? [])
+  println(contains(recorded, "Foo.swift"))
+  println(contains(recorded, "Bar.swift"))
+  daemon_stop(resumed)
+  delete_file(root)
+}

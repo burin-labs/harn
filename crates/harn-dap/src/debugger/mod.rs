@@ -371,7 +371,9 @@ impl Debugger {
         let items: Vec<_> = targets
             .into_iter()
             .filter(|name| prefix_lower.is_empty() || name.to_lowercase().contains(&prefix_lower))
-            .take(200)
+            // Keep the response bounded, but large enough that the
+            // default builtin surface still fits even as stdlib grows.
+            .take(512)
             .map(|label| {
                 json!({
                     "label": label,
