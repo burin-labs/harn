@@ -220,7 +220,7 @@ async fn resolve_endpoint(
             Err(error) => {
                 let message = agent_card_fetch_error_message(&error);
                 last_error = Some(message);
-                if should_try_cleartext_fallback(scheme, &error) {
+                if should_try_cleartext_fallback(scheme, &error, &target.authority) {
                     continue;
                 }
                 break;
@@ -280,7 +280,7 @@ fn endpoint_from_card(
         A2aClientError::Discovery(format!("invalid A2A card url '{base_url}': {error}"))
     })?;
     let card_authority = url_authority(&base_url)?;
-    if card_authority != requested_authority {
+    if !authorities_equivalent(&card_authority, requested_authority) {
         return Err(A2aClientError::Discovery(format!(
             "A2A agent card url authority mismatch: requested '{requested_authority}', card returned '{card_authority}'"
         )));
@@ -329,8 +329,87 @@ fn card_resolution_schemes() -> [&'static str; 2] {
     ]
 }
 
-fn should_try_cleartext_fallback(scheme: &str, error: &AgentCardFetchError) -> bool {
-    scheme == "https" && matches!(error, AgentCardFetchError::ConnectRefused(_))
+/// Decide whether an HTTPS discovery failure should fall through to cleartext.
+///
+/// External targets only fall back on `ConnectionRefused` — the common "HTTPS
+/// port isn't listening" case. TLS handshake failures to an external host MUST
+/// NOT silently downgrade to HTTP, because an active network attacker can
+/// forge TLS errors to trigger a downgrade.
+///
+/// Loopback targets (`127.0.0.0/8`, `::1`, `localhost`) fall back on any
+/// discovery-style error. They cover the standard local-dev case where
+/// `harn serve` binds HTTP-only on `127.0.0.1:PORT`, and the SSRF threat
+/// model for loopback is already bounded — any attacker who can reach the
+/// local loopback already has code execution on the box.
+fn should_try_cleartext_fallback(
+    scheme: &str,
+    error: &AgentCardFetchError,
+    authority: &str,
+) -> bool {
+    if scheme != "https" {
+        return false;
+    }
+    match error {
+        AgentCardFetchError::Cancelled(_) => false,
+        AgentCardFetchError::ConnectRefused(_) => true,
+        AgentCardFetchError::Discovery(_) => is_loopback_authority(authority),
+    }
+}
+
+fn is_loopback_authority(authority: &str) -> bool {
+    let (host, _) = split_authority(authority);
+    if host.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+        return ip.is_loopback();
+    }
+    false
+}
+
+/// Return true when two authority strings refer to the same A2A endpoint.
+///
+/// Exact string equality is the default — an agent card that reports a
+/// different host than the one the client asked for is a security-relevant
+/// discrepancy (see harn#248 SSRF hardening). The one well-defined exception
+/// is loopback: `localhost`, `127.0.0.1`, `::1`, and the rest of
+/// `127.0.0.0/8` are all the same socket on this machine, and `harn serve`
+/// hardcodes `http://localhost:PORT` in its agent card even when a caller
+/// dials `127.0.0.1:PORT`. Treating both sides as loopback avoids a spurious
+/// mismatch in that case without widening the external-host trust boundary.
+fn authorities_equivalent(card_authority: &str, requested_authority: &str) -> bool {
+    if card_authority == requested_authority {
+        return true;
+    }
+    let (_, card_port) = split_authority(card_authority);
+    let (_, requested_port) = split_authority(requested_authority);
+    if card_port != requested_port {
+        return false;
+    }
+    is_loopback_authority(card_authority) && is_loopback_authority(requested_authority)
+}
+
+/// Split an authority into `(host, port_or_empty)`. Strips IPv6 brackets so
+/// `[::1]:8080` becomes `("::1", "8080")`.
+fn split_authority(authority: &str) -> (&str, &str) {
+    let (host_raw, port) = if authority.starts_with('[') {
+        // IPv6 bracketed form: "[addr]:port" or "[addr]".
+        if let Some(end) = authority.rfind(']') {
+            let host = &authority[..=end];
+            let rest = &authority[end + 1..];
+            let port = rest.strip_prefix(':').unwrap_or("");
+            (host, port)
+        } else {
+            (authority, "")
+        }
+    } else {
+        match authority.rsplit_once(':') {
+            Some((host, port)) => (host, port),
+            None => (authority, ""),
+        }
+    };
+    let host = host_raw.trim_start_matches('[').trim_end_matches(']');
+    (host, port)
 }
 
 fn agent_card_fetch_error_message(error: &AgentCardFetchError) -> String {
@@ -485,16 +564,74 @@ mod tests {
     fn cleartext_fallback_only_after_https_connect_refused() {
         assert!(should_try_cleartext_fallback(
             "https",
-            &AgentCardFetchError::ConnectRefused("connect refused".to_string())
+            &AgentCardFetchError::ConnectRefused("connect refused".to_string()),
+            "reviewer.example:443",
         ));
         assert!(!should_try_cleartext_fallback(
             "http",
-            &AgentCardFetchError::ConnectRefused("connect refused".to_string())
+            &AgentCardFetchError::ConnectRefused("connect refused".to_string()),
+            "reviewer.example:443",
         ));
         assert!(!should_try_cleartext_fallback(
             "https",
-            &AgentCardFetchError::Discovery("tls handshake failed".to_string())
+            &AgentCardFetchError::Discovery("tls handshake failed".to_string()),
+            "reviewer.example:443",
         ));
+    }
+
+    #[test]
+    fn cleartext_fallback_auto_allowed_for_loopback_authorities() {
+        // Local dev: harn serve is HTTP-only, so TLS handshake fails but we
+        // still need the HTTP fallback to succeed.
+        for authority in [
+            "127.0.0.1:8080",
+            "localhost:8080",
+            "[::1]:8080",
+            "127.1.2.3:9000",
+        ] {
+            assert!(
+                should_try_cleartext_fallback(
+                    "https",
+                    &AgentCardFetchError::Discovery("tls handshake failed".to_string()),
+                    authority,
+                ),
+                "expected cleartext fallback for loopback authority '{authority}'"
+            );
+        }
+    }
+
+    #[test]
+    fn cleartext_fallback_denies_external_tls_failures() {
+        // External target + TLS handshake failure must not downgrade — an
+        // attacker able to forge TLS errors shouldn't force cleartext.
+        for authority in [
+            "reviewer.example:443",
+            "8.8.8.8:443",
+            "192.168.1.10:8080",
+            "10.0.0.5:8443",
+        ] {
+            assert!(
+                !should_try_cleartext_fallback(
+                    "https",
+                    &AgentCardFetchError::Discovery("tls handshake failed".to_string()),
+                    authority,
+                ),
+                "cleartext fallback must be denied for external authority '{authority}'"
+            );
+        }
+    }
+
+    #[test]
+    fn is_loopback_authority_recognises_loopback_forms() {
+        assert!(is_loopback_authority("127.0.0.1:8080"));
+        assert!(is_loopback_authority("localhost:8080"));
+        assert!(is_loopback_authority("LOCALHOST:9000"));
+        assert!(is_loopback_authority("[::1]:8080"));
+        assert!(is_loopback_authority("127.5.5.5:1234"));
+        assert!(!is_loopback_authority("8.8.8.8:443"));
+        assert!(!is_loopback_authority("192.168.1.10:8080"));
+        assert!(!is_loopback_authority("example.com:443"));
+        assert!(!is_loopback_authority("reviewer.prod"));
     }
 
     #[test]
@@ -513,5 +650,67 @@ mod tests {
             error.to_string(),
             "A2A agent card url authority mismatch: requested 'trusted.example', card returned 'evil.example'"
         );
+    }
+
+    #[test]
+    fn endpoint_from_card_accepts_loopback_alias_pairs() {
+        // harn serve reports `http://localhost:PORT` in its card, but clients
+        // commonly dial `127.0.0.1:PORT`. Both refer to the same socket, so
+        // the authority check must not spuriously reject the pair.
+        let card = serde_json::json!({
+            "url": "http://localhost:8080",
+            "interfaces": [{"protocol": "jsonrpc", "url": "/rpc"}],
+        });
+        let endpoint = endpoint_from_card(
+            "http://127.0.0.1:8080/.well-known/a2a-agent".to_string(),
+            "127.0.0.1:8080",
+            "triage".to_string(),
+            &card,
+        )
+        .expect("loopback alias pair should be accepted");
+        assert_eq!(endpoint.rpc_url, "http://localhost:8080/rpc");
+
+        // IPv6 loopback `[::1]` also aliases to `127.0.0.1` / `localhost`.
+        let card_v6 = serde_json::json!({
+            "url": "http://[::1]:8080",
+            "interfaces": [{"protocol": "jsonrpc", "url": "/rpc"}],
+        });
+        let endpoint_v6 = endpoint_from_card(
+            "http://localhost:8080/.well-known/a2a-agent".to_string(),
+            "localhost:8080",
+            "triage".to_string(),
+            &card_v6,
+        )
+        .expect("IPv6 loopback alias should be accepted");
+        assert_eq!(endpoint_v6.rpc_url, "http://[::1]:8080/rpc");
+
+        // Port mismatch is still rejected even on loopback.
+        let card_wrong_port = serde_json::json!({
+            "url": "http://localhost:9000",
+            "interfaces": [{"protocol": "jsonrpc", "url": "/rpc"}],
+        });
+        let error = endpoint_from_card(
+            "http://127.0.0.1:8080/.well-known/a2a-agent".to_string(),
+            "127.0.0.1:8080",
+            "triage".to_string(),
+            &card_wrong_port,
+        )
+        .expect_err("mismatched ports must still be rejected even on loopback");
+        assert!(error
+            .to_string()
+            .contains("A2A agent card url authority mismatch"));
+    }
+
+    #[test]
+    fn authorities_equivalent_rejects_non_loopback_host_mismatch() {
+        assert!(!authorities_equivalent(
+            "internal.corp.example:443",
+            "trusted.example:443",
+        ));
+        assert!(!authorities_equivalent("10.0.0.5:8080", "127.0.0.1:8080",));
+        assert!(authorities_equivalent(
+            "trusted.example:443",
+            "trusted.example:443",
+        ));
     }
 }
