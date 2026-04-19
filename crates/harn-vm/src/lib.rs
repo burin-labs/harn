@@ -41,8 +41,9 @@ pub use connectors::{
     cron::{CatchupMode, CronConnector},
     hmac::verify_hmac_signed,
     ActivationHandle, ClientError, Connector, ConnectorClient, ConnectorCtx, ConnectorError,
-    ConnectorRegistry, InboxIndex, MetricsRegistry, ProviderPayloadSchema, RateLimitConfig,
-    RateLimiterFactory, RawInbound, TriggerBinding, TriggerKind, TriggerRegistry,
+    ConnectorRegistry, GenericWebhookConnector, InboxIndex, MetricsRegistry, ProviderPayloadSchema,
+    RateLimitConfig, RateLimiterFactory, RawInbound, TriggerBinding, TriggerKind, TriggerRegistry,
+    WebhookSignatureVariant,
 };
 pub use http::{register_http_builtins, reset_http_state};
 pub use llm::register_llm_builtins;

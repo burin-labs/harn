@@ -47,6 +47,7 @@ fn binding(id: &str, schedule: &str, timezone: &str, catchup_mode: CatchupMode) 
         provider: ProviderId::from("cron"),
         kind: TriggerKind::from("cron"),
         binding_id: id.to_string(),
+        dedupe_key: None,
         config: json!({
             "schedule": schedule,
             "timezone": timezone,
@@ -59,7 +60,7 @@ fn ctx(event_log: Arc<AnyEventLog>) -> ConnectorCtx {
     ConnectorCtx {
         event_log,
         secrets: Arc::new(FakeSecretProvider),
-        inbox: Arc::new(InboxIndex),
+        inbox: Arc::new(InboxIndex::default()),
         metrics: Arc::new(MetricsRegistry),
         rate_limiter: Arc::new(RateLimiterFactory::default()),
     }

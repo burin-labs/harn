@@ -72,6 +72,17 @@ granular archaeology.
   docs at `docs/src/connectors/authoring.md`. Foundation for
   upcoming MVP connectors (cron, webhooks, GitHub, Slack, Linear,
   Notion, A2A push).
+- **Generic webhook receiver connector (#168).** `harn_vm::connectors`
+  now ships a built-in `GenericWebhookConnector` for inbound HTTP
+  webhook deliveries. The connector verifies Standard Webhooks,
+  Stripe-style, and GitHub-style HMAC signatures through the shared
+  C-01 helper, normalizes verified payloads into `TriggerEvent`
+  using `GenericWebhookPayload`, records verification failures on
+  `audit.signature_verify`, exposes the built-in provider through
+  `ConnectorRegistry::list()`, and adds authoring docs at
+  `docs/src/connectors/webhook.md`. Listener routing/TLS integration
+  remains deferred to O-02, and durable inbox-backed dedupe remains
+  deferred to T-09.
 - **Secret-provider primitives for reactive runtime work (#194,
   closes #154).** `harn_vm::secrets` now provides `SecretProvider`,
   `ChainSecretProvider`, zeroizing `SecretBytes`, and concrete env +

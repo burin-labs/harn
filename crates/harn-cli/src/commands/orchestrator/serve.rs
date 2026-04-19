@@ -204,7 +204,7 @@ async fn initialize_connectors(
     let ctx = harn_vm::ConnectorCtx {
         event_log,
         secrets,
-        inbox: Arc::new(harn_vm::InboxIndex),
+        inbox: Arc::new(harn_vm::InboxIndex::default()),
         metrics: Arc::new(harn_vm::MetricsRegistry),
         rate_limiter: Arc::new(harn_vm::RateLimiterFactory::default()),
     };
@@ -245,6 +245,7 @@ fn trigger_binding_for(config: &ResolvedTriggerConfig) -> harn_vm::TriggerBindin
         provider: config.provider.clone(),
         kind: harn_vm::TriggerKind::from(trigger_kind_name(config.kind)),
         binding_id: config.id.clone(),
+        dedupe_key: None,
         config: JsonValue::Null,
     }
 }

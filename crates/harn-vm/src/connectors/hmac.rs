@@ -574,6 +574,9 @@ async fn reject<L: EventLog + ?Sized>(
         ConnectorError::DuplicateProvider(value) => {
             ConnectorError::DuplicateProvider(value.clone())
         }
+        ConnectorError::DuplicateDelivery(value) => {
+            ConnectorError::DuplicateDelivery(value.clone())
+        }
         ConnectorError::UnknownProvider(value) => ConnectorError::UnknownProvider(value.clone()),
         ConnectorError::MissingHeader(value) => ConnectorError::MissingHeader(value.clone()),
         ConnectorError::InvalidHeader { name, detail } => ConnectorError::InvalidHeader {
