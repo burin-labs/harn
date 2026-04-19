@@ -21,6 +21,7 @@ pub use async_builtin::{
     take_async_builtin_child_vm, AsyncBuiltinChildVmGuard,
 };
 pub use debug::{DebugAction, DebugState};
+pub use modules::resolve_module_import_path;
 pub use state::Vm;
 
 pub(crate) use state::{CallFrame, ExceptionHandler, IterState, ScopeSpan};

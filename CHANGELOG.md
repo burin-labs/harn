@@ -48,6 +48,18 @@ granular archaeology.
   retriggerable workers until a real terminal state, and the
   persisted worker snapshot keeps the new lifecycle/carry-policy
   fields across resume.
+- **`[[triggers]]` manifest overlay parsing and validation (#199,
+  closes #156).** `harn.toml` can now declare `[[triggers]]` entries
+  alongside `[[hooks]]`, with typed parsing for trigger kinds
+  (`cron`, `webhook`, `a2a-push`, `poll`, `stream`, `predicate`),
+  retry/priority/budget config, and kind-specific fields. The loader
+  reuses the manifest-extension ABI from #138 + #141 to resolve
+  handler and `when` identifiers against exported Harn functions.
+  Validation covers id uniqueness, handler URI schemes, cron
+  schedules, JMESPath dedupe expressions, and secret-id namespaces.
+  `harn doctor` now surfaces loaded triggers with id, kind, provider,
+  handler kind, and budget. Ships with example manifests for
+  github-new-issue, cron-daily-digest, and a2a-reviewer-fanout.
 
 ## v0.7.22
 

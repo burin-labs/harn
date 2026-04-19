@@ -118,6 +118,10 @@ pub(crate) async fn run_bench(path: &str, iterations: usize) {
                 connect_mcp_servers(&manifest.mcp, &mut vm).await;
             }
         }
+        if let Err(error) = package::collect_manifest_triggers(&mut vm, &extensions).await {
+            eprintln!("error: failed to validate manifest triggers: {error}");
+            process::exit(1);
+        }
         if let Err(error) = package::install_manifest_hooks(&mut vm, &extensions).await {
             eprintln!("error: failed to install manifest hooks: {error}");
             process::exit(1);

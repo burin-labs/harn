@@ -81,7 +81,7 @@ fn finalize_package_target(path: &Path) -> Option<PathBuf> {
     None
 }
 
-fn resolve_import_target(base: &Path, path: &str) -> PathBuf {
+pub fn resolve_module_import_path(base: &Path, path: &str) -> PathBuf {
     let mut file_path = base.join(path);
 
     if !file_path.exists() && file_path.extension().is_none() {
@@ -175,7 +175,7 @@ impl Vm {
                 .source_dir
                 .clone()
                 .unwrap_or_else(|| PathBuf::from("."));
-            let file_path = resolve_import_target(&base, path);
+            let file_path = resolve_module_import_path(&base, path);
 
             let canonical = file_path
                 .canonicalize()
@@ -444,7 +444,7 @@ impl Vm {
             .source_dir
             .clone()
             .unwrap_or_else(|| PathBuf::from("."));
-        let file_path = resolve_import_target(&base, import_path);
+        let file_path = resolve_module_import_path(&base, import_path);
         self.load_module_exports(&file_path).await
     }
 }

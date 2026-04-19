@@ -1,0 +1,5 @@
+import "std/triggers"
+
+pub fn should_forward(event: TriggerEvent) -> bool {
+  return event.provider == "a2a-push"
+}

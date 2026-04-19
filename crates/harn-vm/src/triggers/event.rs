@@ -444,6 +444,13 @@ pub fn reset_provider_catalog() {
         .expect("provider catalog poisoned") = ProviderCatalog::with_defaults();
 }
 
+pub fn registered_provider_schema_names() -> BTreeMap<String, String> {
+    provider_catalog()
+        .read()
+        .expect("provider catalog poisoned")
+        .schema_names()
+}
+
 fn provider_catalog() -> &'static RwLock<ProviderCatalog> {
     static PROVIDER_CATALOG: OnceLock<RwLock<ProviderCatalog>> = OnceLock::new();
     PROVIDER_CATALOG.get_or_init(|| RwLock::new(ProviderCatalog::with_defaults()))

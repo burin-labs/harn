@@ -1,12 +1,16 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::{fs, process};
 
-use serde::Deserialize;
+use chrono_tz::Tz;
+use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 
 const PKG_DIR: &str = ".harn/packages";
 const MANIFEST: &str = "harn.toml";
 const LOCK_FILE: &str = "harn.lock";
+const TRIGGER_RETRY_MAX_LIMIT: u32 = 100;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Manifest {
@@ -55,6 +59,12 @@ pub struct Manifest {
     /// the handlers themselves live in Harn modules.
     #[serde(default)]
     pub hooks: Vec<HookConfig>,
+    /// `[[triggers]]` array-of-tables — declarative event-driven trigger
+    /// registrations that resolve local handlers and predicates from Harn
+    /// modules at load time and preserve remote URI schemes for later
+    /// dispatcher work.
+    #[serde(default)]
+    pub triggers: Vec<TriggerManifestEntry>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -67,6 +77,98 @@ pub struct HookConfig {
 
 fn default_hook_pattern() -> String {
     "*".to_string()
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TriggerManifestEntry {
+    pub id: String,
+    pub kind: TriggerKind,
+    pub provider: harn_vm::ProviderId,
+    #[serde(rename = "match")]
+    pub match_: TriggerMatchExpr,
+    #[serde(default)]
+    pub when: Option<String>,
+    pub handler: String,
+    #[serde(default)]
+    pub dedupe_key: Option<String>,
+    #[serde(default)]
+    pub retry: TriggerRetrySpec,
+    #[serde(default)]
+    pub priority: TriggerPriority,
+    #[serde(default)]
+    pub budget: TriggerBudgetSpec,
+    #[serde(default)]
+    pub secrets: BTreeMap<String, String>,
+    #[serde(default)]
+    pub filter: Option<String>,
+    #[serde(flatten, default)]
+    pub kind_specific: BTreeMap<String, toml::Value>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum TriggerKind {
+    Webhook,
+    Cron,
+    Poll,
+    Stream,
+    Predicate,
+    A2aPush,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct TriggerMatchExpr {
+    #[serde(default)]
+    pub events: Vec<String>,
+    #[serde(flatten, default)]
+    pub extra: BTreeMap<String, toml::Value>,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TriggerRetrySpec {
+    #[serde(default)]
+    pub max: u32,
+    #[serde(default)]
+    pub backoff: TriggerRetryBackoff,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum TriggerRetryBackoff {
+    #[default]
+    Immediate,
+    Svix,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TriggerPriority {
+    High,
+    #[default]
+    Normal,
+    Low,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TriggerBudgetSpec {
+    #[serde(default)]
+    pub daily_cost_usd: Option<f64>,
+    #[serde(default)]
+    pub max_concurrent: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TriggerHandlerUri {
+    Local(TriggerFunctionRef),
+    A2a { target: String },
+    Worker { queue: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TriggerFunctionRef {
+    pub raw: String,
+    pub module_name: Option<String>,
+    pub function_name: String,
 }
 
 /// `[skills]` table body.
@@ -285,6 +387,7 @@ pub struct RuntimeExtensions {
     pub llm: Option<harn_vm::llm_config::ProvidersConfig>,
     pub capabilities: Option<harn_vm::llm::capabilities::CapabilitiesFile>,
     pub hooks: Vec<ResolvedHookConfig>,
+    pub triggers: Vec<ResolvedTriggerConfig>,
 }
 
 #[derive(Debug, Clone)]
@@ -294,6 +397,60 @@ pub struct ResolvedHookConfig {
     pub handler: String,
     pub manifest_dir: PathBuf,
     pub package_name: Option<String>,
+    pub exports: HashMap<String, String>,
+}
+
+#[derive(Debug, Clone)]
+#[allow(dead_code)] // Trigger metadata is carried forward for doctor output and downstream dispatcher work.
+pub struct ResolvedTriggerConfig {
+    pub id: String,
+    pub kind: TriggerKind,
+    pub provider: harn_vm::ProviderId,
+    pub match_: TriggerMatchExpr,
+    pub when: Option<String>,
+    pub handler: String,
+    pub dedupe_key: Option<String>,
+    pub retry: TriggerRetrySpec,
+    pub priority: TriggerPriority,
+    pub budget: TriggerBudgetSpec,
+    pub secrets: BTreeMap<String, String>,
+    pub filter: Option<String>,
+    pub kind_specific: BTreeMap<String, toml::Value>,
+    pub manifest_dir: PathBuf,
+    pub manifest_path: PathBuf,
+    pub package_name: Option<String>,
+    pub exports: HashMap<String, String>,
+    pub table_index: usize,
+}
+
+#[derive(Debug, Clone)]
+#[allow(dead_code)] // Collected trigger bindings are validated now and consumed by follow-up trigger dispatcher work.
+pub struct CollectedManifestTrigger {
+    pub config: ResolvedTriggerConfig,
+    pub handler: CollectedTriggerHandler,
+    pub when: Option<CollectedTriggerPredicate>,
+}
+
+#[derive(Debug, Clone)]
+#[allow(dead_code)] // Remote handler targets and resolved closures are retained for downstream trigger execution.
+pub enum CollectedTriggerHandler {
+    Local {
+        reference: TriggerFunctionRef,
+        closure: Rc<harn_vm::VmClosure>,
+    },
+    A2a {
+        target: String,
+    },
+    Worker {
+        queue: String,
+    },
+}
+
+#[derive(Debug, Clone)]
+#[allow(dead_code)] // Predicate closures are validated now and reused by later trigger dispatch work.
+pub struct CollectedTriggerPredicate {
+    pub reference: TriggerFunctionRef,
+    pub closure: Rc<harn_vm::VmClosure>,
 }
 
 #[derive(Debug, Clone)]
@@ -302,8 +459,8 @@ struct LocatedManifest {
     dir: PathBuf,
 }
 
-type HookModuleCacheKey = (PathBuf, Option<String>, String);
-type HookModuleExports = std::collections::BTreeMap<String, std::rc::Rc<harn_vm::VmClosure>>;
+type ManifestModuleCacheKey = (PathBuf, Option<String>, Option<String>);
+type ManifestModuleExports = BTreeMap<String, Rc<harn_vm::VmClosure>>;
 
 #[derive(Debug, Default)]
 struct LockFile {
@@ -465,8 +622,425 @@ fn resolved_hooks_from_manifest(
             handler: hook.handler.clone(),
             manifest_dir: manifest_dir.to_path_buf(),
             package_name: manifest.package.as_ref().and_then(|pkg| pkg.name.clone()),
+            exports: manifest.exports.clone(),
         })
         .collect()
+}
+
+fn resolved_triggers_from_manifest(
+    manifest: &Manifest,
+    manifest_dir: &Path,
+) -> Vec<ResolvedTriggerConfig> {
+    let manifest_path = manifest_dir.join(MANIFEST);
+    let package_name = manifest.package.as_ref().and_then(|pkg| pkg.name.clone());
+    manifest
+        .triggers
+        .iter()
+        .enumerate()
+        .map(|(table_index, trigger)| ResolvedTriggerConfig {
+            id: trigger.id.clone(),
+            kind: trigger.kind,
+            provider: trigger.provider.clone(),
+            match_: trigger.match_.clone(),
+            when: trigger.when.clone(),
+            handler: trigger.handler.clone(),
+            dedupe_key: trigger.dedupe_key.clone(),
+            retry: trigger.retry.clone(),
+            priority: trigger.priority,
+            budget: trigger.budget.clone(),
+            secrets: trigger.secrets.clone(),
+            filter: trigger.filter.clone(),
+            kind_specific: trigger.kind_specific.clone(),
+            manifest_dir: manifest_dir.to_path_buf(),
+            manifest_path: manifest_path.clone(),
+            package_name: package_name.clone(),
+            exports: manifest.exports.clone(),
+            table_index,
+        })
+        .collect()
+}
+
+#[derive(Debug, Clone)]
+struct TriggerFunctionSignature {
+    params: Vec<Option<harn_parser::TypeExpr>>,
+    return_type: Option<harn_parser::TypeExpr>,
+}
+
+fn manifest_trigger_location(trigger: &ResolvedTriggerConfig) -> String {
+    format!(
+        "{} [[triggers]] table #{} (id = {})",
+        trigger.manifest_path.display(),
+        trigger.table_index + 1,
+        trigger.id
+    )
+}
+
+fn trigger_error(trigger: &ResolvedTriggerConfig, message: impl Into<String>) -> String {
+    format!("{}: {}", manifest_trigger_location(trigger), message.into())
+}
+
+fn valid_identifier(value: &str) -> bool {
+    let mut chars = value.chars();
+    match chars.next() {
+        Some(ch) if ch == '_' || ch.is_ascii_alphabetic() => {}
+        _ => return false,
+    }
+    chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+}
+
+fn parse_local_trigger_ref(
+    raw: &str,
+    field_name: &str,
+    trigger: &ResolvedTriggerConfig,
+) -> Result<TriggerFunctionRef, String> {
+    if raw.trim().is_empty() {
+        return Err(trigger_error(
+            trigger,
+            format!("{field_name} cannot be empty"),
+        ));
+    }
+    if raw.contains("://") {
+        return Err(trigger_error(
+            trigger,
+            format!("{field_name} must reference a local function, not a URI"),
+        ));
+    }
+    if let Some((module_name, function_name)) = raw.rsplit_once("::") {
+        if module_name.trim().is_empty() || function_name.trim().is_empty() {
+            return Err(trigger_error(
+                trigger,
+                format!("{field_name} must use <module>::<function> when module-qualified"),
+            ));
+        }
+        if !valid_identifier(function_name) {
+            return Err(trigger_error(
+                trigger,
+                format!("{field_name} function name '{function_name}' is not a valid identifier"),
+            ));
+        }
+        return Ok(TriggerFunctionRef {
+            raw: raw.to_string(),
+            module_name: Some(module_name.to_string()),
+            function_name: function_name.to_string(),
+        });
+    }
+    if !valid_identifier(raw) {
+        return Err(trigger_error(
+            trigger,
+            format!("{field_name} '{raw}' is not a valid bare function identifier"),
+        ));
+    }
+    Ok(TriggerFunctionRef {
+        raw: raw.to_string(),
+        module_name: None,
+        function_name: raw.to_string(),
+    })
+}
+
+fn parse_trigger_handler_uri(trigger: &ResolvedTriggerConfig) -> Result<TriggerHandlerUri, String> {
+    let raw = trigger.handler.trim();
+    if let Some(target) = raw.strip_prefix("a2a://") {
+        if target.is_empty() {
+            return Err(trigger_error(
+                trigger,
+                "handler a2a:// target cannot be empty",
+            ));
+        }
+        return Ok(TriggerHandlerUri::A2a {
+            target: target.to_string(),
+        });
+    }
+    if let Some(queue) = raw.strip_prefix("worker://") {
+        if queue.is_empty() {
+            return Err(trigger_error(
+                trigger,
+                "handler worker:// queue cannot be empty",
+            ));
+        }
+        return Ok(TriggerHandlerUri::Worker {
+            queue: queue.to_string(),
+        });
+    }
+    if raw.contains("://") {
+        return Err(trigger_error(
+            trigger,
+            format!("handler URI scheme in '{raw}' is not implemented"),
+        ));
+    }
+    Ok(TriggerHandlerUri::Local(parse_local_trigger_ref(
+        raw, "handler", trigger,
+    )?))
+}
+
+fn parse_secret_id(raw: &str) -> Option<harn_vm::secrets::SecretId> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let (base, version) = match trimmed.rsplit_once('@') {
+        Some((base, version_text)) => {
+            let version = version_text.parse::<u64>().ok()?;
+            (base, harn_vm::secrets::SecretVersion::Exact(version))
+        }
+        None => (trimmed, harn_vm::secrets::SecretVersion::Latest),
+    };
+    let (namespace, name) = base.split_once('/')?;
+    if namespace.is_empty() || name.is_empty() {
+        return None;
+    }
+    Some(harn_vm::secrets::SecretId::new(namespace, name).with_version(version))
+}
+
+fn extract_kind_field<'a>(
+    trigger: &'a ResolvedTriggerConfig,
+    field: &str,
+) -> Option<&'a toml::Value> {
+    trigger.kind_specific.get(field)
+}
+
+fn parse_jmespath_expression(
+    trigger: &ResolvedTriggerConfig,
+    field_name: &str,
+    expr: &str,
+) -> Result<(), String> {
+    jmespath::compile(expr).map(|_| ()).map_err(|error| {
+        trigger_error(
+            trigger,
+            format!("{field_name} '{expr}' is invalid: {error}"),
+        )
+    })
+}
+
+fn validate_static_trigger_config(trigger: &ResolvedTriggerConfig) -> Result<(), String> {
+    if trigger.id.trim().is_empty() {
+        return Err(trigger_error(trigger, "id cannot be empty"));
+    }
+    let provider_schemas = harn_vm::registered_provider_schema_names();
+    if !provider_schemas.contains_key(trigger.provider.as_str()) {
+        return Err(trigger_error(
+            trigger,
+            format!("provider '{}' is not registered", trigger.provider.as_str()),
+        ));
+    }
+    if let Some(dedupe_key) = &trigger.dedupe_key {
+        parse_jmespath_expression(trigger, "dedupe_key", dedupe_key)?;
+    }
+    if let Some(filter) = &trigger.filter {
+        parse_jmespath_expression(trigger, "filter", filter)?;
+    }
+    if let Some(daily_cost_usd) = trigger.budget.daily_cost_usd {
+        if daily_cost_usd.is_sign_negative() {
+            return Err(trigger_error(
+                trigger,
+                "budget.daily_cost_usd must be greater than or equal to 0",
+            ));
+        }
+    }
+    if trigger.retry.max > TRIGGER_RETRY_MAX_LIMIT {
+        return Err(trigger_error(
+            trigger,
+            format!("retry.max must be less than or equal to {TRIGGER_RETRY_MAX_LIMIT}"),
+        ));
+    }
+    for (name, secret_ref) in &trigger.secrets {
+        let Some(secret_id) = parse_secret_id(secret_ref) else {
+            return Err(trigger_error(
+                trigger,
+                format!("secret '{name}' must use <namespace>/<name> syntax"),
+            ));
+        };
+        if secret_id.namespace != trigger.provider.as_str() {
+            return Err(trigger_error(
+                trigger,
+                format!(
+                    "secret '{name}' uses namespace '{}' but provider is '{}'",
+                    secret_id.namespace,
+                    trigger.provider.as_str()
+                ),
+            ));
+        }
+    }
+    if matches!(trigger.kind, TriggerKind::Cron) {
+        let Some(schedule) = extract_kind_field(trigger, "schedule").and_then(toml::Value::as_str)
+        else {
+            return Err(trigger_error(
+                trigger,
+                "cron triggers require a string schedule field",
+            ));
+        };
+        croner::Cron::from_str(schedule).map_err(|error| {
+            trigger_error(
+                trigger,
+                format!("invalid cron schedule '{schedule}': {error}"),
+            )
+        })?;
+        if let Some(timezone) =
+            extract_kind_field(trigger, "timezone").and_then(toml::Value::as_str)
+        {
+            timezone.parse::<Tz>().map_err(|error| {
+                trigger_error(
+                    trigger,
+                    format!("invalid cron timezone '{timezone}': {error}"),
+                )
+            })?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_static_trigger_configs(triggers: &[ResolvedTriggerConfig]) -> Result<(), String> {
+    let mut seen_ids = HashSet::new();
+    for trigger in triggers {
+        validate_static_trigger_config(trigger)?;
+        if !seen_ids.insert(trigger.id.clone()) {
+            return Err(trigger_error(
+                trigger,
+                format!(
+                    "duplicate trigger id '{}' across loaded manifests",
+                    trigger.id
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn manifest_module_source_path(
+    manifest_dir: &Path,
+    package_name: Option<&str>,
+    exports: &HashMap<String, String>,
+    module_name: Option<&str>,
+) -> Result<PathBuf, String> {
+    match module_name {
+        None => {
+            let path = manifest_dir.join("lib.harn");
+            if path.exists() {
+                Ok(path)
+            } else {
+                Err(format!(
+                    "no lib.harn found next to manifest in {}",
+                    manifest_dir.display()
+                ))
+            }
+        }
+        Some(module_name) if package_name.is_some_and(|pkg| pkg == module_name) => {
+            let path = manifest_dir.join("lib.harn");
+            if path.exists() {
+                Ok(path)
+            } else {
+                Err(format!(
+                    "module '{}' resolves to local lib.harn, but {} is missing",
+                    module_name,
+                    path.display()
+                ))
+            }
+        }
+        Some(module_name) if exports.contains_key(module_name) => {
+            let rel_path = exports.get(module_name).expect("checked export key exists");
+            let path = manifest_dir.join(rel_path);
+            if path.exists() {
+                Ok(path)
+            } else {
+                Err(format!(
+                    "export '{}' resolves to {}, but that path does not exist",
+                    module_name,
+                    path.display()
+                ))
+            }
+        }
+        Some(module_name) => {
+            let path = harn_vm::resolve_module_import_path(manifest_dir, module_name);
+            if path.exists() {
+                Ok(path)
+            } else {
+                Err(format!(
+                    "module '{}' could not be resolved from {}",
+                    module_name,
+                    manifest_dir.display()
+                ))
+            }
+        }
+    }
+}
+
+fn load_trigger_function_signatures(
+    path: &Path,
+) -> Result<BTreeMap<String, TriggerFunctionSignature>, String> {
+    let source = fs::read_to_string(path)
+        .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+    let program = harn_parser::parse_source(&source)
+        .map_err(|error| format!("failed to parse {}: {error}", path.display()))?;
+    let mut signatures = BTreeMap::new();
+    for node in &program {
+        let (_, inner) = harn_parser::peel_attributes(node);
+        if let harn_parser::Node::FnDecl {
+            name,
+            params,
+            return_type,
+            ..
+        } = &inner.node
+        {
+            signatures.insert(
+                name.clone(),
+                TriggerFunctionSignature {
+                    params: params.iter().map(|param| param.type_expr.clone()).collect(),
+                    return_type: return_type.clone(),
+                },
+            );
+        }
+    }
+    Ok(signatures)
+}
+
+async fn resolve_manifest_exports(
+    vm: &mut harn_vm::Vm,
+    manifest_dir: &Path,
+    package_name: Option<&str>,
+    exports: &HashMap<String, String>,
+    module_name: Option<&str>,
+) -> Result<ManifestModuleExports, String> {
+    match module_name {
+        None => {
+            let lib_path = manifest_module_source_path(manifest_dir, package_name, exports, None)?;
+            vm.load_module_exports(&lib_path)
+                .await
+                .map_err(|error| error.to_string())
+        }
+        Some(module_name) if package_name.is_some_and(|name| name == module_name) => {
+            let lib_path = manifest_module_source_path(
+                manifest_dir,
+                package_name,
+                exports,
+                Some(module_name),
+            )?;
+            vm.load_module_exports(&lib_path)
+                .await
+                .map_err(|error| error.to_string())
+        }
+        Some(module_name) if exports.contains_key(module_name) => {
+            let lib_path = manifest_module_source_path(
+                manifest_dir,
+                package_name,
+                exports,
+                Some(module_name),
+            )?;
+            vm.load_module_exports(&lib_path)
+                .await
+                .map_err(|error| error.to_string())
+        }
+        Some(module_name) => vm
+            .load_module_exports_from_import(module_name)
+            .await
+            .map_err(|error| error.to_string()),
+    }
+}
+
+fn is_trigger_event_type(ty: &harn_parser::TypeExpr) -> bool {
+    matches!(ty, harn_parser::TypeExpr::Named(name) if name == "TriggerEvent")
+}
+
+fn is_bool_type(ty: &harn_parser::TypeExpr) -> bool {
+    matches!(ty, harn_parser::TypeExpr::Named(name) if name == "bool")
 }
 
 fn manifest_capabilities(
@@ -490,6 +1064,7 @@ pub fn load_runtime_extensions(anchor: &Path) -> RuntimeExtensions {
     let mut llm = harn_vm::llm_config::ProvidersConfig::default();
     let mut capabilities = harn_vm::llm::capabilities::CapabilitiesFile::default();
     let mut hooks = Vec::new();
+    let mut triggers = Vec::new();
 
     for located in collect_package_manifests(&manifest_dir.join(PKG_DIR)) {
         llm.merge_from(&located.manifest.llm);
@@ -500,6 +1075,10 @@ pub fn load_runtime_extensions(anchor: &Path) -> RuntimeExtensions {
             &located.manifest,
             &located.dir,
         ));
+        triggers.extend(resolved_triggers_from_manifest(
+            &located.manifest,
+            &located.dir,
+        ));
     }
 
     llm.merge_from(&root_manifest.llm);
@@ -507,12 +1086,17 @@ pub fn load_runtime_extensions(anchor: &Path) -> RuntimeExtensions {
         merge_capability_overrides(&mut capabilities, file);
     }
     hooks.extend(resolved_hooks_from_manifest(&root_manifest, &manifest_dir));
+    triggers.extend(resolved_triggers_from_manifest(
+        &root_manifest,
+        &manifest_dir,
+    ));
 
     RuntimeExtensions {
         root_manifest: Some(root_manifest),
         llm: (!llm.is_empty()).then_some(llm),
         capabilities: (!is_empty_capabilities(&capabilities)).then_some(capabilities),
         hooks,
+        triggers,
     }
 }
 
@@ -522,36 +1106,12 @@ pub fn install_runtime_extensions(extensions: &RuntimeExtensions) {
     harn_vm::llm::capabilities::set_user_overrides(extensions.capabilities.clone());
 }
 
-async fn resolve_hook_exports(
-    vm: &mut harn_vm::Vm,
-    hook: &ResolvedHookConfig,
-    module_name: &str,
-) -> Result<HookModuleExports, String> {
-    let self_name_matches = hook
-        .package_name
-        .as_deref()
-        .is_some_and(|name| name == module_name);
-    if self_name_matches {
-        let lib_path = hook.manifest_dir.join("lib.harn");
-        if lib_path.exists() {
-            return vm
-                .load_module_exports(&lib_path)
-                .await
-                .map_err(|error| error.to_string());
-        }
-    }
-
-    vm.load_module_exports_from_import(module_name)
-        .await
-        .map_err(|error| error.to_string())
-}
-
 pub async fn install_manifest_hooks(
     vm: &mut harn_vm::Vm,
     extensions: &RuntimeExtensions,
 ) -> Result<(), String> {
     harn_vm::orchestration::clear_runtime_hooks();
-    let mut loaded_exports: HashMap<HookModuleCacheKey, HookModuleExports> = HashMap::new();
+    let mut loaded_exports: HashMap<ManifestModuleCacheKey, ManifestModuleExports> = HashMap::new();
     for hook in &extensions.hooks {
         let Some((module_name, function_name)) = hook.handler.rsplit_once("::") else {
             return Err(format!(
@@ -562,10 +1122,17 @@ pub async fn install_manifest_hooks(
         let cache_key = (
             hook.manifest_dir.clone(),
             hook.package_name.clone(),
-            module_name.to_string(),
+            Some(module_name.to_string()),
         );
         if !loaded_exports.contains_key(&cache_key) {
-            let exports = resolve_hook_exports(vm, hook, module_name).await?;
+            let exports = resolve_manifest_exports(
+                vm,
+                &hook.manifest_dir,
+                hook.package_name.as_deref(),
+                &hook.exports,
+                Some(module_name),
+            )
+            .await?;
             loaded_exports.insert(cache_key.clone(), exports);
         }
         let exports = loaded_exports
@@ -585,6 +1152,159 @@ pub async fn install_manifest_hooks(
         );
     }
     Ok(())
+}
+
+pub async fn collect_manifest_triggers(
+    vm: &mut harn_vm::Vm,
+    extensions: &RuntimeExtensions,
+) -> Result<Vec<CollectedManifestTrigger>, String> {
+    validate_static_trigger_configs(&extensions.triggers)?;
+    let mut loaded_exports: HashMap<ManifestModuleCacheKey, ManifestModuleExports> = HashMap::new();
+    let mut module_signatures: HashMap<PathBuf, BTreeMap<String, TriggerFunctionSignature>> =
+        HashMap::new();
+    let mut collected = Vec::new();
+
+    for trigger in &extensions.triggers {
+        let handler = parse_trigger_handler_uri(trigger)?;
+        let collected_handler = match handler {
+            TriggerHandlerUri::Local(reference) => {
+                let cache_key = (
+                    trigger.manifest_dir.clone(),
+                    trigger.package_name.clone(),
+                    reference.module_name.clone(),
+                );
+                if !loaded_exports.contains_key(&cache_key) {
+                    let exports = resolve_manifest_exports(
+                        vm,
+                        &trigger.manifest_dir,
+                        trigger.package_name.as_deref(),
+                        &trigger.exports,
+                        reference.module_name.as_deref(),
+                    )
+                    .await
+                    .map_err(|error| trigger_error(trigger, error))?;
+                    loaded_exports.insert(cache_key.clone(), exports);
+                }
+                let exports = loaded_exports
+                    .get(&cache_key)
+                    .expect("manifest trigger exports cached");
+                let Some(closure) = exports.get(&reference.function_name) else {
+                    return Err(trigger_error(
+                        trigger,
+                        format!(
+                            "handler '{}' is not exported by the resolved module",
+                            reference.raw
+                        ),
+                    ));
+                };
+                CollectedTriggerHandler::Local {
+                    reference,
+                    closure: closure.clone(),
+                }
+            }
+            TriggerHandlerUri::A2a { target } => CollectedTriggerHandler::A2a { target },
+            TriggerHandlerUri::Worker { queue } => CollectedTriggerHandler::Worker { queue },
+        };
+
+        let collected_when = if let Some(when_raw) = &trigger.when {
+            let reference = parse_local_trigger_ref(when_raw, "when", trigger)?;
+            let cache_key = (
+                trigger.manifest_dir.clone(),
+                trigger.package_name.clone(),
+                reference.module_name.clone(),
+            );
+            if !loaded_exports.contains_key(&cache_key) {
+                let exports = resolve_manifest_exports(
+                    vm,
+                    &trigger.manifest_dir,
+                    trigger.package_name.as_deref(),
+                    &trigger.exports,
+                    reference.module_name.as_deref(),
+                )
+                .await
+                .map_err(|error| trigger_error(trigger, error))?;
+                loaded_exports.insert(cache_key.clone(), exports);
+            }
+            let exports = loaded_exports
+                .get(&cache_key)
+                .expect("manifest trigger predicate exports cached");
+            let Some(closure) = exports.get(&reference.function_name) else {
+                return Err(trigger_error(
+                    trigger,
+                    format!(
+                        "when predicate '{}' is not exported by the resolved module",
+                        reference.raw
+                    ),
+                ));
+            };
+
+            let source_path = manifest_module_source_path(
+                &trigger.manifest_dir,
+                trigger.package_name.as_deref(),
+                &trigger.exports,
+                reference.module_name.as_deref(),
+            )
+            .map_err(|error| trigger_error(trigger, error))?;
+            if !module_signatures.contains_key(&source_path) {
+                let signatures = load_trigger_function_signatures(&source_path)
+                    .map_err(|error| trigger_error(trigger, error))?;
+                module_signatures.insert(source_path.clone(), signatures);
+            }
+            let signatures = module_signatures
+                .get(&source_path)
+                .expect("module signatures cached");
+            let Some(signature) = signatures.get(&reference.function_name) else {
+                return Err(trigger_error(
+                    trigger,
+                    format!(
+                        "when predicate '{}' must resolve to a function declaration",
+                        reference.raw
+                    ),
+                ));
+            };
+            if signature.params.len() != 1
+                || signature.params[0]
+                    .as_ref()
+                    .is_none_or(|param| !is_trigger_event_type(param))
+            {
+                return Err(trigger_error(
+                    trigger,
+                    format!(
+                        "when predicate '{}' must have signature fn(TriggerEvent) -> bool",
+                        reference.raw
+                    ),
+                ));
+            }
+            if signature
+                .return_type
+                .as_ref()
+                .is_none_or(|return_type| !is_bool_type(return_type))
+            {
+                return Err(trigger_error(
+                    trigger,
+                    format!(
+                        "when predicate '{}' must have signature fn(TriggerEvent) -> bool",
+                        reference.raw
+                    ),
+                ));
+            }
+
+            Some(CollectedTriggerPredicate {
+                reference,
+                closure: closure.clone(),
+            })
+        } else {
+            None
+        };
+
+        collected.push(CollectedManifestTrigger {
+            config: trigger.clone(),
+            handler: collected_handler,
+            when: collected_when,
+        });
+    }
+
+    Ok(collected)
 }
 
 fn absolutize_check_config_paths(mut config: CheckConfig, manifest_dir: &Path) -> CheckConfig {
@@ -1077,6 +1797,30 @@ fn expand_single_star_glob(path: &Path) -> Vec<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde::{Deserialize, Serialize};
+
+    #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+    struct TriggerTables {
+        #[serde(default)]
+        triggers: Vec<TriggerManifestEntry>,
+    }
+
+    fn test_vm() -> harn_vm::Vm {
+        let mut vm = harn_vm::Vm::new();
+        harn_vm::register_vm_stdlib(&mut vm);
+        vm
+    }
+
+    fn write_trigger_project(root: &Path, manifest: &str, lib_source: Option<&str>) -> PathBuf {
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        fs::write(root.join(MANIFEST), manifest).unwrap();
+        if let Some(source) = lib_source {
+            fs::write(root.join("lib.harn"), source).unwrap();
+        }
+        let harn_file = root.join("main.harn");
+        fs::write(&harn_file, "pipeline main() {}\n").unwrap();
+        harn_file
+    }
 
     #[test]
     fn preflight_severity_parsing_accepts_synonyms() {
@@ -1330,5 +2074,332 @@ handler = "acme::audit_edit"
         assert_eq!(extensions.hooks.len(), 2);
         assert_eq!(extensions.hooks[0].handler, "acme::audit_edit");
         assert_eq!(extensions.hooks[1].handler, "workspace::after_read");
+    }
+
+    #[test]
+    fn trigger_manifest_entries_round_trip_through_toml() {
+        let source = r#"
+[[triggers]]
+id = "github-new-issue"
+kind = "webhook"
+provider = "github"
+match = { events = ["issues.opened"] }
+when = "handlers::should_handle"
+handler = "handlers::on_new_issue"
+dedupe_key = "event.dedupe_key"
+retry = { max = 7, backoff = "svix" }
+priority = "high"
+budget = { daily_cost_usd = 5.0, max_concurrent = 10 }
+secrets = { signing_secret = "github/webhook-secret" }
+filter = "event.kind"
+
+[[triggers]]
+id = "daily-digest"
+kind = "cron"
+provider = "cron"
+match = { events = ["cron.tick"] }
+handler = "worker://digest-queue"
+schedule = "0 9 * * *"
+timezone = "America/Los_Angeles"
+"#;
+        let parsed: TriggerTables = toml::from_str(source).expect("trigger tables parse");
+        let encoded = toml::to_string(&parsed).expect("trigger tables encode");
+        let reparsed: TriggerTables = toml::from_str(&encoded).expect("trigger tables reparse");
+        assert_eq!(reparsed, parsed);
+    }
+
+    #[test]
+    fn load_runtime_extensions_collects_manifest_triggers_in_order() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        std::fs::create_dir_all(root.join(".harn/packages/acme")).unwrap();
+        fs::write(
+            root.join(MANIFEST),
+            r#"
+[package]
+name = "workspace"
+
+[[triggers]]
+id = "workspace-trigger"
+kind = "webhook"
+provider = "github"
+match = { events = ["issues.opened"] }
+handler = "worker://workspace-queue"
+"#,
+        )
+        .unwrap();
+        fs::write(
+            root.join(".harn/packages/acme/harn.toml"),
+            r#"
+[package]
+name = "acme"
+
+[[triggers]]
+id = "acme-trigger"
+kind = "cron"
+provider = "cron"
+match = { events = ["cron.tick"] }
+handler = "worker://acme-queue"
+schedule = "0 9 * * *"
+timezone = "UTC"
+"#,
+        )
+        .unwrap();
+        let harn_file = root.join("main.harn");
+        fs::write(&harn_file, "pipeline main() {}\n").unwrap();
+
+        let extensions = load_runtime_extensions(&harn_file);
+        assert_eq!(extensions.triggers.len(), 2);
+        assert_eq!(extensions.triggers[0].id, "acme-trigger");
+        assert_eq!(extensions.triggers[1].id, "workspace-trigger");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn collect_manifest_triggers_accepts_local_handler_and_when() {
+        let tmp = tempfile::tempdir().unwrap();
+        let harn_file = write_trigger_project(
+            tmp.path(),
+            r#"
+[package]
+name = "workspace"
+
+[exports]
+handlers = "lib.harn"
+
+[[triggers]]
+id = "github-new-issue"
+kind = "webhook"
+provider = "github"
+match = { events = ["issues.opened"] }
+when = "handlers::should_handle"
+handler = "handlers::on_new_issue"
+dedupe_key = "event.dedupe_key"
+retry = { max = 7, backoff = "svix" }
+priority = "normal"
+budget = { daily_cost_usd = 5.0, max_concurrent = 10 }
+secrets = { signing_secret = "github/webhook-secret" }
+filter = "event.kind"
+"#,
+            Some(
+                r#"
+import "std/triggers"
+
+pub fn on_new_issue(event: TriggerEvent) {
+  log(event.kind)
+}
+
+pub fn should_handle(event: TriggerEvent) -> bool {
+  return event.provider == "github"
+}
+"#,
+            ),
+        );
+        let extensions = load_runtime_extensions(&harn_file);
+        let mut vm = test_vm();
+        let collected = collect_manifest_triggers(&mut vm, &extensions)
+            .await
+            .expect("trigger collection succeeds");
+        assert_eq!(collected.len(), 1);
+        assert!(matches!(
+            &collected[0].handler,
+            CollectedTriggerHandler::Local { reference, .. } if reference.raw == "handlers::on_new_issue"
+        ));
+        assert_eq!(collected[0].config.priority, TriggerPriority::Normal);
+        assert!(collected[0].when.is_some());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn collect_manifest_triggers_rejects_duplicate_ids() {
+        let tmp = tempfile::tempdir().unwrap();
+        let harn_file = write_trigger_project(
+            tmp.path(),
+            r#"
+[[triggers]]
+id = "duplicate"
+kind = "webhook"
+provider = "github"
+match = { events = ["issues.opened"] }
+handler = "worker://queue-a"
+
+[[triggers]]
+id = "duplicate"
+kind = "webhook"
+provider = "github"
+match = { events = ["issues.edited"] }
+handler = "worker://queue-b"
+"#,
+            None,
+        );
+        let mut vm = test_vm();
+        let error = collect_manifest_triggers(&mut vm, &load_runtime_extensions(&harn_file))
+            .await
+            .unwrap_err();
+        assert!(error.contains("duplicate trigger id 'duplicate'"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn collect_manifest_triggers_rejects_unknown_provider() {
+        let tmp = tempfile::tempdir().unwrap();
+        let harn_file = write_trigger_project(
+            tmp.path(),
+            r#"
+[[triggers]]
+id = "unknown-provider"
+kind = "webhook"
+provider = "made-up"
+match = { events = ["issues.opened"] }
+handler = "worker://queue"
+"#,
+            None,
+        );
+        let mut vm = test_vm();
+        let error = collect_manifest_triggers(&mut vm, &load_runtime_extensions(&harn_file))
+            .await
+            .unwrap_err();
+        assert!(error.contains("provider 'made-up' is not registered"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn collect_manifest_triggers_rejects_unresolved_handler() {
+        let tmp = tempfile::tempdir().unwrap();
+        let harn_file = write_trigger_project(
+            tmp.path(),
+            r#"
+[package]
+name = "workspace"
+
+[exports]
+handlers = "lib.harn"
+
+[[triggers]]
+id = "missing-handler"
+kind = "webhook"
+provider = "github"
+match = { events = ["issues.opened"] }
+handler = "handlers::missing"
+"#,
+            Some(
+                r#"
+import "std/triggers"
+
+pub fn on_new_issue(event: TriggerEvent) {
+  log(event.kind)
+}
+"#,
+            ),
+        );
+        let mut vm = test_vm();
+        let error = collect_manifest_triggers(&mut vm, &load_runtime_extensions(&harn_file))
+            .await
+            .unwrap_err();
+        assert!(error.contains("handler 'handlers::missing' is not exported"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn collect_manifest_triggers_rejects_malformed_cron() {
+        let tmp = tempfile::tempdir().unwrap();
+        let harn_file = write_trigger_project(
+            tmp.path(),
+            r#"
+[[triggers]]
+id = "bad-cron"
+kind = "cron"
+provider = "cron"
+match = { events = ["cron.tick"] }
+handler = "worker://queue"
+schedule = "not a cron"
+timezone = "America/Los_Angeles"
+"#,
+            None,
+        );
+        let mut vm = test_vm();
+        let error = collect_manifest_triggers(&mut vm, &load_runtime_extensions(&harn_file))
+            .await
+            .unwrap_err();
+        assert!(error.contains("invalid cron schedule"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn collect_manifest_triggers_rejects_invalid_dedupe_expression() {
+        let tmp = tempfile::tempdir().unwrap();
+        let harn_file = write_trigger_project(
+            tmp.path(),
+            r#"
+[[triggers]]
+id = "bad-dedupe"
+kind = "webhook"
+provider = "github"
+match = { events = ["issues.opened"] }
+handler = "worker://queue"
+dedupe_key = "["
+"#,
+            None,
+        );
+        let mut vm = test_vm();
+        let error = collect_manifest_triggers(&mut vm, &load_runtime_extensions(&harn_file))
+            .await
+            .unwrap_err();
+        assert!(error.contains("dedupe_key"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn collect_manifest_triggers_rejects_secret_namespace_mismatch() {
+        let tmp = tempfile::tempdir().unwrap();
+        let harn_file = write_trigger_project(
+            tmp.path(),
+            r#"
+[[triggers]]
+id = "bad-secret"
+kind = "webhook"
+provider = "github"
+match = { events = ["issues.opened"] }
+handler = "worker://queue"
+secrets = { signing_secret = "slack/webhook-secret" }
+"#,
+            None,
+        );
+        let mut vm = test_vm();
+        let error = collect_manifest_triggers(&mut vm, &load_runtime_extensions(&harn_file))
+            .await
+            .unwrap_err();
+        assert!(error.contains("uses namespace 'slack'"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn collect_manifest_triggers_rejects_invalid_when_signature() {
+        let tmp = tempfile::tempdir().unwrap();
+        let harn_file = write_trigger_project(
+            tmp.path(),
+            r#"
+[package]
+name = "workspace"
+
+[exports]
+handlers = "lib.harn"
+
+[[triggers]]
+id = "bad-when"
+kind = "webhook"
+provider = "github"
+match = { events = ["issues.opened"] }
+when = "handlers::should_handle"
+handler = "worker://queue"
+"#,
+            Some(
+                r#"
+import "std/triggers"
+
+pub fn should_handle(event: TriggerEvent) -> string {
+  return event.kind
+}
+"#,
+            ),
+        );
+        let mut vm = test_vm();
+        let error = collect_manifest_triggers(&mut vm, &load_runtime_extensions(&harn_file))
+            .await
+            .unwrap_err();
+        assert!(error.contains("must have signature fn(TriggerEvent) -> bool"));
     }
 }

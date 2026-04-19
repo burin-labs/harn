@@ -1,0 +1,5 @@
+import "std/triggers"
+
+pub fn send_daily_digest(event: TriggerEvent) {
+  log("running digest for ${event.kind}")
+}
