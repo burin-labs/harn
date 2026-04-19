@@ -82,14 +82,14 @@ pub use triggers::{
     registered_provider_schema_names, reset_provider_catalog, resolve_live_trigger_binding,
     run_trigger_harness_fixture, snapshot_dispatcher_stats, snapshot_trigger_bindings,
     unpin_trigger_binding, DispatchError, DispatchOutcome, DispatchStatus, Dispatcher,
-    DispatcherStatsSnapshot, HeaderRedactionPolicy, InboxIndex, ProviderCatalog,
-    ProviderCatalogError, ProviderId, ProviderMetadata, ProviderOutboundMethod, ProviderPayload,
-    ProviderRuntimeMetadata, ProviderSchema, ProviderSecretRequirement, RetryPolicy,
-    SignatureStatus, SignatureVerificationMetadata, TenantId, TraceId, TriggerBindingSnapshot,
-    TriggerBindingSource, TriggerBindingSpec, TriggerDispatchOutcome, TriggerEvent, TriggerEventId,
-    TriggerHandlerSpec, TriggerHarnessResult, TriggerId, TriggerMetricsSnapshot,
-    TriggerPredicateSpec, TriggerRegistryError, TriggerRetryConfig, TriggerState,
-    DEFAULT_INBOX_RETENTION_DAYS, TRIGGER_INBOX_TOPIC, TRIGGER_TEST_FIXTURES,
+    DispatcherDrainReport, DispatcherStatsSnapshot, HeaderRedactionPolicy, InboxIndex,
+    ProviderCatalog, ProviderCatalogError, ProviderId, ProviderMetadata, ProviderOutboundMethod,
+    ProviderPayload, ProviderRuntimeMetadata, ProviderSchema, ProviderSecretRequirement,
+    RetryPolicy, SignatureStatus, SignatureVerificationMetadata, TenantId, TraceId,
+    TriggerBindingSnapshot, TriggerBindingSource, TriggerBindingSpec, TriggerDispatchOutcome,
+    TriggerEvent, TriggerEventId, TriggerHandlerSpec, TriggerHarnessResult, TriggerId,
+    TriggerMetricsSnapshot, TriggerPredicateSpec, TriggerRegistryError, TriggerRetryConfig,
+    TriggerState, DEFAULT_INBOX_RETENTION_DAYS, TRIGGER_INBOX_TOPIC, TRIGGER_TEST_FIXTURES,
 };
 pub use value::*;
 pub use vm::*;

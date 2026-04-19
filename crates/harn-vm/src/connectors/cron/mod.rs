@@ -19,7 +19,7 @@ use crate::triggers::{
     DEFAULT_INBOX_RETENTION_DAYS,
 };
 
-use self::scheduler::{run_tick_loop, Clock, CronSchedule, RealClock, TickHandler};
+use self::scheduler::{run_tick_loop, Clock, CronSchedule, RealClock, ShutdownSignal, TickHandler};
 use self::state::{CronStateStore, PersistedCronState};
 
 pub(crate) mod scheduler;
@@ -48,6 +48,7 @@ pub struct CronConnector {
     clock: Arc<dyn Clock>,
     sink_override: Option<Arc<dyn CronEventSink>>,
     tasks: Mutex<Vec<JoinHandle<()>>>,
+    shutdown: Mutex<Arc<ShutdownSignal>>,
 }
 
 impl CronConnector {
@@ -64,6 +65,7 @@ impl CronConnector {
             clock,
             sink_override: None,
             tasks: Mutex::new(Vec::new()),
+            shutdown: Mutex::new(Arc::new(ShutdownSignal::default())),
         }
     }
 
@@ -84,6 +86,21 @@ impl CronConnector {
                 )
             })
     }
+
+    fn request_stop(&self) {
+        self.shutdown
+            .lock()
+            .expect("cron connector shutdown mutex poisoned")
+            .request_stop();
+    }
+
+    fn take_tasks(&self) -> Vec<JoinHandle<()>> {
+        self.tasks
+            .lock()
+            .expect("cron connector tasks mutex poisoned")
+            .drain(..)
+            .collect()
+    }
 }
 
 impl Default for CronConnector {
@@ -94,6 +111,7 @@ impl Default for CronConnector {
 
 impl Drop for CronConnector {
     fn drop(&mut self) {
+        self.request_stop();
         let mut tasks = self
             .tasks
             .lock()
@@ -127,6 +145,11 @@ impl Connector for CronConnector {
         bindings: &[TriggerBinding],
     ) -> Result<ActivationHandle, ConnectorError> {
         let ctx = self.context()?;
+        let shutdown = Arc::new(ShutdownSignal::default());
+        *self
+            .shutdown
+            .lock()
+            .expect("cron connector shutdown mutex poisoned") = shutdown.clone();
         let state_store = Arc::new(CronStateStore::new(ctx.event_log.clone()));
         let sink: Arc<dyn CronEventSink> = self.sink_override.clone().unwrap_or_else(|| {
             Arc::new(EventLogCronEventSink::new(
@@ -174,6 +197,7 @@ impl Connector for CronConnector {
                 sink,
                 state_store,
             });
+            let shutdown = shutdown.clone();
             let task = tokio::spawn(async move {
                 let _ = run_tick_loop(
                     handler.trigger.schedule.clone(),
@@ -181,6 +205,7 @@ impl Connector for CronConnector {
                     cursor,
                     catchup_ticks,
                     handler,
+                    shutdown,
                 )
                 .await;
             });
@@ -194,6 +219,30 @@ impl Connector for CronConnector {
             self.provider_id.clone(),
             bindings.len(),
         ))
+    }
+
+    async fn shutdown(&self, deadline: StdDuration) -> Result<(), ConnectorError> {
+        self.request_stop();
+        let pending = self.take_tasks();
+
+        if pending.is_empty() {
+            return Ok(());
+        }
+
+        let wait_all = async {
+            for task in pending {
+                let _ = task.await;
+            }
+        };
+        tokio::time::timeout(deadline, wait_all)
+            .await
+            .map_err(|_| {
+                ConnectorError::Activation(format!(
+                    "cron connector shutdown exceeded {}s",
+                    deadline.as_secs()
+                ))
+            })?;
+        Ok(())
     }
 
     fn normalize_inbound(&self, _raw: RawInbound) -> Result<TriggerEvent, ConnectorError> {

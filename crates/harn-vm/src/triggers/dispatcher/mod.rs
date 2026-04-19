@@ -8,6 +8,7 @@ use std::time::Duration;
 use futures::{pin_mut, StreamExt};
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
+use tokio::sync::Notify;
 
 use crate::event_log::{active_event_log, AnyEventLog, EventLog, LogError, LogEvent, Topic};
 use crate::llm::vm_value_to_json;
@@ -68,6 +69,7 @@ struct DispatcherRuntimeState {
     dlq: Mutex<Vec<DlqEntry>>,
     cancel_tokens: Mutex<Vec<Arc<std::sync::atomic::AtomicBool>>>,
     shutting_down: std::sync::atomic::AtomicBool,
+    idle_notify: Notify,
 }
 
 impl Default for DispatcherRuntimeState {
@@ -78,6 +80,7 @@ impl Default for DispatcherRuntimeState {
             dlq: Mutex::new(Vec::new()),
             cancel_tokens: Mutex::new(Vec::new()),
             shutting_down: std::sync::atomic::AtomicBool::new(false),
+            idle_notify: Notify::new(),
         }
     }
 }
@@ -113,6 +116,22 @@ pub struct DispatchOutcome {
     pub replay_of_event_id: Option<String>,
     pub result: Option<serde_json::Value>,
     pub error: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct InboxEnvelope {
+    pub trigger_id: Option<String>,
+    pub binding_version: Option<u32>,
+    pub event: TriggerEvent,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DispatcherDrainReport {
+    pub drained: bool,
+    pub in_flight: u64,
+    pub retry_queue_depth: u64,
+    pub dlq_depth: u64,
 }
 
 impl Default for DispatchOutcome {
@@ -251,10 +270,23 @@ impl Dispatcher {
     }
 
     pub async fn enqueue(&self, event: TriggerEvent) -> Result<u64, DispatchError> {
+        self.enqueue_targeted(None, None, event).await
+    }
+
+    pub async fn enqueue_targeted(
+        &self,
+        trigger_id: Option<String>,
+        binding_version: Option<u32>,
+        event: TriggerEvent,
+    ) -> Result<u64, DispatchError> {
         let topic = Topic::new(TRIGGER_INBOX_TOPIC).expect("static trigger.inbox topic is valid");
         let headers = event_headers(&event, None, None, None);
-        let payload = serde_json::to_value(&event)
-            .map_err(|error| DispatchError::Serde(error.to_string()))?;
+        let payload = serde_json::to_value(InboxEnvelope {
+            trigger_id,
+            binding_version,
+            event,
+        })
+        .map_err(|error| DispatchError::Serde(error.to_string()))?;
         self.event_log
             .append(
                 &topic,
@@ -280,11 +312,11 @@ impl Dispatcher {
                     if event.kind != "event_ingested" {
                         continue;
                     }
-                    let trigger_event: TriggerEvent = serde_json::from_value(event.payload)
+                    let envelope: InboxEnvelope = serde_json::from_value(event.payload)
                         .map_err(|error| DispatchError::Serde(error.to_string()))?;
                     let dispatcher = self.clone();
                     tokio::task::spawn_local(async move {
-                        let _ = dispatcher.dispatch_event(trigger_event).await;
+                        let _ = dispatcher.dispatch_inbox_envelope(envelope).await;
                     });
                 }
                 _ = recv_cancel(&mut cancel_rx) => break,
@@ -292,6 +324,78 @@ impl Dispatcher {
         }
 
         Ok(())
+    }
+
+    pub async fn drain(&self, timeout: Duration) -> Result<DispatcherDrainReport, DispatchError> {
+        let deadline = tokio::time::Instant::now() + timeout;
+        loop {
+            let snapshot = self.snapshot();
+            if snapshot.in_flight == 0 && snapshot.retry_queue_depth == 0 {
+                return Ok(DispatcherDrainReport {
+                    drained: true,
+                    in_flight: snapshot.in_flight,
+                    retry_queue_depth: snapshot.retry_queue_depth,
+                    dlq_depth: snapshot.dlq_depth,
+                });
+            }
+
+            let notified = self.state.idle_notify.notified();
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            if remaining.is_zero() {
+                return Ok(DispatcherDrainReport {
+                    drained: false,
+                    in_flight: snapshot.in_flight,
+                    retry_queue_depth: snapshot.retry_queue_depth,
+                    dlq_depth: snapshot.dlq_depth,
+                });
+            }
+            if tokio::time::timeout(remaining, notified).await.is_err() {
+                let snapshot = self.snapshot();
+                return Ok(DispatcherDrainReport {
+                    drained: false,
+                    in_flight: snapshot.in_flight,
+                    retry_queue_depth: snapshot.retry_queue_depth,
+                    dlq_depth: snapshot.dlq_depth,
+                });
+            }
+        }
+    }
+
+    pub async fn dispatch_inbox_envelope(
+        &self,
+        envelope: InboxEnvelope,
+    ) -> Result<Vec<DispatchOutcome>, DispatchError> {
+        if let Some(trigger_id) = envelope.trigger_id {
+            let binding = super::registry::resolve_live_trigger_binding(
+                &trigger_id,
+                envelope.binding_version,
+            )
+            .map_err(|error| DispatchError::Registry(error.to_string()))?;
+            return Ok(vec![
+                self.dispatch_with_replay(&binding, envelope.event, None)
+                    .await?,
+            ]);
+        }
+
+        let cron_target = match &envelope.event.provider_payload {
+            crate::triggers::ProviderPayload::Known(
+                crate::triggers::event::KnownProviderPayload::Cron(payload),
+            ) => payload.cron_id.clone(),
+            _ => None,
+        };
+        if let Some(trigger_id) = cron_target {
+            let binding = super::registry::resolve_live_trigger_binding(
+                &trigger_id,
+                envelope.binding_version,
+            )
+            .map_err(|error| DispatchError::Registry(error.to_string()))?;
+            return Ok(vec![
+                self.dispatch_with_replay(&binding, envelope.event, None)
+                    .await?,
+            ]);
+        }
+
+        self.dispatch_event(envelope.event).await
     }
 
     pub async fn dispatch_event(
@@ -447,7 +551,7 @@ impl Dispatcher {
                 )
                 .await
                 .map_err(|error| DispatchError::Registry(error.to_string()))?;
-                self.state.in_flight.fetch_sub(1, Ordering::Relaxed);
+                decrement_in_flight(&self.state);
                 return Ok(DispatchOutcome {
                     trigger_id: binding.id.as_str().to_string(),
                     binding_key: binding.binding_key(),
@@ -623,7 +727,7 @@ impl Dispatcher {
                     )
                     .await
                     .map_err(|error| DispatchError::Registry(error.to_string()))?;
-                    self.state.in_flight.fetch_sub(1, Ordering::Relaxed);
+                    decrement_in_flight(&self.state);
                     return Ok(DispatchOutcome {
                         trigger_id: binding.id.as_str().to_string(),
                         binding_key: binding.binding_key(),
@@ -706,7 +810,7 @@ impl Dispatcher {
                         .map_err(|registry_error| {
                             DispatchError::Registry(registry_error.to_string())
                         })?;
-                        self.state.in_flight.fetch_sub(1, Ordering::Relaxed);
+                        decrement_in_flight(&self.state);
                         return Ok(DispatchOutcome {
                             trigger_id: binding.id.as_str().to_string(),
                             binding_key: binding.binding_key(),
@@ -795,7 +899,7 @@ impl Dispatcher {
                         self.state.retry_queue_depth.fetch_add(1, Ordering::Relaxed);
                         let sleep_result =
                             sleep_or_cancel(delay, &mut self.cancel_tx.subscribe()).await;
-                        self.state.retry_queue_depth.fetch_sub(1, Ordering::Relaxed);
+                        decrement_retry_queue_depth(&self.state);
                         if sleep_result.is_err() {
                             finish_in_flight(
                                 binding.id.as_str(),
@@ -806,7 +910,7 @@ impl Dispatcher {
                             .map_err(|registry_error| {
                                 DispatchError::Registry(registry_error.to_string())
                             })?;
-                            self.state.in_flight.fetch_sub(1, Ordering::Relaxed);
+                            decrement_in_flight(&self.state);
                             return Ok(DispatchOutcome {
                                 trigger_id: binding.id.as_str().to_string(),
                                 binding_key: binding.binding_key(),
@@ -902,7 +1006,7 @@ impl Dispatcher {
                     .map_err(|registry_error| {
                         DispatchError::Registry(registry_error.to_string())
                     })?;
-                    self.state.in_flight.fetch_sub(1, Ordering::Relaxed);
+                    decrement_in_flight(&self.state);
                     return Ok(DispatchOutcome {
                         trigger_id: binding.id.as_str().to_string(),
                         binding_key: binding.binding_key(),
@@ -926,7 +1030,7 @@ impl Dispatcher {
         )
         .await
         .map_err(|error| DispatchError::Registry(error.to_string()))?;
-        self.state.in_flight.fetch_sub(1, Ordering::Relaxed);
+        decrement_in_flight(&self.state);
         Ok(DispatchOutcome {
             trigger_id: binding.id.as_str().to_string(),
             binding_key: binding.binding_key(),
@@ -1108,6 +1212,20 @@ impl Dispatcher {
         )
         .await
         .map_err(DispatchError::from)
+    }
+}
+
+fn decrement_in_flight(state: &DispatcherRuntimeState) {
+    let previous = state.in_flight.fetch_sub(1, Ordering::Relaxed);
+    if previous == 1 && state.retry_queue_depth.load(Ordering::Relaxed) == 0 {
+        state.idle_notify.notify_waiters();
+    }
+}
+
+fn decrement_retry_queue_depth(state: &DispatcherRuntimeState) {
+    let previous = state.retry_queue_depth.fetch_sub(1, Ordering::Relaxed);
+    if previous == 1 && state.in_flight.load(Ordering::Relaxed) == 0 {
+        state.idle_notify.notify_waiters();
     }
 }
 

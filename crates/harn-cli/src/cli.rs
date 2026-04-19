@@ -516,6 +516,9 @@ pub(crate) struct OrchestratorServeArgs {
     /// PEM-encoded private key for HTTPS termination.
     #[arg(long, env = "HARN_ORCHESTRATOR_KEY", value_name = "PATH")]
     pub key: Option<PathBuf>,
+    /// Seconds to wait for connector and dispatcher drain before forcing shutdown.
+    #[arg(long = "shutdown-timeout", default_value_t = 30, value_name = "SECS")]
+    pub shutdown_timeout: u64,
     /// Runtime role to boot. Multi-tenant is a stub for now.
     #[arg(
         long,
@@ -920,6 +923,8 @@ mod tests {
             "tls/cert.pem",
             "--key",
             "tls/key.pem",
+            "--shutdown-timeout",
+            "45",
             "--role",
             "single-tenant",
         ]);
@@ -935,6 +940,7 @@ mod tests {
         assert_eq!(serve.bind.to_string(), "0.0.0.0:8080");
         assert_eq!(serve.cert, Some(PathBuf::from("tls/cert.pem")));
         assert_eq!(serve.key, Some(PathBuf::from("tls/key.pem")));
+        assert_eq!(serve.shutdown_timeout, 45);
         assert_eq!(
             serve.role,
             crate::commands::orchestrator::role::OrchestratorRole::SingleTenant

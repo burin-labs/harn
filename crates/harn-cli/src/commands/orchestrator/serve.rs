@@ -2,12 +2,15 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
-use serde::Serialize;
+use futures::StreamExt;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
+use tokio::sync::watch;
 
 use harn_vm::event_log::EventLog;
 
@@ -23,9 +26,17 @@ use crate::package::{
 const LIFECYCLE_TOPIC: &str = "orchestrator.lifecycle";
 const MANIFEST_TOPIC: &str = "orchestrator.manifest";
 const STATE_SNAPSHOT_FILE: &str = "orchestrator-state.json";
+const PENDING_TOPIC: &str = "orchestrator.triggers.pending";
+const CRON_TICK_TOPIC: &str = "connectors.cron.tick";
 
 pub(crate) async fn run(args: OrchestratorServeArgs) -> Result<(), String> {
+    let local = tokio::task::LocalSet::new();
+    local.run_until(async move { run_local(args).await }).await
+}
+
+async fn run_local(args: OrchestratorServeArgs) -> Result<(), String> {
     harn_vm::reset_thread_local_state();
+    let shutdown_timeout = Duration::from_secs(args.shutdown_timeout.max(1));
 
     let tls = TlsFiles::from_args(args.cert.clone(), args.key.clone())?;
     let config_path = absolutize_from_cwd(&args.local.config)?;
@@ -115,6 +126,11 @@ pub(crate) async fn run(args: OrchestratorServeArgs) -> Result<(), String> {
         format_activation_summary(&connector_runtime.activations)
     );
 
+    let dispatcher = harn_vm::Dispatcher::with_event_log(vm, event_log.clone());
+    let pending_pump = spawn_pending_pump(event_log.clone(), dispatcher.clone())?;
+    let cron_pump = spawn_cron_pump(event_log.clone(), dispatcher.clone())?;
+    let inbox_pump = spawn_inbox_pump(event_log.clone(), dispatcher.clone())?;
+
     let listener = ListenerRuntime::start(ListenerConfig {
         bind: args.bind,
         tls,
@@ -173,6 +189,7 @@ pub(crate) async fn run(args: OrchestratorServeArgs) -> Result<(), String> {
             "trigger_count": live_triggers.len(),
             "connector_count": connector_runtime.providers.len(),
             "tls_enabled": listener.scheme() == "https",
+            "shutdown_timeout_secs": shutdown_timeout.as_secs(),
         }),
     )
     .await?;
@@ -205,14 +222,20 @@ pub(crate) async fn run(args: OrchestratorServeArgs) -> Result<(), String> {
             secret_chain_display: &secret_chain_display,
             triggers: &live_triggers,
             connectors: &connector_runtime,
+            shutdown_timeout,
         },
         listener,
+        dispatcher,
+        pending_pump,
+        cron_pump,
+        inbox_pump,
     )
     .await
 }
 
 struct ConnectorRuntime {
     _registry: harn_vm::ConnectorRegistry,
+    handles: Vec<harn_vm::connectors::ConnectorHandle>,
     providers: Vec<String>,
     activations: Vec<harn_vm::ActivationHandle>,
 }
@@ -269,6 +292,7 @@ async fn initialize_connectors(
     // referenced by a trigger but *not* already in the catalog
     // (skip-if-already-registered).
     let mut providers = Vec::new();
+    let mut handles = Vec::new();
     for (provider, kinds) in grouped_kinds {
         let provider_name = provider.as_str().to_string();
         if registry.get(&provider).is_none() {
@@ -286,6 +310,7 @@ async fn initialize_connectors(
             .init(ctx.clone())
             .await
             .map_err(|error| error.to_string())?;
+        handles.push(handle.clone());
         providers.push(provider_name);
     }
 
@@ -296,6 +321,7 @@ async fn initialize_connectors(
 
     Ok(ConnectorRuntime {
         _registry: registry,
+        handles,
         providers,
         activations,
     })
@@ -473,6 +499,172 @@ fn handler_kind(handler: &CollectedTriggerHandler) -> &'static str {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PumpMode {
+    Running,
+    Draining { up_to: u64 },
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct PumpStats {
+    last_seen: u64,
+    processed: u64,
+}
+
+struct PumpHandle {
+    mode_tx: watch::Sender<PumpMode>,
+    join: tokio::task::JoinHandle<Result<PumpStats, String>>,
+}
+
+impl PumpHandle {
+    async fn drain(self, up_to: u64) -> Result<PumpStats, String> {
+        let _ = self.mode_tx.send(PumpMode::Draining { up_to });
+        match self.join.await {
+            Ok(result) => result,
+            Err(error) => Err(format!("pump task join failed: {error}")),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct PendingTriggerRecord {
+    trigger_id: String,
+    binding_version: u32,
+    event: harn_vm::TriggerEvent,
+}
+
+fn spawn_pending_pump(
+    event_log: Arc<harn_vm::event_log::AnyEventLog>,
+    dispatcher: harn_vm::Dispatcher,
+) -> Result<PumpHandle, String> {
+    let topic = harn_vm::event_log::Topic::new(PENDING_TOPIC).map_err(|error| error.to_string())?;
+    spawn_topic_pump(event_log, topic, move |logged| {
+        let dispatcher = dispatcher.clone();
+        async move {
+            if logged.kind != "trigger_event" {
+                return Ok(false);
+            }
+            let record: PendingTriggerRecord = serde_json::from_value(logged.payload)
+                .map_err(|error| format!("failed to decode pending trigger event: {error}"))?;
+            dispatcher
+                .enqueue_targeted(
+                    Some(record.trigger_id),
+                    Some(record.binding_version),
+                    record.event,
+                )
+                .await
+                .map_err(|error| format!("failed to enqueue pending trigger event: {error}"))?;
+            Ok(true)
+        }
+    })
+}
+
+fn spawn_cron_pump(
+    event_log: Arc<harn_vm::event_log::AnyEventLog>,
+    dispatcher: harn_vm::Dispatcher,
+) -> Result<PumpHandle, String> {
+    let topic =
+        harn_vm::event_log::Topic::new(CRON_TICK_TOPIC).map_err(|error| error.to_string())?;
+    spawn_topic_pump(event_log, topic, move |logged| {
+        let dispatcher = dispatcher.clone();
+        async move {
+            if logged.kind != "trigger_event" {
+                return Ok(false);
+            }
+            let event: harn_vm::TriggerEvent = serde_json::from_value(logged.payload)
+                .map_err(|error| format!("failed to decode cron trigger event: {error}"))?;
+            let trigger_id = match &event.provider_payload {
+                harn_vm::ProviderPayload::Known(
+                    harn_vm::triggers::event::KnownProviderPayload::Cron(payload),
+                ) => payload.cron_id.clone(),
+                _ => None,
+            };
+            dispatcher
+                .enqueue_targeted(trigger_id, None, event)
+                .await
+                .map_err(|error| format!("failed to enqueue cron trigger event: {error}"))?;
+            Ok(true)
+        }
+    })
+}
+
+fn spawn_inbox_pump(
+    event_log: Arc<harn_vm::event_log::AnyEventLog>,
+    dispatcher: harn_vm::Dispatcher,
+) -> Result<PumpHandle, String> {
+    let topic = harn_vm::event_log::Topic::new(harn_vm::TRIGGER_INBOX_TOPIC)
+        .map_err(|error| error.to_string())?;
+    spawn_topic_pump(event_log, topic, move |logged| {
+        let dispatcher = dispatcher.clone();
+        async move {
+            if logged.kind != "event_ingested" {
+                return Ok(false);
+            }
+            let envelope: harn_vm::triggers::dispatcher::InboxEnvelope =
+                serde_json::from_value(logged.payload)
+                    .map_err(|error| format!("failed to decode dispatcher inbox event: {error}"))?;
+            tokio::task::spawn_local(async move {
+                let _ = dispatcher.dispatch_inbox_envelope(envelope).await;
+            });
+            Ok(true)
+        }
+    })
+}
+
+fn spawn_topic_pump<F, Fut>(
+    event_log: Arc<harn_vm::event_log::AnyEventLog>,
+    topic: harn_vm::event_log::Topic,
+    process: F,
+) -> Result<PumpHandle, String>
+where
+    F: Fn(harn_vm::event_log::LogEvent) -> Fut + 'static,
+    Fut: std::future::Future<Output = Result<bool, String>> + 'static,
+{
+    let (mode_tx, mut mode_rx) = watch::channel(PumpMode::Running);
+    let join = tokio::task::spawn_local(async move {
+        let start_from = event_log
+            .latest(&topic)
+            .await
+            .map_err(|error| format!("failed to read topic head {topic}: {error}"))?;
+        let mut stream = event_log
+            .clone()
+            .subscribe(&topic, start_from)
+            .await
+            .map_err(|error| format!("failed to subscribe topic {topic}: {error}"))?;
+        let mut stats = PumpStats {
+            last_seen: start_from.unwrap_or(0),
+            processed: 0,
+        };
+        loop {
+            if matches!(*mode_rx.borrow(), PumpMode::Draining { up_to } if stats.last_seen >= up_to)
+            {
+                break;
+            }
+            tokio::select! {
+                changed = mode_rx.changed() => {
+                    if changed.is_err() {
+                        break;
+                    }
+                }
+                received = stream.next() => {
+                    let Some(received) = received else {
+                        break;
+                    };
+                    let (event_id, logged) = received
+                        .map_err(|error| format!("topic pump read failed for {topic}: {error}"))?;
+                    let handled = process(logged).await?;
+                    stats.last_seen = event_id;
+                    if handled {
+                        stats.processed += 1;
+                    }
+                }
+            }
+        }
+        Ok(stats)
+    });
+    Ok(PumpHandle { mode_tx, join })
+}
+
 fn trigger_kind_name(kind: crate::package::TriggerKind) -> &'static str {
     match kind {
         crate::package::TriggerKind::Webhook => "webhook",
@@ -487,29 +679,84 @@ fn trigger_kind_name(kind: crate::package::TriggerKind) -> &'static str {
 async fn graceful_shutdown(
     ctx: GracefulShutdownCtx<'_>,
     listener: ListenerRuntime,
+    dispatcher: harn_vm::Dispatcher,
+    pending_pump: PumpHandle,
+    cron_pump: PumpHandle,
+    inbox_pump: PumpHandle,
 ) -> Result<(), String> {
     eprintln!("[harn] signal received, starting graceful shutdown...");
-    // TODO(O-06): replace this listener-local scan with the shared
-    // orchestrator drain coordinator when that lands on the main branch.
-    let drained_events = listener
+    let listener_in_flight = listener
         .trigger_metrics()
         .into_values()
         .map(|metrics| metrics.in_flight)
         .sum::<u64>();
-    let listener_metrics = listener.shutdown().await?;
-
-    let stopped_at = now_rfc3339()?;
+    let dispatcher_before = dispatcher.snapshot();
     append_lifecycle_event(
         ctx.event_log,
-        "shutdown",
+        "draining",
         json!({
             "bind": ctx.bind.to_string(),
-            "drained_events": drained_events,
             "role": ctx.role.as_str(),
-            "status": "stopped",
+            "status": "draining",
+            "http_in_flight": listener_in_flight,
+            "dispatcher_in_flight": dispatcher_before.in_flight,
+            "dispatcher_retry_queue_depth": dispatcher_before.retry_queue_depth,
+            "dispatcher_dlq_depth": dispatcher_before.dlq_depth,
+            "shutdown_timeout_secs": ctx.shutdown_timeout.as_secs(),
         }),
     )
     .await?;
+
+    let deadline = tokio::time::Instant::now() + ctx.shutdown_timeout;
+    let listener_metrics = listener.shutdown(remaining_budget(deadline)).await?;
+    for handle in &ctx.connectors.handles {
+        let connector = handle.lock().await;
+        if let Err(error) = connector.shutdown(remaining_budget(deadline)).await {
+            eprintln!(
+                "[harn] connector {} shutdown warning: {error}",
+                connector.provider_id().as_str()
+            );
+        }
+    }
+
+    let pending_stats = pending_pump
+        .drain(topic_latest_id(ctx.event_log, PENDING_TOPIC).await?)
+        .await?;
+    let cron_stats = cron_pump
+        .drain(topic_latest_id(ctx.event_log, CRON_TICK_TOPIC).await?)
+        .await?;
+    let inbox_stats = inbox_pump
+        .drain(topic_latest_id(ctx.event_log, harn_vm::TRIGGER_INBOX_TOPIC).await?)
+        .await?;
+    let drain_report = dispatcher
+        .drain(remaining_budget(deadline))
+        .await
+        .map_err(|error| format!("failed to drain dispatcher: {error}"))?;
+
+    let stopped_at = now_rfc3339()?;
+    let timed_out = !drain_report.drained;
+    append_lifecycle_event(
+        ctx.event_log,
+        "stopped",
+        json!({
+            "bind": ctx.bind.to_string(),
+            "role": ctx.role.as_str(),
+            "status": "stopped",
+            "http_in_flight": listener_in_flight,
+            "dispatcher_in_flight": drain_report.in_flight,
+            "dispatcher_retry_queue_depth": drain_report.retry_queue_depth,
+            "dispatcher_dlq_depth": drain_report.dlq_depth,
+            "pending_events_drained": pending_stats.processed,
+            "cron_events_drained": cron_stats.processed,
+            "inbox_events_drained": inbox_stats.processed,
+            "timed_out": timed_out,
+        }),
+    )
+    .await?;
+    ctx.event_log
+        .flush()
+        .await
+        .map_err(|error| format!("failed to flush event log: {error}"))?;
 
     write_state_snapshot(
         &ctx.state_dir.join(STATE_SNAPSHOT_FILE),
@@ -542,6 +789,12 @@ async fn graceful_shutdown(
         },
     )?;
 
+    if timed_out {
+        eprintln!(
+            "[harn] graceful shutdown timed out with {} dispatches and {} retry waits remaining",
+            drain_report.in_flight, drain_report.retry_queue_depth
+        );
+    }
     eprintln!("[harn] graceful shutdown complete");
     Ok(())
 }
@@ -570,6 +823,21 @@ async fn append_manifest_event(
         .await
         .map(|_| ())
         .map_err(|error| format!("failed to append orchestrator manifest event: {error}"))
+}
+
+async fn topic_latest_id(
+    log: &Arc<harn_vm::event_log::AnyEventLog>,
+    topic_name: &str,
+) -> Result<u64, String> {
+    let topic = harn_vm::event_log::Topic::new(topic_name).map_err(|error| error.to_string())?;
+    log.latest(&topic)
+        .await
+        .map(|value| value.unwrap_or(0))
+        .map_err(|error| format!("failed to read topic head for {topic_name}: {error}"))
+}
+
+fn remaining_budget(deadline: tokio::time::Instant) -> Duration {
+    deadline.saturating_duration_since(tokio::time::Instant::now())
 }
 
 struct RuntimeSignalCtx<'a> {
@@ -834,6 +1102,7 @@ struct GracefulShutdownCtx<'a> {
     secret_chain_display: &'a str,
     triggers: &'a [CollectedManifestTrigger],
     connectors: &'a ConnectorRuntime,
+    shutdown_timeout: Duration,
 }
 
 #[derive(Debug, Serialize)]

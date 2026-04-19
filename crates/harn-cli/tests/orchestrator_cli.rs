@@ -8,6 +8,8 @@ use std::sync::mpsc::{self, Receiver};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use harn_vm::event_log::{EventLog, EventLogBackendKind, EventLogConfig, Topic};
+use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
 use tempfile::TempDir;
 
 const STARTUP_NEEDLE: &str = "HTTP listener ready on";
@@ -22,7 +24,16 @@ fn write_file(dir: &Path, relative: &str, contents: &str) {
 }
 
 fn spawn_orchestrator(temp: &TempDir) -> (Child, Receiver<String>, thread::JoinHandle<String>) {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_harn"))
+    spawn_orchestrator_with(temp, &[], &[])
+}
+
+fn spawn_orchestrator_with(
+    temp: &TempDir,
+    extra_args: &[&str],
+    envs: &[(&str, &str)],
+) -> (Child, Receiver<String>, thread::JoinHandle<String>) {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_harn"));
+    child
         .current_dir(temp.path())
         .arg("orchestrator")
         .arg("serve")
@@ -32,10 +43,17 @@ fn spawn_orchestrator(temp: &TempDir) -> (Child, Receiver<String>, thread::JoinH
         .arg("./state")
         .arg("--role")
         .arg("single-tenant")
+        .arg("--bind")
+        .arg("127.0.0.1:0")
         .stderr(Stdio::piped())
-        .stdout(Stdio::null())
-        .spawn()
-        .unwrap();
+        .stdout(Stdio::null());
+    for arg in extra_args {
+        child.arg(arg);
+    }
+    for (key, value) in envs {
+        child.env(key, value);
+    }
+    let mut child = child.spawn().unwrap();
 
     let stderr = child.stderr.take().expect("stderr pipe");
     let (tx, rx) = mpsc::channel();
@@ -72,6 +90,32 @@ fn wait_for_log_line(child: &mut Child, rx: &Receiver<String>, needle: &str) {
     panic!("timed out waiting for '{needle}'");
 }
 
+fn wait_for_listener_url(child: &mut Child, rx: &Receiver<String>) -> String {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while Instant::now() < deadline {
+        match rx.recv_timeout(Duration::from_millis(100)) {
+            Ok(line) if line.contains(STARTUP_NEEDLE) => {
+                return line
+                    .split(STARTUP_NEEDLE)
+                    .nth(1)
+                    .expect("startup URL suffix")
+                    .trim()
+                    .to_string();
+            }
+            Ok(_) => continue,
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                if let Some(status) = child.try_wait().unwrap() {
+                    panic!("process exited before listener became ready: {status}");
+                }
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                panic!("stderr stream closed before listener became ready");
+            }
+        }
+    }
+    panic!("timed out waiting for listener URL");
+}
+
 fn send_sigterm(child: &Child) {
     let status = Command::new("kill")
         .arg("-TERM")
@@ -91,6 +135,47 @@ fn wait_for_exit(child: &mut Child) {
         thread::sleep(Duration::from_millis(100));
     }
     panic!("timed out waiting for orchestrator exit");
+}
+
+fn json_headers() -> HeaderMap {
+    let mut headers = HeaderMap::new();
+    headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+    headers
+}
+
+fn bearer_headers() -> HeaderMap {
+    let mut headers = json_headers();
+    headers.insert(AUTHORIZATION, HeaderValue::from_static("Bearer test-key"));
+    headers
+}
+
+fn read_topic_events(
+    state_dir: &Path,
+    topic_name: &str,
+) -> Vec<(u64, harn_vm::event_log::LogEvent)> {
+    let mut config = EventLogConfig::for_base_dir(state_dir).unwrap();
+    let file_dir = state_dir.join("events");
+    if file_dir.join("topics").is_dir() {
+        config.backend = EventLogBackendKind::File;
+        config.file_dir = file_dir;
+    }
+    let log = harn_vm::event_log::open_event_log(&config).unwrap();
+    let topic = Topic::new(topic_name).unwrap();
+    futures::executor::block_on(log.read_range(&topic, None, usize::MAX)).unwrap()
+}
+
+fn wait_for_topic_kind(state_dir: &Path, topic_name: &str, kind: &str) {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while Instant::now() < deadline {
+        if read_topic_events(state_dir, topic_name)
+            .iter()
+            .any(|(_, event)| event.kind == kind)
+        {
+            return;
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+    panic!("timed out waiting for {topic_name}/{kind}");
 }
 
 #[test]
@@ -147,5 +232,95 @@ pub fn on_issue(event: TriggerEvent) {
     let snapshot = temp.path().join("state/orchestrator-state.json");
     let snapshot_contents = fs::read_to_string(&snapshot).unwrap();
     assert!(snapshot_contents.contains("\"status\": \"stopped\""));
-    assert!(snapshot_contents.contains("\"bind\": \"127.0.0.1:8080\""));
+    assert!(snapshot_contents.contains("\"bind\": \"127.0.0.1:"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn graceful_shutdown_drains_in_flight_dispatch_and_emits_lifecycle_events() {
+    let temp = TempDir::new().unwrap();
+    write_file(
+        temp.path(),
+        "harn.toml",
+        r#"
+[package]
+name = "fixture"
+
+[exports]
+handlers = "lib.harn"
+
+[[triggers]]
+id = "incoming-review-task"
+kind = "a2a-push"
+provider = "a2a-push"
+path = "/a2a/review"
+match = { events = ["a2a.task.received"] }
+handler = "handlers::on_task"
+"#,
+    );
+    write_file(
+        temp.path(),
+        "lib.harn",
+        r#"
+import "std/triggers"
+
+pub fn on_task(event: TriggerEvent) -> string {
+  sleep(1000)
+  return event.kind
+}
+"#,
+    );
+
+    let envs = [
+        ("HARN_EVENT_LOG_BACKEND", "file"),
+        ("HARN_ORCHESTRATOR_API_KEYS", "test-key"),
+        ("HARN_ORCHESTRATOR_HMAC_SECRET", "unused-shared-secret"),
+    ];
+    let (mut child, rx, handle) =
+        spawn_orchestrator_with(&temp, &["--shutdown-timeout", "5"], &envs);
+    let base_url = wait_for_listener_url(&mut child, &rx);
+    let state_dir = temp.path().join("state");
+
+    let body = br#"{"kind":"a2a.task.received","task":{"id":"task-123"}}"#;
+    let response = reqwest::Client::new()
+        .post(format!("{base_url}/a2a/review"))
+        .headers(bearer_headers())
+        .body(body.to_vec())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+
+    wait_for_topic_kind(&state_dir, "triggers.lifecycle", "DispatchStarted");
+    send_sigterm(&child);
+    wait_for_exit(&mut child);
+    let stderr = handle.join().expect("stderr collector thread");
+
+    assert!(stderr.contains(SHUTDOWN_NEEDLE), "stderr={stderr}");
+
+    let lifecycle = read_topic_events(&state_dir, "orchestrator.lifecycle");
+    assert!(lifecycle.iter().any(|(_, event)| event.kind == "draining"));
+    assert!(lifecycle.iter().any(|(_, event)| {
+        event.kind == "stopped" && event.payload["timed_out"] == serde_json::json!(false)
+    }));
+
+    let inbox = read_topic_events(&state_dir, "trigger.inbox");
+    assert!(
+        inbox
+            .iter()
+            .any(|(_, event)| event.kind == "event_ingested"),
+        "inbox={inbox:?}"
+    );
+
+    let outbox = read_topic_events(&state_dir, "trigger.outbox");
+    assert!(outbox.iter().any(|(_, event)| {
+        event.kind == "dispatch_succeeded" && event.payload["result"] == serde_json::json!("push")
+    }));
+
+    let snapshot_contents =
+        fs::read_to_string(temp.path().join("state/orchestrator-state.json")).unwrap();
+    assert!(snapshot_contents.contains("\"status\": \"stopped\""));
+    assert!(
+        snapshot_contents.contains("\"in_flight\": 0"),
+        "snapshot={snapshot_contents}"
+    );
 }

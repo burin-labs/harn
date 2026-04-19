@@ -128,9 +128,12 @@ impl ListenerRuntime {
         self.routes.reload(routes)
     }
 
-    pub(crate) async fn shutdown(self) -> Result<BTreeMap<String, TriggerMetricSnapshot>, String> {
+    pub(crate) async fn shutdown(
+        self,
+        timeout: Duration,
+    ) -> Result<BTreeMap<String, TriggerMetricSnapshot>, String> {
         let Self { server, routes } = self;
-        server.shutdown().await?;
+        server.shutdown(timeout).await?;
         Ok(routes.snapshot_metrics())
     }
 }
@@ -1053,7 +1056,10 @@ mod tests {
         assert_eq!(versions, vec![1, 2]);
         assert_eq!(task_ids, vec!["task-1".to_string(), "task-2".to_string()]);
 
-        listener.shutdown().await.expect("shutdown listener");
+        listener
+            .shutdown(Duration::from_secs(5))
+            .await
+            .expect("shutdown listener");
         std::env::remove_var(REQUEST_DELAY_ENV);
         reset_active_event_log();
         harn_vm::clear_trigger_registry();
