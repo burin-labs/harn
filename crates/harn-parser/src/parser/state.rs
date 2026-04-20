@@ -1,6 +1,5 @@
 use crate::ast::*;
 use harn_lexer::{Span, Token, TokenKind};
-use std::collections::HashSet;
 
 use super::error::ParserError;
 
@@ -9,7 +8,6 @@ pub struct Parser {
     pub(super) tokens: Vec<Token>,
     pub(super) pos: usize,
     pub(super) errors: Vec<ParserError>,
-    pub(super) struct_names: HashSet<String>,
 }
 
 impl Parser {
@@ -18,7 +16,6 @@ impl Parser {
             tokens,
             pos: 0,
             errors: Vec::new(),
-            struct_names: HashSet::new(),
         }
     }
 

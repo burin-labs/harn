@@ -5,6 +5,92 @@ use super::error::ParserError;
 use super::state::Parser;
 
 impl Parser {
+    fn kind_at_non_newline_offset(&self, mut offset: usize) -> Option<&TokenKind> {
+        while matches!(
+            self.tokens.get(offset).map(|token| &token.kind),
+            Some(TokenKind::Newline)
+        ) {
+            offset += 1;
+        }
+        self.tokens.get(offset).map(|token| &token.kind)
+    }
+
+    fn token_starts_dict_key(kind: &TokenKind) -> bool {
+        matches!(
+            kind,
+            TokenKind::Identifier(_)
+                | TokenKind::Pipeline
+                | TokenKind::Extends
+                | TokenKind::Override
+                | TokenKind::Let
+                | TokenKind::Var
+                | TokenKind::If
+                | TokenKind::Else
+                | TokenKind::For
+                | TokenKind::In
+                | TokenKind::Match
+                | TokenKind::Retry
+                | TokenKind::Parallel
+                | TokenKind::Return
+                | TokenKind::Import
+                | TokenKind::True
+                | TokenKind::False
+                | TokenKind::Nil
+                | TokenKind::Try
+                | TokenKind::Catch
+                | TokenKind::Throw
+                | TokenKind::Fn
+                | TokenKind::Spawn
+                | TokenKind::While
+                | TokenKind::TypeKw
+                | TokenKind::Enum
+                | TokenKind::Struct
+                | TokenKind::Interface
+                | TokenKind::Pub
+                | TokenKind::From
+                | TokenKind::To
+                | TokenKind::Tool
+                | TokenKind::Exclusive
+                | TokenKind::Guard
+                | TokenKind::Deadline
+                | TokenKind::Defer
+                | TokenKind::Yield
+                | TokenKind::Mutex
+                | TokenKind::Break
+                | TokenKind::Continue
+                | TokenKind::Impl
+        )
+    }
+
+    fn looks_like_struct_construct(&self) -> bool {
+        let Some(first_kind) = self.kind_at_non_newline_offset(self.pos + 1) else {
+            return false;
+        };
+        match first_kind {
+            TokenKind::RBrace => true,
+            TokenKind::Dot => matches!(
+                (
+                    self.kind_at_non_newline_offset(self.pos + 2),
+                    self.kind_at_non_newline_offset(self.pos + 3),
+                ),
+                (Some(TokenKind::Dot), Some(TokenKind::Dot))
+            ),
+            TokenKind::StringLiteral(_) => {
+                matches!(
+                    self.kind_at_non_newline_offset(self.pos + 2),
+                    Some(TokenKind::Colon)
+                )
+            }
+            other if Self::token_starts_dict_key(other) => {
+                matches!(
+                    self.kind_at_non_newline_offset(self.pos + 2),
+                    Some(TokenKind::Colon)
+                )
+            }
+            _ => false,
+        }
+    }
+
     /// Parse a single expression (for string interpolation).
     pub fn parse_single_expression(&mut self) -> Result<SNode, ParserError> {
         self.skip_newlines();
