@@ -1791,10 +1791,7 @@ impl Dispatcher {
             .expect("dispatcher cancel tokens poisoned")
             .push(cancel_token.clone());
         vm.install_cancel_token(cancel_token.clone());
-        let arg = json_to_vm_value(
-            &serde_json::to_value(event)
-                .map_err(|error| DispatchError::Serde(error.to_string()))?,
-        );
+        let arg = event_to_handler_value(event)?;
         let args = [arg];
         let future = vm.call_closure_pub(closure, &args, &[]);
         pin_mut!(future);
@@ -2460,6 +2457,23 @@ fn json_value_to_gate(value: &serde_json::Value) -> String {
         serde_json::Value::Bool(value) => value.to_string(),
         serde_json::Value::Number(value) => value.to_string(),
         other => serde_json::to_string(other).unwrap_or_else(|_| "unserializable".to_string()),
+    }
+}
+
+fn event_to_handler_value(event: &TriggerEvent) -> Result<VmValue, DispatchError> {
+    let json =
+        serde_json::to_value(event).map_err(|error| DispatchError::Serde(error.to_string()))?;
+    let value = json_to_vm_value(&json);
+    match (&event.raw_body, value) {
+        (Some(raw_body), VmValue::Dict(dict)) => {
+            let mut map = (*dict).clone();
+            map.insert(
+                "raw_body".to_string(),
+                VmValue::Bytes(Rc::new(raw_body.clone())),
+            );
+            Ok(VmValue::Dict(Rc::new(map)))
+        }
+        (_, other) => Ok(other),
     }
 }
 

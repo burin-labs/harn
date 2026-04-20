@@ -901,6 +901,7 @@ unresolved import itself still surfaces via the runtime loader.
 | Type | Syntax | Description |
 |---|---|---|
 | `string` | `"text"` | UTF-8 string |
+| `bytes` | builtin-produced | Immutable byte buffer |
 | `int` | `42` | Platform-width integer |
 | `float` | `3.14` | Double-precision float |
 | `bool` | `true` / `false` | Boolean |
@@ -924,6 +925,7 @@ unresolved import itself still surfaces via the runtime loader.
 | `int(0)` | No |
 | `float(0)` | No |
 | `string("")` | No |
+| `bytes(b"")` | No |
 | `list([])` | No |
 | `dict([:])` | No |
 | `set()` (empty) | No |
@@ -2290,7 +2292,7 @@ Narrowing rules for `unknown`:
 
 - `type_of(x) == "T"` narrows `x` to `T` on the truthy branch (where
   `T` is one of the type-of protocol names: `string`, `int`, `float`,
-  `bool`, `nil`, `list`, `dict`, `closure`).
+  `bool`, `nil`, `list`, `dict`, `closure`, `bytes`).
 - `schema_is(x, Shape)` narrows `x` to `Shape` on the truthy branch.
 - `guard type_of(x) == "T" else { ... }` narrows `x` to `T` in the
   surrounding scope after the guard.
@@ -2802,12 +2804,12 @@ fn handle(v: unknown) -> string {
   unreachable("unknown type_of variant")
   // warning: `unreachable()` reached but `v: unknown` was not fully
   // narrowed — uncovered concrete type(s): float, bool, nil, list,
-  // dict, closure
+  // dict, closure, bytes
 }
 ```
 
 Covering all eight `type_of` variants (`int`, `string`, `float`, `bool`,
-`nil`, `list`, `dict`, `closure`) silences the warning. Suppression via
+`nil`, `list`, `dict`, `closure`, `bytes`) silences the warning. Suppression via
 an explicit fallthrough `return` is intentional: a plain `return`
 doesn't claim exhaustiveness, so partial narrowing followed by a normal
 return stays silent. Reaching `throw` or `unreachable()` with no prior
@@ -2852,8 +2854,8 @@ If the types do not match, a `TypeError` is thrown:
 TypeError: parameter 'name' expected string, got int (42)
 ```
 
-The following types are enforced at runtime: `int`, `float`, `string`, `bool`,
-`list`, `dict`, `set`, `nil`, and `closure`. `int` and `float` are mutually
+The following types are enforced at runtime: `int`, `float`, `string`, `bytes`,
+`bool`, `list`, `dict`, `set`, `nil`, and `closure`. `int` and `float` are mutually
 compatible (passing an `int` to a `float` parameter is allowed, and vice versa).
 Union types, `list<T>`, `dict<string, V>`, and nested shapes are also checked at
 runtime when the parameter annotation can be lowered into a runtime schema.
@@ -2961,6 +2963,17 @@ Sets are iterable with `for ... in` and support `len()`.
 | `base32_decode(str)` | Returns the decoded string from a base32-encoded `str` |
 | `hex_encode(str)` | Returns the lowercase hex encoding of `str` |
 | `hex_decode(str)` | Returns the decoded string from a hex-encoded `str` |
+| `bytes_from_string(str)` | UTF-8 encodes `str` into `bytes` |
+| `bytes_to_string(bytes)` | UTF-8 decodes `bytes` into `string` |
+| `bytes_to_string_lossy(bytes)` | Lossy UTF-8 decode of `bytes` |
+| `bytes_from_hex(str)` | Parses lowercase/uppercase hex into `bytes` |
+| `bytes_to_hex(bytes)` | Hex-encodes `bytes` |
+| `bytes_from_base64(str)` | Decodes base64 into `bytes` |
+| `bytes_to_base64(bytes)` | Encodes `bytes` as base64 |
+| `bytes_len(bytes)` | Returns the length in octets |
+| `bytes_concat(a, b)` | Concatenates two byte buffers |
+| `bytes_slice(bytes, start, end)` | Returns a clamped slice of a byte buffer |
+| `bytes_eq(a, b)` | Constant-time byte equality check |
 | `sha256(str)` | Returns the hex-encoded SHA-256 hash of `str` |
 | `md5(str)` | Returns the hex-encoded MD5 hash of `str` |
 

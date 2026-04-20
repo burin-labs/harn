@@ -353,7 +353,7 @@ impl Compiler {
         match type_expr {
             harn_parser::TypeExpr::Named(name) => match name.as_str() {
                 "int" | "float" | "string" | "bool" | "list" | "dict" | "set" | "nil"
-                | "closure" => Some(VmValue::Dict(Rc::new(BTreeMap::from([(
+                | "closure" | "bytes" => Some(VmValue::Dict(Rc::new(BTreeMap::from([(
                     "type".to_string(),
                     VmValue::String(Rc::from(name.as_str())),
                 )])))),

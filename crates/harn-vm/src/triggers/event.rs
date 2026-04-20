@@ -10,6 +10,39 @@ use crate::triggers::test_util::clock;
 
 const REDACTED_HEADER_VALUE: &str = "[redacted]";
 
+fn serialize_optional_bytes_b64<S>(
+    value: &Option<Vec<u8>>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    use base64::Engine;
+
+    match value {
+        Some(bytes) => {
+            serializer.serialize_some(&base64::engine::general_purpose::STANDARD.encode(bytes))
+        }
+        None => serializer.serialize_none(),
+    }
+}
+
+fn deserialize_optional_bytes_b64<'de, D>(deserializer: D) -> Result<Option<Vec<u8>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    use base64::Engine;
+
+    let encoded = Option::<String>::deserialize(deserializer)?;
+    encoded
+        .map(|text| {
+            base64::engine::general_purpose::STANDARD
+                .decode(text.as_bytes())
+                .map_err(serde::de::Error::custom)
+        })
+        .transpose()
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct TriggerEventId(pub String);
@@ -584,6 +617,13 @@ pub struct TriggerEvent {
     pub headers: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub batch: Option<Vec<JsonValue>>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "serialize_optional_bytes_b64",
+        deserialize_with = "deserialize_optional_bytes_b64"
+    )]
+    pub raw_body: Option<Vec<u8>>,
     pub provider_payload: ProviderPayload,
     pub signature_status: SignatureStatus,
     #[serde(skip)]
@@ -613,6 +653,7 @@ impl TriggerEvent {
             tenant_id,
             headers,
             batch: None,
+            raw_body: None,
             provider_payload,
             signature_status,
             dedupe_claimed: false,
@@ -1894,9 +1935,11 @@ mod tests {
             signature_status: SignatureStatus::Verified,
             dedupe_claimed: false,
             batch: None,
+            raw_body: Some(vec![0, 159, 255, 10]),
         };
 
         let once = serde_json::to_value(&event).unwrap();
+        assert_eq!(once["raw_body"], serde_json::json!("AJ//Cg=="));
         let decoded: TriggerEvent = serde_json::from_value(once.clone()).unwrap();
         let twice = serde_json::to_value(&decoded).unwrap();
         assert_eq!(decoded, event);

@@ -14,6 +14,7 @@ pub fn values_identical(a: &VmValue, b: &VmValue) -> bool {
         (VmValue::Set(x), VmValue::Set(y)) => Rc::ptr_eq(x, y),
         (VmValue::Closure(x), VmValue::Closure(y)) => Rc::ptr_eq(x, y),
         (VmValue::String(x), VmValue::String(y)) => Rc::ptr_eq(x, y) || x == y,
+        (VmValue::Bytes(x), VmValue::Bytes(y)) => Rc::ptr_eq(x, y) || x == y,
         (VmValue::BuiltinRef(x), VmValue::BuiltinRef(y)) => x == y,
         (VmValue::Pair(x), VmValue::Pair(y)) => Rc::ptr_eq(x, y),
         // Primitives: identity collapses to structural equality.
@@ -32,6 +33,7 @@ pub fn value_identity_key(v: &VmValue) -> String {
         VmValue::Set(x) => format!("set@{:p}", Rc::as_ptr(x)),
         VmValue::Closure(x) => format!("closure@{:p}", Rc::as_ptr(x)),
         VmValue::String(x) => format!("string@{:p}", x.as_ptr()),
+        VmValue::Bytes(x) => format!("bytes@{:p}", Rc::as_ptr(x)),
         VmValue::BuiltinRef(name) => format!("builtin@{name}"),
         other => format!("{}@{}", other.type_name(), other.display()),
     }
@@ -73,6 +75,13 @@ fn write_structural_hash_key(v: &VmValue, out: &mut String) {
             out.push_str(&s.len().to_string());
             out.push(':');
             out.push_str(s);
+        }
+        VmValue::Bytes(bytes) => {
+            out.push('b');
+            for byte in bytes.iter() {
+                out.push_str(&format!("{byte:02x}"));
+            }
+            out.push(';');
         }
         VmValue::Duration(ms) => {
             out.push('d');
@@ -130,6 +139,7 @@ pub fn values_equal(a: &VmValue, b: &VmValue) -> bool {
         (VmValue::Int(x), VmValue::Int(y)) => x == y,
         (VmValue::Float(x), VmValue::Float(y)) => x == y,
         (VmValue::String(x), VmValue::String(y)) => x == y,
+        (VmValue::Bytes(x), VmValue::Bytes(y)) => x == y,
         (VmValue::Bool(x), VmValue::Bool(y)) => x == y,
         (VmValue::Nil, VmValue::Nil) => true,
         (VmValue::Int(x), VmValue::Float(y)) => (*x as f64) == *y,

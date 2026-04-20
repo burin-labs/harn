@@ -133,7 +133,7 @@ type ProviderRuntime = ProviderRuntimeBuiltin | ProviderRuntimePlaceholder
 
 type ProviderCatalogEntry = {provider: string, kinds: list<string>, schema_name: string, outbound_methods: list<ProviderOutboundMethod>, secret_requirements: list<ProviderSecretRequirement>, signature_verification: ProviderSignatureVerification, runtime: ProviderRuntime}
 
-type TriggerEvent = {id: string, provider: ProviderId, kind: string, received_at: string, occurred_at: string | nil, dedupe_key: string, trace_id: string, tenant_id: string | nil, headers: dict, batch: list<dict> | nil, provider_payload: ProviderPayload, signature_status: SignatureStatus}
+type TriggerEvent = {id: string, provider: ProviderId, kind: string, received_at: string, occurred_at: string | nil, dedupe_key: string, trace_id: string, tenant_id: string | nil, headers: dict, batch: list<dict> | nil, raw_body: bytes | nil, provider_payload: ProviderPayload, signature_status: SignatureStatus}
 
 type TriggerState = "registering" | "active" | "draining" | "terminated"
 

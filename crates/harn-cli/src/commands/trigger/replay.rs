@@ -864,6 +864,8 @@ pub fn {handler_name}(event: TriggerEvent) -> string {{
             trace_id: harn_vm::TraceId(format!("trace-{event_id}")),
             tenant_id: None,
             headers: BTreeMap::new(),
+            batch: None,
+            raw_body: None,
             provider_payload: harn_vm::ProviderPayload::Known(KnownProviderPayload::Cron(
                 CronEventPayload {
                     cron_id: Some("test-cron".to_string()),
@@ -874,7 +876,6 @@ pub fn {handler_name}(event: TriggerEvent) -> string {{
             )),
             signature_status: harn_vm::SignatureStatus::Verified,
             dedupe_claimed: false,
-            batch: None,
         }
     }
 

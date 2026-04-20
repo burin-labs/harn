@@ -696,6 +696,7 @@ async fn normalize_request(
             &harn_vm::HeaderRedactionPolicy::default(),
         ),
         batch: None,
+        raw_body: Some(body.to_vec()),
         provider_payload,
         signature_status,
         dedupe_claimed: false,

@@ -277,7 +277,7 @@ impl TypeChecker {
         };
 
         const KNOWN_TYPES: &[&str] = &[
-            "int", "string", "float", "bool", "nil", "list", "dict", "closure",
+            "int", "string", "float", "bool", "nil", "list", "dict", "closure", "bytes",
         ];
         if !KNOWN_TYPES.contains(&type_name.as_str()) {
             return Refinements::empty();
@@ -795,7 +795,7 @@ impl TypeChecker {
     /// Complete set of concrete variants that `type_of` may return, used as
     /// the reference for exhaustive-narrowing warnings on `unknown`.
     const UNKNOWN_CONCRETE_TYPES: &'static [&'static str] = &[
-        "int", "string", "float", "bool", "nil", "list", "dict", "closure",
+        "int", "string", "float", "bool", "nil", "list", "dict", "closure", "bytes",
     ];
 
     /// Emit a warning if any `unknown`-typed variable in scope has been

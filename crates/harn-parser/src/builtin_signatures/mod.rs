@@ -16,9 +16,9 @@ use std::sync::OnceLock;
 
 pub use types::BuiltinMetadata;
 pub(crate) use types::{
-    BuiltinGenericSig, BuiltinReturn, BuiltinSig, EMPTY_RETURN_TYPES, RETURN_BOOL, RETURN_DICT,
-    RETURN_FLOAT, RETURN_INT, RETURN_LIST, RETURN_NEVER, RETURN_NIL, RETURN_STRING, UNION_DICT_NIL,
-    UNION_STRING_NIL,
+    BuiltinGenericSig, BuiltinReturn, BuiltinSig, EMPTY_RETURN_TYPES, RETURN_BOOL, RETURN_BYTES,
+    RETURN_DICT, RETURN_FLOAT, RETURN_INT, RETURN_LIST, RETURN_NEVER, RETURN_NIL, RETURN_STRING,
+    UNION_DICT_NIL, UNION_STRING_NIL,
 };
 
 pub(crate) use lookup::{

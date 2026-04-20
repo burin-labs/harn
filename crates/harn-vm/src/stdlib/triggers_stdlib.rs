@@ -1292,6 +1292,8 @@ mod tests {
             trace_id: crate::TraceId(format!("trace-{event_id}")),
             tenant_id: None,
             headers: BTreeMap::new(),
+            batch: None,
+            raw_body: None,
             provider_payload: ProviderPayload::Known(KnownProviderPayload::Cron(
                 CronEventPayload {
                     cron_id: Some("test-cron".to_string()),
@@ -1302,7 +1304,6 @@ mod tests {
             )),
             signature_status: crate::SignatureStatus::Verified,
             dedupe_claimed: false,
-            batch: None,
         }
     }
 

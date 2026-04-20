@@ -728,6 +728,7 @@ mod tests {
             tenant_id: None,
             headers: BTreeMap::new(),
             batch: None,
+            raw_body: None,
             provider_payload: ProviderPayload::Known(KnownProviderPayload::Webhook(
                 GenericWebhookPayload {
                     source: Some("worker-queue-test".to_string()),

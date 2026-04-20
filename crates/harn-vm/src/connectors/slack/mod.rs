@@ -400,6 +400,7 @@ impl Connector for SlackConnector {
             tenant_id: raw.tenant_id.clone(),
             headers: redact_headers(&headers, &HeaderRedactionPolicy::default()),
             batch: None,
+            raw_body: Some(raw.body.clone()),
             provider_payload,
             signature_status: SignatureStatus::Verified,
             dedupe_claimed: false,

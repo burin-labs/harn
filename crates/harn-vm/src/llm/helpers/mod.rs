@@ -43,6 +43,7 @@ pub fn vm_value_to_json(val: &VmValue) -> serde_json::Value {
         VmValue::Int(i) => serde_json::json!(i),
         VmValue::Float(f) => serde_json::json!(f),
         VmValue::String(s) => serde_json::json!(s.as_ref()),
+        VmValue::Bytes(bytes) => crate::schema::tagged_bytes_json(bytes),
         VmValue::Bool(b) => serde_json::json!(b),
         VmValue::Nil => serde_json::Value::Null,
         VmValue::List(list) => {

@@ -4,6 +4,7 @@ mod agent_sessions;
 pub mod agent_state;
 mod agents;
 mod agents_daemon;
+mod bytes;
 mod concurrency;
 mod connectors;
 mod crypto;
@@ -55,6 +56,7 @@ pub fn register_core_stdlib(vm: &mut Vm) {
     json::register_json_builtins(vm);
     datetime::register_datetime_builtins(vm);
     regex::register_regex_builtins(vm);
+    bytes::register_bytes_builtins(vm);
     crypto::register_crypto_builtins(vm);
     path::register_path_helper_builtins(vm);
     sets::register_set_builtins(vm);
