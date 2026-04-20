@@ -368,7 +368,8 @@ Workflow helpers built on transcripts and `agent_loop`:
 | `workflow_session_archive(prev)` | Archive a session transcript |
 | `workflow_session_resume(prev)` | Resume an archived session transcript |
 | `workflow_session_compact(prev, options?)` | Summarize/compact a session transcript in place |
-| `workflow_session_reset(prev, carry_summary)` | Reset a session transcript, optionally carrying summary |
+| `workflow_session_reset(prev, carry_summary)` | Reset a session transcript, optionally carrying summary, while preserving `workflow_id` |
+| `continue_as_new(prev, options?)` | Advance workflow generation and return a reset session that keeps the same `workflow_id` |
 | `workflow_session_persist(prev, path?)` | Persist the session run record and attach the saved path |
 | `workflow_continue(prev, task, flow, overrides?)` | Continue from an existing transcript |
 | `workflow_compact(prev, options?)` | Summarize and compact a transcript |
@@ -382,8 +383,9 @@ Workflow helpers built on transcripts and `agent_loop`:
 | `worker_verification_steps(worker)` | Return the worker's canonical `verification_steps` list |
 
 `workflow_session(...)` returns a normalized session dict that includes the
-current transcript, message count, summary, persisted run metadata, and a
-`usage` object when the source run captured LLM totals:
+current transcript, message count, summary, persisted run metadata,
+`workflow_id` when one is available, and a `usage` object when the source run
+captured LLM totals:
 `{input_tokens, output_tokens, total_duration_ms, call_count}`.
 
 For background or delegated execution, use the worker lifecycle builtins

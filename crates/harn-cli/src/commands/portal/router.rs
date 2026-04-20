@@ -22,7 +22,10 @@ pub(super) fn build_router(state: Arc<PortalState>) -> Router {
         .route("/api/llm/options", get(llm_options_handler))
         .route("/api/runs", get(list_runs_handler))
         .route("/api/run", get(run_detail_handler))
-        .route("/api/run/action-graph/stream", get(action_graph_stream_handler))
+        .route(
+            "/api/run/action-graph/stream",
+            get(action_graph_stream_handler),
+        )
         .route("/api/compare", get(compare_runs_handler))
         .route("/api/launch/targets", get(list_launch_targets_handler))
         .route("/api/launch/jobs", get(list_launch_jobs_handler))

@@ -2382,7 +2382,18 @@ fn cache_root() -> Result<PathBuf, String> {
 }
 
 fn sha256_hex(bytes: impl AsRef<[u8]>) -> String {
-    format!("{:x}", Sha256::digest(bytes.as_ref()))
+    hex_bytes(Sha256::digest(bytes.as_ref()))
+}
+
+fn hex_bytes(bytes: impl AsRef<[u8]>) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let bytes = bytes.as_ref();
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for &byte in bytes {
+        out.push(HEX[(byte >> 4) as usize] as char);
+        out.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    out
 }
 
 fn git_cache_dir(source: &str, commit: &str) -> Result<PathBuf, String> {
@@ -2483,7 +2494,7 @@ fn compute_content_hash(dir: &Path) -> Result<String, String> {
         hasher.update([0]);
         hasher.update(sha256_hex(contents).as_bytes());
     }
-    Ok(format!("sha256:{:x}", hasher.finalize()))
+    Ok(format!("sha256:{}", hex_bytes(hasher.finalize())))
 }
 
 fn verify_content_hash_or_compute(dir: &Path, expected: &str) -> Result<(), String> {

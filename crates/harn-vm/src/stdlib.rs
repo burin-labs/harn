@@ -38,8 +38,9 @@ mod transcript_compact;
 mod triggers_stdlib;
 mod types;
 mod vision;
-mod waitpoints;
 pub(crate) mod waitpoint;
+mod waitpoints;
+pub mod workflow_messages;
 
 use crate::http::register_http_builtins;
 use crate::llm::register_llm_builtins;
@@ -98,6 +99,7 @@ pub fn register_agent_stdlib(vm: &mut Vm) {
     waitpoint::register_waitpoint_builtins(vm);
     agents::register_agent_builtins(vm);
     agent_sessions::register_agent_session_builtins(vm);
+    workflow_messages::register_workflow_message_builtins(vm);
     transcript_compact::register_transcript_compaction_builtins(vm);
     register_http_builtins(vm);
     register_llm_builtins(vm);

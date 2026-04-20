@@ -95,6 +95,11 @@ pub use stdlib::template::{
 pub use stdlib::waitpoint::{
     process_waitpoint_resume_event, service_waitpoints_once, WAITPOINT_RESUME_TOPIC,
 };
+pub use stdlib::workflow_messages::{
+    workflow_pause_for_base, workflow_publish_query_for_base, workflow_query_for_base,
+    workflow_respond_update_for_base, workflow_resume_for_base, workflow_signal_for_base,
+    workflow_update_for_base, WorkflowMailboxState,
+};
 pub use stdlib::{
     register_agent_stdlib, register_core_stdlib, register_io_stdlib, register_vm_stdlib,
 };

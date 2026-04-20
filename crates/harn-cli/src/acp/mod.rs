@@ -618,6 +618,122 @@ impl AcpServer {
             Err(error) => self.send_error(id, -32000, &error),
         }
     }
+
+    fn workflow_base_dir_for<'a>(&'a self, params: &'a serde_json::Value) -> Option<&'a PathBuf> {
+        params
+            .get("sessionId")
+            .and_then(|value| value.as_str())
+            .and_then(|session_id| self.sessions.get(session_id))
+            .map(|session| &session.cwd)
+            .or_else(|| self.sessions.values().next().map(|session| &session.cwd))
+    }
+
+    async fn handle_workflow_signal(&self, id: &serde_json::Value, params: &serde_json::Value) {
+        let Some(workflow_id) = params.get("workflowId").and_then(|value| value.as_str()) else {
+            self.send_error(id, -32602, "workflow/signal: missing workflowId");
+            return;
+        };
+        let Some(name) = params.get("name").and_then(|value| value.as_str()) else {
+            self.send_error(id, -32602, "workflow/signal: missing name");
+            return;
+        };
+        let Some(base_dir) = self.workflow_base_dir_for(params) else {
+            self.send_error(id, -32602, "workflow/signal: no session cwd available");
+            return;
+        };
+        let payload = params
+            .get("payload")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
+        match harn_vm::workflow_signal_for_base(base_dir, workflow_id, name, payload) {
+            Ok(result) => self.send_response(id, result),
+            Err(error) => self.send_error(id, -32000, &error),
+        }
+    }
+
+    fn handle_workflow_query(&self, id: &serde_json::Value, params: &serde_json::Value) {
+        let Some(workflow_id) = params.get("workflowId").and_then(|value| value.as_str()) else {
+            self.send_error(id, -32602, "workflow/query: missing workflowId");
+            return;
+        };
+        let Some(name) = params.get("name").and_then(|value| value.as_str()) else {
+            self.send_error(id, -32602, "workflow/query: missing name");
+            return;
+        };
+        let Some(base_dir) = self.workflow_base_dir_for(params) else {
+            self.send_error(id, -32602, "workflow/query: no session cwd available");
+            return;
+        };
+        match harn_vm::workflow_query_for_base(base_dir, workflow_id, name) {
+            Ok(result) => self.send_response(id, result),
+            Err(error) => self.send_error(id, -32000, &error),
+        }
+    }
+
+    async fn handle_workflow_update(&self, id: &serde_json::Value, params: &serde_json::Value) {
+        let Some(workflow_id) = params.get("workflowId").and_then(|value| value.as_str()) else {
+            self.send_error(id, -32602, "workflow/update: missing workflowId");
+            return;
+        };
+        let Some(name) = params.get("name").and_then(|value| value.as_str()) else {
+            self.send_error(id, -32602, "workflow/update: missing name");
+            return;
+        };
+        let Some(base_dir) = self.workflow_base_dir_for(params) else {
+            self.send_error(id, -32602, "workflow/update: no session cwd available");
+            return;
+        };
+        let payload = params
+            .get("payload")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
+        let timeout_ms = params
+            .get("timeoutMs")
+            .and_then(|value| value.as_u64())
+            .unwrap_or(30_000);
+        match harn_vm::workflow_update_for_base(
+            base_dir,
+            workflow_id,
+            name,
+            payload,
+            std::time::Duration::from_millis(timeout_ms),
+        )
+        .await
+        {
+            Ok(result) => self.send_response(id, result),
+            Err(error) => self.send_error(id, -32000, &error),
+        }
+    }
+
+    fn handle_workflow_pause(&self, id: &serde_json::Value, params: &serde_json::Value) {
+        let Some(workflow_id) = params.get("workflowId").and_then(|value| value.as_str()) else {
+            self.send_error(id, -32602, "workflow/pause: missing workflowId");
+            return;
+        };
+        let Some(base_dir) = self.workflow_base_dir_for(params) else {
+            self.send_error(id, -32602, "workflow/pause: no session cwd available");
+            return;
+        };
+        match harn_vm::workflow_pause_for_base(base_dir, workflow_id) {
+            Ok(result) => self.send_response(id, result),
+            Err(error) => self.send_error(id, -32000, &error),
+        }
+    }
+
+    fn handle_workflow_resume(&self, id: &serde_json::Value, params: &serde_json::Value) {
+        let Some(workflow_id) = params.get("workflowId").and_then(|value| value.as_str()) else {
+            self.send_error(id, -32602, "workflow/resume: missing workflowId");
+            return;
+        };
+        let Some(base_dir) = self.workflow_base_dir_for(params) else {
+            self.send_error(id, -32602, "workflow/resume: no session cwd available");
+            return;
+        };
+        match harn_vm::workflow_resume_for_base(base_dir, workflow_id) {
+            Ok(result) => self.send_response(id, result),
+            Err(error) => self.send_error(id, -32000, &error),
+        }
+    }
 }
 
 /// Shared state that bridge-style builtins use to communicate with the
@@ -881,6 +997,21 @@ pub async fn run_acp_server(pipeline: Option<&str>) {
                     }
                     "harn.hitl.respond" => {
                         server.handle_hitl_respond(&id, &params).await;
+                    }
+                    "workflow/signal" | "harn.workflow.signal" => {
+                        server.handle_workflow_signal(&id, &params).await;
+                    }
+                    "workflow/query" | "harn.workflow.query" => {
+                        server.handle_workflow_query(&id, &params);
+                    }
+                    "workflow/update" | "harn.workflow.update" => {
+                        server.handle_workflow_update(&id, &params).await;
+                    }
+                    "workflow/pause" | "harn.workflow.pause" => {
+                        server.handle_workflow_pause(&id, &params);
+                    }
+                    "workflow/resume" | "harn.workflow.resume" => {
+                        server.handle_workflow_resume(&id, &params);
                     }
                     "session/list" => {
                         server.handle_session_list(&id);

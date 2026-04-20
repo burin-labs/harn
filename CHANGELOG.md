@@ -41,12 +41,23 @@ in Harn.
 
 ### Added
 
+<<<<<<< HEAD
 - **`project_fingerprint()` now returns a normalized repo profile for
   autonomous personas (#218).** The shallow detector now exposes stable
   primary tags for package manager, test runner, build tool, VCS, and CI
   provider alongside the existing language/framework signals, with
   conformance coverage for representative Rust, Swift, Node, Python, Go,
   mixed, and empty-directory shapes.
+- **Durable workflow message/runtime control surface (#302).** Harn now ships
+  persisted workflow mailbox builtins (`workflow.signal`, `workflow.query`,
+  `workflow.publish_query`, `workflow.update`, `workflow.receive`,
+  `workflow.respond_update`, `workflow.pause`, `workflow.resume`,
+  `workflow.status`, and `workflow.continue_as_new` plus top-level
+  `continue_as_new`) backed by `.harn/workflows/<workflow_id>/state.json`.
+  `std/agents` workflow sessions now preserve `workflow_id`, and ACP/A2A expose
+  matching workflow control methods so external callers can signal, query,
+  update, pause, resume, and roll generations forward through the same durable
+  runtime state.
 - **Git-backed package manager v0 (#345, #355).** Typed lockfile with
   content hashes, `harn add/install/update/remove/lock` commands, shared
   cache, ref resolution, frozen/refetch flows, and import resolution

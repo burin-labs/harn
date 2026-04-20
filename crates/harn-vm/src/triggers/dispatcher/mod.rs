@@ -1258,11 +1258,7 @@ impl Dispatcher {
                             run_id: None,
                             run_path: None,
                             metadata: dispatch_success_metadata(
-                                &route,
-                                binding,
-                                &event,
-                                attempt,
-                                &result,
+                                &route, binding, &event, attempt, &result,
                             ),
                         }],
                         Vec::new(),
@@ -1449,11 +1445,7 @@ impl Dispatcher {
                             run_id: None,
                             run_path: None,
                             metadata: dispatch_error_metadata(
-                                &route,
-                                binding,
-                                &event,
-                                attempt,
-                                &error,
+                                &route, binding, &event, attempt, &error,
                             ),
                         }],
                         Vec::new(),
@@ -2983,8 +2975,8 @@ fn dispatch_error_label(error: &DispatchError) -> &'static str {
 fn dispatch_success_outcome(route: &DispatchUri, result: &serde_json::Value) -> &'static str {
     match route {
         DispatchUri::Worker { .. } => "enqueued",
-        DispatchUri::A2a { .. } if result.get("kind").and_then(|value| value.as_str())
-            == Some("a2a_task_handle") =>
+        DispatchUri::A2a { .. }
+            if result.get("kind").and_then(|value| value.as_str()) == Some("a2a_task_handle") =>
         {
             "pending"
         }
@@ -3046,9 +3038,15 @@ fn signature_status_label(status: &crate::triggers::SignatureStatus) -> &'static
 
 fn trigger_node_metadata(event: &TriggerEvent) -> BTreeMap<String, serde_json::Value> {
     let mut metadata = BTreeMap::new();
-    metadata.insert("provider".to_string(), serde_json::json!(event.provider.as_str()));
+    metadata.insert(
+        "provider".to_string(),
+        serde_json::json!(event.provider.as_str()),
+    );
     metadata.insert("event_kind".to_string(), serde_json::json!(event.kind));
-    metadata.insert("dedupe_key".to_string(), serde_json::json!(event.dedupe_key));
+    metadata.insert(
+        "dedupe_key".to_string(),
+        serde_json::json!(event.dedupe_key),
+    );
     metadata.insert(
         "signature_status".to_string(),
         serde_json::json!(signature_status_label(&event.signature_status)),
@@ -3069,7 +3067,10 @@ fn predicate_node_metadata(
     );
     metadata.insert("predicate".to_string(), serde_json::json!(predicate.raw));
     metadata.insert("result".to_string(), serde_json::json!(evaluation.result));
-    metadata.insert("cost_usd".to_string(), serde_json::json!(evaluation.cost_usd));
+    metadata.insert(
+        "cost_usd".to_string(),
+        serde_json::json!(evaluation.cost_usd),
+    );
     metadata.insert("tokens".to_string(), serde_json::json!(evaluation.tokens));
     metadata.insert(
         "latency_ms".to_string(),
@@ -3090,11 +3091,11 @@ fn dispatch_node_metadata(
     attempt: u32,
 ) -> BTreeMap<String, serde_json::Value> {
     let mut metadata = BTreeMap::new();
+    metadata.insert("handler_kind".to_string(), serde_json::json!(route.kind()));
     metadata.insert(
-        "handler_kind".to_string(),
-        serde_json::json!(route.kind()),
+        "target_uri".to_string(),
+        serde_json::json!(route.target_uri()),
     );
-    metadata.insert("target_uri".to_string(), serde_json::json!(route.target_uri()));
     metadata.insert("attempt".to_string(), serde_json::json!(attempt));
     metadata.insert(
         "trigger_id".to_string(),
@@ -3132,11 +3133,18 @@ fn dispatch_success_metadata(
             }
         }
         DispatchUri::Worker { .. } => {
-            if let Some(job_event_id) = result.get("job_event_id").and_then(|value| value.as_u64()) {
+            if let Some(job_event_id) = result.get("job_event_id").and_then(|value| value.as_u64())
+            {
                 metadata.insert("job_event_id".to_string(), serde_json::json!(job_event_id));
             }
-            if let Some(response_topic) = result.get("response_topic").and_then(|value| value.as_str()) {
-                metadata.insert("response_topic".to_string(), serde_json::json!(response_topic));
+            if let Some(response_topic) = result
+                .get("response_topic")
+                .and_then(|value| value.as_str())
+            {
+                metadata.insert(
+                    "response_topic".to_string(),
+                    serde_json::json!(response_topic),
+                );
             }
         }
         DispatchUri::Local { .. } => {}
@@ -3170,10 +3178,7 @@ fn retry_node_metadata(
     );
     metadata.insert("event_id".to_string(), serde_json::json!(event.id.0));
     metadata.insert("attempt".to_string(), serde_json::json!(attempt));
-    metadata.insert(
-        "delay_ms".to_string(),
-        serde_json::json!(delay.as_millis()),
-    );
+    metadata.insert("delay_ms".to_string(), serde_json::json!(delay.as_millis()));
     metadata.insert("error".to_string(), serde_json::json!(error.to_string()));
     metadata
 }

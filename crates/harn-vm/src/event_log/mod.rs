@@ -1110,35 +1110,32 @@ impl EventLog for SqliteEventLog {
             .map_err(|error| LogError::Sqlite(format!("event log prepare error: {error}")))?;
         let from_sql = event_id_to_sqlite_i64(from.unwrap_or(0))?;
         let rows = statement
-            .query_map(
-                params![topic.as_str(), from_sql, limit as i64],
-                |row| {
-                    let payload: String = row.get(2)?;
-                    let headers: String = row.get(3)?;
-                    let event_id = sqlite_i64_to_event_id_for_row(row.get::<_, i64>(0)?)?;
-                    Ok((
-                        event_id,
-                        LogEvent {
-                            kind: row.get(1)?,
-                            payload: serde_json::from_str(&payload).map_err(|error| {
-                                rusqlite::Error::FromSqlConversionFailure(
-                                    payload.len(),
-                                    rusqlite::types::Type::Text,
-                                    Box::new(error),
-                                )
-                            })?,
-                            headers: serde_json::from_str(&headers).map_err(|error| {
-                                rusqlite::Error::FromSqlConversionFailure(
-                                    headers.len(),
-                                    rusqlite::types::Type::Text,
-                                    Box::new(error),
-                                )
-                            })?,
-                            occurred_at_ms: row.get(4)?,
-                        },
-                    ))
-                },
-            )
+            .query_map(params![topic.as_str(), from_sql, limit as i64], |row| {
+                let payload: String = row.get(2)?;
+                let headers: String = row.get(3)?;
+                let event_id = sqlite_i64_to_event_id_for_row(row.get::<_, i64>(0)?)?;
+                Ok((
+                    event_id,
+                    LogEvent {
+                        kind: row.get(1)?,
+                        payload: serde_json::from_str(&payload).map_err(|error| {
+                            rusqlite::Error::FromSqlConversionFailure(
+                                payload.len(),
+                                rusqlite::types::Type::Text,
+                                Box::new(error),
+                            )
+                        })?,
+                        headers: serde_json::from_str(&headers).map_err(|error| {
+                            rusqlite::Error::FromSqlConversionFailure(
+                                headers.len(),
+                                rusqlite::types::Type::Text,
+                                Box::new(error),
+                            )
+                        })?,
+                        occurred_at_ms: row.get(4)?,
+                    },
+                ))
+            })
             .map_err(|error| LogError::Sqlite(format!("event log query error: {error}")))?;
         let mut events = Vec::new();
         for row in rows {

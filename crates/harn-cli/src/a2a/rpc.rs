@@ -60,6 +60,34 @@ pub(super) fn extract_message_params(parsed: &serde_json::Value) -> (String, Opt
     (task_text, context_id)
 }
 
+fn workflow_id_param<'a>(
+    parsed: &'a serde_json::Value,
+    method: &str,
+) -> Result<&'a str, serde_json::Value> {
+    parsed
+        .pointer("/params/workflowId")
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            error_response(
+                &parsed["id"],
+                -32602,
+                &format!("{method}: missing workflowId"),
+            )
+        })
+}
+
+fn workflow_name_param<'a>(
+    parsed: &'a serde_json::Value,
+    method: &str,
+) -> Result<&'a str, serde_json::Value> {
+    parsed
+        .pointer("/params/name")
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| error_response(&parsed["id"], -32602, &format!("{method}: missing name")))
+}
+
 /// Handle a JSON-RPC request body, returning the JSON response string.
 pub(super) async fn handle_jsonrpc(pipeline_path: &str, body: &str, store: &TaskStore) -> String {
     let parsed: serde_json::Value = match serde_json::from_str(body) {
@@ -157,6 +185,119 @@ pub(super) async fn handle_jsonrpc(pipeline_path: &str, body: &str, store: &Task
                 .map(|v| v as usize);
             let result = list_tasks(store, cursor, limit);
             task_rpc_response(&rpc_id, result)
+        }
+        "a2a.WorkflowSignal" | "harn.workflow.signal" => {
+            let workflow_id = match workflow_id_param(&parsed, method) {
+                Ok(value) => value,
+                Err(response) => {
+                    return serde_json::to_string(&response).unwrap_or_default();
+                }
+            };
+            let name = match workflow_name_param(&parsed, method) {
+                Ok(value) => value,
+                Err(response) => {
+                    return serde_json::to_string(&response).unwrap_or_default();
+                }
+            };
+            let payload = parsed
+                .pointer("/params/payload")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null);
+            let base_dir = std::path::Path::new(pipeline_path)
+                .parent()
+                .unwrap_or_else(|| std::path::Path::new("."));
+            match harn_vm::workflow_signal_for_base(base_dir, workflow_id, name, payload) {
+                Ok(result) => harn_vm::jsonrpc::response(rpc_id.clone(), result),
+                Err(error) => error_response(&rpc_id, -32000, &error),
+            }
+        }
+        "a2a.WorkflowQuery" | "harn.workflow.query" => {
+            let workflow_id = match workflow_id_param(&parsed, method) {
+                Ok(value) => value,
+                Err(response) => {
+                    return serde_json::to_string(&response).unwrap_or_default();
+                }
+            };
+            let name = match workflow_name_param(&parsed, method) {
+                Ok(value) => value,
+                Err(response) => {
+                    return serde_json::to_string(&response).unwrap_or_default();
+                }
+            };
+            let base_dir = std::path::Path::new(pipeline_path)
+                .parent()
+                .unwrap_or_else(|| std::path::Path::new("."));
+            match harn_vm::workflow_query_for_base(base_dir, workflow_id, name) {
+                Ok(result) => harn_vm::jsonrpc::response(rpc_id.clone(), result),
+                Err(error) => error_response(&rpc_id, -32000, &error),
+            }
+        }
+        "a2a.WorkflowUpdate" | "harn.workflow.update" => {
+            let workflow_id = match workflow_id_param(&parsed, method) {
+                Ok(value) => value,
+                Err(response) => {
+                    return serde_json::to_string(&response).unwrap_or_default();
+                }
+            };
+            let name = match workflow_name_param(&parsed, method) {
+                Ok(value) => value,
+                Err(response) => {
+                    return serde_json::to_string(&response).unwrap_or_default();
+                }
+            };
+            let payload = parsed
+                .pointer("/params/payload")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null);
+            let timeout = parsed
+                .pointer("/params/timeoutMs")
+                .and_then(|value| value.as_u64())
+                .unwrap_or(30_000);
+            let base_dir = std::path::Path::new(pipeline_path)
+                .parent()
+                .unwrap_or_else(|| std::path::Path::new("."));
+            match harn_vm::workflow_update_for_base(
+                base_dir,
+                workflow_id,
+                name,
+                payload,
+                std::time::Duration::from_millis(timeout),
+            )
+            .await
+            {
+                Ok(result) => harn_vm::jsonrpc::response(rpc_id.clone(), result),
+                Err(error) => error_response(&rpc_id, -32000, &error),
+            }
+        }
+        "a2a.WorkflowPause" | "harn.workflow.pause" => {
+            let workflow_id = match workflow_id_param(&parsed, method) {
+                Ok(value) => value,
+                Err(response) => {
+                    return serde_json::to_string(&response).unwrap_or_default();
+                }
+            };
+            let base_dir = std::path::Path::new(pipeline_path)
+                .parent()
+                .unwrap_or_else(|| std::path::Path::new("."));
+            match harn_vm::workflow_pause_for_base(base_dir, workflow_id) {
+                Ok(result) => harn_vm::jsonrpc::response(rpc_id.clone(), result),
+                Err(error) => error_response(&rpc_id, -32000, &error),
+            }
+        }
+        "a2a.WorkflowResume" | "harn.workflow.resume" => {
+            let workflow_id = match workflow_id_param(&parsed, method) {
+                Ok(value) => value,
+                Err(response) => {
+                    return serde_json::to_string(&response).unwrap_or_default();
+                }
+            };
+            let base_dir = std::path::Path::new(pipeline_path)
+                .parent()
+                .unwrap_or_else(|| std::path::Path::new("."));
+            match harn_vm::workflow_resume_for_base(base_dir, workflow_id) {
+                Ok(result) => harn_vm::jsonrpc::response(rpc_id.clone(), result),
+                Err(error) => error_response(&rpc_id, -32000, &error),
+            }
         }
         _ => error_response(
             &rpc_id,

@@ -1159,7 +1159,10 @@ pub fn derive_run_observability(
                     run_id: child.run_id.clone(),
                     run_path: child.run_path.clone(),
                     metadata: BTreeMap::from([
-                        ("worker_name".to_string(), serde_json::json!(child.worker_name)),
+                        (
+                            "worker_name".to_string(),
+                            serde_json::json!(child.worker_name),
+                        ),
                         ("task".to_string(), serde_json::json!(child.task)),
                     ]),
                 },
