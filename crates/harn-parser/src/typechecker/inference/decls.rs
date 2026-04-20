@@ -48,6 +48,7 @@ impl TypeChecker {
         }
         for param in params {
             fn_scope.define_var(&param.name, param.type_expr.clone());
+            fn_scope.clear_nil_widenable(&param.name);
             if let Some(default) = &param.default_value {
                 self.check_node(default, &mut fn_scope);
             }
