@@ -7,6 +7,39 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
+## v0.7.25
+
+### Added
+
+- **`hmac_sha256`, `hmac_sha256_base64`, and `constant_time_eq` stdlib
+  builtins (groundwork for #350).** Lifts the existing private
+  `hmac_sha256` helper out of `connectors/hmac.rs` into the stdlib so
+  pure-Harn connector implementations can verify webhook signatures
+  without re-implementing crypto. `constant_time_eq` wraps
+  `subtle::ConstantTimeEq` so scripts can compare signatures without
+  leaking byte positions through timing. Covered by RFC 4231 and
+  GitHub's documented webhook test vectors.
+
+### Fixed
+
+- **Orchestrator no longer SIGTERM-races under parallel test load
+  (#344).** `harn orchestrator serve` now installs tokio Unix signal
+  streams before logging its `HTTP listener ready` line, closing the
+  window where a supervisor could observe readiness and send SIGTERM
+  before the handler was wired up.
+- **`harn-cli` unit-test isolation on event-log globals (#351).** The
+  shared `HARN_STATE_DIR` / `HARN_EVENT_LOG_*` environment variables and
+  process-global event-log thread-local are now gated by a
+  `lock_harn_state()` helper so tests stop observing stale dedupe state
+  from earlier fixtures under `cargo test` parallelism.
+
+### Internal
+
+- **Gitignore ephemeral conformance `.harn/` artifacts.** SQLite
+  event-log files (`events.sqlite`, `events.sqlite-shm`,
+  `events.sqlite-wal`) and checkpoint directories dropped by
+  conformance test runs are no longer surfaced as untracked files.
+
 ## v0.7.24
 
 ### Fixed

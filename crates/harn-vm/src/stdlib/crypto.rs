@@ -364,7 +364,10 @@ mod tests {
             vec![s("Jefe"), s("what do ya want for nothing?")],
         )
         .unwrap();
-        assert_eq!(result.display(), "W9zBRr9gdU5qBCQmCJV1x1oAPwidJzmDnexYuWTsOEM=");
+        assert_eq!(
+            result.display(),
+            "W9zBRr9gdU5qBCQmCJV1x1oAPwidJzmDnexYuWTsOEM="
+        );
     }
 
     #[test]

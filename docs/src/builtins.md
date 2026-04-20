@@ -560,6 +560,23 @@ println(sha256("hello"))  // 2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e730
 println(md5("hello"))     // 5d41402abc4b2a76b9719d911017c592
 ```
 
+### HMAC and signature comparison
+
+| Function | Parameters | Returns | Description |
+|---|---|---|---|
+| `hmac_sha256(key, message)` | key: string, message: string | string | HMAC-SHA256 as a lowercase hex-encoded string. Most webhook providers (GitHub, Stripe) send signatures in this form |
+| `hmac_sha256_base64(key, message)` | key: string, message: string | string | HMAC-SHA256 as standard base64 (used by Slack-style signatures) |
+| `constant_time_eq(a, b)` | a: string, b: string | bool | Timing-safe string equality. Always use this to compare HMAC signatures — plain `==` can leak the signature byte-by-byte through timing differences |
+
+Example (GitHub-style webhook signature verification):
+
+```harn
+let signature = "sha256=" + hmac_sha256(secret, raw_body)
+if !constant_time_eq(signature, request_signature) {
+  throw "invalid signature"
+}
+```
+
 ## Date/Time
 
 | Function | Parameters | Returns | Description |
