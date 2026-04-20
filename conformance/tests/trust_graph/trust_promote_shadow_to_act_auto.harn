@@ -2,7 +2,7 @@ import "std/triggers"
 
 fn gated_handler(event: TriggerEvent) -> dict {
   let context = handler_context()
-  let file_path = path_join(".harn", "trust_graph_shadow_" + (context?.agent ?? "unknown") + ".txt")
+  let file_path = path_join(".harn", "trust_graph_shadow_" + context?.agent ?? "unknown" + ".txt")
   write_file(file_path, "approved:" + event.kind)
   return {autonomy_tier: context?.autonomy_tier, file_path: file_path}
 }
@@ -12,7 +12,8 @@ pipeline test(task) {
   let agent_id = "shadow-bot-" + unique
   let file_path = path_join(".harn", "trust_graph_shadow_" + agent_id + ".txt")
   mkdir(".harn")
-  let handle: TriggerHandle = trigger_register({
+  let handle: TriggerHandle = trigger_register(
+    {
     id: agent_id,
     kind: "issue.opened",
     provider: "github",
@@ -27,39 +28,21 @@ pipeline test(task) {
     budget: nil,
     manifest_path: "runtime://trust-graph",
     package_name: "conformance",
-  })
-
+  },
+  )
   let first: DispatchHandle = trigger_fire(
     handle,
     {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-shadow-" + unique}},
   )
-  let denied: list<TrustRecord> = trust_query({
-    agent: agent_id,
-    action: "github.issue.opened",
-    outcome: "denied",
-  })
+  let denied: list<TrustRecord> = trust_query({agent: agent_id, action: "github.issue.opened", outcome: "denied"})
   let file_after_first = file_exists(file_path)
-  let promoted: TrustRecord = trust_record(
-    agent_id,
-    "trust.promote",
-    "tester",
-    "success",
-    "act_auto",
-  )
-  let promote_records: list<TrustRecord> = trust_query({
-    agent: agent_id,
-    action: "trust.promote",
-  })
+  let promoted: TrustRecord = trust_record(agent_id, "trust.promote", "tester", "success", "act_auto")
+  let promote_records: list<TrustRecord> = trust_query({agent: agent_id, action: "trust.promote"})
   let second: DispatchHandle = trigger_fire(
     handle,
     {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-auto-" + unique}},
   )
-  let successes: list<TrustRecord> = trust_query({
-    agent: agent_id,
-    action: "github.issue.opened",
-    outcome: "success",
-  })
-
+  let successes: list<TrustRecord> = trust_query({agent: agent_id, action: "github.issue.opened", outcome: "success"})
   println(first.status == "failed")
   println(!file_after_first)
   println(len(denied) == 1 && denied[0].autonomy_tier == "shadow")

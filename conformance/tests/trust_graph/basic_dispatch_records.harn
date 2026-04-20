@@ -14,7 +14,8 @@ fn handle_issue(event: TriggerEvent) -> dict {
 pipeline test(task) {
   let unique = to_string(to_int(timestamp())) + "-" + to_string(random_int(100000, 999999))
   let agent_id = "github-triage-bot-" + unique
-  let handle: TriggerHandle = trigger_register({
+  let handle: TriggerHandle = trigger_register(
+    {
     id: agent_id,
     kind: "issue.opened",
     provider: "github",
@@ -29,16 +30,13 @@ pipeline test(task) {
     budget: nil,
     manifest_path: "runtime://trust-graph",
     package_name: "conformance",
-  })
+  },
+  )
   let fired: DispatchHandle = trigger_fire(
     handle,
     {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-" + unique}},
   )
-  let records: list<TrustRecord> = trust_query({
-    agent: agent_id,
-    action: "github.issue.opened",
-  })
-
+  let records: list<TrustRecord> = trust_query({agent: agent_id, action: "github.issue.opened"})
   println(fired.status == "dispatched" && fired.error == nil)
   println(fired.result?.agent == agent_id)
   println(fired.result?.action == "github.issue.opened")
