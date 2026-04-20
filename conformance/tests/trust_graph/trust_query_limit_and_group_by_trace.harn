@@ -5,26 +5,25 @@ pipeline test(task) {
   let agent_id = "trust-grouped-" + unique
   let handle: TriggerHandle = trigger_register(
     {
-      id: agent_id,
-      kind: "issue.opened",
-      provider: "github",
-      autonomy_tier: "act_auto",
-      handler: { event ->
-        let _ = trust_record(agent_id, "audit.note", nil, "success", "suggest")
-        return handler_context()
-      },
-      when: nil,
-      retry: nil,
-      match: {events: ["issue.opened"]},
-      events: nil,
-      dedupe_key: nil,
-      filter: nil,
-      budget: nil,
-      manifest_path: "runtime://trust-graph",
-      package_name: "conformance",
-    },
+    id: agent_id,
+    kind: "issue.opened",
+    provider: "github",
+    autonomy_tier: "act_auto",
+    handler: { event ->
+    let _ = trust_record(agent_id, "audit.note", nil, "success", "suggest")
+    return handler_context()
+  },
+    when: nil,
+    retry: nil,
+    match: {events: ["issue.opened"]},
+    events: nil,
+    dedupe_key: nil,
+    filter: nil,
+    budget: nil,
+    manifest_path: "runtime://trust-graph",
+    package_name: "conformance",
+  },
   )
-
   let first: DispatchHandle = trigger_fire(
     handle,
     {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-a-" + unique}},
@@ -33,11 +32,8 @@ pipeline test(task) {
     handle,
     {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-b-" + unique}},
   )
-
   let flat: list<TrustRecord> = trust_query({agent: agent_id, limit: 2})
-  let grouped: list<TrustTraceGroup> =
-    trust_query({agent: agent_id, limit: 2, grouped_by_trace: true})
-
+  let grouped: list<TrustTraceGroup> = trust_query({agent: agent_id, limit: 2, grouped_by_trace: true})
   println(first.status == "dispatched")
   println(second.status == "dispatched")
   println(len(flat) == 2)
