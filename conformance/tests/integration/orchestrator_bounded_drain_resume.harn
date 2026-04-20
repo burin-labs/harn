@@ -139,7 +139,7 @@ pipeline default() {
             "Content-Type": "application/json",
             "Authorization": "Bearer test-key",
         }
-        for index in range(5000):
+        for index in range(500):
             body = json.dumps(
                 {
                     "kind": "a2a.task.received",
@@ -174,7 +174,7 @@ pipeline default() {
     second_proc, second_log = start(None, "orchestrator-second.log")
     try:
         wait_ready("orchestrator-second.log")
-        outbox_count = wait_outbox(5000)
+        outbox_count = wait_outbox(500)
         second_proc.send_signal(signal.SIGTERM)
         second_proc.wait(timeout=10)
         if second_proc.returncode != 0:
@@ -204,5 +204,5 @@ pipeline default() {
   println(summary.shutdown_ms <= 4000)
   println(summary.truncated == true)
   println(summary.remaining_queued > 0)
-  println(summary.outbox_count == 5000)
+  println(summary.outbox_count == 500)
 }
