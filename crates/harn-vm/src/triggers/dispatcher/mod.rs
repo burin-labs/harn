@@ -1324,6 +1324,7 @@ pub async fn enqueue_trigger_event<L: EventLog + ?Sized>(
         )
         .await
         .map_err(DispatchError::from)
+}
 
 pub fn snapshot_dispatcher_stats() -> DispatcherStatsSnapshot {
     ACTIVE_DISPATCHER_STATE.with(|slot| {

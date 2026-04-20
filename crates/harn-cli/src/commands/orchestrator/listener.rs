@@ -320,7 +320,7 @@ impl RouteRegistry {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy)]
 pub(crate) enum SignatureMode {
     GitHub,
     Standard,
@@ -1136,6 +1136,7 @@ mod tests {
             signing_secret: Some(SecretId::new("github", "test-signing-secret")),
             dedupe_key_template: Some("event.dedupe_key".to_string()),
             dedupe_retention_days: harn_vm::DEFAULT_INBOX_RETENTION_DAYS,
+            connector: None,
         }
     }
 
