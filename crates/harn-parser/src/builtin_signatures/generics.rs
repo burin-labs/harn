@@ -180,7 +180,44 @@ fn project_fingerprint_builtin_sig() -> BuiltinGenericSig {
                 optional: false,
             },
             ShapeField {
+                name: "package_manager".into(),
+                type_expr: TypeExpr::Union(vec![
+                    TypeExpr::Named("string".into()),
+                    TypeExpr::Named("nil".into()),
+                ]),
+                optional: false,
+            },
+            ShapeField {
                 name: "package_managers".into(),
+                type_expr: TypeExpr::List(Box::new(TypeExpr::Named("string".into()))),
+                optional: false,
+            },
+            ShapeField {
+                name: "test_runner".into(),
+                type_expr: TypeExpr::Union(vec![
+                    TypeExpr::Named("string".into()),
+                    TypeExpr::Named("nil".into()),
+                ]),
+                optional: false,
+            },
+            ShapeField {
+                name: "build_tool".into(),
+                type_expr: TypeExpr::Union(vec![
+                    TypeExpr::Named("string".into()),
+                    TypeExpr::Named("nil".into()),
+                ]),
+                optional: false,
+            },
+            ShapeField {
+                name: "vcs".into(),
+                type_expr: TypeExpr::Union(vec![
+                    TypeExpr::Named("string".into()),
+                    TypeExpr::Named("nil".into()),
+                ]),
+                optional: false,
+            },
+            ShapeField {
+                name: "ci".into(),
                 type_expr: TypeExpr::List(Box::new(TypeExpr::Named("string".into()))),
                 optional: false,
             },

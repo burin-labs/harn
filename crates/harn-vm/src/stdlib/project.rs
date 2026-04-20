@@ -41,10 +41,35 @@ const FINGERPRINT_SKIP_DIRS: &[&str] = &[
     "venv",
 ];
 const PROJECT_FINGERPRINT_MAX_DEPTH: usize = 4;
-const PROJECT_LANGUAGE_ORDER: &[&str] = &["rust", "typescript", "python", "go", "swift"];
+const PROJECT_LANGUAGE_ORDER: &[&str] = &["rust", "typescript", "python", "go", "swift", "ruby"];
 const PROJECT_FRAMEWORK_ORDER: &[&str] = &["axum", "next", "react", "django", "fastapi", "rails"];
-const PROJECT_PACKAGE_MANAGER_ORDER: &[&str] =
-    &["cargo", "npm", "pnpm", "yarn", "pip", "poetry", "uv", "go"];
+const PROJECT_PACKAGE_MANAGER_ORDER: &[&str] = &[
+    "cargo", "spm", "pnpm", "npm", "yarn", "uv", "poetry", "pip", "go-mod", "bundler",
+];
+const PROJECT_TEST_RUNNER_ORDER: &[&str] = &[
+    "nextest",
+    "cargo-test",
+    "vitest",
+    "jest",
+    "mocha",
+    "pytest",
+    "unittest",
+    "go-test",
+    "xctest",
+    "rspec",
+    "minitest",
+];
+const PROJECT_BUILD_TOOL_ORDER: &[&str] = &[
+    "cargo", "spm", "next", "vite", "uv", "poetry", "pnpm", "npm", "yarn", "go", "bundler", "pip",
+];
+const PROJECT_CI_ORDER: &[&str] = &[
+    "github-actions",
+    "gitlab-ci",
+    "circleci",
+    "buildkite",
+    "azure-pipelines",
+    "bitrise",
+];
 const PROJECT_LOCKFILES: &[(&str, Option<&str>)] = &[
     ("Cargo.lock", Some("cargo")),
     ("package-lock.json", Some("npm")),
@@ -54,12 +79,25 @@ const PROJECT_LOCKFILES: &[(&str, Option<&str>)] = &[
     ("poetry.lock", Some("poetry")),
     ("Pipfile.lock", Some("pip")),
     ("requirements.lock", Some("pip")),
-    ("go.sum", Some("go")),
-    ("Gemfile.lock", None),
-    ("Package.resolved", None),
+    ("go.sum", Some("go-mod")),
+    ("Gemfile.lock", Some("bundler")),
+    ("Package.resolved", Some("spm")),
+    ("bun.lockb", Some("npm")),
+    ("bun.lock", Some("npm")),
 ];
 const TEST_DIR_NAMES: &[&str] = &["tests", "test", "__tests__", "spec", "e2e", "cypress"];
 const NEXT_CONFIG_NAMES: &[&str] = &["next.config.js", "next.config.mjs", "next.config.ts"];
+const VITEST_CONFIG_NAMES: &[&str] = &["vitest.config.js", "vitest.config.ts", "vitest.config.mjs"];
+const JEST_CONFIG_NAMES: &[&str] = &["jest.config.js", "jest.config.ts", "jest.config.cjs"];
+const VITE_CONFIG_NAMES: &[&str] = &["vite.config.js", "vite.config.ts", "vite.config.mjs"];
+const MOCHA_CONFIG_NAMES: &[&str] = &[
+    ".mocharc.js",
+    ".mocharc.json",
+    ".mocharc.yml",
+    ".mocharc.yaml",
+];
+const PYTEST_CONFIG_NAMES: &[&str] = &["pytest.ini", "tox.ini", "conftest.py"];
+const NEXTEST_CONFIG_NAMES: &[&str] = &["nextest.toml"];
 const CI_FILE_NAMES: &[&str] = &[
     ".gitlab-ci.yml",
     "azure-pipelines.yml",
@@ -72,7 +110,12 @@ struct ProjectFingerprint {
     primary_language: String,
     languages: Vec<String>,
     frameworks: Vec<String>,
+    package_manager: Option<String>,
     package_managers: Vec<String>,
+    test_runner: Option<String>,
+    build_tool: Option<String>,
+    vcs: Option<String>,
+    ci: Vec<String>,
     has_tests: bool,
     has_ci: bool,
     lockfile_paths: Vec<String>,
@@ -104,9 +147,42 @@ impl ProjectFingerprint {
             )),
         );
         value.insert(
+            "package_manager".to_string(),
+            self.package_manager
+                .map(|value| VmValue::String(Rc::from(value)))
+                .unwrap_or(VmValue::Nil),
+        );
+        value.insert(
             "package_managers".to_string(),
             VmValue::List(Rc::new(
                 self.package_managers
+                    .into_iter()
+                    .map(|item| VmValue::String(Rc::from(item)))
+                    .collect(),
+            )),
+        );
+        value.insert(
+            "test_runner".to_string(),
+            self.test_runner
+                .map(|value| VmValue::String(Rc::from(value)))
+                .unwrap_or(VmValue::Nil),
+        );
+        value.insert(
+            "build_tool".to_string(),
+            self.build_tool
+                .map(|value| VmValue::String(Rc::from(value)))
+                .unwrap_or(VmValue::Nil),
+        );
+        value.insert(
+            "vcs".to_string(),
+            self.vcs
+                .map(|value| VmValue::String(Rc::from(value)))
+                .unwrap_or(VmValue::Nil),
+        );
+        value.insert(
+            "ci".to_string(),
+            VmValue::List(Rc::new(
+                self.ci
                     .into_iter()
                     .map(|item| VmValue::String(Rc::from(item)))
                     .collect(),
@@ -132,14 +208,23 @@ struct FingerprintSignals {
     languages: BTreeSet<String>,
     frameworks: BTreeSet<String>,
     package_managers: BTreeSet<String>,
+    test_runners: BTreeSet<String>,
+    build_tools: BTreeSet<String>,
+    ci: BTreeSet<String>,
     lockfile_paths: BTreeSet<String>,
     has_tests: bool,
-    has_ci: bool,
+    has_spec_dir: bool,
+    has_test_dir: bool,
     node_project: bool,
     python_project: bool,
     python_needs_pip: bool,
+    ruby_project: bool,
     has_next_dep: bool,
     has_next_config: bool,
+    has_vite_dep: bool,
+    has_vite_config: bool,
+    has_pytest_signal: bool,
+    has_unittest_signal: bool,
 }
 
 #[derive(Debug, Clone, Copy, Default, Eq, Ord, PartialEq, PartialOrd)]
@@ -487,6 +572,7 @@ fn detect_project_fingerprint(dir: &Path) -> ProjectFingerprint {
     if signals.has_next_dep && signals.has_next_config {
         signals.frameworks.insert("next".to_string());
         signals.languages.insert("typescript".to_string());
+        signals.build_tools.insert("next".to_string());
     }
     if signals.node_project
         && !signals.package_managers.contains("npm")
@@ -502,10 +588,65 @@ fn detect_project_fingerprint(dir: &Path) -> ProjectFingerprint {
     {
         signals.package_managers.insert("pip".to_string());
     }
+    if signals.languages.contains("rust") {
+        signals.build_tools.insert("cargo".to_string());
+        signals.test_runners.insert("cargo-test".to_string());
+    }
+    if signals.languages.contains("go") {
+        signals.package_managers.insert("go-mod".to_string());
+        signals.build_tools.insert("go".to_string());
+        signals.test_runners.insert("go-test".to_string());
+    }
+    if signals.languages.contains("swift") {
+        signals.package_managers.insert("spm".to_string());
+        signals.build_tools.insert("spm".to_string());
+        signals.test_runners.insert("xctest".to_string());
+    }
+    if signals.python_project && signals.test_runners.is_empty() {
+        signals.test_runners.insert("pytest".to_string());
+    }
+    if signals.ruby_project {
+        signals.package_managers.insert("bundler".to_string());
+        signals.build_tools.insert("bundler".to_string());
+        if signals.test_runners.is_empty() {
+            if signals.has_spec_dir {
+                signals.test_runners.insert("rspec".to_string());
+            } else if signals.has_test_dir {
+                signals.test_runners.insert("minitest".to_string());
+            }
+        }
+    }
+    if signals.has_vite_dep || signals.has_vite_config {
+        signals.build_tools.insert("vite".to_string());
+        if signals.has_tests && signals.test_runners.is_empty() {
+            signals.test_runners.insert("vitest".to_string());
+        }
+    }
+    if signals.node_project && signals.build_tools.is_empty() {
+        if signals.package_managers.contains("pnpm") {
+            signals.build_tools.insert("pnpm".to_string());
+        } else if signals.package_managers.contains("yarn") {
+            signals.build_tools.insert("yarn".to_string());
+        } else if signals.package_managers.contains("npm") {
+            signals.build_tools.insert("npm".to_string());
+        }
+    }
+    if signals.python_project && signals.build_tools.is_empty() {
+        if signals.package_managers.contains("uv") {
+            signals.build_tools.insert("uv".to_string());
+        } else if signals.package_managers.contains("poetry") {
+            signals.build_tools.insert("poetry".to_string());
+        } else if signals.package_managers.contains("pip") {
+            signals.build_tools.insert("pip".to_string());
+        }
+    }
 
     let languages = ordered_values(&signals.languages, PROJECT_LANGUAGE_ORDER);
     let frameworks = ordered_values(&signals.frameworks, PROJECT_FRAMEWORK_ORDER);
     let package_managers = ordered_values(&signals.package_managers, PROJECT_PACKAGE_MANAGER_ORDER);
+    let test_runners = ordered_values(&signals.test_runners, PROJECT_TEST_RUNNER_ORDER);
+    let build_tools = ordered_values(&signals.build_tools, PROJECT_BUILD_TOOL_ORDER);
+    let ci = ordered_values(&signals.ci, PROJECT_CI_ORDER);
     let primary_language = match languages.as_slice() {
         [] => "unknown".to_string(),
         [only] => only.clone(),
@@ -516,9 +657,14 @@ fn detect_project_fingerprint(dir: &Path) -> ProjectFingerprint {
         primary_language,
         languages,
         frameworks,
+        package_manager: first_ordered_value(&package_managers),
         package_managers,
+        test_runner: first_ordered_value(&test_runners),
+        build_tool: first_ordered_value(&build_tools),
+        vcs: detect_vcs(dir),
+        ci: ci.clone(),
         has_tests: signals.has_tests,
-        has_ci: signals.has_ci,
+        has_ci: !ci.is_empty(),
         lockfile_paths: signals.lockfile_paths.into_iter().collect(),
     }
 }
@@ -560,16 +706,24 @@ fn walk_project_fingerprint(
 }
 
 fn inspect_fingerprint_dir(rel: &str, name: &str, signals: &mut FingerprintSignals) {
-    if TEST_DIR_NAMES.contains(&name) {
+    let lower_name = name.to_ascii_lowercase();
+    if TEST_DIR_NAMES.contains(&lower_name.as_str()) {
         signals.has_tests = true;
+        if lower_name == "spec" {
+            signals.has_spec_dir = true;
+        }
+        if lower_name == "test" || lower_name == "tests" {
+            signals.has_test_dir = true;
+        }
     }
-    if rel == ".github"
-        || rel.ends_with("/.github")
-        || rel == ".github/workflows"
-        || name == ".circleci"
-        || name == ".buildkite"
-    {
-        signals.has_ci = true;
+    if rel == ".github/workflows" || rel.ends_with("/.github/workflows") {
+        signals.ci.insert("github-actions".to_string());
+    }
+    if name == ".circleci" {
+        signals.ci.insert("circleci".to_string());
+    }
+    if name == ".buildkite" {
+        signals.ci.insert("buildkite".to_string());
     }
     match name {
         "crates" => {
@@ -578,6 +732,8 @@ fn inspect_fingerprint_dir(rel: &str, name: &str, signals: &mut FingerprintSigna
         "cmd" | "pkg" => {
             signals.languages.insert("go".to_string());
         }
+        ".git" => {}
+        ".hg" => {}
         _ => {}
     }
 }
@@ -592,11 +748,25 @@ fn inspect_fingerprint_file(path: &Path, rel: &str, name: &str, signals: &mut Fi
             signals.package_managers.insert((*manager).to_string());
         }
     }
-    if CI_FILE_NAMES.contains(&name)
-        || rel.starts_with(".github/workflows/")
-        || rel == ".github/workflows"
-    {
-        signals.has_ci = true;
+    if rel.starts_with(".github/workflows/") || rel == ".github/workflows" {
+        signals.ci.insert("github-actions".to_string());
+    }
+    if CI_FILE_NAMES.contains(&name) {
+        match name {
+            ".gitlab-ci.yml" => {
+                signals.ci.insert("gitlab-ci".to_string());
+            }
+            "azure-pipelines.yml" => {
+                signals.ci.insert("azure-pipelines".to_string());
+            }
+            "bitrise.yml" => {
+                signals.ci.insert("bitrise".to_string());
+            }
+            "circle.yml" => {
+                signals.ci.insert("circleci".to_string());
+            }
+            _ => {}
+        }
     }
 
     match name {
@@ -614,10 +784,15 @@ fn inspect_fingerprint_file(path: &Path, rel: &str, name: &str, signals: &mut Fi
         }
         "go.mod" => {
             signals.languages.insert("go".to_string());
-            signals.package_managers.insert("go".to_string());
+            signals.package_managers.insert("go-mod".to_string());
+            signals.build_tools.insert("go".to_string());
+            signals.test_runners.insert("go-test".to_string());
         }
         "Package.swift" => {
             signals.languages.insert("swift".to_string());
+            signals.package_managers.insert("spm".to_string());
+            signals.build_tools.insert("spm".to_string());
+            signals.test_runners.insert("xctest".to_string());
         }
         "Gemfile" => inspect_gemfile(path, signals),
         _ => {}
@@ -626,6 +801,31 @@ fn inspect_fingerprint_file(path: &Path, rel: &str, name: &str, signals: &mut Fi
     if NEXT_CONFIG_NAMES.contains(&name) {
         signals.has_next_config = true;
         signals.languages.insert("typescript".to_string());
+        signals.build_tools.insert("next".to_string());
+    }
+    if VITEST_CONFIG_NAMES.contains(&name) {
+        signals.test_runners.insert("vitest".to_string());
+        signals.has_tests = true;
+    }
+    if JEST_CONFIG_NAMES.contains(&name) {
+        signals.test_runners.insert("jest".to_string());
+        signals.has_tests = true;
+    }
+    if VITE_CONFIG_NAMES.contains(&name) {
+        signals.has_vite_config = true;
+        signals.build_tools.insert("vite".to_string());
+    }
+    if MOCHA_CONFIG_NAMES.contains(&name) {
+        signals.test_runners.insert("mocha".to_string());
+        signals.has_tests = true;
+    }
+    if PYTEST_CONFIG_NAMES.contains(&name) {
+        signals.has_pytest_signal = true;
+        signals.test_runners.insert("pytest".to_string());
+        signals.has_tests = true;
+    }
+    if NEXTEST_CONFIG_NAMES.contains(&name) || rel.ends_with("/.config/nextest.toml") {
+        signals.test_runners.insert("nextest".to_string());
     }
 
     match path.extension().and_then(|ext| ext.to_str()) {
@@ -646,6 +846,10 @@ fn inspect_fingerprint_file(path: &Path, rel: &str, name: &str, signals: &mut Fi
         Some("swift") => {
             signals.languages.insert("swift".to_string());
         }
+        Some("rb") => {
+            signals.languages.insert("ruby".to_string());
+            signals.ruby_project = true;
+        }
         _ => {}
     }
 }
@@ -653,6 +857,8 @@ fn inspect_fingerprint_file(path: &Path, rel: &str, name: &str, signals: &mut Fi
 fn inspect_cargo_manifest(path: &Path, signals: &mut FingerprintSignals) {
     signals.languages.insert("rust".to_string());
     signals.package_managers.insert("cargo".to_string());
+    signals.build_tools.insert("cargo".to_string());
+    signals.test_runners.insert("cargo-test".to_string());
     let Some(text) = read_text_if_exists(path.to_path_buf()) else {
         return;
     };
@@ -682,6 +888,7 @@ fn inspect_package_json(path: &Path, signals: &mut FingerprintSignals) {
     let deps = collect_json_dependency_names(&parsed);
     if deps.contains("next") {
         signals.has_next_dep = true;
+        signals.build_tools.insert("next".to_string());
     }
     if deps.contains("react") {
         signals.frameworks.insert("react".to_string());
@@ -689,6 +896,22 @@ fn inspect_package_json(path: &Path, signals: &mut FingerprintSignals) {
     }
     if deps.contains("typescript") {
         signals.languages.insert("typescript".to_string());
+    }
+    if deps.contains("vite") {
+        signals.has_vite_dep = true;
+        signals.build_tools.insert("vite".to_string());
+    }
+    if deps.contains("vitest") {
+        signals.test_runners.insert("vitest".to_string());
+        signals.has_tests = true;
+    }
+    if deps.contains("jest") {
+        signals.test_runners.insert("jest".to_string());
+        signals.has_tests = true;
+    }
+    if deps.contains("mocha") {
+        signals.test_runners.insert("mocha".to_string());
+        signals.has_tests = true;
     }
 
     if let Some(package_manager) = parsed
@@ -701,6 +924,12 @@ fn inspect_package_json(path: &Path, signals: &mut FingerprintSignals) {
             signals.package_managers.insert("yarn".to_string());
         } else if package_manager.starts_with("npm@") {
             signals.package_managers.insert("npm".to_string());
+        }
+    }
+
+    if let Some(scripts) = parsed.get("scripts").and_then(|value| value.as_object()) {
+        for command in scripts.values().filter_map(serde_json::Value::as_str) {
+            record_command_signal(command, signals);
         }
     }
 }
@@ -721,9 +950,11 @@ fn inspect_pyproject(path: &Path, signals: &mut FingerprintSignals) {
     let has_uv = table_path_exists(&parsed, &["tool", "uv"]);
     if has_poetry {
         signals.package_managers.insert("poetry".to_string());
+        signals.build_tools.insert("poetry".to_string());
     }
     if has_uv {
         signals.package_managers.insert("uv".to_string());
+        signals.build_tools.insert("uv".to_string());
     }
     if !has_poetry && !has_uv {
         signals.python_needs_pip = true;
@@ -734,6 +965,7 @@ fn inspect_python_requirements(path: &Path, signals: &mut FingerprintSignals) {
     signals.languages.insert("python".to_string());
     signals.python_project = true;
     signals.python_needs_pip = true;
+    signals.build_tools.insert("pip".to_string());
     inspect_python_text(read_text_if_exists(path.to_path_buf()).as_deref(), signals);
 }
 
@@ -748,14 +980,87 @@ fn inspect_python_text(text: Option<&str>, signals: &mut FingerprintSignals) {
     if lower.contains("django") {
         signals.frameworks.insert("django".to_string());
     }
+    if lower.contains("pytest") || lower.contains("[tool.pytest") {
+        signals.has_pytest_signal = true;
+        signals.test_runners.insert("pytest".to_string());
+        signals.has_tests = true;
+    }
+    if lower.contains("unittest") {
+        signals.has_unittest_signal = true;
+        signals.test_runners.insert("unittest".to_string());
+        signals.has_tests = true;
+    }
 }
 
 fn inspect_gemfile(path: &Path, signals: &mut FingerprintSignals) {
+    signals.languages.insert("ruby".to_string());
+    signals.ruby_project = true;
+    signals.package_managers.insert("bundler".to_string());
+    signals.build_tools.insert("bundler".to_string());
     let Some(text) = read_text_if_exists(path.to_path_buf()) else {
         return;
     };
     if text.contains("gem \"rails\"") || text.contains("gem 'rails'") {
         signals.frameworks.insert("rails".to_string());
+    }
+    if text.contains("gem \"rspec\"") || text.contains("gem 'rspec'") {
+        signals.test_runners.insert("rspec".to_string());
+    }
+    if text.contains("gem \"minitest\"") || text.contains("gem 'minitest'") {
+        signals.test_runners.insert("minitest".to_string());
+    }
+}
+
+fn record_command_signal(command: &str, signals: &mut FingerprintSignals) {
+    let normalized = command.to_ascii_lowercase();
+    if normalized.contains("next build") || normalized.contains("next dev") {
+        signals.build_tools.insert("next".to_string());
+    }
+    if normalized.contains("vite build")
+        || normalized.contains("vite dev")
+        || normalized.contains("npx vite")
+    {
+        signals.has_vite_dep = true;
+        signals.build_tools.insert("vite".to_string());
+    }
+    if normalized.contains("vitest") {
+        signals.test_runners.insert("vitest".to_string());
+        signals.has_tests = true;
+    }
+    if normalized.contains("jest") {
+        signals.test_runners.insert("jest".to_string());
+        signals.has_tests = true;
+    }
+    if normalized.contains("mocha") {
+        signals.test_runners.insert("mocha".to_string());
+        signals.has_tests = true;
+    }
+    if normalized.contains("cargo nextest") {
+        signals.test_runners.insert("nextest".to_string());
+        signals.has_tests = true;
+    }
+    if normalized.contains("cargo test") {
+        signals.test_runners.insert("cargo-test".to_string());
+        signals.has_tests = true;
+    }
+    if normalized.contains("pytest") {
+        signals.test_runners.insert("pytest".to_string());
+        signals.has_tests = true;
+    }
+    if normalized.contains("python -m unittest") || normalized.contains("unittest") {
+        signals.test_runners.insert("unittest".to_string());
+        signals.has_tests = true;
+    }
+    if normalized.contains("go test") {
+        signals.test_runners.insert("go-test".to_string());
+        signals.has_tests = true;
+    }
+    if normalized.contains("swift test") {
+        signals.test_runners.insert("xctest".to_string());
+        signals.has_tests = true;
+    }
+    if normalized.contains("swift build") {
+        signals.build_tools.insert("spm".to_string());
     }
 }
 
@@ -813,6 +1118,10 @@ fn ordered_values(values: &BTreeSet<String>, order: &[&str]) -> Vec<String> {
         }
     }
     ordered
+}
+
+fn first_ordered_value(values: &[String]) -> Option<String> {
+    values.first().cloned()
 }
 
 fn path_error(error: std::io::Error) -> VmError {
@@ -1403,6 +1712,9 @@ fn detect_vcs(dir: &Path) -> Option<String> {
         if path.join(".git").exists() {
             return Some("git".to_string());
         }
+        if path.join(".hg").exists() {
+            return Some("hg".to_string());
+        }
         cursor = path.parent();
     }
     None
@@ -1767,6 +2079,11 @@ mod tests {
             fingerprint.package_managers,
             vec!["cargo".to_string(), "pnpm".to_string()]
         );
+        assert_eq!(fingerprint.package_manager.as_deref(), Some("cargo"));
+        assert_eq!(fingerprint.test_runner.as_deref(), Some("cargo-test"));
+        assert_eq!(fingerprint.build_tool.as_deref(), Some("cargo"));
+        assert_eq!(fingerprint.vcs, None);
+        assert_eq!(fingerprint.ci, vec!["github-actions".to_string()]);
         assert!(fingerprint.has_tests);
         assert!(fingerprint.has_ci);
         assert_eq!(
@@ -1794,8 +2111,140 @@ mod tests {
         assert_eq!(fingerprint.languages, vec!["python".to_string()]);
         assert!(fingerprint.frameworks.contains(&"fastapi".to_string()));
         assert_eq!(fingerprint.package_managers, vec!["uv".to_string()]);
+        assert_eq!(fingerprint.package_manager.as_deref(), Some("uv"));
+        assert_eq!(fingerprint.test_runner.as_deref(), Some("pytest"));
+        assert_eq!(fingerprint.build_tool.as_deref(), Some("uv"));
         assert!(fingerprint.has_tests);
         assert!(!fingerprint.has_ci);
         assert_eq!(fingerprint.lockfile_paths, vec!["uv.lock".to_string()]);
+    }
+
+    #[test]
+    fn project_fingerprint_detects_rust_nextest_profile() {
+        let dir = temp_dir("fingerprint-rust-nextest");
+        std::fs::create_dir_all(dir.path().join(".config")).unwrap();
+        std::fs::create_dir_all(dir.path().join(".git")).unwrap();
+        std::fs::write(
+            dir.path().join("Cargo.toml"),
+            "[package]\nname = \"runner\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join(".config/nextest.toml"),
+            "[profile.default]\n",
+        )
+        .unwrap();
+
+        let fingerprint = detect_project_fingerprint(dir.path());
+        assert_eq!(fingerprint.primary_language, "rust");
+        assert_eq!(fingerprint.package_manager.as_deref(), Some("cargo"));
+        assert_eq!(fingerprint.test_runner.as_deref(), Some("nextest"));
+        assert_eq!(fingerprint.build_tool.as_deref(), Some("cargo"));
+        assert_eq!(fingerprint.vcs.as_deref(), Some("git"));
+    }
+
+    #[test]
+    fn project_fingerprint_detects_swift_spm_profile() {
+        let dir = temp_dir("fingerprint-swift");
+        std::fs::create_dir_all(dir.path().join("Sources/App")).unwrap();
+        std::fs::create_dir_all(dir.path().join("Tests/AppTests")).unwrap();
+        std::fs::write(
+            dir.path().join("Package.swift"),
+            "import PackageDescription\nlet package = Package(name: \"App\")\n",
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("Sources/App/main.swift"), "print(\"hi\")\n").unwrap();
+        std::fs::write(
+            dir.path().join("Tests/AppTests/AppTests.swift"),
+            "import XCTest\n",
+        )
+        .unwrap();
+
+        let fingerprint = detect_project_fingerprint(dir.path());
+        assert_eq!(fingerprint.primary_language, "swift");
+        assert_eq!(fingerprint.package_manager.as_deref(), Some("spm"));
+        assert_eq!(fingerprint.test_runner.as_deref(), Some("xctest"));
+        assert_eq!(fingerprint.build_tool.as_deref(), Some("spm"));
+        assert!(fingerprint.has_tests);
+    }
+
+    #[test]
+    fn project_fingerprint_detects_npm_workspace_profile() {
+        let dir = temp_dir("fingerprint-npm");
+        std::fs::create_dir_all(dir.path().join("packages/web/src")).unwrap();
+        std::fs::create_dir_all(dir.path().join("packages/web/tests")).unwrap();
+        std::fs::write(
+            dir.path().join("package.json"),
+            "{\n  \"name\": \"workspace\",\n  \"private\": true,\n  \"workspaces\": [\"packages/*\"],\n  \"packageManager\": \"npm@10.8.0\",\n  \"devDependencies\": {\n    \"vite\": \"5.0.0\",\n    \"vitest\": \"2.0.0\"\n  },\n  \"scripts\": {\n    \"build\": \"vite build\",\n    \"test\": \"vitest run\"\n  }\n}\n",
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("package-lock.json"), "{}\n").unwrap();
+        std::fs::write(
+            dir.path().join("packages/web/src/app.ts"),
+            "export const app = 1;\n",
+        )
+        .unwrap();
+
+        let fingerprint = detect_project_fingerprint(dir.path());
+        assert_eq!(fingerprint.primary_language, "typescript");
+        assert_eq!(fingerprint.package_manager.as_deref(), Some("npm"));
+        assert_eq!(fingerprint.test_runner.as_deref(), Some("vitest"));
+        assert_eq!(fingerprint.build_tool.as_deref(), Some("vite"));
+        assert!(fingerprint.has_tests);
+    }
+
+    #[test]
+    fn project_fingerprint_detects_poetry_profile() {
+        let dir = temp_dir("fingerprint-poetry");
+        std::fs::create_dir_all(dir.path().join("tests")).unwrap();
+        std::fs::write(
+            dir.path().join("pyproject.toml"),
+            "[tool.poetry]\nname = \"svc\"\nversion = \"0.1.0\"\n[tool.poetry.dependencies]\npython = \"^3.12\"\nfastapi = \"^0.110\"\n[tool.poetry.group.dev.dependencies]\npytest = \"^8.0\"\n",
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("poetry.lock"), "# lock\n").unwrap();
+
+        let fingerprint = detect_project_fingerprint(dir.path());
+        assert_eq!(fingerprint.package_manager.as_deref(), Some("poetry"));
+        assert_eq!(fingerprint.test_runner.as_deref(), Some("pytest"));
+        assert_eq!(fingerprint.build_tool.as_deref(), Some("poetry"));
+        assert!(fingerprint.frameworks.contains(&"fastapi".to_string()));
+    }
+
+    #[test]
+    fn project_fingerprint_detects_go_module_profile() {
+        let dir = temp_dir("fingerprint-go");
+        std::fs::create_dir_all(dir.path().join("pkg")).unwrap();
+        std::fs::write(
+            dir.path().join("go.mod"),
+            "module github.com/acme/service\n\ngo 1.23\n",
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("go.sum"), "example v0.0.0 h1:abc\n").unwrap();
+        std::fs::write(dir.path().join("pkg/service.go"), "package pkg\n").unwrap();
+
+        let fingerprint = detect_project_fingerprint(dir.path());
+        assert_eq!(fingerprint.primary_language, "go");
+        assert_eq!(fingerprint.package_manager.as_deref(), Some("go-mod"));
+        assert_eq!(fingerprint.test_runner.as_deref(), Some("go-test"));
+        assert_eq!(fingerprint.build_tool.as_deref(), Some("go"));
+    }
+
+    #[test]
+    fn project_fingerprint_handles_empty_directory() {
+        let dir = temp_dir("fingerprint-empty");
+        let fingerprint = detect_project_fingerprint(dir.path());
+        assert_eq!(fingerprint.primary_language, "unknown");
+        assert!(fingerprint.languages.is_empty());
+        assert!(fingerprint.frameworks.is_empty());
+        assert!(fingerprint.package_managers.is_empty());
+        assert_eq!(fingerprint.package_manager, None);
+        assert_eq!(fingerprint.test_runner, None);
+        assert_eq!(fingerprint.build_tool, None);
+        assert_eq!(fingerprint.vcs, None);
+        assert!(fingerprint.ci.is_empty());
+        assert!(!fingerprint.has_tests);
+        assert!(!fingerprint.has_ci);
+        assert!(fingerprint.lockfile_paths.is_empty());
     }
 }

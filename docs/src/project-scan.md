@@ -9,6 +9,51 @@ Import it with:
 import "std/project"
 ```
 
+## Fast fingerprint
+
+`project_fingerprint(path?)` returns the fast normalized repo profile that
+skill-card and persona bootstraps can consume without paying for enrichment:
+
+```harn
+let fp = project_fingerprint(".")
+```
+
+Typical fields:
+
+- `primary_language`: `"rust"`, `"typescript"`, `"python"`, `"go"`,
+  `"swift"`, `"ruby"`, `"mixed"`, or `"unknown"`
+- `frameworks`: normalized coarse framework tags such as `"axum"`, `"next"`,
+  `"react"`, `"django"`, `"fastapi"`, or `"rails"`
+- `package_manager`: dominant normalized package-manager tag such as
+  `"cargo"`, `"spm"`, `"pnpm"`, `"npm"`, `"uv"`, `"poetry"`, `"pip"`,
+  `"go-mod"`, or `"bundler"`
+- `test_runner`: dominant normalized test-runner tag such as `"nextest"`,
+  `"cargo-test"`, `"vitest"`, `"pytest"`, `"go-test"`, or `"xctest"`
+- `build_tool`: dominant normalized build-tool tag such as `"cargo"`,
+  `"spm"`, `"next"`, `"vite"`, `"uv"`, `"poetry"`, or `"go"`
+- `vcs`: `"git"`, `"hg"`, or `nil`
+- `ci`: normalized CI-provider tags such as `"github-actions"`,
+  `"gitlab-ci"`, `"circleci"`, `"buildkite"`, `"azure-pipelines"`, or
+  `"bitrise"`
+
+Compatibility fields remain available for callers that need the full shallow
+signal set:
+
+- `languages`
+- `package_managers`
+- `has_tests`
+- `has_ci`
+- `lockfile_paths`
+
+Normalization rules:
+
+- Tags are lowercase and versionless.
+- Singular fields choose the dominant value in a stable precedence order, while
+  the plural fields preserve every detected tag.
+- The catalog is local to Harn so `project_fingerprint(...)` remains fast and
+  self-contained; downstream repos such as burin-code consume the stable output
+  tags rather than acting as a runtime dependency for detection.
+
 ## What it returns
 
 `project_scan(path, options?)` resolves `path` to a directory and returns a
