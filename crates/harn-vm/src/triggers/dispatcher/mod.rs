@@ -11,6 +11,7 @@ use tokio::sync::broadcast;
 use tokio::sync::Notify;
 
 use crate::event_log::{active_event_log, AnyEventLog, EventLog, LogError, LogEvent, Topic};
+use crate::llm::trigger_predicate::{start_predicate_evaluation, PredicateCacheEntry};
 use crate::llm::vm_value_to_json;
 use crate::orchestration::{
     append_action_graph_update, RunActionGraphEdgeRecord, RunActionGraphNodeRecord,
@@ -19,6 +20,7 @@ use crate::orchestration::{
     ACTION_GRAPH_EDGE_KIND_RETRY, ACTION_GRAPH_EDGE_KIND_TRIGGER_DISPATCH,
     ACTION_GRAPH_NODE_KIND_A2A_HOP, ACTION_GRAPH_NODE_KIND_DISPATCH, ACTION_GRAPH_NODE_KIND_DLQ,
     ACTION_GRAPH_NODE_KIND_RETRY, ACTION_GRAPH_NODE_KIND_TRIGGER,
+    ACTION_GRAPH_NODE_KIND_TRIGGER_PREDICATE,
 };
 use crate::stdlib::json_to_vm_value;
 use crate::value::{error_to_category, ErrorCategory, VmError, VmValue};
@@ -30,7 +32,7 @@ use super::registry::{TriggerBinding, TriggerHandlerSpec};
 use super::{
     begin_in_flight, finish_in_flight, TriggerDispatchOutcome, TriggerEvent,
     TRIGGERS_LIFECYCLE_TOPIC, TRIGGER_ATTEMPTS_TOPIC, TRIGGER_DLQ_TOPIC,
-    TRIGGER_INBOX_ENVELOPES_TOPIC, TRIGGER_OUTBOX_TOPIC,
+    TRIGGER_INBOX_ENVELOPES_TOPIC, TRIGGER_INBOX_LEGACY_TOPIC, TRIGGER_OUTBOX_TOPIC,
 };
 
 pub mod retry;
@@ -53,6 +55,23 @@ tokio::task_local! {
 pub(crate) struct DispatchContext {
     pub trigger_event: TriggerEvent,
     pub replay_of_event_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct PredicateCacheRecord {
+    trigger_id: String,
+    event_id: String,
+    entries: Vec<PredicateCacheEntry>,
+}
+
+#[derive(Clone, Debug, Default)]
+struct PredicateEvaluationRecord {
+    result: bool,
+    cost_usd: f64,
+    tokens: u64,
+    latency_ms: u64,
+    cached: bool,
+    reason: Option<String>,
 }
 
 pub(crate) fn current_dispatch_context() -> Option<DispatchContext> {
@@ -538,21 +557,16 @@ impl Dispatcher {
 
         if let Some(predicate) = binding.when.as_ref() {
             let predicate_node_id = format!("predicate:{binding_key}:{}", event.id.0);
-            let predicate_result = self
-                .invoke_vm_callable(
-                    &predicate.closure,
-                    &event,
-                    replay_of_event_id.as_ref(),
-                    &mut self.cancel_tx.subscribe(),
-                )
+            let evaluation = self
+                .evaluate_predicate(binding, predicate, &event, replay_of_event_id.as_ref())
                 .await?;
-            let passed = matches!(predicate_result, VmValue::Bool(true));
+            let passed = evaluation.result;
             self.emit_action_graph(
                 &event,
                 vec![RunActionGraphNodeRecord {
                     id: predicate_node_id.clone(),
                     label: predicate.raw.clone(),
-                    kind: crate::orchestration::ACTION_GRAPH_NODE_KIND_PREDICATE.to_string(),
+                    kind: ACTION_GRAPH_NODE_KIND_TRIGGER_PREDICATE.to_string(),
                     status: "completed".to_string(),
                     outcome: passed.to_string(),
                     trace_id: Some(event.trace_id.0.clone()),
@@ -574,6 +588,11 @@ impl Dispatcher {
                     "binding_key": binding.binding_key(),
                     "event_id": event.id.0,
                     "predicate": predicate.raw,
+                    "reason": evaluation.reason,
+                    "cached": evaluation.cached,
+                    "cost_usd": evaluation.cost_usd,
+                    "tokens": evaluation.tokens,
+                    "latency_ms": evaluation.latency_ms,
                     "replay_of_event_id": replay_of_event_id,
                 }),
             )
@@ -600,6 +619,7 @@ impl Dispatcher {
                     result: Some(serde_json::json!({
                         "skipped": true,
                         "predicate": predicate.raw,
+                        "reason": evaluation.reason,
                     })),
                     error: None,
                 });
@@ -1187,6 +1207,342 @@ impl Dispatcher {
         }
     }
 
+    async fn evaluate_predicate(
+        &self,
+        binding: &TriggerBinding,
+        predicate: &super::registry::TriggerPredicateSpec,
+        event: &TriggerEvent,
+        replay_of_event_id: Option<&String>,
+    ) -> Result<PredicateEvaluationRecord, DispatchError> {
+        let event_id = event.id.0.clone();
+        let trigger_id = binding.id.as_str().to_string();
+        let now_ms = now_unix_ms();
+        let today = utc_day_key();
+
+        let breaker_open_until = {
+            let mut state = binding
+                .predicate_state
+                .lock()
+                .expect("trigger predicate state poisoned");
+            if state.budget_day_utc != Some(today) {
+                state.budget_day_utc = Some(today);
+                binding
+                    .metrics
+                    .cost_today_usd_micros
+                    .store(0, Ordering::Relaxed);
+            }
+            if state
+                .breaker_open_until_ms
+                .is_some_and(|until_ms| until_ms > now_ms)
+            {
+                state.breaker_open_until_ms
+            } else {
+                None
+            }
+        };
+
+        if breaker_open_until.is_some() {
+            let mut metadata = BTreeMap::new();
+            metadata.insert("trigger_id".to_string(), serde_json::json!(trigger_id));
+            metadata.insert("event_id".to_string(), serde_json::json!(event_id));
+            metadata.insert(
+                "breaker_open_until_ms".to_string(),
+                serde_json::json!(breaker_open_until),
+            );
+            crate::events::log_warn_meta(
+                "trigger.predicate.circuit_breaker",
+                "trigger predicate circuit breaker is open; short-circuiting to false",
+                metadata,
+            );
+            let record = PredicateEvaluationRecord {
+                result: false,
+                reason: Some("circuit_open".to_string()),
+                ..Default::default()
+            };
+            self.append_predicate_evaluated_event(binding, event, &record, replay_of_event_id)
+                .await?;
+            return Ok(record);
+        }
+
+        if binding
+            .daily_cost_usd
+            .is_some_and(|limit| current_predicate_daily_cost(binding) > limit)
+        {
+            self.append_lifecycle_event(
+                "predicate.daily_budget_exceeded",
+                event,
+                binding,
+                serde_json::json!({
+                    "trigger_id": binding.id.as_str(),
+                    "event_id": event.id.0,
+                    "limit_usd": binding.daily_cost_usd,
+                    "cost_today_usd": current_predicate_daily_cost(binding),
+                    "replay_of_event_id": replay_of_event_id,
+                }),
+                replay_of_event_id,
+            )
+            .await?;
+            let record = PredicateEvaluationRecord {
+                result: false,
+                reason: Some("daily_budget_exceeded".to_string()),
+                ..Default::default()
+            };
+            self.append_predicate_evaluated_event(binding, event, &record, replay_of_event_id)
+                .await?;
+            return Ok(record);
+        }
+
+        let replay_cache = self
+            .read_predicate_cache_record(replay_of_event_id.unwrap_or(&event_id))
+            .await?;
+        let guard = start_predicate_evaluation(
+            binding.when_budget.clone().unwrap_or_default(),
+            replay_cache,
+        );
+        let started = std::time::Instant::now();
+        let eval = self
+            .invoke_vm_callable_with_timeout(
+                &predicate.closure,
+                event,
+                replay_of_event_id,
+                &mut self.cancel_tx.subscribe(),
+                binding
+                    .when_budget
+                    .as_ref()
+                    .and_then(|budget| budget.timeout()),
+            )
+            .await;
+        let capture = guard.finish();
+        let latency_ms = started.elapsed().as_millis() as u64;
+        if replay_of_event_id.is_none() && !capture.entries.is_empty() {
+            self.append_predicate_cache_record(binding, event, &capture.entries)
+                .await?;
+        }
+
+        let mut record = PredicateEvaluationRecord {
+            result: false,
+            cost_usd: capture.total_cost_usd,
+            tokens: capture.total_tokens,
+            latency_ms,
+            cached: capture.cached,
+            reason: None,
+        };
+
+        let mut count_failure = false;
+        let mut opened_breaker = false;
+
+        match eval {
+            Ok(value) => match predicate_value_as_bool(value) {
+                Ok(result) => {
+                    record.result = result;
+                }
+                Err(reason) => {
+                    count_failure = true;
+                    record.reason = Some(reason);
+                }
+            },
+            Err(error) => {
+                count_failure = true;
+                record.reason = Some(error.to_string());
+            }
+        }
+
+        let cost_usd_micros = usd_to_micros(record.cost_usd);
+        if cost_usd_micros > 0 {
+            binding
+                .metrics
+                .cost_total_usd_micros
+                .fetch_add(cost_usd_micros, Ordering::Relaxed);
+            binding
+                .metrics
+                .cost_today_usd_micros
+                .fetch_add(cost_usd_micros, Ordering::Relaxed);
+        }
+
+        let timed_out = matches!(
+            record.reason.as_deref(),
+            Some("predicate evaluation timed out")
+        );
+        if capture.budget_exceeded || timed_out {
+            record.result = false;
+            record.reason = Some("budget_exceeded".to_string());
+            self.append_lifecycle_event(
+                "predicate.budget_exceeded",
+                event,
+                binding,
+                serde_json::json!({
+                    "trigger_id": binding.id.as_str(),
+                    "event_id": event.id.0,
+                    "max_cost_usd": binding.when_budget.as_ref().and_then(|budget| budget.max_cost_usd),
+                    "tokens_max": binding.when_budget.as_ref().and_then(|budget| budget.tokens_max),
+                    "cost_usd": record.cost_usd,
+                    "tokens": record.tokens,
+                    "replay_of_event_id": replay_of_event_id,
+                }),
+                replay_of_event_id,
+            )
+            .await?;
+        }
+
+        if binding
+            .daily_cost_usd
+            .is_some_and(|limit| current_predicate_daily_cost(binding) > limit)
+        {
+            record.result = false;
+            record.reason = Some("daily_budget_exceeded".to_string());
+            self.append_lifecycle_event(
+                "predicate.daily_budget_exceeded",
+                event,
+                binding,
+                serde_json::json!({
+                    "trigger_id": binding.id.as_str(),
+                    "event_id": event.id.0,
+                    "limit_usd": binding.daily_cost_usd,
+                    "cost_today_usd": current_predicate_daily_cost(binding),
+                    "replay_of_event_id": replay_of_event_id,
+                }),
+                replay_of_event_id,
+            )
+            .await?;
+        }
+
+        {
+            let mut state = binding
+                .predicate_state
+                .lock()
+                .expect("trigger predicate state poisoned");
+            if state.budget_day_utc != Some(today) {
+                state.budget_day_utc = Some(today);
+                binding
+                    .metrics
+                    .cost_today_usd_micros
+                    .store(cost_usd_micros, Ordering::Relaxed);
+            }
+            if count_failure {
+                state.consecutive_failures = state.consecutive_failures.saturating_add(1);
+                if state.consecutive_failures >= 3 {
+                    state.breaker_open_until_ms = Some(now_ms.saturating_add(5 * 60 * 1000));
+                    opened_breaker = true;
+                }
+            } else {
+                state.consecutive_failures = 0;
+                state.breaker_open_until_ms = None;
+            }
+        }
+
+        if opened_breaker {
+            let mut metadata = BTreeMap::new();
+            metadata.insert(
+                "trigger_id".to_string(),
+                serde_json::json!(binding.id.as_str()),
+            );
+            metadata.insert("event_id".to_string(), serde_json::json!(event.id.0));
+            metadata.insert("failure_count".to_string(), serde_json::json!(3));
+            metadata.insert("reason".to_string(), serde_json::json!(record.reason));
+            crate::events::log_warn_meta(
+                "trigger.predicate.circuit_breaker",
+                "trigger predicate circuit breaker opened for 5 minutes",
+                metadata,
+            );
+        }
+
+        self.append_predicate_evaluated_event(binding, event, &record, replay_of_event_id)
+            .await?;
+        Ok(record)
+    }
+
+    async fn invoke_vm_callable_with_timeout(
+        &self,
+        closure: &crate::value::VmClosure,
+        event: &TriggerEvent,
+        replay_of_event_id: Option<&String>,
+        cancel_rx: &mut broadcast::Receiver<()>,
+        timeout: Option<Duration>,
+    ) -> Result<VmValue, DispatchError> {
+        let future = self.invoke_vm_callable(closure, event, replay_of_event_id, cancel_rx);
+        pin_mut!(future);
+        if let Some(timeout) = timeout {
+            match tokio::time::timeout(timeout, future).await {
+                Ok(result) => result,
+                Err(_) => Err(DispatchError::Local(
+                    "predicate evaluation timed out".to_string(),
+                )),
+            }
+        } else {
+            future.await
+        }
+    }
+
+    async fn append_predicate_evaluated_event(
+        &self,
+        binding: &TriggerBinding,
+        event: &TriggerEvent,
+        record: &PredicateEvaluationRecord,
+        replay_of_event_id: Option<&String>,
+    ) -> Result<(), DispatchError> {
+        self.append_lifecycle_event(
+            "predicate.evaluated",
+            event,
+            binding,
+            serde_json::json!({
+                "trigger_id": binding.id.as_str(),
+                "event_id": event.id.0,
+                "result": record.result,
+                "cost_usd": record.cost_usd,
+                "tokens": record.tokens,
+                "latency_ms": record.latency_ms,
+                "cached": record.cached,
+                "reason": record.reason,
+                "replay_of_event_id": replay_of_event_id,
+            }),
+            replay_of_event_id,
+        )
+        .await
+    }
+
+    async fn append_predicate_cache_record(
+        &self,
+        binding: &TriggerBinding,
+        event: &TriggerEvent,
+        entries: &[PredicateCacheEntry],
+    ) -> Result<(), DispatchError> {
+        let topic = Topic::new(TRIGGER_INBOX_LEGACY_TOPIC)
+            .expect("static trigger inbox legacy topic name is valid");
+        let payload = serde_json::to_value(PredicateCacheRecord {
+            trigger_id: binding.id.as_str().to_string(),
+            event_id: event.id.0.clone(),
+            entries: entries.to_vec(),
+        })
+        .map_err(|error| DispatchError::Serde(error.to_string()))?;
+        self.event_log
+            .append(&topic, LogEvent::new("predicate_llm_cache", payload))
+            .await
+            .map_err(DispatchError::from)
+            .map(|_| ())
+    }
+
+    async fn read_predicate_cache_record(
+        &self,
+        event_id: &str,
+    ) -> Result<Vec<PredicateCacheEntry>, DispatchError> {
+        let topic = Topic::new(TRIGGER_INBOX_LEGACY_TOPIC)
+            .expect("static trigger inbox legacy topic name is valid");
+        let records = self
+            .event_log
+            .read_range(&topic, None, usize::MAX)
+            .await
+            .map_err(DispatchError::from)?;
+        Ok(records
+            .into_iter()
+            .filter(|(_, event)| event.kind == "predicate_llm_cache")
+            .filter_map(|(_, event)| {
+                serde_json::from_value::<PredicateCacheRecord>(event.payload).ok()
+            })
+            .filter(|record| record.event_id == event_id)
+            .flat_map(|record| record.entries)
+            .collect())
+    }
+
     async fn append_attempt_record(
         &self,
         event: &TriggerEvent,
@@ -1405,6 +1761,51 @@ fn dispatch_entry_edge_kind(route: &DispatchUri, has_predicate: bool) -> &'stati
     }
 }
 
+fn predicate_value_as_bool(value: VmValue) -> Result<bool, String> {
+    match value {
+        VmValue::Bool(result) => Ok(result),
+        VmValue::EnumVariant {
+            enum_name,
+            variant,
+            mut fields,
+        } if enum_name == "Result" && variant == "Ok" => match fields.pop() {
+            Some(VmValue::Bool(result)) => Ok(result),
+            Some(other) => Err(format!(
+                "predicate Result.Ok payload must be bool, got {}",
+                other.type_name()
+            )),
+            None => Err("predicate Result.Ok payload is missing".to_string()),
+        },
+        VmValue::EnumVariant {
+            enum_name,
+            variant,
+            fields,
+        } if enum_name == "Result" && variant == "Err" => Err(fields
+            .first()
+            .map(VmValue::display)
+            .unwrap_or_else(|| "predicate returned Result.Err".to_string())),
+        other => Err(format!(
+            "predicate must return bool or Result<bool, _>, got {}",
+            other.type_name()
+        )),
+    }
+}
+
+fn usd_to_micros(value: f64) -> u64 {
+    if !value.is_finite() || value <= 0.0 {
+        return 0;
+    }
+    (value * 1_000_000.0).round() as u64
+}
+
+fn current_predicate_daily_cost(binding: &TriggerBinding) -> f64 {
+    binding
+        .metrics
+        .cost_today_usd_micros
+        .load(Ordering::Relaxed) as f64
+        / 1_000_000.0
+}
+
 fn is_cancelled_vm_error(error: &VmError) -> bool {
     matches!(
         error,
@@ -1453,6 +1854,14 @@ fn now_rfc3339() -> String {
     time::OffsetDateTime::now_utc()
         .format(&time::format_description::well_known::Rfc3339)
         .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())
+}
+
+fn now_unix_ms() -> i64 {
+    (time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000) as i64
+}
+
+fn utc_day_key() -> i32 {
+    time::OffsetDateTime::now_utc().date().to_julian_day()
 }
 
 async fn sleep_or_cancel(

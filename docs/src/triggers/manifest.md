@@ -20,6 +20,7 @@ kind = "webhook"
 provider = "github"
 match = { events = ["issues.opened"] }
 when = "handlers::should_handle"
+when_budget = { max_cost_usd = 0.001, tokens_max = 500, timeout = "5s" }
 handler = "handlers::on_new_issue"
 dedupe_key = "event.dedupe_key"
 retry = { max = 7, backoff = "svix", retention_days = 7 }
@@ -67,6 +68,9 @@ The manifest loader rejects invalid trigger declarations before execution:
 - `allow_cleartext`, when present, must be a boolean and is only valid for
   `a2a://...` handlers
 - `when` must resolve to a function with signature `fn(TriggerEvent) -> bool`
+  or `fn(TriggerEvent) -> Result<bool, _>`
+- `when_budget` requires `when`, and its `max_cost_usd`, `tokens_max`, and
+  `timeout` fields must all be valid when present
 - `dedupe_key` and `filter` must parse as JMESPath expressions
 - `retry.max` must be `<= 100`
 - `retry.retention_days` defaults to `7` and must be `>= 1`
@@ -78,6 +82,36 @@ The manifest loader rejects invalid trigger declarations before execution:
 
 Errors include the manifest path plus the `[[triggers]]` table index so the bad
 entry is easy to locate.
+
+## LLM-gated predicates
+
+`when` runs before handler dispatch, so it is the right place to express typed
+LLM classification gates such as:
+
+```toml
+[[triggers]]
+id = "slack-outage-triage"
+kind = "webhook"
+provider = "slack"
+match = { events = ["slack.message"] }
+when = "handlers::about_outages"
+when_budget = { max_cost_usd = 0.001, tokens_max = 500, timeout = "5s" }
+handler = "handlers::triage_outage"
+budget = { daily_cost_usd = 1.00, max_concurrent = 10 }
+```
+
+Behavior:
+
+- the predicate may call `llm_call(...)`
+- per-evaluation overruns emit `predicate.budget_exceeded` and short-circuit to
+  `false`
+- `budget.daily_cost_usd` applies to aggregate predicate spend for the trigger
+  over the current UTC day; once exceeded, the trigger keeps returning `false`
+  until the next UTC midnight
+- replay reuses cached predicate `llm_call(...)` responses from the provider
+  request cache plus the event-scoped `trigger.inbox` record
+- three consecutive predicate failures open a five-minute circuit breaker that
+  fails closed with operator-visible warnings
 
 ## Durable dedupe retention
 

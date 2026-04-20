@@ -1052,6 +1052,7 @@ mod tests {
                 queue: "triage".to_string(),
             },
             when: None,
+            when_budget: None,
             retry: TriggerRetryConfig::default(),
             match_events: vec!["a2a.task.received".to_string()],
             dedupe_key: None,

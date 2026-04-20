@@ -43,6 +43,7 @@ Register a trigger dynamically and return its `TriggerHandle`.
 - `provider`
 - `handler`
 - `when`
+- `when_budget`
 - `retry`
 - `match` or `events`
 - `dedupe_key`
@@ -82,6 +83,7 @@ let handle: TriggerHandle = trigger_register({
   handler: handle_issue,
   allow_cleartext: nil,
   when: nil,
+  when_budget: nil,
   match: {events: ["issue.opened"]},
   events: nil,
   dedupe_key: nil,
@@ -112,6 +114,8 @@ Current behavior:
   dispatcher retries, lifecycle events, action-graph updates, and DLQ moves.
 - `when` predicates execute before the handler and can still short-circuit a
   dispatch.
+- `when_budget` accepts `{max_cost_usd, tokens_max, timeout}` and applies
+  fail-closed per-predicate LLM cost governance.
 - `a2a://...` and `worker://...` handlers still return the dispatcher’s
   explicit `NotImplemented` failure path.
 
@@ -145,6 +149,13 @@ Each `DlqEntry` includes:
 
 `retry_history` records every DLQ attempt, including replay attempts.
 
+### `trigger_inspect_lifecycle(kind?)`
+
+Return the trigger lifecycle stream as a list of `{kind, headers, payload}`
+records. Pass a kind such as `predicate.evaluated`,
+`predicate.budget_exceeded`, or `DispatchStarted` to filter on the runtime
+side.
+
 ## Example
 
 ```harn
@@ -160,6 +171,7 @@ let handle = trigger_register({
   provider: "github",
   handler: fail_handler,
   when: nil,
+  when_budget: nil,
   retry: {max: 1, backoff: "immediate"},
   match: nil,
   events: ["issue.opened"],
@@ -189,6 +201,9 @@ println(replay.replay_of_event_id)     // original event id
   persist `triggers.events` and `triggers.dlq`. If the runtime did not already
   install one, the stdlib wrapper falls back to an in-memory log for the
   current thread.
+- Predicate replay is deterministic for `llm_call(...)`: cached predicate
+  responses are reused from the request cache plus the per-event
+  `trigger.inbox` record rather than calling the live provider again.
 - When `workflow_execute(...)` runs inside a replayed trigger dispatch, the
   runtime carries the replay pointer into run metadata so derived
   observability can render a `replay_chain` edge back to the original event.

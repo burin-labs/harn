@@ -200,6 +200,10 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("list")),
     },
     BuiltinSig {
+        name: "trigger_inspect_lifecycle",
+        return_type: Some(BuiltinReturn::Named("list")),
+    },
+    BuiltinSig {
         name: "trigger_list",
         return_type: Some(BuiltinReturn::Named("list")),
     },

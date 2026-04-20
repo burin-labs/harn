@@ -1278,6 +1278,7 @@ fn manifest_spec(id: &str, fingerprint: &str) -> TriggerBindingSpec {
             queue: format!("{id}-queue"),
         },
         when: None,
+        when_budget: None,
         retry: TriggerRetryConfig::default(),
         match_events: vec!["issues.opened".to_string()],
         dedupe_key: Some("event.dedupe_key".to_string()),

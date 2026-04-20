@@ -27,7 +27,7 @@ pub use registry::{
     snapshot_trigger_bindings, unpin_trigger_binding, RecordedTriggerBinding,
     TriggerBindingSnapshot, TriggerBindingSource, TriggerBindingSpec, TriggerDispatchOutcome,
     TriggerHandlerSpec, TriggerId, TriggerMetricsSnapshot, TriggerPredicateSpec,
-    TriggerRegistryError, TriggerState,
+    TriggerPredicateState, TriggerRegistryError, TriggerState,
 };
 pub use test_util::{run_trigger_harness_fixture, TriggerHarnessResult, TRIGGER_TEST_FIXTURES};
 pub use topics::{

@@ -94,6 +94,7 @@ pub(crate) mod rate_limit;
 mod stream;
 mod tools;
 mod trace;
+pub(crate) mod trigger_predicate;
 
 /// Shared process-wide lock for tests that mutate LLM-related environment
 /// variables (LOCAL_LLM_BASE_URL, LOCAL_LLM_MODEL, HARN_LLM_*). Any test that
@@ -363,6 +364,7 @@ pub fn reset_llm_state() {
     provider::register_default_providers();
     rate_limit::reset_rate_limit_state();
     mock::reset_llm_mock_state();
+    trigger_predicate::reset_trigger_predicate_state();
     capabilities::clear_user_overrides();
 }
 

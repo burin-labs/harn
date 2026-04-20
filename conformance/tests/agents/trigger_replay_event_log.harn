@@ -24,6 +24,7 @@ pipeline test(task) {
     handler: flaky_handler,
     retry: {max: 1, backoff: "immediate"},
     when: nil,
+    when_budget: nil,
     match: nil,
     events: ["issue.opened"],
     dedupe_key: nil,

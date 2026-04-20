@@ -6,6 +6,7 @@ use std::rc::Rc;
 
 use crate::value::VmValue;
 
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
 pub(crate) struct LlmResult {
     pub text: String,
     pub tool_calls: Vec<serde_json::Value>,

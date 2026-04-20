@@ -91,12 +91,23 @@ async fn vm_call_llm_full_inner_request(
     request: &LlmRequestPayload,
     delta_tx: Option<DeltaSender>,
 ) -> Result<LlmResult, VmError> {
+    if let Some(result) = super::trigger_predicate::lookup_cached_result(request) {
+        record_cli_llm_result(&result);
+        if let Some(tx) = delta_tx {
+            if !result.text.is_empty() {
+                let _ = tx.send(result.text.clone());
+            }
+        }
+        return Ok(result);
+    }
+
     if crate::llm::providers::MockProvider::should_intercept(&request.provider) {
         let result = mock_llm_response(
             &request.messages,
             request.system.as_deref(),
             request.native_tools.as_deref(),
         )?;
+        super::trigger_predicate::note_result(request, &result);
         record_cli_llm_result(&result);
         if let Some(tx) = delta_tx {
             if !result.text.is_empty() {
@@ -111,6 +122,7 @@ async fn vm_call_llm_full_inner_request(
 
     if replay_mode == LlmReplayMode::Replay {
         if let Some(result) = load_fixture(&hash) {
+            super::trigger_predicate::note_result(request, &result);
             return Ok(result);
         }
         return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
@@ -133,6 +145,7 @@ async fn vm_call_llm_full_inner_request(
     if replay_mode == LlmReplayMode::Record {
         save_fixture(&hash, &result);
     }
+    super::trigger_predicate::note_result(request, &result);
     record_cli_llm_result(&result);
 
     super::cost::accumulate_cost(&result.model, result.input_tokens, result.output_tokens)?;
@@ -144,6 +157,11 @@ async fn vm_call_llm_full_inner_offthread(
     request: &LlmRequestPayload,
     delta_tx: Option<DeltaSender>,
 ) -> Result<LlmResult, String> {
+    if let Some(result) = super::trigger_predicate::lookup_cached_result(request) {
+        record_cli_llm_result(&result);
+        return Ok(result);
+    }
+
     if crate::llm::providers::MockProvider::should_intercept(&request.provider) {
         let result = mock_llm_response(
             &request.messages,
@@ -151,6 +169,7 @@ async fn vm_call_llm_full_inner_offthread(
             request.native_tools.as_deref(),
         )
         .map_err(|e| e.to_string())?;
+        super::trigger_predicate::note_result(request, &result);
         record_cli_llm_result(&result);
         return Ok(result);
     }
@@ -159,9 +178,13 @@ async fn vm_call_llm_full_inner_offthread(
     let hash = fixture_hash(&request.model, &request.messages, request.system.as_deref());
 
     if replay_mode == LlmReplayMode::Replay {
-        return load_fixture(&hash).ok_or_else(|| {
-            format!("No fixture found for LLM call (hash: {hash}). Run with --record first.")
-        });
+        return load_fixture(&hash)
+            .inspect(|result| {
+                super::trigger_predicate::note_result(request, result);
+            })
+            .ok_or_else(|| {
+                format!("No fixture found for LLM call (hash: {hash}). Run with --record first.")
+            });
     }
 
     let result = vm_call_llm_api(request, delta_tx)
@@ -175,6 +198,7 @@ async fn vm_call_llm_full_inner_offthread(
     if replay_mode == LlmReplayMode::Record {
         save_fixture(&hash, &result);
     }
+    super::trigger_predicate::note_result(request, &result);
     record_cli_llm_result(&result);
 
     super::cost::accumulate_cost(&result.model, result.input_tokens, result.output_tokens)

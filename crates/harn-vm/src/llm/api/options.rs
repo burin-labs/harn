@@ -7,7 +7,7 @@ use crate::value::VmValue;
 pub(crate) type DeltaSender = tokio::sync::mpsc::UnboundedSender<String>;
 
 /// Extended thinking configuration.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub(crate) enum ThinkingConfig {
     /// Enable with provider defaults.
     Enabled,
@@ -272,7 +272,7 @@ impl LlmCallOptions {
 }
 
 /// Send-safe subset of `LlmCallOptions` used for provider transport.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub(crate) struct LlmRequestPayload {
     pub provider: String,
     pub model: String,

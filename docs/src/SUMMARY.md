@@ -20,6 +20,7 @@
 
 - [LLM calls and agent loops](./llm-and-agents.md)
 - [Daemon stdlib](./stdlib/daemon.md)
+- [Triggers](./triggers.md)
 - [Trigger stdlib](./stdlib/triggers.md)
 - [Human in the loop](./hitl.md)
 - [Skills](./skills.md)

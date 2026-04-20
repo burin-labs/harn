@@ -10,6 +10,7 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::event_log::{active_event_log, AnyEventLog, EventLog, LogEvent, Topic};
+use crate::llm::trigger_predicate::TriggerPredicateBudget;
 use crate::secrets::{configured_default_chain, SecretProvider};
 use crate::triggers::test_util::clock;
 use crate::value::VmClosure;
@@ -136,6 +137,7 @@ pub struct TriggerBindingSpec {
     pub provider: ProviderId,
     pub handler: TriggerHandlerSpec,
     pub when: Option<TriggerPredicateSpec>,
+    pub when_budget: Option<TriggerPredicateBudget>,
     pub retry: TriggerRetryConfig,
     pub match_events: Vec<String>,
     pub dedupe_key: Option<String>,
@@ -193,6 +195,7 @@ pub struct TriggerBinding {
     pub provider: ProviderId,
     pub handler: TriggerHandlerSpec,
     pub when: Option<TriggerPredicateSpec>,
+    pub when_budget: Option<TriggerPredicateBudget>,
     pub retry: TriggerRetryConfig,
     pub match_events: Vec<String>,
     pub dedupe_key: Option<String>,
@@ -207,6 +210,14 @@ pub struct TriggerBinding {
     pub metrics: TriggerMetrics,
     pub in_flight: AtomicU64,
     pub cancel_token: Arc<AtomicBool>,
+    pub predicate_state: Mutex<TriggerPredicateState>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct TriggerPredicateState {
+    pub budget_day_utc: Option<i32>,
+    pub consecutive_failures: u32,
+    pub breaker_open_until_ms: Option<i64>,
 }
 
 impl std::fmt::Debug for TriggerBinding {
@@ -246,6 +257,7 @@ impl TriggerBinding {
             provider: spec.provider,
             handler: spec.handler,
             when: spec.when,
+            when_budget: spec.when_budget,
             retry: spec.retry,
             match_events: spec.match_events,
             dedupe_key: spec.dedupe_key,
@@ -260,6 +272,7 @@ impl TriggerBinding {
             metrics: TriggerMetrics::default(),
             in_flight: AtomicU64::new(0),
             cancel_token: Arc::new(AtomicBool::new(false)),
+            predicate_state: Mutex::new(TriggerPredicateState::default()),
         }
     }
 
@@ -1120,6 +1133,7 @@ mod tests {
                 queue: format!("{id}-queue"),
             },
             when: None,
+            when_budget: None,
             retry: TriggerRetryConfig::default(),
             match_events: vec!["issues.opened".to_string()],
             dedupe_key: Some("event.dedupe_key".to_string()),
@@ -1143,6 +1157,7 @@ mod tests {
                 queue: format!("{id}-queue"),
             },
             when: None,
+            when_budget: None,
             retry: TriggerRetryConfig::default(),
             match_events: vec!["issues.opened".to_string()],
             dedupe_key: None,
