@@ -368,6 +368,10 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("int")),
     },
     BuiltinSig {
+        name: "event_log_emit",
+        return_type: None,
+    },
+    BuiltinSig {
         name: "execution_root",
         return_type: Some(BuiltinReturn::Named("string")),
     },
@@ -558,6 +562,10 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
     BuiltinSig {
         name: "md5",
         return_type: Some(BuiltinReturn::Named("string")),
+    },
+    BuiltinSig {
+        name: "metrics_inc",
+        return_type: None,
     },
     BuiltinSig {
         name: "microcompact",
@@ -761,6 +769,10 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
     },
     BuiltinSig {
         name: "send",
+        return_type: None,
+    },
+    BuiltinSig {
+        name: "secret_get",
         return_type: None,
     },
     BuiltinSig {
