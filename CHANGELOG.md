@@ -7,6 +7,18 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
+## Unreleased
+
+### Added
+
+- **Git-backed package manager v0 (#345, #355).** Typed lockfile with
+  content hashes, `harn add/install/update/remove/lock` commands, shared
+  cache, ref resolution, frozen/refetch flows, and import resolution
+  that materializes `.harn/packages/` without auto-merging hooks,
+  triggers, or LLM config from installed manifests. Groundwork for the
+  pure-Harn connectors pivot (#350) — external connector repos can now
+  be consumed with `harn add <git-url>`.
+
 ## v0.7.25
 
 ### Added
