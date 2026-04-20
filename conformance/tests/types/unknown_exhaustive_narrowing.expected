@@ -4,6 +4,7 @@
 [harn] list:3
 [harn] dict:1
 [harn] bool:true
+[harn] bytes:2
 [harn] str
 [harn] int
 [harn] other

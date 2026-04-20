@@ -1,4 +1,4 @@
-// Exhaustive narrowing on `unknown`: when all eight concrete `type_of`
+// Exhaustive narrowing on `unknown`: when all nine concrete `type_of`
 // variants are covered before an `unreachable()` fallback, the type
 // checker emits no warning and the program runs end-to-end.
 pipeline test(task) {
@@ -27,6 +27,9 @@ pipeline test(task) {
     if type_of(v) == "closure" {
       return "closure"
     }
+    if type_of(v) == "bytes" {
+      return "bytes:${bytes_len(v)}"
+    }
     unreachable("unknown type_of variant")
   }
   log(describe("hi"))
@@ -35,6 +38,7 @@ pipeline test(task) {
   log(describe([1, 2, 3]))
   log(describe({a: 1}))
   log(describe(true))
+  log(describe(bytes_from_string("ab")))
   // Partial narrowing with a plain `return` fallback is NOT an
   // exhaustiveness claim — it compiles silently and runs fine.
   fn categorize(v: unknown) -> string {
@@ -77,6 +81,9 @@ pipeline test(task) {
     }
     if type_of(v) == "closure" {
       return "c"
+    }
+    if type_of(v) == "bytes" {
+      return "bytes"
     }
     unreachable("unknown type_of variant")
   }
