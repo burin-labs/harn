@@ -7,7 +7,14 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
-## Unreleased
+## v0.7.26
+
+This release lands the full groundwork slate for epic #350 — the
+pure-Harn connectors pivot. Package management, the Harn-backed
+connector contract, HTTP retries with `Retry-After`, the standard
+encoding helpers, and first-class `bytes` + raw inbound bodies now
+ship together so external connector repos can be written entirely
+in Harn.
 
 ### Added
 
