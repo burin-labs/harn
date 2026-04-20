@@ -41,6 +41,17 @@ async fn run_local(args: OrchestratorServeArgs) -> Result<(), String> {
         harn_vm::observability::otel::ObservabilityGuard::install_orchestrator_subscriber_from_env(
         )?;
     harn_vm::reset_thread_local_state();
+
+    // Install signal streams BEFORE any startup log a supervisor (test harness,
+    // systemd, launchd) might be watching for. Tokio's signal streams install
+    // the OS-level handler on their first call per SignalKind; any SIGTERM
+    // delivered before that call uses the default disposition (terminate),
+    // which caused orchestrator_serve_starts_and_shuts_down_cleanly to flake
+    // under parallel test load when the harness raced past the "HTTP listener
+    // ready" log.
+    #[cfg(unix)]
+    let signal_streams = install_signal_streams()?;
+
     let shutdown_timeout = Duration::from_secs(args.shutdown_timeout.max(1));
 
     let tls = TlsFiles::from_args(args.cert.clone(), args.key.clone())?;
@@ -243,20 +254,24 @@ async fn run_local(args: OrchestratorServeArgs) -> Result<(), String> {
     )
     .await?;
 
-    wait_for_runtime_signal_loop(RuntimeSignalCtx {
-        role: args.role,
-        config_path: &config_path,
-        state_dir: &state_dir,
-        bind: local_bind,
-        startup_started_at: &startup_started_at,
-        event_log: &event_log,
-        event_log_description: &event_log_description,
-        secret_chain_display: &secret_chain_display,
-        listener: &listener,
-        connectors: &connector_runtime,
-        live_manifest: &mut live_manifest,
-        live_triggers: &mut live_triggers,
-    })
+    wait_for_runtime_signal_loop(
+        RuntimeSignalCtx {
+            role: args.role,
+            config_path: &config_path,
+            state_dir: &state_dir,
+            bind: local_bind,
+            startup_started_at: &startup_started_at,
+            event_log: &event_log,
+            event_log_description: &event_log_description,
+            secret_chain_display: &secret_chain_display,
+            listener: &listener,
+            connectors: &connector_runtime,
+            live_manifest: &mut live_manifest,
+            live_triggers: &mut live_triggers,
+        },
+        #[cfg(unix)]
+        signal_streams,
+    )
     .await?;
 
     let shutdown = graceful_shutdown(
@@ -1178,17 +1193,37 @@ struct RuntimeSignalCtx<'a> {
     live_triggers: &'a mut Vec<CollectedManifestTrigger>,
 }
 
-async fn wait_for_runtime_signal_loop(ctx: RuntimeSignalCtx<'_>) -> Result<(), String> {
+#[cfg(unix)]
+struct SignalStreams {
+    sigterm: tokio::signal::unix::Signal,
+    sigint: tokio::signal::unix::Signal,
+    sighup: tokio::signal::unix::Signal,
+}
+
+#[cfg(unix)]
+fn install_signal_streams() -> Result<SignalStreams, String> {
+    use tokio::signal::unix::{signal, SignalKind};
+    Ok(SignalStreams {
+        sigterm: signal(SignalKind::terminate())
+            .map_err(|error| format!("failed to register SIGTERM handler: {error}"))?,
+        sigint: signal(SignalKind::interrupt())
+            .map_err(|error| format!("failed to register SIGINT handler: {error}"))?,
+        sighup: signal(SignalKind::hangup())
+            .map_err(|error| format!("failed to register SIGHUP handler: {error}"))?,
+    })
+}
+
+async fn wait_for_runtime_signal_loop(
+    ctx: RuntimeSignalCtx<'_>,
+    #[cfg(unix)] mut signals: SignalStreams,
+) -> Result<(), String> {
     #[cfg(unix)]
     {
-        use tokio::signal::unix::{signal, SignalKind};
-
-        let mut sigterm = signal(SignalKind::terminate())
-            .map_err(|error| format!("failed to register SIGTERM handler: {error}"))?;
-        let mut sigint = signal(SignalKind::interrupt())
-            .map_err(|error| format!("failed to register SIGINT handler: {error}"))?;
-        let mut sighup = signal(SignalKind::hangup())
-            .map_err(|error| format!("failed to register SIGHUP handler: {error}"))?;
+        let SignalStreams {
+            sigterm,
+            sigint,
+            sighup,
+        } = &mut signals;
         loop {
             tokio::select! {
                 _ = sigterm.recv() => return Ok(()),
