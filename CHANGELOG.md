@@ -11,6 +11,11 @@ granular archaeology.
 
 ### Changed
 
+- **Agent session forks now record ancestry (#320).** `agent_session_fork`
+  and `agent_session_fork_at` populate the new `agent_session_ancestry(id)`
+  query so replay/eval tooling can trace the parent→child chain across
+  forks, with coverage in `conformance/tests/agents/agent_sessions_ancestry`.
+
 - **Bundled secret scanning now ships in both stdlib and `harn mcp serve`
   (#309).** Harn now exposes `secret_scan(content)` for in-process
   scans plus the `harn.secret_scan` MCP tool for agent-loop PR gates.

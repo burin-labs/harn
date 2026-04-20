@@ -41,8 +41,14 @@ pipeline main(task) {
   let branch = agent_session_fork(s)
   agent_session_inject(branch, {role: "user", content: "what if …"})
 
+  // Or branch from a scrubber-rebuilt prefix.
+  let replay_branch = agent_session_fork_at(s, 1)
+  let ancestry = agent_session_ancestry(replay_branch)
+  assert(ancestry["root_id"] == s, "fork ancestry resolves back to the root session")
+
   // Release a session immediately.
   agent_session_close(branch)
+  agent_session_close(replay_branch)
 }
 ```
 
@@ -57,9 +63,11 @@ the "one-shot" call shape.
 | `agent_session_open(id?: string)` | `string` | Idempotent. `nil` mints a UUIDv7. |
 | `agent_session_exists(id)` | `bool` | Safe on unknown ids. |
 | `agent_session_length(id)` | `int` | Message count. Errors if `id` doesn't exist. |
-| `agent_session_snapshot(id)` | `dict` or `nil` | Read-only deep copy of the transcript. |
+| `agent_session_snapshot(id)` | `dict` or `nil` | Read-only transcript snapshot plus `parent_id`, `child_ids`, and `branched_at_event_index`. |
+| `agent_session_ancestry(id)` | `dict` or `nil` | Returns `{parent_id, child_ids, root_id}` for the in-VM session graph. |
 | `agent_session_reset(id)` | `nil` | Wipes history; preserves id and subscribers. |
-| `agent_session_fork(src, dst?)` | `string` | Copies transcript; subscribers are NOT copied. |
+| `agent_session_fork(src, dst?)` | `string` | Copies transcript, sets parent/child lineage, and does NOT copy subscribers. |
+| `agent_session_fork_at(src, keep_first, dst?)` | `string` | Forks then keeps only the first `keep_first` messages on the child. Records `branched_at_event_index`. |
 | `agent_session_trim(id, keep_last)` | `int` | Retains last `keep_last` messages. Returns kept count. |
 | `agent_session_compact(id, opts)` | `int` | Runs the LLM/truncate/observation-mask compactor. Unknown keys in `opts` error. |
 | `agent_session_inject(id, message)` | `nil` | Appends a `{role, content, …}` message. Missing `role` errors. |
@@ -97,6 +105,18 @@ events through every subscriber for that session id. Subscribers are
 not copied by `agent_session_fork` — a fork is a conversation branch,
 not an event fanout.
 
+## Lineage
+
+Forks now populate a small in-memory ancestry graph:
+
+- `agent_session_fork(src, dst?)` sets the child's `parent_id` and appends the child id to the parent's `child_ids`.
+- `agent_session_fork_at(src, keep_first, dst?)` does the same and also records `branched_at_event_index` on the child snapshot.
+- `agent_session_ancestry(id)` walks parent links up to the reachable root and returns `{parent_id, child_ids, root_id}`.
+
+This lineage stays VM-local. It is meant for host UIs and replay tools
+that want to render branching conversation trees without re-deriving
+parentage from workflow state or external logs.
+
 ## Interaction with workflows
 
 Workflow stages pick up a session id from
@@ -113,7 +133,7 @@ wire the fork id into the relevant node's `model_policy.session_id`.
 
 Unknown option keys on `agent_session_compact`, a missing `role` on
 `agent_session_inject`, a negative `keep_last`, and any of the
-lifecycle verbs (`reset`, `fork`, `close`, `trim`, `inject`,
-`length`, `compact`) called against an unknown id all raise a
-`VmError::Thrown(string)`. `exists`, `open`, and `snapshot` are the
-only calls that tolerate unknown ids by design.
+lifecycle verbs (`reset`, `fork`, `fork_at`, `close`, `trim`,
+`inject`, `length`, `compact`) called against an unknown id all raise
+a `VmError::Thrown(string)`. `exists`, `open`, `snapshot`, and
+`ancestry` are the only calls that tolerate unknown ids by design.

@@ -317,6 +317,7 @@ setters plus the lifecycle builtins:
 - `workflow_set_output_visibility(graph, node_id, visibility)` —
   `"public" | "private" | nil`.
 - `agent_session_reset(id)`, `agent_session_fork(src, dst?)`,
+  `agent_session_fork_at(src, keep_first, dst?)`,
   `agent_session_trim(id, keep_last)`, `agent_session_compact(id, opts)`
   — call these in the pipeline before `workflow_execute` to branch,
   reset, or compact a stage's conversation explicitly.

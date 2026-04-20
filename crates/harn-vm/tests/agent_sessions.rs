@@ -55,9 +55,12 @@ pipeline main(task) {
   log(agent_session_length(s))
   let snap = agent_session_snapshot(s)
   log(len(snap["messages"]))
+  log(snap["parent_id"] == nil)
+  log(len(snap["child_ids"]))
+  log(snap["branched_at_event_index"] == nil)
 }
 "#);
-    assert_eq!(lines, vec!["2", "2"]);
+    assert_eq!(lines, vec!["2", "2", "true", "0", "true"]);
 }
 
 #[test]
@@ -82,7 +85,13 @@ pipeline main(task) {
   let src = agent_session_open()
   agent_session_inject(src, {role: "user", content: "shared"})
   let dst = agent_session_fork(src)
+  let src_snap = agent_session_snapshot(src)
+  let dst_snap = agent_session_snapshot(dst)
+  let dst_ancestry = agent_session_ancestry(dst)
   log(agent_session_length(dst))
+  log(dst_snap["parent_id"] == src)
+  log(len(src_snap["child_ids"]))
+  log(dst_ancestry["root_id"] == src)
 
   agent_session_inject(src, {role: "user", content: "src-only"})
   agent_session_inject(dst, {role: "user", content: "dst-only-1"})
@@ -93,7 +102,27 @@ pipeline main(task) {
   log(src == dst)
 }
 "#);
-    assert_eq!(lines, vec!["1", "2", "3", "false"]);
+    assert_eq!(lines, vec!["1", "true", "1", "true", "2", "3", "false"]);
+}
+
+#[test]
+fn fork_at_records_branch_index_and_root_lineage() {
+    let lines = out(r#"
+pipeline main(task) {
+  let root = agent_session_open("root")
+  agent_session_inject(root, {role: "user", content: "a"})
+  agent_session_inject(root, {role: "assistant", content: "b"})
+  agent_session_inject(root, {role: "user", content: "c"})
+  let branch = agent_session_fork_at(root, 2, "branch")
+  let snap = agent_session_snapshot(branch)
+  let ancestry = agent_session_ancestry(branch)
+  log(agent_session_length(branch))
+  log(snap["branched_at_event_index"])
+  log(ancestry["parent_id"] == root)
+  log(ancestry["root_id"] == root)
+}
+"#);
+    assert_eq!(lines, vec!["2", "2", "true", "true"]);
 }
 
 #[test]
@@ -178,9 +207,31 @@ pipeline main(task) {
   log(agent_session_exists("nope"))
   let snap = agent_session_snapshot("nope")
   log(snap == nil)
+  let ancestry = agent_session_ancestry("nope")
+  log(ancestry == nil)
 }
 "#);
-    assert_eq!(lines, vec!["false", "true"]);
+    assert_eq!(lines, vec!["false", "true", "true"]);
+}
+
+#[test]
+fn fork_at_on_unknown_or_negative_keep_first_errors() {
+    for op in [
+        r#"agent_session_fork_at("does-not-exist", 1)"#,
+        r#"
+let s = agent_session_open()
+agent_session_fork_at(s, -1)
+"#,
+    ] {
+        let src = format!("pipeline main(task) {{ {op} }}");
+        let err = run(&src).unwrap_err();
+        assert!(
+            err.contains("does-not-exist")
+                || err.contains("keep_first")
+                || err.to_lowercase().contains("unknown"),
+            "{op} => {err}"
+        );
+    }
 }
 
 #[test]

@@ -44,6 +44,10 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: None,
     },
     BuiltinSig {
+        name: "agent_session_ancestry",
+        return_type: Some(BuiltinReturn::Union(UNION_DICT_NIL)),
+    },
+    BuiltinSig {
         name: "agent_session_close",
         return_type: Some(BuiltinReturn::Named("nil")),
     },
@@ -57,6 +61,10 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
     },
     BuiltinSig {
         name: "agent_session_fork",
+        return_type: Some(BuiltinReturn::Named("string")),
+    },
+    BuiltinSig {
+        name: "agent_session_fork_at",
         return_type: Some(BuiltinReturn::Named("string")),
     },
     BuiltinSig {

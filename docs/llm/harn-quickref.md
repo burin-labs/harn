@@ -778,17 +778,19 @@ agent_session_inject(s, {role: "user", content: "hi"})
 let a = agent_loop("continue", nil, {session_id: s, provider: "mock"})
 let b = agent_loop("remember me?", nil, {session_id: s, provider: "mock"})
 let branch = agent_session_fork(s)                 // counterfactual
+let replay = agent_session_fork_at(s, 1)           // branch from a rebuilt prefix
 agent_session_close(branch)
+agent_session_close(replay)
 ```
 
 Lifecycle builtins (all hard-error on unknown ids except `exists`,
-`open`, `snapshot`):
+`open`, `snapshot`, `ancestry`):
 
 - `agent_session_open(id?)` / `_close(id)` / `_exists(id)`
-- `agent_session_reset(id)` / `_fork(src, dst?)` / `_trim(id, keep_last)`
+- `agent_session_reset(id)` / `_fork(src, dst?)` / `_fork_at(src, keep_first, dst?)` / `_trim(id, keep_last)`
 - `agent_session_inject(id, {role, content, …})` — missing `role` errors.
 - `agent_session_compact(id, opts)` — unknown keys in `opts` error.
-- `agent_session_length(id)` / `_snapshot(id)` for read-only inspection.
+- `agent_session_length(id)` / `_snapshot(id)` / `_ancestry(id)` for read-only inspection.
 
 ### Daemon wrappers
 
