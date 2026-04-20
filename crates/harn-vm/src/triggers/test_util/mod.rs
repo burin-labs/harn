@@ -1664,36 +1664,6 @@ fn linear_raw_inbound(webhook_timestamp_ms: i64, received_at_ms: i64) -> RawInbo
     raw
 }
 
-fn hmac_sha256(secret: &[u8], data: &[u8]) -> Vec<u8> {
-    const BLOCK_SIZE: usize = 64;
-    let mut key = if secret.len() > BLOCK_SIZE {
-        use sha2::Digest;
-        sha2::Sha256::digest(secret).to_vec()
-    } else {
-        secret.to_vec()
-    };
-    key.resize(BLOCK_SIZE, 0);
-
-    let mut inner_pad = vec![0x36; BLOCK_SIZE];
-    let mut outer_pad = vec![0x5c; BLOCK_SIZE];
-    for (slot, key_byte) in inner_pad.iter_mut().zip(&key) {
-        *slot ^= key_byte;
-    }
-    for (slot, key_byte) in outer_pad.iter_mut().zip(&key) {
-        *slot ^= key_byte;
-    }
-
-    let mut inner = sha2::Sha256::new();
-    inner.update(&inner_pad);
-    inner.update(data);
-    let inner_digest = inner.finalize();
-
-    let mut outer = sha2::Sha256::new();
-    outer.update(&outer_pad);
-    outer.update(inner_digest);
-    outer.finalize().to_vec()
-}
-
 fn manifest_spec(id: &str, fingerprint: &str) -> TriggerBindingSpec {
     TriggerBindingSpec {
         id: id.to_string(),
