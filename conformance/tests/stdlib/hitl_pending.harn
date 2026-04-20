@@ -6,9 +6,8 @@ pipeline test(task) {
     ask_user(prompt, {timeout: 5m})
   }
   sleep(10ms)
-  let rows: list<HitlPendingRequest> = hitl_pending({}).filter({row ->
-    row.prompt == prompt
-  })
+  let rows: list<HitlPendingRequest> = hitl_pending({})
+    .filter({ row -> row.prompt == prompt })
   println(len(rows))
   println(rows[0].request_kind)
   println(starts_with(rows[0].prompt, "Need a human "))
