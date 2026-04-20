@@ -26,6 +26,10 @@ pub(crate) async fn run_bench(path: &str, iterations: usize) {
 
     let (source, program) = parse_source_file(path);
     let file_path = Path::new(path);
+    if let Err(error) = package::ensure_dependencies_materialized(file_path) {
+        eprintln!("error: {error}");
+        process::exit(1);
+    }
     let graph = harn_modules::build(&[file_path.to_path_buf()]);
     let mut checker = harn_parser::TypeChecker::new();
     if let Some(imported) = graph.imported_names_for_file(file_path) {

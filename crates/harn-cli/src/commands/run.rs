@@ -79,6 +79,10 @@ fn typecheck_with_imports(
     program: &[harn_parser::SNode],
     path: &Path,
 ) -> Vec<harn_parser::TypeDiagnostic> {
+    if let Err(error) = package::ensure_dependencies_materialized(path) {
+        eprintln!("error: {error}");
+        process::exit(1);
+    }
     let graph = harn_modules::build(&[path.to_path_buf()]);
     let mut checker = harn_parser::TypeChecker::new();
     if let Some(imported) = graph.imported_names_for_file(path) {
