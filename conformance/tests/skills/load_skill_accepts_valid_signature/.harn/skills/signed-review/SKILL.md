@@ -1,10 +1,8 @@
 ---
 name: signed-review
+short: Signed review instructions
 description: Signed review workflow
 trusted_signers:
-  - 02488db042c9242ac7cd3554f8bc47099a3e1ff3f0d696906b57678f976f6064
+  - 752857540d2b9a5efba8d16c61e7e42de61decf8d2df9dcbe726557d3daf0c32
 ---
-
-# Signed review
-
 Always verify the signed skill body.

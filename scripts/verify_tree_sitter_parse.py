@@ -82,7 +82,16 @@ def main() -> int:
     for scan_root in SCAN_ROOTS:
         if not scan_root.exists():
             continue
-        paths.extend(sorted(p for p in scan_root.rglob("*.harn") if p.is_file()))
+        for candidate in sorted(scan_root.rglob("*.harn")):
+            if not candidate.is_file():
+                continue
+            # Skip conformance fixtures that intentionally exercise a parse
+            # failure — those ship alongside a sibling `<name>.error` file
+            # that describes the expected compiler message. Including them
+            # in the tree-sitter sweep would count them as parser bugs.
+            if candidate.with_suffix(".error").exists():
+                continue
+            paths.append(candidate)
 
     if not paths:
         print("error: no positive .harn files found for tree-sitter parse sweep", file=sys.stderr)
