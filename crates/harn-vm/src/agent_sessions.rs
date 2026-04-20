@@ -13,12 +13,13 @@
 //! on that same thread.
 //!
 //! Lifecycle is explicit. Builtins (`agent_session_open`,
-//! `_reset`, `_fork`, `_close`, `_trim`, `_compact`, `_inject`,
-//! `_exists`, `_length`, `_snapshot`) drive the store directly — there
-//! is no "policy" config dict that performs lifecycle as a side effect.
+//! `_reset`, `_fork`, `_fork_at`, `_close`, `_trim`, `_compact`,
+//! `_inject`, `_exists`, `_length`, `_snapshot`, `_ancestry`) drive
+//! the store directly — there is no "policy" config dict that
+//! performs lifecycle as a side effect.
 
 use std::cell::{Cell, RefCell};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::rc::Rc;
 use std::time::Instant;
 
@@ -36,6 +37,7 @@ pub struct SessionState {
     pub last_accessed: Instant,
     pub parent_id: Option<String>,
     pub child_ids: Vec<String>,
+    pub branched_at_event_index: Option<usize>,
     /// Names of skills that were active at the end of the most recent
     /// `agent_loop` run on this session. Empty when no skills were
     /// matched, when the skill system wasn't used, or when the
@@ -56,9 +58,17 @@ impl SessionState {
             last_accessed: now,
             parent_id: None,
             child_ids: Vec::new(),
+            branched_at_event_index: None,
             active_skills: Vec::new(),
         }
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SessionAncestry {
+    pub parent_id: Option<String>,
+    pub child_ids: Vec<String>,
+    pub root_id: String,
 }
 
 thread_local! {
@@ -121,7 +131,7 @@ pub fn length(id: &str) -> Option<usize> {
 }
 
 pub fn snapshot(id: &str) -> Option<VmValue> {
-    SESSIONS.with(|s| s.borrow().get(id).map(|state| state.transcript.clone()))
+    SESSIONS.with(|s| s.borrow().get(id).map(session_snapshot))
 }
 
 /// Open a session, or create it if missing. Returns the resolved id.
@@ -167,6 +177,14 @@ pub fn open_child_session(parent_id: &str, id: Option<String>) -> String {
 }
 
 pub fn link_child_session(parent_id: &str, child_id: &str) {
+    link_child_session_with_branch(parent_id, child_id, None);
+}
+
+pub fn link_child_session_with_branch(
+    parent_id: &str,
+    child_id: &str,
+    branched_at_event_index: Option<usize>,
+) {
     if parent_id == child_id {
         return;
     }
@@ -174,17 +192,7 @@ pub fn link_child_session(parent_id: &str, child_id: &str) {
     open_or_create(Some(child_id.to_string()));
     SESSIONS.with(|s| {
         let mut map = s.borrow_mut();
-        if let Some(parent) = map.get_mut(parent_id) {
-            parent.last_accessed = Instant::now();
-            if !parent.child_ids.iter().any(|id| id == child_id) {
-                parent.child_ids.push(child_id.to_string());
-            }
-        }
-        if let Some(child) = map.get_mut(child_id) {
-            child.last_accessed = Instant::now();
-            child.parent_id = Some(parent_id.to_string());
-            child.transcript = clone_transcript_with_parent(&child.transcript, parent_id);
-        }
+        update_lineage(&mut map, parent_id, child_id, branched_at_event_index);
     });
 }
 
@@ -198,6 +206,30 @@ pub fn child_ids(id: &str) -> Vec<String> {
             .get(id)
             .map(|state| state.child_ids.clone())
             .unwrap_or_default()
+    })
+}
+
+pub fn ancestry(id: &str) -> Option<SessionAncestry> {
+    SESSIONS.with(|s| {
+        let map = s.borrow();
+        let state = map.get(id)?;
+        let mut root_id = state.id.clone();
+        let mut cursor = state.parent_id.clone();
+        let mut seen = HashSet::from([state.id.clone()]);
+        while let Some(parent_id) = cursor {
+            if !seen.insert(parent_id.clone()) {
+                break;
+            }
+            root_id = parent_id.clone();
+            cursor = map
+                .get(&parent_id)
+                .and_then(|parent| parent.parent_id.clone());
+        }
+        Some(SessionAncestry {
+            parent_id: state.parent_id.clone(),
+            child_ids: state.child_ids.clone(),
+            root_id,
+        })
     })
 }
 
@@ -260,10 +292,12 @@ pub fn fork(src_id: &str, dst_id: Option<String>) -> Option<String> {
     // Ensure cap is respected when inserting the fork.
     open_or_create(Some(dst.clone()));
     SESSIONS.with(|s| {
-        if let Some(state) = s.borrow_mut().get_mut(&dst) {
+        let mut map = s.borrow_mut();
+        if let Some(state) = map.get_mut(&dst) {
             state.transcript = src_transcript;
             state.last_accessed = Instant::now();
         }
+        update_lineage(&mut map, src_id, &dst, None);
     });
     // open_or_create evicts BEFORE inserting, so the dst slot is
     // guaranteed once we get here. The existence check is cheap
@@ -286,7 +320,13 @@ pub fn fork(src_id: &str, dst_id: Option<String>) -> Option<String> {
 /// Returns the new session id on success, `None` if `src_id` doesn't
 /// exist.
 pub fn fork_at(src_id: &str, keep_first: usize, dst_id: Option<String>) -> Option<String> {
+    let branched_at_event_index = SESSIONS.with(|s| {
+        let map = s.borrow();
+        let src = map.get(src_id)?;
+        Some(branch_event_index(&src.transcript, keep_first))
+    })?;
     let new_id = fork(src_id, dst_id)?;
+    link_child_session_with_branch(src_id, &new_id, Some(branched_at_event_index));
     retain_first(&new_id, keep_first);
     Some(new_id)
 }
@@ -648,6 +688,93 @@ fn clone_transcript_with_parent(transcript: &VmValue, parent_id: &str) -> VmValu
     VmValue::Dict(Rc::new(next))
 }
 
+fn session_snapshot(state: &SessionState) -> VmValue {
+    let Some(dict) = state.transcript.as_dict() else {
+        return state.transcript.clone();
+    };
+    let mut next = dict.clone();
+    next.insert(
+        "parent_id".to_string(),
+        state
+            .parent_id
+            .as_ref()
+            .map(|id| VmValue::String(Rc::from(id.clone())))
+            .unwrap_or(VmValue::Nil),
+    );
+    next.insert(
+        "child_ids".to_string(),
+        VmValue::List(Rc::new(
+            state
+                .child_ids
+                .iter()
+                .cloned()
+                .map(|id| VmValue::String(Rc::from(id)))
+                .collect(),
+        )),
+    );
+    next.insert(
+        "branched_at_event_index".to_string(),
+        state
+            .branched_at_event_index
+            .map(|index| VmValue::Int(index as i64))
+            .unwrap_or(VmValue::Nil),
+    );
+    VmValue::Dict(Rc::new(next))
+}
+
+fn update_lineage(
+    map: &mut HashMap<String, SessionState>,
+    parent_id: &str,
+    child_id: &str,
+    branched_at_event_index: Option<usize>,
+) {
+    let old_parent_id = map.get(child_id).and_then(|child| child.parent_id.clone());
+    if let Some(old_parent_id) = old_parent_id.filter(|old_parent_id| old_parent_id != parent_id) {
+        if let Some(old_parent) = map.get_mut(&old_parent_id) {
+            old_parent.child_ids.retain(|id| id != child_id);
+            old_parent.last_accessed = Instant::now();
+        }
+    }
+    if let Some(parent) = map.get_mut(parent_id) {
+        parent.last_accessed = Instant::now();
+        if !parent.child_ids.iter().any(|id| id == child_id) {
+            parent.child_ids.push(child_id.to_string());
+        }
+    }
+    if let Some(child) = map.get_mut(child_id) {
+        child.last_accessed = Instant::now();
+        child.parent_id = Some(parent_id.to_string());
+        child.branched_at_event_index = branched_at_event_index;
+        child.transcript = clone_transcript_with_parent(&child.transcript, parent_id);
+    }
+}
+
+fn branch_event_index(transcript: &VmValue, keep_first: usize) -> usize {
+    if keep_first == 0 {
+        return 0;
+    }
+    let Some(dict) = transcript.as_dict() else {
+        return keep_first;
+    };
+    let Some(VmValue::List(events)) = dict.get("events") else {
+        return keep_first;
+    };
+    let mut retained_messages = 0usize;
+    for (index, event) in events.iter().enumerate() {
+        let kind = event
+            .as_dict()
+            .and_then(|dict| dict.get("kind"))
+            .map(VmValue::display);
+        if matches!(kind.as_deref(), Some("message" | "tool_result")) {
+            retained_messages += 1;
+            if retained_messages == keep_first {
+                return index + 1;
+            }
+        }
+    }
+    events.len()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -691,6 +818,14 @@ mod tests {
         let dst = fork_at(&src, 2, Some("dst-fork-at".into())).expect("fork_at");
         assert_ne!(dst, src);
         assert_eq!(message_count(&dst), 2, "branched at message index 2");
+        assert_eq!(
+            snapshot(&dst)
+                .and_then(|value| value.as_dict().cloned())
+                .and_then(|dict| dict
+                    .get("branched_at_event_index")
+                    .and_then(VmValue::as_int)),
+            Some(2)
+        );
         // Source untouched.
         assert_eq!(message_count(&src), 4);
         // Subscribers not carried — forks start with a clean fanout list.
@@ -711,17 +846,79 @@ mod tests {
         let child = open_child_session(&parent, Some("child-session".into()));
         assert_eq!(parent_id(&child).as_deref(), Some("parent-session"));
         assert_eq!(child_ids(&parent), vec!["child-session".to_string()]);
+        assert_eq!(
+            ancestry(&child),
+            Some(SessionAncestry {
+                parent_id: Some("parent-session".to_string()),
+                child_ids: Vec::new(),
+                root_id: "parent-session".to_string(),
+            })
+        );
 
         let transcript = snapshot(&child).expect("child transcript");
+        let transcript = transcript.as_dict().expect("child snapshot");
         let metadata = transcript
-            .as_dict()
-            .and_then(|dict| dict.get("metadata"))
+            .get("metadata")
             .and_then(|value| value.as_dict())
             .expect("child metadata");
+        assert!(
+            matches!(transcript.get("parent_id"), Some(VmValue::String(value)) if value.as_ref() == "parent-session")
+        );
+        assert!(
+            matches!(transcript.get("child_ids"), Some(VmValue::List(children)) if children.is_empty())
+        );
+        assert!(matches!(
+            transcript.get("branched_at_event_index"),
+            Some(VmValue::Nil)
+        ));
         assert!(matches!(
             metadata.get("parent_session_id"),
             Some(VmValue::String(value)) if value.as_ref() == "parent-session"
         ));
+    }
+
+    #[test]
+    fn branch_event_index_counts_non_message_events() {
+        reset_session_store();
+        let src = open_or_create(Some("branch-event-index".into()));
+        let transcript = VmValue::Dict(Rc::new(BTreeMap::from([
+            ("id".to_string(), VmValue::String(Rc::from(src.clone()))),
+            (
+                "messages".to_string(),
+                VmValue::List(Rc::new(vec![
+                    make_msg("user", "a"),
+                    make_msg("assistant", "b"),
+                ])),
+            ),
+            (
+                "events".to_string(),
+                VmValue::List(Rc::new(vec![
+                    VmValue::Dict(Rc::new(BTreeMap::from([(
+                        "kind".to_string(),
+                        VmValue::String(Rc::from("message")),
+                    )]))),
+                    VmValue::Dict(Rc::new(BTreeMap::from([(
+                        "kind".to_string(),
+                        VmValue::String(Rc::from("sub_agent_start")),
+                    )]))),
+                    VmValue::Dict(Rc::new(BTreeMap::from([(
+                        "kind".to_string(),
+                        VmValue::String(Rc::from("message")),
+                    )]))),
+                ])),
+            ),
+        ])));
+        store_transcript(&src, transcript);
+
+        let dst = fork_at(&src, 2, Some("branch-event-index-child".into())).expect("fork_at");
+        assert_eq!(
+            snapshot(&dst)
+                .and_then(|value| value.as_dict().cloned())
+                .and_then(|dict| dict
+                    .get("branched_at_event_index")
+                    .and_then(VmValue::as_int)),
+            Some(3)
+        );
     }
 
     #[test]

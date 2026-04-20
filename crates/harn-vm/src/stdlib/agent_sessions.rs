@@ -17,8 +17,10 @@ pub fn register_agent_session_builtins(vm: &mut Vm) {
     register_exists(vm);
     register_length(vm);
     register_snapshot(vm);
+    register_ancestry(vm);
     register_reset(vm);
     register_fork(vm);
+    register_fork_at(vm);
     register_close(vm);
     register_trim(vm);
     register_inject(vm);
@@ -56,6 +58,17 @@ fn arg_string_required(
     }
 }
 
+fn arg_int_required(
+    args: &[VmValue],
+    idx: usize,
+    fn_name: &str,
+    arg_name: &str,
+) -> Result<i64, VmError> {
+    args.get(idx)
+        .and_then(VmValue::as_int)
+        .ok_or_else(|| err(format!("{fn_name}: `{arg_name}` must be an int")))
+}
+
 fn register_open(vm: &mut Vm) {
     vm.register_builtin("agent_session_open", |args, _out| {
         let id = arg_string_opt(args, 0, "agent_session_open", "id")?;
@@ -90,6 +103,38 @@ fn register_snapshot(vm: &mut Vm) {
     });
 }
 
+fn register_ancestry(vm: &mut Vm) {
+    vm.register_builtin("agent_session_ancestry", |args, _out| {
+        let id = arg_string_required(args, 0, "agent_session_ancestry", "id")?;
+        let Some(ancestry) = agent_sessions::ancestry(&id) else {
+            return Ok(VmValue::Nil);
+        };
+        Ok(VmValue::Dict(Rc::new(BTreeMap::from([
+            (
+                "parent_id".to_string(),
+                ancestry
+                    .parent_id
+                    .map(|value| VmValue::String(Rc::from(value)))
+                    .unwrap_or(VmValue::Nil),
+            ),
+            (
+                "child_ids".to_string(),
+                VmValue::List(Rc::new(
+                    ancestry
+                        .child_ids
+                        .into_iter()
+                        .map(|value| VmValue::String(Rc::from(value)))
+                        .collect(),
+                )),
+            ),
+            (
+                "root_id".to_string(),
+                VmValue::String(Rc::from(ancestry.root_id)),
+            ),
+        ]))))
+    });
+}
+
 fn register_reset(vm: &mut Vm) {
     vm.register_builtin("agent_session_reset", |args, _out| {
         let id = arg_string_required(args, 0, "agent_session_reset", "id")?;
@@ -115,6 +160,28 @@ fn register_fork(vm: &mut Vm) {
             Some(new_id) => Ok(VmValue::String(Rc::from(new_id))),
             None => Err(err(format!(
                 "agent_session_fork: failed to fork session '{src}'"
+            ))),
+        }
+    });
+}
+
+fn register_fork_at(vm: &mut Vm) {
+    vm.register_builtin("agent_session_fork_at", |args, _out| {
+        let src = arg_string_required(args, 0, "agent_session_fork_at", "src")?;
+        let keep_first = arg_int_required(args, 1, "agent_session_fork_at", "keep_first")?;
+        if keep_first < 0 {
+            return Err(err("agent_session_fork_at: `keep_first` must be >= 0"));
+        }
+        let dst = arg_string_opt(args, 2, "agent_session_fork_at", "dst")?;
+        if !agent_sessions::exists(&src) {
+            return Err(err(format!(
+                "agent_session_fork_at: unknown session id '{src}'"
+            )));
+        }
+        match agent_sessions::fork_at(&src, keep_first as usize, dst) {
+            Some(new_id) => Ok(VmValue::String(Rc::from(new_id))),
+            None => Err(err(format!(
+                "agent_session_fork_at: failed to fork session '{src}'"
             ))),
         }
     });

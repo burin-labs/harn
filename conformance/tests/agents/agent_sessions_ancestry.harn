@@ -1,0 +1,34 @@
+pipeline main(task) {
+  let root = agent_session_open("ancestry-root")
+  agent_session_inject(root, {role: "user", content: "hello"})
+  agent_session_inject(root, {role: "assistant", content: "hi"})
+
+  let depth1 = agent_session_fork(root, "ancestry-depth1")
+  let depth2 = agent_session_fork(depth1, "ancestry-depth2")
+  let depth3 = agent_session_fork_at(depth2, 1, "ancestry-depth3")
+
+  let depth3_ancestry = agent_session_ancestry(depth3)
+  assert(depth3_ancestry["parent_id"] == depth2, "fork_at child records its parent")
+  assert(depth3_ancestry["root_id"] == root, "ancestry walks the full chain back to root")
+
+  let depth2_snap = agent_session_snapshot(depth2)
+  let depth3_snap = agent_session_snapshot(depth3)
+  assert(contains(depth2_snap["child_ids"], depth3), "parent snapshot includes fork_at child id")
+  assert(depth3_snap["parent_id"] == depth2, "snapshot exposes child parent_id")
+  assert(depth3_snap["branched_at_event_index"] == 1, "fork_at records branch point")
+  assert(len(depth3_snap["messages"]) == 1, "fork_at truncates child transcript")
+
+  let fanout = agent_session_open("ancestry-fanout")
+  agent_session_inject(fanout, {role: "user", content: "seed"})
+  let left = agent_session_fork(fanout, "ancestry-left")
+  let right = agent_session_fork(fanout, "ancestry-right")
+
+  let fanout_snap = agent_session_snapshot(fanout)
+  assert(len(fanout_snap["child_ids"]) == 2, "fanout parent tracks both children")
+  assert(contains(fanout_snap["child_ids"], left), "fanout parent includes left child")
+  assert(contains(fanout_snap["child_ids"], right), "fanout parent includes right child")
+  assert(agent_session_ancestry(left)["root_id"] == fanout, "left child resolves root_id")
+  assert(agent_session_ancestry(right)["root_id"] == fanout, "right child resolves root_id")
+
+  log("agent_sessions ancestry tests passed")
+}
