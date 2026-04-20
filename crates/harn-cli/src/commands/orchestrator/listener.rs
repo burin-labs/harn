@@ -1370,6 +1370,7 @@ mod tests {
             }),
             allowed_origins: OriginAllowList::wildcard(),
             max_body_bytes: DEFAULT_MAX_BODY_BYTES,
+            metrics_registry: Arc::new(harn_vm::MetricsRegistry::default()),
             routes: vec![webhook_route("/hooks/github")],
         })
         .await
@@ -1428,6 +1429,7 @@ mod tests {
             }),
             allowed_origins: OriginAllowList::wildcard(),
             max_body_bytes: DEFAULT_MAX_BODY_BYTES,
+            metrics_registry: Arc::new(harn_vm::MetricsRegistry::default()),
             routes: vec![webhook_route("/hooks/github")],
         })
         .await
