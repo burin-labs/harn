@@ -105,6 +105,14 @@ use crate::stdlib::template::{
     render_template_result, render_template_with_provenance, PromptSourceSpan, PromptSpanKind,
 };
 
+fn render_template_string(args: &[VmValue]) -> Result<VmValue, VmError> {
+    let template = args.first().map(|a| a.display()).unwrap_or_default();
+    let bindings = args.get(1).and_then(|a| a.as_dict());
+    let rendered =
+        render_template_result(&template, bindings, None, None).map_err(VmError::from)?;
+    Ok(VmValue::String(Rc::from(rendered)))
+}
+
 fn render_asset(args: &[VmValue]) -> Result<VmValue, VmError> {
     let path = args.first().map(|a| a.display()).unwrap_or_default();
     let resolved = crate::stdlib::process::resolve_source_asset_path(&path);
@@ -462,6 +470,7 @@ pub(crate) fn register_string_builtins(vm: &mut Vm) {
 
     vm.register_builtin("render", |args, _out| render_asset(args));
     vm.register_builtin("render_prompt", |args, _out| render_asset(args));
+    vm.register_builtin("render_string", |args, _out| render_template_string(args));
     vm.register_builtin("render_with_provenance", |args, _out| {
         render_asset_with_provenance(args)
     });

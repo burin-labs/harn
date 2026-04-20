@@ -1,0 +1,8 @@
+pub fn greet(name = nil) {
+  // optional arg present
+  return "HELLO"
+}
+pub fn greet() {
+  // no params
+  return "HI"
+}

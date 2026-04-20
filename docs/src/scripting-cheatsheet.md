@@ -25,6 +25,30 @@ Heredoc-style `<<TAG ... TAG` is **only** valid inside LLM tool-call
 argument JSON — in source code, the parser points you at triple
 quotes.
 
+## Prompt templates
+
+Use `render("file.prompt", bindings)` / `render_prompt(...)` for
+source-relative prompt assets, and `render_string(template, bindings)`
+when the template should live inline in the module:
+
+```harn
+let template = """
+pub fn {{ fn_name }}({{ for p in params }}{{ p }}{{ if !loop.last }}, {{ end }}{{ end }}) {
+  return "{{ fn_name }}"
+}
+"""
+
+let src = render_string(template, {
+  fn_name: "hello",
+  params: ["name", "title = nil"],
+})
+```
+
+The template language is the same either way: `{{ if }}`, `{{ for }}`,
+filters like `| upper` / `| default: ...`, `{{ include "..." }}` for
+file-backed partials, comments, raw blocks, and whitespace trimming.
+See `prompt-templating.md` for the full reference.
+
 ## Slicing
 
 End-exclusive slicing works on strings and lists:
