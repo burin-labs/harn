@@ -1,11 +1,16 @@
 import { clear_host_mocks, mock_host_response } from "std/testing"
 
+fn destructive_step() -> string {
+  return "deleted"
+}
+
 pipeline test(task) {
   clear_host_mocks()
-  mock_host_response("hitl", "dual_control", [
-    {approved: true, reviewer: "alice"},
-    {approved: true, reviewer: "bob"},
-  ])
-  let result = dual_control(2, 3, { -> "deleted" }, ["alice", "bob", "carol"])
+  mock_host_response(
+    "hitl",
+    "dual_control",
+    [{approved: true, reviewer: "alice"}, {approved: true, reviewer: "bob"}],
+  )
+  let result = dual_control(2, 3, destructive_step, ["alice", "bob", "carol"])
   println(result)
 }

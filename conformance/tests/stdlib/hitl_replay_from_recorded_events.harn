@@ -1,5 +1,5 @@
-import "std/triggers"
 import { clear_host_mocks, mock_host_response } from "std/testing"
+import "std/triggers"
 
 pub fn hitl_handler(event: TriggerEvent) -> dict {
   let answer = ask_user("Should we continue handling " + event.kind + "?")
@@ -27,14 +27,12 @@ pipeline test(task) {
     package_name: nil,
   },
   )
-
   let fired: DispatchHandle = trigger_fire(
     handle,
     {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-hitl-replay"}},
   )
   println(fired.status == "dispatched")
   println(contains(json_stringify(fired.result ?? {}), "\"verdict\":\"approved\""))
-
   clear_host_mocks()
   let replay: DispatchHandle = trigger_replay(fired.event_id)
   println(replay.status == "dispatched")
