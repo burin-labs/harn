@@ -178,7 +178,7 @@ fn test_non_exhaustive_match_wildcard_silences_error() {
 
 #[test]
 fn test_unknown_exhaustive_unreachable_happy_path() {
-    // All eight concrete variants covered → no warning on unreachable().
+    // All nine concrete variants covered → no warning on unreachable().
     let source = r#"pipeline t(task) {
   fn describe(v: unknown) -> string {
 if type_of(v) == "string"  { return "s" }
@@ -188,6 +188,7 @@ if type_of(v) == "bool"    { return "b" }
 if type_of(v) == "nil"     { return "n" }
 if type_of(v) == "list"    { return "l" }
 if type_of(v) == "dict"    { return "d" }
+if type_of(v) == "bytes"   { return "y" }
 if type_of(v) == "closure" { return "c" }
 unreachable("unknown type_of variant")
   }
@@ -209,7 +210,7 @@ unreachable("unknown type_of variant")
     let warns = exhaustive_warns(source);
     assert_eq!(warns.len(), 1, "expected one warning, got: {:?}", warns);
     let w = &warns[0];
-    for missing in &["float", "bool", "nil", "list", "dict", "closure"] {
+    for missing in &["float", "bool", "nil", "list", "dict", "bytes", "closure"] {
         assert!(w.contains(missing), "missing {missing} in: {w}");
     }
     assert!(!w.contains("int"));
