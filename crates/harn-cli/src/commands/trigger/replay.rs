@@ -694,6 +694,11 @@ fn diff_outcomes(
 }
 
 #[cfg(test)]
+// Tests below hold the shared `lock_harn_state` guard across `.await`
+// points; the guard is dropped when each `#[tokio::test]` future resolves
+// so this is safe in practice, matching the pattern already in
+// `mcp/serve.rs`.
+#[allow(clippy::await_holding_lock)]
 mod tests {
     use std::collections::BTreeMap;
     use std::fs;
@@ -718,6 +723,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn replay_falls_back_to_recorded_timestamp_when_version_lookup_is_stale() {
+        let _guard = crate::tests::common::harn_state_lock::lock_harn_state();
         harn_vm::reset_thread_local_state();
         let sink = Rc::new(CollectorSink::new());
         clear_event_sinks();

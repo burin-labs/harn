@@ -1138,6 +1138,11 @@ impl IntoResponse for HttpError {
 }
 
 #[cfg(test)]
+// Tests below hold the shared `lock_harn_state` guard across `.await`
+// points; the guard is dropped when each `#[tokio::test]` future resolves
+// so this is safe in practice, matching the pattern already in
+// `mcp/serve.rs`.
+#[allow(clippy::await_holding_lock)]
 mod tests {
     use super::*;
     use harn_vm::event_log::{
@@ -1153,7 +1158,7 @@ mod tests {
     use sha2::{Digest, Sha256};
     use tempfile::tempdir;
 
-    static REQUEST_DELAY_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    use crate::tests::common::harn_state_lock::lock_harn_state;
 
     fn manifest_binding_spec(id: &str, fingerprint: &str) -> TriggerBindingSpec {
         TriggerBindingSpec {
@@ -1295,7 +1300,7 @@ mod tests {
     #[allow(clippy::await_holding_lock)]
     #[tokio::test(flavor = "current_thread")]
     async fn reload_swaps_routes_without_losing_inflight_request() {
-        let _env_guard = REQUEST_DELAY_LOCK.lock().expect("request delay lock");
+        let _guard = lock_harn_state();
         reset_active_event_log();
         harn_vm::clear_trigger_registry();
 
@@ -1417,6 +1422,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn webhook_first_delivery_is_appended() {
+        let _guard = lock_harn_state();
         reset_active_event_log();
         let dir = tempdir().expect("tempdir");
         let log = install_default_for_base_dir(dir.path()).expect("install event log");
@@ -1476,6 +1482,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn webhook_duplicate_delivery_is_dropped() {
+        let _guard = lock_harn_state();
         reset_active_event_log();
         let dir = tempdir().expect("tempdir");
         let log = install_default_for_base_dir(dir.path()).expect("install event log");
