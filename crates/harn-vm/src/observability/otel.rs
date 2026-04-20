@@ -82,6 +82,7 @@ impl ObservabilityGuard {
         })
     }
 
+    #[cfg_attr(not(feature = "otel"), allow(unused_mut))]
     pub fn shutdown(mut self) -> Result<(), String> {
         #[cfg(feature = "otel")]
         if let Some(provider) = self.tracer_provider.take() {
