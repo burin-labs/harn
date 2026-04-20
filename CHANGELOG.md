@@ -18,6 +18,12 @@ granular archaeology.
   triggers, or LLM config from installed manifests. Groundwork for the
   pure-Harn connectors pivot (#350) — external connector repos can now
   be consumed with `harn add <git-url>`.
+- **Harn-backed connector modules (#346, #356).** Manifest-driven
+  `[connectors.harn.<provider>]` overrides, a dedicated Harn connector
+  adapter/runtime, and connector-only builtins for secrets, event-log
+  writes, and custom metrics wired through orchestrator ingress and
+  outbound client paths. Enables connectors to be authored in pure Harn
+  and shipped from external repos (#350).
 
 ## v0.7.25
 
