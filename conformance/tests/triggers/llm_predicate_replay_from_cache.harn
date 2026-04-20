@@ -16,9 +16,9 @@ fn classify(event: TriggerEvent) -> bool {
 pipeline test(task) {
   llm_mock_clear()
   llm_mock({text: "yes", input_tokens: 10, output_tokens: 5, model: "gpt-4o-mini"})
-
   let unique = to_string(to_int(timestamp())) + "-" + to_string(random_int(100000, 999999))
-  let handle: TriggerHandle = trigger_register({
+  let handle: TriggerHandle = trigger_register(
+    {
     id: "llm-predicate-replay-" + unique,
     kind: "issue.opened",
     provider: "github",
@@ -33,17 +33,17 @@ pipeline test(task) {
     budget: nil,
     manifest_path: nil,
     package_name: nil,
-  })
-
+  },
+  )
   let fire: DispatchHandle = trigger_fire(
     handle,
     {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-replay-" + unique}},
   )
   let replay: DispatchHandle = trigger_replay(fire.event_id)
-  let evaluated = trigger_inspect_lifecycle("predicate.evaluated").filter(
+  let evaluated = trigger_inspect_lifecycle("predicate.evaluated")
+    .filter(
     { entry -> entry?.headers?.trigger_id == handle.id },
   )
-
   println(fire.status == "dispatched" && replay.status == "dispatched")
   println(len(llm_mock_calls()) == 1)
   println(len(evaluated) == 2)

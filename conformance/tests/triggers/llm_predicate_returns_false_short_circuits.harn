@@ -16,9 +16,9 @@ fn classify(event: TriggerEvent) -> bool {
 pipeline test(task) {
   llm_mock_clear()
   llm_mock({text: "no", input_tokens: 10, output_tokens: 5, model: "gpt-4o-mini"})
-
   let unique = to_string(to_int(timestamp())) + "-" + to_string(random_int(100000, 999999))
-  let handle: TriggerHandle = trigger_register({
+  let handle: TriggerHandle = trigger_register(
+    {
     id: "llm-predicate-false-" + unique,
     kind: "issue.opened",
     provider: "github",
@@ -33,16 +33,16 @@ pipeline test(task) {
     budget: nil,
     manifest_path: nil,
     package_name: nil,
-  })
-
+  },
+  )
   let fire: DispatchHandle = trigger_fire(
     handle,
     {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-false-" + unique}},
   )
-  let dispatches = trigger_inspect_lifecycle("DispatchStarted").filter(
+  let dispatches = trigger_inspect_lifecycle("DispatchStarted")
+    .filter(
     { entry -> entry?.headers?.trigger_id == handle.id },
   )
-
   println(fire.status == "dispatched")
   println(contains(json_stringify(fire.result ?? {}), "\"skipped\":true"))
   println(contains(json_stringify(fire.result ?? {}), "\"reason\":null"))

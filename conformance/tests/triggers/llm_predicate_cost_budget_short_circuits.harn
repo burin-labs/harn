@@ -16,9 +16,9 @@ fn classify(event: TriggerEvent) -> bool {
 pipeline test(task) {
   llm_mock_clear()
   llm_mock({text: "yes", input_tokens: 3000, output_tokens: 4000, model: "gpt-4o-mini"})
-
   let unique = to_string(to_int(timestamp())) + "-" + to_string(random_int(100000, 999999))
-  let handle: TriggerHandle = trigger_register({
+  let handle: TriggerHandle = trigger_register(
+    {
     id: "llm-predicate-budget-" + unique,
     kind: "issue.opened",
     provider: "github",
@@ -33,19 +33,20 @@ pipeline test(task) {
     budget: nil,
     manifest_path: nil,
     package_name: nil,
-  })
-
+  },
+  )
   let fire: DispatchHandle = trigger_fire(
     handle,
     {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-budget-" + unique}},
   )
-  let budget_events = trigger_inspect_lifecycle("predicate.budget_exceeded").filter(
+  let budget_events = trigger_inspect_lifecycle("predicate.budget_exceeded")
+    .filter(
     { entry -> entry?.headers?.trigger_id == handle.id },
   )
-  let dispatches = trigger_inspect_lifecycle("DispatchStarted").filter(
+  let dispatches = trigger_inspect_lifecycle("DispatchStarted")
+    .filter(
     { entry -> entry?.headers?.trigger_id == handle.id },
   )
-
   println(fire.status == "dispatched")
   println(contains(json_stringify(fire.result ?? {}), "\"reason\":\"budget_exceeded\""))
   println(len(budget_events) == 1 && budget_events[0]?.payload?.tokens == 7000)
