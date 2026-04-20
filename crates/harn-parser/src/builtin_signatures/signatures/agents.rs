@@ -56,6 +56,10 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("int")),
     },
     BuiltinSig {
+        name: "agent_session_current_id",
+        return_type: Some(BuiltinReturn::Union(UNION_STRING_NIL)),
+    },
+    BuiltinSig {
         name: "agent_session_exists",
         return_type: Some(BuiltinReturn::Named("bool")),
     },

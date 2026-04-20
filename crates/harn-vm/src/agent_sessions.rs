@@ -106,7 +106,7 @@ pub(crate) fn pop_current_session() {
     });
 }
 
-pub(crate) fn current_session_id() -> Option<String> {
+pub fn current_session_id() -> Option<String> {
     CURRENT_SESSION_STACK.with(|stack| stack.borrow().last().cloned())
 }
 

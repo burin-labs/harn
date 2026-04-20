@@ -1495,6 +1495,7 @@ See the [Sessions](./sessions.md) chapter for the full model.
 |---|---|---|---|
 | `agent_session_open(id?)` | id: string or nil | string | Idempotent open; `nil` mints a UUIDv7 |
 | `agent_session_exists(id)` | id | bool | Safe on unknown ids |
+| `agent_session_current_id()` | none | string or nil | Returns the innermost active session id, or `nil` outside any active session |
 | `agent_session_length(id)` | id | int | Message count; errors on unknown id |
 | `agent_session_snapshot(id)` | id | dict or nil | Read-only transcript snapshot plus `parent_id`, `child_ids`, `branched_at_event_index` |
 | `agent_session_ancestry(id)` | id | dict or nil | Returns `{parent_id, child_ids, root_id}` for the current in-VM lineage |

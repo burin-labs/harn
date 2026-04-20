@@ -20,6 +20,7 @@
 
 - [LLM calls and agent loops](./llm-and-agents.md)
 - [Daemon stdlib](./stdlib/daemon.md)
+- [Current session builtin](./stdlib/agent_session_current_id.md)
 - [Triggers](./triggers.md)
 - [Trigger stdlib](./stdlib/triggers.md)
 - [Human in the loop](./hitl.md)

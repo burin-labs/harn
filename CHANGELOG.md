@@ -24,6 +24,13 @@ granular archaeology.
   `hitl.approvals`, `hitl.dual_control`, and `hitl.escalations` through the
   event log without reaching into SQLite directly.
 
+- **Expose `agent_session_current_id()` as a public stdlib builtin
+  (#318).** Handlers and subscribers can now read the innermost active
+  agent session id directly, which makes it easier to compose
+  `agent_session_snapshot`, `agent_session_fork`, and
+  `agent_session_trim` against the currently executing session without
+  threading the id through every call.
+
 ## v0.7.23
 
 ### Changed
