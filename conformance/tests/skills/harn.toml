@@ -1,0 +1,10 @@
+[package]
+name = "skill-provenance-conformance"
+version = "0.0.0"
+
+[skills]
+paths = [
+  "load_skill_accepts_valid_signature/.harn/skills",
+  "load_skill_rejects_unsigned_when_required/.harn/skills",
+]
+signer_registry_url = "./signers"

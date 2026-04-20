@@ -140,6 +140,15 @@ granular archaeology.
 
 ### Added
 
+- **Cryptographic provenance for Harn skills.** Added `harn skill key
+  generate`, `harn skill sign`, `harn skill verify`, `harn skill trust
+  add`, and `harn skill trust list` for Ed25519-based detached
+  signatures over `SKILL.md`. Skill manifests now support
+  `require_signature` and `trusted_signers`, projects can configure a
+  `signer_registry_url`, runtime `load_skill(...)` can require signed
+  skills via call arg or `HARN_REQUIRE_SIGNED_SKILLS=1`, and every load
+  attempt emits a `skill.loaded` trust record into the transcript.
+
 - **`harn orchestrator {inspect, fire, replay, dlq, queue}` CLI
   commands (#185).** Implemented the placeholder orchestrator
   subcommands that used to error with `not implemented`. `inspect`

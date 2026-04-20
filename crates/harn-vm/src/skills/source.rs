@@ -457,6 +457,22 @@ pub fn skill_entry_to_vm(skill: &Skill) -> crate::value::VmValue {
             VmValue::String(Rc::from(effort.as_str())),
         );
     }
+    if skill.manifest.require_signature {
+        entry.insert("require_signature".to_string(), VmValue::Bool(true));
+    }
+    if !skill.manifest.trusted_signers.is_empty() {
+        entry.insert(
+            "trusted_signers".to_string(),
+            VmValue::List(Rc::new(
+                skill
+                    .manifest
+                    .trusted_signers
+                    .iter()
+                    .map(|fingerprint| VmValue::String(Rc::from(fingerprint.as_str())))
+                    .collect(),
+            )),
+        );
+    }
     if let Some(shell) = &skill.manifest.shell {
         entry.insert(
             "shell".to_string(),

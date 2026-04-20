@@ -59,6 +59,9 @@ The frontmatter is YAML, delimited by `---` on its own line above and
 below. Unknown fields are **not** hard errors — `harn doctor` reports
 them as warnings so newer spec fields roll out cleanly.
 
+See [Skill provenance](./skill-provenance.md) for detached signatures,
+trusted signers, and `load_skill(..., require_signature: true)`.
+
 ```markdown
 ---
 name: deploy
@@ -103,6 +106,8 @@ Ship it: `$ARGUMENTS`. Skill directory: `${HARN_SKILL_DIR}`.
 | `hooks` | map or list | Shell commands for lifecycle events. |
 | `model` | string | Preferred model alias. |
 | `effort` | string | `low` / `medium` / `high`. |
+| `require-signature` | bool | Require a valid detached signature before runtime `load_skill(...)` may promote the skill body. |
+| `trusted-signers` | list of string | Optional signer fingerprint allowlist layered on top of the trusted registry. |
 | `shell` | string | Shell to run the body under when `context` is shell-ish. |
 | `argument-hint` | string | UI hint for `$ARGUMENTS`. |
 
@@ -239,6 +244,7 @@ tag use the manifest instead of a per-script flag:
 paths = ["packages/*/skills", "../shared-skills"]
 lookup_order = ["cli", "project", "manifest", "user", "package", "system", "host"]
 disable = ["system"]
+signer_registry_url = "./signers"
 
 [skills.defaults]
 tool_search = "bm25"
@@ -266,6 +272,9 @@ name = "acme/ops"
   the repo.
 - `disable` kicks entire layers out of discovery. Disabled layers are
   reported by `harn doctor`.
+- `signer_registry_url` points at a flat directory or URL prefix that
+  serves `<fingerprint>.pub` signer files for skill signature
+  verification.
 - `[[skill.source]]` entries of type `git` expect their materialized
   checkout to live under `.harn/packages/<name>/skills/` — run
   `harn install` to populate it.

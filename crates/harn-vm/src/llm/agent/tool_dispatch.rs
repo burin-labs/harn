@@ -51,6 +51,8 @@ use super::helpers::{append_message_to_contexts, assistant_history_text};
 use super::llm_call::LlmCallResult;
 use super::state::AgentLoopState;
 
+const REQUIRE_SIGNED_SKILLS_ENV: &str = "HARN_REQUIRE_SIGNED_SKILLS";
+
 pub(super) struct ToolDispatchContext<'a> {
     pub bridge: &'a Option<Rc<HostBridge>>,
     pub tool_format: &'a str,
@@ -77,6 +79,102 @@ fn runtime_tool_error(error: &str, skill: &str, message: impl Into<String>) -> S
         "message": message.into(),
     }))
     .unwrap_or_else(|_| format!("{{\"error\":\"{error}\",\"skill\":\"{skill}\"}}"))
+}
+
+#[derive(Default)]
+struct RuntimeSkillProvenance {
+    signed: bool,
+    trusted: bool,
+    signer_fingerprint: Option<String>,
+    require_signature: bool,
+    trusted_signers: Vec<String>,
+    error: Option<String>,
+}
+
+fn env_requires_signed_skills() -> bool {
+    matches!(
+        std::env::var(REQUIRE_SIGNED_SKILLS_ENV)
+            .ok()
+            .map(|value| value.trim().to_ascii_lowercase()),
+        Some(value) if value == "1" || value == "true" || value == "yes"
+    )
+}
+
+fn runtime_provenance(
+    entry: &std::collections::BTreeMap<String, VmValue>,
+) -> RuntimeSkillProvenance {
+    let mut provenance = RuntimeSkillProvenance {
+        require_signature: entry
+            .get("require_signature")
+            .and_then(|value| match value {
+                VmValue::Bool(value) => Some(*value),
+                _ => None,
+            })
+            .unwrap_or(false),
+        trusted_signers: entry
+            .get("trusted_signers")
+            .and_then(|value| match value {
+                VmValue::List(values) => Some(
+                    values
+                        .iter()
+                        .filter_map(|value| match value {
+                            VmValue::String(value) => Some(value.to_string()),
+                            _ => None,
+                        })
+                        .collect(),
+                ),
+                _ => None,
+            })
+            .unwrap_or_default(),
+        ..RuntimeSkillProvenance::default()
+    };
+    let Some(inner) = entry.get("provenance").and_then(VmValue::as_dict) else {
+        return provenance;
+    };
+    provenance.signed = inner
+        .get("signed")
+        .and_then(|value| match value {
+            VmValue::Bool(value) => Some(*value),
+            _ => None,
+        })
+        .unwrap_or(false);
+    provenance.trusted = inner
+        .get("trusted")
+        .and_then(|value| match value {
+            VmValue::Bool(value) => Some(*value),
+            _ => None,
+        })
+        .unwrap_or(false);
+    provenance.signer_fingerprint = inner
+        .get("signer_fingerprint")
+        .and_then(|value| match value {
+            VmValue::String(value) => Some(value.to_string()),
+            _ => None,
+        });
+    provenance.error = inner.get("error").and_then(|value| match value {
+        VmValue::String(value) => Some(value.to_string()),
+        _ => None,
+    });
+    provenance
+}
+
+fn emit_skill_loaded_record(
+    state: &mut AgentLoopState,
+    skill_id: &str,
+    provenance: &RuntimeSkillProvenance,
+) {
+    state.transcript_events.push(transcript_event(
+        "skill.loaded",
+        "system",
+        "internal",
+        skill_id,
+        Some(serde_json::json!({
+            "skill_id": skill_id,
+            "signer_fingerprint": provenance.signer_fingerprint,
+            "signed": provenance.signed,
+            "trusted": provenance.trusted,
+        })),
+    ));
 }
 
 fn apply_loaded_skill_prompt(state: &mut AgentLoopState, entry: &VmValue, prompt: String) {
@@ -108,6 +206,7 @@ fn apply_loaded_skill_prompt(state: &mut AgentLoopState, entry: &VmValue, prompt
 fn execute_runtime_load_skill(
     state: &mut AgentLoopState,
     requested: &str,
+    require_signature: bool,
     session_id: &str,
 ) -> String {
     let Some(registry) = state.skill_registry.as_ref() else {
@@ -125,12 +224,39 @@ fn execute_runtime_load_skill(
     let entry_value = VmValue::Dict(Rc::new(entry.clone()));
     let active = super::state::ActiveSkill::from_entry(&entry_value);
     let skill_id = crate::skills::skill_entry_id(&entry);
+    let provenance = runtime_provenance(&entry);
+    emit_skill_loaded_record(state, &skill_id, &provenance);
 
     if active.disable_model_invocation {
         return runtime_tool_error(
             "skill_model_invocation_disabled",
             &skill_id,
             format!("skill '{skill_id}' is gated to explicit user invocation"),
+        );
+    }
+    let signature_required = require_signature
+        || env_requires_signed_skills()
+        || provenance.require_signature
+        || !provenance.trusted_signers.is_empty();
+    if signature_required && !provenance.signed {
+        return runtime_tool_error(
+            "UnsignedSkillError",
+            &skill_id,
+            provenance
+                .error
+                .unwrap_or_else(|| format!("skill '{skill_id}' is missing a valid signature")),
+        );
+    }
+    if signature_required && !provenance.trusted {
+        let signer = provenance
+            .signer_fingerprint
+            .unwrap_or_else(|| "unknown".to_string());
+        return runtime_tool_error(
+            "UntrustedSignerError",
+            &skill_id,
+            provenance.error.unwrap_or_else(|| {
+                format!("skill '{skill_id}' was signed by untrusted signer {signer}")
+            }),
         );
     }
 
@@ -289,6 +415,51 @@ pub(super) async fn run_tool_dispatch(
                 .and_then(|value| value.as_str())
                 .map(str::trim)
                 .unwrap_or("");
+            let require_signature = match tool_args.get("require_signature") {
+                Some(serde_json::Value::Bool(value)) => *value,
+                Some(_) => {
+                    let result_text = runtime_tool_error(
+                        "invalid_arguments",
+                        requested,
+                        "load_skill `require_signature` must be a boolean",
+                    );
+                    tools_used_this_iter.push(tool_name.to_string());
+                    tool_results_this_iter.push(serde_json::json!({
+                        "tool_name": tool_name,
+                        "status": "error",
+                        "rejected": false,
+                    }));
+                    state.transcript_events.push(transcript_event(
+                        "tool_execution",
+                        "tool",
+                        "internal",
+                        &result_text,
+                        Some(serde_json::json!({
+                            "tool_name": tool_name,
+                            "tool_use_id": tool_id,
+                            "rejected": false,
+                        })),
+                    ));
+                    if ctx.tool_format == "native" {
+                        append_message_to_contexts(
+                            &mut state.visible_messages,
+                            &mut state.recorded_messages,
+                            build_tool_result_message(
+                                tool_id,
+                                tool_name,
+                                &result_text,
+                                &opts.provider,
+                            ),
+                        );
+                    } else {
+                        observations.push_str(&format!(
+                            "[result of {tool_name}]\n{result_text}\n[end of {tool_name} result]\n\n"
+                        ));
+                    }
+                    continue;
+                }
+                None => false,
+            };
             let result_text = if requested.is_empty() {
                 runtime_tool_error(
                     "invalid_arguments",
@@ -296,7 +467,7 @@ pub(super) async fn run_tool_dispatch(
                     "load_skill requires a non-empty `name` argument",
                 )
             } else {
-                execute_runtime_load_skill(state, requested, ctx.session_id)
+                execute_runtime_load_skill(state, requested, require_signature, ctx.session_id)
             };
             let status = if result_text.starts_with('{') && result_text.contains("\"error\"") {
                 "error"

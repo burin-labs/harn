@@ -319,6 +319,10 @@ pub(crate) fn build_load_skill_tool_schema(provider: &str) -> serde_json::Value 
             "name": {
                 "type": "string",
                 "description": "Skill id from the always-on catalog.",
+            },
+            "require_signature": {
+                "type": "boolean",
+                "description": "When true, fail unless the skill has a valid signature from a trusted signer.",
             }
         },
         "required": ["name"],

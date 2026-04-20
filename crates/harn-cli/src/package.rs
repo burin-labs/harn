@@ -6,6 +6,7 @@ use std::{fs, process};
 use chrono_tz::Tz;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
+use url::Url;
 
 const PKG_DIR: &str = ".harn/packages";
 const MANIFEST: &str = "harn.toml";
@@ -252,6 +253,10 @@ pub struct SkillsConfig {
     /// Disable entire layers. Same label set as `lookup_order`.
     #[serde(default)]
     pub disable: Vec<String>,
+    /// Optional remote registry base URL used to resolve
+    /// `<fingerprint>.pub` when a signer is not installed locally.
+    #[serde(default)]
+    pub signer_registry_url: Option<String>,
     /// `[skills.defaults]` inline sub-table — applied to every
     /// discovered skill when the field is unset in its SKILL.md
     /// frontmatter.
@@ -2007,8 +2012,15 @@ pub fn load_skills_config(anchor: Option<&Path>) -> Option<ResolvedSkillsConfig>
         })
         .collect();
 
+    let mut config = manifest.skills;
+    if let Some(raw) = config.signer_registry_url.as_deref() {
+        if !raw.is_empty() && Url::parse(raw).is_err() && !PathBuf::from(raw).is_absolute() {
+            config.signer_registry_url = Some(dir.join(raw).display().to_string());
+        }
+    }
+
     Some(ResolvedSkillsConfig {
-        config: manifest.skills,
+        config,
         sources,
         manifest_dir: dir,
     })
@@ -2215,6 +2227,7 @@ drain.deadline_seconds = 12
 paths = ["packages/*/skills", "../shared-skills"]
 lookup_order = ["cli", "project", "host"]
 disable = ["system"]
+signer_registry_url = "https://skills.harnlang.com/signers/"
 
 [skills.defaults]
 tool_search = "bm25"
@@ -2243,6 +2256,10 @@ name = "acme/ops"
         assert_eq!(resolved.config.paths.len(), 2);
         assert_eq!(resolved.config.lookup_order, vec!["cli", "project", "host"]);
         assert_eq!(resolved.config.disable, vec!["system"]);
+        assert_eq!(
+            resolved.config.signer_registry_url.as_deref(),
+            Some("https://skills.harnlang.com/signers/")
+        );
         assert_eq!(
             resolved.config.defaults.tool_search.as_deref(),
             Some("bm25")
