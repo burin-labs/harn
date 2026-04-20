@@ -80,11 +80,27 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: None,
     },
     BuiltinSig {
+        name: "base32_decode",
+        return_type: None,
+    },
+    BuiltinSig {
+        name: "base32_encode",
+        return_type: Some(BuiltinReturn::Named("string")),
+    },
+    BuiltinSig {
         name: "base64_decode",
         return_type: None,
     },
     BuiltinSig {
         name: "base64_encode",
+        return_type: Some(BuiltinReturn::Named("string")),
+    },
+    BuiltinSig {
+        name: "base64url_decode",
+        return_type: None,
+    },
+    BuiltinSig {
+        name: "base64url_encode",
         return_type: Some(BuiltinReturn::Named("string")),
     },
     BuiltinSig {
@@ -338,6 +354,14 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
     BuiltinSig {
         name: "hash_value",
         return_type: Some(BuiltinReturn::Named("int")),
+    },
+    BuiltinSig {
+        name: "hex_decode",
+        return_type: None,
+    },
+    BuiltinSig {
+        name: "hex_encode",
+        return_type: Some(BuiltinReturn::Named("string")),
     },
     BuiltinSig {
         name: "hmac_sha256",

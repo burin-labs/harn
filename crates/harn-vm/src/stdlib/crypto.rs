@@ -4,21 +4,70 @@ use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
 pub(crate) fn register_crypto_builtins(vm: &mut Vm) {
+    fn display_arg(args: &[VmValue]) -> String {
+        args.first().map(|a| a.display()).unwrap_or_default()
+    }
+
     vm.register_builtin("base64_encode", |args, _out| {
-        let val = args.first().map(|a| a.display()).unwrap_or_default();
+        let val = display_arg(args);
         use base64::Engine;
         Ok(VmValue::String(Rc::from(
             base64::engine::general_purpose::STANDARD.encode(val.as_bytes()),
         )))
     });
     vm.register_builtin("base64_decode", |args, _out| {
-        let val = args.first().map(|a| a.display()).unwrap_or_default();
+        let val = display_arg(args);
         use base64::Engine;
         match base64::engine::general_purpose::STANDARD.decode(val.as_bytes()) {
             Ok(bytes) => Ok(VmValue::String(Rc::from(
                 String::from_utf8_lossy(&bytes).into_owned(),
             ))),
             Err(e) => Err(VmError::Runtime(format!("base64 decode error: {e}"))),
+        }
+    });
+    vm.register_builtin("base64url_encode", |args, _out| {
+        let val = display_arg(args);
+        use base64::Engine;
+        Ok(VmValue::String(Rc::from(
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(val.as_bytes()),
+        )))
+    });
+    vm.register_builtin("base64url_decode", |args, _out| {
+        let val = display_arg(args);
+        use base64::Engine;
+        match base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(val.as_bytes()) {
+            Ok(bytes) => Ok(VmValue::String(Rc::from(
+                String::from_utf8_lossy(&bytes).into_owned(),
+            ))),
+            Err(e) => Err(VmError::Runtime(format!("base64url decode error: {e}"))),
+        }
+    });
+    vm.register_builtin("base32_encode", |args, _out| {
+        let val = display_arg(args);
+        Ok(VmValue::String(Rc::from(
+            data_encoding::BASE32.encode(val.as_bytes()),
+        )))
+    });
+    vm.register_builtin("base32_decode", |args, _out| {
+        let val = display_arg(args);
+        match data_encoding::BASE32.decode(val.as_bytes()) {
+            Ok(bytes) => Ok(VmValue::String(Rc::from(
+                String::from_utf8_lossy(&bytes).into_owned(),
+            ))),
+            Err(e) => Err(VmError::Runtime(format!("base32 decode error: {e}"))),
+        }
+    });
+    vm.register_builtin("hex_encode", |args, _out| {
+        let val = display_arg(args);
+        Ok(VmValue::String(Rc::from(hex::encode(val.as_bytes()))))
+    });
+    vm.register_builtin("hex_decode", |args, _out| {
+        let val = display_arg(args);
+        match hex::decode(val.as_bytes()) {
+            Ok(bytes) => Ok(VmValue::String(Rc::from(
+                String::from_utf8_lossy(&bytes).into_owned(),
+            ))),
+            Err(e) => Err(VmError::Runtime(format!("hex decode error: {e}"))),
         }
     });
 
@@ -39,7 +88,7 @@ pub(crate) fn register_crypto_builtins(vm: &mut Vm) {
         ($vm:expr, $name:expr, $digest:path, $hasher:ty) => {
             $vm.register_builtin($name, |args, _out| {
                 use $digest as _;
-                let val = args.first().map(|a| a.display()).unwrap_or_default();
+                let val = display_arg(args);
                 let hash = <$hasher>::digest(val.as_bytes());
                 let hex: String = hash.iter().map(|b| format!("{b:02x}")).collect();
                 Ok(VmValue::String(Rc::from(hex)))
@@ -90,7 +139,7 @@ pub(crate) fn register_crypto_builtins(vm: &mut Vm) {
     });
 
     vm.register_builtin("url_encode", |args, _out| {
-        let val = args.first().map(|a| a.display()).unwrap_or_default();
+        let val = display_arg(args);
         let encoded: String = val
             .bytes()
             .map(|b| match b {
@@ -104,7 +153,7 @@ pub(crate) fn register_crypto_builtins(vm: &mut Vm) {
     });
 
     vm.register_builtin("url_decode", |args, _out| {
-        let val = args.first().map(|a| a.display()).unwrap_or_default();
+        let val = display_arg(args);
         let mut result = Vec::new();
         let bytes = val.as_bytes();
         let mut i = 0;
@@ -182,6 +231,70 @@ mod tests {
         let encoded = call(&mut vm, "base64_encode", vec![s("\x00\x01\x02")]).unwrap();
         let decoded = call(&mut vm, "base64_decode", vec![encoded]).unwrap();
         assert_eq!(decoded.display(), "\x00\x01\x02");
+    }
+
+    #[test]
+    fn base64url_known_vector() {
+        let mut vm = vm();
+        let encoded = call(&mut vm, "base64url_encode", vec![s(">>>???///")]).unwrap();
+        assert_eq!(encoded.display(), "Pj4-Pz8_Ly8v");
+        let decoded = call(&mut vm, "base64url_decode", vec![encoded]).unwrap();
+        assert_eq!(decoded.display(), ">>>???///");
+    }
+
+    #[test]
+    fn base64url_omits_padding() {
+        let mut vm = vm();
+        let encoded = call(&mut vm, "base64url_encode", vec![s("f")]).unwrap();
+        assert_eq!(encoded.display(), "Zg");
+    }
+
+    #[test]
+    fn base64url_decode_invalid_input() {
+        let mut vm = vm();
+        let result = call(&mut vm, "base64url_decode", vec![s("not+url/safe")]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn base32_known_vector() {
+        let mut vm = vm();
+        let encoded = call(&mut vm, "base32_encode", vec![s("foobar")]).unwrap();
+        assert_eq!(encoded.display(), "MZXW6YTBOI======");
+        let decoded = call(&mut vm, "base32_decode", vec![encoded]).unwrap();
+        assert_eq!(decoded.display(), "foobar");
+    }
+
+    #[test]
+    fn base32_decode_invalid_input() {
+        let mut vm = vm();
+        let result = call(&mut vm, "base32_decode", vec![s("INVALID-BASE32")]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn hex_round_trip_ascii() {
+        let mut vm = vm();
+        let encoded = call(&mut vm, "hex_encode", vec![s("hello")]).unwrap();
+        assert_eq!(encoded.display(), "68656c6c6f");
+        let decoded = call(&mut vm, "hex_decode", vec![encoded]).unwrap();
+        assert_eq!(decoded.display(), "hello");
+    }
+
+    #[test]
+    fn hex_round_trip_control_bytes() {
+        let mut vm = vm();
+        let encoded = call(&mut vm, "hex_encode", vec![s("\x00\x01\x02")]).unwrap();
+        assert_eq!(encoded.display(), "000102");
+        let decoded = call(&mut vm, "hex_decode", vec![encoded]).unwrap();
+        assert_eq!(decoded.display(), "\x00\x01\x02");
+    }
+
+    #[test]
+    fn hex_decode_invalid_input() {
+        let mut vm = vm();
+        let result = call(&mut vm, "hex_decode", vec![s("abc")]);
+        assert!(result.is_err());
     }
 
     #[test]

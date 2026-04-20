@@ -528,6 +528,12 @@ Returns an empty list if there are no matches. Throws on invalid regex.
 |---|---|---|---|
 | `base64_encode(string)` | string: string | string | Base64 encode a string (standard alphabet with padding) |
 | `base64_decode(string)` | string: string | string | Base64 decode a string. Throws on invalid input |
+| `base64url_encode(string)` | string: string | string | Base64 encode a string with the URL-safe alphabet and no padding |
+| `base64url_decode(string)` | string: string | string | Decode a URL-safe base64 string without padding. Throws on invalid input |
+| `base32_encode(string)` | string: string | string | Base32 encode a string using the RFC 4648 alphabet with padding |
+| `base32_decode(string)` | string: string | string | Decode a base32 string. Throws on invalid input |
+| `hex_encode(string)` | string: string | string | Hex encode a string as lowercase ASCII |
+| `hex_decode(string)` | string: string | string | Decode a hex string. Throws on invalid input |
 | `url_encode(string)` | string: string | string | URL percent-encode a string. Unreserved characters (alphanumeric, `-`, `_`, `.`, `~`) pass through unchanged |
 | `url_decode(string)` | string: string | string | Decode a URL-encoded string. Decodes `%XX` sequences and `+` as space |
 
@@ -537,6 +543,13 @@ Example:
 let encoded = base64_encode("Hello, World!")
 println(encoded)                  // SGVsbG8sIFdvcmxkIQ==
 println(base64_decode(encoded))   // Hello, World!
+```
+
+```harn
+println(base64url_encode(">>>???///"))     // Pj4-Pz8_Ly8v
+println(base32_encode("foobar"))           // MZXW6YTBOI======
+println(hex_encode("hello"))               // 68656c6c6f
+println(hex_decode("68656c6c6f"))          // hello
 ```
 
 ```harn

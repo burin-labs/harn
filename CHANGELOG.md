@@ -32,6 +32,12 @@ granular archaeology.
   is honored on `429` / `503`, and `http_mock` can script response
   sequences through `responses: [...]` for conformance-friendly retry
   tests.
+- **Stdlib encoding builtins (#349, #352).** `base64url_encode` /
+  `base64url_decode`, `base32_encode` / `base32_decode`, and
+  `hex_encode` / `hex_decode` join the existing `base64_*`, `url_*`
+  helpers in the crypto stdlib. Supports the pure-Harn connectors pivot
+  (#350) by giving Harn code first-class access to the encodings that
+  webhook signatures and typical REST APIs use.
 
 ## v0.7.25
 
