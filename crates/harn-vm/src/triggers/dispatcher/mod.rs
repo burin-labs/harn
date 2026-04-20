@@ -643,7 +643,13 @@ impl Dispatcher {
         if let Some(predicate) = binding.when.as_ref() {
             let predicate_node_id = format!("predicate:{binding_key}:{}", event.id.0);
             let evaluation = self
-                .evaluate_predicate(binding, predicate, &event, replay_of_event_id.as_ref())
+                .evaluate_predicate(
+                    binding,
+                    predicate,
+                    &event,
+                    replay_of_event_id.as_ref(),
+                    autonomy_tier,
+                )
                 .await?;
             let passed = evaluation.result;
             self.emit_action_graph(
@@ -1397,6 +1403,7 @@ impl Dispatcher {
         predicate: &super::registry::TriggerPredicateSpec,
         event: &TriggerEvent,
         replay_of_event_id: Option<&String>,
+        autonomy_tier: AutonomyTier,
     ) -> Result<PredicateEvaluationRecord, DispatchError> {
         let event_id = event.id.0.clone();
         let trigger_id = binding.id.as_str().to_string();
@@ -1489,6 +1496,9 @@ impl Dispatcher {
                 &predicate.closure,
                 event,
                 replay_of_event_id,
+                binding.id.as_str(),
+                &format!("{}.{}", event.provider.as_str(), event.kind),
+                autonomy_tier,
                 &mut self.cancel_tx.subscribe(),
                 binding
                     .when_budget
@@ -1635,15 +1645,27 @@ impl Dispatcher {
         Ok(record)
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn invoke_vm_callable_with_timeout(
         &self,
         closure: &crate::value::VmClosure,
         event: &TriggerEvent,
         replay_of_event_id: Option<&String>,
+        agent_id: &str,
+        action: &str,
+        autonomy_tier: AutonomyTier,
         cancel_rx: &mut broadcast::Receiver<()>,
         timeout: Option<Duration>,
     ) -> Result<VmValue, DispatchError> {
-        let future = self.invoke_vm_callable(closure, event, replay_of_event_id, cancel_rx);
+        let future = self.invoke_vm_callable(
+            closure,
+            event,
+            replay_of_event_id,
+            agent_id,
+            action,
+            autonomy_tier,
+            cancel_rx,
+        );
         pin_mut!(future);
         if let Some(timeout) = timeout {
             match tokio::time::timeout(timeout, future).await {
