@@ -178,6 +178,7 @@ impl RouteConfig {
                     "github" => SignatureMode::GitHub,
                     "webhook" => SignatureMode::Standard,
                     "slack" => SignatureMode::Unsigned,
+                    "notion" => SignatureMode::Unsigned,
                     other => {
                         return Err(format!(
                             "HTTP listener does not yet support webhook provider '{other}' on this branch"
@@ -612,6 +613,9 @@ async fn normalize_request(
                     .into_response(),
             ));
         }
+        if let Some(response) = notion_subscription_verification_response(&event) {
+            return Ok(NormalizedRequest::Immediate(response));
+        }
         event.trace_id = trace_id.clone();
         return Ok(NormalizedRequest::Event(Box::new(event)));
     }
@@ -878,6 +882,9 @@ fn normalize_headers(headers: &HeaderMap) -> BTreeMap<String, String> {
         ("x-slack-request-timestamp", "X-Slack-Request-Timestamp"),
         ("x-slack-retry-num", "X-Slack-Retry-Num"),
         ("x-slack-retry-reason", "X-Slack-Retry-Reason"),
+        ("x-notion-signature", "X-Notion-Signature"),
+        ("request-id", "request-id"),
+        ("x-request-id", "x-request-id"),
         ("webhook-id", "webhook-id"),
         ("webhook-signature", "webhook-signature"),
         ("webhook-timestamp", "webhook-timestamp"),
@@ -1025,6 +1032,28 @@ fn slack_url_verification_challenge(event: &harn_vm::TriggerEvent) -> Option<Str
         .get("challenge")
         .and_then(JsonValue::as_str)
         .map(ToString::to_string)
+}
+
+fn notion_subscription_verification_response(event: &harn_vm::TriggerEvent) -> Option<Response> {
+    let harn_vm::ProviderPayload::Known(harn_vm::triggers::event::KnownProviderPayload::Notion(
+        payload,
+    )) = &event.provider_payload
+    else {
+        return None;
+    };
+    if event.kind != "subscription.verification" {
+        return None;
+    }
+    Some(
+        (
+            StatusCode::OK,
+            axum::Json(json!({
+                "status": "handshake_captured",
+                "verification_token": payload.verification_token,
+            })),
+        )
+            .into_response(),
+    )
 }
 
 fn header_value<'a>(headers: &'a BTreeMap<String, String>, name: &str) -> Option<&'a str> {

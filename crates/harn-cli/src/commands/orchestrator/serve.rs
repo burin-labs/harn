@@ -407,6 +407,11 @@ fn connector_binding_config(config: &ResolvedTriggerConfig) -> Result<JsonValue,
             "secrets": config.secrets,
             "webhook": config.kind_specific,
         })),
+        crate::package::TriggerKind::Poll => Ok(serde_json::json!({
+            "match": config.match_,
+            "secrets": config.secrets,
+            "poll": config.kind_specific,
+        })),
         _ => Ok(JsonValue::Null),
     }
     // Dedupe retention lives on the connector TriggerBinding rather than in
@@ -475,7 +480,7 @@ fn attach_route_connectors(
 }
 
 fn connector_owns_ingress(provider: &str) -> bool {
-    matches!(provider, "slack")
+    matches!(provider, "slack" | "notion")
 }
 
 fn live_manifest_binding_versions() -> BTreeMap<String, u32> {

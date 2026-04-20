@@ -29,6 +29,7 @@ use crate::triggers::{
 pub mod cron;
 pub mod github;
 pub mod hmac;
+pub mod notion;
 pub mod slack;
 #[cfg(test)]
 pub(crate) mod test_util;
@@ -38,10 +39,14 @@ pub use cron::{CatchupMode, CronConnector};
 pub use github::GitHubConnector;
 pub use hmac::{
     verify_hmac_authorization, HmacSignatureStyle, DEFAULT_CANONICAL_AUTHORIZATION_HEADER,
-    DEFAULT_CANONICAL_HMAC_SCHEME, DEFAULT_GITHUB_SIGNATURE_HEADER, DEFAULT_SLACK_SIGNATURE_HEADER,
+    DEFAULT_CANONICAL_HMAC_SCHEME, DEFAULT_GITHUB_SIGNATURE_HEADER,
+    DEFAULT_NOTION_SIGNATURE_HEADER, DEFAULT_SLACK_SIGNATURE_HEADER,
     DEFAULT_SLACK_TIMESTAMP_HEADER, DEFAULT_STANDARD_WEBHOOKS_ID_HEADER,
     DEFAULT_STANDARD_WEBHOOKS_SIGNATURE_HEADER, DEFAULT_STANDARD_WEBHOOKS_TIMESTAMP_HEADER,
     DEFAULT_STRIPE_SIGNATURE_HEADER, SIGNATURE_VERIFY_AUDIT_TOPIC,
+};
+pub use notion::{
+    load_pending_webhook_handshakes, NotionConnector, PersistedNotionWebhookHandshake,
 };
 pub use slack::SlackConnector;
 use webhook::WebhookProviderProfile;
@@ -776,6 +781,9 @@ fn default_connector_for_provider(provider: &ProviderMetadata) -> Box<dyn Connec
     }
     if provider.provider == "slack" {
         return Box::new(SlackConnector::new());
+    }
+    if provider.provider == "notion" {
+        return Box::new(NotionConnector::new());
     }
     match &provider.runtime {
         ProviderRuntimeMetadata::Builtin {

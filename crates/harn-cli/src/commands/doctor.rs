@@ -48,6 +48,7 @@ pub(crate) async fn run_doctor(network: bool) {
     checks.extend(check_secret_providers());
     checks.extend(check_manifest().await);
     checks.extend(check_event_log());
+    checks.extend(check_notion_connector_state().await);
     checks.extend(check_metadata_cache());
     checks.extend(check_skills());
     checks.extend(check_provider_health(network).await);
@@ -478,6 +479,64 @@ fn check_event_log() -> Vec<DoctorCheck> {
             detail: error.to_string(),
         }],
     }
+}
+
+async fn check_notion_connector_state() -> Vec<DoctorCheck> {
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let config = match harn_vm::event_log::EventLogConfig::for_base_dir(&cwd) {
+        Ok(config) => config,
+        Err(error) => {
+            return vec![DoctorCheck {
+                status: DoctorStatus::Warn,
+                label: "notion".to_string(),
+                detail: format!("failed to resolve event log config: {error}"),
+            }]
+        }
+    };
+    let log = match harn_vm::event_log::open_event_log(&config) {
+        Ok(log) => log,
+        Err(error) => {
+            return vec![DoctorCheck {
+                status: DoctorStatus::Warn,
+                label: "notion".to_string(),
+                detail: format!("failed to open event log: {error}"),
+            }]
+        }
+    };
+    let handshakes = match harn_vm::load_pending_webhook_handshakes(log.as_ref()).await {
+        Ok(handshakes) => handshakes,
+        Err(error) => {
+            return vec![DoctorCheck {
+                status: DoctorStatus::Warn,
+                label: "notion".to_string(),
+                detail: format!("failed to inspect webhook handshake state: {error}"),
+            }]
+        }
+    };
+    if handshakes.is_empty() {
+        return vec![DoctorCheck {
+            status: DoctorStatus::Skip,
+            label: "notion".to_string(),
+            detail: "no pending webhook verification tokens recorded".to_string(),
+        }];
+    }
+    handshakes
+        .into_values()
+        .map(|handshake| DoctorCheck {
+            status: DoctorStatus::Warn,
+            label: format!("notion:{}", handshake.binding_id),
+            detail: format!(
+                "captured verification_token={} at {}{}",
+                handshake.verification_token,
+                handshake.captured_at,
+                handshake
+                    .path
+                    .as_deref()
+                    .map(|path| format!(" (path {path})"))
+                    .unwrap_or_default(),
+            ),
+        })
+        .collect()
 }
 
 async fn check_provider_health(network: bool) -> Vec<DoctorCheck> {
