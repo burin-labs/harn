@@ -868,6 +868,7 @@ pub fn {handler_name}(event: TriggerEvent) -> string {{
             )),
             signature_status: harn_vm::SignatureStatus::Verified,
             dedupe_claimed: false,
+            batch: None,
         }
     }
 

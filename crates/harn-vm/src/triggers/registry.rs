@@ -17,6 +17,7 @@ use crate::trust_graph::AutonomyTier;
 use crate::value::VmClosure;
 
 use super::dispatcher::TriggerRetryConfig;
+use super::flow_control::TriggerFlowControlConfig;
 use super::ProviderId;
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -147,6 +148,7 @@ pub struct TriggerBindingSpec {
     pub filter: Option<String>,
     pub daily_cost_usd: Option<f64>,
     pub max_concurrent: Option<u32>,
+    pub flow_control: TriggerFlowControlConfig,
     pub manifest_path: Option<PathBuf>,
     pub package_name: Option<String>,
     pub definition_fingerprint: String,
@@ -206,6 +208,7 @@ pub struct TriggerBinding {
     pub filter: Option<String>,
     pub daily_cost_usd: Option<f64>,
     pub max_concurrent: Option<u32>,
+    pub flow_control: TriggerFlowControlConfig,
     pub manifest_path: Option<PathBuf>,
     pub package_name: Option<String>,
     pub definition_fingerprint: String,
@@ -270,6 +273,7 @@ impl TriggerBinding {
             filter: spec.filter,
             daily_cost_usd: spec.daily_cost_usd,
             max_concurrent: spec.max_concurrent,
+            flow_control: spec.flow_control,
             manifest_path: spec.manifest_path,
             package_name: spec.package_name,
             definition_fingerprint: spec.definition_fingerprint,
@@ -1148,6 +1152,7 @@ mod tests {
             filter: Some("event.kind".to_string()),
             daily_cost_usd: Some(5.0),
             max_concurrent: Some(10),
+            flow_control: crate::triggers::TriggerFlowControlConfig::default(),
             manifest_path: None,
             package_name: Some("workspace".to_string()),
             definition_fingerprint: fingerprint.to_string(),
@@ -1173,6 +1178,7 @@ mod tests {
             filter: None,
             daily_cost_usd: None,
             max_concurrent: None,
+            flow_control: crate::triggers::TriggerFlowControlConfig::default(),
             manifest_path: None,
             package_name: None,
             definition_fingerprint: format!("dynamic:{id}"),

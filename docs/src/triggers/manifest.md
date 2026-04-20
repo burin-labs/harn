@@ -10,7 +10,7 @@ Each entry declares:
 - a `provider` from the registered trigger provider catalog
 - an `autonomy_tier` that defines the default execution mode
 - a delivery `handler`
-- optional dedupe, retry, budget, secret, and predicate settings
+- optional dedupe, retry, budget, flow-control, secret, and predicate settings
 
 ## Shape
 
@@ -27,7 +27,8 @@ handler = "handlers::on_new_issue"
 dedupe_key = "event.dedupe_key"
 retry = { max = 7, backoff = "svix", retention_days = 7 }
 priority = "normal"
-budget = { daily_cost_usd = 5.00, max_concurrent = 10 }
+budget = { daily_cost_usd = 5.00 }
+concurrency = { max = 10 }
 secrets = { signing_secret = "github/webhook-secret" }
 filter = "event.kind"
 ```
@@ -125,6 +126,75 @@ Behavior:
   request cache plus the event-scoped `trigger.inbox` record
 - three consecutive predicate failures open a five-minute circuit breaker that
   fails closed with operator-visible warnings
+
+## Flow control
+
+Trigger manifests can shape dispatch admission with top-level flow-control
+tables:
+
+```toml
+[[triggers]]
+id = "github-new-issue"
+kind = "webhook"
+provider = "github"
+match = { events = ["issues.opened"] }
+handler = "handlers::on_new_issue"
+
+concurrency = { key = "event.headers.tenant", max = 10 }
+throttle = { key = "event.headers.user", period = "1m", max = 30 }
+rate_limit = { period = "1h", max = 1000 }
+debounce = { key = "event.headers.pr_id", period = "30s" }
+singleton = { key = "event.headers.repo" }
+priority = { key = "event.headers.tier", order = ["gold", "silver", "bronze"] }
+```
+
+Supported tables:
+
+- `concurrency = { max = N }` or `concurrency = { key = "<expr>", max = N }`
+- `throttle = { period = "<duration>", max = N }` or
+  `throttle = { key = "<expr>", period = "<duration>", max = N }`
+- `rate_limit = { period = "<duration>", max = N }` or
+  `rate_limit = { key = "<expr>", period = "<duration>", max = N }`
+- `debounce = { key = "<expr>", period = "<duration>" }`
+- `singleton = {}` or `singleton = { key = "<expr>" }`
+- `batch = { size = N, timeout = "<duration>" }` or
+  `batch = { key = "<expr>", size = N, timeout = "<duration>" }`
+- `priority = { key = "<expr>", order = ["...", "..."] }`
+
+Durations use compact suffixes: `s`, `m`, `h`, `d`, `w`.
+
+`key` expressions compile into Harn closures over the typed `TriggerEvent`
+surface. They use the same event shape as `when` predicates and local handlers,
+so expressions like `event.headers.tenant`, `event.kind`, or
+`event.provider_payload.raw.repo.full_name` all resolve through the normal
+stdlib trigger types.
+
+When a keyed field omits `key`, Harn uses a single global gate for that binding.
+For example, `rate_limit = { period = "1h", max = 1000 }` applies one shared
+hourly budget across all matching events for that trigger.
+
+`priority` is overloaded:
+
+- `priority = "low" | "normal" | "high"` keeps the existing dispatch-priority
+  field
+- `priority = { key = "...", order = [...] }` enables concurrency-waiter
+  ordering for flow control
+
+`batch` delivers the selected leader event to the handler and attaches the full
+coalesced group under `event.batch`.
+
+Legacy `budget.max_concurrent` still loads, but Harn treats it as deprecated and
+normalizes it to `concurrency = { max = N }` with a warning.
+
+Current validation rules:
+
+- `concurrency.max`, `throttle.max`, `rate_limit.max`, and `batch.size` must be
+  positive
+- `priority.order` must be non-empty
+- `priority = { ... }` requires `concurrency = { ... }`
+- `batch` cannot be combined with `debounce`, `singleton`, `concurrency`,
+  keyed priority ordering, `throttle`, `rate_limit`, or legacy
+  `budget.max_concurrent`
 
 ## Durable dedupe retention
 

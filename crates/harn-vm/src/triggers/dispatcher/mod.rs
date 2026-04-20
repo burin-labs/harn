@@ -39,7 +39,9 @@ use super::{
     TRIGGER_DLQ_TOPIC, TRIGGER_INBOX_ENVELOPES_TOPIC, TRIGGER_INBOX_LEGACY_TOPIC,
     TRIGGER_OUTBOX_TOPIC,
 };
+use flow_control::{BatchDecision, ConcurrencyPermit, FlowControlManager};
 
+mod flow_control;
 pub mod retry;
 pub mod uri;
 
@@ -109,10 +111,11 @@ struct DispatcherRuntimeState {
     cancel_tokens: Mutex<Vec<Arc<std::sync::atomic::AtomicBool>>>,
     shutting_down: std::sync::atomic::AtomicBool,
     idle_notify: Notify,
+    flow_control: FlowControlManager,
 }
 
-impl Default for DispatcherRuntimeState {
-    fn default() -> Self {
+impl DispatcherRuntimeState {
+    fn new(event_log: Arc<AnyEventLog>) -> Self {
         Self {
             in_flight: AtomicU64::new(0),
             retry_queue_depth: AtomicU64::new(0),
@@ -120,6 +123,7 @@ impl Default for DispatcherRuntimeState {
             cancel_tokens: Mutex::new(Vec::new()),
             shutting_down: std::sync::atomic::AtomicBool::new(false),
             idle_notify: Notify::new(),
+            flow_control: FlowControlManager::new(event_log),
         }
     }
 }
@@ -238,6 +242,22 @@ pub struct DlqEntry {
     pub attempts: Vec<DispatchAttemptRecord>,
 }
 
+#[derive(Default)]
+struct AcquiredFlowControl {
+    singleton_gate: Option<String>,
+    concurrency: Option<ConcurrencyPermit>,
+}
+
+enum FlowControlOutcome {
+    Dispatch {
+        event: Box<TriggerEvent>,
+        acquired: AcquiredFlowControl,
+    },
+    Skip {
+        reason: String,
+    },
+}
+
 #[derive(Debug)]
 pub enum DispatchError {
     EventLog(String),
@@ -320,7 +340,7 @@ impl Dispatcher {
         event_log: Arc<AnyEventLog>,
         metrics: Option<Arc<crate::MetricsRegistry>>,
     ) -> Self {
-        let state = Arc::new(DispatcherRuntimeState::default());
+        let state = Arc::new(DispatcherRuntimeState::new(event_log.clone()));
         ACTIVE_DISPATCHER_STATE.with(|slot| {
             *slot.borrow_mut() = Some(state.clone());
         });
@@ -418,7 +438,10 @@ impl Dispatcher {
                     let envelope: InboxEnvelope = serde_json::from_value(event.payload)
                         .map_err(|error| DispatchError::Serde(error.to_string()))?;
                     notify_test_inbox_dequeued();
-                    let _ = self.dispatch_inbox_envelope(envelope).await;
+                    let dispatcher = self.clone();
+                    tokio::task::spawn_local(async move {
+                        let _ = dispatcher.dispatch_inbox_envelope(envelope).await;
+                    });
                 }
                 _ = recv_cancel(&mut cancel_rx) => break,
             }
@@ -785,6 +808,38 @@ impl Dispatcher {
             source_node_id = predicate_node_id;
         }
 
+        let (event, mut acquired_flow) = match self
+            .apply_flow_control(binding, &event, replay_of_event_id.as_ref())
+            .await?
+        {
+            FlowControlOutcome::Dispatch { event, acquired } => (*event, acquired),
+            FlowControlOutcome::Skip { reason } => {
+                finish_in_flight(
+                    binding.id.as_str(),
+                    binding.version,
+                    TriggerDispatchOutcome::Dispatched,
+                )
+                .await
+                .map_err(|error| DispatchError::Registry(error.to_string()))?;
+                decrement_in_flight(&self.state);
+                return Ok(DispatchOutcome {
+                    trigger_id: binding.id.as_str().to_string(),
+                    binding_key: binding.binding_key(),
+                    event_id: event.id.0,
+                    attempt_count: 0,
+                    status: DispatchStatus::Skipped,
+                    handler_kind: route.kind().to_string(),
+                    target_uri: route.target_uri(),
+                    replay_of_event_id,
+                    result: Some(serde_json::json!({
+                        "skipped": true,
+                        "flow_control": reason,
+                    })),
+                    error: None,
+                });
+            }
+        };
+
         let mut previous_retry_node = None;
         let max_attempts = binding.retry.max_attempts();
         for attempt in 1..=max_attempts {
@@ -969,6 +1024,7 @@ impl Dispatcher {
                     )
                     .await
                     .map_err(|error| DispatchError::Registry(error.to_string()))?;
+                    self.release_flow_control(&mut acquired_flow).await?;
                     decrement_in_flight(&self.state);
                     self.append_dispatch_trust_record(
                         binding,
@@ -1060,6 +1116,7 @@ impl Dispatcher {
                         .map_err(|registry_error| {
                             DispatchError::Registry(registry_error.to_string())
                         })?;
+                        self.release_flow_control(&mut acquired_flow).await?;
                         decrement_in_flight(&self.state);
                         let trust_outcome = match error {
                             DispatchError::Denied(_) => TrustOutcome::Denied,
@@ -1189,6 +1246,7 @@ impl Dispatcher {
                             .map_err(|registry_error| {
                                 DispatchError::Registry(registry_error.to_string())
                             })?;
+                            self.release_flow_control(&mut acquired_flow).await?;
                             decrement_in_flight(&self.state);
                             self.append_dispatch_trust_record(
                                 binding,
@@ -1297,6 +1355,7 @@ impl Dispatcher {
                     .map_err(|registry_error| {
                         DispatchError::Registry(registry_error.to_string())
                     })?;
+                    self.release_flow_control(&mut acquired_flow).await?;
                     decrement_in_flight(&self.state);
                     self.append_dispatch_trust_record(
                         binding,
@@ -1333,6 +1392,7 @@ impl Dispatcher {
         )
         .await
         .map_err(|error| DispatchError::Registry(error.to_string()))?;
+        self.release_flow_control(&mut acquired_flow).await?;
         decrement_in_flight(&self.state);
         self.append_dispatch_trust_record(
             binding,
@@ -1423,6 +1483,238 @@ impl Dispatcher {
                 "worker:// dispatch to '{queue}' is not implemented yet; see O-05 #182"
             ))),
         }
+    }
+
+    async fn apply_flow_control(
+        &self,
+        binding: &TriggerBinding,
+        event: &TriggerEvent,
+        replay_of_event_id: Option<&String>,
+    ) -> Result<FlowControlOutcome, DispatchError> {
+        let flow = &binding.flow_control;
+        let mut managed_event = event.clone();
+
+        if let Some(batch) = &flow.batch {
+            let gate = self
+                .resolve_flow_gate(
+                    &binding.binding_key(),
+                    batch.key.as_ref(),
+                    &managed_event,
+                    replay_of_event_id,
+                )
+                .await?;
+            match self
+                .state
+                .flow_control
+                .consume_batch(&gate, batch.size, batch.timeout, managed_event.clone())
+                .await
+                .map_err(DispatchError::from)?
+            {
+                BatchDecision::Dispatch(events) => {
+                    managed_event = build_batched_event(events)?;
+                }
+                BatchDecision::Merged => {
+                    return Ok(FlowControlOutcome::Skip {
+                        reason: "batch_merged".to_string(),
+                    })
+                }
+            }
+        }
+
+        if let Some(debounce) = &flow.debounce {
+            let gate = self
+                .resolve_flow_gate(
+                    &binding.binding_key(),
+                    Some(&debounce.key),
+                    &managed_event,
+                    replay_of_event_id,
+                )
+                .await?;
+            let latest = self
+                .state
+                .flow_control
+                .debounce(&gate, debounce.period)
+                .await
+                .map_err(DispatchError::from)?;
+            if !latest {
+                return Ok(FlowControlOutcome::Skip {
+                    reason: "debounced".to_string(),
+                });
+            }
+        }
+
+        if let Some(rate_limit) = &flow.rate_limit {
+            let gate = self
+                .resolve_flow_gate(
+                    &binding.binding_key(),
+                    rate_limit.key.as_ref(),
+                    &managed_event,
+                    replay_of_event_id,
+                )
+                .await?;
+            let allowed = self
+                .state
+                .flow_control
+                .check_rate_limit(&gate, rate_limit.period, rate_limit.max)
+                .await
+                .map_err(DispatchError::from)?;
+            if !allowed {
+                return Ok(FlowControlOutcome::Skip {
+                    reason: "rate_limited".to_string(),
+                });
+            }
+        }
+
+        if let Some(throttle) = &flow.throttle {
+            let gate = self
+                .resolve_flow_gate(
+                    &binding.binding_key(),
+                    throttle.key.as_ref(),
+                    &managed_event,
+                    replay_of_event_id,
+                )
+                .await?;
+            self.state
+                .flow_control
+                .wait_for_throttle(&gate, throttle.period, throttle.max)
+                .await
+                .map_err(DispatchError::from)?;
+        }
+
+        let mut acquired = AcquiredFlowControl::default();
+        if let Some(singleton) = &flow.singleton {
+            let gate = self
+                .resolve_flow_gate(
+                    &binding.binding_key(),
+                    singleton.key.as_ref(),
+                    &managed_event,
+                    replay_of_event_id,
+                )
+                .await?;
+            let acquired_singleton = self
+                .state
+                .flow_control
+                .try_acquire_singleton(&gate)
+                .await
+                .map_err(DispatchError::from)?;
+            if !acquired_singleton {
+                return Ok(FlowControlOutcome::Skip {
+                    reason: "singleton_active".to_string(),
+                });
+            }
+            acquired.singleton_gate = Some(gate);
+        }
+
+        if let Some(concurrency) = &flow.concurrency {
+            let gate = self
+                .resolve_flow_gate(
+                    &binding.binding_key(),
+                    concurrency.key.as_ref(),
+                    &managed_event,
+                    replay_of_event_id,
+                )
+                .await?;
+            let priority_rank = self
+                .resolve_priority_rank(
+                    &binding.binding_key(),
+                    flow.priority.as_ref(),
+                    &managed_event,
+                    replay_of_event_id,
+                )
+                .await?;
+            acquired.concurrency = Some(
+                self.state
+                    .flow_control
+                    .acquire_concurrency(&gate, concurrency.max, priority_rank)
+                    .await
+                    .map_err(DispatchError::from)?,
+            );
+        }
+
+        Ok(FlowControlOutcome::Dispatch {
+            event: Box::new(managed_event),
+            acquired,
+        })
+    }
+
+    async fn release_flow_control(
+        &self,
+        acquired: &mut AcquiredFlowControl,
+    ) -> Result<(), DispatchError> {
+        if let Some(gate) = acquired.singleton_gate.take() {
+            self.state
+                .flow_control
+                .release_singleton(&gate)
+                .await
+                .map_err(DispatchError::from)?;
+        }
+        if let Some(permit) = acquired.concurrency.take() {
+            self.state
+                .flow_control
+                .release_concurrency(permit)
+                .await
+                .map_err(DispatchError::from)?;
+        }
+        Ok(())
+    }
+
+    async fn resolve_flow_gate(
+        &self,
+        binding_key: &str,
+        expr: Option<&crate::triggers::TriggerExpressionSpec>,
+        event: &TriggerEvent,
+        replay_of_event_id: Option<&String>,
+    ) -> Result<String, DispatchError> {
+        let key = match expr {
+            Some(expr) => {
+                self.evaluate_flow_expression(binding_key, expr, event, replay_of_event_id)
+                    .await?
+            }
+            None => "_global".to_string(),
+        };
+        Ok(format!("{binding_key}:{key}"))
+    }
+
+    async fn resolve_priority_rank(
+        &self,
+        binding_key: &str,
+        priority: Option<&crate::triggers::TriggerPriorityOrderConfig>,
+        event: &TriggerEvent,
+        replay_of_event_id: Option<&String>,
+    ) -> Result<usize, DispatchError> {
+        let Some(priority) = priority else {
+            return Ok(0);
+        };
+        let value = self
+            .evaluate_flow_expression(binding_key, &priority.key, event, replay_of_event_id)
+            .await?;
+        Ok(priority
+            .order
+            .iter()
+            .position(|candidate| candidate == &value)
+            .unwrap_or(priority.order.len()))
+    }
+
+    async fn evaluate_flow_expression(
+        &self,
+        binding_key: &str,
+        expr: &crate::triggers::TriggerExpressionSpec,
+        event: &TriggerEvent,
+        replay_of_event_id: Option<&String>,
+    ) -> Result<String, DispatchError> {
+        let value = self
+            .invoke_vm_callable(
+                &expr.closure,
+                binding_key,
+                event,
+                replay_of_event_id,
+                "",
+                "flow_control",
+                AutonomyTier::Suggest,
+                &mut self.cancel_tx.subscribe(),
+            )
+            .await?;
+        Ok(json_value_to_gate(&vm_value_to_json(&value)))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -2086,6 +2378,37 @@ async fn sleep_or_cancel_or_request(
                 }
             }
         }
+    }
+}
+
+fn build_batched_event(events: Vec<TriggerEvent>) -> Result<TriggerEvent, DispatchError> {
+    let mut iter = events.into_iter();
+    let Some(mut root) = iter.next() else {
+        return Err(DispatchError::Registry(
+            "batch dispatch produced an empty event list".to_string(),
+        ));
+    };
+    let mut batch = Vec::new();
+    batch.push(
+        serde_json::to_value(&root).map_err(|error| DispatchError::Serde(error.to_string()))?,
+    );
+    for event in iter {
+        batch.push(
+            serde_json::to_value(&event)
+                .map_err(|error| DispatchError::Serde(error.to_string()))?,
+        );
+    }
+    root.batch = Some(batch);
+    Ok(root)
+}
+
+fn json_value_to_gate(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::Null => "null".to_string(),
+        serde_json::Value::String(text) => text.clone(),
+        serde_json::Value::Bool(value) => value.to_string(),
+        serde_json::Value::Number(value) => value.to_string(),
+        other => serde_json::to_string(other).unwrap_or_else(|_| "unserializable".to_string()),
     }
 }
 

@@ -16,13 +16,15 @@ Each dispatch goes through the same sequence:
    event kind.
 3. Evaluate the optional `when` predicate in the same VM/runtime surface as
    the handler.
-4. Invoke the resolved handler target.
-5. Record each attempt on `trigger.attempts`.
-6. Record successful handler results on `trigger.outbox`.
-7. Schedule retries from the manifest retry policy.
-8. Move exhausted deliveries into the in-memory DLQ and append a copy to
+4. Apply any manifest flow-control gates (`batch`, `debounce`, `rate_limit`,
+   `throttle`, `singleton`, `concurrency`, `priority`).
+5. Invoke the resolved handler target.
+6. Record each attempt on `trigger.attempts`.
+7. Record successful handler results on `trigger.outbox`.
+8. Schedule retries from the manifest retry policy.
+9. Move exhausted deliveries into the in-memory DLQ and append a copy to
    `trigger.dlq`.
-9. When the dispatch is a replay, emit a `replay_chain` action-graph edge
+10. When the dispatch is a replay, emit a `replay_chain` action-graph edge
    linking the new trigger node back to the original event id.
 
 The dispatcher keeps per-thread stats for:
@@ -105,12 +107,19 @@ The dispatcher uses the shared `EventLog` instead of a parallel queue layer:
 - `trigger.dlq`
 - `triggers.lifecycle`
 - `observability.action_graph`
+- dynamic flow-control gate topics under
+  `trigger.{debounce,rate_limit,throttle,singleton,concurrency,batch}.*`
 
 `trigger.inbox.envelopes` is the dispatcher's durable ingress stream.
 `trigger.inbox.claims` stores TTL-bound dedupe claims for `InboxIndex`.
 Harn v0.7.23 also soft-reads the legacy mixed `trigger.inbox` topic on
 startup so older event logs keep working while new writes go only to the
 split topics.
+
+Flow-control topics record per-gate admission decisions and waits. For example,
+`concurrency = { key = "event.headers.tenant", max = 2 }` writes records under
+`trigger.concurrency.<binding-and-gate>`, while `debounce` and `batch` emit the
+selected/merged decision for the keyed gate they evaluated.
 
 `triggers.lifecycle` now includes dispatcher-specific lifecycle records:
 
@@ -132,6 +141,10 @@ Each update is appended to `observability.action_graph` using the shared
 `RunActionGraphNodeRecord` / `RunActionGraphEdgeRecord` schema so the portal
 and any other subscriber can consume dispatcher traces without special-casing a
 separate payload format.
+
+When `batch = { ... }` coalesces multiple envelopes, the handler still receives
+one root `TriggerEvent`, and the remaining serialized members are attached on
+`event.batch`.
 
 Replay dispatches add one more edge kind:
 

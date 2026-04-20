@@ -306,6 +306,7 @@ type TriggerEvent = {
   trace_id: string,
   tenant_id: string | nil,
   headers: dict,
+  batch: list<dict> | nil,
   provider_payload: ProviderPayload,
   signature_status: SignatureStatus,
 }

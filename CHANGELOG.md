@@ -170,6 +170,15 @@ granular archaeology.
 
 ### Added
 
+- **Expression-keyed trigger flow control for manifest bindings (harn#307).**
+  `[[triggers]]` now supports top-level `concurrency`, `throttle`,
+  `rate_limit`, `debounce`, `singleton`, `batch`, and keyed `priority`
+  tables. Keys compile against the typed `TriggerEvent` surface, flow-control
+  decisions emit EventLog records under dedicated `trigger.<gate>.*` topics,
+  batch dispatch attaches coalesced members on `event.batch`, and legacy
+  `budget.max_concurrent` now warns and normalizes to
+  `concurrency = { max = N }`.
+
 - **Cryptographic provenance for Harn skills.** Added `harn skill key
   generate`, `harn skill sign`, `harn skill verify`, `harn skill trust
   add`, and `harn skill trust list` for Ed25519-based detached

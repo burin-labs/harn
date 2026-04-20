@@ -57,6 +57,25 @@ fn trigger_event(kind: &str, dedupe_key: &str) -> TriggerEvent {
     )
 }
 
+async fn compile_trigger_expr(
+    vm: &mut Vm,
+    dir: &std::path::Path,
+    label: &str,
+    expr: &str,
+) -> crate::triggers::TriggerExpressionSpec {
+    let source = format!(
+        "import \"std/triggers\"\n\npub fn __expr(event: TriggerEvent) -> any {{\n  return {expr}\n}}\n"
+    );
+    let exports = vm
+        .load_module_exports_from_source(dir.join(format!("{label}.harn")), &source)
+        .await
+        .expect("compile trigger expression");
+    crate::triggers::TriggerExpressionSpec {
+        raw: expr.to_string(),
+        closure: exports["__expr"].clone(),
+    }
+}
+
 async fn dispatcher_fixture(
     source: &str,
     handler_name: &str,
@@ -67,7 +86,31 @@ async fn dispatcher_fixture(
     Arc<crate::event_log::AnyEventLog>,
     Dispatcher,
 ) {
-    dispatcher_fixture_with_options(source, handler_name, when_name, None, None, retry).await
+    dispatcher_fixture_with_options(
+        source,
+        handler_name,
+        when_name,
+        None,
+        None,
+        retry,
+        crate::triggers::TriggerFlowControlConfig::default(),
+    )
+    .await
+}
+
+async fn dispatcher_fixture_with_flow_control(
+    source: &str,
+    handler_name: &str,
+    when_name: Option<&str>,
+    retry: TriggerRetryConfig,
+    flow_control: crate::triggers::TriggerFlowControlConfig,
+) -> (
+    tempfile::TempDir,
+    Arc<crate::event_log::AnyEventLog>,
+    Dispatcher,
+) {
+    dispatcher_fixture_with_options(source, handler_name, when_name, None, None, retry, flow_control)
+        .await
 }
 
 async fn dispatcher_fixture_with_options(
@@ -77,6 +120,7 @@ async fn dispatcher_fixture_with_options(
     when_budget: Option<TriggerPredicateBudget>,
     daily_cost_usd: Option<f64>,
     retry: TriggerRetryConfig,
+    flow_control: crate::triggers::TriggerFlowControlConfig,
 ) -> (
     tempfile::TempDir,
     Arc<crate::event_log::AnyEventLog>,
@@ -127,6 +171,7 @@ async fn dispatcher_fixture_with_options(
         filter: None,
         daily_cost_usd,
         max_concurrent: None,
+        flow_control,
         manifest_path: None,
         package_name: Some("workspace".to_string()),
         definition_fingerprint: format!("fp:{handler_name}"),
@@ -173,6 +218,7 @@ async fn a2a_dispatcher_fixture(
         filter: None,
         daily_cost_usd: None,
         max_concurrent: None,
+        flow_control: crate::triggers::TriggerFlowControlConfig::default(),
         manifest_path: None,
         package_name: Some("workspace".to_string()),
         definition_fingerprint: format!("fp:{target}"),
@@ -554,6 +600,7 @@ pub fn should_handle(event: TriggerEvent) -> bool {
                 }),
                 None,
                 TriggerRetryConfig::default(),
+                crate::triggers::TriggerFlowControlConfig::default(),
             )
             .await;
 
@@ -636,6 +683,7 @@ pub fn should_handle(event: TriggerEvent) -> bool {
                 None,
                 Some(0.001),
                 TriggerRetryConfig::default(),
+                crate::triggers::TriggerFlowControlConfig::default(),
             )
             .await;
 
@@ -1622,6 +1670,529 @@ pub fn wait_for_cancel(event: TriggerEvent) -> string {
                 outbox.iter().any(|(_, event)| event.kind == "dispatch_failed"),
                 "shutdown-triggered cancellation must be recorded instead of silently dropping the inbox event"
             );
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn flow_control_rate_limit_skips_excess_dispatches() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (_dir, log, dispatcher) = dispatcher_fixture_with_flow_control(
+                r#"
+import "std/triggers"
+
+pub fn local_fn(event: TriggerEvent) -> string {
+  return event.dedupe_key
+}
+"#,
+                "local_fn",
+                None,
+                TriggerRetryConfig::default(),
+                crate::triggers::TriggerFlowControlConfig {
+                    rate_limit: Some(crate::triggers::TriggerRateLimitConfig {
+                        key: None,
+                        period: Duration::from_secs(60),
+                        max: 1,
+                    }),
+                    ..Default::default()
+                },
+            )
+            .await;
+
+            let first = dispatcher
+                .dispatch_event(trigger_event("issues.opened", "delivery-rate-1"))
+                .await
+                .expect("first dispatch succeeds");
+            let second = dispatcher
+                .dispatch_event(trigger_event("issues.opened", "delivery-rate-2"))
+                .await
+                .expect("second dispatch returns skip");
+
+            assert_eq!(first[0].status, DispatchStatus::Succeeded);
+            assert_eq!(first[0].result, Some(serde_json::json!("delivery-rate-1")));
+            assert_eq!(second[0].status, DispatchStatus::Skipped);
+            assert_eq!(
+                second[0].result,
+                Some(serde_json::json!({
+                    "skipped": true,
+                    "flow_control": "rate_limited",
+                }))
+            );
+
+            let events = read_topic(
+                log.clone(),
+                "trigger.rate_limit.github-new-issue_v1__global",
+            )
+            .await;
+            assert!(events
+                .iter()
+                .any(|(_, event)| event.kind == "rate_limit_allowed"));
+            assert!(events
+                .iter()
+                .any(|(_, event)| event.kind == "rate_limit_blocked"));
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn flow_control_throttle_waits_for_window() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let clock = crate::triggers::test_util::clock::MockClock::new(
+                time::OffsetDateTime::from_unix_timestamp(0).expect("epoch"),
+            );
+            let _guard = crate::triggers::test_util::clock::install_override(clock.clone());
+            let (_dir, log, dispatcher) = dispatcher_fixture_with_flow_control(
+                r#"
+import "std/triggers"
+
+pub fn local_fn(event: TriggerEvent) -> string {
+  return event.dedupe_key
+}
+"#,
+                "local_fn",
+                None,
+                TriggerRetryConfig::default(),
+                crate::triggers::TriggerFlowControlConfig {
+                    throttle: Some(crate::triggers::TriggerThrottleConfig {
+                        key: None,
+                        period: Duration::from_secs(30),
+                        max: 1,
+                    }),
+                    ..Default::default()
+                },
+            )
+            .await;
+
+            let first = dispatcher
+                .dispatch_event(trigger_event("issues.opened", "delivery-throttle-1"))
+                .await
+                .expect("first dispatch succeeds");
+            assert_eq!(first[0].status, DispatchStatus::Succeeded);
+
+            let dispatcher_for_task = dispatcher.clone();
+            let second = tokio::task::spawn_local(async move {
+                dispatcher_for_task
+                    .dispatch_event(trigger_event("issues.opened", "delivery-throttle-2"))
+                    .await
+                    .expect("second dispatch succeeds")
+            });
+
+            tokio::task::yield_now().await;
+            assert!(
+                !second.is_finished(),
+                "second dispatch should still be waiting on the throttle window"
+            );
+
+            clock.advance_std(Duration::from_secs(30)).await;
+
+            let second = second.await.expect("join throttled dispatch");
+            assert_eq!(second[0].status, DispatchStatus::Succeeded);
+            assert_eq!(
+                second[0].result,
+                Some(serde_json::json!("delivery-throttle-2"))
+            );
+
+            let events =
+                read_topic(log.clone(), "trigger.throttle.github-new-issue_v1__global").await;
+            assert!(events
+                .iter()
+                .any(|(_, event)| event.kind == "throttle_wait"));
+            assert!(
+                events
+                    .iter()
+                    .filter(|(_, event)| event.kind == "throttle_acquired")
+                    .count()
+                    >= 2
+            );
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn flow_control_singleton_skips_while_inflight() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (_dir, log, dispatcher) = dispatcher_fixture_with_flow_control(
+                r#"
+import "std/triggers"
+
+pub fn slow_handler(event: TriggerEvent) -> string {
+  sleep(50)
+  return event.dedupe_key
+}
+"#,
+                "slow_handler",
+                None,
+                TriggerRetryConfig::default(),
+                crate::triggers::TriggerFlowControlConfig {
+                    singleton: Some(crate::triggers::TriggerSingletonConfig { key: None }),
+                    ..Default::default()
+                },
+            )
+            .await;
+
+            let dispatcher_for_task = dispatcher.clone();
+            let first = tokio::task::spawn_local(async move {
+                dispatcher_for_task
+                    .dispatch_event(trigger_event("issues.opened", "delivery-singleton-1"))
+                    .await
+                    .expect("first dispatch succeeds")
+            });
+
+            tokio::time::sleep(Duration::from_millis(10)).await;
+
+            let second = dispatcher
+                .dispatch_event(trigger_event("issues.opened", "delivery-singleton-2"))
+                .await
+                .expect("second dispatch returns skip");
+            let first = first.await.expect("join singleton leader");
+
+            assert_eq!(first[0].status, DispatchStatus::Succeeded);
+            assert_eq!(second[0].status, DispatchStatus::Skipped);
+            assert_eq!(
+                second[0].result,
+                Some(serde_json::json!({
+                    "skipped": true,
+                    "flow_control": "singleton_active",
+                }))
+            );
+
+            let events =
+                read_topic(log.clone(), "trigger.singleton.github-new-issue_v1__global").await;
+            assert!(events
+                .iter()
+                .any(|(_, event)| event.kind == "singleton_acquired"));
+            assert!(events
+                .iter()
+                .any(|(_, event)| event.kind == "singleton_skipped"));
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn flow_control_debounce_keeps_latest_event() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let clock = crate::triggers::test_util::clock::MockClock::new(
+                time::OffsetDateTime::from_unix_timestamp(0).expect("epoch"),
+            );
+            let _guard = crate::triggers::test_util::clock::install_override(clock.clone());
+            crate::reset_thread_local_state();
+            let dir = tempfile::tempdir().expect("tempdir");
+            let log = install_default_for_base_dir(dir.path()).expect("install event log");
+            let lib_path = dir.path().join("lib.harn");
+            std::fs::write(
+                &lib_path,
+                r#"
+import "std/triggers"
+
+pub fn local_fn(event: TriggerEvent) -> string {
+  return event.dedupe_key
+}
+"#,
+            )
+            .expect("write module source");
+
+            let mut vm = Vm::new();
+            register_vm_stdlib(&mut vm);
+            vm.set_source_dir(dir.path());
+            let flow_control = crate::triggers::TriggerFlowControlConfig {
+                debounce: Some(crate::triggers::TriggerDebounceConfig {
+                    key: compile_trigger_expr(
+                        &mut vm,
+                        dir.path(),
+                        "debounce_group",
+                        "event.headers.group",
+                    )
+                    .await,
+                    period: Duration::from_secs(30),
+                }),
+                ..Default::default()
+            };
+            let exports = vm
+                .load_module_exports(&lib_path)
+                .await
+                .expect("load handler exports");
+            let handler = exports["local_fn"].clone();
+            install_manifest_triggers(vec![TriggerBindingSpec {
+                id: "github-new-issue".to_string(),
+                source: TriggerBindingSource::Manifest,
+                kind: "webhook".to_string(),
+                provider: ProviderId::from("github"),
+                handler: TriggerHandlerSpec::Local {
+                    raw: "local_fn".to_string(),
+                    closure: handler,
+                },
+                when: None,
+                retry: TriggerRetryConfig::default(),
+                match_events: vec!["issues.opened".to_string()],
+                dedupe_key: Some("event.dedupe_key".to_string()),
+                dedupe_retention_days: crate::triggers::DEFAULT_INBOX_RETENTION_DAYS,
+                filter: None,
+                daily_cost_usd: None,
+                max_concurrent: None,
+                flow_control,
+                manifest_path: None,
+                package_name: Some("workspace".to_string()),
+                definition_fingerprint: "fp:local_fn".to_string(),
+            }])
+            .await
+            .expect("install test trigger binding");
+            let dispatcher = Dispatcher::with_event_log(vm, log);
+
+            let mut first_event = trigger_event("issues.opened", "delivery-debounce-1");
+            first_event
+                .headers
+                .insert("group".to_string(), "issues".to_string());
+            let mut second_event = trigger_event("issues.opened", "delivery-debounce-2");
+            second_event
+                .headers
+                .insert("group".to_string(), "issues".to_string());
+
+            let first_dispatcher = dispatcher.clone();
+            let first = tokio::task::spawn_local(async move {
+                first_dispatcher
+                    .dispatch_event(first_event)
+                    .await
+                    .expect("first dispatch completes")
+            });
+            tokio::task::yield_now().await;
+
+            let second_dispatcher = dispatcher.clone();
+            let second = tokio::task::spawn_local(async move {
+                second_dispatcher
+                    .dispatch_event(second_event)
+                    .await
+                    .expect("second dispatch completes")
+            });
+            tokio::task::yield_now().await;
+
+            clock.advance_std(Duration::from_secs(30)).await;
+
+            let first = first.await.expect("join first debounce dispatch");
+            let second = second.await.expect("join second debounce dispatch");
+            assert_eq!(first[0].status, DispatchStatus::Skipped);
+            assert_eq!(second[0].status, DispatchStatus::Succeeded);
+            assert_eq!(
+                second[0].result,
+                Some(serde_json::json!("delivery-debounce-2"))
+            );
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn flow_control_batch_coalesces_multiple_events() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (_dir, log, dispatcher) = dispatcher_fixture_with_flow_control(
+                r#"
+import "std/triggers"
+
+pub fn local_fn(event: TriggerEvent) -> dict {
+  let batch_count = if event.batch == nil { 0 } else { len(event.batch) }
+  return {dedupe_key: event.dedupe_key, batch_count: batch_count}
+}
+"#,
+                "local_fn",
+                None,
+                TriggerRetryConfig::default(),
+                crate::triggers::TriggerFlowControlConfig {
+                    batch: Some(crate::triggers::TriggerBatchConfig {
+                        key: None,
+                        size: 2,
+                        timeout: Duration::from_secs(30),
+                    }),
+                    ..Default::default()
+                },
+            )
+            .await;
+
+            let first_dispatcher = dispatcher.clone();
+            let first = tokio::task::spawn_local(async move {
+                first_dispatcher
+                    .dispatch_event(trigger_event("issues.opened", "delivery-batch-1"))
+                    .await
+                    .expect("first batch dispatch completes")
+            });
+            tokio::task::yield_now().await;
+
+            let second_dispatcher = dispatcher.clone();
+            let second = tokio::task::spawn_local(async move {
+                second_dispatcher
+                    .dispatch_event(trigger_event("issues.opened", "delivery-batch-2"))
+                    .await
+                    .expect("second batch dispatch completes")
+            });
+
+            let first = first.await.expect("join batch leader");
+            let second = second.await.expect("join batch follower");
+
+            assert_eq!(first[0].status, DispatchStatus::Succeeded);
+            assert_eq!(
+                first[0].result,
+                Some(serde_json::json!({
+                    "dedupe_key": "delivery-batch-1",
+                    "batch_count": 2,
+                }))
+            );
+            assert_eq!(second[0].status, DispatchStatus::Skipped);
+            assert_eq!(
+                second[0].result,
+                Some(serde_json::json!({
+                    "skipped": true,
+                    "flow_control": "batch_merged",
+                }))
+            );
+
+            let events = read_topic(log.clone(), "trigger.batch.github-new-issue_v1__global").await;
+            assert!(events
+                .iter()
+                .any(|(_, event)| event.kind == "batch_dispatched"));
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn flow_control_priority_prefers_higher_ranked_waiters() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            crate::reset_thread_local_state();
+            let dir = tempfile::tempdir().expect("tempdir");
+            let log = install_default_for_base_dir(dir.path()).expect("install event log");
+            let lib_path = dir.path().join("lib.harn");
+            std::fs::write(
+                &lib_path,
+                r#"
+import "std/triggers"
+
+pub fn slow_handler(event: TriggerEvent) -> string {
+  sleep(30)
+  return event.headers.tier
+}
+"#,
+            )
+            .expect("write module source");
+
+            let mut vm = Vm::new();
+            register_vm_stdlib(&mut vm);
+            vm.set_source_dir(dir.path());
+            let flow_control = crate::triggers::TriggerFlowControlConfig {
+                concurrency: Some(crate::triggers::TriggerConcurrencyConfig { key: None, max: 1 }),
+                priority: Some(crate::triggers::TriggerPriorityOrderConfig {
+                    key: compile_trigger_expr(
+                        &mut vm,
+                        dir.path(),
+                        "priority_tier",
+                        "event.headers.tier",
+                    )
+                    .await,
+                    order: vec![
+                        "gold".to_string(),
+                        "silver".to_string(),
+                        "bronze".to_string(),
+                    ],
+                }),
+                ..Default::default()
+            };
+            let exports = vm
+                .load_module_exports(&lib_path)
+                .await
+                .expect("load handler exports");
+            let handler = exports["slow_handler"].clone();
+            install_manifest_triggers(vec![TriggerBindingSpec {
+                id: "github-new-issue".to_string(),
+                source: TriggerBindingSource::Manifest,
+                kind: "webhook".to_string(),
+                provider: ProviderId::from("github"),
+                handler: TriggerHandlerSpec::Local {
+                    raw: "slow_handler".to_string(),
+                    closure: handler,
+                },
+                when: None,
+                retry: TriggerRetryConfig::default(),
+                match_events: vec!["issues.opened".to_string()],
+                dedupe_key: Some("event.dedupe_key".to_string()),
+                dedupe_retention_days: crate::triggers::DEFAULT_INBOX_RETENTION_DAYS,
+                filter: None,
+                daily_cost_usd: None,
+                max_concurrent: None,
+                flow_control,
+                manifest_path: None,
+                package_name: Some("workspace".to_string()),
+                definition_fingerprint: "fp:slow_handler".to_string(),
+            }])
+            .await
+            .expect("install test trigger binding");
+            let dispatcher = Dispatcher::with_event_log(vm, log.clone());
+
+            let mut bronze_first = trigger_event("issues.opened", "delivery-priority-bronze-1");
+            bronze_first
+                .headers
+                .insert("tier".to_string(), "bronze".to_string());
+            let mut bronze_second = trigger_event("issues.opened", "delivery-priority-bronze-2");
+            bronze_second
+                .headers
+                .insert("tier".to_string(), "bronze".to_string());
+            let mut gold = trigger_event("issues.opened", "delivery-priority-gold");
+            gold.headers.insert("tier".to_string(), "gold".to_string());
+
+            let bronze_first_id = bronze_first.id.0.clone();
+            let bronze_second_id = bronze_second.id.0.clone();
+            let gold_id = gold.id.0.clone();
+
+            let leader_dispatcher = dispatcher.clone();
+            let leader = tokio::task::spawn_local(async move {
+                leader_dispatcher
+                    .dispatch_event(bronze_first)
+                    .await
+                    .expect("leader dispatch succeeds")
+            });
+
+            tokio::time::sleep(Duration::from_millis(10)).await;
+
+            let bronze_dispatcher = dispatcher.clone();
+            let bronze_waiter = tokio::task::spawn_local(async move {
+                bronze_dispatcher
+                    .dispatch_event(bronze_second)
+                    .await
+                    .expect("bronze waiter succeeds")
+            });
+            let gold_dispatcher = dispatcher.clone();
+            let gold_waiter = tokio::task::spawn_local(async move {
+                gold_dispatcher
+                    .dispatch_event(gold)
+                    .await
+                    .expect("gold waiter succeeds")
+            });
+
+            let leader = leader.await.expect("join leader");
+            let gold = gold_waiter.await.expect("join gold waiter");
+            let bronze = bronze_waiter.await.expect("join bronze waiter");
+            assert_eq!(leader[0].status, DispatchStatus::Succeeded);
+            assert_eq!(gold[0].status, DispatchStatus::Succeeded);
+            assert_eq!(bronze[0].status, DispatchStatus::Succeeded);
+
+            let started = read_topic(log.clone(), "trigger.outbox")
+                .await
+                .into_iter()
+                .filter(|(_, event)| event.kind == "dispatch_started")
+                .filter_map(|(_, event)| event.headers.get("event_id").cloned())
+                .filter(|event_id| {
+                    event_id == &bronze_first_id
+                        || event_id == &bronze_second_id
+                        || event_id == &gold_id
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(started, vec![bronze_first_id, gold_id, bronze_second_id]);
         })
         .await;
 }

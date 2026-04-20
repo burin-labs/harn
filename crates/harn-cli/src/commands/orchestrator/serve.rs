@@ -741,7 +741,9 @@ fn spawn_inbox_pump(
             let envelope: harn_vm::triggers::dispatcher::InboxEnvelope =
                 serde_json::from_value(logged.payload)
                     .map_err(|error| format!("failed to decode dispatcher inbox event: {error}"))?;
-            let _ = dispatcher.dispatch_inbox_envelope(envelope).await;
+            tokio::task::spawn_local(async move {
+                let _ = dispatcher.dispatch_inbox_envelope(envelope).await;
+            });
             Ok(true)
         }
     })
