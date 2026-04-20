@@ -38,6 +38,15 @@ granular archaeology.
   helpers in the crypto stdlib. Supports the pure-Harn connectors pivot
   (#350) by giving Harn code first-class access to the encodings that
   webhook signatures and typical REST APIs use.
+- **First-class `bytes` runtime value + trigger raw-body access (#347,
+  #354).** New `bytes` type with `bytes_from_string` / `bytes_to_string`
+  / `bytes_from_hex` / `bytes_to_hex` / `bytes_from_base64` /
+  `bytes_to_base64` / `bytes_len` / `bytes_concat` / `bytes_slice` /
+  `bytes_eq` stdlib helpers, file-IO helpers that round-trip raw
+  buffers, and inbound `TriggerEvent.raw_body` exposure so signature
+  verification doesn't need to round-trip bytes through strings. Final
+  epic-#350 groundwork piece: pure-Harn connectors can now own
+  signature verification end-to-end.
 
 ## v0.7.25
 
