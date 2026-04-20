@@ -385,14 +385,10 @@ pub fn on_issue(event: TriggerEvent) {
     assert!(snapshot_contents.contains("\"bind\": \"127.0.0.1:"));
 }
 
-// TODO(harn#325): The a2a-push handler now emits `dispatch_failed` instead of
-// `dispatch_succeeded` during the 5s shutdown window. Suspected regression from
-// the #261/#264 in-flight shutdown cancellation changes — the drain budget
-// reaches `remaining_budget(deadline) == 0` before the dispatcher finishes the
-// 1-second handler. Ignored until the drain budgeting is re-balanced so single
-// in-flight a2a-push dispatches can complete within a 5s shutdown-timeout.
+// Regression coverage for harn#325: graceful shutdown should let an in-flight
+// a2a-push dispatch finish within the configured shutdown window and emit the
+// terminal `dispatch_succeeded` lifecycle event instead of a shutdown failure.
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "dispatch_failed regression — tracked in harn#325"]
 async fn graceful_shutdown_drains_in_flight_dispatch_and_emits_lifecycle_events() {
     let temp = TempDir::new().unwrap();
     write_file(
