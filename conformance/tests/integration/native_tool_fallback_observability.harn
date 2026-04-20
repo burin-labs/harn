@@ -1,0 +1,53 @@
+fn tools() {
+  var registry = tool_registry()
+  registry = tool_define(
+    registry,
+    "read",
+    "Read a file",
+    {
+    handler: { args -> "read:" + args.path },
+    parameters: {path: {type: "string", description: "Path to read"}},
+    returns: {type: "string"},
+  },
+  )
+  return registry
+}
+
+pipeline default() {
+  llm_mock_clear()
+  llm_mock({text: "<tool_call>\nread({ path: \"src/lib.rs\" })\n</tool_call>"})
+  llm_mock({text: "<tool_call>\nread({ path: \"src/lib.rs\" })\n</tool_call>"})
+  let fallback = agent_loop(
+    "Inspect the repo",
+    "You are helpful",
+    {
+    provider: "mock",
+    tools: tools(),
+    tool_format: "native",
+    native_tool_fallback: "allow_once",
+    persistent: true,
+    max_iterations: 2,
+  },
+  )
+  println(fallback?.trace?.native_text_tool_fallbacks == 2)
+  println(fallback?.trace?.native_text_tool_fallback_rejections == 1)
+  let fallback_events = transcript_events_by_kind(fallback?.transcript, "native_tool_fallback")
+  println(len(fallback_events) == 2)
+  println(fallback_events[0]?.metadata?.accepted == true)
+  println(fallback_events[1]?.metadata?.accepted == false)
+
+  llm_mock_clear()
+  llm_mock({
+    error: {
+      category: "server_error",
+      message: "openai-compatible model mock reported completion_tokens=1 but delivered no content, reasoning, or tool calls",
+    },
+  })
+  llm_mock({text: "<done>##DONE##</done>"})
+  let retried = agent_loop(
+    "Finish the task",
+    "You are helpful",
+    {provider: "mock", persistent: true, max_iterations: 1},
+  )
+  println(retried?.trace?.empty_completion_retries == 1)
+}

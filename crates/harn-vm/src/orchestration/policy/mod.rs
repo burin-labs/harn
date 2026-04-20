@@ -20,8 +20,9 @@ use crate::workspace_path::{classify_workspace_path, WorkspacePathInfo};
 pub use crate::tool_annotations::{ToolArgSchema, ToolKind};
 pub use types::{
     enforce_tool_arg_constraints, AutoCompactPolicy, BranchSemantics, CapabilityPolicy,
-    ContextPolicy, EqIgnored, EscalationPolicy, JoinPolicy, MapPolicy, ModelPolicy, ReducePolicy,
-    RetryPolicy, StageContract, ToolArgConstraint, TurnPolicy,
+    ContextPolicy, EqIgnored, EscalationPolicy, JoinPolicy, MapPolicy, ModelPolicy,
+    NativeToolFallbackPolicy, ReducePolicy, RetryPolicy, StageContract, ToolArgConstraint,
+    TurnPolicy,
 };
 
 thread_local! {

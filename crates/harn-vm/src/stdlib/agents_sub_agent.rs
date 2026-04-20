@@ -634,6 +634,16 @@ fn sub_agent_loop_options(spec: &SubAgentRunSpec) -> Result<crate::llm::AgentLoo
             )
             .unwrap_or_default()
         });
+    let native_tool_fallback = crate::llm::helpers::opt_str(&options, "native_tool_fallback")
+        .map(|value| {
+            crate::orchestration::NativeToolFallbackPolicy::parse(&value).ok_or_else(|| {
+                VmError::Runtime(format!(
+                    "sub_agent_run: native_tool_fallback must be one of allow, allow_once, reject; got `{value}`"
+                ))
+            })
+        })
+        .transpose()?
+        .unwrap_or_default();
     let (skill_registry, skill_match, working_files) = crate::llm::parse_skill_config(&options);
     Ok(crate::llm::AgentLoopConfig {
         persistent: crate::llm::helpers::opt_bool(&options, "persistent"),
@@ -645,6 +655,7 @@ fn sub_agent_loop_options(spec: &SubAgentRunSpec) -> Result<crate::llm::AgentLoo
         tool_retries: tool_retries as usize,
         tool_backoff_ms: tool_backoff_ms as u64,
         tool_format: tool_format.unwrap_or_default(),
+        native_tool_fallback,
         auto_compact: None,
         policy,
         approval_policy,

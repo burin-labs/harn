@@ -52,6 +52,7 @@ use super::state::AgentLoopState;
 pub(super) struct LlmCallContext<'a> {
     pub bridge: &'a Option<Rc<HostBridge>>,
     pub tool_format: &'a str,
+    pub native_tool_fallback: crate::orchestration::NativeToolFallbackPolicy,
     pub done_sentinel: &'a str,
     pub break_unless_phase: Option<&'a str>,
     pub exit_when_verified: bool,
@@ -270,14 +271,70 @@ pub(super) async fn run_llm_call(
         // a native `tools` channel (the model's chat template doesn't
         // actually route through the native function-call surface).
         // Discarding them would strand a legitimate call mid-loop.
-        if ctx.tool_format == "native" && !parse_result.calls.is_empty() {
-            crate::events::log_info(
-                "llm.tool",
-                "native-mode stage accepted text-mode tool calls (model fell back to text)",
-            );
-        }
         {
-            let calls = parse_result.calls;
+            let mut calls = parse_result.calls;
+            let parsed_call_count = calls.len();
+            if ctx.tool_format == "native" && !calls.is_empty() {
+                state.native_text_tool_fallbacks += 1;
+                let fallback_index = state.native_text_tool_fallbacks;
+                let accepted = match ctx.native_tool_fallback {
+                    crate::orchestration::NativeToolFallbackPolicy::Allow => true,
+                    crate::orchestration::NativeToolFallbackPolicy::AllowOnce => {
+                        fallback_index == 1
+                    }
+                    crate::orchestration::NativeToolFallbackPolicy::Reject => false,
+                };
+                if accepted {
+                    crate::events::log_info(
+                        "llm.tool",
+                        "native-mode stage accepted text-mode tool calls (model fell back to text)",
+                    );
+                } else {
+                    state.native_text_tool_fallback_rejections += 1;
+                    crate::events::log_warn(
+                        "llm.tool",
+                        &format!(
+                            "native-mode stage rejected text-mode tool calls (policy={}, fallback_index={fallback_index})",
+                            ctx.native_tool_fallback.as_str(),
+                        ),
+                    );
+                    let feedback = format!(
+                        "This stage is running in native tool mode. Your last response emitted text-mode tool calls instead of provider-native tool calls.\n\n\
+                         Re-issue the same action using ONLY the native tool channel. Do not write `<tool_call>` tags, bare `name({{ ... }})` calls, Markdown fences, or JSON tool-call envelopes in assistant text.\n\n\
+                         Policy: `{}`. Observed fallback turn: {}.",
+                        ctx.native_tool_fallback.as_str(),
+                        fallback_index,
+                    );
+                    append_message_to_contexts(
+                        &mut state.visible_messages,
+                        &mut state.recorded_messages,
+                        runtime_feedback_message("native_tool_contract", feedback),
+                    );
+                    calls.clear();
+                }
+                state.transcript_events.push(transcript_event(
+                    "native_tool_fallback",
+                    "assistant",
+                    "internal",
+                    "",
+                    Some(serde_json::json!({
+                        "accepted": accepted,
+                        "policy": ctx.native_tool_fallback.as_str(),
+                        "fallback_index": fallback_index,
+                        "tool_call_count": parsed_call_count,
+                        "tool_parse_error_count": tool_parse_errors.len(),
+                    })),
+                ));
+                super::super::trace::emit_agent_event(
+                    super::super::trace::AgentTraceEvent::NativeToolFallback {
+                        iteration,
+                        accepted,
+                        policy: ctx.native_tool_fallback.as_str().to_string(),
+                        fallback_index,
+                        tool_call_count: parsed_call_count,
+                    },
+                );
+            }
 
             // Emit feedback on ANY parse error so mixed-batch cases
             // (some calls parsed, some didn't) still signal the model.

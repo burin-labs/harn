@@ -639,6 +639,16 @@ pub fn register_llm_builtins(vm: &mut Vm) {
         let tool_retries = opt_int(&options, "tool_retries").unwrap_or(0) as usize;
         let tool_backoff_ms = opt_int(&options, "tool_backoff_ms").unwrap_or(1000) as u64;
         let tool_format = opt_str(&options, "tool_format").unwrap_or_else(|| "text".to_string());
+        let native_tool_fallback = opt_str(&options, "native_tool_fallback")
+            .map(|value| {
+                crate::orchestration::NativeToolFallbackPolicy::parse(&value).ok_or_else(|| {
+                    crate::value::VmError::Runtime(format!(
+                        "agent_loop: native_tool_fallback must be one of allow, allow_once, reject; got `{value}`"
+                    ))
+                })
+            })
+            .transpose()?
+            .unwrap_or_default();
         let daemon = opt_bool(&options, "daemon");
         // Empty string means "mint an anonymous session" (state.rs handles
         // this path and does not persist). A caller-provided id flows
@@ -713,6 +723,7 @@ pub fn register_llm_builtins(vm: &mut Vm) {
                 tool_retries,
                 tool_backoff_ms,
                 tool_format,
+                native_tool_fallback,
                 auto_compact,
                 policy,
                 approval_policy,

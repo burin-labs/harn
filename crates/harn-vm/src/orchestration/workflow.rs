@@ -1404,6 +1404,7 @@ pub async fn execute_stage_node(
                     tool_retries: 0,
                     tool_backoff_ms: 1000,
                     tool_format: tool_format.clone(),
+                    native_tool_fallback: node.model_policy.native_tool_fallback,
                     auto_compact,
                     policy: Some(effective_policy),
                     approval_policy: Some(node.approval_policy.clone()),

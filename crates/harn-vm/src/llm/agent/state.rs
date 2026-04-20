@@ -486,6 +486,8 @@ pub(super) struct AgentLoopState {
     pub(super) daemon_state: String,
     pub(super) daemon_snapshot_path: Option<String>,
     pub(super) daemon_watch_state: std::collections::BTreeMap<String, u64>,
+    pub(super) native_text_tool_fallbacks: usize,
+    pub(super) native_text_tool_fallback_rejections: usize,
 
     /// Set only by the finalize phase.
     pub(super) final_status: &'static str,
@@ -1175,6 +1177,8 @@ impl AgentLoopState {
         };
         let mut daemon_snapshot_path: Option<String> = None;
         let mut daemon_watch_state = watch_state(&daemon_config.watch_paths);
+        let native_text_tool_fallbacks = 0usize;
+        let native_text_tool_fallback_rejections = 0usize;
         let mut resumed_iterations = 0usize;
         let mut last_run_exit_code = last_run_exit_code;
 
@@ -1247,6 +1251,8 @@ impl AgentLoopState {
             daemon_state,
             daemon_snapshot_path,
             daemon_watch_state,
+            native_text_tool_fallbacks,
+            native_text_tool_fallback_rejections,
             final_status,
             loop_start,
             bridge,

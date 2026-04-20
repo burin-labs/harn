@@ -198,6 +198,7 @@ pub async fn run_agent_loop_internal(
     let loop_detect_enabled = state.loop_detect_enabled;
     let resumed_iterations = state.resumed_iterations;
     let tool_format = state.tool_format.clone();
+    let native_tool_fallback = state.config.native_tool_fallback;
     let done_sentinel = state.done_sentinel.clone();
     let break_unless_phase = state.break_unless_phase.clone();
     let loop_start = state.loop_start;
@@ -292,6 +293,7 @@ pub async fn run_agent_loop_internal(
             &llm_call::LlmCallContext {
                 bridge: &bridge,
                 tool_format: &tool_format,
+                native_tool_fallback,
                 done_sentinel: &done_sentinel,
                 break_unless_phase: break_unless_phase.as_deref(),
                 exit_when_verified,
