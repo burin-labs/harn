@@ -294,11 +294,13 @@ export type RunActionGraphNode = {
   kind: string
   status: string
   outcome: string
+  trace_id: string | null
   stage_id: string | null
   node_id: string | null
   worker_id: string | null
   run_id: string | null
   run_path: string | null
+  metadata: Record<string, unknown>
 }
 
 export type RunActionGraphEdge = {

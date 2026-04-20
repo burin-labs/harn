@@ -26,6 +26,7 @@ use self::state::PortalState;
 pub(crate) async fn run_portal(dir: &str, host: &str, port: u16, open_browser: bool) {
     let run_dir = PathBuf::from(dir);
     let workspace_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let event_log = harn_vm::event_log::install_default_for_base_dir(&workspace_root).ok();
     let launch_program = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("harn"));
     let addr: SocketAddr = match format!("{host}:{port}").parse() {
         Ok(a) => a,
@@ -38,6 +39,7 @@ pub(crate) async fn run_portal(dir: &str, host: &str, port: u16, open_browser: b
     let state = Arc::new(PortalState {
         run_dir: run_dir.clone(),
         workspace_root,
+        event_log,
         launch_program,
         launch_jobs: Arc::new(Mutex::new(HashMap::new())),
     });

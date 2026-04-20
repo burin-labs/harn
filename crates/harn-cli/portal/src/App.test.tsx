@@ -107,8 +107,34 @@ const detailPayload = {
     planner_rounds: [],
     research_fact_count: 0,
     action_graph_nodes: [
-      { id: "trigger:original", label: "github:issue.opened (original trigger_evt_original)", kind: "trigger", status: "historical", outcome: "replayed_from", trace_id: "trace", stage_id: null, node_id: null, worker_id: null, run_id: null, run_path: null },
-      { id: "trigger:current", label: "github:issue.opened", kind: "trigger", status: "received", outcome: "received", trace_id: "trace", stage_id: null, node_id: null, worker_id: null, run_id: null, run_path: null },
+      {
+        id: "trigger:original",
+        label: "github:issue.opened (original trigger_evt_original)",
+        kind: "trigger",
+        status: "historical",
+        outcome: "replayed_from",
+        trace_id: "trace",
+        stage_id: null,
+        node_id: null,
+        worker_id: null,
+        run_id: null,
+        run_path: null,
+        metadata: { provider: "github", event_kind: "issue.opened", event_id: "trigger_evt_original" },
+      },
+      {
+        id: "trigger:current",
+        label: "github:issue.opened",
+        kind: "trigger",
+        status: "received",
+        outcome: "received",
+        trace_id: "trace",
+        stage_id: null,
+        node_id: null,
+        worker_id: null,
+        run_id: null,
+        run_path: null,
+        metadata: { provider: "github", event_kind: "issue.opened", event_id: "trigger_evt_current", signature_status: "verified" },
+      },
     ],
     action_graph_edges: [
       { from_id: "trigger:original", to_id: "trigger:current", kind: "replay_chain", label: "replay chain" },
@@ -176,6 +202,24 @@ describe("App", () => {
       if (input.startsWith("/api/run?path=failed.json")) {
         return { ok: true, json: async () => detailPayload }
       }
+      if (input === "/api/trigger/replay") {
+        return {
+          ok: true,
+          json: async () => ({
+            id: "job-1",
+            mode: "trigger_replay",
+            target_label: "trigger replay trigger_evt_current",
+            status: "running",
+            started_at: "2026-04-04T10:01:30Z",
+            finished_at: null,
+            exit_code: null,
+            logs: "",
+            discovered_run_paths: [],
+            workspace_dir: null,
+            transcript_path: null,
+          }),
+        }
+      }
       if (input === "/api/launch/targets") {
         return { ok: true, json: async () => ({ targets: [] }) }
       }
@@ -221,5 +265,10 @@ describe("App", () => {
     expect(screen.getByText("harn replay .harn-runs/failed.json")).toBeInTheDocument()
     expect(screen.getByText(/reviewer • Spawned • 1710000000.100/)).toBeInTheDocument()
     expect(screen.getByText(/github:issue\.opened \(original trigger_evt_original\) → github:issue\.opened • replay chain • replay_chain/)).toBeInTheDocument()
+    expect(screen.getAllByRole("button", { name: "Replay trigger" }).length).toBeGreaterThan(0)
+
+    const replayButtons = screen.getAllByRole("button", { name: "Replay trigger" })
+    await userEvent.click(replayButtons[replayButtons.length - 1])
+    expect(await screen.findByText("Queued trigger replay trigger_evt_current")).toBeInTheDocument()
   })
 })

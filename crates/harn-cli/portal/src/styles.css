@@ -743,6 +743,61 @@ textarea {
   color: var(--accent);
 }
 
+.action-node-grid {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.action-node-card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.01));
+}
+
+.action-node-card strong {
+  display: block;
+  margin-top: 2px;
+}
+
+.action-node-card .eyebrow {
+  margin-bottom: 2px;
+}
+
+.action-node-actions {
+  margin-top: 10px;
+}
+
+.action-node-trigger {
+  border-left: 4px solid var(--accent);
+}
+
+.action-node-predicate {
+  border-left: 4px solid var(--amber);
+}
+
+.action-node-dispatch {
+  border-left: 4px solid #6dd3ce;
+}
+
+.action-node-a2a {
+  border: 1px dashed #7dd3fc;
+  box-shadow: inset 0 0 0 1px rgba(125, 211, 252, 0.18);
+}
+
+.action-node-worker {
+  border-left: 4px solid #7ee081;
+}
+
+.action-node-retry {
+  border-left: 4px solid #f59e0b;
+}
+
+.action-node-dlq {
+  border-left: 4px solid #ef4444;
+}
+
 .turn-message {
   border-left: 2px solid var(--accent);
   padding-left: 10px;

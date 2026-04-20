@@ -22,6 +22,7 @@ pub const ACTION_GRAPH_NODE_KIND_STAGE: &str = "stage";
 pub const ACTION_GRAPH_NODE_KIND_WORKER: &str = "worker";
 pub const ACTION_GRAPH_NODE_KIND_DISPATCH: &str = "dispatch";
 pub const ACTION_GRAPH_NODE_KIND_A2A_HOP: &str = "a2a_hop";
+pub const ACTION_GRAPH_NODE_KIND_WORKER_ENQUEUE: &str = "worker_enqueue";
 pub const ACTION_GRAPH_NODE_KIND_RETRY: &str = "retry";
 pub const ACTION_GRAPH_NODE_KIND_DLQ: &str = "dlq";
 
@@ -234,6 +235,7 @@ pub struct RunActionGraphNodeRecord {
     pub worker_id: Option<String>,
     pub run_id: Option<String>,
     pub run_path: Option<String>,
+    pub metadata: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -533,6 +535,43 @@ fn action_graph_kind_for_stage(stage: &RunStageRecord) -> &'static str {
     }
 }
 
+fn trigger_node_metadata(trigger_event: &TriggerEvent) -> BTreeMap<String, serde_json::Value> {
+    let mut metadata = BTreeMap::new();
+    metadata.insert(
+        "provider".to_string(),
+        serde_json::json!(trigger_event.provider.as_str()),
+    );
+    metadata.insert(
+        "event_kind".to_string(),
+        serde_json::json!(trigger_event.kind),
+    );
+    metadata.insert(
+        "dedupe_key".to_string(),
+        serde_json::json!(trigger_event.dedupe_key),
+    );
+    metadata.insert(
+        "signature_status".to_string(),
+        serde_json::json!(signature_status_label(&trigger_event.signature_status)),
+    );
+    metadata
+}
+
+fn stage_node_metadata(stage: &RunStageRecord) -> BTreeMap<String, serde_json::Value> {
+    let mut metadata = BTreeMap::new();
+    metadata.insert("stage_kind".to_string(), serde_json::json!(stage.kind));
+    if let Some(branch) = stage.branch.as_ref() {
+        metadata.insert("branch".to_string(), serde_json::json!(branch));
+    }
+    if let Some(worker_id) = stage
+        .metadata
+        .get("worker_id")
+        .and_then(|value| value.as_str())
+    {
+        metadata.insert("worker_id".to_string(), serde_json::json!(worker_id));
+    }
+    metadata
+}
+
 fn append_action_graph_node(
     nodes: &mut Vec<RunActionGraphNodeRecord>,
     record: RunActionGraphNodeRecord,
@@ -814,6 +853,10 @@ pub fn derive_run_observability(
             worker_id: None,
             run_id: Some(run.id.clone()),
             run_path: run.persisted_path.clone(),
+            metadata: BTreeMap::from([(
+                "workflow_id".to_string(),
+                serde_json::json!(run.workflow_id),
+            )]),
         },
     );
     let mut entry_node_id = root_node_id.clone();
@@ -839,6 +882,7 @@ pub fn derive_run_observability(
                     worker_id: None,
                     run_id: Some(run.id.clone()),
                     run_path: run.persisted_path.clone(),
+                    metadata: trigger_node_metadata(trigger_event),
                 },
             );
             action_graph_edges.push(RunActionGraphEdgeRecord {
@@ -863,6 +907,7 @@ pub fn derive_run_observability(
                 worker_id: None,
                 run_id: Some(run.id.clone()),
                 run_path: run.persisted_path.clone(),
+                metadata: trigger_node_metadata(trigger_event),
             },
         );
         action_graph_edges.push(RunActionGraphEdgeRecord {
@@ -919,6 +964,7 @@ pub fn derive_run_observability(
                     .map(str::to_string),
                 run_id: None,
                 run_path: None,
+                metadata: stage_node_metadata(stage),
             },
         );
         if !incoming_nodes.contains(&stage.node_id) {
@@ -1112,6 +1158,10 @@ pub fn derive_run_observability(
                     worker_id: Some(child.worker_id.clone()),
                     run_id: child.run_id.clone(),
                     run_path: child.run_path.clone(),
+                    metadata: BTreeMap::from([
+                        ("worker_name".to_string(), serde_json::json!(child.worker_name)),
+                        ("task".to_string(), serde_json::json!(child.task)),
+                    ]),
                 },
             );
             if let Some(parent_stage_id) = child.parent_stage_id.as_ref() {

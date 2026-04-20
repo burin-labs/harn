@@ -332,18 +332,23 @@ fn lifecycle_payloads(
 
 struct MockA2aServer {
     authority: String,
-    requests: Receiver<serde_json::Value>,
+    requests: Receiver<MockA2aRequest>,
     stop: Arc<AtomicBool>,
     join: thread::JoinHandle<()>,
 }
 
+struct MockA2aRequest {
+    headers: BTreeMap<String, String>,
+    body: serde_json::Value,
+}
+
 impl MockA2aServer {
-    fn next_request(&self) -> serde_json::Value {
+    fn next_request(&self) -> MockA2aRequest {
         self.request_within(Duration::from_secs(5))
             .expect("mock A2A request")
     }
 
-    fn request_within(&self, timeout: Duration) -> Option<serde_json::Value> {
+    fn request_within(&self, timeout: Duration) -> Option<MockA2aRequest> {
         self.requests.recv_timeout(timeout).ok()
     }
 
@@ -453,10 +458,10 @@ fn handle_mock_a2a_connection<T: Read + Write>(
     stream: &mut T,
     card_scheme: &str,
     port: u16,
-    tx: &mpsc::Sender<serde_json::Value>,
+    tx: &mpsc::Sender<MockA2aRequest>,
     task_result: &serde_json::Value,
 ) {
-    let (request_line, body) = read_http_request(stream);
+    let (request_line, headers, body) = read_http_request(stream);
     if request_line.starts_with("GET /.well-known/a2a-agent ") {
         write_json_response(
             stream,
@@ -472,11 +477,13 @@ fn handle_mock_a2a_connection<T: Read + Write>(
         request_line.starts_with("POST /rpc "),
         "unexpected request line: {request_line}"
     );
-    tx.send(serde_json::from_slice::<serde_json::Value>(&body).expect("mock A2A request json"))
-        .expect("capture mock A2A request");
-    let rpc_id = serde_json::from_slice::<serde_json::Value>(&body).expect("mock A2A request json")
-        ["id"]
-        .clone();
+    let payload = serde_json::from_slice::<serde_json::Value>(&body).expect("mock A2A request json");
+    tx.send(MockA2aRequest {
+        headers,
+        body: payload.clone(),
+    })
+    .expect("capture mock A2A request");
+    let rpc_id = payload["id"].clone();
     write_json_response(
         stream,
         &crate::jsonrpc::response(rpc_id, task_result.clone()),
@@ -504,7 +511,7 @@ fn install_rustls_provider() {
     });
 }
 
-fn read_http_request<T: Read>(stream: &mut T) -> (String, Vec<u8>) {
+fn read_http_request<T: Read>(stream: &mut T) -> (String, BTreeMap<String, String>, Vec<u8>) {
     let mut buffer = Vec::new();
     let mut chunk = [0u8; 4096];
     let header_end;
@@ -526,8 +533,15 @@ fn read_http_request<T: Read>(stream: &mut T) -> (String, Vec<u8>) {
     }
     let headers = String::from_utf8_lossy(&buffer[..header_end]);
     let request_line = headers.lines().next().unwrap_or_default().to_string();
+    let mut parsed_headers = BTreeMap::new();
+    for line in headers.lines().skip(1) {
+        let Some((name, value)) = line.split_once(':') else {
+            continue;
+        };
+        parsed_headers.insert(name.trim().to_ascii_lowercase(), value.trim().to_string());
+    }
     let body = buffer[header_end..header_end + content_length].to_vec();
-    (request_line, body)
+    (request_line, parsed_headers, body)
 }
 
 fn find_header_end(buffer: &[u8]) -> Option<usize> {
@@ -620,6 +634,17 @@ pub fn should_handle(event: TriggerEvent) -> bool {
             assert!(node_kinds.iter().any(|kind| kind == "dispatch"));
             assert!(edge_kinds.iter().any(|kind| kind == "trigger_dispatch"));
             assert!(edge_kinds.iter().any(|kind| kind == "predicate_gate"));
+            assert!(graph.iter().any(|(_, event)| {
+                event.payload["observability"]["action_graph_nodes"]
+                    .as_array()
+                    .is_some_and(|nodes| {
+                        nodes.iter().any(|node| {
+                            node["kind"] == serde_json::json!("dispatch")
+                                && node["status"] == serde_json::json!("completed")
+                                && node["metadata"]["handler_kind"] == serde_json::json!("local")
+                        })
+                    })
+            }));
         })
         .await;
 }
@@ -1049,8 +1074,12 @@ async fn a2a_handler_returns_inline_result_and_emits_a2a_action_graph() {
             );
 
             let request = server.next_request();
-            assert_eq!(request["method"], "a2a.SendMessage");
-            let envelope_text = request["params"]["message"]["parts"][0]["text"]
+            assert_eq!(request.body["method"], "a2a.SendMessage");
+            assert_eq!(
+                request.headers.get("a2a-trace-id").map(String::as_str),
+                Some("trace_inline")
+            );
+            let envelope_text = request.body["params"]["message"]["parts"][0]["text"]
                 .as_str()
                 .expect("A2A text part");
             let envelope: serde_json::Value =
@@ -1102,7 +1131,7 @@ async fn worker_handler_enqueues_job_and_returns_receipt() {
     );
     assert!(receipt["job_event_id"].as_u64().is_some());
 
-    let queue = crate::WorkerQueue::new(log);
+    let queue = crate::WorkerQueue::new(log.clone());
     let state = queue.queue_state("triage").await.expect("load queue state");
     let now_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -1112,6 +1141,19 @@ async fn worker_handler_enqueues_job_and_returns_receipt() {
     assert_eq!(state.jobs.len(), 1);
     assert_eq!(state.jobs[0].job.trigger_id, "github-worker-review");
     assert_eq!(state.jobs[0].job.priority, crate::WorkerQueuePriority::High);
+
+    let graph = read_topic(log.clone(), "observability.action_graph").await;
+    assert!(graph.iter().any(|(_, event)| {
+        event.payload["observability"]["action_graph_nodes"]
+            .as_array()
+            .is_some_and(|nodes| {
+                nodes.iter().any(|node| {
+                    node["kind"] == serde_json::json!("worker_enqueue")
+                        && node["metadata"]["queue_name"] == serde_json::json!("triage")
+                        && node["metadata"]["job_event_id"].as_u64().is_some()
+                })
+            })
+    }));
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -1154,7 +1196,7 @@ async fn a2a_handler_returns_pending_task_handle() {
             );
 
             let request = server.next_request();
-            assert_eq!(request["method"], "a2a.SendMessage");
+            assert_eq!(request.body["method"], "a2a.SendMessage");
             server.finish();
         })
         .await;
@@ -1288,7 +1330,11 @@ async fn a2a_handler_allows_cleartext_after_opt_in() {
             );
 
             let request = server.next_request();
-            assert_eq!(request["method"], "a2a.SendMessage");
+            assert_eq!(request.body["method"], "a2a.SendMessage");
+            assert_eq!(
+                request.headers.get("a2a-trace-id").map(String::as_str),
+                Some("trace_http")
+            );
 
             server.finish();
         })
@@ -1350,6 +1396,17 @@ pub fn local_fn(event: TriggerEvent) -> string {
             assert!(node_kinds.iter().any(|kind| kind == "dlq"));
             assert!(edge_kinds.iter().any(|kind| kind == "retry"));
             assert!(edge_kinds.iter().any(|kind| kind == "dlq_move"));
+            assert!(graph.iter().any(|(_, event)| {
+                event.payload["observability"]["action_graph_nodes"]
+                    .as_array()
+                    .is_some_and(|nodes| {
+                        nodes.iter().any(|node| {
+                            node["kind"] == serde_json::json!("dlq")
+                                && node["metadata"]["attempt_count"] == serde_json::json!(2)
+                                && node["metadata"]["final_error"] == serde_json::json!("boom")
+                        })
+                    })
+            }));
         })
         .await;
 }

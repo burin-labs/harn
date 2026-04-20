@@ -23,7 +23,7 @@ use crate::orchestration::{
     ACTION_GRAPH_EDGE_KIND_RETRY, ACTION_GRAPH_EDGE_KIND_TRIGGER_DISPATCH,
     ACTION_GRAPH_NODE_KIND_A2A_HOP, ACTION_GRAPH_NODE_KIND_DISPATCH, ACTION_GRAPH_NODE_KIND_DLQ,
     ACTION_GRAPH_NODE_KIND_RETRY, ACTION_GRAPH_NODE_KIND_TRIGGER,
-    ACTION_GRAPH_NODE_KIND_TRIGGER_PREDICATE,
+    ACTION_GRAPH_NODE_KIND_TRIGGER_PREDICATE, ACTION_GRAPH_NODE_KIND_WORKER_ENQUEUE,
 };
 use crate::stdlib::json_to_vm_value;
 use crate::trust_graph::{append_trust_record, AutonomyTier, TrustOutcome, TrustRecord};
@@ -708,6 +708,7 @@ impl Dispatcher {
                 worker_id: None,
                 run_id: None,
                 run_path: None,
+                metadata: trigger_node_metadata(&event),
             });
             initial_edges.push(RunActionGraphEdgeRecord {
                 from_id: original_node_id,
@@ -728,6 +729,7 @@ impl Dispatcher {
             worker_id: None,
             run_id: None,
             run_path: None,
+            metadata: trigger_node_metadata(&event),
         });
         self.emit_action_graph(
             &event,
@@ -795,6 +797,7 @@ impl Dispatcher {
                     worker_id: None,
                     run_id: None,
                     run_path: None,
+                    metadata: predicate_node_metadata(binding, predicate, &event, &evaluation),
                 }],
                 vec![RunActionGraphEdgeRecord {
                     from_id: source_node_id.clone(),
@@ -1010,6 +1013,7 @@ impl Dispatcher {
                     worker_id: None,
                     run_id: None,
                     run_path: None,
+                    metadata: dispatch_node_metadata(&route, binding, &event, attempt),
                 }],
                 dispatch_edges,
                 serde_json::json!({
@@ -1090,6 +1094,42 @@ impl Dispatcher {
                             "replay_of_event_id": replay_of_event_id,
                         }),
                         replay_of_event_id.as_ref(),
+                    )
+                    .await?;
+                    self.emit_action_graph(
+                        &event,
+                        vec![RunActionGraphNodeRecord {
+                            id: attempt_node_id.clone(),
+                            label: dispatch_node_label(&route),
+                            kind: dispatch_node_kind(&route).to_string(),
+                            status: "completed".to_string(),
+                            outcome: dispatch_success_outcome(&route, &result).to_string(),
+                            trace_id: Some(event.trace_id.0.clone()),
+                            stage_id: None,
+                            node_id: None,
+                            worker_id: None,
+                            run_id: None,
+                            run_path: None,
+                            metadata: dispatch_success_metadata(
+                                &route,
+                                binding,
+                                &event,
+                                attempt,
+                                &result,
+                            ),
+                        }],
+                        Vec::new(),
+                        serde_json::json!({
+                            "source": "dispatcher",
+                            "trigger_id": binding.id.as_str(),
+                            "binding_key": binding.binding_key(),
+                            "event_id": event.id.0,
+                            "attempt": attempt,
+                            "handler_kind": route.kind(),
+                            "target_uri": route.target_uri(),
+                            "result": result,
+                            "replay_of_event_id": replay_of_event_id,
+                        }),
                     )
                     .await?;
                     finish_in_flight(
@@ -1180,6 +1220,46 @@ impl Dispatcher {
                         replay_of_event_id.as_ref(),
                     )
                     .await?;
+                    self.emit_action_graph(
+                        &event,
+                        vec![RunActionGraphNodeRecord {
+                            id: attempt_node_id.clone(),
+                            label: dispatch_node_label(&route),
+                            kind: dispatch_node_kind(&route).to_string(),
+                            status: if matches!(error, DispatchError::Cancelled(_)) {
+                                "cancelled".to_string()
+                            } else {
+                                "failed".to_string()
+                            },
+                            outcome: dispatch_error_label(&error).to_string(),
+                            trace_id: Some(event.trace_id.0.clone()),
+                            stage_id: None,
+                            node_id: None,
+                            worker_id: None,
+                            run_id: None,
+                            run_path: None,
+                            metadata: dispatch_error_metadata(
+                                &route,
+                                binding,
+                                &event,
+                                attempt,
+                                &error,
+                            ),
+                        }],
+                        Vec::new(),
+                        serde_json::json!({
+                            "source": "dispatcher",
+                            "trigger_id": binding.id.as_str(),
+                            "binding_key": binding.binding_key(),
+                            "event_id": event.id.0,
+                            "attempt": attempt,
+                            "handler_kind": route.kind(),
+                            "target_uri": route.target_uri(),
+                            "error": error.to_string(),
+                            "replay_of_event_id": replay_of_event_id,
+                        }),
+                    )
+                    .await?;
 
                     if !error.retryable() {
                         finish_in_flight(
@@ -1250,6 +1330,13 @@ impl Dispatcher {
                                 worker_id: None,
                                 run_id: None,
                                 run_path: None,
+                                metadata: retry_node_metadata(
+                                    binding,
+                                    &event,
+                                    attempt + 1,
+                                    delay,
+                                    &error,
+                                ),
                             }],
                             vec![RunActionGraphEdgeRecord {
                                 from_id: attempt_node_id,
@@ -1379,6 +1466,7 @@ impl Dispatcher {
                             worker_id: None,
                             run_id: None,
                             run_path: None,
+                            metadata: dlq_node_metadata(binding, &event, attempt, &final_error),
                         }],
                         vec![RunActionGraphEdgeRecord {
                             from_id: dispatch_node_id(&route, &binding_key, &event.id.0, attempt),
@@ -2641,6 +2729,19 @@ fn dispatch_error_label(error: &DispatchError) -> &'static str {
     }
 }
 
+fn dispatch_success_outcome(route: &DispatchUri, result: &serde_json::Value) -> &'static str {
+    match route {
+        DispatchUri::Worker { .. } => "enqueued",
+        DispatchUri::A2a { .. } if result.get("kind").and_then(|value| value.as_str())
+            == Some("a2a_task_handle") =>
+        {
+            "pending"
+        }
+        DispatchUri::A2a { .. } => "completed",
+        DispatchUri::Local { .. } => "success",
+    }
+}
+
 fn dispatch_node_id(
     route: &DispatchUri,
     binding_key: &str,
@@ -2657,6 +2758,7 @@ fn dispatch_node_id(
 fn dispatch_node_kind(route: &DispatchUri) -> &'static str {
     match route {
         DispatchUri::A2a { .. } => ACTION_GRAPH_NODE_KIND_A2A_HOP,
+        DispatchUri::Worker { .. } => ACTION_GRAPH_NODE_KIND_WORKER_ENQUEUE,
         _ => ACTION_GRAPH_NODE_KIND_DISPATCH,
     }
 }
@@ -2681,6 +2783,168 @@ fn dispatch_entry_edge_kind(route: &DispatchUri, has_predicate: bool) -> &'stati
         _ if has_predicate => ACTION_GRAPH_EDGE_KIND_PREDICATE_GATE,
         _ => ACTION_GRAPH_EDGE_KIND_TRIGGER_DISPATCH,
     }
+}
+
+fn signature_status_label(status: &crate::triggers::SignatureStatus) -> &'static str {
+    match status {
+        crate::triggers::SignatureStatus::Verified => "verified",
+        crate::triggers::SignatureStatus::Unsigned => "unsigned",
+        crate::triggers::SignatureStatus::Failed { .. } => "failed",
+    }
+}
+
+fn trigger_node_metadata(event: &TriggerEvent) -> BTreeMap<String, serde_json::Value> {
+    let mut metadata = BTreeMap::new();
+    metadata.insert("provider".to_string(), serde_json::json!(event.provider.as_str()));
+    metadata.insert("event_kind".to_string(), serde_json::json!(event.kind));
+    metadata.insert("dedupe_key".to_string(), serde_json::json!(event.dedupe_key));
+    metadata.insert(
+        "signature_status".to_string(),
+        serde_json::json!(signature_status_label(&event.signature_status)),
+    );
+    metadata
+}
+
+fn predicate_node_metadata(
+    binding: &TriggerBinding,
+    predicate: &super::registry::TriggerPredicateSpec,
+    event: &TriggerEvent,
+    evaluation: &PredicateEvaluationRecord,
+) -> BTreeMap<String, serde_json::Value> {
+    let mut metadata = BTreeMap::new();
+    metadata.insert(
+        "trigger_id".to_string(),
+        serde_json::json!(binding.id.as_str()),
+    );
+    metadata.insert("predicate".to_string(), serde_json::json!(predicate.raw));
+    metadata.insert("result".to_string(), serde_json::json!(evaluation.result));
+    metadata.insert("cost_usd".to_string(), serde_json::json!(evaluation.cost_usd));
+    metadata.insert("tokens".to_string(), serde_json::json!(evaluation.tokens));
+    metadata.insert(
+        "latency_ms".to_string(),
+        serde_json::json!(evaluation.latency_ms),
+    );
+    metadata.insert("cached".to_string(), serde_json::json!(evaluation.cached));
+    metadata.insert("event_id".to_string(), serde_json::json!(event.id.0));
+    if let Some(reason) = evaluation.reason.as_ref() {
+        metadata.insert("reason".to_string(), serde_json::json!(reason));
+    }
+    metadata
+}
+
+fn dispatch_node_metadata(
+    route: &DispatchUri,
+    binding: &TriggerBinding,
+    event: &TriggerEvent,
+    attempt: u32,
+) -> BTreeMap<String, serde_json::Value> {
+    let mut metadata = BTreeMap::new();
+    metadata.insert(
+        "handler_kind".to_string(),
+        serde_json::json!(route.kind()),
+    );
+    metadata.insert("target_uri".to_string(), serde_json::json!(route.target_uri()));
+    metadata.insert("attempt".to_string(), serde_json::json!(attempt));
+    metadata.insert(
+        "trigger_id".to_string(),
+        serde_json::json!(binding.id.as_str()),
+    );
+    metadata.insert("event_id".to_string(), serde_json::json!(event.id.0));
+    if let Some(target_agent) = dispatch_target_agent(route) {
+        metadata.insert("target_agent".to_string(), serde_json::json!(target_agent));
+    }
+    if let DispatchUri::Worker { queue } = route {
+        metadata.insert("queue_name".to_string(), serde_json::json!(queue));
+    }
+    metadata
+}
+
+fn dispatch_success_metadata(
+    route: &DispatchUri,
+    binding: &TriggerBinding,
+    event: &TriggerEvent,
+    attempt: u32,
+    result: &serde_json::Value,
+) -> BTreeMap<String, serde_json::Value> {
+    let mut metadata = dispatch_node_metadata(route, binding, event, attempt);
+    match route {
+        DispatchUri::A2a { .. } => {
+            if let Some(task_id) = result
+                .get("task_id")
+                .or_else(|| result.get("id"))
+                .and_then(|value| value.as_str())
+            {
+                metadata.insert("task_id".to_string(), serde_json::json!(task_id));
+            }
+            if let Some(state) = result.get("state").and_then(|value| value.as_str()) {
+                metadata.insert("state".to_string(), serde_json::json!(state));
+            }
+        }
+        DispatchUri::Worker { .. } => {
+            if let Some(job_event_id) = result.get("job_event_id").and_then(|value| value.as_u64()) {
+                metadata.insert("job_event_id".to_string(), serde_json::json!(job_event_id));
+            }
+            if let Some(response_topic) = result.get("response_topic").and_then(|value| value.as_str()) {
+                metadata.insert("response_topic".to_string(), serde_json::json!(response_topic));
+            }
+        }
+        DispatchUri::Local { .. } => {}
+    }
+    metadata
+}
+
+fn dispatch_error_metadata(
+    route: &DispatchUri,
+    binding: &TriggerBinding,
+    event: &TriggerEvent,
+    attempt: u32,
+    error: &DispatchError,
+) -> BTreeMap<String, serde_json::Value> {
+    let mut metadata = dispatch_node_metadata(route, binding, event, attempt);
+    metadata.insert("error".to_string(), serde_json::json!(error.to_string()));
+    metadata
+}
+
+fn retry_node_metadata(
+    binding: &TriggerBinding,
+    event: &TriggerEvent,
+    attempt: u32,
+    delay: Duration,
+    error: &DispatchError,
+) -> BTreeMap<String, serde_json::Value> {
+    let mut metadata = BTreeMap::new();
+    metadata.insert(
+        "trigger_id".to_string(),
+        serde_json::json!(binding.id.as_str()),
+    );
+    metadata.insert("event_id".to_string(), serde_json::json!(event.id.0));
+    metadata.insert("attempt".to_string(), serde_json::json!(attempt));
+    metadata.insert(
+        "delay_ms".to_string(),
+        serde_json::json!(delay.as_millis()),
+    );
+    metadata.insert("error".to_string(), serde_json::json!(error.to_string()));
+    metadata
+}
+
+fn dlq_node_metadata(
+    binding: &TriggerBinding,
+    event: &TriggerEvent,
+    attempt_count: u32,
+    final_error: &str,
+) -> BTreeMap<String, serde_json::Value> {
+    let mut metadata = BTreeMap::new();
+    metadata.insert(
+        "trigger_id".to_string(),
+        serde_json::json!(binding.id.as_str()),
+    );
+    metadata.insert("event_id".to_string(), serde_json::json!(event.id.0));
+    metadata.insert(
+        "attempt_count".to_string(),
+        serde_json::json!(attempt_count),
+    );
+    metadata.insert("final_error".to_string(), serde_json::json!(final_error));
+    metadata
 }
 
 fn predicate_value_as_bool(value: VmValue) -> Result<bool, String> {
