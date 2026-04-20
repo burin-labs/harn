@@ -54,6 +54,7 @@ impl<'a> Linter<'a> {
                 if Self::is_test_pipeline_name(name) {
                     self.test_pipeline_depth += 1;
                 }
+                let _ = self.analyze_secret_scan_block(body, false);
                 self.lint_block(body);
                 if Self::is_test_pipeline_name(name) {
                     self.test_pipeline_depth -= 1;
@@ -112,6 +113,7 @@ impl<'a> Linter<'a> {
                     self.declare_parameter(&p.name, snode.span);
                 }
                 self.return_type_stack.push(return_type.clone());
+                let _ = self.analyze_secret_scan_block(body, false);
                 self.lint_block(body);
                 self.return_type_stack.pop();
                 self.loop_depth = saved_loop_depth;
@@ -146,6 +148,7 @@ impl<'a> Linter<'a> {
                     self.declare_parameter(&p.name, snode.span);
                 }
                 self.return_type_stack.push(return_type.clone());
+                let _ = self.analyze_secret_scan_block(body, false);
                 self.lint_block(body);
                 self.return_type_stack.pop();
                 self.loop_depth = saved_loop_depth;

@@ -19,6 +19,7 @@ use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
 
 use harn_vm::event_log::{EventLog, LogEvent, Topic};
+use harn_vm::{append_secret_scan_audit, secret_scan_content, SecretFinding};
 
 use crate::cli::{McpServeArgs, McpServeTransport, OrchestratorLocalArgs};
 use crate::commands::orchestrator::common::{
@@ -187,6 +188,11 @@ struct DlqRetryRequest {
 }
 
 #[derive(Clone, Debug, Deserialize)]
+struct SecretScanRequest {
+    content: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
 struct TrustQueryRequest {
     #[serde(default)]
     query: Option<String>,
@@ -314,6 +320,48 @@ impl McpOrchestratorService {
             id,
             json!({
                 "tools": [
+                    tool_def(
+                        "harn.secret_scan",
+                        "Scan content for high-signal secrets before commit or PR-open flows. The `harn::secret_scan` alias is also accepted.",
+                        json!({
+                            "type": "object",
+                            "required": ["content"],
+                            "properties": {
+                                "content": { "type": "string" },
+                            },
+                            "additionalProperties": false,
+                        }),
+                        Some(json!({
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "required": [
+                                    "detector",
+                                    "source",
+                                    "title",
+                                    "line",
+                                    "column_start",
+                                    "column_end",
+                                    "start_offset",
+                                    "end_offset",
+                                    "redacted",
+                                    "fingerprint"
+                                ],
+                                "properties": {
+                                    "detector": { "type": "string" },
+                                    "source": { "type": "string" },
+                                    "title": { "type": "string" },
+                                    "line": { "type": "integer" },
+                                    "column_start": { "type": "integer" },
+                                    "column_end": { "type": "integer" },
+                                    "start_offset": { "type": "integer" },
+                                    "end_offset": { "type": "integer" },
+                                    "redacted": { "type": "string" },
+                                    "fingerprint": { "type": "string" },
+                                },
+                            },
+                        })),
+                    ),
                     tool_def(
                         "harn.trigger.fire",
                         "Dispatch a trigger inline and return its event id plus terminal status.",
@@ -446,6 +494,7 @@ impl McpOrchestratorService {
         let trace_id = format!("mcp_{}", Uuid::now_v7().simple());
 
         let result = match name {
+            "harn.secret_scan" | "harn::secret_scan" => self.tool_secret_scan(arguments).await,
             "harn.trigger.fire" => self.tool_trigger_fire(session, &trace_id, arguments).await,
             "harn.trigger.list" => self.tool_trigger_list(arguments).await,
             "harn.trigger.replay" => self.tool_trigger_replay(arguments).await,
@@ -509,6 +558,22 @@ impl McpOrchestratorService {
             ),
             Err(error) => harn_vm::jsonrpc::error_response(id, -32002, &error),
         }
+    }
+
+    async fn tool_secret_scan(&self, arguments: JsonValue) -> Result<JsonValue, String> {
+        let request: SecretScanRequest =
+            serde_json::from_value(arguments).map_err(|error| error.to_string())?;
+        let findings: Vec<SecretFinding> = secret_scan_content(&request.content);
+        let ctx = load_local_runtime(&self.local_args()).await?;
+        append_secret_scan_audit(
+            ctx.event_log.as_ref(),
+            "mcp.harn.secret_scan",
+            request.content.len(),
+            &findings,
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+        serde_json::to_value(findings).map_err(|error| error.to_string())
     }
 
     async fn tool_trigger_fire(
@@ -1572,6 +1637,36 @@ pub fn on_fail(event: TriggerEvent) -> any {
         assert!(triggers
             .iter()
             .any(|trigger| trigger["trigger_id"] == "cron-fail"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn secret_scan_tool_returns_findings_and_audits_them() {
+        let _guard = test_lock();
+        let temp = TempDir::new().unwrap();
+        write_fixture(&temp);
+        let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
+        let mut session = init_session(&service).await;
+
+        let result = call_tool(
+            &service,
+            &mut session,
+            "harn.secret_scan",
+            json!({
+                "content": r#"token = "ghp_1234567890abcdefghijklmnopqrstuvwxyzAB""#,
+            }),
+        )
+        .await;
+        let findings = result.as_array().unwrap();
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0]["detector"], "github-token");
+
+        let ctx = load_local_runtime(&service.local_args()).await.unwrap();
+        let events = read_topic(&ctx.event_log, harn_vm::SECRET_SCAN_AUDIT_TOPIC)
+            .await
+            .unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].1.payload["caller"], "mcp.harn.secret_scan");
+        assert_eq!(events[0].1.payload["finding_count"], 1);
     }
 
     #[tokio::test(flavor = "current_thread")]

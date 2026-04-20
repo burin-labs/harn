@@ -14,5 +14,13 @@
     // Tables: don't enforce padding style
     "MD060": false
   },
-  "ignores": ["node_modules", "**/node_modules", "target", ".burin", ".claude", "docs/src/SUMMARY.md"]
+  "ignores": [
+    "node_modules",
+    "**/node_modules",
+    "target",
+    ".burin",
+    ".claude",
+    "docs/src/SUMMARY.md",
+    "conformance/tests/skills/**/.harn/skills/**/SKILL.md"
+  ]
 }

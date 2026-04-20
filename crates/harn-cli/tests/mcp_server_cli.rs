@@ -173,6 +173,31 @@ fn mcp_server_stdio_roundtrips_tools_and_resources() {
         .unwrap()
         .iter()
         .any(|tool| tool["name"] == "harn.trigger.fire"));
+    assert!(tools["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|tool| tool["name"] == "harn.secret_scan"));
+
+    let scan = send_request(
+        &mut stdin,
+        &mut stdout,
+        json!({
+            "jsonrpc": "2.0",
+            "id": 22,
+            "method": "tools/call",
+            "params": {
+                "name": "harn.secret_scan",
+                "arguments": {
+                    "content": r#"token = "ghp_1234567890abcdefghijklmnopqrstuvwxyzAB""#
+                }
+            }
+        }),
+    );
+    assert_eq!(
+        scan["result"]["structuredContent"][0]["detector"],
+        json!("github-token")
+    );
 
     let dlq_fire = send_request(
         &mut stdin,

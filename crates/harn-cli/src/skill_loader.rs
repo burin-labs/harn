@@ -377,7 +377,7 @@ mod tests {
         fs::create_dir_all(&skill_dir).unwrap();
         fs::write(
             skill_dir.join("SKILL.md"),
-            "---\nname: deploy\nrequire_signature: true\n---\nbody",
+            "---\nname: deploy\nshort: deploy short card\nrequire_signature: true\n---\nbody",
         )
         .unwrap();
 
@@ -426,13 +426,17 @@ mod tests {
 
         let skill_dir = tmp.path().join("deploy");
         fs::create_dir_all(&skill_dir).unwrap();
-        fs::write(skill_dir.join("SKILL.md"), "---\nname: deploy\n---\nbody").unwrap();
+        fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: deploy\nshort: deploy short card\n---\nbody",
+        )
+        .unwrap();
 
         let keys = skill_provenance::generate_keypair(tmp.path().join("signer.pem")).unwrap();
         skill_provenance::sign_skill(skill_dir.join("SKILL.md"), &keys.private_key_path).unwrap();
         fs::write(
             skill_dir.join("SKILL.md"),
-            "---\nname: deploy\n---\nbody changed",
+            "---\nname: deploy\nshort: deploy short card\n---\nbody changed",
         )
         .unwrap();
 
