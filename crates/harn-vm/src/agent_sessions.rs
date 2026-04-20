@@ -77,6 +77,18 @@ thread_local! {
     static CURRENT_SESSION_STACK: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
 }
 
+pub struct CurrentSessionGuard {
+    active: bool,
+}
+
+impl Drop for CurrentSessionGuard {
+    fn drop(&mut self) {
+        if self.active {
+            pop_current_session();
+        }
+    }
+}
+
 /// Set the per-thread session cap. Primarily for tests; production VMs
 /// inherit the default.
 pub fn set_session_cap(cap: usize) {
@@ -108,6 +120,15 @@ pub(crate) fn pop_current_session() {
 
 pub fn current_session_id() -> Option<String> {
     CURRENT_SESSION_STACK.with(|stack| stack.borrow().last().cloned())
+}
+
+pub fn enter_current_session(id: impl Into<String>) -> CurrentSessionGuard {
+    let id = id.into();
+    if id.trim().is_empty() {
+        return CurrentSessionGuard { active: false };
+    }
+    push_current_session(id);
+    CurrentSessionGuard { active: true }
 }
 
 pub fn exists(id: &str) -> bool {

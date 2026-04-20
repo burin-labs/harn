@@ -69,12 +69,19 @@ fn suppress_default_info_log(message: &str) -> bool {
     .any(|prefix| message.starts_with(prefix))
 }
 
+#[derive(Clone, Default)]
+struct SessionInfo {
+    title: Option<String>,
+    meta: serde_json::Map<String, serde_json::Value>,
+}
+
 struct Session {
     cwd: PathBuf,
     /// If a cancel was requested for the current prompt execution.
     cancelled: Arc<AtomicBool>,
     /// Active host bridge for queued input / daemon resume while a prompt runs.
     host_bridge: Option<Rc<harn_vm::bridge::HostBridge>>,
+    info: SessionInfo,
 }
 
 /// ACP server that reads JSON-RPC requests from stdin and writes
@@ -185,6 +192,9 @@ impl AcpServer {
                 "protocolVersion": 1,
                 "agentCapabilities": {
                     "promptCapabilities": {},
+                    "sessionCapabilities": {
+                        "fork": {},
+                    },
                 },
                 "agentInfo": {
                     "name": "harn",
@@ -192,6 +202,19 @@ impl AcpServer {
                 },
             }),
         );
+    }
+
+    fn insert_session(&mut self, session_id: String, cwd: PathBuf, info: SessionInfo) {
+        self.sessions.insert(
+            session_id.clone(),
+            Session {
+                cwd,
+                cancelled: Arc::new(AtomicBool::new(false)),
+                host_bridge: None,
+                info,
+            },
+        );
+        harn_vm::agent_sessions::open_or_create(Some(session_id));
     }
 
     fn handle_session_new(&mut self, id: &serde_json::Value, params: &serde_json::Value) {
@@ -202,15 +225,7 @@ impl AcpServer {
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
 
         let session_id = self.next_session_id();
-
-        self.sessions.insert(
-            session_id.clone(),
-            Session {
-                cwd,
-                cancelled: Arc::new(AtomicBool::new(false)),
-                host_bridge: None,
-            },
-        );
+        self.insert_session(session_id.clone(), cwd, SessionInfo::default());
 
         self.send_response(
             id,
@@ -221,6 +236,125 @@ impl AcpServer {
                     "name": "Default",
                     "description": "Execute harn pipelines",
                 }],
+            }),
+        );
+    }
+
+    fn emit_session_info_update(&self, session_id: &str, info: &SessionInfo) {
+        let mut update = serde_json::json!({
+            "sessionUpdate": "session_info_update",
+        });
+        if let Some(title) = &info.title {
+            update["title"] = serde_json::json!(title);
+        }
+        if !info.meta.is_empty() {
+            update["_meta"] = serde_json::Value::Object(info.meta.clone());
+        }
+        self.send_notification(
+            "session/update",
+            serde_json::json!({
+                "sessionId": session_id,
+                "update": update,
+            }),
+        );
+    }
+
+    fn handle_session_fork(&mut self, id: &serde_json::Value, params: &serde_json::Value) {
+        let src_id = params
+            .get("session_id")
+            .or_else(|| params.get("sessionId"))
+            .and_then(|value| value.as_str())
+            .map(str::to_string);
+        let Some(src_id) = src_id else {
+            self.send_error(id, -32602, "Missing session_id");
+            return;
+        };
+        let Some(src_cwd) = self
+            .sessions
+            .get(&src_id)
+            .map(|session| session.cwd.clone())
+        else {
+            self.send_error(id, -32602, &format!("Unknown session: {src_id}"));
+            return;
+        };
+
+        if !harn_vm::agent_sessions::exists(&src_id) {
+            harn_vm::agent_sessions::open_or_create(Some(src_id.clone()));
+        }
+
+        let keep_first = match params.get("keep_first").and_then(|value| value.as_i64()) {
+            Some(value) if value < 0 => {
+                self.send_error(id, -32602, "Invalid keep_first: must be >= 0");
+                return;
+            }
+            Some(value) => Some(value as usize),
+            None => None,
+        };
+        let dst_id = params
+            .get("id")
+            .and_then(|value| value.as_str())
+            .map(str::to_string);
+        if let Some(dst_id) = dst_id.as_deref() {
+            if self.sessions.contains_key(dst_id) {
+                self.send_error(id, -32602, &format!("Session already exists: {dst_id}"));
+                return;
+            }
+            if harn_vm::agent_sessions::exists(dst_id) {
+                self.send_error(id, -32602, &format!("Session already exists: {dst_id}"));
+                return;
+            }
+        }
+        let branch_name = params
+            .get("branch_name")
+            .and_then(|value| value.as_str())
+            .map(str::to_string);
+
+        let new_session_id = match keep_first {
+            Some(keep_first) => harn_vm::agent_sessions::fork_at(&src_id, keep_first, dst_id),
+            None => harn_vm::agent_sessions::fork(&src_id, dst_id),
+        };
+        let Some(new_session_id) = new_session_id else {
+            self.send_error(id, -32000, &format!("Failed to fork session: {src_id}"));
+            return;
+        };
+
+        let snapshot = harn_vm::agent_sessions::snapshot(&new_session_id)
+            .and_then(|value| serde_json::to_value(harn_vm::llm::vm_value_to_json(&value)).ok())
+            .unwrap_or_else(|| serde_json::json!({}));
+        let branched_at = snapshot
+            .get("branched_at_event_index")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
+
+        let mut meta = serde_json::Map::new();
+        meta.insert("state".to_string(), serde_json::json!("forked"));
+        meta.insert("parent_id".to_string(), serde_json::json!(src_id.clone()));
+        meta.insert("branched_at".to_string(), branched_at.clone());
+        if let Some(branch_name) = &branch_name {
+            meta.insert("branch_name".to_string(), serde_json::json!(branch_name));
+        }
+        let info = SessionInfo {
+            title: branch_name,
+            meta,
+        };
+
+        self.sessions.insert(
+            new_session_id.clone(),
+            Session {
+                cwd: src_cwd,
+                cancelled: Arc::new(AtomicBool::new(false)),
+                host_bridge: None,
+                info: info.clone(),
+            },
+        );
+        self.emit_session_info_update(&new_session_id, &info);
+        self.send_response(
+            id,
+            serde_json::json!({
+                "sessionId": new_session_id,
+                "state": "forked",
+                "parent_id": src_id,
+                "branched_at": branched_at,
             }),
         );
     }
@@ -263,6 +397,8 @@ impl AcpServer {
                 return;
             }
         };
+        harn_vm::agent_sessions::open_or_create(Some(session_id.clone()));
+        let _session_guard = harn_vm::agent_sessions::enter_current_session(session_id.clone());
 
         let fatal_prompt_error = |message: String| -> ! {
             exit_after_fatal_prompt_error(&self.stdout_lock, &session_id, id, &message)
@@ -436,8 +572,20 @@ impl AcpServer {
     fn handle_session_list(&self, id: &serde_json::Value) {
         let sessions: Vec<serde_json::Value> = self
             .sessions
-            .keys()
-            .map(|sid| serde_json::json!({"sessionId": sid}))
+            .iter()
+            .map(|(sid, session)| {
+                let mut item = serde_json::json!({
+                    "sessionId": sid,
+                    "cwd": session.cwd,
+                });
+                if let Some(title) = &session.info.title {
+                    item["title"] = serde_json::json!(title);
+                }
+                if !session.info.meta.is_empty() {
+                    item["_meta"] = serde_json::Value::Object(session.info.meta.clone());
+                }
+                item
+            })
             .collect();
         self.send_response(id, serde_json::json!({"sessions": sessions}));
     }
@@ -715,6 +863,9 @@ pub async fn run_acp_server(pipeline: Option<&str>) {
                     }
                     "session/new" => {
                         server.handle_session_new(&id, &params);
+                    }
+                    "session/fork" => {
+                        server.handle_session_fork(&id, &params);
                     }
                     "session/prompt" => {
                         server.handle_session_prompt(&id, &params).await;
