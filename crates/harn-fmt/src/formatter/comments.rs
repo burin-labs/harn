@@ -1,6 +1,6 @@
 use super::Formatter;
 
-impl Formatter {
+impl Formatter<'_> {
     /// Emit any comments on the given source line that haven't been emitted yet.
     ///
     /// Non-doc comments are emitted verbatim. Doc comments are coalesced with

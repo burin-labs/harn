@@ -17,7 +17,8 @@ pub(crate) struct Comment {
     pub(crate) is_doc: bool,
 }
 
-pub(crate) struct Formatter {
+pub(crate) struct Formatter<'a> {
+    pub(crate) source: &'a str,
     pub(crate) output: String,
     pub(crate) indent: usize,
     pub(crate) line_width: usize,
@@ -28,13 +29,15 @@ pub(crate) struct Formatter {
     pub(crate) emitted_lines: HashSet<usize>,
 }
 
-impl Formatter {
+impl<'a> Formatter<'a> {
     pub(crate) fn new(
+        source: &'a str,
         comments: BTreeMap<usize, Vec<Comment>>,
         line_width: usize,
         separator_width: usize,
     ) -> Self {
         Self {
+            source,
             output: String::new(),
             indent: 0,
             line_width,
@@ -45,8 +48,6 @@ impl Formatter {
     }
 
     pub(crate) fn finish(mut self) -> String {
-        let trimmed: Vec<&str> = self.output.lines().map(|l| l.trim_end()).collect();
-        self.output = trimmed.join("\n");
         if !self.output.ends_with('\n') {
             self.output.push('\n');
         }
@@ -71,6 +72,10 @@ impl Formatter {
         self.write_indent();
         self.output.push_str(s);
         self.output.push('\n');
+    }
+
+    pub(crate) fn source_slice(&self, node: &SNode) -> &str {
+        &self.source[node.span.start..node.span.end]
     }
 
     /// Inner lines of a block — does NOT include opening/closing braces.

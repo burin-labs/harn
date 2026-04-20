@@ -9,7 +9,7 @@ use crate::Formatter;
 
 /// Format a default-value expression in a destructuring pattern.
 fn format_default_expr(node: &SNode) -> String {
-    let fmt = Formatter::new(BTreeMap::new(), 100, 80);
+    let fmt = Formatter::new("", BTreeMap::new(), 100, 80);
     fmt.format_expr(node)
 }
 
@@ -179,28 +179,6 @@ pub(crate) fn escape_string(s: &str) -> String {
         .replace('\t', "\\t")
 }
 
-/// Render a multi-line `"""..."""` with body and closing delimiter indented
-/// one level deeper. The lexer strips common leading indent from the body, so
-/// re-indenting is purely aesthetic and round-trip safe.
-pub(crate) fn format_multiline_triple_quoted(body: &str, indent: usize) -> String {
-    let pad = "  ".repeat(indent + 1);
-    if body.is_empty() {
-        return format!("\"\"\"\n{pad}\"\"\"");
-    }
-    let indented: String = body
-        .split('\n')
-        .map(|l| {
-            if l.is_empty() {
-                String::new()
-            } else {
-                format!("{pad}{l}")
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-    format!("\"\"\"\n{indented}\n{pad}\"\"\"")
-}
-
 /// Format the `(error_var: Type)` portion of a catch clause.
 pub(crate) fn format_catch_param(
     error_var: &Option<String>,
@@ -304,7 +282,7 @@ pub(crate) fn format_where_clauses(clauses: &[WhereClause]) -> String {
 
 /// Format an expression inline for use in parameter defaults.
 pub(crate) fn format_inline_expr(node: &SNode) -> String {
-    let fmt = Formatter::new(BTreeMap::new(), 100, 80);
+    let fmt = Formatter::new("", BTreeMap::new(), 100, 80);
     fmt.format_expr(node)
 }
 

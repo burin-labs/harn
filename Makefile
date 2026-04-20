@@ -80,9 +80,8 @@ lint-harn:
 	@echo "    Harn lint OK."
 
 # Check harn formatting on conformance tests (CI, not pre-commit).
-# Skip tests that exercise syntax the formatter intentionally normalizes
-# (triple-quoted multiline strings → single-line escaped strings).
-FMT_HARN_SKIP := multiline_strings.harn multiline_string_interpolation.harn semicolon_statements.harn semicolon_if_else_invalid.harn semicolon_try_catch_invalid.harn semicolon_empty_statement_invalid.harn
+# Skip syntax cases the formatter intentionally normalizes.
+FMT_HARN_SKIP := semicolon_statements.harn semicolon_if_else_invalid.harn semicolon_try_catch_invalid.harn semicolon_empty_statement_invalid.harn
 EXPERIMENT_HARN_CHECK := experiments/burin-mini/host.harn experiments/burin-mini/lib/common.harn experiments/burin-mini/lib/profiles.harn
 fmt-harn:
 	@echo "=== Checking Harn formatting ==="
