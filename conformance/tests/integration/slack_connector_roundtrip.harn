@@ -1,0 +1,45 @@
+import { add_reaction, configure, post_message, reset } from "std/connectors/slack"
+import { process_exec } from "std/runtime"
+
+fn wait_for_file(path, attempts) {
+  var remaining = attempts
+  while !file_exists(path) && remaining > 0 {
+    sleep(50ms)
+    remaining = remaining - 1
+  }
+  assert(file_exists(path), "timed out waiting for " + path)
+}
+
+pipeline default() {
+  let root = project_root() ?? cwd()
+  let helper_dir = path_join(root, "conformance/helpers")
+  let server_script = path_join(helper_dir, "slack_mock_server.py")
+  let state_dir = path_join(temp_dir(), "harn-slack-connector-" + uuid())
+  let port_path = path_join(state_dir, "port")
+  let pid_path = path_join(state_dir, "server.pid")
+  let log_path = path_join(state_dir, "server.log")
+  mkdir(state_dir)
+  let start = process_exec(
+    "python3 \"" + server_script + "\" \"" + state_dir + "\" >\"" + log_path
+    + "\" 2>&1 & echo $! > \""
+    + pid_path
+    + "\"",
+  )
+  assert(start?.success, "slack mock server started")
+  wait_for_file(port_path, 100)
+  let base = "http://127.0.0.1:" + read_file(port_path).trim()
+  configure({api_base_url: base, bot_token: "xoxb-test-token"})
+  let posted = post_message("C123ABC456", "hello from harn")
+  let reacted = add_reaction("C123ABC456", posted.ts, "thumbsup")
+  let state = json_parse(http_get(base + "/__state").body)
+  let _stop = http_post(base + "/__shutdown", "")
+  process_exec("kill $(cat \"" + pid_path + "\") >/dev/null 2>&1 || true")
+  reset()
+  println(posted.channel)
+  println(posted.ts)
+  println(reacted.event.reaction)
+  println(reacted.event.item.channel)
+  println(len(state.requests))
+  println(state.requests[0].path)
+  println(state.requests[1].body.timestamp)
+}

@@ -14,6 +14,8 @@ use super::ConnectorError;
 
 pub const SIGNATURE_VERIFY_AUDIT_TOPIC: &str = "audit.signature_verify";
 pub const DEFAULT_GITHUB_SIGNATURE_HEADER: &str = "x-hub-signature-256";
+pub const DEFAULT_SLACK_SIGNATURE_HEADER: &str = "x-slack-signature";
+pub const DEFAULT_SLACK_TIMESTAMP_HEADER: &str = "x-slack-request-timestamp";
 pub const DEFAULT_STRIPE_SIGNATURE_HEADER: &str = "stripe-signature";
 pub const DEFAULT_STANDARD_WEBHOOKS_ID_HEADER: &str = "webhook-id";
 pub const DEFAULT_STANDARD_WEBHOOKS_SIGNATURE_HEADER: &str = "webhook-signature";
@@ -27,6 +29,11 @@ pub enum HmacSignatureStyle<'a> {
     GitHub {
         signature_header: &'a str,
         prefix: &'a str,
+    },
+    Slack {
+        signature_header: &'a str,
+        timestamp_header: &'a str,
+        version: &'a str,
     },
     Stripe {
         signature_header: &'a str,
@@ -59,6 +66,14 @@ impl<'a> HmacSignatureStyle<'a> {
         }
     }
 
+    pub fn slack() -> Self {
+        Self::Slack {
+            signature_header: DEFAULT_SLACK_SIGNATURE_HEADER,
+            timestamp_header: DEFAULT_SLACK_TIMESTAMP_HEADER,
+            version: "v0",
+        }
+    }
+
     pub fn standard_webhooks() -> Self {
         Self::StandardWebhooks {
             id_header: DEFAULT_STANDARD_WEBHOOKS_ID_HEADER,
@@ -78,6 +93,7 @@ impl<'a> HmacSignatureStyle<'a> {
     fn label(self) -> &'static str {
         match self {
             Self::GitHub { .. } => "github",
+            Self::Slack { .. } => "slack",
             Self::Stripe { .. } => "stripe",
             Self::StandardWebhooks { .. } => "standard_webhooks",
             Self::CanonicalRequest { .. } => "canonical_request",
@@ -111,6 +127,26 @@ pub async fn verify_hmac_signed<L: EventLog + ?Sized>(
                 body,
                 headers,
                 secret,
+                now,
+            )
+            .await
+        }
+        HmacSignatureStyle::Slack {
+            signature_header,
+            timestamp_header,
+            version,
+        } => {
+            verify_slack(
+                event_log,
+                provider,
+                style,
+                signature_header,
+                timestamp_header,
+                version,
+                body,
+                headers,
+                secret,
+                timestamp_window,
                 now,
             )
             .await
@@ -263,6 +299,136 @@ async fn verify_github<L: EventLog + ?Sized>(
         let error =
             ConnectorError::invalid_signature("signature did not match the raw request body");
         reject(event_log, provider, style, &error, now, None, None).await
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn verify_slack<L: EventLog + ?Sized>(
+    event_log: &L,
+    provider: &ProviderId,
+    style: HmacSignatureStyle<'_>,
+    signature_header: &str,
+    timestamp_header: &str,
+    version: &str,
+    body: &[u8],
+    headers: &BTreeMap<String, String>,
+    secret: &str,
+    timestamp_window: Option<Duration>,
+    now: OffsetDateTime,
+) -> Result<(), ConnectorError> {
+    let window = match timestamp_window {
+        Some(window) => window,
+        None => {
+            let error = ConnectorError::Unsupported(
+                "slack-style signature verification requires a timestamp window".to_string(),
+            );
+            return reject(event_log, provider, style, &error, now, None, None).await;
+        }
+    };
+
+    let timestamp_raw = match required_header(headers, timestamp_header) {
+        Ok(value) => value,
+        Err(error) => {
+            return reject(event_log, provider, style, &error, now, None, Some(window)).await;
+        }
+    };
+    let timestamp = match timestamp_raw.parse::<i64>() {
+        Ok(raw) => match OffsetDateTime::from_unix_timestamp(raw) {
+            Ok(timestamp) => timestamp,
+            Err(error) => {
+                let error = ConnectorError::InvalidHeader {
+                    name: timestamp_header.to_string(),
+                    detail: error.to_string(),
+                };
+                return reject(event_log, provider, style, &error, now, None, Some(window)).await;
+            }
+        },
+        Err(error) => {
+            let error = ConnectorError::InvalidHeader {
+                name: timestamp_header.to_string(),
+                detail: error.to_string(),
+            };
+            return reject(event_log, provider, style, &error, now, None, Some(window)).await;
+        }
+    };
+    ensure_timestamp_within_window(event_log, provider, style, timestamp, window, now).await?;
+
+    let header = match required_header(headers, signature_header) {
+        Ok(value) => value,
+        Err(error) => {
+            return reject(
+                event_log,
+                provider,
+                style,
+                &error,
+                now,
+                Some(timestamp),
+                Some(window),
+            )
+            .await;
+        }
+    };
+    let prefix = format!("{version}=");
+    let encoded = match header.strip_prefix(prefix.as_str()) {
+        Some(value) => value,
+        None => {
+            let error = ConnectorError::InvalidHeader {
+                name: signature_header.to_string(),
+                detail: format!("expected `{prefix}` prefix"),
+            };
+            return reject(
+                event_log,
+                provider,
+                style,
+                &error,
+                now,
+                Some(timestamp),
+                Some(window),
+            )
+            .await;
+        }
+    };
+    let provided = match hex::decode(encoded) {
+        Ok(value) => value,
+        Err(error) => {
+            let error = ConnectorError::InvalidHeader {
+                name: signature_header.to_string(),
+                detail: error.to_string(),
+            };
+            return reject(
+                event_log,
+                provider,
+                style,
+                &error,
+                now,
+                Some(timestamp),
+                Some(window),
+            )
+            .await;
+        }
+    };
+
+    let mut signed = Vec::with_capacity(version.len() + timestamp_raw.len() + body.len() + 2);
+    signed.extend_from_slice(version.as_bytes());
+    signed.push(b':');
+    signed.extend_from_slice(timestamp_raw.as_bytes());
+    signed.push(b':');
+    signed.extend_from_slice(body);
+    let expected = hmac_sha256(secret.as_bytes(), &signed);
+    if secure_eq(&expected, &provided) {
+        Ok(())
+    } else {
+        let error = ConnectorError::invalid_signature("slack signature mismatch");
+        reject(
+            event_log,
+            provider,
+            style,
+            &error,
+            now,
+            Some(timestamp),
+            Some(window),
+        )
+        .await
     }
 }
 
@@ -973,6 +1139,37 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn verifies_slack_signature_using_official_docs_vector() {
+        let log = log();
+        let headers = BTreeMap::from([
+            (
+                "X-Slack-Signature".to_string(),
+                "v0=a2114d57b48eac39b9ad189dd8316235a7b4a8d21a10bd27519666489c69b503".to_string(),
+            ),
+            (
+                "X-Slack-Request-Timestamp".to_string(),
+                "1531420618".to_string(),
+            ),
+        ]);
+        let body = b"token=xyzz0WbapA4vBCDEFasx0q6G&team_id=T1DC2JH3J&team_domain=testteamnow&channel_id=G8PSS9T3V&channel_name=foobar&user_id=U2CERLKJA&user_name=roadrunner&command=%2Fwebhook-collect&text=&response_url=https%3A%2F%2Fhooks.slack.com%2Fcommands%2FT1DC2JH3J%2F397700885554%2F96rGlfmibIGlgcZRskXaIFfN&trigger_id=398738663015.47445629121.803a0bc887a14d10d2c447fce8b6703c";
+
+        verify_hmac_signed(
+            log.as_ref(),
+            &ProviderId::from("slack"),
+            HmacSignatureStyle::slack(),
+            body,
+            &headers,
+            "8f742231b10e8888abcd99yyyzzz85a5",
+            Some(Duration::minutes(5)),
+            OffsetDateTime::from_unix_timestamp(1_531_420_618).unwrap(),
+        )
+        .await
+        .unwrap();
+
+        assert!(audit_events(&log).await.is_empty());
+    }
+
+    #[tokio::test]
     async fn verifies_standard_webhooks_using_vendor_test_vector() {
         let log = log();
         let headers = BTreeMap::from([
@@ -1124,6 +1321,38 @@ mod tests {
             "whsec_test_secret",
             Some(Duration::seconds(10)),
             OffsetDateTime::from_unix_timestamp(12_400).unwrap(),
+        )
+        .await
+        .unwrap_err();
+
+        assert!(matches!(error, ConnectorError::TimestampOutOfWindow { .. }));
+        assert_eq!(audit_events(&log).await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn rejects_expired_slack_timestamp_window() {
+        let log = log();
+        let headers = BTreeMap::from([
+            (
+                "X-Slack-Signature".to_string(),
+                "v0=a2114d57b48eac39b9ad189dd8316235a7b4a8d21a10bd27519666489c69b503".to_string(),
+            ),
+            (
+                "X-Slack-Request-Timestamp".to_string(),
+                "1531420618".to_string(),
+            ),
+        ]);
+        let body = b"token=xyzz0WbapA4vBCDEFasx0q6G&team_id=T1DC2JH3J&team_domain=testteamnow&channel_id=G8PSS9T3V&channel_name=foobar&user_id=U2CERLKJA&user_name=roadrunner&command=%2Fwebhook-collect&text=&response_url=https%3A%2F%2Fhooks.slack.com%2Fcommands%2FT1DC2JH3J%2F397700885554%2F96rGlfmibIGlgcZRskXaIFfN&trigger_id=398738663015.47445629121.803a0bc887a14d10d2c447fce8b6703c";
+
+        let error = verify_hmac_signed(
+            log.as_ref(),
+            &ProviderId::from("slack"),
+            HmacSignatureStyle::slack(),
+            body,
+            &headers,
+            "8f742231b10e8888abcd99yyyzzz85a5",
+            Some(Duration::minutes(5)),
+            OffsetDateTime::from_unix_timestamp(1_531_421_000).unwrap(),
         )
         .await
         .unwrap_err();

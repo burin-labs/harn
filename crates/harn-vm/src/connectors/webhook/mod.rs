@@ -428,6 +428,11 @@ fn derive_dedupe_key(
         WebhookSignatureVariant::GitHub => header_value(headers, "x-github-delivery")
             .map(ToString::to_string)
             .unwrap_or_else(|| fallback_body_digest(raw_body)),
+        WebhookSignatureVariant::Slack => body
+            .get("event_id")
+            .and_then(JsonValue::as_str)
+            .map(ToString::to_string)
+            .unwrap_or_else(|| fallback_body_digest(raw_body)),
     }
 }
 

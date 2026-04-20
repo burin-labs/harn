@@ -29,6 +29,7 @@ use crate::triggers::{
 pub mod cron;
 pub mod github;
 pub mod hmac;
+pub mod slack;
 #[cfg(test)]
 pub(crate) mod test_util;
 pub mod webhook;
@@ -37,11 +38,12 @@ pub use cron::{CatchupMode, CronConnector};
 pub use github::GitHubConnector;
 pub use hmac::{
     verify_hmac_authorization, HmacSignatureStyle, DEFAULT_CANONICAL_AUTHORIZATION_HEADER,
-    DEFAULT_CANONICAL_HMAC_SCHEME, DEFAULT_GITHUB_SIGNATURE_HEADER,
-    DEFAULT_STANDARD_WEBHOOKS_ID_HEADER, DEFAULT_STANDARD_WEBHOOKS_SIGNATURE_HEADER,
-    DEFAULT_STANDARD_WEBHOOKS_TIMESTAMP_HEADER, DEFAULT_STRIPE_SIGNATURE_HEADER,
-    SIGNATURE_VERIFY_AUDIT_TOPIC,
+    DEFAULT_CANONICAL_HMAC_SCHEME, DEFAULT_GITHUB_SIGNATURE_HEADER, DEFAULT_SLACK_SIGNATURE_HEADER,
+    DEFAULT_SLACK_TIMESTAMP_HEADER, DEFAULT_STANDARD_WEBHOOKS_ID_HEADER,
+    DEFAULT_STANDARD_WEBHOOKS_SIGNATURE_HEADER, DEFAULT_STANDARD_WEBHOOKS_TIMESTAMP_HEADER,
+    DEFAULT_STRIPE_SIGNATURE_HEADER, SIGNATURE_VERIFY_AUDIT_TOPIC,
 };
+pub use slack::SlackConnector;
 use webhook::WebhookProviderProfile;
 pub use webhook::{GenericWebhookConnector, WebhookSignatureVariant};
 
@@ -696,6 +698,9 @@ fn default_connector_for_provider(provider: &ProviderMetadata) -> Box<dyn Connec
     // users to switch to a distinct provider_id.
     if provider.provider == "github" {
         return Box::new(GitHubConnector::new());
+    }
+    if provider.provider == "slack" {
+        return Box::new(SlackConnector::new());
     }
     match &provider.runtime {
         ProviderRuntimeMetadata::Builtin {

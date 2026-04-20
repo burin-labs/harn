@@ -1,0 +1,39 @@
+import { filter_nil } from "std/collections"
+import { merge } from "std/json"
+
+var slack_connector_config = {}
+
+pub fn configure(config) {
+  slack_connector_config = filter_nil(config ?? {})
+  return slack_connector_config
+}
+
+pub fn reset() {
+  slack_connector_config = {}
+}
+
+fn __call(method, params = {}) {
+  return connector_call("slack", method, filter_nil(merge(slack_connector_config, params ?? {})))
+}
+
+pub fn post_message(channel, text, blocks = nil, options = nil) {
+  return __call(
+    "post_message",
+    filter_nil((options ?? {}) + {channel: channel, text: text, blocks: blocks}),
+  )
+}
+
+pub fn update_message(channel, ts, text, blocks = nil, options = nil) {
+  return __call(
+    "update_message",
+    filter_nil((options ?? {}) + {channel: channel, ts: ts, text: text, blocks: blocks}),
+  )
+}
+
+pub fn add_reaction(channel, ts, name, options = nil) {
+  return __call("add_reaction", (options ?? {}) + {channel: channel, ts: ts, name: name})
+}
+
+pub fn upload_file(filename, content, options = nil) {
+  return __call("upload_file", (options ?? {}) + {filename: filename, content: content})
+}

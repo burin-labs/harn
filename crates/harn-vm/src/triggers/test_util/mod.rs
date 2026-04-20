@@ -1220,6 +1220,7 @@ fn webhook_binding(
                 WebhookSignatureVariant::Standard => "standard",
                 WebhookSignatureVariant::Stripe => "stripe",
                 WebhookSignatureVariant::GitHub => "github",
+                WebhookSignatureVariant::Slack => "slack",
             },
             "source": "fixtures",
         }

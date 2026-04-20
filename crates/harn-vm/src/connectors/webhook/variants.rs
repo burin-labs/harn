@@ -15,6 +15,7 @@ pub enum WebhookSignatureVariant {
     Standard,
     Stripe,
     GitHub,
+    Slack,
 }
 
 impl WebhookSignatureVariant {
@@ -23,15 +24,16 @@ impl WebhookSignatureVariant {
             "standard" => Ok(Self::Standard),
             "stripe" => Ok(Self::Stripe),
             "github" => Ok(Self::GitHub),
+            "slack" => Ok(Self::Slack),
             other => Err(ConnectorError::Unsupported(format!(
-                "unsupported generic webhook signature scheme `{other}`; expected one of standard, stripe, github"
+                "unsupported generic webhook signature scheme `{other}`; expected one of standard, stripe, github, slack"
             ))),
         }
     }
 
     pub fn default_timestamp_window(self) -> Option<Duration> {
         match self {
-            Self::Standard | Self::Stripe => Some(Duration::minutes(5)),
+            Self::Standard | Self::Stripe | Self::Slack => Some(Duration::minutes(5)),
             Self::GitHub => None,
         }
     }
@@ -50,6 +52,7 @@ impl WebhookSignatureVariant {
             Self::Standard => HmacSignatureStyle::standard_webhooks(),
             Self::Stripe => HmacSignatureStyle::stripe(),
             Self::GitHub => HmacSignatureStyle::github(),
+            Self::Slack => HmacSignatureStyle::slack(),
         };
         block_on(verify_hmac_signed(
             event_log,

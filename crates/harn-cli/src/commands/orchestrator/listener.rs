@@ -7,7 +7,7 @@ use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, Extension, OriginalUri, Query};
 use axum::http::{HeaderMap, Method, StatusCode};
 use axum::middleware;
-use axum::response::IntoResponse;
+use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::Router;
 use serde_json::{json, Value as JsonValue};
@@ -156,6 +156,7 @@ pub(crate) struct RouteConfig {
     pub(crate) signing_secret: Option<SecretId>,
     pub(crate) dedupe_key_template: Option<String>,
     pub(crate) dedupe_retention_days: u32,
+    pub(crate) connector: Option<harn_vm::connectors::ConnectorHandle>,
 }
 
 impl RouteConfig {
@@ -169,6 +170,7 @@ impl RouteConfig {
                 let signature_mode = match provider.as_str() {
                     "github" => SignatureMode::GitHub,
                     "webhook" => SignatureMode::Standard,
+                    "slack" => SignatureMode::Unsigned,
                     other => {
                         return Err(format!(
                             "HTTP listener does not yet support webhook provider '{other}' on this branch"
@@ -191,6 +193,7 @@ impl RouteConfig {
                     ),
                     dedupe_key_template: trigger.config.dedupe_key.clone(),
                     dedupe_retention_days: trigger.config.retry.retention_days,
+                    connector: None,
                 }))
             }
             TriggerKind::A2aPush => Ok(Some(Self {
@@ -203,6 +206,7 @@ impl RouteConfig {
                 signing_secret: None,
                 dedupe_key_template: trigger.config.dedupe_key.clone(),
                 dedupe_retention_days: trigger.config.retry.retention_days,
+                connector: None,
             })),
             _ => Ok(None),
         }
@@ -399,7 +403,7 @@ async fn ingest_trigger(
 
     let result = normalize_request(&context, &normalized_headers, &query, body.as_ref()).await;
     let response = match result {
-        Ok(event) => {
+        Ok(NormalizedRequest::Event(event)) => {
             let dedupe_ttl = Duration::from_secs(
                 u64::from(context.route.dedupe_retention_days.max(1)) * 24 * 60 * 60,
             );
@@ -408,7 +412,7 @@ async fn ingest_trigger(
                 &context.route.trigger_id,
                 context.route.dedupe_key_template.is_some(),
                 dedupe_ttl,
-                event,
+                *event,
             )
             .await;
             match postprocess {
@@ -469,6 +473,11 @@ async fn ingest_trigger(
                 }
             }
         }
+        Ok(NormalizedRequest::Immediate(response)) => {
+            context.metrics.dispatched.fetch_add(1, Ordering::Relaxed);
+            context.metrics.in_flight.fetch_sub(1, Ordering::Relaxed);
+            response
+        }
         Err(error) => {
             context.metrics.failed.fetch_add(1, Ordering::Relaxed);
             context.metrics.in_flight.fetch_sub(1, Ordering::Relaxed);
@@ -499,10 +508,37 @@ async fn authorize_request(
 async fn normalize_request(
     context: &RouteContext,
     normalized_headers: &BTreeMap<String, String>,
-    _query: &BTreeMap<String, String>,
+    query: &BTreeMap<String, String>,
     body: &[u8],
-) -> Result<harn_vm::TriggerEvent, HttpError> {
+) -> Result<NormalizedRequest, HttpError> {
     let received_at = OffsetDateTime::now_utc();
+    if let Some(connector) = context.route.connector.as_ref() {
+        let mut raw = harn_vm::RawInbound::new("", normalized_headers.clone(), body.to_vec());
+        raw.query = query.clone();
+        raw.received_at = received_at;
+        raw.metadata = json!({
+            "binding_id": context.route.trigger_id,
+            "binding_version": context.route.binding_version,
+            "path": context.route.path,
+        });
+        let event = connector
+            .lock()
+            .await
+            .normalize_inbound(raw)
+            .map_err(HttpError::from_connector)?;
+        if let Some(challenge) = slack_url_verification_challenge(&event) {
+            return Ok(NormalizedRequest::Immediate(
+                (
+                    StatusCode::OK,
+                    [("content-type", "text/plain; charset=utf-8")],
+                    challenge,
+                )
+                    .into_response(),
+            ));
+        }
+        return Ok(NormalizedRequest::Event(Box::new(event)));
+    }
+
     let normalized_body = normalize_body(body, normalized_headers);
     let provider = context.route.provider.clone();
 
@@ -544,12 +580,7 @@ async fn normalize_request(
 
     let provider_kind = provider_event_kind(&provider, normalized_headers, &normalized_body);
     let trigger_kind = trigger_event_kind(&provider, normalized_headers, &normalized_body);
-    let dedupe_key = dedupe_key(
-        context.route.signature_mode,
-        normalized_headers,
-        &normalized_body,
-        body,
-    );
+    let dedupe_key = dedupe_key(&provider, normalized_headers, &normalized_body, body);
     let provider_payload = harn_vm::ProviderPayload::normalize(
         &provider,
         &provider_kind,
@@ -558,7 +589,7 @@ async fn normalize_request(
     )
     .map_err(|error| HttpError::unprocessable(error.to_string()))?;
 
-    Ok(harn_vm::TriggerEvent {
+    Ok(NormalizedRequest::Event(Box::new(harn_vm::TriggerEvent {
         id: harn_vm::TriggerEventId::new(),
         provider,
         kind: trigger_kind,
@@ -574,7 +605,12 @@ async fn normalize_request(
         provider_payload,
         signature_status,
         dedupe_claimed: false,
-    })
+    })))
+}
+
+enum NormalizedRequest {
+    Event(Box<harn_vm::TriggerEvent>),
+    Immediate(Response),
 }
 
 fn trigger_path(trigger: &CollectedManifestTrigger) -> Result<String, String> {
@@ -760,6 +796,10 @@ fn normalize_headers(headers: &HeaderMap) -> BTreeMap<String, String> {
         ("x-github-event", "X-GitHub-Event"),
         ("x-github-delivery", "X-GitHub-Delivery"),
         ("x-hub-signature-256", "X-Hub-Signature-256"),
+        ("x-slack-signature", "X-Slack-Signature"),
+        ("x-slack-request-timestamp", "X-Slack-Request-Timestamp"),
+        ("x-slack-retry-num", "X-Slack-Retry-Num"),
+        ("x-slack-retry-reason", "X-Slack-Retry-Reason"),
         ("webhook-id", "webhook-id"),
         ("webhook-signature", "webhook-signature"),
         ("webhook-timestamp", "webhook-timestamp"),
@@ -827,16 +867,16 @@ fn trigger_event_kind(
 }
 
 fn dedupe_key(
-    signature_mode: SignatureMode,
+    provider: &harn_vm::ProviderId,
     headers: &BTreeMap<String, String>,
     body: &JsonValue,
     raw_body: &[u8],
 ) -> String {
-    match signature_mode {
-        SignatureMode::GitHub => header_value(headers, "x-github-delivery")
+    match provider.as_str() {
+        "github" => header_value(headers, "x-github-delivery")
             .map(ToString::to_string)
             .unwrap_or_else(|| fallback_body_digest(raw_body)),
-        SignatureMode::Standard => header_value(headers, "webhook-id")
+        "webhook" => header_value(headers, "webhook-id")
             .map(ToString::to_string)
             .or_else(|| {
                 body.get("id")
@@ -844,7 +884,7 @@ fn dedupe_key(
                     .map(ToString::to_string)
             })
             .unwrap_or_else(|| fallback_body_digest(raw_body)),
-        SignatureMode::Unsigned => header_value(headers, "x-a2a-delivery")
+        _ => header_value(headers, "x-a2a-delivery")
             .map(ToString::to_string)
             .unwrap_or_else(|| fallback_body_digest(raw_body)),
     }
@@ -856,6 +896,7 @@ fn infer_occurred_at(payload: &harn_vm::ProviderPayload) -> Option<OffsetDateTim
     };
     let raw = match payload {
         harn_vm::triggers::event::KnownProviderPayload::GitHub(payload) => github_raw(payload),
+        harn_vm::triggers::event::KnownProviderPayload::Slack(payload) => slack_raw(payload),
         harn_vm::triggers::event::KnownProviderPayload::Webhook(payload) => &payload.raw,
         harn_vm::triggers::event::KnownProviderPayload::A2aPush(payload) => &payload.raw,
         _ => return None,
@@ -877,6 +918,33 @@ fn github_raw(payload: &harn_vm::triggers::event::GitHubEventPayload) -> &JsonVa
         harn_vm::triggers::event::GitHubEventPayload::WorkflowRun(inner) => &inner.common.raw,
         harn_vm::triggers::event::GitHubEventPayload::Other(common) => &common.raw,
     }
+}
+
+fn slack_raw(payload: &harn_vm::triggers::event::SlackEventPayload) -> &JsonValue {
+    match payload {
+        harn_vm::triggers::event::SlackEventPayload::MessageChannels(inner) => &inner.common.raw,
+        harn_vm::triggers::event::SlackEventPayload::AppMention(inner) => &inner.common.raw,
+        harn_vm::triggers::event::SlackEventPayload::ReactionAdded(inner) => &inner.common.raw,
+        harn_vm::triggers::event::SlackEventPayload::TeamJoin(inner) => &inner.common.raw,
+        harn_vm::triggers::event::SlackEventPayload::ChannelCreated(inner) => &inner.common.raw,
+        harn_vm::triggers::event::SlackEventPayload::Other(common) => &common.raw,
+    }
+}
+
+fn slack_url_verification_challenge(event: &harn_vm::TriggerEvent) -> Option<String> {
+    let harn_vm::ProviderPayload::Known(harn_vm::triggers::event::KnownProviderPayload::Slack(
+        payload,
+    )) = &event.provider_payload
+    else {
+        return None;
+    };
+    if event.kind != "url_verification" {
+        return None;
+    }
+    slack_raw(payload)
+        .get("challenge")
+        .and_then(JsonValue::as_str)
+        .map(ToString::to_string)
 }
 
 fn header_value<'a>(headers: &'a BTreeMap<String, String>, name: &str) -> Option<&'a str> {
@@ -1008,6 +1076,7 @@ mod tests {
             signing_secret: None,
             dedupe_key_template: None,
             dedupe_retention_days: harn_vm::DEFAULT_INBOX_RETENTION_DAYS,
+            connector: None,
         }
     }
 
@@ -1067,6 +1136,7 @@ mod tests {
             signing_secret: Some(SecretId::new("github", "test-signing-secret")),
             dedupe_key_template: Some("event.dedupe_key".to_string()),
             dedupe_retention_days: harn_vm::DEFAULT_INBOX_RETENTION_DAYS,
+            connector: None,
         }
     }
 

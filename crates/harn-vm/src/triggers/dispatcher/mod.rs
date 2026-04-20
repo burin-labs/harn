@@ -1308,6 +1308,24 @@ fn notify_test_inbox_dequeued() {
     });
 }
 
+pub async fn enqueue_trigger_event<L: EventLog + ?Sized>(
+    event_log: &L,
+    event: &TriggerEvent,
+) -> Result<u64, DispatchError> {
+    let topic = Topic::new(TRIGGER_INBOX_ENVELOPES_TOPIC)
+        .expect("static trigger.inbox.envelopes topic is valid");
+    let headers = event_headers(event, None, None, None);
+    let payload =
+        serde_json::to_value(event).map_err(|error| DispatchError::Serde(error.to_string()))?;
+    event_log
+        .append(
+            &topic,
+            LogEvent::new("event_ingested", payload).with_headers(headers),
+        )
+        .await
+        .map_err(DispatchError::from)
+}
+
 pub fn snapshot_dispatcher_stats() -> DispatcherStatsSnapshot {
     ACTIVE_DISPATCHER_STATE.with(|slot| {
         slot.borrow()

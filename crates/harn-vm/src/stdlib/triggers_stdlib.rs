@@ -893,9 +893,12 @@ fn default_provider_payload(
         "slack" => serde_json::json!({
             "provider": "slack",
             "event": kind,
-            "subtype": serde_json::Value::Null,
+            "event_id": serde_json::Value::Null,
+            "api_app_id": serde_json::Value::Null,
             "team_id": serde_json::Value::Null,
             "channel_id": serde_json::Value::Null,
+            "user_id": serde_json::Value::Null,
+            "event_ts": serde_json::Value::Null,
             "raw": raw_event,
         }),
         "linear" => serde_json::json!({

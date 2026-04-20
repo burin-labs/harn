@@ -121,12 +121,13 @@ async fn run_local(args: OrchestratorServeArgs) -> Result<(), String> {
 
     let binding_versions = live_manifest_binding_versions();
     let route_configs = build_route_configs(&collected_triggers, &binding_versions)?;
-    let connector_runtime = initialize_connectors(
+    let mut connector_runtime = initialize_connectors(
         &collected_triggers,
         event_log.clone(),
         secret_provider.clone(),
     )
     .await?;
+    let route_configs = attach_route_connectors(route_configs, &connector_runtime.registry)?;
     eprintln!(
         "[harn] registered connectors ({}): {}",
         connector_runtime.providers.len(),
@@ -159,6 +160,16 @@ async fn run_local(args: OrchestratorServeArgs) -> Result<(), String> {
     let mut live_manifest = manifest;
     let mut live_triggers = collected_triggers;
     eprintln!("[harn] HTTP listener ready on {}", listener.url());
+
+    connector_runtime.activations = connector_runtime
+        .registry
+        .activate_all(&connector_runtime.trigger_registry)
+        .await
+        .map_err(|error| error.to_string())?;
+    eprintln!(
+        "[harn] activated connectors: {}",
+        format_activation_summary(&connector_runtime.activations)
+    );
 
     write_state_snapshot(
         &state_dir.join(STATE_SNAPSHOT_FILE),
@@ -239,7 +250,8 @@ async fn run_local(args: OrchestratorServeArgs) -> Result<(), String> {
     })
     .await?;
 
-    graceful_shutdown(
+    dispatcher.shutdown();
+    let shutdown = graceful_shutdown(
         GracefulShutdownCtx {
             role: args.role,
             bind: local_bind,
@@ -260,11 +272,13 @@ async fn run_local(args: OrchestratorServeArgs) -> Result<(), String> {
         cron_pump,
         inbox_pump,
     )
-    .await
+    .await;
+    shutdown
 }
 
 struct ConnectorRuntime {
-    _registry: harn_vm::ConnectorRegistry,
+    registry: harn_vm::ConnectorRegistry,
+    trigger_registry: harn_vm::TriggerRegistry,
     handles: Vec<harn_vm::connectors::ConnectorHandle>,
     providers: Vec<String>,
     activations: Vec<harn_vm::ActivationHandle>,
@@ -344,16 +358,12 @@ async fn initialize_connectors(
         providers.push(provider_name);
     }
 
-    let activations = registry
-        .activate_all(&trigger_registry)
-        .await
-        .map_err(|error| error.to_string())?;
-
     Ok(ConnectorRuntime {
-        _registry: registry,
+        registry,
+        trigger_registry,
         handles,
         providers,
-        activations,
+        activations: Vec::new(),
     })
 }
 
@@ -423,6 +433,35 @@ fn build_route_configs(
         }
     }
     Ok(routes)
+}
+
+fn attach_route_connectors(
+    routes: Vec<RouteConfig>,
+    registry: &harn_vm::ConnectorRegistry,
+) -> Result<Vec<RouteConfig>, String> {
+    routes
+        .into_iter()
+        .map(|mut route| {
+            // Only providers whose `normalize_inbound` owns HMAC verification
+            // and URL-challenge handling need the connector handle on the
+            // HTTP listener path. Webhook/github routes stay on the
+            // signature-based `normalize_request` flow in the listener so
+            // their existing Option-2 post-processing dedupe keeps working.
+            if connector_owns_ingress(route.provider.as_str()) {
+                route.connector = Some(registry.get(&route.provider).ok_or_else(|| {
+                    format!(
+                        "connector registry is missing provider '{}'",
+                        route.provider.as_str()
+                    )
+                })?);
+            }
+            Ok(route)
+        })
+        .collect()
+}
+
+fn connector_owns_ingress(provider: &str) -> bool {
+    matches!(provider, "slack")
 }
 
 fn live_manifest_binding_versions() -> BTreeMap<String, u32> {
