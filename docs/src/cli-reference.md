@@ -344,6 +344,36 @@ harn doctor
 harn doctor --no-network
 ```
 
+## harn connect linear
+
+Register a Linear webhook through the GraphQL `webhookCreate` mutation using
+the Linear triggers declared in the nearest `harn.toml`.
+
+The command derives `resourceTypes` from `[[triggers]]` entries with
+`provider = "linear"` and requires either `--team-id` or
+`--all-public-teams`.
+
+```bash
+harn connect linear \
+  --url https://example.com/hooks/linear \
+  --team-id 72b2a2dc-6f4f-4423-9d34-24b5bd10634a \
+  --access-token-secret linear/access-token
+
+harn connect linear \
+  --url https://example.com/hooks/linear \
+  --all-public-teams \
+  --api-key-secret linear/api-key \
+  --json
+```
+
+Auth options:
+
+- `--access-token` or `--access-token-secret`
+- `--api-key` or `--api-key-secret`
+
+Use `--config <path>` to point at an explicit manifest instead of discovering
+the nearest one from the current working directory.
+
 ## harn watch
 
 Watch a file for changes and re-run it automatically.

@@ -48,7 +48,42 @@ type SlackOtherEventPayload = {provider: "slack", event: string, event_id: strin
 
 type SlackEventPayload = SlackMessageEventPayload | SlackAppMentionEventPayload | SlackReactionAddedEventPayload | SlackAppHomeOpenedEventPayload | SlackAssistantThreadStartedEventPayload | SlackOtherEventPayload
 
-type LinearEventPayload = {provider: "linear", action: string | nil, organization_id: string | nil, webhook_timestamp: string | nil, raw: dict}
+type LinearEventCommon = {provider: "linear", event: string, action: string | nil, delivery_id: string | nil, organization_id: string | nil, webhook_timestamp: int | nil, webhook_id: string | nil, url: string | nil, created_at: string | nil, actor: dict | nil, raw: dict}
+
+type LinearIssueTitleChange = {field_name: "title", previous: string | nil}
+type LinearIssueDescriptionChange = {field_name: "description", previous: string | nil}
+type LinearIssuePriorityChange = {field_name: "priority", previous: int | nil}
+type LinearIssueEstimateChange = {field_name: "estimate", previous: int | nil}
+type LinearIssueStateIdChange = {field_name: "state_id", previous: string | nil}
+type LinearIssueTeamIdChange = {field_name: "team_id", previous: string | nil}
+type LinearIssueAssigneeIdChange = {field_name: "assignee_id", previous: string | nil}
+type LinearIssueProjectIdChange = {field_name: "project_id", previous: string | nil}
+type LinearIssueCycleIdChange = {field_name: "cycle_id", previous: string | nil}
+type LinearIssueDueDateChange = {field_name: "due_date", previous: string | nil}
+type LinearIssueParentIdChange = {field_name: "parent_id", previous: string | nil}
+type LinearIssueSortOrderChange = {field_name: "sort_order", previous: float | nil}
+type LinearIssueLabelIdsChange = {field_name: "label_ids", previous: list<string>}
+type LinearIssueCompletedAtChange = {field_name: "completed_at", previous: string | nil}
+type LinearIssueOtherChange = {field_name: "other", field: string, previous: any}
+type LinearIssueChange = LinearIssueTitleChange | LinearIssueDescriptionChange | LinearIssuePriorityChange | LinearIssueEstimateChange | LinearIssueStateIdChange | LinearIssueTeamIdChange | LinearIssueAssigneeIdChange | LinearIssueProjectIdChange | LinearIssueCycleIdChange | LinearIssueDueDateChange | LinearIssueParentIdChange | LinearIssueSortOrderChange | LinearIssueLabelIdsChange | LinearIssueCompletedAtChange | LinearIssueOtherChange
+
+type LinearIssueEventPayload = {provider: "linear", event: "issue", action: string | nil, delivery_id: string | nil, organization_id: string | nil, webhook_timestamp: int | nil, webhook_id: string | nil, url: string | nil, created_at: string | nil, actor: dict | nil, issue: dict, changes: list<LinearIssueChange>, raw: dict}
+
+type LinearIssueCommentEventPayload = {provider: "linear", event: "comment", action: string | nil, delivery_id: string | nil, organization_id: string | nil, webhook_timestamp: int | nil, webhook_id: string | nil, url: string | nil, created_at: string | nil, actor: dict | nil, comment: dict, raw: dict}
+
+type LinearIssueLabelEventPayload = {provider: "linear", event: "issue_label", action: string | nil, delivery_id: string | nil, organization_id: string | nil, webhook_timestamp: int | nil, webhook_id: string | nil, url: string | nil, created_at: string | nil, actor: dict | nil, label: dict, raw: dict}
+
+type LinearProjectEventPayload = {provider: "linear", event: "project", action: string | nil, delivery_id: string | nil, organization_id: string | nil, webhook_timestamp: int | nil, webhook_id: string | nil, url: string | nil, created_at: string | nil, actor: dict | nil, project: dict, raw: dict}
+
+type LinearCycleEventPayload = {provider: "linear", event: "cycle", action: string | nil, delivery_id: string | nil, organization_id: string | nil, webhook_timestamp: int | nil, webhook_id: string | nil, url: string | nil, created_at: string | nil, actor: dict | nil, cycle: dict, raw: dict}
+
+type LinearCustomerEventPayload = {provider: "linear", event: "customer", action: string | nil, delivery_id: string | nil, organization_id: string | nil, webhook_timestamp: int | nil, webhook_id: string | nil, url: string | nil, created_at: string | nil, actor: dict | nil, customer: dict, raw: dict}
+
+type LinearCustomerRequestEventPayload = {provider: "linear", event: "customer_request", action: string | nil, delivery_id: string | nil, organization_id: string | nil, webhook_timestamp: int | nil, webhook_id: string | nil, url: string | nil, created_at: string | nil, actor: dict | nil, customer_request: dict, raw: dict}
+
+type LinearOtherEventPayload = LinearEventCommon
+
+type LinearEventPayload = LinearIssueEventPayload | LinearIssueCommentEventPayload | LinearIssueLabelEventPayload | LinearProjectEventPayload | LinearCycleEventPayload | LinearCustomerEventPayload | LinearCustomerRequestEventPayload | LinearOtherEventPayload
 
 type NotionPolledChangeEvent = {resource: string, source_id: string, entity_id: string, high_water_mark: string, before: dict | nil, after: dict}
 

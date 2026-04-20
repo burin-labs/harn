@@ -176,6 +176,7 @@ impl RouteConfig {
                 let provider = trigger.config.provider.clone();
                 let signature_mode = match provider.as_str() {
                     "github" => SignatureMode::GitHub,
+                    "linear" => SignatureMode::Unsigned,
                     "webhook" => SignatureMode::Standard,
                     "slack" => SignatureMode::Unsigned,
                     "notion" => SignatureMode::Unsigned,
@@ -878,6 +879,9 @@ fn normalize_headers(headers: &HeaderMap) -> BTreeMap<String, String> {
         ("x-github-event", "X-GitHub-Event"),
         ("x-github-delivery", "X-GitHub-Delivery"),
         ("x-hub-signature-256", "X-Hub-Signature-256"),
+        ("linear-signature", "Linear-Signature"),
+        ("linear-delivery", "Linear-Delivery"),
+        ("linear-event", "Linear-Event"),
         ("x-slack-signature", "X-Slack-Signature"),
         ("x-slack-request-timestamp", "X-Slack-Request-Timestamp"),
         ("x-slack-retry-num", "X-Slack-Retry-Num"),

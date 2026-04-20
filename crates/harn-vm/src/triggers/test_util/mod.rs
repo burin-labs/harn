@@ -13,6 +13,7 @@ use tokio::sync::Notify;
 use uuid::Uuid;
 
 use crate::connectors::cron::{CatchupMode, CronConnector, CronEventSink};
+use crate::connectors::linear::LinearConnector;
 use crate::connectors::webhook::{
     GenericWebhookConnector, WebhookProviderProfile, WebhookSignatureVariant,
 };
@@ -56,6 +57,8 @@ pub const TRIGGER_TEST_FIXTURES: &[&str] = &[
     "slack_events_3s_ack",
     "slack_events_message",
     "webhook_dedupe_blocks_duplicates",
+    "webhook_linear_issue_update",
+    "webhook_linear_timestamp_window",
     "webhook_verifies_hmac",
 ];
 
@@ -231,6 +234,8 @@ impl TriggerTestHarness {
             "slack_events_3s_ack" => self.slack_events_3s_ack().await,
             "slack_events_message" => self.slack_events_message().await,
             "webhook_dedupe_blocks_duplicates" => self.webhook_dedupe_blocks_duplicates().await,
+            "webhook_linear_issue_update" => self.webhook_linear_issue_update().await,
+            "webhook_linear_timestamp_window" => self.webhook_linear_timestamp_window().await,
             "webhook_verifies_hmac" => self.webhook_verifies_hmac().await,
             _ => Err(format!(
                 "unknown trigger harness fixture '{fixture}' (known: {})",
@@ -387,6 +392,80 @@ impl TriggerTestHarness {
         })
     }
 
+    async fn webhook_linear_issue_update(self) -> Result<TriggerHarnessResult, String> {
+        let _guard = clock::install_override(self.clock.clone());
+        let log = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(32)));
+        let metrics = Arc::new(MetricsRegistry::default());
+        let inbox = Arc::new(
+            InboxIndex::new(log.clone(), metrics.clone())
+                .await
+                .map_err(|error| error.to_string())?,
+        );
+        let mut connector = LinearConnector::new();
+        connector
+            .init(ConnectorCtx {
+                event_log: log,
+                secrets: Arc::new(StaticSecretProvider::new(
+                    "linear",
+                    BTreeMap::from([(
+                        SecretId::new("linear", "test-signing-secret"),
+                        "linear-signing-secret".to_string(),
+                    )]),
+                )),
+                inbox,
+                metrics,
+                rate_limiter: Arc::new(RateLimiterFactory::default()),
+            })
+            .await
+            .map_err(|error| error.to_string())?;
+        connector
+            .activate(&[linear_binding()])
+            .await
+            .map_err(|error| error.to_string())?;
+
+        let event = connector
+            .normalize_inbound(linear_issue_update_inbound())
+            .map_err(|error| error.to_string())?;
+        self.connector_registry.record_event(
+            "linear.fixture",
+            1,
+            &event,
+            Some("issue_update"),
+            None,
+        );
+        let emitted = self.connector_registry.emitted();
+        let changes = match &event.provider_payload {
+            ProviderPayload::Known(KnownProviderPayload::Linear(
+                crate::triggers::event::LinearEventPayload::Issue(payload),
+            )) => payload
+                .changes
+                .iter()
+                .map(|change| serde_json::to_value(change).unwrap_or_default())
+                .collect::<Vec<_>>(),
+            other => {
+                return Err(format!(
+                    "expected normalized Linear issue payload, got {other:?}"
+                ))
+            }
+        };
+        Ok(TriggerHarnessResult {
+            fixture: "webhook_linear_issue_update".to_string(),
+            ok: emitted.len() == 1 && emitted[0].kind == "issue.update" && changes.len() == 3,
+            stub: false,
+            summary: "linear webhook issue.update normalizes into typed payload + change-set"
+                .to_string(),
+            emitted,
+            attempts: Vec::new(),
+            dlq: Vec::new(),
+            alerts: Vec::new(),
+            bindings: Vec::new(),
+            notes: Vec::new(),
+            details: json!({
+                "changes": changes,
+            }),
+        })
+    }
+
     async fn slack_events_3s_ack(self) -> Result<TriggerHarnessResult, String> {
         let _guard = clock::install_override(self.clock.clone());
         let log = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(32)));
@@ -457,6 +536,60 @@ impl TriggerTestHarness {
             notes: Vec::new(),
             details: json!({
                 "elapsed_ms": elapsed_ms,
+            }),
+        })
+    }
+
+    async fn webhook_linear_timestamp_window(self) -> Result<TriggerHarnessResult, String> {
+        let _guard = clock::install_override(self.clock.clone());
+        let log = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(32)));
+        let metrics = Arc::new(MetricsRegistry::default());
+        let inbox = Arc::new(
+            InboxIndex::new(log.clone(), metrics.clone())
+                .await
+                .map_err(|error| error.to_string())?,
+        );
+        let mut connector = LinearConnector::new();
+        connector
+            .init(ConnectorCtx {
+                event_log: log,
+                secrets: Arc::new(StaticSecretProvider::new(
+                    "linear",
+                    BTreeMap::from([(
+                        SecretId::new("linear", "test-signing-secret"),
+                        "linear-signing-secret".to_string(),
+                    )]),
+                )),
+                inbox,
+                metrics: metrics.clone(),
+                rate_limiter: Arc::new(RateLimiterFactory::default()),
+            })
+            .await
+            .map_err(|error| error.to_string())?;
+        connector
+            .activate(&[linear_binding()])
+            .await
+            .map_err(|error| error.to_string())?;
+
+        let error = connector
+            .normalize_inbound(linear_issue_update_inbound_stale())
+            .expect_err("stale linear webhook should reject");
+        Ok(TriggerHarnessResult {
+            fixture: "webhook_linear_timestamp_window".to_string(),
+            ok: matches!(error, ConnectorError::TimestampOutOfWindow { .. })
+                && metrics.snapshot().linear_timestamp_rejections_total == 1,
+            stub: false,
+            summary: "linear webhook replay window rejects stale timestamps and increments metrics"
+                .to_string(),
+            emitted: Vec::new(),
+            attempts: Vec::new(),
+            dlq: Vec::new(),
+            alerts: Vec::new(),
+            bindings: Vec::new(),
+            notes: Vec::new(),
+            details: json!({
+                "error": error.to_string(),
+                "linear_timestamp_rejections_total": metrics.snapshot().linear_timestamp_rejections_total,
             }),
         })
     }
@@ -1484,6 +1617,81 @@ fn github_raw_inbound() -> RawInbound {
     );
     raw.received_at = OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap();
     raw
+}
+
+fn linear_binding() -> ConnectorTriggerBinding {
+    let mut binding =
+        ConnectorTriggerBinding::new(ProviderId::from("linear"), "webhook", "linear.fixture");
+    binding.config = json!({
+        "match": { "path": "/hooks/linear" },
+        "replay_grace_secs": 15,
+        "secrets": { "signing_secret": "linear/test-signing-secret" },
+    });
+    binding
+}
+
+fn linear_issue_update_inbound() -> RawInbound {
+    linear_raw_inbound(1_715_000_000_000i64, 1_715_000_000_000i64)
+}
+
+fn linear_issue_update_inbound_stale() -> RawInbound {
+    linear_raw_inbound(1_715_000_000_000i64, 1_715_000_100_000i64)
+}
+
+fn linear_raw_inbound(webhook_timestamp_ms: i64, received_at_ms: i64) -> RawInbound {
+    let body = json!({
+        "action": "update",
+        "type": "Issue",
+        "organizationId": "org_123",
+        "webhookTimestamp": webhook_timestamp_ms,
+        "actor": { "id": "user_1", "name": "Ada" },
+        "data": { "id": "ISS-1", "title": "Fix connector" },
+        "updatedFrom": { "title": "Old title", "priority": 2, "labelIds": ["lbl_1"] }
+    });
+    let encoded = serde_json::to_vec(&body).unwrap();
+    let signature = hex::encode(hmac_sha256("linear-signing-secret".as_bytes(), &encoded));
+    let mut raw = RawInbound::new(
+        "",
+        BTreeMap::from([
+            ("Linear-Signature".to_string(), signature),
+            ("Linear-Delivery".to_string(), "delivery-123".to_string()),
+            ("Content-Type".to_string(), "application/json".to_string()),
+        ]),
+        encoded,
+    );
+    raw.received_at = OffsetDateTime::from_unix_timestamp(received_at_ms / 1000).unwrap();
+    raw.metadata = json!({ "binding_id": "linear.fixture" });
+    raw
+}
+
+fn hmac_sha256(secret: &[u8], data: &[u8]) -> Vec<u8> {
+    const BLOCK_SIZE: usize = 64;
+    let mut key = if secret.len() > BLOCK_SIZE {
+        use sha2::Digest;
+        sha2::Sha256::digest(secret).to_vec()
+    } else {
+        secret.to_vec()
+    };
+    key.resize(BLOCK_SIZE, 0);
+
+    let mut inner_pad = vec![0x36; BLOCK_SIZE];
+    let mut outer_pad = vec![0x5c; BLOCK_SIZE];
+    for (slot, key_byte) in inner_pad.iter_mut().zip(&key) {
+        *slot ^= key_byte;
+    }
+    for (slot, key_byte) in outer_pad.iter_mut().zip(&key) {
+        *slot ^= key_byte;
+    }
+
+    let mut inner = sha2::Sha256::new();
+    inner.update(&inner_pad);
+    inner.update(data);
+    let inner_digest = inner.finalize();
+
+    let mut outer = sha2::Sha256::new();
+    outer.update(&outer_pad);
+    outer.update(inner_digest);
+    outer.finalize().to_vec()
 }
 
 fn manifest_spec(id: &str, fingerprint: &str) -> TriggerBindingSpec {

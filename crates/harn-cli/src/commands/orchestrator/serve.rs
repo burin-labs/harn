@@ -480,7 +480,7 @@ fn attach_route_connectors(
 }
 
 fn connector_owns_ingress(provider: &str) -> bool {
-    matches!(provider, "slack" | "notion")
+    matches!(provider, "linear" | "notion" | "slack")
 }
 
 fn live_manifest_binding_versions() -> BTreeMap<String, u32> {

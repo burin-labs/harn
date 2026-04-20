@@ -3,7 +3,7 @@ import "std/triggers"
 pipeline test(task) {
   let providers: list<ProviderCatalogEntry> = list_providers()
   let builtin = providers.filter({ provider -> provider.runtime.kind == "builtin" })
-  assert(len(builtin) == 5, "expected exactly five builtin trigger providers")
+  assert(len(builtin) == 6, "expected exactly six builtin trigger providers")
   let cron = builtin.find({ provider -> provider.provider == "cron" })
   assert(cron?.schema_name == "CronEventPayload", "cron schema should be cataloged")
   assert(cron?.runtime?.connector == "cron", "cron should use the cron connector")
@@ -107,6 +107,41 @@ pipeline test(task) {
   assert(slack_methods[3].name == "open_view", "slack should expose open_view")
   assert(slack_methods[4].name == "user_info", "slack should expose user_info")
   assert(slack_methods[5].name == "api_call", "slack should expose api_call")
+  let linear = builtin.find({ provider -> provider.provider == "linear" })
+  assert(linear?.schema_name == "LinearEventPayload", "linear schema should be cataloged")
+  assert(linear?.runtime?.connector == "linear", "linear should use the native linear connector")
+  assert(
+    linear?.runtime?.default_signature_variant == "linear",
+    "linear should default to linear signatures",
+  )
+  assert(
+    linear?.signature_verification?.kind == "hmac",
+    "linear should publish HMAC verification metadata",
+  )
+  assert(
+    linear?.signature_verification?.signature_header == "Linear-Signature",
+    "linear should expose the signature header",
+  )
+  assert(
+    linear?.signature_verification?.default_tolerance_secs == 75,
+    "linear should publish the default replay tolerance",
+  )
+  let linear_secrets = linear?.secret_requirements ?? []
+  assert(len(linear_secrets) == 2, "linear should publish signing + outbound auth secret requirements")
+  assert(
+    linear_secrets.any({ requirement -> requirement.name == "signing_secret" && requirement.required }),
+    "linear should require signing_secret",
+  )
+  assert(
+    linear_secrets.any({ requirement -> requirement.name == "access_token" && !requirement.required }),
+    "linear should optionally document access_token",
+  )
+  let linear_methods = linear?.outbound_methods ?? []
+  assert(len(linear_methods) == 5, "linear should publish its outbound helper methods")
+  assert(
+    linear_methods.any({ method -> method.name == "graphql" }),
+    "linear should publish the graphql escape hatch",
+  )
   let notion = builtin.find({ provider -> provider.provider == "notion" })
   assert(notion?.schema_name == "NotionEventPayload", "notion schema should be cataloged")
   assert(notion?.runtime?.connector == "notion", "notion should use the notion connector")

@@ -1,0 +1,6 @@
+pipeline test(task) {
+  let result = trigger_test_harness("webhook_linear_timestamp_window")
+  println(result.ok)
+  println(result.details.linear_timestamp_rejections_total == 1)
+  println(contains(result.details.error, "outside the allowed verification window"))
+}

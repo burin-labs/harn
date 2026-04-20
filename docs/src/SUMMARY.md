@@ -39,6 +39,7 @@
 - [Trigger registry](./triggers/registry.md)
 - [Cron connector](./connectors/cron.md)
 - [GitHub App connector](./connectors/github.md)
+- [Linear connector](./connectors/linear.md)
 - [Notion connector](./connectors/notion.md)
 - [Slack Events connector](./connectors/slack-events.md)
 - [Generic webhook connector](./connectors/webhook.md)
