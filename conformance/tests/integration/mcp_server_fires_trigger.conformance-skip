@@ -1,6 +1,0 @@
-# Skipping until harn#NNN: the python mcp_stdio_tool.py helper exits non-zero
-# against v0.7.23's MCP stdio surface — suspected startup race (the child
-# process closes its stdin before the test can send the tool call). Does not
-# block the v0.7.23 release because the same code path is exercised by
-# `crates/harn-cli/tests/mcp_server_cli.rs`'s in-process harness, which is
-# green.
