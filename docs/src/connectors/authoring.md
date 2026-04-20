@@ -1,9 +1,12 @@
 # Connector authoring
 
-Custom connectors implement the `harn_vm::connectors::Connector` trait and
-plug into a `ConnectorRegistry` at orchestrator startup. The initial surface
-lives in `crates/harn-vm/src/connectors/` because the supporting abstractions
-it depends on today already live in `harn-vm`:
+Custom connectors can now be authored in two ways:
+
+- Rust implementations that implement `harn_vm::connectors::Connector`
+- `.harn` modules loaded through `[[providers]]` manifest entries
+
+The initial surface lives in `crates/harn-vm/src/connectors/` because the
+supporting abstractions it depends on today already live in `harn-vm`:
 
 - `EventLog` for audit and durable event plumbing
 - `SecretProvider` for signing secrets and outbound tokens
@@ -29,7 +32,115 @@ Harn also exposes that same catalog to scripts through
 `import "std/triggers"` and `list_providers()`, so connector metadata has one
 runtime-facing source instead of separate registry and docs tables.
 
-## Implementing a connector
+## Harn module connectors
+
+Root manifests can override a provider's connector implementation:
+
+```toml
+[[providers]]
+id = "echo"
+connector = { harn = "./echo_connector.harn" }
+
+[[triggers]]
+id = "echo-webhook"
+kind = "webhook"
+provider = "echo"
+path = "/hooks/echo"
+match = { path = "/hooks/echo", events = ["echo.received"] }
+handler = "handlers::on_echo"
+```
+
+The referenced `.harn` module must export:
+
+```harn
+pub fn provider_id() -> string
+pub fn kinds() -> list
+pub fn payload_schema() -> dict
+```
+
+Optional lifecycle exports:
+
+```harn
+pub fn init(ctx)
+pub fn activate(bindings)
+pub fn shutdown()
+pub fn call(method, args)
+```
+
+Inbound providers must also export:
+
+```harn
+pub fn normalize_inbound(raw) -> dict
+```
+
+`normalize_inbound(raw)` returns a dict with:
+
+- `kind`: normalized trigger kind
+- `dedupe_key`: stable delivery key
+- `payload`: provider payload dict preserved as `event.provider_payload.raw`
+- `occurred_at?`: optional RFC3339 timestamp
+- `tenant_id?`: optional tenant override
+- `headers?`: optional normalized headers
+- `batch?`: optional list payload for batched deliveries
+- `signature_status?`: optional `{ state = "verified" | "unsigned" | "failed", ... }`
+
+Harn-side connectors get three connector-only builtins during connector export
+execution:
+
+- `secret_get(secret_id)` reads from the orchestrator secret providers
+- `event_log_emit(topic, kind, payload, headers?)` appends to the active event log
+- `metrics_inc(name, amount?)` increments a Prometheus counter rendered as `connector_custom_<name>_total`
+
+Minimal example:
+
+```harn
+pub fn provider_id() {
+  return "echo"
+}
+
+pub fn kinds() {
+  return ["webhook"]
+}
+
+pub fn payload_schema() {
+  return {
+    harn_schema_name: "EchoEventPayload",
+    json_schema: { type: "object", additionalProperties: true },
+  }
+}
+
+pub fn normalize_inbound(raw) {
+  let body = raw.body_json ?? json_parse(raw.body_text)
+  let token = secret_get("echo/api-token")
+  metrics_inc("echo_normalize_calls")
+  event_log_emit("connectors.echo.lifecycle", "normalize", {
+    binding_id: raw.binding_id,
+  })
+  return {
+    kind: "echo.received",
+    occurred_at: raw.received_at,
+    dedupe_key: "echo:" + body.id,
+    payload: {
+      body: body,
+      token: token,
+      binding_id: raw.binding_id,
+    },
+  }
+}
+
+pub fn call(method, args) {
+  if method == "ping" {
+    return { message: args.message }
+  }
+  throw "method_not_found:" + method
+}
+```
+
+`raw` includes normalized request metadata such as `headers`, `query`,
+`body_text`, `body_json` when the body is valid JSON, `received_at`,
+`binding_id`, `binding_version`, and `binding_path`.
+
+## Rust connectors
 
 A connector implementation owns two concerns:
 
@@ -91,7 +202,7 @@ impl Connector for ExampleConnector {
         Ok(harn_vm::ActivationHandle::new(self.provider_id.clone(), 0))
     }
 
-    fn normalize_inbound(&self, raw: RawInbound) -> Result<TriggerEvent, ConnectorError> {
+    async fn normalize_inbound(&self, raw: RawInbound) -> Result<TriggerEvent, ConnectorError> {
         let _payload = raw.json_body()?;
         todo!("map the provider request into TriggerEvent")
     }

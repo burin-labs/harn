@@ -315,6 +315,7 @@ async fn slack_connector_normalizes_docs_fixtures_into_typed_payloads() {
     for case in cases {
         let event = connector
             .normalize_inbound(raw_inbound(&case.body, timestamp))
+            .await
             .unwrap();
         assert_eq!(event.kind, case.expected_kind, "case {}", case.name);
         let payload = match &event.provider_payload {
@@ -362,6 +363,7 @@ async fn slack_connector_accepts_url_verification_payloads() {
     });
     let event = connector
         .normalize_inbound(raw_inbound(&payload, 1_715_000_000))
+        .await
         .unwrap();
     assert_eq!(event.kind, "url_verification");
     match event.provider_payload {
@@ -399,7 +401,7 @@ async fn slack_connector_rejects_tampered_signature() {
         "X-Slack-Signature".to_string(),
         "v0=0000000000000000000000000000000000000000000000000000000000000000".to_string(),
     );
-    let error = connector.normalize_inbound(raw).unwrap_err();
+    let error = connector.normalize_inbound(raw).await.unwrap_err();
     assert!(matches!(
         error,
         crate::connectors::ConnectorError::InvalidSignature(_)

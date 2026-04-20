@@ -21,7 +21,8 @@ use super::role::OrchestratorRole;
 use super::tls::TlsFiles;
 use crate::cli::OrchestratorServeArgs;
 use crate::package::{
-    self, CollectedManifestTrigger, CollectedTriggerHandler, Manifest, ResolvedTriggerConfig,
+    self, CollectedManifestTrigger, CollectedTriggerHandler, Manifest,
+    ResolvedProviderConnectorConfig, ResolvedProviderConnectorKind, ResolvedTriggerConfig,
 };
 
 const LIFECYCLE_TOPIC: &str = "orchestrator.lifecycle";
@@ -123,6 +124,7 @@ async fn run_local(args: OrchestratorServeArgs) -> Result<(), String> {
     let secret_provider: Arc<dyn harn_vm::secrets::SecretProvider> = Arc::new(secret_chain);
 
     let extensions = package::load_runtime_extensions(&config_path);
+    let metrics_registry = Arc::new(harn_vm::MetricsRegistry::default());
     let collected_triggers = package::collect_manifest_triggers(&mut vm, &extensions)
         .await
         .map_err(|error| format!("failed to collect manifest triggers: {error}"))?;
@@ -139,9 +141,17 @@ async fn run_local(args: OrchestratorServeArgs) -> Result<(), String> {
         &collected_triggers,
         event_log.clone(),
         secret_provider.clone(),
+        metrics_registry.clone(),
+        &extensions.provider_connectors,
     )
     .await?;
-    let route_configs = attach_route_connectors(route_configs, &connector_runtime.registry)?;
+    let route_configs = attach_route_connectors(
+        route_configs,
+        &connector_runtime.registry,
+        &extensions.provider_connectors,
+    )?;
+    let connector_clients = connector_runtime.registry.client_map().await;
+    harn_vm::install_active_connector_clients(connector_clients);
     eprintln!(
         "[harn] registered connectors ({}): {}",
         connector_runtime.providers.len(),
@@ -152,7 +162,6 @@ async fn run_local(args: OrchestratorServeArgs) -> Result<(), String> {
         format_activation_summary(&connector_runtime.activations)
     );
 
-    let metrics_registry = Arc::new(harn_vm::MetricsRegistry::default());
     let dispatcher = harn_vm::Dispatcher::with_event_log_and_metrics(
         vm,
         event_log.clone(),
@@ -331,6 +340,8 @@ async fn initialize_connectors(
     triggers: &[CollectedManifestTrigger],
     event_log: Arc<harn_vm::event_log::AnyEventLog>,
     secrets: Arc<dyn harn_vm::secrets::SecretProvider>,
+    metrics: Arc<harn_vm::MetricsRegistry>,
+    provider_overrides: &[ResolvedProviderConnectorConfig],
 ) -> Result<ConnectorRuntime, String> {
     let mut registry = harn_vm::ConnectorRegistry::default();
     let mut trigger_registry = harn_vm::TriggerRegistry::default();
@@ -345,7 +356,6 @@ async fn initialize_connectors(
         trigger_registry.register(binding);
     }
 
-    let metrics = Arc::new(harn_vm::MetricsRegistry::default());
     let ctx = harn_vm::ConnectorCtx {
         inbox: Arc::new(
             harn_vm::InboxIndex::new(event_log.clone(), metrics.clone())
@@ -368,6 +378,12 @@ async fn initialize_connectors(
     let mut handles = Vec::new();
     for (provider, kinds) in grouped_kinds {
         let provider_name = provider.as_str().to_string();
+        if let Some(connector) = connector_override_for(&provider, provider_overrides).await? {
+            registry.remove(&provider);
+            registry
+                .register(connector)
+                .map_err(|error| error.to_string())?;
+        }
         if registry.get(&provider).is_none() {
             let connector = connector_for(&provider, kinds);
             registry
@@ -443,6 +459,36 @@ fn connector_for(
     }
 }
 
+async fn connector_override_for(
+    provider: &harn_vm::ProviderId,
+    provider_overrides: &[ResolvedProviderConnectorConfig],
+) -> Result<Option<Box<dyn harn_vm::Connector>>, String> {
+    let Some(override_config) = provider_overrides
+        .iter()
+        .find(|entry| entry.id == *provider)
+    else {
+        return Ok(None);
+    };
+    match &override_config.connector {
+        ResolvedProviderConnectorKind::RustBuiltin => Ok(None),
+        ResolvedProviderConnectorKind::Invalid(message) => Err(message.clone()),
+        ResolvedProviderConnectorKind::Harn { module } => {
+            let module_path =
+                harn_vm::resolve_module_import_path(&override_config.manifest_dir, module);
+            let connector = harn_vm::HarnConnector::load(&module_path)
+                .await
+                .map_err(|error| {
+                    format!(
+                        "failed to load Harn connector '{}' for provider '{}': {error}",
+                        module_path.display(),
+                        provider.as_str()
+                    )
+                })?;
+            Ok(Some(Box::new(connector)))
+        }
+    }
+}
+
 fn build_route_configs(
     triggers: &[CollectedManifestTrigger],
     binding_versions: &BTreeMap<String, u32>,
@@ -472,6 +518,7 @@ fn build_route_configs(
 fn attach_route_connectors(
     routes: Vec<RouteConfig>,
     registry: &harn_vm::ConnectorRegistry,
+    provider_overrides: &[ResolvedProviderConnectorConfig],
 ) -> Result<Vec<RouteConfig>, String> {
     routes
         .into_iter()
@@ -481,7 +528,7 @@ fn attach_route_connectors(
             // HTTP listener path. Webhook/github routes stay on the
             // signature-based `normalize_request` flow in the listener so
             // their existing Option-2 post-processing dedupe keeps working.
-            if connector_owns_ingress(route.provider.as_str()) {
+            if connector_owns_ingress(route.provider.as_str(), provider_overrides) {
                 route.connector = Some(registry.get(&route.provider).ok_or_else(|| {
                     format!(
                         "connector registry is missing provider '{}'",
@@ -494,8 +541,15 @@ fn attach_route_connectors(
         .collect()
 }
 
-fn connector_owns_ingress(provider: &str) -> bool {
+fn connector_owns_ingress(
+    provider: &str,
+    provider_overrides: &[ResolvedProviderConnectorConfig],
+) -> bool {
     matches!(provider, "linear" | "notion" | "slack")
+        || provider_overrides.iter().any(|entry| {
+            entry.id.as_str() == provider
+                && matches!(entry.connector, ResolvedProviderConnectorKind::Harn { .. })
+        })
 }
 
 fn live_manifest_binding_versions() -> BTreeMap<String, u32> {
@@ -1557,7 +1611,7 @@ impl harn_vm::Connector for PlaceholderConnector {
         ))
     }
 
-    fn normalize_inbound(
+    async fn normalize_inbound(
         &self,
         _raw: harn_vm::RawInbound,
     ) -> Result<harn_vm::TriggerEvent, harn_vm::ConnectorError> {

@@ -397,7 +397,7 @@ impl Connector for LinearConnector {
         Ok(())
     }
 
-    fn normalize_inbound(&self, raw: RawInbound) -> Result<TriggerEvent, ConnectorError> {
+    async fn normalize_inbound(&self, raw: RawInbound) -> Result<TriggerEvent, ConnectorError> {
         let ctx = self.ctx()?;
         let binding = self.binding_for_raw(&raw)?;
         let provider = self.provider_id.clone();

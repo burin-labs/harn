@@ -3000,6 +3000,24 @@ cache. Repeated calls with the same pattern string reuse the compiled
 regex, avoiding recompilation overhead. This is a performance optimization
 with no API-visible change.
 
+### Connector interop builtins
+
+The orchestrator exposes connector-oriented builtins for manifest-driven
+provider integrations.
+
+| Function | Description |
+|---|---|
+| `connector_call(provider, method, params?)` | Invoke the active outbound connector client for `provider` and return JSON-like result data |
+| `secret_get(secret_id)` | Read a secret from the active connector context. Only available while executing a Harn-backed connector export such as `normalize_inbound` or `call` |
+| `event_log_emit(topic, kind, payload, headers?)` | Append an event to the active event log from a Harn-backed connector export |
+| `metrics_inc(name, amount?)` | Increment a connector-owned Prometheus counter from a Harn-backed connector export |
+
+Harn-backed connector modules are loaded through manifest `[[providers]]`
+entries and must export `provider_id()`, `kinds()`, and `payload_schema()`.
+Inbound providers also export `normalize_inbound(raw)`, which returns a dict
+with `kind`, `dedupe_key`, and `payload` plus optional metadata such as
+`occurred_at`, `tenant_id`, `headers`, `batch`, and `signature_status`.
+
 ## Iterator protocol
 
 Harn provides a lazy iterator protocol layered over the eager

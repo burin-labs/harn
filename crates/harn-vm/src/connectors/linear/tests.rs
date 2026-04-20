@@ -313,6 +313,7 @@ async fn linear_connector_normalizes_typed_variants() {
     for case in cases {
         let event = connector
             .normalize_inbound(raw_inbound(&case.body, received_at_ms))
+            .await
             .expect("normalize linear event");
         assert_eq!(event.kind, case.expected_kind);
         assert_eq!(event.signature_status, SignatureStatus::Verified);
@@ -375,6 +376,7 @@ async fn linear_connector_rejects_stale_timestamps_and_records_metric() {
     });
     let error = connector
         .normalize_inbound(raw_inbound(&payload, 1_715_000_100_000i64))
+        .await
         .expect_err("stale timestamp should reject");
     assert!(matches!(error, ConnectorError::TimestampOutOfWindow { .. }));
     assert_eq!(metrics.snapshot().linear_timestamp_rejections_total, 1);

@@ -44,6 +44,9 @@ pub use compiler::*;
 pub use connectors::{
     active_connector_client, clear_active_connector_clients,
     cron::{CatchupMode, CronConnector},
+    harn_module::{
+        load_contract as load_harn_connector_contract, HarnConnector, HarnConnectorContract,
+    },
     hmac::verify_hmac_signed,
     install_active_connector_clients, load_pending_webhook_handshakes,
     postprocess_normalized_event, ActivationHandle, ClientError, Connector, ConnectorClient,
