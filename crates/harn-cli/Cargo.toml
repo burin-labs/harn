@@ -37,6 +37,7 @@ harn-vm = { path = "../harn-vm", version = "0.7", features = ["otel"] }
 harn-lint = { path = "../harn-lint", version = "0.7" }
 harn-modules = { path = "../harn-modules", version = "0.7" }
 harn-fmt = { path = "../harn-fmt", version = "0.7" }
+harn-serve = { path = "../harn-serve", version = "0.7" }
 async-trait = "0.1"
 axum = "0.8"
 axum-server = { version = "0.8", features = ["tls-rustls"] }

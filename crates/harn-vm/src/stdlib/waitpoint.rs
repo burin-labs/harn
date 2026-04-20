@@ -26,6 +26,8 @@ const WAITPOINT_WAITS_TOPIC: &str = "waitpoint.waits";
 pub const WAITPOINT_RESUME_TOPIC: &str = "waitpoint.resumes";
 const TRIGGER_EVENTS_TOPIC: &str = "triggers.events";
 
+type TerminalOptions = (Option<String>, Option<String>, Option<JsonValue>);
+
 thread_local! {
     static CREATE_SEQUENCE: RefCell<SequenceState> = RefCell::new(SequenceState::default());
     static WAIT_SEQUENCE: RefCell<SequenceState> = RefCell::new(SequenceState::default());
@@ -191,7 +193,7 @@ pub(crate) async fn create_waitpoint_on(
     metadata: Option<JsonValue>,
 ) -> Result<WaitpointRecord, VmError> {
     let id = explicit_id.unwrap_or_else(next_waitpoint_id);
-    if let Some(existing) = read_waitpoint_record(&log, &id).await? {
+    if let Some(existing) = read_waitpoint_record(log, &id).await? {
         return Ok(existing);
     }
     let record = WaitpointRecord {
@@ -201,7 +203,7 @@ pub(crate) async fn create_waitpoint_on(
         metadata,
         ..WaitpointRecord::default()
     };
-    append_waitpoint_record(&log, &record).await?;
+    append_waitpoint_record(log, &record).await?;
     Ok(record)
 }
 
@@ -313,7 +315,7 @@ pub(crate) async fn complete_waitpoint_on(
     reason: Option<String>,
     metadata: Option<JsonValue>,
 ) -> Result<WaitpointRecord, VmError> {
-    let mut record = read_waitpoint_record(&log, id)
+    let mut record = read_waitpoint_record(log, id)
         .await?
         .ok_or_else(|| VmError::Runtime(format!("waitpoint.complete: unknown waitpoint '{id}'")))?;
     if record.status == WaitpointStatus::Completed {
@@ -332,8 +334,8 @@ pub(crate) async fn complete_waitpoint_on(
     if metadata.is_some() {
         record.metadata = metadata;
     }
-    append_waitpoint_record(&log, &record).await?;
-    trigger_waitpoint_service(&log, Some(id.to_string())).await?;
+    append_waitpoint_record(log, &record).await?;
+    trigger_waitpoint_service(log, Some(id.to_string())).await?;
     Ok(record)
 }
 
@@ -354,7 +356,7 @@ pub(crate) async fn cancel_waitpoint_on(
     reason: Option<String>,
     metadata: Option<JsonValue>,
 ) -> Result<WaitpointRecord, VmError> {
-    let mut record = read_waitpoint_record(&log, id)
+    let mut record = read_waitpoint_record(log, id)
         .await?
         .ok_or_else(|| VmError::Runtime(format!("waitpoint.cancel: unknown waitpoint '{id}'")))?;
     if record.status == WaitpointStatus::Cancelled {
@@ -372,8 +374,8 @@ pub(crate) async fn cancel_waitpoint_on(
     if metadata.is_some() {
         record.metadata = metadata;
     }
-    append_waitpoint_record(&log, &record).await?;
-    trigger_waitpoint_service(&log, Some(id.to_string())).await?;
+    append_waitpoint_record(log, &record).await?;
+    trigger_waitpoint_service(log, Some(id.to_string())).await?;
     Ok(record)
 }
 
@@ -786,7 +788,7 @@ async fn read_waitpoint_record(
     Ok(events
         .into_iter()
         .filter_map(|(_, event)| serde_json::from_value::<WaitpointRecord>(event.payload).ok())
-        .last())
+        .next_back())
 }
 
 async fn read_waiter_record(
@@ -802,8 +804,7 @@ async fn read_waiter_record(
     Ok(events
         .into_iter()
         .filter_map(|(_, event)| serde_json::from_value::<WaiterRecord>(event.payload).ok())
-        .filter(|record| record.wait_id == wait_id)
-        .last())
+        .rfind(|record| record.wait_id == wait_id))
 }
 
 async fn load_waitpoint_states(
@@ -979,7 +980,7 @@ fn parse_wait_options(value: Option<&VmValue>) -> Result<WaitpointWaitOptions, V
 fn parse_terminal_options(
     value: Option<&VmValue>,
     builtin: &str,
-) -> Result<(Option<String>, Option<String>, Option<JsonValue>), VmError> {
+) -> Result<TerminalOptions, VmError> {
     let Some(value) = value else {
         return Ok((None, None, None));
     };

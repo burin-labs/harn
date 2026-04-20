@@ -1016,7 +1016,7 @@ impl Dispatcher {
             source_node_id = predicate_node_id;
         }
 
-        let (event, mut acquired_flow) = match self
+        let (event, acquired_flow) = match self
             .apply_flow_control(binding, &event, replay_of_event_id.as_ref())
             .await?
         {
@@ -1373,7 +1373,7 @@ impl Dispatcher {
                         .map_err(|registry_error| {
                             DispatchError::Registry(registry_error.to_string())
                         })?;
-                        self.release_flow_control(&mut acquired_flow).await?;
+                        self.release_flow_control(&acquired_flow).await?;
                         decrement_in_flight(&self.state);
                         return Ok(DispatchOutcome {
                             trigger_id: binding.id.as_str().to_string(),

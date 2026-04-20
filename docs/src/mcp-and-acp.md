@@ -576,8 +576,9 @@ interact with. The server implements A2A protocol version 1.0.0.
 ### Running the server
 
 ```bash
-harn serve agent.harn               # default port 8080
-harn serve --port 3000 agent.harn   # custom port
+harn serve a2a agent.harn             # explicit A2A
+harn serve agent.harn                 # legacy shorthand for A2A
+harn serve a2a --port 3000 agent.harn
 ```
 
 ### Agent card

@@ -12,6 +12,7 @@ pub(crate) mod playground;
 pub(crate) mod portal;
 pub(crate) mod repl;
 pub(crate) mod run;
+pub(crate) mod serve;
 pub(crate) mod skill;
 pub(crate) mod skills;
 pub(crate) mod test;

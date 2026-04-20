@@ -632,22 +632,41 @@ harn trust demote deploy-bot --to suggest --reason "needs tighter review gate"
 
 ## harn serve
 
-Start an A2A (Agent-to-Agent) HTTP server.
+Start a workflow server through one of the outbound transport adapters.
 
 ```bash
-harn serve agent.harn               # default port 8080
-harn serve --port 3000 agent.harn   # custom port
+harn serve a2a agent.harn                  # explicit A2A
+harn serve agent.harn                      # legacy A2A shorthand
+harn serve --port 3000 agent.harn          # legacy A2A shorthand with custom port
+harn serve mcp server.harn                 # exported pub fn -> MCP tools over stdio
+harn serve mcp --transport http server.harn
 ```
 
-See [MCP and ACP Integration](./mcp-and-acp.md) for protocol details.
+`harn serve mcp` uses the shared `harn-serve` dispatch core and maps each
+exported `pub fn` in the target module to one MCP tool. Tool schemas are
+derived from Harn type annotations. With `--transport http`, the server also
+supports Streamable HTTP on `--path` plus the legacy SSE compatibility
+endpoints `--sse-path` and `--messages-path`.
+
+`harn serve a2a` exposes the older A2A HTTP server. The legacy shorthand
+`harn serve <file>` is preserved and rewrites internally to `harn serve a2a
+<file>`.
+
+See [MCP and ACP Integration](./mcp-and-acp.md) and
+[Outbound workflow server](./harn-serve.md) for protocol details.
 
 ## harn mcp-serve
 
-Serve a Harn pipeline as an MCP server over stdio.
+Serve a Harn pipeline as an MCP server over stdio using the legacy
+tool-registry surface (`mcp_tools`, `mcp_resource`, `mcp_prompt`).
 
 ```bash
 harn mcp-serve agent.harn
 ```
+
+Use `harn serve mcp` when you want the newer `harn-serve` adapter that maps
+exported `pub fn` entrypoints automatically. Use `harn mcp-serve` when the
+server surface is authored explicitly through MCP registration builtins.
 
 See [MCP and ACP Integration](./mcp-and-acp.md) for details on defining
 tools, resources, and prompts.
