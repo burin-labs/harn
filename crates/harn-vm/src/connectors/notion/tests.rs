@@ -230,7 +230,7 @@ async fn notion_webhook_handshake_is_captured_for_doctor() {
     .unwrap();
     raw.metadata = json!({ "binding_id": "notion.webhook" });
 
-    let event = connector.normalize_inbound(raw).unwrap();
+    let event = connector.normalize_inbound(raw).await.unwrap();
     assert_eq!(event.kind, "subscription.verification");
     assert_eq!(event.signature_status, SignatureStatus::Unsigned);
 
@@ -267,6 +267,7 @@ async fn notion_webhook_signed_event_normalizes_to_typed_payload() {
     });
     let event = connector
         .normalize_inbound(signed_raw_inbound(&body))
+        .await
         .unwrap();
     assert_eq!(event.kind, "page.content_updated");
     assert_eq!(event.signature_status, SignatureStatus::Verified);

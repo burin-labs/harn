@@ -383,7 +383,7 @@ impl Connector for GitHubConnector {
         ))
     }
 
-    fn normalize_inbound(&self, raw: RawInbound) -> Result<TriggerEvent, ConnectorError> {
+    async fn normalize_inbound(&self, raw: RawInbound) -> Result<TriggerEvent, ConnectorError> {
         let ctx = self.ctx()?;
         let binding = self.binding_for_raw(&raw)?;
         let provider = self.provider_id.clone();
@@ -417,11 +417,10 @@ impl Connector for GitHubConnector {
             .map(ToString::to_string)
             .unwrap_or_else(|| fallback_body_digest(&raw.body));
         if binding.dedupe_enabled {
-            let inserted = futures::executor::block_on(ctx.inbox.insert_if_new(
-                &binding.binding_id,
-                &dedupe_key,
-                binding.dedupe_ttl,
-            ))?;
+            let inserted = ctx
+                .inbox
+                .insert_if_new(&binding.binding_id, &dedupe_key, binding.dedupe_ttl)
+                .await?;
             if !inserted {
                 return Err(ConnectorError::DuplicateDelivery(format!(
                     "duplicate GitHub delivery `{dedupe_key}` for binding `{}`",

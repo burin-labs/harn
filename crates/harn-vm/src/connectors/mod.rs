@@ -28,6 +28,7 @@ use crate::triggers::{
 
 pub mod cron;
 pub mod github;
+pub mod harn_module;
 pub mod hmac;
 pub mod linear;
 pub mod notion;
@@ -38,6 +39,9 @@ pub mod webhook;
 
 pub use cron::{CatchupMode, CronConnector};
 pub use github::GitHubConnector;
+pub use harn_module::{
+    load_contract as load_harn_connector_contract, HarnConnector, HarnConnectorContract,
+};
 pub use hmac::{
     verify_hmac_authorization, HmacSignatureStyle, DEFAULT_CANONICAL_AUTHORIZATION_HEADER,
     DEFAULT_CANONICAL_HMAC_SCHEME, DEFAULT_GITHUB_SIGNATURE_HEADER,
@@ -87,7 +91,7 @@ pub trait Connector: Send + Sync {
     }
 
     /// Verify + normalize a provider-native inbound request into `TriggerEvent`.
-    fn normalize_inbound(&self, raw: RawInbound) -> Result<TriggerEvent, ConnectorError>;
+    async fn normalize_inbound(&self, raw: RawInbound) -> Result<TriggerEvent, ConnectorError>;
 
     /// Payload schema surfaced to future trigger-type narrowing.
     fn payload_schema(&self) -> ProviderPayloadSchema;
@@ -172,6 +176,7 @@ pub enum ConnectorError {
     Json(String),
     Secret(String),
     EventLog(String),
+    HarnRuntime(String),
     Client(ClientError),
     Unsupported(String),
     Activation(String),
@@ -201,6 +206,7 @@ impl fmt::Display for ConnectorError {
             | Self::Json(message)
             | Self::Secret(message)
             | Self::EventLog(message)
+            | Self::HarnRuntime(message)
             | Self::Unsupported(message)
             | Self::Activation(message) => message.fmt(f),
             Self::TimestampOutOfWindow {
@@ -284,6 +290,7 @@ pub struct MetricsRegistry {
     retry_scheduled_total: AtomicU64,
     slack_delivery_success_total: AtomicU64,
     slack_delivery_failure_total: AtomicU64,
+    custom_counters: Mutex<BTreeMap<String, u64>>,
 }
 
 impl MetricsRegistry {
@@ -362,6 +369,17 @@ impl MetricsRegistry {
             .fetch_add(1, Ordering::Relaxed);
     }
 
+    pub fn record_custom_counter(&self, name: &str, amount: u64) {
+        if amount == 0 {
+            return;
+        }
+        let mut counters = self
+            .custom_counters
+            .lock()
+            .expect("custom counters poisoned");
+        *counters.entry(name.to_string()).or_default() += amount;
+    }
+
     pub fn render_prometheus(&self) -> String {
         let snapshot = self.snapshot();
         let counters = [
@@ -392,6 +410,29 @@ impl MetricsRegistry {
             rendered.push_str(name);
             rendered.push_str(" counter\n");
             rendered.push_str(name);
+            rendered.push(' ');
+            rendered.push_str(&value.to_string());
+            rendered.push('\n');
+        }
+        let custom_counters = self
+            .custom_counters
+            .lock()
+            .expect("custom counters poisoned");
+        for (name, value) in custom_counters.iter() {
+            let metric_name = format!(
+                "connector_custom_{}_total",
+                name.chars()
+                    .map(|ch| if ch.is_ascii_alphanumeric() || ch == '_' {
+                        ch
+                    } else {
+                        '_'
+                    })
+                    .collect::<String>()
+            );
+            rendered.push_str("# TYPE ");
+            rendered.push_str(&metric_name);
+            rendered.push_str(" counter\n");
+            rendered.push_str(&metric_name);
             rendered.push(' ');
             rendered.push_str(&value.to_string());
             rendered.push('\n');
@@ -740,6 +781,10 @@ impl ConnectorRegistry {
         self.connectors.get(id).cloned()
     }
 
+    pub fn remove(&mut self, id: &ProviderId) -> Option<ConnectorHandle> {
+        self.connectors.remove(id)
+    }
+
     pub fn list(&self) -> Vec<ProviderId> {
         self.connectors.keys().cloned().collect()
     }
@@ -886,7 +931,7 @@ impl Connector for PlaceholderConnector {
         ))
     }
 
-    fn normalize_inbound(&self, _raw: RawInbound) -> Result<TriggerEvent, ConnectorError> {
+    async fn normalize_inbound(&self, _raw: RawInbound) -> Result<TriggerEvent, ConnectorError> {
         Err(ConnectorError::Unsupported(format!(
             "provider '{}' is cataloged but does not have a concrete inbound connector yet",
             self.provider_id.as_str()
@@ -978,7 +1023,10 @@ mod tests {
             ))
         }
 
-        fn normalize_inbound(&self, _raw: RawInbound) -> Result<TriggerEvent, ConnectorError> {
+        async fn normalize_inbound(
+            &self,
+            _raw: RawInbound,
+        ) -> Result<TriggerEvent, ConnectorError> {
             Err(ConnectorError::Unsupported(
                 "not needed for registry tests".to_string(),
             ))

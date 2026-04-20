@@ -245,7 +245,7 @@ impl Connector for CronConnector {
         Ok(())
     }
 
-    fn normalize_inbound(&self, _raw: RawInbound) -> Result<TriggerEvent, ConnectorError> {
+    async fn normalize_inbound(&self, _raw: RawInbound) -> Result<TriggerEvent, ConnectorError> {
         Err(ConnectorError::Unsupported(
             "cron is an in-process scheduler and does not accept inbound payloads".to_string(),
         ))

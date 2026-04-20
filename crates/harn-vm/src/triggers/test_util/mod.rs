@@ -318,6 +318,7 @@ impl TriggerTestHarness {
 
         let event = connector
             .normalize_inbound(github_raw_inbound())
+            .await
             .map_err(|error| error.to_string())?;
         self.connector_registry
             .record_event("webhook.fixture", 1, &event, Some("verified"), None);
@@ -367,6 +368,7 @@ impl TriggerTestHarness {
 
         let event = connector
             .normalize_inbound(slack_raw_inbound())
+            .await
             .map_err(|error| error.to_string())?;
         self.connector_registry
             .record_event("slack.fixture", 1, &event, Some("verified"), None);
@@ -425,6 +427,7 @@ impl TriggerTestHarness {
 
         let event = connector
             .normalize_inbound(linear_issue_update_inbound())
+            .await
             .map_err(|error| error.to_string())?;
         self.connector_registry.record_event(
             "linear.fixture",
@@ -493,6 +496,7 @@ impl TriggerTestHarness {
         let started = Instant::now();
         let event = connector
             .normalize_inbound(slack_raw_inbound())
+            .await
             .map_err(|error| error.to_string())?;
         let processed = crate::connectors::postprocess_normalized_event(
             inbox.as_ref(),
@@ -573,6 +577,7 @@ impl TriggerTestHarness {
 
         let error = connector
             .normalize_inbound(linear_issue_update_inbound_stale())
+            .await
             .expect_err("stale linear webhook should reject");
         Ok(TriggerHarnessResult {
             fixture: "webhook_linear_timestamp_window".to_string(),
@@ -780,6 +785,7 @@ impl TriggerTestHarness {
             StdDuration::from_secs(u64::from(DEFAULT_INBOX_RETENTION_DAYS) * 24 * 60 * 60);
         let first = connector
             .normalize_inbound(raw.clone())
+            .await
             .map_err(|error| error.to_string())?;
         let first_claim = matches!(
             crate::connectors::postprocess_normalized_event(
@@ -804,6 +810,7 @@ impl TriggerTestHarness {
         }
         let second = connector
             .normalize_inbound(raw)
+            .await
             .map_err(|error| error.to_string())?;
         let second_claim = matches!(
             crate::connectors::postprocess_normalized_event(
@@ -901,6 +908,7 @@ impl TriggerTestHarness {
 
         let first = connector
             .normalize_inbound(raw.clone())
+            .await
             .map_err(|error| error.to_string())?;
         let first_appended = matches!(
             crate::connectors::postprocess_normalized_event(
@@ -926,6 +934,7 @@ impl TriggerTestHarness {
 
         let second = connector
             .normalize_inbound(raw)
+            .await
             .map_err(|error| error.to_string())?;
         let second_appended = matches!(
             crate::connectors::postprocess_normalized_event(

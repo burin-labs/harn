@@ -180,11 +180,21 @@ impl RouteConfig {
                     "webhook" => SignatureMode::Standard,
                     "slack" => SignatureMode::Unsigned,
                     "notion" => SignatureMode::Unsigned,
-                    other => {
-                        return Err(format!(
-                            "HTTP listener does not yet support webhook provider '{other}' on this branch"
-                        ))
-                    }
+                    other => match harn_vm::provider_metadata(other) {
+                        Some(metadata)
+                            if matches!(
+                                metadata.runtime,
+                                harn_vm::ProviderRuntimeMetadata::Placeholder
+                            ) =>
+                        {
+                            SignatureMode::Unsigned
+                        }
+                        _ => {
+                            return Err(format!(
+                                "HTTP listener does not yet support webhook provider '{other}' on this branch"
+                            ))
+                        }
+                    },
                 };
                 Ok(Some(Self {
                     trigger_id: trigger.config.id.clone(),
@@ -603,6 +613,7 @@ async fn normalize_request(
             .lock()
             .await
             .normalize_inbound(raw)
+            .await
             .map_err(HttpError::from_connector)?;
         if let Some(challenge) = slack_url_verification_challenge(&event) {
             return Ok(NormalizedRequest::Immediate(

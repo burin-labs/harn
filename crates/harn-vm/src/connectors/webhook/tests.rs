@@ -328,11 +328,14 @@ async fn webhook_variants_cover_valid_and_failure_cases() {
 
     for case in cases {
         let harness = TestHarness::new(binding(case.variant, None), case.secret).await;
-        let result = harness.connector.normalize_inbound(raw_inbound(
-            case.headers.clone(),
-            &case.body,
-            case.received_at,
-        ));
+        let result = harness
+            .connector
+            .normalize_inbound(raw_inbound(
+                case.headers.clone(),
+                &case.body,
+                case.received_at,
+            ))
+            .await;
         let audit_events = harness.audit_events().await;
 
         if case.expect_ok {
@@ -387,7 +390,11 @@ async fn postprocess_drops_duplicate_delivery_key() {
         OffsetDateTime::from_unix_timestamp(1_614_265_330).unwrap(),
     );
 
-    let first = harness.connector.normalize_inbound(raw.clone()).unwrap();
+    let first = harness
+        .connector
+        .normalize_inbound(raw.clone())
+        .await
+        .unwrap();
     assert_eq!(first.dedupe_key, "msg_p5jXN8AQM9LWM0D4loKWxJek");
     let first = crate::connectors::postprocess_normalized_event(
         harness.connector.ctx().unwrap().inbox.as_ref(),
@@ -412,7 +419,7 @@ async fn postprocess_drops_duplicate_delivery_key() {
         std::time::Duration::from_secs(
             u64::from(crate::DEFAULT_INBOX_RETENTION_DAYS) * 24 * 60 * 60,
         ),
-        harness.connector.normalize_inbound(raw).unwrap(),
+        harness.connector.normalize_inbound(raw).await.unwrap(),
     )
     .await
     .unwrap();
@@ -459,6 +466,7 @@ async fn github_profile_normalizes_events_under_the_github_provider() {
             b"Hello, World!",
             OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap(),
         ))
+        .await
         .unwrap();
 
     assert_eq!(event.provider.as_str(), "github");

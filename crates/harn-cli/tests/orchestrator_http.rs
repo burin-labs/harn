@@ -19,6 +19,7 @@ use axum::body::Bytes;
 use axum::extract::State;
 use axum::routing::post;
 use axum::Router;
+use harn_vm::event_log::{EventLog, SqliteEventLog, Topic};
 use hmac::{Hmac, Mac};
 use rcgen::generate_simple_self_signed;
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE, ORIGIN};
@@ -148,6 +149,35 @@ secrets = { verification_token = "notion/verification-token" }
     manifest
 }
 
+fn echo_manifest(orchestrator_block: Option<&str>) -> String {
+    let mut manifest = r#"
+[package]
+name = "fixture"
+
+[exports]
+handlers = "lib.harn"
+
+[[providers]]
+id = "echo"
+connector = { harn = "echo_connector.harn" }
+
+[[triggers]]
+id = "echo-webhook"
+kind = "webhook"
+provider = "echo"
+path = "/hooks/echo"
+match = { path = "/hooks/echo", events = ["echo.received"] }
+handler = "handlers::on_echo"
+"#
+    .to_string();
+    if let Some(block) = orchestrator_block {
+        manifest.push('\n');
+        manifest.push_str(block);
+        manifest.push('\n');
+    }
+    manifest
+}
+
 fn slack_handler_module(marker_path: &Path) -> String {
     format!(
         r#"
@@ -173,6 +203,105 @@ pub fn on_notion(event: TriggerEvent) {{
 "#,
         marker = marker_path.display().to_string()
     )
+}
+
+fn echo_handler_module(marker_path: &Path) -> String {
+    format!(
+        r#"
+import "std/triggers"
+
+pub fn on_echo(event: TriggerEvent) {{
+  let ping = connector_call("echo", "ping", {{
+    message: event.provider_payload.raw.body.message,
+  }})
+  write_file({marker:?}, json_stringify({{
+    kind: event.kind,
+    token: event.provider_payload.raw.token,
+    binding_id: event.provider_payload.raw.binding_id,
+    echoed: ping.message,
+    ping_token: ping.token,
+  }}))
+}}
+"#,
+        marker = marker_path.display().to_string()
+    )
+}
+
+fn echo_connector_module() -> &'static str {
+    r#"
+var active_bindings = []
+
+pub fn provider_id() {
+  return "echo"
+}
+
+pub fn kinds() {
+  return ["webhook"]
+}
+
+pub fn payload_schema() {
+  return {
+    harn_schema_name: "EchoEventPayload",
+    json_schema: {
+      type: "object",
+      additionalProperties: true,
+    },
+  }
+}
+
+pub fn init(_ctx) {
+  event_log_emit("connectors.echo.lifecycle", "init", {phase: "init"})
+}
+
+pub fn activate(bindings) {
+  active_bindings = bindings
+  metrics_inc("echo_activate_bindings", len(bindings))
+  event_log_emit("connectors.echo.lifecycle", "activate", {
+    binding_count: len(bindings),
+  })
+}
+
+pub fn shutdown() {
+  event_log_emit("connectors.echo.lifecycle", "shutdown", {
+    binding_count: len(active_bindings),
+  })
+}
+
+pub fn normalize_inbound(raw) {
+  let body = raw.body_json ?? json_parse(raw.body_text)
+  let token = secret_get("echo/api-token")
+  metrics_inc("echo_normalize_calls")
+  event_log_emit("connectors.echo.lifecycle", "normalize", {
+    binding_id: raw.binding_id,
+    message: body.message,
+  })
+  return {
+    kind: "echo.received",
+    occurred_at: raw.received_at,
+    dedupe_key: "echo:" + body.id,
+    payload: {
+      body: body,
+      token: token,
+      binding_id: raw.binding_id,
+    },
+  }
+}
+
+pub fn call(method, args) {
+  if method == "ping" {
+    metrics_inc("echo_client_calls")
+    event_log_emit("connectors.echo.calls", "ping", {
+      message: args.message,
+    })
+    return {
+      message: args.message,
+      token: secret_get("echo/api-token"),
+    }
+  }
+
+  throw "method_not_found:" + method
+}
+"#
 }
 
 fn a2a_manifest(orchestrator_block: Option<&str>) -> String {
@@ -426,6 +555,15 @@ fn notion_headers(secret: &str, body: &[u8]) -> HeaderMap {
 
 fn state_snapshot(temp: &TempDir) -> String {
     fs::read_to_string(temp.path().join("state/orchestrator-state.json")).unwrap()
+}
+
+async fn read_topic_events(
+    temp: &TempDir,
+    topic: &str,
+) -> Vec<(u64, harn_vm::event_log::LogEvent)> {
+    let log = SqliteEventLog::open(temp.path().join("state/events.sqlite"), 32).unwrap();
+    let topic = Topic::new(topic).unwrap();
+    log.read_range(&topic, None, usize::MAX).await.unwrap()
 }
 
 async fn assert_status(response: reqwest::Response, expected: StatusCode) {
@@ -1017,6 +1155,130 @@ async fn notion_webhook_signed_delivery_is_dispatched() {
     assert!(
         snapshot.contains("\"dispatched\": 1"),
         "snapshot={snapshot}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn harn_connector_module_round_trips_inbound_and_client_calls() {
+    let _lock = lock_orchestrator_tests();
+    let temp = TempDir::new().unwrap();
+    let marker_path = temp.path().join("echo-handler.json");
+    write_file(temp.path(), "harn.toml", &echo_manifest(None));
+    write_file(temp.path(), "lib.harn", &echo_handler_module(&marker_path));
+    write_file(temp.path(), "echo_connector.harn", echo_connector_module());
+
+    let envs = [
+        ("HARN_SECRET_PROVIDERS", "env"),
+        ("HARN_SECRET_ECHO_API_TOKEN", "echo-secret-token"),
+    ];
+    let mut process = spawn_orchestrator(&temp, &[], &envs);
+    let base_url = process.wait_for_listener_url();
+
+    let body = serde_json::to_vec(&serde_json::json!({
+        "id": "evt_echo_1",
+        "message": "hello from echo"
+    }))
+    .unwrap();
+    let response = reqwest::Client::new()
+        .post(format!("{base_url}/hooks/echo"))
+        .header(CONTENT_TYPE, "application/json")
+        .body(body)
+        .send()
+        .await
+        .unwrap();
+    assert_status(response, StatusCode::OK).await;
+
+    wait_for_path(&marker_path, Duration::from_secs(10));
+    let marker: JsonValue =
+        serde_json::from_str(&fs::read_to_string(&marker_path).unwrap()).unwrap();
+    assert_eq!(
+        marker.get("kind").and_then(JsonValue::as_str),
+        Some("echo.received")
+    );
+    assert_eq!(
+        marker.get("token").and_then(JsonValue::as_str),
+        Some("echo-secret-token")
+    );
+    assert_eq!(
+        marker.get("binding_id").and_then(JsonValue::as_str),
+        Some("echo-webhook")
+    );
+    assert_eq!(
+        marker.get("echoed").and_then(JsonValue::as_str),
+        Some("hello from echo")
+    );
+    assert_eq!(
+        marker.get("ping_token").and_then(JsonValue::as_str),
+        Some("echo-secret-token")
+    );
+
+    let metrics = reqwest::Client::new()
+        .get(format!("{base_url}/metrics"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(
+        metrics.contains("connector_custom_echo_activate_bindings_total 1"),
+        "metrics={metrics}"
+    );
+    assert!(
+        metrics.contains("connector_custom_echo_normalize_calls_total 1"),
+        "metrics={metrics}"
+    );
+    assert!(
+        metrics.contains("connector_custom_echo_client_calls_total 1"),
+        "metrics={metrics}"
+    );
+
+    send_sigterm(&process.child);
+    let status = wait_for_exit_async(&mut process.child).await;
+    let stderr = process.join_stderr();
+    assert!(status.success(), "status={status} stderr={stderr}");
+    assert!(stderr.contains(SHUTDOWN_NEEDLE), "stderr={stderr}");
+
+    let lifecycle = read_topic_events(&temp, "connectors.echo.lifecycle").await;
+    let lifecycle_kinds: Vec<_> = lifecycle
+        .iter()
+        .map(|(_, event)| event.kind.as_str())
+        .collect();
+    assert_eq!(
+        lifecycle_kinds,
+        vec!["init", "activate", "normalize", "shutdown"]
+    );
+    let normalize_event = lifecycle
+        .iter()
+        .find(|(_, event)| event.kind == "normalize")
+        .expect("normalize event");
+    assert_eq!(
+        normalize_event
+            .1
+            .payload
+            .get("binding_id")
+            .and_then(JsonValue::as_str),
+        Some("echo-webhook")
+    );
+    assert_eq!(
+        normalize_event
+            .1
+            .payload
+            .get("message")
+            .and_then(JsonValue::as_str),
+        Some("hello from echo")
+    );
+
+    let calls = read_topic_events(&temp, "connectors.echo.calls").await;
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].1.kind, "ping");
+    assert_eq!(
+        calls[0]
+            .1
+            .payload
+            .get("message")
+            .and_then(JsonValue::as_str),
+        Some("hello from echo")
     );
 }
 

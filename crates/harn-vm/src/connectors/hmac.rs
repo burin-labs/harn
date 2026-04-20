@@ -1225,6 +1225,7 @@ async fn reject<L: EventLog + ?Sized>(
         ConnectorError::Json(value) => ConnectorError::Json(value.clone()),
         ConnectorError::Secret(value) => ConnectorError::Secret(value.clone()),
         ConnectorError::EventLog(value) => ConnectorError::EventLog(value.clone()),
+        ConnectorError::HarnRuntime(value) => ConnectorError::HarnRuntime(value.clone()),
         ConnectorError::Client(value) => ConnectorError::Client(value.clone()),
         ConnectorError::Unsupported(value) => ConnectorError::Unsupported(value.clone()),
         ConnectorError::Activation(value) => ConnectorError::Activation(value.clone()),

@@ -3,6 +3,7 @@ use std::ffi::OsStr;
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{fs, process};
 
@@ -74,6 +75,11 @@ pub struct Manifest {
     /// dispatcher work.
     #[serde(default)]
     pub triggers: Vec<TriggerManifestEntry>,
+    /// `[[providers]]` array-of-tables — provider-specific connector
+    /// overrides used by the orchestrator to load either builtin Rust
+    /// connectors or `.harn` modules as connector implementations.
+    #[serde(default)]
+    pub providers: Vec<ProviderManifestEntry>,
     /// `[orchestrator]` table — listener-level controls shared by
     /// manifest-driven ingress surfaces.
     #[serde(default)]
@@ -557,6 +563,35 @@ pub struct RuntimeExtensions {
     pub capabilities: Option<harn_vm::llm::capabilities::CapabilitiesFile>,
     pub hooks: Vec<ResolvedHookConfig>,
     pub triggers: Vec<ResolvedTriggerConfig>,
+    pub provider_connectors: Vec<ResolvedProviderConnectorConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ProviderManifestEntry {
+    pub id: harn_vm::ProviderId,
+    pub connector: ProviderConnectorManifest,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ProviderConnectorManifest {
+    #[serde(default)]
+    pub harn: Option<String>,
+    #[serde(default)]
+    pub rust: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ResolvedProviderConnectorKind {
+    Harn { module: String },
+    RustBuiltin,
+    Invalid(String),
+}
+
+#[derive(Debug, Clone)]
+pub struct ResolvedProviderConnectorConfig {
+    pub id: harn_vm::ProviderId,
+    pub manifest_dir: PathBuf,
+    pub connector: ResolvedProviderConnectorKind,
 }
 
 #[derive(Debug, Clone)]
@@ -862,6 +897,42 @@ fn resolved_triggers_from_manifest(
                 package_name: package_name.clone(),
                 exports: manifest.exports.clone(),
                 table_index,
+            }
+        })
+        .collect()
+}
+
+fn resolved_provider_connectors_from_manifest(
+    manifest: &Manifest,
+    manifest_dir: &Path,
+) -> Vec<ResolvedProviderConnectorConfig> {
+    manifest
+        .providers
+        .iter()
+        .map(|provider| {
+            let connector = match (
+                provider.connector.harn.as_deref(),
+                provider.connector.rust.as_deref(),
+            ) {
+                (Some(module), None) => ResolvedProviderConnectorKind::Harn {
+                    module: module.to_string(),
+                },
+                (None, Some("builtin")) | (None, None) => {
+                    ResolvedProviderConnectorKind::RustBuiltin
+                }
+                (None, Some(other)) => ResolvedProviderConnectorKind::Invalid(format!(
+                    "provider '{}' uses unsupported connector.rust value '{other}'",
+                    provider.id.as_str()
+                )),
+                (Some(_), Some(_)) => ResolvedProviderConnectorKind::Invalid(format!(
+                    "provider '{}' cannot set both connector.harn and connector.rust",
+                    provider.id.as_str()
+                )),
+            };
+            ResolvedProviderConnectorConfig {
+                id: provider.id.clone(),
+                manifest_dir: manifest_dir.to_path_buf(),
+                connector,
             }
         })
         .collect()
@@ -1454,6 +1525,100 @@ async fn resolve_manifest_exports(
     }
 }
 
+struct ManifestExtensionProviderSchema {
+    provider_id: &'static str,
+    schema_name: &'static str,
+    metadata: harn_vm::ProviderMetadata,
+}
+
+impl harn_vm::ProviderSchema for ManifestExtensionProviderSchema {
+    fn provider_id(&self) -> &'static str {
+        self.provider_id
+    }
+
+    fn harn_schema_name(&self) -> &'static str {
+        self.schema_name
+    }
+
+    fn metadata(&self) -> harn_vm::ProviderMetadata {
+        self.metadata.clone()
+    }
+
+    fn normalize(
+        &self,
+        _kind: &str,
+        _headers: &BTreeMap<String, String>,
+        raw: serde_json::Value,
+    ) -> Result<harn_vm::ProviderPayload, harn_vm::ProviderCatalogError> {
+        Ok(harn_vm::ProviderPayload::Extension(
+            harn_vm::triggers::ExtensionProviderPayload {
+                provider: self.metadata.provider.clone(),
+                schema_name: self.metadata.schema_name.clone(),
+                raw,
+            },
+        ))
+    }
+}
+
+fn leak_static_string(value: String) -> &'static str {
+    Box::leak(value.into_boxed_str())
+}
+
+async fn install_manifest_provider_schemas(extensions: &RuntimeExtensions) -> Result<(), String> {
+    harn_vm::reset_provider_catalog();
+    for provider in &extensions.provider_connectors {
+        match &provider.connector {
+            ResolvedProviderConnectorKind::RustBuiltin => continue,
+            ResolvedProviderConnectorKind::Invalid(message) => {
+                return Err(message.clone());
+            }
+            ResolvedProviderConnectorKind::Harn { module } => {
+                let module_path =
+                    harn_vm::resolve_module_import_path(&provider.manifest_dir, module);
+                let contract = harn_vm::connectors::harn_module::load_contract(&module_path)
+                    .await
+                    .map_err(|error| {
+                        format!(
+                            "failed to load connector module '{}' for provider '{}': {error}",
+                            module_path.display(),
+                            provider.id.as_str()
+                        )
+                    })?;
+                if contract.provider_id != provider.id {
+                    return Err(format!(
+                        "provider '{}' resolves to connector module '{}' which declares provider_id '{}'",
+                        provider.id.as_str(),
+                        module_path.display(),
+                        contract.provider_id.as_str()
+                    ));
+                }
+                if harn_vm::provider_metadata(provider.id.as_str()).is_some() {
+                    continue;
+                }
+                let metadata = harn_vm::ProviderMetadata {
+                    provider: contract.provider_id.as_str().to_string(),
+                    kinds: contract
+                        .kinds
+                        .iter()
+                        .map(|kind| kind.as_str().to_string())
+                        .collect(),
+                    schema_name: contract.payload_schema.harn_schema_name.clone(),
+                    runtime: harn_vm::ProviderRuntimeMetadata::Placeholder,
+                    ..harn_vm::ProviderMetadata::default()
+                };
+                let schema = ManifestExtensionProviderSchema {
+                    provider_id: leak_static_string(metadata.provider.clone()),
+                    schema_name: leak_static_string(metadata.schema_name.clone()),
+                    metadata,
+                };
+                harn_vm::register_provider_schema(Arc::new(schema))
+                    .map_err(|error| error.to_string())?;
+            }
+        }
+    }
+    Ok(())
+}
+
 fn is_trigger_event_type(ty: &harn_parser::TypeExpr) -> bool {
     matches!(ty, harn_parser::TypeExpr::Named(name) if name == "TriggerEvent")
 }
@@ -1511,6 +1676,8 @@ pub fn load_runtime_extensions(anchor: &Path) -> RuntimeExtensions {
         &root_manifest,
         &manifest_dir,
     ));
+    let provider_connectors =
+        resolved_provider_connectors_from_manifest(&root_manifest, &manifest_dir);
 
     RuntimeExtensions {
         root_manifest: Some(root_manifest),
@@ -1518,6 +1685,7 @@ pub fn load_runtime_extensions(anchor: &Path) -> RuntimeExtensions {
         capabilities: (!is_empty_capabilities(&capabilities)).then_some(capabilities),
         hooks,
         triggers,
+        provider_connectors,
     }
 }
 
@@ -1579,6 +1747,7 @@ pub async fn collect_manifest_triggers(
     vm: &mut harn_vm::Vm,
     extensions: &RuntimeExtensions,
 ) -> Result<Vec<CollectedManifestTrigger>, String> {
+    install_manifest_provider_schemas(extensions).await?;
     validate_static_trigger_configs(&extensions.triggers)?;
     let mut loaded_exports: HashMap<ManifestModuleCacheKey, ManifestModuleExports> = HashMap::new();
     let mut module_signatures: HashMap<PathBuf, BTreeMap<String, TriggerFunctionSignature>> =
@@ -3513,6 +3682,30 @@ version = "0.1.0"
         (tmp, repo, branch)
     }
 
+    fn test_harn_connector_source(provider_id: &str) -> String {
+        format!(
+            r#"
+pub fn provider_id() {{
+  return "{provider_id}"
+}}
+
+pub fn kinds() {{
+  return ["webhook"]
+}}
+
+pub fn payload_schema() {{
+  return {{
+    harn_schema_name: "EchoEventPayload",
+    json_schema: {{
+      type: "object",
+      additionalProperties: true,
+    }},
+  }}
+}}
+"#
+        )
+    }
+
     #[test]
     fn preflight_severity_parsing_accepts_synonyms() {
         assert_eq!(
@@ -3964,6 +4157,39 @@ handler = "acme::audit_edit"
     }
 
     #[test]
+    fn load_runtime_extensions_collects_manifest_provider_connectors() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        fs::write(
+            root.join(MANIFEST),
+            r#"
+[[providers]]
+id = "echo"
+connector = { harn = "./echo_connector.harn" }
+
+[[providers]]
+id = "github"
+connector = { rust = "builtin" }
+"#,
+        )
+        .unwrap();
+        let harn_file = root.join("main.harn");
+        fs::write(&harn_file, "pipeline main() {}\n").unwrap();
+
+        let extensions = load_runtime_extensions(&harn_file);
+        assert_eq!(extensions.provider_connectors.len(), 2);
+        assert!(matches!(
+            &extensions.provider_connectors[0].connector,
+            ResolvedProviderConnectorKind::Harn { module } if module == "./echo_connector.harn"
+        ));
+        assert!(matches!(
+            extensions.provider_connectors[1].connector,
+            ResolvedProviderConnectorKind::RustBuiltin
+        ));
+    }
+
+    #[test]
     fn trigger_manifest_entries_round_trip_through_toml() {
         let source = r#"
 [[triggers]]
@@ -4350,6 +4576,46 @@ secrets = { signing_secret = "github/webhook-secret" }
                 allow_cleartext: true,
             } if target == "127.0.0.1:8787/triage"
         ));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn collect_manifest_triggers_accepts_harn_provider_override() {
+        let tmp = tempfile::tempdir().unwrap();
+        let harn_file = write_trigger_project(
+            tmp.path(),
+            r#"
+[[providers]]
+id = "echo"
+connector = { harn = "./echo_connector.harn" }
+
+[[triggers]]
+id = "echo-webhook"
+kind = "webhook"
+provider = "echo"
+path = "/hooks/echo"
+match = { path = "/hooks/echo", events = ["echo.received"] }
+handler = "worker://echo-queue"
+"#,
+            None,
+        );
+        fs::write(
+            tmp.path().join("echo_connector.harn"),
+            test_harn_connector_source("echo"),
+        )
+        .unwrap();
+
+        let mut vm = test_vm();
+        let collected = collect_manifest_triggers(&mut vm, &load_runtime_extensions(&harn_file))
+            .await
+            .expect("trigger collection succeeds");
+        assert_eq!(collected.len(), 1);
+        assert_eq!(collected[0].config.provider.as_str(), "echo");
+        assert_eq!(
+            harn_vm::provider_metadata("echo")
+                .expect("provider metadata registered")
+                .schema_name,
+            "EchoEventPayload"
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]

@@ -444,7 +444,7 @@ async fn normalizes_signed_github_webhook_events() {
         metadata: JsonValue::Null,
     };
 
-    let event = connector.normalize_inbound(raw.clone()).unwrap();
+    let event = connector.normalize_inbound(raw.clone()).await.unwrap();
     assert_eq!(event.kind, "issues");
     assert_eq!(event.dedupe_key, "delivery-1");
     assert!(matches!(
@@ -469,7 +469,7 @@ async fn normalizes_signed_github_webhook_events() {
         other => panic!("unexpected provider payload: {other:?}"),
     }
 
-    let duplicate = connector.normalize_inbound(raw).unwrap_err();
+    let duplicate = connector.normalize_inbound(raw).await.unwrap_err();
     assert!(matches!(duplicate, ConnectorError::DuplicateDelivery(_)));
 }
 
