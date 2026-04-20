@@ -3491,6 +3491,7 @@ mod tests {
         }
         run_git(&repo, &["config", "user.email", "tests@example.com"]);
         run_git(&repo, &["config", "user.name", "Harn Tests"]);
+        run_git(&repo, &["config", "core.hooksPath", "/dev/null"]);
         fs::write(
             repo.join(MANIFEST),
             r#"
