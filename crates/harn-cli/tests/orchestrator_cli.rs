@@ -869,3 +869,147 @@ pub fn on_task(event: TriggerEvent) -> string {
         "stderr={restarted_stderr}"
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn worker_queue_drain_uses_consumer_manifest_and_persists_response_records() {
+    let temp = TempDir::new().unwrap();
+    write_file(
+        temp.path(),
+        "producer/harn.toml",
+        r#"
+[package]
+name = "worker-producer"
+
+[[triggers]]
+id = "incoming-review-task"
+kind = "a2a-push"
+provider = "a2a-push"
+match = { events = ["a2a.task.received"] }
+handler = "worker://triage"
+priority = "high"
+"#,
+    );
+    write_file(
+        temp.path(),
+        "consumer/harn.toml",
+        r#"
+[package]
+name = "worker-consumer"
+
+[exports]
+handlers = "lib.harn"
+
+[[triggers]]
+id = "incoming-review-task"
+kind = "a2a-push"
+provider = "a2a-push"
+match = { events = ["a2a.task.received"] }
+handler = "handlers::on_task"
+"#,
+    );
+    write_file(
+        temp.path(),
+        "consumer/lib.harn",
+        r#"
+import "std/triggers"
+
+pub fn on_task(event: TriggerEvent) -> dict {
+  return {
+    ok: true,
+    kind: event.kind,
+    event_id: event.id,
+  }
+}
+"#,
+    );
+
+    let fire = run_harn_with_env(
+        &temp,
+        &[
+            "orchestrator",
+            "fire",
+            "incoming-review-task",
+            "--config",
+            "producer/harn.toml",
+            "--state-dir",
+            "./state",
+        ],
+        &[],
+    );
+    assert!(
+        fire.status.success(),
+        "status={:?}\nstdout={}\nstderr={}",
+        fire.status.code(),
+        stdout(&fire),
+        stderr(&fire)
+    );
+    assert!(stdout(&fire).contains("\"queue\":\"triage\""));
+
+    let queue_before = run_harn_with_env(
+        &temp,
+        &[
+            "orchestrator",
+            "queue",
+            "--config",
+            "consumer/harn.toml",
+            "--state-dir",
+            "./state",
+            "ls",
+            "--json",
+        ],
+        &[],
+    );
+    assert!(
+        queue_before.status.success(),
+        "status={:?}\nstdout={}\nstderr={}",
+        queue_before.status.code(),
+        stdout(&queue_before),
+        stderr(&queue_before)
+    );
+    let queue_before_json: serde_json::Value =
+        serde_json::from_str(&stdout(&queue_before)).expect("queue ls JSON");
+    assert_eq!(
+        queue_before_json["worker_queues"][0]["queue"],
+        serde_json::json!("triage")
+    );
+    assert_eq!(
+        queue_before_json["worker_queues"][0]["ready"],
+        serde_json::json!(1)
+    );
+
+    let drain = run_harn_with_env(
+        &temp,
+        &[
+            "orchestrator",
+            "queue",
+            "--config",
+            "consumer/harn.toml",
+            "--state-dir",
+            "./state",
+            "drain",
+            "triage",
+            "--consumer-id",
+            "consumer-a",
+            "--json",
+        ],
+        &[],
+    );
+    assert!(
+        drain.status.success(),
+        "status={:?}\nstdout={}\nstderr={}",
+        drain.status.code(),
+        stdout(&drain),
+        stderr(&drain)
+    );
+    let drain_json: serde_json::Value =
+        serde_json::from_str(&stdout(&drain)).expect("queue drain JSON");
+    assert_eq!(drain_json["drained"], serde_json::json!(1));
+    assert_eq!(drain_json["acked"], serde_json::json!(1));
+    assert_eq!(drain_json["deferred"], serde_json::json!(0));
+    assert_eq!(
+        drain_json["responses"][0]["outcome"]["status"],
+        serde_json::json!("succeeded")
+    );
+    assert_eq!(drain_json["summary"]["ready"], serde_json::json!(0));
+    assert_eq!(drain_json["summary"]["responses"], serde_json::json!(1));
+}

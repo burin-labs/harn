@@ -1278,6 +1278,7 @@ fn manifest_spec(id: &str, fingerprint: &str) -> TriggerBindingSpec {
         handler: TriggerHandlerSpec::Worker {
             queue: format!("{id}-queue"),
         },
+        dispatch_priority: crate::WorkerQueuePriority::Normal,
         when: None,
         when_budget: None,
         retry: TriggerRetryConfig::default(),

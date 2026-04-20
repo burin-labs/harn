@@ -11,6 +11,16 @@ granular archaeology.
 
 ### Changed
 
+- **`worker://` trigger dispatch now ships as a durable EventLog-backed
+  queue (harn#182).** The dispatcher now enqueues worker jobs under
+  `worker.<queue>`, tracks claim/ack/TTL state in companion claim
+  topics, records handler results under `worker.<queue>.responses`, and
+  exposes queue inspection/drain/purge through
+  `harn orchestrator queue {ls,drain,purge}`. Queue priority honors the
+  manifest's scalar `priority = "high" | "normal" | "low"` by default,
+  with age-based promotion for older normal jobs and event-header
+  overrides when callers need per-delivery priority.
+
 - **Agent session forks now record ancestry (#320).** `agent_session_fork`
   and `agent_session_fork_at` populate the new `agent_session_ancestry(id)`
   query so replay/eval tooling can trace the parent→child chain across

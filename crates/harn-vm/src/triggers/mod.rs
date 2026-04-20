@@ -5,6 +5,7 @@ pub mod inbox;
 pub mod registry;
 pub mod test_util;
 pub mod topics;
+pub mod worker_queue;
 
 pub use dispatcher::{
     append_dispatch_cancel_request, clear_dispatcher_state, snapshot_dispatcher_stats,
@@ -41,4 +42,11 @@ pub use topics::{
     TRIGGERS_LIFECYCLE_TOPIC, TRIGGER_ATTEMPTS_TOPIC, TRIGGER_CANCEL_REQUESTS_TOPIC,
     TRIGGER_DLQ_TOPIC, TRIGGER_INBOX_CLAIMS_TOPIC, TRIGGER_INBOX_ENVELOPES_TOPIC,
     TRIGGER_INBOX_LEGACY_TOPIC, TRIGGER_OPERATION_AUDIT_TOPIC, TRIGGER_OUTBOX_TOPIC,
+};
+pub use worker_queue::{
+    claims_topic_name as worker_claims_topic_name, job_topic_name as worker_job_topic_name,
+    response_topic_name as worker_response_topic_name, ClaimedWorkerJob, WorkerQueue,
+    WorkerQueueClaimHandle, WorkerQueueEnqueueReceipt, WorkerQueueJob, WorkerQueueJobState,
+    WorkerQueuePriority, WorkerQueueResponseRecord, WorkerQueueState, WorkerQueueSummary,
+    WORKER_QUEUE_CATALOG_TOPIC,
 };

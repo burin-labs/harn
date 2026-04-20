@@ -4,8 +4,9 @@ The trigger dispatcher is the runtime path that turns a normalized
 `TriggerEvent` plus a live registry binding into actual handler work.
 
 At MVP, the dispatcher fully wires the local-function path plus synchronous
-and pending-handle `a2a://...` dispatch. The `worker://...` scheme remains an
-explicit stub with a clear follow-up ticket.
+and pending-handle `a2a://...` dispatch. `worker://...` dispatch now enqueues
+durable jobs on the shared EventLog so a separate orchestrator or handler-only
+consumer can drain them later.
 
 ## Dispatch shape
 
@@ -67,6 +68,16 @@ For local-dev receivers started with `harn serve`, add `allow_cleartext = true`
 on the trigger binding. `harn serve` is HTTP-only today, so the dispatcher will
 otherwise stop after the HTTPS probe instead of silently downgrading.
 
+For `worker://<queue>` routes, the dispatcher:
+
+- appends a durable job record under `worker.<queue>`
+- records the originating trigger id, binding key, binding version, event id,
+  and effective priority on the queued job
+- returns an enqueue receipt with the queue name, job event id, and
+  `worker.<queue>.responses` topic
+- leaves execution to a later `harn orchestrator queue drain <queue>` consumer
+  running against the same EventLog backend
+
 ## Retry policy
 
 Bindings carry a normalized `TriggerRetryConfig`:
@@ -107,6 +118,10 @@ The dispatcher uses the shared `EventLog` instead of a parallel queue layer:
 - `trigger.dlq`
 - `triggers.lifecycle`
 - `observability.action_graph`
+- `worker.queues`
+- `worker.<queue>`
+- `worker.<queue>.claims`
+- `worker.<queue>.responses`
 - dynamic flow-control gate topics under
   `trigger.{debounce,rate_limit,throttle,singleton,concurrency,batch}.*`
 
@@ -158,7 +173,8 @@ event back to the original event id.
 - `a2a://...` currently uses the single-shot `a2a.SendMessage` path only; push
   callbacks, streaming chunk accumulation, and remote cancel/resubscribe stay
   deferred
-- `worker://...` still returns `DispatchError::NotImplemented` and points at
-  `O-05 #182`
+- worker consumers use polling claim/ack/TTL semantics today through
+  `harn orchestrator queue drain`; there is not yet a long-running dedicated
+  worker daemon mode
 - DLQ storage is in-memory plus event-log append; durable replay remains
   follow-up work

@@ -1104,6 +1104,7 @@ mod tests {
             handler: TriggerHandlerSpec::Worker {
                 queue: "triage".to_string(),
             },
+            dispatch_priority: harn_vm::WorkerQueuePriority::Normal,
             when: None,
             when_budget: None,
             retry: TriggerRetryConfig::default(),
