@@ -16,7 +16,7 @@ pipeline test(task) {
   let unique = to_string(to_int(timestamp())) + "-" + to_string(random_int(100000, 999999))
   let ok_id = "ok-trigger-" + unique
   let fail_id = "fail-trigger-" + unique
-  let ok_config: TriggerConfig = {
+  let ok_config = {
     id: ok_id,
     kind: "issue.opened",
     provider: "github",
@@ -33,7 +33,7 @@ pipeline test(task) {
     manifest_path: "runtime://trigger-stdlib",
     package_name: "conformance",
   }
-  let fail_config: TriggerConfig = {
+  let fail_config = {
     id: fail_id,
     kind: "issue.opened",
     provider: "github",

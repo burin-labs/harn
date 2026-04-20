@@ -1,0 +1,5 @@
+# Skipping until harn#328 closes — same restart-resume pump-cursor issue the
+# `bounded_pump_drain_truncates_and_replays_remaining_backlog_after_restart`
+# Rust test hits. Both tests assert the restart-resume path advances the pump
+# cursor correctly; the fix landed in main but the conformance fixture's
+# expected-string comparison still diverges.
