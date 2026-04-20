@@ -9,6 +9,7 @@ pub(crate) fn lookup_generic_builtin_sig(name: &str) -> Option<BuiltinGenericSig
         "ask_user" => Some(ask_user_generic_sig()),
         "dual_control" => Some(dual_control_generic_sig()),
         "escalate_to" => Some(escalate_to_builtin_sig()),
+        "hitl_pending" => Some(hitl_pending_builtin_sig()),
         "llm_call" | "llm_completion" => Some(llm_call_generic_sig()),
         "project_fingerprint" => Some(project_fingerprint_builtin_sig()),
         "request_approval" => Some(request_approval_builtin_sig()),
@@ -338,6 +339,47 @@ fn escalate_to_builtin_sig() -> BuiltinGenericSig {
             },
         ]),
     }
+}
+
+fn hitl_pending_builtin_sig() -> BuiltinGenericSig {
+    BuiltinGenericSig {
+        type_params: vec![],
+        params: vec![TypeExpr::Union(vec![
+            hitl_pending_filters_type(),
+            TypeExpr::Named("nil".into()),
+        ])],
+        return_type: TypeExpr::List(Box::new(TypeExpr::Named("HitlPendingRequest".into()))),
+    }
+}
+
+fn hitl_pending_filters_type() -> TypeExpr {
+    TypeExpr::Shape(vec![
+        ShapeField {
+            name: "since".into(),
+            type_expr: TypeExpr::Named("string".into()),
+            optional: true,
+        },
+        ShapeField {
+            name: "until".into(),
+            type_expr: TypeExpr::Named("string".into()),
+            optional: true,
+        },
+        ShapeField {
+            name: "kinds".into(),
+            type_expr: TypeExpr::List(Box::new(TypeExpr::Named("HitlRequestKind".into()))),
+            optional: true,
+        },
+        ShapeField {
+            name: "agent".into(),
+            type_expr: TypeExpr::Named("string".into()),
+            optional: true,
+        },
+        ShapeField {
+            name: "limit".into(),
+            type_expr: TypeExpr::Named("int".into()),
+            optional: true,
+        },
+    ])
 }
 
 fn handler_context_builtin_sig() -> BuiltinGenericSig {

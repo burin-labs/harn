@@ -832,6 +832,8 @@ live in `std/hitl`; the builtins themselves are always available.
 - `request_approval(action, {detail?, quorum?, reviewers?, deadline?}) -> {approved, reviewers, approved_at, reason}`
 - `dual_control<T>(n, m, action: fn() -> T, approvers?) -> T`
 - `escalate_to(role, reason) -> {request_id, role, reason, trace_id, status, accepted_at, reviewer}`
+- `hitl_pending({since?, until?, kinds?, agent?, limit?} | nil)
+  -> list<{request_id, request_kind, agent, prompt, trace_id, timestamp, approvers, metadata}>`
 
 Operational semantics:
 

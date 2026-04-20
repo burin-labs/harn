@@ -1,0 +1,17 @@
+import "std/hitl"
+
+pipeline test(task) {
+  let prompt = "Need a human " + uuid()
+  let handle = spawn {
+    ask_user(prompt, {timeout: 5m})
+  }
+  sleep(10ms)
+  let rows: list<HitlPendingRequest> = hitl_pending({}).filter({row ->
+    row.prompt == prompt
+  })
+  println(len(rows))
+  println(rows[0].request_kind)
+  println(starts_with(rows[0].prompt, "Need a human "))
+  println(len(rows[0].approvers))
+  cancel(handle)
+}

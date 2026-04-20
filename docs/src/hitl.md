@@ -103,6 +103,36 @@ type EscalationHandle = {
 }
 ```
 
+### `hitl_pending(filters?: HitlPendingFilters) -> list<HitlPendingRequest>`
+
+Read the active event log and return pending HITL requests as typed rows.
+
+- Returns `[]` when no event log is attached.
+- Reads and merges `hitl.questions`, `hitl.approvals`, `hitl.dual_control`,
+  and `hitl.escalations`.
+- Filters are all optional:
+  - `since` / `until`: inclusive RFC3339 timestamp bounds
+  - `kinds`: subset of `"question" | "approval" | "dual_control" | "escalation"`
+  - `agent`: exact agent id match
+  - `limit`: defaults to 500, capped at 5000
+- Results are sorted newest first and omit requests that already reached a
+  terminal HITL event.
+
+`HitlPendingRequest` is the shared row shape:
+
+```harn
+type HitlPendingRequest = {
+  request_id: string,
+  request_kind: HitlRequestKind,
+  agent: string,
+  prompt: string,
+  trace_id: string,
+  timestamp: string,
+  approvers: list<string>,
+  metadata: dict,
+}
+```
+
 ## Event Topics
 
 HITL records are written to dedicated durable topics:

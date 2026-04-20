@@ -2527,6 +2527,11 @@ records, and replay.
 - `escalate_to(role: string, reason: string)`
   returns `{request_id: string, role: string, reason: string, trace_id: string,
   status: string, accepted_at: string | nil, reviewer: string | nil}`.
+- `hitl_pending(filters?: {since?: string, until?: string, kinds?: list<string>,
+  agent?: string, limit?: int})`
+  returns `list<{request_id: string, request_kind: string, agent: string,
+  prompt: string, trace_id: string, timestamp: string, approvers: list<string>,
+  metadata: dict}>`.
 
 Normative behavior:
 
@@ -2544,6 +2549,10 @@ Normative behavior:
 - `escalate_to` appends `hitl.escalation_issued` and blocks until the host
   appends `hitl.escalation_accepted`. If the host does not respond, the
   dispatch remains paused until manual resume.
+- `hitl_pending` reads the durable HITL topics via the active event log,
+  returns `[]` when no event log is attached, filters by `since` / `until` /
+  `kinds` / `agent` / `limit`, and omits requests that have already reached a
+  terminal HITL event.
 
 HITL records live in durable event-log topics:
 

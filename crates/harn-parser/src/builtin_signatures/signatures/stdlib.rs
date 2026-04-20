@@ -344,6 +344,10 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("string")),
     },
     BuiltinSig {
+        name: "hitl_pending",
+        return_type: None,
+    },
+    BuiltinSig {
         name: "is_cancelled",
         return_type: None,
     },

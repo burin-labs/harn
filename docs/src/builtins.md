@@ -783,6 +783,7 @@ event-log topics, bridge contract, and replay semantics.
 | `request_approval(action, options?)` | action: string, options: `{detail?: any, quorum?: int, reviewers?: list<string>, deadline?: duration}` | `{approved, reviewers, approved_at, reason}` | Emit a durable approval request, wait for quorum, and return the approval record. Defaults to quorum 1 and a 24-hour deadline. Denial throws `ApprovalDeniedError` |
 | `dual_control(n, m, action, approvers?)` | `n: int, m: int, action: fn() -> T, approvers: list<string> or nil` | `T` | n-of-m approval gate for executing `action`. Commonly used for destructive or privileged operations. Denial throws `ApprovalDeniedError` |
 | `escalate_to(role, reason)` | role: string, reason: string | `{request_id, role, reason, trace_id, status, accepted_at, reviewer}` | Raise the current dispatch to a higher-trust role and wait for host acceptance. The host or operator resolves it with `harn.hitl.respond` / `harn orchestrator resume` |
+| `hitl_pending(filters?)` | filters: `{since?: string, until?: string, kinds?: list<string>, agent?: string, limit?: int}` or `nil` | `list<{request_id, request_kind, agent, prompt, trace_id, timestamp, approvers, metadata}>` | Read the active event log's pending HITL requests as typed rows, newest first. Returns `[]` when no event log is attached. |
 
 ```harn
 // Queue specific responses for the mock provider
