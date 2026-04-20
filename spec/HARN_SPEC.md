@@ -2811,7 +2811,7 @@ fn handle(v: unknown) -> string {
 }
 ```
 
-Covering all eight `type_of` variants (`int`, `string`, `float`, `bool`,
+Covering all nine `type_of` variants (`int`, `string`, `float`, `bool`,
 `nil`, `list`, `dict`, `closure`, `bytes`) silences the warning. Suppression via
 an explicit fallthrough `return` is intentional: a plain `return`
 doesn't claim exhaustiveness, so partial narrowing followed by a normal
