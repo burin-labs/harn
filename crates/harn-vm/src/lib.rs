@@ -120,10 +120,10 @@ pub use triggers::{
     TRIGGER_TEST_FIXTURES, WORKER_QUEUE_CATALOG_TOPIC,
 };
 pub use trust_graph::{
-    append_active_trust_record, append_trust_record, query_trust_records,
-    resolve_agent_autonomy_tier, summarize_trust_records, topic_for_agent, AutonomyTier,
-    TrustAgentSummary, TrustOutcome, TrustQueryFilters, TrustRecord, OPENTRUSTGRAPH_SCHEMA_V0,
-    TRUST_GRAPH_GLOBAL_TOPIC, TRUST_GRAPH_TOPIC_PREFIX,
+    append_active_trust_record, append_trust_record, group_trust_records_by_trace,
+    query_trust_records, resolve_agent_autonomy_tier, summarize_trust_records, topic_for_agent,
+    AutonomyTier, TrustAgentSummary, TrustOutcome, TrustQueryFilters, TrustRecord, TrustTraceGroup,
+    OPENTRUSTGRAPH_SCHEMA_V0, TRUST_GRAPH_GLOBAL_TOPIC, TRUST_GRAPH_TOPIC_PREFIX,
 };
 pub use value::*;
 pub use vm::*;

@@ -878,7 +878,8 @@ Trust-graph helpers also live in `std/triggers`:
 - `handler_context()` returns the active trigger dispatch context or `nil`.
 - `trust_record(agent, action, approver, outcome, tier)` appends a manual
   trust record.
-- `trust_query(filters)` queries historical trust records.
+- `trust_query(filters)` queries historical trust records, including
+  `limit` and `grouped_by_trace`.
 - `TriggerConfig.autonomy_tier` and manifest `[[triggers]].autonomy_tier`
   accept `shadow | suggest | act_with_approval | act_auto`.
 - `harn trust query`, `harn trust promote`, and `harn trust demote` expose the

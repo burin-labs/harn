@@ -417,7 +417,7 @@ fn trust_query_builtin_sig() -> BuiltinGenericSig {
             TypeExpr::Named("TrustQueryFilters".into()),
             TypeExpr::Named("nil".into()),
         ])],
-        return_type: TypeExpr::List(Box::new(TypeExpr::Named("TrustRecord".into()))),
+        return_type: TypeExpr::Named("list".into()),
     }
 }
 

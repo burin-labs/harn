@@ -20,6 +20,14 @@ granular archaeology.
   leaking byte positions through timing. Covered by RFC 4231 and
   GitHub's documented webhook test vectors.
 
+- **`trust_query(filters)` now supports `limit` and `grouped_by_trace`
+  (#338).** Trust-graph queries can now cap results to the newest N
+  matching records server-side and optionally return
+  `{trace_id, records}` buckets for timeline UIs that need bounded
+  polling without regrouping the full history client-side. The same
+  filters are now wired through the stdlib builtin, `harn trust query`,
+  and `harn mcp serve`'s `harn.trust.query` tool.
+
 ### Fixed
 
 - **Orchestrator no longer SIGTERM-races under parallel test load
