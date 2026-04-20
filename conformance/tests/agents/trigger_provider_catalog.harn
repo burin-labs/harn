@@ -129,17 +129,31 @@ pipeline test(task) {
   let notion_secrets = notion?.secret_requirements ?? []
   assert(len(notion_secrets) == 1, "notion should publish its webhook verification secret")
   assert(
-    notion_secrets.any({ secret -> secret.name == "verification_token" && secret.namespace == "notion" }),
+    notion_secrets.any(
+    { secret -> secret.name == "verification_token" && secret.namespace == "notion" },
+  ),
     "notion should require verification_token in the notion namespace",
   )
   let notion_methods = notion?.outbound_methods ?? []
   assert(len(notion_methods) == 7, "notion should publish seven outbound methods")
   assert(notion_methods.any({ method -> method.name == "get_page" }), "notion should expose get_page")
-  assert(notion_methods.any({ method -> method.name == "update_page" }), "notion should expose update_page")
-  assert(notion_methods.any({ method -> method.name == "append_blocks" }), "notion should expose append_blocks")
-  assert(notion_methods.any({ method -> method.name == "query_database" }), "notion should expose query_database")
+  assert(
+    notion_methods.any({ method -> method.name == "update_page" }),
+    "notion should expose update_page",
+  )
+  assert(
+    notion_methods.any({ method -> method.name == "append_blocks" }),
+    "notion should expose append_blocks",
+  )
+  assert(
+    notion_methods.any({ method -> method.name == "query_database" }),
+    "notion should expose query_database",
+  )
   assert(notion_methods.any({ method -> method.name == "search" }), "notion should expose search")
-  assert(notion_methods.any({ method -> method.name == "create_comment" }), "notion should expose create_comment")
+  assert(
+    notion_methods.any({ method -> method.name == "create_comment" }),
+    "notion should expose create_comment",
+  )
   assert(notion_methods.any({ method -> method.name == "api_call" }), "notion should expose api_call")
   log("trigger_provider_catalog tests passed")
 }
