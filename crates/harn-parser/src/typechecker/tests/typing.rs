@@ -137,6 +137,48 @@ second: B
 }
 
 #[test]
+fn test_unknown_struct_literal_reports_error() {
+    let diagnostics = check_source(
+        r#"pipeline t(task) {
+  let p = Point {x: 3, y: 4}
+}"#,
+    );
+    let errors: Vec<_> = diagnostics
+        .into_iter()
+        .filter(|diag| diag.severity == DiagnosticSeverity::Error)
+        .collect();
+    assert_eq!(errors.len(), 1, "expected one error, got: {errors:?}");
+    assert_eq!(errors[0].message, "unknown struct type `Point`");
+}
+
+#[test]
+fn test_unknown_struct_literal_suggests_close_match() {
+    let diagnostics = check_source(
+        r#"pipeline t(task) {
+  struct Point {
+    x: int
+    y: int
+  }
+
+  let p = Piont {x: 3, y: 4}
+}"#,
+    );
+    let errors: Vec<_> = diagnostics
+        .into_iter()
+        .filter(|diag| diag.severity == DiagnosticSeverity::Error)
+        .collect();
+    assert_eq!(errors.len(), 1, "expected one error, got: {errors:?}");
+    assert_eq!(
+        errors[0].message,
+        "unknown struct type `Piont` — did you mean `Point`?"
+    );
+    assert_eq!(
+        errors[0].help.as_deref(),
+        Some("declare `struct Point { ... }` or fix the type name")
+    );
+}
+
+#[test]
 fn test_generic_enum_construct_instantiates_type_arguments() {
     let errs = errors(
         r#"pipeline t(task) {

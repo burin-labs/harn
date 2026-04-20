@@ -421,14 +421,17 @@ impl Parser {
                         );
                     }
                 }
-            } else if self.check(&TokenKind::LBrace)
-                && matches!(&expr.node, Node::Identifier(name) if self.struct_names.contains(name))
-            {
-                let start = expr.span;
-                let struct_name = match expr.node {
-                    Node::Identifier(name) => name,
-                    _ => unreachable!("checked above"),
+            } else if self.check(&TokenKind::LBrace) {
+                let struct_name = match &expr.node {
+                    Node::Identifier(name) if self.is_struct_construct_lookahead(name) => {
+                        Some(name.clone())
+                    }
+                    _ => None,
                 };
+                let Some(struct_name) = struct_name else {
+                    break;
+                };
+                let start = expr.span;
                 self.advance();
                 let dict = self.parse_dict_literal(start)?;
                 let fields = match dict.node {
@@ -710,6 +713,28 @@ impl Parser {
         }
         self.pos = saved;
         self.parse_dict_literal(start)
+    }
+
+    /// After seeing `Identifier {`, decide whether the brace block is a
+    /// struct-construction field list rather than a control-flow block.
+    /// Struct fields always start with `name:` / `"name":` or `}`.
+    pub(super) fn is_struct_construct_lookahead(&self, struct_name: &str) -> bool {
+        let mut offset = 1;
+        while matches!(self.peek_kind_at(offset), Some(TokenKind::Newline)) {
+            offset += 1;
+        }
+
+        match self.peek_kind_at(offset) {
+            Some(TokenKind::RBrace) => self.struct_names.contains(struct_name),
+            Some(TokenKind::Identifier(_)) | Some(TokenKind::StringLiteral(_)) => {
+                offset += 1;
+                while matches!(self.peek_kind_at(offset), Some(TokenKind::Newline)) {
+                    offset += 1;
+                }
+                matches!(self.peek_kind_at(offset), Some(TokenKind::Colon))
+            }
+            _ => false,
+        }
     }
 
     /// Caller must save/restore `pos`; this advances while scanning.

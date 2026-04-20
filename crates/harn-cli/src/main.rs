@@ -917,19 +917,33 @@ pub(crate) fn parse_source_file(path: &str) -> (String, Vec<harn_parser::SNode>)
     let mut parser = Parser::new(tokens);
     let program = match parser.parse() {
         Ok(p) => p,
-        Err(_) => {
-            for e in parser.all_errors() {
-                let span = error_span_from_parse(e);
+        Err(err) => {
+            if parser.all_errors().is_empty() {
+                let span = error_span_from_parse(&err);
                 let diagnostic = harn_parser::diagnostic::render_diagnostic(
                     &source,
                     path,
                     &span,
                     "error",
-                    &harn_parser::diagnostic::parser_error_message(e),
-                    Some(harn_parser::diagnostic::parser_error_label(e)),
-                    harn_parser::diagnostic::parser_error_help(e),
+                    &harn_parser::diagnostic::parser_error_message(&err),
+                    Some(harn_parser::diagnostic::parser_error_label(&err)),
+                    harn_parser::diagnostic::parser_error_help(&err),
                 );
                 eprint!("{diagnostic}");
+            } else {
+                for e in parser.all_errors() {
+                    let span = error_span_from_parse(e);
+                    let diagnostic = harn_parser::diagnostic::render_diagnostic(
+                        &source,
+                        path,
+                        &span,
+                        "error",
+                        &harn_parser::diagnostic::parser_error_message(e),
+                        Some(harn_parser::diagnostic::parser_error_label(e)),
+                        harn_parser::diagnostic::parser_error_help(e),
+                    );
+                    eprint!("{diagnostic}");
+                }
             }
             process::exit(1);
         }
