@@ -1,15 +1,19 @@
 fn first() {
   return "one"
-}; fn second() {
+}
+
+fn second() {
   return "two"
 }
 
 skill deploy {
-  description "Ship it"; prompt "Follow the runbook."
+  description "Ship it"
+  prompt "Follow the runbook."
 }
 
 pipeline test(task) {
-  let x = 1; let y = 2
+  let x = 1
+  let y = 2
   let meta = skill_find(deploy, "deploy")
   assert(first() == "one", "first function should parse on one line")
   assert(second() == "two", "second function should parse on one line")
