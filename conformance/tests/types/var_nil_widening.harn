@@ -1,7 +1,6 @@
 // `var x = nil` should widen on the first concrete assignment instead of
 // pinning `x` to `nil` forever. Explicit `T | nil` annotations remain the
 // precise escape hatch when callers want to say so up front.
-
 fn first_hit() -> {name: string, score: int} | nil {
   var hit = nil
   for entry in {a: 1, b: 2}.entries() {
