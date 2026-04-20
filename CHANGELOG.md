@@ -166,6 +166,21 @@ granular archaeology.
   documentation, and `harn orchestrator resume <request_id>` for manual
   escalation acceptance.
 
+- **LLM-gated trigger predicates with replay-safe cost governance
+  (harn#161).** `[[triggers]]` and `trigger_register(...)` now accept
+  `when = ...` plus `when_budget = {max_cost_usd, tokens_max, timeout}`
+  so typed predicates can call `llm_call(...)` before handler
+  dispatch. Predicate spend is tracked against the trigger's UTC-day
+  `budget.daily_cost_usd`; overruns emit
+  `predicate.budget_exceeded` / `predicate.daily_budget_exceeded` and
+  fail closed. Predicate `llm_call(...)` results are cached in the
+  request cache plus per-event `trigger.inbox` records so replay stays
+  deterministic, `predicate.evaluated` now emits cost/token/cache
+  metadata, action-graph observability includes a
+  `trigger_predicate` node kind, and three consecutive predicate
+  failures open a five-minute circuit breaker with operator-visible
+  warnings.
+
 - **`harn orchestrator {inspect, fire, replay, dlq, queue}` CLI
   commands (#185).** Implemented the placeholder orchestrator
   subcommands that used to error with `not implemented`. `inspect`

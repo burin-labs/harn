@@ -853,18 +853,57 @@ exercise the live trigger registry:
 - `trigger_list()` returns `list<TriggerBinding>`.
 - `trigger_register(config)` hot-installs a dynamic trigger and returns a
   `TriggerHandle`. `config.retry` accepts `{max, backoff}` with
-  `backoff: "svix" | "immediate"`.
+  `backoff: "svix" | "immediate"`. `config.when_budget` accepts
+  `{max_cost_usd, tokens_max, timeout}` when `config.when` calls `llm_call(...)`.
 - `trigger_fire(handle, event)` injects a synthetic `TriggerEvent` and returns a
   `DispatchHandle`.
 - `trigger_replay(event_id)` fetches an event from `triggers.events` and
   re-dispatches it through the trigger dispatcher, preserving
   `replay_of_event_id`.
 - `trigger_inspect_dlq()` returns `list<DlqEntry>` with retry history.
+- `trigger_inspect_lifecycle(kind?)` returns lifecycle records including
+  `predicate.evaluated`, `predicate.budget_exceeded`, and
+  `predicate.daily_budget_exceeded`.
 
 Shared types live in `std/triggers`: `TriggerConfig`, `TriggerBinding`,
 `TriggerHandle`, `DispatchHandle`, `DlqEntry`, and `TriggerEvent`.
 
 Current caveats:
+
+- LLM-gated predicates are fail-closed. Single-evaluation budget overruns,
+  daily budget exhaustion, provider failures, and circuit-breaker-open states
+  all short-circuit the handler to `false`.
+- Example:
+
+```harn
+import "std/triggers"
+
+fn about_outages(event: TriggerEvent) -> bool {
+  let result = llm_call(
+    "Is this message about outages? " + event.kind,
+    nil,
+    {provider: "mock", model: "gpt-4o-mini", llm_retries: 0},
+  )
+  return contains(result.text.lower(), "yes")
+}
+
+let handle = trigger_register({
+  id: "slack-outage-gate",
+  kind: "slack.message",
+  provider: "slack",
+  handler: fn(event) { return event.kind },
+  when: about_outages,
+  when_budget: {max_cost_usd: 0.001, tokens_max: 500, timeout: "5s"},
+  retry: nil,
+  match: {events: ["slack.message"]},
+  events: nil,
+  dedupe_key: nil,
+  filter: nil,
+  budget: {daily_cost_usd: 1.0, max_concurrent: nil},
+  manifest_path: nil,
+  package_name: nil,
+})
+```
 
 - `trigger_fire` / `trigger_replay` now reuse the dispatcher for local
   handlers, retries, and DLQ transitions, but `a2a://...` and

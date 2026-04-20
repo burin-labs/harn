@@ -131,6 +131,8 @@ pub struct TriggerManifestEntry {
     pub match_: TriggerMatchExpr,
     #[serde(default)]
     pub when: Option<String>,
+    #[serde(default)]
+    pub when_budget: Option<TriggerWhenBudgetSpec>,
     pub handler: String,
     #[serde(default)]
     pub dedupe_key: Option<String>,
@@ -214,6 +216,16 @@ pub struct TriggerBudgetSpec {
     pub daily_cost_usd: Option<f64>,
     #[serde(default)]
     pub max_concurrent: Option<u32>,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TriggerWhenBudgetSpec {
+    #[serde(default)]
+    pub max_cost_usd: Option<f64>,
+    #[serde(default)]
+    pub tokens_max: Option<u64>,
+    #[serde(default)]
+    pub timeout: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -476,6 +488,7 @@ pub struct ResolvedTriggerConfig {
     pub provider: harn_vm::ProviderId,
     pub match_: TriggerMatchExpr,
     pub when: Option<String>,
+    pub when_budget: Option<TriggerWhenBudgetSpec>,
     pub handler: String,
     pub dedupe_key: Option<String>,
     pub retry: TriggerRetrySpec,
@@ -712,6 +725,7 @@ fn resolved_triggers_from_manifest(
             provider: trigger.provider.clone(),
             match_: trigger.match_.clone(),
             when: trigger.when.clone(),
+            when_budget: trigger.when_budget.clone(),
             handler: trigger.handler.clone(),
             dedupe_key: trigger.dedupe_key.clone(),
             retry: trigger.retry.clone(),
@@ -904,6 +918,33 @@ fn parse_jmespath_expression(
     })
 }
 
+fn parse_duration_millis(raw: &str) -> Result<u64, String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err("duration cannot be empty".to_string());
+    }
+    let (value, unit) = trimmed
+        .char_indices()
+        .find(|(_, ch)| !ch.is_ascii_digit())
+        .map(|(index, _)| (&trimmed[..index], &trimmed[index..]))
+        .unwrap_or((trimmed, "ms"));
+    let amount = value
+        .parse::<u64>()
+        .map_err(|_| format!("invalid duration '{raw}'"))?;
+    let multiplier = match unit.trim() {
+        "ms" => 1,
+        "s" => 1_000,
+        "m" => 60_000,
+        "h" => 3_600_000,
+        _ => {
+            return Err(format!(
+                "invalid duration unit in '{raw}'; expected ms, s, m, or h"
+            ))
+        }
+    };
+    Ok(amount.saturating_mul(multiplier))
+}
+
 fn validate_static_trigger_config(trigger: &ResolvedTriggerConfig) -> Result<(), String> {
     if trigger.id.trim().is_empty() {
         return Err(trigger_error(trigger, "id cannot be empty"));
@@ -952,12 +993,39 @@ fn validate_static_trigger_config(trigger: &ResolvedTriggerConfig) -> Result<(),
             ));
         }
     }
+    if trigger.when_budget.is_some() && trigger.when.is_none() {
+        return Err(trigger_error(
+            trigger,
+            "when_budget requires a when predicate",
+        ));
+    }
     if let Some(daily_cost_usd) = trigger.budget.daily_cost_usd {
         if daily_cost_usd.is_sign_negative() {
             return Err(trigger_error(
                 trigger,
                 "budget.daily_cost_usd must be greater than or equal to 0",
             ));
+        }
+    }
+    if let Some(when_budget) = trigger.when_budget.as_ref() {
+        if when_budget
+            .max_cost_usd
+            .is_some_and(|value| value.is_sign_negative())
+        {
+            return Err(trigger_error(
+                trigger,
+                "when_budget.max_cost_usd must be greater than or equal to 0",
+            ));
+        }
+        if when_budget.tokens_max == Some(0) {
+            return Err(trigger_error(
+                trigger,
+                "when_budget.tokens_max must be greater than or equal to 1",
+            ));
+        }
+        if let Some(timeout) = when_budget.timeout.as_deref() {
+            parse_duration_millis(timeout)
+                .map_err(|error| trigger_error(trigger, format!("when_budget.timeout {error}")))?;
         }
     }
     if trigger.retry.max > TRIGGER_RETRY_MAX_LIMIT {
@@ -1185,6 +1253,19 @@ fn is_trigger_event_type(ty: &harn_parser::TypeExpr) -> bool {
 
 fn is_bool_type(ty: &harn_parser::TypeExpr) -> bool {
     matches!(ty, harn_parser::TypeExpr::Named(name) if name == "bool")
+}
+
+fn is_predicate_return_type(ty: &harn_parser::TypeExpr) -> bool {
+    if is_bool_type(ty) {
+        return true;
+    }
+    matches!(
+        ty,
+        harn_parser::TypeExpr::Applied { name, args }
+            if name == "Result"
+                && args.len() == 2
+                && args.first().is_some_and(is_bool_type)
+    )
 }
 
 fn manifest_capabilities(
@@ -1428,12 +1509,12 @@ pub async fn collect_manifest_triggers(
             if signature
                 .return_type
                 .as_ref()
-                .is_none_or(|return_type| !is_bool_type(return_type))
+                .is_none_or(|return_type| !is_predicate_return_type(return_type))
             {
                 return Err(trigger_error(
                     trigger,
                     format!(
-                        "when predicate '{}' must have signature fn(TriggerEvent) -> bool",
+                        "when predicate '{}' must have signature fn(TriggerEvent) -> bool or Result<bool, _>",
                         reference.raw
                     ),
                 ));
@@ -1516,6 +1597,22 @@ pub fn manifest_trigger_binding_spec(
         raw: predicate.reference.raw,
         closure: predicate.closure,
     });
+    let when_budget = config
+        .when_budget
+        .as_ref()
+        .map(|budget| {
+            Ok::<harn_vm::TriggerPredicateBudget, String>(harn_vm::TriggerPredicateBudget {
+                max_cost_usd: budget.max_cost_usd,
+                tokens_max: budget.tokens_max,
+                timeout_ms: budget
+                    .timeout
+                    .as_deref()
+                    .map(parse_duration_millis)
+                    .transpose()?,
+            })
+        })
+        .transpose()
+        .unwrap_or_default();
     let id = config.id.clone();
     let kind = trigger_kind_label(config.kind).to_string();
     let provider = config.provider.clone();
@@ -1541,6 +1638,7 @@ pub fn manifest_trigger_binding_spec(
         "provider": provider.as_str(),
         "match": config.match_,
         "when": when_raw,
+        "when_budget": config.when_budget,
         "handler": handler_descriptor,
         "dedupe_key": &dedupe_key,
         "retry": config.retry,
@@ -1561,6 +1659,7 @@ pub fn manifest_trigger_binding_spec(
         provider,
         handler,
         when,
+        when_budget,
         retry,
         match_events,
         dedupe_key,
@@ -2412,6 +2511,7 @@ kind = "webhook"
 provider = "github"
 match = { events = ["issues.opened"] }
 when = "handlers::should_handle"
+when_budget = { max_cost_usd = 0.001, tokens_max = 500, timeout = "5s" }
 handler = "handlers::on_new_issue"
 dedupe_key = "event.dedupe_key"
 retry = { max = 7, backoff = "svix", retention_days = 7 }
@@ -2500,6 +2600,7 @@ kind = "webhook"
 provider = "github"
 match = { events = ["issues.opened"] }
 when = "handlers::should_handle"
+when_budget = { max_cost_usd = 0.001, tokens_max = 500, timeout = "5s" }
 handler = "handlers::on_new_issue"
 dedupe_key = "event.dedupe_key"
 retry = { max = 7, backoff = "svix", retention_days = 7 }
@@ -2516,8 +2617,8 @@ pub fn on_new_issue(event: TriggerEvent) {
   log(event.kind)
 }
 
-pub fn should_handle(event: TriggerEvent) -> bool {
-  return event.provider == "github"
+pub fn should_handle(event: TriggerEvent) -> Result<bool, string> {
+  return Result.Ok(event.provider == "github")
 }
 "#,
             ),
@@ -2534,6 +2635,14 @@ pub fn should_handle(event: TriggerEvent) -> bool {
         ));
         assert_eq!(collected[0].config.priority, TriggerPriority::Normal);
         assert!(collected[0].when.is_some());
+        assert_eq!(
+            collected[0]
+                .config
+                .when_budget
+                .as_ref()
+                .and_then(|budget| budget.tokens_max),
+            Some(500)
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -2909,6 +3018,69 @@ pub fn should_handle(event: TriggerEvent) -> string {
         let error = collect_manifest_triggers(&mut vm, &load_runtime_extensions(&harn_file))
             .await
             .unwrap_err();
-        assert!(error.contains("must have signature fn(TriggerEvent) -> bool"));
+        assert!(error.contains("must have signature fn(TriggerEvent) -> bool or Result<bool, _>"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn collect_manifest_triggers_rejects_when_budget_without_when() {
+        let tmp = tempfile::tempdir().unwrap();
+        let harn_file = write_trigger_project(
+            tmp.path(),
+            r#"
+[[triggers]]
+id = "bad-when-budget"
+kind = "webhook"
+provider = "github"
+match = { events = ["issues.opened"] }
+when_budget = { timeout = "5s" }
+handler = "worker://queue"
+secrets = { signing_secret = "github/webhook-secret" }
+"#,
+            None,
+        );
+        let mut vm = test_vm();
+        let error = collect_manifest_triggers(&mut vm, &load_runtime_extensions(&harn_file))
+            .await
+            .unwrap_err();
+        assert!(error.contains("when_budget requires a when predicate"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn collect_manifest_triggers_rejects_invalid_when_budget_timeout() {
+        let tmp = tempfile::tempdir().unwrap();
+        let harn_file = write_trigger_project(
+            tmp.path(),
+            r#"
+[package]
+name = "workspace"
+
+[exports]
+handlers = "lib.harn"
+
+[[triggers]]
+id = "bad-when-timeout"
+kind = "webhook"
+provider = "github"
+match = { events = ["issues.opened"] }
+when = "handlers::should_handle"
+when_budget = { timeout = "soon" }
+handler = "worker://queue"
+secrets = { signing_secret = "github/webhook-secret" }
+"#,
+            Some(
+                r#"
+import "std/triggers"
+
+pub fn should_handle(event: TriggerEvent) -> bool {
+  return true
+}
+"#,
+            ),
+        );
+        let mut vm = test_vm();
+        let error = collect_manifest_triggers(&mut vm, &load_runtime_extensions(&harn_file))
+            .await
+            .unwrap_err();
+        assert!(error.contains("when_budget.timeout"));
     }
 }

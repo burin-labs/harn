@@ -17,6 +17,7 @@ use crate::value::{VmError, VmValue};
 pub const ACTION_GRAPH_NODE_KIND_RUN: &str = "run";
 pub const ACTION_GRAPH_NODE_KIND_TRIGGER: &str = "trigger";
 pub const ACTION_GRAPH_NODE_KIND_PREDICATE: &str = "predicate";
+pub const ACTION_GRAPH_NODE_KIND_TRIGGER_PREDICATE: &str = "trigger_predicate";
 pub const ACTION_GRAPH_NODE_KIND_STAGE: &str = "stage";
 pub const ACTION_GRAPH_NODE_KIND_WORKER: &str = "worker";
 pub const ACTION_GRAPH_NODE_KIND_DISPATCH: &str = "dispatch";

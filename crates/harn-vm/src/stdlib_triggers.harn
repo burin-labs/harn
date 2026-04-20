@@ -316,7 +316,7 @@ type TriggerBindingSource = "manifest" | "dynamic"
 
 type TriggerHandler = fn(TriggerEvent) -> any | string
 
-type TriggerPredicate = fn(TriggerEvent) -> bool
+type TriggerPredicate = fn(TriggerEvent) -> bool | Result<bool, any>
 
 type TriggerMatch = {
   events: list<string> | nil,
@@ -325,6 +325,12 @@ type TriggerMatch = {
 type TriggerBudget = {
   daily_cost_usd: float | nil,
   max_concurrent: int | nil,
+}
+
+type TriggerWhenBudget = {
+  max_cost_usd: float | nil,
+  tokens_max: int | nil,
+  timeout: string | nil,
 }
 
 type TriggerRetryBackoff = "svix" | "immediate"
@@ -340,6 +346,7 @@ type TriggerConfig = {
   provider: ProviderId,
   handler: TriggerHandler,
   when: TriggerPredicate | nil,
+  when_budget: TriggerWhenBudget | nil,
   retry: TriggerRetry | nil,
   match: TriggerMatch | nil,
   events: list<string> | nil,

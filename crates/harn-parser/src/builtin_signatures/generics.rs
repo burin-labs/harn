@@ -16,6 +16,7 @@ pub(crate) fn lookup_generic_builtin_sig(name: &str) -> Option<BuiltinGenericSig
         "schema_expect" => Some(schema_expect_generic_sig()),
         "trigger_fire" => Some(trigger_fire_builtin_sig()),
         "trigger_inspect_dlq" => Some(trigger_inspect_dlq_builtin_sig()),
+        "trigger_inspect_lifecycle" => Some(trigger_inspect_lifecycle_builtin_sig()),
         "trigger_list" => Some(trigger_list_builtin_sig()),
         "trigger_register" => Some(trigger_register_builtin_sig()),
         "trigger_replay" => Some(trigger_replay_builtin_sig()),
@@ -368,5 +369,16 @@ fn trigger_inspect_dlq_builtin_sig() -> BuiltinGenericSig {
         type_params: vec![],
         params: vec![],
         return_type: TypeExpr::List(Box::new(TypeExpr::Named("DlqEntry".into()))),
+    }
+}
+
+fn trigger_inspect_lifecycle_builtin_sig() -> BuiltinGenericSig {
+    BuiltinGenericSig {
+        type_params: vec![],
+        params: vec![TypeExpr::Union(vec![
+            TypeExpr::Named("string".into()),
+            TypeExpr::Named("nil".into()),
+        ])],
+        return_type: TypeExpr::List(Box::new(TypeExpr::Named("dict".into()))),
     }
 }

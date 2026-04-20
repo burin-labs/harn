@@ -15,10 +15,11 @@ use crate::triggers::{
     resolve_live_trigger_binding, snapshot_trigger_bindings, RecordedTriggerBinding, RetryPolicy,
     TriggerBindingSnapshot, TriggerBindingSource, TriggerBindingSpec, TriggerEvent, TriggerEventId,
     TriggerHandlerSpec, TriggerPredicateSpec, TriggerRegistryError, TriggerRetryConfig,
-    TRIGGER_DLQ_TOPIC,
+    TRIGGERS_LIFECYCLE_TOPIC, TRIGGER_DLQ_TOPIC,
 };
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
+use crate::TriggerPredicateBudget;
 
 const TRIGGER_EVENTS_TOPIC: &str = "triggers.events";
 const TRIGGER_EVENT_LOG_QUEUE_DEPTH: usize = 128;
@@ -63,6 +64,13 @@ struct DlqEntryRecord {
     error: String,
     event: TriggerEvent,
     retry_history: Vec<DlqAttemptRecord>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct LifecycleEventRecord {
+    kind: String,
+    headers: BTreeMap<String, String>,
+    payload: serde_json::Value,
 }
 
 pub(crate) fn register_trigger_builtins(vm: &mut Vm) {
@@ -119,6 +127,21 @@ pub(crate) fn register_trigger_builtins(vm: &mut Vm) {
 
     vm.register_async_builtin("trigger_inspect_dlq", |_args| async move {
         let entries = inspect_dlq_entries().await?;
+        Ok(VmValue::List(Rc::new(
+            entries
+                .into_iter()
+                .map(|entry| value_from_serde(&entry))
+                .collect(),
+        )))
+    });
+
+    vm.register_async_builtin("trigger_inspect_lifecycle", |args| async move {
+        let kind = args.first().and_then(|value| match value {
+            VmValue::String(text) => Some(text.to_string()),
+            VmValue::Nil => None,
+            _ => None,
+        });
+        let entries = inspect_lifecycle_events(kind.as_deref()).await?;
         Ok(VmValue::List(Rc::new(
             entries
                 .into_iter()
@@ -408,6 +431,31 @@ async fn inspect_dlq_entries() -> Result<Vec<DlqEntryRecord>, VmError> {
     Ok(entries)
 }
 
+async fn inspect_lifecycle_events(
+    kind_filter: Option<&str>,
+) -> Result<Vec<LifecycleEventRecord>, VmError> {
+    let log = ensure_trigger_event_log();
+    let topic = Topic::new(TRIGGERS_LIFECYCLE_TOPIC)
+        .map_err(|error| VmError::Runtime(format!("trigger_inspect_lifecycle: {error}")))?;
+    let events = log
+        .read_range(&topic, None, usize::MAX)
+        .await
+        .map_err(|error| VmError::Runtime(format!("trigger_inspect_lifecycle: {error}")))?;
+    Ok(events
+        .into_iter()
+        .filter_map(|(_, event)| {
+            if kind_filter.is_some_and(|expected| expected != event.kind) {
+                return None;
+            }
+            Some(LifecycleEventRecord {
+                kind: event.kind,
+                headers: event.headers,
+                payload: event.payload,
+            })
+        })
+        .collect())
+}
+
 async fn find_pending_dlq_entry_for_event(
     event_id: &str,
 ) -> Result<Option<DlqEntryRecord>, VmError> {
@@ -588,6 +636,11 @@ fn parse_trigger_config(config: &BTreeMap<String, VmValue>) -> Result<TriggerBin
         VmValue::Dict(map) => Some(map),
         _ => None,
     });
+    let when_budget = config.get("when_budget").and_then(|value| match value {
+        VmValue::Dict(map) => Some(map),
+        VmValue::Nil => None,
+        _ => None,
+    });
     let retry = config.get("retry").and_then(|value| match value {
         VmValue::Dict(map) => Some(map),
         VmValue::Nil => None,
@@ -602,6 +655,30 @@ fn parse_trigger_config(config: &BTreeMap<String, VmValue>) -> Result<TriggerBin
         .and_then(|map| map.get("max_concurrent"))
         .and_then(VmValue::as_int)
         .map(|value| value as u32);
+    let when_budget = when_budget
+        .map(|map| {
+            Ok::<TriggerPredicateBudget, VmError>(TriggerPredicateBudget {
+                max_cost_usd: map.get("max_cost_usd").and_then(number_value),
+                tokens_max: map
+                    .get("tokens_max")
+                    .and_then(VmValue::as_int)
+                    .map(|value| value.max(0) as u64),
+                timeout_ms: map
+                    .get("timeout")
+                    .and_then(|value| match value {
+                        VmValue::String(text) => Some(text.to_string()),
+                        _ => None,
+                    })
+                    .map(|text| parse_duration_millis(&text))
+                    .transpose()?,
+            })
+        })
+        .transpose()?;
+    if when_budget.is_some() && when.is_none() {
+        return Err(VmError::Runtime(
+            "trigger_register: when_budget requires a when predicate".to_string(),
+        ));
+    }
     let manifest_path = optional_string(config, "manifest_path").map(std::path::PathBuf::from);
     let package_name = optional_string(config, "package_name");
     let retry = parse_retry_config(retry.map(|value| &**value), "trigger_register")?;
@@ -611,6 +688,7 @@ fn parse_trigger_config(config: &BTreeMap<String, VmValue>) -> Result<TriggerBin
         "provider": provider.as_str(),
         "handler": handler_descriptor,
         "when": when.as_ref().map(|predicate| predicate.raw.clone()),
+        "when_budget": when_budget,
         "retry": {
             "max": retry.max_attempts(),
             "policy": format!("{:?}", retry.policy),
@@ -633,6 +711,7 @@ fn parse_trigger_config(config: &BTreeMap<String, VmValue>) -> Result<TriggerBin
         provider,
         handler,
         when,
+        when_budget,
         retry,
         match_events,
         dedupe_key,
@@ -644,6 +723,37 @@ fn parse_trigger_config(config: &BTreeMap<String, VmValue>) -> Result<TriggerBin
         package_name,
         definition_fingerprint: fingerprint,
     })
+}
+
+fn parse_duration_millis(raw: &str) -> Result<u64, VmError> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err(VmError::Runtime(
+            "trigger_register: when_budget.timeout cannot be empty".to_string(),
+        ));
+    }
+    let (value, unit) = trimmed
+        .char_indices()
+        .find(|(_, ch)| !ch.is_ascii_digit())
+        .map(|(index, _)| (&trimmed[..index], &trimmed[index..]))
+        .unwrap_or((trimmed, "ms"));
+    let amount = value.parse::<u64>().map_err(|_| {
+        VmError::Runtime(format!(
+            "trigger_register: invalid when_budget.timeout '{raw}'"
+        ))
+    })?;
+    let multiplier = match unit.trim() {
+        "ms" => 1,
+        "s" => 1_000,
+        "m" => 60_000,
+        "h" => 3_600_000,
+        _ => {
+            return Err(VmError::Runtime(format!(
+                "trigger_register: unsupported when_budget.timeout unit in '{raw}'"
+            )))
+        }
+    };
+    Ok(amount.saturating_mul(multiplier))
 }
 
 fn parse_retry_config(
@@ -971,6 +1081,7 @@ mod tests {
                 closure,
             },
             when: None,
+            when_budget: None,
             retry: TriggerRetryConfig::default(),
             match_events: vec!["cron.tick".to_string()],
             dedupe_key: None,

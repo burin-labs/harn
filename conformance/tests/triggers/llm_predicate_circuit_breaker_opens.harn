@@ -1,0 +1,67 @@
+import "std/triggers"
+
+fn handler(event: TriggerEvent) -> dict {
+  return {handled: true, kind: event.kind}
+}
+
+fn classify(event: TriggerEvent) -> bool {
+  let result = llm_call(
+    "predicate breaker " + event.kind,
+    nil,
+    {provider: "mock", model: "gpt-4o-mini", llm_retries: 0},
+  )
+  return contains(result.text, "yes")
+}
+
+pipeline test(task) {
+  llm_mock_clear()
+  llm_mock({error: {category: "server_error", message: "503 upstream"}, model: "gpt-4o-mini"})
+  llm_mock({error: {category: "server_error", message: "503 upstream"}, model: "gpt-4o-mini"})
+  llm_mock({error: {category: "server_error", message: "503 upstream"}, model: "gpt-4o-mini"})
+
+  let unique = to_string(to_int(timestamp())) + "-" + to_string(random_int(100000, 999999))
+  let handle: TriggerHandle = trigger_register({
+    id: "llm-predicate-breaker-" + unique,
+    kind: "issue.opened",
+    provider: "github",
+    handler: handler,
+    when: classify,
+    when_budget: nil,
+    retry: nil,
+    match: {events: ["issue.opened"]},
+    events: nil,
+    dedupe_key: nil,
+    filter: nil,
+    budget: nil,
+    manifest_path: nil,
+    package_name: nil,
+  })
+
+  let first: DispatchHandle = trigger_fire(
+    handle,
+    {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-breaker-1-" + unique}},
+  )
+  let second: DispatchHandle = trigger_fire(
+    handle,
+    {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-breaker-2-" + unique}},
+  )
+  let third: DispatchHandle = trigger_fire(
+    handle,
+    {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-breaker-3-" + unique}},
+  )
+  let fourth: DispatchHandle = trigger_fire(
+    handle,
+    {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-breaker-4-" + unique}},
+  )
+  let evaluated = trigger_inspect_lifecycle("predicate.evaluated").filter(
+    { entry -> entry?.headers?.trigger_id == handle.id },
+  )
+  let last = evaluated[len(evaluated) - 1]
+
+  println(len(llm_mock_calls()) == 3)
+  println(contains(json_stringify(first.result ?? {}), "\"skipped\":true"))
+  println(contains(json_stringify(second.result ?? {}), "\"skipped\":true"))
+  println(contains(json_stringify(third.result ?? {}), "\"skipped\":true"))
+  println(contains(json_stringify(fourth.result ?? {}), "\"reason\":\"circuit_open\""))
+  println(len(evaluated) == 4 && last?.payload?.reason == "circuit_open")
+}
