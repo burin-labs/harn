@@ -1873,6 +1873,9 @@ Struct instances can be constructed with the struct name followed by
 a named-field body:
 
 ```harn
+struct Point { x: int, y: int }
+struct User { name: string, age: int }
+struct Pair<A, B> { first: A, second: B }
 let p = Point { x: 3, y: 4 }
 let u = User { name: "Alice", age: 30 }
 let pair: Pair<int, string> = Pair { first: 1, second: "two" }
