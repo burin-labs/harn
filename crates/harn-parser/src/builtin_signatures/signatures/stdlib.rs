@@ -780,6 +780,10 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("list")),
     },
     BuiltinSig {
+        name: "self_review",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
         name: "set",
         return_type: None,
     },

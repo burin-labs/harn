@@ -1085,6 +1085,29 @@ monolithic `root.json` shard.
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
 | `secret_scan(content)` | content: string | list | Scan text or diffs for high-signal leaked credentials and return redacted findings with detector metadata and source locations |
+| `self_review(diff, rubric?, max_rounds?)` | diff: string, rubric: string, max_rounds: int | dict | Run a structured pre-PR self-review over a diff, merge in `secret_scan` blockers, and append a `pr.self_review` trust-graph record with review metadata |
+
+`self_review(...)` uses the existing tier-based model resolver with
+`model_tier: "small"` today, so it benefits from Harn's current
+provider/model fallback chain without waiting on the broader routing DSL work.
+
+The builtin accepts either a custom rubric string or one of the built-in preset
+names:
+
+- `default` — correctness, test coverage, security, and style
+- `code` — correctness, regressions, tests, and API compatibility
+- `docs` — accuracy, implementation drift, examples, and migration notes
+- `infra` — rollout safety, observability, failure modes, and rollback posture
+- `security` — credential exposure, auth, data handling, and hardening gaps
+
+It returns a structured result with:
+
+- `summary`
+- `findings`
+- `has_blocking_findings`
+- `rounds`
+- `secret_scan_findings`
+- `trust_record`
 
 ## MCP (Model Context Protocol)
 
