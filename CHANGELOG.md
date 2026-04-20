@@ -7,6 +7,16 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
+## Unreleased
+
+### Fixed
+
+- **`project_fingerprint` no longer leaks its fixture tree into the repo
+  root (#330).** The conformance test now builds its synthetic repo under
+  a temp directory and cleans it up automatically, so documented
+  `harn test conformance` runs stop leaving a stray
+  `project_fingerprint_repo/` behind.
+
 ## v0.7.23
 
 ### Changed

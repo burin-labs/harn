@@ -1,22 +1,27 @@
 import "std/project"
 
 pipeline test(task) {
-  mkdir("project_fingerprint_repo/backend")
-  mkdir("project_fingerprint_repo/frontend/tests")
-  mkdir("project_fingerprint_repo/.github/workflows")
+  let root = path_join(temp_dir(), "project-fingerprint-" + uuid())
+  mkdir(root)
+  defer {
+    delete_file(root)
+  }
+  mkdir(path_join(root, "backend"))
+  mkdir(path_join(root, "frontend/tests"))
+  mkdir(path_join(root, ".github/workflows"))
   write_file(
-    "project_fingerprint_repo/backend/Cargo.toml",
+    path_join(root, "backend/Cargo.toml"),
     "[package]\nname = \"backend\"\nversion = \"0.1.0\"\n[dependencies]\naxum = \"0.8\"\n",
   )
-  write_file("project_fingerprint_repo/backend/Cargo.lock", "# lock\n")
+  write_file(path_join(root, "backend/Cargo.lock"), "# lock\n")
   write_file(
-    "project_fingerprint_repo/frontend/package.json",
+    path_join(root, "frontend/package.json"),
     "{\n  \"name\": \"frontend\",\n  \"packageManager\": \"pnpm@9.0.0\",\n  \"dependencies\": {\n    \"next\": \"15.0.0\",\n    \"react\": \"19.0.0\"\n  }\n}\n",
   )
-  write_file("project_fingerprint_repo/frontend/next.config.ts", "export default {}\n")
-  write_file("project_fingerprint_repo/frontend/pnpm-lock.yaml", "lockfileVersion: '9.0'\n")
-  write_file("project_fingerprint_repo/.github/workflows/ci.yml", "name: ci\non: push\n")
-  let fingerprint: ProjectFingerprint = project_fingerprint("project_fingerprint_repo")
+  write_file(path_join(root, "frontend/next.config.ts"), "export default {}\n")
+  write_file(path_join(root, "frontend/pnpm-lock.yaml"), "lockfileVersion: '9.0'\n")
+  write_file(path_join(root, ".github/workflows/ci.yml"), "name: ci\non: push\n")
+  let fingerprint: ProjectFingerprint = project_fingerprint(root)
   println(fingerprint.primary_language == "mixed")
   println(fingerprint.languages[0] == "rust")
   println(fingerprint.languages[1] == "typescript")
