@@ -62,6 +62,7 @@ the "one-shot" call shape.
 |---|---|---|
 | `agent_session_open(id?: string)` | `string` | Idempotent. `nil` mints a UUIDv7. |
 | `agent_session_exists(id)` | `bool` | Safe on unknown ids. |
+| `agent_session_current_id()` | `string` or `nil` | Returns the innermost active session id for the current thread, or `nil` outside any active session. |
 | `agent_session_length(id)` | `int` | Message count. Errors if `id` doesn't exist. |
 | `agent_session_snapshot(id)` | `dict` or `nil` | Read-only transcript snapshot plus `parent_id`, `child_ids`, and `branched_at_event_index`. |
 | `agent_session_ancestry(id)` | `dict` or `nil` | Returns `{parent_id, child_ids, root_id}` for the in-VM session graph. |
@@ -104,6 +105,10 @@ accessed session when a new one is opened over the cap.
 events through every subscriber for that session id. Subscribers are
 not copied by `agent_session_fork` — a fork is a conversation branch,
 not an event fanout.
+
+Inside those callbacks, `agent_session_current_id()` resolves to the
+session currently being driven by the agent loop. Outside any active
+session, it returns `nil`.
 
 ## Lineage
 

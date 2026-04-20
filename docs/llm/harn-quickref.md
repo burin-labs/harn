@@ -787,6 +787,7 @@ Lifecycle builtins (all hard-error on unknown ids except `exists`,
 `open`, `snapshot`, `ancestry`):
 
 - `agent_session_open(id?)` / `_close(id)` / `_exists(id)`
+- `agent_session_current_id()` returns the innermost active session id or `nil`.
 - `agent_session_reset(id)` / `_fork(src, dst?)` / `_fork_at(src, keep_first, dst?)` / `_trim(id, keep_last)`
 - `agent_session_inject(id, {role, content, …})` — missing `role` errors.
 - `agent_session_compact(id, opts)` — unknown keys in `opts` error.

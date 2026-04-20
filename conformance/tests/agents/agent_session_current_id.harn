@@ -1,0 +1,54 @@
+pipeline main(task) {
+  assert(
+    agent_session_current_id() == nil,
+    "top-level current session lookup returns nil outside any active session",
+  )
+  let session = "current-id-session"
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "read_current_id",
+    "Return the current session id",
+    {
+    handler: { _args ->
+    let current = agent_session_current_id()
+    assert(current == session, "tool handler sees the session it is running under")
+    return current
+  },
+    parameters: {},
+    returns: {type: "string"},
+  },
+  )
+  llm_mock(
+    {text: "Checking the session.", tool_calls: [{id: "sid1", name: "read_current_id", arguments: {}}]},
+  )
+  llm_mock({text: "<done>##DONE##</done>"})
+  let result = agent_loop(
+    "Report the current session id",
+    nil,
+    {
+    provider: "mock",
+    tools: tools,
+    tool_format: "native",
+    persistent: true,
+    max_iterations: 4,
+    session_id: session,
+  },
+  )
+  assert(result?.status == "done", "loop completes")
+  let calls = llm_mock_calls()
+  assert(len(calls) >= 2, "tool call produces a second turn")
+  let turn2_messages = calls[1].messages
+  var saw_session_feedback = false
+  for m in turn2_messages {
+    let content = m?.content
+    if content != nil && contains(content, session) {
+      saw_session_feedback = true
+    }
+  }
+  assert(
+    saw_session_feedback,
+    "next turn includes the tool result returned by agent_session_current_id()",
+  )
+  log("agent_session_current_id tests passed")
+}

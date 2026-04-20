@@ -18,6 +18,7 @@ pub fn register_agent_session_builtins(vm: &mut Vm) {
     register_length(vm);
     register_snapshot(vm);
     register_ancestry(vm);
+    register_current_id(vm);
     register_reset(vm);
     register_fork(vm);
     register_fork_at(vm);
@@ -132,6 +133,16 @@ fn register_ancestry(vm: &mut Vm) {
                 VmValue::String(Rc::from(ancestry.root_id)),
             ),
         ]))))
+    });
+}
+
+/// Return the innermost active agent session id for the currently
+/// executing thread, or `nil` when no session is active.
+fn register_current_id(vm: &mut Vm) {
+    vm.register_builtin("agent_session_current_id", |_args, _out| {
+        Ok(agent_sessions::current_session_id()
+            .map(|id| VmValue::String(Rc::from(id)))
+            .unwrap_or(VmValue::Nil))
     });
 }
 
@@ -330,4 +341,43 @@ fn build_compact_config(
         cfg.compress_callback = Some(v);
     }
     Ok(cfg)
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::value::VmValue;
+
+    fn call_current_id_builtin() -> VmValue {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        rt.block_on(async {
+            let local = tokio::task::LocalSet::new();
+            local
+                .run_until(async {
+                    let mut vm = crate::Vm::new();
+                    crate::register_vm_stdlib(&mut vm);
+                    vm.call_named_builtin("agent_session_current_id", Vec::new())
+                        .await
+                        .expect("builtin call")
+                })
+                .await
+        })
+    }
+
+    #[test]
+    fn current_id_returns_nil_outside_active_session() {
+        crate::reset_thread_local_state();
+        assert!(matches!(call_current_id_builtin(), VmValue::Nil));
+    }
+
+    #[test]
+    fn current_id_returns_active_session_id() {
+        crate::reset_thread_local_state();
+        crate::agent_sessions::push_current_session("unit-test-session".to_string());
+        let current = call_current_id_builtin();
+        crate::agent_sessions::pop_current_session();
+        assert!(matches!(current, VmValue::String(value) if value.as_ref() == "unit-test-session"));
+    }
 }
