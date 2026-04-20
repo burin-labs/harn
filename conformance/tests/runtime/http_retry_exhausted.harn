@@ -1,17 +1,11 @@
 pipeline test(task) {
-  http_mock("GET", "https://api.example.com/retry-exhausted", {
-    responses: [
-      {status: 503},
-      {status: 503},
-      {status: 503},
-    ],
-  })
-
-  let resp = http_get("https://api.example.com/retry-exhausted", {
-    retry: {max: 2, backoff_ms: 0},
-  })
+  http_mock(
+    "GET",
+    "https://api.example.com/retry-exhausted",
+    {responses: [{status: 503}, {status: 503}, {status: 503}]},
+  )
+  let resp = http_get("https://api.example.com/retry-exhausted", {retry: {max: 2, backoff_ms: 0}})
   let calls = http_mock_calls()
-
   assert_eq(resp.status, 503)
   assert_eq(len(calls), 3)
   log("exhausted status: " + to_string(resp.status))

@@ -5,7 +5,6 @@ pipeline test(task) {
   } catch (e) {
     println("caught_timeout_ms")
   }
-
   try {
     let _r = http_get("http://127.0.0.1:1", {timeout: 100})
     println("unexpected_timeout_alias_success")
