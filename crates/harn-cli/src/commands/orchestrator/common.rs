@@ -226,7 +226,7 @@ pub(super) async fn stranded_envelopes(
     }
 
     let mut stranded = Vec::new();
-    for (offset, event) in envelopes.into_iter().chain(legacy_inbox.into_iter()) {
+    for (offset, event) in envelopes.into_iter().chain(legacy_inbox) {
         if event.kind != "event_ingested" {
             continue;
         }
