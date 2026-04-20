@@ -209,15 +209,18 @@ fn execute_runtime_load_skill(
     require_signature: bool,
     session_id: &str,
 ) -> String {
-    let Some(registry) = state.skill_registry.as_ref() else {
-        return runtime_tool_error(
-            "skill_registry_unavailable",
-            requested,
-            "load_skill requires agent_loop to receive a `skills:` registry",
-        );
+    let registry = match state.skill_registry.as_ref() {
+        Some(registry) => registry.clone(),
+        None => {
+            return runtime_tool_error(
+                "skill_registry_unavailable",
+                requested,
+                "load_skill requires agent_loop to receive a `skills:` registry",
+            )
+        }
     };
 
-    let entry = match crate::skills::resolve_skill_entry(registry, requested, "load_skill") {
+    let entry = match crate::skills::resolve_skill_entry(&registry, requested, "load_skill") {
         Ok(entry) => entry,
         Err(message) => return runtime_tool_error("skill_not_found", requested, message),
     };
@@ -262,7 +265,7 @@ fn execute_runtime_load_skill(
 
     let binding = crate::skills::current_skill_registry();
     let loaded = match crate::skills::load_skill_from_registry(
-        registry,
+        &registry,
         binding.as_ref().map(|bound| &bound.fetcher),
         requested,
         Some(session_id),

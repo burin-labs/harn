@@ -1,0 +1,47 @@
+fn resolve_harn_bin(repo_root) {
+  let cargo_config = path_join(repo_root, ".cargo/config.toml")
+  if file_exists(cargo_config) {
+    let config = exec("cat", cargo_config).stdout
+    let configured = first_group("target-dir = \\\"([^\\\"]+)\\\"", config)
+    if configured {
+      return path_join(configured, "debug/harn")
+    }
+  }
+  let target_dir = env("CARGO_TARGET_DIR") ?? path_join(repo_root, "target")
+  return path_join(target_dir, "debug/harn")
+}
+
+pipeline default() {
+  let root = path_join(temp_dir(), "harn-mcp-fire-" + uuid())
+  mkdir(root)
+  let log_path = path_join(root, "trigger.log")
+  write_file(
+    path_join(root, "harn.toml"),
+    "[package]\nname = \"fixture\"\n\n[exports]\nhandlers = \"lib.harn\"\n\n[[triggers]]\nid = \"cron-ok\"\nkind = \"cron\"\nprovider = \"cron\"\nschedule = \"* * * * *\"\nmatch = { events = [\"cron.tick\"] }\nhandler = \"handlers::on_ok\"\n",
+  )
+  write_file(
+    path_join(root, "lib.harn"),
+    "import \"std/triggers\"\n\nlet log_path = \""
+    + log_path
+    + "\"\n\npub fn on_ok(event: TriggerEvent) -> dict {\n  write_file(log_path, \"fired:\" + event.kind + \"\\n\")\n  return {kind: event.kind, event_id: event.id}\n}\n",
+  )
+
+  let repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+  let harn_bin = resolve_harn_bin(repo_root)
+  let helper = path_join(repo_root, "conformance/helpers/mcp_stdio_tool.py")
+  let result = exec(
+    "python3",
+    helper,
+    harn_bin,
+    path_join(root, "harn.toml"),
+    path_join(root, "state"),
+    "harn.trigger.fire",
+    "{\"trigger_id\":\"cron-ok\",\"payload\":{}}",
+  )
+  assert(result.success, "mcp helper failed")
+  let payload = json_parse(result.stdout.trim())
+  println(payload.status == "dispatched")
+  println(payload.binding_id == "cron-ok")
+  println(file_exists(log_path))
+  println(read_file(log_path).contains("fired:cron.tick"))
+}

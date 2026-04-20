@@ -641,13 +641,13 @@ fn parse_secret_id(raw: Option<&str>) -> Option<SecretId> {
 }
 
 #[derive(Clone, Default)]
-struct ListenerAuth {
+pub(crate) struct ListenerAuth {
     api_keys: Vec<String>,
     hmac_secret: Option<String>,
 }
 
 impl ListenerAuth {
-    fn from_env(required: bool) -> Result<Self, String> {
+    pub(crate) fn from_env(required: bool) -> Result<Self, String> {
         let api_keys = std::env::var(API_KEYS_ENV)
             .ok()
             .map(|value| {
@@ -681,7 +681,11 @@ impl ListenerAuth {
         })
     }
 
-    async fn authorize(
+    pub(crate) fn has_api_keys(&self) -> bool {
+        !self.api_keys.is_empty()
+    }
+
+    pub(crate) async fn authorize(
         &self,
         event_log: &AnyEventLog,
         method: &str,
@@ -689,6 +693,13 @@ impl ListenerAuth {
         headers: &BTreeMap<String, String>,
         body: &[u8],
     ) -> Result<(), ()> {
+        if let Some(api_key) = header_value(headers, "x-api-key") {
+            if self.matches_api_key(api_key.trim()) {
+                return Ok(());
+            }
+            return Err(());
+        }
+
         let authorization = header_value(headers, "authorization").ok_or(())?;
         let Some((scheme, value)) = authorization.split_once(' ') else {
             return Err(());
@@ -727,7 +738,7 @@ impl ListenerAuth {
         Err(())
     }
 
-    fn matches_api_key(&self, candidate: &str) -> bool {
+    pub(crate) fn matches_api_key(&self, candidate: &str) -> bool {
         self.api_keys
             .iter()
             .any(|key| key.as_bytes().ct_eq(candidate.as_bytes()).into())

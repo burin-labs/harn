@@ -69,8 +69,9 @@ SCRIPTING
     Serve(ServeArgs),
     /// Start the ACP server on stdio.
     Acp(AcpArgs),
-    /// Expose a .harn tool bundle as an MCP server on stdio.
-    McpServe(McpServeArgs),
+    /// Legacy alias: expose a .harn tool bundle as an MCP server on stdio.
+    #[command(hide = true, name = "mcp-serve")]
+    McpServe(LegacyMcpServeArgs),
     /// Manage remote MCP OAuth credentials and status.
     Mcp(McpArgs),
     /// Watch a .harn file and re-run it on changes.
@@ -368,7 +369,7 @@ pub(crate) struct AcpArgs {
 }
 
 #[derive(Debug, Args)]
-pub(crate) struct McpServeArgs {
+pub(crate) struct LegacyMcpServeArgs {
     /// Path to the .harn file that defines the MCP surface.
     pub file: String,
     /// Optional Server Card JSON to advertise (MCP v2.1). Path to a
@@ -379,6 +380,12 @@ pub(crate) struct McpServeArgs {
     pub card: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum McpServeTransport {
+    Stdio,
+    Http,
+}
+
 #[derive(Debug, Args)]
 pub(crate) struct McpArgs {
     #[command(subcommand)]
@@ -387,6 +394,8 @@ pub(crate) struct McpArgs {
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum McpCommand {
+    /// Expose a running orchestrator as an MCP server.
+    Serve(McpServeArgs),
     /// Log in to a remote MCP server via OAuth.
     Login(McpLoginArgs),
     /// Remove a stored OAuth token.
@@ -395,6 +404,36 @@ pub(crate) enum McpCommand {
     Status(McpServerRefArgs),
     /// Print the default OAuth redirect URI.
     RedirectUri,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct McpServeArgs {
+    #[command(flatten)]
+    pub local: OrchestratorLocalArgs,
+    /// Transport to expose for MCP clients.
+    #[arg(long, value_enum, default_value_t = McpServeTransport::Stdio)]
+    pub transport: McpServeTransport,
+    /// Socket address to bind when serving over HTTP.
+    #[arg(
+        long,
+        env = "HARN_MCP_SERVE_BIND",
+        default_value = "127.0.0.1:8765",
+        value_name = "ADDR"
+    )]
+    pub bind: SocketAddr,
+    /// Streamable HTTP endpoint path.
+    #[arg(long, default_value = "/mcp", value_name = "PATH")]
+    pub path: String,
+    /// Legacy SSE endpoint path for older MCP clients.
+    #[arg(long = "sse-path", default_value = "/sse", value_name = "PATH")]
+    pub sse_path: String,
+    /// Legacy SSE POST endpoint path for older MCP clients.
+    #[arg(
+        long = "messages-path",
+        default_value = "/messages",
+        value_name = "PATH"
+    )]
+    pub messages_path: String,
 }
 
 #[derive(Debug, Args)]
@@ -1044,6 +1083,43 @@ mod tests {
         assert_eq!(login.target.as_deref(), Some("notion"));
         assert_eq!(login.url.as_deref(), Some("https://example.com/mcp"));
         assert_eq!(login.client_id.as_deref(), Some("abc"));
+    }
+
+    #[test]
+    fn test_parses_mcp_serve_flags() {
+        let cli = Cli::parse_from([
+            "harn",
+            "mcp",
+            "serve",
+            "--config",
+            "workspace/harn.toml",
+            "--state-dir",
+            "state/orchestrator",
+            "--transport",
+            "http",
+            "--bind",
+            "127.0.0.1:9000",
+            "--path",
+            "/rpc",
+            "--sse-path",
+            "/events",
+            "--messages-path",
+            "/legacy/messages",
+        ]);
+
+        let Command::Mcp(args) = cli.command.unwrap() else {
+            panic!("expected mcp command");
+        };
+        let McpCommand::Serve(serve) = args.command else {
+            panic!("expected mcp serve");
+        };
+        assert_eq!(serve.local.config, PathBuf::from("workspace/harn.toml"));
+        assert_eq!(serve.local.state_dir, PathBuf::from("state/orchestrator"));
+        assert_eq!(serve.transport, crate::cli::McpServeTransport::Http);
+        assert_eq!(serve.bind.to_string(), "127.0.0.1:9000");
+        assert_eq!(serve.path, "/rpc");
+        assert_eq!(serve.sse_path, "/events");
+        assert_eq!(serve.messages_path, "/legacy/messages");
     }
 
     #[test]
