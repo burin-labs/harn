@@ -57,8 +57,12 @@ payload is already narrowed into the six MVP event families (`issues`,
 `workflow_run`) with event-specific top-level fields such as `issue`,
 `pull_request`, `comment`, `review`, `commits`, and `workflow_run`. Slack's
 payload is narrowed into `Message` (`message.*`), `AppMention`,
-`ReactionAdded`, `AppHomeOpened`, and `AssistantThreadStarted`, while still
-preserving the full outer envelope in `raw`:
+`ReactionAdded`, `AppHomeOpened`, and `AssistantThreadStarted`. Notion's
+payload is narrowed around the current connector landing:
+`subscription.verification`, `page.content_updated`, `page.locked`,
+`comment.created`, `data_source.schema_updated`, plus polled fallback events
+surfaced through `payload.polled`. All providers still preserve the full outer
+envelope in `raw`:
 
 - `GitHubEventPayload`
 - `SlackEventPayload`

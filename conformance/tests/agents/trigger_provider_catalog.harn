@@ -3,7 +3,7 @@ import "std/triggers"
 pipeline test(task) {
   let providers: list<ProviderCatalogEntry> = list_providers()
   let builtin = providers.filter({ provider -> provider.runtime.kind == "builtin" })
-  assert(len(builtin) == 4, "expected exactly four builtin trigger providers")
+  assert(len(builtin) == 5, "expected exactly five builtin trigger providers")
   let cron = builtin.find({ provider -> provider.provider == "cron" })
   assert(cron?.schema_name == "CronEventPayload", "cron schema should be cataloged")
   assert(cron?.runtime?.connector == "cron", "cron should use the cron connector")
@@ -107,5 +107,54 @@ pipeline test(task) {
   assert(slack_methods[3].name == "open_view", "slack should expose open_view")
   assert(slack_methods[4].name == "user_info", "slack should expose user_info")
   assert(slack_methods[5].name == "api_call", "slack should expose api_call")
+  let notion = builtin.find({ provider -> provider.provider == "notion" })
+  assert(notion?.schema_name == "NotionEventPayload", "notion schema should be cataloged")
+  assert(notion?.runtime?.connector == "notion", "notion should use the notion connector")
+  assert(
+    notion?.runtime?.default_signature_variant == "notion",
+    "notion should default to notion webhook signatures",
+  )
+  assert(
+    notion?.signature_verification?.kind == "hmac",
+    "notion should publish HMAC verification metadata",
+  )
+  assert(
+    notion?.signature_verification?.variant == "notion",
+    "notion should publish the notion signature variant",
+  )
+  assert(
+    notion?.signature_verification?.signature_header == "X-Notion-Signature",
+    "notion should expose the signature header",
+  )
+  let notion_secrets = notion?.secret_requirements ?? []
+  assert(len(notion_secrets) == 1, "notion should publish its webhook verification secret")
+  assert(
+    notion_secrets
+    .any(
+    { secret -> secret.name == "verification_token" && secret.namespace == "notion" },
+  ),
+    "notion should require verification_token in the notion namespace",
+  )
+  let notion_methods = notion?.outbound_methods ?? []
+  assert(len(notion_methods) == 7, "notion should publish seven outbound methods")
+  assert(notion_methods.any({ method -> method.name == "get_page" }), "notion should expose get_page")
+  assert(
+    notion_methods.any({ method -> method.name == "update_page" }),
+    "notion should expose update_page",
+  )
+  assert(
+    notion_methods.any({ method -> method.name == "append_blocks" }),
+    "notion should expose append_blocks",
+  )
+  assert(
+    notion_methods.any({ method -> method.name == "query_database" }),
+    "notion should expose query_database",
+  )
+  assert(notion_methods.any({ method -> method.name == "search" }), "notion should expose search")
+  assert(
+    notion_methods.any({ method -> method.name == "create_comment" }),
+    "notion should expose create_comment",
+  )
+  assert(notion_methods.any({ method -> method.name == "api_call" }), "notion should expose api_call")
   log("trigger_provider_catalog tests passed")
 }

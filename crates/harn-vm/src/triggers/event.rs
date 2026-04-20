@@ -237,10 +237,28 @@ pub struct LinearEventPayload {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct NotionPolledChangeEvent {
+    pub resource: String,
+    pub source_id: String,
+    pub entity_id: String,
+    pub high_water_mark: String,
+    pub before: Option<JsonValue>,
+    pub after: JsonValue,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct NotionEventPayload {
     pub event: String,
     pub workspace_id: Option<String>,
     pub request_id: Option<String>,
+    pub subscription_id: Option<String>,
+    pub integration_id: Option<String>,
+    pub attempt_number: Option<u32>,
+    pub entity_id: Option<String>,
+    pub entity_type: Option<String>,
+    pub api_version: Option<String>,
+    pub verification_token: Option<String>,
+    pub polled: Option<NotionPolledChangeEvent>,
     pub raw: JsonValue,
 }
 
@@ -312,7 +330,7 @@ pub enum KnownProviderPayload {
     #[serde(rename = "linear")]
     Linear(LinearEventPayload),
     #[serde(rename = "notion")]
-    Notion(NotionEventPayload),
+    Notion(Box<NotionEventPayload>),
     #[serde(rename = "cron")]
     Cron(CronEventPayload),
     #[serde(rename = "webhook")]
@@ -780,6 +798,12 @@ fn required_secret(name: &str, namespace: &str) -> ProviderSecretRequirement {
     }
 }
 
+fn outbound_method(name: &str) -> ProviderOutboundMethod {
+    ProviderOutboundMethod {
+        name: name.to_string(),
+    }
+}
+
 fn default_provider_schemas() -> Vec<Arc<dyn ProviderSchema>> {
     vec![
         Arc::new(BuiltinProviderSchema {
@@ -855,15 +879,37 @@ fn default_provider_schemas() -> Vec<Arc<dyn ProviderSchema>> {
         Arc::new(BuiltinProviderSchema {
             provider_id: "notion",
             harn_schema_name: "NotionEventPayload",
-            metadata: provider_metadata_entry(
-                "notion",
-                &["webhook"],
-                "NotionEventPayload",
-                &[],
-                SignatureVerificationMetadata::None,
-                Vec::new(),
-                ProviderRuntimeMetadata::Placeholder,
-            ),
+            metadata: {
+                let mut metadata = provider_metadata_entry(
+                    "notion",
+                    &["webhook", "poll"],
+                    "NotionEventPayload",
+                    &[],
+                    hmac_signature_metadata(
+                        "notion",
+                        "X-Notion-Signature",
+                        None,
+                        None,
+                        None,
+                        "hex",
+                    ),
+                    vec![required_secret("verification_token", "notion")],
+                    ProviderRuntimeMetadata::Builtin {
+                        connector: "notion".to_string(),
+                        default_signature_variant: Some("notion".to_string()),
+                    },
+                );
+                metadata.outbound_methods = vec![
+                    outbound_method("get_page"),
+                    outbound_method("update_page"),
+                    outbound_method("append_blocks"),
+                    outbound_method("query_database"),
+                    outbound_method("search"),
+                    outbound_method("create_comment"),
+                    outbound_method("api_call"),
+                ];
+                metadata
+            },
             normalize: notion_payload,
         }),
         Arc::new(BuiltinProviderSchema {
@@ -1208,15 +1254,46 @@ fn notion_payload(
         .get("workspace_id")
         .and_then(JsonValue::as_str)
         .map(ToString::to_string);
-    ProviderPayload::Known(KnownProviderPayload::Notion(NotionEventPayload {
+    ProviderPayload::Known(KnownProviderPayload::Notion(Box::new(NotionEventPayload {
         event: kind.to_string(),
         workspace_id,
         request_id: headers
             .get("request-id")
             .cloned()
             .or_else(|| headers.get("x-request-id").cloned()),
+        subscription_id: raw
+            .get("subscription_id")
+            .and_then(JsonValue::as_str)
+            .map(ToString::to_string),
+        integration_id: raw
+            .get("integration_id")
+            .and_then(JsonValue::as_str)
+            .map(ToString::to_string),
+        attempt_number: raw
+            .get("attempt_number")
+            .and_then(JsonValue::as_u64)
+            .and_then(|value| u32::try_from(value).ok()),
+        entity_id: raw
+            .get("entity")
+            .and_then(|value| value.get("id"))
+            .and_then(JsonValue::as_str)
+            .map(ToString::to_string),
+        entity_type: raw
+            .get("entity")
+            .and_then(|value| value.get("type"))
+            .and_then(JsonValue::as_str)
+            .map(ToString::to_string),
+        api_version: raw
+            .get("api_version")
+            .and_then(JsonValue::as_str)
+            .map(ToString::to_string),
+        verification_token: raw
+            .get("verification_token")
+            .and_then(JsonValue::as_str)
+            .map(ToString::to_string),
+        polled: None,
         raw,
-    }))
+    })))
 }
 
 fn cron_payload(
@@ -1361,9 +1438,10 @@ mod tests {
             .filter(|entry| matches!(entry.runtime, ProviderRuntimeMetadata::Builtin { .. }))
             .collect();
 
-        assert_eq!(builtin.len(), 4);
+        assert_eq!(builtin.len(), 5);
         assert!(builtin.iter().any(|entry| entry.provider == "cron"));
         assert!(builtin.iter().any(|entry| entry.provider == "github"));
+        assert!(builtin.iter().any(|entry| entry.provider == "notion"));
         assert!(builtin.iter().any(|entry| entry.provider == "slack"));
         assert!(builtin.iter().any(|entry| entry.provider == "webhook"));
     }

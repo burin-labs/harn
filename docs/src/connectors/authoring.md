@@ -121,6 +121,7 @@ The helper currently supports the three MVP HMAC header styles needed by the
 planned connector tickets:
 
 - GitHub: `X-Hub-Signature-256: sha256=<hex>`
+- Notion: `X-Notion-Signature: sha256=<hex>`
 - Stripe: `Stripe-Signature: t=<unix>,v1=<hex>[,v1=<hex>...]`
 - Standard Webhooks: `webhook-id`, `webhook-timestamp`, and
   `webhook-signature: v1,<base64>`

@@ -50,7 +50,25 @@ type SlackEventPayload = SlackMessageEventPayload | SlackAppMentionEventPayload 
 
 type LinearEventPayload = {provider: "linear", action: string | nil, organization_id: string | nil, webhook_timestamp: string | nil, raw: dict}
 
-type NotionEventPayload = {provider: "notion", event: string, workspace_id: string | nil, request_id: string | nil, raw: dict}
+type NotionPolledChangeEvent = {resource: string, source_id: string, entity_id: string, high_water_mark: string, before: dict | nil, after: dict}
+
+type NotionEventCommon = {provider: "notion", event: string, workspace_id: string | nil, request_id: string | nil, subscription_id: string | nil, integration_id: string | nil, attempt_number: int | nil, entity_id: string | nil, entity_type: string | nil, api_version: string | nil, verification_token: string | nil, polled: NotionPolledChangeEvent | nil, raw: dict}
+
+type NotionSubscriptionVerificationEventPayload = {provider: "notion", event: "subscription.verification", workspace_id: string | nil, request_id: string | nil, subscription_id: string | nil, integration_id: string | nil, attempt_number: int | nil, entity_id: string | nil, entity_type: string | nil, api_version: string | nil, verification_token: string | nil, polled: NotionPolledChangeEvent | nil, raw: dict}
+
+type NotionPageContentUpdatedEventPayload = {provider: "notion", event: "page.content_updated", workspace_id: string | nil, request_id: string | nil, subscription_id: string | nil, integration_id: string | nil, attempt_number: int | nil, entity_id: string | nil, entity_type: string | nil, api_version: string | nil, verification_token: string | nil, polled: NotionPolledChangeEvent | nil, raw: dict}
+
+type NotionPageLockedEventPayload = {provider: "notion", event: "page.locked", workspace_id: string | nil, request_id: string | nil, subscription_id: string | nil, integration_id: string | nil, attempt_number: int | nil, entity_id: string | nil, entity_type: string | nil, api_version: string | nil, verification_token: string | nil, polled: NotionPolledChangeEvent | nil, raw: dict}
+
+type NotionCommentCreatedEventPayload = {provider: "notion", event: "comment.created", workspace_id: string | nil, request_id: string | nil, subscription_id: string | nil, integration_id: string | nil, attempt_number: int | nil, entity_id: string | nil, entity_type: string | nil, api_version: string | nil, verification_token: string | nil, polled: NotionPolledChangeEvent | nil, raw: dict}
+
+type NotionDataSourceSchemaUpdatedEventPayload = {provider: "notion", event: "data_source.schema_updated", workspace_id: string | nil, request_id: string | nil, subscription_id: string | nil, integration_id: string | nil, attempt_number: int | nil, entity_id: string | nil, entity_type: string | nil, api_version: string | nil, verification_token: string | nil, polled: NotionPolledChangeEvent | nil, raw: dict}
+
+type NotionPolledEventPayload = {provider: "notion", event: "page.content_updated", workspace_id: string | nil, request_id: string | nil, subscription_id: string | nil, integration_id: string | nil, attempt_number: int | nil, entity_id: string | nil, entity_type: string | nil, api_version: string | nil, verification_token: string | nil, polled: NotionPolledChangeEvent, raw: dict}
+
+type NotionOtherEventPayload = {provider: "notion", event: string, workspace_id: string | nil, request_id: string | nil, subscription_id: string | nil, integration_id: string | nil, attempt_number: int | nil, entity_id: string | nil, entity_type: string | nil, api_version: string | nil, verification_token: string | nil, polled: NotionPolledChangeEvent | nil, raw: dict}
+
+type NotionEventPayload = NotionSubscriptionVerificationEventPayload | NotionPageContentUpdatedEventPayload | NotionPageLockedEventPayload | NotionCommentCreatedEventPayload | NotionDataSourceSchemaUpdatedEventPayload | NotionPolledEventPayload | NotionOtherEventPayload
 
 type CronEventPayload = {provider: "cron", cron_id: string | nil, schedule: string | nil, tick_at: string, raw: dict}
 

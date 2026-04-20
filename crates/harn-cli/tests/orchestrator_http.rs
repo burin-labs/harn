@@ -122,6 +122,32 @@ secrets = { signing_secret = "slack/signing-secret" }
     manifest
 }
 
+fn notion_manifest(orchestrator_block: Option<&str>) -> String {
+    let mut manifest = r#"
+[package]
+name = "fixture"
+
+[exports]
+handlers = "lib.harn"
+
+[[triggers]]
+id = "notion-pages"
+kind = "webhook"
+provider = "notion"
+path = "/hooks/notion"
+match = { path = "/hooks/notion", events = ["page.content_updated"] }
+handler = "handlers::on_notion"
+secrets = { verification_token = "notion/verification-token" }
+"#
+    .to_string();
+    if let Some(block) = orchestrator_block {
+        manifest.push('\n');
+        manifest.push_str(block);
+        manifest.push('\n');
+    }
+    manifest
+}
+
 fn slack_handler_module(marker_path: &Path) -> String {
     format!(
         r#"
@@ -129,6 +155,19 @@ import "std/triggers"
 
 pub fn on_slack(event: TriggerEvent) {{
   sleep(4100ms)
+  write_file({marker:?}, event.kind)
+}}
+"#,
+        marker = marker_path.display().to_string()
+    )
+}
+
+fn notion_handler_module(marker_path: &Path) -> String {
+    format!(
+        r#"
+import "std/triggers"
+
+pub fn on_notion(event: TriggerEvent) {{
   write_file({marker:?}, event.kind)
 }}
 "#,
@@ -371,6 +410,17 @@ fn slack_headers(secret: &str, timestamp: i64, body: &[u8]) -> HeaderMap {
         "X-Slack-Signature",
         HeaderValue::from_str(&slack_signature(secret, timestamp, body)).unwrap(),
     );
+    headers
+}
+
+fn notion_headers(secret: &str, body: &[u8]) -> HeaderMap {
+    let mut headers = HeaderMap::new();
+    headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+    headers.insert(
+        "X-Notion-Signature",
+        HeaderValue::from_str(&github_signature(secret, body)).unwrap(),
+    );
+    headers.insert("request-id", HeaderValue::from_static("req-notion-123"));
     headers
 }
 
@@ -838,6 +888,136 @@ async fn slack_bad_requests_set_no_retry_header_and_export_delivery_metrics() {
 
     send_sigterm(&process.child);
     wait_for_exit(&mut process.child);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn notion_webhook_handshake_is_captured_and_reported_by_doctor() {
+    let _lock = lock_orchestrator_tests();
+    let temp = TempDir::new().unwrap();
+    write_file(temp.path(), "harn.toml", &notion_manifest(None));
+    write_file(
+        temp.path(),
+        "lib.harn",
+        &notion_handler_module(&temp.path().join("unused-notion-marker.txt")),
+    );
+
+    let envs = [("HARN_SECRET_PROVIDERS", "env")];
+    let mut process = spawn_orchestrator(&temp, &[], &envs);
+    let base_url = process.wait_for_listener_url();
+
+    let body = serde_json::to_vec(&serde_json::json!({
+        "verification_token": "secret_notion_test_token"
+    }))
+    .unwrap();
+    let response = reqwest::Client::new()
+        .post(format!("{base_url}/hooks/notion"))
+        .header(CONTENT_TYPE, "application/json")
+        .body(body)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload: JsonValue = response.json().await.unwrap();
+    assert_eq!(
+        payload.get("status").and_then(JsonValue::as_str),
+        Some("handshake_captured")
+    );
+    assert_eq!(
+        payload
+            .get("verification_token")
+            .and_then(JsonValue::as_str),
+        Some("secret_notion_test_token")
+    );
+
+    send_sigterm(&process.child);
+    let status = wait_for_exit_async(&mut process.child).await;
+    let stderr = process.join_stderr();
+    assert!(status.success(), "status={status} stderr={stderr}");
+
+    let doctor = Command::new(env!("CARGO_BIN_EXE_harn"))
+        .current_dir(temp.path())
+        .arg("doctor")
+        .arg("--no-network")
+        .env("HARN_SECRET_PROVIDERS", "env")
+        .env("HARN_EVENT_LOG_SQLITE_PATH", "state/events.sqlite")
+        .output()
+        .unwrap();
+    assert!(
+        doctor.status.success(),
+        "doctor failed: stdout={}\nstderr={}",
+        String::from_utf8_lossy(&doctor.stdout),
+        String::from_utf8_lossy(&doctor.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&doctor.stdout);
+    assert!(
+        stdout.contains("WARN  notion:notion-pages"),
+        "stdout={stdout}"
+    );
+    assert!(
+        stdout.contains("captured verification_token=secret_notion_test_token"),
+        "stdout={stdout}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn notion_webhook_signed_delivery_is_dispatched() {
+    let _lock = lock_orchestrator_tests();
+    let temp = TempDir::new().unwrap();
+    let marker_path = temp.path().join("notion-handler.txt");
+    write_file(temp.path(), "harn.toml", &notion_manifest(None));
+    write_file(
+        temp.path(),
+        "lib.harn",
+        &notion_handler_module(&marker_path),
+    );
+
+    let secret = "secret-notion-live-token";
+    let envs = [
+        ("HARN_SECRET_PROVIDERS", "env"),
+        ("HARN_SECRET_NOTION_VERIFICATION_TOKEN", secret),
+    ];
+    let mut process = spawn_orchestrator(&temp, &[], &envs);
+    let base_url = process.wait_for_listener_url();
+
+    let body = serde_json::to_vec(&serde_json::json!({
+        "id": "evt_notion_1",
+        "timestamp": "2026-04-19T12:34:56Z",
+        "type": "page.content_updated",
+        "workspace_id": "ws_123",
+        "subscription_id": "sub_123",
+        "integration_id": "int_123",
+        "attempt_number": 1,
+        "entity": {
+            "id": "page_123",
+            "type": "page"
+        }
+    }))
+    .unwrap();
+    let response = reqwest::Client::new()
+        .post(format!("{base_url}/hooks/notion"))
+        .headers(notion_headers(secret, &body))
+        .body(body)
+        .send()
+        .await
+        .unwrap();
+    assert_status(response, StatusCode::OK).await;
+
+    wait_for_path(&marker_path, Duration::from_secs(10));
+    let marker = fs::read_to_string(&marker_path).unwrap();
+    assert_eq!(marker, "page.content_updated");
+
+    send_sigterm(&process.child);
+    let status = wait_for_exit_async(&mut process.child).await;
+    let stderr = process.join_stderr();
+    assert!(status.success(), "status={status} stderr={stderr}");
+    assert!(stderr.contains(SHUTDOWN_NEEDLE), "stderr={stderr}");
+
+    let snapshot = state_snapshot(&temp);
+    assert!(snapshot.contains("\"received\": 1"), "snapshot={snapshot}");
+    assert!(
+        snapshot.contains("\"dispatched\": 1"),
+        "snapshot={snapshot}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
