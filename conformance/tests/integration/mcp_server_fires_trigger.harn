@@ -25,7 +25,6 @@ pipeline default() {
     + log_path
     + "\"\n\npub fn on_ok(event: TriggerEvent) -> dict {\n  write_file(log_path, \"fired:\" + event.kind + \"\\n\")\n  return {kind: event.kind, event_id: event.id}\n}\n",
   )
-
   let repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
   let harn_bin = resolve_harn_bin(repo_root)
   let helper = path_join(repo_root, "conformance/helpers/mcp_stdio_tool.py")

@@ -8,7 +8,6 @@ pipeline test(task) {
   },
   )
   llm_mock({text: "<done>##DONE##</done>"})
-
   let result = agent_loop(
     "Use the unsigned skill",
     catalog,
@@ -23,7 +22,6 @@ pipeline test(task) {
   },
   )
   assert(result?.status == "done", "agent loop finishes")
-
   let calls = llm_mock_calls()
   let second_messages = json_stringify(calls[1].messages)
   assert(
@@ -34,7 +32,6 @@ pipeline test(task) {
     !contains(second_messages, "Unsigned skill body should never load."),
     "unsigned skill body is not leaked",
   )
-
   let events = transcript_events(result?.transcript)
   var saw_record = false
   for ev in events {

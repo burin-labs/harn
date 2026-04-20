@@ -8,7 +8,6 @@ pipeline test(task) {
   },
   )
   llm_mock({text: "<done>##DONE##</done>"})
-
   let result = agent_loop(
     "Use the signed skill",
     catalog,
@@ -23,14 +22,12 @@ pipeline test(task) {
   },
   )
   assert(result?.status == "done", "agent loop finishes")
-
   let calls = llm_mock_calls()
   let second_messages = json_stringify(calls[1].messages)
   assert(
     contains(second_messages, "Always verify the signed skill body."),
     "signed skill body is loaded",
   )
-
   let events = transcript_events(result?.transcript)
   var saw_record = false
   for ev in events {

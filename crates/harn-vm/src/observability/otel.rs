@@ -4,8 +4,10 @@ use std::collections::HashMap;
 #[cfg(feature = "otel")]
 use sha2::{Digest, Sha256};
 use tracing::level_filters::LevelFilter;
+#[cfg(feature = "otel")]
 use tracing_subscriber::filter::filter_fn;
 use tracing_subscriber::layer::SubscriberExt;
+#[cfg(feature = "otel")]
 use tracing_subscriber::Layer as _;
 
 use crate::TraceId;
@@ -77,9 +79,9 @@ impl ObservabilityGuard {
         })
     }
 
-    pub fn shutdown(self) -> Result<(), String> {
+    pub fn shutdown(mut self) -> Result<(), String> {
         #[cfg(feature = "otel")]
-        if let Some(provider) = self.tracer_provider {
+        if let Some(provider) = self.tracer_provider.take() {
             provider
                 .force_flush()
                 .map_err(|error| format!("failed to flush OTel spans: {error}"))?;
@@ -88,6 +90,20 @@ impl ObservabilityGuard {
                 .map_err(|error| format!("failed to shut down OTel tracer provider: {error}"))?;
         }
         Ok(())
+    }
+}
+
+impl Drop for ObservabilityGuard {
+    fn drop(&mut self) {
+        // Best-effort flush + shutdown so span batches are delivered even when
+        // the caller exits via panic or early return without calling
+        // `shutdown()` explicitly. Ignore errors — there's nothing to recover
+        // to during teardown.
+        #[cfg(feature = "otel")]
+        if let Some(provider) = self.tracer_provider.take() {
+            let _ = provider.force_flush();
+            let _ = provider.shutdown();
+        }
     }
 }
 

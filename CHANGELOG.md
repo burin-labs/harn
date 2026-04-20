@@ -7,7 +7,7 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
-## Unreleased
+## v0.7.23
 
 ### Changed
 
@@ -232,6 +232,18 @@ granular archaeology.
   `harn trust promote`, and `harn trust demote`. Added the
   `spec/opentrustgraph.md` draft plus trust-graph docs and conformance
   coverage.
+
+- **First-class Slack Events connector (#239).** Harn now ships a
+  `slack` connector that handles Slack's URL-verification challenge
+  response inline, normalizes `event_callback` payloads into
+  `TriggerEvent`s keyed by `team_id:event_id`, and verifies
+  `X-Slack-Signature` / `X-Slack-Request-Timestamp` with a 5-minute
+  skew tolerance before enqueueing. Registered as the default
+  connector for provider `slack` in
+  `ConnectorRegistry::with_defaults()` with listener-route
+  `signature_mode: SignatureMode::Unsigned` (Slack uses its own
+  signing scheme). Idle-GC the known dedupe index entries on a
+  24-hour TTL.
 
 - **`harn orchestrator {inspect, fire, replay, dlq, queue}` CLI
   commands (#185).** Implemented the placeholder orchestrator
