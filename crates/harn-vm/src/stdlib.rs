@@ -39,6 +39,7 @@ mod triggers_stdlib;
 mod types;
 mod vision;
 mod waitpoints;
+pub(crate) mod waitpoint;
 
 use crate::http::register_http_builtins;
 use crate::llm::register_llm_builtins;
@@ -94,6 +95,7 @@ pub fn register_agent_stdlib(vm: &mut Vm) {
     waitpoints::register_waitpoint_builtins(vm);
     hitl::register_hitl_builtins(vm);
     hitl_read::register_hitl_read_builtins(vm);
+    waitpoint::register_waitpoint_builtins(vm);
     agents::register_agent_builtins(vm);
     agent_sessions::register_agent_session_builtins(vm);
     transcript_compact::register_transcript_compaction_builtins(vm);
@@ -144,6 +146,7 @@ pub fn reset_stdlib_state() {
     host::reset_host_state();
     hitl::reset_hitl_state();
     waitpoints::reset_waitpoint_state();
+    waitpoint::reset_waitpoint_state();
     agents::records::reset_eval_metrics();
     tools::clear_current_tool_registry();
     vision::reset_vision_state();

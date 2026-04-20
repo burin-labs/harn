@@ -1,0 +1,27 @@
+import { complete, create, wait } from "std/waitpoint"
+
+pipeline test(task) {
+  let wp = create("fan-in")
+  let first = spawn {
+    wait(wp).value + "-1"
+  }
+  let second = spawn {
+    wait(wp).value + "-2"
+  }
+  let third = spawn {
+    wait(wp).value + "-3"
+  }
+  let fourth = spawn {
+    wait(wp).value + "-4"
+  }
+  let fifth = spawn {
+    wait(wp).value + "-5"
+  }
+  sleep(10ms)
+  complete(wp, "go")
+  println(await(first))
+  println(await(second))
+  println(await(third))
+  println(await(fourth))
+  println(await(fifth))
+}

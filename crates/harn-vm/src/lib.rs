@@ -92,6 +92,9 @@ pub use stdlib::template::{
     lookup_prompt_consumers, lookup_prompt_span, prompt_render_indices, record_prompt_render_index,
     PromptSourceSpan, PromptSpanKind,
 };
+pub use stdlib::waitpoint::{
+    process_waitpoint_resume_event, service_waitpoints_once, WAITPOINT_RESUME_TOPIC,
+};
 pub use stdlib::{
     register_agent_stdlib, register_core_stdlib, register_io_stdlib, register_vm_stdlib,
 };

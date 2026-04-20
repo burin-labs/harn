@@ -1,0 +1,25 @@
+import { complete, create, wait } from "std/waitpoint"
+
+pipeline test(task) {
+  let points = [
+    create("fan-out-1"),
+    create("fan-out-2"),
+    create("fan-out-3"),
+    create("fan-out-4"),
+    create("fan-out-5"),
+  ]
+  let waiter = spawn {
+    let resolved = wait(points)
+    return {count: len(resolved), first: resolved[0].value, last: resolved[4].value}
+  }
+  sleep(10ms)
+  complete(points[0], "a")
+  complete(points[1], "b")
+  complete(points[2], "c")
+  complete(points[3], "d")
+  complete(points[4], "e")
+  let result = await(waiter)
+  println(result.count)
+  println(result.first)
+  println(result.last)
+}

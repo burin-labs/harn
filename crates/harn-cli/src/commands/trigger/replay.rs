@@ -644,6 +644,7 @@ fn summarize_dispatch_outcome(outcome: &harn_vm::DispatchOutcome) -> DispatchOut
             harn_vm::DispatchStatus::Failed => "failed".to_string(),
             harn_vm::DispatchStatus::Dlq => "dlq".to_string(),
             harn_vm::DispatchStatus::Skipped => "skipped".to_string(),
+            harn_vm::DispatchStatus::Waiting => "waiting".to_string(),
             harn_vm::DispatchStatus::Cancelled => "cancelled".to_string(),
         },
         attempt_count: outcome.attempt_count,
