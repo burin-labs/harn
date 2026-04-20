@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 use crate::value::{VmAtomicHandle, VmChannelHandle, VmError, VmValue};
 use crate::vm::Vm;
@@ -60,6 +61,12 @@ fn try_poll_channels(channels: &[VmValue]) -> (Option<(usize, VmValue, String)>,
         }
     }
     (None, all_closed)
+}
+
+fn cancelled_vm_error() -> VmError {
+    VmError::Thrown(VmValue::String(Rc::from(
+        "kind:cancelled:VM cancelled by host",
+    )))
 }
 
 pub(crate) fn register_concurrency_builtins(vm: &mut Vm) {
@@ -181,7 +188,23 @@ pub(crate) fn register_concurrency_builtins(vm: &mut Vm) {
             _ => 0,
         };
         if ms > 0 {
-            tokio::time::sleep(tokio::time::Duration::from_millis(ms)).await;
+            let sleep = tokio::time::sleep(tokio::time::Duration::from_millis(ms));
+            tokio::pin!(sleep);
+            if let Some(vm) = crate::vm::clone_async_builtin_child_vm() {
+                let mut poll = tokio::time::interval(Duration::from_millis(10));
+                loop {
+                    tokio::select! {
+                        _ = &mut sleep => break,
+                        _ = poll.tick() => {
+                            if vm.is_cancel_requested() {
+                                return Err(cancelled_vm_error());
+                            }
+                        }
+                    }
+                }
+            } else {
+                sleep.await;
+            }
         }
         Ok(VmValue::Nil)
     });

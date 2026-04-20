@@ -272,7 +272,7 @@ impl Vm {
             source_text: self.source_text.clone(),
             bridge: self.bridge.clone(),
             denied_builtins: self.denied_builtins.clone(),
-            cancel_token: None,
+            cancel_token: self.cancel_token.clone(),
             error_stack_trace: Vec::new(),
             yield_sender: None,
             project_root: self.project_root.clone(),

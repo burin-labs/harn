@@ -1614,15 +1614,10 @@ pub fn slow_handler(event: TriggerEvent) -> string {
         .await;
 }
 
-// TODO(harn#324): Hangs deterministically after the #258 topic split — the
-// handler's `is_cancelled()` loop doesn't observe the cancel_token set by
-// `dispatcher.shutdown()` when the handler is mid-`sleep()`. The topic read
-// below was already repointed at `trigger.inbox.envelopes` (the old
-// `trigger.inbox` legacy topic never receives `event_ingested` after the
-// split), but the shutdown-cancel wiring itself needs to plumb cancel
-// notification into the sleep future, not just polled via a busy loop.
+// Regression coverage for harn#324: dispatcher shutdown must wake handlers
+// that are blocked in `sleep()` so a cooperative `is_cancelled()` loop can
+// exit without silently dropping an already-dequeued inbox event.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "flaky after #258 inbox topic split — tracked in harn#324"]
 async fn run_shutdown_does_not_silently_drop_dequeued_inbox_events() {
     let local = tokio::task::LocalSet::new();
     local
