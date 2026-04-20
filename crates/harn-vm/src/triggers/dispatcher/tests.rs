@@ -1652,7 +1652,7 @@ pub fn wait_for_cancel(event: TriggerEvent) -> string {
                 run_dispatcher.run().await.expect("dispatcher run exits cleanly");
             });
 
-            tokio::time::sleep(Duration::from_millis(20)).await;
+            tokio::task::yield_now().await;
             dispatcher
                 .enqueue(trigger_event("issues.opened", "delivery-run-shutdown"))
                 .await
@@ -1670,7 +1670,7 @@ pub fn wait_for_cancel(event: TriggerEvent) -> string {
                 .expect("shutdown drain completes");
             assert!(drain.drained, "{drain:?}");
 
-            let inbox = read_topic(log.clone(), "trigger.inbox.envelopes").await;
+            let inbox = read_topic(log.clone(), crate::TRIGGER_INBOX_ENVELOPES_TOPIC).await;
             assert_eq!(
                 inbox.iter()
                     .filter(|(_, event)| event.kind == "event_ingested")

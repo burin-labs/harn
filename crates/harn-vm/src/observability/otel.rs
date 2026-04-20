@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 #[cfg(feature = "otel")]
 use std::collections::HashMap;
 
@@ -13,6 +14,8 @@ use tracing_subscriber::Layer as _;
 use crate::TraceId;
 
 pub const OTEL_PARENT_SPAN_ID_HEADER: &str = "otel_parent_span_id";
+pub const OTEL_TRACEPARENT_HEADER: &str = "traceparent";
+pub const OTEL_TRACESTATE_HEADER: &str = "tracestate";
 
 static OBSERVABILITY_INIT: std::sync::OnceLock<()> = std::sync::OnceLock::new();
 
@@ -147,6 +150,80 @@ pub fn current_span_id_hex(span: &tracing::Span) -> Option<String> {
 #[cfg(not(feature = "otel"))]
 pub fn current_span_id_hex(_span: &tracing::Span) -> Option<String> {
     None
+}
+
+#[cfg(feature = "otel")]
+pub fn inject_current_context_headers(
+    span: &tracing::Span,
+    headers: &mut BTreeMap<String, String>,
+) -> Result<(), String> {
+    use opentelemetry::propagation::{Injector, TextMapPropagator as _};
+    use tracing_opentelemetry::OpenTelemetrySpanExt as _;
+
+    struct HeaderInjector<'a>(&'a mut BTreeMap<String, String>);
+
+    impl Injector for HeaderInjector<'_> {
+        fn set(&mut self, key: &str, value: String) {
+            self.0.insert(key.to_string(), value);
+        }
+    }
+
+    let propagator = opentelemetry_sdk::propagation::TraceContextPropagator::new();
+    propagator.inject_context(&span.context(), &mut HeaderInjector(headers));
+    Ok(())
+}
+
+#[cfg(not(feature = "otel"))]
+pub fn inject_current_context_headers(
+    _span: &tracing::Span,
+    _headers: &mut BTreeMap<String, String>,
+) -> Result<(), String> {
+    Ok(())
+}
+
+#[cfg(feature = "otel")]
+pub fn set_span_parent_from_headers(
+    span: &tracing::Span,
+    headers: &BTreeMap<String, String>,
+    trace_id: &TraceId,
+    fallback_parent_span_id: Option<&str>,
+) -> Result<(), String> {
+    use opentelemetry::propagation::{Extractor, TextMapPropagator as _};
+    use opentelemetry::trace::TraceContextExt as _;
+    use tracing_opentelemetry::OpenTelemetrySpanExt as _;
+
+    struct HeaderExtractor<'a>(&'a BTreeMap<String, String>);
+
+    impl Extractor for HeaderExtractor<'_> {
+        fn get(&self, key: &str) -> Option<&str> {
+            self.0.get(key).map(String::as_str)
+        }
+
+        fn keys(&self) -> Vec<&str> {
+            self.0.keys().map(String::as_str).collect()
+        }
+    }
+
+    let propagator = opentelemetry_sdk::propagation::TraceContextPropagator::new();
+    let context = propagator.extract(&HeaderExtractor(headers));
+    let binding = context.span();
+    let span_context = binding.span_context();
+    if span_context.is_valid() {
+        return span
+            .set_parent(context)
+            .map_err(|error| format!("failed to attach OTel parent context: {error}"));
+    }
+    set_span_parent(span, trace_id, fallback_parent_span_id)
+}
+
+#[cfg(not(feature = "otel"))]
+pub fn set_span_parent_from_headers(
+    _span: &tracing::Span,
+    _headers: &BTreeMap<String, String>,
+    _trace_id: &TraceId,
+    _fallback_parent_span_id: Option<&str>,
+) -> Result<(), String> {
+    Ok(())
 }
 
 fn fmt_layer<S>() -> impl tracing_subscriber::Layer<S> + Send + Sync

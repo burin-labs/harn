@@ -435,13 +435,13 @@ impl Dispatcher {
                     if event.kind != "event_ingested" {
                         continue;
                     }
+                    let parent_headers = event.headers.clone();
                     let envelope: InboxEnvelope = serde_json::from_value(event.payload)
                         .map_err(|error| DispatchError::Serde(error.to_string()))?;
                     notify_test_inbox_dequeued();
-                    let dispatcher = self.clone();
-                    tokio::task::spawn_local(async move {
-                        let _ = dispatcher.dispatch_inbox_envelope(envelope).await;
-                    });
+                    let _ = self
+                        .dispatch_inbox_envelope_with_headers(envelope, Some(&parent_headers))
+                        .await;
                 }
                 _ = recv_cancel(&mut cancel_rx) => break,
             }
@@ -489,6 +489,15 @@ impl Dispatcher {
         &self,
         envelope: InboxEnvelope,
     ) -> Result<Vec<DispatchOutcome>, DispatchError> {
+        self.dispatch_inbox_envelope_with_headers(envelope, None)
+            .await
+    }
+
+    async fn dispatch_inbox_envelope_with_headers(
+        &self,
+        envelope: InboxEnvelope,
+        parent_headers: Option<&BTreeMap<String, String>>,
+    ) -> Result<Vec<DispatchOutcome>, DispatchError> {
         if let Some(trigger_id) = envelope.trigger_id {
             let binding = super::registry::resolve_live_trigger_binding(
                 &trigger_id,
@@ -496,7 +505,7 @@ impl Dispatcher {
             )
             .map_err(|error| DispatchError::Registry(error.to_string()))?;
             return Ok(vec![
-                self.dispatch_with_replay(&binding, envelope.event, None, None)
+                self.dispatch_with_replay(&binding, envelope.event, None, None, parent_headers)
                     .await?,
             ]);
         }
@@ -514,7 +523,7 @@ impl Dispatcher {
             )
             .map_err(|error| DispatchError::Registry(error.to_string()))?;
             return Ok(vec![
-                self.dispatch_with_replay(&binding, envelope.event, None, None)
+                self.dispatch_with_replay(&binding, envelope.event, None, None, parent_headers)
                     .await?,
             ]);
         }
@@ -539,7 +548,8 @@ impl Dispatcher {
         binding: &TriggerBinding,
         event: TriggerEvent,
     ) -> Result<DispatchOutcome, DispatchError> {
-        self.dispatch_with_replay(binding, event, None, None).await
+        self.dispatch_with_replay(binding, event, None, None, None)
+            .await
     }
 
     pub async fn dispatch_replay(
@@ -548,7 +558,7 @@ impl Dispatcher {
         event: TriggerEvent,
         replay_of_event_id: String,
     ) -> Result<DispatchOutcome, DispatchError> {
-        self.dispatch_with_replay(binding, event, Some(replay_of_event_id), None)
+        self.dispatch_with_replay(binding, event, Some(replay_of_event_id), None, None)
             .await
     }
 
@@ -558,7 +568,7 @@ impl Dispatcher {
         event: TriggerEvent,
         parent_span_id: Option<String>,
     ) -> Result<DispatchOutcome, DispatchError> {
-        self.dispatch_with_replay(binding, event, None, parent_span_id)
+        self.dispatch_with_replay(binding, event, None, parent_span_id, None)
             .await
     }
 
@@ -568,6 +578,7 @@ impl Dispatcher {
         event: TriggerEvent,
         replay_of_event_id: Option<String>,
         parent_span_id: Option<String>,
+        parent_headers: Option<&BTreeMap<String, String>>,
     ) -> Result<DispatchOutcome, DispatchError> {
         let span = tracing::info_span!(
             "dispatch",
@@ -575,11 +586,22 @@ impl Dispatcher {
             binding_version = binding.version,
             trace_id = %event.trace_id.0
         );
-        let _ = crate::observability::otel::set_span_parent(
-            &span,
-            &event.trace_id,
-            parent_span_id.as_deref(),
-        );
+        #[cfg(feature = "otel")]
+        let span_for_otel = span.clone();
+        let _ = if let Some(headers) = parent_headers {
+            crate::observability::otel::set_span_parent_from_headers(
+                &span,
+                headers,
+                &event.trace_id,
+                parent_span_id.as_deref(),
+            )
+        } else {
+            crate::observability::otel::set_span_parent(
+                &span,
+                &event.trace_id,
+                parent_span_id.as_deref(),
+            )
+        };
         #[cfg(feature = "otel")]
         let started_at = Instant::now();
         let metrics = self.metrics.clone();
@@ -603,7 +625,22 @@ impl Dispatcher {
         }
         #[cfg(feature = "otel")]
         {
-            let _ = started_at;
+            use tracing_opentelemetry::OpenTelemetrySpanExt as _;
+
+            let duration_ms = started_at.elapsed().as_millis() as i64;
+            let status = match &outcome {
+                Ok(dispatch_outcome) => match dispatch_outcome.status {
+                    DispatchStatus::Succeeded => "succeeded",
+                    DispatchStatus::Skipped => "skipped",
+                    DispatchStatus::Cancelled => "cancelled",
+                    DispatchStatus::Failed => "failed",
+                    DispatchStatus::Dlq => "dlq",
+                },
+                Err(DispatchError::Cancelled(_)) => "cancelled",
+                Err(_) => "failed",
+            };
+            span_for_otel.set_attribute("result.status", status);
+            span_for_otel.set_attribute("result.duration_ms", duration_ms);
         }
         outcome
     }

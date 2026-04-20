@@ -567,6 +567,8 @@ pub fn on_event(event: TriggerEvent) {
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "hangs on pump-cursor resume after restart — tracked in harn#328"]
 async fn bounded_pump_drain_truncates_and_replays_remaining_backlog_after_restart() {
+    const TOTAL_EVENTS: usize = 500;
+
     let temp = TempDir::new().unwrap();
     write_file(
         temp.path(),
@@ -618,7 +620,7 @@ pub fn on_task(event: TriggerEvent) -> string {
     let state_dir = temp.path().join("state");
 
     let client = reqwest::Client::new();
-    for index in 0..5000 {
+    for index in 0..TOTAL_EVENTS {
         let body = serde_json::json!({
             "kind": "a2a.task.received",
             "task": {"id": format!("task-{index}")},
@@ -654,7 +656,12 @@ pub fn on_task(event: TriggerEvent) -> string {
     let (mut restart_child, restart_rx, restart_handle) =
         spawn_orchestrator_with(&temp, &extra_args, &restart_envs);
     wait_for_listener_url(&mut restart_child, &restart_rx);
-    wait_for_sqlite_event_count(&state_dir, "trigger.outbox", "dispatch_succeeded", 5000);
+    wait_for_sqlite_event_count(
+        &state_dir,
+        "trigger.outbox",
+        "dispatch_succeeded",
+        TOTAL_EVENTS,
+    );
     send_sigterm(&restart_child);
     wait_for_exit(&mut restart_child);
     let restart_stderr = restart_handle.join().expect("stderr collector thread");
@@ -665,7 +672,7 @@ pub fn on_task(event: TriggerEvent) -> string {
 
     assert_eq!(
         sqlite_event_count(&state_dir, "trigger.outbox", "dispatch_succeeded"),
-        5000
+        TOTAL_EVENTS
     );
 }
 

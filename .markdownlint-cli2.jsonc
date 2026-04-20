@@ -21,6 +21,6 @@
     ".burin",
     ".claude",
     "docs/src/SUMMARY.md",
-    "conformance/tests/skills/**/.harn/skills/**/SKILL.md"
+    "conformance/tests/**/.harn/**/*.md"
   ]
 }

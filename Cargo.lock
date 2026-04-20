@@ -1223,6 +1223,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "harn-serve"
+version = "0.7.22"
+dependencies = [
+ "async-trait",
+ "base64",
+ "harn-parser",
+ "harn-vm",
+ "hex",
+ "hmac",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "time",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "harn-vm"
 version = "0.7.22"
 dependencies = [

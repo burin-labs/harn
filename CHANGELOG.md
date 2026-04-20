@@ -170,6 +170,15 @@ granular archaeology.
 
 ### Added
 
+- **Shared `harn-serve` dispatch core (harn#301).** New `harn-serve`
+  workspace crate introduces a transport-agnostic adapter boundary,
+  shared API-key/HMAC/OAuth auth handling, an in-memory replay cache,
+  export-catalog discovery from `pub fn` exports with JSON schema
+  metadata, and shared dispatch plumbing for cancellation, trust-graph
+  context, and OpenTelemetry parent propagation. Transport-specific
+  serve implementations can now delegate these concerns instead of
+  reimplementing them.
+
 - **Expression-keyed trigger flow control for manifest bindings (harn#307).**
   `[[triggers]]` now supports top-level `concurrency`, `throttle`,
   `rate_limit`, `debounce`, `singleton`, `batch`, and keyed `priority`
