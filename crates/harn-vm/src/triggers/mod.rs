@@ -1,5 +1,6 @@
 pub mod dispatcher;
 pub mod event;
+pub mod flow_control;
 pub mod inbox;
 pub mod registry;
 pub mod test_util;
@@ -18,6 +19,12 @@ pub use event::{
     ProviderMetadata, ProviderOutboundMethod, ProviderPayload, ProviderRuntimeMetadata,
     ProviderSchema, ProviderSecretRequirement, SignatureStatus, SignatureVerificationMetadata,
     SlackEventPayload, TenantId, TraceId, TriggerEvent, TriggerEventId,
+};
+pub use flow_control::{
+    parse_flow_control_duration, TriggerBatchConfig, TriggerConcurrencyConfig,
+    TriggerDebounceConfig, TriggerExpressionSpec, TriggerFlowControlConfig,
+    TriggerPriorityOrderConfig, TriggerRateLimitConfig, TriggerSingletonConfig,
+    TriggerThrottleConfig,
 };
 pub use inbox::{InboxIndex, DEFAULT_INBOX_RETENTION_DAYS};
 pub use registry::{

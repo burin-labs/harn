@@ -443,6 +443,7 @@ impl Connector for GitHubConnector {
             trace_id: TraceId::new(),
             tenant_id: raw.tenant_id.clone(),
             headers: redact_headers(&headers, &HeaderRedactionPolicy::default()),
+            batch: None,
             provider_payload,
             signature_status: SignatureStatus::Verified,
             dedupe_claimed: false,

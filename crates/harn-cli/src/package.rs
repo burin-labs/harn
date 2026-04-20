@@ -141,9 +141,21 @@ pub struct TriggerManifestEntry {
     #[serde(default)]
     pub retry: TriggerRetrySpec,
     #[serde(default)]
-    pub priority: TriggerPriority,
+    pub priority: Option<TriggerPriorityField>,
     #[serde(default)]
     pub budget: TriggerBudgetSpec,
+    #[serde(default)]
+    pub concurrency: Option<TriggerConcurrencyManifestSpec>,
+    #[serde(default)]
+    pub throttle: Option<TriggerThrottleManifestSpec>,
+    #[serde(default)]
+    pub rate_limit: Option<TriggerRateLimitManifestSpec>,
+    #[serde(default)]
+    pub debounce: Option<TriggerDebounceManifestSpec>,
+    #[serde(default)]
+    pub singleton: Option<TriggerSingletonManifestSpec>,
+    #[serde(default)]
+    pub batch: Option<TriggerBatchManifestSpec>,
     #[serde(default)]
     pub secrets: BTreeMap<String, String>,
     #[serde(default)]
@@ -205,11 +217,18 @@ impl Default for TriggerRetrySpec {
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub enum TriggerPriority {
+pub enum TriggerDispatchPriority {
     High,
     #[default]
     Normal,
     Low,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum TriggerPriorityField {
+    Dispatch(TriggerDispatchPriority),
+    Flow(TriggerPriorityManifestSpec),
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
@@ -228,6 +247,56 @@ pub struct TriggerWhenBudgetSpec {
     pub tokens_max: Option<u64>,
     #[serde(default)]
     pub timeout: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TriggerConcurrencyManifestSpec {
+    #[serde(default)]
+    pub key: Option<String>,
+    pub max: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TriggerThrottleManifestSpec {
+    #[serde(default)]
+    pub key: Option<String>,
+    pub period: String,
+    pub max: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TriggerRateLimitManifestSpec {
+    #[serde(default)]
+    pub key: Option<String>,
+    pub period: String,
+    pub max: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TriggerDebounceManifestSpec {
+    pub key: String,
+    pub period: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TriggerSingletonManifestSpec {
+    #[serde(default)]
+    pub key: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TriggerBatchManifestSpec {
+    #[serde(default)]
+    pub key: Option<String>,
+    pub size: u32,
+    pub timeout: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TriggerPriorityManifestSpec {
+    pub key: String,
+    #[serde(default)]
+    pub order: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -495,8 +564,15 @@ pub struct ResolvedTriggerConfig {
     pub handler: String,
     pub dedupe_key: Option<String>,
     pub retry: TriggerRetrySpec,
-    pub priority: TriggerPriority,
+    pub dispatch_priority: TriggerDispatchPriority,
     pub budget: TriggerBudgetSpec,
+    pub concurrency: Option<TriggerConcurrencyManifestSpec>,
+    pub throttle: Option<TriggerThrottleManifestSpec>,
+    pub rate_limit: Option<TriggerRateLimitManifestSpec>,
+    pub debounce: Option<TriggerDebounceManifestSpec>,
+    pub singleton: Option<TriggerSingletonManifestSpec>,
+    pub batch: Option<TriggerBatchManifestSpec>,
+    pub priority_flow: Option<TriggerPriorityManifestSpec>,
     pub secrets: BTreeMap<String, String>,
     pub filter: Option<String>,
     pub kind_specific: BTreeMap<String, toml::Value>,
@@ -513,6 +589,7 @@ pub struct CollectedManifestTrigger {
     pub config: ResolvedTriggerConfig,
     pub handler: CollectedTriggerHandler,
     pub when: Option<CollectedTriggerPredicate>,
+    pub flow_control: harn_vm::TriggerFlowControlConfig,
 }
 
 #[derive(Debug, Clone)]
@@ -722,29 +799,50 @@ fn resolved_triggers_from_manifest(
         .triggers
         .iter()
         .enumerate()
-        .map(|(table_index, trigger)| ResolvedTriggerConfig {
-            id: trigger.id.clone(),
-            kind: trigger.kind,
-            provider: trigger.provider.clone(),
-            autonomy_tier: trigger.autonomy_tier,
-            match_: trigger.match_.clone(),
-            when: trigger.when.clone(),
-            when_budget: trigger.when_budget.clone(),
-            handler: trigger.handler.clone(),
-            dedupe_key: trigger.dedupe_key.clone(),
-            retry: trigger.retry.clone(),
-            priority: trigger.priority,
-            budget: trigger.budget.clone(),
-            secrets: trigger.secrets.clone(),
-            filter: trigger.filter.clone(),
-            kind_specific: trigger.kind_specific.clone(),
-            manifest_dir: manifest_dir.to_path_buf(),
-            manifest_path: manifest_path.clone(),
-            package_name: package_name.clone(),
-            exports: manifest.exports.clone(),
-            table_index,
+        .map(|(table_index, trigger)| {
+            let (dispatch_priority, priority_flow) =
+                split_trigger_priority(trigger.priority.clone());
+            ResolvedTriggerConfig {
+                id: trigger.id.clone(),
+                kind: trigger.kind,
+                provider: trigger.provider.clone(),
+                autonomy_tier: trigger.autonomy_tier,
+                match_: trigger.match_.clone(),
+                when: trigger.when.clone(),
+                when_budget: trigger.when_budget.clone(),
+                handler: trigger.handler.clone(),
+                dedupe_key: trigger.dedupe_key.clone(),
+                retry: trigger.retry.clone(),
+                dispatch_priority,
+                budget: trigger.budget.clone(),
+                concurrency: trigger.concurrency.clone(),
+                throttle: trigger.throttle.clone(),
+                rate_limit: trigger.rate_limit.clone(),
+                debounce: trigger.debounce.clone(),
+                singleton: trigger.singleton.clone(),
+                batch: trigger.batch.clone(),
+                priority_flow,
+                secrets: trigger.secrets.clone(),
+                filter: trigger.filter.clone(),
+                kind_specific: trigger.kind_specific.clone(),
+                manifest_dir: manifest_dir.to_path_buf(),
+                manifest_path: manifest_path.clone(),
+                package_name: package_name.clone(),
+                exports: manifest.exports.clone(),
+                table_index,
+            }
         })
         .collect()
+}
+
+fn split_trigger_priority(
+    priority: Option<TriggerPriorityField>,
+) -> (TriggerDispatchPriority, Option<TriggerPriorityManifestSpec>) {
+    match priority {
+        Some(TriggerPriorityField::Dispatch(priority)) => (priority, None),
+        Some(TriggerPriorityField::Flow(spec)) => (TriggerDispatchPriority::Normal, Some(spec)),
+        None => (TriggerDispatchPriority::Normal, None),
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1042,6 +1140,79 @@ fn validate_static_trigger_config(trigger: &ResolvedTriggerConfig) -> Result<(),
         return Err(trigger_error(
             trigger,
             "retry.retention_days must be greater than or equal to 1",
+        ));
+    }
+    if let Some(spec) = &trigger.concurrency {
+        if spec.max == 0 {
+            return Err(trigger_error(
+                trigger,
+                "concurrency.max must be greater than or equal to 1",
+            ));
+        }
+    }
+    if let Some(spec) = &trigger.throttle {
+        if spec.max == 0 {
+            return Err(trigger_error(
+                trigger,
+                "throttle.max must be greater than or equal to 1",
+            ));
+        }
+        harn_vm::parse_flow_control_duration(&spec.period)
+            .map_err(|error| trigger_error(trigger, format!("throttle.period {error}")))?;
+    }
+    if let Some(spec) = &trigger.rate_limit {
+        if spec.max == 0 {
+            return Err(trigger_error(
+                trigger,
+                "rate_limit.max must be greater than or equal to 1",
+            ));
+        }
+        harn_vm::parse_flow_control_duration(&spec.period)
+            .map_err(|error| trigger_error(trigger, format!("rate_limit.period {error}")))?;
+    }
+    if let Some(spec) = &trigger.debounce {
+        harn_vm::parse_flow_control_duration(&spec.period)
+            .map_err(|error| trigger_error(trigger, format!("debounce.period {error}")))?;
+    }
+    if let Some(spec) = &trigger.batch {
+        if spec.size == 0 {
+            return Err(trigger_error(
+                trigger,
+                "batch.size must be greater than or equal to 1",
+            ));
+        }
+        harn_vm::parse_flow_control_duration(&spec.timeout)
+            .map_err(|error| trigger_error(trigger, format!("batch.timeout {error}")))?;
+    }
+    if let Some(spec) = &trigger.priority_flow {
+        if spec.order.is_empty() {
+            return Err(trigger_error(
+                trigger,
+                "priority.order must contain at least one value",
+            ));
+        }
+    }
+    if trigger.priority_flow.is_some()
+        && trigger.concurrency.is_none()
+        && trigger.budget.max_concurrent.is_none()
+    {
+        return Err(trigger_error(
+            trigger,
+            "priority requires concurrency.max so queued dispatches have a slot to compete for",
+        ));
+    }
+    if trigger.batch.is_some()
+        && (trigger.debounce.is_some()
+            || trigger.singleton.is_some()
+            || trigger.concurrency.is_some()
+            || trigger.priority_flow.is_some()
+            || trigger.throttle.is_some()
+            || trigger.rate_limit.is_some()
+            || trigger.budget.max_concurrent.is_some())
+    {
+        return Err(trigger_error(
+            trigger,
+            "batch cannot currently be combined with debounce, singleton, concurrency, priority, throttle, or rate_limit",
         ));
     }
     for (name, secret_ref) in &trigger.secrets {
@@ -1532,14 +1703,168 @@ pub async fn collect_manifest_triggers(
             None
         };
 
+        let flow_control = collect_trigger_flow_control(vm, trigger).await?;
+
         collected.push(CollectedManifestTrigger {
             config: trigger.clone(),
             handler: collected_handler,
             when: collected_when,
+            flow_control,
         });
     }
 
     Ok(collected)
+}
+
+async fn collect_trigger_flow_control(
+    vm: &mut harn_vm::Vm,
+    trigger: &ResolvedTriggerConfig,
+) -> Result<harn_vm::TriggerFlowControlConfig, String> {
+    let mut flow = harn_vm::TriggerFlowControlConfig::default();
+
+    let concurrency = if let Some(spec) = &trigger.concurrency {
+        Some(spec.clone())
+    } else if let Some(max) = trigger.budget.max_concurrent {
+        eprintln!(
+            "warning: {} uses deprecated budget.max_concurrent; prefer concurrency = {{ max = {} }}",
+            manifest_trigger_location(trigger),
+            max
+        );
+        Some(TriggerConcurrencyManifestSpec { key: None, max })
+    } else {
+        None
+    };
+    if let Some(spec) = concurrency {
+        flow.concurrency = Some(harn_vm::TriggerConcurrencyConfig {
+            key: compile_optional_trigger_expression(
+                vm,
+                trigger,
+                "concurrency.key",
+                spec.key.as_deref(),
+            )
+            .await?,
+            max: spec.max,
+        });
+    }
+
+    if let Some(spec) = &trigger.throttle {
+        flow.throttle = Some(harn_vm::TriggerThrottleConfig {
+            key: compile_optional_trigger_expression(
+                vm,
+                trigger,
+                "throttle.key",
+                spec.key.as_deref(),
+            )
+            .await?,
+            period: harn_vm::parse_flow_control_duration(&spec.period)
+                .map_err(|error| trigger_error(trigger, format!("throttle.period {error}")))?,
+            max: spec.max,
+        });
+    }
+
+    if let Some(spec) = &trigger.rate_limit {
+        flow.rate_limit = Some(harn_vm::TriggerRateLimitConfig {
+            key: compile_optional_trigger_expression(
+                vm,
+                trigger,
+                "rate_limit.key",
+                spec.key.as_deref(),
+            )
+            .await?,
+            period: harn_vm::parse_flow_control_duration(&spec.period)
+                .map_err(|error| trigger_error(trigger, format!("rate_limit.period {error}")))?,
+            max: spec.max,
+        });
+    }
+
+    if let Some(spec) = &trigger.debounce {
+        flow.debounce = Some(harn_vm::TriggerDebounceConfig {
+            key: compile_trigger_expression(vm, trigger, "debounce.key", &spec.key).await?,
+            period: harn_vm::parse_flow_control_duration(&spec.period)
+                .map_err(|error| trigger_error(trigger, format!("debounce.period {error}")))?,
+        });
+    }
+
+    if let Some(spec) = &trigger.singleton {
+        flow.singleton = Some(harn_vm::TriggerSingletonConfig {
+            key: compile_optional_trigger_expression(
+                vm,
+                trigger,
+                "singleton.key",
+                spec.key.as_deref(),
+            )
+            .await?,
+        });
+    }
+
+    if let Some(spec) = &trigger.batch {
+        flow.batch = Some(harn_vm::TriggerBatchConfig {
+            key: compile_optional_trigger_expression(vm, trigger, "batch.key", spec.key.as_deref())
+                .await?,
+            size: spec.size,
+            timeout: harn_vm::parse_flow_control_duration(&spec.timeout)
+                .map_err(|error| trigger_error(trigger, format!("batch.timeout {error}")))?,
+        });
+    }
+
+    if let Some(spec) = &trigger.priority_flow {
+        flow.priority = Some(harn_vm::TriggerPriorityOrderConfig {
+            key: compile_trigger_expression(vm, trigger, "priority.key", &spec.key).await?,
+            order: spec.order.clone(),
+        });
+    }
+
+    Ok(flow)
+}
+
+async fn compile_optional_trigger_expression(
+    vm: &mut harn_vm::Vm,
+    trigger: &ResolvedTriggerConfig,
+    field_name: &str,
+    expr: Option<&str>,
+) -> Result<Option<harn_vm::TriggerExpressionSpec>, String> {
+    match expr {
+        Some(expr) => compile_trigger_expression(vm, trigger, field_name, expr)
+            .await
+            .map(Some),
+        None => Ok(None),
+    }
+}
+
+async fn compile_trigger_expression(
+    vm: &mut harn_vm::Vm,
+    trigger: &ResolvedTriggerConfig,
+    field_name: &str,
+    expr: &str,
+) -> Result<harn_vm::TriggerExpressionSpec, String> {
+    let synthetic = PathBuf::from(format!(
+        "<trigger-expr>/{}/{:04}-{}.harn",
+        harn_vm::event_log::sanitize_topic_component(&trigger.id),
+        trigger.table_index,
+        harn_vm::event_log::sanitize_topic_component(field_name),
+    ));
+    let source = format!(
+        "import \"std/triggers\"\n\npub fn __trigger_expr(event: TriggerEvent) -> any {{\n  return {expr}\n}}\n"
+    );
+    let exports = vm
+        .load_module_exports_from_source(synthetic, &source)
+        .await
+        .map_err(|error| {
+            trigger_error(
+                trigger,
+                format!("{field_name} '{expr}' is invalid Harn expression: {error}"),
+            )
+        })?;
+    let closure = exports.get("__trigger_expr").ok_or_else(|| {
+        trigger_error(
+            trigger,
+            format!("{field_name} '{expr}' did not compile into an exported closure"),
+        )
+    })?;
+    Ok(harn_vm::TriggerExpressionSpec {
+        raw: expr.to_string(),
+        closure: closure.clone(),
+    })
 }
 
 fn trigger_kind_label(kind: TriggerKind) -> &'static str {
@@ -1556,6 +1881,7 @@ fn trigger_kind_label(kind: TriggerKind) -> &'static str {
 pub fn manifest_trigger_binding_spec(
     trigger: CollectedManifestTrigger,
 ) -> harn_vm::TriggerBindingSpec {
+    let flow_control = trigger.flow_control.clone();
     let config = trigger.config;
     let (handler, handler_descriptor) = match trigger.handler {
         CollectedTriggerHandler::Local { reference, closure } => (
@@ -1633,7 +1959,7 @@ pub fn manifest_trigger_binding_spec(
     let filter = config.filter.clone();
     let dedupe_retention_days = config.retry.retention_days;
     let daily_cost_usd = config.budget.daily_cost_usd;
-    let max_concurrent = config.budget.max_concurrent;
+    let max_concurrent = flow_control.concurrency.as_ref().map(|config| config.max);
     let manifest_path = Some(config.manifest_path.clone());
     let package_name = config.package_name.clone();
 
@@ -1648,8 +1974,17 @@ pub fn manifest_trigger_binding_spec(
         "handler": handler_descriptor,
         "dedupe_key": &dedupe_key,
         "retry": config.retry,
-        "priority": config.priority,
+        "dispatch_priority": config.dispatch_priority,
         "budget": config.budget,
+        "flow_control": {
+            "concurrency": config.concurrency,
+            "throttle": config.throttle,
+            "rate_limit": config.rate_limit,
+            "debounce": config.debounce,
+            "singleton": config.singleton,
+            "batch": config.batch,
+            "priority": config.priority_flow,
+        },
         "secrets": config.secrets,
         "filter": &filter,
         "kind_specific": config.kind_specific,
@@ -1674,6 +2009,7 @@ pub fn manifest_trigger_binding_spec(
         dedupe_retention_days,
         daily_cost_usd,
         max_concurrent,
+        flow_control,
         manifest_path,
         package_name,
         definition_fingerprint: fingerprint,
@@ -2544,6 +2880,38 @@ timezone = "America/Los_Angeles"
     }
 
     #[test]
+    fn trigger_manifest_entries_round_trip_flow_control_tables() {
+        let source = r#"
+[[triggers]]
+id = "github-priority"
+kind = "webhook"
+provider = "github"
+match = { events = ["issues.opened"] }
+handler = "handlers::on_new_issue"
+concurrency = { key = "event.headers.tenant", max = 2 }
+throttle = { key = "event.headers.user", period = "1m", max = 30 }
+rate_limit = { period = "1h", max = 1000 }
+debounce = { key = "event.headers.pr_id", period = "30s" }
+singleton = { key = "event.headers.repo" }
+priority = { key = "event.headers.tier", order = ["gold", "silver", "bronze"] }
+secrets = { signing_secret = "github/webhook-secret" }
+
+[[triggers]]
+id = "github-batch"
+kind = "webhook"
+provider = "github"
+match = { events = ["issues.opened"] }
+handler = "handlers::on_new_issue"
+batch = { key = "event.headers.repo", size = 50, timeout = "30s" }
+secrets = { signing_secret = "github/webhook-secret" }
+"#;
+        let parsed: TriggerTables = toml::from_str(source).expect("trigger tables parse");
+        let encoded = toml::to_string(&parsed).expect("trigger tables encode");
+        let reparsed: TriggerTables = toml::from_str(&encoded).expect("trigger tables reparse");
+        assert_eq!(reparsed, parsed);
+    }
+
+    #[test]
     fn load_runtime_extensions_collects_manifest_triggers_in_order() {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
@@ -2642,10 +3010,21 @@ pub fn should_handle(event: TriggerEvent) -> Result<bool, string> {
             &collected[0].handler,
             CollectedTriggerHandler::Local { reference, .. } if reference.raw == "handlers::on_new_issue"
         ));
-        assert_eq!(collected[0].config.priority, TriggerPriority::Normal);
+        assert_eq!(
+            collected[0].config.dispatch_priority,
+            TriggerDispatchPriority::Normal
+        );
         assert_eq!(
             collected[0].config.autonomy_tier,
             harn_vm::AutonomyTier::Suggest
+        );
+        assert_eq!(
+            collected[0]
+                .flow_control
+                .concurrency
+                .as_ref()
+                .map(|config| config.max),
+            Some(10)
         );
         assert!(collected[0].when.is_some());
         assert_eq!(
@@ -2655,6 +3034,173 @@ pub fn should_handle(event: TriggerEvent) -> Result<bool, string> {
                 .as_ref()
                 .and_then(|budget| budget.tokens_max),
             Some(500)
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn collect_manifest_triggers_accepts_expression_keyed_flow_control() {
+        let tmp = tempfile::tempdir().unwrap();
+        let harn_file = write_trigger_project(
+            tmp.path(),
+            r#"
+[package]
+name = "workspace"
+
+[exports]
+handlers = "lib.harn"
+
+[[triggers]]
+id = "github-flow-control"
+kind = "webhook"
+provider = "github"
+match = { events = ["issues.opened"] }
+handler = "handlers::on_new_issue"
+concurrency = { key = "event.headers.tenant", max = 2 }
+throttle = { key = "event.headers.user", period = "1m", max = 30 }
+rate_limit = { period = "1h", max = 1000 }
+debounce = { key = "event.headers.pr_id", period = "30s" }
+singleton = { key = "event.headers.repo" }
+priority = { key = "event.headers.tier", order = ["gold", "silver", "bronze"] }
+secrets = { signing_secret = "github/webhook-secret" }
+"#,
+            Some(
+                r#"
+import "std/triggers"
+
+pub fn on_new_issue(event: TriggerEvent) -> string {
+  return event.kind
+}
+"#,
+            ),
+        );
+        let extensions = load_runtime_extensions(&harn_file);
+        let mut vm = test_vm();
+        let collected = collect_manifest_triggers(&mut vm, &extensions)
+            .await
+            .expect("trigger collection succeeds");
+        assert_eq!(collected.len(), 1);
+        let flow = &collected[0].flow_control;
+        assert_eq!(
+            flow.concurrency
+                .as_ref()
+                .and_then(|config| config.key.as_ref())
+                .map(|expr| expr.raw.as_str()),
+            Some("event.headers.tenant")
+        );
+        assert_eq!(flow.concurrency.as_ref().map(|config| config.max), Some(2));
+        assert_eq!(
+            flow.throttle
+                .as_ref()
+                .and_then(|config| config.key.as_ref())
+                .map(|expr| expr.raw.as_str()),
+            Some("event.headers.user")
+        );
+        assert_eq!(
+            flow.throttle.as_ref().map(|config| config.period),
+            Some(std::time::Duration::from_secs(60))
+        );
+        assert_eq!(flow.throttle.as_ref().map(|config| config.max), Some(30));
+        assert!(flow
+            .rate_limit
+            .as_ref()
+            .is_some_and(|config| config.key.is_none()));
+        assert_eq!(
+            flow.rate_limit.as_ref().map(|config| config.period),
+            Some(std::time::Duration::from_secs(60 * 60))
+        );
+        assert_eq!(
+            flow.rate_limit.as_ref().map(|config| config.max),
+            Some(1000)
+        );
+        assert_eq!(
+            flow.debounce.as_ref().map(|config| config.key.raw.as_str()),
+            Some("event.headers.pr_id")
+        );
+        assert_eq!(
+            flow.debounce.as_ref().map(|config| config.period),
+            Some(std::time::Duration::from_secs(30))
+        );
+        assert_eq!(
+            flow.singleton
+                .as_ref()
+                .and_then(|config| config.key.as_ref())
+                .map(|expr| expr.raw.as_str()),
+            Some("event.headers.repo")
+        );
+        assert_eq!(
+            flow.priority.as_ref().map(|config| config.key.raw.as_str()),
+            Some("event.headers.tier")
+        );
+        assert_eq!(
+            flow.priority.as_ref().map(|config| config.order.clone()),
+            Some(vec![
+                "gold".to_string(),
+                "silver".to_string(),
+                "bronze".to_string(),
+            ])
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn collect_manifest_triggers_accepts_batch_flow_control() {
+        let tmp = tempfile::tempdir().unwrap();
+        let harn_file = write_trigger_project(
+            tmp.path(),
+            r#"
+[package]
+name = "workspace"
+
+[exports]
+handlers = "lib.harn"
+
+[[triggers]]
+id = "github-batch"
+kind = "webhook"
+provider = "github"
+match = { events = ["issues.opened"] }
+handler = "handlers::on_new_issue"
+batch = { key = "event.headers.repo", size = 50, timeout = "30s" }
+secrets = { signing_secret = "github/webhook-secret" }
+"#,
+            Some(
+                r#"
+import "std/triggers"
+
+pub fn on_new_issue(event: TriggerEvent) -> string {
+  return event.kind
+}
+"#,
+            ),
+        );
+        let mut vm = test_vm();
+        let collected = collect_manifest_triggers(&mut vm, &load_runtime_extensions(&harn_file))
+            .await
+            .expect("trigger collection succeeds");
+        assert_eq!(collected.len(), 1);
+        assert_eq!(
+            collected[0]
+                .flow_control
+                .batch
+                .as_ref()
+                .and_then(|config| config.key.as_ref())
+                .map(|expr| expr.raw.as_str()),
+            Some("event.headers.repo")
+        );
+        assert_eq!(
+            collected[0]
+                .flow_control
+                .batch
+                .as_ref()
+                .map(|config| config.size),
+            Some(50)
+        );
+        assert_eq!(
+            collected[0]
+                .flow_control
+                .batch
+                .as_ref()
+                .map(|config| config.timeout),
+            Some(std::time::Duration::from_secs(30))
         );
     }
 
@@ -2764,6 +3310,44 @@ secrets = { signing_secret = "github/webhook-secret" }
             .await
             .unwrap_err();
         assert!(error.contains("`allow_cleartext` must be a boolean"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn collect_manifest_triggers_rejects_priority_without_concurrency() {
+        let tmp = tempfile::tempdir().unwrap();
+        let harn_file = write_trigger_project(
+            tmp.path(),
+            r#"
+[package]
+name = "workspace"
+
+[exports]
+handlers = "lib.harn"
+
+[[triggers]]
+id = "priority-without-concurrency"
+kind = "webhook"
+provider = "github"
+match = { events = ["issues.opened"] }
+handler = "handlers::on_new_issue"
+priority = { key = "event.headers.tier", order = ["gold", "silver"] }
+secrets = { signing_secret = "github/webhook-secret" }
+"#,
+            Some(
+                r#"
+import "std/triggers"
+
+pub fn on_new_issue(event: TriggerEvent) -> string {
+  return event.kind
+}
+"#,
+            ),
+        );
+        let mut vm = test_vm();
+        let error = collect_manifest_triggers(&mut vm, &load_runtime_extensions(&harn_file))
+            .await
+            .unwrap_err();
+        assert!(error.contains("priority requires concurrency"));
     }
 
     #[tokio::test(flavor = "current_thread")]

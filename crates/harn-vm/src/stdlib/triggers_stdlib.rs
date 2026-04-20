@@ -802,6 +802,7 @@ fn parse_trigger_config(config: &BTreeMap<String, VmValue>) -> Result<TriggerBin
         filter,
         daily_cost_usd,
         max_concurrent,
+        flow_control: crate::triggers::TriggerFlowControlConfig::default(),
         manifest_path,
         package_name,
         definition_fingerprint: fingerprint,
@@ -1257,6 +1258,7 @@ mod tests {
             filter: None,
             daily_cost_usd: None,
             max_concurrent: None,
+            flow_control: crate::triggers::TriggerFlowControlConfig::default(),
             manifest_path: None,
             package_name: Some("workspace".to_string()),
             definition_fingerprint: fingerprint.to_string(),
@@ -1284,6 +1286,7 @@ mod tests {
             )),
             signature_status: crate::SignatureStatus::Verified,
             dedupe_claimed: false,
+            batch: None,
         }
     }
 

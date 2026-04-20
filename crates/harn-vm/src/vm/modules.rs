@@ -98,6 +98,34 @@ pub fn resolve_module_import_path(base: &Path, path: &str) -> PathBuf {
 }
 
 impl Vm {
+    async fn load_module_from_source(
+        &mut self,
+        synthetic: PathBuf,
+        source: &str,
+    ) -> Result<LoadedModule, VmError> {
+        if let Some(loaded) = self.module_cache.get(&synthetic).cloned() {
+            return Ok(loaded);
+        }
+
+        let mut lexer = harn_lexer::Lexer::new(source);
+        let tokens = lexer.tokenize().map_err(|e| {
+            VmError::Runtime(format!("Import lex error in {}: {e}", synthetic.display()))
+        })?;
+        let mut parser = harn_parser::Parser::new(tokens);
+        let program = parser.parse().map_err(|e| {
+            VmError::Runtime(format!(
+                "Import parse error in {}: {e}",
+                synthetic.display()
+            ))
+        })?;
+
+        self.imported_paths.push(synthetic.clone());
+        let loaded = self.import_declarations(&program, None).await?;
+        self.imported_paths.pop();
+        self.module_cache.insert(synthetic, loaded.clone());
+        Ok(loaded)
+    }
+
     fn export_loaded_module(
         &mut self,
         module_path: &Path,
@@ -146,23 +174,9 @@ impl Vm {
                     if self.imported_paths.contains(&synthetic) {
                         return Ok(());
                     }
-                    if let Some(loaded) = self.module_cache.get(&synthetic).cloned() {
-                        return self.export_loaded_module(&synthetic, &loaded, selected_names);
-                    }
-                    self.imported_paths.push(synthetic.clone());
-
-                    let mut lexer = harn_lexer::Lexer::new(source);
-                    let tokens = lexer.tokenize().map_err(|e| {
-                        VmError::Runtime(format!("stdlib lex error in std/{module}: {e}"))
-                    })?;
-                    let mut parser = harn_parser::Parser::new(tokens);
-                    let program = parser.parse().map_err(|e| {
-                        VmError::Runtime(format!("stdlib parse error in std/{module}: {e}"))
-                    })?;
-
-                    let loaded = self.import_declarations(&program, None).await?;
-                    self.imported_paths.pop();
-                    self.module_cache.insert(synthetic.clone(), loaded.clone());
+                    let loaded = self
+                        .load_module_from_source(synthetic.clone(), source)
+                        .await?;
                     self.export_loaded_module(&synthetic, &loaded, selected_names)?;
                     return Ok(());
                 }
@@ -397,6 +411,37 @@ impl Vm {
                 return Err(VmError::Runtime(format!(
                     "Import error: exported function '{name}' is missing from {}",
                     canonical.display()
+                )));
+            };
+            exports.insert(name, Rc::clone(closure));
+        }
+
+        Ok(exports)
+    }
+
+    /// Load synthetic source keyed by a synthetic module path and return
+    /// the exported function closures that a wildcard import would expose.
+    pub async fn load_module_exports_from_source(
+        &mut self,
+        source_key: impl Into<PathBuf>,
+        source: &str,
+    ) -> Result<BTreeMap<String, Rc<VmClosure>>, VmError> {
+        let synthetic = source_key.into();
+        let loaded = self
+            .load_module_from_source(synthetic.clone(), source)
+            .await?;
+        let export_names: Vec<String> = if loaded.public_names.is_empty() {
+            loaded.functions.keys().cloned().collect()
+        } else {
+            loaded.public_names.iter().cloned().collect()
+        };
+
+        let mut exports = BTreeMap::new();
+        for name in export_names {
+            let Some(closure) = loaded.functions.get(&name) else {
+                return Err(VmError::Runtime(format!(
+                    "Import error: exported function '{name}' is missing from {}",
+                    synthetic.display()
                 )));
             };
             exports.insert(name, Rc::clone(closure));

@@ -342,6 +342,8 @@ pub struct TriggerEvent {
     pub trace_id: TraceId,
     pub tenant_id: Option<TenantId>,
     pub headers: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub batch: Option<Vec<JsonValue>>,
     pub provider_payload: ProviderPayload,
     pub signature_status: SignatureStatus,
     #[serde(skip)]
@@ -370,6 +372,7 @@ impl TriggerEvent {
             trace_id: TraceId::new(),
             tenant_id,
             headers,
+            batch: None,
             provider_payload,
             signature_status,
             dedupe_claimed: false,
@@ -1317,6 +1320,7 @@ mod tests {
             provider_payload: payload,
             signature_status: SignatureStatus::Verified,
             dedupe_claimed: false,
+            batch: None,
         };
 
         let once = serde_json::to_value(&event).unwrap();

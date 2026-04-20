@@ -55,6 +55,11 @@ Register a trigger dynamically and return its `TriggerHandle`.
 - `manifest_path`
 - `package_name`
 
+Dynamic `trigger_register(...)` currently supports the legacy budget fields but
+does not yet accept manifest-only flow-control tables such as `concurrency`,
+`throttle`, `rate_limit`, `debounce`, `singleton`, `batch`, or keyed
+`priority`.
+
 The runtime currently accepts two handler forms:
 
 - Local Harn closures / function references
@@ -119,6 +124,8 @@ Current behavior:
   dispatch.
 - `when_budget` accepts `{max_cost_usd, tokens_max, timeout}` and applies
   fail-closed per-predicate LLM cost governance.
+- When a manifest-installed binding uses `batch = { ... }`, the selected leader
+  event carries the coalesced member list in `event.batch`.
 - `a2a://...` and `worker://...` handlers still return the dispatcher’s
   explicit `NotImplemented` failure path.
 
