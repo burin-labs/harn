@@ -281,6 +281,7 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
             let done_sentinel = opt_str(&options, "done_sentinel");
             let break_unless_phase = opt_str(&options, "break_unless_phase");
             let session_id = opt_str(&options, "session_id")
+                .or_else(crate::agent_sessions::current_session_id)
                 .unwrap_or_else(|| format!("agent_session_{}", uuid::Uuid::now_v7()));
             let daemon = opt_bool(&options, "daemon");
             let auto_compact = if opt_bool(&options, "auto_compact") {

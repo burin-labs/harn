@@ -393,8 +393,53 @@ The ACP server supports these JSON-RPC methods:
 |---|---|
 | `initialize` | Handshake with capabilities |
 | `session/new` | Create a new session (returns session ID) |
+| `session/fork` | Fork an existing session into an independent branch |
+| `session/list` | List active sessions known to the ACP adapter |
 | `session/prompt` | Send a prompt to the agent for execution |
 | `session/cancel` | Cancel the currently running prompt |
+
+Harn advertises `agentCapabilities.sessionCapabilities.fork = {}` during
+`initialize`, so ACP clients can gate `session/fork` the same way they do
+other unstable session lifecycle methods.
+
+### Session Forking
+
+`session/fork` promotes Harn's runtime transcript branching to a host-visible
+ACP method. The request shape is:
+
+```json
+{
+  "session_id": "sess_parent",
+  "keep_first": 3,
+  "id": "sess_branch",
+  "branch_name": "left"
+}
+```
+
+- `session_id` is required and identifies the source session to fork.
+- `keep_first` is optional; when present Harn uses
+  `agent_session_fork_at(session_id, keep_first, id?)`.
+- Without `keep_first`, Harn uses `agent_session_fork(session_id, id?)`.
+- `id` is optional; when omitted Harn mints a fresh session id.
+- `branch_name` is optional session metadata that Harn mirrors into the
+  forked session's title and `_meta.branch_name`.
+
+Successful responses return the new branch id plus fork metadata:
+
+```json
+{
+  "sessionId": "sess_branch",
+  "state": "forked",
+  "parent_id": "sess_parent",
+  "branched_at": 3
+}
+```
+
+When a fork is created, Harn also emits a `session/update` notification with
+`sessionUpdate: "session_info_update"` and `_meta.state = "forked"` so ACP
+hosts can render branch-aware session UIs without scraping text output. The
+forked session gets its own stream; subscriber sinks and in-flight prompt state
+are not copied from the parent.
 
 ### Queued user messages during agent execution
 
