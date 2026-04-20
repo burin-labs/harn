@@ -6,310 +6,81 @@
 // provider-tagged payload union. Connector-specific payloads intentionally
 // start with a small normalized surface plus `raw: dict`; provider tickets can
 // refine these aliases later without changing the top-level TriggerEvent shape.
-
 type ProviderId = "github" | "slack" | "linear" | "notion" | "cron" | "webhook" | "a2a-push" | string
 
-type SignatureVerified = {
-  state: "verified",
-}
+type SignatureVerified = {state: "verified"}
 
-type SignatureUnsigned = {
-  state: "unsigned",
-}
+type SignatureUnsigned = {state: "unsigned"}
 
-type SignatureFailed = {
-  state: "failed",
-  reason: string,
-}
+type SignatureFailed = {state: "failed", reason: string}
 
 type SignatureStatus = SignatureVerified | SignatureUnsigned | SignatureFailed
 
-type GitHubIssuesEventPayload = {
-  provider: "github",
-  event: "issues",
-  action: string | nil,
-  delivery_id: string | nil,
-  installation_id: int | nil,
-  issue: dict,
-  raw: dict,
-}
+type GitHubIssuesEventPayload = {provider: "github", event: "issues", action: string | nil, delivery_id: string | nil, installation_id: int | nil, issue: dict, raw: dict}
 
-type GitHubPullRequestEventPayload = {
-  provider: "github",
-  event: "pull_request",
-  action: string | nil,
-  delivery_id: string | nil,
-  installation_id: int | nil,
-  pull_request: dict,
-  raw: dict,
-}
+type GitHubPullRequestEventPayload = {provider: "github", event: "pull_request", action: string | nil, delivery_id: string | nil, installation_id: int | nil, pull_request: dict, raw: dict}
 
-type GitHubIssueCommentEventPayload = {
-  provider: "github",
-  event: "issue_comment",
-  action: string | nil,
-  delivery_id: string | nil,
-  installation_id: int | nil,
-  issue: dict,
-  comment: dict,
-  raw: dict,
-}
+type GitHubIssueCommentEventPayload = {provider: "github", event: "issue_comment", action: string | nil, delivery_id: string | nil, installation_id: int | nil, issue: dict, comment: dict, raw: dict}
 
-type GitHubPullRequestReviewEventPayload = {
-  provider: "github",
-  event: "pull_request_review",
-  action: string | nil,
-  delivery_id: string | nil,
-  installation_id: int | nil,
-  pull_request: dict,
-  review: dict,
-  raw: dict,
-}
+type GitHubPullRequestReviewEventPayload = {provider: "github", event: "pull_request_review", action: string | nil, delivery_id: string | nil, installation_id: int | nil, pull_request: dict, review: dict, raw: dict}
 
-type GitHubPushEventPayload = {
-  provider: "github",
-  event: "push",
-  action: string | nil,
-  delivery_id: string | nil,
-  installation_id: int | nil,
-  commits: list<dict>,
-  distinct_size: int | nil,
-  raw: dict,
-}
+type GitHubPushEventPayload = {provider: "github", event: "push", action: string | nil, delivery_id: string | nil, installation_id: int | nil, commits: list<dict>, distinct_size: int | nil, raw: dict}
 
-type GitHubWorkflowRunEventPayload = {
-  provider: "github",
-  event: "workflow_run",
-  action: string | nil,
-  delivery_id: string | nil,
-  installation_id: int | nil,
-  workflow_run: dict,
-  raw: dict,
-}
+type GitHubWorkflowRunEventPayload = {provider: "github", event: "workflow_run", action: string | nil, delivery_id: string | nil, installation_id: int | nil, workflow_run: dict, raw: dict}
 
-type GitHubOtherEventPayload = {
-  provider: "github",
-  event: string,
-  action: string | nil,
-  delivery_id: string | nil,
-  installation_id: int | nil,
-  raw: dict,
-}
+type GitHubOtherEventPayload = {provider: "github", event: string, action: string | nil, delivery_id: string | nil, installation_id: int | nil, raw: dict}
 
 type GitHubEventPayload = GitHubIssuesEventPayload | GitHubPullRequestEventPayload | GitHubIssueCommentEventPayload | GitHubPullRequestReviewEventPayload | GitHubPushEventPayload | GitHubWorkflowRunEventPayload | GitHubOtherEventPayload
 
-type SlackEventCommon = {
-  provider: "slack",
-  event: string,
-  event_id: string | nil,
-  api_app_id: string | nil,
-  team_id: string | nil,
-  channel_id: string | nil,
-  user_id: string | nil,
-  event_ts: string | nil,
-  raw: dict,
-}
+type SlackEventCommon = {provider: "slack", event: string, event_id: string | nil, api_app_id: string | nil, team_id: string | nil, channel_id: string | nil, user_id: string | nil, event_ts: string | nil, raw: dict}
 
-type SlackMessageChannelsEventPayload = {
-  provider: "slack",
-  event: "message.channels",
-  event_id: string | nil,
-  api_app_id: string | nil,
-  team_id: string | nil,
-  channel_id: string | nil,
-  user_id: string | nil,
-  event_ts: string | nil,
-  subtype: string | nil,
-  channel: string | nil,
-  user: string | nil,
-  text: string | nil,
-  ts: string | nil,
-  thread_ts: string | nil,
-  raw: dict,
-}
+type SlackMessageChannelsEventPayload = {provider: "slack", event: "message.channels", event_id: string | nil, api_app_id: string | nil, team_id: string | nil, channel_id: string | nil, user_id: string | nil, event_ts: string | nil, subtype: string | nil, channel: string | nil, user: string | nil, text: string | nil, ts: string | nil, thread_ts: string | nil, raw: dict}
 
-type SlackAppMentionEventPayload = {
-  provider: "slack",
-  event: "app_mention",
-  event_id: string | nil,
-  api_app_id: string | nil,
-  team_id: string | nil,
-  channel_id: string | nil,
-  user_id: string | nil,
-  event_ts: string | nil,
-  channel: string | nil,
-  user: string | nil,
-  text: string | nil,
-  ts: string | nil,
-  thread_ts: string | nil,
-  raw: dict,
-}
+type SlackAppMentionEventPayload = {provider: "slack", event: "app_mention", event_id: string | nil, api_app_id: string | nil, team_id: string | nil, channel_id: string | nil, user_id: string | nil, event_ts: string | nil, channel: string | nil, user: string | nil, text: string | nil, ts: string | nil, thread_ts: string | nil, raw: dict}
 
-type SlackReactionAddedEventPayload = {
-  provider: "slack",
-  event: "reaction_added",
-  event_id: string | nil,
-  api_app_id: string | nil,
-  team_id: string | nil,
-  channel_id: string | nil,
-  user_id: string | nil,
-  event_ts: string | nil,
-  reaction: string | nil,
-  item_user: string | nil,
-  item: dict,
-  raw: dict,
-}
+type SlackReactionAddedEventPayload = {provider: "slack", event: "reaction_added", event_id: string | nil, api_app_id: string | nil, team_id: string | nil, channel_id: string | nil, user_id: string | nil, event_ts: string | nil, reaction: string | nil, item_user: string | nil, item: dict, raw: dict}
 
-type SlackTeamJoinEventPayload = {
-  provider: "slack",
-  event: "team_join",
-  event_id: string | nil,
-  api_app_id: string | nil,
-  team_id: string | nil,
-  channel_id: string | nil,
-  user_id: string | nil,
-  event_ts: string | nil,
-  user: dict,
-  raw: dict,
-}
+type SlackTeamJoinEventPayload = {provider: "slack", event: "team_join", event_id: string | nil, api_app_id: string | nil, team_id: string | nil, channel_id: string | nil, user_id: string | nil, event_ts: string | nil, user: dict, raw: dict}
 
-type SlackChannelCreatedEventPayload = {
-  provider: "slack",
-  event: "channel_created",
-  event_id: string | nil,
-  api_app_id: string | nil,
-  team_id: string | nil,
-  channel_id: string | nil,
-  user_id: string | nil,
-  event_ts: string | nil,
-  channel: dict,
-  raw: dict,
-}
+type SlackChannelCreatedEventPayload = {provider: "slack", event: "channel_created", event_id: string | nil, api_app_id: string | nil, team_id: string | nil, channel_id: string | nil, user_id: string | nil, event_ts: string | nil, channel: dict, raw: dict}
 
-type SlackOtherEventPayload = {
-  provider: "slack",
-  event: string,
-  event_id: string | nil,
-  api_app_id: string | nil,
-  team_id: string | nil,
-  channel_id: string | nil,
-  user_id: string | nil,
-  event_ts: string | nil,
-  raw: dict,
-}
+type SlackOtherEventPayload = {provider: "slack", event: string, event_id: string | nil, api_app_id: string | nil, team_id: string | nil, channel_id: string | nil, user_id: string | nil, event_ts: string | nil, raw: dict}
 
 type SlackEventPayload = SlackMessageChannelsEventPayload | SlackAppMentionEventPayload | SlackReactionAddedEventPayload | SlackTeamJoinEventPayload | SlackChannelCreatedEventPayload | SlackOtherEventPayload
 
-type LinearEventPayload = {
-  provider: "linear",
-  action: string | nil,
-  organization_id: string | nil,
-  webhook_timestamp: string | nil,
-  raw: dict,
-}
+type LinearEventPayload = {provider: "linear", action: string | nil, organization_id: string | nil, webhook_timestamp: string | nil, raw: dict}
 
-type NotionEventPayload = {
-  provider: "notion",
-  event: string,
-  workspace_id: string | nil,
-  request_id: string | nil,
-  raw: dict,
-}
+type NotionEventPayload = {provider: "notion", event: string, workspace_id: string | nil, request_id: string | nil, raw: dict}
 
-type CronEventPayload = {
-  provider: "cron",
-  cron_id: string | nil,
-  schedule: string | nil,
-  tick_at: string,
-  raw: dict,
-}
+type CronEventPayload = {provider: "cron", cron_id: string | nil, schedule: string | nil, tick_at: string, raw: dict}
 
-type GenericWebhookPayload = {
-  provider: "webhook",
-  source: string | nil,
-  content_type: string | nil,
-  raw: dict,
-}
+type GenericWebhookPayload = {provider: "webhook", source: string | nil, content_type: string | nil, raw: dict}
 
-type A2aPushPayload = {
-  provider: "a2a-push",
-  task_id: string | nil,
-  sender: string | nil,
-  raw: dict,
-}
+type A2aPushPayload = {provider: "a2a-push", task_id: string | nil, sender: string | nil, raw: dict}
 
-type ExtensionProviderPayload = {
-  provider: string,
-  schema_name: string,
-  raw: dict,
-}
+type ExtensionProviderPayload = {provider: string, schema_name: string, raw: dict}
 
 type ProviderPayload = GitHubEventPayload | SlackEventPayload | LinearEventPayload | NotionEventPayload | CronEventPayload | GenericWebhookPayload | A2aPushPayload | ExtensionProviderPayload
 
-type ProviderSecretRequirement = {
-  name: string,
-  required: bool,
-  namespace: string,
-}
+type ProviderSecretRequirement = {name: string, required: bool, namespace: string}
 
-type ProviderOutboundMethod = {
-  name: string,
-}
+type ProviderOutboundMethod = {name: string}
 
-type ProviderSignatureVerificationNone = {
-  kind: "none",
-}
+type ProviderSignatureVerificationNone = {kind: "none"}
 
-type ProviderSignatureVerificationHmac = {
-  kind: "hmac",
-  variant: string,
-  raw_body: bool,
-  signature_header: string,
-  timestamp_header: string | nil,
-  id_header: string | nil,
-  default_tolerance_secs: int | nil,
-  digest: string,
-  encoding: string,
-}
+type ProviderSignatureVerificationHmac = {kind: "hmac", variant: string, raw_body: bool, signature_header: string, timestamp_header: string | nil, id_header: string | nil, default_tolerance_secs: int | nil, digest: string, encoding: string}
 
 type ProviderSignatureVerification = ProviderSignatureVerificationNone | ProviderSignatureVerificationHmac
 
-type ProviderRuntimeBuiltin = {
-  kind: "builtin",
-  connector: string,
-  default_signature_variant: string | nil,
-}
+type ProviderRuntimeBuiltin = {kind: "builtin", connector: string, default_signature_variant: string | nil}
 
-type ProviderRuntimePlaceholder = {
-  kind: "placeholder",
-}
+type ProviderRuntimePlaceholder = {kind: "placeholder"}
 
 type ProviderRuntime = ProviderRuntimeBuiltin | ProviderRuntimePlaceholder
 
-type ProviderCatalogEntry = {
-  provider: string,
-  kinds: list<string>,
-  schema_name: string,
-  outbound_methods: list<ProviderOutboundMethod>,
-  secret_requirements: list<ProviderSecretRequirement>,
-  signature_verification: ProviderSignatureVerification,
-  runtime: ProviderRuntime,
-}
+type ProviderCatalogEntry = {provider: string, kinds: list<string>, schema_name: string, outbound_methods: list<ProviderOutboundMethod>, secret_requirements: list<ProviderSecretRequirement>, signature_verification: ProviderSignatureVerification, runtime: ProviderRuntime}
 
-type TriggerEvent = {
-  id: string,
-  provider: ProviderId,
-  kind: string,
-  received_at: string,
-  occurred_at: string | nil,
-  dedupe_key: string,
-  trace_id: string,
-  tenant_id: string | nil,
-  headers: dict,
-  batch: list<dict> | nil,
-  provider_payload: ProviderPayload,
-  signature_status: SignatureStatus,
-}
+type TriggerEvent = {id: string, provider: ProviderId, kind: string, received_at: string, occurred_at: string | nil, dedupe_key: string, trace_id: string, tenant_id: string | nil, headers: dict, batch: list<dict> | nil, provider_payload: ProviderPayload, signature_status: SignatureStatus}
 
 type TriggerState = "registering" | "active" | "draining" | "terminated"
 
@@ -319,138 +90,39 @@ type TriggerHandler = fn(TriggerEvent) -> any | string
 
 type TriggerPredicate = fn(TriggerEvent) -> bool | Result<bool, any>
 
-type TriggerMatch = {
-  events: list<string> | nil,
-}
+type TriggerMatch = {events: list<string> | nil}
 
-type TriggerBudget = {
-  daily_cost_usd: float | nil,
-  max_concurrent: int | nil,
-}
+type TriggerBudget = {daily_cost_usd: float | nil, max_concurrent: int | nil}
 
-type TriggerWhenBudget = {
-  max_cost_usd: float | nil,
-  tokens_max: int | nil,
-  timeout: string | nil,
-}
+type TriggerWhenBudget = {max_cost_usd: float | nil, tokens_max: int | nil, timeout: string | nil}
 
 type TriggerRetryBackoff = "svix" | "immediate"
 
-type TriggerRetry = {
-  max: int | nil,
-  backoff: TriggerRetryBackoff | nil,
-}
+type TriggerRetry = {max: int | nil, backoff: TriggerRetryBackoff | nil}
 
 type AutonomyTier = "shadow" | "suggest" | "act_with_approval" | "act_auto"
 
 type TrustOutcome = "success" | "failure" | "denied" | "timeout"
 
-type TriggerConfig = {
-  id: string | nil,
-  kind: string,
-  provider: ProviderId,
-  autonomy_tier: AutonomyTier | nil,
-  handler: TriggerHandler,
-  when: TriggerPredicate | nil,
-  when_budget: TriggerWhenBudget | nil,
-  retry: TriggerRetry | nil,
-  match: TriggerMatch | nil,
-  events: list<string> | nil,
-  dedupe_key: string | nil,
-  filter: string | nil,
-  allow_cleartext: bool | nil,
-  budget: TriggerBudget | nil,
-  manifest_path: string | nil,
-  package_name: string | nil,
-}
+type TriggerConfig = {id: string | nil, kind: string, provider: ProviderId, autonomy_tier: AutonomyTier | nil, handler: TriggerHandler, when: TriggerPredicate | nil, when_budget: TriggerWhenBudget | nil, retry: TriggerRetry | nil, match: TriggerMatch | nil, events: list<string> | nil, dedupe_key: string | nil, filter: string | nil, allow_cleartext: bool | nil, budget: TriggerBudget | nil, manifest_path: string | nil, package_name: string | nil}
 
-type TriggerMetrics = {
-  received: int,
-  dispatched: int,
-  failed: int,
-  dlq: int,
-  in_flight: int,
-  last_received_ms: int | nil,
-  cost_total_usd_micros: int,
-  cost_today_usd_micros: int,
-}
+type TriggerMetrics = {received: int, dispatched: int, failed: int, dlq: int, in_flight: int, last_received_ms: int | nil, cost_total_usd_micros: int, cost_today_usd_micros: int}
 
-type TriggerBinding = {
-  id: string,
-  version: int,
-  source: TriggerBindingSource,
-  kind: string,
-  provider: string,
-  autonomy_tier: AutonomyTier,
-  handler_kind: string,
-  state: TriggerState,
-  metrics: TriggerMetrics,
-}
+type TriggerBinding = {id: string, version: int, source: TriggerBindingSource, kind: string, provider: string, autonomy_tier: AutonomyTier, handler_kind: string, state: TriggerState, metrics: TriggerMetrics}
 
 type TriggerHandle = TriggerBinding
 
-type DispatchHandle = {
-  event_id: string,
-  binding_id: string,
-  binding_version: int,
-  status: string,
-  replay_of_event_id: string | nil,
-  dlq_entry_id: string | nil,
-  error: string | nil,
-  result: any | nil,
-}
+type DispatchHandle = {event_id: string, binding_id: string, binding_version: int, status: string, replay_of_event_id: string | nil, dlq_entry_id: string | nil, error: string | nil, result: any | nil}
 
-type DlqAttempt = {
-  attempt: int,
-  at: string,
-  status: string,
-  error: string | nil,
-}
+type DlqAttempt = {attempt: int, at: string, status: string, error: string | nil}
 
-type DlqEntry = {
-  id: string,
-  event_id: string,
-  binding_id: string,
-  binding_version: int,
-  provider: string,
-  kind: string,
-  state: string,
-  error: string,
-  event: TriggerEvent,
-  retry_history: list<DlqAttempt>,
-}
+type DlqEntry = {id: string, event_id: string, binding_id: string, binding_version: int, provider: string, kind: string, state: string, error: string, event: TriggerEvent, retry_history: list<DlqAttempt>}
 
-type TrustRecord = {
-  schema: string,
-  record_id: string,
-  agent: string,
-  action: string,
-  approver: string | nil,
-  outcome: TrustOutcome,
-  trace_id: string,
-  autonomy_tier: AutonomyTier,
-  timestamp: string,
-  cost_usd: float | nil,
-  metadata: dict,
-}
+type TrustRecord = {schema: string, record_id: string, agent: string, action: string, approver: string | nil, outcome: TrustOutcome, trace_id: string, autonomy_tier: AutonomyTier, timestamp: string, cost_usd: float | nil, metadata: dict}
 
-type TrustQueryFilters = {
-  agent: string | nil,
-  action: string | nil,
-  since: string | nil,
-  until: string | nil,
-  tier: AutonomyTier | nil,
-  outcome: TrustOutcome | nil,
-}
+type TrustQueryFilters = {agent: string | nil, action: string | nil, since: string | nil, until: string | nil, tier: AutonomyTier | nil, outcome: TrustOutcome | nil}
 
-type HandlerContext = {
-  agent: string,
-  action: string,
-  trace_id: string,
-  replay_of_event_id: string | nil,
-  autonomy_tier: AutonomyTier,
-  trigger_event: TriggerEvent,
-}
+type HandlerContext = {agent: string, action: string, trace_id: string, replay_of_event_id: string | nil, autonomy_tier: AutonomyTier, trigger_event: TriggerEvent}
 
 /** list_providers. */
 pub fn list_providers() -> list<ProviderCatalogEntry> {

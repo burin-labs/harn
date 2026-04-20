@@ -955,6 +955,9 @@ async fn graceful_shutdown(
 
     let stopped_at = now_rfc3339()?;
     let timed_out = !drain_report.drained;
+    if timed_out {
+        dispatcher.shutdown();
+    }
     append_lifecycle_event(
         ctx.event_log,
         "stopped",

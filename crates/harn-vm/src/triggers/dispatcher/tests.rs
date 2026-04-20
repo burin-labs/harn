@@ -109,8 +109,16 @@ async fn dispatcher_fixture_with_flow_control(
     Arc<crate::event_log::AnyEventLog>,
     Dispatcher,
 ) {
-    dispatcher_fixture_with_options(source, handler_name, when_name, None, None, retry, flow_control)
-        .await
+    dispatcher_fixture_with_options(
+        source,
+        handler_name,
+        when_name,
+        None,
+        None,
+        retry,
+        flow_control,
+    )
+    .await
 }
 
 async fn dispatcher_fixture_with_options(
@@ -1636,11 +1644,6 @@ pub fn wait_for_cancel(event: TriggerEvent) -> string {
             )
             .await;
 
-            dispatcher
-                .enqueue(trigger_event("issues.opened", "delivery-run-shutdown"))
-                .await
-                .expect("enqueue succeeds");
-
             let (dequeued_tx, dequeued_rx) = oneshot::channel();
             super::install_test_inbox_dequeued_signal(dequeued_tx);
 
@@ -1649,17 +1652,33 @@ pub fn wait_for_cancel(event: TriggerEvent) -> string {
                 run_dispatcher.run().await.expect("dispatcher run exits cleanly");
             });
 
-            dequeued_rx.await.expect("run dequeued inbox event");
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            dispatcher
+                .enqueue(trigger_event("issues.opened", "delivery-run-shutdown"))
+                .await
+                .expect("enqueue succeeds");
+
+            tokio::time::timeout(Duration::from_secs(5), dequeued_rx)
+                .await
+                .expect("run should dequeue live inbox event")
+                .expect("run dequeued inbox event");
             dispatcher.shutdown();
             run_handle.await.expect("join dispatcher run");
+            let drain = dispatcher
+                .drain(Duration::from_secs(1))
+                .await
+                .expect("shutdown drain completes");
+            assert!(drain.drained, "{drain:?}");
 
             let inbox = read_topic(log.clone(), "trigger.inbox.envelopes").await;
             assert_eq!(
                 inbox.iter()
                     .filter(|(_, event)| event.kind == "event_ingested")
-                    .count(),
+                .count(),
                 1
             );
+            let legacy_inbox = read_topic(log.clone(), "trigger.inbox").await;
+            assert!(legacy_inbox.is_empty(), "legacy_inbox={legacy_inbox:?}");
 
             let outbox = read_topic(log.clone(), "trigger.outbox").await;
             assert!(
@@ -1925,11 +1944,13 @@ pub fn local_fn(event: TriggerEvent) -> string {
                 source: TriggerBindingSource::Manifest,
                 kind: "webhook".to_string(),
                 provider: ProviderId::from("github"),
+                autonomy_tier: crate::AutonomyTier::ActAuto,
                 handler: TriggerHandlerSpec::Local {
                     raw: "local_fn".to_string(),
                     closure: handler,
                 },
                 when: None,
+                when_budget: None,
                 retry: TriggerRetryConfig::default(),
                 match_events: vec!["issues.opened".to_string()],
                 dedupe_key: Some("event.dedupe_key".to_string()),
@@ -2113,11 +2134,13 @@ pub fn slow_handler(event: TriggerEvent) -> string {
                 source: TriggerBindingSource::Manifest,
                 kind: "webhook".to_string(),
                 provider: ProviderId::from("github"),
+                autonomy_tier: crate::AutonomyTier::ActAuto,
                 handler: TriggerHandlerSpec::Local {
                     raw: "slow_handler".to_string(),
                     closure: handler,
                 },
                 when: None,
+                when_budget: None,
                 retry: TriggerRetryConfig::default(),
                 match_events: vec!["issues.opened".to_string()],
                 dedupe_key: Some("event.dedupe_key".to_string()),
