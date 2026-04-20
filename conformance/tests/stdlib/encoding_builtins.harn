@@ -1,0 +1,8 @@
+pipeline test(task) {
+  println(base64url_encode(">>>???///"))
+  println(base64url_decode("Pj4-Pz8_Ly8v"))
+  println(base32_encode("foobar"))
+  println(base32_decode("MZXW6YTBOI======"))
+  println(hex_encode("hello"))
+  println(hex_decode("68656c6c6f"))
+}

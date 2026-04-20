@@ -2955,12 +2955,20 @@ Sets are iterable with `for ... in` and support `len()`.
 |---|---|
 | `base64_encode(str)` | Returns the base64-encoded version of `str` |
 | `base64_decode(str)` | Returns the decoded string from a base64-encoded `str` |
+| `base64url_encode(str)` | Returns the URL-safe base64 encoding of `str` using the RFC 4648 alphabet without padding |
+| `base64url_decode(str)` | Returns the decoded string from a URL-safe base64 `str` without padding |
+| `base32_encode(str)` | Returns the RFC 4648 base32 encoding of `str` |
+| `base32_decode(str)` | Returns the decoded string from a base32-encoded `str` |
+| `hex_encode(str)` | Returns the lowercase hex encoding of `str` |
+| `hex_decode(str)` | Returns the decoded string from a hex-encoded `str` |
 | `sha256(str)` | Returns the hex-encoded SHA-256 hash of `str` |
 | `md5(str)` | Returns the hex-encoded MD5 hash of `str` |
 
 ```harn
 let encoded = base64_encode("hello world")  // "aGVsbG8gd29ybGQ="
 let decoded = base64_decode(encoded)        // "hello world"
+let jwt = base64url_encode("{\"alg\":\"HS256\"}") // no `=` padding
+let text = hex_decode("68656c6c6f")         // "hello"
 let hash = sha256("hello")                  // hex string
 let md5hash = md5("hello")                  // hex string
 ```
