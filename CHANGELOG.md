@@ -7,6 +7,16 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
+## Unreleased
+
+### Added
+
+- **ACP `session/fork` support (#319, #364).** Runtime transcripts can
+  now be forked in place, with fork metadata notifications wired
+  through the ACP stdio integration. ACP session ids are bound to the
+  runtime session store so prompts and forks operate on the same
+  transcript state.
+
 ## v0.7.26
 
 This release lands the full groundwork slate for epic #350 — the
