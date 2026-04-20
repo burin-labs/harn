@@ -156,6 +156,10 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("string")),
     },
     BuiltinSig {
+        name: "constant_time_eq",
+        return_type: Some(BuiltinReturn::Named("bool")),
+    },
+    BuiltinSig {
         name: "contains",
         return_type: None,
     },
@@ -334,6 +338,14 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
     BuiltinSig {
         name: "hash_value",
         return_type: Some(BuiltinReturn::Named("int")),
+    },
+    BuiltinSig {
+        name: "hmac_sha256",
+        return_type: Some(BuiltinReturn::Named("string")),
+    },
+    BuiltinSig {
+        name: "hmac_sha256_base64",
+        return_type: Some(BuiltinReturn::Named("string")),
     },
     BuiltinSig {
         name: "home_dir",

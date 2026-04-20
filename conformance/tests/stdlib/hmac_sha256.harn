@@ -1,0 +1,15 @@
+pipeline test(task) {
+  // RFC 4231 test case 2.
+  let mac = hmac_sha256("Jefe", "what do ya want for nothing?")
+  log(mac)
+  // GitHub's documented webhook signature vector.
+  let github = hmac_sha256("It's a Secret to Everybody", "Hello, World!")
+  log(github)
+  // Slack-style base64 output.
+  let slack = hmac_sha256_base64("Jefe", "what do ya want for nothing?")
+  log(slack)
+  // Constant-time equality. Same value, then differing byte, then differing length.
+  log(constant_time_eq(mac, mac))
+  log(constant_time_eq(mac, "0000000000000000000000000000000000000000000000000000000000000000"))
+  log(constant_time_eq(mac, "abc"))
+}

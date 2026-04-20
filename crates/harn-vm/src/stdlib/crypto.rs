@@ -53,6 +53,42 @@ pub(crate) fn register_crypto_builtins(vm: &mut Vm) {
     register_hash!(vm, "sha512_256", sha2::Digest, sha2::Sha512_256);
     register_hash!(vm, "md5", md5::Digest, md5::Md5);
 
+    // HMAC-SHA256 over (key, message). Both inputs are taken as their byte
+    // sequences (string `display()` of nil/numbers stringifies first). The
+    // returned hex string is what most webhook providers send in their
+    // signature header (e.g. GitHub's `x-hub-signature-256: sha256=<hex>`).
+    vm.register_builtin("hmac_sha256", |args, _out| {
+        let key = args.first().map(|a| a.display()).unwrap_or_default();
+        let msg = args.get(1).map(|a| a.display()).unwrap_or_default();
+        let mac = crate::connectors::hmac::hmac_sha256(key.as_bytes(), msg.as_bytes());
+        let hex: String = mac.iter().map(|b| format!("{b:02x}")).collect();
+        Ok(VmValue::String(Rc::from(hex)))
+    });
+
+    // HMAC-SHA256 returning standard base64 (used by Slack-style signatures).
+    vm.register_builtin("hmac_sha256_base64", |args, _out| {
+        use base64::Engine;
+        let key = args.first().map(|a| a.display()).unwrap_or_default();
+        let msg = args.get(1).map(|a| a.display()).unwrap_or_default();
+        let mac = crate::connectors::hmac::hmac_sha256(key.as_bytes(), msg.as_bytes());
+        Ok(VmValue::String(Rc::from(
+            base64::engine::general_purpose::STANDARD.encode(&mac),
+        )))
+    });
+
+    // Constant-time string equality. The variable-time `==` operator can leak
+    // the position of the first differing byte through timing, which lets an
+    // attacker recover an HMAC signature byte-by-byte. Always use this for
+    // signature comparison.
+    vm.register_builtin("constant_time_eq", |args, _out| {
+        let a = args.first().map(|a| a.display()).unwrap_or_default();
+        let b = args.get(1).map(|a| a.display()).unwrap_or_default();
+        Ok(VmValue::Bool(crate::connectors::hmac::secure_eq(
+            a.as_bytes(),
+            b.as_bytes(),
+        )))
+    });
+
     vm.register_builtin("url_encode", |args, _out| {
         let val = args.first().map(|a| a.display()).unwrap_or_default();
         let encoded: String = val
@@ -284,5 +320,81 @@ mod tests {
         let mut vm = vm();
         let result = call(&mut vm, "hash_value", vec![VmValue::Nil]).unwrap();
         assert!(matches!(result, VmValue::Int(_)));
+    }
+
+    // RFC 4231 test case 2: key="Jefe", data="what do ya want for nothing?".
+    #[test]
+    fn hmac_sha256_rfc4231_vector_2() {
+        let mut vm = vm();
+        let result = call(
+            &mut vm,
+            "hmac_sha256",
+            vec![s("Jefe"), s("what do ya want for nothing?")],
+        )
+        .unwrap();
+        assert_eq!(
+            result.display(),
+            "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843"
+        );
+    }
+
+    // GitHub's published HMAC test vector for webhook signature verification.
+    // https://docs.github.com/en/webhooks/using-webhooks/validating-webhook-deliveries
+    #[test]
+    fn hmac_sha256_github_documented_vector() {
+        let mut vm = vm();
+        let result = call(
+            &mut vm,
+            "hmac_sha256",
+            vec![s("It's a Secret to Everybody"), s("Hello, World!")],
+        )
+        .unwrap();
+        assert_eq!(
+            result.display(),
+            "757107ea0eb2509fc211221cce984b8a37570b6d7586c22c46f4379c8b043e17"
+        );
+    }
+
+    #[test]
+    fn hmac_sha256_base64_known_vector() {
+        let mut vm = vm();
+        let result = call(
+            &mut vm,
+            "hmac_sha256_base64",
+            vec![s("Jefe"), s("what do ya want for nothing?")],
+        )
+        .unwrap();
+        assert_eq!(result.display(), "W9zBRr9gdU5qBCQmCJV1x1oAPwidJzmDnexYuWTsOEM=");
+    }
+
+    #[test]
+    fn hmac_sha256_empty_inputs() {
+        let mut vm = vm();
+        let result = call(&mut vm, "hmac_sha256", vec![s(""), s("")]).unwrap();
+        assert_eq!(
+            result.display(),
+            "b613679a0814d9ec772f95d778c35fc5ff1697c493715653c6c712144292c5ad"
+        );
+    }
+
+    #[test]
+    fn constant_time_eq_matches_for_equal() {
+        let mut vm = vm();
+        let result = call(&mut vm, "constant_time_eq", vec![s("abc"), s("abc")]).unwrap();
+        assert!(matches!(result, VmValue::Bool(true)));
+    }
+
+    #[test]
+    fn constant_time_eq_rejects_different_lengths() {
+        let mut vm = vm();
+        let result = call(&mut vm, "constant_time_eq", vec![s("abc"), s("abcd")]).unwrap();
+        assert!(matches!(result, VmValue::Bool(false)));
+    }
+
+    #[test]
+    fn constant_time_eq_rejects_different_content() {
+        let mut vm = vm();
+        let result = call(&mut vm, "constant_time_eq", vec![s("abc"), s("abd")]).unwrap();
+        assert!(matches!(result, VmValue::Bool(false)));
     }
 }

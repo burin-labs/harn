@@ -1155,7 +1155,7 @@ fn sha256_hex(data: &[u8]) -> String {
     encoded
 }
 
-fn hmac_sha256(secret: &[u8], data: &[u8]) -> Vec<u8> {
+pub(crate) fn hmac_sha256(secret: &[u8], data: &[u8]) -> Vec<u8> {
     const BLOCK_SIZE: usize = 64;
 
     let mut key = if secret.len() > BLOCK_SIZE {
@@ -1185,7 +1185,7 @@ fn hmac_sha256(secret: &[u8], data: &[u8]) -> Vec<u8> {
     outer.finalize().to_vec()
 }
 
-fn secure_eq(expected: &[u8], provided: &[u8]) -> bool {
+pub(crate) fn secure_eq(expected: &[u8], provided: &[u8]) -> bool {
     expected.ct_eq(provided).into()
 }
 
