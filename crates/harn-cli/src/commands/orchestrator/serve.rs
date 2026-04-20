@@ -37,7 +37,7 @@ pub(crate) async fn run(args: OrchestratorServeArgs) -> Result<(), String> {
 }
 
 async fn run_local(args: OrchestratorServeArgs) -> Result<(), String> {
-    let _observability =
+    let observability =
         harn_vm::observability::otel::ObservabilityGuard::install_orchestrator_subscriber_from_env(
         )?;
     harn_vm::reset_thread_local_state();
@@ -281,6 +281,12 @@ async fn run_local(args: OrchestratorServeArgs) -> Result<(), String> {
         inbox_pump,
     )
     .await;
+    if let Err(error) = observability.shutdown() {
+        if shutdown.is_ok() {
+            return Err(error);
+        }
+        eprintln!("[harn] observability shutdown warning: {error}");
+    }
     shutdown
 }
 

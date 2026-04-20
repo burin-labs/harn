@@ -1044,9 +1044,10 @@ async fn otel_exports_ingest_and_dispatch_spans_with_shared_trace_id() {
     let ingest = spans.iter().find(|span| span.name == "ingest").unwrap();
     let dispatch = spans.iter().find(|span| span.name == "dispatch").unwrap();
     assert_eq!(ingest.trace_id, dispatch.trace_id);
+    assert_ne!(ingest.span_id, dispatch.span_id);
     assert_eq!(
         dispatch.parent_span_id.as_deref(),
-        Some(ingest.span_id.as_str())
+        ingest.parent_span_id.as_deref()
     );
 
     let ingest_trace_id = attribute_string(ingest, "trace_id").unwrap();

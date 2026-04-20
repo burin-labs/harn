@@ -396,6 +396,11 @@ async fn ingest_trigger(
         trace_id = %trace_id.0
     );
     let _ = harn_vm::observability::otel::set_span_parent(&span, &trace_id, None);
+    let mut span_context_headers = BTreeMap::new();
+    let _ = harn_vm::observability::otel::inject_current_context_headers(
+        &span,
+        &mut span_context_headers,
+    );
 
     async move {
         let normalized_headers = normalize_headers(&headers);
@@ -459,17 +464,7 @@ async fn ingest_trigger(
                         });
                         let mut pending_headers = BTreeMap::new();
                         pending_headers.insert("trace_id".to_string(), event.trace_id.0.clone());
-                        if let Some(parent_span_id) =
-                            harn_vm::observability::otel::current_span_id_hex(
-                                &tracing::Span::current(),
-                            )
-                        {
-                            pending_headers.insert(
-                                harn_vm::observability::otel::OTEL_PARENT_SPAN_ID_HEADER
-                                    .to_string(),
-                                parent_span_id,
-                            );
-                        }
+                        pending_headers.extend(span_context_headers.clone());
 
                         match context
                             .event_log
