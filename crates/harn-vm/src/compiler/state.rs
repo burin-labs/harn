@@ -349,7 +349,7 @@ impl Compiler {
         }
     }
 
-    pub(super) fn type_expr_to_schema_value(type_expr: &harn_parser::TypeExpr) -> Option<VmValue> {
+    pub(crate) fn type_expr_to_schema_value(type_expr: &harn_parser::TypeExpr) -> Option<VmValue> {
         match type_expr {
             harn_parser::TypeExpr::Named(name) => match name.as_str() {
                 "int" | "float" | "string" | "bool" | "list" | "dict" | "set" | "nil"

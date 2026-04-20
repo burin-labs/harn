@@ -4,6 +4,7 @@ members = [
     "crates/harn-lexer",
     "crates/harn-parser",
     "crates/harn-cli",
+    "crates/harn-serve",
     "crates/harn-lsp",
     "crates/harn-modules",
     "crates/harn-vm",

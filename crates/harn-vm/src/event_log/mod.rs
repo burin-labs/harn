@@ -296,6 +296,13 @@ pub fn install_memory_for_current_thread(queue_depth: usize) -> Arc<AnyEventLog>
     log
 }
 
+pub fn install_active_event_log(log: Arc<AnyEventLog>) -> Arc<AnyEventLog> {
+    ACTIVE_EVENT_LOG.with(|slot| {
+        *slot.borrow_mut() = Some(log.clone());
+    });
+    log
+}
+
 pub fn active_event_log() -> Option<Arc<AnyEventLog>> {
     ACTIVE_EVENT_LOG.with(|slot| slot.borrow().clone())
 }

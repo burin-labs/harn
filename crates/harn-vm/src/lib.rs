@@ -131,6 +131,43 @@ pub fn compile_source(source: &str) -> Result<Chunk, String> {
     Compiler::new().compile(&program).map_err(|e| e.to_string())
 }
 
+pub fn json_schema_for_type_expr(type_expr: &harn_parser::TypeExpr) -> Option<serde_json::Value> {
+    let schema = compiler::Compiler::type_expr_to_schema_value(type_expr)?;
+    let json_schema = schema::schema_to_json_schema_value(&schema).ok()?;
+    Some(llm::vm_value_to_json(&json_schema))
+}
+
+pub fn json_schema_for_typed_params(params: &[harn_parser::TypedParam]) -> serde_json::Value {
+    let mut properties = serde_json::Map::new();
+    let mut required = Vec::new();
+
+    for param in params {
+        let param_schema = param
+            .type_expr
+            .as_ref()
+            .and_then(json_schema_for_type_expr)
+            .unwrap_or_else(|| serde_json::json!({}));
+        if param.default_value.is_none() {
+            required.push(serde_json::Value::String(param.name.clone()));
+        }
+        properties.insert(param.name.clone(), param_schema);
+    }
+
+    let mut schema = serde_json::Map::new();
+    schema.insert(
+        "type".to_string(),
+        serde_json::Value::String("object".to_string()),
+    );
+    schema.insert(
+        "properties".to_string(),
+        serde_json::Value::Object(properties),
+    );
+    if !required.is_empty() {
+        schema.insert("required".to_string(), serde_json::Value::Array(required));
+    }
+    serde_json::Value::Object(schema)
+}
+
 /// Reset all thread-local state that can leak between test runs.
 pub fn reset_thread_local_state() {
     llm::reset_llm_state();
