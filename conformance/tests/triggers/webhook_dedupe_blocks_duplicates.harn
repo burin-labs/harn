@@ -1,0 +1,7 @@
+pipeline test(task) {
+  let result = trigger_test_harness("webhook_dedupe_blocks_duplicates")
+  println(result.ok)
+  println(len(result.emitted) == 1)
+  println(result.emitted[0].dedupe_key == "delivery-123")
+  println(result.details.first_appended && !result.details.second_appended)
+}

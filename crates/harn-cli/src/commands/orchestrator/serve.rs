@@ -333,6 +333,7 @@ fn trigger_binding_for(config: &ResolvedTriggerConfig) -> Result<harn_vm::Trigge
         kind: harn_vm::TriggerKind::from(trigger_kind_name(config.kind)),
         binding_id: config.id.clone(),
         dedupe_key: config.dedupe_key.clone(),
+        dedupe_retention_days: config.retry.retention_days,
         config: connector_binding_config(config)?,
     })
 }
@@ -354,11 +355,8 @@ fn connector_binding_config(config: &ResolvedTriggerConfig) -> Result<JsonValue,
         })),
         _ => Ok(JsonValue::Null),
     }
-    // Note: #220's earlier approach inserted `retention_days` into the JSON
-    // binding config. Post-#221, dedupe retention is carried on the
-    // TriggerBinding struct field `dedupe_retention_days` (see
-    // triggers/registry.rs) rather than in the connector-specific JSON,
-    // so no insertion is needed here.
+    // Dedupe retention lives on the connector TriggerBinding rather than in
+    // connector-specific JSON, so no retention_days insertion is needed here.
 }
 
 fn connector_for(

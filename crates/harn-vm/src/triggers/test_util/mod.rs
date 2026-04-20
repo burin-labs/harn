@@ -12,7 +12,9 @@ use tokio::sync::Notify;
 use uuid::Uuid;
 
 use crate::connectors::cron::{CatchupMode, CronConnector, CronEventSink};
-use crate::connectors::webhook::{GenericWebhookConnector, WebhookSignatureVariant};
+use crate::connectors::webhook::{
+    GenericWebhookConnector, WebhookProviderProfile, WebhookSignatureVariant,
+};
 use crate::connectors::{
     Connector, ConnectorCtx, ConnectorError, MetricsRegistry, RateLimitConfig, RateLimiterFactory,
     RawInbound, TriggerBinding as ConnectorTriggerBinding,
@@ -50,6 +52,7 @@ pub const TRIGGER_TEST_FIXTURES: &[&str] = &[
     "rate_limit_throttles",
     "replay_binding_gc_fallback",
     "replay_refires_from_dlq",
+    "webhook_dedupe_blocks_duplicates",
     "webhook_verifies_hmac",
 ];
 
@@ -222,6 +225,7 @@ impl TriggerTestHarness {
             "rate_limit_throttles" => self.rate_limit_throttles().await,
             "replay_binding_gc_fallback" => self.replay_binding_gc_fallback().await,
             "replay_refires_from_dlq" => self.replay_refires_from_dlq().await,
+            "webhook_dedupe_blocks_duplicates" => self.webhook_dedupe_blocks_duplicates().await,
             "webhook_verifies_hmac" => self.webhook_verifies_hmac().await,
             _ => Err(format!(
                 "unknown trigger harness fixture '{fixture}' (known: {})",
@@ -508,21 +512,61 @@ impl TriggerTestHarness {
             .map_err(|error| error.to_string())?;
 
         let raw = standard_raw_inbound();
+        let binding_id = "webhook.fixture";
+        let retention =
+            StdDuration::from_secs(u64::from(DEFAULT_INBOX_RETENTION_DAYS) * 24 * 60 * 60);
         let first = connector
             .normalize_inbound(raw.clone())
             .map_err(|error| error.to_string())?;
-        self.connector_registry.record_event(
-            "webhook.fixture",
-            1,
-            &first,
-            Some("first_delivery"),
-            None,
+        let first_claim = matches!(
+            crate::connectors::postprocess_normalized_event(
+                inbox.as_ref(),
+                binding_id,
+                true,
+                retention,
+                first.clone(),
+            )
+            .await
+            .map_err(|error| error.to_string())?,
+            crate::connectors::PostNormalizeOutcome::Ready(_)
         );
-        let duplicate = connector.normalize_inbound(raw).unwrap_err();
+        if first_claim {
+            self.connector_registry.record_event(
+                binding_id,
+                1,
+                &first,
+                Some("first_delivery"),
+                None,
+            );
+        }
+        let second = connector
+            .normalize_inbound(raw)
+            .map_err(|error| error.to_string())?;
+        let second_claim = matches!(
+            crate::connectors::postprocess_normalized_event(
+                inbox.as_ref(),
+                binding_id,
+                true,
+                retention,
+                second.clone(),
+            )
+            .await
+            .map_err(|error| error.to_string())?,
+            crate::connectors::PostNormalizeOutcome::Ready(_)
+        );
+        if second_claim {
+            self.connector_registry.record_event(
+                binding_id,
+                1,
+                &second,
+                Some("duplicate_delivery"),
+                None,
+            );
+        }
         let emitted = self.connector_registry.emitted();
         Ok(TriggerHarnessResult {
             fixture: "dedupe_swallows_duplicate_key".to_string(),
-            ok: emitted.len() == 1 && matches!(duplicate, ConnectorError::DuplicateDelivery(_)),
+            ok: first_claim && !second_claim && emitted.len() == 1,
             stub: false,
             summary: "duplicate inbound deliveries are swallowed by the dedupe guard".to_string(),
             emitted,
@@ -533,7 +577,135 @@ impl TriggerTestHarness {
             notes: Vec::new(),
             details: json!({
                 "dedupe_key": first.dedupe_key,
-                "duplicate_error": duplicate.to_string(),
+                "first_claim": first_claim,
+                "second_claim": second_claim,
+                "duplicate_error": if !second_claim {
+                    format!(
+                        "duplicate delivery `{}` for binding `{}` dropped by post-normalize dedupe",
+                        second.dedupe_key, binding_id
+                    )
+                } else {
+                    String::new()
+                },
+            }),
+        })
+    }
+
+    async fn webhook_dedupe_blocks_duplicates(self) -> Result<TriggerHarnessResult, String> {
+        let _guard = clock::install_override(self.clock.clone());
+        let log = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(32)));
+        let inbox = build_inbox(&log).await;
+        let mut connector = GenericWebhookConnector::with_profile(WebhookProviderProfile::new(
+            ProviderId::from("github"),
+            "GitHubEventPayload",
+            WebhookSignatureVariant::GitHub,
+        ));
+        connector
+            .init(connector_ctx(
+                log,
+                Arc::new(StaticSecretProvider::new(
+                    "github",
+                    BTreeMap::from([(
+                        SecretId::new("github", "test-signing-secret"),
+                        "It's a Secret to Everybody".to_string(),
+                    )]),
+                )),
+                inbox.clone(),
+            ))
+            .await
+            .map_err(|error| error.to_string())?;
+        let mut binding =
+            webhook_binding(WebhookSignatureVariant::GitHub, Some("event.dedupe_key"));
+        binding.provider = ProviderId::from("github");
+        binding.binding_id = "github.webhook.fixture".to_string();
+        binding.config = json!({
+            "match": { "path": "/hooks/github" },
+            "secrets": { "signing_secret": "github/test-signing-secret" },
+            "webhook": {
+                "signature_scheme": "github",
+                "source": "fixtures",
+            }
+        });
+        connector
+            .activate(&[binding])
+            .await
+            .map_err(|error| error.to_string())?;
+
+        let raw = github_raw_inbound();
+        let binding_id = "github.webhook.fixture";
+        let retention =
+            StdDuration::from_secs(u64::from(DEFAULT_INBOX_RETENTION_DAYS) * 24 * 60 * 60);
+
+        let first = connector
+            .normalize_inbound(raw.clone())
+            .map_err(|error| error.to_string())?;
+        let first_appended = matches!(
+            crate::connectors::postprocess_normalized_event(
+                inbox.as_ref(),
+                binding_id,
+                true,
+                retention,
+                first.clone(),
+            )
+            .await
+            .map_err(|error| error.to_string())?,
+            crate::connectors::PostNormalizeOutcome::Ready(_)
+        );
+        if first_appended {
+            self.connector_registry.record_event(
+                binding_id,
+                1,
+                &first,
+                Some("first_delivery"),
+                None,
+            );
+        }
+
+        let second = connector
+            .normalize_inbound(raw)
+            .map_err(|error| error.to_string())?;
+        let second_appended = matches!(
+            crate::connectors::postprocess_normalized_event(
+                inbox.as_ref(),
+                binding_id,
+                true,
+                retention,
+                second.clone(),
+            )
+            .await
+            .map_err(|error| error.to_string())?,
+            crate::connectors::PostNormalizeOutcome::Ready(_)
+        );
+        if second_appended {
+            self.connector_registry.record_event(
+                binding_id,
+                1,
+                &second,
+                Some("duplicate_delivery"),
+                None,
+            );
+        }
+
+        let emitted = self.connector_registry.emitted();
+        Ok(TriggerHarnessResult {
+            fixture: "webhook_dedupe_blocks_duplicates".to_string(),
+            ok: first_appended
+                && !second_appended
+                && emitted.len() == 1
+                && emitted[0].dedupe_key == "delivery-123",
+            stub: false,
+            summary: "duplicate GitHub-style webhook deliveries are dropped before append"
+                .to_string(),
+            emitted,
+            attempts: Vec::new(),
+            dlq: Vec::new(),
+            alerts: Vec::new(),
+            bindings: Vec::new(),
+            notes: Vec::new(),
+            details: json!({
+                "delivery_id": "delivery-123",
+                "first_appended": first_appended,
+                "second_appended": second_appended,
             }),
         })
     }

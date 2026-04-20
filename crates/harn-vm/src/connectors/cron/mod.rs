@@ -304,7 +304,7 @@ impl CronEventSink for EventLogCronEventSink {
         &self,
         binding_id: &str,
         retention: StdDuration,
-        event: TriggerEvent,
+        mut event: TriggerEvent,
     ) -> Result<(), ConnectorError> {
         if !self
             .inbox
@@ -313,6 +313,24 @@ impl CronEventSink for EventLogCronEventSink {
         {
             return Ok(());
         }
+        let dedupe_key = event.dedupe_key.clone();
+        event.mark_dedupe_claimed();
+        let event = match crate::connectors::postprocess_normalized_event(
+            self.inbox.as_ref(),
+            binding_id,
+            true,
+            retention,
+            event,
+        )
+        .await?
+        {
+            crate::connectors::PostNormalizeOutcome::Ready(event) => *event,
+            crate::connectors::PostNormalizeOutcome::DuplicateDropped => {
+                return Err(ConnectorError::Activation(format!(
+                    "cron event `{dedupe_key}` for binding `{binding_id}` was deduped twice"
+                )));
+            }
+        };
         let payload = serde_json::to_value(&event).map_err(ConnectorError::from)?;
         self.event_log
             .append(&self.topic, LogEvent::new("trigger_event", payload))

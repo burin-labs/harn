@@ -16,7 +16,7 @@ use crate::connectors::{
 use crate::secrets::{SecretId, SecretVersion};
 use crate::triggers::{
     redact_headers, HeaderRedactionPolicy, ProviderId, ProviderPayload, SignatureStatus, TraceId,
-    TriggerEvent, TriggerEventId, DEFAULT_INBOX_RETENTION_DAYS,
+    TriggerEvent, TriggerEventId,
 };
 
 pub mod variants;
@@ -73,13 +73,12 @@ struct ConnectorState {
 
 #[derive(Clone, Debug)]
 struct ActivatedWebhookBinding {
+    #[allow(dead_code)]
     binding_id: String,
     path: Option<String>,
     signing_secret: SecretId,
     signature_variant: WebhookSignatureVariant,
     timestamp_tolerance: Option<Duration>,
-    dedupe_enabled: bool,
-    dedupe_ttl: std::time::Duration,
     source: Option<String>,
 }
 
@@ -228,20 +227,6 @@ impl Connector for GenericWebhookConnector {
             &normalized_body,
             &raw.body,
         );
-        if binding.dedupe_enabled {
-            let inserted = futures::executor::block_on(ctx.inbox.insert_if_new(
-                &binding.binding_id,
-                &dedupe_key,
-                binding.dedupe_ttl,
-            ))?;
-            if !inserted {
-                return Err(ConnectorError::DuplicateDelivery(format!(
-                    "duplicate {} delivery `{dedupe_key}` for binding `{}`",
-                    provider.as_str(),
-                    binding.binding_id
-                )));
-            }
-        }
 
         let provider_payload = ProviderPayload::normalize(
             &provider,
@@ -265,6 +250,7 @@ impl Connector for GenericWebhookConnector {
             headers: redact_headers(&effective_headers, &HeaderRedactionPolicy::default()),
             provider_payload,
             signature_status: SignatureStatus::Verified,
+            dedupe_claimed: false,
         })
     }
 
@@ -317,10 +303,6 @@ impl ActivatedWebhookBinding {
             signing_secret,
             signature_variant,
             timestamp_tolerance,
-            dedupe_enabled: binding.dedupe_key.is_some(),
-            dedupe_ttl: std::time::Duration::from_secs(
-                u64::from(DEFAULT_INBOX_RETENTION_DAYS) * 24 * 60 * 60,
-            ),
             source: config.webhook.source,
         })
     }

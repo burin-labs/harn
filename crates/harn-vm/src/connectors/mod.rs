@@ -86,6 +86,32 @@ pub trait Connector: Send + Sync {
     fn client(&self) -> Arc<dyn ConnectorClient>;
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum PostNormalizeOutcome {
+    Ready(Box<TriggerEvent>),
+    DuplicateDropped,
+}
+
+pub async fn postprocess_normalized_event(
+    inbox: &InboxIndex,
+    binding_id: &str,
+    dedupe_enabled: bool,
+    dedupe_ttl: StdDuration,
+    mut event: TriggerEvent,
+) -> Result<PostNormalizeOutcome, ConnectorError> {
+    if dedupe_enabled && !event.dedupe_claimed() {
+        if !inbox
+            .insert_if_new(binding_id, &event.dedupe_key, dedupe_ttl)
+            .await?
+        {
+            return Ok(PostNormalizeOutcome::DuplicateDropped);
+        }
+        event.mark_dedupe_claimed();
+    }
+
+    Ok(PostNormalizeOutcome::Ready(Box::new(event)))
+}
+
 /// Outbound provider client interface used by connector-backed stdlib modules.
 #[async_trait]
 pub trait ConnectorClient: Send + Sync {
@@ -341,6 +367,8 @@ pub struct TriggerBinding {
     pub binding_id: String,
     #[serde(default)]
     pub dedupe_key: Option<String>,
+    #[serde(default = "default_dedupe_retention_days")]
+    pub dedupe_retention_days: u32,
     #[serde(default)]
     pub config: JsonValue,
 }
@@ -356,9 +384,14 @@ impl TriggerBinding {
             kind: kind.into(),
             binding_id: binding_id.into(),
             dedupe_key: None,
+            dedupe_retention_days: crate::triggers::DEFAULT_INBOX_RETENTION_DAYS,
             config: JsonValue::Null,
         }
     }
+}
+
+fn default_dedupe_retention_days() -> u32 {
+    crate::triggers::DEFAULT_INBOX_RETENTION_DAYS
 }
 
 /// Small in-memory trigger-binding registry used to fan bindings into connectors.

@@ -55,6 +55,7 @@ fn binding(id: &str, schedule: &str, timezone: &str, catchup_mode: CatchupMode) 
         kind: TriggerKind::from("cron"),
         binding_id: id.to_string(),
         dedupe_key: None,
+        dedupe_retention_days: crate::triggers::DEFAULT_INBOX_RETENTION_DAYS,
         config: json!({
             "schedule": schedule,
             "timezone": timezone,
@@ -324,6 +325,36 @@ async fn default_sink_writes_trigger_events_to_event_log() {
     let topic = Topic::new(CRON_TICK_TOPIC).unwrap();
     let events = log.read_range(&topic, None, usize::MAX).await.unwrap();
     assert_eq!(events.len(), 1);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn default_sink_does_not_double_claim_dedupe() {
+    let log = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(32)));
+    let metrics = Arc::new(MetricsRegistry::default());
+    let inbox = Arc::new(InboxIndex::new(log.clone(), metrics.clone()).await.unwrap());
+    let sink = EventLogCronEventSink::new(log.clone(), inbox);
+    let trigger =
+        super::CronTrigger::from_binding(&binding("hourly", "* * * * *", "UTC", CatchupMode::Skip))
+            .unwrap();
+
+    sink.emit(
+        "hourly",
+        trigger.dedupe_retention,
+        trigger.to_event(parse("2026-04-19T00:01:00Z"), false),
+    )
+    .await
+    .unwrap();
+
+    let inbox_topic = Topic::new(crate::triggers::TRIGGER_INBOX_CLAIMS_TOPIC).unwrap();
+    let claims = log
+        .read_range(&inbox_topic, None, usize::MAX)
+        .await
+        .unwrap();
+    assert_eq!(
+        claims.len(),
+        1,
+        "cron post-processing should not re-claim inbox dedupe"
+    );
 }
 
 #[test]

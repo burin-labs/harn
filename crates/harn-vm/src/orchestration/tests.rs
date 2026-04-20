@@ -485,6 +485,7 @@ fn derive_run_observability_adds_trigger_and_predicate_nodes_with_shared_trace_i
             }),
         ),
         signature_status: crate::triggers::SignatureStatus::Unsigned,
+        dedupe_claimed: false,
     };
     let run = RunRecord {
         id: "run_trigger_obs".to_string(),
@@ -579,6 +580,7 @@ fn derive_run_observability_adds_replay_chain_for_replayed_trigger_runs() {
             ),
         ),
         signature_status: crate::triggers::SignatureStatus::Verified,
+        dedupe_claimed: false,
     };
     let run = RunRecord {
         id: "run_replay_chain".to_string(),

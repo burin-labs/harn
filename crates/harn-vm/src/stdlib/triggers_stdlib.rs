@@ -937,6 +937,7 @@ mod tests {
                 },
             )),
             signature_status: crate::SignatureStatus::Verified,
+            dedupe_claimed: false,
         }
     }
 
