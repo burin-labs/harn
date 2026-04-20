@@ -49,6 +49,7 @@
 - [Bridge protocol](./bridge-protocol.md)
 - [Host tools over the bridge](./bridge/host-tools.md)
 - [MCP and ACP integration](./mcp-and-acp.md)
+- [Orchestrator MCP server](./mcp-server.md)
 - [Harn portal](./portal.md)
 - [Orchestrator](./orchestrator.md)
 - [Orchestrator secrets](./orchestrator/secrets.md)

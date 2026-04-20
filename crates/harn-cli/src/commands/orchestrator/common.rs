@@ -14,13 +14,13 @@ use crate::package::{self, CollectedManifestTrigger, Manifest};
 
 use super::role::OrchestratorRole;
 
-pub(super) const STATE_SNAPSHOT_FILE: &str = "orchestrator-state.json";
-pub(super) use harn_vm::{
+pub(crate) const STATE_SNAPSHOT_FILE: &str = "orchestrator-state.json";
+pub(crate) use harn_vm::{
     TRIGGER_ATTEMPTS_TOPIC, TRIGGER_DLQ_TOPIC, TRIGGER_INBOX_CLAIMS_TOPIC,
     TRIGGER_INBOX_ENVELOPES_TOPIC, TRIGGER_INBOX_LEGACY_TOPIC, TRIGGER_OUTBOX_TOPIC,
 };
 
-pub(super) struct LoadedOrchestratorContext {
+pub(crate) struct LoadedOrchestratorContext {
     pub vm: harn_vm::Vm,
     pub event_log: Arc<AnyEventLog>,
     pub collected_triggers: Vec<CollectedManifestTrigger>,
@@ -28,7 +28,7 @@ pub(super) struct LoadedOrchestratorContext {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub(super) struct PersistedStateSnapshot {
+pub(crate) struct PersistedStateSnapshot {
     pub status: String,
     pub bind: String,
     #[serde(default)]
@@ -38,13 +38,13 @@ pub(super) struct PersistedStateSnapshot {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub(super) struct ConnectorActivationSnapshot {
+pub(crate) struct ConnectorActivationSnapshot {
     pub provider: String,
     pub binding_count: usize,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub(super) struct DispatchHandleRecord {
+pub(crate) struct DispatchHandleRecord {
     pub event_id: String,
     pub binding_id: String,
     pub binding_version: u32,
@@ -56,7 +56,7 @@ pub(super) struct DispatchHandleRecord {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub(super) struct DlqAttemptRecord {
+pub(crate) struct DlqAttemptRecord {
     pub attempt: u32,
     pub at: String,
     pub status: String,
@@ -64,7 +64,7 @@ pub(super) struct DlqAttemptRecord {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub(super) struct DlqEntryRecord {
+pub(crate) struct DlqEntryRecord {
     pub id: String,
     pub event_id: String,
     pub binding_id: String,
@@ -78,7 +78,7 @@ pub(super) struct DlqEntryRecord {
 }
 
 #[derive(Clone, Debug)]
-pub(super) struct StrandedEnvelopeRecord {
+pub(crate) struct StrandedEnvelopeRecord {
     pub inbox_offset: u64,
     pub event_id: String,
     pub trigger_id: Option<String>,
@@ -89,7 +89,7 @@ pub(super) struct StrandedEnvelopeRecord {
     pub age: StdDuration,
 }
 
-pub(super) async fn load_local_runtime(
+pub(crate) async fn load_local_runtime(
     args: &OrchestratorLocalArgs,
 ) -> Result<LoadedOrchestratorContext, String> {
     harn_vm::reset_thread_local_state();
@@ -124,13 +124,13 @@ pub(super) async fn load_local_runtime(
     })
 }
 
-pub(super) async fn trigger_list(
+pub(crate) async fn trigger_list(
     ctx: &mut LoadedOrchestratorContext,
 ) -> Result<Vec<harn_vm::TriggerBindingSnapshot>, String> {
     eval_json(&mut ctx.vm, "trigger_list()").await
 }
 
-pub(super) async fn trigger_replay(
+pub(crate) async fn trigger_replay(
     ctx: &mut LoadedOrchestratorContext,
     event_id: &str,
 ) -> Result<DispatchHandleRecord, String> {
@@ -138,13 +138,13 @@ pub(super) async fn trigger_replay(
     eval_json(&mut ctx.vm, &format!("trigger_replay({event_id})")).await
 }
 
-pub(super) async fn trigger_inspect_dlq(
+pub(crate) async fn trigger_inspect_dlq(
     ctx: &mut LoadedOrchestratorContext,
 ) -> Result<Vec<DlqEntryRecord>, String> {
     eval_json(&mut ctx.vm, "trigger_inspect_dlq()").await
 }
 
-pub(super) async fn trigger_fire(
+pub(crate) async fn trigger_fire(
     ctx: &mut LoadedOrchestratorContext,
     binding_id: &str,
     event: serde_json::Value,
@@ -159,7 +159,7 @@ pub(super) async fn trigger_fire(
     .await
 }
 
-pub(super) fn synthetic_event_for_binding(
+pub(crate) fn synthetic_event_for_binding(
     ctx: &LoadedOrchestratorContext,
     binding_id: &str,
 ) -> Result<serde_json::Value, String> {
@@ -192,7 +192,7 @@ pub(super) fn synthetic_event_for_binding(
     }))
 }
 
-pub(super) async fn read_topic(
+pub(crate) async fn read_topic(
     log: &Arc<AnyEventLog>,
     topic_name: &str,
 ) -> Result<Vec<(u64, LogEvent)>, String> {
@@ -202,7 +202,7 @@ pub(super) async fn read_topic(
         .map_err(|error| error.to_string())
 }
 
-pub(super) async fn stranded_envelopes(
+pub(crate) async fn stranded_envelopes(
     log: &Arc<AnyEventLog>,
     min_age: StdDuration,
 ) -> Result<Vec<StrandedEnvelopeRecord>, String> {
@@ -270,7 +270,7 @@ pub(super) async fn stranded_envelopes(
     Ok(stranded)
 }
 
-pub(super) async fn append_dlq_entry(
+pub(crate) async fn append_dlq_entry(
     log: &Arc<AnyEventLog>,
     entry: &DlqEntryRecord,
 ) -> Result<(), String> {
@@ -282,7 +282,7 @@ pub(super) async fn append_dlq_entry(
         .map_err(|error| error.to_string())
 }
 
-pub(super) fn discard_dlq_entry(entry: &DlqEntryRecord) -> Result<DlqEntryRecord, String> {
+pub(crate) fn discard_dlq_entry(entry: &DlqEntryRecord) -> Result<DlqEntryRecord, String> {
     let mut next = entry.clone();
     next.state = "discarded".to_string();
     next.retry_history.push(DlqAttemptRecord {
@@ -296,7 +296,7 @@ pub(super) fn discard_dlq_entry(entry: &DlqEntryRecord) -> Result<DlqEntryRecord
     Ok(next)
 }
 
-pub(super) fn print_json<T>(value: &T) -> Result<(), String>
+pub(crate) fn print_json<T>(value: &T) -> Result<(), String>
 where
     T: Serialize,
 {

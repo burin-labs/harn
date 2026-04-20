@@ -26,7 +26,7 @@ struct TriggerEventRecord {
 }
 
 #[derive(Clone, Debug, Serialize)]
-struct DispatchOutcomeSummary {
+pub(crate) struct DispatchOutcomeSummary {
     status: String,
     attempt_count: u32,
     handler_kind: String,
@@ -36,19 +36,19 @@ struct DispatchOutcomeSummary {
 }
 
 #[derive(Clone, Debug, Serialize)]
-struct DriftField {
+pub(crate) struct DriftField {
     original: JsonValue,
     replayed: JsonValue,
 }
 
 #[derive(Clone, Debug, Serialize)]
-struct DriftReport {
+pub(crate) struct DriftReport {
     changed: bool,
     fields: BTreeMap<String, DriftField>,
 }
 
 #[derive(Clone, Debug, Serialize)]
-struct TriggerReplayReport {
+pub(crate) struct TriggerReplayReport {
     event_id: String,
     binding_id: String,
     binding_version: u32,
@@ -68,7 +68,30 @@ pub(crate) async fn run(args: TriggerReplayArgs) -> Result<(), String> {
     let workspace_root = harn_vm::stdlib::process::find_project_root(&cwd).unwrap_or(cwd.clone());
     let event_log = harn_vm::event_log::install_default_for_base_dir(&workspace_root)
         .map_err(|error| format!("failed to open event log snapshot: {error}"))?;
+    let report = replay_report_for_event_log(
+        event_log,
+        &workspace_root,
+        &args.event_id,
+        args.as_of.as_deref(),
+        args.diff,
+    )
+    .await?;
 
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&report)
+            .map_err(|error| format!("failed to encode replay report: {error}"))?
+    );
+    Ok(())
+}
+
+pub(crate) async fn replay_report_for_event_log(
+    event_log: Arc<AnyEventLog>,
+    workspace_root: &Path,
+    event_id: &str,
+    as_of: Option<&str>,
+    diff: bool,
+) -> Result<TriggerReplayReport, String> {
     let mut vm = build_replay_vm(&workspace_root);
     let extensions = package::load_runtime_extensions(&workspace_root);
     package::install_runtime_extensions(&extensions);
@@ -76,13 +99,13 @@ pub(crate) async fn run(args: TriggerReplayArgs) -> Result<(), String> {
         .await
         .map_err(|error| format!("failed to install manifest triggers: {error}"))?;
 
-    let recorded = load_recorded_event(&event_log, &args.event_id).await?;
-    let original = if args.diff {
+    let recorded = load_recorded_event(&event_log, event_id).await?;
+    let original = if diff {
         Some(load_original_outcome(&event_log, &recorded).await?)
     } else {
         None
     };
-    let as_of = args.as_of.as_deref().map(parse_timestamp).transpose()?;
+    let as_of = as_of.map(parse_timestamp).transpose()?;
     let binding = resolve_binding(&recorded, as_of)?;
 
     append_replay_record(&event_log, &binding, &recorded.event).await?;
@@ -100,7 +123,7 @@ pub(crate) async fn run(args: TriggerReplayArgs) -> Result<(), String> {
     let drift = original
         .as_ref()
         .map(|original| diff_outcomes(original, &replay_summary));
-    let report = TriggerReplayReport {
+    Ok(TriggerReplayReport {
         event_id: recorded.event.id.0,
         binding_id: binding.id.as_str().to_string(),
         binding_version: binding.version,
@@ -108,14 +131,7 @@ pub(crate) async fn run(args: TriggerReplayArgs) -> Result<(), String> {
         replay: replay_summary,
         original,
         drift,
-    };
-
-    println!(
-        "{}",
-        serde_json::to_string_pretty(&report)
-            .map_err(|error| format!("failed to encode replay report: {error}"))?
-    );
-    Ok(())
+    })
 }
 
 fn build_replay_vm(workspace_root: &Path) -> harn_vm::Vm {

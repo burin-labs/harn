@@ -1,4 +1,4 @@
-mod replay;
+pub(crate) mod replay;
 
 use crate::cli::{TriggerArgs, TriggerCommand};
 

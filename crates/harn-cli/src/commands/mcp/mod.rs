@@ -12,6 +12,8 @@ use url::Url;
 use crate::cli::{McpCommand, McpLoginArgs, McpServerRefArgs};
 use crate::package::{self, McpServerConfig};
 
+mod serve;
+
 const DEFAULT_REDIRECT_URI: &str = "http://127.0.0.1:9783/oauth/callback";
 const KEYRING_SERVICE: &str = "dev.harn.mcp";
 const TOKEN_REFRESH_SKEW_SECS: i64 = 60;
@@ -82,6 +84,12 @@ pub(crate) enum AuthResolution {
 
 pub(crate) async fn handle_mcp_command(command: &McpCommand) {
     match command {
+        McpCommand::Serve(args) => {
+            if let Err(error) = serve::run(args).await {
+                eprintln!("error: {error}");
+                process::exit(1);
+            }
+        }
         McpCommand::Login(options) => {
             if let Err(error) = login(options).await {
                 eprintln!("error: {error}");

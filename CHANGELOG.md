@@ -149,6 +149,14 @@ granular archaeology.
   skills via call arg or `HARN_REQUIRE_SIGNED_SKILLS=1`, and every load
   attempt emits a `skill.loaded` trust record into the transcript.
 
+- **`harn mcp serve` exposes orchestrators as MCP servers.**
+  Added a new orchestrator-backed MCP server command that serves over stdio and
+  HTTP, exposes trigger fire/list/replay, queue + DLQ inspection/retry,
+  dispatcher inspection, manifest/event/DLQ resources, and a placeholder trust
+  query surface. Tool calls now append `observability.action_graph` entries with
+  MCP client identity so external MCP clients can drive Harn without a custom
+  adapter layer.
+
 - **`harn orchestrator {inspect, fire, replay, dlq, queue}` CLI
   commands (#185).** Implemented the placeholder orchestrator
   subcommands that used to error with `not implemented`. `inspect`
