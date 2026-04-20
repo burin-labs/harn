@@ -1,0 +1,76 @@
+// std/vision — deterministic OCR helpers built on the runtime's vision builtins.
+//
+// Import with: import "std/vision"
+
+type VisionBox = {
+  left: int,
+  top: int,
+  width: int,
+  height: int,
+}
+
+type VisionToken = {
+  page: int,
+  block: int,
+  paragraph: int,
+  line: int,
+  word: int,
+  text: string,
+  normalized: string,
+  char_start: int,
+  char_end: int,
+  confidence: float | nil,
+  bbox: VisionBox,
+}
+
+type VisionLine = {
+  page: int,
+  block: int,
+  paragraph: int,
+  line: int,
+  text: string,
+  token_start: int,
+  token_count: int,
+  char_start: int,
+  char_end: int,
+  confidence: float | nil,
+  bbox: VisionBox,
+}
+
+type VisionBlock = {
+  page: int,
+  block: int,
+  text: string,
+  token_start: int,
+  token_count: int,
+  line_start: int,
+  line_count: int,
+  char_start: int,
+  char_end: int,
+  confidence: float | nil,
+  bbox: VisionBox,
+}
+
+type VisionSource = {
+  kind: string,
+  path: string | nil,
+  name: string | nil,
+  mime_type: string,
+  byte_len: int,
+  sha256: string,
+}
+
+type StructuredText = {
+  _type: "structured_text",
+  text: string,
+  blocks: list<VisionBlock>,
+  lines: list<VisionLine>,
+  tokens: list<VisionToken>,
+  source: VisionSource,
+  backend: {name: string},
+  stats: {token_count: int, line_count: int, block_count: int},
+}
+
+pub fn ocr(image, options = nil) -> StructuredText {
+  return vision_ocr(image, options)
+}

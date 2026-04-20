@@ -114,6 +114,7 @@ pub(crate) const BUILTINS: &[(&str, &str)] = &[
     ),
     ("resume_agent", "resume_agent(id_or_snapshot_path) -> dict"),
     ("secret_scan", "secret_scan(content) -> list"),
+    ("vision_ocr", "vision_ocr(image, options?) -> dict"),
     // MCP
     ("mcp_connect", "mcp_connect(command, args?) -> client"),
     ("mcp_list_tools", "mcp_list_tools(client) -> list"),
@@ -646,6 +647,7 @@ pub(crate) fn builtin_doc(name: &str) -> Option<String> {
         "compute_content_hash" => "**compute_content_hash(dir)** → string — Hash of directory contents for staleness detection",
         "invalidate_facts" => "**invalidate_facts(dir)** → nil — Mark cached facts as stale",
         "secret_scan" => "**secret_scan(content)** → list — Scan text or diffs for redacted secret findings before commit or PR-open flows",
+        "vision_ocr" => "**vision_ocr(image, options?)** → dict — Run deterministic OCR over an image path or image payload and return structured text with blocks, lines, tokens, and source metadata",
         "mcp_connect" => "**mcp_connect(command, args?)** → mcp_client — Spawn an MCP server and connect",
         "mcp_list_tools" => "**mcp_list_tools(client)** → list — List available tools from MCP server",
         "mcp_call" => "**mcp_call(client, name, arguments?)** → string | list — Call an MCP tool",

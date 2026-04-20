@@ -599,6 +599,23 @@ if !constant_time_eq(signature, request_signature) {
 | `date_parse(str)` | str: string | float | Parse a datetime string (e.g., `"2024-01-15 10:30:00"`) into a Unix timestamp. Extracts numeric components from the string. Throws if fewer than 3 parts (year, month, day). Validates month (1-12), day (1-31), hour (0-23), minute (0-59), second (0-59) |
 | `date_format(dt, format?)` | dt: float, int, or dict; format: string (default `"%Y-%m-%d %H:%M:%S"`) | string | Format a timestamp or date dict as a string. Supports `%Y`, `%m`, `%d`, `%H`, `%M`, `%S` placeholders. Throws for negative timestamps |
 
+## Vision
+
+| Function | Parameters | Returns | Description |
+|---|---|---|---|
+| `vision_ocr(image, options?)` | image: string or dict, options: dict | dict | Run deterministic OCR over an image and return `StructuredText` with `text`, `blocks`, `lines`, `tokens`, `source`, `backend`, and `stats`. `image` may be a path string, `{path, ...}`, `{storage: {path}, ...}`, `{bytes_base64, mime_type, name?}`, or `{data_url, name?}`. `options.language` sets the Tesseract language code when the default backend is in use |
+
+Example:
+
+```harn
+import "std/vision"
+
+let text = ocr("fixtures/receipt.png", {language: "eng"})
+println(text.text)
+println(text.tokens[0]?.text)
+println(text.source.sha256)
+```
+
 ## Testing
 
 | Function | Parameters | Returns | Description |

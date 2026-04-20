@@ -345,6 +345,7 @@ Imports starting with `std/` load embedded stdlib modules:
   parse_float_or)
 - `import "std/collections"` — collection utilities (filter_nil, store_stale,
   store_refresh)
+- `import "std/vision"` — deterministic OCR helpers (`ocr(image, options?)`)
 - `import "std/agent_state"` — durable session-scoped state helpers
   (agent_state_init, agent_state_resume, agent_state_write,
   agent_state_read, agent_state_list, agent_state_delete,

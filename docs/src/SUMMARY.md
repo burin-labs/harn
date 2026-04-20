@@ -19,6 +19,7 @@
 # Agents and workflows
 
 - [LLM calls and agent loops](./llm-and-agents.md)
+- [Typed tools for agent loops](./typed-tools.md)
 - [Daemon stdlib](./stdlib/daemon.md)
 - [Current session builtin](./stdlib/agent_session_current_id.md)
 - [Triggers](./triggers.md)

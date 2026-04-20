@@ -83,6 +83,13 @@ in Harn.
   verification doesn't need to round-trip bytes through strings. Final
   epic-#350 groundwork piece: pure-Harn connectors can now own
   signature verification end-to-end.
+- **Deterministic OCR stdlib and typed-tool docs (#311).** Added
+  `vision_ocr(...)` plus `import "std/vision"` for structured OCR over
+  image paths or inline payloads, with token/line/block output and
+  `audit.vision_ocr` event-log records that capture the canonical input
+  plus output. Docs now show how to wire deterministic stdlib logic into
+  typed `agent_loop(...)` tools instead of inventing bespoke host tools
+  for math, regex, strings, crypto, and OCR.
 
 ## v0.7.25
 
