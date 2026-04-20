@@ -127,7 +127,10 @@ pipeline test(task) {
     "linear should publish the default replay tolerance",
   )
   let linear_secrets = linear?.secret_requirements ?? []
-  assert(len(linear_secrets) == 2, "linear should publish signing + outbound auth secret requirements")
+  assert(
+    len(linear_secrets) == 2,
+    "linear should publish signing + outbound auth secret requirements",
+  )
   assert(
     linear_secrets.any({ requirement -> requirement.name == "signing_secret" && requirement.required }),
     "linear should require signing_secret",
