@@ -466,10 +466,51 @@ harn trigger replay <event-id> --diff
 
 # Replay against a historical binding version by timestamp.
 harn trigger replay <event-id> --as-of 2026-04-19T12:00:00Z
+
+# Preview a filtered bulk replay without dispatching anything.
+harn trigger replay --where "event.payload.tenant == 'acme' AND attempt.status == 'failed'" --dry-run
+
+# Replay matching records with progress output and throttling.
+harn trigger replay --where "attempt.failed_at > '2026-04-18'" --progress --rate-limit 4
 ```
 
 Sets `HARN_REPLAY=1` during dispatch so nondeterminism in handlers
 can fall back to recorded values when the handler cooperates.
+
+Bulk replay selection uses a Harn expression over event-log records with
+top-level `event`, `binding`, `attempt`, `outcome`, and `audit` objects.
+The CLI accepts SQL-ish convenience syntax for filters: single-quoted
+strings plus `AND`/`OR`/`NOT` normalize into the underlying Harn
+expression evaluator before dispatch.
+
+`--dry-run` returns the matching records without replaying them.
+`--progress` streams per-item progress to stderr, and `--rate-limit`
+caps bulk execution throughput in operations per second.
+
+Every bulk replay appends an audit envelope to
+`trigger.operations.audit` describing who ran it, when, the normalized
+filter, and the affected records.
+
+## harn trigger cancel
+
+Request cancellation for pending or in-flight non-replay trigger
+dispatches recorded in the EventLog snapshot.
+
+```bash
+# Cancel a single event/binding lineage if it is still active.
+harn trigger cancel <event-id>
+
+# Preview which active runs match a filter.
+harn trigger cancel --where "attempt.handler == 'handlers::risky'" --dry-run
+
+# Request cancellation for matching runs with progress output.
+harn trigger cancel --where "event.payload.tenant == 'acme'" --progress --rate-limit 4
+```
+
+Cancellation writes durable control records to `trigger.cancel.requests`
+and the dispatcher polls that topic while dispatches are queued,
+sleeping between retries, or running local handlers. Terminal runs are
+reported as `not_cancellable` and are left unchanged.
 
 ## harn trust query
 

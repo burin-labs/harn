@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::{json, Value as JsonValue};
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
@@ -10,20 +10,17 @@ use time::OffsetDateTime;
 use harn_vm::event_log::{AnyEventLog, EventLog, LogEvent, Topic};
 
 use crate::cli::TriggerReplayArgs;
+use crate::commands::trigger::ops::{
+    build_operation_audit, install_trigger_runtime, load_bulk_targets,
+    workspace_root_and_event_log, BulkTriggerTarget, ProgressReporter, RateLimiter,
+    TriggerEventRecord,
+};
 use crate::package;
 
 const TRIGGER_EVENTS_TOPIC: &str = "triggers.events";
 const TRIGGER_OUTBOX_TOPIC: &str = "trigger.outbox";
 const TRIGGER_DLQ_TOPIC: &str = "trigger.dlq";
 const ACTION_GRAPH_TOPIC: &str = "observability.action_graph";
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-struct TriggerEventRecord {
-    binding_id: String,
-    binding_version: u32,
-    replay_of_event_id: Option<String>,
-    event: harn_vm::TriggerEvent,
-}
 
 #[derive(Clone, Debug, Serialize)]
 pub(crate) struct DispatchOutcomeSummary {
@@ -61,22 +58,82 @@ pub(crate) struct TriggerReplayReport {
     drift: Option<DriftReport>,
 }
 
-pub(crate) async fn run(args: TriggerReplayArgs) -> Result<(), String> {
-    harn_vm::reset_thread_local_state();
+#[derive(Clone, Debug, Serialize)]
+struct BulkReplayItem {
+    event_id: String,
+    binding_id: String,
+    binding_version: u32,
+    binding_key: String,
+    latest_status: String,
+    status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    report: Option<TriggerReplayReport>,
+}
 
-    let cwd = std::env::current_dir().map_err(|error| format!("failed to read cwd: {error}"))?;
-    let workspace_root = harn_vm::stdlib::process::find_project_root(&cwd).unwrap_or(cwd.clone());
-    let event_log = harn_vm::event_log::install_default_for_base_dir(&workspace_root)
-        .map_err(|error| format!("failed to open event log snapshot: {error}"))?;
-    let report = replay_report_for_event_log(
-        event_log,
+#[derive(Clone, Debug, Serialize)]
+struct BulkReplayReport {
+    operation: String,
+    dry_run: bool,
+    filter: String,
+    matched_count: usize,
+    executed_count: usize,
+    skipped_count: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    audit_id: Option<String>,
+    items: Vec<BulkReplayItem>,
+}
+
+struct BulkReplayOptions<'a> {
+    diff: bool,
+    dry_run: bool,
+    progress: bool,
+    rate_limit: Option<f64>,
+    as_of: Option<&'a str>,
+}
+
+pub(crate) async fn run(args: TriggerReplayArgs) -> Result<(), String> {
+    let (workspace_root, event_log) = workspace_root_and_event_log()?;
+
+    if args.where_expr.is_none() {
+        let event_id = args
+            .event_id
+            .as_deref()
+            .ok_or_else(|| "missing trigger event id".to_string())?;
+        let report = replay_report_for_event_log(
+            event_log,
+            &workspace_root,
+            event_id,
+            args.as_of.as_deref(),
+            args.diff,
+        )
+        .await?;
+
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&report)
+                .map_err(|error| format!("failed to encode replay report: {error}"))?
+        );
+        return Ok(());
+    }
+
+    install_trigger_runtime(&workspace_root).await?;
+    let as_of = args.as_of.as_deref().map(parse_timestamp).transpose()?;
+    let where_expr = args.where_expr.as_deref().unwrap_or_default();
+    let (targets, normalized_filter) = load_bulk_targets(&event_log, where_expr, as_of).await?;
+    let report = replay_bulk_targets(
+        &event_log,
         &workspace_root,
-        &args.event_id,
-        args.as_of.as_deref(),
-        args.diff,
+        targets,
+        normalized_filter,
+        BulkReplayOptions {
+            diff: args.diff,
+            dry_run: args.dry_run,
+            progress: args.progress,
+            rate_limit: args.rate_limit,
+            as_of: args.as_of.as_deref(),
+        },
     )
     .await?;
-
     println!(
         "{}",
         serde_json::to_string_pretty(&report)
@@ -92,6 +149,17 @@ pub(crate) async fn replay_report_for_event_log(
     as_of: Option<&str>,
     diff: bool,
 ) -> Result<TriggerReplayReport, String> {
+    let recorded = load_recorded_event(&event_log, event_id).await?;
+    replay_report_for_record(event_log, workspace_root, recorded, as_of, diff).await
+}
+
+async fn replay_report_for_record(
+    event_log: Arc<AnyEventLog>,
+    workspace_root: &Path,
+    recorded: TriggerEventRecord,
+    as_of: Option<&str>,
+    diff: bool,
+) -> Result<TriggerReplayReport, String> {
     let mut vm = build_replay_vm(workspace_root);
     let extensions = package::load_runtime_extensions(workspace_root);
     package::install_runtime_extensions(&extensions);
@@ -99,7 +167,6 @@ pub(crate) async fn replay_report_for_event_log(
         .await
         .map_err(|error| format!("failed to install manifest triggers: {error}"))?;
 
-    let recorded = load_recorded_event(&event_log, event_id).await?;
     let original = if diff {
         Some(load_original_outcome(&event_log, &recorded).await?)
     } else {
@@ -134,7 +201,91 @@ pub(crate) async fn replay_report_for_event_log(
     })
 }
 
-fn build_replay_vm(workspace_root: &Path) -> harn_vm::Vm {
+async fn replay_bulk_targets(
+    event_log: &Arc<AnyEventLog>,
+    workspace_root: &Path,
+    targets: Vec<BulkTriggerTarget>,
+    normalized_filter: String,
+    options: BulkReplayOptions<'_>,
+) -> Result<BulkReplayReport, String> {
+    let matched_count = targets.len();
+    let mut items = Vec::new();
+    let mut executed_count = 0;
+    let mut skipped_count = 0;
+    let mut limiter = RateLimiter::new(options.rate_limit);
+    let mut progress_reporter = ProgressReporter::new(options.progress, "replay", matched_count);
+
+    for target in &targets {
+        if options.dry_run {
+            skipped_count += 1;
+            progress_reporter.update("dry_run");
+            items.push(BulkReplayItem {
+                event_id: target.event_id.clone(),
+                binding_id: target.binding_id.clone(),
+                binding_version: target.binding_version,
+                binding_key: target.binding_key.clone(),
+                latest_status: target.latest_status.clone(),
+                status: "dry_run".to_string(),
+                report: None,
+            });
+            continue;
+        }
+
+        limiter.wait().await;
+        let report = replay_report_for_record(
+            event_log.clone(),
+            workspace_root,
+            target.record.clone(),
+            options.as_of,
+            options.diff,
+        )
+        .await?;
+        executed_count += 1;
+        progress_reporter.update(report.replay.status.as_str());
+        items.push(BulkReplayItem {
+            event_id: target.event_id.clone(),
+            binding_id: target.binding_id.clone(),
+            binding_version: target.binding_version,
+            binding_key: target.binding_key.clone(),
+            latest_status: target.latest_status.clone(),
+            status: report.replay.status.clone(),
+            report: Some(report),
+        });
+    }
+
+    let audit = build_operation_audit(
+        "replay",
+        options.dry_run,
+        Some(normalized_filter.clone()),
+        options.rate_limit,
+        matched_count,
+        executed_count,
+        skipped_count,
+        &targets,
+    );
+    let audit_id = append_replay_audit(event_log, &audit).await?;
+
+    Ok(BulkReplayReport {
+        operation: "replay".to_string(),
+        dry_run: options.dry_run,
+        filter: normalized_filter,
+        matched_count,
+        executed_count,
+        skipped_count,
+        audit_id: Some(audit_id),
+        items,
+    })
+}
+
+async fn append_replay_audit(
+    event_log: &Arc<AnyEventLog>,
+    audit: &crate::commands::trigger::ops::TriggerOperationAuditEntry,
+) -> Result<String, String> {
+    crate::commands::trigger::ops::append_operation_audit(event_log, audit).await?;
+    Ok(audit.id.clone())
+}
+
+pub(crate) fn build_replay_vm(workspace_root: &Path) -> harn_vm::Vm {
     let mut vm = harn_vm::Vm::new();
     harn_vm::register_vm_stdlib(&mut vm);
     harn_vm::register_store_builtins(&mut vm, workspace_root);
@@ -145,7 +296,7 @@ fn build_replay_vm(workspace_root: &Path) -> harn_vm::Vm {
     vm
 }
 
-fn parse_timestamp(raw: &str) -> Result<OffsetDateTime, String> {
+pub(crate) fn parse_timestamp(raw: &str) -> Result<OffsetDateTime, String> {
     if let Ok(parsed) = OffsetDateTime::parse(raw, &Rfc3339) {
         return Ok(parsed);
     }
@@ -191,7 +342,56 @@ async fn load_recorded_event(
         replay_match.get_or_insert(record);
     }
 
-    replay_match.ok_or_else(|| format!("unknown trigger event id '{event_id}'"))
+    if let Some(record) = replay_match {
+        return Ok(record);
+    }
+
+    load_ingested_event(event_log, event_id).await
+}
+
+async fn load_ingested_event(
+    event_log: &Arc<AnyEventLog>,
+    event_id: &str,
+) -> Result<TriggerEventRecord, String> {
+    let envelopes_topic = Topic::new(harn_vm::TRIGGER_INBOX_ENVELOPES_TOPIC)
+        .map_err(|error| format!("invalid trigger inbox topic: {error}"))?;
+    let legacy_topic = Topic::new(harn_vm::TRIGGER_INBOX_LEGACY_TOPIC)
+        .map_err(|error| format!("invalid trigger inbox legacy topic: {error}"))?;
+    let mut envelopes = event_log
+        .read_range(&envelopes_topic, None, usize::MAX)
+        .await
+        .map_err(|error| format!("failed to read trigger inbox envelopes: {error}"))?;
+    let legacy = event_log
+        .read_range(&legacy_topic, None, usize::MAX)
+        .await
+        .map_err(|error| format!("failed to read legacy trigger inbox envelopes: {error}"))?;
+    envelopes.extend(legacy);
+    for (_, event) in envelopes {
+        if event.kind != "event_ingested" {
+            continue;
+        }
+        let Ok(envelope) =
+            serde_json::from_value::<harn_vm::triggers::dispatcher::InboxEnvelope>(event.payload)
+        else {
+            continue;
+        };
+        let (Some(binding_id), Some(binding_version)) =
+            (envelope.trigger_id, envelope.binding_version)
+        else {
+            continue;
+        };
+        if envelope.event.id.0 != event_id {
+            continue;
+        }
+        return Ok(TriggerEventRecord {
+            binding_id,
+            binding_version,
+            replay_of_event_id: None,
+            event: envelope.event,
+        });
+    }
+
+    Err(format!("unknown trigger event id '{event_id}'"))
 }
 
 fn resolve_binding(

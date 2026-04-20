@@ -6,9 +6,9 @@ pub mod test_util;
 pub mod topics;
 
 pub use dispatcher::{
-    clear_dispatcher_state, snapshot_dispatcher_stats, DispatchError, DispatchOutcome,
-    DispatchStatus, Dispatcher, DispatcherDrainReport, DispatcherStatsSnapshot, RetryPolicy,
-    TriggerRetryConfig,
+    append_dispatch_cancel_request, clear_dispatcher_state, snapshot_dispatcher_stats,
+    DispatchCancelRequest, DispatchError, DispatchOutcome, DispatchStatus, Dispatcher,
+    DispatcherDrainReport, DispatcherStatsSnapshot, RetryPolicy, TriggerRetryConfig,
 };
 pub use event::{
     provider_metadata, redact_headers, register_provider_schema, registered_provider_metadata,
@@ -31,7 +31,7 @@ pub use registry::{
 };
 pub use test_util::{run_trigger_harness_fixture, TriggerHarnessResult, TRIGGER_TEST_FIXTURES};
 pub use topics::{
-    TRIGGERS_LIFECYCLE_TOPIC, TRIGGER_ATTEMPTS_TOPIC, TRIGGER_DLQ_TOPIC,
-    TRIGGER_INBOX_CLAIMS_TOPIC, TRIGGER_INBOX_ENVELOPES_TOPIC, TRIGGER_INBOX_LEGACY_TOPIC,
-    TRIGGER_OUTBOX_TOPIC,
+    TRIGGERS_LIFECYCLE_TOPIC, TRIGGER_ATTEMPTS_TOPIC, TRIGGER_CANCEL_REQUESTS_TOPIC,
+    TRIGGER_DLQ_TOPIC, TRIGGER_INBOX_CLAIMS_TOPIC, TRIGGER_INBOX_ENVELOPES_TOPIC,
+    TRIGGER_INBOX_LEGACY_TOPIC, TRIGGER_OPERATION_AUDIT_TOPIC, TRIGGER_OUTBOX_TOPIC,
 };

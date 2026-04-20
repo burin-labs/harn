@@ -88,6 +88,19 @@ The trigger stdlib’s manual replay path also depends on the registry:
 - the wrapper then re-enters the dispatcher against the resolved live binding
   version and threads `replay_of_event_id` through dispatch observability
 
+The CLI’s bulk trigger operations build on the same registry + event-log
+model:
+
+- `harn trigger replay --where ...` filters original trigger records
+  against Harn expressions over `event` / `binding` / `attempt` /
+  `outcome` / `audit` views, then replays each selected binding lineage
+- `harn trigger cancel ...` appends durable cancel requests to
+  `trigger.cancel.requests`; the dispatcher polls that topic for
+  non-replay dispatches so queued retries and local handlers can observe
+  cancellation without requiring a separate control plane
+- both commands append operator metadata to `trigger.operations.audit`
+  so portal/MCP surfaces can inspect historical bulk operations later
+
 ## Test Harness
 
 `harn_vm::triggers::test_util` now provides the shared trigger-system
