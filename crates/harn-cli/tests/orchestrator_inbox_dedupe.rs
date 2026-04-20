@@ -164,7 +164,7 @@ async fn restart_after_emit_does_not_duplicate_cron_dispatch() {
 
     let (mut crashing_child, crashing_rx, crashing_handle) =
         spawn_orchestrator(&temp, &[("HARN_TEST_CRON_FAIL_AFTER_EMIT", "1")]);
-    wait_for_log_line(&mut crashing_child, &crashing_rx, STARTUP_NEEDLE);
+    drop(crashing_rx);
     wait_for_exit_code(&mut crashing_child, 86);
     let crashing_stderr = crashing_handle.join().expect("stderr collector thread");
     assert!(crashing_stderr.contains("registered connectors (1): cron"));

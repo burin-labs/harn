@@ -19,6 +19,7 @@ pub mod mcp_card;
 pub mod mcp_registry;
 pub mod mcp_server;
 pub mod metadata;
+pub mod observability;
 pub mod orchestration;
 pub mod runtime_paths;
 pub mod schema;

@@ -11,20 +11,28 @@ use std::io::{BufRead, BufReader};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{self, Receiver};
-use std::sync::{Mutex, MutexGuard, OnceLock};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use axum::body::Bytes;
+use axum::extract::State;
+use axum::routing::post;
+use axum::Router;
 use hmac::{Hmac, Mac};
 use rcgen::generate_simple_self_signed;
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE, ORIGIN};
 use reqwest::Certificate;
 use reqwest::StatusCode;
+use serde_json::Value as JsonValue;
 use sha2::Sha256;
 use tempfile::TempDir;
 use time::OffsetDateTime;
+use tokio::net::TcpListener;
+use tokio::sync::oneshot;
 
 const STARTUP_PREFIX: &str = "[harn] HTTP listener ready on ";
+const STARTUP_NEEDLE: &str = "HTTP listener ready";
 const SHUTDOWN_NEEDLE: &str = "graceful shutdown complete";
 
 type HmacSha256 = Hmac<Sha256>;
@@ -222,13 +230,10 @@ impl OrchestratorProcess {
         let deadline = Instant::now() + Duration::from_secs(30);
         while Instant::now() < deadline {
             match self.rx.recv_timeout(Duration::from_millis(100)) {
-                Ok(line) if line.contains(STARTUP_PREFIX) => {
-                    return line
-                        .split(STARTUP_PREFIX)
-                        .nth(1)
-                        .expect("startup line has URL")
-                        .trim()
-                        .to_string();
+                Ok(line) if line.contains(STARTUP_NEEDLE) => {
+                    if let Some(url) = listener_url_from_line(&line) {
+                        return url;
+                    }
                 }
                 Ok(_) => continue,
                 Err(mpsc::RecvTimeoutError::Timeout) => {
@@ -240,13 +245,19 @@ impl OrchestratorProcess {
                     }
                 }
                 Err(mpsc::RecvTimeoutError::Disconnected) => {
-                    let stderr = self.join_stderr();
+                    let stderr = self.shutdown_and_join_stderr();
                     panic!("stderr stream closed before listener became ready\nstderr={stderr}");
                 }
             }
         }
-        let stderr = self.join_stderr();
+        let stderr = self.shutdown_and_join_stderr();
         panic!("timed out waiting for listener startup\nstderr={stderr}");
+    }
+
+    fn shutdown_and_join_stderr(&mut self) -> String {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+        self.join_stderr()
     }
 
     fn join_stderr(&mut self) -> String {
@@ -256,6 +267,25 @@ impl OrchestratorProcess {
             .join()
             .expect("stderr collector result")
     }
+}
+
+fn listener_url_from_line(line: &str) -> Option<String> {
+    if let Some(url) = line.split(STARTUP_PREFIX).nth(1) {
+        return url
+            .split_whitespace()
+            .next()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string);
+    }
+    let field = "listener_url=";
+    let start = line.find(field)? + field.len();
+    let url = line[start..]
+        .split_whitespace()
+        .next()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?;
+    Some(url.to_string())
 }
 
 fn send_sigterm(child: &Child) {
@@ -275,6 +305,17 @@ fn wait_for_exit(child: &mut Child) {
             return;
         }
         thread::sleep(Duration::from_millis(100));
+    }
+    panic!("timed out waiting for orchestrator exit");
+}
+
+async fn wait_for_exit_async(child: &mut Child) -> std::process::ExitStatus {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while Instant::now() < deadline {
+        if let Some(status) = child.try_wait().unwrap() {
+            return status;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
     }
     panic!("timed out waiting for orchestrator exit");
 }
@@ -360,6 +401,200 @@ fn wait_for_path(path: &Path, timeout: Duration) {
     panic!("timed out waiting for {}", path.display());
 }
 
+#[derive(Clone, Debug)]
+struct OtlpRequest {
+    headers: Vec<(String, String)>,
+    body: Vec<u8>,
+}
+
+#[derive(Clone)]
+struct MockOtelCollectorState {
+    requests: Arc<Mutex<Vec<OtlpRequest>>>,
+}
+
+struct MockOtelCollector {
+    url: String,
+    requests: Arc<Mutex<Vec<OtlpRequest>>>,
+    shutdown: Option<oneshot::Sender<()>>,
+    thread: Option<thread::JoinHandle<()>>,
+}
+
+impl MockOtelCollector {
+    fn start() -> Self {
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let state = MockOtelCollectorState {
+            requests: requests.clone(),
+        };
+        let (url_tx, url_rx) = mpsc::channel();
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        let thread = thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            runtime.block_on(async move {
+                let app = Router::new()
+                    .route("/v1/traces", post(record_otlp_traces))
+                    .with_state(state);
+                let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+                let addr = listener.local_addr().unwrap();
+                url_tx.send(format!("http://{addr}")).unwrap();
+                axum::serve(listener, app)
+                    .with_graceful_shutdown(async {
+                        let _ = shutdown_rx.await;
+                    })
+                    .await
+                    .unwrap();
+            });
+        });
+
+        Self {
+            url: url_rx.recv().unwrap(),
+            requests,
+            shutdown: Some(shutdown_tx),
+            thread: Some(thread),
+        }
+    }
+
+    fn collected_spans(&self) -> Vec<CollectedSpan> {
+        let requests = self.requests.lock().unwrap().clone();
+        requests
+            .into_iter()
+            .flat_map(|request| {
+                serde_json::from_slice::<JsonValue>(&request.body)
+                    .map(|body| collect_spans_from_body(&body))
+                    .unwrap_or_default()
+            })
+            .collect()
+    }
+}
+
+impl Drop for MockOtelCollector {
+    fn drop(&mut self) {
+        if let Some(shutdown) = self.shutdown.take() {
+            let _ = shutdown.send(());
+        }
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+#[derive(Debug)]
+struct CollectedSpan {
+    name: String,
+    trace_id: String,
+    span_id: String,
+    parent_span_id: Option<String>,
+    attributes: Vec<(String, JsonValue)>,
+}
+
+async fn record_otlp_traces(
+    State(state): State<MockOtelCollectorState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> StatusCode {
+    let captured_headers = headers
+        .iter()
+        .filter_map(|(name, value)| {
+            value
+                .to_str()
+                .ok()
+                .map(|value| (name.as_str().to_ascii_lowercase(), value.to_string()))
+        })
+        .collect::<Vec<_>>();
+    state.requests.lock().unwrap().push(OtlpRequest {
+        headers: captured_headers,
+        body: body.to_vec(),
+    });
+    StatusCode::OK
+}
+
+fn collect_spans_from_body(body: &JsonValue) -> Vec<CollectedSpan> {
+    let mut spans = Vec::new();
+    let Some(resource_spans) = body.get("resourceSpans").and_then(JsonValue::as_array) else {
+        return spans;
+    };
+
+    for resource_span in resource_spans {
+        let Some(scope_spans) = resource_span
+            .get("scopeSpans")
+            .and_then(JsonValue::as_array)
+        else {
+            continue;
+        };
+        for scope_span in scope_spans {
+            let Some(otel_spans) = scope_span.get("spans").and_then(JsonValue::as_array) else {
+                continue;
+            };
+            for span in otel_spans {
+                spans.push(CollectedSpan {
+                    name: span
+                        .get("name")
+                        .and_then(JsonValue::as_str)
+                        .unwrap_or_default()
+                        .to_string(),
+                    trace_id: span
+                        .get("traceId")
+                        .and_then(JsonValue::as_str)
+                        .unwrap_or_default()
+                        .to_string(),
+                    span_id: span
+                        .get("spanId")
+                        .and_then(JsonValue::as_str)
+                        .unwrap_or_default()
+                        .to_string(),
+                    parent_span_id: span
+                        .get("parentSpanId")
+                        .and_then(JsonValue::as_str)
+                        .map(ToString::to_string)
+                        .filter(|value| !value.is_empty()),
+                    attributes: span
+                        .get("attributes")
+                        .and_then(JsonValue::as_array)
+                        .map(|attributes| {
+                            attributes
+                                .iter()
+                                .filter_map(|attribute| {
+                                    Some((
+                                        attribute.get("key")?.as_str()?.to_string(),
+                                        attribute.get("value")?.clone(),
+                                    ))
+                                })
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_default(),
+                });
+            }
+        }
+    }
+
+    spans
+}
+
+fn attribute_string(span: &CollectedSpan, key: &str) -> Option<String> {
+    span.attributes
+        .iter()
+        .find(|(name, _)| name == key)
+        .and_then(|(_, value)| {
+            value
+                .get("stringValue")
+                .and_then(JsonValue::as_str)
+                .map(ToString::to_string)
+                .or_else(|| {
+                    value
+                        .get("intValue")
+                        .map(|value| {
+                            value
+                                .as_str()
+                                .map(ToString::to_string)
+                                .or_else(|| value.as_i64().map(|value| value.to_string()))
+                        })
+                        .and_then(|value| value)
+                })
+        })
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn github_webhook_delivery_is_accepted_and_persisted() {
     let _lock = lock_orchestrator_tests();
@@ -389,8 +624,9 @@ async fn github_webhook_delivery_is_accepted_and_persisted() {
     assert_status(response, StatusCode::OK).await;
 
     send_sigterm(&process.child);
-    wait_for_exit(&mut process.child);
+    let status = wait_for_exit_async(&mut process.child).await;
     let stderr = process.join_stderr();
+    assert!(status.success(), "status={status} stderr={stderr}");
     assert!(stderr.contains(SHUTDOWN_NEEDLE), "stderr={stderr}");
 
     let snapshot = state_snapshot(&temp);
@@ -567,8 +803,9 @@ async fn a2a_push_route_requires_bearer_or_valid_hmac() {
     assert_status(response, StatusCode::OK).await;
 
     send_sigterm(&process.child);
-    wait_for_exit(&mut process.child);
+    let status = wait_for_exit_async(&mut process.child).await;
     let stderr = process.join_stderr();
+    assert!(status.success(), "status={status} stderr={stderr}");
     assert!(stderr.contains(SHUTDOWN_NEEDLE), "stderr={stderr}");
 
     let snapshot = state_snapshot(&temp);
@@ -618,8 +855,9 @@ async fn tls_listener_serves_https_with_supplied_cert_and_key() {
     assert_status(response, StatusCode::OK).await;
 
     send_sigterm(&process.child);
-    wait_for_exit(&mut process.child);
+    let status = process.child.wait().unwrap();
     let stderr = process.join_stderr();
+    assert!(status.success(), "status={status} stderr={stderr}");
     assert!(stderr.contains(SHUTDOWN_NEEDLE), "stderr={stderr}");
 }
 
@@ -735,4 +973,105 @@ async fn graceful_shutdown_waits_for_in_flight_request() {
         "snapshot={snapshot}"
     );
     assert!(snapshot.contains("\"in_flight\": 0"), "snapshot={snapshot}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn otel_exports_ingest_and_dispatch_spans_with_shared_trace_id() {
+    let _lock = lock_orchestrator_tests();
+    let temp = TempDir::new().unwrap();
+    write_file(temp.path(), "harn.toml", &base_manifest(None));
+    write_file(temp.path(), "lib.harn", handler_module());
+
+    let collector = MockOtelCollector::start();
+    let secret = "otel-secret";
+    let envs = [
+        ("HARN_SECRET_PROVIDERS", "env"),
+        ("HARN_SECRET_GITHUB_WEBHOOK_SECRET", secret),
+        ("HARN_OTEL_ENDPOINT", collector.url.as_str()),
+        ("HARN_OTEL_SERVICE_NAME", "harn-orchestrator-test"),
+        (
+            "HARN_OTEL_HEADERS",
+            "authorization=Bearer otel-token,x-tenant-id=tenant-abc",
+        ),
+    ];
+    let mut process = spawn_orchestrator(&temp, &[], &envs);
+    let base_url = process.wait_for_listener_url();
+
+    let body = br#"{"action":"opened","issue":{"number":5}}"#;
+    let client = reqwest::Client::new();
+    let request = client
+        .post(format!("{base_url}/triggers/github-new-issue"))
+        .headers(github_headers(secret, body, None))
+        .body(body.to_vec())
+        .build()
+        .unwrap();
+    let response = client.execute(request).await.unwrap();
+    assert_status(response, StatusCode::OK).await;
+
+    send_sigterm(&process.child);
+    let status = wait_for_exit_async(&mut process.child).await;
+    let stderr = process.join_stderr();
+    assert!(status.success(), "status={status} stderr={stderr}");
+    assert!(stderr.contains(SHUTDOWN_NEEDLE), "stderr={stderr}");
+
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let spans = loop {
+        let spans = collector.collected_spans();
+        let has_ingest = spans.iter().any(|span| span.name == "ingest");
+        let has_dispatch = spans.iter().any(|span| span.name == "dispatch");
+        if has_ingest && has_dispatch {
+            break spans;
+        }
+        if Instant::now() >= deadline {
+            let requests = collector.requests.lock().unwrap().clone();
+            panic!(
+                "timed out waiting for OTel spans\ncollector_headers={:#?}",
+                requests
+                    .iter()
+                    .map(|request| request.headers.clone())
+                    .collect::<Vec<_>>()
+            );
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    };
+
+    let ingest = spans.iter().find(|span| span.name == "ingest").unwrap();
+    let dispatch = spans.iter().find(|span| span.name == "dispatch").unwrap();
+    assert_eq!(ingest.trace_id, dispatch.trace_id);
+    assert_eq!(
+        dispatch.parent_span_id.as_deref(),
+        Some(ingest.span_id.as_str())
+    );
+
+    let ingest_trace_id = attribute_string(ingest, "trace_id").unwrap();
+    let dispatch_trace_id = attribute_string(dispatch, "trace_id").unwrap();
+    assert_eq!(ingest_trace_id, dispatch_trace_id);
+    assert_eq!(
+        attribute_string(dispatch, "result.status").as_deref(),
+        Some("succeeded")
+    );
+    assert!(
+        attribute_string(dispatch, "result.duration_ms").is_some(),
+        "dispatch span was missing duration attribute: {dispatch:?}"
+    );
+
+    let requests = collector.requests.lock().unwrap().clone();
+    assert!(
+        requests.iter().any(|request| {
+            request
+                .headers
+                .iter()
+                .any(|(name, value)| name == "authorization" && value == "Bearer otel-token")
+        }),
+        "collector never saw Authorization header: {requests:?}"
+    );
+    assert!(
+        requests.iter().any(|request| {
+            request
+                .headers
+                .iter()
+                .any(|(name, value)| name == "x-tenant-id" && value == "tenant-abc")
+        }),
+        "collector never saw tenant header: {requests:?}"
+    );
 }

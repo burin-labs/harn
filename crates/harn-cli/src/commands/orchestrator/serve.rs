@@ -37,6 +37,9 @@ pub(crate) async fn run(args: OrchestratorServeArgs) -> Result<(), String> {
 }
 
 async fn run_local(args: OrchestratorServeArgs) -> Result<(), String> {
+    let _observability =
+        harn_vm::observability::otel::ObservabilityGuard::install_orchestrator_subscriber_from_env(
+        )?;
     harn_vm::reset_thread_local_state();
     let shutdown_timeout = Duration::from_secs(args.shutdown_timeout.max(1));
 
@@ -138,7 +141,12 @@ async fn run_local(args: OrchestratorServeArgs) -> Result<(), String> {
         format_activation_summary(&connector_runtime.activations)
     );
 
-    let dispatcher = harn_vm::Dispatcher::with_event_log(vm, event_log.clone());
+    let metrics_registry = Arc::new(harn_vm::MetricsRegistry::default());
+    let dispatcher = harn_vm::Dispatcher::with_event_log_and_metrics(
+        vm,
+        event_log.clone(),
+        Some(metrics_registry.clone()),
+    );
     let pending_pump = spawn_pending_pump(event_log.clone(), dispatcher.clone())?;
     let cron_pump = spawn_cron_pump(event_log.clone(), dispatcher.clone())?;
     let inbox_pump = spawn_inbox_pump(event_log.clone(), dispatcher.clone())?;
@@ -152,6 +160,7 @@ async fn run_local(args: OrchestratorServeArgs) -> Result<(), String> {
         max_body_bytes: ListenerConfig::max_body_bytes_or_default(
             manifest.orchestrator.max_body_bytes,
         ),
+        metrics_registry: metrics_registry.clone(),
         routes: route_configs,
     })
     .await?;

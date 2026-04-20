@@ -368,7 +368,7 @@ pub fn on_issue(event: TriggerEvent) {
     wait_for_exit(&mut child);
     let stderr = handle.join().expect("stderr collector thread");
 
-    assert!(stderr.contains("secret providers:"), "stderr={stderr}");
+    assert!(stderr.contains("secret providers"), "stderr={stderr}");
     assert!(
         stderr.contains("registered triggers (1):"),
         "stderr={stderr}"

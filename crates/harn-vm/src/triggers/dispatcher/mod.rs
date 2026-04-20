@@ -4,11 +4,14 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+#[cfg(feature = "otel")]
+use std::time::Instant;
 
 use futures::{pin_mut, StreamExt};
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
 use tokio::sync::Notify;
+use tracing::Instrument as _;
 
 use crate::event_log::{active_event_log, AnyEventLog, EventLog, LogError, LogEvent, Topic};
 use crate::llm::trigger_predicate::{start_predicate_evaluation, PredicateCacheEntry};
@@ -90,6 +93,7 @@ pub struct Dispatcher {
     event_log: Arc<AnyEventLog>,
     cancel_tx: broadcast::Sender<()>,
     state: Arc<DispatcherRuntimeState>,
+    metrics: Option<Arc<crate::MetricsRegistry>>,
 }
 
 #[derive(Debug)]
@@ -131,6 +135,18 @@ pub enum DispatchStatus {
     Dlq,
     Skipped,
     Cancelled,
+}
+
+impl DispatchStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Succeeded => "succeeded",
+            Self::Failed => "failed",
+            Self::Dlq => "dlq",
+            Self::Skipped => "skipped",
+            Self::Cancelled => "cancelled",
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -253,6 +269,14 @@ impl Dispatcher {
     }
 
     pub fn with_event_log(base_vm: Vm, event_log: Arc<AnyEventLog>) -> Self {
+        Self::with_event_log_and_metrics(base_vm, event_log, None)
+    }
+
+    pub fn with_event_log_and_metrics(
+        base_vm: Vm,
+        event_log: Arc<AnyEventLog>,
+        metrics: Option<Arc<crate::MetricsRegistry>>,
+    ) -> Self {
         let state = Arc::new(DispatcherRuntimeState::default());
         ACTIVE_DISPATCHER_STATE.with(|slot| {
             *slot.borrow_mut() = Some(state.clone());
@@ -263,6 +287,7 @@ impl Dispatcher {
             event_log,
             cancel_tx,
             state,
+            metrics,
         }
     }
 
@@ -409,7 +434,7 @@ impl Dispatcher {
             )
             .map_err(|error| DispatchError::Registry(error.to_string()))?;
             return Ok(vec![
-                self.dispatch_with_replay(&binding, envelope.event, None)
+                self.dispatch_with_replay(&binding, envelope.event, None, None)
                     .await?,
             ]);
         }
@@ -427,7 +452,7 @@ impl Dispatcher {
             )
             .map_err(|error| DispatchError::Registry(error.to_string()))?;
             return Ok(vec![
-                self.dispatch_with_replay(&binding, envelope.event, None)
+                self.dispatch_with_replay(&binding, envelope.event, None, None)
                     .await?,
             ]);
         }
@@ -452,7 +477,7 @@ impl Dispatcher {
         binding: &TriggerBinding,
         event: TriggerEvent,
     ) -> Result<DispatchOutcome, DispatchError> {
-        self.dispatch_with_replay(binding, event, None).await
+        self.dispatch_with_replay(binding, event, None, None).await
     }
 
     pub async fn dispatch_replay(
@@ -461,7 +486,17 @@ impl Dispatcher {
         event: TriggerEvent,
         replay_of_event_id: String,
     ) -> Result<DispatchOutcome, DispatchError> {
-        self.dispatch_with_replay(binding, event, Some(replay_of_event_id))
+        self.dispatch_with_replay(binding, event, Some(replay_of_event_id), None)
+            .await
+    }
+
+    pub async fn dispatch_with_parent_span_id(
+        &self,
+        binding: &TriggerBinding,
+        event: TriggerEvent,
+        parent_span_id: Option<String>,
+    ) -> Result<DispatchOutcome, DispatchError> {
+        self.dispatch_with_replay(binding, event, None, parent_span_id)
             .await
     }
 
@@ -470,13 +505,45 @@ impl Dispatcher {
         binding: &TriggerBinding,
         event: TriggerEvent,
         replay_of_event_id: Option<String>,
+        parent_span_id: Option<String>,
     ) -> Result<DispatchOutcome, DispatchError> {
-        ACTIVE_DISPATCH_IS_REPLAY
+        let span = tracing::info_span!(
+            "dispatch",
+            trigger_id = %binding.id.as_str(),
+            binding_version = binding.version,
+            trace_id = %event.trace_id.0
+        );
+        let _ = crate::observability::otel::set_span_parent(
+            &span,
+            &event.trace_id,
+            parent_span_id.as_deref(),
+        );
+        #[cfg(feature = "otel")]
+        let started_at = Instant::now();
+        let metrics = self.metrics.clone();
+        let outcome = ACTIVE_DISPATCH_IS_REPLAY
             .scope(
                 replay_of_event_id.is_some(),
-                self.dispatch_with_replay_inner(binding, event, replay_of_event_id),
+                self.dispatch_with_replay_inner(binding, event, replay_of_event_id)
+                    .instrument(span),
             )
-            .await
+            .await;
+        if let Some(metrics) = metrics.as_ref() {
+            match &outcome {
+                Ok(dispatch_outcome) => match dispatch_outcome.status {
+                    DispatchStatus::Succeeded | DispatchStatus::Skipped => {
+                        metrics.record_dispatch_succeeded();
+                    }
+                    _ => metrics.record_dispatch_failed(),
+                },
+                Err(_) => metrics.record_dispatch_failed(),
+            }
+        }
+        #[cfg(feature = "otel")]
+        {
+            let _ = started_at;
+        }
+        outcome
     }
 
     async fn dispatch_with_replay_inner(

@@ -253,6 +253,9 @@ pub struct ConnectorMetricsSnapshot {
     pub inbox_durable_hits: u64,
     pub inbox_expired_entries: u64,
     pub inbox_active_entries: u64,
+    pub dispatch_succeeded_total: u64,
+    pub dispatch_failed_total: u64,
+    pub retry_scheduled_total: u64,
 }
 
 /// Shared metrics surface for connector-local counters and timings.
@@ -264,6 +267,9 @@ pub struct MetricsRegistry {
     inbox_durable_hits: AtomicU64,
     inbox_expired_entries: AtomicU64,
     inbox_active_entries: AtomicU64,
+    dispatch_succeeded_total: AtomicU64,
+    dispatch_failed_total: AtomicU64,
+    retry_scheduled_total: AtomicU64,
 }
 
 impl MetricsRegistry {
@@ -275,6 +281,9 @@ impl MetricsRegistry {
             inbox_durable_hits: self.inbox_durable_hits.load(Ordering::Relaxed),
             inbox_expired_entries: self.inbox_expired_entries.load(Ordering::Relaxed),
             inbox_active_entries: self.inbox_active_entries.load(Ordering::Relaxed),
+            dispatch_succeeded_total: self.dispatch_succeeded_total.load(Ordering::Relaxed),
+            dispatch_failed_total: self.dispatch_failed_total.load(Ordering::Relaxed),
+            retry_scheduled_total: self.retry_scheduled_total.load(Ordering::Relaxed),
         }
     }
 
@@ -304,6 +313,44 @@ impl MetricsRegistry {
     pub(crate) fn set_inbox_active_entries(&self, count: usize) {
         self.inbox_active_entries
             .store(count as u64, Ordering::Relaxed);
+    }
+
+    pub fn record_dispatch_succeeded(&self) {
+        self.dispatch_succeeded_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_dispatch_failed(&self) {
+        self.dispatch_failed_total.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_retry_scheduled(&self) {
+        self.retry_scheduled_total.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn render_prometheus(&self) -> String {
+        let snapshot = self.snapshot();
+        let counters = [
+            (
+                "dispatch_succeeded_total",
+                snapshot.dispatch_succeeded_total,
+            ),
+            ("dispatch_failed_total", snapshot.dispatch_failed_total),
+            ("inbox_duplicates_total", snapshot.inbox_duplicates_rejected),
+            ("retry_scheduled_total", snapshot.retry_scheduled_total),
+        ];
+
+        let mut rendered = String::new();
+        for (name, value) in counters {
+            rendered.push_str("# TYPE ");
+            rendered.push_str(name);
+            rendered.push_str(" counter\n");
+            rendered.push_str(name);
+            rendered.push(' ');
+            rendered.push_str(&value.to_string());
+            rendered.push('\n');
+        }
+        rendered
     }
 }
 
