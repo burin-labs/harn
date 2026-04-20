@@ -1204,9 +1204,9 @@ mod tests {
     use std::time::Duration as StdDuration;
 
     use super::{
-        Cli, Command, McpCommand, OrchestratorCommand, ProjectTemplate, RunsCommand, SkillCommand,
-        SkillKeyCommand, SkillTrustCommand, SkillsCommand, TriggerCommand, TrustCommand,
-        TrustOutcomeArg, TrustTierArg,
+        Cli, Command, McpCommand, OrchestratorCommand, OrchestratorQueueCommand, ProjectTemplate,
+        RunsCommand, SkillCommand, SkillKeyCommand, SkillTrustCommand, SkillsCommand,
+        TriggerCommand, TrustCommand, TrustOutcomeArg, TrustTierArg,
     };
     use clap::Parser;
 
