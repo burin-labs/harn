@@ -818,6 +818,52 @@ pub(crate) struct OrchestratorDlqArgs {
 pub(crate) struct OrchestratorQueueArgs {
     #[command(flatten)]
     pub local: OrchestratorLocalArgs,
+    #[command(subcommand)]
+    pub command: Option<OrchestratorQueueCommand>,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum OrchestratorQueueCommand {
+    /// List worker queues plus the existing dispatcher/inbox summary.
+    Ls(OrchestratorQueueLsArgs),
+    /// Claim and process every ready job on one worker queue.
+    Drain(OrchestratorQueueDrainArgs),
+    /// Drop all currently unclaimed jobs from one worker queue.
+    Purge(OrchestratorQueuePurgeArgs),
+}
+
+#[derive(Debug, Args, Default)]
+pub(crate) struct OrchestratorQueueLsArgs {
+    /// Emit JSON instead of human-readable output.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct OrchestratorQueueDrainArgs {
+    /// Queue name to drain.
+    pub queue: String,
+    /// Consumer id recorded on queue claims/responses. Defaults to a generated local id.
+    #[arg(long, value_name = "ID")]
+    pub consumer_id: Option<String>,
+    /// Claim TTL before another consumer may re-claim an in-flight job.
+    #[arg(long = "claim-ttl", value_name = "DURATION", value_parser = parse_duration_arg, default_value = "5m")]
+    pub claim_ttl: StdDuration,
+    /// Emit JSON instead of human-readable output.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct OrchestratorQueuePurgeArgs {
+    /// Queue name to purge.
+    pub queue: String,
+    /// Confirm that the ready jobs should actually be purged.
+    #[arg(long, default_value_t = false, action = ArgAction::SetTrue)]
+    pub confirm: bool,
+    /// Emit JSON instead of human-readable output.
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Debug, Args)]
@@ -1158,9 +1204,9 @@ mod tests {
     use std::time::Duration as StdDuration;
 
     use super::{
-        Cli, Command, McpCommand, OrchestratorCommand, ProjectTemplate, RunsCommand, SkillCommand,
-        SkillKeyCommand, SkillTrustCommand, SkillsCommand, TriggerCommand, TrustCommand,
-        TrustOutcomeArg, TrustTierArg,
+        Cli, Command, McpCommand, OrchestratorCommand, OrchestratorQueueCommand, ProjectTemplate,
+        RunsCommand, SkillCommand, SkillKeyCommand, SkillTrustCommand, SkillsCommand,
+        TriggerCommand, TrustCommand, TrustOutcomeArg, TrustTierArg,
     };
     use clap::Parser;
 
@@ -1674,6 +1720,67 @@ mod tests {
             panic!("expected orchestrator queue");
         };
         assert_eq!(queue.local.state_dir, PathBuf::from("state/orchestrator"));
+        assert!(queue.command.is_none());
+    }
+
+    #[test]
+    fn test_parses_orchestrator_queue_drain_args() {
+        let cli = Cli::parse_from([
+            "harn",
+            "orchestrator",
+            "queue",
+            "--state-dir",
+            "state/orchestrator",
+            "drain",
+            "triage",
+            "--consumer-id",
+            "worker-a",
+            "--claim-ttl",
+            "30s",
+            "--json",
+        ]);
+
+        let Command::Orchestrator(args) = cli.command.unwrap() else {
+            panic!("expected orchestrator command");
+        };
+        let OrchestratorCommand::Queue(queue) = args.command else {
+            panic!("expected orchestrator queue");
+        };
+        let Some(OrchestratorQueueCommand::Drain(drain)) = queue.command else {
+            panic!("expected orchestrator queue drain");
+        };
+        assert_eq!(queue.local.state_dir, PathBuf::from("state/orchestrator"));
+        assert_eq!(drain.queue, "triage");
+        assert_eq!(drain.consumer_id.as_deref(), Some("worker-a"));
+        assert_eq!(drain.claim_ttl, StdDuration::from_secs(30));
+        assert!(drain.json);
+    }
+
+    #[test]
+    fn test_parses_orchestrator_queue_purge_args() {
+        let cli = Cli::parse_from([
+            "harn",
+            "orchestrator",
+            "queue",
+            "--state-dir",
+            "state/orchestrator",
+            "purge",
+            "triage",
+            "--confirm",
+        ]);
+
+        let Command::Orchestrator(args) = cli.command.unwrap() else {
+            panic!("expected orchestrator command");
+        };
+        let OrchestratorCommand::Queue(queue) = args.command else {
+            panic!("expected orchestrator queue");
+        };
+        let Some(OrchestratorQueueCommand::Purge(purge)) = queue.command else {
+            panic!("expected orchestrator queue purge");
+        };
+        assert_eq!(queue.local.state_dir, PathBuf::from("state/orchestrator"));
+        assert_eq!(purge.queue, "triage");
+        assert!(purge.confirm);
     }
 
     #[test]

@@ -1878,6 +1878,14 @@ fn trigger_kind_label(kind: TriggerKind) -> &'static str {
     }
 }
 
+fn worker_queue_priority(priority: TriggerDispatchPriority) -> harn_vm::WorkerQueuePriority {
+    match priority {
+        TriggerDispatchPriority::High => harn_vm::WorkerQueuePriority::High,
+        TriggerDispatchPriority::Normal => harn_vm::WorkerQueuePriority::Normal,
+        TriggerDispatchPriority::Low => harn_vm::WorkerQueuePriority::Low,
+    }
+}
+
 pub fn manifest_trigger_binding_spec(
     trigger: CollectedManifestTrigger,
 ) -> harn_vm::TriggerBindingSpec {
@@ -2000,6 +2008,7 @@ pub fn manifest_trigger_binding_spec(
         provider,
         autonomy_tier,
         handler,
+        dispatch_priority: worker_queue_priority(config.dispatch_priority),
         when,
         when_budget,
         retry,

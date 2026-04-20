@@ -126,8 +126,10 @@ Current behavior:
   fail-closed per-predicate LLM cost governance.
 - When a manifest-installed binding uses `batch = { ... }`, the selected leader
   event carries the coalesced member list in `event.batch`.
-- `a2a://...` and `worker://...` handlers still return the dispatcher’s
-  explicit `NotImplemented` failure path.
+- `a2a://...` handlers return either the inline remote result or a pending task
+  handle, depending on the peer response.
+- `worker://...` handlers return an enqueue receipt in `DispatchHandle.result`
+  with `{queue, job_event_id, response_topic}`.
 
 ### `trigger_replay(event_id)`
 

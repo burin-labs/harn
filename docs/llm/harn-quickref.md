@@ -919,9 +919,9 @@ let handle = trigger_register({
 ```
 
 - `trigger_fire` / `trigger_replay` now reuse the dispatcher for local
-  handlers, retries, and DLQ transitions, but `a2a://...` and
-  `worker://...` still return the dispatcher’s explicit
-  `NotImplemented` path.
+  handlers, retries, and DLQ transitions. `a2a://...` returns either
+  an inline remote result or a pending task handle, while `worker://...`
+  returns an enqueue receipt for the durable worker queue job.
 - `trigger_replay` is not the full deterministic T-14 replay engine yet:
   it replays the recorded trigger event through today’s dispatcher/runtime
   state rather than a sandboxed drift-detecting environment.

@@ -1,0 +1,106 @@
+import "../_common"
+
+pipeline default(task) {
+  let unique = uuid()
+  let root = path_join(temp_dir(), "harn-worker-claim-expiry-" + unique)
+  let producer_dir = path_join(root, "producer")
+  let failing_consumer_dir = path_join(root, "consumer-fail")
+  let ok_consumer_dir = path_join(root, "consumer-ok")
+  let state_dir = path_join(root, "state")
+  mkdir(root)
+  mkdir(producer_dir)
+  mkdir(failing_consumer_dir)
+  mkdir(ok_consumer_dir)
+  mkdir(state_dir)
+  write_file(
+    path_join(producer_dir, "harn.toml"),
+    "[package]\nname = \"worker-producer\"\n\n[[triggers]]\nid = \"incoming-review-task\"\nkind = \"a2a-push\"\nprovider = \"a2a-push\"\nmatch = { events = [\"a2a.task.received\"] }\nhandler = \"worker://triage\"\n",
+  )
+  write_file(
+    path_join(failing_consumer_dir, "harn.toml"),
+    "[package]\nname = \"worker-consumer-fail\"\n\n[exports]\nhandlers = \"lib.harn\"\n\n[[triggers]]\nid = \"incoming-review-task\"\nkind = \"a2a-push\"\nprovider = \"a2a-push\"\nmatch = { events = [\"a2a.task.received\"] }\nhandler = \"handlers::on_task\"\n",
+  )
+  write_file(
+    path_join(failing_consumer_dir, "lib.harn"),
+    "import \"std/triggers\"\n\npub fn on_task(event: TriggerEvent) -> any {\n  throw(\"fail:\" + event.id)\n}\n",
+  )
+  write_file(
+    path_join(ok_consumer_dir, "harn.toml"),
+    "[package]\nname = \"worker-consumer-ok\"\n\n[exports]\nhandlers = \"lib.harn\"\n\n[[triggers]]\nid = \"incoming-review-task\"\nkind = \"a2a-push\"\nprovider = \"a2a-push\"\nmatch = { events = [\"a2a.task.received\"] }\nhandler = \"handlers::on_task\"\n",
+  )
+  write_file(
+    path_join(ok_consumer_dir, "lib.harn"),
+    "import \"std/triggers\"\n\npub fn on_task(event: TriggerEvent) -> dict {\n  return {ok: true, event_id: event.id}\n}\n",
+  )
+  let repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+  let harn_bin = env_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(repo_root))
+  assert(file_exists(harn_bin), "missing built harn binary at " + harn_bin)
+  let fire = exec(
+    harn_bin,
+    "orchestrator",
+    "fire",
+    "incoming-review-task",
+    "--config",
+    path_join(producer_dir, "harn.toml"),
+    "--state-dir",
+    state_dir,
+  )
+  assert(fire.success, "producer fire failed: " + fire.stderr)
+  let first = exec(
+    harn_bin,
+    "orchestrator",
+    "queue",
+    "--config",
+    path_join(failing_consumer_dir, "harn.toml"),
+    "--state-dir",
+    state_dir,
+    "drain",
+    "triage",
+    "--consumer-id",
+    "consumer-a",
+    "--claim-ttl",
+    "1s",
+    "--json",
+  )
+  let first_data = json_parse(first.stdout)
+  println(
+    first.success && first_data.drained == 1 && first_data.acked == 0 && first_data.deferred == 1,
+  )
+  println(
+    first_data.summary.in_flight == 1
+    && first_data.summary.responses == 1
+    && first_data.responses[0].outcome?.status == "dlq"
+    && first_data.responses[0].outcome?.error != nil,
+  )
+  sleep(2200ms)
+  let second = exec(
+    harn_bin,
+    "orchestrator",
+    "queue",
+    "--config",
+    path_join(ok_consumer_dir, "harn.toml"),
+    "--state-dir",
+    state_dir,
+    "drain",
+    "triage",
+    "--consumer-id",
+    "consumer-b",
+    "--json",
+  )
+  let second_data = json_parse(second.stdout)
+  println(
+    second.success && second_data.drained == 1 && second_data.acked == 1 && second_data.deferred == 0,
+  )
+  let first_has_response = len(first_data.responses ?? []) > 0
+  let second_has_response = len(second_data.responses ?? []) > 0
+  println(
+    first_has_response
+    && second_has_response
+    && second_data.responses[0].job_event_id == first_data.responses[0].job_event_id
+    && second_data.responses[0].outcome?.status == "succeeded",
+  )
+  println(
+    second_data.summary.ready == 0 && second_data.summary.in_flight == 0
+    && second_data.summary.responses == 2,
+  )
+}

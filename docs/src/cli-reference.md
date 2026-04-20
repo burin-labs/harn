@@ -442,6 +442,15 @@ harn orchestrator dlq --replay <event-id>
 
 # Inspect the pending-queue head.
 harn orchestrator queue
+
+# List worker queues + stranded dispatcher envelopes explicitly.
+harn orchestrator queue --config harn.toml --state-dir ./.harn/orchestrator ls
+
+# Drain one worker queue with a local consumer manifest.
+harn orchestrator queue --config harn.toml --state-dir ./.harn/orchestrator drain <queue>
+
+# Drop ready jobs from a worker queue.
+harn orchestrator queue --config harn.toml --state-dir ./.harn/orchestrator purge <queue> --confirm
 ```
 
 `harn orchestrator inspect/fire/replay/dlq/queue` are offline

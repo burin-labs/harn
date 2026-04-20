@@ -48,9 +48,18 @@ surfaces those envelopes instead of silently re-firing them:
 - `harn orchestrator queue` shows a `stranded_envelopes=<count>` summary
   plus a `Stranded envelopes:` section with the event ids, bindings, and
   ages.
+- `harn orchestrator queue ls` also reports worker queue depth, in-flight
+  claims, response counts, and oldest-unclaimed age for each known
+  `worker://` queue.
 - `orchestrator.lifecycle` records a
   `startup_stranded_envelopes` event with a `count` payload.
 - Recovery is explicit via `harn orchestrator recover`.
+
+Worker queues use the same state dir EventLog as the rest of the orchestrator.
+That means a producer manifest can enqueue `worker://triage` jobs while a
+separate consumer manifest, running against the same EventLog backend, drains
+the queue with `harn orchestrator queue drain triage`. See
+[Worker dispatch](./orchestrator/worker-dispatch.md) for the full model.
 
 `--manifest` is an alias for `--config`, and `--listen` is an alias for
 `--bind`. Container deployments can also configure those through

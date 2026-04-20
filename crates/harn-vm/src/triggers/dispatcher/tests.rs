@@ -170,6 +170,7 @@ async fn dispatcher_fixture_with_options(
             raw: handler_name.to_string(),
             closure: handler,
         },
+        dispatch_priority: crate::WorkerQueuePriority::Normal,
         when,
         when_budget,
         retry,
@@ -217,6 +218,7 @@ async fn a2a_dispatcher_fixture(
             target: target.clone(),
             allow_cleartext,
         },
+        dispatch_priority: crate::WorkerQueuePriority::Normal,
         when: None,
         when_budget: None,
         retry,
@@ -230,6 +232,51 @@ async fn a2a_dispatcher_fixture(
         manifest_path: None,
         package_name: Some("workspace".to_string()),
         definition_fingerprint: format!("fp:{target}"),
+    }])
+    .await
+    .expect("install test trigger binding");
+
+    (dir, log.clone(), Dispatcher::with_event_log(vm, log))
+}
+
+async fn worker_dispatcher_fixture(
+    queue: String,
+    retry: TriggerRetryConfig,
+    dispatch_priority: crate::WorkerQueuePriority,
+) -> (
+    tempfile::TempDir,
+    Arc<crate::event_log::AnyEventLog>,
+    Dispatcher,
+) {
+    crate::reset_thread_local_state();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let log = install_default_for_base_dir(dir.path()).expect("install event log");
+
+    let mut vm = Vm::new();
+    register_vm_stdlib(&mut vm);
+    vm.set_source_dir(dir.path());
+
+    install_manifest_triggers(vec![TriggerBindingSpec {
+        id: "github-worker-review".to_string(),
+        source: TriggerBindingSource::Manifest,
+        kind: "webhook".to_string(),
+        provider: ProviderId::from("github"),
+        autonomy_tier: crate::AutonomyTier::ActAuto,
+        handler: TriggerHandlerSpec::Worker { queue },
+        dispatch_priority,
+        when: None,
+        when_budget: None,
+        retry,
+        match_events: vec!["issues.opened".to_string()],
+        dedupe_key: Some("event.dedupe_key".to_string()),
+        dedupe_retention_days: crate::triggers::DEFAULT_INBOX_RETENTION_DAYS,
+        filter: None,
+        daily_cost_usd: None,
+        max_concurrent: None,
+        flow_control: crate::triggers::TriggerFlowControlConfig::default(),
+        manifest_path: None,
+        package_name: Some("workspace".to_string()),
+        definition_fingerprint: "fp:worker-review".to_string(),
     }])
     .await
     .expect("install test trigger binding");
@@ -982,6 +1029,47 @@ async fn a2a_handler_returns_inline_result_and_emits_a2a_action_graph() {
             server.finish();
         })
         .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn worker_handler_enqueues_job_and_returns_receipt() {
+    let (_dir, log, dispatcher) = worker_dispatcher_fixture(
+        "triage".to_string(),
+        TriggerRetryConfig::default(),
+        crate::WorkerQueuePriority::High,
+    )
+    .await;
+
+    let outcomes = dispatcher
+        .dispatch_event(trigger_event("issues.opened", "delivery-worker"))
+        .await
+        .expect("worker dispatch succeeds");
+    assert_eq!(outcomes.len(), 1);
+    assert_eq!(outcomes[0].status, DispatchStatus::Succeeded);
+    assert_eq!(outcomes[0].handler_kind, "worker");
+    assert_eq!(outcomes[0].target_uri, "worker://triage");
+
+    let receipt = outcomes[0]
+        .result
+        .clone()
+        .expect("worker dispatch returns enqueue receipt");
+    assert_eq!(receipt["queue"], serde_json::json!("triage"));
+    assert_eq!(
+        receipt["response_topic"],
+        serde_json::json!(crate::worker_response_topic_name("triage"))
+    );
+    assert!(receipt["job_event_id"].as_u64().is_some());
+
+    let queue = crate::WorkerQueue::new(log);
+    let state = queue.queue_state("triage").await.expect("load queue state");
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock")
+        .as_millis() as i64;
+    assert_eq!(state.summary(now_ms).ready, 1);
+    assert_eq!(state.jobs.len(), 1);
+    assert_eq!(state.jobs[0].job.trigger_id, "github-worker-review");
+    assert_eq!(state.jobs[0].job.priority, crate::WorkerQueuePriority::High);
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -1944,6 +2032,7 @@ pub fn local_fn(event: TriggerEvent) -> string {
                     raw: "local_fn".to_string(),
                     closure: handler,
                 },
+                dispatch_priority: crate::WorkerQueuePriority::Normal,
                 when: None,
                 when_budget: None,
                 retry: TriggerRetryConfig::default(),
@@ -2134,6 +2223,7 @@ pub fn slow_handler(event: TriggerEvent) -> string {
                     raw: "slow_handler".to_string(),
                     closure: handler,
                 },
+                dispatch_priority: crate::WorkerQueuePriority::Normal,
                 when: None,
                 when_budget: None,
                 retry: TriggerRetryConfig::default(),

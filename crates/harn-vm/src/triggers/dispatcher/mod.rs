@@ -1516,9 +1516,23 @@ impl Dispatcher {
                     crate::a2a::DispatchAck::PendingTask { handle, .. } => Ok(handle),
                 }
             }
-            DispatchUri::Worker { queue } => Err(DispatchError::NotImplemented(format!(
-                "worker:// dispatch to '{queue}' is not implemented yet; see O-05 #182"
-            ))),
+            DispatchUri::Worker { queue } => {
+                let receipt = crate::WorkerQueue::new(self.event_log.clone())
+                    .enqueue(&crate::WorkerQueueJob {
+                        queue: queue.clone(),
+                        trigger_id: binding.id.as_str().to_string(),
+                        binding_key: binding.binding_key(),
+                        binding_version: binding.version,
+                        event: event.clone(),
+                        replay_of_event_id: current_dispatch_context()
+                            .and_then(|context| context.replay_of_event_id),
+                        priority: worker_queue_priority(binding, event),
+                    })
+                    .await
+                    .map_err(DispatchError::from)?;
+                Ok(serde_json::to_value(receipt)
+                    .map_err(|error| DispatchError::Serde(error.to_string()))?)
+            }
         }
     }
 
@@ -2666,6 +2680,22 @@ fn event_headers(
         headers.insert("attempt".to_string(), attempt.to_string());
     }
     headers
+}
+
+fn worker_queue_priority(
+    binding: &super::registry::TriggerBinding,
+    event: &TriggerEvent,
+) -> crate::WorkerQueuePriority {
+    match event
+        .headers
+        .get("priority")
+        .map(|value| value.trim().to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("high") => crate::WorkerQueuePriority::High,
+        Some("low") => crate::WorkerQueuePriority::Low,
+        _ => binding.dispatch_priority,
+    }
 }
 
 const TEST_FAIL_BEFORE_OUTBOX_ENV: &str = "HARN_TEST_DISPATCHER_FAIL_BEFORE_OUTBOX";

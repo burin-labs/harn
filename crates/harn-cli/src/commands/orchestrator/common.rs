@@ -77,7 +77,7 @@ pub(crate) struct DlqEntryRecord {
     pub retry_history: Vec<DlqAttemptRecord>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub(crate) struct StrandedEnvelopeRecord {
     pub inbox_offset: u64,
     pub event_id: String,

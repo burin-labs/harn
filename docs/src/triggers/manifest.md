@@ -65,6 +65,16 @@ Unsupported URI schemes fail fast at load time.
 Leave it unset for normal remote targets. It exists for bounded local-dev cases
 such as dispatching into `harn serve`, which currently listens on HTTP only.
 
+`worker://...` handlers reuse the top-level scalar dispatch priority:
+
+- `priority = "high"`
+- `priority = "normal"`
+- `priority = "low"`
+
+That scalar priority becomes the default queue priority when the dispatcher
+enqueues the job. An explicit event header `priority` still overrides it at
+dispatch time.
+
 Local handlers and predicates resolve through the same module-export plumbing as
 the manifest hook loader:
 
