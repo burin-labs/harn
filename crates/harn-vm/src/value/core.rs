@@ -17,6 +17,7 @@ pub enum VmValue {
     Int(i64),
     Float(f64),
     String(Rc<str>),
+    Bytes(Rc<Vec<u8>>),
     Bool(bool),
     Nil,
     List(Rc<Vec<VmValue>>),
@@ -60,6 +61,7 @@ impl VmValue {
             VmValue::Int(n) => *n != 0,
             VmValue::Float(n) => *n != 0.0,
             VmValue::String(s) => !s.is_empty(),
+            VmValue::Bytes(bytes) => !bytes.is_empty(),
             VmValue::List(l) => !l.is_empty(),
             VmValue::Dict(d) => !d.is_empty(),
             VmValue::Closure(_) => true,
@@ -84,6 +86,7 @@ impl VmValue {
     pub fn type_name(&self) -> &'static str {
         match self {
             VmValue::String(_) => "string",
+            VmValue::Bytes(_) => "bytes",
             VmValue::Int(_) => "int",
             VmValue::Float(_) => "float",
             VmValue::Bool(_) => "bool",
@@ -130,6 +133,18 @@ impl VmValue {
                 }
             }
             VmValue::String(s) => out.push_str(s),
+            VmValue::Bytes(bytes) => {
+                const MAX_PREVIEW_BYTES: usize = 32;
+
+                out.push_str("b\"");
+                for byte in bytes.iter().take(MAX_PREVIEW_BYTES) {
+                    let _ = write!(out, "{byte:02x}");
+                }
+                if bytes.len() > MAX_PREVIEW_BYTES {
+                    let _ = write!(out, "...+{}", bytes.len() - MAX_PREVIEW_BYTES);
+                }
+                out.push('"');
+            }
             VmValue::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
             VmValue::Nil => out.push_str("nil"),
             VmValue::List(items) => {
@@ -270,6 +285,14 @@ impl VmValue {
     pub fn as_int(&self) -> Option<i64> {
         if let VmValue::Int(n) = self {
             Some(*n)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_bytes(&self) -> Option<&[u8]> {
+        if let VmValue::Bytes(bytes) = self {
+            Some(bytes.as_slice())
         } else {
             None
         }

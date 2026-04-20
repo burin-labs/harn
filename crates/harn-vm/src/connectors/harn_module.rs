@@ -400,6 +400,7 @@ impl Connector for HarnConnector {
             headers,
             batch: normalized.batch,
             provider_payload,
+            raw_body: Some(raw.body.clone()),
             signature_status: normalized
                 .signature_status
                 .unwrap_or(SignatureStatus::Unsigned),

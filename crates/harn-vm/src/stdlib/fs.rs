@@ -77,6 +77,18 @@ pub(crate) fn register_fs_builtins(vm: &mut Vm) {
         }
     });
 
+    vm.register_builtin("read_file_bytes", |args, _out| {
+        let path = args.first().map(|a| a.display()).unwrap_or_default();
+        let resolved = resolve_fs_path(&path);
+        match std::fs::read(&resolved) {
+            Ok(content) => Ok(VmValue::Bytes(Rc::new(content))),
+            Err(e) => Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                "Failed to read file {}: {e}",
+                resolved.display()
+            ))))),
+        }
+    });
+
     vm.register_builtin("write_file", |args, _out| {
         if args.len() >= 2 {
             let path = args[0].display();
@@ -90,6 +102,32 @@ pub(crate) fn register_fs_builtins(vm: &mut Vm) {
             })?;
             FILE_TEXT_CACHE.with(|cache| {
                 cache.borrow_mut().insert(resolved, Rc::from(content));
+            });
+        }
+        Ok(VmValue::Nil)
+    });
+
+    vm.register_builtin("write_file_bytes", |args, _out| {
+        if args.len() >= 2 {
+            let path = args[0].display();
+            let resolved = resolve_fs_path(&path);
+            let content = match &args[1] {
+                VmValue::Bytes(bytes) => bytes.as_slice(),
+                other => {
+                    return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                        "write_file_bytes expects bytes content, got {}",
+                        other.type_name()
+                    )))));
+                }
+            };
+            std::fs::write(&resolved, content).map_err(|e| {
+                VmError::Thrown(VmValue::String(Rc::from(format!(
+                    "Failed to write file {}: {e}",
+                    resolved.display()
+                ))))
+            })?;
+            FILE_TEXT_CACHE.with(|cache| {
+                cache.borrow_mut().remove(&resolved);
             });
         }
         Ok(VmValue::Nil)

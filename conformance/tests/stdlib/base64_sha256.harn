@@ -4,6 +4,12 @@ pipeline test(task) {
   log(encoded)
   let decoded = base64_decode(encoded)
   log(decoded)
+  let bytes = bytes_from_string("hello world")
+  log(type_of(bytes))
+  log(bytes_to_string(bytes))
+  log(bytes_to_hex(bytes_from_hex("0001ff")))
+  log(bytes_to_base64(bytes_from_string("hi")))
+  log(bytes_to_string(bytes_from_base64("aGk=")))
   // sha256
   let hash = sha256("hello")
   log(hash)

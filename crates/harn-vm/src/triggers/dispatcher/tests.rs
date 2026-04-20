@@ -625,6 +625,48 @@ pub fn should_handle(event: TriggerEvent) -> bool {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn local_handler_receives_raw_body_as_bytes() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (_dir, _log, dispatcher) = dispatcher_fixture(
+                r#"
+import "std/triggers"
+
+pub fn local_fn(event: TriggerEvent) -> dict {
+  return {
+    raw_body_type: type_of(event.raw_body),
+    raw_body_text: bytes_to_string(event.raw_body ?? bytes_from_string("")),
+  }
+}
+"#,
+                "local_fn",
+                None,
+                TriggerRetryConfig::default(),
+            )
+            .await;
+
+            let mut event = trigger_event("issues.opened", "delivery-raw-body");
+            event.raw_body = Some(b"Hello, World!".to_vec());
+
+            let outcomes = dispatcher
+                .dispatch_event(event)
+                .await
+                .expect("dispatch succeeds");
+            assert_eq!(outcomes.len(), 1);
+            assert_eq!(outcomes[0].status, DispatchStatus::Succeeded);
+            assert_eq!(
+                outcomes[0].result,
+                Some(serde_json::json!({
+                    "raw_body_type": "bytes",
+                    "raw_body_text": "Hello, World!",
+                }))
+            );
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn predicate_budget_exceeded_short_circuits_and_emits_lifecycle() {
     let local = tokio::task::LocalSet::new();
     local

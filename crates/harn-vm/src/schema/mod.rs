@@ -16,6 +16,16 @@ pub(crate) use api::{
 };
 pub(crate) use canonicalize::json_to_vm_value;
 
+pub(crate) const BYTES_B64_TAG: &str = "$bytes_b64";
+
+pub(crate) fn tagged_bytes_json(bytes: &[u8]) -> serde_json::Value {
+    use base64::Engine;
+
+    serde_json::json!({
+        BYTES_B64_TAG: base64::engine::general_purpose::STANDARD.encode(bytes),
+    })
+}
+
 fn vm_value_to_serde_json(value: &VmValue) -> serde_json::Value {
     match value {
         VmValue::Nil => serde_json::Value::Null,
@@ -23,6 +33,7 @@ fn vm_value_to_serde_json(value: &VmValue) -> serde_json::Value {
         VmValue::Int(value) => serde_json::json!(value),
         VmValue::Float(value) => serde_json::json!(value),
         VmValue::String(value) => serde_json::Value::String(value.to_string()),
+        VmValue::Bytes(bytes) => tagged_bytes_json(bytes),
         VmValue::List(items) | VmValue::Set(items) => {
             serde_json::Value::Array(items.iter().map(vm_value_to_serde_json).collect())
         }

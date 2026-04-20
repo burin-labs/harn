@@ -476,6 +476,7 @@ fn derive_run_observability_adds_trigger_and_predicate_nodes_with_shared_trace_i
         trace_id: crate::triggers::TraceId("trace_123".to_string()),
         tenant_id: None,
         headers: BTreeMap::new(),
+        raw_body: None,
         provider_payload: crate::triggers::ProviderPayload::Known(
             crate::triggers::event::KnownProviderPayload::Cron(crate::triggers::CronEventPayload {
                 cron_id: Some("daily-review".to_string()),
@@ -564,6 +565,7 @@ fn derive_run_observability_adds_replay_chain_for_replayed_trigger_runs() {
         trace_id: crate::triggers::TraceId("trace_replay".to_string()),
         tenant_id: None,
         headers: BTreeMap::new(),
+        raw_body: None,
         provider_payload: crate::triggers::ProviderPayload::Known(
             crate::triggers::event::KnownProviderPayload::GitHub(
                 crate::triggers::GitHubEventPayload::Issues(

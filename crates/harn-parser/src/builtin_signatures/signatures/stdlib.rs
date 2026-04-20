@@ -108,6 +108,50 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("string")),
     },
     BuiltinSig {
+        name: "bytes_concat",
+        return_type: Some(BuiltinReturn::Named("bytes")),
+    },
+    BuiltinSig {
+        name: "bytes_eq",
+        return_type: Some(BuiltinReturn::Named("bool")),
+    },
+    BuiltinSig {
+        name: "bytes_from_base64",
+        return_type: Some(BuiltinReturn::Named("bytes")),
+    },
+    BuiltinSig {
+        name: "bytes_from_hex",
+        return_type: Some(BuiltinReturn::Named("bytes")),
+    },
+    BuiltinSig {
+        name: "bytes_from_string",
+        return_type: Some(BuiltinReturn::Named("bytes")),
+    },
+    BuiltinSig {
+        name: "bytes_len",
+        return_type: Some(BuiltinReturn::Named("int")),
+    },
+    BuiltinSig {
+        name: "bytes_slice",
+        return_type: Some(BuiltinReturn::Named("bytes")),
+    },
+    BuiltinSig {
+        name: "bytes_to_base64",
+        return_type: Some(BuiltinReturn::Named("string")),
+    },
+    BuiltinSig {
+        name: "bytes_to_hex",
+        return_type: Some(BuiltinReturn::Named("string")),
+    },
+    BuiltinSig {
+        name: "bytes_to_string",
+        return_type: Some(BuiltinReturn::Named("string")),
+    },
+    BuiltinSig {
+        name: "bytes_to_string_lossy",
+        return_type: Some(BuiltinReturn::Named("string")),
+    },
+    BuiltinSig {
         name: "bold",
         return_type: Some(BuiltinReturn::Named("string")),
     },
@@ -656,6 +700,10 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("string")),
     },
     BuiltinSig {
+        name: "read_file_bytes",
+        return_type: Some(BuiltinReturn::Named("bytes")),
+    },
+    BuiltinSig {
         name: "read_file_result",
         return_type: None,
     },
@@ -969,6 +1017,10 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
     },
     BuiltinSig {
         name: "write_file",
+        return_type: Some(BuiltinReturn::Named("nil")),
+    },
+    BuiltinSig {
+        name: "write_file_bytes",
         return_type: Some(BuiltinReturn::Named("nil")),
     },
     BuiltinSig {

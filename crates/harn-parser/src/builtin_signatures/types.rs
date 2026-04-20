@@ -48,6 +48,7 @@ pub(crate) const UNION_STRING_NIL: &[&str] = &["string", "nil"];
 pub(crate) const UNION_DICT_NIL: &[&str] = &["dict", "nil"];
 pub(crate) const EMPTY_RETURN_TYPES: &[&str] = &[];
 pub(crate) const RETURN_BOOL: &[&str] = &["bool"];
+pub(crate) const RETURN_BYTES: &[&str] = &["bytes"];
 pub(crate) const RETURN_DICT: &[&str] = &["dict"];
 pub(crate) const RETURN_FLOAT: &[&str] = &["float"];
 pub(crate) const RETURN_INT: &[&str] = &["int"];

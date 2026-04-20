@@ -9,10 +9,14 @@ pub(crate) fn register_crypto_builtins(vm: &mut Vm) {
     }
 
     vm.register_builtin("base64_encode", |args, _out| {
-        let val = display_arg(args);
+        let bytes = match args.first() {
+            Some(VmValue::Bytes(bytes)) => bytes.as_slice().to_vec(),
+            Some(other) => other.display().into_bytes(),
+            None => Vec::new(),
+        };
         use base64::Engine;
         Ok(VmValue::String(Rc::from(
-            base64::engine::general_purpose::STANDARD.encode(val.as_bytes()),
+            base64::engine::general_purpose::STANDARD.encode(bytes),
         )))
     });
     vm.register_builtin("base64_decode", |args, _out| {
@@ -295,6 +299,18 @@ mod tests {
         let mut vm = vm();
         let result = call(&mut vm, "hex_decode", vec![s("abc")]);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn base64_encode_accepts_bytes() {
+        let mut vm = vm();
+        let encoded = call(
+            &mut vm,
+            "base64_encode",
+            vec![VmValue::Bytes(Rc::new(vec![0, 1, 2]))],
+        )
+        .unwrap();
+        assert_eq!(encoded.display(), "AAEC");
     }
 
     #[test]

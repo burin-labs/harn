@@ -2,8 +2,8 @@ use crate::ast::TypeExpr;
 
 use super::{
     all_signatures, generics, BuiltinGenericSig, BuiltinMetadata, BuiltinReturn, BuiltinSig,
-    EMPTY_RETURN_TYPES, RETURN_BOOL, RETURN_DICT, RETURN_FLOAT, RETURN_INT, RETURN_LIST,
-    RETURN_NEVER, RETURN_NIL, RETURN_STRING,
+    EMPTY_RETURN_TYPES, RETURN_BOOL, RETURN_BYTES, RETURN_DICT, RETURN_FLOAT, RETURN_INT,
+    RETURN_LIST, RETURN_NEVER, RETURN_NIL, RETURN_STRING,
 };
 
 /// Binary-search the registry for a given name.
@@ -32,6 +32,7 @@ pub(crate) fn iter_builtin_metadata() -> impl Iterator<Item = BuiltinMetadata> {
         return_types: match sig.return_type {
             Some(BuiltinReturn::Named(name)) => match name {
                 "bool" => RETURN_BOOL,
+                "bytes" => RETURN_BYTES,
                 "dict" => RETURN_DICT,
                 "float" => RETURN_FLOAT,
                 "int" => RETURN_INT,

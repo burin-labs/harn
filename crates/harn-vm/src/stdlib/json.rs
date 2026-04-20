@@ -305,6 +305,17 @@ pub(crate) fn vm_value_to_json(val: &VmValue) -> String {
 fn write_vm_value_to_json(val: &VmValue, out: &mut String) {
     match val {
         VmValue::String(s) => out.push_str(&escape_json_string_vm(s)),
+        VmValue::Bytes(bytes) => {
+            use base64::Engine;
+
+            out.push('{');
+            out.push_str(&escape_json_string_vm(crate::schema::BYTES_B64_TAG));
+            out.push(':');
+            out.push_str(&escape_json_string_vm(
+                &base64::engine::general_purpose::STANDARD.encode(bytes.as_slice()),
+            ));
+            out.push('}');
+        }
         VmValue::Int(n) => out.push_str(&n.to_string()),
         VmValue::Float(n) => out.push_str(&n.to_string()),
         VmValue::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
