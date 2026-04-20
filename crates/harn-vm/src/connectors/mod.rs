@@ -29,6 +29,7 @@ use crate::triggers::{
 pub mod cron;
 pub mod github;
 pub mod hmac;
+pub mod linear;
 pub mod notion;
 pub mod slack;
 #[cfg(test)]
@@ -40,11 +41,13 @@ pub use github::GitHubConnector;
 pub use hmac::{
     verify_hmac_authorization, HmacSignatureStyle, DEFAULT_CANONICAL_AUTHORIZATION_HEADER,
     DEFAULT_CANONICAL_HMAC_SCHEME, DEFAULT_GITHUB_SIGNATURE_HEADER,
-    DEFAULT_NOTION_SIGNATURE_HEADER, DEFAULT_SLACK_SIGNATURE_HEADER,
-    DEFAULT_SLACK_TIMESTAMP_HEADER, DEFAULT_STANDARD_WEBHOOKS_ID_HEADER,
-    DEFAULT_STANDARD_WEBHOOKS_SIGNATURE_HEADER, DEFAULT_STANDARD_WEBHOOKS_TIMESTAMP_HEADER,
-    DEFAULT_STRIPE_SIGNATURE_HEADER, SIGNATURE_VERIFY_AUDIT_TOPIC,
+    DEFAULT_LINEAR_SIGNATURE_HEADER, DEFAULT_NOTION_SIGNATURE_HEADER,
+    DEFAULT_SLACK_SIGNATURE_HEADER, DEFAULT_SLACK_TIMESTAMP_HEADER,
+    DEFAULT_STANDARD_WEBHOOKS_ID_HEADER, DEFAULT_STANDARD_WEBHOOKS_SIGNATURE_HEADER,
+    DEFAULT_STANDARD_WEBHOOKS_TIMESTAMP_HEADER, DEFAULT_STRIPE_SIGNATURE_HEADER,
+    SIGNATURE_VERIFY_AUDIT_TOPIC,
 };
+pub use linear::LinearConnector;
 pub use notion::{
     load_pending_webhook_handshakes, NotionConnector, PersistedNotionWebhookHandshake,
 };
@@ -258,6 +261,7 @@ pub struct ConnectorMetricsSnapshot {
     pub inbox_durable_hits: u64,
     pub inbox_expired_entries: u64,
     pub inbox_active_entries: u64,
+    pub linear_timestamp_rejections_total: u64,
     pub dispatch_succeeded_total: u64,
     pub dispatch_failed_total: u64,
     pub retry_scheduled_total: u64,
@@ -274,6 +278,7 @@ pub struct MetricsRegistry {
     inbox_durable_hits: AtomicU64,
     inbox_expired_entries: AtomicU64,
     inbox_active_entries: AtomicU64,
+    linear_timestamp_rejections_total: AtomicU64,
     dispatch_succeeded_total: AtomicU64,
     dispatch_failed_total: AtomicU64,
     retry_scheduled_total: AtomicU64,
@@ -290,6 +295,9 @@ impl MetricsRegistry {
             inbox_durable_hits: self.inbox_durable_hits.load(Ordering::Relaxed),
             inbox_expired_entries: self.inbox_expired_entries.load(Ordering::Relaxed),
             inbox_active_entries: self.inbox_active_entries.load(Ordering::Relaxed),
+            linear_timestamp_rejections_total: self
+                .linear_timestamp_rejections_total
+                .load(Ordering::Relaxed),
             dispatch_succeeded_total: self.dispatch_succeeded_total.load(Ordering::Relaxed),
             dispatch_failed_total: self.dispatch_failed_total.load(Ordering::Relaxed),
             retry_scheduled_total: self.retry_scheduled_total.load(Ordering::Relaxed),
@@ -326,6 +334,11 @@ impl MetricsRegistry {
             .store(count as u64, Ordering::Relaxed);
     }
 
+    pub fn record_linear_timestamp_rejection(&self) {
+        self.linear_timestamp_rejections_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
     pub fn record_dispatch_succeeded(&self) {
         self.dispatch_succeeded_total
             .fetch_add(1, Ordering::Relaxed);
@@ -352,6 +365,10 @@ impl MetricsRegistry {
     pub fn render_prometheus(&self) -> String {
         let snapshot = self.snapshot();
         let counters = [
+            (
+                "connector_linear_timestamp_rejections_total",
+                snapshot.linear_timestamp_rejections_total,
+            ),
             (
                 "dispatch_succeeded_total",
                 snapshot.dispatch_succeeded_total,
@@ -778,6 +795,9 @@ fn default_connector_for_provider(provider: &ProviderMetadata) -> Box<dyn Connec
     // users to switch to a distinct provider_id.
     if provider.provider == "github" {
         return Box::new(GitHubConnector::new());
+    }
+    if provider.provider == "linear" {
+        return Box::new(LinearConnector::new());
     }
     if provider.provider == "slack" {
         return Box::new(SlackConnector::new());

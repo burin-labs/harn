@@ -14,6 +14,7 @@ use super::ConnectorError;
 
 pub const SIGNATURE_VERIFY_AUDIT_TOPIC: &str = "audit.signature_verify";
 pub const DEFAULT_GITHUB_SIGNATURE_HEADER: &str = "x-hub-signature-256";
+pub const DEFAULT_LINEAR_SIGNATURE_HEADER: &str = "linear-signature";
 pub const DEFAULT_NOTION_SIGNATURE_HEADER: &str = "x-notion-signature";
 pub const DEFAULT_SLACK_SIGNATURE_HEADER: &str = "x-slack-signature";
 pub const DEFAULT_SLACK_TIMESTAMP_HEADER: &str = "x-slack-request-timestamp";
@@ -30,6 +31,9 @@ pub enum HmacSignatureStyle<'a> {
     GitHub {
         signature_header: &'a str,
         prefix: &'a str,
+    },
+    Linear {
+        signature_header: &'a str,
     },
     Notion {
         signature_header: &'a str,
@@ -71,6 +75,12 @@ impl<'a> HmacSignatureStyle<'a> {
         }
     }
 
+    pub fn linear() -> Self {
+        Self::Linear {
+            signature_header: DEFAULT_LINEAR_SIGNATURE_HEADER,
+        }
+    }
+
     pub fn notion() -> Self {
         Self::Notion {
             signature_header: DEFAULT_NOTION_SIGNATURE_HEADER,
@@ -105,6 +115,7 @@ impl<'a> HmacSignatureStyle<'a> {
     fn label(self) -> &'static str {
         match self {
             Self::GitHub { .. } => "github",
+            Self::Linear { .. } => "linear",
             Self::Notion { .. } => "notion",
             Self::Slack { .. } => "slack",
             Self::Stripe { .. } => "stripe",
@@ -144,6 +155,20 @@ pub async fn verify_hmac_signed<L: EventLog + ?Sized>(
                 body,
                 headers,
                 secret,
+                now,
+            )
+            .await
+        }
+        HmacSignatureStyle::Linear { signature_header } => {
+            verify_linear(
+                event_log,
+                provider,
+                style,
+                signature_header,
+                body,
+                headers,
+                secret,
+                timestamp_window,
                 now,
             )
             .await
@@ -316,6 +341,111 @@ async fn verify_github<L: EventLog + ?Sized>(
         let error =
             ConnectorError::invalid_signature("signature did not match the raw request body");
         reject(event_log, provider, style, &error, now, None, None).await
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn verify_linear<L: EventLog + ?Sized>(
+    event_log: &L,
+    provider: &ProviderId,
+    style: HmacSignatureStyle<'_>,
+    signature_header: &str,
+    body: &[u8],
+    headers: &BTreeMap<String, String>,
+    secret: &str,
+    timestamp_window: Option<Duration>,
+    now: OffsetDateTime,
+) -> Result<(), ConnectorError> {
+    let window = match timestamp_window {
+        Some(window) => window,
+        None => {
+            let error = ConnectorError::Unsupported(
+                "linear-style signature verification requires a timestamp window".to_string(),
+            );
+            return reject(event_log, provider, style, &error, now, None, None).await;
+        }
+    };
+
+    let payload: serde_json::Value = match serde_json::from_slice(body) {
+        Ok(payload) => payload,
+        Err(error) => {
+            let error = ConnectorError::Json(error.to_string());
+            return reject(event_log, provider, style, &error, now, None, Some(window)).await;
+        }
+    };
+    let timestamp_ms = match payload.get("webhookTimestamp").and_then(parse_json_i64ish) {
+        Some(timestamp_ms) => timestamp_ms,
+        None => {
+            let error = ConnectorError::InvalidHeader {
+                name: "webhookTimestamp".to_string(),
+                detail: "missing from payload body".to_string(),
+            };
+            return reject(event_log, provider, style, &error, now, None, Some(window)).await;
+        }
+    };
+    let timestamp = match offset_from_unix_millis(timestamp_ms) {
+        Ok(timestamp) => timestamp,
+        Err(error) => {
+            let error = ConnectorError::InvalidHeader {
+                name: "webhookTimestamp".to_string(),
+                detail: error,
+            };
+            return reject(event_log, provider, style, &error, now, None, Some(window)).await;
+        }
+    };
+    ensure_timestamp_within_window(event_log, provider, style, timestamp, window, now).await?;
+
+    let header = match required_header(headers, signature_header) {
+        Ok(value) => value,
+        Err(error) => {
+            return reject(
+                event_log,
+                provider,
+                style,
+                &error,
+                now,
+                Some(timestamp),
+                Some(window),
+            )
+            .await;
+        }
+    };
+    let provided = match hex::decode(header.trim()) {
+        Ok(value) => value,
+        Err(error) => {
+            let error = ConnectorError::InvalidHeader {
+                name: signature_header.to_string(),
+                detail: error.to_string(),
+            };
+            return reject(
+                event_log,
+                provider,
+                style,
+                &error,
+                now,
+                Some(timestamp),
+                Some(window),
+            )
+            .await;
+        }
+    };
+
+    let expected = hmac_sha256(secret.as_bytes(), body);
+    if secure_eq(&expected, &provided) {
+        Ok(())
+    } else {
+        let error =
+            ConnectorError::invalid_signature("signature did not match the raw request body");
+        reject(
+            event_log,
+            provider,
+            style,
+            &error,
+            now,
+            Some(timestamp),
+            Some(window),
+        )
+        .await
     }
 }
 
@@ -951,6 +1081,23 @@ fn required_header<'a>(
     name: &str,
 ) -> Result<&'a str, ConnectorError> {
     header_value(headers, name).ok_or_else(|| ConnectorError::MissingHeader(name.to_string()))
+}
+
+fn parse_json_i64ish(value: &serde_json::Value) -> Option<i64> {
+    value
+        .as_i64()
+        .or_else(|| value.as_u64().and_then(|raw| i64::try_from(raw).ok()))
+        .or_else(|| value.as_str().and_then(|raw| raw.parse::<i64>().ok()))
+}
+
+fn offset_from_unix_millis(raw: i64) -> Result<OffsetDateTime, String> {
+    let seconds = raw.div_euclid(1_000);
+    let millis = raw.rem_euclid(1_000);
+    let timestamp =
+        OffsetDateTime::from_unix_timestamp(seconds).map_err(|error| error.to_string())?;
+    timestamp
+        .checked_add(Duration::milliseconds(millis))
+        .ok_or_else(|| "timestamp overflow".to_string())
 }
 
 fn header_value<'a>(headers: &'a BTreeMap<String, String>, name: &str) -> Option<&'a str> {

@@ -1,0 +1,7 @@
+pipeline test(task) {
+  let result = trigger_test_harness("webhook_linear_issue_update")
+  println(result.ok)
+  println(len(result.emitted) == 1)
+  println(result.emitted[0].kind == "issue.update")
+  println(len(result.details.changes) == 3)
+}

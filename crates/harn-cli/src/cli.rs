@@ -65,6 +65,8 @@ SCRIPTING
     New(InitArgs),
     /// Diagnose the local Harn environment and provider setup.
     Doctor(DoctorArgs),
+    /// Register outbound connector resources with a provider.
+    Connect(ConnectArgs),
     /// Serve a .harn agent over HTTP using A2A.
     Serve(ServeArgs),
     /// Start the ACP server on stdio.
@@ -335,6 +337,55 @@ pub(crate) struct DoctorArgs {
     /// Skip provider connectivity checks.
     #[arg(long)]
     pub no_network: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ConnectArgs {
+    #[command(subcommand)]
+    pub command: ConnectCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum ConnectCommand {
+    /// Create or inspect a Linear webhook registration from manifest triggers.
+    Linear(ConnectLinearArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ConnectLinearArgs {
+    /// Public HTTPS URL that Linear should deliver webhook events to.
+    #[arg(long)]
+    pub url: String,
+    /// Optional path to an explicit `harn.toml`. Defaults to the nearest manifest from cwd.
+    #[arg(long)]
+    pub config: Option<String>,
+    /// Linear team id for a team-scoped webhook.
+    #[arg(long, conflicts_with = "all_public_teams")]
+    pub team_id: Option<String>,
+    /// Register the webhook for all public teams instead of one team.
+    #[arg(long, conflicts_with = "team_id")]
+    pub all_public_teams: bool,
+    /// Optional display label for the Linear webhook.
+    #[arg(long)]
+    pub label: Option<String>,
+    /// Override the Linear GraphQL endpoint, mainly for tests and self-hosted proxies.
+    #[arg(long)]
+    pub api_base_url: Option<String>,
+    /// Inline Linear personal API key.
+    #[arg(long, conflicts_with_all = ["api_key_secret", "access_token", "access_token_secret"])]
+    pub api_key: Option<String>,
+    /// Secret id containing a Linear personal API key (`namespace/name[@version]`).
+    #[arg(long, conflicts_with_all = ["api_key", "access_token", "access_token_secret"])]
+    pub api_key_secret: Option<String>,
+    /// Inline OAuth access token.
+    #[arg(long, conflicts_with_all = ["api_key", "api_key_secret", "access_token_secret"])]
+    pub access_token: Option<String>,
+    /// Secret id containing an OAuth access token (`namespace/name[@version]`).
+    #[arg(long, conflicts_with_all = ["api_key", "api_key_secret", "access_token"])]
+    pub access_token_secret: Option<String>,
+    /// Emit machine-readable JSON instead of a human summary.
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Debug, Args)]

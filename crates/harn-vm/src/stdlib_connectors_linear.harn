@@ -1,0 +1,37 @@
+import { filter_nil } from "std/collections"
+import { merge } from "std/json"
+
+var linear_connector_config = {}
+
+pub fn configure(config) {
+  linear_connector_config = filter_nil(config ?? {})
+  return linear_connector_config
+}
+
+pub fn reset() {
+  linear_connector_config = {}
+}
+
+fn __call(method, params = {}) {
+  return connector_call("linear", method, filter_nil(merge(linear_connector_config, params ?? {})))
+}
+
+pub fn list_issues(filter = nil, options = nil) {
+  return __call("list_issues", filter_nil((options ?? {}) + {filter: filter}))
+}
+
+pub fn update_issue(id, changes, options = nil) {
+  return __call("update_issue", (options ?? {}) + {id: id, changes: changes})
+}
+
+pub fn create_comment(issue_id, body, options = nil) {
+  return __call("create_comment", (options ?? {}) + {issue_id: issue_id, body: body})
+}
+
+pub fn search(query, options = nil) {
+  return __call("search", (options ?? {}) + {query: query})
+}
+
+pub fn graphql(query, variables = nil, options = nil) {
+  return __call("graphql", filter_nil((options ?? {}) + {query: query, variables: variables}))
+}

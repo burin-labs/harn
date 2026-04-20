@@ -1,0 +1,57 @@
+import {
+  configure,
+  create_comment,
+  graphql,
+  list_issues,
+  reset,
+  search,
+  update_issue,
+} from "std/connectors/linear"
+import { process_exec } from "std/runtime"
+
+fn wait_for_file(path, attempts) {
+  var remaining = attempts
+  while !file_exists(path) && remaining > 0 {
+    sleep(50ms)
+    remaining = remaining - 1
+  }
+  assert(file_exists(path), "timed out waiting for " + path)
+}
+
+pipeline default() {
+  let root = project_root() ?? cwd()
+  let helper_dir = path_join(root, "conformance/helpers")
+  let server_script = path_join(helper_dir, "linear_mock_server.py")
+  let state_dir = path_join(temp_dir(), "harn-linear-connector-" + uuid())
+  let port_path = path_join(state_dir, "port")
+  let pid_path = path_join(state_dir, "server.pid")
+  let log_path = path_join(state_dir, "server.log")
+  mkdir(state_dir)
+  let start = process_exec(
+    "python3 \"" + server_script + "\" \"" + state_dir + "\" >\"" + log_path
+    + "\" 2>&1 & echo $! > \""
+    + pid_path
+    + "\"",
+  )
+  assert(start?.success, "linear mock server started")
+  wait_for_file(port_path, 100)
+  let base = "http://127.0.0.1:" + read_file(port_path).trim()
+  configure({api_base_url: base + "/graphql", access_token: "linear-access-token"})
+  let listed = list_issues({priority: {lte: 2}}, {first: 10})
+  let updated = update_issue("ISS-1", {title: "Updated title"})
+  let commented = create_comment("ISS-1", "Looks good")
+  let searched = search("connector", {first: 5})
+  let raw = graphql("query Viewer { viewer { id } }", nil, {operation_name: "Viewer"})
+  let state = json_parse(http_get(base + "/__state").body)
+  let _stop = http_post(base + "/__shutdown", "")
+  process_exec("kill $(cat \"" + pid_path + "\") >/dev/null 2>&1 || true")
+  reset()
+  println(listed.nodes[0].identifier)
+  println(updated.issue.title)
+  println(commented.comment.id)
+  println(searched.nodes[0].title)
+  println(raw.data.viewer.id)
+  println(raw.meta.observed_complexity)
+  println(state.requests[0].headers.authorization)
+  println(len(state.requests))
+}

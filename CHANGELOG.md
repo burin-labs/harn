@@ -204,6 +204,15 @@ granular archaeology.
 
 ### Added
 
+- **Native Linear connector + `harn connect linear` (#173).** Harn now ships a
+  first-class `LinearConnector` with signed webhook ingestion
+  (`Linear-Signature` + `webhookTimestamp` replay protection), typed payloads
+  for issue/comment/project/cycle/customer updates, typed `updatedFrom`
+  issue-change decoding, optional webhook health probing with automatic
+  re-enable attempts, outbound GraphQL helpers through `std/connectors/linear`,
+  and a `harn connect linear` CLI that creates webhooks from
+  manifest-derived resource types.
+
 - **Shared `harn-serve` dispatch core (harn#301).** New `harn-serve`
   workspace crate introduces a transport-agnostic adapter boundary,
   shared API-key/HMAC/OAuth auth handling, an in-memory replay cache,

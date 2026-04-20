@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, OnceLock, RwLock};
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value as JsonValue;
 use time::OffsetDateTime;
 use uuid::Uuid;
@@ -229,11 +229,226 @@ pub enum SlackEventPayload {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct LinearEventPayload {
+pub struct LinearEventCommon {
+    pub event: String,
     pub action: Option<String>,
+    pub delivery_id: Option<String>,
     pub organization_id: Option<String>,
-    pub webhook_timestamp: Option<String>,
+    pub webhook_timestamp: Option<i64>,
+    pub webhook_id: Option<String>,
+    pub url: Option<String>,
+    pub created_at: Option<String>,
+    pub actor: JsonValue,
     pub raw: JsonValue,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum LinearIssueChange {
+    Title { previous: Option<String> },
+    Description { previous: Option<String> },
+    Priority { previous: Option<i64> },
+    Estimate { previous: Option<i64> },
+    StateId { previous: Option<String> },
+    TeamId { previous: Option<String> },
+    AssigneeId { previous: Option<String> },
+    ProjectId { previous: Option<String> },
+    CycleId { previous: Option<String> },
+    DueDate { previous: Option<String> },
+    ParentId { previous: Option<String> },
+    SortOrder { previous: Option<f64> },
+    LabelIds { previous: Vec<String> },
+    CompletedAt { previous: Option<String> },
+    Other { field: String, previous: JsonValue },
+}
+
+impl Serialize for LinearIssueChange {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let value = match self {
+            Self::Title { previous } => {
+                serde_json::json!({ "field_name": "title", "previous": previous })
+            }
+            Self::Description { previous } => {
+                serde_json::json!({ "field_name": "description", "previous": previous })
+            }
+            Self::Priority { previous } => {
+                serde_json::json!({ "field_name": "priority", "previous": previous })
+            }
+            Self::Estimate { previous } => {
+                serde_json::json!({ "field_name": "estimate", "previous": previous })
+            }
+            Self::StateId { previous } => {
+                serde_json::json!({ "field_name": "state_id", "previous": previous })
+            }
+            Self::TeamId { previous } => {
+                serde_json::json!({ "field_name": "team_id", "previous": previous })
+            }
+            Self::AssigneeId { previous } => {
+                serde_json::json!({ "field_name": "assignee_id", "previous": previous })
+            }
+            Self::ProjectId { previous } => {
+                serde_json::json!({ "field_name": "project_id", "previous": previous })
+            }
+            Self::CycleId { previous } => {
+                serde_json::json!({ "field_name": "cycle_id", "previous": previous })
+            }
+            Self::DueDate { previous } => {
+                serde_json::json!({ "field_name": "due_date", "previous": previous })
+            }
+            Self::ParentId { previous } => {
+                serde_json::json!({ "field_name": "parent_id", "previous": previous })
+            }
+            Self::SortOrder { previous } => {
+                serde_json::json!({ "field_name": "sort_order", "previous": previous })
+            }
+            Self::LabelIds { previous } => {
+                serde_json::json!({ "field_name": "label_ids", "previous": previous })
+            }
+            Self::CompletedAt { previous } => {
+                serde_json::json!({ "field_name": "completed_at", "previous": previous })
+            }
+            Self::Other { field, previous } => {
+                serde_json::json!({ "field_name": "other", "field": field, "previous": previous })
+            }
+        };
+        value.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for LinearIssueChange {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = JsonValue::deserialize(deserializer)?;
+        let field_name = value
+            .get("field_name")
+            .and_then(JsonValue::as_str)
+            .ok_or_else(|| serde::de::Error::custom("linear issue change missing field_name"))?;
+        let previous = value.get("previous").cloned().unwrap_or(JsonValue::Null);
+        Ok(match field_name {
+            "title" => Self::Title {
+                previous: previous.as_str().map(ToString::to_string),
+            },
+            "description" => Self::Description {
+                previous: previous.as_str().map(ToString::to_string),
+            },
+            "priority" => Self::Priority {
+                previous: parse_json_i64ish(&previous),
+            },
+            "estimate" => Self::Estimate {
+                previous: parse_json_i64ish(&previous),
+            },
+            "state_id" => Self::StateId {
+                previous: previous.as_str().map(ToString::to_string),
+            },
+            "team_id" => Self::TeamId {
+                previous: previous.as_str().map(ToString::to_string),
+            },
+            "assignee_id" => Self::AssigneeId {
+                previous: previous.as_str().map(ToString::to_string),
+            },
+            "project_id" => Self::ProjectId {
+                previous: previous.as_str().map(ToString::to_string),
+            },
+            "cycle_id" => Self::CycleId {
+                previous: previous.as_str().map(ToString::to_string),
+            },
+            "due_date" => Self::DueDate {
+                previous: previous.as_str().map(ToString::to_string),
+            },
+            "parent_id" => Self::ParentId {
+                previous: previous.as_str().map(ToString::to_string),
+            },
+            "sort_order" => Self::SortOrder {
+                previous: previous.as_f64(),
+            },
+            "label_ids" => Self::LabelIds {
+                previous: parse_string_array(&previous),
+            },
+            "completed_at" => Self::CompletedAt {
+                previous: previous.as_str().map(ToString::to_string),
+            },
+            "other" => Self::Other {
+                field: value
+                    .get("field")
+                    .and_then(JsonValue::as_str)
+                    .map(ToString::to_string)
+                    .unwrap_or_else(|| "unknown".to_string()),
+                previous,
+            },
+            other => Self::Other {
+                field: other.to_string(),
+                previous,
+            },
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LinearIssueEventPayload {
+    #[serde(flatten)]
+    pub common: LinearEventCommon,
+    pub issue: JsonValue,
+    #[serde(default)]
+    pub changes: Vec<LinearIssueChange>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LinearIssueCommentEventPayload {
+    #[serde(flatten)]
+    pub common: LinearEventCommon,
+    pub comment: JsonValue,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LinearIssueLabelEventPayload {
+    #[serde(flatten)]
+    pub common: LinearEventCommon,
+    pub label: JsonValue,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LinearProjectEventPayload {
+    #[serde(flatten)]
+    pub common: LinearEventCommon,
+    pub project: JsonValue,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LinearCycleEventPayload {
+    #[serde(flatten)]
+    pub common: LinearEventCommon,
+    pub cycle: JsonValue,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LinearCustomerEventPayload {
+    #[serde(flatten)]
+    pub common: LinearEventCommon,
+    pub customer: JsonValue,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LinearCustomerRequestEventPayload {
+    #[serde(flatten)]
+    pub common: LinearEventCommon,
+    pub customer_request: JsonValue,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum LinearEventPayload {
+    Issue(LinearIssueEventPayload),
+    IssueComment(LinearIssueCommentEventPayload),
+    IssueLabel(LinearIssueLabelEventPayload),
+    Project(LinearProjectEventPayload),
+    Cycle(LinearCycleEventPayload),
+    Customer(LinearCustomerEventPayload),
+    CustomerRequest(LinearCustomerRequestEventPayload),
+    Other(LinearEventCommon),
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -292,6 +507,7 @@ pub struct ExtensionProviderPayload {
     pub raw: JsonValue,
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum ProviderPayload {
@@ -804,6 +1020,14 @@ fn outbound_method(name: &str) -> ProviderOutboundMethod {
     }
 }
 
+fn optional_secret(name: &str, namespace: &str) -> ProviderSecretRequirement {
+    ProviderSecretRequirement {
+        name: name.to_string(),
+        required: false,
+        namespace: namespace.to_string(),
+    }
+}
+
 fn default_provider_schemas() -> Vec<Arc<dyn ProviderSchema>> {
     vec![
         Arc::new(BuiltinProviderSchema {
@@ -865,15 +1089,48 @@ fn default_provider_schemas() -> Vec<Arc<dyn ProviderSchema>> {
         Arc::new(BuiltinProviderSchema {
             provider_id: "linear",
             harn_schema_name: "LinearEventPayload",
-            metadata: provider_metadata_entry(
-                "linear",
-                &["webhook"],
-                "LinearEventPayload",
-                &[],
-                SignatureVerificationMetadata::None,
-                Vec::new(),
-                ProviderRuntimeMetadata::Placeholder,
-            ),
+            metadata: {
+                let mut metadata = provider_metadata_entry(
+                    "linear",
+                    &["webhook"],
+                    "LinearEventPayload",
+                    &[],
+                    hmac_signature_metadata(
+                        "linear",
+                        "Linear-Signature",
+                        None,
+                        Some("Linear-Delivery"),
+                        Some(75),
+                        "hex",
+                    ),
+                    vec![
+                        required_secret("signing_secret", "linear"),
+                        optional_secret("access_token", "linear"),
+                    ],
+                    ProviderRuntimeMetadata::Builtin {
+                        connector: "linear".to_string(),
+                        default_signature_variant: Some("linear".to_string()),
+                    },
+                );
+                metadata.outbound_methods = vec![
+                    ProviderOutboundMethod {
+                        name: "list_issues".to_string(),
+                    },
+                    ProviderOutboundMethod {
+                        name: "update_issue".to_string(),
+                    },
+                    ProviderOutboundMethod {
+                        name: "create_comment".to_string(),
+                    },
+                    ProviderOutboundMethod {
+                        name: "search".to_string(),
+                    },
+                    ProviderOutboundMethod {
+                        name: "graphql".to_string(),
+                    },
+                ];
+                metadata
+            },
             normalize: linear_payload,
         }),
         Arc::new(BuiltinProviderSchema {
@@ -1229,20 +1486,181 @@ fn linear_payload(
     headers: &BTreeMap<String, String>,
     raw: JsonValue,
 ) -> ProviderPayload {
-    let action = raw
-        .get("action")
-        .and_then(JsonValue::as_str)
-        .map(ToString::to_string);
-    let organization_id = raw
-        .get("organizationId")
-        .and_then(JsonValue::as_str)
-        .map(ToString::to_string);
-    ProviderPayload::Known(KnownProviderPayload::Linear(LinearEventPayload {
-        action,
-        organization_id,
-        webhook_timestamp: headers.get("Linear-Request-Timestamp").cloned(),
-        raw,
-    }))
+    let common = linear_event_common(headers, &raw);
+    let event = common.event.clone();
+    let payload = match event.as_str() {
+        "issue" => LinearEventPayload::Issue(LinearIssueEventPayload {
+            common,
+            issue: raw.get("data").cloned().unwrap_or(JsonValue::Null),
+            changes: parse_linear_issue_changes(raw.get("updatedFrom")),
+        }),
+        "comment" => LinearEventPayload::IssueComment(LinearIssueCommentEventPayload {
+            common,
+            comment: raw.get("data").cloned().unwrap_or(JsonValue::Null),
+        }),
+        "issue_label" => LinearEventPayload::IssueLabel(LinearIssueLabelEventPayload {
+            common,
+            label: raw.get("data").cloned().unwrap_or(JsonValue::Null),
+        }),
+        "project" => LinearEventPayload::Project(LinearProjectEventPayload {
+            common,
+            project: raw.get("data").cloned().unwrap_or(JsonValue::Null),
+        }),
+        "cycle" => LinearEventPayload::Cycle(LinearCycleEventPayload {
+            common,
+            cycle: raw.get("data").cloned().unwrap_or(JsonValue::Null),
+        }),
+        "customer" => LinearEventPayload::Customer(LinearCustomerEventPayload {
+            common,
+            customer: raw.get("data").cloned().unwrap_or(JsonValue::Null),
+        }),
+        "customer_request" => {
+            LinearEventPayload::CustomerRequest(LinearCustomerRequestEventPayload {
+                common,
+                customer_request: raw.get("data").cloned().unwrap_or(JsonValue::Null),
+            })
+        }
+        _ => LinearEventPayload::Other(common),
+    };
+    ProviderPayload::Known(KnownProviderPayload::Linear(payload))
+}
+
+fn linear_event_common(headers: &BTreeMap<String, String>, raw: &JsonValue) -> LinearEventCommon {
+    LinearEventCommon {
+        event: linear_event_name(
+            raw.get("type")
+                .and_then(JsonValue::as_str)
+                .or_else(|| headers.get("Linear-Event").map(String::as_str)),
+        ),
+        action: raw
+            .get("action")
+            .and_then(JsonValue::as_str)
+            .map(ToString::to_string),
+        delivery_id: header_value(headers, "Linear-Delivery").map(ToString::to_string),
+        organization_id: raw
+            .get("organizationId")
+            .and_then(JsonValue::as_str)
+            .map(ToString::to_string),
+        webhook_timestamp: raw.get("webhookTimestamp").and_then(parse_json_i64ish),
+        webhook_id: raw
+            .get("webhookId")
+            .and_then(JsonValue::as_str)
+            .map(ToString::to_string),
+        url: raw
+            .get("url")
+            .and_then(JsonValue::as_str)
+            .map(ToString::to_string),
+        created_at: raw
+            .get("createdAt")
+            .and_then(JsonValue::as_str)
+            .map(ToString::to_string),
+        actor: raw.get("actor").cloned().unwrap_or(JsonValue::Null),
+        raw: raw.clone(),
+    }
+}
+
+fn linear_event_name(raw_type: Option<&str>) -> String {
+    match raw_type.unwrap_or_default().to_ascii_lowercase().as_str() {
+        "issue" => "issue".to_string(),
+        "comment" | "issuecomment" | "issue_comment" => "comment".to_string(),
+        "issuelabel" | "issue_label" => "issue_label".to_string(),
+        "project" | "projectupdate" | "project_update" => "project".to_string(),
+        "cycle" => "cycle".to_string(),
+        "customer" => "customer".to_string(),
+        "customerrequest" | "customer_request" => "customer_request".to_string(),
+        other if !other.is_empty() => other.to_string(),
+        _ => "other".to_string(),
+    }
+}
+
+fn parse_linear_issue_changes(updated_from: Option<&JsonValue>) -> Vec<LinearIssueChange> {
+    let Some(JsonValue::Object(fields)) = updated_from else {
+        return Vec::new();
+    };
+    let mut changes = Vec::new();
+    for (field, previous) in fields {
+        let change = match field.as_str() {
+            "title" => LinearIssueChange::Title {
+                previous: previous.as_str().map(ToString::to_string),
+            },
+            "description" => LinearIssueChange::Description {
+                previous: previous.as_str().map(ToString::to_string),
+            },
+            "priority" => LinearIssueChange::Priority {
+                previous: parse_json_i64ish(previous),
+            },
+            "estimate" => LinearIssueChange::Estimate {
+                previous: parse_json_i64ish(previous),
+            },
+            "stateId" => LinearIssueChange::StateId {
+                previous: previous.as_str().map(ToString::to_string),
+            },
+            "teamId" => LinearIssueChange::TeamId {
+                previous: previous.as_str().map(ToString::to_string),
+            },
+            "assigneeId" => LinearIssueChange::AssigneeId {
+                previous: previous.as_str().map(ToString::to_string),
+            },
+            "projectId" => LinearIssueChange::ProjectId {
+                previous: previous.as_str().map(ToString::to_string),
+            },
+            "cycleId" => LinearIssueChange::CycleId {
+                previous: previous.as_str().map(ToString::to_string),
+            },
+            "dueDate" => LinearIssueChange::DueDate {
+                previous: previous.as_str().map(ToString::to_string),
+            },
+            "parentId" => LinearIssueChange::ParentId {
+                previous: previous.as_str().map(ToString::to_string),
+            },
+            "sortOrder" => LinearIssueChange::SortOrder {
+                previous: previous.as_f64(),
+            },
+            "labelIds" => LinearIssueChange::LabelIds {
+                previous: parse_string_array(previous),
+            },
+            "completedAt" => LinearIssueChange::CompletedAt {
+                previous: previous.as_str().map(ToString::to_string),
+            },
+            _ => LinearIssueChange::Other {
+                field: field.clone(),
+                previous: previous.clone(),
+            },
+        };
+        changes.push(change);
+    }
+    changes
+}
+
+fn parse_json_i64ish(value: &JsonValue) -> Option<i64> {
+    value
+        .as_i64()
+        .or_else(|| value.as_u64().and_then(|raw| i64::try_from(raw).ok()))
+        .or_else(|| value.as_str().and_then(|raw| raw.parse::<i64>().ok()))
+}
+
+fn parse_string_array(value: &JsonValue) -> Vec<String> {
+    let Some(array) = value.as_array() else {
+        return Vec::new();
+    };
+    array
+        .iter()
+        .filter_map(|entry| {
+            entry.as_str().map(ToString::to_string).or_else(|| {
+                entry
+                    .get("id")
+                    .and_then(JsonValue::as_str)
+                    .map(ToString::to_string)
+            })
+        })
+        .collect()
+}
+
+fn header_value<'a>(headers: &'a BTreeMap<String, String>, name: &str) -> Option<&'a str> {
+    headers
+        .iter()
+        .find(|(key, _)| key.eq_ignore_ascii_case(name))
+        .map(|(_, value)| value.as_str())
 }
 
 fn notion_payload(
@@ -1438,9 +1856,10 @@ mod tests {
             .filter(|entry| matches!(entry.runtime, ProviderRuntimeMetadata::Builtin { .. }))
             .collect();
 
-        assert_eq!(builtin.len(), 5);
+        assert_eq!(builtin.len(), 6);
         assert!(builtin.iter().any(|entry| entry.provider == "cron"));
         assert!(builtin.iter().any(|entry| entry.provider == "github"));
+        assert!(builtin.iter().any(|entry| entry.provider == "linear"));
         assert!(builtin.iter().any(|entry| entry.provider == "notion"));
         assert!(builtin.iter().any(|entry| entry.provider == "slack"));
         assert!(builtin.iter().any(|entry| entry.provider == "webhook"));

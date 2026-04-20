@@ -48,7 +48,7 @@ pub use connectors::{
     install_active_connector_clients, load_pending_webhook_handshakes,
     postprocess_normalized_event, ActivationHandle, ClientError, Connector, ConnectorClient,
     ConnectorCtx, ConnectorError, ConnectorMetricsSnapshot, ConnectorRegistry,
-    GenericWebhookConnector, GitHubConnector, MetricsRegistry, NotionConnector,
+    GenericWebhookConnector, GitHubConnector, LinearConnector, MetricsRegistry, NotionConnector,
     PersistedNotionWebhookHandshake, PostNormalizeOutcome, ProviderPayloadSchema, RateLimitConfig,
     RateLimiterFactory, RawInbound, SlackConnector, TriggerBinding, TriggerKind, TriggerRegistry,
     WebhookSignatureVariant,

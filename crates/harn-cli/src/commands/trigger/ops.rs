@@ -784,7 +784,30 @@ fn normalized_event_payload(payload: &ProviderPayload) -> JsonValue {
             }
         }
         ProviderPayload::Known(harn_vm::triggers::event::KnownProviderPayload::Linear(payload)) => {
-            payload.raw.clone()
+            match payload {
+                harn_vm::triggers::event::LinearEventPayload::Issue(value) => {
+                    value.common.raw.clone()
+                }
+                harn_vm::triggers::event::LinearEventPayload::IssueComment(value) => {
+                    value.common.raw.clone()
+                }
+                harn_vm::triggers::event::LinearEventPayload::IssueLabel(value) => {
+                    value.common.raw.clone()
+                }
+                harn_vm::triggers::event::LinearEventPayload::Project(value) => {
+                    value.common.raw.clone()
+                }
+                harn_vm::triggers::event::LinearEventPayload::Cycle(value) => {
+                    value.common.raw.clone()
+                }
+                harn_vm::triggers::event::LinearEventPayload::Customer(value) => {
+                    value.common.raw.clone()
+                }
+                harn_vm::triggers::event::LinearEventPayload::CustomerRequest(value) => {
+                    value.common.raw.clone()
+                }
+                harn_vm::triggers::event::LinearEventPayload::Other(value) => value.raw.clone(),
+            }
         }
         ProviderPayload::Known(harn_vm::triggers::event::KnownProviderPayload::Notion(payload)) => {
             payload.raw.clone()
