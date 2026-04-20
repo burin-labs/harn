@@ -975,13 +975,10 @@ async fn graceful_shutdown_waits_for_in_flight_request() {
     assert!(snapshot.contains("\"in_flight\": 0"), "snapshot={snapshot}");
 }
 
-// TODO(harn#327): ObservabilityGuard now force_flushes on drop (fixed in
-// v0.7.23), so spans ARE exported. But `dispatch.parent_span_id` diverges
-// from `ingest.span_id` — the listener's parent-id header generation grabs
-// a different span than the one ultimately attached to the dispatch span.
-// Ignore until the listener → dispatcher span linkage is repaired.
+// Regression coverage for harn#327: ingest should inject W3C trace-context
+// headers, and dispatch should adopt that remote parent so both spans share a
+// trace ID with `dispatch.parent_span_id == ingest.span_id`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "parent/child span linkage broken — tracked in harn#327"]
 async fn otel_exports_ingest_and_dispatch_spans_with_shared_trace_id() {
     let _lock = lock_orchestrator_tests();
     let temp = TempDir::new().unwrap();
