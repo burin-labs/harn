@@ -24,6 +24,10 @@ conformance/tests/**/.harn/metadata/
 # .claude/ is local-only except for shared skill definitions
 .claude/*
 !.claude/commands/
+# `merge-captain` covers the Harn-triad lay of the land (including the
+# private harn-cloud repo + business goals); it lives in burin-code's
+# local `.claude/commands/` only, never in the public harn repo.
+.claude/commands/merge-captain.md
 meta_scratch/
 .remember/
 .serena/
