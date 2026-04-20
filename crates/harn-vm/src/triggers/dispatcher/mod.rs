@@ -1425,6 +1425,7 @@ impl Dispatcher {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn invoke_vm_callable(
         &self,
         closure: &crate::value::VmClosure,
@@ -1617,6 +1618,7 @@ impl Dispatcher {
         let eval = self
             .invoke_vm_callable_with_timeout(
                 &predicate.closure,
+                &binding.binding_key(),
                 event,
                 replay_of_event_id,
                 binding.id.as_str(),
@@ -1769,9 +1771,11 @@ impl Dispatcher {
     }
 
     #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments)]
     async fn invoke_vm_callable_with_timeout(
         &self,
         closure: &crate::value::VmClosure,
+        binding_key: &str,
         event: &TriggerEvent,
         replay_of_event_id: Option<&String>,
         agent_id: &str,
@@ -1782,6 +1786,7 @@ impl Dispatcher {
     ) -> Result<VmValue, DispatchError> {
         let future = self.invoke_vm_callable(
             closure,
+            binding_key,
             event,
             replay_of_event_id,
             agent_id,
@@ -2323,19 +2328,6 @@ fn now_unix_ms() -> i64 {
 
 fn utc_day_key() -> i32 {
     time::OffsetDateTime::now_utc().date().to_julian_day()
-}
-
-async fn sleep_or_cancel(
-    duration: Duration,
-    cancel_rx: &mut broadcast::Receiver<()>,
-) -> Result<(), DispatchError> {
-    if duration.is_zero() {
-        return Ok(());
-    }
-    tokio::select! {
-        _ = tokio::time::sleep(duration) => Ok(()),
-        _ = recv_cancel(cancel_rx) => Err(DispatchError::Cancelled("dispatcher shutdown cancelled retry wait".to_string())),
-    }
 }
 
 fn cancelled_dispatch_outcome(
