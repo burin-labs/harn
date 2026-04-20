@@ -250,6 +250,51 @@ fn wait_for_topic_kind(state_dir: &Path, topic_name: &str, kind: &str) {
     panic!("timed out waiting for {topic_name}/{kind}");
 }
 
+fn sqlite_event_count(state_dir: &Path, topic_name: &str, kind: &str) -> usize {
+    let output = Command::new("python3")
+        .arg("-c")
+        .arg(
+            r#"
+import pathlib
+import sqlite3
+import sys
+
+state_dir, topic, kind = sys.argv[1:]
+conn = sqlite3.connect(str(pathlib.Path(state_dir) / "events.sqlite"))
+count = conn.execute(
+    "SELECT COUNT(*) FROM events WHERE topic = ? AND kind = ?",
+    (topic, kind),
+).fetchone()[0]
+print(count)
+"#,
+        )
+        .arg(state_dir)
+        .arg(topic_name)
+        .arg(kind)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "python stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .parse()
+        .unwrap()
+}
+
+fn wait_for_sqlite_event_count(state_dir: &Path, topic_name: &str, kind: &str, expected: usize) {
+    let deadline = Instant::now() + Duration::from_secs(90);
+    while Instant::now() < deadline {
+        if sqlite_event_count(state_dir, topic_name, kind) >= expected {
+            return;
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+    panic!("timed out waiting for {topic_name}/{kind} count {expected}");
+}
+
 #[test]
 fn orchestrator_serve_starts_and_shuts_down_cleanly() {
     let temp = TempDir::new().unwrap();
@@ -470,4 +515,108 @@ pub fn on_event(event: TriggerEvent) {
         Duration::from_secs(60),
     ))
     .unwrap());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn bounded_pump_drain_truncates_and_replays_remaining_backlog_after_restart() {
+    let temp = TempDir::new().unwrap();
+    write_file(
+        temp.path(),
+        "harn.toml",
+        r#"
+[package]
+name = "fixture"
+
+[exports]
+handlers = "lib.harn"
+
+[[triggers]]
+id = "incoming-review-task"
+kind = "a2a-push"
+provider = "a2a-push"
+path = "/a2a/review"
+match = { events = ["a2a.task.received"] }
+handler = "handlers::on_task"
+"#,
+    );
+    write_file(
+        temp.path(),
+        "lib.harn",
+        r#"
+import "std/triggers"
+
+pub fn on_task(event: TriggerEvent) -> string {
+  return event.kind
+}
+"#,
+    );
+
+    let envs = [
+        ("HARN_ORCHESTRATOR_API_KEYS", "test-key"),
+        ("HARN_ORCHESTRATOR_HMAC_SECRET", "unused-shared-secret"),
+        ("HARN_EVENT_LOG_QUEUE_DEPTH", "8192"),
+        ("HARN_TEST_ORCHESTRATOR_PUMP_DELAY_MS", "50"),
+    ];
+    let extra_args = [
+        "--shutdown-timeout",
+        "5",
+        "--drain-max-items",
+        "100",
+        "--drain-deadline",
+        "1",
+    ];
+    let (mut child, rx, handle) = spawn_orchestrator_with(&temp, &extra_args, &envs);
+    let base_url = wait_for_listener_url(&mut child, &rx);
+    let state_dir = temp.path().join("state");
+
+    let client = reqwest::Client::new();
+    for index in 0..5000 {
+        let body = serde_json::json!({
+            "kind": "a2a.task.received",
+            "task": {"id": format!("task-{index}")},
+        });
+        let response = client
+            .post(format!("{base_url}/a2a/review"))
+            .headers(bearer_headers())
+            .body(body.to_string())
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), reqwest::StatusCode::OK);
+    }
+
+    let shutdown_started = Instant::now();
+    send_sigterm(&child);
+    wait_for_exit(&mut child);
+    let shutdown_elapsed = shutdown_started.elapsed();
+    let stderr = handle.join().expect("stderr collector thread");
+
+    assert!(
+        shutdown_elapsed < Duration::from_secs(4),
+        "shutdown should finish within bounded drain budget: {shutdown_elapsed:?}"
+    );
+    assert!(stderr.contains(SHUTDOWN_NEEDLE), "stderr={stderr}");
+    assert!(stderr.contains("pump drain truncated"), "stderr={stderr}");
+
+    let restart_envs = [
+        ("HARN_ORCHESTRATOR_API_KEYS", "test-key"),
+        ("HARN_ORCHESTRATOR_HMAC_SECRET", "unused-shared-secret"),
+        ("HARN_EVENT_LOG_QUEUE_DEPTH", "8192"),
+    ];
+    let (mut restart_child, restart_rx, restart_handle) =
+        spawn_orchestrator_with(&temp, &extra_args, &restart_envs);
+    wait_for_listener_url(&mut restart_child, &restart_rx);
+    wait_for_sqlite_event_count(&state_dir, "trigger.outbox", "dispatch_succeeded", 5000);
+    send_sigterm(&restart_child);
+    wait_for_exit(&mut restart_child);
+    let restart_stderr = restart_handle.join().expect("stderr collector thread");
+    assert!(
+        restart_stderr.contains(SHUTDOWN_NEEDLE),
+        "stderr={restart_stderr}"
+    );
+
+    assert_eq!(
+        sqlite_event_count(&state_dir, "trigger.outbox", "dispatch_succeeded"),
+        5000
+    );
 }

@@ -217,6 +217,12 @@ pub trait EventLog: Send + Sync {
         up_to: EventId,
     ) -> Result<(), LogError>;
 
+    async fn consumer_cursor(
+        &self,
+        topic: &Topic,
+        consumer: &ConsumerId,
+    ) -> Result<Option<EventId>, LogError>;
+
     async fn latest(&self, topic: &Topic) -> Result<Option<EventId>, LogError>;
 
     async fn compact(&self, topic: &Topic, before: EventId) -> Result<CompactReport, LogError>;
@@ -426,6 +432,18 @@ impl EventLog for AnyEventLog {
         }
     }
 
+    async fn consumer_cursor(
+        &self,
+        topic: &Topic,
+        consumer: &ConsumerId,
+    ) -> Result<Option<EventId>, LogError> {
+        match self {
+            Self::Memory(log) => log.consumer_cursor(topic, consumer).await,
+            Self::File(log) => log.consumer_cursor(topic, consumer).await,
+            Self::Sqlite(log) => log.consumer_cursor(topic, consumer).await,
+        }
+    }
+
     async fn latest(&self, topic: &Topic) -> Result<Option<EventId>, LogError> {
         match self {
             Self::Memory(log) => log.latest(topic).await,
@@ -616,6 +634,18 @@ impl EventLog for MemoryEventLog {
             up_to,
         );
         Ok(())
+    }
+
+    async fn consumer_cursor(
+        &self,
+        topic: &Topic,
+        consumer: &ConsumerId,
+    ) -> Result<Option<EventId>, LogError> {
+        let state = self.state.lock().await;
+        Ok(state
+            .consumers
+            .get(&(topic.as_str().to_string(), consumer.as_str().to_string()))
+            .copied())
     }
 
     async fn latest(&self, topic: &Topic) -> Result<Option<EventId>, LogError> {
@@ -834,6 +864,28 @@ impl EventLog for FileEventLog {
             "updated_at_ms": now_ms(),
         });
         write_json_atomically(&path, &payload)
+    }
+
+    async fn consumer_cursor(
+        &self,
+        topic: &Topic,
+        consumer: &ConsumerId,
+    ) -> Result<Option<EventId>, LogError> {
+        let path = self.consumer_path(topic, consumer);
+        if !path.is_file() {
+            return Ok(None);
+        }
+        let raw = std::fs::read_to_string(&path)
+            .map_err(|error| LogError::Io(format!("event log consumer read error: {error}")))?;
+        let payload: serde_json::Value = serde_json::from_str(&raw)
+            .map_err(|error| LogError::Serde(format!("event log consumer parse error: {error}")))?;
+        let cursor = payload
+            .get("cursor")
+            .and_then(serde_json::Value::as_u64)
+            .ok_or_else(|| {
+                LogError::Serde("event log consumer record missing numeric cursor".to_string())
+            })?;
+        Ok(Some(cursor))
     }
 
     async fn latest(&self, topic: &Topic) -> Result<Option<EventId>, LogError> {
@@ -1115,6 +1167,25 @@ impl EventLog for SqliteEventLog {
             )
             .map_err(|error| LogError::Sqlite(format!("event log ack error: {error}")))?;
         Ok(())
+    }
+
+    async fn consumer_cursor(
+        &self,
+        topic: &Topic,
+        consumer: &ConsumerId,
+    ) -> Result<Option<EventId>, LogError> {
+        let connection = self
+            .connection
+            .lock()
+            .expect("sqlite event log connection poisoned");
+        connection
+            .query_row(
+                "SELECT cursor FROM consumers WHERE topic = ?1 AND consumer_id = ?2",
+                params![topic.as_str(), consumer.as_str()],
+                |row| row.get::<_, EventId>(0),
+            )
+            .optional()
+            .map_err(|error| LogError::Sqlite(format!("event log consumer cursor error: {error}")))
     }
 
     async fn latest(&self, topic: &Topic) -> Result<Option<EventId>, LogError> {

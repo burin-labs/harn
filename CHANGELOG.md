@@ -84,6 +84,16 @@ granular archaeology.
   record its outbox outcome or observe cancellation instead of letting
   SIGTERM exit with the envelope stranded between inbox and outbox.
 
+- **Bounded orchestrator pump drain on shutdown (harn#240).** The
+  orchestrator no longer tries to drain an unbounded pending/cron/inbox
+  backlog during SIGTERM/SIGINT. `harn orchestrator serve` now applies a
+  configurable per-pump shutdown bound from
+  `[orchestrator].drain.{max_items,deadline_seconds}` or
+  `--drain-max-items` / `--drain-deadline`, emits
+  `orchestrator.lifecycle` `drain_truncated` when backlog remains, and
+  resumes truncated pump backlog on the next start from a durable pump
+  cursor instead of skipping pre-existing source-topic events.
+
 - **Flaky cwd-mutating test collisions (#204).** Added a shared-process
   cwd mutex so parallel `cargo test` no longer observes mid-test cwd
   swaps. `check_manifest_reports_loaded_triggers` and
