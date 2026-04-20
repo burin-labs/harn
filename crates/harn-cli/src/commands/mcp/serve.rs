@@ -1462,25 +1462,21 @@ fn auth_event_log(state_dir: &Path) -> Result<Arc<harn_vm::event_log::AnyEventLo
 }
 
 #[cfg(test)]
-// MCP_TEST_LOCK serializes tests that share a process-global harn state.
-// Swapping in a tokio::sync::Mutex would require threading it through every
-// test helper + the `init_session` future; the `std::sync::Mutex` guard is
-// dropped when each `#[tokio::test]` future resolves, so holding it across
+// Tests here mutate harn_vm process-global state (`HARN_STATE_DIR` env,
+// thread-local `ACTIVE_EVENT_LOG`, trigger registry) through the shared
+// `lock_harn_state` guard in `crate::tests::common::harn_state_lock`.
+// The guard is a `std::sync::Mutex` held across `.await` points; it is
+// dropped when each `#[tokio::test]` future resolves, so holding across
 // awaits is safe in practice despite the clippy lint.
 #[allow(clippy::await_holding_lock)]
 mod tests {
     use super::*;
     use std::fs;
     use std::path::Path;
-    use std::sync::{Mutex, OnceLock};
 
     use tempfile::TempDir;
 
-    static MCP_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-
-    fn test_lock() -> std::sync::MutexGuard<'static, ()> {
-        MCP_TEST_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
-    }
+    use crate::tests::common::harn_state_lock::lock_harn_state;
 
     fn write_file(dir: &Path, relative: &str, contents: &str) {
         let path = dir.join(relative);
@@ -1622,7 +1618,7 @@ pub fn on_fail(event: TriggerEvent) -> any {
 
     #[tokio::test(flavor = "current_thread")]
     async fn trigger_list_tool_returns_manifest_bindings() {
-        let _guard = test_lock();
+        let _guard = lock_harn_state();
         let temp = TempDir::new().unwrap();
         write_fixture(&temp);
         let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
@@ -1641,7 +1637,7 @@ pub fn on_fail(event: TriggerEvent) -> any {
 
     #[tokio::test(flavor = "current_thread")]
     async fn secret_scan_tool_returns_findings_and_audits_them() {
-        let _guard = test_lock();
+        let _guard = lock_harn_state();
         let temp = TempDir::new().unwrap();
         write_fixture(&temp);
         let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
@@ -1671,7 +1667,7 @@ pub fn on_fail(event: TriggerEvent) -> any {
 
     #[tokio::test(flavor = "current_thread")]
     async fn trigger_fire_roundtrip_records_event_resource_and_action_graph() {
-        let _guard = test_lock();
+        let _guard = lock_harn_state();
         let temp = TempDir::new().unwrap();
         write_fixture(&temp);
         let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
@@ -1712,7 +1708,7 @@ pub fn on_fail(event: TriggerEvent) -> any {
 
     #[tokio::test(flavor = "current_thread")]
     async fn trigger_replay_tool_replays_event() {
-        let _guard = test_lock();
+        let _guard = lock_harn_state();
         let temp = TempDir::new().unwrap();
         write_fixture(&temp);
         let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
@@ -1737,7 +1733,7 @@ pub fn on_fail(event: TriggerEvent) -> any {
 
     #[tokio::test(flavor = "current_thread")]
     async fn dlq_tools_roundtrip_and_resource_read() {
-        let _guard = test_lock();
+        let _guard = lock_harn_state();
         let temp = TempDir::new().unwrap();
         write_fixture(&temp);
         let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
@@ -1775,7 +1771,7 @@ pub fn on_fail(event: TriggerEvent) -> any {
 
     #[tokio::test(flavor = "current_thread")]
     async fn queue_and_inspect_tools_return_snapshots() {
-        let _guard = test_lock();
+        let _guard = lock_harn_state();
         let temp = TempDir::new().unwrap();
         write_fixture(&temp);
         let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
@@ -1803,7 +1799,7 @@ pub fn on_fail(event: TriggerEvent) -> any {
 
     #[tokio::test(flavor = "current_thread")]
     async fn trust_query_returns_empty_results() {
-        let _guard = test_lock();
+        let _guard = lock_harn_state();
         let temp = TempDir::new().unwrap();
         write_fixture(&temp);
         let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
@@ -1822,7 +1818,7 @@ pub fn on_fail(event: TriggerEvent) -> any {
 
     #[tokio::test(flavor = "current_thread")]
     async fn manifest_resource_reads_raw_manifest() {
-        let _guard = test_lock();
+        let _guard = lock_harn_state();
         let temp = TempDir::new().unwrap();
         write_fixture(&temp);
         let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();

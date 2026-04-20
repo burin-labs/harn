@@ -813,6 +813,7 @@ mod tests {
 
     #[test]
     fn event_log_check_reports_backend_and_location() {
+        let _state_guard = crate::tests::common::harn_state_lock::lock_harn_state();
         let _cwd_guard = crate::tests::common::cwd_lock::lock_cwd();
         let dir = tempfile::tempdir().expect("tempdir");
         let previous = std::env::current_dir().expect("cwd");
