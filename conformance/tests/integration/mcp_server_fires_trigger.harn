@@ -1,15 +1,4 @@
-fn resolve_harn_bin(repo_root) {
-  let cargo_config = path_join(repo_root, ".cargo/config.toml")
-  if file_exists(cargo_config) {
-    let config = exec("cat", cargo_config).stdout
-    let captures = regex_captures("target-dir = \"([^\"]+)\"", config)
-    if captures != nil && len(captures) > 1 {
-      return path_join(captures[1], "debug/harn")
-    }
-  }
-  let target_dir = env("CARGO_TARGET_DIR") ?? path_join(repo_root, "target")
-  return path_join(target_dir, "debug/harn")
-}
+import "../_common"
 
 pipeline default() {
   let root = path_join(temp_dir(), "harn-mcp-fire-" + uuid())

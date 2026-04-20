@@ -7,7 +7,7 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
-## Unreleased
+## v0.7.24
 
 ### Fixed
 
@@ -18,6 +18,35 @@ granular archaeology.
   `project_fingerprint_repo/` behind.
 
 ### Added
+
+- **Native Linear connector with `harn connect linear` (#339, harn#173).**
+  Harn now ships a built-in `LinearConnector` with signed inbound webhook
+  normalization, typed payload variants, typed `updatedFrom` issue diffs,
+  and outbound GraphQL helpers. The new `harn connect linear` CLI
+  registers webhooks end-to-end, and an optional health monitor probes a
+  configured health URL and auto-re-enables webhooks via
+  `webhookUpdate(enabled: true)` after a healthy streak. Covered by
+  stdlib, docs, and conformance fixtures.
+
+- **Notion hybrid connector (#334, harn#174).** Replaces the
+  webhook-only Notion plumbing with a production-capable hybrid
+  connector: webhook handshake capture, signed webhook verification,
+  dedupe, a polling fallback with persisted high-water marks, snapshot
+  diffing, and 429 backoff. Ships outbound stdlib helpers for
+  `get_page`, `update_page`, `append_blocks`, `query_database`,
+  `search`, `create_comment`, and `api_call`; the orchestrator listener
+  now routes Notion ingress through the connector and emits the required
+  handshake response, and `harn doctor` surfaces captured Notion
+  verification tokens.
+
+- **Slack Events API connector expansion (#332, harn#171).** Inbound
+  Slack event typing and normalization now cover the core Events API
+  surface across runtime, trigger schema, and stdlib, with outbound
+  helpers for `open_view`, `user_info`, and a generic `api_call`. The
+  listener path adds Slack delivery metrics plus
+  `x-slack-no-retry: 1` on permanent client errors, and a sample Slack
+  app manifest ships alongside focused Rust tests and conformance
+  coverage for inbound events and 3s acknowledgement behavior.
 
 - **`hitl_pending(filters)` exposes typed pending HITL inbox rows (harn#333).**
   Harn scripts can now read merged pending requests from `hitl.questions`,
