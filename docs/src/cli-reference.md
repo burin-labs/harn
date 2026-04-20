@@ -457,7 +457,7 @@ harn orchestrator serve \
   --bind 0.0.0.0:8080 \
   --role single-tenant
 
-# Inspect the running orchestrator state snapshot + bindings.
+# Inspect the running orchestrator state, trigger flow-control state, and recent dispatches.
 harn orchestrator inspect --state-dir .harn/orchestrator
 
 # Inject a synthetic TriggerEvent to exercise a specific binding.

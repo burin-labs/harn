@@ -258,6 +258,12 @@ enum FlowControlOutcome {
     },
 }
 
+#[derive(Clone, Debug)]
+enum DispatchSkipStage {
+    Predicate,
+    FlowControl,
+}
+
 #[derive(Debug)]
 pub enum DispatchError {
     EventLog(String),
@@ -295,6 +301,15 @@ impl DispatchError {
             self,
             Self::Cancelled(_) | Self::Denied(_) | Self::NotImplemented(_)
         )
+    }
+}
+
+impl DispatchSkipStage {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::Predicate => "predicate",
+            Self::FlowControl => "flow_control",
+        }
     }
 }
 
@@ -804,6 +819,18 @@ impl Dispatcher {
             .await?;
 
             if !passed {
+                self.append_skipped_outbox_event(
+                    binding,
+                    &route,
+                    &event,
+                    replay_of_event_id.as_ref(),
+                    DispatchSkipStage::Predicate,
+                    serde_json::json!({
+                        "predicate": predicate.raw,
+                        "reason": evaluation.reason,
+                    }),
+                )
+                .await?;
                 finish_in_flight(
                     binding.id.as_str(),
                     binding.version,
@@ -851,6 +878,17 @@ impl Dispatcher {
         {
             FlowControlOutcome::Dispatch { event, acquired } => (*event, acquired),
             FlowControlOutcome::Skip { reason } => {
+                self.append_skipped_outbox_event(
+                    binding,
+                    &route,
+                    &event,
+                    replay_of_event_id.as_ref(),
+                    DispatchSkipStage::FlowControl,
+                    serde_json::json!({
+                        "flow_control": reason,
+                    }),
+                )
+                .await?;
                 finish_in_flight(
                     binding.id.as_str(),
                     binding.version,
@@ -2322,6 +2360,36 @@ impl Dispatcher {
             Some(binding),
             None,
             payload,
+            replay_of_event_id,
+        )
+        .await
+    }
+
+    async fn append_skipped_outbox_event(
+        &self,
+        binding: &TriggerBinding,
+        route: &DispatchUri,
+        event: &TriggerEvent,
+        replay_of_event_id: Option<&String>,
+        stage: DispatchSkipStage,
+        detail: serde_json::Value,
+    ) -> Result<(), DispatchError> {
+        self.append_topic_event(
+            TRIGGER_OUTBOX_TOPIC,
+            "dispatch_skipped",
+            event,
+            Some(binding),
+            None,
+            serde_json::json!({
+                "event_id": event.id.0,
+                "trigger_id": binding.id.as_str(),
+                "binding_key": binding.binding_key(),
+                "handler_kind": route.kind(),
+                "target_uri": route.target_uri(),
+                "skip_stage": stage.as_str(),
+                "detail": detail,
+                "replay_of_event_id": replay_of_event_id,
+            }),
             replay_of_event_id,
         )
         .await

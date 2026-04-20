@@ -24,9 +24,12 @@ use harn_vm::{append_secret_scan_audit, secret_scan_content, SecretFinding};
 use crate::cli::{McpServeArgs, McpServeTransport, OrchestratorLocalArgs};
 use crate::commands::orchestrator::common::{
     load_local_runtime, read_topic, synthetic_event_for_binding, trigger_fire, trigger_inspect_dlq,
-    trigger_list, trigger_replay, ConnectorActivationSnapshot, PersistedStateSnapshot,
-    TRIGGER_ATTEMPTS_TOPIC, TRIGGER_DLQ_TOPIC, TRIGGER_INBOX_CLAIMS_TOPIC,
-    TRIGGER_INBOX_ENVELOPES_TOPIC, TRIGGER_INBOX_LEGACY_TOPIC, TRIGGER_OUTBOX_TOPIC,
+    trigger_list, trigger_replay, TRIGGER_ATTEMPTS_TOPIC, TRIGGER_DLQ_TOPIC,
+    TRIGGER_INBOX_CLAIMS_TOPIC, TRIGGER_INBOX_ENVELOPES_TOPIC, TRIGGER_INBOX_LEGACY_TOPIC,
+    TRIGGER_OUTBOX_TOPIC,
+};
+use crate::commands::orchestrator::inspect_data::{
+    collect_orchestrator_inspect_data, OrchestratorInspectData,
 };
 use crate::commands::orchestrator::listener::ListenerAuth;
 use crate::package::CollectedTriggerHandler;
@@ -138,26 +141,8 @@ struct TopicPreview {
 #[derive(Clone, Debug, Serialize)]
 struct InspectPayload {
     dispatcher: harn_vm::DispatcherStatsSnapshot,
-    bindings: Vec<harn_vm::TriggerBindingSnapshot>,
-    connectors: Vec<String>,
-    activations: Vec<ConnectorActivationSnapshot>,
-    snapshot: Option<PersistedStateSnapshot>,
-    recent_dispatches: Vec<RecentDispatchRecord>,
-}
-
-#[derive(Clone, Debug, Serialize)]
-struct RecentDispatchRecord {
-    kind: String,
-    status: String,
-    occurred_at_ms: i64,
-    trigger_id: Option<String>,
-    event_id: Option<String>,
-    attempt: Option<u32>,
-    replay_of_event_id: Option<String>,
-    handler_kind: Option<String>,
-    target_uri: Option<String>,
-    error: Option<String>,
-    result: Option<JsonValue>,
+    #[serde(flatten)]
+    inspect: OrchestratorInspectData,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -442,7 +427,7 @@ impl McpOrchestratorService {
                     ),
                     tool_def(
                         "harn.orchestrator.inspect",
-                        "Snapshot dispatcher state, bindings, metrics, and recent dispatches.",
+                        "Snapshot dispatcher state, triggers, flow-control state, and recent dispatches.",
                         json!({
                             "type": "object",
                             "properties": {},
@@ -715,23 +700,10 @@ impl McpOrchestratorService {
 
     async fn tool_orchestrator_inspect(&self, _arguments: JsonValue) -> Result<JsonValue, String> {
         let mut ctx = load_local_runtime(&self.local_args()).await?;
-        let bindings = trigger_list(&mut ctx).await?;
-        let dispatches = read_topic(&ctx.event_log, TRIGGER_OUTBOX_TOPIC).await?;
+        let inspect = collect_orchestrator_inspect_data(&mut ctx).await?;
         let payload = InspectPayload {
             dispatcher: harn_vm::snapshot_dispatcher_stats(),
-            bindings,
-            connectors: ctx
-                .snapshot
-                .as_ref()
-                .map(|snapshot| snapshot.connectors.clone())
-                .unwrap_or_default(),
-            activations: ctx
-                .snapshot
-                .as_ref()
-                .map(|snapshot| snapshot.activations.clone())
-                .unwrap_or_default(),
-            snapshot: ctx.snapshot.clone(),
-            recent_dispatches: recent_dispatch_records(dispatches, 20),
+            inspect,
         };
         serde_json::to_value(payload).map_err(|error| error.to_string())
     }
@@ -1350,55 +1322,6 @@ fn preview_events(events: Vec<(u64, LogEvent)>) -> Vec<QueuePreviewEntry> {
         .collect()
 }
 
-fn recent_dispatch_records(
-    dispatches: Vec<(u64, LogEvent)>,
-    limit: usize,
-) -> Vec<RecentDispatchRecord> {
-    let mut recent: Vec<_> = dispatches
-        .into_iter()
-        .filter_map(|(_, event)| {
-            if !matches!(
-                event.kind.as_str(),
-                "dispatch_succeeded" | "dispatch_failed"
-            ) {
-                return None;
-            }
-            let payload = event.payload.as_object();
-            Some(RecentDispatchRecord {
-                status: event.kind.trim_start_matches("dispatch_").to_string(),
-                kind: event.kind,
-                occurred_at_ms: event.occurred_at_ms,
-                trigger_id: event.headers.get("trigger_id").cloned(),
-                event_id: event.headers.get("event_id").cloned(),
-                attempt: event
-                    .headers
-                    .get("attempt")
-                    .and_then(|attempt| attempt.parse::<u32>().ok()),
-                replay_of_event_id: event.headers.get("replay_of_event_id").cloned(),
-                handler_kind: event.headers.get("handler_kind").cloned(),
-                target_uri: payload.and_then(|payload| {
-                    payload
-                        .get("target_uri")
-                        .and_then(JsonValue::as_str)
-                        .map(ToOwned::to_owned)
-                }),
-                error: payload.and_then(|payload| {
-                    payload
-                        .get("error")
-                        .and_then(JsonValue::as_str)
-                        .map(ToOwned::to_owned)
-                }),
-                result: payload.and_then(|payload| payload.get("result").cloned()),
-            })
-        })
-        .collect();
-    recent.sort_by_key(|dispatch| dispatch.occurred_at_ms);
-    if recent.len() > limit {
-        recent.drain(0..recent.len() - limit);
-    }
-    recent
-}
-
 fn filter_related_events(
     events: Vec<(u64, LogEvent)>,
     event_id: &str,
@@ -1794,7 +1717,7 @@ pub fn on_fail(event: TriggerEvent) -> any {
             json!({}),
         )
         .await;
-        assert_eq!(inspect["bindings"].as_array().unwrap().len(), 2);
+        assert_eq!(inspect["triggers"].as_array().unwrap().len(), 2);
     }
 
     #[tokio::test(flavor = "current_thread")]

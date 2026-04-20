@@ -14,7 +14,7 @@ pub(crate) use api::{
     schema_pick_value, schema_result_value, schema_to_json_schema_value,
     schema_to_openapi_schema_value,
 };
-pub(crate) use canonicalize::json_to_vm_value;
+pub use canonicalize::json_to_vm_value;
 
 fn vm_value_to_serde_json(value: &VmValue) -> serde_json::Value {
     match value {

@@ -480,7 +480,7 @@ fn json_type_for_harn(type_name: &str) -> serde_json::Value {
     serde_json::Value::String(json_type.to_string())
 }
 
-pub(crate) fn json_to_vm_value(jv: &serde_json::Value) -> VmValue {
+pub fn json_to_vm_value(jv: &serde_json::Value) -> VmValue {
     match jv {
         serde_json::Value::Null => VmValue::Nil,
         serde_json::Value::Bool(b) => VmValue::Bool(*b),

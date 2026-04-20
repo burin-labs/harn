@@ -331,7 +331,7 @@ fn mcp_server_stdio_roundtrips_tools_and_resources() {
         }),
     );
     assert_eq!(
-        inspect["result"]["structuredContent"]["bindings"]
+        inspect["result"]["structuredContent"]["triggers"]
             .as_array()
             .unwrap()
             .len(),
