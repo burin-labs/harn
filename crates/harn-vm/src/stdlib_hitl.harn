@@ -4,6 +4,25 @@
 
 type HitlRequestKind = "question" | "approval" | "dual_control" | "escalation"
 
+type HitlPendingFilters = {
+  since?: string,
+  until?: string,
+  kinds?: list<HitlRequestKind>,
+  agent?: string,
+  limit?: int,
+}
+
+type HitlPendingRequest = {
+  request_id: string,
+  request_kind: HitlRequestKind,
+  agent: string,
+  prompt: string,
+  trace_id: string,
+  timestamp: string,
+  approvers: list<string>,
+  metadata: dict,
+}
+
 type AskUserOptions<T> = {
   schema?: Schema<T>,
   timeout?: duration,

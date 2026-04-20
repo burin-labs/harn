@@ -17,6 +17,13 @@ granular archaeology.
   `harn test conformance` runs stop leaving a stray
   `project_fingerprint_repo/` behind.
 
+### Added
+
+- **`hitl_pending(filters)` exposes typed pending HITL inbox rows (harn#333).**
+  Harn scripts can now read merged pending requests from `hitl.questions`,
+  `hitl.approvals`, `hitl.dual_control`, and `hitl.escalations` through the
+  event log without reaching into SQLite directly.
+
 ## v0.7.23
 
 ### Changed

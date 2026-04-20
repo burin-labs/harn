@@ -10,6 +10,7 @@ mod crypto;
 mod datetime;
 mod fs;
 pub(crate) mod hitl;
+mod hitl_read;
 pub mod host;
 mod io;
 mod iter;
@@ -84,6 +85,7 @@ pub fn register_agent_stdlib(vm: &mut Vm) {
     agents_daemon::register_daemon_builtins(vm);
     triggers_stdlib::register_trigger_builtins(vm);
     hitl::register_hitl_builtins(vm);
+    hitl_read::register_hitl_read_builtins(vm);
     agents::register_agent_builtins(vm);
     agent_sessions::register_agent_session_builtins(vm);
     transcript_compact::register_transcript_compaction_builtins(vm);

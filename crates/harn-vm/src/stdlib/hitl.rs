@@ -50,7 +50,7 @@ pub enum HitlRequestKind {
 }
 
 impl HitlRequestKind {
-    fn as_str(self) -> &'static str {
+    pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Question => "question",
             Self::Approval => "approval",
@@ -77,7 +77,7 @@ impl HitlRequestKind {
         }
     }
 
-    fn from_request_id(request_id: &str) -> Option<Self> {
+    pub(crate) fn from_request_id(request_id: &str) -> Option<Self> {
         if request_id.starts_with("hitl_question_") {
             Some(Self::Question)
         } else if request_id.starts_with("hitl_approval_") {
@@ -115,6 +115,8 @@ pub struct HitlHostResponse {
 struct HitlRequestEnvelope {
     request_id: String,
     kind: HitlRequestKind,
+    #[serde(default)]
+    agent: String,
     trace_id: String,
     requested_at: String,
     payload: JsonValue,
@@ -132,6 +134,7 @@ struct HitlTimeoutRecord {
 struct DispatchKeys {
     instance_key: String,
     stable_base: String,
+    agent: String,
     trace_id: String,
 }
 
@@ -237,6 +240,10 @@ async fn ask_user_impl(args: &[VmValue]) -> Result<VmValue, VmError> {
     let request = HitlRequestEnvelope {
         request_id: request_id.clone(),
         kind: HitlRequestKind::Question,
+        agent: keys
+            .as_ref()
+            .map(|keys| keys.agent.clone())
+            .unwrap_or_default(),
         trace_id: trace_id.clone(),
         requested_at: now_rfc3339(),
         payload: json!({
@@ -295,6 +302,10 @@ async fn request_approval_impl(args: &[VmValue]) -> Result<VmValue, VmError> {
     let request = HitlRequestEnvelope {
         request_id: request_id.clone(),
         kind: HitlRequestKind::Approval,
+        agent: keys
+            .as_ref()
+            .map(|keys| keys.agent.clone())
+            .unwrap_or_default(),
         trace_id: trace_id.clone(),
         requested_at: now_rfc3339(),
         payload: json!({
@@ -374,6 +385,10 @@ async fn dual_control_impl(args: &[VmValue]) -> Result<VmValue, VmError> {
     let request = HitlRequestEnvelope {
         request_id: request_id.clone(),
         kind: HitlRequestKind::DualControl,
+        agent: keys
+            .as_ref()
+            .map(|keys| keys.agent.clone())
+            .unwrap_or_default(),
         trace_id: trace_id.clone(),
         requested_at: now_rfc3339(),
         payload: json!({
@@ -446,6 +461,10 @@ async fn escalate_to_impl(args: &[VmValue]) -> Result<VmValue, VmError> {
     let request = HitlRequestEnvelope {
         request_id: request_id.clone(),
         kind: HitlRequestKind::Escalation,
+        agent: keys
+            .as_ref()
+            .map(|keys| keys.agent.clone())
+            .unwrap_or_default(),
         trace_id: trace_id.clone(),
         requested_at: now_rfc3339(),
         payload: json!({
@@ -1013,6 +1032,7 @@ fn current_dispatch_keys() -> Option<DispatchKeys> {
     Some(DispatchKeys {
         instance_key,
         stable_base,
+        agent: context.agent_id,
         trace_id: context.trigger_event.trace_id.0,
     })
 }
