@@ -1,4 +1,9 @@
 #![cfg(unix)]
+// Serialized via MCP_CLI_TEST_LOCK (std::sync::Mutex). Swapping to
+// tokio::sync::Mutex here would require threading it through every async test
+// helper; the std guard is released when each test's async runtime finishes
+// so holding it across awaits is safe in practice.
+#![allow(clippy::await_holding_lock)]
 
 use std::fs;
 use std::io::{BufRead, BufReader, Write};

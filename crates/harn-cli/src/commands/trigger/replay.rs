@@ -92,8 +92,8 @@ pub(crate) async fn replay_report_for_event_log(
     as_of: Option<&str>,
     diff: bool,
 ) -> Result<TriggerReplayReport, String> {
-    let mut vm = build_replay_vm(&workspace_root);
-    let extensions = package::load_runtime_extensions(&workspace_root);
+    let mut vm = build_replay_vm(workspace_root);
+    let extensions = package::load_runtime_extensions(workspace_root);
     package::install_runtime_extensions(&extensions);
     package::install_manifest_triggers(&mut vm, &extensions)
         .await

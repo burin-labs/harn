@@ -580,12 +580,12 @@ impl McpOrchestratorService {
                 false,
             )
             .await?;
-            return Ok(serde_json::to_value(report).map_err(|error| error.to_string())?);
+            return serde_json::to_value(report).map_err(|error| error.to_string());
         }
 
         let mut ctx = load_local_runtime(&self.local_args()).await?;
         let handle = trigger_replay(&mut ctx, &request.event_id).await?;
-        Ok(serde_json::to_value(handle).map_err(|error| error.to_string())?)
+        serde_json::to_value(handle).map_err(|error| error.to_string())
     }
 
     async fn tool_orchestrator_queue(&self, _arguments: JsonValue) -> Result<JsonValue, String> {
@@ -605,8 +605,8 @@ impl McpOrchestratorService {
                 head: preview_events(
                     inbox_claims
                         .into_iter()
-                        .chain(inbox_envelopes.into_iter())
-                        .chain(inbox_legacy.into_iter())
+                        .chain(inbox_envelopes)
+                        .chain(inbox_legacy)
                         .collect(),
                 ),
             },
@@ -623,7 +623,7 @@ impl McpOrchestratorService {
                 head: preview_events(dlq),
             },
         };
-        Ok(serde_json::to_value(queue).map_err(|error| error.to_string())?)
+        serde_json::to_value(queue).map_err(|error| error.to_string())
     }
 
     async fn tool_orchestrator_dlq_list(&self, _arguments: JsonValue) -> Result<JsonValue, String> {
@@ -668,7 +668,7 @@ impl McpOrchestratorService {
             snapshot: ctx.snapshot.clone(),
             recent_dispatches: recent_dispatch_records(dispatches, 20),
         };
-        Ok(serde_json::to_value(payload).map_err(|error| error.to_string())?)
+        serde_json::to_value(payload).map_err(|error| error.to_string())
     }
 
     async fn tool_trust_query(&self, arguments: JsonValue) -> Result<JsonValue, String> {
@@ -787,7 +787,7 @@ impl McpOrchestratorService {
             .into_iter()
             .find(|entry| entry.id == entry_id)
             .ok_or_else(|| format!("unknown DLQ entry '{entry_id}'"))?;
-        Ok(serde_json::to_value(entry).map_err(|error| error.to_string())?)
+        serde_json::to_value(entry).map_err(|error| error.to_string())
     }
 
     async fn record_tool_call(
@@ -1123,6 +1123,7 @@ async fn legacy_sse_message(
     StatusCode::ACCEPTED.into_response()
 }
 
+#[allow(clippy::result_large_err)] // axum::Response is large but short-lived on the error path.
 fn lookup_or_create_session(
     state: &HttpState,
     request: &JsonValue,
@@ -1396,6 +1397,12 @@ fn auth_event_log(state_dir: &Path) -> Result<Arc<harn_vm::event_log::AnyEventLo
 }
 
 #[cfg(test)]
+// MCP_TEST_LOCK serializes tests that share a process-global harn state.
+// Swapping in a tokio::sync::Mutex would require threading it through every
+// test helper + the `init_session` future; the `std::sync::Mutex` guard is
+// dropped when each `#[tokio::test]` future resolves, so holding it across
+// awaits is safe in practice despite the clippy lint.
+#[allow(clippy::await_holding_lock)]
 mod tests {
     use super::*;
     use std::fs;
