@@ -1,0 +1,5 @@
+pipeline test(task) {
+  let result = trigger_test_harness("slack_events_3s_ack")
+  println(result.ok)
+  println((result.details.elapsed_ms ?? 999999) < 200)
+}

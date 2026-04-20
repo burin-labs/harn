@@ -34,19 +34,19 @@ type GitHubEventPayload = GitHubIssuesEventPayload | GitHubPullRequestEventPaylo
 
 type SlackEventCommon = {provider: "slack", event: string, event_id: string | nil, api_app_id: string | nil, team_id: string | nil, channel_id: string | nil, user_id: string | nil, event_ts: string | nil, raw: dict}
 
-type SlackMessageChannelsEventPayload = {provider: "slack", event: "message.channels", event_id: string | nil, api_app_id: string | nil, team_id: string | nil, channel_id: string | nil, user_id: string | nil, event_ts: string | nil, subtype: string | nil, channel: string | nil, user: string | nil, text: string | nil, ts: string | nil, thread_ts: string | nil, raw: dict}
+type SlackMessageEventPayload = {provider: "slack", event: string, event_id: string | nil, api_app_id: string | nil, team_id: string | nil, channel_id: string | nil, user_id: string | nil, event_ts: string | nil, subtype: string | nil, channel_type: string | nil, channel: string | nil, user: string | nil, text: string | nil, ts: string | nil, thread_ts: string | nil, raw: dict}
 
 type SlackAppMentionEventPayload = {provider: "slack", event: "app_mention", event_id: string | nil, api_app_id: string | nil, team_id: string | nil, channel_id: string | nil, user_id: string | nil, event_ts: string | nil, channel: string | nil, user: string | nil, text: string | nil, ts: string | nil, thread_ts: string | nil, raw: dict}
 
 type SlackReactionAddedEventPayload = {provider: "slack", event: "reaction_added", event_id: string | nil, api_app_id: string | nil, team_id: string | nil, channel_id: string | nil, user_id: string | nil, event_ts: string | nil, reaction: string | nil, item_user: string | nil, item: dict, raw: dict}
 
-type SlackTeamJoinEventPayload = {provider: "slack", event: "team_join", event_id: string | nil, api_app_id: string | nil, team_id: string | nil, channel_id: string | nil, user_id: string | nil, event_ts: string | nil, user: dict, raw: dict}
+type SlackAppHomeOpenedEventPayload = {provider: "slack", event: "app_home_opened", event_id: string | nil, api_app_id: string | nil, team_id: string | nil, channel_id: string | nil, user_id: string | nil, event_ts: string | nil, user: string | nil, channel: string | nil, tab: string | nil, view: dict, raw: dict}
 
-type SlackChannelCreatedEventPayload = {provider: "slack", event: "channel_created", event_id: string | nil, api_app_id: string | nil, team_id: string | nil, channel_id: string | nil, user_id: string | nil, event_ts: string | nil, channel: dict, raw: dict}
+type SlackAssistantThreadStartedEventPayload = {provider: "slack", event: "assistant_thread_started", event_id: string | nil, api_app_id: string | nil, team_id: string | nil, channel_id: string | nil, user_id: string | nil, event_ts: string | nil, assistant_thread: dict, thread_ts: string | nil, context: dict, raw: dict}
 
 type SlackOtherEventPayload = {provider: "slack", event: string, event_id: string | nil, api_app_id: string | nil, team_id: string | nil, channel_id: string | nil, user_id: string | nil, event_ts: string | nil, raw: dict}
 
-type SlackEventPayload = SlackMessageChannelsEventPayload | SlackAppMentionEventPayload | SlackReactionAddedEventPayload | SlackTeamJoinEventPayload | SlackChannelCreatedEventPayload | SlackOtherEventPayload
+type SlackEventPayload = SlackMessageEventPayload | SlackAppMentionEventPayload | SlackReactionAddedEventPayload | SlackAppHomeOpenedEventPayload | SlackAssistantThreadStartedEventPayload | SlackOtherEventPayload
 
 type LinearEventPayload = {provider: "linear", action: string | nil, organization_id: string | nil, webhook_timestamp: string | nil, raw: dict}
 

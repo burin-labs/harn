@@ -54,17 +54,17 @@ struct SlackClient {
 #[allow(dead_code)]
 #[derive(Debug)]
 enum ParsedSlackEvent {
-    MessageChannels(MessageChannelsEvent),
+    Message(MessageEvent),
     AppMention(AppMentionEvent),
     ReactionAdded(ReactionAddedEvent),
-    TeamJoin(TeamJoinEvent),
-    ChannelCreated(ChannelCreatedEvent),
+    AppHomeOpened(AppHomeOpenedEvent),
+    AssistantThreadStarted(AssistantThreadStartedEvent),
     Other { kind: String, raw: JsonValue },
 }
 
 #[allow(dead_code)]
 #[derive(Debug, Deserialize)]
-struct MessageChannelsEvent {
+struct MessageEvent {
     channel: Option<String>,
     user: Option<String>,
     text: Option<String>,
@@ -94,14 +94,17 @@ struct ReactionAddedEvent {
 
 #[allow(dead_code)]
 #[derive(Debug, Deserialize)]
-struct TeamJoinEvent {
-    user: JsonValue,
+struct AppHomeOpenedEvent {
+    user: Option<String>,
+    channel: Option<String>,
+    tab: Option<String>,
+    view: Option<JsonValue>,
 }
 
 #[allow(dead_code)]
 #[derive(Debug, Deserialize)]
-struct ChannelCreatedEvent {
-    channel: JsonValue,
+struct AssistantThreadStartedEvent {
+    assistant_thread: JsonValue,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -174,6 +177,32 @@ struct AddReactionArgs {
     channel: String,
     ts: String,
     name: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenViewArgs {
+    #[serde(flatten)]
+    config: SlackClientConfigArgs,
+    trigger_id: String,
+    view: JsonValue,
+}
+
+#[derive(Debug, Deserialize)]
+struct UserInfoArgs {
+    #[serde(flatten)]
+    config: SlackClientConfigArgs,
+    user_id: String,
+    #[serde(default)]
+    include_locale: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ApiCallArgs {
+    #[serde(flatten)]
+    config: SlackClientConfigArgs,
+    method: String,
+    #[serde(default)]
+    args: JsonValue,
 }
 
 #[derive(Debug, Deserialize)]
@@ -432,6 +461,45 @@ impl ConnectorClient for SlackClient {
                 )
                 .await
             }
+            "open_view" => {
+                let args: OpenViewArgs = parse_args(args)?;
+                let config = self.resolve_client_config(&args.config)?;
+                self.request_json(
+                    &config,
+                    "views.open",
+                    json!({
+                        "trigger_id": args.trigger_id,
+                        "view": args.view,
+                    }),
+                )
+                .await
+            }
+            "user_info" => {
+                let args: UserInfoArgs = parse_args(args)?;
+                let config = self.resolve_client_config(&args.config)?;
+                let mut query = vec![("user".to_string(), args.user_id)];
+                if let Some(include_locale) = args.include_locale {
+                    query.push((
+                        "include_locale".to_string(),
+                        if include_locale { "true" } else { "false" }.to_string(),
+                    ));
+                }
+                self.request_query_json(&config, "users.info", &query).await
+            }
+            "api_call" => {
+                let args: ApiCallArgs = parse_args(args)?;
+                let config = self.resolve_client_config(&args.config)?;
+                let body = match args.args {
+                    JsonValue::Null => JsonValue::Object(JsonMap::new()),
+                    JsonValue::Object(_) => args.args,
+                    _ => {
+                        return Err(ClientError::InvalidArgs(
+                            "slack api_call args must be a JSON object".to_string(),
+                        ));
+                    }
+                };
+                self.request_json(&config, &args.method, body).await
+            }
             "upload_file" => {
                 let args: UploadFileArgs = parse_args(args)?;
                 let config = self.resolve_client_config(&args.config)?;
@@ -487,7 +555,27 @@ impl SlackClient {
         method: &str,
         body: JsonValue,
     ) -> Result<JsonValue, ClientError> {
-        let response = self.request(method, config, Some(body)).await?;
+        let response = self
+            .request(Method::POST, method, config, Some(body))
+            .await?;
+        self.decode_api_response(method, response).await
+    }
+
+    async fn request_query_json(
+        &self,
+        config: &ResolvedSlackClientConfig,
+        method: &str,
+        query: &[(String, String)],
+    ) -> Result<JsonValue, ClientError> {
+        let response = self.request_query(method, config, query).await?;
+        self.decode_api_response(method, response).await
+    }
+
+    async fn decode_api_response(
+        &self,
+        method: &str,
+        response: reqwest::Response,
+    ) -> Result<JsonValue, ClientError> {
         let status = response.status();
         let payload = response
             .json::<SlackApiEnvelope>()
@@ -515,6 +603,7 @@ impl SlackClient {
 
     async fn request(
         &self,
+        http_method: Method,
         method: &str,
         config: &ResolvedSlackClientConfig,
         body: Option<JsonValue>,
@@ -532,12 +621,38 @@ impl SlackClient {
         );
         let mut request = self
             .http
-            .request(Method::POST, url)
+            .request(http_method, url)
             .header("Authorization", format!("Bearer {token}"));
         if let Some(body) = body {
             request = request.json(&body);
         }
         request
+            .send()
+            .await
+            .map_err(|error| ClientError::Transport(error.to_string()))
+    }
+
+    async fn request_query(
+        &self,
+        method: &str,
+        config: &ResolvedSlackClientConfig,
+        query: &[(String, String)],
+    ) -> Result<reqwest::Response, ClientError> {
+        let ctx = self.ctx()?;
+        ctx.rate_limiter
+            .scoped(&self.provider_id, "bot")
+            .acquire()
+            .await;
+        let token = self.bot_token(config).await?;
+        let url = format!(
+            "{}/{}",
+            config.api_base_url.trim_end_matches('/'),
+            method.trim_start_matches('/')
+        );
+        self.http
+            .request(Method::GET, url)
+            .header("Authorization", format!("Bearer {token}"))
+            .query(query)
             .send()
             .await
             .map_err(|error| ClientError::Transport(error.to_string()))
@@ -753,8 +868,16 @@ fn slack_event_kind(payload: &JsonValue, raw: &RawInbound) -> Result<String, Con
             .get("channel_type")
             .and_then(JsonValue::as_str)
             .unwrap_or_default();
-        if channel_type == "channel" {
-            return Ok("message.channels".to_string());
+        if !channel_type.is_empty() {
+            let kind = match channel_type {
+                "channel" => "message.channels",
+                "group" => "message.groups",
+                "im" => "message.im",
+                "mpim" => "message.mpim",
+                "app_home" => "message.app_home",
+                other => return Ok(format!("message.{other}")),
+            };
+            return Ok(kind.to_string());
         }
     }
     Ok(event_type.to_string())
@@ -769,8 +892,8 @@ fn parse_typed_event(kind: &str, payload: &JsonValue) -> Result<ParsedSlackEvent
     }
     let event = payload.get("event").cloned().unwrap_or(JsonValue::Null);
     match kind {
-        "message.channels" => serde_json::from_value(event)
-            .map(ParsedSlackEvent::MessageChannels)
+        kind if kind == "message" || kind.starts_with("message.") => serde_json::from_value(event)
+            .map(ParsedSlackEvent::Message)
             .map_err(|error| ConnectorError::Json(error.to_string())),
         "app_mention" => serde_json::from_value(event)
             .map(ParsedSlackEvent::AppMention)
@@ -778,11 +901,11 @@ fn parse_typed_event(kind: &str, payload: &JsonValue) -> Result<ParsedSlackEvent
         "reaction_added" => serde_json::from_value(event)
             .map(ParsedSlackEvent::ReactionAdded)
             .map_err(|error| ConnectorError::Json(error.to_string())),
-        "team_join" => serde_json::from_value(event)
-            .map(ParsedSlackEvent::TeamJoin)
+        "app_home_opened" => serde_json::from_value(event)
+            .map(ParsedSlackEvent::AppHomeOpened)
             .map_err(|error| ConnectorError::Json(error.to_string())),
-        "channel_created" => serde_json::from_value(event)
-            .map(ParsedSlackEvent::ChannelCreated)
+        "assistant_thread_started" => serde_json::from_value(event)
+            .map(ParsedSlackEvent::AssistantThreadStarted)
             .map_err(|error| ConnectorError::Json(error.to_string())),
         _ => Ok(ParsedSlackEvent::Other {
             kind: kind.to_string(),
@@ -812,11 +935,13 @@ fn infer_occurred_at(provider_payload: &ProviderPayload) -> Option<OffsetDateTim
 
 fn slack_raw(payload: &crate::triggers::event::SlackEventPayload) -> &JsonValue {
     match payload {
-        crate::triggers::event::SlackEventPayload::MessageChannels(inner) => &inner.common.raw,
+        crate::triggers::event::SlackEventPayload::Message(inner) => &inner.common.raw,
         crate::triggers::event::SlackEventPayload::AppMention(inner) => &inner.common.raw,
         crate::triggers::event::SlackEventPayload::ReactionAdded(inner) => &inner.common.raw,
-        crate::triggers::event::SlackEventPayload::TeamJoin(inner) => &inner.common.raw,
-        crate::triggers::event::SlackEventPayload::ChannelCreated(inner) => &inner.common.raw,
+        crate::triggers::event::SlackEventPayload::AppHomeOpened(inner) => &inner.common.raw,
+        crate::triggers::event::SlackEventPayload::AssistantThreadStarted(inner) => {
+            &inner.common.raw
+        }
         crate::triggers::event::SlackEventPayload::Other(common) => &common.raw,
     }
 }

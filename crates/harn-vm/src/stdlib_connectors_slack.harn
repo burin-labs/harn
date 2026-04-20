@@ -34,6 +34,18 @@ pub fn add_reaction(channel, ts, name, options = nil) {
   return __call("add_reaction", (options ?? {}) + {channel: channel, ts: ts, name: name})
 }
 
+pub fn open_view(trigger_id, view, options = nil) {
+  return __call("open_view", (options ?? {}) + {trigger_id: trigger_id, view: view})
+}
+
+pub fn user_info(user_id, options = nil) {
+  return __call("user_info", (options ?? {}) + {user_id: user_id})
+}
+
+pub fn api_call(method, args = nil, options = nil) {
+  return __call("api_call", filter_nil((options ?? {}) + {method: method, args: args ?? {}}))
+}
+
 pub fn upload_file(filename, content, options = nil) {
   return __call("upload_file", (options ?? {}) + {filename: filename, content: content})
 }

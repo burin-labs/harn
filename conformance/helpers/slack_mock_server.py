@@ -88,6 +88,22 @@ class SlackMockHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         parsed = urlparse(self.path)
+        if parsed.path == "/users.info":
+            self._record(
+                {
+                    key: values[0] if len(values) == 1 else values
+                    for key, values in parse_qs(parsed.query).items()
+                }
+            )
+            json_response(
+                self,
+                200,
+                {
+                    "ok": True,
+                    "user": {"id": "U123ABC456", "name": "roadrunner"},
+                },
+            )
+            return
         if parsed.path == "/__state":
             json_response(self, 200, self.state.snapshot())
             return
@@ -113,6 +129,19 @@ class SlackMockHandler(BaseHTTPRequestHandler):
                 },
             )
             return
+        if parsed.path == "/chat.update":
+            self._record(body)
+            json_response(
+                self,
+                200,
+                {
+                    "ok": True,
+                    "channel": body["channel"],
+                    "ts": body["ts"],
+                    "text": body["text"],
+                },
+            )
+            return
         if parsed.path == "/reactions.add":
             self._record(body)
             json_response(
@@ -131,6 +160,22 @@ class SlackMockHandler(BaseHTTPRequestHandler):
                         },
                     },
                 },
+            )
+            return
+        if parsed.path == "/views.open":
+            self._record(body)
+            json_response(
+                self,
+                200,
+                {"ok": True, "view": {"id": "V123ABC456", "type": "modal"}},
+            )
+            return
+        if parsed.path == "/auth.test":
+            self._record(body)
+            json_response(
+                self,
+                200,
+                {"ok": True, "team": "Example", "user": "bot"},
             )
             return
         json_response(self, 404, {"ok": False, "error": f"unhandled POST {parsed.path}"})

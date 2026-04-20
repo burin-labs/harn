@@ -166,10 +166,11 @@ pub struct SlackEventCommon {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct SlackMessageChannelsEventPayload {
+pub struct SlackMessageEventPayload {
     #[serde(flatten)]
     pub common: SlackEventCommon,
     pub subtype: Option<String>,
+    pub channel_type: Option<String>,
     pub channel: Option<String>,
     pub user: Option<String>,
     pub text: Option<String>,
@@ -198,27 +199,32 @@ pub struct SlackReactionAddedEventPayload {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct SlackTeamJoinEventPayload {
+pub struct SlackAppHomeOpenedEventPayload {
     #[serde(flatten)]
     pub common: SlackEventCommon,
-    pub user: JsonValue,
+    pub user: Option<String>,
+    pub channel: Option<String>,
+    pub tab: Option<String>,
+    pub view: JsonValue,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct SlackChannelCreatedEventPayload {
+pub struct SlackAssistantThreadStartedEventPayload {
     #[serde(flatten)]
     pub common: SlackEventCommon,
-    pub channel: JsonValue,
+    pub assistant_thread: JsonValue,
+    pub thread_ts: Option<String>,
+    pub context: JsonValue,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum SlackEventPayload {
-    MessageChannels(SlackMessageChannelsEventPayload),
+    Message(SlackMessageEventPayload),
     AppMention(SlackAppMentionEventPayload),
     ReactionAdded(SlackReactionAddedEventPayload),
-    TeamJoin(SlackTeamJoinEventPayload),
-    ChannelCreated(SlackChannelCreatedEventPayload),
+    AppHomeOpened(SlackAppHomeOpenedEventPayload),
+    AssistantThreadStarted(SlackAssistantThreadStartedEventPayload),
     Other(SlackEventCommon),
 }
 
@@ -725,6 +731,7 @@ fn provider_metadata_entry(
     provider: &str,
     kinds: &[&str],
     schema_name: &str,
+    outbound_methods: &[&str],
     signature_verification: SignatureVerificationMetadata,
     secret_requirements: Vec<ProviderSecretRequirement>,
     runtime: ProviderRuntimeMetadata,
@@ -733,7 +740,12 @@ fn provider_metadata_entry(
         provider: provider.to_string(),
         kinds: kinds.iter().map(|kind| kind.to_string()).collect(),
         schema_name: schema_name.to_string(),
-        outbound_methods: Vec::new(),
+        outbound_methods: outbound_methods
+            .iter()
+            .map(|name| ProviderOutboundMethod {
+                name: (*name).to_string(),
+            })
+            .collect(),
         secret_requirements,
         signature_verification,
         runtime,
@@ -777,6 +789,7 @@ fn default_provider_schemas() -> Vec<Arc<dyn ProviderSchema>> {
                 "github",
                 &["webhook"],
                 "GitHubEventPayload",
+                &[],
                 hmac_signature_metadata(
                     "github",
                     "X-Hub-Signature-256",
@@ -800,6 +813,15 @@ fn default_provider_schemas() -> Vec<Arc<dyn ProviderSchema>> {
                 "slack",
                 &["webhook"],
                 "SlackEventPayload",
+                &[
+                    "post_message",
+                    "update_message",
+                    "add_reaction",
+                    "open_view",
+                    "user_info",
+                    "api_call",
+                    "upload_file",
+                ],
                 hmac_signature_metadata(
                     "slack",
                     "X-Slack-Signature",
@@ -823,6 +845,7 @@ fn default_provider_schemas() -> Vec<Arc<dyn ProviderSchema>> {
                 "linear",
                 &["webhook"],
                 "LinearEventPayload",
+                &[],
                 SignatureVerificationMetadata::None,
                 Vec::new(),
                 ProviderRuntimeMetadata::Placeholder,
@@ -836,6 +859,7 @@ fn default_provider_schemas() -> Vec<Arc<dyn ProviderSchema>> {
                 "notion",
                 &["webhook"],
                 "NotionEventPayload",
+                &[],
                 SignatureVerificationMetadata::None,
                 Vec::new(),
                 ProviderRuntimeMetadata::Placeholder,
@@ -849,6 +873,7 @@ fn default_provider_schemas() -> Vec<Arc<dyn ProviderSchema>> {
                 "cron",
                 &["cron"],
                 "CronEventPayload",
+                &[],
                 SignatureVerificationMetadata::None,
                 Vec::new(),
                 ProviderRuntimeMetadata::Builtin {
@@ -865,6 +890,7 @@ fn default_provider_schemas() -> Vec<Arc<dyn ProviderSchema>> {
                 "webhook",
                 &["webhook"],
                 "GenericWebhookPayload",
+                &[],
                 hmac_signature_metadata(
                     "standard",
                     "webhook-signature",
@@ -888,6 +914,7 @@ fn default_provider_schemas() -> Vec<Arc<dyn ProviderSchema>> {
                 "a2a-push",
                 &["a2a-push"],
                 "A2aPushPayload",
+                &[],
                 SignatureVerificationMetadata::None,
                 Vec::new(),
                 ProviderRuntimeMetadata::Placeholder,
@@ -983,10 +1010,14 @@ fn slack_payload(
         raw: raw.clone(),
     };
     let payload = match kind {
-        "message.channels" => {
-            SlackEventPayload::MessageChannels(SlackMessageChannelsEventPayload {
+        kind if kind == "message" || kind.starts_with("message.") => {
+            SlackEventPayload::Message(SlackMessageEventPayload {
                 subtype: event
                     .and_then(|value| value.get("subtype"))
+                    .and_then(JsonValue::as_str)
+                    .map(ToString::to_string),
+                channel_type: event
+                    .and_then(|value| value.get("channel_type"))
                     .and_then(JsonValue::as_str)
                     .map(ToString::to_string),
                 channel: event
@@ -1050,20 +1081,43 @@ fn slack_payload(
                 .unwrap_or(JsonValue::Null),
             common,
         }),
-        "team_join" => SlackEventPayload::TeamJoin(SlackTeamJoinEventPayload {
+        "app_home_opened" => SlackEventPayload::AppHomeOpened(SlackAppHomeOpenedEventPayload {
             user: event
                 .and_then(|value| value.get("user"))
-                .cloned()
-                .unwrap_or(JsonValue::Null),
-            common,
-        }),
-        "channel_created" => SlackEventPayload::ChannelCreated(SlackChannelCreatedEventPayload {
+                .and_then(JsonValue::as_str)
+                .map(ToString::to_string),
             channel: event
                 .and_then(|value| value.get("channel"))
+                .and_then(JsonValue::as_str)
+                .map(ToString::to_string),
+            tab: event
+                .and_then(|value| value.get("tab"))
+                .and_then(JsonValue::as_str)
+                .map(ToString::to_string),
+            view: event
+                .and_then(|value| value.get("view"))
                 .cloned()
                 .unwrap_or(JsonValue::Null),
             common,
         }),
+        "assistant_thread_started" => {
+            let assistant_thread = event
+                .and_then(|value| value.get("assistant_thread"))
+                .cloned()
+                .unwrap_or(JsonValue::Null);
+            SlackEventPayload::AssistantThreadStarted(SlackAssistantThreadStartedEventPayload {
+                thread_ts: assistant_thread
+                    .get("thread_ts")
+                    .and_then(JsonValue::as_str)
+                    .map(ToString::to_string),
+                context: assistant_thread
+                    .get("context")
+                    .cloned()
+                    .unwrap_or(JsonValue::Null),
+                assistant_thread,
+                common,
+            })
+        }
         _ => SlackEventPayload::Other(common),
     };
     ProviderPayload::Known(KnownProviderPayload::Slack(Box::new(payload)))
@@ -1088,6 +1142,13 @@ fn slack_channel_id(event: Option<&JsonValue>) -> Option<String> {
                 .and_then(JsonValue::as_str)
                 .map(ToString::to_string)
         })
+        .or_else(|| {
+            event
+                .and_then(|value| value.get("assistant_thread"))
+                .and_then(|value| value.get("channel_id"))
+                .and_then(JsonValue::as_str)
+                .map(ToString::to_string)
+        })
 }
 
 fn slack_user_id(event: Option<&JsonValue>) -> Option<String> {
@@ -1099,6 +1160,19 @@ fn slack_user_id(event: Option<&JsonValue>) -> Option<String> {
             event
                 .and_then(|value| value.get("user"))
                 .and_then(|value| value.get("id"))
+                .and_then(JsonValue::as_str)
+                .map(ToString::to_string)
+        })
+        .or_else(|| {
+            event
+                .and_then(|value| value.get("item_user"))
+                .and_then(JsonValue::as_str)
+                .map(ToString::to_string)
+        })
+        .or_else(|| {
+            event
+                .and_then(|value| value.get("assistant_thread"))
+                .and_then(|value| value.get("user_id"))
                 .and_then(JsonValue::as_str)
                 .map(ToString::to_string)
         })
@@ -1249,6 +1323,7 @@ mod tests {
                     "github",
                     &["webhook"],
                     "GitHubEventPayload",
+                    &[],
                     SignatureVerificationMetadata::None,
                     Vec::new(),
                     ProviderRuntimeMetadata::Placeholder,
@@ -1264,6 +1339,7 @@ mod tests {
                     "github",
                     &["webhook"],
                     "GitHubEventPayload",
+                    &[],
                     SignatureVerificationMetadata::None,
                     Vec::new(),
                     ProviderRuntimeMetadata::Placeholder,

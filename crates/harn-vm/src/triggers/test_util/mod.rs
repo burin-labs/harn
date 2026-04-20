@@ -2,11 +2,12 @@ use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::time::Duration as StdDuration;
+use std::time::{Duration as StdDuration, Instant};
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
+use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 use tokio::sync::Notify;
 use uuid::Uuid;
@@ -17,7 +18,7 @@ use crate::connectors::webhook::{
 };
 use crate::connectors::{
     Connector, ConnectorCtx, ConnectorError, MetricsRegistry, RateLimitConfig, RateLimiterFactory,
-    RawInbound, TriggerBinding as ConnectorTriggerBinding,
+    RawInbound, SlackConnector, TriggerBinding as ConnectorTriggerBinding,
 };
 use crate::event_log::{
     install_memory_for_current_thread, AnyEventLog, EventLog, FileEventLog, LogEvent,
@@ -52,6 +53,8 @@ pub const TRIGGER_TEST_FIXTURES: &[&str] = &[
     "rate_limit_throttles",
     "replay_binding_gc_fallback",
     "replay_refires_from_dlq",
+    "slack_events_3s_ack",
+    "slack_events_message",
     "webhook_dedupe_blocks_duplicates",
     "webhook_verifies_hmac",
 ];
@@ -225,6 +228,8 @@ impl TriggerTestHarness {
             "rate_limit_throttles" => self.rate_limit_throttles().await,
             "replay_binding_gc_fallback" => self.replay_binding_gc_fallback().await,
             "replay_refires_from_dlq" => self.replay_refires_from_dlq().await,
+            "slack_events_3s_ack" => self.slack_events_3s_ack().await,
+            "slack_events_message" => self.slack_events_message().await,
             "webhook_dedupe_blocks_duplicates" => self.webhook_dedupe_blocks_duplicates().await,
             "webhook_verifies_hmac" => self.webhook_verifies_hmac().await,
             _ => Err(format!(
@@ -327,6 +332,131 @@ impl TriggerTestHarness {
             notes: Vec::new(),
             details: json!({
                 "provider": event.provider.as_str(),
+            }),
+        })
+    }
+
+    async fn slack_events_message(self) -> Result<TriggerHarnessResult, String> {
+        let _guard = clock::install_override(self.clock.clone());
+        let log = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(32)));
+        let inbox = build_inbox(&log).await;
+        let mut connector = SlackConnector::new();
+        connector
+            .init(connector_ctx(
+                log,
+                Arc::new(StaticSecretProvider::new(
+                    "slack",
+                    BTreeMap::from([(
+                        SecretId::new("slack", "test-signing-secret"),
+                        "8f742231b10e8888abcd99yyyzzz85a5".to_string(),
+                    )]),
+                )),
+                inbox,
+            ))
+            .await
+            .map_err(|error| error.to_string())?;
+        connector
+            .activate(&[slack_binding()])
+            .await
+            .map_err(|error| error.to_string())?;
+
+        let event = connector
+            .normalize_inbound(slack_raw_inbound())
+            .map_err(|error| error.to_string())?;
+        self.connector_registry
+            .record_event("slack.fixture", 1, &event, Some("verified"), None);
+        let emitted = self.connector_registry.emitted();
+        Ok(TriggerHarnessResult {
+            fixture: "slack_events_message".to_string(),
+            ok: emitted.len() == 1
+                && emitted[0].provider == "slack"
+                && emitted[0].kind == "message.channels"
+                && emitted[0].signature_state == "verified",
+            stub: false,
+            summary: "slack connector verifies the signature and emits a typed message event"
+                .to_string(),
+            emitted,
+            attempts: Vec::new(),
+            dlq: Vec::new(),
+            alerts: Vec::new(),
+            bindings: Vec::new(),
+            notes: Vec::new(),
+            details: json!({
+                "expected_kind": "message.channels",
+            }),
+        })
+    }
+
+    async fn slack_events_3s_ack(self) -> Result<TriggerHarnessResult, String> {
+        let _guard = clock::install_override(self.clock.clone());
+        let log = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(32)));
+        let inbox = build_inbox(&log).await;
+        let mut connector = SlackConnector::new();
+        connector
+            .init(connector_ctx(
+                log.clone(),
+                Arc::new(StaticSecretProvider::new(
+                    "slack",
+                    BTreeMap::from([(
+                        SecretId::new("slack", "test-signing-secret"),
+                        "8f742231b10e8888abcd99yyyzzz85a5".to_string(),
+                    )]),
+                )),
+                inbox.clone(),
+            ))
+            .await
+            .map_err(|error| error.to_string())?;
+        connector
+            .activate(&[slack_binding()])
+            .await
+            .map_err(|error| error.to_string())?;
+
+        let started = Instant::now();
+        let event = connector
+            .normalize_inbound(slack_raw_inbound())
+            .map_err(|error| error.to_string())?;
+        let processed = crate::connectors::postprocess_normalized_event(
+            inbox.as_ref(),
+            "slack.fixture",
+            false,
+            StdDuration::from_secs(60),
+            event,
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+        let crate::connectors::PostNormalizeOutcome::Ready(event) = processed else {
+            return Err("slack ack fixture unexpectedly dropped the event".to_string());
+        };
+        let pending_topic = Topic::new("triggers.harness.pending")
+            .expect("pending topic for slack ack fixture should be valid");
+        log.append(
+            &pending_topic,
+            LogEvent::new(
+                "trigger_event",
+                json!({
+                    "trigger_id": "slack.fixture",
+                    "binding_version": 1,
+                    "event": *event,
+                }),
+            ),
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+        let elapsed_ms = started.elapsed().as_millis() as u64;
+
+        Ok(TriggerHarnessResult {
+            fixture: "slack_events_3s_ack".to_string(),
+            ok: elapsed_ms < 200,
+            stub: false,
+            summary: "slack ack-first ingress path stays below 200ms before dispatch".to_string(),
+            emitted: Vec::new(),
+            attempts: Vec::new(),
+            dlq: Vec::new(),
+            alerts: Vec::new(),
+            bindings: Vec::new(),
+            notes: Vec::new(),
+            details: json!({
+                "elapsed_ms": elapsed_ms,
             }),
         })
     }
@@ -1226,6 +1356,94 @@ fn webhook_binding(
         }
     });
     binding
+}
+
+fn slack_binding() -> ConnectorTriggerBinding {
+    let mut binding =
+        ConnectorTriggerBinding::new(ProviderId::from("slack"), "webhook", "slack.fixture");
+    binding.config = json!({
+        "match": { "path": "/hooks/slack" },
+        "secrets": { "signing_secret": "slack/test-signing-secret" },
+    });
+    binding
+}
+
+fn slack_raw_inbound() -> RawInbound {
+    let payload = json!({
+        "team_id": "T123ABC456",
+        "api_app_id": "A123ABC456",
+        "event": {
+            "type": "message",
+            "user": "U123ABC456",
+            "text": "hello from slack",
+            "ts": "1715000000.000100",
+            "channel": "C123ABC456",
+            "channel_type": "channel",
+            "event_ts": "1715000000.000100"
+        },
+        "type": "event_callback",
+        "event_id": "Ev123MESSAGE",
+        "event_time": 1715000000
+    });
+    let body = serde_json::to_vec(&payload).expect("slack fixture body should serialize");
+    let timestamp = 1_715_000_000i64;
+    let mut raw = RawInbound::new(
+        "",
+        BTreeMap::from([
+            ("Content-Type".to_string(), "application/json".to_string()),
+            (
+                "X-Slack-Request-Timestamp".to_string(),
+                timestamp.to_string(),
+            ),
+            (
+                "X-Slack-Signature".to_string(),
+                slack_signature("8f742231b10e8888abcd99yyyzzz85a5", timestamp, &body),
+            ),
+        ]),
+        body,
+    );
+    raw.received_at = OffsetDateTime::from_unix_timestamp(timestamp).unwrap();
+    raw.metadata = json!({ "binding_id": "slack.fixture" });
+    raw
+}
+
+fn slack_signature(secret: &str, timestamp: i64, body: &[u8]) -> String {
+    let mut signed = format!("v0:{timestamp}:").into_bytes();
+    signed.extend_from_slice(body);
+    format!(
+        "v0={}",
+        hex::encode(hmac_sha256(secret.as_bytes(), &signed))
+    )
+}
+
+fn hmac_sha256(secret: &[u8], data: &[u8]) -> Vec<u8> {
+    const BLOCK_SIZE: usize = 64;
+
+    let mut key = if secret.len() > BLOCK_SIZE {
+        Sha256::digest(secret).to_vec()
+    } else {
+        secret.to_vec()
+    };
+    key.resize(BLOCK_SIZE, 0);
+
+    let mut inner_pad = vec![0x36; BLOCK_SIZE];
+    let mut outer_pad = vec![0x5c; BLOCK_SIZE];
+    for (slot, key_byte) in inner_pad.iter_mut().zip(&key) {
+        *slot ^= key_byte;
+    }
+    for (slot, key_byte) in outer_pad.iter_mut().zip(&key) {
+        *slot ^= key_byte;
+    }
+
+    let mut inner = Sha256::new();
+    inner.update(&inner_pad);
+    inner.update(data);
+    let inner_digest = inner.finalize();
+
+    let mut outer = Sha256::new();
+    outer.update(&outer_pad);
+    outer.update(inner_digest);
+    outer.finalize().to_vec()
 }
 
 fn standard_raw_inbound() -> RawInbound {
