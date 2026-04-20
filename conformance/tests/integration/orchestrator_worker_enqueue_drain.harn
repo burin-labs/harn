@@ -10,7 +10,6 @@ pipeline default(task) {
   mkdir(producer_dir)
   mkdir(consumer_dir)
   mkdir(state_dir)
-
   write_file(
     path_join(producer_dir, "harn.toml"),
     "[package]\nname = \"worker-producer\"\n\n[[triggers]]\nid = \"incoming-review-task\"\nkind = \"a2a-push\"\nprovider = \"a2a-push\"\nmatch = { events = [\"a2a.task.received\"] }\nhandler = \"worker://triage\"\npriority = \"high\"\n",
@@ -23,11 +22,9 @@ pipeline default(task) {
     path_join(consumer_dir, "lib.harn"),
     "import \"std/triggers\"\n\npub fn on_task(event: TriggerEvent) -> dict {\n  return {ok: true, kind: event.kind, event_id: event.id}\n}\n",
   )
-
   let repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
   let harn_bin = env_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(repo_root))
   assert(file_exists(harn_bin), "missing built harn binary at " + harn_bin)
-
   let fire = exec(
     harn_bin,
     "orchestrator",
@@ -57,7 +54,6 @@ pipeline default(task) {
     && before.worker_queues[0].queue == "triage"
     && before.worker_queues[0].ready == 1,
   )
-
   let drain = exec(
     harn_bin,
     "orchestrator",
