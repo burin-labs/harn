@@ -18,8 +18,13 @@ tree-sitter-harn/*.dll
 !conformance/tests/**/.harn/**
 # …but per-run metadata shards from project_deep_scan tests (namespace
 # dirs under .harn/metadata/<UUID>/entries.json) are always ephemeral
-# and must stay ignored.
+# and must stay ignored. Same goes for SQLite event-log files and
+# checkpoint dirs that tests drop into the fixture's .harn/.
 conformance/tests/**/.harn/metadata/
+conformance/tests/**/.harn/checkpoints/
+conformance/tests/**/.harn/events.sqlite
+conformance/tests/**/.harn/events.sqlite-shm
+conformance/tests/**/.harn/events.sqlite-wal
 .cargo/config.toml
 # .claude/ is local-only except for shared skill definitions
 .claude/*
