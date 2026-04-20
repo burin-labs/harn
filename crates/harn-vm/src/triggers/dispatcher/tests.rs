@@ -111,6 +111,7 @@ async fn dispatcher_fixture_with_options(
         source: TriggerBindingSource::Manifest,
         kind: "webhook".to_string(),
         provider: ProviderId::from("github"),
+        autonomy_tier: crate::AutonomyTier::ActAuto,
         handler: TriggerHandlerSpec::Local {
             raw: handler_name.to_string(),
             closure: handler,
@@ -156,6 +157,7 @@ async fn a2a_dispatcher_fixture(
         source: TriggerBindingSource::Manifest,
         kind: "webhook".to_string(),
         provider: ProviderId::from("github"),
+        autonomy_tier: crate::AutonomyTier::ActAuto,
         handler: TriggerHandlerSpec::A2a {
             target: target.clone(),
             allow_cleartext,

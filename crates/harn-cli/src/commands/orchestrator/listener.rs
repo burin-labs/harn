@@ -1104,6 +1104,7 @@ mod tests {
             source: TriggerBindingSource::Manifest,
             kind: "a2a-push".to_string(),
             provider: ProviderId::from("a2a-push"),
+            autonomy_tier: harn_vm::AutonomyTier::ActAuto,
             handler: TriggerHandlerSpec::Worker {
                 queue: "triage".to_string(),
             },

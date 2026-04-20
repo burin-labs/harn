@@ -31,6 +31,7 @@ pub mod store;
 pub mod tool_annotations;
 pub mod tracing;
 pub mod triggers;
+pub mod trust_graph;
 pub mod value;
 pub mod visible_text;
 mod vm;
@@ -101,6 +102,12 @@ pub use triggers::{
     TRIGGER_ATTEMPTS_TOPIC, TRIGGER_DLQ_TOPIC, TRIGGER_INBOX_CLAIMS_TOPIC,
     TRIGGER_INBOX_ENVELOPES_TOPIC, TRIGGER_INBOX_LEGACY_TOPIC, TRIGGER_OUTBOX_TOPIC,
     TRIGGER_TEST_FIXTURES,
+};
+pub use trust_graph::{
+    append_active_trust_record, append_trust_record, query_trust_records,
+    resolve_agent_autonomy_tier, summarize_trust_records, topic_for_agent, AutonomyTier,
+    TrustAgentSummary, TrustOutcome, TrustQueryFilters, TrustRecord, OPENTRUSTGRAPH_SCHEMA_V0,
+    TRUST_GRAPH_GLOBAL_TOPIC, TRUST_GRAPH_TOPIC_PREFIX,
 };
 pub use value::*;
 pub use vm::*;

@@ -471,6 +471,59 @@ harn trigger replay <event-id> --as-of 2026-04-19T12:00:00Z
 Sets `HARN_REPLAY=1` during dispatch so nondeterminism in handlers
 can fall back to recorded values when the handler cooperates.
 
+## harn trust query
+
+Query trust-graph records from the workspace event log.
+
+```bash
+# List all trust records for one agent.
+harn trust query --agent github-triage-bot
+
+# Filter by action, tier, and outcome, then emit JSON.
+harn trust query \
+  --agent github-triage-bot \
+  --action github.issue.opened \
+  --tier act-auto \
+  --outcome success \
+  --json
+
+# Aggregate per-agent stats.
+harn trust query --summary
+```
+
+Supported filters:
+
+- `--agent`
+- `--action`
+- `--since`
+- `--until`
+- `--tier`
+- `--outcome`
+- `--json`
+- `--summary`
+
+`--summary` groups records by agent and reports success rate, mean recorded
+cost, tier distribution, and outcome distribution.
+
+## harn trust promote
+
+Manually promote an agent to a higher autonomy tier. This appends a
+`trust.promote` control record to the trust graph.
+
+```bash
+harn trust promote github-triage-bot --to act-auto
+harn trust promote reviewer-bot --to act-with-approval
+```
+
+## harn trust demote
+
+Manually demote an agent and record the reason in trust-graph metadata.
+
+```bash
+harn trust demote github-triage-bot --to shadow --reason "unexpected mutation"
+harn trust demote deploy-bot --to suggest --reason "needs tighter review gate"
+```
+
 ## harn serve
 
 Start an A2A (Agent-to-Agent) HTTP server.

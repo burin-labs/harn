@@ -340,10 +340,15 @@ type TriggerRetry = {
   backoff: TriggerRetryBackoff | nil,
 }
 
+type AutonomyTier = "shadow" | "suggest" | "act_with_approval" | "act_auto"
+
+type TrustOutcome = "success" | "failure" | "denied" | "timeout"
+
 type TriggerConfig = {
   id: string | nil,
   kind: string,
   provider: ProviderId,
+  autonomy_tier: AutonomyTier | nil,
   handler: TriggerHandler,
   when: TriggerPredicate | nil,
   when_budget: TriggerWhenBudget | nil,
@@ -375,6 +380,7 @@ type TriggerBinding = {
   source: TriggerBindingSource,
   kind: string,
   provider: string,
+  autonomy_tier: AutonomyTier,
   handler_kind: string,
   state: TriggerState,
   metrics: TriggerMetrics,
@@ -411,6 +417,38 @@ type DlqEntry = {
   error: string,
   event: TriggerEvent,
   retry_history: list<DlqAttempt>,
+}
+
+type TrustRecord = {
+  schema: string,
+  record_id: string,
+  agent: string,
+  action: string,
+  approver: string | nil,
+  outcome: TrustOutcome,
+  trace_id: string,
+  autonomy_tier: AutonomyTier,
+  timestamp: string,
+  cost_usd: float | nil,
+  metadata: dict,
+}
+
+type TrustQueryFilters = {
+  agent: string | nil,
+  action: string | nil,
+  since: string | nil,
+  until: string | nil,
+  tier: AutonomyTier | nil,
+  outcome: TrustOutcome | nil,
+}
+
+type HandlerContext = {
+  agent: string,
+  action: string,
+  trace_id: string,
+  replay_of_event_id: string | nil,
+  autonomy_tier: AutonomyTier,
+  trigger_event: TriggerEvent,
 }
 
 /** list_providers. */

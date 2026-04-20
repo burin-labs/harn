@@ -8,6 +8,7 @@ use uuid::Uuid;
 use crate::event_log::{
     active_event_log, install_memory_for_current_thread, EventLog, LogEvent, Topic,
 };
+use crate::triggers::dispatcher::current_dispatch_context;
 use crate::triggers::dispatcher::DEFAULT_MAX_ATTEMPTS;
 use crate::triggers::test_util::{clock, run_trigger_harness_fixture};
 use crate::triggers::{
@@ -16,6 +17,9 @@ use crate::triggers::{
     TriggerBindingSnapshot, TriggerBindingSource, TriggerBindingSpec, TriggerEvent, TriggerEventId,
     TriggerHandlerSpec, TriggerPredicateSpec, TriggerRegistryError, TriggerRetryConfig,
     TRIGGERS_LIFECYCLE_TOPIC, TRIGGER_DLQ_TOPIC,
+};
+use crate::trust_graph::{
+    query_trust_records, AutonomyTier, TrustOutcome, TrustQueryFilters, TrustRecord,
 };
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
@@ -74,6 +78,20 @@ struct LifecycleEventRecord {
 }
 
 pub(crate) fn register_trigger_builtins(vm: &mut Vm) {
+    vm.register_builtin("handler_context", |_args, _out| {
+        let Some(context) = current_dispatch_context() else {
+            return Ok(VmValue::Nil);
+        };
+        Ok(value_from_serde(&serde_json::json!({
+            "agent": context.agent_id,
+            "action": context.action,
+            "trace_id": context.trigger_event.trace_id.0,
+            "replay_of_event_id": context.replay_of_event_id,
+            "autonomy_tier": context.autonomy_tier,
+            "trigger_event": context.trigger_event,
+        })))
+    });
+
     vm.register_builtin("list_providers_native", |_args, _out| {
         Ok(VmValue::List(Rc::new(
             registered_provider_metadata()
@@ -146,6 +164,65 @@ pub(crate) fn register_trigger_builtins(vm: &mut Vm) {
             entries
                 .into_iter()
                 .map(|entry| value_from_serde(&entry))
+                .collect(),
+        )))
+    });
+
+    vm.register_async_builtin("trust_record", |args| async move {
+        let agent = args
+            .first()
+            .and_then(|value| match value {
+                VmValue::String(text) => Some(text.to_string()),
+                _ => None,
+            })
+            .ok_or_else(|| VmError::Runtime("trust_record: expected agent string".to_string()))?;
+        let action = args
+            .get(1)
+            .and_then(|value| match value {
+                VmValue::String(text) => Some(text.to_string()),
+                _ => None,
+            })
+            .ok_or_else(|| VmError::Runtime("trust_record: expected action string".to_string()))?;
+        let approver = args.get(2).and_then(|value| match value {
+            VmValue::String(text) if !text.is_empty() => Some(text.to_string()),
+            VmValue::Nil => None,
+            _ => None,
+        });
+        let outcome = args
+            .get(3)
+            .map(parse_trust_outcome)
+            .transpose()?
+            .ok_or_else(|| VmError::Runtime("trust_record: expected outcome".to_string()))?;
+        let tier = args
+            .get(4)
+            .map(parse_autonomy_tier)
+            .transpose()?
+            .ok_or_else(|| VmError::Runtime("trust_record: expected autonomy tier".to_string()))?;
+        let trace_id = current_dispatch_context()
+            .map(|context| context.trigger_event.trace_id.0)
+            .unwrap_or_else(|| format!("trace-{}", uuid::Uuid::now_v7()));
+        let record = TrustRecord::new(agent, action, approver, outcome, trace_id, tier);
+        let log = ensure_trigger_event_log();
+        crate::append_trust_record(&log, &record)
+            .await
+            .map_err(|error| VmError::Runtime(format!("trust_record: {error}")))?;
+        Ok(value_from_serde(&record))
+    });
+
+    vm.register_async_builtin("trust_query", |args| async move {
+        let filters = args
+            .first()
+            .map(parse_trust_query_filters)
+            .transpose()?
+            .unwrap_or_default();
+        let log = ensure_trigger_event_log();
+        let records = query_trust_records(&log, &filters)
+            .await
+            .map_err(|error| VmError::Runtime(format!("trust_query: {error}")))?;
+        Ok(VmValue::List(Rc::new(
+            records
+                .into_iter()
+                .map(|record| value_from_serde(&record))
                 .collect(),
         )))
     });
@@ -632,6 +709,10 @@ fn parse_trigger_config(config: &BTreeMap<String, VmValue>) -> Result<TriggerBin
         .map(parse_string_list)
         .transpose()?
         .unwrap_or_default();
+    let autonomy_tier = match config.get("autonomy_tier") {
+        Some(VmValue::Nil) | None => AutonomyTier::default(),
+        Some(value) => parse_autonomy_tier(value)?,
+    };
     let budget = config.get("budget").and_then(|value| match value {
         VmValue::Dict(map) => Some(map),
         _ => None,
@@ -686,6 +767,7 @@ fn parse_trigger_config(config: &BTreeMap<String, VmValue>) -> Result<TriggerBin
         "id": id,
         "kind": kind,
         "provider": provider.as_str(),
+        "autonomy_tier": autonomy_tier,
         "handler": handler_descriptor,
         "when": when.as_ref().map(|predicate| predicate.raw.clone()),
         "when_budget": when_budget,
@@ -709,6 +791,7 @@ fn parse_trigger_config(config: &BTreeMap<String, VmValue>) -> Result<TriggerBin
         source: TriggerBindingSource::Dynamic,
         kind,
         provider,
+        autonomy_tier,
         handler,
         when,
         when_budget,
@@ -754,6 +837,90 @@ fn parse_duration_millis(raw: &str) -> Result<u64, VmError> {
         }
     };
     Ok(amount.saturating_mul(multiplier))
+}
+
+fn parse_autonomy_tier(value: &VmValue) -> Result<AutonomyTier, VmError> {
+    let raw = match value {
+        VmValue::String(text) => text.as_ref(),
+        other => {
+            return Err(VmError::Runtime(format!(
+                "trigger_register: `autonomy_tier` must be a string, got {}",
+                other.type_name()
+            )))
+        }
+    };
+    match raw {
+        "shadow" => Ok(AutonomyTier::Shadow),
+        "suggest" => Ok(AutonomyTier::Suggest),
+        "act_with_approval" => Ok(AutonomyTier::ActWithApproval),
+        "act_auto" => Ok(AutonomyTier::ActAuto),
+        other => Err(VmError::Runtime(format!(
+            "trigger_register: unsupported autonomy_tier '{other}', expected shadow|suggest|act_with_approval|act_auto"
+        ))),
+    }
+}
+
+fn parse_trust_outcome(value: &VmValue) -> Result<TrustOutcome, VmError> {
+    let raw = match value {
+        VmValue::String(text) => text.as_ref(),
+        other => {
+            return Err(VmError::Runtime(format!(
+                "trust_record: outcome must be a string, got {}",
+                other.type_name()
+            )))
+        }
+    };
+    match raw {
+        "success" => Ok(TrustOutcome::Success),
+        "failure" => Ok(TrustOutcome::Failure),
+        "denied" => Ok(TrustOutcome::Denied),
+        "timeout" => Ok(TrustOutcome::Timeout),
+        other => Err(VmError::Runtime(format!(
+            "trust_record: unsupported outcome '{other}', expected success|failure|denied|timeout"
+        ))),
+    }
+}
+
+fn parse_trust_query_filters(value: &VmValue) -> Result<TrustQueryFilters, VmError> {
+    let VmValue::Dict(map) = value else {
+        return Err(VmError::Runtime(
+            "trust_query: filters must be a dict".to_string(),
+        ));
+    };
+    Ok(TrustQueryFilters {
+        agent: optional_string(map, "agent"),
+        action: optional_string(map, "action"),
+        since: optional_string(map, "since")
+            .map(|raw| parse_query_timestamp("trust_query", "since", &raw))
+            .transpose()?,
+        until: optional_string(map, "until")
+            .map(|raw| parse_query_timestamp("trust_query", "until", &raw))
+            .transpose()?,
+        tier: map.get("tier").map(parse_autonomy_tier).transpose()?,
+        outcome: map.get("outcome").map(parse_trust_outcome).transpose()?,
+    })
+}
+
+fn parse_query_timestamp(builtin: &str, field: &str, raw: &str) -> Result<OffsetDateTime, VmError> {
+    if let Ok(parsed) = OffsetDateTime::parse(raw, &time::format_description::well_known::Rfc3339) {
+        return Ok(parsed);
+    }
+    if let Ok(unix) = raw.parse::<i64>() {
+        let parsed = if raw.len() > 10 {
+            OffsetDateTime::from_unix_timestamp_nanos(unix as i128 * 1_000_000)
+        } else {
+            OffsetDateTime::from_unix_timestamp(unix)
+        }
+        .map_err(|error| {
+            VmError::Runtime(format!(
+                "{builtin}: invalid `{field}` timestamp '{raw}': {error}"
+            ))
+        })?;
+        return Ok(parsed);
+    }
+    Err(VmError::Runtime(format!(
+        "{builtin}: invalid `{field}` timestamp '{raw}', expected RFC3339 or unix seconds/milliseconds"
+    )))
 }
 
 fn parse_retry_config(
@@ -1076,6 +1243,7 @@ mod tests {
             source: TriggerBindingSource::Manifest,
             kind: "cron".to_string(),
             provider: ProviderId::from("cron"),
+            autonomy_tier: crate::AutonomyTier::ActAuto,
             handler: TriggerHandlerSpec::Local {
                 raw: handler_name.to_string(),
                 closure,

@@ -23,6 +23,7 @@
 - [Triggers](./triggers.md)
 - [Trigger stdlib](./stdlib/triggers.md)
 - [Human in the loop](./hitl.md)
+- [Trust graph](./trust-graph.md)
 - [Skills](./skills.md)
 - [Skill provenance](./skill-provenance.md)
 - [Sessions](./sessions.md)

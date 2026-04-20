@@ -127,6 +127,8 @@ pub struct TriggerManifestEntry {
     pub id: String,
     pub kind: TriggerKind,
     pub provider: harn_vm::ProviderId,
+    #[serde(default)]
+    pub autonomy_tier: harn_vm::AutonomyTier,
     #[serde(rename = "match")]
     pub match_: TriggerMatchExpr,
     #[serde(default)]
@@ -486,6 +488,7 @@ pub struct ResolvedTriggerConfig {
     pub id: String,
     pub kind: TriggerKind,
     pub provider: harn_vm::ProviderId,
+    pub autonomy_tier: harn_vm::AutonomyTier,
     pub match_: TriggerMatchExpr,
     pub when: Option<String>,
     pub when_budget: Option<TriggerWhenBudgetSpec>,
@@ -723,6 +726,7 @@ fn resolved_triggers_from_manifest(
             id: trigger.id.clone(),
             kind: trigger.kind,
             provider: trigger.provider.clone(),
+            autonomy_tier: trigger.autonomy_tier,
             match_: trigger.match_.clone(),
             when: trigger.when.clone(),
             when_budget: trigger.when_budget.clone(),
@@ -1616,6 +1620,7 @@ pub fn manifest_trigger_binding_spec(
     let id = config.id.clone();
     let kind = trigger_kind_label(config.kind).to_string();
     let provider = config.provider.clone();
+    let autonomy_tier = config.autonomy_tier;
     let match_events = config.match_.events.clone();
     let dedupe_key = config.dedupe_key.clone();
     let retry = harn_vm::TriggerRetryConfig::new(
@@ -1636,6 +1641,7 @@ pub fn manifest_trigger_binding_spec(
         "id": &id,
         "kind": &kind,
         "provider": provider.as_str(),
+        "autonomy_tier": autonomy_tier,
         "match": config.match_,
         "when": when_raw,
         "when_budget": config.when_budget,
@@ -1657,6 +1663,7 @@ pub fn manifest_trigger_binding_spec(
         source: harn_vm::TriggerBindingSource::Manifest,
         kind,
         provider,
+        autonomy_tier,
         handler,
         when,
         when_budget,
@@ -2509,6 +2516,7 @@ handler = "acme::audit_edit"
 id = "github-new-issue"
 kind = "webhook"
 provider = "github"
+autonomy_tier = "act_with_approval"
 match = { events = ["issues.opened"] }
 when = "handlers::should_handle"
 when_budget = { max_cost_usd = 0.001, tokens_max = 500, timeout = "5s" }
@@ -2598,6 +2606,7 @@ handlers = "lib.harn"
 id = "github-new-issue"
 kind = "webhook"
 provider = "github"
+autonomy_tier = "suggest"
 match = { events = ["issues.opened"] }
 when = "handlers::should_handle"
 when_budget = { max_cost_usd = 0.001, tokens_max = 500, timeout = "5s" }
@@ -2634,6 +2643,10 @@ pub fn should_handle(event: TriggerEvent) -> Result<bool, string> {
             CollectedTriggerHandler::Local { reference, .. } if reference.raw == "handlers::on_new_issue"
         ));
         assert_eq!(collected[0].config.priority, TriggerPriority::Normal);
+        assert_eq!(
+            collected[0].config.autonomy_tier,
+            harn_vm::AutonomyTier::Suggest
+        );
         assert!(collected[0].when.is_some());
         assert_eq!(
             collected[0]

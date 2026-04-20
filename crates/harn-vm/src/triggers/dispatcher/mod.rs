@@ -26,6 +26,7 @@ use crate::orchestration::{
     ACTION_GRAPH_NODE_KIND_TRIGGER_PREDICATE,
 };
 use crate::stdlib::json_to_vm_value;
+use crate::trust_graph::{append_trust_record, AutonomyTier, TrustOutcome, TrustRecord};
 use crate::value::{error_to_category, ErrorCategory, VmError, VmValue};
 use crate::vm::Vm;
 
@@ -58,6 +59,9 @@ tokio::task_local! {
 pub(crate) struct DispatchContext {
     pub trigger_event: TriggerEvent,
     pub replay_of_event_id: Option<String>,
+    pub agent_id: String,
+    pub action: String,
+    pub autonomy_tier: AutonomyTier,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -228,6 +232,8 @@ pub enum DispatchError {
     Serde(String),
     Local(String),
     A2a(String),
+    Denied(String),
+    Timeout(String),
     Cancelled(String),
     NotImplemented(String),
 }
@@ -240,6 +246,8 @@ impl std::fmt::Display for DispatchError {
             | Self::Serde(message)
             | Self::Local(message)
             | Self::A2a(message)
+            | Self::Denied(message)
+            | Self::Timeout(message)
             | Self::Cancelled(message)
             | Self::NotImplemented(message) => f.write_str(message),
         }
@@ -250,7 +258,10 @@ impl std::error::Error for DispatchError {}
 
 impl DispatchError {
     fn retryable(&self) -> bool {
-        !matches!(self, Self::Cancelled(_) | Self::NotImplemented(_))
+        !matches!(
+            self,
+            Self::Cancelled(_) | Self::Denied(_) | Self::NotImplemented(_)
+        )
     }
 }
 
@@ -552,6 +563,13 @@ impl Dispatcher {
         event: TriggerEvent,
         replay_of_event_id: Option<String>,
     ) -> Result<DispatchOutcome, DispatchError> {
+        let autonomy_tier = crate::resolve_agent_autonomy_tier(
+            &self.event_log,
+            binding.id.as_str(),
+            binding.autonomy_tier,
+        )
+        .await
+        .unwrap_or(binding.autonomy_tier);
         let binding_key = binding.binding_key();
         let route = DispatchUri::from(&binding.handler);
         let trigger_id = binding.id.as_str().to_string();
@@ -674,6 +692,18 @@ impl Dispatcher {
                 .await
                 .map_err(|error| DispatchError::Registry(error.to_string()))?;
                 decrement_in_flight(&self.state);
+                self.append_dispatch_trust_record(
+                    binding,
+                    &route,
+                    &event,
+                    replay_of_event_id.as_ref(),
+                    autonomy_tier,
+                    TrustOutcome::Denied,
+                    "skipped",
+                    0,
+                    None,
+                )
+                .await?;
                 return Ok(DispatchOutcome {
                     trigger_id: binding.id.as_str().to_string(),
                     binding_key: binding.binding_key(),
@@ -782,7 +812,13 @@ impl Dispatcher {
             .await?;
 
             let result = self
-                .dispatch_once(binding, &route, &event, &mut self.cancel_tx.subscribe())
+                .dispatch_once(
+                    binding,
+                    &route,
+                    &event,
+                    autonomy_tier,
+                    &mut self.cancel_tx.subscribe(),
+                )
                 .await;
             let completed_at = now_rfc3339();
 
@@ -849,6 +885,18 @@ impl Dispatcher {
                     .await
                     .map_err(|error| DispatchError::Registry(error.to_string()))?;
                     decrement_in_flight(&self.state);
+                    self.append_dispatch_trust_record(
+                        binding,
+                        &route,
+                        &event,
+                        replay_of_event_id.as_ref(),
+                        autonomy_tier,
+                        TrustOutcome::Success,
+                        "succeeded",
+                        attempt,
+                        None,
+                    )
+                    .await?;
                     return Ok(DispatchOutcome {
                         trigger_id: binding.id.as_str().to_string(),
                         binding_key: binding.binding_key(),
@@ -871,11 +919,7 @@ impl Dispatcher {
                         handler_kind: route.kind().to_string(),
                         started_at,
                         completed_at,
-                        outcome: if matches!(error, DispatchError::Cancelled(_)) {
-                            "cancelled".to_string()
-                        } else {
-                            "failed".to_string()
-                        },
+                        outcome: dispatch_error_label(&error).to_string(),
                         error_msg: Some(error.to_string()),
                     };
                     attempts.push(attempt_record.clone());
@@ -932,6 +976,28 @@ impl Dispatcher {
                             DispatchError::Registry(registry_error.to_string())
                         })?;
                         decrement_in_flight(&self.state);
+                        let trust_outcome = match error {
+                            DispatchError::Denied(_) => TrustOutcome::Denied,
+                            DispatchError::Timeout(_) => TrustOutcome::Timeout,
+                            _ => TrustOutcome::Failure,
+                        };
+                        let terminal_status = if matches!(error, DispatchError::Cancelled(_)) {
+                            "cancelled"
+                        } else {
+                            "failed"
+                        };
+                        self.append_dispatch_trust_record(
+                            binding,
+                            &route,
+                            &event,
+                            replay_of_event_id.as_ref(),
+                            autonomy_tier,
+                            trust_outcome,
+                            terminal_status,
+                            attempt,
+                            Some(error.to_string()),
+                        )
+                        .await?;
                         return Ok(DispatchOutcome {
                             trigger_id: binding.id.as_str().to_string(),
                             binding_key: binding.binding_key(),
@@ -1032,6 +1098,18 @@ impl Dispatcher {
                                 DispatchError::Registry(registry_error.to_string())
                             })?;
                             decrement_in_flight(&self.state);
+                            self.append_dispatch_trust_record(
+                                binding,
+                                &route,
+                                &event,
+                                replay_of_event_id.as_ref(),
+                                autonomy_tier,
+                                TrustOutcome::Failure,
+                                "cancelled",
+                                attempt,
+                                Some("dispatcher shutdown cancelled retry wait".to_string()),
+                            )
+                            .await?;
                             return Ok(DispatchOutcome {
                                 trigger_id: binding.id.as_str().to_string(),
                                 binding_key: binding.binding_key(),
@@ -1128,6 +1206,18 @@ impl Dispatcher {
                         DispatchError::Registry(registry_error.to_string())
                     })?;
                     decrement_in_flight(&self.state);
+                    self.append_dispatch_trust_record(
+                        binding,
+                        &route,
+                        &event,
+                        replay_of_event_id.as_ref(),
+                        autonomy_tier,
+                        TrustOutcome::Failure,
+                        "dlq",
+                        attempt,
+                        Some(error.to_string()),
+                    )
+                    .await?;
                     return Ok(DispatchOutcome {
                         trigger_id: binding.id.as_str().to_string(),
                         binding_key: binding.binding_key(),
@@ -1152,6 +1242,18 @@ impl Dispatcher {
         .await
         .map_err(|error| DispatchError::Registry(error.to_string()))?;
         decrement_in_flight(&self.state);
+        self.append_dispatch_trust_record(
+            binding,
+            &route,
+            &event,
+            replay_of_event_id.as_ref(),
+            autonomy_tier,
+            TrustOutcome::Failure,
+            "failed",
+            max_attempts,
+            Some("dispatch exhausted without terminal outcome".to_string()),
+        )
+        .await?;
         Ok(DispatchOutcome {
             trigger_id: binding.id.as_str().to_string(),
             binding_key: binding.binding_key(),
@@ -1171,6 +1273,7 @@ impl Dispatcher {
         binding: &TriggerBinding,
         route: &DispatchUri,
         event: &TriggerEvent,
+        autonomy_tier: AutonomyTier,
         cancel_rx: &mut broadcast::Receiver<()>,
     ) -> Result<serde_json::Value, DispatchError> {
         match route {
@@ -1182,7 +1285,15 @@ impl Dispatcher {
                     )));
                 };
                 let value = self
-                    .invoke_vm_callable(closure, event, None, cancel_rx)
+                    .invoke_vm_callable(
+                        closure,
+                        event,
+                        None,
+                        binding.id.as_str(),
+                        &format!("{}.{}", event.provider.as_str(), event.kind),
+                        autonomy_tier,
+                        cancel_rx,
+                    )
                     .await?;
                 Ok(vm_value_to_json(&value))
             }
@@ -1226,6 +1337,9 @@ impl Dispatcher {
         closure: &crate::value::VmClosure,
         event: &TriggerEvent,
         replay_of_event_id: Option<&String>,
+        agent_id: &str,
+        action: &str,
+        autonomy_tier: AutonomyTier,
         _cancel_rx: &mut broadcast::Receiver<()>,
     ) -> Result<VmValue, DispatchError> {
         let mut vm = self.base_vm.child_vm();
@@ -1250,6 +1364,9 @@ impl Dispatcher {
             slot.borrow_mut().replace(DispatchContext {
                 trigger_event: event.clone(),
                 replay_of_event_id: replay_of_event_id.cloned(),
+                agent_id: agent_id.to_string(),
+                action: action.to_string(),
+                autonomy_tier,
             })
         });
         let prior_hitl_state = crate::stdlib::hitl::take_hitl_state();
@@ -1610,6 +1727,73 @@ impl Dispatcher {
             .collect())
     }
 
+    #[allow(clippy::too_many_arguments)]
+    async fn append_dispatch_trust_record(
+        &self,
+        binding: &TriggerBinding,
+        route: &DispatchUri,
+        event: &TriggerEvent,
+        replay_of_event_id: Option<&String>,
+        autonomy_tier: AutonomyTier,
+        outcome: TrustOutcome,
+        terminal_status: &str,
+        attempt_count: u32,
+        error: Option<String>,
+    ) -> Result<(), DispatchError> {
+        let mut record = TrustRecord::new(
+            binding.id.as_str().to_string(),
+            format!("{}.{}", event.provider.as_str(), event.kind),
+            None,
+            outcome,
+            event.trace_id.0.clone(),
+            autonomy_tier,
+        );
+        record.metadata.insert(
+            "binding_key".to_string(),
+            serde_json::json!(binding.binding_key()),
+        );
+        record.metadata.insert(
+            "binding_version".to_string(),
+            serde_json::json!(binding.version),
+        );
+        record.metadata.insert(
+            "provider".to_string(),
+            serde_json::json!(event.provider.as_str()),
+        );
+        record
+            .metadata
+            .insert("event_kind".to_string(), serde_json::json!(event.kind));
+        record
+            .metadata
+            .insert("handler_kind".to_string(), serde_json::json!(route.kind()));
+        record.metadata.insert(
+            "target_uri".to_string(),
+            serde_json::json!(route.target_uri()),
+        );
+        record.metadata.insert(
+            "terminal_status".to_string(),
+            serde_json::json!(terminal_status),
+        );
+        record.metadata.insert(
+            "attempt_count".to_string(),
+            serde_json::json!(attempt_count),
+        );
+        if let Some(replay_of_event_id) = replay_of_event_id {
+            record.metadata.insert(
+                "replay_of_event_id".to_string(),
+                serde_json::json!(replay_of_event_id),
+            );
+        }
+        if let Some(error) = error {
+            record
+                .metadata
+                .insert("error".to_string(), serde_json::json!(error));
+        }
+        append_trust_record(&self.event_log, &record)
+            .await
+            .map_err(DispatchError::from)
+    }
+
     async fn append_attempt_record(
         &self,
         event: &TriggerEvent,
@@ -1779,10 +1963,21 @@ fn dispatch_error_from_vm_error(error: VmError) -> DispatchError {
         return DispatchError::Local(message.to_string());
     }
     match error_to_category(&error) {
+        ErrorCategory::Timeout => DispatchError::Timeout(error.to_string()),
+        ErrorCategory::ToolRejected => DispatchError::Denied(error.to_string()),
         ErrorCategory::Cancelled => {
             DispatchError::Cancelled("dispatcher shutdown cancelled local handler".to_string())
         }
         _ => DispatchError::Local(error.to_string()),
+    }
+}
+
+fn dispatch_error_label(error: &DispatchError) -> &'static str {
+    match error {
+        DispatchError::Denied(_) => "denied",
+        DispatchError::Timeout(_) => "timeout",
+        DispatchError::Cancelled(_) => "cancelled",
+        _ => "failed",
     }
 }
 

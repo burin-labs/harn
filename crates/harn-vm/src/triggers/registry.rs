@@ -13,6 +13,7 @@ use crate::event_log::{active_event_log, AnyEventLog, EventLog, LogEvent, Topic}
 use crate::llm::trigger_predicate::TriggerPredicateBudget;
 use crate::secrets::{configured_default_chain, SecretProvider};
 use crate::triggers::test_util::clock;
+use crate::trust_graph::AutonomyTier;
 use crate::value::VmClosure;
 
 use super::dispatcher::TriggerRetryConfig;
@@ -135,6 +136,7 @@ pub struct TriggerBindingSpec {
     pub source: TriggerBindingSource,
     pub kind: String,
     pub provider: ProviderId,
+    pub autonomy_tier: AutonomyTier,
     pub handler: TriggerHandlerSpec,
     pub when: Option<TriggerPredicateSpec>,
     pub when_budget: Option<TriggerPredicateBudget>,
@@ -193,6 +195,7 @@ pub struct TriggerBinding {
     pub source: TriggerBindingSource,
     pub kind: String,
     pub provider: ProviderId,
+    pub autonomy_tier: AutonomyTier,
     pub handler: TriggerHandlerSpec,
     pub when: Option<TriggerPredicateSpec>,
     pub when_budget: Option<TriggerPredicateBudget>,
@@ -242,6 +245,7 @@ impl TriggerBinding {
             source: self.source,
             kind: self.kind.clone(),
             provider: self.provider.as_str().to_string(),
+            autonomy_tier: self.autonomy_tier,
             handler_kind: self.handler.kind().to_string(),
             state: self.state_snapshot(),
             metrics: self.metrics_snapshot(),
@@ -255,6 +259,7 @@ impl TriggerBinding {
             source: spec.source,
             kind: spec.kind,
             provider: spec.provider,
+            autonomy_tier: spec.autonomy_tier,
             handler: spec.handler,
             when: spec.when,
             when_budget: spec.when_budget,
@@ -309,6 +314,7 @@ pub struct TriggerBindingSnapshot {
     pub source: TriggerBindingSource,
     pub kind: String,
     pub provider: String,
+    pub autonomy_tier: AutonomyTier,
     pub handler_kind: String,
     pub state: TriggerState,
     pub metrics: TriggerMetricsSnapshot,
@@ -1129,6 +1135,7 @@ mod tests {
             source: TriggerBindingSource::Manifest,
             kind: "webhook".to_string(),
             provider: ProviderId::from("github"),
+            autonomy_tier: crate::AutonomyTier::ActAuto,
             handler: TriggerHandlerSpec::Worker {
                 queue: format!("{id}-queue"),
             },
@@ -1153,6 +1160,7 @@ mod tests {
             source: TriggerBindingSource::Dynamic,
             kind: "webhook".to_string(),
             provider: ProviderId::from("github"),
+            autonomy_tier: crate::AutonomyTier::ActAuto,
             handler: TriggerHandlerSpec::Worker {
                 queue: format!("{id}-queue"),
             },
