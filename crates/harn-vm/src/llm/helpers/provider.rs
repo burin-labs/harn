@@ -292,7 +292,7 @@ pub(crate) fn vm_resolve_model(
             .unwrap_or_else(|_| "gpt-4o".to_string()),
         "openai" => "gpt-4o".to_string(),
         "ollama" => "llama3.2".to_string(),
-        "openrouter" => "anthropic/claude-sonnet-4-20250514".to_string(),
+        "openrouter" => "anthropic/claude-sonnet-4.6".to_string(),
         _ => "claude-sonnet-4-20250514".to_string(),
     }
 }

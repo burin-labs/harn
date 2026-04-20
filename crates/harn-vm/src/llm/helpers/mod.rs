@@ -335,4 +335,42 @@ mod tests {
         }
         reset_provider_key_cache();
     }
+
+    #[test]
+    fn openrouter_provider_fallback_uses_current_valid_model_id() {
+        let _guard = crate::llm::env_lock().lock().expect("env lock");
+        let prev_harn_model = std::env::var("HARN_LLM_MODEL").ok();
+        let prev_harn_provider = std::env::var("HARN_LLM_PROVIDER").ok();
+        let prev_local_model = std::env::var("LOCAL_LLM_MODEL").ok();
+        let prev_local_base = std::env::var("LOCAL_LLM_BASE_URL").ok();
+        unsafe {
+            std::env::remove_var("HARN_LLM_MODEL");
+            std::env::remove_var("HARN_LLM_PROVIDER");
+            std::env::remove_var("LOCAL_LLM_MODEL");
+            std::env::remove_var("LOCAL_LLM_BASE_URL");
+        }
+
+        let resolved = vm_resolve_model(&None, "openrouter");
+
+        unsafe {
+            match prev_harn_model {
+                Some(value) => std::env::set_var("HARN_LLM_MODEL", value),
+                None => std::env::remove_var("HARN_LLM_MODEL"),
+            }
+            match prev_harn_provider {
+                Some(value) => std::env::set_var("HARN_LLM_PROVIDER", value),
+                None => std::env::remove_var("HARN_LLM_PROVIDER"),
+            }
+            match prev_local_model {
+                Some(value) => std::env::set_var("LOCAL_LLM_MODEL", value),
+                None => std::env::remove_var("LOCAL_LLM_MODEL"),
+            }
+            match prev_local_base {
+                Some(value) => std::env::set_var("LOCAL_LLM_BASE_URL", value),
+                None => std::env::remove_var("LOCAL_LLM_BASE_URL"),
+            }
+        }
+
+        assert_eq!(resolved, "anthropic/claude-sonnet-4.6");
+    }
 }
