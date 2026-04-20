@@ -320,7 +320,7 @@ impl RouteRegistry {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SignatureMode {
     GitHub,
     Standard,
@@ -628,6 +628,52 @@ fn trigger_path(trigger: &CollectedManifestTrigger) -> Result<String, String> {
         ));
     }
     Ok(path)
+}
+
+async fn load_secret(
+    context: &RouteContext,
+    secret_id: Option<&SecretId>,
+) -> Result<String, HttpError> {
+    let secret_id = secret_id.ok_or_else(|| {
+        HttpError::internal(format!(
+            "trigger '{}' requires a signing secret",
+            context.route.trigger_id
+        ))
+    })?;
+    let secret = context
+        .secrets
+        .get(secret_id)
+        .await
+        .map_err(|error| HttpError::internal(error.to_string()))?;
+    secret.with_exposed(|bytes| {
+        std::str::from_utf8(bytes)
+            .map(|value| value.to_string())
+            .map_err(|error| {
+                HttpError::internal(format!(
+                    "secret '{}' is not valid UTF-8: {error}",
+                    secret_id
+                ))
+            })
+    })
+}
+
+fn parse_secret_id(raw: Option<&str>) -> Option<SecretId> {
+    let trimmed = raw?.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let (base, version) = match trimmed.rsplit_once('@') {
+        Some((base, version_text)) => {
+            let version = version_text.parse::<u64>().ok()?;
+            (base, SecretVersion::Exact(version))
+        }
+        None => (trimmed, SecretVersion::Latest),
+    };
+    let (namespace, name) = base.split_once('/')?;
+    if namespace.is_empty() || name.is_empty() {
+        return None;
+    }
+    Some(SecretId::new(namespace, name).with_version(version))
 }
 
 #[derive(Clone, Default)]
@@ -1030,6 +1076,7 @@ mod tests {
             signing_secret: None,
             dedupe_key_template: None,
             dedupe_retention_days: harn_vm::DEFAULT_INBOX_RETENTION_DAYS,
+            connector: None,
         }
     }
 
