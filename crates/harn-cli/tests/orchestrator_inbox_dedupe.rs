@@ -178,7 +178,7 @@ async fn restart_after_emit_does_not_duplicate_cron_dispatch() {
         .clone();
 
     let (mut second_child, second_rx, second_handle) = spawn_orchestrator(&temp, &[]);
-    wait_for_log_line(&mut second_child, &second_rx, "HTTP listener ready on");
+    wait_for_log_line(&mut second_child, &second_rx, STARTUP_NEEDLE);
     thread::sleep(Duration::from_secs(3));
     send_sigterm(&second_child);
     wait_for_successful_exit(&mut second_child);
