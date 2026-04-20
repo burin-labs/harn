@@ -3393,7 +3393,7 @@ fn expand_single_star_glob(path: &Path) -> Vec<PathBuf> {
 mod tests {
     use super::*;
     use serde::{Deserialize, Serialize};
-    use std::sync::{Mutex, OnceLock};
+    use tokio::sync::MutexGuard;
 
     #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
     struct TriggerTables {
@@ -3418,24 +3418,37 @@ mod tests {
         harn_file
     }
 
-    fn test_env_lock() -> &'static Mutex<()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
+    struct TestEnvGuard {
+        previous_cwd: PathBuf,
+        previous_cache: Option<std::ffi::OsString>,
+        _cwd_lock: MutexGuard<'static, ()>,
+        _env_lock: MutexGuard<'static, ()>,
+    }
+
+    impl Drop for TestEnvGuard {
+        fn drop(&mut self) {
+            std::env::set_current_dir(&self.previous_cwd).unwrap();
+            if let Some(value) = self.previous_cache.clone() {
+                std::env::set_var(HARN_CACHE_DIR_ENV, value);
+            } else {
+                std::env::remove_var(HARN_CACHE_DIR_ENV);
+            }
+        }
     }
 
     fn with_test_env<T>(cwd: &Path, cache_dir: &Path, f: impl FnOnce() -> T) -> T {
-        let _guard = test_env_lock().lock().unwrap();
-        let previous_cwd = std::env::current_dir().unwrap();
-        let previous_cache = std::env::var_os(HARN_CACHE_DIR_ENV);
+        let cwd_lock = crate::tests::common::cwd_lock::lock_cwd();
+        let env_lock = crate::tests::common::env_lock::lock_env().blocking_lock();
+        let guard = TestEnvGuard {
+            previous_cwd: std::env::current_dir().unwrap(),
+            previous_cache: std::env::var_os(HARN_CACHE_DIR_ENV),
+            _cwd_lock: cwd_lock,
+            _env_lock: env_lock,
+        };
         std::env::set_current_dir(cwd).unwrap();
         std::env::set_var(HARN_CACHE_DIR_ENV, cache_dir);
         let result = f();
-        std::env::set_current_dir(previous_cwd).unwrap();
-        if let Some(value) = previous_cache {
-            std::env::set_var(HARN_CACHE_DIR_ENV, value);
-        } else {
-            std::env::remove_var(HARN_CACHE_DIR_ENV);
-        }
+        drop(guard);
         result
     }
 
