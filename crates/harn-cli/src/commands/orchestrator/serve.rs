@@ -259,7 +259,6 @@ async fn run_local(args: OrchestratorServeArgs) -> Result<(), String> {
     })
     .await?;
 
-    dispatcher.shutdown();
     let shutdown = graceful_shutdown(
         GracefulShutdownCtx {
             role: args.role,
