@@ -846,7 +846,9 @@ though this is mostly relevant for closures and parallel bodies.
 1. If path starts with `std/`, loads embedded stdlib module (e.g. `std/text`)
 2. Relative to current file's directory; auto-adds `.harn` extension
 3. `.harn/packages/<path>` directories rooted at the nearest ancestor
-   package root (the search walks upward and stops at a `.git` boundary)
+   package root (the search walks upward and stops at a `.git` boundary).
+   Harn materializes this tree from `harn.lock` before import-aware
+   commands run.
 4. Package manifest `[exports]` mappings under
    `.harn/packages/<package>/harn.toml`
 5. Package directories with `lib.harn` entry point
@@ -3327,6 +3329,43 @@ each. Positional targets remain additive. The manifest is discovered by
 walking upward from the first positional target (or the current working
 directory when none is supplied).
 
+### `[dependencies]` and `harn.lock` — git-backed package installs
+
+```toml
+[dependencies]
+notion-sdk-harn = { git = "https://github.com/burin-labs/notion-sdk-harn", rev = "v1.2.3" }
+notion = { git = "https://github.com/burin-labs/notion-sdk-harn", rev = "v1.2.3", package = "notion-sdk-harn" }
+openapi = { git = "https://github.com/burin-labs/harn-openapi", branch = "main" }
+local-fixture = { path = "../fixture-lib" }
+```
+
+`[dependencies]` installs package sources into `.harn/packages/` so
+imports like `import "notion-sdk-harn"` or `import "notion/providers"`
+resolve without filesystem-relative hacks.
+
+- The table key is the local import alias.
+- `git` accepts HTTPS, SSH, `file://`, local-repo paths, and GitHub-style
+  shorthand URLs.
+- `rev` pins a tag, symbolic ref, or full commit SHA in the manifest.
+- `branch` records a moving ref in the manifest, but `harn.lock` still
+  pins one resolved commit for reproducible installs.
+- `package` documents the upstream package name when the local alias
+  differs from the repository name.
+- `path` installs a local directory or `.harn` file without using the
+  shared git cache.
+
+`harn.lock` is a typed TOML file with `version = 1` and one `[[package]]`
+entry per dependency. Each git entry records:
+
+- `source`
+- `rev_request`
+- `commit`
+- `content_hash`
+
+`content_hash` is a SHA-256 over the cached package tree. Harn verifies
+that hash whenever it reuses a cached package or re-materializes
+`.harn/packages/<alias>/`.
+
 ### `[exports]` — stable package module entry points
 
 ```toml
@@ -3366,11 +3405,12 @@ When Harn starts from a file inside a workspace, it merges:
 1. built-in defaults,
 2. the global provider file (`HARN_PROVIDERS_CONFIG` or
    `~/.config/harn/providers.toml`),
-3. installed package `[llm]` tables from `.harn/packages/*/harn.toml`,
-4. the root project's `[llm]` table.
+3. the root project's `[llm]` table.
 
-Later layers win on key collisions; rule lists are prepended so package
-and project inference/tier overrides run before the built-in defaults.
+Installed package manifests do not auto-merge runtime extensions such as
+`[llm]`, `[capabilities]`, `[[hooks]]`, or `[[triggers]]` into the host
+project. Package code is importable; host runtime configuration remains
+root-manifest-owned by default.
 
 ### `[lint]` — lint configuration
 

@@ -399,6 +399,17 @@ declared file inside `.harn/packages/acme/`, and nested package modules
 can import sibling packages through the workspace-level `.harn/packages`
 root instead of relying on brittle relative paths.
 
+`harn add`, `harn install`, and `harn lock` populate
+`.harn/packages/` from `harn.lock`. Git dependencies are resolved once
+to a commit, cached under the user cache directory, and copied back into
+the workspace as needed. Path dependencies are copied directly from the
+declared local source.
+
+Installed package code is importable, but package manifests do not
+automatically inject host runtime configuration. Runtime tables such as
+`[llm]`, `[capabilities]`, `[[hooks]]`, and `[[triggers]]` only come
+from the root project's `harn.toml` by default.
+
 1. The imported file is parsed and executed
 2. Pipelines in the imported file are registered by name
 3. Non-pipeline top-level statements (fn declarations, let bindings) are executed, making their values available

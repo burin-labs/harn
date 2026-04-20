@@ -101,9 +101,15 @@ SCRIPTING
     /// Render a .harn file as a Mermaid workflow graph.
     Viz(VizArgs),
     /// Install dependencies declared in harn.toml.
-    Install,
+    Install(InstallArgs),
     /// Add a dependency to harn.toml.
     Add(AddArgs),
+    /// Refresh one or more dependency lock entries.
+    Update(UpdateArgs),
+    /// Remove a dependency from harn.toml and harn.lock.
+    Remove(RemoveArgs),
+    /// Resolve dependencies and write harn.lock without materializing packages.
+    Lock,
     /// Print resolved metadata for a model alias or model id as JSON.
     ModelInfo(ModelInfoArgs),
     /// Manage and inspect Harn skills (list, inspect, match, install, new).
@@ -1050,18 +1056,52 @@ pub(crate) struct DumpHighlightKeywordsArgs {
 }
 
 #[derive(Debug, Args)]
+pub(crate) struct InstallArgs {
+    /// Fail if harn.lock would need to change.
+    #[arg(long, default_value_t = false, action = ArgAction::SetTrue)]
+    pub frozen: bool,
+    /// Force refetching one dependency (or every dependency with `--refetch all`).
+    #[arg(long, value_name = "ALIAS|all")]
+    pub refetch: Option<String>,
+}
+
+#[derive(Debug, Args)]
 pub(crate) struct AddArgs {
-    /// Dependency name to add to harn.toml.
-    pub name: String,
+    /// Git URL/ref spec (preferred) or dependency name in the legacy `--git/--path` form.
+    pub name_or_spec: String,
+    /// Override the dependency alias written under `[dependencies]`.
+    #[arg(long)]
+    pub alias: Option<String>,
     /// Git URL for a remote dependency.
     #[arg(long, conflicts_with = "path")]
     pub git: Option<String>,
-    /// Git tag to pin for a remote dependency.
-    #[arg(long)]
+    /// Deprecated alias for `--rev` on the legacy `--git` form.
+    #[arg(long, conflicts_with_all = ["rev", "branch"])]
     pub tag: Option<String>,
+    /// Git rev to pin for a remote dependency.
+    #[arg(long, conflicts_with = "branch")]
+    pub rev: Option<String>,
+    /// Git branch to track in the manifest; the lockfile still pins a commit.
+    #[arg(long, conflicts_with_all = ["rev", "tag"])]
+    pub branch: Option<String>,
     /// Local path for a path dependency.
     #[arg(long, conflicts_with = "git")]
     pub path: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct UpdateArgs {
+    /// Refresh every dependency instead of one alias.
+    #[arg(long, default_value_t = false, action = ArgAction::SetTrue)]
+    pub all: bool,
+    /// Refresh only this dependency alias.
+    pub alias: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct RemoveArgs {
+    /// Dependency alias to remove from harn.toml and harn.lock.
+    pub alias: String,
 }
 
 #[derive(Debug, Args)]

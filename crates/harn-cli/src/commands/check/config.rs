@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::process;
 
 use crate::config as harn_config;
 use crate::package::CheckConfig;
@@ -76,5 +77,11 @@ pub(crate) fn collect_cross_file_imports(
 }
 
 pub(crate) fn build_module_graph(files: &[PathBuf]) -> harn_modules::ModuleGraph {
+    for file in files {
+        if let Err(error) = crate::package::ensure_dependencies_materialized(file) {
+            eprintln!("error: {error}");
+            process::exit(1);
+        }
+    }
     harn_modules::build(files)
 }

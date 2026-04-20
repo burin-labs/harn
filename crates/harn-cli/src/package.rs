@@ -1,13 +1,21 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::ffi::OsStr;
+use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::time::{SystemTime, UNIX_EPOCH};
 use std::{fs, process};
 
 use chrono_tz::Tz;
+use fs2::FileExt;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::str::FromStr;
 use url::Url;
 
+const CONTENT_HASH_FILE: &str = ".harn-content-hash";
+const HARN_CACHE_DIR_ENV: &str = "HARN_CACHE_DIR";
+const LOCK_FILE_VERSION: u32 = 1;
 const PKG_DIR: &str = ".harn/packages";
 const MANIFEST: &str = "harn.toml";
 const LOCK_FILE: &str = "harn.lock";
@@ -506,7 +514,10 @@ pub enum Dependency {
 pub struct DepTable {
     pub git: Option<String>,
     pub tag: Option<String>,
+    pub rev: Option<String>,
+    pub branch: Option<String>,
     pub path: Option<String>,
+    pub package: Option<String>,
 }
 
 impl Dependency {
@@ -517,9 +528,16 @@ impl Dependency {
         }
     }
 
-    fn tag(&self) -> Option<&str> {
+    fn rev(&self) -> Option<&str> {
         match self {
-            Dependency::Table(t) => t.tag.as_deref(),
+            Dependency::Table(t) => t.rev.as_deref().or(t.tag.as_deref()),
+            Dependency::Path(_) => None,
+        }
+    }
+
+    fn branch(&self) -> Option<&str> {
+        match self {
+            Dependency::Table(t) => t.branch.as_deref(),
             Dependency::Path(_) => None,
         }
     }
@@ -615,121 +633,158 @@ pub struct CollectedTriggerPredicate {
     pub closure: Rc<harn_vm::VmClosure>,
 }
 
-#[derive(Debug, Clone)]
-struct LocatedManifest {
-    manifest: Manifest,
-    dir: PathBuf,
-}
-
 type ManifestModuleCacheKey = (PathBuf, Option<String>, Option<String>);
 type ManifestModuleExports = BTreeMap<String, Rc<harn_vm::VmClosure>>;
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct LockFile {
-    entries: HashMap<String, LockEntry>,
+    version: u32,
+    #[serde(default, rename = "package")]
+    packages: Vec<LockEntry>,
 }
 
-#[derive(Debug, Clone)]
+impl Default for LockFile {
+    fn default() -> Self {
+        Self {
+            version: LOCK_FILE_VERSION,
+            packages: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct LockEntry {
-    git: Option<String>,
-    tag: Option<String>,
+    name: String,
+    source: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    rev_request: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     commit: Option<String>,
-    path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    content_hash: Option<String>,
 }
 
 impl LockFile {
-    fn load(path: &Path) -> Self {
+    fn load(path: &Path) -> Result<Option<Self>, String> {
         let content = match fs::read_to_string(path) {
             Ok(s) => s,
-            Err(_) => return Self::default(),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(format!("failed to read {}: {error}", path.display())),
         };
 
-        let mut entries = HashMap::new();
-        let mut current_name: Option<String> = None;
-        let mut current = LockEntry {
-            git: None,
-            tag: None,
-            commit: None,
-            path: None,
-        };
-
-        for line in content.lines() {
-            let trimmed = line.trim();
-            if trimmed.starts_with("[[package]]") {
-                if let Some(name) = current_name.take() {
-                    entries.insert(name, current.clone());
+        match toml::from_str::<Self>(&content) {
+            Ok(mut lock) => {
+                if lock.version != LOCK_FILE_VERSION {
+                    return Err(format!(
+                        "unsupported {} version {} (expected {})",
+                        path.display(),
+                        lock.version,
+                        LOCK_FILE_VERSION
+                    ));
                 }
-                current = LockEntry {
-                    git: None,
-                    tag: None,
-                    commit: None,
-                    path: None,
+                lock.sort_entries();
+                Ok(Some(lock))
+            }
+            Err(_) => {
+                let legacy = toml::from_str::<LegacyLockFile>(&content)
+                    .map_err(|error| format!("failed to parse {}: {error}", path.display()))?;
+                let mut lock = Self {
+                    version: LOCK_FILE_VERSION,
+                    packages: legacy
+                        .packages
+                        .into_iter()
+                        .map(|entry| LockEntry {
+                            name: entry.name,
+                            source: entry
+                                .path
+                                .map(|path| format!("path+{path}"))
+                                .or_else(|| entry.git.map(|git| format!("git+{git}")))
+                                .unwrap_or_default(),
+                            rev_request: entry.rev_request.or(entry.tag),
+                            commit: entry.commit,
+                            content_hash: None,
+                        })
+                        .collect(),
                 };
-            } else if let Some((key, value)) = trimmed.split_once('=') {
-                let key = key.trim();
-                let value = value.trim().trim_matches('"');
-                match key {
-                    "name" => current_name = Some(value.to_string()),
-                    "git" => current.git = Some(value.to_string()),
-                    "tag" => current.tag = Some(value.to_string()),
-                    "commit" => current.commit = Some(value.to_string()),
-                    "path" => current.path = Some(value.to_string()),
-                    _ => {}
-                }
+                lock.sort_entries();
+                Ok(Some(lock))
             }
         }
-        if let Some(name) = current_name {
-            entries.insert(name, current);
-        }
-
-        LockFile { entries }
     }
 
-    fn save(&self, path: &Path) {
-        let mut out =
-            String::from("# This file is auto-generated by `harn install`. Do not edit.\n\n");
-        let mut names: Vec<&String> = self.entries.keys().collect();
-        names.sort();
-        for name in names {
-            let entry = &self.entries[name];
-            out.push_str("[[package]]\n");
-            out.push_str(&format!("name = \"{name}\"\n"));
-            if let Some(git) = &entry.git {
-                out.push_str(&format!("git = \"{git}\"\n"));
-            }
-            if let Some(tag) = &entry.tag {
-                out.push_str(&format!("tag = \"{tag}\"\n"));
-            }
-            if let Some(commit) = &entry.commit {
-                out.push_str(&format!("commit = \"{commit}\"\n"));
-            }
-            if let Some(path) = &entry.path {
-                out.push_str(&format!("path = \"{path}\"\n"));
-            }
-            out.push('\n');
+    fn save(&self, path: &Path) -> Result<(), String> {
+        let mut normalized = self.clone();
+        normalized.version = LOCK_FILE_VERSION;
+        normalized.sort_entries();
+        let body = toml::to_string_pretty(&normalized)
+            .map_err(|error| format!("failed to encode {}: {error}", path.display()))?;
+        let mut out = String::from("# This file is auto-generated by Harn. Do not edit.\n\n");
+        out.push_str(&body);
+        fs::write(path, out).map_err(|error| format!("failed to write {}: {error}", path.display()))
+    }
+
+    fn sort_entries(&mut self) {
+        self.packages
+            .sort_by(|left, right| left.name.cmp(&right.name));
+    }
+
+    fn find(&self, name: &str) -> Option<&LockEntry> {
+        self.packages.iter().find(|entry| entry.name == name)
+    }
+
+    fn replace(&mut self, entry: LockEntry) {
+        if let Some(existing) = self.packages.iter_mut().find(|pkg| pkg.name == entry.name) {
+            *existing = entry;
+        } else {
+            self.packages.push(entry);
         }
-        if let Err(e) = fs::write(path, &out) {
-            eprintln!("Failed to write lock file: {e}");
-        }
+        self.sort_entries();
+    }
+
+    fn remove(&mut self, name: &str) {
+        self.packages.retain(|entry| entry.name != name);
     }
 }
 
-pub fn read_manifest() -> Manifest {
-    let content = match fs::read_to_string(MANIFEST) {
-        Ok(s) => s,
-        Err(_) => {
-            eprintln!("No harn.toml found in current directory.");
-            eprintln!("Create one with `harn init` or manually.");
-            process::exit(1);
+#[derive(Debug, Deserialize)]
+struct LegacyLockFile {
+    #[serde(default, rename = "package")]
+    packages: Vec<LegacyLockEntry>,
+}
+
+#[derive(Debug, Deserialize)]
+struct LegacyLockEntry {
+    name: String,
+    #[serde(default)]
+    git: Option<String>,
+    #[serde(default)]
+    tag: Option<String>,
+    #[serde(default)]
+    rev_request: Option<String>,
+    #[serde(default)]
+    commit: Option<String>,
+    #[serde(default)]
+    path: Option<String>,
+}
+
+fn read_manifest_from_path(path: &Path) -> Result<Manifest, String> {
+    let content = fs::read_to_string(path).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            format!(
+                "No {} found in {}.",
+                MANIFEST,
+                path.parent().unwrap_or_else(|| Path::new(".")).display()
+            )
+        } else {
+            format!("failed to read {}: {error}", path.display())
         }
-    };
-    match toml::from_str::<Manifest>(&content) {
-        Ok(m) => m,
-        Err(e) => {
-            eprintln!("Failed to parse harn.toml: {e}");
-            process::exit(1);
-        }
-    }
+    })?;
+    toml::from_str::<Manifest>(&content)
+        .map_err(|error| format!("failed to parse {}: {error}", path.display()))
+}
+
+fn write_manifest_content(path: &Path, content: &str) -> Result<(), String> {
+    fs::write(path, content).map_err(|error| format!("failed to write {}: {error}", path.display()))
 }
 
 fn merge_capability_overrides(
@@ -746,29 +801,6 @@ fn merge_capability_overrides(
     target
         .provider_family
         .extend(source.provider_family.clone());
-}
-
-fn collect_package_manifests(packages_dir: &Path) -> Vec<LocatedManifest> {
-    let mut manifests = Vec::new();
-    let Ok(entries) = fs::read_dir(packages_dir) else {
-        return manifests;
-    };
-    let mut dirs: Vec<PathBuf> = entries
-        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
-        .filter(|path| path.is_dir())
-        .collect();
-    dirs.sort();
-    for dir in dirs {
-        let manifest_path = dir.join(MANIFEST);
-        let Ok(content) = fs::read_to_string(&manifest_path) else {
-            continue;
-        };
-        match toml::from_str::<Manifest>(&content) {
-            Ok(manifest) => manifests.push(LocatedManifest { manifest, dir }),
-            Err(e) => eprintln!("warning: failed to parse {}: {e}", manifest_path.display()),
-        }
-    }
-    manifests
 }
 
 fn resolved_hooks_from_manifest(
@@ -1454,9 +1486,13 @@ fn is_empty_capabilities(file: &harn_vm::llm::capabilities::CapabilitiesFile) ->
 }
 
 /// Load the nearest project manifest plus any installed package manifests and
-/// merge their runtime extensions. Installed packages load first; the root
-/// project manifest wins on conflicts.
+/// merge the root project's runtime extensions.
 pub fn load_runtime_extensions(anchor: &Path) -> RuntimeExtensions {
+    if let Err(error) = ensure_dependencies_materialized(anchor) {
+        eprintln!("error: {error}");
+        process::exit(1);
+    }
+
     let Some((root_manifest, manifest_dir)) = find_nearest_manifest(anchor) else {
         return RuntimeExtensions::default();
     };
@@ -1465,21 +1501,6 @@ pub fn load_runtime_extensions(anchor: &Path) -> RuntimeExtensions {
     let mut capabilities = harn_vm::llm::capabilities::CapabilitiesFile::default();
     let mut hooks = Vec::new();
     let mut triggers = Vec::new();
-
-    for located in collect_package_manifests(&manifest_dir.join(PKG_DIR)) {
-        llm.merge_from(&located.manifest.llm);
-        if let Some(file) = manifest_capabilities(&located.manifest) {
-            merge_capability_overrides(&mut capabilities, file);
-        }
-        hooks.extend(resolved_hooks_from_manifest(
-            &located.manifest,
-            &located.dir,
-        ));
-        triggers.extend(resolved_triggers_from_manifest(
-            &located.manifest,
-            &located.dir,
-        ));
-    }
 
     llm.merge_from(&root_manifest.llm);
     if let Some(file) = manifest_capabilities(&root_manifest) {
@@ -2090,13 +2111,11 @@ fn find_nearest_manifest(start: &Path) -> Option<(Manifest, PathBuf)> {
         steps += 1;
         let candidate = dir.join(MANIFEST);
         if candidate.is_file() {
-            if let Ok(content) = fs::read_to_string(&candidate) {
-                match toml::from_str::<Manifest>(&content) {
-                    Ok(manifest) => return Some((manifest, dir)),
-                    Err(e) => {
-                        eprintln!("warning: failed to parse {}: {e}", candidate.display());
-                        return None;
-                    }
+            match read_manifest_from_path(&candidate) {
+                Ok(manifest) => return Some((manifest, dir)),
+                Err(error) => {
+                    eprintln!("warning: {error}");
+                    return None;
                 }
             }
         }
@@ -2132,296 +2151,1126 @@ pub fn load_workspace_config(anchor: Option<&Path>) -> Option<(WorkspaceConfig, 
     Some((manifest.workspace, dir))
 }
 
-/// `harn install` — install all dependencies from harn.toml.
-pub fn install_packages() {
-    let manifest = read_manifest();
+#[derive(Debug, Clone)]
+struct ManifestContext {
+    manifest: Manifest,
+    dir: PathBuf,
+}
 
-    if manifest.dependencies.is_empty() {
-        println!("No dependencies to install.");
-        return;
+impl ManifestContext {
+    fn manifest_path(&self) -> PathBuf {
+        self.dir.join(MANIFEST)
     }
 
-    let has_git_deps = manifest
+    fn lock_path(&self) -> PathBuf {
+        self.dir.join(LOCK_FILE)
+    }
+
+    fn packages_dir(&self) -> PathBuf {
+        self.dir.join(PKG_DIR)
+    }
+}
+
+fn load_current_manifest_context() -> Result<ManifestContext, String> {
+    let dir = std::env::current_dir().map_err(|error| format!("failed to read cwd: {error}"))?;
+    let manifest_path = dir.join(MANIFEST);
+    let manifest = read_manifest_from_path(&manifest_path)?;
+    Ok(ManifestContext { manifest, dir })
+}
+
+fn manifest_has_git_dependencies(manifest: &Manifest) -> bool {
+    manifest
         .dependencies
         .values()
-        .any(|d| d.git_url().is_some());
-    if has_git_deps
-        && process::Command::new("git")
-            .arg("--version")
-            .output()
-            .is_err()
-    {
-        eprintln!("Error: git is required to install git dependencies but was not found.");
-        eprintln!("Install git and ensure it's in your PATH.");
-        process::exit(1);
-    }
-
-    let pkg_dir = PathBuf::from(PKG_DIR);
-    if let Err(e) = fs::create_dir_all(&pkg_dir) {
-        eprintln!("Failed to create {PKG_DIR}: {e}");
-        process::exit(1);
-    }
-
-    let mut lock = LockFile::load(Path::new(LOCK_FILE));
-    let mut installed = 0;
-    let mut visiting = HashSet::new();
-
-    for (name, dep) in &manifest.dependencies {
-        install_one(
-            name,
-            dep,
-            &pkg_dir,
-            &mut lock,
-            &mut visiting,
-            &mut installed,
-        );
-    }
-
-    lock.save(Path::new(LOCK_FILE));
-    println!("\nInstalled {installed} package(s) to {PKG_DIR}/");
+        .any(|dependency| dependency.git_url().is_some())
 }
 
-fn install_one(
-    name: &str,
-    dep: &Dependency,
-    pkg_dir: &Path,
-    lock: &mut LockFile,
-    visiting: &mut HashSet<String>,
-    installed: &mut usize,
-) {
-    if !visiting.insert(name.to_string()) {
-        eprintln!("  warning: circular dependency detected for '{name}', skipping");
-        return;
-    }
-
-    let dest = pkg_dir.join(name);
-
-    if let Some(git_url) = dep.git_url() {
-        install_git_dep(name, git_url, dep.tag(), &dest, lock);
-        *installed += 1;
-    } else if let Some(local_path) = dep.local_path() {
-        install_local_dep(name, local_path, &dest);
-        *installed += 1;
-        lock.entries.insert(
-            name.to_string(),
-            LockEntry {
-                git: None,
-                tag: None,
-                commit: None,
-                path: Some(local_path.to_string()),
-            },
-        );
-    } else {
-        eprintln!("  {name}: no git or path specified, skipping");
-        visiting.remove(name);
-        return;
-    }
-
-    let sub_manifest_path = dest.join("harn.toml");
-    if sub_manifest_path.exists() {
-        if let Ok(content) = fs::read_to_string(&sub_manifest_path) {
-            if let Ok(sub_manifest) = toml::from_str::<Manifest>(&content) {
-                for (sub_name, sub_dep) in &sub_manifest.dependencies {
-                    let sub_dest = pkg_dir.join(sub_name);
-                    if !sub_dest.exists() {
-                        install_one(sub_name, sub_dep, pkg_dir, lock, visiting, installed);
-                    }
-                }
-            }
-        }
-    }
-
-    visiting.remove(name);
-}
-
-fn install_git_dep(name: &str, git_url: &str, tag: Option<&str>, dest: &Path, lock: &mut LockFile) {
-    if let Some(entry) = lock.entries.get(name) {
-        if entry.git.as_deref() == Some(git_url)
-            && entry.tag.as_deref() == tag
-            && entry.commit.is_some()
-            && dest.exists()
-        {
-            println!("  {name}: up to date (locked)");
-            return;
-        }
-    }
-
-    if dest.exists() {
-        println!("  updating {name} from {git_url}");
-        let _ = fs::remove_dir_all(dest);
-    } else {
-        println!("  installing {name} from {git_url}");
-    }
-
-    let mut cmd = process::Command::new("git");
-    cmd.args(["clone", "--depth", "1"]);
-    if let Some(t) = tag {
-        cmd.args(["--branch", t]);
-    }
-    cmd.arg(git_url);
-    cmd.arg(dest.as_os_str());
-    cmd.stdout(process::Stdio::null());
-    cmd.stderr(process::Stdio::piped());
-
-    match cmd.output() {
-        Ok(output) if output.status.success() => {
-            let commit = get_git_commit(dest);
-            // Drop .git to save disk space.
-            let _ = fs::remove_dir_all(dest.join(".git"));
-            lock.entries.insert(
-                name.to_string(),
-                LockEntry {
-                    git: Some(git_url.to_string()),
-                    tag: tag.map(|t| t.to_string()),
-                    commit,
-                    path: None,
-                },
-            );
-        }
-        Ok(output) => {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            eprintln!("  failed to clone {name}: {stderr}");
-        }
-        Err(e) => {
-            eprintln!("  failed to run git for {name}: {e}");
-            eprintln!("  hint: make sure git is installed and in PATH");
-        }
-    }
-}
-
-fn get_git_commit(repo_dir: &Path) -> Option<String> {
-    let output = process::Command::new("git")
-        .args(["rev-parse", "HEAD"])
-        .current_dir(repo_dir)
+fn ensure_git_available() -> Result<(), String> {
+    process::Command::new("git")
+        .arg("--version")
         .output()
-        .ok()?;
-    if output.status.success() {
-        Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
-    } else {
-        None
+        .map(|_| ())
+        .map_err(|_| "git is required for git dependencies but was not found in PATH".to_string())
+}
+
+fn cache_root() -> Result<PathBuf, String> {
+    if let Ok(value) = std::env::var(HARN_CACHE_DIR_ENV) {
+        if !value.trim().is_empty() {
+            return Ok(PathBuf::from(value));
+        }
+    }
+
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .ok_or_else(|| "HOME is not set and HARN_CACHE_DIR was not provided".to_string())?;
+    if cfg!(target_os = "macos") {
+        return Ok(home.join("Library/Caches/harn"));
+    }
+    if let Some(xdg) = std::env::var_os("XDG_CACHE_HOME") {
+        return Ok(PathBuf::from(xdg).join("harn"));
+    }
+    Ok(home.join(".cache/harn"))
+}
+
+fn sha256_hex(bytes: impl AsRef<[u8]>) -> String {
+    format!("{:x}", Sha256::digest(bytes.as_ref()))
+}
+
+fn git_cache_dir(source: &str, commit: &str) -> Result<PathBuf, String> {
+    Ok(cache_root()?
+        .join("git")
+        .join(sha256_hex(source))
+        .join(commit))
+}
+
+fn git_cache_lock_path(source: &str, commit: &str) -> Result<PathBuf, String> {
+    Ok(cache_root()?
+        .join("locks")
+        .join(format!("{}-{commit}.lock", sha256_hex(source))))
+}
+
+fn acquire_git_cache_lock(source: &str, commit: &str) -> Result<File, String> {
+    let path = git_cache_lock_path(source, commit)?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
+    }
+    let file = File::create(&path)
+        .map_err(|error| format!("failed to open {}: {error}", path.display()))?;
+    file.lock_exclusive()
+        .map_err(|error| format!("failed to lock {}: {error}", path.display()))?;
+    Ok(file)
+}
+
+fn read_cached_content_hash(dir: &Path) -> Result<Option<String>, String> {
+    let path = dir.join(CONTENT_HASH_FILE);
+    match fs::read_to_string(&path) {
+        Ok(value) => Ok(Some(value.trim().to_string())),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(format!("failed to read {}: {error}", path.display())),
     }
 }
 
-fn install_local_dep(name: &str, source_path: &str, dest: &Path) {
-    let source = Path::new(source_path);
-
-    if source.is_dir() {
-        if dest.exists() {
-            println!("  updating {name} from {source_path}");
-            let _ = fs::remove_dir_all(dest);
-        } else {
-            println!("  installing {name} from {source_path}");
-        }
-        if let Err(e) = copy_dir_recursive(source, dest) {
-            eprintln!("  failed to install {name}: {e}");
-        }
-    } else if source.is_file() {
-        let dest_file = dest.with_extension("harn");
-        if dest_file.exists() {
-            println!("  updating {name} from {source_path}");
-        } else {
-            println!("  installing {name} from {source_path}");
-        }
-        if let Some(parent) = dest_file.parent() {
-            fs::create_dir_all(parent).ok();
-        }
-        if let Err(e) = fs::copy(source, &dest_file) {
-            eprintln!("  failed to install {name}: {e}");
-        }
-    } else {
-        let harn_source = PathBuf::from(format!("{source_path}.harn"));
-        if harn_source.exists() {
-            let dest_file = dest.with_extension("harn");
-            println!("  installing {name} from {}", harn_source.display());
-            if let Some(parent) = dest_file.parent() {
-                fs::create_dir_all(parent).ok();
-            }
-            if let Err(e) = fs::copy(&harn_source, &dest_file) {
-                eprintln!("  failed to install {name}: {e}");
-            }
-        } else {
-            eprintln!("  package source not found: {source_path}");
-        }
-    }
+fn write_cached_content_hash(dir: &Path, hash: &str) -> Result<(), String> {
+    fs::write(dir.join(CONTENT_HASH_FILE), format!("{hash}\n")).map_err(|error| {
+        format!(
+            "failed to write {}: {error}",
+            dir.join(CONTENT_HASH_FILE).display()
+        )
+    })
 }
 
-fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
-    fs::create_dir_all(dst)?;
-    for entry in fs::read_dir(src)? {
-        let entry = entry?;
-        let ty = entry.file_type()?;
-        let dest_path = dst.join(entry.file_name());
-        if ty.is_dir() {
-            copy_dir_recursive(&entry.path(), &dest_path)?;
-        } else {
-            fs::copy(entry.path(), &dest_path)?;
+fn normalized_relative_path(path: &Path) -> String {
+    path.components()
+        .map(|component| component.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+fn collect_hashable_files(
+    root: &Path,
+    cursor: &Path,
+    out: &mut Vec<PathBuf>,
+) -> Result<(), String> {
+    for entry in fs::read_dir(cursor)
+        .map_err(|error| format!("failed to read {}: {error}", cursor.display()))?
+    {
+        let entry =
+            entry.map_err(|error| format!("failed to read {} entry: {error}", cursor.display()))?;
+        let path = entry.path();
+        let file_type = entry
+            .file_type()
+            .map_err(|error| format!("failed to stat {}: {error}", path.display()))?;
+        let name = entry.file_name();
+        if name == OsStr::new(".git")
+            || name == OsStr::new(".gitignore")
+            || name == OsStr::new(CONTENT_HASH_FILE)
+        {
+            continue;
+        }
+        if file_type.is_dir() {
+            collect_hashable_files(root, &path, out)?;
+        } else if file_type.is_file() {
+            let relative = path
+                .strip_prefix(root)
+                .map_err(|error| format!("failed to relativize {}: {error}", path.display()))?;
+            out.push(relative.to_path_buf());
         }
     }
     Ok(())
 }
 
-/// `harn add <name> --git <url> [--tag <tag>]` — add a dependency to harn.toml.
-pub fn add_package(name: &str, git_url: Option<&str>, tag: Option<&str>, local_path: Option<&str>) {
-    if git_url.is_none() && local_path.is_none() {
-        eprintln!("Must specify --git <url> or --path <local-path>");
-        process::exit(1);
+fn compute_content_hash(dir: &Path) -> Result<String, String> {
+    let mut files = Vec::new();
+    collect_hashable_files(dir, dir, &mut files)?;
+    files.sort();
+    let mut hasher = Sha256::new();
+    for relative in files {
+        let normalized = normalized_relative_path(&relative);
+        let contents = fs::read(dir.join(&relative)).map_err(|error| {
+            format!("failed to read {}: {error}", dir.join(&relative).display())
+        })?;
+        hasher.update(normalized.as_bytes());
+        hasher.update([0]);
+        hasher.update(sha256_hex(contents).as_bytes());
     }
+    Ok(format!("sha256:{:x}", hasher.finalize()))
+}
 
-    let manifest_path = Path::new(MANIFEST);
-    let mut content = if manifest_path.exists() {
-        fs::read_to_string(manifest_path).unwrap_or_default()
-    } else {
-        "[package]\nname = \"my-project\"\nversion = \"0.1.0\"\n".to_string()
-    };
-
-    if !content.contains("[dependencies]") {
-        content.push_str("\n[dependencies]\n");
-    }
-
-    let dep_line = if let Some(url) = git_url {
-        if let Some(t) = tag {
-            format!("{name} = {{ git = \"{url}\", tag = \"{t}\" }}")
-        } else {
-            format!("{name} = {{ git = \"{url}\" }}")
+fn verify_content_hash_or_compute(dir: &Path, expected: &str) -> Result<(), String> {
+    let actual = match read_cached_content_hash(dir)? {
+        Some(value) => value,
+        None => {
+            let computed = compute_content_hash(dir)?;
+            write_cached_content_hash(dir, &computed)?;
+            computed
         }
+    };
+    if actual != expected {
+        return Err(format!(
+            "content hash mismatch for {}: expected {}, got {}",
+            dir.display(),
+            expected,
+            actual
+        ));
+    }
+    Ok(())
+}
+
+fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
+    fs::create_dir_all(dst)
+        .map_err(|error| format!("failed to create {}: {error}", dst.display()))?;
+    for entry in
+        fs::read_dir(src).map_err(|error| format!("failed to read {}: {error}", src.display()))?
+    {
+        let entry =
+            entry.map_err(|error| format!("failed to read {} entry: {error}", src.display()))?;
+        let ty = entry
+            .file_type()
+            .map_err(|error| format!("failed to stat {}: {error}", entry.path().display()))?;
+        let dest_path = dst.join(entry.file_name());
+        if ty.is_dir() {
+            copy_dir_recursive(&entry.path(), &dest_path)?;
+        } else if ty.is_file() {
+            if let Some(parent) = dest_path.parent() {
+                fs::create_dir_all(parent)
+                    .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
+            }
+            fs::copy(entry.path(), &dest_path).map_err(|error| {
+                format!(
+                    "failed to copy {} to {}: {error}",
+                    entry.path().display(),
+                    dest_path.display()
+                )
+            })?;
+        }
+    }
+    Ok(())
+}
+
+fn remove_materialized_package(packages_dir: &Path, alias: &str) -> Result<(), String> {
+    let dir = packages_dir.join(alias);
+    if dir.exists() {
+        fs::remove_dir_all(&dir)
+            .map_err(|error| format!("failed to remove {}: {error}", dir.display()))?;
+    }
+    let file = packages_dir.join(format!("{alias}.harn"));
+    if file.exists() {
+        fs::remove_file(&file)
+            .map_err(|error| format!("failed to remove {}: {error}", file.display()))?;
+    }
+    Ok(())
+}
+
+fn copy_path_dependency(source: &Path, dest_root: &Path, alias: &str) -> Result<(), String> {
+    remove_materialized_package(dest_root, alias)?;
+    if source.is_dir() {
+        copy_dir_recursive(source, &dest_root.join(alias))
     } else {
-        let p = local_path.unwrap();
-        format!("{name} = {{ path = \"{p}\" }}")
+        let dest = dest_root.join(format!("{alias}.harn"));
+        if let Some(parent) = dest.parent() {
+            fs::create_dir_all(parent)
+                .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
+        }
+        fs::copy(source, &dest).map_err(|error| {
+            format!(
+                "failed to copy {} to {}: {error}",
+                source.display(),
+                dest.display()
+            )
+        })?;
+        Ok(())
+    }
+}
+
+fn materialized_hash_matches(dir: &Path, expected: &str) -> bool {
+    verify_content_hash_or_compute(dir, expected).is_ok()
+}
+
+fn resolve_path_dependency_source(manifest_dir: &Path, raw: &str) -> Result<PathBuf, String> {
+    let source = {
+        let candidate = PathBuf::from(raw);
+        if candidate.is_absolute() {
+            candidate
+        } else {
+            manifest_dir.join(candidate)
+        }
+    };
+    if source.exists() {
+        return source
+            .canonicalize()
+            .map_err(|error| format!("failed to canonicalize {}: {error}", source.display()));
+    }
+    if source.extension().is_none() {
+        let with_ext = source.with_extension("harn");
+        if with_ext.exists() {
+            return with_ext.canonicalize().map_err(|error| {
+                format!("failed to canonicalize {}: {error}", with_ext.display())
+            });
+        }
+    }
+    Err(format!("package source not found: {}", source.display()))
+}
+
+fn path_source_uri(path: &Path) -> Result<String, String> {
+    let url = Url::from_file_path(path)
+        .map_err(|_| format!("failed to convert {} to file:// URL", path.display()))?;
+    Ok(format!("path+{}", url))
+}
+
+fn path_from_source_uri(source: &str) -> Result<PathBuf, String> {
+    let raw = source
+        .strip_prefix("path+")
+        .ok_or_else(|| format!("invalid path source: {source}"))?;
+    if let Ok(url) = Url::parse(raw) {
+        return url
+            .to_file_path()
+            .map_err(|_| format!("invalid file:// path source: {source}"));
+    }
+    Ok(PathBuf::from(raw))
+}
+
+fn is_probable_shorthand_git_url(raw: &str) -> bool {
+    !raw.contains("://")
+        && !raw.starts_with("git@")
+        && raw.contains('/')
+        && raw
+            .split('/')
+            .next()
+            .is_some_and(|segment| segment.contains('.'))
+}
+
+fn normalize_git_url(raw: &str) -> Result<String, String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err("git URL cannot be empty".to_string());
+    }
+
+    let candidate_path = PathBuf::from(trimmed);
+    if candidate_path.exists() {
+        let canonical = candidate_path
+            .canonicalize()
+            .map_err(|error| format!("failed to canonicalize {}: {error}", trimmed))?;
+        let url = Url::from_file_path(canonical)
+            .map_err(|_| format!("failed to convert {} to file:// URL", trimmed))?;
+        return Ok(url.to_string().trim_end_matches('/').to_string());
+    }
+
+    if let Some(rest) = trimmed.strip_prefix("git@") {
+        if let Some((host, path)) = rest.split_once(':') {
+            return Ok(format!(
+                "ssh://git@{}/{}",
+                host,
+                path.trim_start_matches('/').trim_end_matches('/')
+            ));
+        }
+    }
+
+    let with_scheme = if is_probable_shorthand_git_url(trimmed) {
+        format!("https://{trimmed}")
+    } else {
+        trimmed.to_string()
+    };
+    let parsed =
+        Url::parse(&with_scheme).map_err(|error| format!("invalid git URL {trimmed}: {error}"))?;
+    let mut normalized = parsed.to_string();
+    while normalized.ends_with('/') {
+        normalized.pop();
+    }
+    if parsed.scheme() != "file" && normalized.ends_with(".git") {
+        normalized.truncate(normalized.len() - 4);
+    }
+    Ok(normalized)
+}
+
+fn derive_repo_name_from_source(source: &str) -> Result<String, String> {
+    let url = Url::parse(source).map_err(|error| format!("invalid git URL {source}: {error}"))?;
+    let segment = url
+        .path_segments()
+        .and_then(|mut segments| segments.rfind(|segment| !segment.is_empty()))
+        .ok_or_else(|| format!("failed to derive package name from {source}"))?;
+    Ok(segment.trim_end_matches(".git").to_string())
+}
+
+fn parse_positional_git_spec(spec: &str) -> (&str, Option<&str>) {
+    if let Some((source, candidate_ref)) = spec.rsplit_once('@') {
+        if !candidate_ref.is_empty()
+            && !candidate_ref.contains('/')
+            && !candidate_ref.contains(':')
+            && !source.ends_with("://")
+        {
+            return (source, Some(candidate_ref));
+        }
+    }
+    (spec, None)
+}
+
+fn is_full_git_sha(value: &str) -> bool {
+    value.len() == 40 && value.as_bytes().iter().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn git_output<I, S>(args: I, cwd: Option<&Path>) -> Result<std::process::Output, String>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    let mut command = process::Command::new("git");
+    command.args(args);
+    if let Some(dir) = cwd {
+        command.current_dir(dir);
+    }
+    command
+        .output()
+        .map_err(|error| format!("failed to run git: {error}"))
+}
+
+fn resolve_git_commit(
+    url: &str,
+    rev: Option<&str>,
+    branch: Option<&str>,
+) -> Result<String, String> {
+    let requested = branch.or(rev).unwrap_or("HEAD");
+    if branch.is_none() && is_full_git_sha(requested) {
+        return Ok(requested.to_string());
+    }
+
+    let refs = if let Some(branch) = branch {
+        vec![format!("refs/heads/{branch}")]
+    } else if requested == "HEAD" {
+        vec!["HEAD".to_string()]
+    } else {
+        vec![
+            requested.to_string(),
+            format!("refs/tags/{requested}^{{}}"),
+            format!("refs/tags/{requested}"),
+            format!("refs/heads/{requested}"),
+        ]
     };
 
-    let mut lines: Vec<String> = content.lines().map(|l| l.to_string()).collect();
-    let mut replaced = false;
-    for line in &mut lines {
-        if line.starts_with(name) && line.contains('=') {
-            // Avoid prefix matches (e.g. `foo_bar` when looking for `foo`).
-            let before_eq = line.split('=').next().unwrap_or("").trim();
-            if before_eq == name {
-                *line = dep_line.clone();
-                replaced = true;
-                break;
+    let output = git_output(
+        std::iter::once("ls-remote".to_string())
+            .chain(std::iter::once(url.to_string()))
+            .chain(refs.clone()),
+        None,
+    )?;
+    if !output.status.success() {
+        return Err(format!(
+            "failed to resolve git ref from {url}: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let commit = stdout
+        .lines()
+        .filter_map(|line| line.split_whitespace().next())
+        .find(|value| is_full_git_sha(value))
+        .ok_or_else(|| format!("could not resolve {requested} from {url}"))?;
+    Ok(commit.to_string())
+}
+
+fn clone_git_commit_to(url: &str, commit: &str, dest: &Path) -> Result<(), String> {
+    if dest.exists() {
+        fs::remove_dir_all(dest)
+            .map_err(|error| format!("failed to reset {}: {error}", dest.display()))?;
+    }
+    fs::create_dir_all(dest)
+        .map_err(|error| format!("failed to create {}: {error}", dest.display()))?;
+
+    let init = git_output(["init", "--quiet"], Some(dest))?;
+    if !init.status.success() {
+        return Err(format!(
+            "failed to initialize git repo in {}: {}",
+            dest.display(),
+            String::from_utf8_lossy(&init.stderr).trim()
+        ));
+    }
+
+    let remote = git_output(["remote", "add", "origin", url], Some(dest))?;
+    if !remote.status.success() {
+        return Err(format!(
+            "failed to add git remote {url}: {}",
+            String::from_utf8_lossy(&remote.stderr).trim()
+        ));
+    }
+
+    let fetch = git_output(["fetch", "--depth", "1", "origin", commit], Some(dest))?;
+    if !fetch.status.success() {
+        let fallback_dir = dest.with_extension("full-clone");
+        if fallback_dir.exists() {
+            fs::remove_dir_all(&fallback_dir)
+                .map_err(|error| format!("failed to remove {}: {error}", fallback_dir.display()))?;
+        }
+        let clone = git_output(
+            ["clone", url, fallback_dir.to_string_lossy().as_ref()],
+            None,
+        )?;
+        if !clone.status.success() {
+            return Err(format!(
+                "failed to fetch {commit} from {url}: {}",
+                String::from_utf8_lossy(&fetch.stderr).trim()
+            ));
+        }
+        let checkout = git_output(["checkout", commit], Some(&fallback_dir))?;
+        if !checkout.status.success() {
+            return Err(format!(
+                "failed to checkout {commit} in {}: {}",
+                fallback_dir.display(),
+                String::from_utf8_lossy(&checkout.stderr).trim()
+            ));
+        }
+        fs::remove_dir_all(dest)
+            .map_err(|error| format!("failed to remove {}: {error}", dest.display()))?;
+        fs::rename(&fallback_dir, dest).map_err(|error| {
+            format!(
+                "failed to move {} to {}: {error}",
+                fallback_dir.display(),
+                dest.display()
+            )
+        })?;
+    } else {
+        let checkout = git_output(["checkout", "--detach", "FETCH_HEAD"], Some(dest))?;
+        if !checkout.status.success() {
+            return Err(format!(
+                "failed to checkout FETCH_HEAD in {}: {}",
+                dest.display(),
+                String::from_utf8_lossy(&checkout.stderr).trim()
+            ));
+        }
+    }
+
+    let git_dir = dest.join(".git");
+    if git_dir.exists() {
+        fs::remove_dir_all(&git_dir)
+            .map_err(|error| format!("failed to remove {}: {error}", git_dir.display()))?;
+    }
+    Ok(())
+}
+
+fn unique_temp_dir(base: &Path, label: &str) -> Result<PathBuf, String> {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| format!("system clock error: {error}"))?
+        .as_nanos();
+    Ok(base.join(format!("{label}-{nanos}")))
+}
+
+fn ensure_git_cache_populated(
+    url: &str,
+    source: &str,
+    commit: &str,
+    expected_hash: Option<&str>,
+    refetch: bool,
+) -> Result<String, String> {
+    let cache_dir = git_cache_dir(source, commit)?;
+    let _lock = acquire_git_cache_lock(source, commit)?;
+    if refetch && cache_dir.exists() {
+        fs::remove_dir_all(&cache_dir)
+            .map_err(|error| format!("failed to remove {}: {error}", cache_dir.display()))?;
+    }
+    if cache_dir.exists() {
+        if let Some(expected) = expected_hash {
+            verify_content_hash_or_compute(&cache_dir, expected)?;
+            return Ok(expected.to_string());
+        }
+        let hash = match read_cached_content_hash(&cache_dir)? {
+            Some(hash) => hash,
+            None => {
+                let computed = compute_content_hash(&cache_dir)?;
+                write_cached_content_hash(&cache_dir, &computed)?;
+                computed
+            }
+        };
+        write_cached_content_hash(&cache_dir, &hash)?;
+        return Ok(hash);
+    }
+
+    let parent = cache_dir
+        .parent()
+        .ok_or_else(|| format!("invalid cache path {}", cache_dir.display()))?;
+    fs::create_dir_all(parent)
+        .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
+    let temp_dir = unique_temp_dir(parent, "tmp")?;
+    clone_git_commit_to(url, commit, &temp_dir)?;
+    let hash = compute_content_hash(&temp_dir)?;
+    if let Some(expected) = expected_hash {
+        if hash != expected {
+            return Err(format!(
+                "content hash mismatch for {} at {}: expected {}, got {}",
+                source, commit, expected, hash
+            ));
+        }
+    }
+    write_cached_content_hash(&temp_dir, &hash)?;
+    fs::rename(&temp_dir, &cache_dir).map_err(|error| {
+        format!(
+            "failed to move {} to {}: {error}",
+            temp_dir.display(),
+            cache_dir.display()
+        )
+    })?;
+    Ok(hash)
+}
+
+fn compatible_locked_entry(
+    alias: &str,
+    dependency: &Dependency,
+    lock: &LockEntry,
+    manifest_dir: &Path,
+) -> Result<bool, String> {
+    if lock.name != alias {
+        return Ok(false);
+    }
+    if let Some(path) = dependency.local_path() {
+        let source = path_source_uri(&resolve_path_dependency_source(manifest_dir, path)?)?;
+        return Ok(lock.source == source);
+    }
+    if let Some(url) = dependency.git_url() {
+        let source = format!("git+{}", normalize_git_url(url)?);
+        let requested = dependency
+            .branch()
+            .map(str::to_string)
+            .or_else(|| dependency.rev().map(str::to_string));
+        return Ok(lock.source == source
+            && lock.rev_request == requested
+            && lock.commit.is_some()
+            && lock.content_hash.is_some());
+    }
+    Ok(false)
+}
+
+fn build_lockfile(
+    ctx: &ManifestContext,
+    existing: Option<&LockFile>,
+    refresh_alias: Option<&str>,
+    refresh_all: bool,
+    allow_resolve: bool,
+) -> Result<LockFile, String> {
+    if manifest_has_git_dependencies(&ctx.manifest) {
+        ensure_git_available()?;
+    }
+
+    let mut aliases: Vec<String> = ctx.manifest.dependencies.keys().cloned().collect();
+    aliases.sort();
+    let mut lock = LockFile::default();
+    for alias in aliases {
+        let dependency = ctx
+            .manifest
+            .dependencies
+            .get(&alias)
+            .ok_or_else(|| format!("dependency {alias} disappeared while locking"))?;
+        let refresh = refresh_all || refresh_alias == Some(alias.as_str());
+        if let Some(existing_lock) = existing.and_then(|lock| lock.find(&alias)) {
+            if !refresh && compatible_locked_entry(&alias, dependency, existing_lock, &ctx.dir)? {
+                let mut entry = existing_lock.clone();
+                if entry.source.starts_with("git+") && entry.content_hash.is_none() {
+                    let url = entry.source.trim_start_matches("git+");
+                    let commit = entry
+                        .commit
+                        .as_deref()
+                        .ok_or_else(|| format!("missing locked commit for {alias}"))?;
+                    entry.content_hash = Some(ensure_git_cache_populated(
+                        url,
+                        &entry.source,
+                        commit,
+                        None,
+                        false,
+                    )?);
+                }
+                lock.replace(entry);
+                continue;
             }
         }
-    }
 
-    if !replaced {
-        let dep_idx = lines
-            .iter()
-            .position(|l| l.trim() == "[dependencies]")
-            .unwrap_or_else(|| {
-                lines.push("[dependencies]".to_string());
-                lines.len() - 1
+        if !allow_resolve {
+            return Err(format!(
+                "{} would need to change",
+                ctx.lock_path().display()
+            ));
+        }
+
+        if let Some(path) = dependency.local_path() {
+            let source = resolve_path_dependency_source(&ctx.dir, path)?;
+            lock.replace(LockEntry {
+                name: alias,
+                source: path_source_uri(&source)?,
+                rev_request: None,
+                commit: None,
+                content_hash: None,
             });
-        lines.insert(dep_idx + 1, dep_line);
+            continue;
+        }
+
+        if let Some(url) = dependency.git_url() {
+            let normalized_url = normalize_git_url(url)?;
+            let source = format!("git+{normalized_url}");
+            let rev_request = dependency
+                .branch()
+                .map(str::to_string)
+                .or_else(|| dependency.rev().map(str::to_string));
+            let commit =
+                resolve_git_commit(&normalized_url, dependency.rev(), dependency.branch())?;
+            let content_hash =
+                ensure_git_cache_populated(&normalized_url, &source, &commit, None, false)?;
+            lock.replace(LockEntry {
+                name: alias,
+                source,
+                rev_request,
+                commit: Some(commit),
+                content_hash: Some(content_hash),
+            });
+            continue;
+        }
+
+        return Err(format!(
+            "dependency {alias} is missing a git or path source"
+        ));
+    }
+    Ok(lock)
+}
+
+fn materialize_dependencies_from_lock(
+    ctx: &ManifestContext,
+    lock: &LockFile,
+    refetch: Option<&str>,
+) -> Result<usize, String> {
+    let packages_dir = ctx.packages_dir();
+    fs::create_dir_all(&packages_dir)
+        .map_err(|error| format!("failed to create {}: {error}", packages_dir.display()))?;
+
+    let mut aliases: Vec<String> = ctx.manifest.dependencies.keys().cloned().collect();
+    aliases.sort();
+    let mut installed = 0usize;
+    for alias in aliases {
+        let dependency = ctx
+            .manifest
+            .dependencies
+            .get(&alias)
+            .ok_or_else(|| format!("dependency {alias} disappeared while installing"))?;
+        let entry = lock.find(&alias).ok_or_else(|| {
+            format!(
+                "{} is missing an entry for {alias}",
+                ctx.lock_path().display()
+            )
+        })?;
+        if !compatible_locked_entry(&alias, dependency, entry, &ctx.dir)? {
+            return Err(format!(
+                "{} is out of date for {alias}; run `harn install`",
+                ctx.lock_path().display()
+            ));
+        }
+
+        if entry.source.starts_with("path+") {
+            let source = path_from_source_uri(&entry.source)?;
+            copy_path_dependency(&source, &packages_dir, &alias)?;
+            installed += 1;
+            continue;
+        }
+
+        let commit = entry
+            .commit
+            .as_deref()
+            .ok_or_else(|| format!("missing locked commit for {alias}"))?;
+        let expected_hash = entry
+            .content_hash
+            .as_deref()
+            .ok_or_else(|| format!("missing content hash for {alias}"))?;
+        let source = entry.source.clone();
+        let url = source.trim_start_matches("git+");
+        let refetch_this = refetch == Some("all") || refetch == Some(alias.as_str());
+        ensure_git_cache_populated(url, &source, commit, Some(expected_hash), refetch_this)?;
+        let cache_dir = git_cache_dir(&source, commit)?;
+        let dest_dir = packages_dir.join(&alias);
+        if !dest_dir.exists() || !materialized_hash_matches(&dest_dir, expected_hash) {
+            remove_materialized_package(&packages_dir, &alias)?;
+            copy_dir_recursive(&cache_dir, &dest_dir)?;
+            write_cached_content_hash(&dest_dir, expected_hash)?;
+        }
+        installed += 1;
+    }
+    Ok(installed)
+}
+
+fn validate_lock_matches_manifest(ctx: &ManifestContext, lock: &LockFile) -> Result<(), String> {
+    for (alias, dependency) in &ctx.manifest.dependencies {
+        let entry = lock.find(alias).ok_or_else(|| {
+            format!(
+                "{} is missing an entry for {alias}",
+                ctx.lock_path().display()
+            )
+        })?;
+        if !compatible_locked_entry(alias, dependency, entry, &ctx.dir)? {
+            return Err(format!(
+                "{} is out of date for {alias}; run `harn install`",
+                ctx.lock_path().display()
+            ));
+        }
+    }
+    Ok(())
+}
+
+pub fn ensure_dependencies_materialized(anchor: &Path) -> Result<(), String> {
+    let Some((manifest, dir)) = find_nearest_manifest(anchor) else {
+        return Ok(());
+    };
+    if manifest.dependencies.is_empty() {
+        return Ok(());
+    }
+    let ctx = ManifestContext { manifest, dir };
+    let lock = LockFile::load(&ctx.lock_path())?.ok_or_else(|| {
+        format!(
+            "{} is missing; run `harn install`",
+            ctx.lock_path().display()
+        )
+    })?;
+    validate_lock_matches_manifest(&ctx, &lock)?;
+    materialize_dependencies_from_lock(&ctx, &lock, None)?;
+    Ok(())
+}
+
+fn dependency_section_bounds(lines: &[String]) -> Option<(usize, usize)> {
+    let start = lines
+        .iter()
+        .position(|line| line.trim() == "[dependencies]")?;
+    let end = lines
+        .iter()
+        .enumerate()
+        .skip(start + 1)
+        .find(|(_, line)| line.trim_start().starts_with('['))
+        .map(|(index, _)| index)
+        .unwrap_or(lines.len());
+    Some((start, end))
+}
+
+fn render_dependency_line(alias: &str, dependency: &Dependency) -> String {
+    match dependency {
+        Dependency::Path(path) => format!("{alias} = {{ path = \"{path}\" }}"),
+        Dependency::Table(table) => {
+            let mut fields = Vec::new();
+            if let Some(path) = table.path.as_deref() {
+                fields.push(format!("path = \"{path}\""));
+            }
+            if let Some(git) = table.git.as_deref() {
+                fields.push(format!("git = \"{git}\""));
+            }
+            if let Some(branch) = table.branch.as_deref() {
+                fields.push(format!("branch = \"{branch}\""));
+            } else if let Some(rev) = table.rev.as_deref().or(table.tag.as_deref()) {
+                fields.push(format!("rev = \"{rev}\""));
+            }
+            if let Some(package) = table.package.as_deref() {
+                fields.push(format!("package = \"{package}\""));
+            }
+            format!("{alias} = {{ {} }}", fields.join(", "))
+        }
+    }
+}
+
+fn ensure_manifest_exists(manifest_path: &Path) -> Result<String, String> {
+    if manifest_path.exists() {
+        return fs::read_to_string(manifest_path)
+            .map_err(|error| format!("failed to read {}: {error}", manifest_path.display()));
+    }
+    Ok("[package]\nname = \"my-project\"\nversion = \"0.1.0\"\n".to_string())
+}
+
+fn upsert_dependency_in_manifest(
+    manifest_path: &Path,
+    alias: &str,
+    dependency: &Dependency,
+) -> Result<(), String> {
+    let content = ensure_manifest_exists(manifest_path)?;
+    let mut lines: Vec<String> = content.lines().map(|line| line.to_string()).collect();
+    if dependency_section_bounds(&lines).is_none() {
+        if !lines.is_empty() && !lines.last().is_some_and(|line| line.is_empty()) {
+            lines.push(String::new());
+        }
+        lines.push("[dependencies]".to_string());
+    }
+    let (start, end) = dependency_section_bounds(&lines).ok_or_else(|| {
+        format!(
+            "failed to locate [dependencies] in {}",
+            manifest_path.display()
+        )
+    })?;
+    let rendered = render_dependency_line(alias, dependency);
+    if let Some((index, _)) = lines
+        .iter()
+        .enumerate()
+        .skip(start + 1)
+        .take(end - start - 1)
+        .find(|(_, line)| {
+            line.split('=')
+                .next()
+                .is_some_and(|key| key.trim() == alias)
+        })
+    {
+        lines[index] = rendered;
+    } else {
+        lines.insert(end, rendered);
+    }
+    write_manifest_content(manifest_path, &(lines.join("\n") + "\n"))
+}
+
+fn remove_dependency_from_manifest(manifest_path: &Path, alias: &str) -> Result<bool, String> {
+    let content = fs::read_to_string(manifest_path)
+        .map_err(|error| format!("failed to read {}: {error}", manifest_path.display()))?;
+    let mut lines: Vec<String> = content.lines().map(|line| line.to_string()).collect();
+    let Some((start, end)) = dependency_section_bounds(&lines) else {
+        return Ok(false);
+    };
+    let mut removed = false;
+    lines = lines
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, line)| {
+            if index <= start || index >= end {
+                return Some(line);
+            }
+            let matches = line
+                .split('=')
+                .next()
+                .is_some_and(|key| key.trim() == alias);
+            if matches {
+                removed = true;
+                None
+            } else {
+                Some(line)
+            }
+        })
+        .collect();
+    if removed {
+        write_manifest_content(manifest_path, &(lines.join("\n") + "\n"))?;
+    }
+    Ok(removed)
+}
+
+fn install_packages_impl(frozen: bool, refetch: Option<&str>) -> Result<usize, String> {
+    let ctx = load_current_manifest_context()?;
+    let existing = LockFile::load(&ctx.lock_path())?;
+    if ctx.manifest.dependencies.is_empty() {
+        if !frozen {
+            LockFile::default().save(&ctx.lock_path())?;
+        }
+        return Ok(0);
     }
 
-    let new_content = lines.join("\n") + "\n";
-    if let Err(e) = fs::write(manifest_path, &new_content) {
-        eprintln!("Failed to write harn.toml: {e}");
+    if frozen && existing.is_none() {
+        return Err(format!("{} is missing", ctx.lock_path().display()));
+    }
+
+    let desired = build_lockfile(&ctx, existing.as_ref(), None, false, !frozen)?;
+    if frozen {
+        if existing.as_ref() != Some(&desired) {
+            return Err(format!(
+                "{} would need to change",
+                ctx.lock_path().display()
+            ));
+        }
+    } else {
+        desired.save(&ctx.lock_path())?;
+    }
+    materialize_dependencies_from_lock(&ctx, &desired, refetch)
+}
+
+pub fn install_packages(frozen: bool, refetch: Option<&str>) {
+    match install_packages_impl(frozen, refetch) {
+        Ok(0) => println!("No dependencies to install."),
+        Ok(installed) => println!("Installed {installed} package(s) to {PKG_DIR}/"),
+        Err(error) => {
+            eprintln!("error: {error}");
+            process::exit(1);
+        }
+    }
+}
+
+pub fn lock_packages() {
+    let result = (|| -> Result<usize, String> {
+        let ctx = load_current_manifest_context()?;
+        let existing = LockFile::load(&ctx.lock_path())?;
+        let lock = build_lockfile(&ctx, existing.as_ref(), None, true, true)?;
+        lock.save(&ctx.lock_path())?;
+        Ok(lock.packages.len())
+    })();
+
+    match result {
+        Ok(count) => println!("Wrote {} with {count} package(s).", LOCK_FILE),
+        Err(error) => {
+            eprintln!("error: {error}");
+            process::exit(1);
+        }
+    }
+}
+
+pub fn update_packages(alias: Option<&str>, all: bool) {
+    if !all && alias.is_none() {
+        eprintln!("error: specify a dependency alias or pass --all");
         process::exit(1);
     }
 
-    println!("Added {name} to harn.toml");
-    println!("Run `harn install` to fetch the package.");
+    let result = (|| -> Result<usize, String> {
+        let ctx = load_current_manifest_context()?;
+        if let Some(alias) = alias {
+            if !ctx.manifest.dependencies.contains_key(alias) {
+                return Err(format!("{alias} is not present in [dependencies]"));
+            }
+        }
+        let existing = LockFile::load(&ctx.lock_path())?;
+        let lock = build_lockfile(&ctx, existing.as_ref(), alias, all, true)?;
+        lock.save(&ctx.lock_path())?;
+        materialize_dependencies_from_lock(&ctx, &lock, None)
+    })();
+
+    match result {
+        Ok(installed) => println!("Updated {installed} package(s)."),
+        Err(error) => {
+            eprintln!("error: {error}");
+            process::exit(1);
+        }
+    }
+}
+
+pub fn remove_package(alias: &str) {
+    let result = (|| -> Result<bool, String> {
+        let ctx = load_current_manifest_context()?;
+        let removed = remove_dependency_from_manifest(&ctx.manifest_path(), alias)?;
+        if !removed {
+            return Ok(false);
+        }
+        let mut lock = LockFile::load(&ctx.lock_path())?.unwrap_or_default();
+        lock.remove(alias);
+        lock.save(&ctx.lock_path())?;
+        remove_materialized_package(&ctx.packages_dir(), alias)?;
+        Ok(true)
+    })();
+
+    match result {
+        Ok(true) => println!("Removed {alias} from {MANIFEST} and {LOCK_FILE}."),
+        Ok(false) => {
+            eprintln!("error: {alias} is not present in [dependencies]");
+            process::exit(1);
+        }
+        Err(error) => {
+            eprintln!("error: {error}");
+            process::exit(1);
+        }
+    }
+}
+
+fn normalize_add_request(
+    name_or_spec: &str,
+    alias: Option<&str>,
+    git_url: Option<&str>,
+    tag: Option<&str>,
+    rev: Option<&str>,
+    branch: Option<&str>,
+    local_path: Option<&str>,
+) -> Result<(String, Dependency), String> {
+    if local_path.is_some() && (rev.is_some() || tag.is_some() || branch.is_some()) {
+        return Err("path dependencies do not accept --rev, --tag, or --branch".to_string());
+    }
+    if git_url.is_some() || local_path.is_some() {
+        let alias = alias.unwrap_or(name_or_spec).to_string();
+        if let Some(path) = local_path {
+            return Ok((
+                alias,
+                Dependency::Table(DepTable {
+                    git: None,
+                    tag: None,
+                    rev: None,
+                    branch: None,
+                    path: Some(path.to_string()),
+                    package: None,
+                }),
+            ));
+        }
+        let git = normalize_git_url(git_url.ok_or_else(|| "missing --git URL".to_string())?)?;
+        let package_name = derive_repo_name_from_source(&git)?;
+        return Ok((
+            alias.clone(),
+            Dependency::Table(DepTable {
+                git: Some(git),
+                tag: None,
+                rev: rev.or(tag).map(str::to_string),
+                branch: branch.map(str::to_string),
+                path: None,
+                package: (alias != package_name).then_some(package_name),
+            }),
+        ));
+    }
+
+    if rev.is_some() && tag.is_some() {
+        return Err("use only one of --rev or --tag".to_string());
+    }
+    let (raw_source, inline_ref) = parse_positional_git_spec(name_or_spec);
+    if inline_ref.is_some() && (rev.is_some() || tag.is_some() || branch.is_some()) {
+        return Err("specify the git ref either inline as @ref or via --rev/--branch".to_string());
+    }
+    let git = normalize_git_url(raw_source)?;
+    let package_name = derive_repo_name_from_source(&git)?;
+    let alias = alias.unwrap_or(package_name.as_str()).to_string();
+    Ok((
+        alias.clone(),
+        Dependency::Table(DepTable {
+            git: Some(git),
+            tag: None,
+            rev: inline_ref.or(rev).or(tag).map(str::to_string),
+            branch: branch.map(str::to_string),
+            path: None,
+            package: (alias != package_name).then_some(package_name),
+        }),
+    ))
+}
+
+pub fn add_package(
+    name_or_spec: &str,
+    alias: Option<&str>,
+    git_url: Option<&str>,
+    tag: Option<&str>,
+    rev: Option<&str>,
+    branch: Option<&str>,
+    local_path: Option<&str>,
+) {
+    let result = (|| -> Result<(String, usize), String> {
+        let manifest_path = std::env::current_dir()
+            .map_err(|error| format!("failed to read cwd: {error}"))?
+            .join(MANIFEST);
+        let (alias, dependency) =
+            normalize_add_request(name_or_spec, alias, git_url, tag, rev, branch, local_path)?;
+        upsert_dependency_in_manifest(&manifest_path, &alias, &dependency)?;
+        let installed = install_packages_impl(false, None)?;
+        Ok((alias, installed))
+    })();
+
+    match result {
+        Ok((alias, installed)) => {
+            println!("Added {alias} to {MANIFEST}.");
+            println!("Installed {installed} package(s).");
+        }
+        Err(error) => {
+            eprintln!("error: {error}");
+            process::exit(1);
+        }
+    }
 }
 
 /// Resolved `[skills]` section plus the directory the manifest came
@@ -2544,6 +3393,7 @@ fn expand_single_star_glob(path: &Path) -> Vec<PathBuf> {
 mod tests {
     use super::*;
     use serde::{Deserialize, Serialize};
+    use tokio::sync::MutexGuard;
 
     #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
     struct TriggerTables {
@@ -2566,6 +3416,101 @@ mod tests {
         let harn_file = root.join("main.harn");
         fs::write(&harn_file, "pipeline main() {}\n").unwrap();
         harn_file
+    }
+
+    struct TestEnvGuard {
+        previous_cwd: PathBuf,
+        previous_cache: Option<std::ffi::OsString>,
+        _cwd_lock: MutexGuard<'static, ()>,
+        _env_lock: MutexGuard<'static, ()>,
+    }
+
+    impl Drop for TestEnvGuard {
+        fn drop(&mut self) {
+            std::env::set_current_dir(&self.previous_cwd).unwrap();
+            if let Some(value) = self.previous_cache.clone() {
+                std::env::set_var(HARN_CACHE_DIR_ENV, value);
+            } else {
+                std::env::remove_var(HARN_CACHE_DIR_ENV);
+            }
+        }
+    }
+
+    fn with_test_env<T>(cwd: &Path, cache_dir: &Path, f: impl FnOnce() -> T) -> T {
+        let cwd_lock = crate::tests::common::cwd_lock::lock_cwd();
+        let env_lock = crate::tests::common::env_lock::lock_env().blocking_lock();
+        let guard = TestEnvGuard {
+            previous_cwd: std::env::current_dir().unwrap(),
+            previous_cache: std::env::var_os(HARN_CACHE_DIR_ENV),
+            _cwd_lock: cwd_lock,
+            _env_lock: env_lock,
+        };
+        std::env::set_current_dir(cwd).unwrap();
+        std::env::set_var(HARN_CACHE_DIR_ENV, cache_dir);
+        let result = f();
+        drop(guard);
+        result
+    }
+
+    fn run_git(repo: &Path, args: &[&str]) -> String {
+        let output = process::Command::new("git")
+            .args(args)
+            .current_dir(repo)
+            .output()
+            .unwrap();
+        if !output.status.success() {
+            panic!(
+                "git {:?} failed: {}",
+                args,
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    }
+
+    fn create_git_package_repo() -> (tempfile::TempDir, PathBuf, String) {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = tmp.path().join("acme-lib");
+        fs::create_dir_all(&repo).unwrap();
+        let init = process::Command::new("git")
+            .args(["init", "-b", "main"])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        if !init.status.success() {
+            let fallback = process::Command::new("git")
+                .arg("init")
+                .current_dir(&repo)
+                .output()
+                .unwrap();
+            assert!(
+                fallback.status.success(),
+                "git init failed: {}",
+                String::from_utf8_lossy(&fallback.stderr)
+            );
+        }
+        run_git(&repo, &["config", "user.email", "tests@example.com"]);
+        run_git(&repo, &["config", "user.name", "Harn Tests"]);
+        run_git(&repo, &["config", "core.hooksPath", "/dev/null"]);
+        fs::write(
+            repo.join(MANIFEST),
+            r#"
+[package]
+name = "acme-lib"
+version = "0.1.0"
+"#,
+        )
+        .unwrap();
+        fs::write(
+            repo.join("lib.harn"),
+            "pub fn value() -> string { return \"v1\" }\n",
+        )
+        .unwrap();
+        run_git(&repo, &["add", "."]);
+        run_git(&repo, &["commit", "-m", "initial"]);
+        run_git(&repo, &["tag", "v1.0.0"]);
+        let branch = run_git(&repo, &["branch", "--show-current"]);
+        (tmp, repo, branch)
     }
 
     #[test]
@@ -2773,7 +3718,172 @@ name = "acme/ops"
     }
 
     #[test]
-    fn load_runtime_extensions_merges_package_and_root_llm_config() {
+    fn lock_file_round_trips_typed_schema() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join(LOCK_FILE);
+        let lock = LockFile {
+            version: LOCK_FILE_VERSION,
+            packages: vec![LockEntry {
+                name: "acme-lib".to_string(),
+                source: "git+https://github.com/acme/acme-lib".to_string(),
+                rev_request: Some("v1.0.0".to_string()),
+                commit: Some("0123456789abcdef0123456789abcdef01234567".to_string()),
+                content_hash: Some("sha256:deadbeef".to_string()),
+            }],
+        };
+        lock.save(&path).unwrap();
+        let loaded = LockFile::load(&path).unwrap().unwrap();
+        assert_eq!(loaded, lock);
+    }
+
+    #[test]
+    fn compute_content_hash_ignores_git_and_hash_marker() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join(".git")).unwrap();
+        fs::write(root.join(".git/HEAD"), "ref: refs/heads/main\n").unwrap();
+        fs::write(root.join(".gitignore"), "ignored\n").unwrap();
+        fs::write(root.join(CONTENT_HASH_FILE), "stale\n").unwrap();
+        fs::write(
+            root.join("lib.harn"),
+            "pub fn value() -> number { return 1 }\n",
+        )
+        .unwrap();
+        let first = compute_content_hash(root).unwrap();
+        fs::write(root.join(".git/HEAD"), "changed\n").unwrap();
+        fs::write(root.join(".gitignore"), "changed\n").unwrap();
+        fs::write(root.join(CONTENT_HASH_FILE), "changed\n").unwrap();
+        let second = compute_content_hash(root).unwrap();
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn add_and_remove_git_dependency_round_trip() {
+        let (_repo_tmp, repo, _branch) = create_git_package_repo();
+        let project_tmp = tempfile::tempdir().unwrap();
+        let root = project_tmp.path();
+        let cache_dir = root.join(".cache");
+        fs::create_dir_all(root.join(".git")).unwrap();
+        fs::write(
+            root.join(MANIFEST),
+            r#"
+[package]
+name = "workspace"
+version = "0.1.0"
+"#,
+        )
+        .unwrap();
+
+        with_test_env(root, &cache_dir, || {
+            let spec = format!("{}@v1.0.0", repo.display());
+            add_package(&spec, None, None, None, None, None, None);
+
+            let alias = "acme-lib";
+            let manifest = fs::read_to_string(root.join(MANIFEST)).unwrap();
+            assert!(manifest.contains("acme-lib"));
+            assert!(manifest.contains("rev = \"v1.0.0\""));
+
+            let lock = LockFile::load(&root.join(LOCK_FILE)).unwrap().unwrap();
+            let entry = lock.find(alias).unwrap();
+            assert_eq!(lock.version, LOCK_FILE_VERSION);
+            assert!(entry.source.starts_with("git+file://"));
+            assert!(entry.commit.as_deref().is_some_and(is_full_git_sha));
+            assert!(entry
+                .content_hash
+                .as_deref()
+                .is_some_and(|hash| hash.starts_with("sha256:")));
+            assert!(root.join(PKG_DIR).join(alias).join("lib.harn").is_file());
+
+            remove_package(alias);
+            let updated_manifest = fs::read_to_string(root.join(MANIFEST)).unwrap();
+            assert!(!updated_manifest.contains("acme-lib ="));
+            let updated_lock = LockFile::load(&root.join(LOCK_FILE)).unwrap().unwrap();
+            assert!(updated_lock.find(alias).is_none());
+            assert!(!root.join(PKG_DIR).join(alias).exists());
+        });
+    }
+
+    #[test]
+    fn update_branch_dependency_refreshes_locked_commit() {
+        let (_repo_tmp, repo, branch) = create_git_package_repo();
+        let project_tmp = tempfile::tempdir().unwrap();
+        let root = project_tmp.path();
+        let cache_dir = root.join(".cache");
+        fs::create_dir_all(root.join(".git")).unwrap();
+        let git = normalize_git_url(repo.to_string_lossy().as_ref()).unwrap();
+        fs::write(
+            root.join(MANIFEST),
+            format!(
+                r#"
+[package]
+name = "workspace"
+version = "0.1.0"
+
+[dependencies]
+acme-lib = {{ git = "{git}", branch = "{branch}" }}
+"#
+            ),
+        )
+        .unwrap();
+
+        with_test_env(root, &cache_dir, || {
+            let installed = install_packages_impl(false, None).unwrap();
+            assert_eq!(installed, 1);
+            let first_lock = LockFile::load(&root.join(LOCK_FILE)).unwrap().unwrap();
+            let first_commit = first_lock
+                .find("acme-lib")
+                .and_then(|entry| entry.commit.clone())
+                .unwrap();
+
+            fs::write(
+                repo.join("lib.harn"),
+                "pub fn value() -> string { return \"v2\" }\n",
+            )
+            .unwrap();
+            run_git(&repo, &["add", "."]);
+            run_git(&repo, &["commit", "-m", "update"]);
+
+            update_packages(Some("acme-lib"), false);
+            let second_lock = LockFile::load(&root.join(LOCK_FILE)).unwrap().unwrap();
+            let second_commit = second_lock
+                .find("acme-lib")
+                .and_then(|entry| entry.commit.clone())
+                .unwrap();
+            assert_ne!(first_commit, second_commit);
+        });
+    }
+
+    #[test]
+    fn frozen_install_errors_when_lockfile_is_missing() {
+        let (_repo_tmp, repo, _branch) = create_git_package_repo();
+        let project_tmp = tempfile::tempdir().unwrap();
+        let root = project_tmp.path();
+        let cache_dir = root.join(".cache");
+        fs::create_dir_all(root.join(".git")).unwrap();
+        let git = normalize_git_url(repo.to_string_lossy().as_ref()).unwrap();
+        fs::write(
+            root.join(MANIFEST),
+            format!(
+                r#"
+[package]
+name = "workspace"
+version = "0.1.0"
+
+[dependencies]
+acme-lib = {{ git = "{git}", rev = "v1.0.0" }}
+"#
+            ),
+        )
+        .unwrap();
+
+        with_test_env(root, &cache_dir, || {
+            let error = install_packages_impl(true, None).unwrap_err();
+            assert!(error.contains(LOCK_FILE));
+        });
+    }
+
+    #[test]
+    fn load_runtime_extensions_uses_only_root_llm_config() {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
         std::fs::create_dir_all(root.join(".git")).unwrap();
@@ -2807,14 +3917,14 @@ chat_endpoint = "/chat/completions"
 
         let extensions = load_runtime_extensions(&harn_file);
         let llm = extensions.llm.expect("merged llm config");
-        assert!(llm.providers.contains_key("acme"));
         assert!(llm.providers.contains_key("project"));
-        assert!(llm.aliases.contains_key("acme-fast"));
         assert!(llm.aliases.contains_key("project-fast"));
+        assert!(!llm.providers.contains_key("acme"));
+        assert!(!llm.aliases.contains_key("acme-fast"));
     }
 
     #[test]
-    fn load_runtime_extensions_collects_manifest_hooks_in_order() {
+    fn load_runtime_extensions_ignores_package_hooks() {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
         std::fs::create_dir_all(root.join(".git")).unwrap();
@@ -2849,9 +3959,8 @@ handler = "acme::audit_edit"
         fs::write(&harn_file, "pipeline main() {}\n").unwrap();
 
         let extensions = load_runtime_extensions(&harn_file);
-        assert_eq!(extensions.hooks.len(), 2);
-        assert_eq!(extensions.hooks[0].handler, "acme::audit_edit");
-        assert_eq!(extensions.hooks[1].handler, "workspace::after_read");
+        assert_eq!(extensions.hooks.len(), 1);
+        assert_eq!(extensions.hooks[0].handler, "workspace::after_read");
     }
 
     #[test]
@@ -2921,7 +4030,7 @@ secrets = { signing_secret = "github/webhook-secret" }
     }
 
     #[test]
-    fn load_runtime_extensions_collects_manifest_triggers_in_order() {
+    fn load_runtime_extensions_ignores_package_triggers() {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
         std::fs::create_dir_all(root.join(".git")).unwrap();
@@ -2962,9 +4071,8 @@ timezone = "UTC"
         fs::write(&harn_file, "pipeline main() {}\n").unwrap();
 
         let extensions = load_runtime_extensions(&harn_file);
-        assert_eq!(extensions.triggers.len(), 2);
-        assert_eq!(extensions.triggers[0].id, "acme-trigger");
-        assert_eq!(extensions.triggers[1].id, "workspace-trigger");
+        assert_eq!(extensions.triggers.len(), 1);
+        assert_eq!(extensions.triggers[0].id, "workspace-trigger");
     }
 
     #[tokio::test(flavor = "current_thread")]

@@ -690,15 +690,47 @@ sequence are exposed individually:
 Add a dependency to `harn.toml`.
 
 ```bash
-harn add my-lib --git https://github.com/user/my-lib
+harn add https://github.com/user/my-lib@v1.2.3
+harn add https://github.com/user/my-lib --alias my-lib
+harn add my-lib --git https://github.com/user/my-lib --rev v1.2.3   # legacy form
 ```
 
 ## harn install
 
-Install dependencies declared in `harn.toml`.
+Install dependencies declared in `harn.toml`, writing or reusing
+`harn.lock` and materializing `.harn/packages/`.
 
 ```bash
 harn install
+harn install --frozen
+harn install --refetch my-lib
+```
+
+## harn lock
+
+Resolve dependencies from `harn.toml` and write `harn.lock` without
+materializing packages.
+
+```bash
+harn lock
+```
+
+## harn update
+
+Refresh one dependency (or all of them) and update `harn.lock`.
+
+```bash
+harn update my-lib
+harn update --all
+```
+
+## harn remove
+
+Remove one dependency from `harn.toml`, `harn.lock`, and
+`.harn/packages/`.
+
+```bash
+harn remove my-lib
 ```
 
 ## harn version
