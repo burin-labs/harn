@@ -824,6 +824,18 @@ plain terminal.
   arguments. Returns an opaque value — narrow it yourself before
   field access (strict types mode treats this as an untyped boundary).
 
+### HTTP builtins
+
+- `http_get/post/put/patch/delete/request` return
+  `{status, headers, body, ok}` for outbound HTTP calls.
+- Common options: `timeout_ms` (alias `timeout`), `retry: {max, backoff_ms}`,
+  legacy `retries` / `backoff`, `retry_on`, `retry_methods`, `headers`,
+  `auth`, `follow_redirects`, and `max_redirects`.
+- Default retries cover `408`, `429`, `500`, `502`, `503`, and `504` for
+  idempotent methods only. `Retry-After` is honored on `429` / `503`.
+- `http_mock(method, url_pattern, response)` can script multiple responses
+  with `{responses: [...]}` and `http_mock_calls()` records each attempt.
+
 ### Human-in-the-loop builtins
 
 These are typed stdlib primitives, not language syntax. Shared type aliases

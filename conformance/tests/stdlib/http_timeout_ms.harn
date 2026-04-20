@@ -1,0 +1,15 @@
+pipeline test(task) {
+  try {
+    let _r = http_get("http://127.0.0.1:1", {timeout_ms: 100})
+    println("unexpected_timeout_ms_success")
+  } catch (e) {
+    println("caught_timeout_ms")
+  }
+
+  try {
+    let _r = http_get("http://127.0.0.1:1", {timeout: 100})
+    println("unexpected_timeout_alias_success")
+  } catch (e2) {
+    println("caught_timeout_alias")
+  }
+}

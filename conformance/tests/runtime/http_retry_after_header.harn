@@ -1,0 +1,18 @@
+pipeline test(task) {
+  http_mock("GET", "https://api.example.com/retry-after", {
+    responses: [
+      {status: 429, headers: {"retry-after": "0"}},
+      {status: 200, body: "ok"},
+    ],
+  })
+
+  let resp = http_get("https://api.example.com/retry-after", {
+    retry: {max: 1, backoff_ms: 0},
+  })
+  let calls = http_mock_calls()
+
+  assert_eq(resp.status, 200)
+  assert_eq(len(calls), 2)
+  log("retry-after status: " + to_string(resp.status))
+  log("retry-after calls: " + to_string(len(calls)))
+}

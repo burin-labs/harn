@@ -1,0 +1,19 @@
+pipeline test(task) {
+  http_mock("GET", "https://api.example.com/retry-compat", {
+    responses: [
+      {status: 503},
+      {status: 200, body: "ok"},
+    ],
+  })
+
+  let resp = http_get("https://api.example.com/retry-compat", {
+    retries: 1,
+    backoff: 0,
+  })
+  let calls = http_mock_calls()
+
+  assert_eq(resp.status, 200)
+  assert_eq(len(calls), 2)
+  log("compat status: " + to_string(resp.status))
+  log("compat calls: " + to_string(len(calls)))
+}

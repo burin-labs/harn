@@ -70,6 +70,15 @@ granular archaeology.
 
 ### Added
 
+- **HTTP builtins now support per-request retry policy and `timeout_ms`
+  (#348).** `http_get` / `http_post` / friends accept canonical
+  `timeout_ms` and `retry: {max, backoff_ms}` options while preserving
+  the legacy flat aliases, default retries now cover `408`, `429`,
+  `500`, `502`, `503`, and `504` for idempotent methods, `Retry-After`
+  is honored on `429` / `503`, and `http_mock` can script response
+  sequences through `responses: [...]` for conformance-friendly retry
+  tests.
+
 - **Native Linear connector with `harn connect linear` (#339, harn#173).**
   Harn now ships a built-in `LinearConnector` with signed inbound webhook
   normalization, typed payload variants, typed `updatedFrom` issue diffs,
