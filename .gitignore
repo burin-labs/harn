@@ -28,6 +28,11 @@ conformance/tests/**/.harn/metadata/
 # private harn-cloud repo + business goals); it lives in burin-code's
 # local `.claude/commands/` only, never in the public harn repo.
 .claude/commands/merge-captain.md
+# conformance/tests/stdlib/project_fingerprint.harn leaks a
+# `project_fingerprint_repo/` fixture into cwd (repo root) because
+# it uses relative mkdir instead of temp_dir(). Tracked as a test
+# hygiene issue; until the test is fixed, don't commit the leak.
+/project_fingerprint_repo/
 meta_scratch/
 .remember/
 .serena/
