@@ -9,6 +9,7 @@ mod connectors;
 mod crypto;
 mod datetime;
 mod fs;
+pub(crate) mod hitl;
 pub mod host;
 mod io;
 mod iter;
@@ -80,6 +81,7 @@ pub fn register_agent_stdlib(vm: &mut Vm) {
     skills::register_skill_builtins(vm);
     agents_daemon::register_daemon_builtins(vm);
     triggers_stdlib::register_trigger_builtins(vm);
+    hitl::register_hitl_builtins(vm);
     agents::register_agent_builtins(vm);
     agent_sessions::register_agent_session_builtins(vm);
     transcript_compact::register_transcript_compaction_builtins(vm);
@@ -128,6 +130,7 @@ pub fn reset_stdlib_state() {
     fs::reset_fs_state();
     json::reset_json_state();
     host::reset_host_state();
+    hitl::reset_hitl_state();
     agents::records::reset_eval_metrics();
     tools::clear_current_tool_registry();
     crate::skills::clear_current_skill_registry();

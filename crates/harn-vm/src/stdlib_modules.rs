@@ -19,6 +19,7 @@ pub fn get_stdlib_source(module: &str) -> Option<&'static str> {
         "agent_state" => Some(include_str!("stdlib_agent_state.harn")),
         "checkpoint" => Some(include_str!("stdlib_checkpoint.harn")),
         "host" => Some(include_str!("stdlib_host.harn")),
+        "hitl" => Some(include_str!("stdlib_hitl.harn")),
         "worktree" => Some(include_str!("stdlib_worktree.harn")),
         "acp" => Some(include_str!("stdlib_acp.harn")),
         "triggers" => Some(include_str!("stdlib_triggers.harn")),

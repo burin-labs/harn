@@ -7,6 +7,7 @@ mod origin_guard;
 mod queue;
 mod recover;
 mod replay;
+mod resume;
 pub(crate) mod role;
 mod serve;
 mod tls;
@@ -19,6 +20,7 @@ pub(crate) async fn handle(args: OrchestratorArgs) -> Result<(), String> {
         OrchestratorCommand::Inspect(inspect_args) => inspect::run(inspect_args).await,
         OrchestratorCommand::Fire(fire_args) => fire::run(fire_args).await,
         OrchestratorCommand::Replay(replay_args) => replay::run(replay_args).await,
+        OrchestratorCommand::Resume(resume_args) => resume::run(resume_args).await,
         OrchestratorCommand::Dlq(dlq_args) => dlq::run(dlq_args).await,
         OrchestratorCommand::Queue(queue_args) => queue::run(queue_args).await,
         OrchestratorCommand::Recover(recover_args) => recover::run(recover_args).await,

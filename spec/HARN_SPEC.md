@@ -2514,6 +2514,47 @@ typechecker support.
 runtime `schema_of(T)` builtin returns an idiomatic schema dict
 whose static type is `Schema<T>`.
 
+### Human-in-the-loop stdlib
+
+Human-in-the-loop is modeled as typed stdlib primitives rather than special
+syntax. The runtime owns blocking semantics, timeout behavior, event-log
+records, and replay.
+
+- `ask_user<T>(prompt: string, options?: {schema?: Schema<T>, timeout?: duration, default?: T}) -> T`
+- `request_approval(action: string, options?: {detail?: any, quorum?: int, reviewers?: list<string>, deadline?: duration})`
+  returns `{approved: bool, reviewers: list<string>, approved_at: string, reason: string | nil}`.
+- `dual_control<T>(n: int, m: int, action: fn() -> T, approvers?: list<string>) -> T`
+- `escalate_to(role: string, reason: string)`
+  returns `{request_id: string, role: string, reason: string, trace_id: string,
+  status: string, accepted_at: string | nil, reviewer: string | nil}`.
+
+Normative behavior:
+
+- `ask_user` appends `hitl.question_asked`, then blocks until the host appends
+  a matching response. If `schema` is present, the answer must satisfy it. If
+  the wait times out, Harn appends `hitl.timeout` and either returns
+  `options.default` or throws `HumanTimeoutError`.
+- `request_approval` appends `hitl.approval_requested` and waits for the
+  configured quorum. `deadline` defaults to 24 hours. Denial raises
+  `ApprovalDeniedError`. Successful completion returns the approval record.
+- `dual_control` is an approval-gated wrapper around a closure. The closure is
+  not executed until quorum is satisfied. The runtime appends
+  `hitl.dual_control_requested`, `hitl.dual_control_approved` /
+  `hitl.dual_control_denied`, and `hitl.dual_control_executed`.
+- `escalate_to` appends `hitl.escalation_issued` and blocks until the host
+  appends `hitl.escalation_accepted`. If the host does not respond, the
+  dispatch remains paused until manual resume.
+
+HITL records live in durable event-log topics:
+
+- `hitl.questions`
+- `hitl.approvals`
+- `hitl.dual_control`
+- `hitl.escalations`
+
+Replay is event-log-driven. During replay, HITL primitives resolve from the
+previously recorded HITL response events instead of consulting a live host.
+
 ### Function type annotations
 
 Parameters and return types can be annotated:

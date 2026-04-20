@@ -821,6 +821,30 @@ plain terminal.
   arguments. Returns an opaque value — narrow it yourself before
   field access (strict types mode treats this as an untyped boundary).
 
+### Human-in-the-loop builtins
+
+These are typed stdlib primitives, not language syntax. Shared type aliases
+live in `std/hitl`; the builtins themselves are always available.
+
+- `ask_user<T>(prompt, {schema?: Schema<T>, timeout?: duration, default?: T}) -> T`
+- `request_approval(action, {detail?, quorum?, reviewers?, deadline?}) -> {approved, reviewers, approved_at, reason}`
+- `dual_control<T>(n, m, action: fn() -> T, approvers?) -> T`
+- `escalate_to(role, reason) -> {request_id, role, reason, trace_id, status, accepted_at, reviewer}`
+
+Operational semantics:
+
+- Approval deadlines default to 24 hours.
+- Timeouts append `hitl.timeout` and either return the supplied default or
+  throw `HumanTimeoutError`.
+- Denials throw `ApprovalDeniedError`.
+- Replay reads recorded HITL responses from the event log instead of asking
+  a live host again.
+
+Host contract:
+
+- Notification: `harn.hitl.requested`
+- Resolution method: `harn.hitl.respond`
+
 ### Trigger stdlib
 
 Use the trigger stdlib wrappers when a script needs to inspect or manually

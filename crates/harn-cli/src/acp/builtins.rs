@@ -1,7 +1,7 @@
 //! ACP builtin registrations and terminal-exec glue.
 //!
 //! These builtins delegate VM-side capabilities (`log`, `print`, `exec`,
-//! `ask_user`, `host_call`, ...) to the ACP client via the `AcpBridge`.
+//! `host_call`, ...) to the ACP client via the `AcpBridge`.
 
 use std::collections::BTreeMap;
 use std::rc::Rc;
@@ -99,26 +99,6 @@ pub(super) async fn register_acp_builtins(vm: &mut harn_vm::Vm, bridge: Rc<AcpBr
             false
         };
         Ok(harn_vm::VmValue::Bool(valid))
-    });
-
-    // ask_user is host-delegated: IDEs show a modal, CLIs read stdin.
-    let b = bridge.clone();
-    vm.register_async_builtin("ask_user", move |args| {
-        let bridge = b.clone();
-        async move {
-            let question = args.first().map(|a| a.display()).unwrap_or_default();
-            let question_type = args.get(1).map(|a| a.display());
-            let mut params = serde_json::json!({
-                "sessionId": bridge.session_id,
-                "name": "ask_user",
-                "args": {"question": question},
-            });
-            if let Some(qt) = question_type {
-                params["args"]["type"] = serde_json::json!(qt);
-            }
-            let result = bridge.call_client("host/call", params).await?;
-            Ok(harn_vm::bridge::json_result_to_vm_value(&result))
-        }
     });
 
     let b = bridge.clone();

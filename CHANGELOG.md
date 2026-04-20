@@ -157,6 +157,15 @@ granular archaeology.
   MCP client identity so external MCP clients can drive Harn without a custom
   adapter layer.
 
+- **Typed human-in-the-loop stdlib primitives.** Harn now ships VM-backed
+  `ask_user`, `request_approval`, `dual_control`, and `escalate_to`
+  builtins with durable `hitl.*` event-log records, replay-safe
+  resolution from recorded responses, a shared `std/hitl` type catalog,
+  and host ingress via `harn.hitl.respond` on the ACP/MCP bridge. Added
+  HITL unit/conformance coverage, `docs/src/hitl.md`, quickref/spec
+  documentation, and `harn orchestrator resume <request_id>` for manual
+  escalation acceptance.
+
 - **`harn orchestrator {inspect, fire, replay, dlq, queue}` CLI
   commands (#185).** Implemented the placeholder orchestrator
   subcommands that used to error with `not implemented`. `inspect`
