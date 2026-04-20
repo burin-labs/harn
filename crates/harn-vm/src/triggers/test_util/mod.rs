@@ -1274,6 +1274,7 @@ fn manifest_spec(id: &str, fingerprint: &str) -> TriggerBindingSpec {
         source: TriggerBindingSource::Manifest,
         kind: "webhook".to_string(),
         provider: ProviderId::from("github"),
+        autonomy_tier: crate::AutonomyTier::ActAuto,
         handler: TriggerHandlerSpec::Worker {
             queue: format!("{id}-queue"),
         },

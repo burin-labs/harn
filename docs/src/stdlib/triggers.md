@@ -25,6 +25,7 @@ Each binding includes:
 - `source` (`"manifest"` or `"dynamic"`)
 - `kind`
 - `provider`
+- `autonomy_tier`
 - `handler_kind`
 - `state`
 - `metrics`
@@ -41,6 +42,7 @@ Register a trigger dynamically and return its `TriggerHandle`.
 - `id`
 - `kind`
 - `provider`
+- `autonomy_tier`
 - `handler`
 - `when`
 - `when_budget`
@@ -80,6 +82,7 @@ let handle: TriggerHandle = trigger_register({
   id: "github-new-issue",
   kind: "issue.opened",
   provider: "github",
+  autonomy_tier: "act_with_approval",
   handler: handle_issue,
   allow_cleartext: nil,
   when: nil,
@@ -156,6 +159,40 @@ records. Pass a kind such as `predicate.evaluated`,
 `predicate.budget_exceeded`, or `DispatchStarted` to filter on the runtime
 side.
 
+### `handler_context()`
+
+Return the current dispatch context as `HandlerContext | nil`.
+
+Inside a trigger handler, the returned record includes:
+
+- `agent`
+- `action`
+- `trace_id`
+- `replay_of_event_id`
+- `autonomy_tier`
+- `trigger_event`
+
+Outside trigger dispatch, the builtin returns `nil`.
+
+### `trust_record(agent, action, approver, outcome, tier)`
+
+Append a manual `TrustRecord` to the trust graph. Scripts usually rely on the
+dispatcher's automatic end-of-handler records, but this builtin is available for
+control-plane events such as promotions, demotions, or manual audit entries.
+
+### `trust_query(filters)`
+
+Query historical trust records from Harn code.
+
+Supported filter keys:
+
+- `agent`
+- `action`
+- `since`
+- `until`
+- `tier`
+- `outcome`
+
 ## Example
 
 ```harn
@@ -197,6 +234,7 @@ println(replay.replay_of_event_id)     // original event id
   live registry in the current process; it does not rewrite `harn.toml`.
 - `a2a://...` bindings default to HTTPS-only. Use `allow_cleartext: true` only
   for intentional local or otherwise trusted HTTP peers.
+- `TriggerConfig.autonomy_tier` defaults to `act_auto` when omitted.
 - `trigger_fire(...)` and `trigger_replay(...)` need an active EventLog to
   persist `triggers.events` and `triggers.dlq`. If the runtime did not already
   install one, the stdlib wrapper falls back to an in-memory log for the
@@ -204,6 +242,8 @@ println(replay.replay_of_event_id)     // original event id
 - Predicate replay is deterministic for `llm_call(...)`: cached predicate
   responses are reused from the request cache plus the per-event
   `trigger.inbox` record rather than calling the live provider again.
+- Every terminal dispatch appends one `TrustRecord` to `trust.graph` plus the
+  per-agent topic `trust.graph.<agent_id>`.
 - When `workflow_execute(...)` runs inside a replayed trigger dispatch, the
   runtime carries the replay pointer into run metadata so derived
   observability can render a `replay_chain` edge back to the original event.

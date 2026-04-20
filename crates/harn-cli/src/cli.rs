@@ -80,6 +80,8 @@ SCRIPTING
     Portal(PortalArgs),
     /// Replay and inspect historical trigger dispatches from the event log.
     Trigger(TriggerArgs),
+    /// Query and manage trust-graph autonomy state.
+    Trust(TrustArgs),
     /// Start the orchestrator process that hosts triggers and connector dispatch.
     Orchestrator(OrchestratorArgs),
     /// Run a pipeline against a Harn-native host module for fast iteration.
@@ -519,6 +521,109 @@ pub(crate) struct TriggerReplayArgs {
     /// Resolve the binding version that was active at this historical timestamp.
     #[arg(long = "as-of", value_name = "TIMESTAMP")]
     pub as_of: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct TrustArgs {
+    #[command(subcommand)]
+    pub command: TrustCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum TrustCommand {
+    /// Query trust records from the event log.
+    Query(TrustQueryArgs),
+    /// Promote an agent to a higher autonomy tier.
+    Promote(TrustPromoteArgs),
+    /// Demote an agent to a lower autonomy tier.
+    Demote(TrustDemoteArgs),
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub(crate) enum TrustTierArg {
+    Shadow,
+    Suggest,
+    ActWithApproval,
+    ActAuto,
+}
+
+impl From<TrustTierArg> for harn_vm::AutonomyTier {
+    fn from(value: TrustTierArg) -> Self {
+        match value {
+            TrustTierArg::Shadow => harn_vm::AutonomyTier::Shadow,
+            TrustTierArg::Suggest => harn_vm::AutonomyTier::Suggest,
+            TrustTierArg::ActWithApproval => harn_vm::AutonomyTier::ActWithApproval,
+            TrustTierArg::ActAuto => harn_vm::AutonomyTier::ActAuto,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub(crate) enum TrustOutcomeArg {
+    Success,
+    Failure,
+    Denied,
+    Timeout,
+}
+
+impl From<TrustOutcomeArg> for harn_vm::TrustOutcome {
+    fn from(value: TrustOutcomeArg) -> Self {
+        match value {
+            TrustOutcomeArg::Success => harn_vm::TrustOutcome::Success,
+            TrustOutcomeArg::Failure => harn_vm::TrustOutcome::Failure,
+            TrustOutcomeArg::Denied => harn_vm::TrustOutcome::Denied,
+            TrustOutcomeArg::Timeout => harn_vm::TrustOutcome::Timeout,
+        }
+    }
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct TrustQueryArgs {
+    /// Filter by agent id.
+    #[arg(long)]
+    pub agent: Option<String>,
+    /// Filter by action class.
+    #[arg(long)]
+    pub action: Option<String>,
+    /// Include records at or after this RFC3339/unix timestamp.
+    #[arg(long)]
+    pub since: Option<String>,
+    /// Include records at or before this RFC3339/unix timestamp.
+    #[arg(long)]
+    pub until: Option<String>,
+    /// Filter by autonomy tier.
+    #[arg(long, value_enum)]
+    pub tier: Option<TrustTierArg>,
+    /// Filter by trust outcome.
+    #[arg(long, value_enum)]
+    pub outcome: Option<TrustOutcomeArg>,
+    /// Emit JSON instead of human-readable output.
+    #[arg(long)]
+    pub json: bool,
+    /// Summarize records per agent.
+    #[arg(long)]
+    pub summary: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct TrustPromoteArgs {
+    /// Agent id to promote.
+    pub agent: String,
+    /// Target autonomy tier.
+    #[arg(long, value_enum)]
+    pub to: TrustTierArg,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct TrustDemoteArgs {
+    /// Agent id to demote.
+    pub agent: String,
+    /// Target autonomy tier.
+    #[arg(long, value_enum)]
+    pub to: TrustTierArg,
+    /// Reason for the demotion.
+    #[arg(long)]
+    pub reason: String,
 }
 
 #[derive(Debug, Args)]
@@ -1020,7 +1125,8 @@ mod tests {
 
     use super::{
         Cli, Command, McpCommand, OrchestratorCommand, ProjectTemplate, RunsCommand, SkillCommand,
-        SkillKeyCommand, SkillTrustCommand, SkillsCommand, TriggerCommand,
+        SkillKeyCommand, SkillTrustCommand, SkillsCommand, TriggerCommand, TrustCommand,
+        TrustOutcomeArg, TrustTierArg,
     };
     use clap::Parser;
 
@@ -1179,6 +1285,68 @@ mod tests {
         assert_eq!(replay.event_id, "trigger_evt_123");
         assert!(replay.diff);
         assert_eq!(replay.as_of.as_deref(), Some("2026-04-19T18:00:00Z"));
+    }
+
+    #[test]
+    fn test_parses_trust_query_flags() {
+        let cli = Cli::parse_from([
+            "harn",
+            "trust",
+            "query",
+            "--agent",
+            "github-triage-bot",
+            "--action",
+            "github.issue.opened",
+            "--since",
+            "2026-04-19T18:00:00Z",
+            "--until",
+            "2026-04-19T19:00:00Z",
+            "--tier",
+            "act-auto",
+            "--outcome",
+            "success",
+            "--json",
+            "--summary",
+        ]);
+
+        let Command::Trust(args) = cli.command.unwrap() else {
+            panic!("expected trust command");
+        };
+        let TrustCommand::Query(query) = args.command else {
+            panic!("expected trust query");
+        };
+        assert_eq!(query.agent.as_deref(), Some("github-triage-bot"));
+        assert_eq!(query.action.as_deref(), Some("github.issue.opened"));
+        assert_eq!(query.since.as_deref(), Some("2026-04-19T18:00:00Z"));
+        assert_eq!(query.until.as_deref(), Some("2026-04-19T19:00:00Z"));
+        assert!(matches!(query.tier, Some(TrustTierArg::ActAuto)));
+        assert!(matches!(query.outcome, Some(TrustOutcomeArg::Success)));
+        assert!(query.json);
+        assert!(query.summary);
+    }
+
+    #[test]
+    fn test_parses_trust_demote_flags() {
+        let cli = Cli::parse_from([
+            "harn",
+            "trust",
+            "demote",
+            "github-triage-bot",
+            "--to",
+            "shadow",
+            "--reason",
+            "unexpected mutation",
+        ]);
+
+        let Command::Trust(args) = cli.command.unwrap() else {
+            panic!("expected trust command");
+        };
+        let TrustCommand::Demote(demote) = args.command else {
+            panic!("expected trust demote");
+        };
+        assert_eq!(demote.agent, "github-triage-bot");
+        assert!(matches!(demote.to, TrustTierArg::Shadow));
+        assert_eq!(demote.reason, "unexpected mutation");
     }
 
     #[test]

@@ -14,6 +14,9 @@ pub(crate) fn lookup_generic_builtin_sig(name: &str) -> Option<BuiltinGenericSig
         "request_approval" => Some(request_approval_builtin_sig()),
         "schema_parse" | "schema_check" => Some(schema_parse_generic_sig()),
         "schema_expect" => Some(schema_expect_generic_sig()),
+        "handler_context" => Some(handler_context_builtin_sig()),
+        "trust_query" => Some(trust_query_builtin_sig()),
+        "trust_record" => Some(trust_record_builtin_sig()),
         "trigger_fire" => Some(trigger_fire_builtin_sig()),
         "trigger_inspect_dlq" => Some(trigger_inspect_dlq_builtin_sig()),
         "trigger_inspect_lifecycle" => Some(trigger_inspect_lifecycle_builtin_sig()),
@@ -334,6 +337,45 @@ fn escalate_to_builtin_sig() -> BuiltinGenericSig {
                 optional: false,
             },
         ]),
+    }
+}
+
+fn handler_context_builtin_sig() -> BuiltinGenericSig {
+    BuiltinGenericSig {
+        type_params: vec![],
+        params: vec![],
+        return_type: TypeExpr::Union(vec![
+            TypeExpr::Named("HandlerContext".into()),
+            TypeExpr::Named("nil".into()),
+        ]),
+    }
+}
+
+fn trust_record_builtin_sig() -> BuiltinGenericSig {
+    BuiltinGenericSig {
+        type_params: vec![],
+        params: vec![
+            TypeExpr::Named("string".into()),
+            TypeExpr::Named("string".into()),
+            TypeExpr::Union(vec![
+                TypeExpr::Named("string".into()),
+                TypeExpr::Named("nil".into()),
+            ]),
+            TypeExpr::Named("TrustOutcome".into()),
+            TypeExpr::Named("AutonomyTier".into()),
+        ],
+        return_type: TypeExpr::Named("TrustRecord".into()),
+    }
+}
+
+fn trust_query_builtin_sig() -> BuiltinGenericSig {
+    BuiltinGenericSig {
+        type_params: vec![],
+        params: vec![TypeExpr::Union(vec![
+            TypeExpr::Named("TrustQueryFilters".into()),
+            TypeExpr::Named("nil".into()),
+        ])],
+        return_type: TypeExpr::List(Box::new(TypeExpr::Named("TrustRecord".into()))),
     }
 }
 

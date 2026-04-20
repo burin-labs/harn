@@ -21,6 +21,11 @@ granular archaeology.
   bounded prompt context so merge-captain / deploy-captain style personas
   see operator conventions without guessing.
 
+- **Manifest triggers now carry `[[triggers]].autonomy_tier`.** Trigger
+  registrations can declare `shadow`, `suggest`, `act_with_approval`,
+  or `act_auto`, and handlers now receive the effective tier at
+  runtime through `handler_context().autonomy_tier`.
+
 - **Split trigger inbox envelopes from durable dedupe claims (#243).**
   Dispatcher envelopes now append to `trigger.inbox.envelopes` while
   `InboxIndex` persists TTL-bound claim records under
@@ -193,6 +198,15 @@ granular archaeology.
   `retry_scheduled_total`) and `GET /metrics` on the listener. Added an
   integration test asserting OTLP span emission with shared trace ids across ingress
   and dispatch hops.
+
+- **Trust graph runtime, CLI, stdlib, and OpenTrustGraph draft schema.**
+  Every terminal trigger dispatch now appends a `TrustRecord` to
+  `trust.graph` plus `trust.graph.<agent_id>`, `std/triggers` now
+  exposes `handler_context()`, `trust_record(...)`, and
+  `trust_query(...)`, and the CLI now includes `harn trust query`,
+  `harn trust promote`, and `harn trust demote`. Added the
+  `spec/opentrustgraph.md` draft plus trust-graph docs and conformance
+  coverage.
 
 - **`harn orchestrator {inspect, fire, replay, dlq, queue}` CLI
   commands (#185).** Implemented the placeholder orchestrator

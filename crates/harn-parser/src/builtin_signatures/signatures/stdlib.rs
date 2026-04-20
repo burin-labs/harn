@@ -192,6 +192,18 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("dict")),
     },
     BuiltinSig {
+        name: "handler_context",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
+        name: "trust_query",
+        return_type: Some(BuiltinReturn::Named("list")),
+    },
+    BuiltinSig {
+        name: "trust_record",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
         name: "trigger_fire",
         return_type: Some(BuiltinReturn::Named("dict")),
     },

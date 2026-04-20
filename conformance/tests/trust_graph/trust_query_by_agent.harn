@@ -1,0 +1,21 @@
+import "std/triggers"
+
+pipeline test(task) {
+  let unique = to_string(to_int(timestamp())) + "-" + to_string(random_int(100000, 999999))
+  let agent_a = "trust-alpha-" + unique
+  let agent_b = "trust-beta-" + unique
+  let first = trust_record(agent_a, "issue.label", "reviewer-1", "success", "suggest")
+  let second = trust_record(agent_a, "deploy.prod", nil, "failure", "act_with_approval")
+  let third = trust_record(agent_b, "pr.merge", "reviewer-2", "denied", "shadow")
+  let alpha_records: list<TrustRecord> = trust_query({agent: agent_a})
+  let failures: list<TrustRecord> = trust_query({agent: agent_a, outcome: "failure"})
+  let denied: list<TrustRecord> = trust_query({agent: agent_b, outcome: "denied"})
+  let suggest_records: list<TrustRecord> = trust_query({agent: agent_a, tier: "suggest"})
+  println(first.schema == "opentrustgraph/v0")
+  println(second.outcome == "failure")
+  println(third.autonomy_tier == "shadow")
+  println(len(alpha_records) == 2)
+  println(len(failures) == 1 && failures[0].action == "deploy.prod")
+  println(len(denied) == 1 && denied[0].agent == agent_b)
+  println(len(suggest_records) == 1 && suggest_records[0].agent == agent_a)
+}

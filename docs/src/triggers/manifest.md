@@ -8,6 +8,7 @@ Each entry declares:
 - a stable trigger `id`
 - a trigger `kind` such as `webhook`, `cron`, or `a2a-push`
 - a `provider` from the registered trigger provider catalog
+- an `autonomy_tier` that defines the default execution mode
 - a delivery `handler`
 - optional dedupe, retry, budget, secret, and predicate settings
 
@@ -18,6 +19,7 @@ Each entry declares:
 id = "github-new-issue"
 kind = "webhook"
 provider = "github"
+autonomy_tier = "act_with_approval"
 match = { events = ["issues.opened"] }
 when = "handlers::should_handle"
 when_budget = { max_cost_usd = 0.001, tokens_max = 500, timeout = "5s" }
@@ -29,6 +31,17 @@ budget = { daily_cost_usd = 5.00, max_concurrent = 10 }
 secrets = { signing_secret = "github/webhook-secret" }
 filter = "event.kind"
 ```
+
+Supported autonomy tiers:
+
+- `shadow`
+- `suggest`
+- `act_with_approval`
+- `act_auto`
+
+The manifest tier is the default. At dispatch time, Harn resolves the effective
+tier from the manifest plus the latest matching trust-graph control record for
+that agent.
 
 ## Handler URI schemes
 
