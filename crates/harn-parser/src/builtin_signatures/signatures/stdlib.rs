@@ -28,6 +28,10 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("float")),
     },
     BuiltinSig {
+        name: "ask_user",
+        return_type: None,
+    },
+    BuiltinSig {
         name: "assert",
         return_type: Some(BuiltinReturn::Named("nil")),
     },
@@ -240,12 +244,20 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("string")),
     },
     BuiltinSig {
+        name: "dual_control",
+        return_type: None,
+    },
+    BuiltinSig {
         name: "e",
         return_type: Some(BuiltinReturn::Named("float")),
     },
     BuiltinSig {
         name: "elapsed",
         return_type: Some(BuiltinReturn::Named("int")),
+    },
+    BuiltinSig {
+        name: "escalate_to",
+        return_type: Some(BuiltinReturn::Named("dict")),
     },
     BuiltinSig {
         name: "enable_tracing",
@@ -594,6 +606,10 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
     BuiltinSig {
         name: "receive",
         return_type: None,
+    },
+    BuiltinSig {
+        name: "request_approval",
+        return_type: Some(BuiltinReturn::Named("dict")),
     },
     BuiltinSig {
         name: "regex_captures",

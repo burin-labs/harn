@@ -769,6 +769,18 @@ default deterministic mock behavior is used.
 See [Trigger stdlib](stdlib/triggers.md) for the typed `std/triggers` aliases,
 DLQ entry shapes, and the current shallow-path replay / manual-fire caveats.
 
+## Human in the loop
+
+See [Human in the loop](hitl.md) for the full primitive catalog,
+event-log topics, bridge contract, and replay semantics.
+
+| Function | Parameters | Returns | Description |
+|---|---|---|---|
+| `ask_user(prompt, options?)` | prompt: string, options: `{schema?: Schema<T>, timeout?: duration, default?: T}` | `T` | Pause the current dispatch until the host supplies a response. Validates against `schema` when present, otherwise coerces toward `default` when possible. On timeout, returns `default` or throws `HumanTimeoutError` |
+| `request_approval(action, options?)` | action: string, options: `{detail?: any, quorum?: int, reviewers?: list<string>, deadline?: duration}` | `{approved, reviewers, approved_at, reason}` | Emit a durable approval request, wait for quorum, and return the approval record. Defaults to quorum 1 and a 24-hour deadline. Denial throws `ApprovalDeniedError` |
+| `dual_control(n, m, action, approvers?)` | `n: int, m: int, action: fn() -> T, approvers: list<string> or nil` | `T` | n-of-m approval gate for executing `action`. Commonly used for destructive or privileged operations. Denial throws `ApprovalDeniedError` |
+| `escalate_to(role, reason)` | role: string, reason: string | `{request_id, role, reason, trace_id, status, accepted_at, reviewer}` | Raise the current dispatch to a higher-trust role and wait for host acceptance. The host or operator resolves it with `harn.hitl.respond` / `harn orchestrator resume` |
+
 ```harn
 // Queue specific responses for the mock provider
 llm_mock({text: "The answer is 42."})

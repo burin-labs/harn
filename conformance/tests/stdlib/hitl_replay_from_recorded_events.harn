@@ -1,0 +1,42 @@
+import "std/triggers"
+import { clear_host_mocks, mock_host_response } from "std/testing"
+
+pub fn hitl_handler(event: TriggerEvent) -> dict {
+  let answer = ask_user("Should we continue handling " + event.kind + "?")
+  return {verdict: answer.verdict, event_id: event.id}
+}
+
+pipeline test(task) {
+  clear_host_mocks()
+  mock_host_response("hitl", "question", {answer: {verdict: "approved"}})
+  let unique = to_string(to_int(timestamp())) + "-" + to_string(random_int(100000, 999999))
+  let handle: TriggerHandle = trigger_register(
+    {
+    id: "hitl-replay-" + unique,
+    kind: "issue.opened",
+    provider: "github",
+    handler: hitl_handler,
+    retry: {max: 1, backoff: "immediate"},
+    when: nil,
+    match: nil,
+    events: ["issue.opened"],
+    dedupe_key: nil,
+    filter: nil,
+    budget: nil,
+    manifest_path: nil,
+    package_name: nil,
+  },
+  )
+
+  let fired: DispatchHandle = trigger_fire(
+    handle,
+    {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-hitl-replay"}},
+  )
+  println(fired.status == "dispatched")
+  println(contains(json_stringify(fired.result ?? {}), "\"verdict\":\"approved\""))
+
+  clear_host_mocks()
+  let replay: DispatchHandle = trigger_replay(fired.event_id)
+  println(replay.status == "dispatched")
+  println(contains(json_stringify(replay.result ?? {}), "\"verdict\":\"approved\""))
+}

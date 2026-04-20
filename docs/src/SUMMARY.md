@@ -21,6 +21,7 @@
 - [LLM calls and agent loops](./llm-and-agents.md)
 - [Daemon stdlib](./stdlib/daemon.md)
 - [Trigger stdlib](./stdlib/triggers.md)
+- [Human in the loop](./hitl.md)
 - [Skills](./skills.md)
 - [Skill provenance](./skill-provenance.md)
 - [Sessions](./sessions.md)

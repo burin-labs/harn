@@ -559,6 +559,8 @@ pub(crate) enum OrchestratorCommand {
     Fire(OrchestratorFireArgs),
     /// Replay orchestrator events.
     Replay(OrchestratorReplayArgs),
+    /// Resume a paused HITL escalation by accepting its request id.
+    Resume(OrchestratorResumeArgs),
     /// Inspect the dead-letter queue.
     Dlq(OrchestratorDlqArgs),
     /// Inspect trigger and dispatch queues.
@@ -628,6 +630,23 @@ pub(crate) struct OrchestratorReplayArgs {
     pub local: OrchestratorLocalArgs,
     /// Previously recorded event id to replay.
     pub event_id: String,
+    /// Emit JSON instead of human-readable output.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct OrchestratorResumeArgs {
+    #[command(flatten)]
+    pub local: OrchestratorLocalArgs,
+    /// HITL request id to resume.
+    pub event_id: String,
+    /// Reviewer/actor recorded on the acceptance event.
+    #[arg(long, default_value = "manual")]
+    pub reviewer: String,
+    /// Optional human-readable resume reason.
+    #[arg(long)]
+    pub reason: Option<String>,
     /// Emit JSON instead of human-readable output.
     #[arg(long)]
     pub json: bool,
@@ -1375,6 +1394,32 @@ mod tests {
         };
         assert!(dlq.json);
         assert!(dlq.list);
+    }
+
+    #[test]
+    fn test_parses_orchestrator_resume_args() {
+        let cli = Cli::parse_from([
+            "harn",
+            "orchestrator",
+            "resume",
+            "hitl_escalation_trigger_evt_123_1",
+            "--reviewer",
+            "ops-lead",
+            "--reason",
+            "manual escalation ack",
+            "--json",
+        ]);
+
+        let Command::Orchestrator(args) = cli.command.unwrap() else {
+            panic!("expected orchestrator command");
+        };
+        let OrchestratorCommand::Resume(resume) = args.command else {
+            panic!("expected orchestrator resume");
+        };
+        assert_eq!(resume.event_id, "hitl_escalation_trigger_evt_123_1");
+        assert_eq!(resume.reviewer, "ops-lead");
+        assert_eq!(resume.reason.as_deref(), Some("manual escalation ack"));
+        assert!(resume.json);
     }
 
     #[test]

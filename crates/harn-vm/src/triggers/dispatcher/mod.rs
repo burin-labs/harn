@@ -1165,10 +1165,13 @@ impl Dispatcher {
                 replay_of_event_id: replay_of_event_id.cloned(),
             })
         });
+        let prior_hitl_state = crate::stdlib::hitl::take_hitl_state();
+        crate::stdlib::hitl::reset_hitl_state();
         let result = future.await;
         ACTIVE_DISPATCH_CONTEXT.with(|slot| {
             *slot.borrow_mut() = prior_context;
         });
+        crate::stdlib::hitl::restore_hitl_state(prior_hitl_state);
         let mut tokens = self
             .state
             .cancel_tokens

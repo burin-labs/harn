@@ -67,6 +67,10 @@ pub use mcp_server::{
     take_mcp_serve_resources, tool_registry_to_mcp_tools, McpServer,
 };
 pub use metadata::{register_metadata_builtins, register_scan_builtins};
+pub use stdlib::hitl::{
+    append_hitl_response, HitlHostResponse, HITL_APPROVALS_TOPIC, HITL_DUAL_CONTROL_TOPIC,
+    HITL_ESCALATIONS_TOPIC, HITL_QUESTIONS_TOPIC,
+};
 pub use stdlib::host::{clear_host_call_bridge, set_host_call_bridge, HostCallBridge};
 pub use stdlib::template::{
     lookup_prompt_consumers, lookup_prompt_span, prompt_render_indices, record_prompt_render_index,

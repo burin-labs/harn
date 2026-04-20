@@ -87,6 +87,7 @@ impl McpServer {
                 "initialize" => self.handle_initialize(&id),
                 "ping" => crate::jsonrpc::response(id.clone(), serde_json::json!({})),
                 "logging/setLevel" => self.handle_logging_set_level(&id, &params),
+                "harn.hitl.respond" => self.handle_hitl_respond(&id, &params).await,
                 "tools/list" => self.handle_tools_list(&id, &params),
                 "tools/call" => self.handle_tools_call(&id, &params, vm).await,
                 "resources/list" => self.handle_resources_list(&id, &params),
@@ -249,6 +250,43 @@ impl McpServer {
                 "result": {
                     "content": [{ "type": "text", "text": format!("{e}") }],
                     "isError": true
+                }
+            }),
+        }
+    }
+
+    async fn handle_hitl_respond(
+        &self,
+        id: &serde_json::Value,
+        params: &serde_json::Value,
+    ) -> serde_json::Value {
+        let response: crate::stdlib::hitl::HitlHostResponse =
+            match serde_json::from_value(params.clone()) {
+                Ok(response) => response,
+                Err(error) => {
+                    return serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": id,
+                        "error": {
+                            "code": -32602,
+                            "message": format!("invalid harn.hitl.respond params: {error}"),
+                        }
+                    });
+                }
+            };
+        let cwd = std::env::current_dir().ok();
+        match crate::stdlib::hitl::append_hitl_response(cwd.as_deref(), response).await {
+            Ok(_) => serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": { "ok": true }
+            }),
+            Err(error) => serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "error": {
+                    "code": -32000,
+                    "message": error
                 }
             }),
         }

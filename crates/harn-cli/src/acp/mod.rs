@@ -441,6 +441,35 @@ impl AcpServer {
             .collect();
         self.send_response(id, serde_json::json!({"sessions": sessions}));
     }
+
+    async fn handle_hitl_respond(&self, id: &serde_json::Value, params: &serde_json::Value) {
+        let session_cwd = params
+            .get("sessionId")
+            .and_then(|value| value.as_str())
+            .and_then(|session_id| self.sessions.get(session_id))
+            .map(|session| session.cwd.as_path());
+        let fallback_cwd = self
+            .sessions
+            .values()
+            .next()
+            .map(|session| session.cwd.as_path());
+        let cwd = session_cwd.or(fallback_cwd);
+        let response: harn_vm::HitlHostResponse = match serde_json::from_value(params.clone()) {
+            Ok(response) => response,
+            Err(error) => {
+                self.send_error(
+                    id,
+                    -32602,
+                    &format!("Invalid harn.hitl.respond params: {error}"),
+                );
+                return;
+            }
+        };
+        match harn_vm::append_hitl_response(cwd, response).await {
+            Ok(_) => self.send_response(id, serde_json::json!({"ok": true})),
+            Err(error) => self.send_error(id, -32000, &error),
+        }
+    }
 }
 
 /// Shared state that bridge-style builtins use to communicate with the
@@ -698,6 +727,9 @@ pub async fn run_acp_server(pipeline: Option<&str>) {
                     }
                     "agent/resume" => {
                         server.handle_agent_resume(&params);
+                    }
+                    "harn.hitl.respond" => {
+                        server.handle_hitl_respond(&id, &params).await;
                     }
                     "session/list" => {
                         server.handle_session_list(&id);

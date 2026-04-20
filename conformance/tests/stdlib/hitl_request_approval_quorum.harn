@@ -1,0 +1,23 @@
+import "std/hitl"
+import { clear_host_mocks, mock_host_response } from "std/testing"
+
+pipeline test(task) {
+  clear_host_mocks()
+  mock_host_response("hitl", "approval", [
+    {approved: true, reviewer: "alice", reason: "checked"},
+    {approved: true, reviewer: "bob", reason: "approved"},
+  ])
+  let record: {
+    approved: bool,
+    reviewers: list<string>,
+    approved_at: string,
+    reason: string | nil,
+  } = request_approval(
+    "deploy production",
+    {quorum: 2, reviewers: ["alice", "bob", "carol"]},
+  )
+  println(record.approved)
+  println(len(record.reviewers))
+  println(record.reviewers[0])
+  println(record.reviewers[1])
+}

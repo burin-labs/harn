@@ -273,7 +273,7 @@ fn record_mock_call(capability: &str, operation: &str, params: &BTreeMap<String,
     });
 }
 
-fn mock_host_call(
+pub(crate) fn dispatch_mock_host_call(
     capability: &str,
     operation: &str,
     params: &BTreeMap<String, VmValue>,
@@ -402,7 +402,7 @@ async fn dispatch_host_operation(
     operation: &str,
     params: &BTreeMap<String, VmValue>,
 ) -> Result<VmValue, VmError> {
-    if let Some(mocked) = mock_host_call(capability, operation, params) {
+    if let Some(mocked) = dispatch_mock_host_call(capability, operation, params) {
         return mocked;
     }
 
@@ -585,7 +585,7 @@ pub(crate) fn register_host_builtins(vm: &mut Vm) {
 mod tests {
     use super::{
         capability_manifest_with_mocks, clear_host_call_bridge, dispatch_host_tool_call,
-        dispatch_host_tool_list, mock_host_call, push_host_mock, reset_host_state,
+        dispatch_host_tool_list, dispatch_mock_host_call, push_host_mock, reset_host_state,
         set_host_call_bridge, HostCallBridge, HostMock,
     };
     use std::collections::BTreeMap;
@@ -656,7 +656,7 @@ mod tests {
         let mut call_params = BTreeMap::new();
         call_params.insert("dir".to_string(), VmValue::String(Rc::from("pkg")));
         call_params.insert("namespace".to_string(), VmValue::String(Rc::from("facts")));
-        let exact = mock_host_call("project", "metadata_get", &call_params)
+        let exact = dispatch_mock_host_call("project", "metadata_get", &call_params)
             .expect("expected exact mock")
             .expect("exact mock should succeed");
         assert_eq!(exact.display(), "facts");
@@ -665,7 +665,7 @@ mod tests {
             "namespace".to_string(),
             VmValue::String(Rc::from("classification")),
         );
-        let fallback = mock_host_call("project", "metadata_get", &call_params)
+        let fallback = dispatch_mock_host_call("project", "metadata_get", &call_params)
             .expect("expected fallback mock")
             .expect("fallback mock should succeed");
         assert_eq!(fallback.display(), "fallback");
@@ -683,8 +683,8 @@ mod tests {
             error: Some("boom".to_string()),
         });
         let params = BTreeMap::new();
-        let result =
-            mock_host_call("project", "metadata_get", &params).expect("expected mock result");
+        let result = dispatch_mock_host_call("project", "metadata_get", &params)
+            .expect("expected mock result");
         match result {
             Err(VmError::Thrown(VmValue::String(message))) => assert_eq!(message.as_ref(), "boom"),
             other => panic!("unexpected result: {other:?}"),

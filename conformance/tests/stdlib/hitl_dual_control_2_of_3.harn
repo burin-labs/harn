@@ -1,0 +1,11 @@
+import { clear_host_mocks, mock_host_response } from "std/testing"
+
+pipeline test(task) {
+  clear_host_mocks()
+  mock_host_response("hitl", "dual_control", [
+    {approved: true, reviewer: "alice"},
+    {approved: true, reviewer: "bob"},
+  ])
+  let result = dual_control(2, 3, { -> "deleted" }, ["alice", "bob", "carol"])
+  println(result)
+}
