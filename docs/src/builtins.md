@@ -605,10 +605,15 @@ if !constant_time_eq(signature, request_signature) {
 | `http_request(method, url, options?)` | method: string, url: string, options: dict | dict | Generic HTTP request |
 
 All HTTP functions return `{status: int, headers: dict, body: string, ok: bool}`.
-Options: `timeout` (ms), `retries`, `backoff` (ms), `headers` (dict),
-`auth` (string or `{bearer: "token"}` or `{basic: {user, password}}`),
-`follow_redirects` (bool), `max_redirects` (int), `body` (string).
-Throws on network errors.
+Options: `timeout_ms` (alias `timeout`, both in ms), `retry: {max, backoff_ms}`,
+legacy aliases `retries` / `backoff`, optional `retry_on` (status list),
+optional `retry_methods` (defaults to `GET`, `HEAD`, `PUT`, `DELETE`,
+`OPTIONS`), `headers` (dict), `auth` (string or `{bearer: "token"}` or
+`{basic: {user, password}}`), `follow_redirects` (bool),
+`max_redirects` (int), `body` (string). `timeout_ms` applies per attempt.
+Retryable responses default to `408`, `429`, `500`, `502`, `503`, and
+`504`; `Retry-After` is honored on `429` and `503` when retries are
+enabled. Throws on network errors.
 
 ### Mock HTTP
 
@@ -616,17 +621,20 @@ For testing pipelines that make HTTP calls without hitting real servers.
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `http_mock(method, url_pattern, response)` | method: string, url_pattern: string, response: dict | nil | Register a mock. Use `*` in url_pattern for glob matching (supports multiple `*` wildcards, e.g., `https://api.example.com/*/items/*`) |
+| `http_mock(method, url_pattern, response)` | method: string, url_pattern: string, response: dict | nil | Register a mock. Use `*` in url_pattern for glob matching (supports multiple `*` wildcards, e.g., `https://api.example.com/*/items/*`). `response` may be a single `{status, body, headers}` dict or `{responses: [...]}` to script retries. |
 | `http_mock_clear()` | none | nil | Clear all mocks and recorded calls |
 | `http_mock_calls()` | none | list | Return list of `{method, url, body}` for all intercepted calls |
 
 ```harn
 http_mock("GET", "https://api.example.com/users", {
-  status: 200,
-  body: "{\"users\": [\"alice\"]}",
-  headers: {}
+  responses: [
+    {status: 429, headers: {"retry-after": "0"}},
+    {status: 200, body: "{\"users\": [\"alice\"]}", headers: {}},
+  ]
 })
-let resp = http_get("https://api.example.com/users")
+let resp = http_get("https://api.example.com/users", {
+  retry: {max: 1, backoff_ms: 0}
+})
 assert_eq(resp.status, 200)
 ```
 

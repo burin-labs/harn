@@ -24,6 +24,14 @@ granular archaeology.
   writes, and custom metrics wired through orchestrator ingress and
   outbound client paths. Enables connectors to be authored in pure Harn
   and shipped from external repos (#350).
+- **HTTP builtins support per-request retry policy and `timeout_ms`
+  (#348, #353).** `http_get` / `http_post` / friends accept canonical
+  `timeout_ms` and `retry: {max, backoff_ms}` options while preserving
+  the legacy flat aliases, default retries now cover `408`, `429`,
+  `500`, `502`, `503`, and `504` for idempotent methods, `Retry-After`
+  is honored on `429` / `503`, and `http_mock` can script response
+  sequences through `responses: [...]` for conformance-friendly retry
+  tests.
 
 ## v0.7.25
 

@@ -1,0 +1,29 @@
+pipeline test(task) {
+  http_mock(
+    "POST",
+    "https://api.example.com/items",
+    {responses: [{status: 503}, {status: 200, body: "created"}]},
+  )
+  let no_retry = http_post("https://api.example.com/items", "{}", {retry: {max: 1, backoff_ms: 0}})
+  let no_retry_calls = http_mock_calls()
+  assert_eq(no_retry.status, 503)
+  assert_eq(len(no_retry_calls), 1)
+  log("post default status: " + to_string(no_retry.status))
+  log("post default calls: " + to_string(len(no_retry_calls)))
+  http_mock_clear()
+  http_mock(
+    "POST",
+    "https://api.example.com/items",
+    {responses: [{status: 503}, {status: 200, body: "created"}]},
+  )
+  let with_retry = http_post(
+    "https://api.example.com/items",
+    "{}",
+    {retry: {max: 1, backoff_ms: 0}, retry_methods: ["POST"]},
+  )
+  let with_retry_calls = http_mock_calls()
+  assert_eq(with_retry.status, 200)
+  assert_eq(len(with_retry_calls), 2)
+  log("post opt-in status: " + to_string(with_retry.status))
+  log("post opt-in calls: " + to_string(len(with_retry_calls)))
+}
