@@ -188,8 +188,13 @@ pub struct TriggerBudgetSpec {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TriggerHandlerUri {
     Local(TriggerFunctionRef),
-    A2a { target: String },
-    Worker { queue: String },
+    A2a {
+        target: String,
+        allow_cleartext: bool,
+    },
+    Worker {
+        queue: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -468,6 +473,7 @@ pub enum CollectedTriggerHandler {
     },
     A2a {
         target: String,
+        allow_cleartext: bool,
     },
     Worker {
         queue: String,
@@ -774,8 +780,13 @@ fn parse_trigger_handler_uri(trigger: &ResolvedTriggerConfig) -> Result<TriggerH
                 "handler a2a:// target cannot be empty",
             ));
         }
+        let allow_cleartext = extract_kind_field(trigger, "allow_cleartext")
+            .map(parse_trigger_allow_cleartext)
+            .transpose()?
+            .unwrap_or(false);
         return Ok(TriggerHandlerUri::A2a {
             target: target.to_string(),
+            allow_cleartext,
         });
     }
     if let Some(queue) = raw.strip_prefix("worker://") {
@@ -897,6 +908,15 @@ fn validate_static_trigger_config(trigger: &ResolvedTriggerConfig) -> Result<(),
     if let Some(filter) = &trigger.filter {
         parse_jmespath_expression(trigger, "filter", filter)?;
     }
+    if let Some(value) = extract_kind_field(trigger, "allow_cleartext") {
+        let _ = parse_trigger_allow_cleartext(value)?;
+        if !trigger.handler.trim().starts_with("a2a://") {
+            return Err(trigger_error(
+                trigger,
+                "`allow_cleartext` is only valid for `a2a://...` handlers",
+            ));
+        }
+    }
     if let Some(daily_cost_usd) = trigger.budget.daily_cost_usd {
         if daily_cost_usd.is_sign_negative() {
             return Err(trigger_error(
@@ -986,6 +1006,12 @@ fn validate_static_trigger_configs(triggers: &[ResolvedTriggerConfig]) -> Result
         }
     }
     Ok(())
+}
+
+fn parse_trigger_allow_cleartext(value: &toml::Value) -> Result<bool, String> {
+    value
+        .as_bool()
+        .ok_or_else(|| "`allow_cleartext` must be a boolean".to_string())
 }
 
 fn manifest_module_source_path(
@@ -1285,7 +1311,13 @@ pub async fn collect_manifest_triggers(
                     closure: closure.clone(),
                 }
             }
-            TriggerHandlerUri::A2a { target } => CollectedTriggerHandler::A2a { target },
+            TriggerHandlerUri::A2a {
+                target,
+                allow_cleartext,
+            } => CollectedTriggerHandler::A2a {
+                target,
+                allow_cleartext,
+            },
             TriggerHandlerUri::Worker { queue } => CollectedTriggerHandler::Worker { queue },
         };
 
@@ -1416,13 +1448,18 @@ pub fn manifest_trigger_binding_spec(
                 "raw": reference.raw,
             }),
         ),
-        CollectedTriggerHandler::A2a { target } => (
+        CollectedTriggerHandler::A2a {
+            target,
+            allow_cleartext,
+        } => (
             harn_vm::TriggerHandlerSpec::A2a {
                 target: target.clone(),
+                allow_cleartext,
             },
             serde_json::json!({
                 "kind": "a2a",
                 "target": target,
+                "allow_cleartext": allow_cleartext,
             }),
         ),
         CollectedTriggerHandler::Worker { queue } => (
@@ -2426,6 +2463,37 @@ pub fn should_handle(event: TriggerEvent) -> bool {
     }
 
     #[tokio::test(flavor = "current_thread")]
+    async fn collect_manifest_triggers_accepts_a2a_allow_cleartext() {
+        let tmp = tempfile::tempdir().unwrap();
+        let harn_file = write_trigger_project(
+            tmp.path(),
+            r#"
+[[triggers]]
+id = "local-a2a"
+kind = "webhook"
+provider = "github"
+match = { events = ["issues.opened"] }
+handler = "a2a://127.0.0.1:8787/triage"
+allow_cleartext = true
+secrets = { signing_secret = "github/webhook-secret" }
+"#,
+            None,
+        );
+        let mut vm = test_vm();
+        let collected = collect_manifest_triggers(&mut vm, &load_runtime_extensions(&harn_file))
+            .await
+            .expect("trigger collection succeeds");
+        assert_eq!(collected.len(), 1);
+        assert!(matches!(
+            &collected[0].handler,
+            CollectedTriggerHandler::A2a {
+                target,
+                allow_cleartext: true,
+            } if target == "127.0.0.1:8787/triage"
+        ));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
     async fn collect_manifest_triggers_rejects_duplicate_ids() {
         let tmp = tempfile::tempdir().unwrap();
         let harn_file = write_trigger_project(
@@ -2476,6 +2544,54 @@ handler = "worker://queue"
             .await
             .unwrap_err();
         assert!(error.contains("provider 'made-up' is not registered"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn collect_manifest_triggers_rejects_non_bool_allow_cleartext() {
+        let tmp = tempfile::tempdir().unwrap();
+        let harn_file = write_trigger_project(
+            tmp.path(),
+            r#"
+[[triggers]]
+id = "bad-allow-cleartext-type"
+kind = "webhook"
+provider = "github"
+match = { events = ["issues.opened"] }
+handler = "a2a://127.0.0.1:8787/triage"
+allow_cleartext = "yes"
+secrets = { signing_secret = "github/webhook-secret" }
+"#,
+            None,
+        );
+        let mut vm = test_vm();
+        let error = collect_manifest_triggers(&mut vm, &load_runtime_extensions(&harn_file))
+            .await
+            .unwrap_err();
+        assert!(error.contains("`allow_cleartext` must be a boolean"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn collect_manifest_triggers_rejects_allow_cleartext_on_non_a2a_handler() {
+        let tmp = tempfile::tempdir().unwrap();
+        let harn_file = write_trigger_project(
+            tmp.path(),
+            r#"
+[[triggers]]
+id = "bad-allow-cleartext-target"
+kind = "webhook"
+provider = "github"
+match = { events = ["issues.opened"] }
+handler = "worker://queue"
+allow_cleartext = true
+secrets = { signing_secret = "github/webhook-secret" }
+"#,
+            None,
+        );
+        let mut vm = test_vm();
+        let error = collect_manifest_triggers(&mut vm, &load_runtime_extensions(&harn_file))
+            .await
+            .unwrap_err();
+        assert!(error.contains("only valid for `a2a://...` handlers"));
     }
 
     #[tokio::test(flavor = "current_thread")]

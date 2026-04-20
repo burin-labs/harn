@@ -23,9 +23,16 @@ impl std::error::Error for DispatchUriError {}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DispatchUri {
-    Local { raw: String },
-    A2a { target: String },
-    Worker { queue: String },
+    Local {
+        raw: String,
+    },
+    A2a {
+        target: String,
+        allow_cleartext: bool,
+    },
+    Worker {
+        queue: String,
+    },
 }
 
 impl DispatchUri {
@@ -42,6 +49,7 @@ impl DispatchUri {
             }
             return Ok(Self::A2a {
                 target: target.to_string(),
+                allow_cleartext: false,
             });
         }
         if let Some(queue) = raw.strip_prefix("worker://") {
@@ -73,7 +81,7 @@ impl DispatchUri {
     pub fn target_uri(&self) -> String {
         match self {
             Self::Local { raw } => raw.clone(),
-            Self::A2a { target } => format!("a2a://{target}"),
+            Self::A2a { target, .. } => format!("a2a://{target}"),
             Self::Worker { queue } => format!("worker://{queue}"),
         }
     }
@@ -83,8 +91,12 @@ impl From<&TriggerHandlerSpec> for DispatchUri {
     fn from(value: &TriggerHandlerSpec) -> Self {
         match value {
             TriggerHandlerSpec::Local { raw, .. } => Self::Local { raw: raw.clone() },
-            TriggerHandlerSpec::A2a { target } => Self::A2a {
+            TriggerHandlerSpec::A2a {
+                target,
+                allow_cleartext,
+            } => Self::A2a {
                 target: target.clone(),
+                allow_cleartext: *allow_cleartext,
             },
             TriggerHandlerSpec::Worker { queue } => Self::Worker {
                 queue: queue.clone(),

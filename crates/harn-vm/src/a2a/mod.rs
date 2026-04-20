@@ -60,13 +60,14 @@ enum AgentCardFetchError {
 
 pub async fn dispatch_trigger_event(
     raw_target: &str,
+    allow_cleartext: bool,
     binding_id: &str,
     binding_key: &str,
     event: &TriggerEvent,
     cancel_rx: &mut broadcast::Receiver<()>,
 ) -> Result<(ResolvedA2aEndpoint, DispatchAck), A2aClientError> {
     let target = parse_target(raw_target)?;
-    let endpoint = resolve_endpoint(&target, cancel_rx).await?;
+    let endpoint = resolve_endpoint(&target, allow_cleartext, cancel_rx).await?;
     let message_id = format!("{}.{}", event.trace_id.0, event.id.0);
     let envelope = serde_json::json!({
         "kind": "harn.trigger.dispatch",
@@ -200,15 +201,17 @@ fn parse_target(raw_target: &str) -> Result<ParsedTarget, A2aClientError> {
 
 async fn resolve_endpoint(
     target: &ParsedTarget,
+    allow_cleartext: bool,
     cancel_rx: &mut broadcast::Receiver<()>,
 ) -> Result<ResolvedA2aEndpoint, A2aClientError> {
     let mut last_error = None;
-    for scheme in card_resolution_schemes() {
+    for scheme in card_resolution_schemes(allow_cleartext) {
         let card_url = format!("{scheme}://{}/{A2A_AGENT_CARD_PATH}", target.authority);
         match fetch_agent_card(&card_url, cancel_rx).await {
             Ok(card) => {
                 return endpoint_from_card(
                     card_url,
+                    allow_cleartext,
                     &target.authority,
                     target.target_agent.clone(),
                     &card,
@@ -220,7 +223,8 @@ async fn resolve_endpoint(
             Err(error) => {
                 let message = agent_card_fetch_error_message(&error);
                 last_error = Some(message);
-                if should_try_cleartext_fallback(scheme, &error, &target.authority) {
+                if should_try_cleartext_fallback(scheme, allow_cleartext, &error, &target.authority)
+                {
                     continue;
                 }
                 break;
@@ -268,6 +272,7 @@ async fn fetch_agent_card(
 
 fn endpoint_from_card(
     card_url: String,
+    allow_cleartext: bool,
     requested_authority: &str,
     target_agent: String,
     card: &Value,
@@ -279,6 +284,7 @@ fn endpoint_from_card(
     let base_url = Url::parse(base_url).map_err(|error| {
         A2aClientError::Discovery(format!("invalid A2A card url '{base_url}': {error}"))
     })?;
+    ensure_cleartext_allowed(&base_url, allow_cleartext, "agent card")?;
     let card_authority = url_authority(&base_url)?;
     if !authorities_equivalent(&card_authority, requested_authority) {
         return Err(A2aClientError::Discovery(format!(
@@ -312,6 +318,7 @@ fn endpoint_from_card(
             "invalid A2A interface url '{interface_url}': {error}"
         ))
     })?;
+    ensure_cleartext_allowed(&rpc_url, allow_cleartext, "jsonrpc interface")?;
     Ok(ResolvedA2aEndpoint {
         card_url,
         rpc_url: rpc_url.to_string(),
@@ -320,13 +327,12 @@ fn endpoint_from_card(
     })
 }
 
-fn card_resolution_schemes() -> [&'static str; 2] {
-    [
-        "https",
-        // Cleartext fallback exists for dev-mode only; production should use TLS.
-        // TODO(harn#250): Require an explicit opt-in gate before trying cleartext A2A discovery.
-        "http",
-    ]
+fn card_resolution_schemes(allow_cleartext: bool) -> &'static [&'static str] {
+    if allow_cleartext {
+        &["https", "http"]
+    } else {
+        &["https"]
+    }
 }
 
 /// Decide whether an HTTPS discovery failure should fall through to cleartext.
@@ -343,10 +349,11 @@ fn card_resolution_schemes() -> [&'static str; 2] {
 /// local loopback already has code execution on the box.
 fn should_try_cleartext_fallback(
     scheme: &str,
+    allow_cleartext: bool,
     error: &AgentCardFetchError,
     authority: &str,
 ) -> bool {
-    if scheme != "https" {
+    if !allow_cleartext || scheme != "https" {
         return false;
     }
     match error {
@@ -354,6 +361,19 @@ fn should_try_cleartext_fallback(
         AgentCardFetchError::ConnectRefused(_) => true,
         AgentCardFetchError::Discovery(_) => is_loopback_authority(authority),
     }
+}
+
+fn ensure_cleartext_allowed(
+    url: &Url,
+    allow_cleartext: bool,
+    label: &str,
+) -> Result<(), A2aClientError> {
+    if allow_cleartext || url.scheme() != "http" {
+        return Ok(());
+    }
+    Err(A2aClientError::Discovery(format!(
+        "cleartext A2A {label} '{url}' requires `allow_cleartext = true` on the trigger binding"
+    )))
 }
 
 fn is_loopback_authority(authority: &str) -> bool {
@@ -557,30 +577,54 @@ mod tests {
 
     #[test]
     fn discovery_prefers_https_before_http() {
-        assert_eq!(card_resolution_schemes(), ["https", "http"]);
+        assert_eq!(card_resolution_schemes(false), ["https"]);
+        assert_eq!(card_resolution_schemes(true), ["https", "http"]);
     }
 
     #[test]
     fn cleartext_fallback_only_after_https_connect_refused() {
         assert!(should_try_cleartext_fallback(
             "https",
+            true,
             &AgentCardFetchError::ConnectRefused("connect refused".to_string()),
             "reviewer.example:443",
         ));
         assert!(!should_try_cleartext_fallback(
             "http",
+            true,
             &AgentCardFetchError::ConnectRefused("connect refused".to_string()),
             "reviewer.example:443",
         ));
         assert!(!should_try_cleartext_fallback(
             "https",
+            true,
             &AgentCardFetchError::Discovery("tls handshake failed".to_string()),
             "reviewer.example:443",
         ));
     }
 
     #[test]
-    fn cleartext_fallback_auto_allowed_for_loopback_authorities() {
+    fn cleartext_fallback_requires_opt_in_even_for_loopback_authorities() {
+        for authority in [
+            "127.0.0.1:8080",
+            "localhost:8080",
+            "[::1]:8080",
+            "127.1.2.3:9000",
+        ] {
+            assert!(
+                !should_try_cleartext_fallback(
+                    "https",
+                    false,
+                    &AgentCardFetchError::Discovery("tls handshake failed".to_string()),
+                    authority,
+                ),
+                "cleartext fallback must stay disabled without opt-in for '{authority}'"
+            );
+        }
+    }
+
+    #[test]
+    fn cleartext_fallback_allows_loopback_after_opt_in() {
         // Local dev: harn serve is HTTP-only, so TLS handshake fails but we
         // still need the HTTP fallback to succeed.
         for authority in [
@@ -592,6 +636,7 @@ mod tests {
             assert!(
                 should_try_cleartext_fallback(
                     "https",
+                    true,
                     &AgentCardFetchError::Discovery("tls handshake failed".to_string()),
                     authority,
                 ),
@@ -613,6 +658,7 @@ mod tests {
             assert!(
                 !should_try_cleartext_fallback(
                     "https",
+                    true,
                     &AgentCardFetchError::Discovery("tls handshake failed".to_string()),
                     authority,
                 ),
@@ -638,6 +684,7 @@ mod tests {
     fn endpoint_from_card_rejects_card_url_authority_mismatch() {
         let error = endpoint_from_card(
             "https://trusted.example/.well-known/a2a-agent".to_string(),
+            false,
             "trusted.example",
             "triage".to_string(),
             &serde_json::json!({
@@ -653,7 +700,25 @@ mod tests {
     }
 
     #[test]
-    fn endpoint_from_card_accepts_loopback_alias_pairs() {
+    fn endpoint_from_card_rejects_cleartext_without_opt_in() {
+        let error = endpoint_from_card(
+            "https://127.0.0.1:8080/.well-known/a2a-agent".to_string(),
+            false,
+            "127.0.0.1:8080",
+            "triage".to_string(),
+            &serde_json::json!({
+                "url": "http://localhost:8080",
+                "interfaces": [{"protocol": "jsonrpc", "url": "/rpc"}],
+            }),
+        )
+        .expect_err("cleartext card should require explicit opt-in");
+        assert!(error
+            .to_string()
+            .contains("requires `allow_cleartext = true`"));
+    }
+
+    #[test]
+    fn endpoint_from_card_accepts_loopback_alias_pairs_when_cleartext_opted_in() {
         // harn serve reports `http://localhost:PORT` in its card, but clients
         // commonly dial `127.0.0.1:PORT`. Both refer to the same socket, so
         // the authority check must not spuriously reject the pair.
@@ -663,6 +728,7 @@ mod tests {
         });
         let endpoint = endpoint_from_card(
             "http://127.0.0.1:8080/.well-known/a2a-agent".to_string(),
+            true,
             "127.0.0.1:8080",
             "triage".to_string(),
             &card,
@@ -677,6 +743,7 @@ mod tests {
         });
         let endpoint_v6 = endpoint_from_card(
             "http://localhost:8080/.well-known/a2a-agent".to_string(),
+            true,
             "localhost:8080",
             "triage".to_string(),
             &card_v6,
@@ -691,6 +758,7 @@ mod tests {
         });
         let error = endpoint_from_card(
             "http://127.0.0.1:8080/.well-known/a2a-agent".to_string(),
+            true,
             "127.0.0.1:8080",
             "triage".to_string(),
             &card_wrong_port,

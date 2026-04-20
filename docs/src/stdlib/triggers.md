@@ -47,6 +47,7 @@ Register a trigger dynamically and return its `TriggerHandle`.
 - `match` or `events`
 - `dedupe_key`
 - `filter`
+- `allow_cleartext`
 - `budget`
 - `manifest_path`
 - `package_name`
@@ -55,6 +56,10 @@ The runtime currently accepts two handler forms:
 
 - Local Harn closures / function references
 - Remote URI strings with `a2a://...` or `worker://...`
+
+`allow_cleartext` is optional and only applies to `a2a://...` handlers. Set it
+to `true` when you intentionally want HTTP A2A discovery / dispatch, for
+example when talking to a local `harn serve` process during development.
 
 `retry` is optional. The current stdlib surface accepts:
 
@@ -75,6 +80,7 @@ let handle: TriggerHandle = trigger_register({
   kind: "issue.opened",
   provider: "github",
   handler: handle_issue,
+  allow_cleartext: nil,
   when: nil,
   match: {events: ["issue.opened"]},
   events: nil,
@@ -177,6 +183,8 @@ println(replay.replay_of_event_id)     // original event id
 
 - Dynamic registrations are runtime-local. `trigger_register(...)` updates the
   live registry in the current process; it does not rewrite `harn.toml`.
+- `a2a://...` bindings default to HTTPS-only. Use `allow_cleartext: true` only
+  for intentional local or otherwise trusted HTTP peers.
 - `trigger_fire(...)` and `trigger_replay(...)` need an active EventLog to
   persist `triggers.events` and `triggers.dlq`. If the runtime did not already
   install one, the stdlib wrapper falls back to an in-memory log for the

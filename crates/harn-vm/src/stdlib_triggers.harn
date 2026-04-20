@@ -252,6 +252,7 @@ type TriggerConfig = {
   events: list<string> | nil,
   dedupe_key: string | nil,
   filter: string | nil,
+  allow_cleartext: bool | nil,
   budget: TriggerBudget | nil,
   manifest_path: string | nil,
   package_name: string | nil,
