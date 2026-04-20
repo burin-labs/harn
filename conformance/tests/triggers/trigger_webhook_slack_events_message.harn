@@ -1,0 +1,7 @@
+pipeline test(task) {
+  let result = trigger_test_harness("slack_events_message")
+  println(result.ok)
+  println(len(result.emitted) == 1)
+  println(result.emitted[0].provider == "slack")
+  println(result.emitted[0].kind == "message.channels")
+}

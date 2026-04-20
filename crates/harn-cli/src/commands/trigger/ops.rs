@@ -765,7 +765,7 @@ fn normalized_event_payload(payload: &ProviderPayload) -> JsonValue {
         }
         ProviderPayload::Known(harn_vm::triggers::event::KnownProviderPayload::Slack(payload)) => {
             match payload.as_ref() {
-                harn_vm::triggers::event::SlackEventPayload::MessageChannels(value) => {
+                harn_vm::triggers::event::SlackEventPayload::Message(value) => {
                     value.common.raw.clone()
                 }
                 harn_vm::triggers::event::SlackEventPayload::AppMention(value) => {
@@ -774,10 +774,10 @@ fn normalized_event_payload(payload: &ProviderPayload) -> JsonValue {
                 harn_vm::triggers::event::SlackEventPayload::ReactionAdded(value) => {
                     value.common.raw.clone()
                 }
-                harn_vm::triggers::event::SlackEventPayload::TeamJoin(value) => {
+                harn_vm::triggers::event::SlackEventPayload::AppHomeOpened(value) => {
                     value.common.raw.clone()
                 }
-                harn_vm::triggers::event::SlackEventPayload::ChannelCreated(value) => {
+                harn_vm::triggers::event::SlackEventPayload::AssistantThreadStarted(value) => {
                     value.common.raw.clone()
                 }
                 harn_vm::triggers::event::SlackEventPayload::Other(value) => value.raw.clone(),

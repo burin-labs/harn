@@ -56,9 +56,9 @@ payload is already narrowed into the six MVP event families (`issues`,
 `pull_request`, `issue_comment`, `pull_request_review`, `push`, and
 `workflow_run`) with event-specific top-level fields such as `issue`,
 `pull_request`, `comment`, `review`, `commits`, and `workflow_run`. Slack's
-payload is narrowed into `message.channels`, `app_mention`,
-`reaction_added`, `team_join`, and `channel_created`, while still preserving
-the full outer envelope in `raw`:
+payload is narrowed into `Message` (`message.*`), `AppMention`,
+`ReactionAdded`, `AppHomeOpened`, and `AssistantThreadStarted`, while still
+preserving the full outer envelope in `raw`:
 
 - `GitHubEventPayload`
 - `SlackEventPayload`

@@ -256,6 +256,8 @@ pub struct ConnectorMetricsSnapshot {
     pub dispatch_succeeded_total: u64,
     pub dispatch_failed_total: u64,
     pub retry_scheduled_total: u64,
+    pub slack_delivery_success_total: u64,
+    pub slack_delivery_failure_total: u64,
 }
 
 /// Shared metrics surface for connector-local counters and timings.
@@ -270,6 +272,8 @@ pub struct MetricsRegistry {
     dispatch_succeeded_total: AtomicU64,
     dispatch_failed_total: AtomicU64,
     retry_scheduled_total: AtomicU64,
+    slack_delivery_success_total: AtomicU64,
+    slack_delivery_failure_total: AtomicU64,
 }
 
 impl MetricsRegistry {
@@ -284,6 +288,8 @@ impl MetricsRegistry {
             dispatch_succeeded_total: self.dispatch_succeeded_total.load(Ordering::Relaxed),
             dispatch_failed_total: self.dispatch_failed_total.load(Ordering::Relaxed),
             retry_scheduled_total: self.retry_scheduled_total.load(Ordering::Relaxed),
+            slack_delivery_success_total: self.slack_delivery_success_total.load(Ordering::Relaxed),
+            slack_delivery_failure_total: self.slack_delivery_failure_total.load(Ordering::Relaxed),
         }
     }
 
@@ -328,6 +334,16 @@ impl MetricsRegistry {
         self.retry_scheduled_total.fetch_add(1, Ordering::Relaxed);
     }
 
+    pub fn record_slack_delivery_success(&self) {
+        self.slack_delivery_success_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_slack_delivery_failure(&self) {
+        self.slack_delivery_failure_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
     pub fn render_prometheus(&self) -> String {
         let snapshot = self.snapshot();
         let counters = [
@@ -338,6 +354,14 @@ impl MetricsRegistry {
             ("dispatch_failed_total", snapshot.dispatch_failed_total),
             ("inbox_duplicates_total", snapshot.inbox_duplicates_rejected),
             ("retry_scheduled_total", snapshot.retry_scheduled_total),
+            (
+                "slack_events_delivery_success_total",
+                snapshot.slack_delivery_success_total,
+            ),
+            (
+                "slack_events_delivery_failure_total",
+                snapshot.slack_delivery_failure_total,
+            ),
         ];
 
         let mut rendered = String::new();
@@ -350,6 +374,10 @@ impl MetricsRegistry {
             rendered.push_str(&value.to_string());
             rendered.push('\n');
         }
+        rendered.push_str("# TYPE slack_events_auto_disable_min_success_ratio gauge\n");
+        rendered.push_str("slack_events_auto_disable_min_success_ratio 0.05\n");
+        rendered.push_str("# TYPE slack_events_auto_disable_min_events_per_hour gauge\n");
+        rendered.push_str("slack_events_auto_disable_min_events_per_hour 1000\n");
         rendered
     }
 }

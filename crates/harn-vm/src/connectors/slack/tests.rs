@@ -233,7 +233,7 @@ async fn slack_connector_normalizes_docs_fixtures_into_typed_payloads() {
                 },
                 "type": "event_callback",
                 "event_id": "Ev123ABC456",
-                "event_time": 1515449522000016i64
+                "event_time": 1515449522
             }),
         },
         FixtureCase {
@@ -257,50 +257,57 @@ async fn slack_connector_normalizes_docs_fixtures_into_typed_payloads() {
                 },
                 "type": "event_callback",
                 "event_id": "Ev123REACTION",
-                "event_time": 1234567890
+                "event_time": 1465244570
             }),
         },
         FixtureCase {
-            name: "team_join",
-            expected_kind: "team_join",
+            name: "app_home_opened",
+            expected_kind: "app_home_opened",
             body: json!({
                 "token": "z26uFbvR1xHJEdHE1OQiO6t8",
                 "team_id": "T123ABC456",
                 "api_app_id": "A123ABC456",
                 "event": {
-                    "type": "team_join",
-                    "user": {
-                        "id": "U024BE7LH",
-                        "name": "sam",
-                        "real_name": "Sam Example"
-                    },
-                    "event_ts": "1360782804.083113"
+                    "type": "app_home_opened",
+                    "user": "U123ABC456",
+                    "channel": "D123ABC456",
+                    "event_ts": "1515449522000016",
+                    "tab": "home",
+                    "view": {
+                        "id": "V123ABC456",
+                        "team_id": "T123ABC456",
+                        "type": "home"
+                    }
                 },
                 "type": "event_callback",
-                "event_id": "Ev123TEAMJOIN",
-                "event_time": 1360782804
+                "event_id": "Ev123HOME",
+                "event_time": 1515449522
             }),
         },
         FixtureCase {
-            name: "channel_created",
-            expected_kind: "channel_created",
+            name: "assistant_thread_started",
+            expected_kind: "assistant_thread_started",
             body: json!({
                 "token": "z26uFbvR1xHJEdHE1OQiO6t8",
-                "team_id": "T123ABC456",
+                "team_id": "T07XY8FPJ5C",
                 "api_app_id": "A123ABC456",
                 "event": {
-                    "type": "channel_created",
-                    "channel": {
-                        "id": "C024BE91L",
-                        "name": "fun",
-                        "created": 1360782804,
-                        "creator": "U024BE7LH"
+                    "type": "assistant_thread_started",
+                    "assistant_thread": {
+                        "user_id": "U123ABC456",
+                        "context": {
+                            "channel_id": "C123ABC456",
+                            "team_id": "T07XY8FPJ5C",
+                            "enterprise_id": "E480293PS82"
+                        },
+                        "channel_id": "D123ABC456",
+                        "thread_ts": "1729999327.187299"
                     },
-                    "event_ts": "1360782804.083113"
+                    "event_ts": "1715873754.429808"
                 },
                 "type": "event_callback",
-                "event_id": "Ev123CHANNEL",
-                "event_time": 1360782804
+                "event_id": "Ev123ASSISTANT",
+                "event_time": 1715873754
             }),
         },
     ];
@@ -317,8 +324,9 @@ async fn slack_connector_normalizes_docs_fixtures_into_typed_payloads() {
             other => panic!("expected slack payload, got {other:?}"),
         };
         match (case.expected_kind, payload.as_ref()) {
-            ("message.channels", SlackEventPayload::MessageChannels(inner)) => {
+            ("message.channels", SlackEventPayload::Message(inner)) => {
                 assert_eq!(inner.channel.as_deref(), Some("C123ABC456"));
+                assert_eq!(inner.channel_type.as_deref(), Some("channel"));
             }
             ("app_mention", SlackEventPayload::AppMention(inner)) => {
                 assert_eq!(inner.user.as_deref(), Some("U123ABC456"));
@@ -326,11 +334,14 @@ async fn slack_connector_normalizes_docs_fixtures_into_typed_payloads() {
             ("reaction_added", SlackEventPayload::ReactionAdded(inner)) => {
                 assert_eq!(inner.reaction.as_deref(), Some("slightly_smiling_face"));
             }
-            ("team_join", SlackEventPayload::TeamJoin(inner)) => {
-                assert_eq!(inner.common.user_id.as_deref(), Some("U024BE7LH"));
+            ("app_home_opened", SlackEventPayload::AppHomeOpened(inner)) => {
+                assert_eq!(inner.channel.as_deref(), Some("D123ABC456"));
+                assert_eq!(inner.tab.as_deref(), Some("home"));
             }
-            ("channel_created", SlackEventPayload::ChannelCreated(inner)) => {
-                assert_eq!(inner.common.channel_id.as_deref(), Some("C024BE91L"));
+            ("assistant_thread_started", SlackEventPayload::AssistantThreadStarted(inner)) => {
+                assert_eq!(inner.common.channel_id.as_deref(), Some("D123ABC456"));
+                assert_eq!(inner.common.user_id.as_deref(), Some("U123ABC456"));
+                assert_eq!(inner.thread_ts.as_deref(), Some("1729999327.187299"));
             }
             other => panic!("unexpected typed payload mapping: {other:?}"),
         }
@@ -544,6 +555,24 @@ fn spawn_mock_server(
                     &[("content-type", "application/json".to_string())],
                     r#"{"ok":true}"#,
                 ),
+                "/views.open" => write_response(
+                    &mut stream,
+                    200,
+                    &[("content-type", "application/json".to_string())],
+                    r#"{"ok":true,"view":{"id":"V123ABC456","type":"modal"}}"#,
+                ),
+                path if path.starts_with("/users.info") => write_response(
+                    &mut stream,
+                    200,
+                    &[("content-type", "application/json".to_string())],
+                    r#"{"ok":true,"user":{"id":"U123ABC456","name":"roadrunner"}}"#,
+                ),
+                "/auth.test" => write_response(
+                    &mut stream,
+                    200,
+                    &[("content-type", "application/json".to_string())],
+                    r#"{"ok":true,"url":"https://example.slack.com/","team":"Example","user":"bot"}"#,
+                ),
                 "/files.getUploadURLExternal" => write_response(
                     &mut stream,
                     200,
@@ -571,7 +600,7 @@ fn spawn_mock_server(
 async fn slack_outbound_helpers_hit_expected_api_methods() {
     let client = initialized_client().await;
     let scenario = Arc::new(Mutex::new(MockScenario::default()));
-    let (base_url, handle) = spawn_mock_server(6, scenario.clone());
+    let (base_url, handle) = spawn_mock_server(9, scenario.clone());
 
     let posted = client
         .call(
@@ -611,6 +640,47 @@ async fn slack_outbound_helpers_hit_expected_api_methods() {
         )
         .await
         .unwrap();
+    let opened = client
+        .call(
+            "open_view",
+            json!({
+                "api_base_url": base_url,
+                "bot_token": BOT_TOKEN,
+                "trigger_id": "12345.98765.abcd2358fdea",
+                "view": {
+                    "type": "modal",
+                    "title": {"type": "plain_text", "text": "Status"},
+                    "close": {"type": "plain_text", "text": "Close"},
+                    "blocks": []
+                }
+            }),
+        )
+        .await
+        .unwrap();
+    let user = client
+        .call(
+            "user_info",
+            json!({
+                "api_base_url": base_url,
+                "bot_token": BOT_TOKEN,
+                "user_id": "U123ABC456",
+                "include_locale": true,
+            }),
+        )
+        .await
+        .unwrap();
+    let auth = client
+        .call(
+            "api_call",
+            json!({
+                "api_base_url": base_url,
+                "bot_token": BOT_TOKEN,
+                "method": "auth.test",
+                "args": {}
+            }),
+        )
+        .await
+        .unwrap();
     let uploaded = client
         .call(
             "upload_file",
@@ -628,22 +698,33 @@ async fn slack_outbound_helpers_hit_expected_api_methods() {
 
     handle.join().expect("server thread");
     let requests = scenario.lock().expect("scenario lock").requests.clone();
-    assert_eq!(requests.len(), 6);
-    assert!(requests.iter().all(|request| request.method == "POST"));
+    assert_eq!(requests.len(), 9);
     assert_eq!(requests[0].path, "/chat.postMessage");
     assert_eq!(requests[1].path, "/chat.update");
     assert_eq!(requests[2].path, "/reactions.add");
-    assert_eq!(requests[3].path, "/files.getUploadURLExternal");
-    assert_eq!(requests[4].path, "/upload/F123");
-    assert_eq!(requests[5].path, "/files.completeUploadExternal");
+    assert_eq!(requests[3].path, "/views.open");
+    assert!(requests[4].path.starts_with("/users.info?"));
+    assert_eq!(requests[4].method, "GET");
+    assert!(requests[4].path.contains("user=U123ABC456"));
+    assert!(requests[4].path.contains("include_locale=true"));
+    assert_eq!(requests[5].path, "/auth.test");
+    assert_eq!(requests[6].path, "/files.getUploadURLExternal");
+    assert_eq!(requests[7].path, "/upload/F123");
+    assert_eq!(requests[8].path, "/files.completeUploadExternal");
     assert_eq!(
         requests[0].headers.get("authorization").map(String::as_str),
         Some("Bearer xoxb-test-token")
     );
-    assert!(requests[3].body.contains("filename=notes.txt"));
-    assert_eq!(requests[4].body, "hello upload");
-    assert!(requests[5].body.contains("\"channel_id\":\"C123ABC456\""));
+    assert!(requests[3]
+        .body
+        .contains("\"trigger_id\":\"12345.98765.abcd2358fdea\""));
+    assert!(requests[6].body.contains("filename=notes.txt"));
+    assert_eq!(requests[7].body, "hello upload");
+    assert!(requests[8].body.contains("\"channel_id\":\"C123ABC456\""));
     assert_eq!(posted["channel"], json!("C123ABC456"));
     assert_eq!(updated["text"], json!("updated"));
+    assert_eq!(opened["view"]["id"], json!("V123ABC456"));
+    assert_eq!(user["user"]["id"], json!("U123ABC456"));
+    assert_eq!(auth["team"], json!("Example"));
     assert_eq!(uploaded["file_id"], json!("F123"));
 }

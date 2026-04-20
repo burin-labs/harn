@@ -79,6 +79,7 @@ impl ListenerRuntime {
             config.event_log.clone(),
             inbox,
             config.secrets.clone(),
+            config.metrics_registry.clone(),
             auth.clone(),
             pending_topic.clone(),
             request_delay,
@@ -225,6 +226,7 @@ struct RouteContext {
     event_log: Arc<AnyEventLog>,
     inbox: Arc<harn_vm::InboxIndex>,
     secrets: Arc<dyn SecretProvider>,
+    metrics_registry: Arc<harn_vm::MetricsRegistry>,
     auth: Arc<ListenerAuth>,
     pending_topic: Topic,
     request_delay: Option<Duration>,
@@ -249,6 +251,7 @@ struct RouteRegistry {
     event_log: Arc<AnyEventLog>,
     inbox: Arc<harn_vm::InboxIndex>,
     secrets: Arc<dyn SecretProvider>,
+    metrics_registry: Arc<harn_vm::MetricsRegistry>,
     auth: Arc<ListenerAuth>,
     pending_topic: Topic,
     request_delay: Option<Duration>,
@@ -260,6 +263,7 @@ impl RouteRegistry {
         event_log: Arc<AnyEventLog>,
         inbox: Arc<harn_vm::InboxIndex>,
         secrets: Arc<dyn SecretProvider>,
+        metrics_registry: Arc<harn_vm::MetricsRegistry>,
         auth: Arc<ListenerAuth>,
         pending_topic: Topic,
         request_delay: Option<Duration>,
@@ -270,6 +274,7 @@ impl RouteRegistry {
             event_log,
             inbox,
             secrets,
+            metrics_registry,
             auth,
             pending_topic,
             request_delay,
@@ -297,6 +302,7 @@ impl RouteRegistry {
                     event_log: self.event_log.clone(),
                     inbox: self.inbox.clone(),
                     secrets: self.secrets.clone(),
+                    metrics_registry: self.metrics_registry.clone(),
                     auth: self.auth.clone(),
                     pending_topic: self.pending_topic.clone(),
                     request_delay: self.request_delay,
@@ -360,6 +366,25 @@ impl RouteRuntimeMetrics {
     }
 }
 
+fn finalize_response(context: &RouteContext, mut response: Response) -> Response {
+    if context.route.provider.as_str() == "slack" {
+        if response.status().is_success() {
+            context.metrics_registry.record_slack_delivery_success();
+        } else {
+            context.metrics_registry.record_slack_delivery_failure();
+            if response.status().is_client_error()
+                && response.status() != StatusCode::TOO_MANY_REQUESTS
+            {
+                response.headers_mut().insert(
+                    axum::http::header::HeaderName::from_static("x-slack-no-retry"),
+                    axum::http::HeaderValue::from_static("1"),
+                );
+            }
+        }
+    }
+    response
+}
+
 fn validate_unique_route_paths(routes: &[RouteConfig]) -> Result<(), String> {
     let mut seen_paths = BTreeSet::new();
     for route in routes {
@@ -415,7 +440,7 @@ async fn ingest_trigger(
         {
             context.metrics.failed.fetch_add(1, Ordering::Relaxed);
             context.metrics.in_flight.fetch_sub(1, Ordering::Relaxed);
-            return error.into_response();
+            return finalize_response(&context, error.into_response());
         }
 
         if let Some(delay) = context.request_delay {
@@ -430,7 +455,7 @@ async fn ingest_trigger(
             trace_id,
         )
         .await;
-        match result {
+        let response = match result {
             Ok(NormalizedRequest::Event(event)) => {
                 let dedupe_ttl = Duration::from_secs(
                     u64::from(context.route.dedupe_retention_days.max(1)) * 24 * 60 * 60,
@@ -518,7 +543,8 @@ async fn ingest_trigger(
                 context.metrics.in_flight.fetch_sub(1, Ordering::Relaxed);
                 error.into_response()
             }
-        }
+        };
+        finalize_response(&context, response)
     }
     .instrument(span)
     .await
@@ -974,11 +1000,13 @@ fn github_raw(payload: &harn_vm::triggers::event::GitHubEventPayload) -> &JsonVa
 
 fn slack_raw(payload: &harn_vm::triggers::event::SlackEventPayload) -> &JsonValue {
     match payload {
-        harn_vm::triggers::event::SlackEventPayload::MessageChannels(inner) => &inner.common.raw,
+        harn_vm::triggers::event::SlackEventPayload::Message(inner) => &inner.common.raw,
         harn_vm::triggers::event::SlackEventPayload::AppMention(inner) => &inner.common.raw,
         harn_vm::triggers::event::SlackEventPayload::ReactionAdded(inner) => &inner.common.raw,
-        harn_vm::triggers::event::SlackEventPayload::TeamJoin(inner) => &inner.common.raw,
-        harn_vm::triggers::event::SlackEventPayload::ChannelCreated(inner) => &inner.common.raw,
+        harn_vm::triggers::event::SlackEventPayload::AppHomeOpened(inner) => &inner.common.raw,
+        harn_vm::triggers::event::SlackEventPayload::AssistantThreadStarted(inner) => {
+            &inner.common.raw
+        }
         harn_vm::triggers::event::SlackEventPayload::Other(common) => &common.raw,
     }
 }
