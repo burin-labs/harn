@@ -969,15 +969,21 @@ impl SqliteEventLog {
         }
         let connection = Connection::open(&path)
             .map_err(|error| LogError::Sqlite(format!("event log open error: {error}")))?;
+        // Set busy_timeout BEFORE the WAL pragma so SQLite waits out transient
+        // SQLITE_BUSY from a previous test's connection that hasn't finished
+        // dropping yet (parallel `cargo test` on the same process, distinct
+        // paths, still contends on SQLite's own global mutex under WAL-mode
+        // promotion). Without this, `journal_mode = WAL` fails fast with
+        // "database is locked" instead of retrying.
+        connection
+            .busy_timeout(std::time::Duration::from_secs(5))
+            .map_err(|error| LogError::Sqlite(format!("event log busy-timeout error: {error}")))?;
         connection
             .pragma_update(None, "journal_mode", "WAL")
             .map_err(|error| LogError::Sqlite(format!("event log WAL pragma error: {error}")))?;
         connection
             .pragma_update(None, "synchronous", "NORMAL")
             .map_err(|error| LogError::Sqlite(format!("event log sync pragma error: {error}")))?;
-        connection
-            .busy_timeout(std::time::Duration::from_secs(5))
-            .map_err(|error| LogError::Sqlite(format!("event log busy-timeout error: {error}")))?;
         connection
             .execute_batch(
                 "CREATE TABLE IF NOT EXISTS topic_heads (
