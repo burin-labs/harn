@@ -1045,19 +1045,21 @@ impl EventLog for SqliteEventLog {
             params![topic.as_str()],
         )
         .map_err(|error| LogError::Sqlite(format!("event log head update error: {error}")))?;
-        let event_id: EventId = tx
+        let event_id = tx
             .query_row(
                 "SELECT last_id FROM topic_heads WHERE topic = ?1",
                 params![topic.as_str()],
-                |row| row.get(0),
+                |row| row.get::<_, i64>(0),
             )
-            .map_err(|error| LogError::Sqlite(format!("event log head read error: {error}")))?;
+            .map_err(|error| LogError::Sqlite(format!("event log head read error: {error}")))
+            .and_then(sqlite_i64_to_event_id)?;
+        let event_id_sql = event_id_to_sqlite_i64(event_id)?;
         tx.execute(
             "INSERT INTO events(topic, event_id, kind, payload, headers, occurred_at_ms)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             params![
                 topic.as_str(),
-                event_id,
+                event_id_sql,
                 event.kind,
                 serde_json::to_string(&event.payload).map_err(|error| LogError::Serde(format!(
                     "event log payload encode error: {error}"
@@ -1106,14 +1108,16 @@ impl EventLog for SqliteEventLog {
                  LIMIT ?3",
             )
             .map_err(|error| LogError::Sqlite(format!("event log prepare error: {error}")))?;
+        let from_sql = event_id_to_sqlite_i64(from.unwrap_or(0))?;
         let rows = statement
             .query_map(
-                params![topic.as_str(), from.unwrap_or(0), limit as i64],
+                params![topic.as_str(), from_sql, limit as i64],
                 |row| {
                     let payload: String = row.get(2)?;
                     let headers: String = row.get(3)?;
+                    let event_id = sqlite_i64_to_event_id_for_row(row.get::<_, i64>(0)?)?;
                     Ok((
-                        row.get::<_, EventId>(0)?,
+                        event_id,
                         LogEvent {
                             kind: row.get(1)?,
                             payload: serde_json::from_str(&payload).map_err(|error| {
@@ -1170,13 +1174,14 @@ impl EventLog for SqliteEventLog {
             .connection
             .lock()
             .expect("sqlite event log connection poisoned");
+        let up_to_sql = event_id_to_sqlite_i64(up_to)?;
         connection
             .execute(
                 "INSERT INTO consumers(topic, consumer_id, cursor, updated_at_ms)
                  VALUES (?1, ?2, ?3, ?4)
                  ON CONFLICT(topic, consumer_id)
                  DO UPDATE SET cursor = excluded.cursor, updated_at_ms = excluded.updated_at_ms",
-                params![topic.as_str(), consumer.as_str(), up_to, now_ms()],
+                params![topic.as_str(), consumer.as_str(), up_to_sql, now_ms()],
             )
             .map_err(|error| LogError::Sqlite(format!("event log ack error: {error}")))?;
         Ok(())
@@ -1195,7 +1200,7 @@ impl EventLog for SqliteEventLog {
             .query_row(
                 "SELECT cursor FROM consumers WHERE topic = ?1 AND consumer_id = ?2",
                 params![topic.as_str(), consumer.as_str()],
-                |row| row.get::<_, EventId>(0),
+                |row| sqlite_i64_to_event_id_for_row(row.get::<_, i64>(0)?),
             )
             .optional()
             .map_err(|error| LogError::Sqlite(format!("event log consumer cursor error: {error}")))
@@ -1210,7 +1215,7 @@ impl EventLog for SqliteEventLog {
             .query_row(
                 "SELECT last_id FROM topic_heads WHERE topic = ?1",
                 params![topic.as_str()],
-                |row| row.get::<_, EventId>(0),
+                |row| sqlite_i64_to_event_id_for_row(row.get::<_, i64>(0)?),
             )
             .optional()
             .map_err(|error| LogError::Sqlite(format!("event log latest error: {error}")))
@@ -1221,26 +1226,28 @@ impl EventLog for SqliteEventLog {
             .connection
             .lock()
             .expect("sqlite event log connection poisoned");
+        let before_sql = event_id_to_sqlite_i64(before)?;
         let removed = connection
             .execute(
                 "DELETE FROM events WHERE topic = ?1 AND event_id <= ?2",
-                params![topic.as_str(), before],
+                params![topic.as_str(), before_sql],
             )
             .map_err(|error| {
                 LogError::Sqlite(format!("event log compact delete error: {error}"))
             })?;
-        let remaining: usize = connection
+        let remaining = connection
             .query_row(
                 "SELECT COUNT(*) FROM events WHERE topic = ?1",
                 params![topic.as_str()],
-                |row| row.get(0),
+                |row| row.get::<_, i64>(0),
             )
-            .map_err(|error| LogError::Sqlite(format!("event log compact count error: {error}")))?;
+            .map_err(|error| LogError::Sqlite(format!("event log compact count error: {error}")))
+            .and_then(sqlite_i64_to_usize)?;
         let latest = connection
             .query_row(
                 "SELECT last_id FROM topic_heads WHERE topic = ?1",
                 params![topic.as_str()],
-                |row| row.get::<_, EventId>(0),
+                |row| sqlite_i64_to_event_id_for_row(row.get::<_, i64>(0)?),
             )
             .optional()
             .map_err(|error| LogError::Sqlite(format!("event log latest error: {error}")))?;
@@ -1353,6 +1360,31 @@ fn now_ms() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|duration| duration.as_millis() as i64)
         .unwrap_or(0)
+}
+
+fn event_id_to_sqlite_i64(event_id: EventId) -> Result<i64, LogError> {
+    i64::try_from(event_id)
+        .map_err(|_| LogError::Sqlite(format!("event id {event_id} exceeds sqlite INTEGER range")))
+}
+
+fn sqlite_i64_to_event_id(value: i64) -> Result<EventId, LogError> {
+    u64::try_from(value)
+        .map_err(|_| LogError::Sqlite(format!("sqlite event id {value} is negative")))
+}
+
+fn sqlite_i64_to_event_id_for_row(value: i64) -> rusqlite::Result<EventId> {
+    u64::try_from(value).map_err(|_| {
+        rusqlite::Error::FromSqlConversionFailure(
+            std::mem::size_of::<i64>(),
+            rusqlite::types::Type::Integer,
+            "sqlite event id is negative".into(),
+        )
+    })
+}
+
+fn sqlite_i64_to_usize(value: i64) -> Result<usize, LogError> {
+    usize::try_from(value)
+        .map_err(|_| LogError::Sqlite(format!("sqlite count {value} is negative")))
 }
 
 #[cfg(test)]

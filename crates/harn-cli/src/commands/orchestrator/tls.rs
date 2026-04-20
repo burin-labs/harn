@@ -29,7 +29,7 @@ impl TlsFiles {
 
 pub(crate) struct ServerRuntime {
     local_addr: SocketAddr,
-    handle: Handle,
+    handle: Handle<SocketAddr>,
     task: tokio::task::JoinHandle<Result<(), String>>,
     tls_enabled: bool,
 }
@@ -51,6 +51,7 @@ impl ServerRuntime {
             let rustls = load_rustls_config(&tls.cert, &tls.key).await?;
             tokio::spawn(async move {
                 axum_server::from_tcp_rustls(listener, rustls)
+                    .map_err(|error| format!("HTTPS listener setup failed: {error}"))?
                     .handle(handle_for_task)
                     .serve(app.into_make_service())
                     .await
@@ -59,6 +60,7 @@ impl ServerRuntime {
         } else {
             tokio::spawn(async move {
                 axum_server::from_tcp(listener)
+                    .map_err(|error| format!("HTTP listener setup failed: {error}"))?
                     .handle(handle_for_task)
                     .serve(app.into_make_service())
                     .await

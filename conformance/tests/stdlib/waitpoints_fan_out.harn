@@ -1,0 +1,29 @@
+import "std/waitpoints"
+
+pipeline test(task) {
+  waitpoint_create("fan-out-a")
+  waitpoint_create("fan-out-b")
+  waitpoint_create("fan-out-c")
+  waitpoint_create("fan-out-d")
+  waitpoint_create("fan-out-e")
+
+  let completer = spawn {
+    sleep(20ms)
+    waitpoint_complete("fan-out-a")
+    waitpoint_complete("fan-out-b")
+    waitpoint_complete("fan-out-c")
+    waitpoint_complete("fan-out-d")
+    waitpoint_complete("fan-out-e")
+  }
+
+  let result = waitpoint_wait(
+    ["fan-out-a", "fan-out-b", "fan-out-c", "fan-out-d", "fan-out-e"],
+    {wait_id: "fan-out-wait"},
+  )
+  await(completer)
+
+  println(result.status == "completed")
+  println(len(result.waitpoints) == 5)
+  println(result.waitpoints[0].status == "completed")
+  println(result.waitpoints[4].status == "completed")
+}

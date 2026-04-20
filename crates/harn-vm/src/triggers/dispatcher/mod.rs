@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 #[cfg(feature = "otel")]
@@ -10,7 +10,7 @@ use std::time::Instant;
 use futures::{pin_mut, StreamExt};
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
-use tokio::sync::Notify;
+use tokio::sync::{Mutex as AsyncMutex, Notify};
 use tracing::Instrument as _;
 
 use crate::event_log::{active_event_log, AnyEventLog, EventLog, LogError, LogEvent, Topic};
@@ -50,6 +50,7 @@ pub use retry::{RetryPolicy, TriggerRetryConfig, DEFAULT_MAX_ATTEMPTS};
 thread_local! {
     static ACTIVE_DISPATCHER_STATE: RefCell<Option<Arc<DispatcherRuntimeState>>> = const { RefCell::new(None) };
     static ACTIVE_DISPATCH_CONTEXT: RefCell<Option<DispatchContext>> = const { RefCell::new(None) };
+    static ACTIVE_DISPATCH_WAIT_LEASE: RefCell<Option<DispatchWaitLease>> = const { RefCell::new(None) };
     #[cfg(test)]
     static TEST_INBOX_DEQUEUED_SIGNAL: RefCell<Option<tokio::sync::oneshot::Sender<()>>> = const { RefCell::new(None) };
 }
@@ -92,6 +93,10 @@ pub(crate) fn current_dispatch_is_replay() -> bool {
     ACTIVE_DISPATCH_IS_REPLAY
         .try_with(|is_replay| *is_replay)
         .unwrap_or(false)
+}
+
+pub(crate) fn current_dispatch_wait_lease() -> Option<DispatchWaitLease> {
+    ACTIVE_DISPATCH_WAIT_LEASE.with(|slot| slot.borrow().clone())
 }
 
 #[derive(Clone)]
@@ -242,10 +247,134 @@ pub struct DlqEntry {
     pub attempts: Vec<DispatchAttemptRecord>,
 }
 
-#[derive(Default)]
+#[derive(Clone, Debug)]
+struct SingletonLease {
+    gate: String,
+    held: bool,
+}
+
+#[derive(Clone, Debug)]
+struct ConcurrencyLease {
+    gate: String,
+    max: u32,
+    priority_rank: usize,
+    permit: Option<ConcurrencyPermit>,
+}
+
+#[derive(Default, Debug)]
 struct AcquiredFlowControl {
-    singleton_gate: Option<String>,
-    concurrency: Option<ConcurrencyPermit>,
+    singleton: Option<SingletonLease>,
+    concurrency: Option<ConcurrencyLease>,
+}
+
+#[derive(Clone)]
+pub(crate) struct DispatchWaitLease {
+    state: Arc<DispatcherRuntimeState>,
+    acquired: Arc<AsyncMutex<AcquiredFlowControl>>,
+    suspended: Arc<AtomicBool>,
+}
+
+impl DispatchWaitLease {
+    fn new(
+        state: Arc<DispatcherRuntimeState>,
+        acquired: Arc<AsyncMutex<AcquiredFlowControl>>,
+    ) -> Self {
+        Self {
+            state,
+            acquired,
+            suspended: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    pub(crate) async fn suspend(&self) -> Result<(), DispatchError> {
+        if self.suspended.swap(true, Ordering::SeqCst) {
+            return Ok(());
+        }
+        let (singleton_gate, concurrency_permit) = {
+            let mut acquired = self.acquired.lock().await;
+            let singleton_gate = acquired.singleton.as_mut().and_then(|lease| {
+                if lease.held {
+                    lease.held = false;
+                    Some(lease.gate.clone())
+                } else {
+                    None
+                }
+            });
+            let concurrency_permit = acquired
+                .concurrency
+                .as_mut()
+                .and_then(|lease| lease.permit.take());
+            (singleton_gate, concurrency_permit)
+        };
+
+        if let Some(gate) = singleton_gate {
+            self.state
+                .flow_control
+                .release_singleton(&gate)
+                .await
+                .map_err(DispatchError::from)?;
+        }
+        if let Some(permit) = concurrency_permit {
+            self.state
+                .flow_control
+                .release_concurrency(permit)
+                .await
+                .map_err(DispatchError::from)?;
+        }
+        Ok(())
+    }
+
+    pub(crate) async fn resume(&self) -> Result<(), DispatchError> {
+        if !self.suspended.swap(false, Ordering::SeqCst) {
+            return Ok(());
+        }
+
+        let singleton_gate = {
+            let acquired = self.acquired.lock().await;
+            acquired.singleton.as_ref().and_then(|lease| {
+                if lease.held {
+                    None
+                } else {
+                    Some(lease.gate.clone())
+                }
+            })
+        };
+        if let Some(gate) = singleton_gate {
+            self.state
+                .flow_control
+                .acquire_singleton(&gate)
+                .await
+                .map_err(DispatchError::from)?;
+            let mut acquired = self.acquired.lock().await;
+            if let Some(lease) = acquired.singleton.as_mut() {
+                lease.held = true;
+            }
+        }
+
+        let concurrency_spec = {
+            let acquired = self.acquired.lock().await;
+            acquired.concurrency.as_ref().and_then(|lease| {
+                if lease.permit.is_some() {
+                    None
+                } else {
+                    Some((lease.gate.clone(), lease.max, lease.priority_rank))
+                }
+            })
+        };
+        if let Some((gate, max, priority_rank)) = concurrency_spec {
+            let permit = self
+                .state
+                .flow_control
+                .acquire_concurrency(&gate, max, priority_rank)
+                .await
+                .map_err(DispatchError::from)?;
+            let mut acquired = self.acquired.lock().await;
+            if let Some(lease) = acquired.concurrency.as_mut() {
+                lease.permit = Some(permit);
+            }
+        }
+        Ok(())
+    }
 }
 
 enum FlowControlOutcome {
@@ -875,11 +1004,13 @@ impl Dispatcher {
             source_node_id = predicate_node_id;
         }
 
-        let (event, mut acquired_flow) = match self
+        let (event, acquired_flow) = match self
             .apply_flow_control(binding, &event, replay_of_event_id.as_ref())
             .await?
         {
-            FlowControlOutcome::Dispatch { event, acquired } => (*event, acquired),
+            FlowControlOutcome::Dispatch { event, acquired } => {
+                (*event, Arc::new(AsyncMutex::new(acquired)))
+            }
             FlowControlOutcome::Skip { reason } => {
                 self.append_skipped_outbox_event(
                     binding,
@@ -1036,6 +1167,10 @@ impl Dispatcher {
                     &route,
                     &event,
                     autonomy_tier,
+                    Some(DispatchWaitLease::new(
+                        self.state.clone(),
+                        acquired_flow.clone(),
+                    )),
                     &mut self.cancel_tx.subscribe(),
                 )
                 .await;
@@ -1139,7 +1274,7 @@ impl Dispatcher {
                     )
                     .await
                     .map_err(|error| DispatchError::Registry(error.to_string()))?;
-                    self.release_flow_control(&mut acquired_flow).await?;
+                    self.release_flow_control(&acquired_flow).await?;
                     decrement_in_flight(&self.state);
                     self.append_dispatch_trust_record(
                         binding,
@@ -1271,7 +1406,7 @@ impl Dispatcher {
                         .map_err(|registry_error| {
                             DispatchError::Registry(registry_error.to_string())
                         })?;
-                        self.release_flow_control(&mut acquired_flow).await?;
+                        self.release_flow_control(&acquired_flow).await?;
                         decrement_in_flight(&self.state);
                         let trust_outcome = match error {
                             DispatchError::Denied(_) => TrustOutcome::Denied,
@@ -1408,7 +1543,7 @@ impl Dispatcher {
                             .map_err(|registry_error| {
                                 DispatchError::Registry(registry_error.to_string())
                             })?;
-                            self.release_flow_control(&mut acquired_flow).await?;
+                            self.release_flow_control(&acquired_flow).await?;
                             decrement_in_flight(&self.state);
                             self.append_dispatch_trust_record(
                                 binding,
@@ -1518,7 +1653,7 @@ impl Dispatcher {
                     .map_err(|registry_error| {
                         DispatchError::Registry(registry_error.to_string())
                     })?;
-                    self.release_flow_control(&mut acquired_flow).await?;
+                    self.release_flow_control(&acquired_flow).await?;
                     decrement_in_flight(&self.state);
                     self.append_dispatch_trust_record(
                         binding,
@@ -1555,7 +1690,7 @@ impl Dispatcher {
         )
         .await
         .map_err(|error| DispatchError::Registry(error.to_string()))?;
-        self.release_flow_control(&mut acquired_flow).await?;
+        self.release_flow_control(&acquired_flow).await?;
         decrement_in_flight(&self.state);
         self.append_dispatch_trust_record(
             binding,
@@ -1589,6 +1724,7 @@ impl Dispatcher {
         route: &DispatchUri,
         event: &TriggerEvent,
         autonomy_tier: AutonomyTier,
+        wait_lease: Option<DispatchWaitLease>,
         cancel_rx: &mut broadcast::Receiver<()>,
     ) -> Result<serde_json::Value, DispatchError> {
         match route {
@@ -1608,6 +1744,7 @@ impl Dispatcher {
                         binding.id.as_str(),
                         &format!("{}.{}", event.provider.as_str(), event.kind),
                         autonomy_tier,
+                        wait_lease,
                         cancel_rx,
                     )
                     .await?;
@@ -1779,7 +1916,7 @@ impl Dispatcher {
                     reason: "singleton_active".to_string(),
                 });
             }
-            acquired.singleton_gate = Some(gate);
+            acquired.singleton = Some(SingletonLease { gate, held: true });
         }
 
         if let Some(concurrency) = &flow.concurrency {
@@ -1799,13 +1936,18 @@ impl Dispatcher {
                     replay_of_event_id,
                 )
                 .await?;
-            acquired.concurrency = Some(
-                self.state
-                    .flow_control
-                    .acquire_concurrency(&gate, concurrency.max, priority_rank)
-                    .await
-                    .map_err(DispatchError::from)?,
-            );
+            let permit = self
+                .state
+                .flow_control
+                .acquire_concurrency(&gate, concurrency.max, priority_rank)
+                .await
+                .map_err(DispatchError::from)?;
+            acquired.concurrency = Some(ConcurrencyLease {
+                gate,
+                max: concurrency.max,
+                priority_rank,
+                permit: Some(permit),
+            });
         }
 
         Ok(FlowControlOutcome::Dispatch {
@@ -1816,16 +1958,32 @@ impl Dispatcher {
 
     async fn release_flow_control(
         &self,
-        acquired: &mut AcquiredFlowControl,
+        acquired: &Arc<AsyncMutex<AcquiredFlowControl>>,
     ) -> Result<(), DispatchError> {
-        if let Some(gate) = acquired.singleton_gate.take() {
+        let (singleton_gate, concurrency_permit) = {
+            let mut acquired = acquired.lock().await;
+            let singleton_gate = acquired.singleton.as_mut().and_then(|lease| {
+                if lease.held {
+                    lease.held = false;
+                    Some(lease.gate.clone())
+                } else {
+                    None
+                }
+            });
+            let concurrency_permit = acquired
+                .concurrency
+                .as_mut()
+                .and_then(|lease| lease.permit.take());
+            (singleton_gate, concurrency_permit)
+        };
+        if let Some(gate) = singleton_gate {
             self.state
                 .flow_control
                 .release_singleton(&gate)
                 .await
                 .map_err(DispatchError::from)?;
         }
-        if let Some(permit) = acquired.concurrency.take() {
+        if let Some(permit) = concurrency_permit {
             self.state
                 .flow_control
                 .release_concurrency(permit)
@@ -1888,6 +2046,7 @@ impl Dispatcher {
                 "",
                 "flow_control",
                 AutonomyTier::Suggest,
+                None,
                 &mut self.cancel_tx.subscribe(),
             )
             .await?;
@@ -1904,6 +2063,7 @@ impl Dispatcher {
         agent_id: &str,
         action: &str,
         autonomy_tier: AutonomyTier,
+        wait_lease: Option<DispatchWaitLease>,
         cancel_rx: &mut broadcast::Receiver<()>,
     ) -> Result<VmValue, DispatchError> {
         let mut vm = self.base_vm.child_vm();
@@ -1930,6 +2090,8 @@ impl Dispatcher {
                 autonomy_tier,
             })
         });
+        let prior_wait_lease = ACTIVE_DISPATCH_WAIT_LEASE
+            .with(|slot| std::mem::replace(&mut *slot.borrow_mut(), wait_lease));
         let prior_hitl_state = crate::stdlib::hitl::take_hitl_state();
         crate::stdlib::hitl::reset_hitl_state();
         let mut poll = tokio::time::interval(Duration::from_millis(100));
@@ -1954,6 +2116,9 @@ impl Dispatcher {
         };
         ACTIVE_DISPATCH_CONTEXT.with(|slot| {
             *slot.borrow_mut() = prior_context;
+        });
+        ACTIVE_DISPATCH_WAIT_LEASE.with(|slot| {
+            *slot.borrow_mut() = prior_wait_lease;
         });
         crate::stdlib::hitl::restore_hitl_state(prior_hitl_state);
         {
@@ -2258,6 +2423,7 @@ impl Dispatcher {
             agent_id,
             action,
             autonomy_tier,
+            None,
             cancel_rx,
         );
         pin_mut!(future);
@@ -2699,6 +2865,9 @@ pub fn snapshot_dispatcher_stats() -> DispatcherStatsSnapshot {
 
 pub fn clear_dispatcher_state() {
     ACTIVE_DISPATCHER_STATE.with(|slot| {
+        *slot.borrow_mut() = None;
+    });
+    ACTIVE_DISPATCH_WAIT_LEASE.with(|slot| {
         *slot.borrow_mut() = None;
     });
 }

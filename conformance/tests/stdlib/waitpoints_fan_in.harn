@@ -1,0 +1,49 @@
+import "std/waitpoints"
+
+pipeline test(task) {
+  waitpoint_create("fan-in")
+  let completed = atomic(0)
+
+  let w1 = spawn {
+    let result = waitpoint_wait("fan-in", {wait_id: "fan-in-1"})
+    if result.status == "completed" {
+      atomic_add(completed, 1)
+    }
+  }
+  let w2 = spawn {
+    let result = waitpoint_wait("fan-in", {wait_id: "fan-in-2"})
+    if result.status == "completed" {
+      atomic_add(completed, 1)
+    }
+  }
+  let w3 = spawn {
+    let result = waitpoint_wait("fan-in", {wait_id: "fan-in-3"})
+    if result.status == "completed" {
+      atomic_add(completed, 1)
+    }
+  }
+  let w4 = spawn {
+    let result = waitpoint_wait("fan-in", {wait_id: "fan-in-4"})
+    if result.status == "completed" {
+      atomic_add(completed, 1)
+    }
+  }
+  let w5 = spawn {
+    let result = waitpoint_wait("fan-in", {wait_id: "fan-in-5"})
+    if result.status == "completed" {
+      atomic_add(completed, 1)
+    }
+  }
+
+  sleep(20ms)
+  let signal = waitpoint_complete("fan-in")
+
+  await(w1)
+  await(w2)
+  await(w3)
+  await(w4)
+  await(w5)
+
+  println(signal.status == "completed")
+  println(atomic_get(completed) == 5)
+}

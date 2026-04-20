@@ -38,6 +38,7 @@ mod transcript_compact;
 mod triggers_stdlib;
 mod types;
 mod vision;
+mod waitpoints;
 
 use crate::http::register_http_builtins;
 use crate::llm::register_llm_builtins;
@@ -90,6 +91,7 @@ pub fn register_agent_stdlib(vm: &mut Vm) {
     skills::register_skill_builtins(vm);
     agents_daemon::register_daemon_builtins(vm);
     triggers_stdlib::register_trigger_builtins(vm);
+    waitpoints::register_waitpoint_builtins(vm);
     hitl::register_hitl_builtins(vm);
     hitl_read::register_hitl_read_builtins(vm);
     agents::register_agent_builtins(vm);
@@ -141,6 +143,7 @@ pub fn reset_stdlib_state() {
     json::reset_json_state();
     host::reset_host_state();
     hitl::reset_hitl_state();
+    waitpoints::reset_waitpoint_state();
     agents::records::reset_eval_metrics();
     tools::clear_current_tool_registry();
     vision::reset_vision_state();
