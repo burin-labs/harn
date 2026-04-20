@@ -1041,6 +1041,12 @@ monolithic `root.json` shard.
 - `lockfile_paths`: relative paths to detected lockfiles such as `Cargo.lock`,
   `package-lock.json`, `pnpm-lock.yaml`, `uv.lock`, or `go.sum`
 
+## Secret scanning
+
+| Function | Parameters | Returns | Description |
+|---|---|---|---|
+| `secret_scan(content)` | content: string | list | Scan text or diffs for high-signal leaked credentials and return redacted findings with detector metadata and source locations |
+
 ## MCP (Model Context Protocol)
 
 Connect to external tool servers using the

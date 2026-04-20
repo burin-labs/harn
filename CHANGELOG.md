@@ -11,6 +11,15 @@ granular archaeology.
 
 ### Changed
 
+- **Bundled secret scanning now ships in both stdlib and `harn mcp serve`
+  (#309).** Harn now exposes `secret_scan(content)` for in-process
+  scans plus the `harn.secret_scan` MCP tool for agent-loop PR gates.
+  Findings are redacted, tagged with detector-pack provenance, and
+  mirrored into `audit.secret_scan` so future trust-graph consumers can
+  reason about PR hygiene without persisting raw credentials. The lint
+  crate also warns when handlers call `git::push_pr` without a prior
+  `secret_scan(...)` in the same flow.
+
 - **`project_enrich(...)` now surfaces repo operator metadata (#219).**
   The deterministic enrichment evidence now includes a `ci` block with
   parsed GitHub Actions workflows, hook stage summaries

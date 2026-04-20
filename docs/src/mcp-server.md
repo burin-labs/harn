@@ -22,7 +22,7 @@ Hook Harn into Cursor Composer in 3 steps:
 harn mcp serve --config ./harn.toml --state-dir ./.harn/orchestrator
 ```
 
-2. Point Cursor at the command as a stdio MCP server.
+1. Point Cursor at the command as a stdio MCP server.
 
 ```json
 {
@@ -35,7 +35,7 @@ harn mcp serve --config ./harn.toml --state-dir ./.harn/orchestrator
 }
 ```
 
-3. Ask the client to call Harn tools such as `harn.trigger.list` or
+1. Ask the client to call Harn tools such as `harn.trigger.list` or
    `harn.orchestrator.inspect`.
 
 Example prompts:
@@ -43,6 +43,7 @@ Example prompts:
 - "List the Harn triggers in this workspace."
 - "Fire the `cron-ok` trigger with an empty payload."
 - "Show the Harn DLQ and retry the newest entry."
+- "Scan this diff for secrets before I open a PR."
 
 ## Transports
 
@@ -92,6 +93,33 @@ Stdio clients authenticate during `initialize` using a Harn extension field:
 If `HARN_ORCHESTRATOR_API_KEYS` is unset, the MCP server runs without auth.
 
 ## Tool Catalog
+
+### `harn.secret_scan`
+
+Scans arbitrary text or diffs for high-signal leaked credentials and returns a
+redacted finding list. Use it before commit or PR-open flows. The server also
+accepts the legacy alias `harn::secret_scan`.
+
+Input:
+
+```json
+{
+  "content": "token = \"ghp_example...\""
+}
+```
+
+Returns a JSON array of findings. Each finding includes:
+
+- `detector`
+- `source`
+- `title`
+- `line`
+- `column_start`
+- `column_end`
+- `start_offset`
+- `end_offset`
+- `redacted`
+- `fingerprint`
 
 ### `harn.trigger.fire`
 
@@ -195,3 +223,7 @@ stderr log line with:
 `harn.trigger.fire` also injects MCP client identity and trace metadata into the
 synthetic event headers so downstream dispatch traces can be tied back to the
 calling MCP client.
+
+`harn.secret_scan` additionally appends `audit.secret_scan` records with only
+redacted findings plus stable fingerprints so future trust-graph consumers can
+reason about scan hygiene without storing raw secret material.

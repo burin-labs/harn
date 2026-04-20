@@ -373,6 +373,258 @@ impl<'a> Linter<'a> {
         }
     }
 
+    pub(super) fn is_secret_scan_call(name: &str, args: &[SNode]) -> bool {
+        if name == "secret_scan" {
+            return true;
+        }
+        matches!(
+            (name, args.get(1).and_then(Self::string_literal_value)),
+            ("mcp_call", Some("harn.secret_scan" | "harn::secret_scan"))
+        ) || matches!(
+            (name, args.first().and_then(Self::string_literal_value)),
+            (
+                "host_tool_call",
+                Some("harn.secret_scan" | "harn::secret_scan")
+            )
+        )
+    }
+
+    pub(super) fn is_pr_open_call(name: &str, args: &[SNode]) -> bool {
+        matches!(
+            (name, args.get(1).and_then(Self::string_literal_value)),
+            (
+                "mcp_call",
+                Some("git::push_pr" | "git.push_pr" | "create_pr")
+            )
+        ) || matches!(
+            (name, args.first().and_then(Self::string_literal_value)),
+            (
+                "host_tool_call",
+                Some("git::push_pr" | "git.push_pr" | "create_pr")
+            )
+        )
+    }
+
+    fn string_literal_value(node: &SNode) -> Option<&str> {
+        match &node.node {
+            Node::StringLiteral(value) | Node::RawStringLiteral(value) => Some(value.as_str()),
+            _ => None,
+        }
+    }
+
+    fn warn_missing_secret_scan(&mut self, span: Span) {
+        self.diagnostics.push(LintDiagnostic {
+            rule: "pr-open-without-secret-scan",
+            message: "PR-open flow calls `git::push_pr` without a preceding `secret_scan(...)` in the same handler".to_string(),
+            span,
+            severity: LintSeverity::Warning,
+            suggestion: Some(
+                "run `secret_scan(content)` first and gate the PR-open call on an empty findings list"
+                    .to_string(),
+            ),
+            fix: None,
+        });
+    }
+
+    fn analyze_secret_scan_expr(&mut self, node: &SNode, scanned: bool) -> bool {
+        match &node.node {
+            Node::FunctionCall { name, args } => {
+                let mut state = scanned;
+                for arg in args {
+                    state = self.analyze_secret_scan_expr(arg, state);
+                }
+                if Self::is_secret_scan_call(name, args) {
+                    return true;
+                }
+                if Self::is_pr_open_call(name, args) && !state {
+                    self.warn_missing_secret_scan(node.span);
+                }
+                state
+            }
+            Node::MethodCall { object, args, .. }
+            | Node::OptionalMethodCall { object, args, .. } => {
+                let mut state = self.analyze_secret_scan_expr(object, scanned);
+                for arg in args {
+                    state = self.analyze_secret_scan_expr(arg, state);
+                }
+                state
+            }
+            Node::PropertyAccess { object, .. }
+            | Node::OptionalPropertyAccess { object, .. }
+            | Node::Spread(object)
+            | Node::TryOperator { operand: object }
+            | Node::TryStar { operand: object }
+            | Node::UnaryOp {
+                operand: object, ..
+            } => self.analyze_secret_scan_expr(object, scanned),
+            Node::SubscriptAccess { object, index } => {
+                let state = self.analyze_secret_scan_expr(object, scanned);
+                self.analyze_secret_scan_expr(index, state)
+            }
+            Node::SliceAccess { object, start, end } => {
+                let mut state = self.analyze_secret_scan_expr(object, scanned);
+                if let Some(start) = start {
+                    state = self.analyze_secret_scan_expr(start, state);
+                }
+                if let Some(end) = end {
+                    state = self.analyze_secret_scan_expr(end, state);
+                }
+                state
+            }
+            Node::BinaryOp { left, right, .. } => {
+                let state = self.analyze_secret_scan_expr(left, scanned);
+                self.analyze_secret_scan_expr(right, state)
+            }
+            Node::Ternary {
+                condition,
+                true_expr,
+                false_expr,
+            } => {
+                let state = self.analyze_secret_scan_expr(condition, scanned);
+                let then_state = self.analyze_secret_scan_expr(true_expr, state);
+                let else_state = self.analyze_secret_scan_expr(false_expr, state);
+                then_state && else_state
+            }
+            Node::ListLiteral(items) | Node::OrPattern(items) => {
+                items.iter().fold(scanned, |state, item| {
+                    self.analyze_secret_scan_expr(item, state)
+                })
+            }
+            Node::DictLiteral(entries)
+            | Node::StructConstruct {
+                fields: entries, ..
+            } => {
+                let mut state = scanned;
+                for entry in entries {
+                    state = self.analyze_secret_scan_expr(&entry.key, state);
+                    state = self.analyze_secret_scan_expr(&entry.value, state);
+                }
+                state
+            }
+            Node::EnumConstruct { args, .. } => args.iter().fold(scanned, |state, arg| {
+                self.analyze_secret_scan_expr(arg, state)
+            }),
+            Node::Block(body) => self.analyze_secret_scan_block(body, scanned),
+            Node::Closure { body, .. } => {
+                let _ = self.analyze_secret_scan_block(body, false);
+                scanned
+            }
+            _ => scanned,
+        }
+    }
+
+    fn analyze_secret_scan_node(&mut self, node: &SNode, scanned: bool) -> bool {
+        match &node.node {
+            Node::LetBinding { value, .. } | Node::VarBinding { value, .. } => {
+                self.analyze_secret_scan_expr(value, scanned)
+            }
+            Node::Assignment { target, value, .. } => {
+                let state = self.analyze_secret_scan_expr(target, scanned);
+                self.analyze_secret_scan_expr(value, state)
+            }
+            Node::IfElse {
+                condition,
+                then_body,
+                else_body,
+            } => {
+                let state = self.analyze_secret_scan_expr(condition, scanned);
+                let then_state = self.analyze_secret_scan_block(then_body, state);
+                let Some(else_body) = else_body.as_ref() else {
+                    return state;
+                };
+                let else_state = self.analyze_secret_scan_block(else_body, state);
+                then_state && else_state
+            }
+            Node::ForIn { iterable, body, .. } => {
+                let state = self.analyze_secret_scan_expr(iterable, scanned);
+                let _ = self.analyze_secret_scan_block(body, state);
+                state
+            }
+            Node::WhileLoop { condition, body } => {
+                let state = self.analyze_secret_scan_expr(condition, scanned);
+                let _ = self.analyze_secret_scan_block(body, state);
+                state
+            }
+            Node::Retry { count, body } => {
+                let state = self.analyze_secret_scan_expr(count, scanned);
+                let _ = self.analyze_secret_scan_block(body, state);
+                state
+            }
+            Node::TryCatch {
+                body,
+                catch_body,
+                finally_body,
+                ..
+            } => {
+                let try_state = self.analyze_secret_scan_block(body, scanned);
+                let catch_state = self.analyze_secret_scan_block(catch_body, scanned);
+                let finally_state = finally_body
+                    .as_ref()
+                    .map(|body| self.analyze_secret_scan_block(body, scanned))
+                    .unwrap_or(scanned);
+                if finally_state {
+                    true
+                } else {
+                    try_state && catch_state
+                }
+            }
+            Node::TryExpr { body } => self.analyze_secret_scan_block(body, scanned),
+            Node::MatchExpr { value, arms } => {
+                let state = self.analyze_secret_scan_expr(value, scanned);
+                if arms.is_empty() {
+                    return state;
+                }
+                let mut all_arms_scanned = true;
+                for arm in arms {
+                    let mut arm_state = self.analyze_secret_scan_expr(&arm.pattern, state);
+                    if let Some(guard) = arm.guard.as_ref() {
+                        arm_state = self.analyze_secret_scan_expr(guard, arm_state);
+                    }
+                    all_arms_scanned &= self.analyze_secret_scan_block(&arm.body, arm_state);
+                }
+                all_arms_scanned
+            }
+            Node::Parallel { expr, body, .. } => {
+                let state = self.analyze_secret_scan_expr(expr, scanned);
+                let _ = self.analyze_secret_scan_block(body, false);
+                state
+            }
+            Node::SelectExpr {
+                cases,
+                timeout,
+                default_body,
+            } => {
+                let mut all_cases_scanned = !cases.is_empty();
+                for case in cases {
+                    let state = self.analyze_secret_scan_expr(&case.channel, scanned);
+                    all_cases_scanned &= self.analyze_secret_scan_block(&case.body, state);
+                }
+                if let Some((timeout_expr, timeout_body)) = timeout {
+                    let state = self.analyze_secret_scan_expr(timeout_expr, scanned);
+                    all_cases_scanned &= self.analyze_secret_scan_block(timeout_body, state);
+                }
+                if let Some(default_body) = default_body {
+                    all_cases_scanned &= self.analyze_secret_scan_block(default_body, scanned);
+                }
+                all_cases_scanned
+            }
+            Node::ReturnStmt { value } => value
+                .as_ref()
+                .map(|value| self.analyze_secret_scan_expr(value, scanned))
+                .unwrap_or(scanned),
+            Node::ThrowStmt { value } => self.analyze_secret_scan_expr(value, scanned),
+            _ => self.analyze_secret_scan_expr(node, scanned),
+        }
+    }
+
+    fn analyze_secret_scan_block(&mut self, nodes: &[SNode], scanned: bool) -> bool {
+        let mut state = scanned;
+        for node in nodes {
+            state = self.analyze_secret_scan_node(node, state);
+        }
+        state
+    }
+
     /// Extract all variable names from a binding pattern.
     pub(super) fn pattern_names(pattern: &BindingPattern) -> Vec<String> {
         match pattern {

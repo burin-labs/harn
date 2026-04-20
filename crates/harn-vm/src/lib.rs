@@ -75,6 +75,10 @@ pub use stdlib::hitl::{
     HITL_ESCALATIONS_TOPIC, HITL_QUESTIONS_TOPIC,
 };
 pub use stdlib::host::{clear_host_call_bridge, set_host_call_bridge, HostCallBridge};
+pub use stdlib::secret_scan::{
+    append_secret_scan_audit, audit_secret_scan_active, scan_content as secret_scan_content,
+    SecretFinding, SECRET_SCAN_AUDIT_TOPIC,
+};
 pub use stdlib::template::{
     lookup_prompt_consumers, lookup_prompt_span, prompt_render_indices, record_prompt_render_index,
     PromptSourceSpan, PromptSpanKind,

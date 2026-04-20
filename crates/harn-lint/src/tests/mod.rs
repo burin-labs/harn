@@ -85,6 +85,7 @@ mod llm_rules;
 mod mutability;
 mod naming_types;
 mod redundant_nil_ternary;
+mod secret_scan_rules;
 mod shadowing;
 mod unreachable;
 mod unused;

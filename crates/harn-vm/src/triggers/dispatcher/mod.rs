@@ -369,11 +369,7 @@ impl Dispatcher {
         let topic = Topic::new(TRIGGER_INBOX_ENVELOPES_TOPIC)
             .expect("static trigger inbox envelopes topic is valid");
         let start_from = self.event_log.latest(&topic).await?;
-        let stream = self
-            .event_log
-            .clone()
-            .subscribe(&topic, start_from)
-            .await?;
+        let stream = self.event_log.clone().subscribe(&topic, start_from).await?;
         pin_mut!(stream);
         let mut cancel_rx = self.cancel_tx.subscribe();
 
