@@ -22,6 +22,7 @@
 - [Daemon stdlib](./stdlib/daemon.md)
 - [Trigger stdlib](./stdlib/triggers.md)
 - [Skills](./skills.md)
+- [Skill provenance](./skill-provenance.md)
 - [Sessions](./sessions.md)
 - [Agent state](./agent-state.md)
 - [Transcript architecture](./transcript-architecture.md)

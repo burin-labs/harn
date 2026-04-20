@@ -5,6 +5,7 @@ mod commands;
 mod config;
 mod package;
 mod skill_loader;
+mod skill_provenance;
 mod test_runner;
 #[cfg(test)]
 mod tests;
@@ -14,7 +15,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::{env, fs, process};
 
-use cli::{Cli, Command, RunsCommand, SkillsCommand};
+use cli::{
+    Cli, Command, RunsCommand, SkillCommand, SkillKeyCommand, SkillTrustCommand, SkillsCommand,
+};
 use harn_lexer::Lexer;
 use harn_parser::{DiagnosticSeverity, Parser, TypeChecker};
 
@@ -48,6 +51,17 @@ async fn main() {
 
     match cli.command.expect("clap requires a command") {
         Command::Version => print_version(),
+        Command::Skill(args) => match args.command {
+            SkillCommand::Key(key_args) => match key_args.command {
+                SkillKeyCommand::Generate(generate) => commands::skill::run_key_generate(&generate),
+            },
+            SkillCommand::Sign(sign) => commands::skill::run_sign(&sign),
+            SkillCommand::Verify(verify) => commands::skill::run_verify(&verify),
+            SkillCommand::Trust(trust_args) => match trust_args.command {
+                SkillTrustCommand::Add(add) => commands::skill::run_trust_add(&add),
+                SkillTrustCommand::List(list) => commands::skill::run_trust_list(&list),
+            },
+        },
         Command::Run(args) => {
             let denied =
                 commands::run::build_denied_builtins(args.deny.as_deref(), args.allow.as_deref());

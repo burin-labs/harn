@@ -1,0 +1,49 @@
+pipeline test(task) {
+  llm_mock_clear()
+  let catalog = render_always_on_catalog(skills_catalog_entries(skills), 2000)
+  llm_mock(
+    {
+    text: "Load the unsigned instructions.",
+    tool_calls: [{id: "ls1", name: "load_skill", arguments: {name: "unsigned-review", require_signature: true}}],
+  },
+  )
+  llm_mock({text: "<done>##DONE##</done>"})
+
+  let result = agent_loop(
+    "Use the unsigned skill",
+    catalog,
+    {
+    provider: "mock",
+    model: "gpt-5.4",
+    tool_format: "native",
+    persistent: true,
+    max_iterations: 3,
+    session_id: "skills-unsigned-reject",
+    skills: skills,
+  },
+  )
+  assert(result?.status == "done", "agent loop finishes")
+
+  let calls = llm_mock_calls()
+  let second_messages = json_stringify(calls[1].messages)
+  assert(
+    contains(second_messages, "UnsignedSkillError"),
+    "unsigned skill load fails with a typed error",
+  )
+  assert(
+    !contains(second_messages, "Unsigned skill body should never load."),
+    "unsigned skill body is not leaked",
+  )
+
+  let events = transcript_events(result?.transcript)
+  var saw_record = false
+  for ev in events {
+    if ev?.kind == "skill.loaded" && ev?.metadata?.skill_id == "unsigned-review" {
+      assert(ev?.metadata?.signed == false, "trust record marks skill as unsigned")
+      assert(ev?.metadata?.trusted == false, "unsigned skill is not trusted")
+      saw_record = true
+    }
+  }
+  assert(saw_record, "skill.loaded trust record emitted")
+  log("load_skill_rejects_unsigned_when_required passed")
+}

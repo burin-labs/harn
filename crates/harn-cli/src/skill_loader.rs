@@ -16,13 +16,14 @@ use std::sync::Arc;
 use harn_vm::skills::{
     build_fs_discovery, default_system_dirs, default_user_dir, install_current_skill_registry,
     parse_env_skills_path, skill_manifest_ref_to_vm, BoundSkillRegistry, DiscoveryOptions,
-    DiscoveryReport, FsLayerConfig, Layer, LayeredDiscovery, ManifestSource,
+    DiscoveryReport, FsLayerConfig, Layer, LayeredDiscovery, ManifestSource, SkillManifestRef,
 };
 use harn_vm::value::VmValue;
 
 use crate::package::{
     load_skills_config, resolve_skills_paths, ResolvedSkillsConfig, SkillSourceEntry,
 };
+use crate::skill_provenance::{self, VerificationReport, VerificationStatus, VerifyOptions};
 
 /// Inputs threaded in from the CLI layer. Anything we can compute from
 /// the environment or from the source path we compute internally; this
@@ -73,6 +74,9 @@ pub fn load_skills(inputs: &SkillLoaderInputs) -> LoadedSkills {
     }
 
     let resolved = load_skills_config(inputs.source_path.as_deref());
+    let registry_url = resolved
+        .as_ref()
+        .and_then(|resolved| resolved.config.signer_registry_url.clone());
     let mut options = DiscoveryOptions::default();
     if let Some(resolved) = resolved.as_ref() {
         cfg.manifest_paths.extend(resolve_skills_paths(resolved));
@@ -97,7 +101,34 @@ pub fn load_skills(inputs: &SkillLoaderInputs) -> LoadedSkills {
                 winner.unknown_fields.join(", "),
             ));
         }
-        entries.push(skill_manifest_ref_to_vm(winner));
+        // Verify provenance up front against the manifest ref (origin is
+        // the skill directory). This keeps the #238 two-tier lazy-load
+        // model — the full SKILL.md body is only fetched on actual
+        // invocation — while still gating on Ed25519 signature trust at
+        // enumeration time.
+        let provenance = build_provenance_report_for_ref(winner, registry_url.clone());
+        if let Some(report) = provenance.as_ref() {
+            if matches!(
+                report.status,
+                VerificationStatus::InvalidSignature
+                    | VerificationStatus::MissingSigner
+                    | VerificationStatus::UntrustedSigner
+            ) {
+                loader_warnings.push(format!(
+                    "skills: {} provenance check: {}",
+                    winner.id,
+                    report.human_summary()
+                ));
+            }
+        }
+        let mut entry = match skill_manifest_ref_to_vm(winner) {
+            VmValue::Dict(map) => (*map).clone(),
+            _ => BTreeMap::new(),
+        };
+        if let Some(report) = provenance {
+            entry.insert("provenance".to_string(), provenance_to_vm(&report));
+        }
+        entries.push(VmValue::Dict(Rc::new(entry)));
     }
 
     let mut registry: BTreeMap<String, VmValue> = BTreeMap::new();
@@ -114,6 +145,67 @@ pub fn load_skills(inputs: &SkillLoaderInputs) -> LoadedSkills {
         loader_warnings,
         discovery,
     }
+}
+
+fn build_provenance_report_for_ref(
+    winner: &SkillManifestRef,
+    registry_url: Option<String>,
+) -> Option<VerificationReport> {
+    if winner.origin.is_empty() {
+        return None;
+    }
+    let skill_path = PathBuf::from(&winner.origin).join("SKILL.md");
+    let options = VerifyOptions {
+        registry_url,
+        allowed_signers: winner.manifest.trusted_signers.clone(),
+    };
+    match skill_provenance::verify_skill(&skill_path, &options) {
+        Ok(report) => Some(report),
+        Err(error) => Some(VerificationReport {
+            skill_path: skill_path.clone(),
+            signature_path: skill_provenance::signature_path_for(&skill_path),
+            skill_sha256: String::new(),
+            signer_fingerprint: None,
+            signed: false,
+            trusted: false,
+            status: VerificationStatus::InvalidSignature,
+            error: Some(error),
+        }),
+    }
+}
+
+fn provenance_to_vm(report: &VerificationReport) -> VmValue {
+    let mut dict = BTreeMap::new();
+    dict.insert(
+        "skill_sha256".to_string(),
+        VmValue::String(Rc::from(report.skill_sha256.as_str())),
+    );
+    dict.insert("signed".to_string(), VmValue::Bool(report.signed));
+    dict.insert("trusted".to_string(), VmValue::Bool(report.trusted));
+    dict.insert(
+        "status".to_string(),
+        VmValue::String(Rc::from(match report.status {
+            VerificationStatus::Verified => "verified",
+            VerificationStatus::MissingSignature => "missing_signature",
+            VerificationStatus::InvalidSignature => "invalid_signature",
+            VerificationStatus::MissingSigner => "missing_signer",
+            VerificationStatus::UntrustedSigner => "untrusted_signer",
+        })),
+    );
+    dict.insert(
+        "signature_path".to_string(),
+        VmValue::String(Rc::from(report.signature_path.display().to_string())),
+    );
+    if let Some(fingerprint) = report.signer_fingerprint.as_deref() {
+        dict.insert(
+            "signer_fingerprint".to_string(),
+            VmValue::String(Rc::from(fingerprint)),
+        );
+    }
+    if let Some(error) = report.error.as_deref() {
+        dict.insert("error".to_string(), VmValue::String(Rc::from(error)));
+    }
+    VmValue::Dict(Rc::new(dict))
 }
 
 fn manifest_source_to_vm(entry: &SkillSourceEntry) -> Option<ManifestSource> {
@@ -208,6 +300,9 @@ mod tests {
     use super::*;
     use std::fs;
 
+    use crate::skill_provenance;
+    use crate::tests::common::{cwd_lock::lock_cwd, env_lock::lock_env};
+
     fn write_skill(root: &Path, sub: &str, name: &str, body: &str) {
         let dir = root.join(sub);
         fs::create_dir_all(&dir).unwrap();
@@ -266,6 +361,90 @@ mod tests {
                 .loader_warnings
                 .iter()
                 .any(|w| w.contains("future_mystery_field")),
+            "{:?}",
+            loaded.loader_warnings
+        );
+    }
+
+    #[test]
+    fn loader_attaches_verified_provenance_metadata() {
+        let _cwd = lock_cwd();
+        let _env = lock_env().blocking_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        std::env::set_var("HOME", tmp.path());
+
+        let skill_dir = tmp.path().join("deploy");
+        fs::create_dir_all(&skill_dir).unwrap();
+        fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: deploy\nrequire_signature: true\n---\nbody",
+        )
+        .unwrap();
+
+        let keys = skill_provenance::generate_keypair(tmp.path().join("signer.pem")).unwrap();
+        skill_provenance::sign_skill(skill_dir.join("SKILL.md"), &keys.private_key_path).unwrap();
+        skill_provenance::trust_add(keys.public_key_path.to_str().unwrap()).unwrap();
+
+        let loaded = load_skills(&SkillLoaderInputs {
+            cli_dirs: vec![tmp.path().to_path_buf()],
+            source_path: None,
+        });
+        let VmValue::Dict(registry) = &loaded.registry else {
+            panic!("registry should be a dict");
+        };
+        let VmValue::List(entries) = registry.get("skills").unwrap() else {
+            panic!("skills should be a list");
+        };
+        let Some(provenance) = entries[0]
+            .as_dict()
+            .and_then(|entry| entry.get("provenance"))
+            .and_then(VmValue::as_dict)
+        else {
+            panic!("provenance should be present");
+        };
+        assert_eq!(
+            provenance.get("signed").map(VmValue::display).as_deref(),
+            Some("true")
+        );
+        assert_eq!(
+            provenance.get("trusted").map(VmValue::display).as_deref(),
+            Some("true")
+        );
+        assert!(
+            loaded.loader_warnings.is_empty(),
+            "{:?}",
+            loaded.loader_warnings
+        );
+    }
+
+    #[test]
+    fn loader_warns_when_signature_is_invalid() {
+        let _cwd = lock_cwd();
+        let _env = lock_env().blocking_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        std::env::set_var("HOME", tmp.path());
+
+        let skill_dir = tmp.path().join("deploy");
+        fs::create_dir_all(&skill_dir).unwrap();
+        fs::write(skill_dir.join("SKILL.md"), "---\nname: deploy\n---\nbody").unwrap();
+
+        let keys = skill_provenance::generate_keypair(tmp.path().join("signer.pem")).unwrap();
+        skill_provenance::sign_skill(skill_dir.join("SKILL.md"), &keys.private_key_path).unwrap();
+        fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: deploy\n---\nbody changed",
+        )
+        .unwrap();
+
+        let loaded = load_skills(&SkillLoaderInputs {
+            cli_dirs: vec![tmp.path().to_path_buf()],
+            source_path: None,
+        });
+        assert!(
+            loaded
+                .loader_warnings
+                .iter()
+                .any(|warning| warning.contains("does not match the current contents")),
             "{:?}",
             loaded.loader_warnings
         );

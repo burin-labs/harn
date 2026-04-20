@@ -20,7 +20,7 @@ use rcgen::generate_simple_self_signed;
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE, ORIGIN};
 use reqwest::Certificate;
 use reqwest::StatusCode;
-use sha2_10::Sha256;
+use sha2::Sha256;
 use tempfile::TempDir;
 use time::OffsetDateTime;
 

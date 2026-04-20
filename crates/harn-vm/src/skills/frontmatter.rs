@@ -66,6 +66,14 @@ pub struct SkillManifest {
     /// Effort hint (`low` / `medium` / `high`).
     #[serde(default)]
     pub effort: Option<String>,
+    /// Require a cryptographic signature before `load_skill` will
+    /// promote this skill into an agent session.
+    #[serde(default)]
+    pub require_signature: bool,
+    /// Optional signer allowlist (SHA-256 fingerprints). When non-empty
+    /// the signer must both be trusted locally and appear in this set.
+    #[serde(default)]
+    pub trusted_signers: Vec<String>,
     /// Shell program to run the body under when `context == "shell"`.
     #[serde(default)]
     pub shell: Option<String>,
@@ -98,6 +106,8 @@ const KNOWN_CANONICAL_KEYS: &[&str] = &[
     "hooks",
     "model",
     "effort",
+    "require_signature",
+    "trusted_signers",
     "shell",
     "argument_hint",
 ];
