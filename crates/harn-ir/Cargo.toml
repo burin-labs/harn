@@ -1,0 +1,11 @@
+[package]
+name = "harn-ir"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "CFG and invariant analysis for the Harn programming language"
+
+[dependencies]
+harn-lexer = { path = "../harn-lexer", version = "0.7" }
+harn-parser = { path = "../harn-parser", version = "0.7" }

@@ -2201,6 +2201,33 @@ Other named arguments pass through to the annotations dict unchanged,
 so additional `ToolAnnotations` fields can be added without a parser
 change.
 
+#### `@invariant`
+
+```harn,ignore
+@invariant("fs.writes", "src/**")
+tool write_patch() {
+  write_file("src/out.txt", "ok")
+}
+```
+
+Attaches one or more compile-time capability invariants to a `fn`,
+`tool`, or `pipeline`. Invariants are only evaluated when the user opts
+into them with `harn check --invariants`; plain `harn check` keeps the
+baseline type-check + preflight behavior. Each attributed handler is
+lowered into a small control-flow graph plus simple data-flow summaries,
+then the selected invariant checks run against that IR.
+
+| Invariant | Configuration | Meaning |
+|---|---|---|
+| `@invariant("fs.writes", "src/**")` | One or more allowed globs, passed positionally or as `path_glob:` / `glob:` / `allow:` | Every reachable file-system write must target a literal path proven to stay within one of the declared globs. |
+| `@invariant("budget.remaining", target: "remaining")` | Optional `target:` variable name, default `budget.remaining` | Assignments to the tracked budget value may only preserve it, decrement it, or refresh it from `llm_budget_remaining()`. |
+| `@invariant("approval.reachability")` | No extra args | Every reachable side-effecting call must be gated by a prior `request_approval(...)` or enclosed inside a `dual_control(...)` approval scope. |
+
+Invariant violations surface through `harn check --invariants`,
+`harn explain --invariant <name> <handler> <file>`, and the LSP. Each
+diagnostic carries a concrete CFG path so editors and the CLI can show
+how the violating call or assignment is reached.
+
 ### Unknown attributes
 
 Unknown attribute names produce a type-checker warning so that

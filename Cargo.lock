@@ -1139,6 +1139,7 @@ dependencies = [
  "fs2",
  "futures",
  "harn-fmt",
+ "harn-ir",
  "harn-lexer",
  "harn-lint",
  "harn-modules",
@@ -1193,6 +1194,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "harn-ir"
+version = "0.7.26"
+dependencies = [
+ "harn-lexer",
+ "harn-parser",
+]
+
+[[package]]
 name = "harn-lexer"
 version = "0.7.26"
 
@@ -1211,6 +1220,7 @@ name = "harn-lsp"
 version = "0.7.26"
 dependencies = [
  "harn-fmt",
+ "harn-ir",
  "harn-lexer",
  "harn-lint",
  "harn-modules",

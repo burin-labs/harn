@@ -4,6 +4,7 @@ pub(crate) mod connect;
 pub(crate) mod contracts;
 pub(crate) mod doctor;
 pub(crate) mod dump_highlight_keywords;
+pub(crate) mod explain;
 pub(crate) mod init;
 pub(crate) mod mcp;
 pub(crate) mod orchestrator;

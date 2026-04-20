@@ -3,6 +3,7 @@ default-members = ["crates/harn-cli"]
 members = [
     "crates/harn-lexer",
     "crates/harn-parser",
+    "crates/harn-ir",
     "crates/harn-cli",
     "crates/harn-serve",
     "crates/harn-lsp",

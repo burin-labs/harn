@@ -1324,12 +1324,12 @@ impl TypeChecker {
 
     /// Validate attribute usage and emit warnings for unknown attributes.
     /// Recognized attribute names: `deprecated`, `test`, `complexity`,
-    /// `acp_tool`. All other names produce a warning so misspellings
+    /// `acp_tool`, `invariant`. All other names produce a warning so misspellings
     /// surface early without breaking compilation.
     fn check_attributes(&mut self, attributes: &[Attribute], inner: &SNode) {
         for attr in attributes {
             match attr.name.as_str() {
-                "deprecated" | "test" | "complexity" | "acp_tool" => {}
+                "deprecated" | "test" | "complexity" | "acp_tool" | "invariant" => {}
                 other => {
                     self.warning_at(format!("unknown attribute `@{}`", other), attr.span);
                 }
@@ -1344,6 +1344,18 @@ impl TypeChecker {
             if attr.name == "acp_tool" && !matches!(inner.node, Node::FnDecl { .. }) {
                 self.warning_at(
                     "`@acp_tool` only applies to function declarations".to_string(),
+                    attr.span,
+                );
+            }
+            if attr.name == "invariant"
+                && !matches!(
+                    inner.node,
+                    Node::FnDecl { .. } | Node::ToolDecl { .. } | Node::Pipeline { .. }
+                )
+            {
+                self.warning_at(
+                    "`@invariant` only applies to function, tool, or pipeline declarations"
+                        .to_string(),
                     attr.span,
                 );
             }

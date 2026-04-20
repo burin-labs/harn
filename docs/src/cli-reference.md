@@ -222,6 +222,7 @@ harn check main.harn
 harn check src/ tests/
 harn check --host-capabilities host-capabilities.json main.harn
 harn check --bundle-root .bundle main.harn
+harn check --invariants main.harn
 harn check --workspace
 harn check --preflight warning src/
 ```
@@ -230,6 +231,7 @@ harn check --preflight warning src/
 |---|---|
 | `--host-capabilities <file>` | Load a host capability manifest for preflight validation. Supports plain `{capability: [ops...]}` objects, nested `{capabilities: ...}` wrappers, and per-op metadata dictionaries. Overrides `[check].host_capabilities_path` in `harn.toml`. |
 | `--bundle-root <dir>` | Validate `render(...)`, `render_prompt(...)`, and template paths against an alternate bundled layout root |
+| `--invariants` | Evaluate `@invariant(...)` annotations on functions, tools, and pipelines. Violations fail the check and are reported as `invariant[<name>]` diagnostics with concrete source spans. |
 | `--workspace` | Walk every path listed in `[workspace].pipelines` of the nearest `harn.toml`. Positional targets remain additive. |
 | `--preflight <severity>` | Override preflight diagnostic severity: `error` (default, fails the check), `warning` (reports but does not fail), or `off` (suppresses all preflight diagnostics). Overrides `[check].preflight_severity`. |
 | `--strict-types` | Flag unvalidated boundary-API values used in field access. |
@@ -271,6 +273,30 @@ pipelines = ["Sources/BurinCore/Resources/pipelines", "scripts"]
 Preflight diagnostics are reported under the `preflight` category so they
 can be distinguished from type-checker errors in IDE output streams and
 CI log filters.
+
+## harn explain
+
+Explain the control-flow path behind one invariant violation for a single
+handler. This is the companion to `harn check --invariants`: `check`
+answers whether a handler violates its declared contract, and `explain`
+shows the path that makes the violation reachable.
+
+```bash
+harn explain --invariant fs.writes write_patch main.harn
+harn explain --invariant approval.reachability deploy_agent agent.harn
+harn explain --invariant budget.remaining spend_budget budget.harn
+```
+
+`harn explain` loads the file, rebuilds the same handler IR used by
+`check`, and prints:
+
+- the invariant name and handler
+- the violation message plus any help text
+- a numbered CFG path showing the source locations traversed to reach the
+  violating call or assignment
+
+If the handler does not exist or does not declare the requested
+`@invariant(...)`, the command exits nonzero with a direct error message.
 
 ## harn contracts
 

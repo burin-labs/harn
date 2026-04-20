@@ -51,6 +51,8 @@ SCRIPTING
     Run(RunArgs),
     /// Type-check .harn files or directories without executing them.
     Check(CheckArgs),
+    /// Explain the CFG path behind an invariant violation for one handler.
+    Explain(ExplainArgs),
     /// Export machine-readable Harn contracts and bundle manifests.
     Contracts(ContractsArgs),
     /// Lint .harn files or directories for common issues.
@@ -192,9 +194,23 @@ pub(crate) struct CheckArgs {
     /// Accepted values: `error` (default), `warning`, `off`.
     #[arg(long = "preflight", value_name = "SEVERITY")]
     pub preflight: Option<String>,
+    /// Evaluate `@invariant(...)` annotations and fail on violations.
+    #[arg(long = "invariants")]
+    pub invariants: bool,
     /// One or more .harn files or directories. Optional when `--workspace`
     /// is set.
     pub targets: Vec<String>,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ExplainArgs {
+    /// The invariant name to explain, e.g. `fs.writes`.
+    #[arg(long = "invariant", value_name = "NAME")]
+    pub invariant: String,
+    /// The handler / function / tool / pipeline name to inspect.
+    pub function: String,
+    /// Path to the `.harn` source file.
+    pub file: String,
 }
 
 #[derive(Debug, Args)]

@@ -14,6 +14,7 @@ pub(crate) fn check_file_inner(
     config: &CheckConfig,
     externally_imported_names: &std::collections::HashSet<String>,
     module_graph: &harn_modules::ModuleGraph,
+    check_invariants: bool,
 ) -> CommandOutcome {
     let path_str = path.to_string_lossy().into_owned();
     let (source, program) = parse_source_file(&path_str);
@@ -106,6 +107,24 @@ pub(crate) fn check_file_inner(
                 severity_label,
                 &diag.message,
                 Some(category),
+                diag.help.as_deref(),
+            );
+            eprint!("{rendered}");
+        }
+    }
+
+    if check_invariants {
+        let report = harn_ir::analyze_program(&program);
+        for diag in &report.diagnostics {
+            has_error = true;
+            diagnostic_count += 1;
+            let rendered = harn_parser::diagnostic::render_diagnostic(
+                &source,
+                &path_str,
+                &diag.span,
+                "error",
+                &diag.message,
+                Some(&format!("invariant[{}]", diag.invariant)),
                 diag.help.as_deref(),
             );
             eprint!("{rendered}");
