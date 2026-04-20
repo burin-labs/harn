@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -35,8 +35,9 @@ use super::registry::matching_bindings;
 use super::registry::{TriggerBinding, TriggerHandlerSpec};
 use super::{
     begin_in_flight, finish_in_flight, TriggerDispatchOutcome, TriggerEvent,
-    TRIGGERS_LIFECYCLE_TOPIC, TRIGGER_ATTEMPTS_TOPIC, TRIGGER_DLQ_TOPIC,
-    TRIGGER_INBOX_ENVELOPES_TOPIC, TRIGGER_INBOX_LEGACY_TOPIC, TRIGGER_OUTBOX_TOPIC,
+    TRIGGERS_LIFECYCLE_TOPIC, TRIGGER_ATTEMPTS_TOPIC, TRIGGER_CANCEL_REQUESTS_TOPIC,
+    TRIGGER_DLQ_TOPIC, TRIGGER_INBOX_ENVELOPES_TOPIC, TRIGGER_INBOX_LEGACY_TOPIC,
+    TRIGGER_OUTBOX_TOPIC,
 };
 
 pub mod retry;
@@ -215,6 +216,18 @@ pub struct DispatchAttemptRecord {
     pub error_msg: Option<String>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct DispatchCancelRequest {
+    pub binding_key: String,
+    pub event_id: String,
+    #[serde(with = "time::serde::rfc3339")]
+    pub requested_at: time::OffsetDateTime,
+    #[serde(default)]
+    pub requested_by: Option<String>,
+    #[serde(default)]
+    pub audit_id: Option<String>,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DlqEntry {
     pub trigger_id: String,
@@ -269,6 +282,25 @@ impl From<LogError> for DispatchError {
     fn from(value: LogError) -> Self {
         Self::EventLog(value.to_string())
     }
+}
+
+pub async fn append_dispatch_cancel_request(
+    event_log: &Arc<AnyEventLog>,
+    request: &DispatchCancelRequest,
+) -> Result<u64, DispatchError> {
+    let topic = Topic::new(TRIGGER_CANCEL_REQUESTS_TOPIC)
+        .expect("static trigger cancel topic should always be valid");
+    event_log
+        .append(
+            &topic,
+            LogEvent::new(
+                "dispatch_cancel_requested",
+                serde_json::to_value(request)
+                    .map_err(|error| DispatchError::Serde(error.to_string()))?,
+            ),
+        )
+        .await
+        .map_err(DispatchError::from)
 }
 
 impl Dispatcher {
@@ -636,6 +668,32 @@ impl Dispatcher {
         )
         .await?;
 
+        if dispatch_cancel_requested(
+            &self.event_log,
+            &binding_key,
+            &event.id.0,
+            replay_of_event_id.as_ref(),
+        )
+        .await?
+        {
+            finish_in_flight(
+                binding.id.as_str(),
+                binding.version,
+                TriggerDispatchOutcome::Failed,
+            )
+            .await
+            .map_err(|error| DispatchError::Registry(error.to_string()))?;
+            decrement_in_flight(&self.state);
+            return Ok(cancelled_dispatch_outcome(
+                binding,
+                &route,
+                &event,
+                replay_of_event_id,
+                0,
+                "trigger cancel request cancelled dispatch before attempt 1".to_string(),
+            ));
+        }
+
         if let Some(predicate) = binding.when.as_ref() {
             let predicate_node_id = format!("predicate:{binding_key}:{}", event.id.0);
             let evaluation = self
@@ -730,6 +788,31 @@ impl Dispatcher {
         let mut previous_retry_node = None;
         let max_attempts = binding.retry.max_attempts();
         for attempt in 1..=max_attempts {
+            if dispatch_cancel_requested(
+                &self.event_log,
+                &binding_key,
+                &event.id.0,
+                replay_of_event_id.as_ref(),
+            )
+            .await?
+            {
+                finish_in_flight(
+                    binding.id.as_str(),
+                    binding.version,
+                    TriggerDispatchOutcome::Failed,
+                )
+                .await
+                .map_err(|error| DispatchError::Registry(error.to_string()))?;
+                decrement_in_flight(&self.state);
+                return Ok(cancelled_dispatch_outcome(
+                    binding,
+                    &route,
+                    &event,
+                    replay_of_event_id,
+                    attempt.saturating_sub(1),
+                    format!("trigger cancel request cancelled dispatch before attempt {attempt}"),
+                ));
+            }
             maybe_fail_before_outbox();
             let started_at = now_rfc3339();
             let attempt_node_id = dispatch_node_id(&route, &binding_key, &event.id.0, attempt);
@@ -1086,8 +1169,15 @@ impl Dispatcher {
                         )
                         .await?;
                         self.state.retry_queue_depth.fetch_add(1, Ordering::Relaxed);
-                        let sleep_result =
-                            sleep_or_cancel(delay, &mut self.cancel_tx.subscribe()).await;
+                        let sleep_result = sleep_or_cancel_or_request(
+                            &self.event_log,
+                            delay,
+                            &binding_key,
+                            &event.id.0,
+                            replay_of_event_id.as_ref(),
+                            &mut self.cancel_tx.subscribe(),
+                        )
+                        .await;
                         decrement_retry_queue_depth(&self.state);
                         if sleep_result.is_err() {
                             finish_in_flight(
@@ -1289,6 +1379,7 @@ impl Dispatcher {
                 let value = self
                     .invoke_vm_callable(
                         closure,
+                        &binding.binding_key(),
                         event,
                         None,
                         binding.id.as_str(),
@@ -1337,12 +1428,13 @@ impl Dispatcher {
     async fn invoke_vm_callable(
         &self,
         closure: &crate::value::VmClosure,
+        binding_key: &str,
         event: &TriggerEvent,
         replay_of_event_id: Option<&String>,
         agent_id: &str,
         action: &str,
         autonomy_tier: AutonomyTier,
-        _cancel_rx: &mut broadcast::Receiver<()>,
+        cancel_rx: &mut broadcast::Receiver<()>,
     ) -> Result<VmValue, DispatchError> {
         let mut vm = self.base_vm.child_vm();
         let cancel_token = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -1373,21 +1465,56 @@ impl Dispatcher {
         });
         let prior_hitl_state = crate::stdlib::hitl::take_hitl_state();
         crate::stdlib::hitl::reset_hitl_state();
-        let result = future.await;
+        let mut poll = tokio::time::interval(Duration::from_millis(100));
+        let result = loop {
+            tokio::select! {
+                result = &mut future => break result,
+                _ = recv_cancel(cancel_rx) => {
+                    cancel_token.store(true, Ordering::SeqCst);
+                }
+                _ = poll.tick() => {
+                    if dispatch_cancel_requested(
+                        &self.event_log,
+                        binding_key,
+                        &event.id.0,
+                        replay_of_event_id,
+                    )
+                    .await? {
+                        cancel_token.store(true, Ordering::SeqCst);
+                    }
+                }
+            }
+        };
         ACTIVE_DISPATCH_CONTEXT.with(|slot| {
             *slot.borrow_mut() = prior_context;
         });
         crate::stdlib::hitl::restore_hitl_state(prior_hitl_state);
-        let mut tokens = self
-            .state
-            .cancel_tokens
-            .lock()
-            .expect("dispatcher cancel tokens poisoned");
-        tokens.retain(|token| !Arc::ptr_eq(token, &cancel_token));
+        {
+            let mut tokens = self
+                .state
+                .cancel_tokens
+                .lock()
+                .expect("dispatcher cancel tokens poisoned");
+            tokens.retain(|token| !Arc::ptr_eq(token, &cancel_token));
+        }
+
         if cancel_token.load(Ordering::SeqCst) {
-            Err(DispatchError::Cancelled(
-                "dispatcher shutdown cancelled local handler".to_string(),
-            ))
+            if dispatch_cancel_requested(
+                &self.event_log,
+                binding_key,
+                &event.id.0,
+                replay_of_event_id,
+            )
+            .await?
+            {
+                Err(DispatchError::Cancelled(
+                    "trigger cancel request cancelled local handler".to_string(),
+                ))
+            } else {
+                Err(DispatchError::Cancelled(
+                    "dispatcher shutdown cancelled local handler".to_string(),
+                ))
+            }
         } else {
             result.map_err(dispatch_error_from_vm_error)
         }
@@ -1903,6 +2030,60 @@ impl Dispatcher {
     }
 }
 
+async fn dispatch_cancel_requested(
+    event_log: &Arc<AnyEventLog>,
+    binding_key: &str,
+    event_id: &str,
+    replay_of_event_id: Option<&String>,
+) -> Result<bool, DispatchError> {
+    if replay_of_event_id.is_some() {
+        return Ok(false);
+    }
+    let topic = Topic::new(TRIGGER_CANCEL_REQUESTS_TOPIC)
+        .expect("static trigger cancel topic should always be valid");
+    let events = event_log.read_range(&topic, None, usize::MAX).await?;
+    let requested = events
+        .into_iter()
+        .filter(|(_, event)| event.kind == "dispatch_cancel_requested")
+        .filter_map(|(_, event)| {
+            serde_json::from_value::<DispatchCancelRequest>(event.payload).ok()
+        })
+        .collect::<BTreeSet<_>>();
+    Ok(requested
+        .iter()
+        .any(|request| request.binding_key == binding_key && request.event_id == event_id))
+}
+
+async fn sleep_or_cancel_or_request(
+    event_log: &Arc<AnyEventLog>,
+    delay: Duration,
+    binding_key: &str,
+    event_id: &str,
+    replay_of_event_id: Option<&String>,
+    cancel_rx: &mut broadcast::Receiver<()>,
+) -> Result<(), DispatchError> {
+    let sleep = tokio::time::sleep(delay);
+    pin_mut!(sleep);
+    let mut poll = tokio::time::interval(Duration::from_millis(100));
+    loop {
+        tokio::select! {
+            _ = &mut sleep => return Ok(()),
+            _ = recv_cancel(cancel_rx) => {
+                return Err(DispatchError::Cancelled(
+                    "dispatcher shutdown cancelled retry wait".to_string(),
+                ));
+            }
+            _ = poll.tick() => {
+                if dispatch_cancel_requested(event_log, binding_key, event_id, replay_of_event_id).await? {
+                    return Err(DispatchError::Cancelled(
+                        "trigger cancel request cancelled retry wait".to_string(),
+                    ));
+                }
+            }
+        }
+    }
+}
+
 fn decrement_in_flight(state: &DispatcherRuntimeState) {
     let previous = state.in_flight.fetch_sub(1, Ordering::Relaxed);
     if previous == 1 && state.retry_queue_depth.load(Ordering::Relaxed) == 0 {
@@ -2154,6 +2335,28 @@ async fn sleep_or_cancel(
     tokio::select! {
         _ = tokio::time::sleep(duration) => Ok(()),
         _ = recv_cancel(cancel_rx) => Err(DispatchError::Cancelled("dispatcher shutdown cancelled retry wait".to_string())),
+    }
+}
+
+fn cancelled_dispatch_outcome(
+    binding: &TriggerBinding,
+    route: &DispatchUri,
+    event: &TriggerEvent,
+    replay_of_event_id: Option<String>,
+    attempt_count: u32,
+    error: String,
+) -> DispatchOutcome {
+    DispatchOutcome {
+        trigger_id: binding.id.as_str().to_string(),
+        binding_key: binding.binding_key(),
+        event_id: event.id.0.clone(),
+        attempt_count,
+        status: DispatchStatus::Cancelled,
+        handler_kind: route.kind().to_string(),
+        target_uri: route.target_uri(),
+        replay_of_event_id,
+        result: None,
+        error: Some(error),
     }
 }
 

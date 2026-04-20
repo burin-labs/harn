@@ -37,6 +37,13 @@ secrets = { signing_secret = "github/webhook-secret" }
 }
 
 fn write_seed_script(dir: &Path, dedupe_key: &str) {
+    write_seed_script_with_tenant(dir, dedupe_key, None);
+}
+
+fn write_seed_script_with_tenant(dir: &Path, dedupe_key: &str, tenant: Option<&str>) {
+    let tenant_field = tenant
+        .map(|tenant| format!(", tenant: \"{tenant}\""))
+        .unwrap_or_default();
     write_file(
         dir,
         "seed.harn",
@@ -55,7 +62,7 @@ pipeline default() {{
       action: "opened",
       delivery_id: "{dedupe_key}",
       installation_id: 42,
-      raw: {{ action: "opened" }},
+      raw: {{ action: "opened"{tenant_field} }},
     }},
     signature_status: {{ state: "verified" }},
   }})))
@@ -83,6 +90,15 @@ fn stderr(output: &Output) -> String {
 
 fn seed_event(temp: &TempDir, dedupe_key: &str) -> serde_json::Value {
     write_seed_script(temp.path(), dedupe_key);
+    seed_written_event(temp)
+}
+
+fn seed_event_with_tenant(temp: &TempDir, dedupe_key: &str, tenant: &str) -> serde_json::Value {
+    write_seed_script_with_tenant(temp.path(), dedupe_key, Some(tenant));
+    seed_written_event(temp)
+}
+
+fn seed_written_event(temp: &TempDir) -> serde_json::Value {
     let output = run_harn(temp, &["run", "seed.harn"]);
     assert!(
         output.status.success(),
@@ -209,4 +225,93 @@ pub fn on_issue(event: TriggerEvent) -> dict {
     assert_eq!(report["binding_version"].as_u64(), Some(1));
     assert_eq!(report["replay"]["result"]["version"].as_str(), Some("v1"));
     assert_eq!(report["as_of"].as_str(), Some(as_of.as_str()));
+}
+
+#[test]
+fn trigger_replay_bulk_dry_run_filters_on_event_payload() {
+    let temp = TempDir::new().unwrap();
+    write_manifest(temp.path());
+    write_file(
+        temp.path(),
+        "lib.harn",
+        r#"
+import "std/triggers"
+
+pub fn on_issue(event: TriggerEvent) -> dict {
+  return { ok: true }
+}
+"#,
+    );
+
+    let acme = seed_event_with_tenant(&temp, "delivery-acme", "acme");
+    let _beta = seed_event_with_tenant(&temp, "delivery-beta", "beta");
+
+    let output = run_harn(
+        &temp,
+        &[
+            "trigger",
+            "replay",
+            "--where",
+            "event.payload.tenant == 'acme'",
+            "--dry-run",
+        ],
+    );
+    assert!(
+        output.status.success(),
+        "status={:?}\nstdout={}\nstderr={}",
+        output.status.code(),
+        stdout(&output),
+        stderr(&output)
+    );
+
+    let report: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+    assert_eq!(report["operation"].as_str(), Some("replay"));
+    assert_eq!(report["dry_run"].as_bool(), Some(true));
+    assert_eq!(report["matched_count"].as_u64(), Some(1));
+    assert_eq!(report["items"][0]["event_id"], acme["event_id"]);
+    assert_eq!(report["items"][0]["status"].as_str(), Some("dry_run"));
+    assert!(report["items"][0]["report"].is_null());
+}
+
+#[test]
+fn trigger_cancel_reports_terminal_events_as_not_cancellable() {
+    let temp = TempDir::new().unwrap();
+    write_manifest(temp.path());
+    write_file(
+        temp.path(),
+        "lib.harn",
+        r#"
+import "std/triggers"
+
+pub fn on_issue(event: TriggerEvent) -> dict {
+  return { ok: true }
+}
+"#,
+    );
+
+    let seeded = seed_event(&temp, "delivery-terminal");
+    let event_id = seeded["event_id"].as_str().unwrap().to_string();
+
+    let output = run_harn(&temp, &["trigger", "cancel", &event_id]);
+    assert!(
+        output.status.success(),
+        "status={:?}\nstdout={}\nstderr={}",
+        output.status.code(),
+        stdout(&output),
+        stderr(&output)
+    );
+
+    let report: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+    assert_eq!(report["operation"].as_str(), Some("cancel"));
+    assert_eq!(report["matched_count"].as_u64(), Some(1));
+    assert_eq!(report["requested_count"].as_u64(), Some(0));
+    assert_eq!(report["skipped_count"].as_u64(), Some(1));
+    assert_eq!(
+        report["items"][0]["status"].as_str(),
+        Some("not_cancellable")
+    );
+    assert_eq!(
+        report["items"][0]["event_id"].as_str(),
+        Some(event_id.as_str())
+    );
 }

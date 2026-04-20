@@ -21,6 +21,7 @@ pub mod mcp_server;
 pub mod metadata;
 pub mod observability;
 pub mod orchestration;
+pub mod record_filter;
 pub mod runtime_paths;
 pub mod schema;
 pub mod secrets;
@@ -70,6 +71,7 @@ pub use mcp_server::{
     take_mcp_serve_resources, tool_registry_to_mcp_tools, McpServer,
 };
 pub use metadata::{register_metadata_builtins, register_scan_builtins};
+pub use record_filter::{normalize_record_filter_expression, CompiledRecordFilter};
 pub use stdlib::hitl::{
     append_hitl_response, HitlHostResponse, HITL_APPROVALS_TOPIC, HITL_DUAL_CONTROL_TOPIC,
     HITL_ESCALATIONS_TOPIC, HITL_QUESTIONS_TOPIC,
@@ -88,24 +90,25 @@ pub use stdlib::{
 };
 pub use store::register_store_builtins;
 pub use triggers::{
-    begin_in_flight, binding_version_as_of, clear_dispatcher_state, clear_trigger_registry, drain,
-    dynamic_deregister, dynamic_register, finish_in_flight, install_manifest_triggers,
-    pin_trigger_binding, provider_metadata, redact_headers, register_provider_schema,
-    registered_provider_metadata, registered_provider_schema_names, reset_provider_catalog,
-    resolve_live_or_as_of, resolve_live_trigger_binding, resolve_trigger_binding_as_of,
-    run_trigger_harness_fixture, snapshot_dispatcher_stats, snapshot_trigger_bindings,
-    unpin_trigger_binding, DispatchError, DispatchOutcome, DispatchStatus, Dispatcher,
-    DispatcherDrainReport, DispatcherStatsSnapshot, HeaderRedactionPolicy, InboxIndex,
-    ProviderCatalog, ProviderCatalogError, ProviderId, ProviderMetadata, ProviderOutboundMethod,
-    ProviderPayload, ProviderRuntimeMetadata, ProviderSchema, ProviderSecretRequirement,
-    RecordedTriggerBinding, RetryPolicy, SignatureStatus, SignatureVerificationMetadata, TenantId,
-    TraceId, TriggerBindingSnapshot, TriggerBindingSource, TriggerBindingSpec,
-    TriggerDispatchOutcome, TriggerEvent, TriggerEventId, TriggerHandlerSpec, TriggerHarnessResult,
-    TriggerId, TriggerMetricsSnapshot, TriggerPredicateSpec, TriggerRegistryError,
-    TriggerRetryConfig, TriggerState, DEFAULT_INBOX_RETENTION_DAYS, TRIGGERS_LIFECYCLE_TOPIC,
-    TRIGGER_ATTEMPTS_TOPIC, TRIGGER_DLQ_TOPIC, TRIGGER_INBOX_CLAIMS_TOPIC,
-    TRIGGER_INBOX_ENVELOPES_TOPIC, TRIGGER_INBOX_LEGACY_TOPIC, TRIGGER_OUTBOX_TOPIC,
-    TRIGGER_TEST_FIXTURES,
+    append_dispatch_cancel_request, begin_in_flight, binding_version_as_of, clear_dispatcher_state,
+    clear_trigger_registry, drain, dynamic_deregister, dynamic_register, finish_in_flight,
+    install_manifest_triggers, pin_trigger_binding, provider_metadata, redact_headers,
+    register_provider_schema, registered_provider_metadata, registered_provider_schema_names,
+    reset_provider_catalog, resolve_live_or_as_of, resolve_live_trigger_binding,
+    resolve_trigger_binding_as_of, run_trigger_harness_fixture, snapshot_dispatcher_stats,
+    snapshot_trigger_bindings, unpin_trigger_binding, DispatchCancelRequest, DispatchError,
+    DispatchOutcome, DispatchStatus, Dispatcher, DispatcherDrainReport, DispatcherStatsSnapshot,
+    HeaderRedactionPolicy, InboxIndex, ProviderCatalog, ProviderCatalogError, ProviderId,
+    ProviderMetadata, ProviderOutboundMethod, ProviderPayload, ProviderRuntimeMetadata,
+    ProviderSchema, ProviderSecretRequirement, RecordedTriggerBinding, RetryPolicy,
+    SignatureStatus, SignatureVerificationMetadata, TenantId, TraceId, TriggerBindingSnapshot,
+    TriggerBindingSource, TriggerBindingSpec, TriggerDispatchOutcome, TriggerEvent, TriggerEventId,
+    TriggerHandlerSpec, TriggerHarnessResult, TriggerId, TriggerMetricsSnapshot,
+    TriggerPredicateSpec, TriggerRegistryError, TriggerRetryConfig, TriggerState,
+    DEFAULT_INBOX_RETENTION_DAYS, TRIGGERS_LIFECYCLE_TOPIC, TRIGGER_ATTEMPTS_TOPIC,
+    TRIGGER_CANCEL_REQUESTS_TOPIC, TRIGGER_DLQ_TOPIC, TRIGGER_INBOX_CLAIMS_TOPIC,
+    TRIGGER_INBOX_ENVELOPES_TOPIC, TRIGGER_INBOX_LEGACY_TOPIC, TRIGGER_OPERATION_AUDIT_TOPIC,
+    TRIGGER_OUTBOX_TOPIC, TRIGGER_TEST_FIXTURES,
 };
 pub use trust_graph::{
     append_active_trust_record, append_trust_record, query_trust_records,

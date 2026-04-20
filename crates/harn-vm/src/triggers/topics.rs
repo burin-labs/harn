@@ -4,4 +4,6 @@ pub const TRIGGER_INBOX_ENVELOPES_TOPIC: &str = "trigger.inbox.envelopes";
 pub const TRIGGER_OUTBOX_TOPIC: &str = "trigger.outbox";
 pub const TRIGGER_ATTEMPTS_TOPIC: &str = "trigger.attempts";
 pub const TRIGGER_DLQ_TOPIC: &str = "trigger.dlq";
+pub const TRIGGER_CANCEL_REQUESTS_TOPIC: &str = "trigger.cancel.requests";
+pub const TRIGGER_OPERATION_AUDIT_TOPIC: &str = "trigger.operations.audit";
 pub const TRIGGERS_LIFECYCLE_TOPIC: &str = "triggers.lifecycle";

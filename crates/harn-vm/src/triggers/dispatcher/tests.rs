@@ -29,7 +29,9 @@ use crate::Vm;
 
 use super::retry::TriggerRetryConfig;
 use super::uri::{DispatchUri, DispatchUriError};
-use super::{DispatchStatus, Dispatcher, RetryPolicy};
+use super::{
+    append_dispatch_cancel_request, DispatchCancelRequest, DispatchStatus, Dispatcher, RetryPolicy,
+};
 
 fn trigger_event(kind: &str, dedupe_key: &str) -> TriggerEvent {
     TriggerEvent::new(
@@ -1357,6 +1359,80 @@ pub fn wait_for_cancel(event: TriggerEvent) -> string {
                 start.elapsed() <= Duration::from_millis(100),
                 "all in-flight dispatches must observe cancellation within 100ms"
             );
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn external_cancel_request_cancels_in_flight_local_handler() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (_dir, log, dispatcher) = dispatcher_fixture(
+                r#"
+import "std/triggers"
+
+pub fn wait_for_cancel(event: TriggerEvent) -> string {
+  while !is_cancelled() {
+    sleep(1)
+  }
+  return event.kind
+}
+"#,
+                "wait_for_cancel",
+                None,
+                TriggerRetryConfig::new(1, RetryPolicy::Linear { delay_ms: 0 }),
+            )
+            .await;
+
+            let binding = resolve_live_trigger_binding("github-new-issue", None)
+                .expect("resolve binding for external cancel");
+            let event = trigger_event("issues.opened", "delivery-external-cancel");
+            let event_id = event.id.0.clone();
+            let binding_key = binding.binding_key();
+
+            let run_dispatcher = dispatcher.clone();
+            let handle = tokio::task::spawn_local(async move {
+                run_dispatcher
+                    .dispatch(&binding, event)
+                    .await
+                    .expect("dispatch completes")
+            });
+
+            tokio::time::sleep(Duration::from_millis(25)).await;
+            append_dispatch_cancel_request(
+                &log,
+                &DispatchCancelRequest {
+                    binding_key: binding_key.clone(),
+                    event_id: event_id.clone(),
+                    requested_at: time::OffsetDateTime::now_utc(),
+                    requested_by: Some("test".to_string()),
+                    audit_id: Some("audit-test".to_string()),
+                },
+            )
+            .await
+            .expect("append external cancel request");
+
+            let outcome = handle.await.expect("join local dispatch");
+            assert_eq!(outcome.status, DispatchStatus::Cancelled);
+            assert!(
+                outcome
+                    .error
+                    .as_deref()
+                    .is_some_and(|message| message.contains("trigger cancel request")),
+                "{outcome:?}"
+            );
+
+            let outbox = read_topic(log.clone(), "trigger.outbox").await;
+            assert!(outbox.iter().any(|(_, event)| {
+                event.kind == "dispatch_failed"
+                    && event.headers.get("event_id").map(String::as_str) == Some(event_id.as_str())
+                    && event
+                        .payload
+                        .get("error")
+                        .and_then(serde_json::Value::as_str)
+                        .is_some_and(|message| message.contains("trigger cancel request"))
+            }));
         })
         .await;
 }

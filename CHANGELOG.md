@@ -25,6 +25,17 @@ granular archaeology.
   crate also warns when handlers call `git::push_pr` without a prior
   `secret_scan(...)` in the same flow.
 
+- **Bulk trigger replay/cancel now use shared event-log filters and
+  durable control records (#308).** `harn trigger replay` gained a
+  `--where` bulk mode with Harn-expression filtering over normalized
+  `event` / `binding` / `attempt` / `outcome` / `audit` records, plus
+  `--dry-run`, `--progress`, and `--rate-limit`. Harn also now ships
+  `harn trigger cancel` for single-event or filtered bulk cancellation.
+  Cancel requests append to `trigger.cancel.requests`, long-running
+  local handlers poll and honor those requests, and both bulk replay and
+  cancel append operator metadata to `trigger.operations.audit` for
+  future portal/MCP surfaces.
+
 - **`project_enrich(...)` now surfaces repo operator metadata (#219).**
   The deterministic enrichment evidence now includes a `ci` block with
   parsed GitHub Actions workflows, hook stage summaries
