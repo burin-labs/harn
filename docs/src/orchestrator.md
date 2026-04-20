@@ -18,8 +18,6 @@ Current limitations:
 
 - `multi-tenant` returns a clear not-implemented error that points at
   `O-12 #190`
-- `inspect`, `replay`, `dlq`, and `queue` are placeholders for
-  `O-08 #185`
 
 ## Command
 
@@ -42,6 +40,18 @@ SIGTERM, it stops accepting new requests, lets in-flight requests drain,
 appends lifecycle events to the EventLog, and persists a final
 `orchestrator-state.json` snapshot under `--state-dir`.
 
+Startup no longer replays old `trigger.inbox` entries automatically.
+If the previous process died after writing an inbox envelope but before
+writing any matching `trigger.outbox` record, the restarted orchestrator
+surfaces those envelopes instead of silently re-firing them:
+
+- `harn orchestrator queue` shows a `stranded_envelopes=<count>` summary
+  plus a `Stranded envelopes:` section with the event ids, bindings, and
+  ages.
+- `orchestrator.lifecycle` records a
+  `startup_stranded_envelopes` event with a `count` payload.
+- Recovery is explicit via `harn orchestrator recover`.
+
 `--manifest` is an alias for `--config`, and `--listen` is an alias for
 `--bind`. Container deployments can also configure those through
 `HARN_ORCHESTRATOR_MANIFEST`, `HARN_ORCHESTRATOR_LISTEN`,
@@ -61,6 +71,37 @@ binding version. The orchestrator records `reload_succeeded` /
 Current reload scope is intentionally narrow: listener-wide settings
 such as `--bind`, TLS files, `allowed_origins`, `max_body_bytes`, and
 connector-managed trigger changes still require a full restart.
+
+## Recovery
+
+Use `recover` to inspect or replay stranded inbox envelopes explicitly.
+
+```bash
+harn orchestrator recover \
+  --config harn.toml \
+  --state-dir ./.harn/orchestrator \
+  --envelope-age 5m \
+  --dry-run
+```
+
+`--envelope-age` is required so recovery stays scoped to envelopes older
+than the threshold you choose. Supported suffixes are `ms`, `s`, `m`,
+`h`, `d`, and `w`.
+
+`--dry-run` lists candidates only. To actually replay them, rerun the
+command without `--dry-run` and add `--yes`:
+
+```bash
+harn orchestrator recover \
+  --config harn.toml \
+  --state-dir ./.harn/orchestrator \
+  --envelope-age 5m \
+  --yes
+```
+
+Recovery reuses the normal `trigger_replay(...)` path, so replayed
+envelopes still flow through the dispatcher's retry policy and DLQ
+handling instead of using a special bypass path.
 
 ## HTTP Listener
 

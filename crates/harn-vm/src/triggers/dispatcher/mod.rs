@@ -313,7 +313,12 @@ impl Dispatcher {
     pub async fn run(&self) -> Result<(), DispatchError> {
         let topic = Topic::new(TRIGGER_INBOX_ENVELOPES_TOPIC)
             .expect("static trigger inbox envelopes topic is valid");
-        let stream = self.event_log.clone().subscribe(&topic, None).await?;
+        let start_from = self.event_log.latest(&topic).await?;
+        let stream = self
+            .event_log
+            .clone()
+            .subscribe(&topic, start_from)
+            .await?;
         pin_mut!(stream);
         let mut cancel_rx = self.cancel_tx.subscribe();
 
@@ -606,6 +611,7 @@ impl Dispatcher {
         let mut previous_retry_node = None;
         let max_attempts = binding.retry.max_attempts();
         for attempt in 1..=max_attempts {
+            maybe_fail_before_outbox();
             let started_at = now_rfc3339();
             let attempt_node_id = dispatch_node_id(&route, &binding_key, &event.id.0, attempt);
             self.append_lifecycle_event(
@@ -1412,6 +1418,14 @@ fn event_headers(
         headers.insert("attempt".to_string(), attempt.to_string());
     }
     headers
+}
+
+const TEST_FAIL_BEFORE_OUTBOX_ENV: &str = "HARN_TEST_DISPATCHER_FAIL_BEFORE_OUTBOX";
+
+fn maybe_fail_before_outbox() {
+    if std::env::var_os(TEST_FAIL_BEFORE_OUTBOX_ENV).is_some() {
+        std::process::exit(86);
+    }
 }
 
 fn now_rfc3339() -> String {

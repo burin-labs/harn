@@ -986,6 +986,83 @@ pub fn wait_for_cancel(event: TriggerEvent) -> string {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn run_skips_historical_inbox_entries_on_startup() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (_dir, log, dispatcher) = dispatcher_fixture(
+                r#"
+import "std/triggers"
+
+pub fn local_fn(event: TriggerEvent) -> string {
+  return event.kind
+}
+"#,
+                "local_fn",
+                None,
+                TriggerRetryConfig::default(),
+            )
+            .await;
+
+            let historical = trigger_event("issues.opened", "delivery-historical");
+            dispatcher
+                .enqueue_targeted(
+                    Some("github-new-issue".to_string()),
+                    Some(1),
+                    historical.clone(),
+                )
+                .await
+                .expect("enqueue historical inbox entry");
+
+            let dispatcher_for_task = dispatcher.clone();
+            let run_task = tokio::task::spawn_local(async move {
+                dispatcher_for_task
+                    .run()
+                    .await
+                    .expect("dispatcher run exits");
+            });
+
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            let outbox_before = read_topic(log.clone(), "trigger.outbox").await;
+            assert!(
+                outbox_before.is_empty(),
+                "startup should not auto-dispatch historical inbox entries: {outbox_before:?}"
+            );
+
+            let live = trigger_event("issues.opened", "delivery-live");
+            dispatcher
+                .enqueue_targeted(Some("github-new-issue".to_string()), Some(1), live.clone())
+                .await
+                .expect("enqueue live inbox entry");
+
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while Instant::now() < deadline {
+                let outbox = read_topic(log.clone(), "trigger.outbox").await;
+                if outbox.iter().any(|(_, event)| {
+                    event.headers.get("event_id").map(String::as_str) == Some(live.id.0.as_str())
+                        && event.kind == "dispatch_succeeded"
+                }) {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+
+            dispatcher.shutdown();
+            run_task.await.expect("join dispatcher run task");
+
+            let outbox = read_topic(log.clone(), "trigger.outbox").await;
+            assert!(!outbox.iter().any(|(_, event)| {
+                event.headers.get("event_id").map(String::as_str) == Some(historical.id.0.as_str())
+            }));
+            assert!(outbox.iter().any(|(_, event)| {
+                event.headers.get("event_id").map(String::as_str) == Some(live.id.0.as_str())
+                    && event.kind == "dispatch_succeeded"
+            }));
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn drain_waits_for_in_flight_local_handlers_without_cancelling() {
     let local = tokio::task::LocalSet::new();
     local

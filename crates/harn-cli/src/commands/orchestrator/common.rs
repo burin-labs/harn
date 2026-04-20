@@ -1,5 +1,7 @@
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration as StdDuration;
 
 use harn_vm::event_log::{AnyEventLog, EventLog, LogEvent, Topic};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -73,6 +75,18 @@ pub(super) struct DlqEntryRecord {
     pub error: String,
     pub event: harn_vm::TriggerEvent,
     pub retry_history: Vec<DlqAttemptRecord>,
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct StrandedEnvelopeRecord {
+    pub inbox_offset: u64,
+    pub event_id: String,
+    pub trigger_id: Option<String>,
+    pub binding_version: Option<u32>,
+    pub provider: String,
+    pub kind: String,
+    pub received_at: OffsetDateTime,
+    pub age: StdDuration,
 }
 
 pub(super) async fn load_local_runtime(
@@ -188,6 +202,74 @@ pub(super) async fn read_topic(
         .map_err(|error| error.to_string())
 }
 
+pub(super) async fn stranded_envelopes(
+    log: &Arc<AnyEventLog>,
+    min_age: StdDuration,
+) -> Result<Vec<StrandedEnvelopeRecord>, String> {
+    let envelopes = read_topic(log, TRIGGER_INBOX_ENVELOPES_TOPIC).await?;
+    let legacy_inbox = read_topic(log, TRIGGER_INBOX_LEGACY_TOPIC).await?;
+    let outbox = read_topic(log, TRIGGER_OUTBOX_TOPIC).await?;
+
+    let mut any_outbox_event_ids = BTreeSet::new();
+    let mut outbox_by_event_id = BTreeMap::<String, BTreeSet<String>>::new();
+    for (_, event) in outbox {
+        let Some(event_id) = event.headers.get("event_id").cloned() else {
+            continue;
+        };
+        any_outbox_event_ids.insert(event_id.clone());
+        if let Some(trigger_id) = event.headers.get("trigger_id").cloned() {
+            outbox_by_event_id
+                .entry(event_id)
+                .or_default()
+                .insert(trigger_id);
+        }
+    }
+
+    let mut stranded = Vec::new();
+    for (offset, event) in envelopes.into_iter().chain(legacy_inbox) {
+        if event.kind != "event_ingested" {
+            continue;
+        }
+        let envelope: harn_vm::triggers::dispatcher::InboxEnvelope =
+            serde_json::from_value(event.payload)
+                .map_err(|error| format!("failed to decode trigger inbox envelope: {error}"))?;
+        let age = age_since(envelope.event.received_at);
+        if age < min_age {
+            continue;
+        }
+
+        let event_id = envelope.event.id.0.clone();
+        let matched_outbox = if let Some(trigger_id) = envelope.trigger_id.as_ref() {
+            outbox_by_event_id
+                .get(&event_id)
+                .is_some_and(|trigger_ids| trigger_ids.contains(trigger_id))
+        } else {
+            any_outbox_event_ids.contains(&event_id)
+        };
+        if matched_outbox {
+            continue;
+        }
+
+        stranded.push(StrandedEnvelopeRecord {
+            inbox_offset: offset,
+            event_id,
+            trigger_id: envelope.trigger_id,
+            binding_version: envelope.binding_version,
+            provider: envelope.event.provider.as_str().to_string(),
+            kind: envelope.event.kind,
+            received_at: envelope.event.received_at,
+            age,
+        });
+    }
+
+    stranded.sort_by(|left, right| {
+        left.received_at
+            .cmp(&right.received_at)
+            .then(left.event_id.cmp(&right.event_id))
+    });
+    Ok(stranded)
+}
+
 pub(super) async fn append_dlq_entry(
     log: &Arc<AnyEventLog>,
     entry: &DlqEntryRecord,
@@ -274,4 +356,37 @@ fn absolutize_from_cwd(path: &Path) -> Result<PathBuf, String> {
             .join(path)
     };
     Ok(candidate)
+}
+
+pub(super) fn format_timestamp(value: OffsetDateTime) -> String {
+    value.format(&Rfc3339).unwrap_or_else(|_| value.to_string())
+}
+
+pub(super) fn format_duration(value: StdDuration) -> String {
+    if value.as_secs() == 0 {
+        return format!("{}ms", value.as_millis());
+    }
+    let seconds = value.as_secs();
+    if seconds < 60 {
+        return format!("{seconds}s");
+    }
+    if seconds < 60 * 60 {
+        return format!("{}m", seconds / 60);
+    }
+    if seconds < 60 * 60 * 24 {
+        return format!("{}h", seconds / (60 * 60));
+    }
+    format!("{}d", seconds / (60 * 60 * 24))
+}
+
+fn age_since(then: OffsetDateTime) -> StdDuration {
+    let now = OffsetDateTime::now_utc();
+    if now <= then {
+        return StdDuration::ZERO;
+    }
+    let delta = now - then;
+    StdDuration::new(
+        delta.whole_seconds() as u64,
+        delta.subsec_nanoseconds().try_into().unwrap_or_default(),
+    )
 }
