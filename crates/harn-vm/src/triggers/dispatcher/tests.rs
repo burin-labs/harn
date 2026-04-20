@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 use rcgen::generate_simple_self_signed;
 use rustls::pki_types::{CertificateDer, PrivatePkcs8KeyDer};
 use rustls::{ServerConfig, ServerConnection, StreamOwned};
+use tokio::sync::oneshot;
 
 use crate::event_log::{install_default_for_base_dir, EventLog, Topic};
 use crate::register_vm_stdlib;
@@ -885,6 +886,66 @@ pub fn slow_handler(event: TriggerEvent) -> string {
             let outcomes = handle.await.expect("join local dispatch");
             assert_eq!(outcomes.len(), 1);
             assert_eq!(outcomes[0].status, DispatchStatus::Succeeded);
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn run_shutdown_does_not_silently_drop_dequeued_inbox_events() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (_dir, log, dispatcher) = dispatcher_fixture(
+                r#"
+import "std/triggers"
+
+pub fn wait_for_cancel(event: TriggerEvent) -> string {
+  while !is_cancelled() {
+    sleep(1)
+  }
+  return event.kind
+}
+"#,
+                "wait_for_cancel",
+                None,
+                TriggerRetryConfig::new(1, RetryPolicy::Linear { delay_ms: 0 }),
+            )
+            .await;
+
+            dispatcher
+                .enqueue(trigger_event("issues.opened", "delivery-run-shutdown"))
+                .await
+                .expect("enqueue succeeds");
+
+            let (dequeued_tx, dequeued_rx) = oneshot::channel();
+            super::install_test_inbox_dequeued_signal(dequeued_tx);
+
+            let run_dispatcher = dispatcher.clone();
+            let run_handle = tokio::task::spawn_local(async move {
+                run_dispatcher.run().await.expect("dispatcher run exits cleanly");
+            });
+
+            dequeued_rx.await.expect("run dequeued inbox event");
+            dispatcher.shutdown();
+            run_handle.await.expect("join dispatcher run");
+
+            let inbox = read_topic(log.clone(), "trigger.inbox").await;
+            assert_eq!(
+                inbox.iter()
+                    .filter(|(_, event)| event.kind == "event_ingested")
+                    .count(),
+                1
+            );
+
+            let outbox = read_topic(log.clone(), "trigger.outbox").await;
+            assert!(
+                outbox.iter().any(|(_, event)| event.kind == "dispatch_started"),
+                "dequeued inbox event must either stay queued or emit an explicit outbox outcome"
+            );
+            assert!(
+                outbox.iter().any(|(_, event)| event.kind == "dispatch_failed"),
+                "shutdown-triggered cancellation must be recorded instead of silently dropping the inbox event"
+            );
         })
         .await;
 }

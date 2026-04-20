@@ -76,6 +76,14 @@ granular archaeology.
   overlapping replays and tests that pre-set `HARN_REPLAY` no longer
   corrupt each other’s value restoration.
 
+- **Trigger inbox shutdown race could silently drop dequeued webhook
+  events (harn#241).** The dispatcher and orchestrator inbox pump no
+  longer detach `dispatch_inbox_envelope(...)` into fire-and-forget
+  local tasks during shutdown. Once an event is read from
+  `trigger.inbox`, drain now waits for that dispatch attempt to either
+  record its outbox outcome or observe cancellation instead of letting
+  SIGTERM exit with the envelope stranded between inbox and outbox.
+
 - **Flaky cwd-mutating test collisions (#204).** Added a shared-process
   cwd mutex so parallel `cargo test` no longer observes mid-test cwd
   swaps. `check_manifest_reports_loaded_triggers` and
