@@ -1,12 +1,10 @@
-true
-true
-true
-true
-true
-true
-true
-true
-true
-true
-true
-true
+rust-workspace ["rust",["axum"],"cargo",["cargo"],"nextest","cargo","git",[],false,false,["Cargo.lock"]]
+swift-library ["swift",[],"spm",["spm"],"xctest","spm",null,[],true,false,[]]
+swift-executable ["swift",[],"spm",["spm"],"xctest","spm",null,[],true,false,[]]
+npm-monorepo ["typescript",[],"npm",["npm"],"vitest","vite",null,[],true,false,["package-lock.json"]]
+pnpm-monorepo ["typescript",["next","react"],"pnpm",["pnpm"],null,"next",null,[],false,false,["pnpm-lock.yaml"]]
+python-poetry ["python",["fastapi"],"poetry",["poetry"],"pytest","poetry",null,[],true,false,["poetry.lock"]]
+python-uv ["python",["fastapi"],"uv",["uv"],"pytest","uv",null,[],true,false,["uv.lock"]]
+go-module ["go",[],"go-mod",["go-mod"],"go-test","go",null,[],false,false,["go.sum"]]
+mixed-repo ["mixed",["axum","next","react"],"cargo",["cargo","pnpm"],"cargo-test","cargo","git",["github-actions"],true,true,["backend/Cargo.lock","portal/pnpm-lock.yaml"]]
+empty-dir ["unknown",[],null,[],null,null,null,[],false,false,[]]

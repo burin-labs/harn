@@ -41,6 +41,12 @@ in Harn.
 
 ### Added
 
+- **`project_fingerprint()` now returns a normalized repo profile for
+  autonomous personas (#218).** The shallow detector now exposes stable
+  primary tags for package manager, test runner, build tool, VCS, and CI
+  provider alongside the existing language/framework signals, with
+  conformance coverage for representative Rust, Swift, Node, Python, Go,
+  mixed, and empty-directory shapes.
 - **Git-backed package manager v0 (#345, #355).** Typed lockfile with
   content hashes, `harn add/install/update/remove/lock` commands, shared
   cache, ref resolution, frozen/refetch flows, and import resolution

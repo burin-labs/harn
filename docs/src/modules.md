@@ -308,6 +308,7 @@ Project metadata helpers plus deterministic project evidence scanning:
 | `metadata_local_namespace(dir, namespace)` | Read only the namespace data stored directly on a directory |
 | `project_inventory(namespace?)` | Return `{entries, status}` for metadata-backed project state |
 | `project_root_package()` | Infer the repository's root package/module name from common manifests |
+| `project_fingerprint(path?)` | Return the normalized shallow repo profile used by higher-level personas |
 | `project_scan(path, options?)` | Scan a directory for deterministic L0/L1 evidence |
 | `project_enrich(path, options)` | Run caller-owned L2 enrichment over bounded project context with schema validation and caching |
 | `project_scan_tree(path, options?)` | Walk subdirectories and return a `{rel_path: evidence}` map |

@@ -1070,15 +1070,25 @@ monolithic `root.json` shard.
 
 `ProjectFingerprint` has these fields:
 
-- `primary_language`: `"rust"`, `"typescript"`, `"python"`, `"go"`, `"swift"`, `"mixed"`, or `"unknown"`
+- `primary_language`: `"rust"`, `"typescript"`, `"python"`, `"go"`, `"swift"`, `"ruby"`, `"mixed"`, or `"unknown"`
 - `languages`: all detected top-level languages in stable order
 - `frameworks`: shallow framework signals such as `"axum"`, `"next"`, `"react"`, `"django"`, `"fastapi"`, or `"rails"`
+- `package_manager`: the dominant normalized package manager tag such as
+  `"cargo"`, `"spm"`, `"pnpm"`, `"npm"`, `"uv"`, `"poetry"`, `"pip"`,
+  `"go-mod"`, or `"bundler"`
 - `package_managers`: detected package managers such as `"cargo"`, `"npm"`,
-  `"pnpm"`, `"yarn"`, `"pip"`, `"poetry"`, `"uv"`, or `"go"`
+  `"pnpm"`, `"yarn"`, `"uv"`, `"poetry"`, `"pip"`, `"go-mod"`, or `"bundler"`
+- `test_runner`: the dominant normalized test runner tag such as `"nextest"`,
+  `"cargo-test"`, `"vitest"`, `"pytest"`, `"go-test"`, or `"xctest"`
+- `build_tool`: the dominant normalized build tool tag such as `"cargo"`,
+  `"spm"`, `"next"`, `"vite"`, `"uv"`, `"poetry"`, or `"go"`
+- `vcs`: `"git"`, `"hg"`, or `nil` when no VCS root is detected
+- `ci`: detected CI providers such as `"github-actions"`, `"gitlab-ci"`,
+  `"circleci"`, `"buildkite"`, `"azure-pipelines"`, or `"bitrise"`
 - `has_tests`: `true` when a standard test directory such as `tests/`, `test/`, `__tests__/`, or `spec/` is present
 - `has_ci`: `true` when CI config such as `.github/workflows/` or `.gitlab-ci.yml` is present
 - `lockfile_paths`: relative paths to detected lockfiles such as `Cargo.lock`,
-  `package-lock.json`, `pnpm-lock.yaml`, `uv.lock`, or `go.sum`
+  `package-lock.json`, `pnpm-lock.yaml`, `uv.lock`, `go.sum`, or `Package.resolved`
 
 ## Secret scanning
 

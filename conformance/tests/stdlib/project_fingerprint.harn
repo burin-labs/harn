@@ -1,37 +1,149 @@
 import "std/project"
 
+fn fingerprint_signature(fp: ProjectFingerprint) -> string {
+  return json_stringify([
+    fp.primary_language,
+    fp.frameworks,
+    fp.package_manager,
+    fp.package_managers,
+    fp.test_runner,
+    fp.build_tool,
+    fp.vcs,
+    fp.ci,
+    fp.has_tests,
+    fp.has_ci,
+    fp.lockfile_paths,
+  ])
+}
+
 pipeline test(task) {
   let root = path_join(temp_dir(), "project-fingerprint-" + uuid())
   mkdir(root)
   defer {
     delete_file(root)
   }
-  mkdir(path_join(root, "backend"))
-  mkdir(path_join(root, "frontend/tests"))
-  mkdir(path_join(root, ".github/workflows"))
+
+  let rust_workspace = path_join(root, "rust-workspace")
+  mkdir(rust_workspace)
+  mkdir(path_join(rust_workspace, ".git"))
+  mkdir(path_join(rust_workspace, ".config"))
+  mkdir(path_join(rust_workspace, "crates/api/src"))
+  mkdir(path_join(rust_workspace, "crates/cli/src"))
   write_file(
-    path_join(root, "backend/Cargo.toml"),
+    path_join(rust_workspace, "Cargo.toml"),
+    "[workspace]\nmembers = [\"crates/api\", \"crates/cli\"]\n",
+  )
+  write_file(path_join(rust_workspace, "Cargo.lock"), "# lock\n")
+  write_file(path_join(rust_workspace, ".config/nextest.toml"), "[profile.default]\n")
+  write_file(
+    path_join(rust_workspace, "crates/api/Cargo.toml"),
+    "[package]\nname = \"api\"\nversion = \"0.1.0\"\n[dependencies]\naxum = \"0.8\"\n",
+  )
+  write_file(
+    path_join(rust_workspace, "crates/cli/Cargo.toml"),
+    "[package]\nname = \"cli\"\nversion = \"0.1.0\"\n",
+  )
+  println("rust-workspace " + fingerprint_signature(project_fingerprint(rust_workspace)))
+
+  let swift_library = path_join(root, "swift-library")
+  mkdir(swift_library)
+  mkdir(path_join(swift_library, "Sources/Lib"))
+  mkdir(path_join(swift_library, "Tests/LibTests"))
+  write_file(
+    path_join(swift_library, "Package.swift"),
+    "import PackageDescription\nlet package = Package(name: \"Lib\", products: [.library(name: \"Lib\", targets: [\"Lib\"])], targets: [.target(name: \"Lib\"), .testTarget(name: \"LibTests\", dependencies: [\"Lib\"])])\n",
+  )
+  write_file(path_join(swift_library, "Sources/Lib/Lib.swift"), "public struct Lib {}\n")
+  write_file(path_join(swift_library, "Tests/LibTests/LibTests.swift"), "import XCTest\n")
+  println("swift-library " + fingerprint_signature(project_fingerprint(swift_library)))
+
+  let swift_executable = path_join(root, "swift-executable")
+  mkdir(swift_executable)
+  mkdir(path_join(swift_executable, "Sources/App"))
+  mkdir(path_join(swift_executable, "Tests/AppTests"))
+  write_file(
+    path_join(swift_executable, "Package.swift"),
+    "import PackageDescription\nlet package = Package(name: \"App\", targets: [.executableTarget(name: \"App\"), .testTarget(name: \"AppTests\", dependencies: [\"App\"])])\n",
+  )
+  write_file(path_join(swift_executable, "Sources/App/main.swift"), "print(\"hi\")\n")
+  write_file(path_join(swift_executable, "Tests/AppTests/AppTests.swift"), "import XCTest\n")
+  println("swift-executable " + fingerprint_signature(project_fingerprint(swift_executable)))
+
+  let npm_monorepo = path_join(root, "npm-monorepo")
+  mkdir(npm_monorepo)
+  mkdir(path_join(npm_monorepo, "packages/web/src"))
+  mkdir(path_join(npm_monorepo, "packages/web/tests"))
+  write_file(
+    path_join(npm_monorepo, "package.json"),
+    "{\n  \"name\": \"npm-monorepo\",\n  \"private\": true,\n  \"workspaces\": [\"packages/*\"],\n  \"packageManager\": \"npm@10.8.0\",\n  \"devDependencies\": {\n    \"vite\": \"5.0.0\",\n    \"vitest\": \"2.0.0\"\n  },\n  \"scripts\": {\n    \"build\": \"vite build\",\n    \"test\": \"vitest run\"\n  }\n}\n",
+  )
+  write_file(path_join(npm_monorepo, "package-lock.json"), "{}\n")
+  write_file(path_join(npm_monorepo, "packages/web/src/app.ts"), "export const app = 1\n")
+  println("npm-monorepo " + fingerprint_signature(project_fingerprint(npm_monorepo)))
+
+  let pnpm_monorepo = path_join(root, "pnpm-monorepo")
+  mkdir(pnpm_monorepo)
+  mkdir(path_join(pnpm_monorepo, "apps/web"))
+  write_file(
+    path_join(pnpm_monorepo, "package.json"),
+    "{\n  \"name\": \"pnpm-monorepo\",\n  \"private\": true,\n  \"workspaces\": [\"apps/*\"],\n  \"packageManager\": \"pnpm@9.0.0\",\n  \"dependencies\": {\n    \"next\": \"15.0.0\",\n    \"react\": \"19.0.0\"\n  },\n  \"scripts\": {\n    \"build\": \"next build\"\n  }\n}\n",
+  )
+  write_file(path_join(pnpm_monorepo, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n")
+  write_file(path_join(pnpm_monorepo, "apps/web/next.config.ts"), "export default {}\n")
+  println("pnpm-monorepo " + fingerprint_signature(project_fingerprint(pnpm_monorepo)))
+
+  let python_poetry = path_join(root, "python-poetry")
+  mkdir(python_poetry)
+  mkdir(path_join(python_poetry, "tests"))
+  write_file(
+    path_join(python_poetry, "pyproject.toml"),
+    "[tool.poetry]\nname = \"svc\"\nversion = \"0.1.0\"\n[tool.poetry.dependencies]\npython = \"^3.12\"\nfastapi = \"^0.110\"\n[tool.poetry.group.dev.dependencies]\npytest = \"^8.0\"\n",
+  )
+  write_file(path_join(python_poetry, "poetry.lock"), "# lock\n")
+  println("python-poetry " + fingerprint_signature(project_fingerprint(python_poetry)))
+
+  let python_uv = path_join(root, "python-uv")
+  mkdir(python_uv)
+  mkdir(path_join(python_uv, "tests"))
+  write_file(
+    path_join(python_uv, "pyproject.toml"),
+    "[project]\nname = \"svc\"\ndependencies = [\"fastapi>=0.110\", \"pytest>=8.0\"]\n[tool.uv]\n",
+  )
+  write_file(path_join(python_uv, "uv.lock"), "# lock\n")
+  println("python-uv " + fingerprint_signature(project_fingerprint(python_uv)))
+
+  let go_module = path_join(root, "go-module")
+  mkdir(go_module)
+  mkdir(path_join(go_module, "pkg"))
+  write_file(
+    path_join(go_module, "go.mod"),
+    "module github.com/acme/service\n\ngo 1.23\n",
+  )
+  write_file(path_join(go_module, "go.sum"), "example v0.0.0 h1:abc\n")
+  write_file(path_join(go_module, "pkg/service.go"), "package pkg\n")
+  println("go-module " + fingerprint_signature(project_fingerprint(go_module)))
+
+  let mixed_repo = path_join(root, "mixed-repo")
+  mkdir(mixed_repo)
+  mkdir(path_join(mixed_repo, ".git"))
+  mkdir(path_join(mixed_repo, ".github/workflows"))
+  mkdir(path_join(mixed_repo, "backend"))
+  mkdir(path_join(mixed_repo, "portal/tests"))
+  write_file(
+    path_join(mixed_repo, "backend/Cargo.toml"),
     "[package]\nname = \"backend\"\nversion = \"0.1.0\"\n[dependencies]\naxum = \"0.8\"\n",
   )
-  write_file(path_join(root, "backend/Cargo.lock"), "# lock\n")
+  write_file(path_join(mixed_repo, "backend/Cargo.lock"), "# lock\n")
   write_file(
-    path_join(root, "frontend/package.json"),
-    "{\n  \"name\": \"frontend\",\n  \"packageManager\": \"pnpm@9.0.0\",\n  \"dependencies\": {\n    \"next\": \"15.0.0\",\n    \"react\": \"19.0.0\"\n  }\n}\n",
+    path_join(mixed_repo, "portal/package.json"),
+    "{\n  \"name\": \"portal\",\n  \"packageManager\": \"pnpm@9.0.0\",\n  \"dependencies\": {\n    \"next\": \"15.0.0\",\n    \"react\": \"19.0.0\"\n  }\n}\n",
   )
-  write_file(path_join(root, "frontend/next.config.ts"), "export default {}\n")
-  write_file(path_join(root, "frontend/pnpm-lock.yaml"), "lockfileVersion: '9.0'\n")
-  write_file(path_join(root, ".github/workflows/ci.yml"), "name: ci\non: push\n")
-  let fingerprint: ProjectFingerprint = project_fingerprint(root)
-  println(fingerprint.primary_language == "mixed")
-  println(fingerprint.languages[0] == "rust")
-  println(fingerprint.languages[1] == "typescript")
-  println(fingerprint.frameworks[0] == "axum")
-  println(fingerprint.frameworks[1] == "next")
-  println(fingerprint.frameworks[2] == "react")
-  println(fingerprint.package_managers[0] == "cargo")
-  println(fingerprint.package_managers[1] == "pnpm")
-  println(fingerprint.has_tests)
-  println(fingerprint.has_ci)
-  println(fingerprint.lockfile_paths[0] == "backend/Cargo.lock")
-  println(fingerprint.lockfile_paths[1] == "frontend/pnpm-lock.yaml")
+  write_file(path_join(mixed_repo, "portal/next.config.ts"), "export default {}\n")
+  write_file(path_join(mixed_repo, "portal/pnpm-lock.yaml"), "lockfileVersion: '9.0'\n")
+  write_file(path_join(mixed_repo, ".github/workflows/ci.yml"), "name: ci\non: push\n")
+  println("mixed-repo " + fingerprint_signature(project_fingerprint(mixed_repo)))
+
+  let empty_dir = path_join(root, "empty-dir")
+  mkdir(empty_dir)
+  println("empty-dir " + fingerprint_signature(project_fingerprint(empty_dir)))
 }
