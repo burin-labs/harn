@@ -1,0 +1,17 @@
+pipeline default(task) {
+  fn countdown(n, acc) {
+    if n <= 0 {
+      return acc
+    }
+    return countdown(n - 1, acc + 1)
+  }
+  var i = 0
+  var total = 0
+  while i < 500 {
+    total = total + countdown(60, 0)
+    i = i + 1
+  }
+  if total < 0 {
+    log("unreachable")
+  }
+}

@@ -1,0 +1,11 @@
+pipeline default(task) {
+  var i = 0
+  var total = 0
+  while i < 200000 {
+    total = total + (i + 3) * 2 - 1
+    i = i + 1
+  }
+  if total < 0 {
+    log("unreachable")
+  }
+}

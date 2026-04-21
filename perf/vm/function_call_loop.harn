@@ -1,0 +1,14 @@
+pipeline default(task) {
+  fn step(value) {
+    return value + 1
+  }
+  var i = 0
+  var total = 0
+  while i < 100000 {
+    total = step(total)
+    i = i + 1
+  }
+  if total < 0 {
+    log("unreachable")
+  }
+}

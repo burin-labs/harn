@@ -1,0 +1,12 @@
+pipeline default(task) {
+  let record = {hot: 7, cold: 2, nested: {value: 3}}
+  var i = 0
+  var total = 0
+  while i < 150000 {
+    total = total + record.hot + record.nested.value
+    i = i + 1
+  }
+  if total < 0 {
+    log("unreachable")
+  }
+}

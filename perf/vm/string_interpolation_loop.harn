@@ -1,0 +1,16 @@
+pipeline default(task) {
+  var i = 0
+  var text = "x"
+  var total = 0
+  while i < 5000 {
+    text = "${text}${i % 10}"
+    if len(text) > 64 {
+      text = "x"
+    }
+    total = total + len(text)
+    i = i + 1
+  }
+  if total < 0 {
+    log("unreachable")
+  }
+}

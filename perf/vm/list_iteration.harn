@@ -1,0 +1,9 @@
+pipeline default(task) {
+  var total = 0
+  for value in range(0, 100000) {
+    total = total + value
+  }
+  if total < 0 {
+    log("unreachable")
+  }
+}

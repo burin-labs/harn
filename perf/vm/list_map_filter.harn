@@ -1,0 +1,14 @@
+pipeline default(task) {
+  let input = range(0, 1000).to_list()
+  var iteration = 0
+  var total = 0
+  while iteration < 200 {
+    let evens = input.filter({ value -> value % 2 == 0 })
+    let doubled = evens.map({ value -> value * 2 })
+    total = total + len(doubled)
+    iteration = iteration + 1
+  }
+  if total < 0 {
+    log("unreachable")
+  }
+}
