@@ -3248,9 +3248,9 @@ fn predicate_value_as_bool(value: VmValue) -> Result<bool, String> {
         VmValue::EnumVariant {
             enum_name,
             variant,
-            mut fields,
-        } if enum_name == "Result" && variant == "Ok" => match fields.pop() {
-            Some(VmValue::Bool(result)) => Ok(result),
+            fields,
+        } if enum_name.as_ref() == "Result" && variant.as_ref() == "Ok" => match fields.first() {
+            Some(VmValue::Bool(result)) => Ok(*result),
             Some(other) => Err(format!(
                 "predicate Result.Ok payload must be bool, got {}",
                 other.type_name()
@@ -3261,7 +3261,7 @@ fn predicate_value_as_bool(value: VmValue) -> Result<bool, String> {
             enum_name,
             variant,
             fields,
-        } if enum_name == "Result" && variant == "Err" => Err(fields
+        } if enum_name.as_ref() == "Result" && variant.as_ref() == "Err" => Err(fields
             .first()
             .map(VmValue::display)
             .unwrap_or_else(|| "predicate returned Result.Err".to_string())),

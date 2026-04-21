@@ -17,7 +17,7 @@ pub struct VmTaskHandle {
 /// A channel handle for the VM (uses tokio mpsc).
 #[derive(Debug, Clone)]
 pub struct VmChannelHandle {
-    pub name: String,
+    pub name: Rc<str>,
     pub sender: Arc<tokio::sync::mpsc::Sender<VmValue>>,
     pub receiver: Arc<tokio::sync::Mutex<tokio::sync::mpsc::Receiver<VmValue>>>,
     pub closed: Arc<AtomicBool>,

@@ -172,19 +172,15 @@ impl super::super::Vm {
                         match result {
                             Ok(val) => {
                                 succeeded += 1;
-                                results.push(VmValue::EnumVariant {
-                                    enum_name: "Result".into(),
-                                    variant: "Ok".into(),
-                                    fields: vec![val],
-                                });
+                                results.push(VmValue::enum_variant("Result", "Ok", vec![val]));
                             }
                             Err(e) => {
                                 failed += 1;
-                                results.push(VmValue::EnumVariant {
-                                    enum_name: "Result".into(),
-                                    variant: "Err".into(),
-                                    fields: vec![VmValue::String(Rc::from(e.to_string()))],
-                                });
+                                results.push(VmValue::enum_variant(
+                                    "Result",
+                                    "Err",
+                                    vec![VmValue::String(Rc::from(e.to_string()))],
+                                ));
                             }
                         }
                     }

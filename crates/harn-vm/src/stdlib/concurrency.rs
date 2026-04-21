@@ -49,7 +49,7 @@ fn try_poll_channels(channels: &[VmValue]) -> (Option<(usize, VmValue, String)>,
         if let VmValue::Channel(ch) = ch_val {
             if let Ok(mut rx) = ch.receiver.try_lock() {
                 match rx.try_recv() {
-                    Ok(val) => return (Some((i, val, ch.name.clone())), false),
+                    Ok(val) => return (Some((i, val, ch.name.to_string())), false),
                     Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {
                         all_closed = false;
                     }
@@ -83,7 +83,7 @@ pub(crate) fn register_concurrency_builtins(vm: &mut Vm) {
         // threads — see the thread-local invariant on crate::llm::agent::emit_agent_event.
         #[allow(clippy::arc_with_non_send_sync)]
         Ok(VmValue::Channel(VmChannelHandle {
-            name,
+            name: Rc::from(name),
             sender: Arc::new(tx),
             receiver: Arc::new(tokio::sync::Mutex::new(rx)),
             closed: Arc::new(AtomicBool::new(false)),

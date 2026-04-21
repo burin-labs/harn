@@ -34,8 +34,8 @@ impl super::super::Vm {
                     enum_name,
                     variant,
                     fields,
-                } if enum_name == "Result" => {
-                    if variant == "Ok" {
+                } if enum_name.as_ref() == "Result" => {
+                    if variant.as_ref() == "Ok" {
                         self.stack
                             .push(fields.first().cloned().unwrap_or(VmValue::Nil));
                     } else {

@@ -59,7 +59,7 @@ impl Debugger {
             } => {
                 let children: Vec<(String, VmValue)> =
                     fields.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-                let display = struct_name.clone();
+                let display = struct_name.to_string();
                 if children.is_empty() {
                     (0, display)
                 } else {

@@ -2,6 +2,17 @@ use std::rc::Rc;
 
 use super::*;
 
+#[cfg(target_pointer_width = "64")]
+#[test]
+fn vm_value_layout_budget() {
+    assert_eq!(std::mem::size_of::<VmValue>(), 48);
+    assert_eq!(std::mem::size_of::<Option<VmValue>>(), 48);
+    assert_eq!(std::mem::size_of::<VmChannelHandle>(), 40);
+    assert_eq!(std::mem::size_of::<VmAtomicHandle>(), 8);
+    assert_eq!(std::mem::size_of::<VmRange>(), 24);
+    assert_eq!(std::mem::size_of::<VmGenerator>(), 16);
+}
+
 fn s(val: &str) -> VmValue {
     VmValue::String(Rc::from(val))
 }

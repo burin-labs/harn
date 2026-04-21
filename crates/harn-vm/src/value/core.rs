@@ -13,6 +13,11 @@ pub type VmAsyncBuiltinFn =
     Rc<dyn Fn(Vec<VmValue>) -> Pin<Box<dyn Future<Output = Result<VmValue, VmError>>>>>;
 
 /// VM runtime value.
+///
+/// Rare compound payloads use shared pointers so cloning or moving common
+/// values does not pay for the largest enum alternatives. Unsafe layouts such
+/// as NaN boxing or tagged pointers are deliberately deferred until Harn has a
+/// stronger object/heap story.
 #[derive(Debug, Clone)]
 pub enum VmValue {
     Int(i64),
@@ -36,13 +41,13 @@ pub enum VmValue {
     },
     Duration(u64),
     EnumVariant {
-        enum_name: String,
-        variant: String,
-        fields: Vec<VmValue>,
+        enum_name: Rc<str>,
+        variant: Rc<str>,
+        fields: Rc<Vec<VmValue>>,
     },
     StructInstance {
-        struct_name: String,
-        fields: BTreeMap<String, VmValue>,
+        struct_name: Rc<str>,
+        fields: Rc<BTreeMap<String, VmValue>>,
     },
     TaskHandle(String),
     Channel(VmChannelHandle),
@@ -61,6 +66,28 @@ pub enum VmValue {
 }
 
 impl VmValue {
+    pub fn enum_variant(
+        enum_name: impl Into<Rc<str>>,
+        variant: impl Into<Rc<str>>,
+        fields: Vec<VmValue>,
+    ) -> Self {
+        VmValue::EnumVariant {
+            enum_name: enum_name.into(),
+            variant: variant.into(),
+            fields: Rc::new(fields),
+        }
+    }
+
+    pub fn struct_instance(
+        struct_name: impl Into<Rc<str>>,
+        fields: BTreeMap<String, VmValue>,
+    ) -> Self {
+        VmValue::StructInstance {
+            struct_name: struct_name.into(),
+            fields: Rc::new(fields),
+        }
+    }
+
     pub fn is_truthy(&self) -> bool {
         match self {
             VmValue::Bool(b) => *b,

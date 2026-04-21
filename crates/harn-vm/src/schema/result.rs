@@ -10,11 +10,7 @@ pub(super) struct ValidationResult {
 }
 
 pub(super) fn result_ok_value(value: VmValue) -> VmValue {
-    VmValue::EnumVariant {
-        enum_name: "Result".to_string(),
-        variant: "Ok".to_string(),
-        fields: vec![value],
-    }
+    VmValue::enum_variant("Result", "Ok", vec![value])
 }
 
 pub(super) fn result_err_value(errors: Vec<String>, value: Option<VmValue>) -> VmValue {
@@ -40,9 +36,5 @@ pub(super) fn result_err_value(errors: Vec<String>, value: Option<VmValue>) -> V
     if let Some(value) = value {
         payload.insert("value".to_string(), value);
     }
-    VmValue::EnumVariant {
-        enum_name: "Result".to_string(),
-        variant: "Err".to_string(),
-        fields: vec![VmValue::Dict(Rc::new(payload))],
-    }
+    VmValue::enum_variant("Result", "Err", vec![VmValue::Dict(Rc::new(payload))])
 }

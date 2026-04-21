@@ -107,7 +107,7 @@ pub(crate) fn register_shape_builtins(vm: &mut Vm) {
 
         let fields: Option<&BTreeMap<String, VmValue>> = match &val {
             VmValue::Dict(map) => Some(map.as_ref()),
-            VmValue::StructInstance { fields, .. } => Some(fields),
+            VmValue::StructInstance { fields, .. } => Some(fields.as_ref()),
             _ => None,
         };
         let fields = match fields {
@@ -167,14 +167,8 @@ pub(crate) fn register_shape_builtins(vm: &mut Vm) {
         let struct_name = args.first().map(|a| a.display()).unwrap_or_default();
         let fields_dict = args.get(1).cloned().unwrap_or(VmValue::Nil);
         match fields_dict {
-            VmValue::Dict(d) => Ok(VmValue::StructInstance {
-                struct_name,
-                fields: (*d).clone(),
-            }),
-            _ => Ok(VmValue::StructInstance {
-                struct_name,
-                fields: BTreeMap::new(),
-            }),
+            VmValue::Dict(d) => Ok(VmValue::struct_instance(struct_name, d.as_ref().clone())),
+            _ => Ok(VmValue::struct_instance(struct_name, BTreeMap::new())),
         }
     });
 }
@@ -212,7 +206,7 @@ fn assert_shape_fields(
                     let inner_spec = &type_spec[1..type_spec.len() - 1];
                     let nested_fields: Option<&BTreeMap<String, VmValue>> = match val {
                         VmValue::Dict(map) => Some(map.as_ref()),
-                        VmValue::StructInstance { fields, .. } => Some(fields),
+                        VmValue::StructInstance { fields, .. } => Some(fields.as_ref()),
                         _ => None,
                     };
                     match nested_fields {
