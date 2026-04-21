@@ -1,4 +1,4 @@
-.PHONY: setup install-hooks check fmt fmt-harn fmt-harn-fix lint lint-md lint-harn test test-cargo test-fast conformance all release-gate portal portal-check portal-demo gen-highlight check-highlight check-docs-snippets
+.PHONY: setup install-hooks check fmt fmt-harn fmt-harn-fix lint lint-md lint-harn test test-cargo test-fast conformance bench-vm all release-gate portal portal-check portal-demo gen-highlight check-highlight check-docs-snippets
 
 # Full quality check: format first, then lint/test in parallel.
 # Usage: make all -j       (parallel checks after formatting)
@@ -45,6 +45,9 @@ test-fast:
 # Run Harn conformance test suite
 conformance:
 	cargo run --bin harn -- test conformance
+
+bench-vm:
+	./scripts/bench_vm.sh
 
 # Lint markdown files
 lint-md:

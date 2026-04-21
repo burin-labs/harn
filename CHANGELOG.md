@@ -26,6 +26,10 @@ granular archaeology.
   manifest-driven orchestrator deploys against Fly, Railway, or Render
   from the CLI, with provider-specific starter configs shipped under
   `deploy/` for quick onboarding.
+- **VM microbenchmark suite (#402, #415).** A deterministic Harn
+  fixture set under `perf/vm/` plus `scripts/bench_vm.sh` and a
+  `make bench-vm` target, with a `perf/vm/BASELINE.md` baseline table
+  the script can diff against to catch VM performance regressions.
 
 ### Fixed
 

@@ -80,6 +80,7 @@ Useful shortcuts:
 
 ```bash
 make check       # alias for make all
+make bench-vm    # opt-in interpreter microbenchmark suite
 make portal      # launch the local Harn observability portal
 make setup       # rerun repo bootstrap
 make test-cargo  # force plain cargo test --workspace
@@ -94,6 +95,30 @@ This runs:
 - `harn lint` -- Harn linter on conformance tests
 - `make test` -- Rust workspace tests (`cargo nextest` when available)
 - `harn test conformance` -- Conformance test suite
+
+## Interpreter microbenchmarks
+
+The VM microbenchmark suite is opt-in and is not part of `make all`. It is
+intended for before/after measurements when changing interpreter behavior,
+opcode handlers, or stdlib collection dispatch:
+
+```bash
+make bench-vm
+```
+
+The target runs deterministic fixtures under `perf/vm/` in release mode using
+the existing `harn bench` command. For repeatable local comparisons, run it a
+few times on the same machine with the same iteration count and compare the
+average wall time values:
+
+```bash
+./scripts/bench_vm.sh --iterations 20 --baseline perf/vm/BASELINE.md
+```
+
+Local CPU load and thermal state can move results by several percent, so treat
+small differences as noise unless they reproduce consistently. When running
+benchmarks from multiple worktrees, set a per-run `CARGO_TARGET_DIR` to avoid
+build contention.
 
 Pre-commit hooks (`.githooks/pre-commit`) run fmt + clippy + highlight keyword
 regeneration + markdown lint automatically. Pre-push hooks

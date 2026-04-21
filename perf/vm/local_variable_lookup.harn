@@ -1,0 +1,19 @@
+pipeline default(task) {
+  let a = 1
+  let b = 2
+  let c = 3
+  let d = 4
+  let e = 5
+  let f = 6
+  let g = 7
+  let h = 8
+  var i = 0
+  var total = 0
+  while i < 200000 {
+    total = total + a + b + c + d + e + f + g + h
+    i = i + 1
+  }
+  if total < 0 {
+    log("unreachable")
+  }
+}
