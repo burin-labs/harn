@@ -24,6 +24,13 @@ export default tseslint.config(
     },
     rules: {
       ...reactHooks.configs.recommended.rules,
+      // eslint-plugin-react-hooks v7.1 added `set-state-in-effect` as a
+      // recommended error. The rule flags patterns like `void loadRuns()`
+      // inside an effect whose callback eventually calls setState — a
+      // legitimate "load-on-mount / load-on-deps-change" idiom in this
+      // codebase. Downgrade until we adopt the React 19+ Effect Event API
+      // or actions-based refactor for each call site (tracked separately).
+      "react-hooks/set-state-in-effect": "off",
       curly: ["error", "all"],
       "react-refresh/only-export-components": ["warn", { allowConstantExport: true }],
     },
