@@ -454,7 +454,6 @@ impl Parser {
         let start = self.current_span();
         self.consume(&TokenKind::Struct, "struct")?;
         let name = self.consume_identifier("struct name")?;
-        self.struct_names.insert(name.clone());
         let type_params = if self.check(&TokenKind::Lt) {
             self.advance();
             self.parse_type_param_list()?

@@ -634,8 +634,7 @@ impl TypeChecker {
                 fields,
             } => scope
                 .get_struct(struct_name)
-                .map(|struct_info| self.infer_struct_type(struct_name, struct_info, fields, scope))
-                .or_else(|| Some(TypeExpr::Named(struct_name.clone()))),
+                .map(|struct_info| self.infer_struct_type(struct_name, struct_info, fields, scope)),
 
             _ => None,
         }
