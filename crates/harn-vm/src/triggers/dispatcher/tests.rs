@@ -2232,6 +2232,88 @@ async fn waitpoint_wait_releases_singleton_flow_control_while_waiting() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn monitor_wait_releases_singleton_flow_control_while_waiting() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (_dir, log, dispatcher) = dispatcher_fixture_with_flow_control(
+                r#"
+import "std/triggers"
+import { wait_for } from "std/monitors"
+
+pub fn coordinated_handler(event: TriggerEvent) -> string {
+  if event.dedupe_key == "delivery-monitor-wait-1" {
+    let ready_at = timestamp() * 1000 + 60
+    let result = wait_for({
+      wait_id: "monitor-singleton",
+      timeout: 500ms,
+      poll_interval: 20ms,
+      source: {label: "monitor-singleton", poll: { ->
+        return {ready: timestamp() * 1000 >= ready_at}
+      }},
+      condition: { state -> state.ready },
+    })
+    return "first:" + result.status
+  }
+  return "second:completed"
+}
+"#,
+                "coordinated_handler",
+                None,
+                TriggerRetryConfig::default(),
+                crate::triggers::TriggerFlowControlConfig {
+                    singleton: Some(crate::triggers::TriggerSingletonConfig { key: None }),
+                    ..Default::default()
+                },
+            )
+            .await;
+
+            let dispatcher_for_task = dispatcher.clone();
+            let first = tokio::task::spawn_local(async move {
+                dispatcher_for_task
+                    .dispatch_event(trigger_event("issues.opened", "delivery-monitor-wait-1"))
+                    .await
+                    .expect("first dispatch succeeds")
+            });
+
+            tokio::time::sleep(Duration::from_millis(20)).await;
+
+            let second = dispatcher
+                .dispatch_event(trigger_event("issues.opened", "delivery-monitor-wait-2"))
+                .await
+                .expect("second dispatch completes");
+            let first = first.await.expect("join waiting monitor leader");
+
+            assert_eq!(first[0].status, DispatchStatus::Succeeded);
+            assert_eq!(second[0].status, DispatchStatus::Succeeded);
+            assert_eq!(first[0].result, Some(serde_json::json!("first:matched")));
+            assert_eq!(
+                second[0].result,
+                Some(serde_json::json!("second:completed"))
+            );
+
+            let events =
+                read_topic(log.clone(), "trigger.singleton.github-new-issue_v1__global").await;
+            let event_kinds = events
+                .into_iter()
+                .map(|(_, event)| event.kind)
+                .collect::<Vec<_>>();
+            assert_eq!(
+                event_kinds,
+                vec![
+                    "singleton_acquired".to_string(),
+                    "singleton_released".to_string(),
+                    "singleton_acquired".to_string(),
+                    "singleton_released".to_string(),
+                    "singleton_acquired".to_string(),
+                    "singleton_released".to_string(),
+                ]
+            );
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn flow_control_debounce_keeps_latest_event() {
     let local = tokio::task::LocalSet::new();
     local

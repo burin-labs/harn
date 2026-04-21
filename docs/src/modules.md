@@ -81,7 +81,8 @@ code or inside any pipeline.
 described below (`std/text`, `std/json`, `std/math`, `std/collections`,
 `std/path`, `std/vision`, `std/context`, `std/agent_state`, `std/agents`,
 `std/runtime`, `std/review`, `std/experiments`, `std/project`,
-`std/worktree`, `std/checkpoint`). These add layered
+`std/monitors`, `std/worktree`,
+`std/checkpoint`). These add layered
 utilities on top of the core builtins; the core builtins themselves are
 always available.
 
@@ -102,7 +103,19 @@ import "std/agent_state"
 import "std/agents"
 import "std/review"
 import "std/experiments"
+import "std/monitors"
 ```
+
+### std/monitors
+
+Monitor waits for external state with deterministic replay records:
+
+| Function | Description |
+|---|---|
+| `wait_for(options)` | Poll a source until `condition(state)` is truthy or timeout expires; push-capable sources can wake early from trigger inbox events |
+
+See [Monitor stdlib](./stdlib/monitors.md) for the source shape and result
+record.
 
 ### std/text
 

@@ -1,0 +1,16 @@
+import { wait_for } from "std/monitors"
+
+pipeline test(task) {
+  let ready_at = timestamp() * 1000 + 15
+  let result = wait_for(
+    {
+    wait_id: "conformance-monitor-poll",
+    timeout: 200ms,
+    poll_interval: 5ms,
+    source: {label: "conformance-poll", poll: { _ -> return {ready: timestamp() * 1000 >= ready_at} }},
+    condition: { state -> state.ready },
+  },
+  )
+  println(result.status == "matched")
+  println(result.poll_count >= 2)
+}

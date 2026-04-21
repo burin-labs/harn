@@ -28,9 +28,13 @@ type GitHubPushEventPayload = {provider: "github", event: "push", action: string
 
 type GitHubWorkflowRunEventPayload = {provider: "github", event: "workflow_run", action: string | nil, delivery_id: string | nil, installation_id: int | nil, workflow_run: dict, raw: dict}
 
+type GitHubDeploymentStatusEventPayload = {provider: "github", event: "deployment_status", action: string | nil, delivery_id: string | nil, installation_id: int | nil, deployment_status: dict, deployment: dict, raw: dict}
+
+type GitHubCheckRunEventPayload = {provider: "github", event: "check_run", action: string | nil, delivery_id: string | nil, installation_id: int | nil, check_run: dict, raw: dict}
+
 type GitHubOtherEventPayload = {provider: "github", event: string, action: string | nil, delivery_id: string | nil, installation_id: int | nil, raw: dict}
 
-type GitHubEventPayload = GitHubIssuesEventPayload | GitHubPullRequestEventPayload | GitHubIssueCommentEventPayload | GitHubPullRequestReviewEventPayload | GitHubPushEventPayload | GitHubWorkflowRunEventPayload | GitHubOtherEventPayload
+type GitHubEventPayload = GitHubIssuesEventPayload | GitHubPullRequestEventPayload | GitHubIssueCommentEventPayload | GitHubPullRequestReviewEventPayload | GitHubPushEventPayload | GitHubWorkflowRunEventPayload | GitHubDeploymentStatusEventPayload | GitHubCheckRunEventPayload | GitHubOtherEventPayload
 
 type SlackEventCommon = {provider: "slack", event: string, event_id: string | nil, api_app_id: string | nil, team_id: string | nil, channel_id: string | nil, user_id: string | nil, event_ts: string | nil, raw: dict}
 

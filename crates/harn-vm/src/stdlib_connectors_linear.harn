@@ -1,5 +1,6 @@
 import { filter_nil } from "std/collections"
 import { merge } from "std/json"
+import { wait_for } from "std/monitors"
 
 var linear_connector_config = {}
 
@@ -17,21 +18,92 @@ fn __call(method, params = {}) {
 }
 
 pub fn list_issues(filter = nil, options = nil) {
-  return __call("list_issues", filter_nil((options ?? {}) + {filter: filter}))
+  return __call("list_issues", filter_nil(options ?? {} + {filter: filter}))
 }
 
 pub fn update_issue(id, changes, options = nil) {
-  return __call("update_issue", (options ?? {}) + {id: id, changes: changes})
+  return __call("update_issue", options ?? {} + {id: id, changes: changes})
 }
 
 pub fn create_comment(issue_id, body, options = nil) {
-  return __call("create_comment", (options ?? {}) + {issue_id: issue_id, body: body})
+  return __call("create_comment", options ?? {} + {issue_id: issue_id, body: body})
 }
 
 pub fn search(query, options = nil) {
-  return __call("search", (options ?? {}) + {query: query})
+  return __call("search", options ?? {} + {query: query})
 }
 
 pub fn graphql(query, variables = nil, options = nil) {
-  return __call("graphql", filter_nil((options ?? {}) + {query: query, variables: variables}))
+  return __call("graphql", filter_nil(options ?? {} + {query: query, variables: variables}))
+}
+
+fn __linear_event(log_event) {
+  return log_event?.payload?.event
+}
+
+fn __linear_payload(log_event) {
+  return __linear_event(log_event)?.provider_payload
+}
+
+fn __linear_issue_matches(payload, issue_id) {
+  return issue_id == nil
+    || payload?.issue?.id == issue_id
+    || payload?.issue?.identifier == issue_id
+    || payload?.issue?.number == issue_id
+}
+
+fn __linear_state_matches(issue, target_state) {
+  return target_state == nil
+    || issue?.state?.id == target_state
+    || issue?.state?.name == target_state
+    || issue?.state?.type == target_state
+}
+
+/** issue_state_source. */
+pub fn issue_state_source(issue_id, target_state = nil, options = nil) {
+  return {
+    label: "linear.issue_state:" + to_string(issue_id) + ":" + to_string(target_state ?? "*"),
+    prefers_push: true,
+    poll: { ctx ->
+    let payload = __linear_payload(ctx?.last_push_event)
+    if payload != nil && __linear_issue_matches(payload, issue_id) {
+      return {
+    matched: __linear_state_matches(payload.issue, target_state),
+    issue: payload.issue,
+    state: payload?.issue?.state,
+    event: payload,
+  }
+    }
+    let response = graphql(
+    "query HarnMonitorIssue($id: String!) { issue(id: $id) { id identifier title state { id name type } } }",
+    {id: issue_id},
+    options,
+  )
+    let issue = response?.data?.issue
+    return {
+    matched: __linear_state_matches(issue, target_state),
+    issue: issue,
+    state: issue?.state,
+    event: nil,
+  }
+  },
+    push_filter: { log_event ->
+    let event = __linear_event(log_event)
+    let payload = __linear_payload(log_event)
+    return event?.provider == "linear"
+    && event?.kind == "issue"
+    && __linear_issue_matches(payload, issue_id)
+    && __linear_state_matches(payload?.issue, target_state)
+  },
+  }
+}
+
+/** wait_until_issue_state. */
+pub fn wait_until_issue_state(issue_id, target_state, options = nil) {
+  return wait_for(
+    merge(
+    options ?? {},
+    {source: issue_state_source(issue_id, target_state, options), condition: { state -> state.matched }},
+  ),
+  )
 }

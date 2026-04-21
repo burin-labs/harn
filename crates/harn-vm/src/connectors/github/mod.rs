@@ -97,6 +97,8 @@ enum ParsedGitHubEvent {
     PullRequestReview(PullRequestReviewEvent),
     Push(PushEvent),
     WorkflowRun(WorkflowRunEvent),
+    DeploymentStatus(DeploymentStatusEvent),
+    CheckRun(CheckRunEvent),
     Other { kind: String, raw: JsonValue },
 }
 
@@ -144,6 +146,21 @@ struct PushEvent {
 struct WorkflowRunEvent {
     action: Option<String>,
     workflow_run: JsonValue,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Deserialize)]
+struct DeploymentStatusEvent {
+    action: Option<String>,
+    deployment_status: JsonValue,
+    deployment: JsonValue,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Deserialize)]
+struct CheckRunEvent {
+    action: Option<String>,
+    check_run: JsonValue,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -242,6 +259,18 @@ struct CreateIssueArgs {
     body: Option<String>,
     #[serde(default)]
     labels: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ApiCallArgs {
+    #[serde(flatten)]
+    config: GitHubClientConfigArgs,
+    path: String,
+    method: String,
+    #[serde(default)]
+    body: Option<JsonValue>,
+    #[serde(default)]
+    accept: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -615,6 +644,22 @@ impl ConnectorClient for GitHubClient {
                     &format!("/repos/{}/{}/issues", repo.owner, repo.repo),
                     Some(JsonValue::Object(body)),
                     "application/vnd.github+json",
+                )
+                .await
+            }
+            "api_call" => {
+                let args: ApiCallArgs = parse_args(args)?;
+                let config = self.resolve_client_config(&args.config)?;
+                let method = Method::from_bytes(args.method.as_bytes())
+                    .map_err(|error| ClientError::InvalidArgs(error.to_string()))?;
+                self.request_json(
+                    &config,
+                    method,
+                    &args.path,
+                    args.body,
+                    args.accept
+                        .as_deref()
+                        .unwrap_or("application/vnd.github+json"),
                 )
                 .await
             }
@@ -1005,6 +1050,12 @@ fn parse_typed_event(kind: &str, payload: &JsonValue) -> Result<ParsedGitHubEven
             .map_err(|error| ConnectorError::Json(error.to_string())),
         "workflow_run" => serde_json::from_value(payload.clone())
             .map(ParsedGitHubEvent::WorkflowRun)
+            .map_err(|error| ConnectorError::Json(error.to_string())),
+        "deployment_status" => serde_json::from_value(payload.clone())
+            .map(ParsedGitHubEvent::DeploymentStatus)
+            .map_err(|error| ConnectorError::Json(error.to_string())),
+        "check_run" => serde_json::from_value(payload.clone())
+            .map(ParsedGitHubEvent::CheckRun)
             .map_err(|error| ConnectorError::Json(error.to_string())),
         other => Ok(ParsedGitHubEvent::Other {
             kind: other.to_string(),

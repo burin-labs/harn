@@ -175,6 +175,21 @@ pub struct GitHubWorkflowRunEventPayload {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct GitHubDeploymentStatusEventPayload {
+    #[serde(flatten)]
+    pub common: GitHubEventCommon,
+    pub deployment_status: JsonValue,
+    pub deployment: JsonValue,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct GitHubCheckRunEventPayload {
+    #[serde(flatten)]
+    pub common: GitHubEventCommon,
+    pub check_run: JsonValue,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum GitHubEventPayload {
     Issues(GitHubIssuesEventPayload),
@@ -183,6 +198,8 @@ pub enum GitHubEventPayload {
     PullRequestReview(GitHubPullRequestReviewEventPayload),
     Push(GitHubPushEventPayload),
     WorkflowRun(GitHubWorkflowRunEventPayload),
+    DeploymentStatus(GitHubDeploymentStatusEventPayload),
+    CheckRun(GitHubCheckRunEventPayload),
     Other(GitHubEventCommon),
 }
 
@@ -1319,6 +1336,20 @@ fn github_payload(
         "workflow_run" => GitHubEventPayload::WorkflowRun(GitHubWorkflowRunEventPayload {
             common,
             workflow_run: raw.get("workflow_run").cloned().unwrap_or(JsonValue::Null),
+        }),
+        "deployment_status" => {
+            GitHubEventPayload::DeploymentStatus(GitHubDeploymentStatusEventPayload {
+                common,
+                deployment_status: raw
+                    .get("deployment_status")
+                    .cloned()
+                    .unwrap_or(JsonValue::Null),
+                deployment: raw.get("deployment").cloned().unwrap_or(JsonValue::Null),
+            })
+        }
+        "check_run" => GitHubEventPayload::CheckRun(GitHubCheckRunEventPayload {
+            common,
+            check_run: raw.get("check_run").cloned().unwrap_or(JsonValue::Null),
         }),
         _ => GitHubEventPayload::Other(common),
     };

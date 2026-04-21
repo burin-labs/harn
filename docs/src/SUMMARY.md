@@ -24,6 +24,7 @@
 - [Current session builtin](./stdlib/agent_session_current_id.md)
 - [Triggers](./triggers.md)
 - [Trigger stdlib](./stdlib/triggers.md)
+- [Monitor stdlib](./stdlib/monitors.md)
 - [Human in the loop](./hitl.md)
 - [Trust graph](./trust-graph.md)
 - [Skills](./skills.md)

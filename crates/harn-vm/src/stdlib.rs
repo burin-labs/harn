@@ -18,6 +18,7 @@ mod iter;
 pub(crate) mod json;
 mod logging;
 mod math;
+mod monitors;
 mod path;
 pub mod process;
 mod project;
@@ -94,6 +95,7 @@ pub fn register_agent_stdlib(vm: &mut Vm) {
     agents_daemon::register_daemon_builtins(vm);
     triggers_stdlib::register_trigger_builtins(vm);
     waitpoints::register_waitpoint_builtins(vm);
+    monitors::register_monitor_builtins(vm);
     hitl::register_hitl_builtins(vm);
     hitl_read::register_hitl_read_builtins(vm);
     waitpoint::register_waitpoint_builtins(vm);
@@ -147,6 +149,7 @@ pub fn reset_stdlib_state() {
     json::reset_json_state();
     host::reset_host_state();
     hitl::reset_hitl_state();
+    monitors::reset_monitor_state();
     waitpoints::reset_waitpoint_state();
     waitpoint::reset_waitpoint_state();
     agents::records::reset_eval_metrics();
