@@ -47,6 +47,13 @@ with the usual environment variables such as `OPENAI_API_KEY`,
 `ANTHROPIC_API_KEY`, or your deployment's `HARN_PROVIDER_*` /
 `HARN_SECRET_*` values.
 
+Cloud deploy templates for Render, Fly.io, and Railway live under
+`deploy/`. To generate a project-local bundle and run the provider CLI:
+
+```bash
+harn orchestrator deploy --provider fly --manifest ./harn.toml --build
+```
+
 ## Quick Start
 
 ```bash

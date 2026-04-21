@@ -1,4 +1,5 @@
 pub(crate) mod common;
+mod deploy;
 mod dlq;
 mod fire;
 mod inspect;
@@ -19,6 +20,7 @@ use crate::cli::{OrchestratorArgs, OrchestratorCommand};
 pub(crate) async fn handle(args: OrchestratorArgs) -> Result<(), String> {
     match args.command {
         OrchestratorCommand::Serve(serve_args) => serve::run(serve_args).await,
+        OrchestratorCommand::Deploy(deploy_args) => deploy::run(deploy_args).await,
         OrchestratorCommand::Reload(reload_args) => reload::run(reload_args).await,
         OrchestratorCommand::Inspect(inspect_args) => inspect::run(inspect_args).await,
         OrchestratorCommand::Fire(fire_args) => fire::run(fire_args).await,

@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: harn-orchestrator
+    runtime: image
+    image:
+      url: ghcr.io/burin-labs/harn:latest
+    disk:
+      name: harn-data
+      mountPath: /data
+      sizeGB: 10
+    envVars:
+      - key: HARN_ORCHESTRATOR_MANIFEST
+        value: "/app/harn.toml"
+      - key: HARN_ORCHESTRATOR_LISTEN
+        value: "0.0.0.0:8080"
+      - key: HARN_ORCHESTRATOR_STATE_DIR
+        value: "/data/state"
+      - key: HARN_EVENT_LOG_BACKEND
+        value: sqlite
+      - key: HARN_EVENT_LOG_SQLITE_PATH
+        value: "/data/events.sqlite"
+      - key: HARN_SECRET_PROVIDERS
+        value: env
+      - key: RUST_LOG
+        value: info
+      - fromGroup: harn-secrets
+    healthCheckPath: /healthz
