@@ -68,10 +68,15 @@ pub(crate) struct ExceptionHandler {
     pub(crate) error_type: String,
 }
 
-/// Iterator state for for-in loops: either a pre-collected vec, an async channel, or a generator.
+/// Iterator state for for-in loops.
 pub(crate) enum IterState {
     Vec {
-        items: Vec<VmValue>,
+        items: Rc<Vec<VmValue>>,
+        idx: usize,
+    },
+    Dict {
+        entries: Rc<BTreeMap<String, VmValue>>,
+        keys: Vec<String>,
         idx: usize,
     },
     Channel {
