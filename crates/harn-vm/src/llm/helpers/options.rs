@@ -398,6 +398,8 @@ pub(crate) fn extract_llm_options(
                 }
             }
         });
+    let structural_experiment =
+        crate::llm::structural_experiments::parse_structural_experiment_option(options.as_ref())?;
 
     let opts = LlmCallOptions {
         provider,
@@ -429,6 +431,8 @@ pub(crate) fn extract_llm_options(
         stream,
         provider_overrides,
         prefill,
+        structural_experiment,
+        applied_structural_experiment: None,
     };
 
     validate_options(&opts);

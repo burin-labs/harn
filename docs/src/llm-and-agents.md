@@ -115,6 +115,7 @@ println(result.text)
 | `stream` | bool | `true` | Use streaming SSE transport. Set `false` for synchronous request/response. Env: `HARN_LLM_STREAM` |
 | `timeout` | int | `120` | Request timeout in seconds |
 | `messages` | list | nil | Full message list (overrides prompt) |
+| `structural_experiment` | string/dict/closure | nil | Prompt-structure transform applied immediately before the provider call. Built-ins: `prompt_order_permutation(seed: N)`, `doubled_prompt`, `chain_of_draft`, `inverted_system`. Env: `HARN_STRUCTURAL_EXPERIMENT` |
 | `transcript` | dict | nil | Continue from a previous transcript; prompt is appended as the next user turn |
 | `model_tier` | string | nil | Resolve a configured tier alias such as `"small"`, `"mid"`, or `"frontier"` |
 
@@ -126,6 +127,19 @@ let result = llm_call("hello", nil, {
   ollama: {num_ctx: 32768}
 })
 ```
+
+Structural experiments can be enabled directly on a call:
+
+```harn
+let result = llm_call("Instruction\n\nContext block", nil, {
+  provider: "mock",
+  structural_experiment: "prompt_order_permutation(seed: 42)",
+})
+```
+
+For custom transforms, pass a closure (or a `std/experiments.custom(...)`
+spec) that rewrites `{messages, system}` and returns either `nil`, a new
+message list, or `{messages?, system?, metadata?}`.
 
 ## Tool Vault
 

@@ -347,6 +347,13 @@ pub(super) fn dump_llm_request(
         crate::llm::tools::collect_tool_schemas(opts.tools.as_ref(), opts.native_tools.as_deref());
     emit_tool_schemas_if_changed(&tool_schemas);
 
+    let structural_experiment = opts
+        .applied_structural_experiment
+        .as_ref()
+        .map(serde_json::to_value)
+        .transpose()
+        .unwrap_or(None)
+        .unwrap_or(serde_json::Value::Null);
     append_llm_transcript_entry(&serde_json::json!({
         "type": "provider_call_request",
         "iteration": iteration,
@@ -361,6 +368,7 @@ pub(super) fn dump_llm_request(
         "tool_format": tool_format,
         "native_tool_count": opts.native_tools.as_ref().map(|tools| tools.len()).unwrap_or(0),
         "message_count": opts.messages.len(),
+        "structural_experiment": structural_experiment,
     }));
 }
 
@@ -369,7 +377,13 @@ pub(super) fn dump_llm_response(
     call_id: &str,
     result: &super::api::LlmResult,
     response_ms: u64,
+    structural_experiment: Option<&crate::llm::structural_experiments::AppliedStructuralExperiment>,
 ) {
+    let structural_experiment = structural_experiment
+        .map(serde_json::to_value)
+        .transpose()
+        .unwrap_or(None)
+        .unwrap_or(serde_json::Value::Null);
     append_llm_transcript_entry(&serde_json::json!({
         "type": "provider_call_response",
         "iteration": iteration,
@@ -387,6 +401,7 @@ pub(super) fn dump_llm_response(
         "cache_hit": result.cache_read_tokens > 0,
         "thinking": result.thinking,
         "response_ms": response_ms,
+        "structural_experiment": structural_experiment,
     }));
 }
 
@@ -554,7 +569,22 @@ pub(crate) async fn observed_llm_call(
                     ("input_tokens", serde_json::json!(result.input_tokens)),
                     ("output_tokens", serde_json::json!(result.output_tokens)),
                 ]);
-                dump_llm_response(iteration.unwrap_or(0), &call_id, &result, duration_ms);
+                dump_llm_response(
+                    iteration.unwrap_or(0),
+                    &call_id,
+                    &result,
+                    duration_ms,
+                    opts.applied_structural_experiment.as_ref(),
+                );
+                annotate_current_span(&[(
+                    "structural_experiment",
+                    opts.applied_structural_experiment
+                        .as_ref()
+                        .map(serde_json::to_value)
+                        .transpose()
+                        .unwrap_or(None)
+                        .unwrap_or(serde_json::Value::Null),
+                )]);
                 if let Some(b) = bridge {
                     b.send_call_end(
                         &call_id,
@@ -567,6 +597,7 @@ pub(crate) async fn observed_llm_call(
                             "input_tokens": result.input_tokens,
                             "output_tokens": result.output_tokens,
                             "user_visible": user_visible,
+                            "structural_experiment": opts.applied_structural_experiment.as_ref(),
                         }),
                     );
                 }

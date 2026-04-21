@@ -1,0 +1,73 @@
+/** message. */
+pub fn message(role, content) {
+  return {role: role, content: content}
+}
+
+/** prompt_order_permutation. */
+pub fn prompt_order_permutation(options = nil) {
+  let seed = options?.seed ?? 0
+  return {
+    name: "prompt_order_permutation",
+    label: "prompt_order_permutation(seed: " + to_string(seed) + ")",
+    seed: seed,
+  }
+}
+
+/** doubled_prompt. */
+pub fn doubled_prompt() {
+  return {name: "doubled_prompt", label: "doubled_prompt"}
+}
+
+/** chain_of_draft. */
+pub fn chain_of_draft() {
+  return {name: "chain_of_draft", label: "chain_of_draft"}
+}
+
+/** inverted_system. */
+pub fn inverted_system() {
+  return {name: "inverted_system", label: "inverted_system"}
+}
+
+/** custom. */
+pub fn custom(label, transform, args = nil) {
+  return {
+    name: label,
+    label: label,
+    args: args ?? {},
+    transform: transform,
+  }
+}
+
+/** latest_string_user_message. */
+pub fn latest_string_user_message(messages) {
+  var idx = len(messages)
+  while idx > 0 {
+    idx = idx - 1
+    let msg = messages[idx]
+    if msg?.role == "user" && type_of(msg?.content) == "string" {
+      return {index: idx, message: msg}
+    }
+  }
+  return nil
+}
+
+/** replace_message. */
+pub fn replace_message(messages, index, message) {
+  var out = []
+  var idx = 0
+  while idx < len(messages) {
+    out = out + [if idx == index { message } else { messages[idx] }]
+    idx = idx + 1
+  }
+  return out
+}
+
+/** prepend_message. */
+pub fn prepend_message(messages, msg) {
+  return [msg] + messages
+}
+
+/** append_message. */
+pub fn append_message(messages, msg) {
+  return messages + [msg]
+}

@@ -80,8 +80,8 @@ code or inside any pipeline.
 `import "std/..."` is only needed for the Harn-written helper modules
 described below (`std/text`, `std/json`, `std/math`, `std/collections`,
 `std/path`, `std/vision`, `std/context`, `std/agent_state`, `std/agents`,
-`std/runtime`, `std/review`, `std/project`, `std/worktree`,
-`std/checkpoint`). These add layered
+`std/runtime`, `std/review`, `std/experiments`, `std/project`,
+`std/worktree`, `std/checkpoint`). These add layered
 utilities on top of the core builtins; the core builtins themselves are
 always available.
 
@@ -101,6 +101,7 @@ import "std/context"
 import "std/agent_state"
 import "std/agents"
 import "std/review"
+import "std/experiments"
 ```
 
 ### std/text
@@ -120,6 +121,21 @@ Text processing utilities for LLM output and code analysis:
 | `detect_compile_error(output)` | Check for compile error patterns (SyntaxError, etc.) |
 | `has_got_want(output)` | Check for got/want test failure patterns |
 | `format_test_errors(output)` | Extract error-relevant lines (max 20) |
+
+### std/experiments
+
+Helpers for structural prompt experiments:
+
+| Function | Description |
+|---|---|
+| `prompt_order_permutation({seed?})` | Built-in experiment spec that permutes blank-line-separated sections of the latest user prompt |
+| `doubled_prompt()` | Built-in experiment spec that duplicates the latest user prompt at the front and back of the message list |
+| `chain_of_draft()` | Built-in experiment spec that injects a lightweight `<draft>` / final-answer scaffold |
+| `inverted_system()` | Built-in experiment spec that swaps the latest user prompt with the system prompt |
+| `custom(label, transform, args?)` | Build a closure-backed experiment spec from Harn |
+| `latest_string_user_message(messages)` | Return `{index, message}` for the latest plain-string user message |
+| `replace_message(messages, index, message)` | Return a copy of `messages` with one entry replaced |
+| `prepend_message(messages, msg)` / `append_message(messages, msg)` | Convenience helpers for custom transforms |
 
 ### std/collections
 

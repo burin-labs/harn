@@ -1133,6 +1133,27 @@ pub(crate) struct EvalArgs {
     /// Optional baseline run record for diffing.
     #[arg(long)]
     pub compare: Option<String>,
+    /// Run a pipeline twice and compare the baseline against this structural experiment.
+    #[arg(long = "structural-experiment")]
+    pub structural_experiment: Option<String>,
+    /// Replay LLM responses from a JSONL fixture file when `path` is a `.harn` pipeline.
+    #[arg(
+        long = "llm-mock",
+        value_name = "PATH",
+        conflicts_with = "llm_mock_record"
+    )]
+    pub llm_mock: Option<String>,
+    /// Record executed LLM responses into a JSONL fixture file when `path` is a `.harn` pipeline.
+    #[arg(
+        long = "llm-mock-record",
+        value_name = "PATH",
+        conflicts_with = "llm_mock"
+    )]
+    pub llm_mock_record: Option<String>,
+    /// Positional arguments forwarded to `harn run <pipeline.harn> -- ...` when
+    /// `path` is a pipeline file and `--structural-experiment` is set.
+    #[arg(last = true)]
+    pub argv: Vec<String>,
 }
 
 #[derive(Debug, Args)]

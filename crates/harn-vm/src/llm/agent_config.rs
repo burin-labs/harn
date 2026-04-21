@@ -125,6 +125,7 @@ pub(crate) fn agent_loop_result_from_llm(
             "input_tokens": result.input_tokens,
             "output_tokens": result.output_tokens,
             "tool_calls": result.tool_calls.clone(),
+            "structural_experiment": opts.applied_structural_experiment.as_ref(),
         })),
     )];
     if let Some(thinking) = result.thinking.clone() {
@@ -185,6 +186,7 @@ pub(crate) fn build_llm_call_result(
             "input_tokens": result.input_tokens,
             "output_tokens": result.output_tokens,
             "tool_calls": result.tool_calls.clone(),
+            "structural_experiment": opts.applied_structural_experiment.as_ref(),
         })),
     )];
     if let Some(thinking) = result.thinking.clone() {
@@ -541,13 +543,16 @@ pub fn register_llm_call_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Host
     vm.register_async_builtin("llm_call", move |args| {
         let bridge = b.clone();
         async move {
-            let opts = extract_llm_options(&args)?;
+            let mut opts = extract_llm_options(&args)?;
             let options = args.get(2).and_then(|a| a.as_dict()).cloned();
             let user_visible = opt_bool(&options, "user_visible");
             let retry_config = LlmRetryConfig {
                 retries: opt_int(&options, "llm_retries").unwrap_or(0) as usize,
                 backoff_ms: opt_int(&options, "llm_backoff_ms").unwrap_or(2000) as u64,
             };
+            let _ =
+                crate::llm::structural_experiments::apply_structural_experiment(&mut opts, None)
+                    .await?;
 
             let result = observed_llm_call(
                 &opts,

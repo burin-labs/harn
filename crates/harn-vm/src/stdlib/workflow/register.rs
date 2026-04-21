@@ -129,7 +129,15 @@ pub(in crate::stdlib) async fn execute_workflow(
 
     let persist_path = optional_string_option(&options, "persist_path")
         .or_else(|| optional_string_option(&options, "resume_path"))
-        .unwrap_or_else(|| format!(".harn-runs/{}.json", uuid::Uuid::now_v7()));
+        .unwrap_or_else(|| {
+            match std::env::var(crate::runtime_paths::HARN_RUN_DIR_ENV) {
+                Ok(value) if !value.trim().is_empty() => crate::orchestration::default_run_dir(),
+                _ => std::path::PathBuf::from(".harn-runs"),
+            }
+            .join(format!("{}.json", uuid::Uuid::now_v7()))
+            .display()
+            .to_string()
+        });
     let execution = parse_execution_record(options.get("execution"))?;
     let parent_run_id = optional_string_option(&options, "parent_run_id");
     let root_run_id =
