@@ -79,6 +79,7 @@ mod empty_blocks;
 mod file_header;
 mod formatting;
 mod harndoc;
+mod hitl;
 mod imports;
 mod invalid_binop;
 mod llm_rules;

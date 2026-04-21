@@ -1,14 +1,30 @@
+import "std/hitl"
 import { clear_host_mocks, mock_host_response } from "std/testing"
 import "std/triggers"
 
 pub fn hitl_handler(event: TriggerEvent) -> dict {
   let answer = ask_user("Should we continue handling " + event.kind + "?")
-  return {verdict: answer.verdict, event_id: event.id}
+  let approval: {approved: bool, reviewers: list<string>, approved_at: string, reason: string | nil, signatures: list<{reviewer: string, signed_at: string, signature: string}>} = request_approval("approve " + event.kind, {quorum: 2, reviewers: ["alice", "bob", "carol"]})
+  return {
+    verdict: answer.verdict,
+    event_id: event.id,
+    first_reviewer: approval.signatures[0].reviewer,
+    first_signed_at: approval.signatures[0].signed_at,
+    first_signature: approval.signatures[0].signature,
+  }
 }
 
 pipeline test(task) {
   clear_host_mocks()
   mock_host_response("hitl", "question", {answer: {verdict: "approved"}})
+  mock_host_response(
+    "hitl",
+    "approval",
+    [
+    {approved: true, reviewer: "alice", responded_at: "2026-04-20T12:00:00Z"},
+    {approved: true, reviewer: "bob", responded_at: "2026-04-20T12:00:01Z"},
+  ],
+  )
   let unique = to_string(to_int(timestamp())) + "-" + to_string(random_int(100000, 999999))
   let handle: TriggerHandle = trigger_register(
     {
@@ -37,4 +53,7 @@ pipeline test(task) {
   let replay: DispatchHandle = trigger_replay(fired.event_id)
   println(replay.status == "dispatched")
   println(contains(json_stringify(replay.result ?? {}), "\"verdict\":\"approved\""))
+  println(replay.result?.first_reviewer == "alice")
+  println(replay.result?.first_signed_at == fired.result?.first_signed_at)
+  println(replay.result?.first_signature == fired.result?.first_signature)
 }

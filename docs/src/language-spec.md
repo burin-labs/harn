@@ -2563,7 +2563,8 @@ records, and replay.
 
 - `ask_user<T>(prompt: string, options?: {schema?: Schema<T>, timeout?: duration, default?: T}) -> T`
 - `request_approval(action: string, options?: {detail?: any, quorum?: int, reviewers?: list<string>, deadline?: duration})`
-  returns `{approved: bool, reviewers: list<string>, approved_at: string, reason: string | nil}`.
+  returns `{approved: bool, reviewers: list<string>, approved_at: string, reason: string | nil,
+  signatures: list<{reviewer: string, signed_at: string, signature: string}>}`.
 - `dual_control<T>(n: int, m: int, action: fn() -> T, approvers?: list<string>) -> T`
 - `escalate_to(role: string, reason: string)`
   returns `{request_id: string, role: string, reason: string, trace_id: string,
@@ -2577,19 +2578,23 @@ records, and replay.
 Normative behavior:
 
 - `ask_user` appends `hitl.question_asked`, then blocks until the host appends
-  a matching response. If `schema` is present, the answer must satisfy it. If
+  a matching response. The default timeout is 24 hours unless `timeout` is
+  supplied. If `schema` is present, the answer must satisfy it. If
   the wait times out, Harn appends `hitl.timeout` and either returns
   `options.default` or throws `HumanTimeoutError`.
 - `request_approval` appends `hitl.approval_requested` and waits for the
   configured quorum. `deadline` defaults to 24 hours. Denial raises
-  `ApprovalDeniedError`. Successful completion returns the approval record.
+  `ApprovalDeniedError`. Successful completion returns the approval record,
+  including one signed reviewer timestamp receipt per counted approver.
 - `dual_control` is an approval-gated wrapper around a closure. The closure is
   not executed until quorum is satisfied. The runtime appends
   `hitl.dual_control_requested`, `hitl.dual_control_approved` /
   `hitl.dual_control_denied`, and `hitl.dual_control_executed`.
 - `escalate_to` appends `hitl.escalation_issued` and blocks until the host
-  appends `hitl.escalation_accepted`. If the host does not respond, the
-  dispatch remains paused until manual resume.
+  appends `hitl.escalation_accepted`. The request payload includes the active
+  capability policy when one is installed so hosts can resolve the requested
+  role against the same capability ceiling enforced by the VM. If the host does
+  not respond, the dispatch remains paused until manual resume.
 - `hitl_pending` reads the durable HITL topics via the active event log,
   returns `[]` when no event log is attached, filters by `since` / `until` /
   `kinds` / `agent` / `limit`, and omits requests that have already reached a
@@ -2603,7 +2608,9 @@ HITL records live in durable event-log topics:
 - `hitl.escalations`
 
 Replay is event-log-driven. During replay, HITL primitives resolve from the
-previously recorded HITL response events instead of consulting a live host.
+previously recorded HITL response events instead of consulting a live host,
+so approval reviewer identities, signed timestamps, and signatures remain
+stable across deterministic replay.
 
 ### Function type annotations
 
