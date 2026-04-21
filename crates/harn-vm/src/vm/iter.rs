@@ -9,6 +9,8 @@
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, VecDeque};
+use std::future::Future;
+use std::pin::Pin;
 use std::rc::Rc;
 
 use crate::chunk::CompiledFunction;
@@ -113,13 +115,12 @@ impl VmIter {
     ///
     /// Combinator variants (`Map`, `Filter`, `FlatMap`) invoke user-provided
     /// closures through the `vm` / `functions` parameters.
-    pub fn next<'a>(
-        &'a mut self,
-        vm: &'a mut crate::vm::Vm,
-        functions: &'a [CompiledFunction],
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Option<VmValue>, VmError>> + 'a>>
-    {
-        Box::pin(async move { self.next_impl(vm, functions).await })
+    pub async fn next(
+        &mut self,
+        vm: &mut crate::vm::Vm,
+        functions: &[CompiledFunction],
+    ) -> Result<Option<VmValue>, VmError> {
+        self.next_impl(vm, functions).await
     }
 
     async fn next_impl(
@@ -196,7 +197,7 @@ impl VmIter {
             }
             VmIter::Map { inner, f } => {
                 let f = f.clone();
-                let item = next_handle(inner, vm, functions).await?;
+                let item = next_handle_boxed(inner, vm, functions).await?;
                 match item {
                     None => {
                         *self = VmIter::Exhausted;
@@ -211,7 +212,7 @@ impl VmIter {
             VmIter::Filter { inner, p } => {
                 let p = p.clone();
                 loop {
-                    let item = next_handle(inner, vm, functions).await?;
+                    let item = next_handle_boxed(inner, vm, functions).await?;
                     match item {
                         None => {
                             *self = VmIter::Exhausted;
@@ -230,13 +231,13 @@ impl VmIter {
                 let f = f.clone();
                 loop {
                     if let Some(cur_iter) = cur.clone() {
-                        let item = next_handle(&cur_iter, vm, functions).await?;
+                        let item = next_handle_boxed(&cur_iter, vm, functions).await?;
                         if let Some(v) = item {
                             return Ok(Some(v));
                         }
                         *cur = None;
                     }
-                    let item = next_handle(inner, vm, functions).await?;
+                    let item = next_handle_boxed(inner, vm, functions).await?;
                     match item {
                         None => {
                             *self = VmIter::Exhausted;
@@ -261,7 +262,7 @@ impl VmIter {
                     *self = VmIter::Exhausted;
                     return Ok(None);
                 }
-                let item = next_handle(inner, vm, functions).await?;
+                let item = next_handle_boxed(inner, vm, functions).await?;
                 match item {
                     None => {
                         *self = VmIter::Exhausted;
@@ -278,7 +279,7 @@ impl VmIter {
             }
             VmIter::Skip { inner, remaining } => {
                 while *remaining > 0 {
-                    let item = next_handle(inner, vm, functions).await?;
+                    let item = next_handle_boxed(inner, vm, functions).await?;
                     match item {
                         None => {
                             *self = VmIter::Exhausted;
@@ -289,7 +290,7 @@ impl VmIter {
                         }
                     }
                 }
-                let item = next_handle(inner, vm, functions).await?;
+                let item = next_handle_boxed(inner, vm, functions).await?;
                 match item {
                     None => {
                         *self = VmIter::Exhausted;
@@ -303,7 +304,7 @@ impl VmIter {
                     return Ok(None);
                 }
                 let p = p.clone();
-                let item = next_handle(inner, vm, functions).await?;
+                let item = next_handle_boxed(inner, vm, functions).await?;
                 match item {
                     None => {
                         *self = VmIter::Exhausted;
@@ -322,7 +323,7 @@ impl VmIter {
             }
             VmIter::SkipWhile { inner, p, primed } => {
                 if *primed {
-                    let item = next_handle(inner, vm, functions).await?;
+                    let item = next_handle_boxed(inner, vm, functions).await?;
                     return match item {
                         None => {
                             *self = VmIter::Exhausted;
@@ -333,7 +334,7 @@ impl VmIter {
                 }
                 let p = p.clone();
                 loop {
-                    let item = next_handle(inner, vm, functions).await?;
+                    let item = next_handle_boxed(inner, vm, functions).await?;
                     match item {
                         None => {
                             *self = VmIter::Exhausted;
@@ -351,7 +352,7 @@ impl VmIter {
                 }
             }
             VmIter::Zip { a, b } => {
-                let ia = next_handle(a, vm, functions).await?;
+                let ia = next_handle_boxed(a, vm, functions).await?;
                 let x = match ia {
                     None => {
                         *self = VmIter::Exhausted;
@@ -359,7 +360,7 @@ impl VmIter {
                     }
                     Some(v) => v,
                 };
-                let ib = next_handle(b, vm, functions).await?;
+                let ib = next_handle_boxed(b, vm, functions).await?;
                 let y = match ib {
                     None => {
                         *self = VmIter::Exhausted;
@@ -370,7 +371,7 @@ impl VmIter {
                 Ok(Some(VmValue::Pair(Rc::new((x, y)))))
             }
             VmIter::Enumerate { inner, i } => {
-                let item = next_handle(inner, vm, functions).await?;
+                let item = next_handle_boxed(inner, vm, functions).await?;
                 match item {
                     None => {
                         *self = VmIter::Exhausted;
@@ -385,13 +386,13 @@ impl VmIter {
             }
             VmIter::Chain { a, b, on_a } => {
                 if *on_a {
-                    let item = next_handle(a, vm, functions).await?;
+                    let item = next_handle_boxed(a, vm, functions).await?;
                     if let Some(v) = item {
                         return Ok(Some(v));
                     }
                     *on_a = false;
                 }
-                let item = next_handle(b, vm, functions).await?;
+                let item = next_handle_boxed(b, vm, functions).await?;
                 match item {
                     None => {
                         *self = VmIter::Exhausted;
@@ -404,7 +405,7 @@ impl VmIter {
                 let n = *n;
                 let mut batch: Vec<VmValue> = Vec::with_capacity(n);
                 for _ in 0..n {
-                    let item = next_handle(inner, vm, functions).await?;
+                    let item = next_handle_boxed(inner, vm, functions).await?;
                     match item {
                         Some(v) => batch.push(v),
                         None => break,
@@ -421,7 +422,7 @@ impl VmIter {
                 let n = *n;
                 if buf.is_empty() {
                     while buf.len() < n {
-                        let item = next_handle(inner, vm, functions).await?;
+                        let item = next_handle_boxed(inner, vm, functions).await?;
                         match item {
                             Some(v) => buf.push_back(v),
                             None => {
@@ -431,7 +432,7 @@ impl VmIter {
                         }
                     }
                 } else {
-                    let item = next_handle(inner, vm, functions).await?;
+                    let item = next_handle_boxed(inner, vm, functions).await?;
                     match item {
                         Some(v) => {
                             buf.pop_front();
@@ -486,6 +487,14 @@ pub async fn next_handle(
     // Restore state unless the inner call replaced it with Exhausted.
     *handle.borrow_mut() = state;
     result
+}
+
+fn next_handle_boxed<'a>(
+    handle: &'a Rc<RefCell<VmIter>>,
+    vm: &'a mut crate::vm::Vm,
+    functions: &'a [CompiledFunction],
+) -> Pin<Box<dyn Future<Output = Result<Option<VmValue>, VmError>> + 'a>> {
+    Box::pin(next_handle(handle, vm, functions))
 }
 
 /// Fully consume an iter handle into a Vec of values.
