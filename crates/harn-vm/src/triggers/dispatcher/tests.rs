@@ -477,7 +477,8 @@ fn handle_mock_a2a_connection<T: Read + Write>(
         request_line.starts_with("POST /rpc "),
         "unexpected request line: {request_line}"
     );
-    let payload = serde_json::from_slice::<serde_json::Value>(&body).expect("mock A2A request json");
+    let payload =
+        serde_json::from_slice::<serde_json::Value>(&body).expect("mock A2A request json");
     tx.send(MockA2aRequest {
         headers,
         body: payload.clone(),

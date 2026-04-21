@@ -397,6 +397,18 @@ The ACP server supports these JSON-RPC methods:
 | `session/list` | List active sessions known to the ACP adapter |
 | `session/prompt` | Send a prompt to the agent for execution |
 | `session/cancel` | Cancel the currently running prompt |
+| `workflow/signal` | Enqueue a workflow signal message in the current session workspace |
+| `workflow/query` | Read a named workflow query value from the current session workspace |
+| `workflow/update` | Send a workflow update request and wait for a response |
+| `workflow/pause` | Mark a workflow paused and enqueue a control message |
+| `workflow/resume` | Mark a workflow resumed and enqueue a control message |
+
+`workflow/*` methods also accept the `harn.workflow.*` aliases. They expect
+`workflowId`, plus `name` where applicable, optional `payload`, and
+`timeoutMs` for `workflow/update`. These methods resolve workflow state against
+the session's configured working directory, so they operate on the same durable
+`.harn/workflows/<workflowId>/state.json` tree that the in-language builtins
+use.
 
 Harn advertises `agentCapabilities.sessionCapabilities.fork = {}` during
 `initialize`, so ACP clients can gate `session/fork` the same way they do
@@ -600,3 +612,19 @@ GET /task/get?id=<task-id>
 
 Task states follow the A2A protocol lifecycle: `submitted`, `working`,
 `completed`, `failed`, `cancelled`.
+
+### Vendor workflow control methods
+
+In addition to the standard task lifecycle calls, Harn's A2A adapter accepts
+vendor JSON-RPC methods for durable workflow control:
+
+- `a2a.WorkflowSignal` or `harn.workflow.signal`
+- `a2a.WorkflowQuery` or `harn.workflow.query`
+- `a2a.WorkflowUpdate` or `harn.workflow.update`
+- `a2a.WorkflowPause` or `harn.workflow.pause`
+- `a2a.WorkflowResume` or `harn.workflow.resume`
+
+These methods expect `workflowId`, optional `name`, optional `payload`, and
+`timeoutMs` for updates. They resolve workflow state relative to the served
+pipeline's workspace, which makes them compatible with the same persisted
+workflow mailbox used by the Harn builtins and ACP surface.

@@ -20,7 +20,7 @@ use axum::extract::State;
 use axum::routing::post;
 use axum::Router;
 use harn_vm::event_log::{EventLog, SqliteEventLog, Topic};
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use rcgen::generate_simple_self_signed;
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE, ORIGIN};
 use reqwest::Certificate;

@@ -69,8 +69,10 @@ pub(crate) async fn run_detail_handler(
 pub(crate) async fn action_graph_stream_handler(
     State(state): State<Arc<PortalState>>,
     Query(query): Query<RunQuery>,
-) -> Result<Sse<impl futures::Stream<Item = Result<Event, Infallible>>>, (StatusCode, Json<ErrorResponse>)>
-{
+) -> Result<
+    Sse<impl futures::Stream<Item = Result<Event, Infallible>>>,
+    (StatusCode, Json<ErrorResponse>),
+> {
     let path = resolve_run_path(&state.run_dir, &query.path)?;
     let run = harn_vm::orchestration::load_run_record(&path).map_err(|error| {
         if path.exists() {
@@ -105,8 +107,13 @@ pub(crate) async fn action_graph_stream_handler(
                 };
                 let matches_trace = event.headers.get("trace_id") == Some(&trace_id)
                     || event.headers.get("run_id") == Some(&run_id)
-                    || event.payload.get("trace_id").and_then(|value| value.as_str()) == Some(trace_id.as_str())
-                    || event.payload.get("run_id").and_then(|value| value.as_str()) == Some(run_id.as_str());
+                    || event
+                        .payload
+                        .get("trace_id")
+                        .and_then(|value| value.as_str())
+                        == Some(trace_id.as_str())
+                    || event.payload.get("run_id").and_then(|value| value.as_str())
+                        == Some(run_id.as_str());
                 if !matches_trace {
                     return None;
                 }
@@ -117,7 +124,9 @@ pub(crate) async fn action_graph_stream_handler(
                     "payload": event.payload,
                 });
                 let encoded = serde_json::to_string(&payload).ok()?;
-                Some(Ok(Event::default().event("action_graph_update").data(encoded)))
+                Some(Ok(Event::default()
+                    .event("action_graph_update")
+                    .data(encoded)))
             }
         });
     Ok(Sse::new(stream).keep_alive(KeepAlive::default()))

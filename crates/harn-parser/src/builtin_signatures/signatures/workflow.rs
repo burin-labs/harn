@@ -1,6 +1,6 @@
 //! Workflow, artifact, and run-record builtin signatures.
 
-use super::{BuiltinReturn, BuiltinSig};
+use super::{BuiltinReturn, BuiltinSig, UNION_DICT_NIL};
 
 pub(crate) const SIGNATURES: &[BuiltinSig] = &[
     BuiltinSig {
@@ -72,6 +72,10 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("dict")),
     },
     BuiltinSig {
+        name: "continue_as_new",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
         name: "eval_metric",
         return_type: Some(BuiltinReturn::Named("nil")),
     },
@@ -125,6 +129,46 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
     },
     BuiltinSig {
         name: "select_artifacts_adaptive",
+        return_type: None,
+    },
+    BuiltinSig {
+        name: "workflow.continue_as_new",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
+        name: "workflow.pause",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
+        name: "workflow.publish_query",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
+        name: "workflow.query",
+        return_type: None,
+    },
+    BuiltinSig {
+        name: "workflow.receive",
+        return_type: Some(BuiltinReturn::Union(UNION_DICT_NIL)),
+    },
+    BuiltinSig {
+        name: "workflow.respond_update",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
+        name: "workflow.resume",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
+        name: "workflow.signal",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
+        name: "workflow.status",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
+        name: "workflow.update",
         return_type: None,
     },
     BuiltinSig {

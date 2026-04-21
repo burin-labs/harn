@@ -1463,6 +1463,32 @@ These builtins expose Harn's typed orchestration runtime.
 - `assert_text` to require visible output to contain a substring
 - `expect_status` to require a specific exit status
 
+### Workflow messaging and lifecycle
+
+| Function | Parameters | Returns | Description |
+|---|---|---|---|
+| `workflow.signal(target, name, payload?)` | target, name: string, payload: any | dict | Enqueue a fire-and-forget signal message for a workflow |
+| `workflow.query(target, name)` | target, name: string | any | Read the last published query value, or `nil` when absent |
+| `workflow.publish_query(target, name, value?)` | target, name: string, value: any | dict | Publish or replace a named query value for a workflow |
+| `workflow.update(target, name, payload?, options?)` | target, name: string, payload: any, options: dict | any | Enqueue an update request and wait for a matching response |
+| `workflow.receive(target)` | target | dict or nil | Pop the next queued message (`signal`, `update`, or control message) |
+| `workflow.respond_update(target, request_id, value, name?)` | target, request_id: string, value: any, name: string (optional) | dict | Fulfill a pending workflow update request |
+| `workflow.pause(target)` | target | dict | Mark a workflow paused and enqueue a control message |
+| `workflow.resume(target)` | target | dict | Mark a workflow resumed and enqueue a control message |
+| `workflow.status(target)` | target | dict | Return mailbox/generation status for a workflow |
+| `workflow.continue_as_new(target)` | target | dict | Advance the workflow generation and clear pending update responses |
+| `continue_as_new(target)` | target | dict | Top-level alias for `workflow.continue_as_new(...)` |
+
+`target` may be either a workflow-id string or a dict containing
+`workflow_id` / `workflow`. The dict form may also include `base_dir`,
+`persisted_path`, or `path`; when a persisted run path is provided, Harn
+derives the workflow root from the run's parent workspace automatically.
+
+Workflow message state is persisted under
+`.harn/workflows/<workflow_id>/state.json` relative to the resolved base
+directory. `workflow.update(...)` polls for a response until
+`options.timeout_ms` elapses; the default is `30000`.
+
 ### Tool lifecycle hooks
 
 | Function | Parameters | Returns | Description |

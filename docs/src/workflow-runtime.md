@@ -301,6 +301,70 @@ used to tie tool gates, workers, and artifacts back to one mutation boundary:
 This is not an editor undo stack. It is the runtime-side provenance contract
 that hosts can map onto their own approval and undo/redo UX.
 
+## Durable workflow messages
+
+Workflows can also expose a durable mailbox/query surface that lives alongside
+run records under `.harn/workflows/<workflow_id>/state.json`. This is the
+shared substrate for external workflow control over Harn builtins, ACP, and
+A2A without requiring a live in-memory handle.
+
+The mailbox builtins are:
+
+- `workflow.signal(target, name, payload?)`
+- `workflow.query(target, name)`
+- `workflow.publish_query(target, name, value?)`
+- `workflow.update(target, name, payload?, options?)`
+- `workflow.receive(target)`
+- `workflow.respond_update(target, request_id, value, name?)`
+- `workflow.pause(target)`
+- `workflow.resume(target)`
+- `workflow.status(target)`
+- `workflow.continue_as_new(target)`
+- `continue_as_new(target)`
+
+`target` may be a workflow-id string or a dict with `workflow_id` /
+`workflow`. When you already have a saved run, passing
+`{workflow_id, persisted_path}` lets Harn derive the correct workspace root
+without an extra lookup.
+
+Use signals for one-way notifications, queries for last-known published state,
+and updates when the caller needs a response:
+
+```harn
+let workflow_id = "customer-journey-42"
+
+workflow.signal(workflow_id, "customer_joined", {customer_id: 7})
+workflow.publish_query(workflow_id, "progress_pct", 25)
+
+let next = workflow.receive(workflow_id)
+println(next?.kind == "signal")
+println(workflow.query(workflow_id, "progress_pct"))
+```
+
+`workflow.update(...)` enqueues a request and waits until
+`workflow.respond_update(...)` publishes a response for the generated
+`request_id`:
+
+```harn
+let response = workflow.update(
+  "review-42",
+  "approve_budget",
+  {max_usd: 10},
+  {timeout_ms: 5000}
+)
+println(response?.approved)
+```
+
+Pause and resume are durable state transitions, not ephemeral process-local
+flags. They set `paused` in workflow state and enqueue a control message so the
+workflow can observe that transition through `workflow.receive(...)`.
+
+`workflow.continue_as_new(...)` increments the workflow generation counter and
+clears pending update responses. The `std/agents` helper
+`continue_as_new(prev, options?)` pairs that state transition with a transcript
+reset so long-running workflows can roll forward without losing their durable
+workflow identity.
+
 ## Transcripts and sessions
 
 Stage transcripts are owned by the [session store](./sessions.md), not by

@@ -1260,8 +1260,10 @@ pub fn workflow_session(prev) {
   let transcript = prev?.transcript ?? prev?.result?.transcript ?? prev
   let run = prev?.run ?? prev?.result?.run
   let persisted_path = prev?.persisted_path ?? prev?.path ?? run?.persisted_path
+  let workflow_id = prev?.workflow_id ?? run?.workflow_id ?? prev?.workflow ?? run?.workflow_name
   return {
     _type: "workflow_session",
+    workflow_id: workflow_id,
     transcript: transcript,
     run: run,
     persisted_path: persisted_path,
@@ -1279,7 +1281,11 @@ pub fn workflow_session(prev) {
 
 /** workflow_session_new. */
 pub fn workflow_session_new(metadata) {
-  return workflow_session({status: "active", transcript: transcript(metadata ?? {})})
+  let raw = metadata ?? {}
+  let workflow_id = raw?.workflow_id ?? raw?.workflow
+  return workflow_session(
+    {status: "active", workflow_id: workflow_id, transcript: transcript(raw)},
+  )
 }
 
 /** workflow_session_restore. */
@@ -1292,6 +1298,7 @@ pub fn workflow_session_restore(source) {
   return workflow_session(
     {
     status: run?.status ?? "restored",
+    workflow_id: run?.workflow_id,
     run: run,
     persisted_path: run?.persisted_path,
     transcript: run?.transcript ?? transcript(),
@@ -1345,8 +1352,26 @@ pub fn workflow_session_reset(prev, carry_summary) {
   let session = workflow_session(prev)
   return workflow_session(
     {
+    workflow_id: session?.workflow_id,
     workflow: session?.workflow,
     status: "active",
+    transcript: workflow_reset(session?.transcript, carry_summary),
+  },
+  )
+}
+
+/** continue_as_new. */
+pub fn continue_as_new(prev, options = nil) {
+  let session = workflow_session(prev)
+  let carry_summary = options?.carry_summary ?? true
+  let _state = workflow.continue_as_new(session)
+  return workflow_session(
+    {
+    workflow_id: session?.workflow_id,
+    workflow: session?.workflow,
+    status: "active",
+    persisted_path: session?.persisted_path,
+    run: session?.run,
     transcript: workflow_reset(session?.transcript, carry_summary),
   },
   )

@@ -433,3 +433,47 @@ async fn test_handle_jsonrpc_send_message_empty() {
     let parsed: serde_json::Value = serde_json::from_str(&resp).unwrap();
     assert_eq!(parsed["error"]["code"], -32602);
 }
+
+#[tokio::test]
+async fn test_handle_jsonrpc_workflow_signal_and_query() {
+    let dir = tempfile::tempdir().unwrap();
+    let pipeline = dir.path().join("server.harn");
+    std::fs::write(&pipeline, "pipeline default() {}\n").unwrap();
+    let store: TaskStore = Arc::new(Mutex::new(HashMap::new()));
+
+    let signal = r#"{"jsonrpc":"2.0","id":1,"method":"a2a.WorkflowSignal","params":{"workflowId":"wf-a2a","name":"customer_joined","payload":{"customer_id":7}}}"#;
+    let signal_resp = handle_jsonrpc(pipeline.to_str().unwrap(), signal, &store).await;
+    let signal_json: serde_json::Value = serde_json::from_str(&signal_resp).unwrap();
+    assert_eq!(signal_json["result"]["message"]["kind"], "signal");
+    assert_eq!(signal_json["result"]["message"]["name"], "customer_joined");
+
+    harn_vm::workflow_publish_query_for_base(
+        dir.path(),
+        "wf-a2a",
+        "progress_pct",
+        serde_json::json!(42),
+    )
+    .unwrap();
+    let query = r#"{"jsonrpc":"2.0","id":2,"method":"a2a.WorkflowQuery","params":{"workflowId":"wf-a2a","name":"progress_pct"}}"#;
+    let query_resp = handle_jsonrpc(pipeline.to_str().unwrap(), query, &store).await;
+    let query_json: serde_json::Value = serde_json::from_str(&query_resp).unwrap();
+    assert_eq!(query_json["result"], 42);
+}
+
+#[tokio::test]
+async fn test_handle_jsonrpc_workflow_pause_and_resume() {
+    let dir = tempfile::tempdir().unwrap();
+    let pipeline = dir.path().join("server.harn");
+    std::fs::write(&pipeline, "pipeline default() {}\n").unwrap();
+    let store: TaskStore = Arc::new(Mutex::new(HashMap::new()));
+
+    let pause = r#"{"jsonrpc":"2.0","id":3,"method":"a2a.WorkflowPause","params":{"workflowId":"wf-a2a-control"}}"#;
+    let pause_resp = handle_jsonrpc(pipeline.to_str().unwrap(), pause, &store).await;
+    let pause_json: serde_json::Value = serde_json::from_str(&pause_resp).unwrap();
+    assert_eq!(pause_json["result"]["paused"], true);
+
+    let resume = r#"{"jsonrpc":"2.0","id":4,"method":"a2a.WorkflowResume","params":{"workflowId":"wf-a2a-control"}}"#;
+    let resume_resp = handle_jsonrpc(pipeline.to_str().unwrap(), resume, &store).await;
+    let resume_json: serde_json::Value = serde_json::from_str(&resume_resp).unwrap();
+    assert_eq!(resume_json["result"]["paused"], false);
+}
