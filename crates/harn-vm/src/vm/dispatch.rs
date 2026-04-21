@@ -4,22 +4,63 @@ use std::rc::Rc;
 
 use crate::chunk::CompiledFunction;
 use crate::value::{ErrorCategory, VmClosure, VmError, VmValue};
+use crate::BuiltinId;
 
 use super::async_builtin::CURRENT_ASYNC_BUILTIN_CHILD_VM;
-use super::{ScopeSpan, Vm};
+use super::{ScopeSpan, Vm, VmBuiltinDispatch, VmBuiltinEntry};
 
 impl Vm {
+    fn index_builtin_id(&mut self, name: &str, dispatch: VmBuiltinDispatch) {
+        let id = BuiltinId::from_name(name);
+        if self.builtin_id_collisions.contains(&id) {
+            return;
+        }
+        if let Some(existing) = self.builtins_by_id.get(&id) {
+            if existing.name.as_ref() != name {
+                self.builtins_by_id.remove(&id);
+                self.builtin_id_collisions.insert(id);
+                return;
+            }
+        }
+        self.builtins_by_id.insert(
+            id,
+            VmBuiltinEntry {
+                name: Rc::from(name),
+                dispatch,
+            },
+        );
+    }
+
+    fn refresh_builtin_id(&mut self, name: &str) {
+        if let Some(builtin) = self.builtins.get(name).cloned() {
+            self.index_builtin_id(name, VmBuiltinDispatch::Sync(builtin));
+        } else if let Some(async_builtin) = self.async_builtins.get(name).cloned() {
+            self.index_builtin_id(name, VmBuiltinDispatch::Async(async_builtin));
+        } else {
+            let id = BuiltinId::from_name(name);
+            if self
+                .builtins_by_id
+                .get(&id)
+                .is_some_and(|entry| entry.name.as_ref() == name)
+            {
+                self.builtins_by_id.remove(&id);
+            }
+        }
+    }
+
     /// Register a sync builtin function.
     pub fn register_builtin<F>(&mut self, name: &str, f: F)
     where
         F: Fn(&[VmValue], &mut String) -> Result<VmValue, VmError> + 'static,
     {
         self.builtins.insert(name.to_string(), Rc::new(f));
+        self.refresh_builtin_id(name);
     }
 
     /// Remove a sync builtin (so an async version can take precedence).
     pub fn unregister_builtin(&mut self, name: &str) {
         self.builtins.remove(name);
+        self.refresh_builtin_id(name);
     }
 
     /// Register an async builtin function.
@@ -30,6 +71,20 @@ impl Vm {
     {
         self.async_builtins
             .insert(name.to_string(), Rc::new(move |args| Box::pin(f(args))));
+        self.refresh_builtin_id(name);
+    }
+
+    pub(crate) fn registered_builtin_id(&self, name: &str) -> Option<BuiltinId> {
+        let id = BuiltinId::from_name(name);
+        if self
+            .builtins_by_id
+            .get(&id)
+            .is_some_and(|entry| entry.name.as_ref() == name)
+        {
+            Some(id)
+        } else {
+            None
+        }
     }
 
     /// Call a closure (used by method calls like .map/.filter etc.)
@@ -119,6 +174,9 @@ impl Vm {
                     self.call_named_builtin(name, args.to_vec()).await
                 }
             }
+            VmValue::BuiltinRefId { id, name } => {
+                self.call_builtin_id_or_name(*id, name, args.to_vec()).await
+            }
             other => Err(VmError::TypeError(format!(
                 "expected callable, got {}",
                 other.type_name()
@@ -155,7 +213,10 @@ impl Vm {
 
     /// Returns true if `v` is callable via `call_callable_value`.
     pub(crate) fn is_callable_value(v: &VmValue) -> bool {
-        matches!(v, VmValue::Closure(_) | VmValue::BuiltinRef(_))
+        matches!(
+            v,
+            VmValue::Closure(_) | VmValue::BuiltinRef(_) | VmValue::BuiltinRefId { .. }
+        )
     }
 
     /// Public wrapper for `call_closure`, used by the MCP server to invoke
@@ -176,6 +237,24 @@ impl Vm {
         name: &str,
         args: Vec<VmValue>,
     ) -> Result<VmValue, VmError> {
+        self.call_builtin_impl(name, args, None).await
+    }
+
+    pub(crate) async fn call_builtin_id_or_name(
+        &mut self,
+        id: BuiltinId,
+        name: &str,
+        args: Vec<VmValue>,
+    ) -> Result<VmValue, VmError> {
+        self.call_builtin_impl(name, args, Some(id)).await
+    }
+
+    async fn call_builtin_impl(
+        &mut self,
+        name: &str,
+        args: Vec<VmValue>,
+        direct_id: Option<BuiltinId>,
+    ) -> Result<VmValue, VmError> {
         // Auto-trace LLM calls and tool calls.
         let span_kind = match name {
             "llm_call" | "llm_stream" | "agent_loop" => Some(crate::tracing::SpanKind::LlmCall),
@@ -192,17 +271,21 @@ impl Vm {
             });
         }
         crate::orchestration::enforce_current_policy_for_builtin(name, &args)?;
+
+        if let Some(id) = direct_id {
+            if let Some(entry) = self.builtins_by_id.get(&id).cloned() {
+                if entry.name.as_ref() == name {
+                    return self.call_builtin_entry(entry.dispatch, args).await;
+                }
+            }
+        }
+
         if let Some(builtin) = self.builtins.get(name).cloned() {
-            builtin(&args, &mut self.output)
+            self.call_builtin_entry(VmBuiltinDispatch::Sync(builtin), args)
+                .await
         } else if let Some(async_builtin) = self.async_builtins.get(name).cloned() {
-            CURRENT_ASYNC_BUILTIN_CHILD_VM.with(|slot| {
-                slot.borrow_mut().push(self.child_vm());
-            });
-            let result = async_builtin(args).await;
-            CURRENT_ASYNC_BUILTIN_CHILD_VM.with(|slot| {
-                slot.borrow_mut().pop();
-            });
-            result
+            self.call_builtin_entry(VmBuiltinDispatch::Async(async_builtin), args)
+                .await
         } else if let Some(bridge) = &self.bridge {
             crate::orchestration::enforce_current_policy_for_bridge_builtin(name)?;
             let args_json: Vec<serde_json::Value> =
@@ -226,6 +309,26 @@ impl Vm {
                 )));
             }
             Err(VmError::UndefinedBuiltin(name.to_string()))
+        }
+    }
+
+    async fn call_builtin_entry(
+        &mut self,
+        dispatch: VmBuiltinDispatch,
+        args: Vec<VmValue>,
+    ) -> Result<VmValue, VmError> {
+        match dispatch {
+            VmBuiltinDispatch::Sync(builtin) => builtin(&args, &mut self.output),
+            VmBuiltinDispatch::Async(async_builtin) => {
+                CURRENT_ASYNC_BUILTIN_CHILD_VM.with(|slot| {
+                    slot.borrow_mut().push(self.child_vm());
+                });
+                let result = async_builtin(args).await;
+                CURRENT_ASYNC_BUILTIN_CHILD_VM.with(|slot| {
+                    slot.borrow_mut().pop();
+                });
+                result
+            }
         }
     }
 }

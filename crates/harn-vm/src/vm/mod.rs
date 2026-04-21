@@ -24,4 +24,6 @@ pub use debug::{DebugAction, DebugState};
 pub use modules::resolve_module_import_path;
 pub use state::Vm;
 
-pub(crate) use state::{CallFrame, ExceptionHandler, IterState, ScopeSpan};
+pub(crate) use state::{
+    CallFrame, ExceptionHandler, IterState, ScopeSpan, VmBuiltinDispatch, VmBuiltinEntry,
+};

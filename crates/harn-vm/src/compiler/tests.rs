@@ -85,7 +85,8 @@ fn test_compile_generic_ops_for_overloaded_or_mixed_cases() {
 fn test_compile_function_call() {
     let chunk = compile_source("pipeline test(task) { log(42) }");
     let disasm = chunk.disassemble("test");
-    assert!(disasm.contains("CALL"));
+    assert!(disasm.contains("CALL_BUILTIN"));
+    assert!(disasm.contains("\"log\""));
 }
 
 #[test]

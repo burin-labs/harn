@@ -16,6 +16,9 @@ pub fn values_identical(a: &VmValue, b: &VmValue) -> bool {
         (VmValue::String(x), VmValue::String(y)) => Rc::ptr_eq(x, y) || x == y,
         (VmValue::Bytes(x), VmValue::Bytes(y)) => Rc::ptr_eq(x, y) || x == y,
         (VmValue::BuiltinRef(x), VmValue::BuiltinRef(y)) => x == y,
+        (VmValue::BuiltinRefId { name: x, .. }, VmValue::BuiltinRefId { name: y, .. }) => x == y,
+        (VmValue::BuiltinRef(x), VmValue::BuiltinRefId { name: y, .. })
+        | (VmValue::BuiltinRefId { name: y, .. }, VmValue::BuiltinRef(x)) => x == y,
         (VmValue::Pair(x), VmValue::Pair(y)) => Rc::ptr_eq(x, y),
         // Primitives: identity collapses to structural equality.
         _ => values_equal(a, b),
@@ -35,6 +38,7 @@ pub fn value_identity_key(v: &VmValue) -> String {
         VmValue::String(x) => format!("string@{:p}", x.as_ptr()),
         VmValue::Bytes(x) => format!("bytes@{:p}", Rc::as_ptr(x)),
         VmValue::BuiltinRef(name) => format!("builtin@{name}"),
+        VmValue::BuiltinRefId { name, .. } => format!("builtin@{name}"),
         other => format!("{}@{}", other.type_name(), other.display()),
     }
 }
@@ -140,6 +144,10 @@ pub fn values_equal(a: &VmValue, b: &VmValue) -> bool {
         (VmValue::Float(x), VmValue::Float(y)) => x == y,
         (VmValue::String(x), VmValue::String(y)) => x == y,
         (VmValue::Bytes(x), VmValue::Bytes(y)) => x == y,
+        (VmValue::BuiltinRef(x), VmValue::BuiltinRef(y)) => x == y,
+        (VmValue::BuiltinRefId { name: x, .. }, VmValue::BuiltinRefId { name: y, .. }) => x == y,
+        (VmValue::BuiltinRef(x), VmValue::BuiltinRefId { name: y, .. })
+        | (VmValue::BuiltinRefId { name: y, .. }, VmValue::BuiltinRef(x)) => x == y,
         (VmValue::Bool(x), VmValue::Bool(y)) => x == y,
         (VmValue::Nil, VmValue::Nil) => true,
         (VmValue::Int(x), VmValue::Float(y)) => (*x as f64) == *y,

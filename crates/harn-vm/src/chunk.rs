@@ -183,6 +183,12 @@ pub enum Op {
     // --- Spread call ---
     /// Call with spread arguments. Stack: [callee, args_list] -> result.
     CallSpread,
+    /// Direct builtin call. Followed by u64 builtin ID, u16 name constant, u8 arg count.
+    /// Runtime still checks closure shadowing before using the ID.
+    CallBuiltin,
+    /// Direct builtin spread call. Followed by u64 builtin ID and u16 name constant.
+    /// Stack: [args_list] -> result.
+    CallBuiltinSpread,
     /// Method call with spread arguments. Stack: [object, args_list] -> result.
     /// Followed by 2 bytes for method name constant index.
     MethodCallSpread,
@@ -419,6 +425,39 @@ impl Chunk {
         self.columns.push(col);
     }
 
+    /// Emit a direct builtin call.
+    pub fn emit_call_builtin(
+        &mut self,
+        id: crate::BuiltinId,
+        name_idx: u16,
+        arg_count: u8,
+        line: u32,
+    ) {
+        let col = self.current_col;
+        self.code.push(Op::CallBuiltin as u8);
+        self.code.extend_from_slice(&id.raw().to_be_bytes());
+        self.code.push((name_idx >> 8) as u8);
+        self.code.push((name_idx & 0xFF) as u8);
+        self.code.push(arg_count);
+        for _ in 0..12 {
+            self.lines.push(line);
+            self.columns.push(col);
+        }
+    }
+
+    /// Emit a direct builtin spread call.
+    pub fn emit_call_builtin_spread(&mut self, id: crate::BuiltinId, name_idx: u16, line: u32) {
+        let col = self.current_col;
+        self.code.push(Op::CallBuiltinSpread as u8);
+        self.code.extend_from_slice(&id.raw().to_be_bytes());
+        self.code.push((name_idx >> 8) as u8);
+        self.code.push((name_idx & 0xFF) as u8);
+        for _ in 0..11 {
+            self.lines.push(line);
+            self.columns.push(col);
+        }
+    }
+
     /// Emit a method call: op + u16 (method name) + u8 (arg count).
     pub fn emit_method_call(&mut self, name_idx: u16, arg_count: u8, line: u32) {
         self.emit_method_call_inner(Op::MethodCall, name_idx, arg_count, line);
@@ -518,6 +557,20 @@ impl Chunk {
     #[cfg(test)]
     pub(crate) fn inline_cache_entries(&self) -> Vec<InlineCacheEntry> {
         self.inline_caches.borrow().clone()
+    }
+
+    /// Read a u64 argument at the given position.
+    pub fn read_u64(&self, pos: usize) -> u64 {
+        u64::from_be_bytes([
+            self.code[pos],
+            self.code[pos + 1],
+            self.code[pos + 2],
+            self.code[pos + 3],
+            self.code[pos + 4],
+            self.code[pos + 5],
+            self.code[pos + 6],
+            self.code[pos + 7],
+        ])
     }
 
     /// Disassemble for debugging.
@@ -763,6 +816,28 @@ impl Chunk {
                 x if x == Op::PopIterator as u8 => out.push_str("POP_ITERATOR\n"),
                 x if x == Op::TryUnwrap as u8 => out.push_str("TRY_UNWRAP\n"),
                 x if x == Op::CallSpread as u8 => out.push_str("CALL_SPREAD\n"),
+                x if x == Op::CallBuiltin as u8 => {
+                    let id = self.read_u64(ip);
+                    ip += 8;
+                    let idx = self.read_u16(ip);
+                    ip += 2;
+                    let argc = self.code[ip];
+                    ip += 1;
+                    out.push_str(&format!(
+                        "CALL_BUILTIN {id:#018x} {:>4} ({}) argc={}\n",
+                        idx, self.constants[idx as usize], argc
+                    ));
+                }
+                x if x == Op::CallBuiltinSpread as u8 => {
+                    let id = self.read_u64(ip);
+                    ip += 8;
+                    let idx = self.read_u16(ip);
+                    ip += 2;
+                    out.push_str(&format!(
+                        "CALL_BUILTIN_SPREAD {id:#018x} {:>4} ({})\n",
+                        idx, self.constants[idx as usize]
+                    ));
+                }
                 x if x == Op::MethodCallSpread as u8 => {
                     let idx = self.read_u16(ip + 1);
                     ip += 2;

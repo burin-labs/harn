@@ -6,6 +6,7 @@ use crate::chunk::{Chunk, Constant};
 use crate::value::{
     ModuleFunctionRegistry, VmAsyncBuiltinFn, VmBuiltinFn, VmEnv, VmError, VmTaskHandle, VmValue,
 };
+use crate::BuiltinId;
 
 use super::debug::DebugHook;
 use super::modules::LoadedModule;
@@ -98,6 +99,18 @@ pub(crate) enum IterState {
     },
 }
 
+#[derive(Clone)]
+pub(crate) enum VmBuiltinDispatch {
+    Sync(VmBuiltinFn),
+    Async(VmAsyncBuiltinFn),
+}
+
+#[derive(Clone)]
+pub(crate) struct VmBuiltinEntry {
+    pub(crate) name: Rc<str>,
+    pub(crate) dispatch: VmBuiltinDispatch,
+}
+
 /// The Harn bytecode virtual machine.
 pub struct Vm {
     pub(crate) stack: Vec<VmValue>,
@@ -105,6 +118,12 @@ pub struct Vm {
     pub(crate) output: String,
     pub(crate) builtins: BTreeMap<String, VmBuiltinFn>,
     pub(crate) async_builtins: BTreeMap<String, VmAsyncBuiltinFn>,
+    /// Numeric side index for builtins. Name-keyed maps remain authoritative;
+    /// this index is the hot path for direct builtin bytecode and callback refs.
+    pub(crate) builtins_by_id: BTreeMap<BuiltinId, VmBuiltinEntry>,
+    /// IDs with detected name collisions. Collided names safely fall back to
+    /// the authoritative name-keyed lookup path.
+    pub(crate) builtin_id_collisions: HashSet<BuiltinId>,
     /// Iterator state for for-in loops.
     pub(crate) iterators: Vec<IterState>,
     /// Call frame stack.
@@ -180,6 +199,8 @@ impl Vm {
             output: String::new(),
             builtins: BTreeMap::new(),
             async_builtins: BTreeMap::new(),
+            builtins_by_id: BTreeMap::new(),
+            builtin_id_collisions: HashSet::new(),
             iterators: Vec::new(),
             frames: Vec::new(),
             exception_handlers: Vec::new(),
@@ -257,6 +278,8 @@ impl Vm {
             output: String::new(),
             builtins: self.builtins.clone(),
             async_builtins: self.async_builtins.clone(),
+            builtins_by_id: self.builtins_by_id.clone(),
+            builtin_id_collisions: self.builtin_id_collisions.clone(),
             iterators: Vec::new(),
             frames: Vec::new(),
             exception_handlers: Vec::new(),
