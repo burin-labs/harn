@@ -2681,6 +2681,7 @@ impl Dispatcher {
         }
         append_trust_record(&self.event_log, &record)
             .await
+            .map(|_| ())
             .map_err(DispatchError::from)
     }
 

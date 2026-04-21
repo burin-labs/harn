@@ -8,6 +8,7 @@ import type {
   PortalListResponse,
   PortalRunDetail,
   PortalRunDiff,
+  PortalTrustGraphResponse,
 } from "../types"
 
 async function fetchJson<T>(url: string): Promise<T> {
@@ -83,6 +84,29 @@ export function fetchRunCompare(left: string, right: string): Promise<PortalRunD
   return fetchJson<PortalRunDiff>(
     `/api/compare?left=${encodeURIComponent(left)}&right=${encodeURIComponent(right)}`,
   )
+}
+
+export function fetchTrustGraph(params?: {
+  agent?: string
+  action?: string
+  limit?: number
+  groupedByTrace?: boolean
+}): Promise<PortalTrustGraphResponse> {
+  const search = new URLSearchParams()
+  if (params?.agent) {
+    search.set("agent", params.agent)
+  }
+  if (params?.action) {
+    search.set("action", params.action)
+  }
+  if (params?.limit) {
+    search.set("limit", String(params.limit))
+  }
+  if (params?.groupedByTrace) {
+    search.set("grouped_by_trace", "true")
+  }
+  const suffix = search.toString()
+  return fetchJson<PortalTrustGraphResponse>(`/api/trust-graph${suffix ? `?${suffix}` : ""}`)
 }
 
 export function fetchLaunchTargets(): Promise<PortalLaunchTargetList> {

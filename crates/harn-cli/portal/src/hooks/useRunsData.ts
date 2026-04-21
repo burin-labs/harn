@@ -61,7 +61,9 @@ export function useRunsData(args: UseRunsDataArgs) {
   }, [args.page, args.pageSize, args.q, args.sort, args.status, args.workflow, args.skill])
 
   useEffect(() => {
-    void loadRuns()
+    queueMicrotask(() => {
+      void loadRuns()
+    })
   }, [loadRuns])
 
   useEffect(() => {

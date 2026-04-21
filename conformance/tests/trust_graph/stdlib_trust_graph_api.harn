@@ -1,0 +1,30 @@
+import "std/triggers"
+
+pipeline test(task) {
+  let unique = to_string(to_int(timestamp())) + "-" + to_string(random_int(100000, 999999))
+  let agent_id = "trust-graph-api-" + unique
+  let entry_id: TrustEntryId = trust_graph_record(
+    {
+    agent: agent_id,
+    action: "deploy.prod",
+    approver: "reviewer-1",
+    outcome: "success",
+    trace_id: "trace-" + unique,
+    autonomy_tier: "suggest",
+    cost_usd: 0.25,
+    metadata: {ticket: "INC-1"},
+  },
+  )
+  let score: TrustScore = trust_graph_query(agent_id, "deploy.prod")
+  let policy: CapabilityPolicy = trust_graph_policy_for(agent_id)
+  let report: TrustChainReport = trust_graph_verify_chain()
+  let records: list<TrustRecord> = trust_query({agent: agent_id, action: "deploy.prod"})
+  println(len(records) == 1)
+  println(entry_id == records[0].record_id)
+  println(records[0].chain_index > 0 && records[0].entry_hash != "")
+  println(records[0].previous_hash == nil || records[0].previous_hash != "")
+  println(score.total == 1 && score.successes == 1 && score.success_rate == 1.0)
+  println(score.policy.side_effect_level == "network")
+  println(policy.side_effect_level == "network")
+  println(report.verified && report.root_hash != nil)
+}

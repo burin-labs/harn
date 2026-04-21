@@ -25,6 +25,14 @@ pub(super) struct ListRunsQuery {
     pub(super) skill: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+pub(super) struct TrustGraphQuery {
+    pub(super) agent: Option<String>,
+    pub(super) action: Option<String>,
+    pub(super) limit: Option<usize>,
+    pub(super) grouped_by_trace: Option<bool>,
+}
+
 #[derive(Debug, Serialize)]
 pub(super) struct ErrorResponse {
     pub(super) error: String,

@@ -13,6 +13,15 @@ pub(super) struct PortalStats {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub(super) struct PortalTrustGraphResponse {
+    pub(super) records: Vec<harn_vm::TrustRecord>,
+    pub(super) groups: Option<Vec<harn_vm::TrustTraceGroup>>,
+    pub(super) summary: Vec<harn_vm::TrustAgentSummary>,
+    pub(super) chain: harn_vm::TrustChainReport,
+    pub(super) topics: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub(super) struct PortalRunSummary {
     pub(super) path: String,
     pub(super) id: String,

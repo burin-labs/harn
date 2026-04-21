@@ -74,13 +74,22 @@ export function useRunDetailData(path: string | null) {
   }, [path])
 
   useEffect(() => {
-    void loadDetail()
+    queueMicrotask(() => {
+      void loadDetail()
+    })
   }, [loadDetail])
 
   useEffect(() => {
     if (!detail) {
-      setCompareRuns([])
-      return
+      let cancelled = false
+      queueMicrotask(() => {
+        if (!cancelled) {
+          setCompareRuns([])
+        }
+      })
+      return () => {
+        cancelled = true
+      }
     }
     let cancelled = false
     const workflowName = detail.summary.workflow_name

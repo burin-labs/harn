@@ -86,6 +86,9 @@ SCRIPTING
     Trigger(TriggerArgs),
     /// Query and manage trust-graph autonomy state.
     Trust(TrustArgs),
+    /// Query and verify trust-graph autonomy state.
+    #[command(name = "trust-graph")]
+    TrustGraph(TrustArgs),
     /// Start the orchestrator process that hosts triggers and connector dispatch.
     Orchestrator(OrchestratorArgs),
     /// Run a pipeline against a Harn-native host module for fast iteration.
@@ -690,6 +693,8 @@ pub(crate) struct TrustArgs {
 pub(crate) enum TrustCommand {
     /// Query trust records from the event log.
     Query(TrustQueryArgs),
+    /// Verify the trust graph hash chain.
+    VerifyChain(TrustVerifyChainArgs),
     /// Promote an agent to a higher autonomy tier.
     Promote(TrustPromoteArgs),
     /// Demote an agent to a lower autonomy tier.
@@ -766,6 +771,13 @@ pub(crate) struct TrustQueryArgs {
     /// Summarize records per agent.
     #[arg(long)]
     pub summary: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct TrustVerifyChainArgs {
+    /// Emit JSON instead of human-readable output.
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Debug, Args)]
@@ -1820,6 +1832,19 @@ mod tests {
         assert_eq!(demote.agent, "github-triage-bot");
         assert!(matches!(demote.to, TrustTierArg::Shadow));
         assert_eq!(demote.reason, "unexpected mutation");
+    }
+
+    #[test]
+    fn test_parses_trust_graph_verify_chain() {
+        let cli = Cli::parse_from(["harn", "trust-graph", "verify-chain", "--json"]);
+
+        let Command::TrustGraph(args) = cli.command.unwrap() else {
+            panic!("expected trust-graph command");
+        };
+        let TrustCommand::VerifyChain(verify) = args.command else {
+            panic!("expected trust-graph verify-chain");
+        };
+        assert!(verify.json);
     }
 
     #[test]

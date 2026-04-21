@@ -630,6 +630,19 @@ Supported filters:
 `--summary` groups records by agent and reports success rate, mean recorded
 cost, tier distribution, and outcome distribution.
 
+## harn trust-graph verify-chain
+
+Verify the workspace trust graph's hash chain.
+
+```bash
+harn trust-graph verify-chain
+harn trust-graph verify-chain --json
+```
+
+The command reads `trust_graph` and falls back to legacy `trust.graph` logs,
+recomputes every `entry_hash`, and checks that each `previous_hash` points to
+the prior record.
+
 ## harn trust promote
 
 Manually promote an agent to a higher autonomy tier. This appends a

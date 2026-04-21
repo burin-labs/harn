@@ -55,20 +55,35 @@ type SlackEventPayload = SlackMessageEventPayload | SlackAppMentionEventPayload 
 type LinearEventCommon = {provider: "linear", event: string, action: string | nil, delivery_id: string | nil, organization_id: string | nil, webhook_timestamp: int | nil, webhook_id: string | nil, url: string | nil, created_at: string | nil, actor: dict | nil, raw: dict}
 
 type LinearIssueTitleChange = {field_name: "title", previous: string | nil}
+
 type LinearIssueDescriptionChange = {field_name: "description", previous: string | nil}
+
 type LinearIssuePriorityChange = {field_name: "priority", previous: int | nil}
+
 type LinearIssueEstimateChange = {field_name: "estimate", previous: int | nil}
+
 type LinearIssueStateIdChange = {field_name: "state_id", previous: string | nil}
+
 type LinearIssueTeamIdChange = {field_name: "team_id", previous: string | nil}
+
 type LinearIssueAssigneeIdChange = {field_name: "assignee_id", previous: string | nil}
+
 type LinearIssueProjectIdChange = {field_name: "project_id", previous: string | nil}
+
 type LinearIssueCycleIdChange = {field_name: "cycle_id", previous: string | nil}
+
 type LinearIssueDueDateChange = {field_name: "due_date", previous: string | nil}
+
 type LinearIssueParentIdChange = {field_name: "parent_id", previous: string | nil}
+
 type LinearIssueSortOrderChange = {field_name: "sort_order", previous: float | nil}
+
 type LinearIssueLabelIdsChange = {field_name: "label_ids", previous: list<string>}
+
 type LinearIssueCompletedAtChange = {field_name: "completed_at", previous: string | nil}
+
 type LinearIssueOtherChange = {field_name: "other", field: string, previous: any}
+
 type LinearIssueChange = LinearIssueTitleChange | LinearIssueDescriptionChange | LinearIssuePriorityChange | LinearIssueEstimateChange | LinearIssueStateIdChange | LinearIssueTeamIdChange | LinearIssueAssigneeIdChange | LinearIssueProjectIdChange | LinearIssueCycleIdChange | LinearIssueDueDateChange | LinearIssueParentIdChange | LinearIssueSortOrderChange | LinearIssueLabelIdsChange | LinearIssueCompletedAtChange | LinearIssueOtherChange
 
 type LinearIssueEventPayload = {provider: "linear", event: "issue", action: string | nil, delivery_id: string | nil, organization_id: string | nil, webhook_timestamp: int | nil, webhook_id: string | nil, url: string | nil, created_at: string | nil, actor: dict | nil, issue: dict, changes: list<LinearIssueChange>, raw: dict}
@@ -177,11 +192,19 @@ type DlqAttempt = {attempt: int, at: string, status: string, error: string | nil
 
 type DlqEntry = {id: string, event_id: string, binding_id: string, binding_version: int, provider: string, kind: string, state: string, error: string, event: TriggerEvent, retry_history: list<DlqAttempt>}
 
-type TrustRecord = {schema: string, record_id: string, agent: string, action: string, approver: string | nil, outcome: TrustOutcome, trace_id: string, autonomy_tier: AutonomyTier, timestamp: string, cost_usd: float | nil, metadata: dict}
+type TrustEntryId = string
+
+type CapabilityPolicy = {tools: list<string>, capabilities: dict, workspace_roots: list<string>, side_effect_level: string | nil, recursion_limit: int | nil, tool_arg_constraints: list<dict>, tool_annotations: dict}
+
+type TrustRecord = {schema: string, record_id: string, agent: string, action: string, approver: string | nil, outcome: TrustOutcome, trace_id: string, autonomy_tier: AutonomyTier, timestamp: string, cost_usd: float | nil, chain_index: int, previous_hash: string | nil, entry_hash: string, metadata: dict}
 
 type TrustTraceGroup = {trace_id: string, records: list<TrustRecord>}
 
 type TrustQueryFilters = {agent: string | nil, action: string | nil, since: string | nil, until: string | nil, tier: AutonomyTier | nil, outcome: TrustOutcome | nil, limit: int | nil, grouped_by_trace: bool | nil}
+
+type TrustScore = {agent: string, action: string | nil, total: int, successes: int, failures: int, denied: int, timeouts: int, success_rate: float, latest_outcome: TrustOutcome | nil, latest_timestamp: string | nil, effective_tier: AutonomyTier, policy: CapabilityPolicy}
+
+type TrustChainReport = {topic: string, total: int, verified: bool, root_hash: string | nil, broken_at_event_id: int | nil, errors: list<string>}
 
 type HandlerContext = {agent: string, action: string, trace_id: string, replay_of_event_id: string | nil, autonomy_tier: AutonomyTier, trigger_event: TriggerEvent}
 
