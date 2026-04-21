@@ -1,4 +1,4 @@
-.PHONY: setup install-hooks check fmt fmt-harn lint lint-md lint-harn test test-cargo test-fast conformance all release-gate portal portal-check portal-demo gen-highlight check-highlight check-docs-snippets
+.PHONY: setup install-hooks check fmt fmt-harn fmt-harn-fix lint lint-md lint-harn test test-cargo test-fast conformance all release-gate portal portal-check portal-demo gen-highlight check-highlight check-docs-snippets
 
 # Full quality check: format first, then lint/test in parallel.
 # Usage: make all -j       (parallel checks after formatting)
@@ -79,10 +79,18 @@ lint-harn:
 	@cargo run --quiet --bin harn -- check $(EXPERIMENT_HARN_CHECK)
 	@echo "    Harn lint OK."
 
-# Check harn formatting on conformance tests (CI, not pre-commit).
+# Check harn formatting on conformance tests.
 # Skip syntax cases the formatter intentionally normalizes.
 FMT_HARN_SKIP := semicolon_statements.harn semicolon_if_else_invalid.harn semicolon_try_catch_invalid.harn semicolon_empty_statement_invalid.harn
 EXPERIMENT_HARN_CHECK := experiments/burin-mini/host.harn experiments/burin-mini/lib/common.harn experiments/burin-mini/lib/profiles.harn
+fmt-harn-fix:
+	@echo "=== Formatting Harn files ==="
+	@find conformance/tests -name '*.harn' $(foreach s,$(FMT_HARN_SKIP),-not -name $(s)) -print0 \
+		| xargs -0 cargo run --quiet --bin harn -- fmt
+	@find experiments -name '*.harn' -print0 \
+		| xargs -0 cargo run --quiet --bin harn -- fmt
+	@echo "    Harn formatting OK."
+
 fmt-harn:
 	@echo "=== Checking Harn formatting ==="
 	@find conformance/tests -name '*.harn' $(foreach s,$(FMT_HARN_SKIP),-not -name $(s)) -print0 \

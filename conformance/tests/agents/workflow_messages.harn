@@ -1,18 +1,15 @@
 pipeline default() {
   let workflow_id = "wf-messages-" + uuid()
   let target = {workflow_id: workflow_id}
-
   let signaled = workflow.signal(target, "new_customer_joined", {customer_id: 1})
   println(signaled?.status?.pending_count == 1)
   let signal = workflow.receive(target)
   println(signal?.kind == "signal")
   println(signal?.name == "new_customer_joined")
   println(signal?.payload?.customer_id == 1)
-
   let published = workflow.publish_query(target, "progress_pct", 42)
   println(published?.query_count == 1)
   println(workflow.query(target, "progress_pct") == 42)
-
   let waiter = spawn {
     let result = workflow.update(target, "adjust_budget", {max_usd: 10}, {timeout_ms: 1000})
     println(result?.ok == true)
@@ -25,18 +22,15 @@ pipeline default() {
   println(update?.request_id != nil)
   workflow.respond_update(target, update?.request_id, {ok: true}, update?.name)
   let _ = await(waiter)
-
   let paused = workflow.pause(target)
   println(paused?.paused == true)
   let pause_event = workflow.receive(target)
   println(pause_event?.kind == "control")
   println(pause_event?.name == "pause")
-
   let resumed = workflow.resume(target)
   println(resumed?.paused == false)
   let resume_event = workflow.receive(target)
   println(resume_event?.name == "resume")
-
   let next = continue_as_new(target)
   println(next?.workflow_id == workflow_id)
   let status = workflow.status(target)

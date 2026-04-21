@@ -1,7 +1,8 @@
 import "std/project"
 
 fn fingerprint_signature(fp: ProjectFingerprint) -> string {
-  return json_stringify([
+  return json_stringify(
+    [
     fp.primary_language,
     fp.frameworks,
     fp.package_manager,
@@ -13,7 +14,8 @@ fn fingerprint_signature(fp: ProjectFingerprint) -> string {
     fp.has_tests,
     fp.has_ci,
     fp.lockfile_paths,
-  ])
+  ],
+  )
 }
 
 pipeline test(task) {
@@ -22,7 +24,6 @@ pipeline test(task) {
   defer {
     delete_file(root)
   }
-
   let rust_workspace = path_join(root, "rust-workspace")
   mkdir(rust_workspace)
   mkdir(path_join(rust_workspace, ".git"))
@@ -44,7 +45,6 @@ pipeline test(task) {
     "[package]\nname = \"cli\"\nversion = \"0.1.0\"\n",
   )
   println("rust-workspace " + fingerprint_signature(project_fingerprint(rust_workspace)))
-
   let swift_library = path_join(root, "swift-library")
   mkdir(swift_library)
   mkdir(path_join(swift_library, "Sources/Lib"))
@@ -56,7 +56,6 @@ pipeline test(task) {
   write_file(path_join(swift_library, "Sources/Lib/Lib.swift"), "public struct Lib {}\n")
   write_file(path_join(swift_library, "Tests/LibTests/LibTests.swift"), "import XCTest\n")
   println("swift-library " + fingerprint_signature(project_fingerprint(swift_library)))
-
   let swift_executable = path_join(root, "swift-executable")
   mkdir(swift_executable)
   mkdir(path_join(swift_executable, "Sources/App"))
@@ -68,7 +67,6 @@ pipeline test(task) {
   write_file(path_join(swift_executable, "Sources/App/main.swift"), "print(\"hi\")\n")
   write_file(path_join(swift_executable, "Tests/AppTests/AppTests.swift"), "import XCTest\n")
   println("swift-executable " + fingerprint_signature(project_fingerprint(swift_executable)))
-
   let npm_monorepo = path_join(root, "npm-monorepo")
   mkdir(npm_monorepo)
   mkdir(path_join(npm_monorepo, "packages/web/src"))
@@ -80,7 +78,6 @@ pipeline test(task) {
   write_file(path_join(npm_monorepo, "package-lock.json"), "{}\n")
   write_file(path_join(npm_monorepo, "packages/web/src/app.ts"), "export const app = 1\n")
   println("npm-monorepo " + fingerprint_signature(project_fingerprint(npm_monorepo)))
-
   let pnpm_monorepo = path_join(root, "pnpm-monorepo")
   mkdir(pnpm_monorepo)
   mkdir(path_join(pnpm_monorepo, "apps/web"))
@@ -91,7 +88,6 @@ pipeline test(task) {
   write_file(path_join(pnpm_monorepo, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n")
   write_file(path_join(pnpm_monorepo, "apps/web/next.config.ts"), "export default {}\n")
   println("pnpm-monorepo " + fingerprint_signature(project_fingerprint(pnpm_monorepo)))
-
   let python_poetry = path_join(root, "python-poetry")
   mkdir(python_poetry)
   mkdir(path_join(python_poetry, "tests"))
@@ -101,7 +97,6 @@ pipeline test(task) {
   )
   write_file(path_join(python_poetry, "poetry.lock"), "# lock\n")
   println("python-poetry " + fingerprint_signature(project_fingerprint(python_poetry)))
-
   let python_uv = path_join(root, "python-uv")
   mkdir(python_uv)
   mkdir(path_join(python_uv, "tests"))
@@ -111,18 +106,13 @@ pipeline test(task) {
   )
   write_file(path_join(python_uv, "uv.lock"), "# lock\n")
   println("python-uv " + fingerprint_signature(project_fingerprint(python_uv)))
-
   let go_module = path_join(root, "go-module")
   mkdir(go_module)
   mkdir(path_join(go_module, "pkg"))
-  write_file(
-    path_join(go_module, "go.mod"),
-    "module github.com/acme/service\n\ngo 1.23\n",
-  )
+  write_file(path_join(go_module, "go.mod"), "module github.com/acme/service\n\ngo 1.23\n")
   write_file(path_join(go_module, "go.sum"), "example v0.0.0 h1:abc\n")
   write_file(path_join(go_module, "pkg/service.go"), "package pkg\n")
   println("go-module " + fingerprint_signature(project_fingerprint(go_module)))
-
   let mixed_repo = path_join(root, "mixed-repo")
   mkdir(mixed_repo)
   mkdir(path_join(mixed_repo, ".git"))
@@ -142,7 +132,6 @@ pipeline test(task) {
   write_file(path_join(mixed_repo, "portal/pnpm-lock.yaml"), "lockfileVersion: '9.0'\n")
   write_file(path_join(mixed_repo, ".github/workflows/ci.yml"), "name: ci\non: push\n")
   println("mixed-repo " + fingerprint_signature(project_fingerprint(mixed_repo)))
-
   let empty_dir = path_join(root, "empty-dir")
   mkdir(empty_dir)
   println("empty-dir " + fingerprint_signature(project_fingerprint(empty_dir)))

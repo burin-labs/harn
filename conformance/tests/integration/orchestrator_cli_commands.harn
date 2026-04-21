@@ -95,7 +95,10 @@ pipeline test(task) {
   let url = wait_for_listener_url(path_join(root, "orchestrator.log"))
   assert(url != nil, "listener URL did not appear in log")
   assert(
-    wait_for_log_contains(path_join(root, "orchestrator.log"), "activated connectors: a2a-push(2), cron(1)"),
+    wait_for_log_contains(
+    path_join(root, "orchestrator.log"),
+    "activated connectors: a2a-push(2), cron(1)",
+  ),
     "connectors did not activate",
   )
   let _ = shell("kill -TERM " + pid)
