@@ -43,10 +43,10 @@ impl super::super::Vm {
             (PropertyCacheTarget::PairFirst, VmValue::Pair(p)) => Some(p.0.clone()),
             (PropertyCacheTarget::PairSecond, VmValue::Pair(p)) => Some(p.1.clone()),
             (PropertyCacheTarget::EnumVariant, VmValue::EnumVariant { variant, .. }) => {
-                Some(VmValue::String(Rc::from(variant.as_str())))
+                Some(VmValue::String(Rc::from(variant.as_ref())))
             }
             (PropertyCacheTarget::EnumFields, VmValue::EnumVariant { fields, .. }) => {
-                Some(VmValue::List(Rc::new(fields.clone())))
+                Some(VmValue::List(fields.clone()))
             }
             _ => None,
         }
@@ -99,8 +99,8 @@ impl super::super::Vm {
             VmValue::EnumVariant {
                 variant, fields, ..
             } => match name {
-                "variant" => VmValue::String(Rc::from(variant.as_str())),
-                "fields" => VmValue::List(Rc::new(fields.clone())),
+                "variant" => VmValue::String(Rc::from(variant.as_ref())),
+                "fields" => VmValue::List(fields.clone()),
                 _ => VmValue::Nil,
             },
             VmValue::StructInstance { fields, .. } => {
@@ -376,15 +376,10 @@ impl super::super::Vm {
                         struct_name,
                         fields,
                     } => {
-                        let mut new_fields = fields.clone();
+                        let mut new_fields = fields.as_ref().clone();
                         new_fields.insert(prop_name, new_value);
-                        self.env.assign(
-                            &var_name,
-                            VmValue::StructInstance {
-                                struct_name,
-                                fields: new_fields,
-                            },
-                        )?;
+                        self.env
+                            .assign(&var_name, VmValue::struct_instance(struct_name, new_fields))?;
                     }
                     _ => {
                         return Err(VmError::TypeError(format!(
@@ -454,11 +449,8 @@ impl super::super::Vm {
             let fields = self
                 .stack
                 .split_off(self.stack.len().saturating_sub(field_count));
-            self.stack.push(VmValue::EnumVariant {
-                enum_name,
-                variant,
-                fields,
-            });
+            self.stack
+                .push(VmValue::enum_variant(enum_name, variant, fields));
         } else if op == Op::MatchEnum as u8 {
             let frame = self.frames.last_mut().unwrap();
             let enum_idx = frame.chunk.read_u16(frame.ip) as usize;
@@ -473,7 +465,7 @@ impl super::super::Vm {
                     enum_name: en,
                     variant: vn,
                     ..
-                } => *en == enum_name && *vn == variant_name,
+                } => en.as_ref() == enum_name && vn.as_ref() == variant_name,
                 _ => false,
             };
             self.stack.push(val);

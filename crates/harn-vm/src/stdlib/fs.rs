@@ -19,19 +19,11 @@ fn resolve_fs_path(path: &str) -> PathBuf {
 }
 
 fn result_ok(value: VmValue) -> VmValue {
-    VmValue::EnumVariant {
-        enum_name: "Result".into(),
-        variant: "Ok".into(),
-        fields: vec![value],
-    }
+    VmValue::enum_variant("Result", "Ok", vec![value])
 }
 
 fn result_err(value: VmValue) -> VmValue {
-    VmValue::EnumVariant {
-        enum_name: "Result".into(),
-        variant: "Err".into(),
-        fields: vec![value],
-    }
+    VmValue::enum_variant("Result", "Err", vec![value])
 }
 
 pub(crate) fn register_fs_builtins(vm: &mut Vm) {

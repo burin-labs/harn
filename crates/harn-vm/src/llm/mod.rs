@@ -193,7 +193,7 @@ fn schema_validation_errors(result: &VmValue) -> Vec<String> {
             enum_name,
             variant,
             fields,
-        } if enum_name == "Result" && variant == "Err" => fields
+        } if enum_name.as_ref() == "Result" && variant.as_ref() == "Err" => fields
             .first()
             .and_then(|payload| payload.as_dict())
             .and_then(|payload| payload.get("errors"))
@@ -971,7 +971,7 @@ fn register_llm_stream(vm: &mut Vm) {
 
         #[allow(clippy::arc_with_non_send_sync)]
         let handle = VmChannelHandle {
-            name: "llm_stream".to_string(),
+            name: Rc::from("llm_stream"),
             sender: tx_arc,
             receiver: Arc::new(tokio::sync::Mutex::new(rx)),
             closed,

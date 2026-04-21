@@ -66,7 +66,7 @@ fn validate_additional_properties_false() {
     );
     assert!(matches!(
         result,
-        VmValue::EnumVariant { variant, .. } if variant == "Err"
+        VmValue::EnumVariant { variant, .. } if variant.as_ref() == "Err"
     ));
 }
 

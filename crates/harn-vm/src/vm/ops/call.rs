@@ -158,44 +158,36 @@ impl super::super::Vm {
                     match tokio::time::timeout_at(deadline, task.handle).await {
                         Ok(Ok(Ok((result, output)))) => {
                             self.output.push_str(&output);
-                            self.stack.push(VmValue::EnumVariant {
-                                enum_name: "Result".into(),
-                                variant: "Ok".into(),
-                                fields: vec![result],
-                            });
+                            self.stack
+                                .push(VmValue::enum_variant("Result", "Ok", vec![result]));
                         }
                         Ok(Ok(Err(e))) => {
-                            self.stack.push(VmValue::EnumVariant {
-                                enum_name: "Result".into(),
-                                variant: "Err".into(),
-                                fields: vec![VmValue::String(Rc::from(e.to_string()))],
-                            });
+                            self.stack.push(VmValue::enum_variant(
+                                "Result",
+                                "Err",
+                                vec![VmValue::String(Rc::from(e.to_string()))],
+                            ));
                         }
                         Ok(Err(e)) => {
-                            self.stack.push(VmValue::EnumVariant {
-                                enum_name: "Result".into(),
-                                variant: "Err".into(),
-                                fields: vec![VmValue::String(Rc::from(format!(
-                                    "Task join error: {e}"
-                                )))],
-                            });
+                            self.stack.push(VmValue::enum_variant(
+                                "Result",
+                                "Err",
+                                vec![VmValue::String(Rc::from(format!("Task join error: {e}")))],
+                            ));
                         }
                         Err(_) => {
-                            self.stack.push(VmValue::EnumVariant {
-                                enum_name: "Result".into(),
-                                variant: "Err".into(),
-                                fields: vec![VmValue::String(Rc::from(
+                            self.stack.push(VmValue::enum_variant(
+                                "Result",
+                                "Err",
+                                vec![VmValue::String(Rc::from(
                                     "cancel_graceful: timeout, task forcefully aborted",
                                 ))],
-                            });
+                            ));
                         }
                     }
                 } else {
-                    self.stack.push(VmValue::EnumVariant {
-                        enum_name: "Result".into(),
-                        variant: "Ok".into(),
-                        fields: vec![VmValue::Nil],
-                    });
+                    self.stack
+                        .push(VmValue::enum_variant("Result", "Ok", vec![VmValue::Nil]));
                 }
             } else {
                 self.stack.push(VmValue::Nil);

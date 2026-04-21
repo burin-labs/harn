@@ -140,7 +140,7 @@ fn validate_against_schema(
         } => {
             let (next_value, next_errors) = validate_object_fields(
                 fields,
-                Some(struct_name),
+                Some(struct_name.as_ref()),
                 schema,
                 root_schema,
                 path,
@@ -382,10 +382,7 @@ fn validate_object_fields(
     }
 
     let normalized = if let Some(struct_name) = struct_name {
-        VmValue::StructInstance {
-            struct_name: struct_name.to_string(),
-            fields: merged,
-        }
+        VmValue::struct_instance(struct_name, merged)
     } else {
         VmValue::Dict(Rc::new(merged))
     };
@@ -490,7 +487,7 @@ pub(super) fn first_param_validation_error(
     if schema_is_object_like(schema) {
         let fields = match value {
             VmValue::Dict(map) => Some(map.as_ref()),
-            VmValue::StructInstance { fields, .. } => Some(fields),
+            VmValue::StructInstance { fields, .. } => Some(fields.as_ref()),
             _ => None,
         };
         let fields = match fields {
