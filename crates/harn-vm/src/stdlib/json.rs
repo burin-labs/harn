@@ -283,8 +283,10 @@ fn vm_value_to_data_value(value: &VmValue) -> serde_json::Value {
                 .map(|(key, value)| (key.clone(), vm_value_to_data_value(value)))
                 .collect(),
         ),
-        VmValue::StructInstance { fields, .. } => serde_json::Value::Object(
-            fields
+        VmValue::StructInstance { .. } => serde_json::Value::Object(
+            value
+                .struct_fields_map()
+                .unwrap_or_default()
                 .iter()
                 .map(|(key, value)| (key.clone(), vm_value_to_data_value(value)))
                 .collect(),
@@ -333,6 +335,23 @@ fn write_vm_value_to_json(val: &VmValue, out: &mut String) {
         VmValue::Dict(map) => {
             out.push('{');
             for (i, (k, v)) in map.iter().enumerate() {
+                if i > 0 {
+                    out.push(',');
+                }
+                out.push_str(&escape_json_string_vm(k));
+                out.push(':');
+                write_vm_value_to_json(v, out);
+            }
+            out.push('}');
+        }
+        VmValue::StructInstance { .. } => {
+            out.push('{');
+            for (i, (k, v)) in val
+                .struct_fields_map()
+                .unwrap_or_default()
+                .iter()
+                .enumerate()
+            {
                 if i > 0 {
                     out.push(',');
                 }

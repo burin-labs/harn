@@ -4,7 +4,7 @@ mod error;
 mod handles;
 mod structural;
 
-pub use core::{VmAsyncBuiltinFn, VmBuiltinFn, VmValue};
+pub use core::{struct_fields_to_map, StructLayout, VmAsyncBuiltinFn, VmBuiltinFn, VmValue};
 pub use env::{closest_match, ModuleFunctionRegistry, ModuleState, VmClosure, VmEnv};
 pub use error::{
     categorized_error, classify_error_message, error_to_category, ErrorCategory, VmError,
