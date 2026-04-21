@@ -1,0 +1,181 @@
+// std/text — Text processing utilities for LLM output and code analysis.
+
+// Convert an integer-compatible value into a decimal string with explicit
+// stdlib import ergonomics for Harn-authored libraries.
+/** int_to_string. */
+pub fn int_to_string(value) {
+  let parsed = to_int(value)
+  require parsed != nil, "int_to_string expects an integer-compatible value"
+  return to_string(parsed)
+}
+
+// Convert a float-compatible value into a string.
+/** float_to_string. */
+pub fn float_to_string(value) {
+  let parsed = to_float(value)
+  require parsed != nil, "float_to_string expects a float-compatible value"
+  return to_string(parsed)
+}
+
+// Parse an integer-like value, returning fallback when conversion fails.
+/** parse_int_or. */
+pub fn parse_int_or(value, fallback) {
+  return to_int(value) ?? fallback
+}
+
+// Parse a float-like value, returning fallback when conversion fails.
+/** parse_float_or. */
+pub fn parse_float_or(value, fallback) {
+  return to_float(value) ?? fallback
+}
+
+// Extract file paths from text.
+// Splits on newlines, skips comment lines, extracts path-like words,
+// validates extensions, and deduplicates.
+/** extract_paths. */
+pub fn extract_paths(text) {
+  let lines = split(text, "\n")
+    .filter({ line ->
+      let t = trim(line)
+      return contains(t, "/")
+        && !starts_with(t, "//")
+        && !starts_with(t, "#")
+    })
+  var seen = []
+  return lines.flat_map({ line ->
+    return split(trim(line), " ").map({ word ->
+      var clean = regex_replace("^[\"'`,;:()\\[\\]{}><]+|[\"'`,;:()\\[\\]{}><]+$", "", trim(word))
+      while ends_with(clean, ".") || ends_with(clean, ",") || ends_with(clean, ":") || ends_with(clean, ";") {
+        clean = substring(clean, 0, len(clean) - 1)
+      }
+      return clean
+    }).filter({ clean ->
+      if !contains(clean, "/") && !contains(clean, ".") { return false }
+      let ext = extname(clean)
+      return ext != "" && len(ext) <= 11
+    })
+  }).filter({ p ->
+    if seen.contains(p) { return false }
+    seen = seen + [p]
+    return true
+  }).sort()
+}
+
+// Parse fenced code blocks from LLM response text.
+// Returns list of {type: "code"|"call", lang: string|nil, code: string}.
+// State machine — not easily expressed as pure map/filter.
+/** parse_cells. */
+pub fn parse_cells(response) {
+  let lines = split(response, "\n")
+  var cells = []
+  var in_block = false
+  var block_type = "code"
+  var block_lang = nil
+  var current_lines = []
+
+  var trimmed = ""
+  var lang_part = ""
+  for line in lines {
+    trimmed = trim(line)
+    if starts_with(trimmed, "```") && in_block {
+      cells = cells + [{type: block_type, lang: block_lang, code: join(current_lines, "\n")}]
+      in_block = false
+      current_lines = []
+    } else if starts_with(trimmed, "```") && !in_block {
+      lang_part = trim(substring(trimmed, 3))
+      if lang_part == "call" || starts_with(lang_part, "call ") {
+        block_type = "call"
+        if starts_with(lang_part, "call ") {
+          block_lang = trim(substring(lang_part, 5))
+        } else {
+          block_lang = nil
+        }
+      } else {
+        block_type = "code"
+        if lang_part == "" {
+          block_lang = nil
+        } else {
+          block_lang = lang_part
+        }
+      }
+      in_block = true
+      current_lines = []
+    } else if in_block {
+      current_lines = current_lines + [line]
+    }
+  }
+  return cells
+}
+
+// Filter parsed cells to keep test-relevant ones.
+// Keeps type="code" cells and type="call" cells containing "write_file".
+// If target_file is provided, only write_file calls mentioning that file are kept.
+/** filter_test_cells. */
+pub fn filter_test_cells(cells, target_file) {
+  return cells.filter({ cell ->
+    if cell.type == "call" && contains(cell.code, "write_file") {
+      if target_file != nil {
+        return contains(cell.code, target_file)
+      }
+      return true
+    }
+    return cell.type == "code"
+  })
+}
+
+// Keep first n and last n lines of text, with an omission marker in between.
+/** truncate_head_tail. */
+pub fn truncate_head_tail(text, n) {
+  let lines = split(text, "\n")
+  if len(lines) <= n * 2 {
+    return text
+  }
+  let skipped = len(lines) - n * 2
+  return join(lines[:n], "\n")
+    + "\n... (" + to_string(skipped) + " lines omitted) ...\n"
+    + join(lines[-n:], "\n")
+}
+
+// Check if compiler/build output contains compile error indicators.
+// Matches Python errors and generic patterns (case-sensitive, matching burin-code behavior).
+/** detect_compile_error. */
+pub fn detect_compile_error(output) {
+  return contains(output, "SyntaxError")
+    || contains(output, "IndentationError")
+    || contains(output, "ImportError")
+    || contains(output, "ModuleNotFoundError")
+    || contains(output, "compile error")
+    || contains(output, "cannot find")
+}
+
+// Check if test output contains both got/actual AND want/expected indicators.
+// Returns true only if BOTH sides are present.
+/** has_got_want. */
+pub fn has_got_want(output) {
+  let has_got = contains(output, "got:")
+    || contains(output, "Got:")
+    || contains(output, "actual:")
+    || contains(output, "Actual:")
+  let has_want = contains(output, "want:")
+    || contains(output, "Want:")
+    || contains(output, "expected:")
+    || contains(output, "Expected:")
+  return has_got && has_want
+}
+
+// Extract error-relevant lines from test output.
+// Filters for lines containing error keywords, returns first 20 joined with newlines.
+/** format_test_errors. */
+pub fn format_test_errors(output) {
+  let error_lines = split(output, "\n").filter({ line ->
+    return contains(line, "FAIL")
+      || contains(line, "Error")
+      || contains(line, "error")
+      || contains(line, "AssertionError")
+      || contains(line, "assert")
+  })
+  if len(error_lines) > 20 {
+    return join(error_lines[:20], "\n")
+  }
+  return join(error_lines, "\n")
+}

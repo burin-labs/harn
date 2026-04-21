@@ -1,0 +1,76 @@
+// std/waitpoint — durable waitpoints for fan-in, fan-out, and long waits.
+//
+// Import with: `import "std/waitpoint"`.
+
+type WaitpointStatus = "open" | "completed" | "cancelled"
+
+type Waitpoint = {
+  id: string,
+  status: WaitpointStatus,
+  created_at: string,
+  completed_at: string | nil,
+  cancelled_at: string | nil,
+  completed_by: string | nil,
+  cancelled_by: string | nil,
+  value: any | nil,
+  reason: string | nil,
+  metadata: any | nil,
+}
+
+type WaitpointWaitOptions = {
+  timeout?: duration,
+}
+
+type WaitpointTerminalOptions = {
+  by?: string,
+  reason?: string,
+  metadata?: any,
+}
+
+type WaitpointTimeoutError = {
+  name: "WaitpointTimeoutError",
+  category: "timeout",
+  message: string,
+  wait_id: string,
+}
+
+type WaitpointCancelledError = {
+  name: "WaitpointCancelledError",
+  category: "cancelled",
+  message: string,
+  wait_id: string,
+  waitpoint_ids: list<string>,
+  reason: string | nil,
+}
+
+/** create. */
+pub fn create(id_or_options) {
+  if id_or_options == nil {
+    return __waitpoint_create()
+  }
+  return __waitpoint_create(id_or_options)
+}
+
+/** wait. */
+pub fn wait(waitpoints, options) {
+  if options == nil {
+    return __waitpoint_wait(waitpoints)
+  }
+  return __waitpoint_wait(waitpoints, options)
+}
+
+/** complete. */
+pub fn complete(waitpoint, value, options) {
+  if options == nil {
+    return __waitpoint_complete(waitpoint, value)
+  }
+  return __waitpoint_complete(waitpoint, value, options)
+}
+
+/** cancel. */
+pub fn cancel(waitpoint, options) {
+  if options == nil {
+    return __waitpoint_cancel(waitpoint)
+  }
+  return __waitpoint_cancel(waitpoint, options)
+}

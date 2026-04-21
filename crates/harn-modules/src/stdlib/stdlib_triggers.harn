@@ -1,0 +1,224 @@
+// std/triggers — typed trigger envelopes shared across inbound providers.
+//
+// Import with: `import "std/triggers"`.
+//
+// The runtime persists RFC3339 timestamps, typed signature status, and a
+// provider-tagged payload union. Connector-specific payloads intentionally
+// start with a small normalized surface plus `raw: dict`; provider tickets can
+// refine these aliases later without changing the top-level TriggerEvent shape.
+type ProviderId = "github" | "slack" | "linear" | "notion" | "cron" | "webhook" | "a2a-push" | "kafka" | "nats" | "pulsar" | "postgres-cdc" | "email" | "websocket" | string
+
+type SignatureVerified = {state: "verified"}
+
+type SignatureUnsigned = {state: "unsigned"}
+
+type SignatureFailed = {state: "failed", reason: string}
+
+type SignatureStatus = SignatureVerified | SignatureUnsigned | SignatureFailed
+
+type GitHubIssuesEventPayload = {provider: "github", event: "issues", action: string | nil, delivery_id: string | nil, installation_id: int | nil, issue: dict, raw: dict}
+
+type GitHubPullRequestEventPayload = {provider: "github", event: "pull_request", action: string | nil, delivery_id: string | nil, installation_id: int | nil, pull_request: dict, raw: dict}
+
+type GitHubIssueCommentEventPayload = {provider: "github", event: "issue_comment", action: string | nil, delivery_id: string | nil, installation_id: int | nil, issue: dict, comment: dict, raw: dict}
+
+type GitHubPullRequestReviewEventPayload = {provider: "github", event: "pull_request_review", action: string | nil, delivery_id: string | nil, installation_id: int | nil, pull_request: dict, review: dict, raw: dict}
+
+type GitHubPushEventPayload = {provider: "github", event: "push", action: string | nil, delivery_id: string | nil, installation_id: int | nil, commits: list<dict>, distinct_size: int | nil, raw: dict}
+
+type GitHubWorkflowRunEventPayload = {provider: "github", event: "workflow_run", action: string | nil, delivery_id: string | nil, installation_id: int | nil, workflow_run: dict, raw: dict}
+
+type GitHubDeploymentStatusEventPayload = {provider: "github", event: "deployment_status", action: string | nil, delivery_id: string | nil, installation_id: int | nil, deployment_status: dict, deployment: dict, raw: dict}
+
+type GitHubCheckRunEventPayload = {provider: "github", event: "check_run", action: string | nil, delivery_id: string | nil, installation_id: int | nil, check_run: dict, raw: dict}
+
+type GitHubOtherEventPayload = {provider: "github", event: string, action: string | nil, delivery_id: string | nil, installation_id: int | nil, raw: dict}
+
+type GitHubEventPayload = GitHubIssuesEventPayload | GitHubPullRequestEventPayload | GitHubIssueCommentEventPayload | GitHubPullRequestReviewEventPayload | GitHubPushEventPayload | GitHubWorkflowRunEventPayload | GitHubDeploymentStatusEventPayload | GitHubCheckRunEventPayload | GitHubOtherEventPayload
+
+type SlackEventCommon = {provider: "slack", event: string, event_id: string | nil, api_app_id: string | nil, team_id: string | nil, channel_id: string | nil, user_id: string | nil, event_ts: string | nil, raw: dict}
+
+type SlackMessageEventPayload = {provider: "slack", event: string, event_id: string | nil, api_app_id: string | nil, team_id: string | nil, channel_id: string | nil, user_id: string | nil, event_ts: string | nil, subtype: string | nil, channel_type: string | nil, channel: string | nil, user: string | nil, text: string | nil, ts: string | nil, thread_ts: string | nil, raw: dict}
+
+type SlackAppMentionEventPayload = {provider: "slack", event: "app_mention", event_id: string | nil, api_app_id: string | nil, team_id: string | nil, channel_id: string | nil, user_id: string | nil, event_ts: string | nil, channel: string | nil, user: string | nil, text: string | nil, ts: string | nil, thread_ts: string | nil, raw: dict}
+
+type SlackReactionAddedEventPayload = {provider: "slack", event: "reaction_added", event_id: string | nil, api_app_id: string | nil, team_id: string | nil, channel_id: string | nil, user_id: string | nil, event_ts: string | nil, reaction: string | nil, item_user: string | nil, item: dict, raw: dict}
+
+type SlackAppHomeOpenedEventPayload = {provider: "slack", event: "app_home_opened", event_id: string | nil, api_app_id: string | nil, team_id: string | nil, channel_id: string | nil, user_id: string | nil, event_ts: string | nil, user: string | nil, channel: string | nil, tab: string | nil, view: dict, raw: dict}
+
+type SlackAssistantThreadStartedEventPayload = {provider: "slack", event: "assistant_thread_started", event_id: string | nil, api_app_id: string | nil, team_id: string | nil, channel_id: string | nil, user_id: string | nil, event_ts: string | nil, assistant_thread: dict, thread_ts: string | nil, context: dict, raw: dict}
+
+type SlackOtherEventPayload = {provider: "slack", event: string, event_id: string | nil, api_app_id: string | nil, team_id: string | nil, channel_id: string | nil, user_id: string | nil, event_ts: string | nil, raw: dict}
+
+type SlackEventPayload = SlackMessageEventPayload | SlackAppMentionEventPayload | SlackReactionAddedEventPayload | SlackAppHomeOpenedEventPayload | SlackAssistantThreadStartedEventPayload | SlackOtherEventPayload
+
+type LinearEventCommon = {provider: "linear", event: string, action: string | nil, delivery_id: string | nil, organization_id: string | nil, webhook_timestamp: int | nil, webhook_id: string | nil, url: string | nil, created_at: string | nil, actor: dict | nil, raw: dict}
+
+type LinearIssueTitleChange = {field_name: "title", previous: string | nil}
+type LinearIssueDescriptionChange = {field_name: "description", previous: string | nil}
+type LinearIssuePriorityChange = {field_name: "priority", previous: int | nil}
+type LinearIssueEstimateChange = {field_name: "estimate", previous: int | nil}
+type LinearIssueStateIdChange = {field_name: "state_id", previous: string | nil}
+type LinearIssueTeamIdChange = {field_name: "team_id", previous: string | nil}
+type LinearIssueAssigneeIdChange = {field_name: "assignee_id", previous: string | nil}
+type LinearIssueProjectIdChange = {field_name: "project_id", previous: string | nil}
+type LinearIssueCycleIdChange = {field_name: "cycle_id", previous: string | nil}
+type LinearIssueDueDateChange = {field_name: "due_date", previous: string | nil}
+type LinearIssueParentIdChange = {field_name: "parent_id", previous: string | nil}
+type LinearIssueSortOrderChange = {field_name: "sort_order", previous: float | nil}
+type LinearIssueLabelIdsChange = {field_name: "label_ids", previous: list<string>}
+type LinearIssueCompletedAtChange = {field_name: "completed_at", previous: string | nil}
+type LinearIssueOtherChange = {field_name: "other", field: string, previous: any}
+type LinearIssueChange = LinearIssueTitleChange | LinearIssueDescriptionChange | LinearIssuePriorityChange | LinearIssueEstimateChange | LinearIssueStateIdChange | LinearIssueTeamIdChange | LinearIssueAssigneeIdChange | LinearIssueProjectIdChange | LinearIssueCycleIdChange | LinearIssueDueDateChange | LinearIssueParentIdChange | LinearIssueSortOrderChange | LinearIssueLabelIdsChange | LinearIssueCompletedAtChange | LinearIssueOtherChange
+
+type LinearIssueEventPayload = {provider: "linear", event: "issue", action: string | nil, delivery_id: string | nil, organization_id: string | nil, webhook_timestamp: int | nil, webhook_id: string | nil, url: string | nil, created_at: string | nil, actor: dict | nil, issue: dict, changes: list<LinearIssueChange>, raw: dict}
+
+type LinearIssueCommentEventPayload = {provider: "linear", event: "comment", action: string | nil, delivery_id: string | nil, organization_id: string | nil, webhook_timestamp: int | nil, webhook_id: string | nil, url: string | nil, created_at: string | nil, actor: dict | nil, comment: dict, raw: dict}
+
+type LinearIssueLabelEventPayload = {provider: "linear", event: "issue_label", action: string | nil, delivery_id: string | nil, organization_id: string | nil, webhook_timestamp: int | nil, webhook_id: string | nil, url: string | nil, created_at: string | nil, actor: dict | nil, label: dict, raw: dict}
+
+type LinearProjectEventPayload = {provider: "linear", event: "project", action: string | nil, delivery_id: string | nil, organization_id: string | nil, webhook_timestamp: int | nil, webhook_id: string | nil, url: string | nil, created_at: string | nil, actor: dict | nil, project: dict, raw: dict}
+
+type LinearCycleEventPayload = {provider: "linear", event: "cycle", action: string | nil, delivery_id: string | nil, organization_id: string | nil, webhook_timestamp: int | nil, webhook_id: string | nil, url: string | nil, created_at: string | nil, actor: dict | nil, cycle: dict, raw: dict}
+
+type LinearCustomerEventPayload = {provider: "linear", event: "customer", action: string | nil, delivery_id: string | nil, organization_id: string | nil, webhook_timestamp: int | nil, webhook_id: string | nil, url: string | nil, created_at: string | nil, actor: dict | nil, customer: dict, raw: dict}
+
+type LinearCustomerRequestEventPayload = {provider: "linear", event: "customer_request", action: string | nil, delivery_id: string | nil, organization_id: string | nil, webhook_timestamp: int | nil, webhook_id: string | nil, url: string | nil, created_at: string | nil, actor: dict | nil, customer_request: dict, raw: dict}
+
+type LinearOtherEventPayload = LinearEventCommon
+
+type LinearEventPayload = LinearIssueEventPayload | LinearIssueCommentEventPayload | LinearIssueLabelEventPayload | LinearProjectEventPayload | LinearCycleEventPayload | LinearCustomerEventPayload | LinearCustomerRequestEventPayload | LinearOtherEventPayload
+
+type NotionPolledChangeEvent = {resource: string, source_id: string, entity_id: string, high_water_mark: string, before: dict | nil, after: dict}
+
+type NotionEventCommon = {provider: "notion", event: string, workspace_id: string | nil, request_id: string | nil, subscription_id: string | nil, integration_id: string | nil, attempt_number: int | nil, entity_id: string | nil, entity_type: string | nil, api_version: string | nil, verification_token: string | nil, polled: NotionPolledChangeEvent | nil, raw: dict}
+
+type NotionSubscriptionVerificationEventPayload = {provider: "notion", event: "subscription.verification", workspace_id: string | nil, request_id: string | nil, subscription_id: string | nil, integration_id: string | nil, attempt_number: int | nil, entity_id: string | nil, entity_type: string | nil, api_version: string | nil, verification_token: string | nil, polled: NotionPolledChangeEvent | nil, raw: dict}
+
+type NotionPageContentUpdatedEventPayload = {provider: "notion", event: "page.content_updated", workspace_id: string | nil, request_id: string | nil, subscription_id: string | nil, integration_id: string | nil, attempt_number: int | nil, entity_id: string | nil, entity_type: string | nil, api_version: string | nil, verification_token: string | nil, polled: NotionPolledChangeEvent | nil, raw: dict}
+
+type NotionPageLockedEventPayload = {provider: "notion", event: "page.locked", workspace_id: string | nil, request_id: string | nil, subscription_id: string | nil, integration_id: string | nil, attempt_number: int | nil, entity_id: string | nil, entity_type: string | nil, api_version: string | nil, verification_token: string | nil, polled: NotionPolledChangeEvent | nil, raw: dict}
+
+type NotionCommentCreatedEventPayload = {provider: "notion", event: "comment.created", workspace_id: string | nil, request_id: string | nil, subscription_id: string | nil, integration_id: string | nil, attempt_number: int | nil, entity_id: string | nil, entity_type: string | nil, api_version: string | nil, verification_token: string | nil, polled: NotionPolledChangeEvent | nil, raw: dict}
+
+type NotionDataSourceSchemaUpdatedEventPayload = {provider: "notion", event: "data_source.schema_updated", workspace_id: string | nil, request_id: string | nil, subscription_id: string | nil, integration_id: string | nil, attempt_number: int | nil, entity_id: string | nil, entity_type: string | nil, api_version: string | nil, verification_token: string | nil, polled: NotionPolledChangeEvent | nil, raw: dict}
+
+type NotionPolledEventPayload = {provider: "notion", event: "page.content_updated", workspace_id: string | nil, request_id: string | nil, subscription_id: string | nil, integration_id: string | nil, attempt_number: int | nil, entity_id: string | nil, entity_type: string | nil, api_version: string | nil, verification_token: string | nil, polled: NotionPolledChangeEvent, raw: dict}
+
+type NotionOtherEventPayload = {provider: "notion", event: string, workspace_id: string | nil, request_id: string | nil, subscription_id: string | nil, integration_id: string | nil, attempt_number: int | nil, entity_id: string | nil, entity_type: string | nil, api_version: string | nil, verification_token: string | nil, polled: NotionPolledChangeEvent | nil, raw: dict}
+
+type NotionEventPayload = NotionSubscriptionVerificationEventPayload | NotionPageContentUpdatedEventPayload | NotionPageLockedEventPayload | NotionCommentCreatedEventPayload | NotionDataSourceSchemaUpdatedEventPayload | NotionPolledEventPayload | NotionOtherEventPayload
+
+type CronEventPayload = {provider: "cron", cron_id: string | nil, schedule: string | nil, tick_at: string, raw: dict}
+
+type GenericWebhookPayload = {provider: "webhook", source: string | nil, content_type: string | nil, raw: dict}
+
+type A2aPushPayload = {provider: "a2a-push", task_id: string | nil, sender: string | nil, raw: dict}
+
+type StreamEventPayload = {provider: "kafka" | "nats" | "pulsar" | "postgres-cdc" | "email" | "websocket", event: string, source: string | nil, stream: string | nil, partition: string | nil, offset: string | nil, key: string | nil, timestamp: string | nil, headers: dict, raw: dict}
+
+type ExtensionProviderPayload = {provider: string, schema_name: string, raw: dict}
+
+type ProviderPayload = GitHubEventPayload | SlackEventPayload | LinearEventPayload | NotionEventPayload | CronEventPayload | GenericWebhookPayload | A2aPushPayload | StreamEventPayload | ExtensionProviderPayload
+
+type ProviderSecretRequirement = {name: string, required: bool, namespace: string}
+
+type ProviderOutboundMethod = {name: string}
+
+type ProviderSignatureVerificationNone = {kind: "none"}
+
+type ProviderSignatureVerificationHmac = {kind: "hmac", variant: string, raw_body: bool, signature_header: string, timestamp_header: string | nil, id_header: string | nil, default_tolerance_secs: int | nil, digest: string, encoding: string}
+
+type ProviderSignatureVerification = ProviderSignatureVerificationNone | ProviderSignatureVerificationHmac
+
+type ProviderRuntimeBuiltin = {kind: "builtin", connector: string, default_signature_variant: string | nil}
+
+type ProviderRuntimePlaceholder = {kind: "placeholder"}
+
+type ProviderRuntime = ProviderRuntimeBuiltin | ProviderRuntimePlaceholder
+
+type ProviderCatalogEntry = {provider: string, kinds: list<string>, schema_name: string, outbound_methods: list<ProviderOutboundMethod>, secret_requirements: list<ProviderSecretRequirement>, signature_verification: ProviderSignatureVerification, runtime: ProviderRuntime}
+
+type TriggerEvent = {id: string, provider: ProviderId, kind: string, received_at: string, occurred_at: string | nil, dedupe_key: string, trace_id: string, tenant_id: string | nil, headers: dict, batch: list<dict> | nil, raw_body: bytes | nil, provider_payload: ProviderPayload, signature_status: SignatureStatus}
+
+type TriggerState = "registering" | "active" | "draining" | "terminated"
+
+type TriggerBindingSource = "manifest" | "dynamic"
+
+type TriggerHandler = fn(TriggerEvent) -> any | string
+
+type TriggerPredicate = fn(TriggerEvent) -> bool | Result<bool, any>
+
+type TriggerMatch = {events: list<string> | nil}
+
+type TriggerBudget = {daily_cost_usd: float | nil, max_concurrent: int | nil}
+
+type TriggerWhenBudget = {max_cost_usd: float | nil, tokens_max: int | nil, timeout: string | nil}
+
+type TriggerRetryBackoff = "svix" | "immediate"
+
+type TriggerRetry = {max: int | nil, backoff: TriggerRetryBackoff | nil}
+
+type AutonomyTier = "shadow" | "suggest" | "act_with_approval" | "act_auto"
+
+type TrustOutcome = "success" | "failure" | "denied" | "timeout"
+
+type TriggerConfig = {id: string | nil, kind: string, provider: ProviderId, autonomy_tier: AutonomyTier | nil, handler: TriggerHandler, when: TriggerPredicate | nil, when_budget: TriggerWhenBudget | nil, retry: TriggerRetry | nil, match: TriggerMatch | nil, events: list<string> | nil, dedupe_key: string | nil, filter: string | nil, allow_cleartext: bool | nil, budget: TriggerBudget | nil, manifest_path: string | nil, package_name: string | nil}
+
+type TriggerMetrics = {received: int, dispatched: int, failed: int, dlq: int, in_flight: int, last_received_ms: int | nil, cost_total_usd_micros: int, cost_today_usd_micros: int}
+
+type TriggerBinding = {id: string, version: int, source: TriggerBindingSource, kind: string, provider: string, autonomy_tier: AutonomyTier, handler_kind: string, state: TriggerState, metrics: TriggerMetrics}
+
+type TriggerHandle = TriggerBinding
+
+type DispatchHandle = {event_id: string, binding_id: string, binding_version: int, status: string, replay_of_event_id: string | nil, dlq_entry_id: string | nil, error: string | nil, result: any | nil}
+
+type DlqAttempt = {attempt: int, at: string, status: string, error: string | nil}
+
+type DlqEntry = {id: string, event_id: string, binding_id: string, binding_version: int, provider: string, kind: string, state: string, error: string, event: TriggerEvent, retry_history: list<DlqAttempt>}
+
+type TrustRecord = {schema: string, record_id: string, agent: string, action: string, approver: string | nil, outcome: TrustOutcome, trace_id: string, autonomy_tier: AutonomyTier, timestamp: string, cost_usd: float | nil, metadata: dict}
+
+type TrustTraceGroup = {trace_id: string, records: list<TrustRecord>}
+
+type TrustQueryFilters = {agent: string | nil, action: string | nil, since: string | nil, until: string | nil, tier: AutonomyTier | nil, outcome: TrustOutcome | nil, limit: int | nil, grouped_by_trace: bool | nil}
+
+type HandlerContext = {agent: string, action: string, trace_id: string, replay_of_event_id: string | nil, autonomy_tier: AutonomyTier, trigger_event: TriggerEvent}
+
+type StreamWindowMode = "tumbling" | "sliding" | "session"
+
+type StreamWindowSpec = {mode: StreamWindowMode, key: string | nil, size: string | nil, every: string | nil, gap: string | nil, max_items: int | nil}
+
+type StreamForkPlan = {kind: "stream.fork", source: any, branches: list<any>}
+
+type StreamJoinPlan = {kind: "stream.join", source: any, join: dict}
+
+type StreamWindowPlan = {kind: "stream.window", events: list<any>, window: StreamWindowSpec}
+
+type StreamLlmClassifyPlan = {kind: "stream.llm_classify", input: any, labels: list<string>, cache: string | nil, options: dict}
+
+/** list_providers. */
+pub fn list_providers() -> list<ProviderCatalogEntry> {
+  return list_providers_native()
+}
+
+/** stream_fork returns a declarative fan-out plan for stream handlers. */
+pub fn stream_fork(source, branches = []) -> StreamForkPlan {
+  return {kind: "stream.fork", source: source, branches: branches}
+}
+
+/** stream_join returns a declarative fan-in plan for stream handlers. */
+pub fn stream_join(source, join = nil) -> StreamJoinPlan {
+  return {kind: "stream.join", source: source, join: join ?? {}}
+}
+
+/** window_by groups stream events with the same manifest window shape. */
+pub fn window_by(events, window: StreamWindowSpec) -> StreamWindowPlan {
+  return {kind: "stream.window", events: events, window: window}
+}
+
+/** llm_classify describes a cached classifier step without forcing a provider call during planning. */
+pub fn llm_classify(input, labels, options = nil) -> StreamLlmClassifyPlan {
+  let config = options ?? {}
+  return {kind: "stream.llm_classify", input: input, labels: labels, cache: config?.cache, options: config}
+}

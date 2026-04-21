@@ -814,16 +814,22 @@ mod tests {
     #[test]
     fn event_log_check_reports_backend_and_location() {
         let _state_guard = crate::tests::common::harn_state_lock::lock_harn_state();
-        let _cwd_guard = crate::tests::common::cwd_lock::lock_cwd();
         let dir = tempfile::tempdir().expect("tempdir");
-        let previous = std::env::current_dir().expect("cwd");
-        std::env::set_current_dir(dir.path()).expect("set current dir");
+        let sqlite_path = dir.path().join(".harn/events.sqlite");
+        std::env::set_var(harn_vm::event_log::HARN_EVENT_LOG_BACKEND_ENV, "sqlite");
+        std::env::set_var(
+            harn_vm::event_log::HARN_EVENT_LOG_SQLITE_PATH_ENV,
+            &sqlite_path,
+        );
         let checks = check_event_log();
-        std::env::set_current_dir(previous).expect("restore current dir");
+        std::env::remove_var(harn_vm::event_log::HARN_EVENT_LOG_BACKEND_ENV);
+        std::env::remove_var(harn_vm::event_log::HARN_EVENT_LOG_SQLITE_PATH_ENV);
         assert_eq!(checks.len(), 1);
         assert_eq!(checks[0].status, super::DoctorStatus::Ok);
         assert!(checks[0].detail.contains("sqlite"));
-        assert!(checks[0].detail.contains(".harn/events.sqlite"));
+        assert!(checks[0]
+            .detail
+            .contains(&sqlite_path.display().to_string()));
     }
 
     #[test]

@@ -13,8 +13,8 @@ set -euo pipefail
 #     catching up before moving on, so an artificial `sleep 15` between
 #     crates just made releases slower without preventing anything.
 #   - crates.io's publish rate limit for new versions of existing crates
-#     is a burst of 30 followed by 1/min sustained; with 8 crates we are
-#     nowhere near the burst ceiling, so no pre-emptive delay is needed.
+#     is a burst of 30 followed by 1/min sustained; this workspace stays
+#     below the burst ceiling, so no pre-emptive delay is needed.
 #
 # Verification:
 #   - Dry run (`--dry-run`) passes `--no-verify` because cargo cannot run the
@@ -71,10 +71,13 @@ MAX_ATTEMPTS=3
 WORKSPACE_CRATES=(
   harn-lexer
   harn-parser
+  harn-ir
   harn-fmt
   harn-vm
+  harn-modules
   harn-lint
   harn-dap
+  harn-serve
   harn-lsp
   harn-cli
 )

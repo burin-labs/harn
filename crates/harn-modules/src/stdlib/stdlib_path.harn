@@ -1,0 +1,60 @@
+// std/path — Path manipulation utilities
+//
+// Import with: import "std/path"
+
+/** Get the file extension without the dot. */
+fn ext(path) {
+  let e = extname(path)
+  if len(e) > 0 {
+    return e.substring(1, len(e) - 1)
+  }
+  return ""
+}
+
+/** Get the filename without extension. */
+fn stem(path) {
+  let base = basename(path)
+  let dot = base.index_of(".")
+  if dot < 0 { return base }
+  return base.substring(0, dot)
+}
+
+/** Normalize path separators (replace backslash with forward slash). */
+fn normalize(path) {
+  return path.replace("\\", "/")
+}
+
+/** Check if a path is absolute. */
+fn is_absolute(path) {
+  return path.starts_with("/") || (len(path) >= 3 && path.substring(1, 1) == ":")
+}
+
+/** Classify a path at the workspace boundary. */
+fn workspace_info(path, workspace_root = nil) {
+  return path_workspace_info(path, workspace_root)
+}
+
+/** Normalize a path into workspace-relative form when possible. */
+fn workspace_normalize(path, workspace_root = nil) {
+  return path_workspace_normalize(path, workspace_root)
+}
+
+/** List files in a directory recursively (one level). */
+fn list_files(dir) {
+  let entries = list_dir(dir)
+  return entries.filter({ name ->
+    let full = path_join(dir, name)
+    let info = stat(full)
+    return info.is_file
+  })
+}
+
+/** List subdirectories. */
+fn list_dirs(dir) {
+  let entries = list_dir(dir)
+  return entries.filter({ name ->
+    let full = path_join(dir, name)
+    let info = stat(full)
+    return info.is_dir
+  })
+}

@@ -7,6 +7,23 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
+## v0.7.28
+
+### Fixed
+
+- **Crates.io `harn-cli` installation.** `harn-modules` now packages
+  crate-local copies of the runtime stdlib `.harn` sources instead of
+  using workspace-relative `include_str!` paths into `harn-vm`, so
+  `cargo install harn-cli --locked` can compile the published crate from
+  crates.io. The module graph mirror now covers the full runtime stdlib
+  import surface, including `std/hitl`, waitpoint/monitor modules, and
+  connector stdlib modules.
+- **Release package verification.** Added `scripts/verify_crate_packages.sh`
+  to package `harn-modules`, inspect the extracted crate archive, compare
+  its stdlib mirror with `harn-vm`, compile the extracted package, and
+  package `harn-cli`. The per-crate publish fallback list now includes
+  every publishable workspace crate, including `harn-modules`.
+
 ## v0.7.27
 
 This release rounds out the trigger + orchestration surface with two

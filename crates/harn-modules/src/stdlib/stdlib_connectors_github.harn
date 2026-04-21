@@ -1,0 +1,185 @@
+import { filter_nil } from "std/collections"
+import { merge } from "std/json"
+import { wait_for } from "std/monitors"
+
+var github_connector_config = {}
+
+pub fn configure(config) {
+  github_connector_config = filter_nil(config ?? {})
+  return github_connector_config
+}
+
+pub fn reset() {
+  github_connector_config = {}
+}
+
+fn __call(method, params = {}) {
+  return connector_call("github", method, filter_nil(merge(github_connector_config, params ?? {})))
+}
+
+pub fn comment(issue_url, body, options = nil) {
+  return __call("comment", merge(options ?? {}, {issue_url: issue_url, body: body}))
+}
+
+pub fn add_labels(issue_url, labels, options = nil) {
+  return __call("add_labels", merge(options ?? {}, {issue_url: issue_url, labels: labels}))
+}
+
+pub fn request_review(pr_url, reviewers, options = nil) {
+  return __call("request_review", merge(options ?? {}, {pr_url: pr_url, reviewers: reviewers}))
+}
+
+pub fn merge_pr(pr_url, options = nil) {
+  return __call("merge_pr", merge(options ?? {}, {pr_url: pr_url}))
+}
+
+pub fn list_stale_prs(repo, days, options = nil) {
+  return __call("list_stale_prs", merge(options ?? {}, {repo: repo, days: days}))
+}
+
+pub fn get_pr_diff(pr_url, options = nil) {
+  return __call("get_pr_diff", merge(options ?? {}, {pr_url: pr_url}))
+}
+
+pub fn create_issue(repo, title, body = nil, labels = nil, options = nil) {
+  return __call(
+    "create_issue",
+    filter_nil(merge(options ?? {}, {repo: repo, title: title, body: body, labels: labels})),
+  )
+}
+
+/** api_call. */
+pub fn api_call(path, method, body = nil, options = nil) {
+  return __call("api_call", filter_nil(merge(options ?? {}, {path: path, method: method, body: body})))
+}
+
+fn __github_event(log_event) {
+  return log_event?.payload?.event
+}
+
+fn __github_payload(log_event) {
+  return __github_event(log_event)?.provider_payload
+}
+
+fn __github_repo_matches(payload, repo) {
+  let full_name = payload?.raw?.repository?.full_name
+  return full_name == nil || full_name == repo
+}
+
+/** deployment_status_source. */
+pub fn deployment_status_source(repo, deployment_id, options = nil) {
+  return {
+    label: "github.deployment_status:" + repo + "#" + to_string(deployment_id),
+    prefers_push: true,
+    poll: { _ ->
+    let path = "/repos/" + repo + "/deployments/" + to_string(deployment_id) + "/statuses"
+    let statuses = api_call(path, "GET", nil, options)
+    var latest = nil
+    if len(statuses) > 0 {
+      latest = statuses[0]
+    }
+    return {
+    repo: repo,
+    deployment_id: deployment_id,
+    deployment_status: latest,
+    state: latest?.state ?? "unknown",
+  }
+  },
+    push_filter: { log_event ->
+    let event = __github_event(log_event)
+    let payload = __github_payload(log_event)
+    return event?.provider == "github"
+    && event?.kind == "deployment_status"
+    && payload?.deployment?.id == deployment_id
+    && __github_repo_matches(payload, repo)
+  },
+  }
+}
+
+/** check_run_source. */
+pub fn check_run_source(repo, check_run_id, options = nil) {
+  return {
+    label: "github.check_run:" + repo + "#" + to_string(check_run_id),
+    prefers_push: true,
+    poll: { _ ->
+    let check_run = api_call("/repos/" + repo + "/check-runs/" + to_string(check_run_id), "GET", nil, options)
+    return {
+    repo: repo,
+    check_run_id: check_run_id,
+    check_run: check_run,
+    status: check_run?.status,
+    conclusion: check_run?.conclusion,
+  }
+  },
+    push_filter: { log_event ->
+    let event = __github_event(log_event)
+    let payload = __github_payload(log_event)
+    return event?.provider == "github"
+    && event?.kind == "check_run"
+    && payload?.check_run?.id == check_run_id
+    && __github_repo_matches(payload, repo)
+  },
+  }
+}
+
+/** pull_request_merged_source. */
+pub fn pull_request_merged_source(repo, number, options = nil) {
+  return {
+    label: "github.pull_request_merged:" + repo + "#" + to_string(number),
+    prefers_push: true,
+    poll: { _ ->
+    let pull_request = api_call("/repos/" + repo + "/pulls/" + to_string(number), "GET", nil, options)
+    return {
+    repo: repo,
+    number: number,
+    pull_request: pull_request,
+    merged: pull_request?.merged ?? false,
+    state: pull_request?.state,
+  }
+  },
+    push_filter: { log_event ->
+    let event = __github_event(log_event)
+    let payload = __github_payload(log_event)
+    return event?.provider == "github"
+    && event?.kind == "pull_request"
+    && payload?.pull_request?.number == number
+    && __github_repo_matches(payload, repo)
+  },
+  }
+}
+
+/** wait_until_deploy_succeeds. */
+pub fn wait_until_deploy_succeeds(repo, deployment_id, options = nil) {
+  return wait_for(
+    merge(
+    options ?? {},
+    {
+    source: deployment_status_source(repo, deployment_id, options),
+    condition: { state -> state.state == "success" },
+  },
+  ),
+  )
+}
+
+/** wait_until_ci_green. */
+pub fn wait_until_ci_green(repo, check_run_id, options = nil) {
+  return wait_for(
+    merge(
+    options ?? {},
+    {
+    source: check_run_source(repo, check_run_id, options),
+    condition: { state -> state.status == "completed" && state.conclusion == "success" },
+  },
+  ),
+  )
+}
+
+/** wait_until_pr_merged. */
+pub fn wait_until_pr_merged(repo, number, options = nil) {
+  return wait_for(
+    merge(
+    options ?? {},
+    {source: pull_request_merged_source(repo, number, options), condition: { state -> state.merged }},
+  ),
+  )
+}

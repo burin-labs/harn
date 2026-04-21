@@ -1,0 +1,49 @@
+// std/waitpoints — typed aliases for durable waitpoint coordination.
+//
+// Import with: `import "std/waitpoints"`.
+
+type WaitpointStatus = "open" | "completed" | "cancelled"
+
+type WaitpointHandle = {
+  id: string,
+  status: WaitpointStatus,
+  created_at: string,
+  created_by: string | nil,
+  completed_at: string | nil,
+  completed_by: string | nil,
+  cancelled_at: string | nil,
+  cancelled_by: string | nil,
+  reason: string | nil,
+  metadata: dict,
+}
+
+type WaitpointWaitStatus = "completed" | "cancelled" | "timed_out" | "interrupted"
+
+type WaitpointCreateOptions = {
+  id?: string,
+  by?: string,
+  metadata?: dict,
+}
+
+type WaitpointSignalOptions = {
+  by?: string,
+  reason?: string,
+}
+
+type WaitpointWaitOptions = {
+  timeout?: duration,
+  wait_id?: string,
+}
+
+type WaitpointWaitResult = {
+  wait_id: string,
+  waitpoint_ids: list<string>,
+  status: WaitpointWaitStatus,
+  started_at: string,
+  resolved_at: string,
+  waitpoints: list<WaitpointHandle>,
+  cancelled_waitpoint_id: string | nil,
+  trace_id: string | nil,
+  replay_of_event_id: string | nil,
+  reason: string | nil,
+}

@@ -227,6 +227,7 @@ cmd_audit() {
   run_step docs-audit run_docs_audit & steps+=("docs-audit") pids+=("$!")
   run_step grammar-audit run_grammar_audit & steps+=("grammar-audit") pids+=("$!")
   run_step security-audit run_security_audit & steps+=("security-audit") pids+=("$!")
+  run_step package-audit ./scripts/verify_crate_packages.sh & steps+=("package-audit") pids+=("$!")
 
   local failed=0
   local idx

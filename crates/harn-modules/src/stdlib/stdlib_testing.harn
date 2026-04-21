@@ -1,0 +1,95 @@
+// std/testing — helpers for writing Harn tests.
+
+fn params_subset_match(expected, actual) {
+  if expected == nil {
+    return true
+  }
+  if type_of(expected) != "dict" || type_of(actual) != "dict" {
+    return expected == actual
+  }
+  for entry in entries(expected) {
+    if actual[entry.key] != entry.value {
+      return false
+    }
+  }
+  return true
+}
+
+/** clear_host_mocks. */
+pub fn clear_host_mocks() {
+  return host_mock_clear()
+}
+
+/** mock_host_result. */
+pub fn mock_host_result(cap: string, op: string, result, params) {
+  if params == nil {
+    return host_mock(cap, op, result)
+  }
+  return host_mock(cap, op, result, params)
+}
+
+/** mock_host_error. */
+pub fn mock_host_error(cap: string, op: string, message: string, params) {
+  let config = {error: message}
+  if params == nil {
+    return host_mock(cap, op, config)
+  }
+  return host_mock(cap, op, config + {params: params})
+}
+
+/** mock_host_response. */
+pub fn mock_host_response(cap: string, op: string, config) {
+  return host_mock(cap, op, config)
+}
+
+/** host_calls. */
+pub fn host_calls() {
+  return host_mock_calls()
+}
+
+/** host_calls_for. */
+pub fn host_calls_for(cap: string, op: string) {
+  return host_mock_calls().filter({ call ->
+    return call?.capability == cap && call?.operation == op
+  })
+}
+
+/** host_call_count. */
+pub fn host_call_count() -> int {
+  return len(host_mock_calls())
+}
+
+/** host_call_count_for. */
+pub fn host_call_count_for(cap: string, op: string) -> int {
+  return len(host_calls_for(cap, op))
+}
+
+/** host_was_called. */
+pub fn host_was_called(cap: string, op: string, expected_params) -> bool {
+  for call in host_calls_for(cap, op) {
+    if params_subset_match(expected_params, call?.params) {
+      return true
+    }
+  }
+  return false
+}
+
+/** assert_host_called. */
+pub fn assert_host_called(cap: string, op: string, params, message) {
+  if host_was_called(cap, op, params) {
+    return nil
+  }
+  let default_message = if params == nil {
+    "Expected host call " + cap + "." + op + " to be recorded"
+  } else {
+    "Expected host call " + cap + "." + op + " with params " + to_string(params) + " to be recorded"
+  }
+  return assert(false, message ?? default_message)
+}
+
+/** assert_host_call_count. */
+pub fn assert_host_call_count(expected_count: int, cap: string, op: string, message) {
+  let actual_count = host_call_count_for(cap, op)
+  let default_message = "Expected " + to_string(expected_count) + " host calls, got " + to_string(actual_count)
+  return assert_eq(actual_count, expected_count, message ?? default_message)
+}

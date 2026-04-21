@@ -1,0 +1,64 @@
+// std/json — JSON utility patterns
+//
+// Import with: import "std/json"
+
+/**
+ * Pretty-print a value as indented JSON (2-space indent).
+ * pretty.
+ */
+pub fn pretty(value) {
+  return json_stringify(value)
+}
+
+/**
+ * Safely parse JSON, returning nil on failure instead of throwing.
+ * safe_parse.
+ */
+pub fn safe_parse(text) {
+  let result = try { json_parse(text) }
+  if is_ok(result) {
+    return unwrap(result)
+  }
+  return nil
+}
+
+/**
+ * Merge two dicts (shallow). Keys in b override keys in a.
+ * merge.
+ */
+pub fn merge(a, b) {
+  var result = a
+  for entry in b {
+    result = result + {[entry.key]: entry.value}
+  }
+  return result
+}
+
+/**
+ * Pick specific keys from a dict.
+ * pick.
+ */
+pub fn pick(data, keys) {
+  var result = {}
+  for k in keys {
+    if data[k] != nil {
+      result = result + {[k]: data[k]}
+    }
+  }
+  return result
+}
+
+/**
+ * Omit specific keys from a dict.
+ * omit.
+ */
+pub fn omit(data, keys) {
+  let exclude = set(keys)
+  var result = {}
+  for entry in data {
+    if !set_contains(exclude, entry.key) {
+      result = result + {[entry.key]: entry.value}
+    }
+  }
+  return result
+}

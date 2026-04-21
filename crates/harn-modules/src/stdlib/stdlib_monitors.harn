@@ -1,0 +1,19 @@
+/**
+ * std/monitors - wait for changing external state with poll-to-push optimization.
+ *
+ * Import with: `import "std/monitors"`.
+ */
+type MonitorWaitStatus = "matched" | "timed_out" | "interrupted"
+
+type MonitorPollContext = {wait_id: string, poll_count: int, last_push_event: any}
+
+type MonitorSource = {label?: string, poll: fn(MonitorPollContext) -> any, prefers_push?: bool, push_filter?: fn(any) -> bool}
+
+type MonitorWaitOptions = {wait_id?: string, timeout: duration, poll_interval?: duration, source: MonitorSource, condition: fn(any) -> bool}
+
+type MonitorWaitResult = {wait_id: string, status: MonitorWaitStatus, source_label: string | nil, started_at: string, resolved_at: string, state: any, condition_value: any, poll_count: int, push_wake_count: int, trace_id: string | nil, replay_of_event_id: string | nil, reason: string | nil}
+
+/** wait_for. */
+pub fn wait_for(options: MonitorWaitOptions) -> MonitorWaitResult {
+  return monitor_wait_for_native(options)
+}

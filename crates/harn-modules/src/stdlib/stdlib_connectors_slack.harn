@@ -1,0 +1,147 @@
+import { filter_nil } from "std/collections"
+import { merge } from "std/json"
+import { wait_for } from "std/monitors"
+
+var slack_connector_config = {}
+
+pub fn configure(config) {
+  slack_connector_config = filter_nil(config ?? {})
+  return slack_connector_config
+}
+
+pub fn reset() {
+  slack_connector_config = {}
+}
+
+fn __call(method, params = {}) {
+  return connector_call("slack", method, filter_nil(merge(slack_connector_config, params ?? {})))
+}
+
+pub fn post_message(channel, text, blocks = nil, options = nil) {
+  return __call("post_message", filter_nil(options ?? {} + {channel: channel, text: text, blocks: blocks}))
+}
+
+pub fn update_message(channel, ts, text, blocks = nil, options = nil) {
+  return __call(
+    "update_message",
+    filter_nil(options ?? {} + {channel: channel, ts: ts, text: text, blocks: blocks}),
+  )
+}
+
+pub fn add_reaction(channel, ts, name, options = nil) {
+  return __call("add_reaction", options ?? {} + {channel: channel, ts: ts, name: name})
+}
+
+pub fn open_view(trigger_id, view, options = nil) {
+  return __call("open_view", options ?? {} + {trigger_id: trigger_id, view: view})
+}
+
+pub fn user_info(user_id, options = nil) {
+  return __call("user_info", options ?? {} + {user_id: user_id})
+}
+
+pub fn api_call(method, args = nil, options = nil) {
+  return __call("api_call", filter_nil(options ?? {} + {method: method, args: args ?? {}}))
+}
+
+pub fn upload_file(filename, content, options = nil) {
+  return __call("upload_file", options ?? {} + {filename: filename, content: content})
+}
+
+fn __slack_event(log_event) {
+  return log_event?.payload?.event
+}
+
+fn __slack_payload(log_event) {
+  return __slack_event(log_event)?.provider_payload
+}
+
+fn __slack_channel_matches(payload, channel) {
+  return channel == nil || payload?.channel == channel || payload?.channel_id == channel
+}
+
+fn __slack_user_matches(payload, user) {
+  return user == nil || payload?.user == user || payload?.user_id == user
+}
+
+fn __slack_text_matches(payload, text) {
+  return text == nil || contains(payload?.text ?? "", text)
+}
+
+/** message_source. */
+pub fn message_source(channel = nil, options = nil) {
+  return {
+    label: "slack.message:" + to_string(channel ?? "*"),
+    prefers_push: true,
+    poll: { ctx ->
+    let payload = __slack_payload(ctx?.last_push_event)
+    return {
+    matched: payload != nil,
+    message: payload,
+    channel: payload?.channel ?? payload?.channel_id,
+    user: payload?.user ?? payload?.user_id,
+    text: payload?.text,
+    ts: payload?.ts,
+    thread_ts: payload?.thread_ts,
+  }
+  },
+    push_filter: { log_event ->
+    let event = __slack_event(log_event)
+    let payload = __slack_payload(log_event)
+    return event?.provider == "slack"
+    && (event?.kind == "message" || event?.kind == "app_mention"
+    || starts_with(event?.kind ?? "", "message."))
+    && __slack_channel_matches(payload, channel)
+    && __slack_user_matches(payload, options?.user)
+    && (options?.thread_ts == nil || payload?.thread_ts == options.thread_ts)
+    && __slack_text_matches(payload, options?.text_contains)
+  },
+  }
+}
+
+/** reaction_source. */
+pub fn reaction_source(channel = nil, reaction = nil, options = nil) {
+  return {
+    label: "slack.reaction:" + to_string(channel ?? "*") + ":" + to_string(reaction ?? "*"),
+    prefers_push: true,
+    poll: { ctx ->
+    let payload = __slack_payload(ctx?.last_push_event)
+    return {
+    matched: payload != nil,
+    reaction: payload?.reaction,
+    item: payload?.item,
+    item_user: payload?.item_user,
+    event: payload,
+  }
+  },
+    push_filter: { log_event ->
+    let event = __slack_event(log_event)
+    let payload = __slack_payload(log_event)
+    return event?.provider == "slack"
+    && event?.kind == "reaction_added"
+    && (reaction == nil || payload?.reaction == reaction)
+    && (channel == nil || payload?.item?.channel == channel || payload?.channel_id == channel)
+    && __slack_user_matches(payload, options?.user)
+  },
+  }
+}
+
+/** wait_for_message. */
+pub fn wait_for_message(channel = nil, options = nil) {
+  return wait_for(
+    merge(
+    options ?? {},
+    {source: message_source(channel, options), condition: { state -> state.matched }},
+  ),
+  )
+}
+
+/** wait_for_reaction. */
+pub fn wait_for_reaction(channel = nil, reaction = nil, options = nil) {
+  return wait_for(
+    merge(
+    options ?? {},
+    {source: reaction_source(channel, reaction, options), condition: { state -> state.matched }},
+  ),
+  )
+}

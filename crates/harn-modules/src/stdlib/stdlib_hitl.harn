@@ -1,0 +1,73 @@
+// std/hitl — typed aliases for human-in-the-loop primitives.
+//
+// Import with: `import "std/hitl"`.
+
+type HitlRequestKind = "question" | "approval" | "dual_control" | "escalation"
+
+type HitlPendingFilters = {
+  since?: string,
+  until?: string,
+  kinds?: list<HitlRequestKind>,
+  agent?: string,
+  limit?: int,
+}
+
+type HitlPendingRequest = {
+  request_id: string,
+  request_kind: HitlRequestKind,
+  agent: string,
+  prompt: string,
+  trace_id: string,
+  timestamp: string,
+  approvers: list<string>,
+  metadata: dict,
+}
+
+type AskUserOptions<T> = {
+  schema?: Schema<T>,
+  timeout?: duration,
+  default?: T,
+}
+
+type ApprovalOptions = {
+  detail?: any,
+  quorum?: int,
+  reviewers?: list<string>,
+  deadline?: duration,
+}
+
+type ApprovalRecord = {
+  approved: bool,
+  reviewers: list<string>,
+  approved_at: string,
+  reason: string | nil,
+}
+
+type EscalationStatus = "pending" | "accepted"
+
+type EscalationHandle = {
+  request_id: string,
+  role: string,
+  reason: string,
+  trace_id: string,
+  status: EscalationStatus,
+  accepted_at: string | nil,
+  reviewer: string | nil,
+}
+
+type HumanTimeoutError = {
+  name: "HumanTimeoutError",
+  category: "timeout",
+  message: string,
+  request_id: string,
+  kind: HitlRequestKind,
+}
+
+type ApprovalDeniedError = {
+  name: "ApprovalDeniedError",
+  category: string,
+  message: string,
+  request_id: string,
+  reviewers: list<string>,
+  reason: string | nil,
+}

@@ -1,0 +1,27 @@
+// std/collections — Collection utilities.
+
+// Remove entries from a dict where the value is nil, empty string, or "null" string.
+/** filter_nil. */
+pub fn filter_nil(d) {
+  return d.filter({ v ->
+    if v == nil { return false }
+    if v == "" { return false }
+    if v == "null" { return false }
+    return true
+  })
+}
+
+// Check if a store key is stale (older than max_age_seconds).
+// Uses store_get/store_set convention: timestamps stored as key + "_ts".
+/** store_stale. */
+pub fn store_stale(key, max_age_seconds) {
+  let ts = store_get(key + "_ts")
+  if ts == nil { return true }
+  return (timestamp() - ts) > max_age_seconds
+}
+
+// Refresh a store key's timestamp to now.
+/** store_refresh. */
+pub fn store_refresh(key) {
+  store_set(key + "_ts", timestamp())
+}

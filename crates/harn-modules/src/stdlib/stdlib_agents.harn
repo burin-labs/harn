@@ -1,0 +1,1424 @@
+import "std/collections"
+import "std/context"
+import "std/json"
+
+/** workflow_model_spec. */
+pub fn workflow_model_spec(config) {
+  let target = config?.model ?? config?.model_alias ?? config?.model_tier ?? config?.tier
+  if target == nil || target == "" {
+    return nil
+  }
+  return llm_pick_model(target, filter_nil({provider: config?.provider}))
+}
+
+/** workflow_options. */
+pub fn workflow_options(config) {
+  let spec = workflow_model_spec(config)
+  return filter_nil(
+    {
+    provider: config?.provider ?? spec?.provider,
+    model: config?.model ?? spec?.id,
+    max_tokens: config?.max_tokens,
+    temperature: config?.temperature,
+    top_p: config?.top_p,
+    top_k: config?.top_k,
+    stop: config?.stop,
+    seed: config?.seed,
+    frequency_penalty: config?.frequency_penalty,
+    presence_penalty: config?.presence_penalty,
+    response_format: config?.response_format,
+    schema: config?.schema,
+    thinking: config?.thinking,
+    tools: config?.tools,
+    tool_choice: config?.tool_choice,
+    cache: config?.cache,
+    timeout: config?.timeout,
+    structural_experiment: config?.structural_experiment,
+    persistent: config?.persistent,
+    max_iterations: config?.max_iterations,
+    max_nudges: config?.max_nudges,
+    nudge: config?.nudge,
+    turn_policy: config?.turn_policy,
+    stop_after_successful_tools: config?.stop_after_successful_tools,
+    require_successful_tools: config?.require_successful_tools,
+    tool_retries: config?.tool_retries,
+    tool_backoff_ms: config?.tool_backoff_ms,
+    tool_format: config?.tool_format,
+    native_tool_fallback: config?.native_tool_fallback,
+    context_callback: config?.context_callback ?? config?.context_filter,
+    transcript: config?.transcript,
+  },
+  )
+}
+
+/** stage_config. */
+pub fn stage_config(flow, overrides, stage_name) {
+  let combined = flow ?? {} + overrides ?? {}
+  let stage = combined[stage_name] ?? {}
+  let merged = combined + stage
+  return filter_nil(merged + {_stage: stage_name})
+}
+
+/** stage_prompt. */
+pub fn stage_prompt(task, config) {
+  let ctx = config?.context
+  return prompt_compose(
+    task,
+    ctx,
+    filter_nil(
+    {
+    system: config?.system,
+    task_label: config?.task_label,
+    separator: config?.context_separator,
+    max_chars: config?.context_max_chars,
+    section_max_chars: config?.context_section_max_chars,
+  },
+  ),
+  )
+}
+
+/** run_stage. */
+pub fn run_stage(task, config) {
+  let prompt = stage_prompt(task, config)
+  let opts = workflow_options(config)
+  if config?.mode == "completion" {
+    return llm_completion(prompt?.prompt, config?.suffix, prompt?.system, opts)
+  }
+  if config?.mode == "llm" || config?.persistent == false {
+    return llm_call(prompt?.prompt, prompt?.system, opts)
+  }
+  return agent_loop(prompt?.prompt, prompt?.system, opts + {persistent: config?.persistent ?? true})
+}
+
+/** verify_command. */
+pub fn verify_command(config) {
+  if config?.command == nil || config?.command == "" {
+    return nil
+  }
+  let output = host_call("process.exec", {command: config?.command})
+  var ok = output?.success == true
+  if config?.expect_status != nil {
+    ok = output?.status == config?.expect_status
+  }
+  if config?.expect_text != nil {
+    ok = ok && contains(output?.combined ?? "", config?.expect_text)
+  }
+  return {kind: "command", ok: ok, output: output}
+}
+
+/** verify_result. */
+pub fn verify_result(task, result, config) {
+  if config == nil {
+    return nil
+  }
+  if config?.command != nil {
+    return verify_command(config)
+  }
+  if config?.assert_text != nil {
+    return {kind: "text", ok: contains(result?.text ?? "", config?.assert_text), output: result?.text ?? ""}
+  }
+  return nil
+}
+
+/** repair_task. */
+pub fn repair_task(original_task, verification, config) {
+  if config?.prompt != nil {
+    return config?.prompt
+  }
+  let summary = json_stringify(verification)
+  let message = "The previous attempt did not pass verification.\n\nVerification:\n" + summary
+    + "\n\nContinue working on the original task and fix the problem.\n\nOriginal task:\n"
+    + original_task
+  return message
+}
+
+/** workflow. */
+pub fn workflow(config) {
+  return workflow_graph(config ?? {})
+}
+
+fn __action_graph_parse_input(raw) {
+  if type_of(raw) != "string" {
+    return raw
+  }
+  let text = trim(raw)
+  if text == "" {
+    return []
+  }
+  if starts_with(text, "{") || starts_with(text, "[") {
+    return safe_parse(text) ?? raw
+  }
+  return raw
+}
+
+fn __action_graph_non_empty_string(value) {
+  if type_of(value) != "string" {
+    return nil
+  }
+  let text = trim(value)
+  if text == "" {
+    return nil
+  }
+  return text
+}
+
+fn __action_graph_first_string(candidates) {
+  for value in candidates {
+    let text = __action_graph_non_empty_string(value)
+    if text != nil {
+      return text
+    }
+  }
+  return nil
+}
+
+fn __action_graph_listify(value) {
+  if value == nil {
+    return []
+  }
+  if type_of(value) == "list" {
+    return value
+  }
+  return [value]
+}
+
+fn __action_graph_tool_list(raw) {
+  let value = raw?.tools ?? raw?.tool ?? raw?.allowed_tools ?? raw?.capabilities
+  if value == nil {
+    return []
+  }
+  var tools = []
+  if type_of(value) == "string" {
+    return [trim(value)]
+  }
+  for item in __action_graph_listify(value) {
+    let tool_name = if type_of(item) == "string" {
+      trim(item)
+    } else {
+      trim(item?.name ?? item?.tool ?? item?.id ?? "")
+    }
+    if tool_name != "" && !contains(tools, tool_name) {
+      tools = tools + [tool_name]
+    }
+  }
+  return tools
+}
+
+fn __action_graph_tool_class(tools, phase) {
+  if phase == "verify" {
+    return "verify"
+  }
+  if len(tools) == 0 {
+    return if phase == "research" {
+      "read"
+    } else {
+      "generic"
+    }
+  }
+  var saw_read = false
+  var saw_write = false
+  var saw_exec = false
+  for tool_name in tools {
+    let name = lowercase(trim(tool_name))
+    if contains(["read", "search", "fetch", "query", "list", "inspect", "grep"], name) {
+      saw_read = true
+      continue
+    }
+    if contains(["edit", "write", "create", "update", "delete", "apply_patch"], name) {
+      saw_write = true
+      continue
+    }
+    if contains(["run", "exec", "shell", "test"], name) {
+      saw_exec = true
+      continue
+    }
+    return "generic"
+  }
+  if saw_write && !saw_read && !saw_exec {
+    return "write"
+  }
+  if saw_exec && !saw_read && !saw_write {
+    return "exec"
+  }
+  if saw_read && !saw_write && !saw_exec {
+    return "read"
+  }
+  return "mixed"
+}
+
+fn __action_graph_phase(raw, fallback_phase, tools, instruction) {
+  let explicit = lowercase(
+    trim(raw?.phase ?? raw?.kind ?? raw?.type ?? raw?.category ?? raw?.mode ?? fallback_phase ?? ""),
+  )
+  if contains(["research", "discover", "analyze", "analysis", "investigate"], explicit) {
+    return "research"
+  }
+  if contains(["verify", "verification", "test", "check", "evaluate", "evaluator", "qa"], explicit) {
+    return "verify"
+  }
+  if contains(["execute", "act", "implementation", "implement", "apply", "fix", "edit"], explicit) {
+    return "execute"
+  }
+  let text = lowercase(trim(instruction ?? ""))
+  if starts_with(text, "research ")
+    || starts_with(text, "inspect ")
+    || starts_with(text, "analyze ")
+    || starts_with(text, "investigate ") {
+    return "research"
+  }
+  if starts_with(text, "verify ")
+    || starts_with(text, "test ")
+    || starts_with(text, "check ")
+    || starts_with(text, "evaluate ") {
+    return "verify"
+  }
+  let tool_class = __action_graph_tool_class(tools, fallback_phase)
+  if tool_class == "read" && explicit != "execute" {
+    return "research"
+  }
+  return "execute"
+}
+
+fn __action_graph_dependency_refs(raw) {
+  let source = raw?.depends_on ?? raw?.dependsOn ?? raw?.dependencies ?? raw?.needs ?? raw?.after
+  if source == nil {
+    return []
+  }
+  var refs = []
+  for item in __action_graph_listify(source) {
+    if item == nil {
+      continue
+    }
+    if type_of(item) == "int" || type_of(item) == "float" {
+      refs = refs + [format("{}", item)]
+      continue
+    }
+    if type_of(item) == "dict" {
+      let ref_text = __action_graph_first_string(
+        [item?.id, item?.action_id, item?.title, item?.name, item?.label, item?.task],
+      )
+      if ref_text != nil {
+        refs = refs + [ref_text]
+      }
+      continue
+    }
+    let text = __action_graph_non_empty_string(item)
+    if text != nil {
+      refs = refs + [text]
+    }
+  }
+  return refs
+}
+
+fn __action_graph_collect_items(parsed) {
+  if parsed == nil {
+    return []
+  }
+  if type_of(parsed) == "list" {
+    return parsed
+  }
+  if type_of(parsed) != "dict" {
+    return [parsed]
+  }
+  for key in ["actions", "plan", "steps", "items", "tasks"] {
+    let value = parsed[key]
+    if type_of(value) == "list" {
+      return value
+    }
+    if type_of(value) == "dict" {
+      let nested = __action_graph_collect_items(value)
+      if len(nested) > 0 {
+        return nested
+      }
+    }
+  }
+  if type_of(parsed?.batches) == "list" {
+    var flattened = []
+    for batch in parsed.batches {
+      let batch_phase = batch?.phase ?? batch?.kind ?? batch?.type
+      let batch_items = batch?.actions ?? batch?.items ?? batch?.steps ?? []
+      for item in __action_graph_listify(batch_items) {
+        if type_of(item) == "dict" {
+          flattened = flattened + [item + {phase: item?.phase ?? batch_phase}]
+        } else {
+          flattened = flattened + [item]
+        }
+      }
+    }
+    if len(flattened) > 0 {
+      return flattened
+    }
+  }
+  var grouped = []
+  for phase in ["research", "execute", "verify"] {
+    let value = parsed[phase]
+    if value == nil {
+      continue
+    }
+    for item in __action_graph_listify(value) {
+      if type_of(item) == "dict" {
+        grouped = grouped + [item + {phase: item?.phase ?? phase}]
+      } else {
+        grouped = grouped + [{title: item, instruction: item, phase: phase}]
+      }
+    }
+  }
+  if len(grouped) > 0 {
+    return grouped
+  }
+  return [parsed]
+}
+
+fn __action_graph_aliases_for(canonical_id, source_id, title, index) {
+  var aliases = {}
+  let numeric = format("{}", index + 1)
+  aliases[canonical_id] = canonical_id
+  aliases[numeric] = canonical_id
+  if source_id != nil {
+    aliases[lowercase(trim(source_id))] = canonical_id
+  }
+  if title != nil {
+    aliases[lowercase(trim(title))] = canonical_id
+  }
+  return aliases
+}
+
+fn __action_graph_merge_aliases(base, extra) {
+  var merged = base ?? {}
+  for entry in extra ?? {} {
+    merged[entry.key] = entry.value
+  }
+  return merged
+}
+
+fn __action_graph_append_unique_strings(items, values) {
+  var result = items ?? []
+  for value in __action_graph_listify(values) {
+    let text = __action_graph_non_empty_string(value)
+    if text != nil && !contains(result, text) {
+      result = result + [text]
+    }
+  }
+  return result
+}
+
+fn __action_graph_batch_target_paths(batch) {
+  var target_paths = []
+  for action in batch.actions {
+    target_paths = __action_graph_append_unique_strings(
+      target_paths,
+      action?.target_paths ?? action?.metadata?.target_paths ?? [],
+    )
+  }
+  return target_paths
+}
+
+fn __action_graph_batch_verification(batch) {
+  let target_paths = __action_graph_batch_target_paths(batch)
+  if len(target_paths) == 0 {
+    return nil
+  }
+  return {
+    summary: "Current batch scope",
+    required_paths: target_paths,
+    notes: [
+    "Only the current batch paths are in scope for this stage.",
+    "Future verifier checks run in later stages; do not satisfy them early unless this batch explicitly names that work.",
+  ],
+  }
+}
+
+fn __action_graph_batch_prompt(batch) {
+  var available_tools = []
+  for action in batch.actions {
+    for tool_name in action?.tools ?? [] {
+      if !contains(available_tools, tool_name) {
+        available_tools = available_tools + [tool_name]
+      }
+    }
+  }
+  let target_paths = __action_graph_batch_target_paths(batch)
+  var create_direct_write = false
+  var has_exact_command = false
+  for action in batch.actions {
+    let instruction = lowercase(trim(action?.instruction ?? action?.title ?? ""))
+    if starts_with(instruction, "create ") || starts_with(instruction, "write new ") {
+      create_direct_write = true
+    }
+    if __action_graph_non_empty_string(action?.command ?? action?.metadata?.command) != nil {
+      has_exact_command = true
+    }
+  }
+  var lines = [
+    "You are executing a scheduled action-graph batch.",
+    "",
+    "Phase: " + batch.phase,
+    "Tool class: " + batch.tool_class,
+    "Available tools this batch: "
+    + if len(available_tools) > 0 {
+    join(available_tools, ", ")
+  } else {
+    "(none declared)"
+  },
+    "Target paths this batch: "
+    + if len(target_paths) > 0 {
+    join(target_paths, ", ")
+  } else {
+    "(none declared)"
+  },
+    "",
+    "Authority order: obey the current batch action list and the injected verifier contract before any broader workflow context.",
+    "Complete every action in this batch before finishing.",
+    "Scope boundary: perform only the action ids listed below for this batch.",
+    "If you write, keep writes inside the current batch target paths unless a tool result proves a listed path needs to move.",
+    "The runtime rejects mutating path-based tool calls outside the current batch target paths.",
+    "You may read supporting workspace files outside the current batch target paths only when that context is immediately necessary to complete this batch.",
+    "Do not inspect sibling files outside the current batch target paths just to prepare future batches.",
+    "Treat broader plan/context artifacts as background evidence only, not as permission to continue with later actions.",
+    "If workflow context mentions future batches or terminal verification, ignore that work until this batch explicitly names it.",
+    "Do not preempt later batches, edit their target files early, or run final verification unless this batch explicitly lists those steps.",
+    "If a tool result rejects another path or scope, treat that as evidence you attempted future-batch work; return to the current batch instead of retrying adjacent files.",
+    "Do not issue a second write to the same target path unless a subsequent read or run result exposed a concrete problem with the first write.",
+    "After a successful write satisfies the current batch target paths, finish immediately unless this batch explicitly includes a verification command.",
+    "Once the listed actions are satisfied, stop immediately instead of continuing with adjacent work from the overall plan.",
+    "Actions:",
+  ]
+  if create_direct_write {
+    lines = lines
+      + [
+      "If an action explicitly says to create a target file, write that file directly instead of reading unrelated files first.",
+      "After a successful write creates the target file, do not reread or rewrite that file unless a tool result exposes a concrete problem or this batch explicitly requires validation.",
+    ]
+  }
+  if has_exact_command {
+    lines = lines
+      + [
+      "If an action includes an exact command string, run that exact command before trying alternatives or discovery commands.",
+    ]
+    if batch.phase == "verify" && len(available_tools) == 1 && available_tools[0] == "run" {
+      lines = lines
+        + [
+        "This verify batch is observation-only.",
+        "After the exact command returns, report whether it passed or failed and stop.",
+        "Do not attempt repairs, shell edits, fallback commands, or extra discovery in this batch.",
+      ]
+    }
+  }
+  for action in batch.actions {
+    let title = action?.title ?? action?.instruction ?? action?.id
+    let exact_command = __action_graph_non_empty_string(action?.command ?? action?.metadata?.command)
+    let detail = if exact_command != nil {
+      action?.instruction ?? title + " Run exactly `${exact_command}`."
+    } else {
+      action?.instruction ?? title
+    }
+    lines = lines + ["- [" + action.id + "] " + title + ": " + detail]
+  }
+  return join(lines, "\n")
+}
+
+fn __action_graph_batch(batch_index, phase, tool_class, actions) {
+  var action_ids = []
+  var titles = []
+  var depends_on = []
+  for action in actions {
+    action_ids = action_ids + [action.id]
+    titles = titles + [action?.title ?? action?.instruction ?? action.id]
+    for dep in action?.depends_on ?? [] {
+      if !contains(action_ids, dep) && !contains(depends_on, dep) {
+        depends_on = depends_on + [dep]
+      }
+    }
+  }
+  let batch = {
+    _type: "action_batch",
+    id: format("batch-{}", batch_index + 1),
+    phase: phase,
+    tool_class: tool_class,
+    actions: actions,
+    action_ids: action_ids,
+    action_titles: titles,
+    depends_on: depends_on,
+    count: len(actions),
+    prompt: nil,
+  }
+  return batch + {prompt: __action_graph_batch_prompt(batch)}
+}
+
+fn __action_graph_batch_output_kind(phase) {
+  if phase == "research" {
+    return "summary"
+  }
+  if phase == "verify" {
+    return "verification_result"
+  }
+  return "summary"
+}
+
+fn __action_graph_output_kind(template, default_output) {
+  let outputs = template?.output_contract?.output_kinds ?? []
+  if len(outputs) > 0 {
+    return outputs[0]
+  }
+  return default_output
+}
+
+fn __action_graph_stage_template(config, phase) {
+  if phase == "research" {
+    return config?.research ?? config?.stage ?? {}
+  }
+  if phase == "verify" {
+    return config?.verify_phase ?? config?.execute ?? config?.stage ?? {}
+  }
+  return config?.execute ?? config?.stage ?? {}
+}
+
+fn __action_graph_terminal_template(config, phase) {
+  if phase == "verify" {
+    return config?.verify ?? {}
+  }
+  if phase == "evaluate" {
+    return config?.evaluate ?? {}
+  }
+  return {}
+}
+
+fn __action_graph_terminal_kind(template, phase) {
+  if template?.kind != nil {
+    return template.kind
+  }
+  if phase == "verify" || template?.command != nil || template?.assert_text != nil {
+    return "verify"
+  }
+  return "stage"
+}
+
+fn __action_graph_node_system(base_system, prompt) {
+  let prefix = __action_graph_non_empty_string(base_system)
+  if prefix == nil {
+    return prompt
+  }
+  return prefix + "\n\n" + prompt
+}
+
+fn __action_graph_batch_tools(batch, template) {
+  let registry = template?.tools
+  if registry == nil {
+    return nil
+  }
+  var selected = []
+  for action in batch.actions {
+    for tool_name in action?.tools ?? [] {
+      if !contains(selected, tool_name) {
+        selected = selected + [tool_name]
+      }
+    }
+  }
+  if contains(selected, "write") && !contains(selected, "read") {
+    selected = ["read"] + selected
+  }
+  if len(selected) == 0 {
+    return registry
+  }
+  return tool_select(registry, selected)
+}
+
+fn __action_graph_batch_context_kinds(batch, template) {
+  let explicit = template?.context_policy?.include_kinds ?? []
+  if len(explicit) > 0 {
+    return explicit
+  }
+  if batch.phase == "research" {
+    return ["summary"]
+  }
+  if batch.phase == "verify" {
+    return ["summary", "artifact", "verification_result"]
+  }
+  return ["summary"]
+}
+
+fn __action_graph_batch_node(batch, template) {
+  let local_verification = __action_graph_batch_verification(batch)
+  let model_policy = template?.model_policy ?? {}
+  let output_kind = __action_graph_output_kind(template, __action_graph_batch_output_kind(batch.phase))
+  let output_contract = template?.output_contract ?? {} + {output_kinds: [output_kind]}
+  let target_paths = __action_graph_batch_target_paths(batch)
+  let context_policy = template?.context_policy ?? {}
+    + {include_kinds: __action_graph_batch_context_kinds(batch, template)}
+  var metadata = template?.metadata ?? {}
+  if local_verification != nil {
+    metadata = metadata + {workflow_verification_scope: "local_only"}
+  }
+  let approval_policy = if len(target_paths) > 0 {
+    template?.approval_policy ?? {} + {write_path_allowlist: target_paths}
+  } else {
+    template?.approval_policy ?? {}
+  }
+  return template ?? {}
+    + {
+    kind: "stage",
+    task_label: format("{} batch {}", uppercase(batch.phase), batch.id),
+    system: __action_graph_node_system(template?.system, batch.prompt),
+    tools: __action_graph_batch_tools(batch, template),
+    model_policy: model_policy,
+    approval_policy: approval_policy,
+    verify: if local_verification != nil {
+    local_verification
+  } else {
+    template?.verify
+  },
+    output_contract: output_contract,
+    context_policy: context_policy,
+    metadata: metadata,
+  }
+}
+
+fn __action_graph_terminal_prompt(plan, phase) {
+  if phase == "verify" {
+    return "Review the action-graph plan and produced artifacts, then verify whether the requested work is complete."
+  }
+  return "Evaluate the completed action-graph run and summarize whether the plan satisfied the task."
+}
+
+fn __action_graph_terminal_node(plan, phase, template) {
+  let default_output = if phase == "verify" {
+    "verification_result"
+  } else {
+    "summary"
+  }
+  let node_kind = __action_graph_terminal_kind(template, phase)
+  var verify_payload = nil
+  if node_kind == "verify" {
+    verify_payload = template?.verify \
+      ?? filter_nil(
+      {
+      command: template?.command,
+      assert_text: template?.assert_text,
+      expect_status: template?.expect_status,
+    },
+    )
+  }
+  let output_contract = template?.output_contract ?? {}
+    + {output_kinds: [__action_graph_output_kind(template, default_output)]}
+  let context_policy = template?.context_policy ?? {}
+    + {
+    include_kinds: template?.context_policy?.include_kinds ?? ["plan", "summary", "artifact", "verification_result"],
+  }
+  return template ?? {}
+    + filter_nil(
+    {
+    kind: node_kind,
+    task_label: uppercase(phase),
+    system: __action_graph_node_system(template?.system, __action_graph_terminal_prompt(plan, phase)),
+    verify: verify_payload,
+    output_contract: output_contract,
+    context_policy: context_policy,
+  },
+  )
+}
+
+/**
+ * Normalize planner output into a canonical action-graph envelope.
+ * action_graph.
+ */
+pub fn action_graph(raw, options = nil) {
+  let parsed = __action_graph_parse_input(raw)
+  let items = __action_graph_collect_items(parsed)
+  var staged = []
+  var aliases = {}
+  for (index, item) in iter(items).enumerate() {
+    let dict = if type_of(item) == "dict" {
+      item
+    } else {
+      {title: item, instruction: item}
+    }
+    let tools = __action_graph_tool_list(dict)
+    let title = __action_graph_first_string(
+      [dict?.title, dict?.name, dict?.label, dict?.action, dict?.task, dict?.instruction, dict?.summary],
+    ) \
+      ?? format("Action {}", index + 1)
+    let instruction = __action_graph_first_string(
+      [
+      dict?.instruction,
+      dict?.prompt,
+      dict?.task,
+      dict?.action,
+      dict?.goal,
+      dict?.description,
+      dict?.text,
+      title,
+    ],
+    ) \
+      ?? title
+    let source_id = __action_graph_first_string([dict?.id, dict?.action_id, dict?.name, dict?.label])
+    let phase = __action_graph_phase(dict, dict?.phase ?? options?.phase, tools, instruction)
+    let canonical_id = format("action-{}", index + 1)
+    staged = staged
+      + [
+      {
+      _type: "action_item",
+      id: canonical_id,
+      title: title,
+      instruction: instruction,
+      phase: phase,
+      depends_on: __action_graph_dependency_refs(dict),
+      tools: tools,
+      tool_class: dict?.tool_class ?? __action_graph_tool_class(tools, phase),
+      metadata: filter_nil({source_id: source_id, source_phase: dict?.phase ?? dict?.kind ?? dict?.type}),
+    },
+    ]
+    aliases = __action_graph_merge_aliases(
+      aliases,
+      __action_graph_aliases_for(canonical_id, source_id, title, index),
+    )
+  }
+  var normalized = []
+  var research_ids = []
+  var execute_ids = []
+  for action in staged {
+    var resolved = []
+    for ref in action.depends_on {
+      let lookup = lowercase(trim(ref))
+      let target = aliases[lookup] ?? aliases[ref]
+      if target != nil && target != action.id && !contains(resolved, target) {
+        resolved = resolved + [target]
+      }
+    }
+    if len(resolved) == 0 && action.phase == "execute" && len(research_ids) > 0 {
+      resolved = research_ids
+    }
+    if len(resolved) == 0 && action.phase == "verify" {
+      resolved = if len(execute_ids) > 0 {
+        execute_ids
+      } else {
+        research_ids
+      }
+    }
+    let repaired = action + {depends_on: resolved}
+    normalized = normalized + [repaired]
+    if repaired.phase == "research" {
+      research_ids = research_ids + [repaired.id]
+    }
+    if repaired.phase == "execute" {
+      execute_ids = execute_ids + [repaired.id]
+    }
+  }
+  return {
+    _type: "action_graph",
+    task: options?.task ?? parsed?.task ?? parsed?.goal,
+    summary: options?.summary ?? parsed?.summary ?? parsed?.rationale,
+    actions: normalized,
+    metadata: filter_nil(
+    {
+    source: if type_of(parsed) == "dict" {
+    parsed?._type ?? "planner_output"
+  } else {
+    "planner_output"
+  },
+  },
+  ),
+  }
+}
+
+/**
+ * Compute dependency-ready execution batches from a canonical action graph.
+ * action_graph_batches.
+ */
+pub fn action_graph_batches(graph, completed = nil) {
+  let plan = if graph?._type == "action_graph" {
+    graph
+  } else {
+    action_graph(graph, nil)
+  }
+  let done = __action_graph_listify(completed)
+  var remaining = []
+  for action in plan.actions {
+    if !contains(done, action.id) {
+      remaining = remaining + [action]
+    }
+  }
+  var finished = done
+  var batches = []
+  var loop_count = 0
+  while len(remaining) > 0 && loop_count < len(plan.actions) + 4 {
+    var ready = []
+    var blocked = []
+    for action in remaining {
+      var can_run = true
+      for dep in action.depends_on {
+        if !contains(finished, dep) {
+          can_run = false
+        }
+      }
+      if can_run {
+        ready = ready + [action]
+      } else {
+        blocked = blocked + [action]
+      }
+    }
+    if len(ready) == 0 {
+      ready = [remaining[0]]
+      blocked = remaining[1:]
+    }
+    let phase = if ready[0]?.phase == "research" || ready[0]?.phase == "execute" || ready[0]?.phase == "verify" {
+      ready[0].phase
+    } else {
+      "execute"
+    }
+    var current_phase = []
+    var next_remaining = blocked
+    for action in ready {
+      if action.phase == phase {
+        current_phase = current_phase + [action]
+      } else {
+        next_remaining = next_remaining + [action]
+      }
+    }
+    var grouped = {}
+    var order = []
+    for action in current_phase {
+      let key = action.tool_class ?? "generic"
+      if grouped[key] == nil {
+        grouped[key] = []
+        order = order + [key]
+      }
+      grouped[key] = grouped[key] + [action]
+    }
+    for key in order {
+      let batch = __action_graph_batch(len(batches), phase, key, grouped[key])
+      batches = batches + [batch]
+      for action in grouped[key] {
+        finished = finished + [action.id]
+      }
+    }
+    remaining = next_remaining
+    loop_count = loop_count + 1
+  }
+  return batches
+}
+
+/**
+ * Render a canonical action graph into readable markdown.
+ * action_graph_render.
+ */
+pub fn action_graph_render(graph) {
+  let plan = if graph?._type == "action_graph" {
+    graph
+  } else {
+    action_graph(graph, nil)
+  }
+  var lines = ["# Action Graph"]
+  if plan?.task != nil {
+    lines = lines + ["", "Task: " + plan.task]
+  }
+  if plan?.summary != nil {
+    lines = lines + ["", "Summary: " + plan.summary]
+  }
+  for phase in ["research", "execute", "verify"] {
+    var phase_lines = []
+    for action in plan.actions {
+      if action.phase != phase {
+        continue
+      }
+      let deps = if len(action.depends_on) > 0 {
+        " (depends on: " + join(action.depends_on, ", ") + ")"
+      } else {
+        ""
+      }
+      let label = action?.title ?? action?.instruction ?? action.id
+      phase_lines = phase_lines
+        + ["- [" + action.id + "] " + label + " [" + action.tool_class + "]" + deps]
+    }
+    if len(phase_lines) > 0 {
+      lines = lines + ["", "## " + uppercase(phase)]
+      lines = lines + phase_lines
+    }
+  }
+  return join(lines, "\n")
+}
+
+/**
+ * Convert a canonical action graph into a typed workflow graph.
+ * action_graph_flow.
+ */
+pub fn action_graph_flow(graph, config = nil) {
+  let plan = if graph?._type == "action_graph" {
+    graph
+  } else {
+    action_graph(graph, config)
+  }
+  let batches = action_graph_batches(plan)
+  var nodes = {}
+  var edges = []
+  var entry = ""
+  var previous = ""
+  for batch in batches {
+    let node_id = replace(batch.id, "-", "_")
+    let template = __action_graph_stage_template(config, batch.phase)
+    nodes[node_id] = __action_graph_batch_node(batch, template)
+    if entry == "" {
+      entry = node_id
+    }
+    if previous != "" {
+      edges = edges + [{from: previous, to: node_id}]
+    }
+    previous = node_id
+  }
+  for phase in ["verify", "evaluate"] {
+    let template = __action_graph_terminal_template(config, phase)
+    if len(keys(template ?? {})) == 0 {
+      continue
+    }
+    let node_id = if phase == "verify" {
+      "final_verify"
+    } else {
+      "final_evaluate"
+    }
+    nodes[node_id] = __action_graph_terminal_node(plan, phase, template)
+    if entry == "" {
+      entry = node_id
+    }
+    if previous != "" {
+      edges = edges + [{from: previous, to: node_id}]
+    }
+    previous = node_id
+  }
+  return workflow_graph(
+    {
+    name: config?.name ?? plan?.task ?? "action_graph",
+    entry: if entry == "" {
+    "final_verify"
+  } else {
+    entry
+  },
+    nodes: nodes,
+    edges: edges,
+  },
+  )
+}
+
+/**
+ * Execute an action graph through the shared workflow runtime.
+ * action_graph_run.
+ */
+pub fn action_graph_run(task, graph, config = nil, overrides = nil) {
+  let plan = if graph?._type == "action_graph" {
+    graph
+  } else {
+    action_graph(graph, config ?? {} + {task: task})
+  }
+  let flow = action_graph_flow(plan, config)
+  let plan_artifact = artifact(
+    {
+    kind: "plan",
+    title: config?.plan_title ?? "Action graph",
+    text: action_graph_render(plan),
+    data: plan,
+    source: "action_graph",
+    freshness: "fresh",
+    relevance: 1.0,
+  },
+  )
+  let artifacts = overrides?.artifacts ?? [] + [plan_artifact]
+  let runtime = workflow_execute(task, flow, artifacts, overrides)
+  return {
+    _type: "action_graph_run",
+    task: task,
+    status: runtime?.status,
+    plan: plan,
+    batches: action_graph_batches(plan),
+    flow: flow,
+    runtime: runtime,
+    run: runtime?.run,
+    artifacts: runtime?.artifacts ?? [],
+    transcript: runtime?.transcript,
+    visible_text: workflow_result_text(runtime),
+  }
+}
+
+/** task_run. */
+pub fn task_run(task, flow, overrides) {
+  let graph = workflow_graph(flow ?? {})
+  let runtime = workflow_execute(task, graph, overrides?.artifacts ?? [], overrides)
+  let stages = runtime?.run?.stages ?? []
+  var act = nil
+  var verify = nil
+  var repair = nil
+  let artifacts = runtime?.artifacts ?? []
+  let latest_text = if len(artifacts) > 0 {
+    artifacts[len(artifacts) - 1]?.text
+  } else {
+    act?.visible_text
+  }
+  for stage in stages {
+    if act == nil {
+      act = stage
+      continue
+    }
+    if verify == nil && (stage?.node_id == "verify" || stage?.kind == "verify") {
+      verify = stage
+      continue
+    }
+    if repair == nil && stage?.node_id == "repair" {
+      repair = stage
+    }
+  }
+  let status = if verify?.status == "failed" || repair != nil {
+    "needs_attention"
+  } else {
+    runtime?.status ?? "completed"
+  }
+  return {
+    task: task,
+    workflow: graph?.name ?? "workflow",
+    status: status,
+    text: latest_text,
+    result: runtime,
+    act: act,
+    repair: repair,
+    verification: verify,
+    final_verification: verify,
+    transcript: runtime?.transcript,
+    run: runtime?.run,
+    artifacts: artifacts,
+  }
+}
+
+/** workflow_continue. */
+pub fn workflow_continue(prev, task, flow, overrides) {
+  let transcript = prev?.transcript ?? prev
+  let merged = overrides ?? {} + {transcript: transcript}
+  return task_run(task, flow, merged)
+}
+
+/** workflow_result_text. */
+pub fn workflow_result_text(result) {
+  let raw = if type_of(result) == "string" {
+    result
+  } else {
+    result?.visible_text ?? result?.text ?? result?.result?.text ?? ""
+  }
+  if raw == nil || raw == "" {
+    return ""
+  }
+  if type_of(raw) == "string" {
+    return raw
+  }
+  return json_stringify(raw)
+}
+
+/** workflow_result_transcript. */
+pub fn workflow_result_transcript(task, workflow_name, result, metadata) {
+  let existing = result?.run?.transcript ?? result?.transcript ?? result?.result?.transcript
+  if existing {
+    return existing
+  }
+  var built = transcript(metadata ?? {} + {workflow: workflow_name})
+  if task {
+    built = add_user(built, [{type: "text", text: task, visibility: "public"}])
+  }
+  let text = workflow_result_text(result)
+  if text {
+    built = add_assistant(built, [{type: "output_text", text: text, visibility: "public"}])
+  }
+  return built
+}
+
+/** workflow_result_run. */
+pub fn workflow_result_run(task, workflow_name, result, artifacts, options) {
+  let base_run = if result?._type == "run_record" {
+    result
+  } else {
+    result?.run ?? {}
+  }
+  let text = workflow_result_text(result)
+  let metadata = base_run?.metadata ?? {} + options?.metadata ?? {}
+  let transcript = if result?.run?.transcript ?? result?.transcript ?? result?.result?.transcript {
+    result?.run?.transcript ?? result?.transcript ?? result?.result?.transcript
+  } else {
+    var built = transcript(metadata ?? {} + {workflow: workflow_name})
+    if task {
+      built = add_user(built, [{type: "text", text: task, visibility: "public"}])
+    }
+    if text {
+      built = add_assistant(built, [{type: "output_text", text: text, visibility: "public"}])
+    }
+    built
+  }
+  var run_artifacts = base_run?.artifacts ?? result?.artifacts ?? artifacts ?? []
+  var has_visible_result_artifact = false
+  if text {
+    for item in run_artifacts {
+      if item?.text == text {
+        has_visible_result_artifact = true
+      }
+    }
+    if !has_visible_result_artifact {
+      run_artifacts = run_artifacts
+        + [
+        artifact(
+        {
+        kind: "summary",
+        title: "Visible result",
+        text: text,
+        source: workflow_name,
+        freshness: "fresh",
+        relevance: 1.0,
+        metadata: {visibility: "public"},
+      },
+      ),
+      ]
+    }
+  }
+  return run_record(
+    base_run
+    + {
+    workflow_id: base_run?.workflow_id ?? workflow_name,
+    workflow_name: base_run?.workflow_name ?? workflow_name,
+    task: task,
+    status: options?.status ?? base_run?.status ?? "completed",
+    transcript: transcript,
+    artifacts: run_artifacts,
+    trace_spans: trace_spans(),
+    metadata: metadata,
+  },
+  )
+}
+
+/** workflow_result_persist. */
+pub fn workflow_result_persist(task, workflow_name, result, artifacts, options) {
+  let base_run = if result?._type == "run_record" {
+    result
+  } else {
+    result?.run ?? {}
+  }
+  let text = workflow_result_text(result)
+  let metadata = base_run?.metadata ?? {} + options?.metadata ?? {}
+  let transcript = if result?.run?.transcript ?? result?.transcript ?? result?.result?.transcript {
+    result?.run?.transcript ?? result?.transcript ?? result?.result?.transcript
+  } else {
+    var built = transcript(metadata ?? {} + {workflow: workflow_name})
+    if task {
+      built = add_user(built, [{type: "text", text: task, visibility: "public"}])
+    }
+    if text {
+      built = add_assistant(built, [{type: "output_text", text: text, visibility: "public"}])
+    }
+    built
+  }
+  var run_artifacts = base_run?.artifacts ?? result?.artifacts ?? artifacts ?? []
+  var has_visible_result_artifact = false
+  if text {
+    for item in run_artifacts {
+      if item?.text == text {
+        has_visible_result_artifact = true
+      }
+    }
+    if !has_visible_result_artifact {
+      run_artifacts = run_artifacts
+        + [
+        artifact(
+        {
+        kind: "summary",
+        title: "Visible result",
+        text: text,
+        source: workflow_name,
+        freshness: "fresh",
+        relevance: 1.0,
+        metadata: {visibility: "public"},
+      },
+      ),
+      ]
+    }
+  }
+  let run = run_record(
+    base_run
+    + {
+    workflow_id: base_run?.workflow_id ?? workflow_name,
+    workflow_name: base_run?.workflow_name ?? workflow_name,
+    task: task,
+    status: options?.status ?? base_run?.status ?? "completed",
+    transcript: transcript,
+    artifacts: run_artifacts,
+    trace_spans: trace_spans(),
+    metadata: metadata,
+  },
+  )
+  let persisted = run_record_save(run, options?.path)
+  return {
+    path: persisted?.path,
+    persisted_path: persisted?.path,
+    run: persisted?.run,
+    status: persisted?.run?.status ?? "completed",
+    transcript: persisted?.run?.transcript,
+    artifacts: persisted?.run?.artifacts ?? [],
+    visible_text: text,
+  }
+}
+
+/** workflow_session. */
+pub fn workflow_session(prev) {
+  let transcript = prev?.transcript ?? prev?.result?.transcript ?? prev
+  let run = prev?.run ?? prev?.result?.run
+  let persisted_path = prev?.persisted_path ?? prev?.path ?? run?.persisted_path
+  let workflow_id = prev?.workflow_id ?? run?.workflow_id ?? prev?.workflow ?? run?.workflow_name
+  return {
+    _type: "workflow_session",
+    workflow_id: workflow_id,
+    transcript: transcript,
+    run: run,
+    persisted_path: persisted_path,
+    status: prev?.status ?? run?.status ?? transcript?.state ?? "active",
+    workflow: prev?.workflow ?? run?.workflow?.name,
+    task: prev?.task ?? run?.task,
+    summary: transcript_summary(transcript),
+    transcript_state: transcript?.state ?? "active",
+    message_count: len(transcript_messages(transcript)),
+    event_count: len(transcript_events(transcript)),
+    asset_count: len(transcript_assets(transcript)),
+    usage: run?.usage ?? prev?.usage,
+  }
+}
+
+/** workflow_session_new. */
+pub fn workflow_session_new(metadata) {
+  let raw = metadata ?? {}
+  let workflow_id = raw?.workflow_id ?? raw?.workflow
+  return workflow_session(
+    {status: "active", workflow_id: workflow_id, transcript: transcript(raw)},
+  )
+}
+
+/** workflow_session_restore. */
+pub fn workflow_session_restore(source) {
+  let run = if type_of(source) == "string" {
+    run_record_load(source)
+  } else {
+    source?.run ?? source
+  }
+  return workflow_session(
+    {
+    status: run?.status ?? "restored",
+    workflow_id: run?.workflow_id,
+    run: run,
+    persisted_path: run?.persisted_path,
+    transcript: run?.transcript ?? transcript(),
+  },
+  )
+}
+
+/** workflow_session_fork. */
+pub fn workflow_session_fork(prev) {
+  let session = workflow_session(prev)
+  return workflow_session(session + {transcript: transcript_fork(session?.transcript)})
+}
+
+/** workflow_session_archive. */
+pub fn workflow_session_archive(prev) {
+  let session = workflow_session(prev)
+  return workflow_session(
+    session + {status: "archived", transcript: transcript_archive(session?.transcript)},
+  )
+}
+
+/** workflow_session_resume. */
+pub fn workflow_session_resume(prev) {
+  let session = workflow_session(prev)
+  return workflow_session(session + {status: "active", transcript: transcript_resume(session?.transcript)})
+}
+
+/** workflow_compact. */
+pub fn workflow_compact(prev, options) {
+  let transcript = prev?.transcript ?? prev
+  return transcript_summarize(transcript, options)
+}
+
+/** workflow_session_compact. */
+pub fn workflow_session_compact(prev, options) {
+  let session = workflow_session(prev)
+  return workflow_session(session + {transcript: transcript_summarize(session?.transcript, options)})
+}
+
+/** workflow_reset. */
+pub fn workflow_reset(prev, carry_summary) {
+  let transcript = prev?.transcript ?? prev
+  if carry_summary && transcript_summary(transcript) {
+    return transcript_compact(transcript, {keep_last: 0})
+  }
+  return transcript()
+}
+
+/** workflow_session_reset. */
+pub fn workflow_session_reset(prev, carry_summary) {
+  let session = workflow_session(prev)
+  return workflow_session(
+    {
+    workflow_id: session?.workflow_id,
+    workflow: session?.workflow,
+    status: "active",
+    transcript: workflow_reset(session?.transcript, carry_summary),
+  },
+  )
+}
+
+/** continue_as_new. */
+pub fn continue_as_new(prev, options = nil) {
+  let session = workflow_session(prev)
+  let carry_summary = options?.carry_summary ?? true
+  let _state = workflow.continue_as_new(session)
+  return workflow_session(
+    {
+    workflow_id: session?.workflow_id,
+    workflow: session?.workflow,
+    status: "active",
+    persisted_path: session?.persisted_path,
+    run: session?.run,
+    transcript: workflow_reset(session?.transcript, carry_summary),
+  },
+  )
+}
+
+/** workflow_session_persist. */
+pub fn workflow_session_persist(prev, path) {
+  let session = workflow_session(prev)
+  if session?.run == nil {
+    return session
+  }
+  let persisted = run_record_save(session?.run, path)
+  return workflow_session(session + {run: persisted?.run, persisted_path: persisted?.path})
+}
+
+/** worker_request. */
+pub fn worker_request(worker) {
+  return worker?.request ?? worker?.worker?.request ?? worker?.data?.request
+}
+
+/** worker_result. */
+pub fn worker_result(worker) {
+  return worker?.result ?? worker?.data?.payload ?? worker?.worker?.result
+}
+
+/** worker_provenance. */
+pub fn worker_provenance(worker) {
+  return worker?.provenance ?? worker?.worker?.provenance ?? worker?.data?.provenance
+}
+
+/** worker_research_questions. */
+pub fn worker_research_questions(worker) {
+  return worker_request(worker)?.research_questions ?? []
+}
+
+/** worker_action_items. */
+pub fn worker_action_items(worker) {
+  return worker_request(worker)?.action_items ?? []
+}
+
+/** worker_workflow_stages. */
+pub fn worker_workflow_stages(worker) {
+  return worker_request(worker)?.workflow_stages ?? []
+}
+
+/** worker_verification_steps. */
+pub fn worker_verification_steps(worker) {
+  return worker_request(worker)?.verification_steps ?? []
+}

@@ -1,0 +1,86 @@
+// std/async — Async utilities: polling, waiting, retrying.
+
+// wait_for(timeout_ms, interval_ms, predicate) -> Result
+// Repeatedly calls predicate() with interval_ms sleep between attempts.
+// Returns Ok(value) with the first truthy return value, or Err("timeout").
+//
+// Example:
+//   import { wait_for } from "std/async"
+//   let result = wait_for(5000, 500, { -> metadata_get("status") == "ready" })
+/** wait_for. */
+pub fn wait_for(timeout_ms, interval_ms, predicate) {
+  let end_time = timestamp() * 1000 + timeout_ms
+  let interval = interval_ms
+  if interval <= 0 {
+    interval = 100
+  }
+  while timestamp() * 1000 < end_time {
+    let value = predicate()
+    if value {
+      return Ok(value)
+    }
+    sleep(interval)
+  }
+  // One final check after deadline
+  let value = predicate()
+  if value {
+    return Ok(value)
+  }
+  return Err("timeout")
+}
+
+// retry_until(max_attempts, predicate) -> Result
+// Calls predicate() up to max_attempts times with no delay.
+// Returns Ok(value) on first truthy result, or Err("exhausted").
+/** retry_until. */
+pub fn retry_until(max_attempts, predicate) {
+  var i = 0
+  while i < max_attempts {
+    let value = predicate()
+    if value {
+      return Ok(value)
+    }
+    i = i + 1
+  }
+  return Err("exhausted")
+}
+
+// retry_with_backoff(max_attempts, base_ms, predicate) -> Result
+// Calls predicate() with exponential backoff (base_ms * 2^attempt).
+// Returns Ok(value) on first truthy result, or Err("exhausted").
+/** retry_with_backoff. */
+pub fn retry_with_backoff(max_attempts, base_ms, predicate) {
+  var attempt = 0
+  while attempt < max_attempts {
+    let value = predicate()
+    if value {
+      return Ok(value)
+    }
+    attempt = attempt + 1
+    if attempt < max_attempts {
+      let delay = base_ms * pow(2, attempt - 1)
+      sleep(delay)
+    }
+  }
+  return Err("exhausted")
+}
+
+// circuit_call(name, closure) -> Result
+// Calls the closure only if the circuit breaker is not open.
+// Records success/failure on the circuit breaker automatically.
+// Returns Err("circuit_open") if the circuit is open.
+// In half_open state, allows one call through as a probe.
+/** circuit_call. */
+pub fn circuit_call(name, closure) {
+  let state = circuit_check(name)
+  if state == "open" {
+    return Err("circuit_open")
+  }
+  let result = try { closure() }
+  if is_ok(result) {
+    circuit_record_success(name)
+  } else {
+    circuit_record_failure(name)
+  }
+  return result
+}

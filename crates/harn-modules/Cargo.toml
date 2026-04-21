@@ -5,6 +5,10 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Cross-file module graph and import resolution utilities for Harn"
+include = [
+    "src/**/*",
+    "Cargo.toml",
+]
 
 [dependencies]
 harn-lexer = { path = "../harn-lexer", version = "0.7" }
