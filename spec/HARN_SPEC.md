@@ -632,6 +632,10 @@ Returns `nil` (which becomes `.nilValue`) if not found anywhere.
 
 - `let name = value` -- defines `name` as immutable in the current scope.
 - `var name = value` -- defines `name` as mutable in the current scope.
+- `var name = nil` -- leaves `name` widenable until the first non-`nil`
+  assignment, which fixes the slot to `T | nil`. The explicit form
+  `var name: T | nil = nil` remains valid when you want to pin `T`
+  up front.
 - `let _ = value` / `var _ = value` -- evaluate `value` and discard it
   without introducing a variable into scope. `_` can be reused any number
   of times in the same scope.

@@ -82,6 +82,7 @@ impl TypeChecker {
                     let mut child = self.scope.child();
                     for p in params {
                         child.define_var(p, None);
+                        child.clear_nil_widenable(p);
                     }
                     self.fn_depth += 1;
                     let ret_scope_base = return_type.as_ref().map(|_| child.child());
@@ -132,6 +133,9 @@ impl TypeChecker {
                     }
                     for name in scope.mutable_vars {
                         self.scope.mutable_vars.insert(name);
+                    }
+                    for (name, enabled) in scope.nil_widenable_vars {
+                        self.scope.nil_widenable_vars.insert(name, enabled);
                     }
                 }
             }
@@ -212,6 +216,7 @@ impl TypeChecker {
                 }
                 Node::SkillDecl { name, .. } => {
                     scope.define_var(name, None);
+                    scope.clear_nil_widenable(name);
                 }
                 Node::LetBinding { pattern, .. } | Node::VarBinding { pattern, .. } => {
                     // Only bare-identifier patterns at module scope
@@ -221,6 +226,7 @@ impl TypeChecker {
                     if let BindingPattern::Identifier(name) = pattern {
                         if !crate::ast::is_discard_name(name) {
                             scope.define_var(name, None);
+                            scope.clear_nil_widenable(name);
                         }
                     }
                 }

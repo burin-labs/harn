@@ -56,6 +56,7 @@ impl TypeChecker {
             } else {
                 scope.define_var(name, None);
             }
+            scope.clear_nil_widenable(name);
         };
         match pattern {
             BindingPattern::Identifier(name) => {
@@ -101,6 +102,25 @@ impl TypeChecker {
         }
     }
 
+    fn is_nil_type(ty: &TypeExpr) -> bool {
+        matches!(ty, TypeExpr::Named(name) if name == "nil")
+    }
+
+    fn union_with_nil(ty: &TypeExpr) -> TypeExpr {
+        if Self::is_nil_type(ty) {
+            return ty.clone();
+        }
+        match ty {
+            TypeExpr::Union(members) if members.iter().any(Self::is_nil_type) => ty.clone(),
+            TypeExpr::Union(members) => {
+                let mut widened = members.clone();
+                widened.push(TypeExpr::Named("nil".into()));
+                TypeExpr::Union(widened)
+            }
+            other => TypeExpr::Union(vec![other.clone(), TypeExpr::Named("nil".into())]),
+        }
+    }
+
     pub(in crate::typechecker) fn check_node(&mut self, snode: &SNode, scope: &mut TypeScope) {
         let span = snode.span;
         match &snode.node {
@@ -142,6 +162,7 @@ impl TypeChecker {
                     }
                     let ty = type_ann.clone().or(inferred);
                     scope.define_var(name, ty);
+                    scope.clear_nil_widenable(name);
                     scope.define_schema_binding(name, schema_type_expr_from_node(value, scope));
                     // Strict types: mark variables assigned from boundary APIs
                     if self.strict_types {
@@ -194,8 +215,15 @@ impl TypeChecker {
                             }
                         }
                     }
+                    let inferred_is_nil =
+                        type_ann.is_none() && inferred.as_ref().is_some_and(Self::is_nil_type);
                     let ty = type_ann.clone().or(inferred);
                     scope.define_var_mutable(name, ty);
+                    if inferred_is_nil {
+                        scope.mark_nil_widenable(name);
+                    } else {
+                        scope.clear_nil_widenable(name);
+                    }
                     scope.define_schema_binding(name, schema_type_expr_from_node(value, scope));
                     // Strict types: mark variables assigned from boundary APIs
                     if self.strict_types {
@@ -239,6 +267,7 @@ impl TypeChecker {
                 };
                 scope.define_fn(name, sig.clone());
                 scope.define_var(name, None);
+                scope.clear_nil_widenable(name);
                 self.check_fn_decl_variance(type_params, params, return_type.as_ref(), name, span);
                 self.check_fn_body(type_params, params, return_type, body, where_clauses);
             }
@@ -265,6 +294,7 @@ impl TypeChecker {
                 };
                 scope.define_fn(name, sig);
                 scope.define_var(name, None);
+                scope.clear_nil_widenable(name);
                 self.check_fn_body(&[], params, return_type, body, &[]);
             }
 
@@ -277,6 +307,7 @@ impl TypeChecker {
                     self.check_node(value, scope);
                 }
                 scope.define_var(name, None);
+                scope.clear_nil_widenable(name);
             }
 
             Node::FunctionCall { name, args } => {
@@ -367,6 +398,7 @@ impl TypeChecker {
                         _ => None,
                     };
                     loop_scope.define_var(variable, elem_type);
+                    loop_scope.clear_nil_widenable(variable);
                 } else if let BindingPattern::Pair(a, b) = pattern {
                     // Pair destructuring: `for (k, v) in iter` — extract K, V
                     // from the yielded Pair<K, V>.
@@ -399,6 +431,8 @@ impl TypeChecker {
                     };
                     loop_scope.define_var(a, ka);
                     loop_scope.define_var(b, vb);
+                    loop_scope.clear_nil_widenable(a);
+                    loop_scope.clear_nil_widenable(b);
                 } else {
                     self.check_pattern_defaults(pattern, &mut loop_scope);
                     Self::define_pattern_vars(pattern, &mut loop_scope, false);
@@ -434,6 +468,7 @@ impl TypeChecker {
                 let mut catch_scope = scope.child();
                 if let Some(var) = error_var {
                     catch_scope.define_var(var, error_type.clone());
+                    catch_scope.clear_nil_widenable(var);
                 }
                 self.check_block(catch_body, &mut catch_scope);
                 if let Some(fb) = finally_body {
@@ -468,6 +503,7 @@ impl TypeChecker {
             } => {
                 self.check_node(value, scope);
                 if let Node::Identifier(name) = &target.node {
+                    let mut widened_slot_type: Option<TypeExpr> = None;
                     // Compile-time immutability check
                     if scope.get_var(name).is_some() && !scope.is_mutable(name) {
                         self.warning_at(
@@ -495,22 +531,38 @@ impl TypeChecker {
                                 .and_then(|t| t.as_ref())
                                 .unwrap_or(var_type);
                             if !self.types_compatible(check_type, actual, scope) {
-                                self.error_at(
-                                    format!(
-                                        "can't assign {} to '{}' (declared as {})",
-                                        format_type(actual),
-                                        name,
-                                        format_type(check_type)
-                                    ),
-                                    span,
-                                );
+                                if scope.is_mutable(name)
+                                    && scope.is_nil_widenable(name)
+                                    && Self::is_nil_type(check_type)
+                                    && !Self::is_nil_type(actual)
+                                {
+                                    widened_slot_type = Some(Self::union_with_nil(actual));
+                                } else {
+                                    self.error_at(
+                                        format!(
+                                            "can't assign {} to '{}' (declared as {})",
+                                            format_type(actual),
+                                            name,
+                                            format_type(check_type)
+                                        ),
+                                        span,
+                                    );
+                                }
                             }
                         }
                     }
 
                     // Invalidate narrowing on reassignment: restore original type
                     if let Some(original) = scope.narrowed_vars.remove(name) {
-                        scope.define_var(name, original);
+                        if let Some(widened) = widened_slot_type.as_ref() {
+                            scope.define_var(name, Some(widened.clone()));
+                        } else {
+                            scope.define_var(name, original);
+                        }
+                    }
+                    if let Some(widened) = widened_slot_type {
+                        scope.define_var(name, Some(widened));
+                        scope.clear_nil_widenable(name);
                     }
                     scope.define_schema_binding(name, None);
                     scope.clear_unknown_ruled_out(name);
@@ -1025,6 +1077,7 @@ impl TypeChecker {
                         }
                     };
                     par_scope.define_var(var, var_type);
+                    par_scope.clear_nil_widenable(var);
                 }
                 self.check_block(body, &mut par_scope);
             }
@@ -1038,6 +1091,7 @@ impl TypeChecker {
                     self.check_node(&case.channel, scope);
                     let mut case_scope = scope.child();
                     case_scope.define_var(&case.variable, None);
+                    case_scope.clear_nil_widenable(&case.variable);
                     self.check_block(&case.body, &mut case_scope);
                 }
                 if let Some((dur, body)) = timeout {
@@ -1072,6 +1126,7 @@ impl TypeChecker {
                 let mut closure_scope = scope.child();
                 for p in params {
                     closure_scope.define_var(&p.name, p.type_expr.clone());
+                    closure_scope.clear_nil_widenable(&p.name);
                 }
                 self.fn_depth += 1;
                 self.check_block(body, &mut closure_scope);

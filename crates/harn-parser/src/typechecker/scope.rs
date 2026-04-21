@@ -99,6 +99,10 @@ pub(super) struct TypeScope {
     /// Variables that have been narrowed by flow-sensitive refinement.
     /// Maps var name → pre-narrowing type (used to restore on reassignment).
     pub(super) narrowed_vars: BTreeMap<String, InferredType>,
+    /// Mutable vars declared as unannotated `var x = nil`. A local `false`
+    /// entry shadows a parent widenable marker after a new declaration or
+    /// after the first successful widening assignment.
+    pub(super) nil_widenable_vars: BTreeMap<String, bool>,
     /// Schema literals bound to variables, reduced to a TypeExpr subset so
     /// `schema_is(x, some_schema)` can participate in flow refinement.
     pub(super) schema_bindings: BTreeMap<String, InferredType>,
@@ -153,6 +157,7 @@ impl TypeScope {
             where_constraints: BTreeMap::new(),
             mutable_vars: std::collections::BTreeSet::new(),
             narrowed_vars: BTreeMap::new(),
+            nil_widenable_vars: BTreeMap::new(),
             schema_bindings: BTreeMap::new(),
             untyped_sources: BTreeMap::new(),
             unknown_ruled_out: BTreeMap::new(),
@@ -209,6 +214,7 @@ impl TypeScope {
             where_constraints: BTreeMap::new(),
             mutable_vars: std::collections::BTreeSet::new(),
             narrowed_vars: BTreeMap::new(),
+            nil_widenable_vars: BTreeMap::new(),
             schema_bindings: BTreeMap::new(),
             untyped_sources: BTreeMap::new(),
             unknown_ruled_out: BTreeMap::new(),
@@ -400,6 +406,29 @@ impl TypeScope {
         }
         self.vars.insert(name.to_string(), ty);
         self.mutable_vars.insert(name.to_string());
+    }
+
+    pub(super) fn mark_nil_widenable(&mut self, name: &str) {
+        if is_discard_name(name) {
+            return;
+        }
+        self.nil_widenable_vars.insert(name.to_string(), true);
+    }
+
+    pub(super) fn clear_nil_widenable(&mut self, name: &str) {
+        if is_discard_name(name) {
+            return;
+        }
+        self.nil_widenable_vars.insert(name.to_string(), false);
+    }
+
+    pub(super) fn is_nil_widenable(&self, name: &str) -> bool {
+        if let Some(enabled) = self.nil_widenable_vars.get(name) {
+            return *enabled;
+        }
+        self.parent
+            .as_ref()
+            .is_some_and(|p| p.is_nil_widenable(name))
     }
 
     pub(super) fn define_schema_binding(&mut self, name: &str, ty: InferredType) {

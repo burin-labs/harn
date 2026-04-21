@@ -61,6 +61,56 @@ fn test_union_type_mismatch() {
 }
 
 #[test]
+fn test_var_nil_widens_on_first_concrete_assignment() {
+    let errs = errors(
+        r#"pipeline t(task) {
+  var hit = nil
+  hit = {name: "b", score: 2}
+  let widened: {name: string, score: int} | nil = hit
+  hit = nil
+}"#,
+    );
+    assert!(errs.is_empty(), "unexpected type errors: {errs:?}");
+}
+
+#[test]
+fn test_var_nil_widens_inside_nil_guard() {
+    let errs = errors(
+        r#"pipeline t(task) {
+  var hit = nil
+  if hit == nil {
+    hit = {name: "b", score: 2}
+  }
+}"#,
+    );
+    assert!(errs.is_empty(), "unexpected type errors: {errs:?}");
+}
+
+#[test]
+fn test_explicit_nullable_var_annotation_still_accepts_nil_and_concrete() {
+    let errs = errors(
+        r#"pipeline t(task) {
+  var hit: {name: string, score: int} | nil = nil
+  hit = {name: "b", score: 2}
+  hit = nil
+}"#,
+    );
+    assert!(errs.is_empty(), "unexpected type errors: {errs:?}");
+}
+
+#[test]
+fn test_explicit_nil_var_does_not_widen() {
+    let errs = errors(
+        r#"pipeline t(task) {
+  var hit: nil = nil
+  hit = {name: "b", score: 2}
+}"#,
+    );
+    assert_eq!(errs.len(), 1, "expected 1 error, got: {errs:?}");
+    assert!(errs[0].contains("declared as nil"), "got: {}", errs[0]);
+}
+
+#[test]
 fn test_type_inference_propagation() {
     let errs = errors(
         r#"pipeline t(task) {

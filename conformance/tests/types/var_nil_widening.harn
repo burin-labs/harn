@@ -1,0 +1,40 @@
+// `var x = nil` should widen on the first concrete assignment instead of
+// pinning `x` to `nil` forever. Explicit `T | nil` annotations remain the
+// precise escape hatch when callers want to say so up front.
+fn first_hit() -> {name: string, score: int} | nil {
+  var hit = nil
+  for entry in {a: 1, b: 2}.entries() {
+    if hit == nil && entry.value > 1 {
+      hit = {name: entry.key, score: entry.value}
+    }
+  }
+  return hit
+}
+
+fn render_hit(hit: {name: string, score: int} | nil) -> string {
+  if hit == nil {
+    return "missing"
+  }
+  return hit.name + ":" + to_string(hit.score)
+}
+
+fn widen_direct() -> string {
+  var label = nil
+  label = "ready"
+  let current: string | nil = label
+  label = nil
+  return current ?? "none"
+}
+
+fn annotated_roundtrip() -> bool {
+  var label: string | nil = nil
+  label = "set"
+  label = nil
+  return label == nil
+}
+
+pipeline default(task) {
+  println(render_hit(first_hit()))
+  println(widen_direct())
+  println(annotated_roundtrip())
+}
