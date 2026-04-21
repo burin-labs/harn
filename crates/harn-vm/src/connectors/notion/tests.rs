@@ -358,12 +358,19 @@ fn write_response(stream: &mut std::net::TcpStream, status: u16, body: &str) {
     let status_text = match status {
         200 => "OK",
         201 => "Created",
+        429 => "Too Many Requests",
         _ => "OK",
     };
+    let retry_after = if status == 429 {
+        "retry-after: 0\r\n"
+    } else {
+        ""
+    };
     let response = format!(
-        "HTTP/1.1 {} {}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+        "HTTP/1.1 {} {}\r\n{}content-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
         status,
         status_text,
+        retry_after,
         body.len(),
         body,
     );

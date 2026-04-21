@@ -114,6 +114,8 @@ struct LinearWebhookMonitorConfig {
     #[serde(default)]
     probe_interval_secs: Option<u64>,
     #[serde(default)]
+    probe_interval_ms: Option<u64>,
+    #[serde(default)]
     success_threshold: Option<u32>,
     #[serde(flatten)]
     client: LinearClientConfigArgs,
@@ -137,7 +139,7 @@ enum LinearAuthSource {
 struct LinearWebhookMonitor {
     webhook_id: String,
     health_url: String,
-    probe_interval_secs: u64,
+    probe_interval: StdDuration,
     success_threshold: u32,
     client_config: ResolvedLinearClientConfig,
 }
@@ -814,10 +816,17 @@ impl LinearWebhookMonitor {
         Ok(Some(Self {
             webhook_id,
             health_url,
-            probe_interval_secs: config
-                .probe_interval_secs
-                .unwrap_or(DEFAULT_WEBHOOK_MONITOR_PROBE_INTERVAL_SECS)
-                .max(1),
+            probe_interval: config
+                .probe_interval_ms
+                .map(|ms| StdDuration::from_millis(ms.max(1)))
+                .unwrap_or_else(|| {
+                    StdDuration::from_secs(
+                        config
+                            .probe_interval_secs
+                            .unwrap_or(DEFAULT_WEBHOOK_MONITOR_PROBE_INTERVAL_SECS)
+                            .max(1),
+                    )
+                }),
             success_threshold: config
                 .success_threshold
                 .unwrap_or(DEFAULT_WEBHOOK_MONITOR_SUCCESS_THRESHOLD)
@@ -840,7 +849,7 @@ async fn run_webhook_monitor(
                     break;
                 }
             }
-            _ = tokio::time::sleep(StdDuration::from_secs(monitor.probe_interval_secs)) => {}
+            _ = tokio::time::sleep(monitor.probe_interval) => {}
         }
         if *shutdown.borrow() {
             break;

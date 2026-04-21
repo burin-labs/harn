@@ -184,7 +184,7 @@ fn slack_handler_module(marker_path: &Path) -> String {
 import "std/triggers"
 
 pub fn on_slack(event: TriggerEvent) {{
-  sleep(4100ms)
+  sleep(100ms)
   write_file({marker:?}, event.kind)
 }}
 "#,

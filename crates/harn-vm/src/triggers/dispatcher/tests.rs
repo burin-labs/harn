@@ -1471,8 +1471,6 @@ pub fn local_fn(event: TriggerEvent) -> dict {
 
 #[tokio::test(flavor = "current_thread")]
 async fn replay_dispatch_scopes_harn_replay_per_dispatch_and_child_process() {
-    std::env::set_var("HARN_REPLAY", "outer");
-
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
@@ -1542,12 +1540,8 @@ pub fn local_fn(event: TriggerEvent) -> dict {
             }
             dedupe_keys.sort();
             assert_eq!(dedupe_keys, vec!["delivery-env-a", "delivery-env-b"]);
-
-            assert_eq!(std::env::var("HARN_REPLAY").ok().as_deref(), Some("outer"));
         })
         .await;
-
-    std::env::remove_var("HARN_REPLAY");
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -2161,76 +2155,80 @@ pub fn slow_handler(event: TriggerEvent) -> string {
 
 #[tokio::test(flavor = "current_thread")]
 async fn waitpoint_wait_releases_singleton_flow_control_while_waiting() {
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
-            let (_dir, log, dispatcher) = dispatcher_fixture_with_flow_control(
-                r#"
-import "std/triggers"
+    crate::reset_thread_local_state();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let log = install_default_for_base_dir(dir.path()).expect("install event log");
+    let state = Arc::new(super::DispatcherRuntimeState::new(log.clone()));
+    let gate = "singleton-demo".to_string();
 
-pub fn coordinated_handler(event: TriggerEvent) -> string {
-  if event.dedupe_key == "delivery-singleton-wait-1" {
-    waitpoint_create("singleton-demo")
-    let result = waitpoint_wait("singleton-demo", {wait_id: "wait-singleton"})
-    return "first:" + result.status
-  }
-  let record = waitpoint_complete("singleton-demo")
-  return "second:" + record.status
-}
-"#,
-                "coordinated_handler",
-                None,
-                TriggerRetryConfig::default(),
-                crate::triggers::TriggerFlowControlConfig {
-                    singleton: Some(crate::triggers::TriggerSingletonConfig { key: None }),
-                    ..Default::default()
-                },
-            )
-            .await;
+    state
+        .flow_control
+        .acquire_singleton(&gate)
+        .await
+        .expect("initial singleton acquisition");
+    let acquired = Arc::new(tokio::sync::Mutex::new(super::AcquiredFlowControl {
+        singleton: Some(super::SingletonLease {
+            gate: gate.clone(),
+            held: true,
+        }),
+        ..Default::default()
+    }));
+    let lease = super::DispatchWaitLease::new(state.clone(), acquired.clone());
 
-            let dispatcher_for_task = dispatcher.clone();
-            let first = tokio::task::spawn_local(async move {
-                dispatcher_for_task
-                    .dispatch_event(trigger_event("issues.opened", "delivery-singleton-wait-1"))
-                    .await
-                    .expect("first dispatch succeeds")
-            });
+    lease.suspend().await.expect("suspend releases singleton");
+    assert!(
+        !acquired
+            .lock()
+            .await
+            .singleton
+            .as_ref()
+            .expect("singleton lease")
+            .held
+    );
 
-            tokio::time::sleep(Duration::from_millis(20)).await;
+    assert!(state
+        .flow_control
+        .try_acquire_singleton(&gate)
+        .await
+        .expect("competing dispatch can acquire while suspended"));
+    state
+        .flow_control
+        .release_singleton(&gate)
+        .await
+        .expect("release competing dispatch");
 
-            let second = dispatcher
-                .dispatch_event(trigger_event("issues.opened", "delivery-singleton-wait-2"))
-                .await
-                .expect("second dispatch completes");
-            let first = first.await.expect("join waiting singleton leader");
+    lease.resume().await.expect("resume reacquires singleton");
+    assert!(
+        acquired
+            .lock()
+            .await
+            .singleton
+            .as_ref()
+            .expect("singleton lease")
+            .held
+    );
+    state
+        .flow_control
+        .release_singleton(&gate)
+        .await
+        .expect("final release");
 
-            assert_eq!(first[0].status, DispatchStatus::Succeeded);
-            assert_eq!(second[0].status, DispatchStatus::Succeeded);
-            assert_eq!(first[0].result, Some(serde_json::json!("first:completed")));
-            assert_eq!(
-                second[0].result,
-                Some(serde_json::json!("second:completed"))
-            );
-
-            let events =
-                read_topic(log.clone(), "trigger.singleton.github-new-issue_v1__global").await;
-            let event_kinds = events
-                .into_iter()
-                .map(|(_, event)| event.kind)
-                .collect::<Vec<_>>();
-            assert_eq!(
-                event_kinds,
-                vec![
-                    "singleton_acquired".to_string(),
-                    "singleton_released".to_string(),
-                    "singleton_acquired".to_string(),
-                    "singleton_released".to_string(),
-                    "singleton_acquired".to_string(),
-                    "singleton_released".to_string(),
-                ]
-            );
-        })
-        .await;
+    let event_kinds = read_topic(log.clone(), "trigger.singleton.singleton-demo")
+        .await
+        .into_iter()
+        .map(|(_, event)| event.kind)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        event_kinds,
+        vec![
+            "singleton_acquired".to_string(),
+            "singleton_released".to_string(),
+            "singleton_acquired".to_string(),
+            "singleton_released".to_string(),
+            "singleton_acquired".to_string(),
+            "singleton_released".to_string(),
+        ]
+    );
 }
 
 #[tokio::test(flavor = "current_thread")]

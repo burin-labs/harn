@@ -42,6 +42,13 @@ fn copy_dir_recursive(source: &Path, destination: &Path) {
 fn seed_fixture(temp: &TempDir) {
     let fixture = repo_root().join("conformance/fixtures/triggers/inbox_dedupe_restart");
     copy_dir_recursive(&fixture, temp.path());
+    let manifest = temp.path().join("harn.toml");
+    let contents = fs::read_to_string(&manifest).unwrap();
+    fs::write(
+        &manifest,
+        contents.replace("*/2 * * * * *", "*/1 * * * * *"),
+    )
+    .unwrap();
 }
 
 fn spawn_orchestrator(
@@ -157,6 +164,21 @@ async fn read_tick_dedupe_counts(temp: &TempDir) -> HashMap<String, usize> {
     counts
 }
 
+async fn wait_for_tick_count(temp: &TempDir, min_count: usize) -> HashMap<String, usize> {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let counts = read_tick_dedupe_counts(temp).await;
+        if counts.len() >= min_count {
+            return counts;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "timed out waiting for {min_count} cron ticks: {counts:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn restart_after_emit_does_not_duplicate_cron_dispatch() {
     let temp = TempDir::new().unwrap();
@@ -179,13 +201,12 @@ async fn restart_after_emit_does_not_duplicate_cron_dispatch() {
 
     let (mut second_child, second_rx, second_handle) = spawn_orchestrator(&temp, &[]);
     wait_for_log_line(&mut second_child, &second_rx, STARTUP_NEEDLE);
-    thread::sleep(Duration::from_secs(3));
+    let counts = wait_for_tick_count(&temp, 2).await;
     send_sigterm(&second_child);
     wait_for_successful_exit(&mut second_child);
     let second_stderr = second_handle.join().expect("stderr collector thread");
     assert!(second_stderr.contains("registered connectors (1): cron"));
 
-    let counts = read_tick_dedupe_counts(&temp).await;
     assert!(
         counts.len() >= 2,
         "expected restarted orchestrator to observe at least one later tick: {counts:?}"

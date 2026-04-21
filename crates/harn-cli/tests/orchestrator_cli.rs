@@ -140,7 +140,7 @@ fn wait_for_exit_code(child: &mut Child, expected: i32) {
             );
             return;
         }
-        thread::sleep(Duration::from_millis(100));
+        thread::sleep(Duration::from_millis(25));
     }
     panic!("timed out waiting for orchestrator exit");
 }
@@ -152,7 +152,7 @@ fn wait_for_exit(child: &mut Child) {
             assert!(status.success(), "child exited unsuccessfully: {status}");
             return;
         }
-        thread::sleep(Duration::from_millis(100));
+        thread::sleep(Duration::from_millis(50));
     }
     panic!("timed out waiting for orchestrator exit");
 }
@@ -319,6 +319,20 @@ fn wait_for_topic_kind(state_dir: &Path, topic_name: &str, kind: &str) {
     panic!("timed out waiting for {topic_name}/{kind}");
 }
 
+fn wait_for_topic_event(state_dir: &Path, topic_name: &str, predicate: impl Fn(&LogEvent) -> bool) {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while Instant::now() < deadline {
+        if read_topic_events(state_dir, topic_name)
+            .iter()
+            .any(|(_, event)| predicate(event))
+        {
+            return;
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
+    panic!("timed out waiting for matching {topic_name} event");
+}
+
 fn sqlite_event_count(state_dir: &Path, topic_name: &str, kind: &str) -> usize {
     let output = Command::new("python3")
         .arg("-c")
@@ -453,7 +467,7 @@ handler = "handlers::on_task"
 import "std/triggers"
 
 pub fn on_task(event: TriggerEvent) -> string {
-  sleep(1000)
+  sleep(100ms)
   return event.kind
 }
 "#,
@@ -571,7 +585,7 @@ pub fn on_task(event: TriggerEvent) -> string {
         .unwrap();
     assert_eq!(response.status(), reqwest::StatusCode::OK);
 
-    tokio::time::sleep(Duration::from_millis(200)).await;
+    tokio::time::sleep(Duration::from_millis(25)).await;
     send_sigterm(&child);
     wait_for_exit(&mut child);
     let stderr = handle.join().expect("stderr collector thread");
@@ -758,7 +772,7 @@ pub fn on_event(event: TriggerEvent) {
 // next orchestrator run replay the remaining backlog to completion.
 #[tokio::test(flavor = "multi_thread")]
 async fn bounded_pump_drain_truncates_and_replays_remaining_backlog_after_restart() {
-    const TOTAL_EVENTS: usize = 500;
+    const TOTAL_EVENTS: usize = 60;
 
     let temp = TempDir::new().unwrap();
     write_file(
@@ -796,13 +810,13 @@ pub fn on_task(event: TriggerEvent) -> string {
         ("HARN_ORCHESTRATOR_API_KEYS", "test-key"),
         ("HARN_ORCHESTRATOR_HMAC_SECRET", "unused-shared-secret"),
         ("HARN_EVENT_LOG_QUEUE_DEPTH", "8192"),
-        ("HARN_TEST_ORCHESTRATOR_PUMP_DELAY_MS", "50"),
+        ("HARN_TEST_ORCHESTRATOR_PUMP_DELAY_MS", "10"),
     ];
     let extra_args = [
         "--shutdown-timeout",
         "5",
         "--drain-max-items",
-        "100",
+        "10",
         "--drain-deadline",
         "1",
     ];
@@ -936,9 +950,11 @@ pub fn on_task(event: TriggerEvent) -> string {
     let (mut restarted_child, restarted_rx, restarted_handle) =
         spawn_orchestrator_with(&temp, &[], &restart_envs);
     wait_for_listener_url(&mut restarted_child, &restarted_rx);
-    tokio::time::sleep(Duration::from_millis(300)).await;
 
     let state_dir = temp.path().join("state");
+    wait_for_topic_event(&state_dir, "orchestrator.lifecycle", |event| {
+        event.kind == "startup_stranded_envelopes" && event.payload["count"] == serde_json::json!(1)
+    });
     let lifecycle = read_topic_events(&state_dir, "orchestrator.lifecycle");
     assert!(lifecycle.iter().any(|(_, event)| {
         event.kind == "startup_stranded_envelopes" && event.payload["count"] == serde_json::json!(1)

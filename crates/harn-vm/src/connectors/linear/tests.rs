@@ -503,13 +503,20 @@ async fn linear_connector_monitor_reenables_webhook_after_probe_streak() {
             "webhook_id": "wh-123",
             "health_url": format!("{base_url}/health"),
             "api_base_url": base_url,
-            "probe_interval_secs": 1,
+            "probe_interval_ms": 25,
             "success_threshold": 2
         }
     });
     let (connector, _) = connector_with_binding(binding).await;
 
-    tokio::time::sleep(std::time::Duration::from_millis(2400)).await;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+    while requests.lock().expect("requests lock").len() < 3 {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "timed out waiting for monitor probes"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
     connector
         .shutdown(std::time::Duration::from_secs(1))
         .await

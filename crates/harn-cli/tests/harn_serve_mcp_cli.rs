@@ -15,6 +15,7 @@ use serde_json::{json, Value as JsonValue};
 use tempfile::TempDir;
 
 static HARN_SERVE_MCP_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+const JSON_RPC_TIMEOUT: Duration = Duration::from_secs(30);
 
 fn lock_harn_serve_mcp_tests() -> MutexGuard<'static, ()> {
     HARN_SERVE_MCP_TEST_LOCK
@@ -47,9 +48,11 @@ pub fn spin(label: string) -> string {
     .unwrap();
 }
 
-fn spawn_stdout_reader(stdout: impl std::io::Read + Send + 'static) -> Receiver<JsonValue> {
+fn spawn_stdout_reader(
+    stdout: impl std::io::Read + Send + 'static,
+) -> (Receiver<JsonValue>, thread::JoinHandle<()>) {
     let (tx, rx) = mpsc::channel();
-    thread::spawn(move || {
+    let handle = thread::spawn(move || {
         for line in BufReader::new(stdout).lines() {
             let line = line.unwrap();
             if line.trim().is_empty() {
@@ -59,7 +62,7 @@ fn spawn_stdout_reader(stdout: impl std::io::Read + Send + 'static) -> Receiver<
             let _ = tx.send(value);
         }
     });
-    rx
+    (rx, handle)
 }
 
 fn recv_until<F>(rx: &Receiver<JsonValue>, timeout: Duration, predicate: F) -> JsonValue
@@ -68,7 +71,7 @@ where
 {
     let deadline = Instant::now() + timeout;
     while Instant::now() < deadline {
-        match rx.recv_timeout(Duration::from_millis(100)) {
+        match rx.recv_timeout(Duration::from_millis(25)) {
             Ok(message) if predicate(&message) => return message,
             Ok(_) => continue,
             Err(mpsc::RecvTimeoutError::Timeout) => continue,
@@ -130,7 +133,7 @@ fn serve_mcp_stdio_lists_calls_and_cancels_exported_functions() {
         .unwrap();
 
     let mut stdin = child.stdin.take().unwrap();
-    let rx = spawn_stdout_reader(child.stdout.take().unwrap());
+    let (rx, stdout_handle) = spawn_stdout_reader(child.stdout.take().unwrap());
 
     writeln!(
         stdin,
@@ -147,7 +150,7 @@ fn serve_mcp_stdio_lists_calls_and_cancels_exported_functions() {
         })
     )
     .unwrap();
-    let init = recv_until(&rx, Duration::from_secs(5), |message| message["id"] == 1);
+    let init = recv_until(&rx, JSON_RPC_TIMEOUT, |message| message["id"] == 1);
     assert_eq!(init["result"]["serverInfo"]["name"], "server");
 
     writeln!(
@@ -161,7 +164,7 @@ fn serve_mcp_stdio_lists_calls_and_cancels_exported_functions() {
         })
     )
     .unwrap();
-    let tools = recv_until(&rx, Duration::from_secs(5), |message| message["id"] == 2);
+    let tools = recv_until(&rx, JSON_RPC_TIMEOUT, |message| message["id"] == 2);
     let names = tools["result"]["tools"]
         .as_array()
         .unwrap()
@@ -184,7 +187,7 @@ fn serve_mcp_stdio_lists_calls_and_cancels_exported_functions() {
         })
     )
     .unwrap();
-    let greet = recv_until(&rx, Duration::from_secs(5), |message| message["id"] == 3);
+    let greet = recv_until(&rx, JSON_RPC_TIMEOUT, |message| message["id"] == 3);
     assert_eq!(
         greet["result"]["structuredContent"]["message"],
         json!("Hello, alice!")
@@ -204,7 +207,7 @@ fn serve_mcp_stdio_lists_calls_and_cancels_exported_functions() {
         })
     )
     .unwrap();
-    let fail = recv_until(&rx, Duration::from_secs(5), |message| message["id"] == 4);
+    let fail = recv_until(&rx, JSON_RPC_TIMEOUT, |message| message["id"] == 4);
     assert_eq!(fail["result"]["isError"], json!(true));
     assert!(fail.get("error").is_none());
 
@@ -223,7 +226,7 @@ fn serve_mcp_stdio_lists_calls_and_cancels_exported_functions() {
         })
     )
     .unwrap();
-    let progress = recv_until(&rx, Duration::from_secs(5), |message| {
+    let progress = recv_until(&rx, JSON_RPC_TIMEOUT, |message| {
         message["method"] == "notifications/progress"
     });
     assert_eq!(progress["params"]["progressToken"], json!("spin-stdio"));
@@ -253,11 +256,12 @@ fn serve_mcp_stdio_lists_calls_and_cancels_exported_functions() {
         })
     )
     .unwrap();
-    let ping = recv_until(&rx, Duration::from_secs(5), |message| message["id"] == 6);
+    let ping = recv_until(&rx, JSON_RPC_TIMEOUT, |message| message["id"] == 6);
     assert_eq!(ping["result"], json!({}));
 
     drop(stdin);
     let status = child.wait().unwrap();
+    stdout_handle.join().expect("stdout reader thread");
     assert!(status.success(), "status={status}");
 }
 

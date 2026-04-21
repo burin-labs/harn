@@ -718,7 +718,15 @@ impl Parser {
     /// After seeing `Identifier {`, decide whether the brace block is a
     /// struct-construction field list rather than a control-flow block.
     /// Struct fields always start with `name:` / `"name":` or `}`.
-    pub(super) fn is_struct_construct_lookahead(&self, _struct_name: &str) -> bool {
+    pub(super) fn is_struct_construct_lookahead(&self, struct_name: &str) -> bool {
+        if !struct_name
+            .chars()
+            .next()
+            .is_some_and(|ch| ch.is_uppercase())
+        {
+            return false;
+        }
+
         let mut offset = 1;
         while matches!(self.peek_kind_at(offset), Some(TokenKind::Newline)) {
             offset += 1;
