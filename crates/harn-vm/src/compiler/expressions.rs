@@ -2,12 +2,29 @@ use harn_lexer::StringSegment;
 use harn_parser::{DictEntry, Node, SNode, TypedParam};
 
 use crate::chunk::{Constant, Op};
+use crate::BuiltinId;
 
 use super::error::CompileError;
 use super::pipe::{contains_pipe_placeholder, replace_pipe_placeholder};
 use super::Compiler;
 
 impl Compiler {
+    pub(super) fn emit_named_call(&mut self, name: &str, arg_count: usize) {
+        let name_idx = self.chunk.add_constant(Constant::String(name.to_string()));
+        self.chunk.emit_call_builtin(
+            BuiltinId::from_name(name),
+            name_idx,
+            arg_count as u8,
+            self.line,
+        );
+    }
+
+    pub(super) fn emit_named_call_spread(&mut self, name: &str) {
+        let name_idx = self.chunk.add_constant(Constant::String(name.to_string()));
+        self.chunk
+            .emit_call_builtin_spread(BuiltinId::from_name(name), name_idx, self.line);
+    }
+
     pub(super) fn compile_binary_op(
         &mut self,
         op: &str,
@@ -133,23 +150,18 @@ impl Compiler {
         if Self::is_schema_guard(name) && args.len() >= 2 {
             if let Node::Identifier(alias) = &args[1].node {
                 if let Some(schema) = self.schema_value_for_alias(alias) {
-                    let name_idx = self.chunk.add_constant(Constant::String(name.to_string()));
-                    self.chunk.emit_u16(Op::Constant, name_idx, self.line);
                     self.compile_node(&args[0])?;
                     self.emit_vm_value_literal(&schema);
                     for arg in &args[2..] {
                         self.compile_node(arg)?;
                     }
-                    self.chunk.emit_u8(Op::Call, args.len() as u8, self.line);
+                    self.emit_named_call(name, args.len());
                     return Ok(());
                 }
             }
         }
 
         let has_spread = args.iter().any(|a| matches!(&a.node, Node::Spread(_)));
-        let name_idx = self.chunk.add_constant(Constant::String(name.to_string()));
-        self.chunk.emit_u16(Op::Constant, name_idx, self.line);
-
         if has_spread {
             // Flush-and-concat pattern: build args into one list
             // (same as ListLiteral with spreads).
@@ -164,12 +176,7 @@ impl Compiler {
                     }
                     self.compile_node(inner)?;
                     self.chunk.emit(Op::Dup, self.line);
-                    let assert_idx = self
-                        .chunk
-                        .add_constant(Constant::String("__assert_list".into()));
-                    self.chunk.emit_u16(Op::Constant, assert_idx, self.line);
-                    self.chunk.emit(Op::Swap, self.line);
-                    self.chunk.emit_u8(Op::Call, 1, self.line);
+                    self.emit_named_call("__assert_list", 1);
                     self.chunk.emit(Op::Pop, self.line);
                     self.chunk.emit(Op::Add, self.line);
                 } else {
@@ -181,12 +188,12 @@ impl Compiler {
                 self.chunk.emit_u16(Op::BuildList, pending, self.line);
                 self.chunk.emit(Op::Add, self.line);
             }
-            self.chunk.emit(Op::CallSpread, self.line);
+            self.emit_named_call_spread(name);
         } else {
             for arg in args {
                 self.compile_node(arg)?;
             }
-            self.chunk.emit_u8(Op::Call, args.len() as u8, self.line);
+            self.emit_named_call(name, args.len());
         }
         Ok(())
     }

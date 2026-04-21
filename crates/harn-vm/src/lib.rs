@@ -4,6 +4,7 @@ pub mod a2a;
 pub mod agent_events;
 pub mod agent_sessions;
 pub mod bridge;
+mod builtin_id;
 pub mod checkpoint;
 mod chunk;
 mod compiler;
@@ -39,6 +40,7 @@ mod vm;
 pub mod waitpoints;
 pub mod workspace_path;
 
+pub use builtin_id::BuiltinId;
 pub use checkpoint::register_checkpoint_builtins;
 pub use chunk::*;
 pub use compiler::*;

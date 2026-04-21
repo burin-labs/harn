@@ -23,7 +23,8 @@ fn test_compile_arithmetic() {
 fn test_compile_function_call() {
     let chunk = compile_source("pipeline test(task) { log(42) }");
     let disasm = chunk.disassemble("test");
-    assert!(disasm.contains("CALL"));
+    assert!(disasm.contains("CALL_BUILTIN"));
+    assert!(disasm.contains("\"log\""));
 }
 
 #[test]

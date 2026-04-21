@@ -4,6 +4,7 @@ use std::sync::atomic::Ordering;
 use std::{cell::RefCell, future::Future, pin::Pin};
 
 use crate::mcp::VmMcpClientHandle;
+use crate::BuiltinId;
 
 use super::{VmAtomicHandle, VmChannelHandle, VmClosure, VmError, VmGenerator, VmRange};
 
@@ -27,6 +28,12 @@ pub enum VmValue {
     /// referenced as a value (e.g. `snake_dict.rekey(snake_to_camel)`). The
     /// contained string is the builtin's registered name.
     BuiltinRef(Rc<str>),
+    /// Compact builtin reference for callback positions. Carries the name for
+    /// policy, diagnostics, and fallback if the ID cannot be used.
+    BuiltinRefId {
+        id: BuiltinId,
+        name: Rc<str>,
+    },
     Duration(u64),
     EnumVariant {
         enum_name: String,
@@ -66,6 +73,7 @@ impl VmValue {
             VmValue::Dict(d) => !d.is_empty(),
             VmValue::Closure(_) => true,
             VmValue::BuiltinRef(_) => true,
+            VmValue::BuiltinRefId { .. } => true,
             VmValue::Duration(ms) => *ms > 0,
             VmValue::EnumVariant { .. } => true,
             VmValue::StructInstance { .. } => true,
@@ -95,6 +103,7 @@ impl VmValue {
             VmValue::Dict(_) => "dict",
             VmValue::Closure(_) => "closure",
             VmValue::BuiltinRef(_) => "builtin",
+            VmValue::BuiltinRefId { .. } => "builtin",
             VmValue::Duration(_) => "duration",
             VmValue::EnumVariant { .. } => "enum",
             VmValue::StructInstance { .. } => "struct",
@@ -173,6 +182,9 @@ impl VmValue {
                 let _ = write!(out, "<fn({})>", c.func.params.join(", "));
             }
             VmValue::BuiltinRef(name) => {
+                let _ = write!(out, "<builtin {name}>");
+            }
+            VmValue::BuiltinRefId { name, .. } => {
                 let _ = write!(out, "<builtin {name}>");
             }
             VmValue::Duration(ms) => {

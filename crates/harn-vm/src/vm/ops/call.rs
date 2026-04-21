@@ -2,6 +2,7 @@ use std::rc::Rc;
 
 use crate::chunk::{InlineCacheEntry, MethodCacheTarget, Op};
 use crate::value::{VmClosure, VmError, VmValue};
+use crate::BuiltinId;
 
 use super::super::CallFrame;
 
@@ -97,6 +98,152 @@ impl super::super::Vm {
         }
     }
 
+    async fn try_call_special_name(
+        &mut self,
+        name: &str,
+        args: &[VmValue],
+    ) -> Result<bool, VmError> {
+        if name == "await" {
+            let task_id = args.first().and_then(|a| match a {
+                VmValue::TaskHandle(id) => Some(id.clone()),
+                _ => None,
+            });
+            if let Some(id) = task_id {
+                if let Some(handle) = self.spawned_tasks.remove(&id) {
+                    let (result, task_output) = handle
+                        .handle
+                        .await
+                        .map_err(|e| VmError::Runtime(format!("Task join error: {e}")))??;
+                    self.output.push_str(&task_output);
+                    self.stack.push(result);
+                } else {
+                    self.stack.push(VmValue::Nil);
+                }
+            } else {
+                self.stack
+                    .push(args.first().cloned().unwrap_or(VmValue::Nil));
+            }
+            return Ok(true);
+        }
+
+        if name == "cancel" {
+            if let Some(VmValue::TaskHandle(id)) = args.first() {
+                if let Some(handle) = self.spawned_tasks.remove(id) {
+                    handle.handle.abort();
+                }
+            }
+            self.stack.push(VmValue::Nil);
+            return Ok(true);
+        }
+
+        if name == "cancel_graceful" {
+            let task_id = args.first().and_then(|a| match a {
+                VmValue::TaskHandle(id) => Some(id.clone()),
+                _ => None,
+            });
+            let timeout_ms = args
+                .get(1)
+                .and_then(|a| match a {
+                    VmValue::Int(n) => Some(*n as u64),
+                    VmValue::Duration(ms) => Some(*ms),
+                    _ => None,
+                })
+                .unwrap_or(5000);
+            if let Some(id) = task_id {
+                if let Some(task) = self.spawned_tasks.remove(&id) {
+                    task.cancel_token
+                        .store(true, std::sync::atomic::Ordering::SeqCst);
+                    let deadline = tokio::time::Instant::now()
+                        + tokio::time::Duration::from_millis(timeout_ms);
+                    match tokio::time::timeout_at(deadline, task.handle).await {
+                        Ok(Ok(Ok((result, output)))) => {
+                            self.output.push_str(&output);
+                            self.stack.push(VmValue::EnumVariant {
+                                enum_name: "Result".into(),
+                                variant: "Ok".into(),
+                                fields: vec![result],
+                            });
+                        }
+                        Ok(Ok(Err(e))) => {
+                            self.stack.push(VmValue::EnumVariant {
+                                enum_name: "Result".into(),
+                                variant: "Err".into(),
+                                fields: vec![VmValue::String(Rc::from(e.to_string()))],
+                            });
+                        }
+                        Ok(Err(e)) => {
+                            self.stack.push(VmValue::EnumVariant {
+                                enum_name: "Result".into(),
+                                variant: "Err".into(),
+                                fields: vec![VmValue::String(Rc::from(format!(
+                                    "Task join error: {e}"
+                                )))],
+                            });
+                        }
+                        Err(_) => {
+                            self.stack.push(VmValue::EnumVariant {
+                                enum_name: "Result".into(),
+                                variant: "Err".into(),
+                                fields: vec![VmValue::String(Rc::from(
+                                    "cancel_graceful: timeout, task forcefully aborted",
+                                ))],
+                            });
+                        }
+                    }
+                } else {
+                    self.stack.push(VmValue::EnumVariant {
+                        enum_name: "Result".into(),
+                        variant: "Ok".into(),
+                        fields: vec![VmValue::Nil],
+                    });
+                }
+            } else {
+                self.stack.push(VmValue::Nil);
+            }
+            return Ok(true);
+        }
+
+        if name == "is_cancelled" {
+            let cancelled = self
+                .cancel_token
+                .as_ref()
+                .map(|t| t.load(std::sync::atomic::Ordering::SeqCst))
+                .unwrap_or(false);
+            self.stack.push(VmValue::Bool(cancelled));
+            return Ok(true);
+        }
+
+        Ok(false)
+    }
+
+    async fn call_named_value(
+        &mut self,
+        name: &str,
+        args: Vec<VmValue>,
+        functions: &[crate::chunk::CompiledFunction],
+        direct_id: Option<BuiltinId>,
+    ) -> Result<(), VmError> {
+        if self.try_call_special_name(name, &args).await? {
+            return Ok(());
+        }
+        if let Some(closure) = self.resolve_named_closure(name) {
+            if closure.func.is_generator {
+                let gen = self.create_generator(&closure, &args);
+                self.stack.push(gen);
+            } else {
+                self.push_closure_frame(&closure, &args, functions)?;
+            }
+        } else {
+            let result = if let Some(id) = direct_id {
+                self.call_builtin_id_or_name(id, name, args).await?
+            } else {
+                self.call_named_builtin(name, args).await?
+            };
+            self.stack.push(result);
+        }
+        Ok(())
+    }
+
     pub(super) async fn try_execute_call_op(&mut self, op: u8) -> Result<bool, VmError> {
         if op == Op::Call as u8 {
             let frame = self.frames.last_mut().unwrap();
@@ -110,115 +257,7 @@ impl super::super::Vm {
 
             match callee {
                 VmValue::String(name) => {
-                    if name.as_ref() == "await" {
-                        let task_id = args.first().and_then(|a| match a {
-                            VmValue::TaskHandle(id) => Some(id.clone()),
-                            _ => None,
-                        });
-                        if let Some(id) = task_id {
-                            if let Some(handle) = self.spawned_tasks.remove(&id) {
-                                let (result, task_output) =
-                                    handle.handle.await.map_err(|e| {
-                                        VmError::Runtime(format!("Task join error: {e}"))
-                                    })??;
-                                self.output.push_str(&task_output);
-                                self.stack.push(result);
-                            } else {
-                                self.stack.push(VmValue::Nil);
-                            }
-                        } else {
-                            self.stack
-                                .push(args.into_iter().next().unwrap_or(VmValue::Nil));
-                        }
-                    } else if name.as_ref() == "cancel" {
-                        if let Some(VmValue::TaskHandle(id)) = args.first() {
-                            if let Some(handle) = self.spawned_tasks.remove(id) {
-                                handle.handle.abort();
-                            }
-                        }
-                        self.stack.push(VmValue::Nil);
-                    } else if name.as_ref() == "cancel_graceful" {
-                        let task_id = args.first().and_then(|a| match a {
-                            VmValue::TaskHandle(id) => Some(id.clone()),
-                            _ => None,
-                        });
-                        let timeout_ms = args
-                            .get(1)
-                            .and_then(|a| match a {
-                                VmValue::Int(n) => Some(*n as u64),
-                                VmValue::Duration(ms) => Some(*ms),
-                                _ => None,
-                            })
-                            .unwrap_or(5000);
-                        if let Some(id) = task_id {
-                            if let Some(task) = self.spawned_tasks.remove(&id) {
-                                task.cancel_token
-                                    .store(true, std::sync::atomic::Ordering::SeqCst);
-                                let deadline = tokio::time::Instant::now()
-                                    + tokio::time::Duration::from_millis(timeout_ms);
-                                match tokio::time::timeout_at(deadline, task.handle).await {
-                                    Ok(Ok(Ok((result, output)))) => {
-                                        self.output.push_str(&output);
-                                        self.stack.push(VmValue::EnumVariant {
-                                            enum_name: "Result".into(),
-                                            variant: "Ok".into(),
-                                            fields: vec![result],
-                                        });
-                                    }
-                                    Ok(Ok(Err(e))) => {
-                                        self.stack.push(VmValue::EnumVariant {
-                                            enum_name: "Result".into(),
-                                            variant: "Err".into(),
-                                            fields: vec![VmValue::String(Rc::from(e.to_string()))],
-                                        });
-                                    }
-                                    Ok(Err(e)) => {
-                                        self.stack.push(VmValue::EnumVariant {
-                                            enum_name: "Result".into(),
-                                            variant: "Err".into(),
-                                            fields: vec![VmValue::String(Rc::from(format!(
-                                                "Task join error: {e}"
-                                            )))],
-                                        });
-                                    }
-                                    Err(_) => {
-                                        self.stack.push(VmValue::EnumVariant {
-                                            enum_name: "Result".into(),
-                                            variant: "Err".into(),
-                                            fields: vec![VmValue::String(Rc::from(
-                                                "cancel_graceful: timeout, task forcefully aborted",
-                                            ))],
-                                        });
-                                    }
-                                }
-                            } else {
-                                self.stack.push(VmValue::EnumVariant {
-                                    enum_name: "Result".into(),
-                                    variant: "Ok".into(),
-                                    fields: vec![VmValue::Nil],
-                                });
-                            }
-                        } else {
-                            self.stack.push(VmValue::Nil);
-                        }
-                    } else if name.as_ref() == "is_cancelled" {
-                        let cancelled = self
-                            .cancel_token
-                            .as_ref()
-                            .map(|t| t.load(std::sync::atomic::Ordering::SeqCst))
-                            .unwrap_or(false);
-                        self.stack.push(VmValue::Bool(cancelled));
-                    } else if let Some(closure) = self.resolve_named_closure(&name) {
-                        if closure.func.is_generator {
-                            let gen = self.create_generator(&closure, &args);
-                            self.stack.push(gen);
-                        } else {
-                            self.push_closure_frame(&closure, &args, &functions)?;
-                        }
-                    } else {
-                        let result = self.call_named_builtin(&name, args).await?;
-                        self.stack.push(result);
-                    }
+                    self.call_named_value(&name, args, &functions, None).await?;
                 }
                 VmValue::Closure(closure) => {
                     if closure.func.is_generator {
@@ -227,6 +266,13 @@ impl super::super::Vm {
                     } else {
                         self.push_closure_frame(&closure, &args, &functions)?;
                     }
+                }
+                VmValue::BuiltinRef(name) => {
+                    self.call_named_value(&name, args, &functions, None).await?;
+                }
+                VmValue::BuiltinRefId { id, name } => {
+                    self.call_named_value(&name, args, &functions, Some(id))
+                        .await?;
                 }
                 _ => {
                     return Err(VmError::TypeError(format!(
@@ -250,44 +296,7 @@ impl super::super::Vm {
 
             match callee {
                 VmValue::String(name) => {
-                    if name.as_ref() == "await" {
-                        let task_id = args.first().and_then(|a| match a {
-                            VmValue::TaskHandle(id) => Some(id.clone()),
-                            _ => None,
-                        });
-                        if let Some(id) = task_id {
-                            if let Some(handle) = self.spawned_tasks.remove(&id) {
-                                let (result, task_output) =
-                                    handle.handle.await.map_err(|e| {
-                                        VmError::Runtime(format!("Task join error: {e}"))
-                                    })??;
-                                self.output.push_str(&task_output);
-                                self.stack.push(result);
-                            } else {
-                                self.stack.push(VmValue::Nil);
-                            }
-                        } else {
-                            self.stack
-                                .push(args.into_iter().next().unwrap_or(VmValue::Nil));
-                        }
-                    } else if name.as_ref() == "cancel" {
-                        if let Some(VmValue::TaskHandle(id)) = args.first() {
-                            if let Some(handle) = self.spawned_tasks.remove(id) {
-                                handle.handle.abort();
-                            }
-                        }
-                        self.stack.push(VmValue::Nil);
-                    } else if let Some(closure) = self.resolve_named_closure(&name) {
-                        if closure.func.is_generator {
-                            let gen = self.create_generator(&closure, &args);
-                            self.stack.push(gen);
-                        } else {
-                            self.push_closure_frame(&closure, &args, &functions)?;
-                        }
-                    } else {
-                        let result = self.call_named_builtin(&name, args).await?;
-                        self.stack.push(result);
-                    }
+                    self.call_named_value(&name, args, &functions, None).await?;
                 }
                 VmValue::Closure(closure) => {
                     if closure.func.is_generator {
@@ -296,6 +305,13 @@ impl super::super::Vm {
                     } else {
                         self.push_closure_frame(&closure, &args, &functions)?;
                     }
+                }
+                VmValue::BuiltinRef(name) => {
+                    self.call_named_value(&name, args, &functions, None).await?;
+                }
+                VmValue::BuiltinRefId { id, name } => {
+                    self.call_named_value(&name, args, &functions, Some(id))
+                        .await?;
                 }
                 _ => {
                     return Err(VmError::TypeError(format!(
@@ -390,6 +406,38 @@ impl super::super::Vm {
                     }
                 }
             }
+        } else if op == Op::CallBuiltin as u8 {
+            let frame = self.frames.last_mut().unwrap();
+            let id = BuiltinId::from_raw(frame.chunk.read_u64(frame.ip));
+            frame.ip += 8;
+            let name_idx = frame.chunk.read_u16(frame.ip) as usize;
+            frame.ip += 2;
+            let argc = frame.chunk.code[frame.ip] as usize;
+            frame.ip += 1;
+            let name = Self::const_string(&frame.chunk.constants[name_idx])?;
+            let functions = frame.chunk.functions.clone();
+            let args: Vec<VmValue> = self.stack.split_off(self.stack.len().saturating_sub(argc));
+            self.call_named_value(&name, args, &functions, Some(id))
+                .await?;
+        } else if op == Op::CallBuiltinSpread as u8 {
+            let frame = self.frames.last_mut().unwrap();
+            let id = BuiltinId::from_raw(frame.chunk.read_u64(frame.ip));
+            frame.ip += 8;
+            let name_idx = frame.chunk.read_u16(frame.ip) as usize;
+            frame.ip += 2;
+            let name = Self::const_string(&frame.chunk.constants[name_idx])?;
+            let functions = frame.chunk.functions.clone();
+            let args_val = self.pop()?;
+            let args = match args_val {
+                VmValue::List(items) => (*items).clone(),
+                _ => {
+                    return Err(VmError::TypeError(
+                        "spread call requires list arguments".into(),
+                    ))
+                }
+            };
+            self.call_named_value(&name, args, &functions, Some(id))
+                .await?;
         } else if op == Op::Return as u8 {
             let val = self.pop().unwrap_or(VmValue::Nil);
             return Err(VmError::Return(val));
@@ -512,12 +560,16 @@ impl super::super::Vm {
                     self.push_closure_frame(&closure, &[value], &functions)?;
                 }
                 VmValue::String(name) => {
-                    if let Some(VmValue::Closure(closure)) = self.env.get(&name) {
-                        self.push_closure_frame(&closure, &[value], &functions)?;
-                    } else {
-                        let result = self.call_named_builtin(&name, vec![value]).await?;
-                        self.stack.push(result);
-                    }
+                    self.call_named_value(&name, vec![value], &functions, None)
+                        .await?;
+                }
+                VmValue::BuiltinRef(name) => {
+                    self.call_named_value(&name, vec![value], &functions, None)
+                        .await?;
+                }
+                VmValue::BuiltinRefId { id, name } => {
+                    self.call_named_value(&name, vec![value], &functions, Some(id))
+                        .await?;
                 }
                 _ => {
                     return Err(VmError::TypeError(format!(
