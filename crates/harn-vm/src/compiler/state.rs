@@ -911,7 +911,7 @@ impl Compiler {
             name: String::new(),
             params: TypedParam::names(params),
             default_start: TypedParam::default_start(params),
-            chunk: fn_compiler.chunk,
+            chunk: Rc::new(fn_compiler.chunk),
             is_generator: is_gen,
             has_rest_param: false,
         })

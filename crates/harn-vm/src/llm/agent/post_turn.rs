@@ -198,7 +198,7 @@ pub(super) async fn run_post_turn(
                 )
             })?;
             let info_vm = crate::stdlib::json_to_vm_value(&turn_info);
-            let cb_result = cb_vm.call_closure_pub(closure, &[info_vm], &[]).await?;
+            let cb_result = cb_vm.call_closure_pub(closure, &[info_vm]).await?;
             let (message, stop) = interpret_post_turn_callback_result(&cb_result);
             if let Some(msg) = message {
                 if !msg.trim().is_empty() {

@@ -494,7 +494,7 @@ async fn evaluate_flow_key(
             .map_err(|error| format!("failed to encode trigger event: {error}"))?,
     );
     let value = vm
-        .call_closure_pub(&expr.closure, &[arg], &[])
+        .call_closure_pub(&expr.closure, &[arg])
         .await
         .map_err(|error| {
             format!(

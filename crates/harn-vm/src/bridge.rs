@@ -114,7 +114,7 @@ impl InProcessHost {
         };
 
         let mut vm = self.vm.child_vm_for_host();
-        let result = vm.call_closure_pub(closure, args, &[]).await?;
+        let result = vm.call_closure_pub(closure, args).await?;
         Ok(crate::llm::vm_value_to_json(&result))
     }
 
@@ -165,7 +165,7 @@ impl InProcessHost {
         };
 
         let mut vm = self.vm.child_vm_for_host();
-        let result = vm.call_closure_pub(closure, &args, &[]).await?;
+        let result = vm.call_closure_pub(closure, &args).await?;
         let payload = match result {
             VmValue::Bool(granted) => serde_json::json!({ "granted": granted }),
             VmValue::String(reason) if !reason.is_empty() => {

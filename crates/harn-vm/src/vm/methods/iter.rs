@@ -2,7 +2,6 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, VecDeque};
 use std::rc::Rc;
 
-use crate::chunk::CompiledFunction;
 use crate::value::{compare_values, values_equal, VmError, VmValue};
 use crate::vm::iter::{drain, iter_from_value, next_handle, VmIter};
 
@@ -12,7 +11,6 @@ impl crate::vm::Vm {
         handle: &Rc<RefCell<VmIter>>,
         method: &str,
         args: &[VmValue],
-        functions: &[CompiledFunction],
     ) -> Result<VmValue, VmError> {
         let handle = Rc::clone(handle);
         match method {
@@ -173,11 +171,11 @@ impl crate::vm::Vm {
                 }))))
             }
             "to_list" => {
-                let items = drain(&handle, self, functions).await?;
+                let items = drain(&handle, self).await?;
                 Ok(VmValue::List(Rc::new(items)))
             }
             "to_set" => {
-                let items = drain(&handle, self, functions).await?;
+                let items = drain(&handle, self).await?;
                 let mut out: Vec<VmValue> = Vec::new();
                 for v in items {
                     if !out.iter().any(|x| values_equal(x, &v)) {
@@ -187,7 +185,7 @@ impl crate::vm::Vm {
                 Ok(VmValue::Set(Rc::new(out)))
             }
             "to_dict" => {
-                let items = drain(&handle, self, functions).await?;
+                let items = drain(&handle, self).await?;
                 let mut map = BTreeMap::new();
                 for v in items {
                     match v {
@@ -217,7 +215,7 @@ impl crate::vm::Vm {
             "count" => {
                 let mut n: i64 = 0;
                 loop {
-                    let v = next_handle(&handle, self, functions).await?;
+                    let v = next_handle(&handle, self).await?;
                     if v.is_none() {
                         break;
                     }
@@ -226,7 +224,7 @@ impl crate::vm::Vm {
                 Ok(VmValue::Int(n))
             }
             "sum" => {
-                let items = drain(&handle, self, functions).await?;
+                let items = drain(&handle, self).await?;
                 let mut has_float = false;
                 let mut int_acc: i64 = 0;
                 let mut float_acc: f64 = 0.0;
@@ -255,7 +253,7 @@ impl crate::vm::Vm {
                 }
             }
             "min" => {
-                let items = drain(&handle, self, functions).await?;
+                let items = drain(&handle, self).await?;
                 let mut best: Option<VmValue> = None;
                 for v in items {
                     best = Some(match best {
@@ -272,7 +270,7 @@ impl crate::vm::Vm {
                 Ok(best.unwrap_or(VmValue::Nil))
             }
             "max" => {
-                let items = drain(&handle, self, functions).await?;
+                let items = drain(&handle, self).await?;
                 let mut best: Option<VmValue> = None;
                 for v in items {
                     best = Some(match best {
@@ -302,23 +300,23 @@ impl crate::vm::Vm {
                     ));
                 }
                 loop {
-                    let item = next_handle(&handle, self, functions).await?;
+                    let item = next_handle(&handle, self).await?;
                     match item {
                         None => return Ok(acc),
                         Some(v) => {
-                            acc = self.call_callable_value(&f, &[acc, v], functions).await?;
+                            acc = self.call_callable_value(&f, &[acc, v]).await?;
                         }
                     }
                 }
             }
             "first" => {
-                let v = next_handle(&handle, self, functions).await?;
+                let v = next_handle(&handle, self).await?;
                 Ok(v.unwrap_or(VmValue::Nil))
             }
             "last" => {
                 let mut last = VmValue::Nil;
                 loop {
-                    let v = next_handle(&handle, self, functions).await?;
+                    let v = next_handle(&handle, self).await?;
                     match v {
                         Some(v) => last = v,
                         None => return Ok(last),
@@ -332,11 +330,11 @@ impl crate::vm::Vm {
                     .cloned()
                     .ok_or_else(|| VmError::TypeError("iter.any: expected callable".to_string()))?;
                 loop {
-                    let item = next_handle(&handle, self, functions).await?;
+                    let item = next_handle(&handle, self).await?;
                     match item {
                         None => return Ok(VmValue::Bool(false)),
                         Some(v) => {
-                            let r = self.call_callable_value(&p, &[v], functions).await?;
+                            let r = self.call_callable_value(&p, &[v]).await?;
                             if r.is_truthy() {
                                 return Ok(VmValue::Bool(true));
                             }
@@ -351,11 +349,11 @@ impl crate::vm::Vm {
                     .cloned()
                     .ok_or_else(|| VmError::TypeError("iter.all: expected callable".to_string()))?;
                 loop {
-                    let item = next_handle(&handle, self, functions).await?;
+                    let item = next_handle(&handle, self).await?;
                     match item {
                         None => return Ok(VmValue::Bool(true)),
                         Some(v) => {
-                            let r = self.call_callable_value(&p, &[v], functions).await?;
+                            let r = self.call_callable_value(&p, &[v]).await?;
                             if !r.is_truthy() {
                                 return Ok(VmValue::Bool(false));
                             }
@@ -372,13 +370,11 @@ impl crate::vm::Vm {
                         VmError::TypeError("iter.find: expected callable".to_string())
                     })?;
                 loop {
-                    let item = next_handle(&handle, self, functions).await?;
+                    let item = next_handle(&handle, self).await?;
                     match item {
                         None => return Ok(VmValue::Nil),
                         Some(v) => {
-                            let r = self
-                                .call_callable_value(&p, &[v.clone()], functions)
-                                .await?;
+                            let r = self.call_callable_value(&p, &[v.clone()]).await?;
                             if r.is_truthy() {
                                 return Ok(v);
                             }
@@ -395,11 +391,11 @@ impl crate::vm::Vm {
                         VmError::TypeError("iter.for_each: expected callable".to_string())
                     })?;
                 loop {
-                    let item = next_handle(&handle, self, functions).await?;
+                    let item = next_handle(&handle, self).await?;
                     match item {
                         None => return Ok(VmValue::Nil),
                         Some(v) => {
-                            self.call_callable_value(&f, &[v], functions).await?;
+                            self.call_callable_value(&f, &[v]).await?;
                         }
                     }
                 }

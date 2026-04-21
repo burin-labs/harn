@@ -271,7 +271,7 @@ pub(super) async fn dispatch_tool_execution(
             };
             let args_vm = crate::stdlib::json_to_vm_value(tool_args);
             let _trusted_bridge_guard = crate::orchestration::allow_trusted_bridge_calls();
-            match vm.call_closure_pub(&handler, &[args_vm], &[]).await {
+            match vm.call_closure_pub(&handler, &[args_vm]).await {
                 Ok(val) => Ok(serde_json::Value::String(val.display())),
                 Err(VmError::CategorizedError {
                     message,

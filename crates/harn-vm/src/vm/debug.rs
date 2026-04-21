@@ -536,7 +536,7 @@ impl Vm {
         self.stopped = false;
 
         self.frames.push(CallFrame {
-            chunk,
+            chunk: Rc::new(chunk),
             ip: 0,
             stack_base: saved_stack_len,
             saved_env,

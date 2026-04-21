@@ -330,7 +330,7 @@ pub struct Chunk {
     /// Current column to use when emitting instructions (set by compiler).
     current_col: u32,
     /// Compiled function bodies (for closures).
-    pub functions: Vec<CompiledFunction>,
+    pub functions: Vec<CompiledFunctionRef>,
     /// Instruction offset to inline-cache slot. Slots are assigned at emit time
     /// for cacheable instructions while bytecode bytes remain immutable.
     inline_cache_slots: BTreeMap<usize, usize>,
@@ -339,6 +339,9 @@ pub struct Chunk {
     inline_caches: Rc<RefCell<Vec<InlineCacheEntry>>>,
 }
 
+pub type ChunkRef = Rc<Chunk>;
+pub type CompiledFunctionRef = Rc<CompiledFunction>;
+
 /// A compiled function (closure body).
 #[derive(Debug, Clone)]
 pub struct CompiledFunction {
@@ -346,7 +349,7 @@ pub struct CompiledFunction {
     pub params: Vec<String>,
     /// Index of the first parameter with a default value, or None if all required.
     pub default_start: Option<usize>,
-    pub chunk: Chunk,
+    pub chunk: ChunkRef,
     /// True if the function body contains `yield` expressions (generator function).
     pub is_generator: bool,
     /// True if the last parameter is a rest parameter (`...name`).

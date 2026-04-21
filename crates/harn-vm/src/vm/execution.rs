@@ -1,7 +1,7 @@
 use std::rc::Rc;
 use std::time::Instant;
 
-use crate::chunk::Chunk;
+use crate::chunk::{Chunk, ChunkRef};
 use crate::value::{ModuleFunctionRegistry, VmError, VmValue};
 
 use super::{CallFrame, Vm};
@@ -82,9 +82,27 @@ impl Vm {
         module_functions: Option<ModuleFunctionRegistry>,
         module_state: Option<crate::value::ModuleState>,
     ) -> Result<VmValue, VmError> {
+        self.run_chunk_ref(
+            Rc::new(chunk.clone()),
+            argc,
+            saved_source_dir,
+            module_functions,
+            module_state,
+        )
+        .await
+    }
+
+    pub(crate) async fn run_chunk_ref(
+        &mut self,
+        chunk: ChunkRef,
+        argc: usize,
+        saved_source_dir: Option<std::path::PathBuf>,
+        module_functions: Option<ModuleFunctionRegistry>,
+        module_state: Option<crate::value::ModuleState>,
+    ) -> Result<VmValue, VmError> {
         let initial_env = self.env.clone();
         self.frames.push(CallFrame {
-            chunk: chunk.clone(),
+            chunk,
             ip: 0,
             stack_base: self.stack.len(),
             saved_env: self.env.clone(),

@@ -480,7 +480,7 @@ async fn required_export_call(
     };
     let mut child = base_vm.child_vm_for_host();
     child
-        .call_closure_pub(closure, args, &[])
+        .call_closure_pub(closure, args)
         .await
         .map_err(vm_error_to_connector)
 }
@@ -505,7 +505,7 @@ async fn call_provider_export(
         .into_iter()
         .map(|value| json_result_to_vm_value(&value))
         .collect::<Vec<_>>();
-    let result = child_vm.call_closure_pub(&closure, &vm_args, &[]).await;
+    let result = child_vm.call_closure_pub(&closure, &vm_args).await;
     ACTIVE_HARN_CONNECTOR_CTX.with(|slot| {
         slot.borrow_mut().pop();
     });

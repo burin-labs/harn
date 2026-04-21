@@ -223,7 +223,7 @@ pub(crate) async fn invoke_compress_callback(
         dict.insert("max_chars".to_string(), VmValue::Int(max_chars as i64));
         dict
     }));
-    match vm.call_closure_pub(&closure, &[args_dict], &[]).await {
+    match vm.call_closure_pub(&closure, &[args_dict]).await {
         Ok(VmValue::String(s)) if !s.is_empty() => s.to_string(),
         _ => microcompact_tool_output(output, max_chars),
     }
@@ -447,7 +447,7 @@ async fn custom_compaction_summary(
             .map(crate::stdlib::json_to_vm_value)
             .collect(),
     ));
-    let result = vm.call_closure_pub(&closure, &[messages_vm], &[]).await;
+    let result = vm.call_closure_pub(&closure, &[messages_vm]).await;
     let summary = compact_summary_text_from_value(&result?)?;
     if summary.trim().is_empty() {
         Ok(truncate_compaction_summary(old_messages, archived_count))
@@ -541,7 +541,7 @@ async fn invoke_mask_callback(
             .map(crate::stdlib::json_to_vm_value)
             .collect(),
     ));
-    let result = vm.call_closure_pub(&closure, &[messages_vm], &[]).await?;
+    let result = vm.call_closure_pub(&closure, &[messages_vm]).await?;
     let list = match result {
         VmValue::List(items) => items,
         _ => return Ok(vec![None; old_messages.len()]),

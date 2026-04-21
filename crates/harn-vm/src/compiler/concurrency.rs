@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use harn_parser::{BindingPattern, ParallelMode, SNode, SelectCase, TypeExpr};
 
 use crate::chunk::{CompiledFunction, Constant, Op};
@@ -62,12 +64,12 @@ impl Compiler {
             name: fn_name.to_string(),
             params,
             default_start: None,
-            chunk: fn_compiler.chunk,
+            chunk: Rc::new(fn_compiler.chunk),
             is_generator: false,
             has_rest_param: false,
         };
         let fn_idx = self.chunk.functions.len();
-        self.chunk.functions.push(func);
+        self.chunk.functions.push(Rc::new(func));
         self.chunk.emit_u16(Op::Closure, fn_idx as u16, self.line);
         let op = match mode {
             ParallelMode::Count => Op::Parallel,
@@ -90,12 +92,12 @@ impl Compiler {
             name: "<spawn>".to_string(),
             params: vec![],
             default_start: None,
-            chunk: fn_compiler.chunk,
+            chunk: Rc::new(fn_compiler.chunk),
             is_generator: false,
             has_rest_param: false,
         };
         let fn_idx = self.chunk.functions.len();
-        self.chunk.functions.push(func);
+        self.chunk.functions.push(Rc::new(func));
         self.chunk.emit_u16(Op::Closure, fn_idx as u16, self.line);
         self.chunk.emit(Op::Spawn, self.line);
         Ok(())

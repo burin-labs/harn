@@ -1,4 +1,3 @@
-use crate::chunk::CompiledFunction;
 use crate::value::{VmError, VmRange, VmValue};
 use crate::vm::iter::iter_from_value;
 
@@ -9,7 +8,6 @@ impl crate::vm::Vm {
         r: &VmRange,
         method: &str,
         args: &[VmValue],
-        functions: &[CompiledFunction],
     ) -> Result<VmValue, VmError> {
         match method {
             "len" | "count" => Ok(VmValue::Int(r.len())),
@@ -27,11 +25,7 @@ impl crate::vm::Vm {
             "to_string" => Ok(VmValue::String(std::rc::Rc::from(obj.display()))),
             _ => {
                 let lifted = iter_from_value(obj.clone())?;
-                let VmValue::Iter(handle) = lifted else {
-                    unreachable!("iter_from_value returns Iter for ranges")
-                };
-                self.call_iter_method(&handle, method, args, functions)
-                    .await
+                self.call_method(lifted, method, args).await
             }
         }
     }

@@ -93,7 +93,7 @@ impl super::super::Vm {
                     let closure = closure.clone();
                     futures.push(async move {
                         let result = child
-                            .call_closure(&closure, &[VmValue::Int(i as i64)], &[])
+                            .call_closure(&closure, &[VmValue::Int(i as i64)])
                             .await?;
                         Ok::<(VmValue, String), VmError>((
                             result,
@@ -126,7 +126,7 @@ impl super::super::Vm {
                         let closure = closure.clone();
                         let item = item.clone();
                         futures.push(async move {
-                            let result = child.call_closure(&closure, &[item], &[]).await?;
+                            let result = child.call_closure(&closure, &[item]).await?;
                             Ok::<(VmValue, String), VmError>((
                                 result,
                                 std::mem::take(&mut child.output),
@@ -158,7 +158,7 @@ impl super::super::Vm {
                         let closure = closure.clone();
                         let item = item.clone();
                         futures.push(async move {
-                            let result = child.call_closure(&closure, &[item], &[]).await;
+                            let result = child.call_closure(&closure, &[item]).await;
                             let output = std::mem::take(&mut child.output);
                             (result, output)
                         });
@@ -203,7 +203,7 @@ impl super::super::Vm {
                 let cancel_token = Arc::new(std::sync::atomic::AtomicBool::new(false));
                 child.cancel_token = Some(cancel_token.clone());
                 let handle = tokio::task::spawn_local(async move {
-                    let result = child.call_closure(&closure, &[], &[]).await?;
+                    let result = child.call_closure(&closure, &[]).await?;
                     Ok((result, std::mem::take(&mut child.output)))
                 });
                 self.spawned_tasks.insert(

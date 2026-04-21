@@ -309,7 +309,7 @@ async fn invoke_vm_hook(
         ));
     };
     let arg = crate::stdlib::json_to_vm_value(payload);
-    vm.call_closure_pub(closure, &[arg], &[]).await
+    vm.call_closure_pub(closure, &[arg]).await
 }
 
 fn parse_pre_tool_result(value: VmValue) -> Result<PreToolAction, VmError> {

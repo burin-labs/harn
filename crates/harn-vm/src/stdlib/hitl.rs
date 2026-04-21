@@ -439,7 +439,7 @@ async fn dual_control_impl(args: &[VmValue]) -> Result<VmValue, VmError> {
             let mut vm = clone_async_builtin_child_vm().ok_or_else(|| {
                 VmError::Runtime("dual_control requires an async builtin VM context".to_string())
             })?;
-            let result = vm.call_closure_pub(&action, &[], &[]).await?;
+            let result = vm.call_closure_pub(&action, &[]).await?;
 
             append_named_event(
                 &log,

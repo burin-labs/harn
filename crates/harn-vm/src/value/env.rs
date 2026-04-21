@@ -2,14 +2,14 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::{cell::RefCell, path::PathBuf};
 
-use crate::chunk::CompiledFunction;
+use crate::chunk::CompiledFunctionRef;
 
 use super::{VmError, VmValue};
 
 /// A compiled closure value.
 #[derive(Debug, Clone)]
 pub struct VmClosure {
-    pub func: CompiledFunction,
+    pub func: CompiledFunctionRef,
     pub env: VmEnv,
     /// Source directory for this closure's originating module.
     /// When set, `render()` and other source-relative builtins resolve
