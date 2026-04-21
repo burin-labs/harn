@@ -12,6 +12,7 @@ Today, the command:
 - resolve and register manifest triggers
 - activate connectors for the manifest's providers
 - bind an HTTP listener for `webhook` and `a2a-push` triggers
+- expose `/metrics` and configurable process logs for production observability
 - write a state snapshot and stay up until shutdown
 
 Current limitations:
@@ -28,6 +29,7 @@ harn orchestrator serve \
   --bind 0.0.0.0:8080 \
   --cert certs/dev.pem \
   --key certs/dev-key.pem \
+  --log-format json \
   --role single-tenant
 ```
 
@@ -66,6 +68,13 @@ the queue with `harn orchestrator queue drain triage`. See
 `HARN_ORCHESTRATOR_MANIFEST`, `HARN_ORCHESTRATOR_LISTEN`,
 `HARN_ORCHESTRATOR_STATE_DIR`, `HARN_ORCHESTRATOR_CERT`, and
 `HARN_ORCHESTRATOR_KEY`.
+
+The listener serves Prometheus metrics at `/metrics`. Logs default to compact
+text; pass `--log-format json` for newline-delimited JSON on stdout plus a
+rotating file at `<state-dir>/logs/orchestrator.log`. Set
+`HARN_OTEL_ENDPOINT` to export OTLP traces. See
+[Orchestrator observability](./orchestrator/observability.md) for metric names,
+log configuration, and the dashboard example.
 
 Hot reload now supports four equivalent entrypoints:
 

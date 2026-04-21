@@ -777,6 +777,17 @@ impl Dispatcher {
                 },
                 Err(_) => metrics.record_dispatch_failed(),
             }
+            let outcome_label = match &outcome {
+                Ok(dispatch_outcome) => dispatch_outcome.status.as_str(),
+                Err(DispatchError::Cancelled(_)) => "cancelled",
+                Err(_) => "failed",
+            };
+            metrics.record_trigger_dispatched(
+                binding.id.as_str(),
+                binding.handler.kind(),
+                outcome_label,
+            );
+            metrics.set_trigger_inflight(binding.id.as_str(), binding.metrics_snapshot().in_flight);
         }
         #[cfg(feature = "otel")]
         {
@@ -1516,6 +1527,10 @@ impl Dispatcher {
                     }
 
                     if let Some(delay) = binding.retry.next_retry_delay(attempt) {
+                        if let Some(metrics) = self.metrics.as_ref() {
+                            metrics.record_retry_scheduled();
+                            metrics.record_trigger_retry(binding.id.as_str(), attempt + 1);
+                        }
                         let retry_node_id = format!("retry:{binding_key}:{}:{attempt}", event.id.0);
                         previous_retry_node = Some(retry_node_id.clone());
                         self.emit_action_graph(
@@ -1654,6 +1669,9 @@ impl Dispatcher {
                         .lock()
                         .expect("dispatcher dlq poisoned")
                         .push(dlq_entry.clone());
+                    if let Some(metrics) = self.metrics.as_ref() {
+                        metrics.record_trigger_dlq(binding.id.as_str(), "retry_exhausted");
+                    }
                     self.emit_action_graph(
                         &event,
                         vec![RunActionGraphNodeRecord {
@@ -2516,6 +2534,26 @@ impl Dispatcher {
         record: &PredicateEvaluationRecord,
         replay_of_event_id: Option<&String>,
     ) -> Result<(), DispatchError> {
+        if let Some(metrics) = self.metrics.as_ref() {
+            metrics.record_trigger_predicate_evaluation(
+                binding.id.as_str(),
+                record.result,
+                record.cost_usd,
+            );
+            metrics.set_trigger_budget_cost_today(
+                binding.id.as_str(),
+                current_predicate_daily_cost(binding),
+            );
+            if matches!(
+                record.reason.as_deref(),
+                Some("budget_exceeded" | "daily_budget_exceeded")
+            ) {
+                metrics.record_trigger_budget_exhausted(
+                    binding.id.as_str(),
+                    record.reason.as_deref().unwrap_or("predicate"),
+                );
+            }
+        }
         self.append_lifecycle_event(
             "predicate.evaluated",
             event,

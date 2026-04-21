@@ -794,6 +794,7 @@ async fn github_webhook_delivery_is_accepted_and_persisted() {
     let envs = [
         ("HARN_SECRET_PROVIDERS", "env"),
         ("HARN_SECRET_GITHUB_WEBHOOK_SECRET", secret),
+        ("RUST_LOG", "info"),
     ];
     let mut process = spawn_orchestrator(&temp, &[], &envs);
     let base_url = process.wait_for_listener_url();
@@ -1021,6 +1022,22 @@ async fn slack_bad_requests_set_no_retry_header_and_export_delivery_metrics() {
     );
     assert!(
         metrics.contains("slack_events_auto_disable_min_success_ratio 0.05"),
+        "metrics={metrics}"
+    );
+    assert!(
+        metrics.contains("harn_http_requests_total{endpoint=\"/triggers/slack-mentions\",method=\"POST\",status=\"200\"} 1"),
+        "metrics={metrics}"
+    );
+    assert!(
+        metrics.contains(
+            "harn_trigger_received_total{provider=\"slack\",trigger_id=\"slack-mentions\"} 2"
+        ),
+        "metrics={metrics}"
+    );
+    assert!(
+        metrics.contains(
+            "harn_event_log_append_duration_seconds_bucket{le=\"+Inf\",topic=\"orchestrator.triggers.pending\""
+        ),
         "metrics={metrics}"
     );
 
@@ -1611,6 +1628,7 @@ async fn tls_listener_serves_https_with_supplied_cert_and_key() {
     let envs = [
         ("HARN_SECRET_PROVIDERS", "env"),
         ("HARN_SECRET_GITHUB_WEBHOOK_SECRET", secret),
+        ("RUST_LOG", "info"),
     ];
     let args = ["--cert", "tls/cert.pem", "--key", "tls/key.pem"];
     let mut process = spawn_orchestrator(&temp, &args, &envs);
@@ -1751,6 +1769,62 @@ async fn graceful_shutdown_waits_for_in_flight_request() {
     assert!(snapshot.contains("\"in_flight\": 0"), "snapshot={snapshot}");
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn json_log_format_writes_structured_rotating_file_with_trace_ids() {
+    let _lock = lock_orchestrator_tests();
+    let temp = TempDir::new().unwrap();
+    write_file(temp.path(), "harn.toml", &base_manifest(None));
+    write_file(temp.path(), "lib.harn", handler_module());
+
+    let secret = "json-log-secret";
+    let envs = [
+        ("HARN_SECRET_PROVIDERS", "env"),
+        ("HARN_SECRET_GITHUB_WEBHOOK_SECRET", secret),
+        ("RUST_LOG", "info"),
+    ];
+    let mut process = spawn_orchestrator(&temp, &["--log-format", "json"], &envs);
+    let base_url = process.wait_for_listener_url();
+
+    let body = br#"{"action":"opened","issue":{"number":5}}"#;
+    let response = reqwest::Client::new()
+        .post(format!("{base_url}/triggers/github-new-issue"))
+        .headers(github_headers(secret, body, None))
+        .body(body.to_vec())
+        .send()
+        .await
+        .unwrap();
+    assert_status(response, StatusCode::OK).await;
+
+    send_sigterm(&process.child);
+    let status = wait_for_exit_async(&mut process.child).await;
+    let stderr = process.join_stderr();
+    assert!(status.success(), "status={status} stderr={stderr}");
+
+    let log_path = temp.path().join("state/logs/orchestrator.log");
+    let log = fs::read_to_string(&log_path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", log_path.display()));
+    let records: Vec<JsonValue> = log
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| serde_json::from_str(line).unwrap_or_else(|error| panic!("{error}: {line}")))
+        .collect();
+    assert!(
+        records.iter().any(|record| record
+            .get("message")
+            .and_then(JsonValue::as_str)
+            .is_some_and(|message| message == "trigger event accepted")),
+        "log={log}"
+    );
+    assert!(
+        records.iter().all(|record| record.get("trace_id").is_some()
+            || record
+                .get("fields")
+                .and_then(|fields| fields.get("trace_id"))
+                .is_some()),
+        "log={log}"
+    );
+}
+
 // Regression coverage for harn#327: ingest should inject W3C trace-context
 // headers, and dispatch should adopt that remote parent so both spans share a
 // trace ID with `dispatch.parent_span_id == ingest.span_id`.
@@ -1772,6 +1846,7 @@ async fn otel_exports_ingest_and_dispatch_spans_with_shared_trace_id() {
             "HARN_OTEL_HEADERS",
             "authorization=Bearer otel-token,x-tenant-id=tenant-abc",
         ),
+        ("RUST_LOG", "info"),
     ];
     let mut process = spawn_orchestrator(&temp, &[], &envs);
     let base_url = process.wait_for_listener_url();

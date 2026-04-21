@@ -66,8 +66,21 @@ pub async fn dispatch_trigger_event(
     event: &TriggerEvent,
     cancel_rx: &mut broadcast::Receiver<()>,
 ) -> Result<(ResolvedA2aEndpoint, DispatchAck), A2aClientError> {
-    let target = parse_target(raw_target)?;
-    let endpoint = resolve_endpoint(&target, allow_cleartext, cancel_rx).await?;
+    let started = std::time::Instant::now();
+    let target = match parse_target(raw_target) {
+        Ok(target) => target,
+        Err(error) => {
+            record_a2a_metric(raw_target, "failed", started.elapsed());
+            return Err(error);
+        }
+    };
+    let endpoint = match resolve_endpoint(&target, allow_cleartext, cancel_rx).await {
+        Ok(endpoint) => endpoint,
+        Err(error) => {
+            record_a2a_metric(raw_target, "failed", started.elapsed());
+            return Err(error);
+        }
+    };
     let message_id = format!("{}.{}", event.trace_id.0, event.id.0);
     let envelope = serde_json::json!({
         "kind": "harn.trigger.dispatch",
@@ -105,8 +118,14 @@ pub async fn dispatch_trigger_event(
         }),
     );
 
-    let body = send_jsonrpc(&endpoint.rpc_url, &request, &event.trace_id.0, cancel_rx).await?;
-    let result = body.get("result").cloned().ok_or_else(|| {
+    let body = match send_jsonrpc(&endpoint.rpc_url, &request, &event.trace_id.0, cancel_rx).await {
+        Ok(body) => body,
+        Err(error) => {
+            record_a2a_metric(raw_target, "failed", started.elapsed());
+            return Err(error);
+        }
+    };
+    let result = match body.get("result").cloned().ok_or_else(|| {
         if let Some(error) = body.get("error") {
             let message = error
                 .get("message")
@@ -116,18 +135,37 @@ pub async fn dispatch_trigger_event(
         } else {
             A2aClientError::Protocol("A2A task dispatch response missing result".to_string())
         }
-    })?;
+    }) {
+        Ok(result) => result,
+        Err(error) => {
+            record_a2a_metric(raw_target, "failed", started.elapsed());
+            return Err(error);
+        }
+    };
 
-    let task_id = result
+    let task_id = match result
         .get("id")
         .and_then(Value::as_str)
         .filter(|value| !value.is_empty())
-        .ok_or_else(|| A2aClientError::Protocol("A2A task response missing result.id".to_string()))?
-        .to_string();
-    let state = task_state(&result)?.to_string();
+        .ok_or_else(|| A2aClientError::Protocol("A2A task response missing result.id".to_string()))
+    {
+        Ok(task_id) => task_id.to_string(),
+        Err(error) => {
+            record_a2a_metric(raw_target, "failed", started.elapsed());
+            return Err(error);
+        }
+    };
+    let state = match task_state(&result) {
+        Ok(state) => state.to_string(),
+        Err(error) => {
+            record_a2a_metric(raw_target, "failed", started.elapsed());
+            return Err(error);
+        }
+    };
 
     if state == "completed" {
         let inline = extract_inline_result(&result);
+        record_a2a_metric(raw_target, "succeeded", started.elapsed());
         return Ok((
             endpoint,
             DispatchAck::InlineResult {
@@ -137,6 +175,7 @@ pub async fn dispatch_trigger_event(
         ));
     }
 
+    record_a2a_metric(raw_target, "succeeded", started.elapsed());
     Ok((
         endpoint.clone(),
         DispatchAck::PendingTask {
@@ -153,6 +192,12 @@ pub async fn dispatch_trigger_event(
             }),
         },
     ))
+}
+
+fn record_a2a_metric(target: &str, outcome: &str, duration: std::time::Duration) {
+    if let Some(metrics) = crate::active_metrics_registry() {
+        metrics.record_a2a_hop(target, outcome, duration);
+    }
 }
 
 pub fn target_agent_label(raw_target: &str) -> String {

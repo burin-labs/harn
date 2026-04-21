@@ -226,6 +226,15 @@ impl WorkerQueue {
                 .with_headers(headers),
             )
             .await?;
+        if let Some(metrics) = crate::active_metrics_registry() {
+            if let Ok(state) = self.queue_state(&queue_name).await {
+                let summary = state.summary(now_ms());
+                metrics.set_worker_queue_depth(
+                    &queue_name,
+                    (summary.ready + summary.in_flight) as u64,
+                );
+            }
+        }
         Ok(WorkerQueueEnqueueReceipt {
             queue: queue_name.clone(),
             job_event_id,
@@ -468,6 +477,17 @@ impl WorkerQueue {
                 .active_claim_for(job.job_event_id)
                 .is_some_and(|active| active.claim_id == claim.claim_id)
             {
+                if let Some(metrics) = crate::active_metrics_registry() {
+                    let summary = refreshed.summary(now_ms);
+                    metrics.record_worker_queue_claim_age(
+                        queue_name,
+                        now_ms.saturating_sub(job.enqueued_at_ms) as f64 / 1000.0,
+                    );
+                    metrics.set_worker_queue_depth(
+                        queue_name,
+                        (summary.ready + summary.in_flight) as u64,
+                    );
+                }
                 return Ok(Some(ClaimedWorkerJob {
                     handle: WorkerQueueClaimHandle {
                         queue: queue_name.to_string(),

@@ -1,0 +1,58 @@
+{
+  "title": "Harn Orchestrator Observability",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "panels": [
+    {
+      "type": "stat",
+      "title": "HTTP requests",
+      "targets": [
+        {
+          "expr": "sum(rate(harn_http_requests_total[5m]))"
+        }
+      ],
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Dispatch outcomes",
+      "targets": [
+        {
+          "expr": "sum by (outcome) (rate(harn_trigger_dispatched_total[5m]))"
+        }
+      ],
+      "gridPos": { "x": 6, "y": 0, "w": 9, "h": 8 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Predicate cost",
+      "targets": [
+        {
+          "expr": "sum by (trigger_id) (rate(harn_trigger_predicate_cost_usd_sum[5m]))"
+        }
+      ],
+      "gridPos": { "x": 15, "y": 0, "w": 9, "h": 8 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Worker queue depth",
+      "targets": [
+        {
+          "expr": "sum by (queue) (harn_worker_queue_depth)"
+        }
+      ],
+      "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 }
+    },
+    {
+      "type": "timeseries",
+      "title": "A2A hop latency p95",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, target) (rate(harn_a2a_hop_duration_seconds_bucket[5m])))"
+        }
+      ],
+      "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 }
+    }
+  ]
+}
