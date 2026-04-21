@@ -10,29 +10,20 @@ impl super::super::Vm {
             let iterable = self.pop()?;
             match iterable {
                 VmValue::List(items) => {
-                    self.iterators.push(super::super::IterState::Vec {
-                        items: (*items).clone(),
-                        idx: 0,
-                    });
-                }
-                VmValue::Dict(map) => {
-                    let items: Vec<VmValue> = map
-                        .iter()
-                        .map(|(k, v)| {
-                            VmValue::Dict(Rc::new(BTreeMap::from([
-                                ("key".to_string(), VmValue::String(Rc::from(k.as_str()))),
-                                ("value".to_string(), v.clone()),
-                            ])))
-                        })
-                        .collect();
                     self.iterators
                         .push(super::super::IterState::Vec { items, idx: 0 });
                 }
-                VmValue::Set(items) => {
-                    self.iterators.push(super::super::IterState::Vec {
-                        items: (*items).clone(),
+                VmValue::Dict(map) => {
+                    let keys = map.keys().cloned().collect();
+                    self.iterators.push(super::super::IterState::Dict {
+                        entries: map,
+                        keys,
                         idx: 0,
                     });
+                }
+                VmValue::Set(items) => {
+                    self.iterators
+                        .push(super::super::IterState::Vec { items, idx: 0 });
                 }
                 VmValue::Channel(ch) => {
                     self.iterators.push(super::super::IterState::Channel {
@@ -62,7 +53,7 @@ impl super::super::Vm {
                 }
                 _ => {
                     self.iterators.push(super::super::IterState::Vec {
-                        items: Vec::new(),
+                        items: Rc::new(Vec::new()),
                         idx: 0,
                     });
                 }
@@ -97,6 +88,21 @@ impl super::super::Vm {
                             let item = items[*idx].clone();
                             *idx += 1;
                             self.stack.push(item);
+                        } else {
+                            self.iterators.pop();
+                            let frame = self.frames.last_mut().unwrap();
+                            frame.ip = target;
+                        }
+                    }
+                    super::super::IterState::Dict { entries, keys, idx } => {
+                        if *idx < keys.len() {
+                            let key = &keys[*idx];
+                            let value = entries.get(key).cloned().unwrap_or(VmValue::Nil);
+                            *idx += 1;
+                            self.stack.push(VmValue::Dict(Rc::new(BTreeMap::from([
+                                ("key".to_string(), VmValue::String(Rc::from(key.as_str()))),
+                                ("value".to_string(), value),
+                            ]))));
                         } else {
                             self.iterators.pop();
                             let frame = self.frames.last_mut().unwrap();
@@ -172,5 +178,90 @@ impl super::super::Vm {
             return Ok(false);
         }
         Ok(true)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::vm::{IterState, Vm};
+
+    fn run_iter_init_test(test: impl std::future::Future<Output = ()>) {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(test);
+    }
+
+    #[test]
+    fn iter_init_list_keeps_shared_backing_store() {
+        run_iter_init_test(async {
+            let items = Rc::new(vec![VmValue::Int(1), VmValue::Int(2)]);
+            let mut vm = Vm::new();
+            vm.stack.push(VmValue::List(items.clone()));
+
+            vm.try_execute_iter_op(Op::IterInit as u8).await.unwrap();
+
+            match vm.iterators.last().unwrap() {
+                IterState::Vec {
+                    items: iter_items,
+                    idx,
+                } => {
+                    assert!(Rc::ptr_eq(&items, iter_items));
+                    assert_eq!(*idx, 0);
+                }
+                _ => panic!("expected vec iterator state"),
+            }
+        });
+    }
+
+    #[test]
+    fn iter_init_set_keeps_shared_backing_store() {
+        run_iter_init_test(async {
+            let items = Rc::new(vec![VmValue::Int(1), VmValue::Int(2)]);
+            let mut vm = Vm::new();
+            vm.stack.push(VmValue::Set(items.clone()));
+
+            vm.try_execute_iter_op(Op::IterInit as u8).await.unwrap();
+
+            match vm.iterators.last().unwrap() {
+                IterState::Vec {
+                    items: iter_items,
+                    idx,
+                } => {
+                    assert!(Rc::ptr_eq(&items, iter_items));
+                    assert_eq!(*idx, 0);
+                }
+                _ => panic!("expected vec iterator state"),
+            }
+        });
+    }
+
+    #[test]
+    fn iter_init_dict_keeps_shared_entries_and_snapshots_keys() {
+        run_iter_init_test(async {
+            let entries = Rc::new(BTreeMap::from([
+                ("a".to_string(), VmValue::Int(1)),
+                ("b".to_string(), VmValue::Int(2)),
+            ]));
+            let mut vm = Vm::new();
+            vm.stack.push(VmValue::Dict(entries.clone()));
+
+            vm.try_execute_iter_op(Op::IterInit as u8).await.unwrap();
+
+            match vm.iterators.last().unwrap() {
+                IterState::Dict {
+                    entries: iter_entries,
+                    keys,
+                    idx,
+                } => {
+                    assert!(Rc::ptr_eq(&entries, iter_entries));
+                    assert_eq!(keys.as_slice(), ["a".to_string(), "b".to_string()]);
+                    assert_eq!(*idx, 0);
+                }
+                _ => panic!("expected dict iterator state"),
+            }
+        });
     }
 }

@@ -3,4 +3,7 @@ pipeline test(task) {
   for entry in d {
     log(entry.key)
   }
+  for {key: k, value: v} in d {
+    log("${k}=${v}")
+  }
 }
