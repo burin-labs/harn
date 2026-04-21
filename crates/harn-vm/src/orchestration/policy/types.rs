@@ -304,6 +304,34 @@ impl Default for TurnPolicy {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum NativeToolFallbackPolicy {
+    #[default]
+    Allow,
+    AllowOnce,
+    Reject,
+}
+
+impl NativeToolFallbackPolicy {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Allow => "allow",
+            Self::AllowOnce => "allow_once",
+            Self::Reject => "reject",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "allow" => Some(Self::Allow),
+            "allow_once" => Some(Self::AllowOnce),
+            "reject" => Some(Self::Reject),
+            _ => None,
+        }
+    }
+}
+
 fn default_true() -> bool {
     true
 }
@@ -351,6 +379,9 @@ pub struct ModelPolicy {
     /// option. When `None`, the workflow falls back to `HARN_AGENT_TOOL_FORMAT`
     /// env / the provider-model default.
     pub tool_format: Option<String>,
+    /// Policy for native-tool stages when a provider emits text-mode
+    /// `<tool_call>` output instead of native tool calls.
+    pub native_tool_fallback: NativeToolFallbackPolicy,
 }
 
 /// Wrapper that always compares equal, allowing non-Eq types in derived PartialEq structs.

@@ -492,6 +492,7 @@ Same as `llm_call`, plus additional options:
 | `context_filter` | closure | nil | Alias for `context_callback` |
 | `post_turn_callback` | closure | nil | Hook called after each tool turn. Receives turn metadata and may inject a message, request an immediate stage stop, or both |
 | `turn_policy` | dict | nil | Turn-shape policy for action stages. Supports `require_action_or_yield: bool`, `allow_done_sentinel: bool` (default `true`; set to `false` in workflow-owned action stages so nudges stop advertising the done sentinel), and `max_prose_chars: int` |
+| `native_tool_fallback` | string | `"allow"` | Native-tool-stage policy when the provider emits text-mode `<tool_call>` content instead of native tool calls. `"allow"` preserves the current recovery path, `"allow_once"` accepts the first fallback turn then rejects later repeats with corrective feedback, and `"reject"` fails closed on the first text fallback |
 | `stop_after_successful_tools` | `list<string>` | nil | Stop after a tool-calling turn whose successful results include one of these tool names. Useful for workflow-owned verify loops such as `["edit", "scaffold"]` |
 | `require_successful_tools` | `list<string>` | nil | Mark the loop `status = "failed"` unless at least one of these tool names succeeds at some point during the interaction. Keeps action stages honest when every attempted effect was rejected or errored |
 | `loop_detect_warn` | int | `2` | Consecutive identical tool calls before appending a redirection hint |
@@ -505,6 +506,11 @@ When `daemon: true`, the loop transitions `active -> idle -> active` instead of
 terminating on a text-only turn. Idle daemons can be woken by queued human
 messages, `agent/resume` bridge notifications, `wake_interval_ms`, or watched
 file changes from `watch_paths`.
+
+Native-tool stages also expose structured fallback / retry metadata in the
+result `trace` summary. Look for `native_text_tool_fallbacks`,
+`native_text_tool_fallback_rejections`, and `empty_completion_retries` when
+debugging provider contract drift or OpenAI-compatible empty completions.
 
 Default nudge message:
 

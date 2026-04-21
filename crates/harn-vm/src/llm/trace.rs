@@ -121,6 +121,18 @@ pub enum AgentTraceEvent {
         errors: Vec<String>,
         nudge_used: bool,
     },
+    NativeToolFallback {
+        iteration: usize,
+        accepted: bool,
+        policy: String,
+        fallback_index: usize,
+        tool_call_count: usize,
+    },
+    EmptyCompletionRetry {
+        iteration: usize,
+        attempt: usize,
+        error: String,
+    },
 }
 
 thread_local! {
@@ -151,6 +163,9 @@ pub fn agent_trace_summary() -> serde_json::Value {
         let mut tool_rejections = 0usize;
         let mut interventions = 0usize;
         let mut compactions = 0usize;
+        let mut native_text_tool_fallbacks = 0usize;
+        let mut native_text_tool_fallback_rejections = 0usize;
+        let mut empty_completion_retries = 0usize;
         let mut total_input_tokens = 0i64;
         let mut total_output_tokens = 0i64;
         let mut total_llm_duration_ms = 0u64;
@@ -205,6 +220,15 @@ pub fn agent_trace_summary() -> serde_json::Value {
                     total_duration_ms = *d;
                 }
                 AgentTraceEvent::SchemaRetry { .. } => {}
+                AgentTraceEvent::NativeToolFallback { accepted, .. } => {
+                    native_text_tool_fallbacks += 1;
+                    if !accepted {
+                        native_text_tool_fallback_rejections += 1;
+                    }
+                }
+                AgentTraceEvent::EmptyCompletionRetry { .. } => {
+                    empty_completion_retries += 1;
+                }
             }
         }
 
@@ -217,6 +241,9 @@ pub fn agent_trace_summary() -> serde_json::Value {
             "tool_rejections": tool_rejections,
             "interventions": interventions,
             "compactions": compactions,
+            "native_text_tool_fallbacks": native_text_tool_fallbacks,
+            "native_text_tool_fallback_rejections": native_text_tool_fallback_rejections,
+            "empty_completion_retries": empty_completion_retries,
             "total_input_tokens": total_input_tokens,
             "total_output_tokens": total_output_tokens,
             "total_llm_duration_ms": total_llm_duration_ms,

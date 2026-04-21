@@ -127,6 +127,17 @@ pub(super) fn is_retryable_llm_error(err: &VmError) -> bool {
         || lower.contains("eof")
 }
 
+fn is_empty_completion_retry_error(err: &VmError) -> bool {
+    let msg = match err {
+        VmError::Thrown(crate::value::VmValue::String(s)) => s.as_ref(),
+        VmError::CategorizedError { message, .. } => message.as_str(),
+        VmError::Runtime(s) => s.as_str(),
+        _ => return false,
+    };
+    let lower = msg.to_lowercase();
+    lower.contains("completion_tokens=") && lower.contains("delivered no content")
+}
+
 /// Extract retry-after delay from an error message if present.
 ///
 /// Supports both forms defined by RFC 7231 §7.1.3:
@@ -609,6 +620,28 @@ pub(crate) async fn observed_llm_call(
                 }
                 if !can_retry {
                     return Err(error);
+                }
+                if is_empty_completion_retry_error(&error) {
+                    append_llm_observability_entry(
+                        "empty_completion_retry",
+                        serde_json::Map::from_iter([
+                            (
+                                "iteration".to_string(),
+                                serde_json::json!(iteration.unwrap_or(0)),
+                            ),
+                            ("attempt".to_string(), serde_json::json!(attempt + 1)),
+                            ("provider".to_string(), serde_json::json!(opts.provider)),
+                            ("model".to_string(), serde_json::json!(opts.model)),
+                            ("error".to_string(), serde_json::json!(error.to_string())),
+                        ]),
+                    );
+                    super::trace::emit_agent_event(
+                        super::trace::AgentTraceEvent::EmptyCompletionRetry {
+                            iteration: iteration.unwrap_or(0),
+                            attempt: attempt + 1,
+                            error: error.to_string(),
+                        },
+                    );
                 }
                 attempt += 1;
                 let backoff = extract_retry_after_ms(&error)

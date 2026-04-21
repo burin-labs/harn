@@ -43,6 +43,7 @@ pub fn workflow_options(config) {
     tool_retries: config?.tool_retries,
     tool_backoff_ms: config?.tool_backoff_ms,
     tool_format: config?.tool_format,
+    native_tool_fallback: config?.native_tool_fallback,
     context_callback: config?.context_callback ?? config?.context_filter,
     transcript: config?.transcript,
   },

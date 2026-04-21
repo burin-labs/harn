@@ -27,6 +27,7 @@ pub struct AgentLoopConfig {
     pub tool_retries: usize,
     pub tool_backoff_ms: u64,
     pub tool_format: String,
+    pub native_tool_fallback: crate::orchestration::NativeToolFallbackPolicy,
     /// Auto-compaction config.
     pub auto_compact: Option<crate::orchestration::AutoCompactConfig>,
     /// Capability policy scoped to this agent loop.
@@ -278,6 +279,18 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                 let provider = opts.as_ref().map(|o| o.provider.as_str()).unwrap_or("");
                 crate::llm_config::default_tool_format(model, provider)
             });
+            let native_tool_fallback = opt_str(&options, "native_tool_fallback")
+                .map(|value| {
+                    crate::orchestration::NativeToolFallbackPolicy::parse(&value).ok_or_else(
+                        || {
+                            crate::value::VmError::Runtime(format!(
+                                "agent_loop: native_tool_fallback must be one of allow, allow_once, reject; got `{value}`"
+                            ))
+                        },
+                    )
+                })
+                .transpose()?
+                .unwrap_or_default();
             let done_sentinel = opt_str(&options, "done_sentinel");
             let break_unless_phase = opt_str(&options, "break_unless_phase");
             let session_id = opt_str(&options, "session_id")
@@ -377,6 +390,7 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                     tool_retries,
                     tool_backoff_ms,
                     tool_format,
+                    native_tool_fallback,
                     auto_compact,
                     policy,
                     approval_policy,

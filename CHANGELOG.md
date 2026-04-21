@@ -26,6 +26,19 @@ encoding helpers, and first-class `bytes` + raw inbound bodies now
 ship together so external connector repos can be written entirely
 in Harn.
 
+### Fixed
+
+- **Native-tool stages can now fail closed or one-shot text fallback,
+  and they expose structured fallback/retry metadata (#229).**
+  `agent_loop`, `sub_agent_run`, and workflow `model_policy` now accept
+  `native_tool_fallback: "allow" | "allow_once" | "reject"` for
+  native-tool stages. Harn also records
+  `native_text_tool_fallbacks`,
+  `native_text_tool_fallback_rejections`, and
+  `empty_completion_retries` in stage trace summaries / observability so
+  eval tooling can distinguish tolerated provider recovery from the
+  intended native-tool contract.
+
 ### Added
 
 - **Git-backed package manager v0 (#345, #355).** Typed lockfile with

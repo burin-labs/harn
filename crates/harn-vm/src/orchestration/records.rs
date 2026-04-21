@@ -195,6 +195,9 @@ pub struct RunPlannerRoundRecord {
     pub tool_rejection_count: usize,
     pub intervention_count: usize,
     pub compaction_count: usize,
+    pub native_text_tool_fallback_count: usize,
+    pub native_text_tool_fallback_rejection_count: usize,
+    pub empty_completion_retry_count: usize,
     pub tools_used: Vec<String>,
     pub successful_tools: Vec<String>,
     pub ledger_done_rejections: usize,
@@ -1026,6 +1029,15 @@ pub fn derive_run_observability(
                 ),
                 intervention_count: json_usize(trace.and_then(|trace| trace.get("interventions"))),
                 compaction_count: json_usize(trace.and_then(|trace| trace.get("compactions"))),
+                native_text_tool_fallback_count: json_usize(
+                    trace.and_then(|trace| trace.get("native_text_tool_fallbacks")),
+                ),
+                native_text_tool_fallback_rejection_count: json_usize(
+                    trace.and_then(|trace| trace.get("native_text_tool_fallback_rejections")),
+                ),
+                empty_completion_retry_count: json_usize(
+                    trace.and_then(|trace| trace.get("empty_completion_retries")),
+                ),
                 tools_used,
                 successful_tools,
                 ledger_done_rejections: json_usize(payload.get("ledger_done_rejections")),
@@ -1035,6 +1047,9 @@ pub fn derive_run_observability(
             let has_agentic_detail = planner_round.iteration_count > 0
                 || planner_round.llm_call_count > 0
                 || planner_round.tool_execution_count > 0
+                || planner_round.native_text_tool_fallback_count > 0
+                || planner_round.native_text_tool_fallback_rejection_count > 0
+                || planner_round.empty_completion_retry_count > 0
                 || planner_round.ledger_done_rejections > 0
                 || planner_round.task_ledger.is_some()
                 || !planner_round.tools_used.is_empty()
@@ -1801,6 +1816,33 @@ pub fn diff_run_records(left: &RunRecord, right: &RunRecord) -> RunDiffReport {
                     details.push(format!(
                         "tool_executions: {} -> {}",
                         left_round.tool_execution_count, right_round.tool_execution_count
+                    ));
+                }
+                if left_round.native_text_tool_fallback_count
+                    != right_round.native_text_tool_fallback_count
+                {
+                    details.push(format!(
+                        "native_text_tool_fallbacks: {} -> {}",
+                        left_round.native_text_tool_fallback_count,
+                        right_round.native_text_tool_fallback_count
+                    ));
+                }
+                if left_round.native_text_tool_fallback_rejection_count
+                    != right_round.native_text_tool_fallback_rejection_count
+                {
+                    details.push(format!(
+                        "native_text_tool_fallback_rejections: {} -> {}",
+                        left_round.native_text_tool_fallback_rejection_count,
+                        right_round.native_text_tool_fallback_rejection_count
+                    ));
+                }
+                if left_round.empty_completion_retry_count
+                    != right_round.empty_completion_retry_count
+                {
+                    details.push(format!(
+                        "empty_completion_retries: {} -> {}",
+                        left_round.empty_completion_retry_count,
+                        right_round.empty_completion_retry_count
                     ));
                 }
                 if left_round.research_facts != right_round.research_facts {

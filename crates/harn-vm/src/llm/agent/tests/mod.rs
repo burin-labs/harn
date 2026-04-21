@@ -29,6 +29,7 @@ pub(super) use std::rc::Rc;
 pub(super) use std::sync::atomic::AtomicBool;
 pub(super) use std::sync::{Arc, Mutex};
 
+mod native_tool_fallback;
 mod phase_history;
 mod policy;
 mod prompts;
@@ -83,6 +84,7 @@ pub(super) fn base_agent_config() -> AgentLoopConfig {
         tool_retries: 0,
         tool_backoff_ms: 1,
         tool_format: "text".to_string(),
+        native_tool_fallback: crate::orchestration::NativeToolFallbackPolicy::Allow,
         auto_compact: None,
         policy: None,
         approval_policy: None,
