@@ -16,7 +16,16 @@ thread_local! {
 
 /// Set the source directory for the current thread (called by VM on file execution).
 pub(crate) fn set_thread_source_dir(dir: &std::path::Path) {
-    VM_SOURCE_DIR.with(|sd| *sd.borrow_mut() = Some(dir.to_path_buf()));
+    VM_SOURCE_DIR.with(|sd| *sd.borrow_mut() = Some(normalize_context_path(dir)));
+}
+
+pub(crate) fn normalize_context_path(path: &std::path::Path) -> PathBuf {
+    if path.is_absolute() {
+        return path.to_path_buf();
+    }
+    std::env::current_dir()
+        .map(|cwd| cwd.join(path))
+        .unwrap_or_else(|_| path.to_path_buf())
 }
 
 pub fn set_thread_execution_context(context: Option<RunExecutionRecord>) {
@@ -517,6 +526,15 @@ mod tests {
         reset_process_state();
         let _ = std::fs::remove_dir_all(&cwd);
         let _ = std::fs::remove_dir_all(&source_dir);
+    }
+
+    #[test]
+    fn set_thread_source_dir_absolutizes_relative_paths() {
+        reset_process_state();
+        let current_dir = std::env::current_dir().unwrap();
+        set_thread_source_dir(std::path::Path::new("scripts"));
+        assert_eq!(source_root_path(), current_dir.join("scripts"));
+        reset_process_state();
     }
 
     #[test]

@@ -7,6 +7,16 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
+## v0.7.29
+
+### Fixed
+
+- **Stable script source directories.** `harn run` now stores source
+  directories as absolute paths before exposing them through
+  `source_dir()`. Scripts can safely derive sibling paths from
+  `source_dir()` even when they `cd` elsewhere before shelling out to a
+  nested `harn` command.
+
 ## v0.7.28
 
 ### Fixed

@@ -290,11 +290,12 @@ impl Vm {
     /// Set the source directory for import resolution and introspection.
     /// Also auto-detects the project root if not already set.
     pub fn set_source_dir(&mut self, dir: &std::path::Path) {
-        self.source_dir = Some(dir.to_path_buf());
-        crate::stdlib::set_thread_source_dir(dir);
+        let dir = crate::stdlib::process::normalize_context_path(dir);
+        self.source_dir = Some(dir.clone());
+        crate::stdlib::set_thread_source_dir(&dir);
         // Auto-detect project root if not explicitly set.
         if self.project_root.is_none() {
-            self.project_root = crate::stdlib::process::find_project_root(dir);
+            self.project_root = crate::stdlib::process::find_project_root(&dir);
         }
     }
 
