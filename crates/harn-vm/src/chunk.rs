@@ -234,6 +234,112 @@ pub enum Op {
     Yield,
 }
 
+impl Op {
+    pub(crate) const ALL: &'static [Self] = &[
+        Op::Constant,
+        Op::Nil,
+        Op::True,
+        Op::False,
+        Op::GetVar,
+        Op::DefLet,
+        Op::DefVar,
+        Op::SetVar,
+        Op::PushScope,
+        Op::PopScope,
+        Op::Add,
+        Op::Sub,
+        Op::Mul,
+        Op::Div,
+        Op::Mod,
+        Op::Pow,
+        Op::Negate,
+        Op::Equal,
+        Op::NotEqual,
+        Op::Less,
+        Op::Greater,
+        Op::LessEqual,
+        Op::GreaterEqual,
+        Op::Not,
+        Op::Jump,
+        Op::JumpIfFalse,
+        Op::JumpIfTrue,
+        Op::Pop,
+        Op::Call,
+        Op::TailCall,
+        Op::Return,
+        Op::Closure,
+        Op::BuildList,
+        Op::BuildDict,
+        Op::Subscript,
+        Op::Slice,
+        Op::GetProperty,
+        Op::GetPropertyOpt,
+        Op::SetProperty,
+        Op::SetSubscript,
+        Op::MethodCall,
+        Op::MethodCallOpt,
+        Op::Concat,
+        Op::IterInit,
+        Op::IterNext,
+        Op::Pipe,
+        Op::Throw,
+        Op::TryCatchSetup,
+        Op::PopHandler,
+        Op::Parallel,
+        Op::ParallelMap,
+        Op::ParallelSettle,
+        Op::Spawn,
+        Op::Import,
+        Op::SelectiveImport,
+        Op::DeadlineSetup,
+        Op::DeadlineEnd,
+        Op::BuildEnum,
+        Op::MatchEnum,
+        Op::PopIterator,
+        Op::GetArgc,
+        Op::CheckType,
+        Op::TryUnwrap,
+        Op::CallSpread,
+        Op::CallBuiltin,
+        Op::CallBuiltinSpread,
+        Op::MethodCallSpread,
+        Op::Dup,
+        Op::Swap,
+        Op::Contains,
+        Op::AddInt,
+        Op::SubInt,
+        Op::MulInt,
+        Op::DivInt,
+        Op::ModInt,
+        Op::AddFloat,
+        Op::SubFloat,
+        Op::MulFloat,
+        Op::DivFloat,
+        Op::ModFloat,
+        Op::EqualInt,
+        Op::NotEqualInt,
+        Op::LessInt,
+        Op::GreaterInt,
+        Op::LessEqualInt,
+        Op::GreaterEqualInt,
+        Op::EqualFloat,
+        Op::NotEqualFloat,
+        Op::LessFloat,
+        Op::GreaterFloat,
+        Op::LessEqualFloat,
+        Op::GreaterEqualFloat,
+        Op::EqualBool,
+        Op::NotEqualBool,
+        Op::EqualString,
+        Op::NotEqualString,
+        Op::Yield,
+    ];
+
+    pub(crate) fn from_byte(byte: u8) -> Option<Self> {
+        Self::ALL.get(byte as usize).copied()
+    }
+}
+
 /// A constant value in the constant pool.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Constant {
@@ -887,5 +993,19 @@ impl Chunk {
 impl Default for Chunk {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Op;
+
+    #[test]
+    fn op_from_byte_matches_repr_order() {
+        for (byte, op) in Op::ALL.iter().copied().enumerate() {
+            assert_eq!(byte as u8, op as u8);
+            assert_eq!(Op::from_byte(byte as u8), Some(op));
+        }
+        assert_eq!(Op::from_byte(Op::ALL.len() as u8), None);
     }
 }
