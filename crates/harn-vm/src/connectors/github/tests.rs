@@ -360,7 +360,7 @@ fn github_signature(secret: &str, body: &[u8]) -> String {
 }
 
 #[test]
-fn parses_all_mvp_github_event_variants() {
+fn parses_all_supported_github_event_variants() {
     assert!(matches!(
         parse_typed_event(
             "issues",
@@ -404,6 +404,29 @@ fn parses_all_mvp_github_event_variants() {
         )
         .unwrap(),
         ParsedGitHubEvent::WorkflowRun(_)
+    ));
+    assert!(matches!(
+        parse_typed_event(
+            "deployment_status",
+            &json!({
+                "action": "created",
+                "deployment_status": {"id": 6, "state": "in_progress"},
+                "deployment": {"id": 16, "environment": "staging"}
+            })
+        )
+        .unwrap(),
+        ParsedGitHubEvent::DeploymentStatus(_)
+    ));
+    assert!(matches!(
+        parse_typed_event(
+            "check_run",
+            &json!({
+                "action": "completed",
+                "check_run": {"id": 7, "status": "completed", "conclusion": "success"}
+            })
+        )
+        .unwrap(),
+        ParsedGitHubEvent::CheckRun(_)
     ));
 }
 
@@ -471,6 +494,115 @@ async fn normalizes_signed_github_webhook_events() {
 
     let duplicate = connector.normalize_inbound(raw).await.unwrap_err();
     assert!(matches!(duplicate, ConnectorError::DuplicateDelivery(_)));
+}
+
+#[tokio::test]
+async fn normalizes_monitor_github_webhook_events() {
+    let secrets = Arc::new(StaticSecretProvider {
+        namespace: "github".to_string(),
+        secrets: BTreeMap::from([(
+            SecretId::new("github", "webhook-secret"),
+            "topsecret".to_string(),
+        )]),
+    });
+    let mut connector = GitHubConnector::new();
+    connector.init(test_ctx(secrets).await).await.unwrap();
+    let mut binding = TriggerBinding::new(ProviderId::from("github"), "webhook", "github.test");
+    binding.config = json!({
+        "match": { "path": "/hooks/github" },
+        "secrets": { "signing_secret": "github/webhook-secret" }
+    });
+    connector.activate(&[binding]).await.unwrap();
+
+    let cases = [
+        (
+            "deployment_status",
+            json!({
+                "action": "created",
+                "deployment_status": {"id": 11, "state": "in_progress"},
+                "deployment": {"id": 21, "environment": "staging"},
+            }),
+        ),
+        (
+            "check_run",
+            json!({
+                "action": "completed",
+                "check_run": {"id": 12, "status": "completed", "conclusion": "success"},
+            }),
+        ),
+    ];
+
+    for (index, (kind, payload)) in cases.iter().enumerate() {
+        let body = serde_json::to_vec(payload).expect("serialize payload");
+        let raw = RawInbound {
+            kind: (*kind).to_string(),
+            headers: BTreeMap::from([
+                ("X-GitHub-Event".to_string(), (*kind).to_string()),
+                (
+                    "X-GitHub-Delivery".to_string(),
+                    format!("delivery-monitor-{index}"),
+                ),
+                (
+                    "X-Hub-Signature-256".to_string(),
+                    github_signature("topsecret", &body),
+                ),
+                ("Content-Type".to_string(), "application/json".to_string()),
+            ]),
+            query: BTreeMap::new(),
+            body,
+            received_at: OffsetDateTime::now_utc(),
+            occurred_at: None,
+            tenant_id: None,
+            metadata: JsonValue::Null,
+        };
+
+        let event = connector.normalize_inbound(raw).await.unwrap();
+        assert_eq!(event.kind, *kind);
+        match (&event.provider_payload, *kind) {
+            (
+                crate::triggers::ProviderPayload::Known(
+                    crate::triggers::event::KnownProviderPayload::GitHub(
+                        crate::triggers::GitHubEventPayload::DeploymentStatus(payload),
+                    ),
+                ),
+                "deployment_status",
+            ) => {
+                assert_eq!(payload.common.event, "deployment_status");
+                assert_eq!(
+                    payload
+                        .deployment_status
+                        .get("state")
+                        .and_then(serde_json::Value::as_str),
+                    Some("in_progress")
+                );
+                assert_eq!(
+                    payload
+                        .deployment
+                        .get("environment")
+                        .and_then(serde_json::Value::as_str),
+                    Some("staging")
+                );
+            }
+            (
+                crate::triggers::ProviderPayload::Known(
+                    crate::triggers::event::KnownProviderPayload::GitHub(
+                        crate::triggers::GitHubEventPayload::CheckRun(payload),
+                    ),
+                ),
+                "check_run",
+            ) => {
+                assert_eq!(payload.common.event, "check_run");
+                assert_eq!(
+                    payload
+                        .check_run
+                        .get("conclusion")
+                        .and_then(serde_json::Value::as_str),
+                    Some("success")
+                );
+            }
+            other => panic!("unexpected provider payload: {other:?}"),
+        }
+    }
 }
 
 #[tokio::test]
@@ -555,6 +687,55 @@ async fn outbound_methods_share_cached_installation_token() {
     );
     assert!(state.api_requests[0].body.contains("hello"));
     assert_eq!(state.api_requests[6].path, "/repos/octo/demo/issues");
+}
+
+#[tokio::test]
+async fn api_call_uses_authenticated_github_rest_request() {
+    let scenario = Arc::new(Mutex::new(MockScenario::default()));
+    let (base_url, server) = spawn_mock_server(2, scenario.clone());
+    let client = initialized_client(Arc::new(StaticSecretProvider {
+        namespace: "github".to_string(),
+        secrets: BTreeMap::new(),
+    }))
+    .await;
+
+    let response = client
+        .call(
+            "api_call",
+            json!({
+                "app_id": 123,
+                "installation_id": 77,
+                "api_base_url": base_url,
+                "private_key_pem": TEST_PRIVATE_KEY_PEM,
+                "path": "/repos/octo/demo/deployments/12/statuses",
+                "method": "POST",
+                "accept": "application/vnd.github.ant-man-preview+json",
+                "body": {"state": "in_progress"}
+            }),
+        )
+        .await
+        .unwrap();
+
+    server.join().unwrap();
+    let state = scenario.lock().unwrap();
+    assert_eq!(state.token_requests, 1);
+    assert_eq!(state.api_requests.len(), 1);
+    assert_eq!(state.api_requests[0].method, "POST");
+    assert_eq!(
+        state.api_requests[0].path,
+        "/repos/octo/demo/deployments/12/statuses"
+    );
+    assert_eq!(
+        state.api_requests[0]
+            .headers
+            .get("accept")
+            .map(String::as_str),
+        Some("application/vnd.github.ant-man-preview+json")
+    );
+    assert!(state.api_requests[0]
+        .body
+        .contains("\"state\":\"in_progress\""));
+    assert_eq!(response["ok"], json!(true));
 }
 
 #[tokio::test]

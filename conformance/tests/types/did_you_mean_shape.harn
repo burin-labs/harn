@@ -3,9 +3,10 @@ pipeline default(task) {
   fn process(data: {name: string, email: string}) {
     println(data.name)
   }
-  // Pass dict with typo: "emial" instead of "email"
+  // Pass boundary data with typo: "emial" instead of "email"
+  let bad = json_parse("{\"name\":\"test\",\"emial\":\"foo@bar.com\"}")
   let result = try {
-    process({name: "test", emial: "foo@bar.com"})
+    process(bad)
   }
   println(is_err(result))
   // The error should mention "email" as a suggestion

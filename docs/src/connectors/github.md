@@ -6,11 +6,12 @@ events plus outbound GitHub REST calls authenticated as an installation.
 The MVP scope in `#170` is intentionally narrow:
 
 - inbound GitHub webhook verification with `X-Hub-Signature-256`
-- strongly typed payload narrowing for the six orchestration-relevant event
-  families: `issues`, `pull_request`, `issue_comment`,
-  `pull_request_review`, `push`, and `workflow_run`
+- strongly typed payload narrowing for the monitor-relevant event families:
+  `issues`, `pull_request`, `issue_comment`, `pull_request_review`, `push`,
+  `workflow_run`, `deployment_status`, and `check_run`
 - outbound installation-token lifecycle for GitHub App auth
-- seven outbound helper methods exposed through `std/connectors/github`
+- eight outbound methods exposed through `std/connectors/github`, including a
+  raw REST escape hatch
 
 Guided install / OAuth setup remains deferred to C-10. This landing supports
 the manual-config path now: provide the App id, installation id, private key,
@@ -41,9 +42,12 @@ does not duplicate HMAC logic. Successful deliveries normalize into
 - `signature_status = { state: "verified" }`
 - `provider_payload = GitHubEventPayload`
 
-`GitHubEventPayload` is narrowed into the six MVP event families. For example,
-an `issues` delivery exposes `payload.issue`, while `pull_request_review`
-exposes both `payload.review` and `payload.pull_request`.
+`GitHubEventPayload` is narrowed into eight monitor-relevant event families.
+For example, an `issues` delivery exposes `payload.issue`,
+`pull_request_review` exposes both `payload.review` and
+`payload.pull_request`, `deployment_status` exposes
+`payload.deployment_status` plus `payload.deployment`, and `check_run`
+exposes `payload.check_run`.
 
 ## Outbound configuration
 
@@ -94,12 +98,19 @@ Import from `std/connectors/github`:
 ```harn
 import {
   add_labels,
+  api_call,
+  check_run_source,
   comment,
   create_issue,
+  deployment_status_source,
   get_pr_diff,
   list_stale_prs,
   merge_pr,
+  pull_request_merged_source,
   request_review,
+  wait_until_ci_green,
+  wait_until_deploy_succeeds,
+  wait_until_pr_merged,
 } from "std/connectors/github"
 ```
 
@@ -112,6 +123,13 @@ Available methods:
 - `list_stale_prs(repo, days, options = nil)`
 - `get_pr_diff(pr_url, options = nil)`
 - `create_issue(repo, title, body = nil, labels = nil, options = nil)`
+- `api_call(path, method, body = nil, options = nil)`
+- `deployment_status_source(repo, deployment_id, options = nil)`
+- `check_run_source(repo, check_run_id, options = nil)`
+- `pull_request_merged_source(repo, number, options = nil)`
+- `wait_until_deploy_succeeds(repo, deployment_id, options = nil)`
+- `wait_until_ci_green(repo, check_run_id, options = nil)`
+- `wait_until_pr_merged(repo, number, options = nil)`
 
 All helpers accept the same auth/config fields through `options`, but
 `configure(...)` is the intended shared setup path.
@@ -151,6 +169,19 @@ pipeline default() {
 annotates the returned JSON with `admin_override_requested = true`. GitHub's
 REST merge endpoint does not currently expose a distinct override flag, so the
 connector still uses the standard merge call.
+
+`api_call(...)` is the JSON-oriented escape hatch for installation-authenticated
+REST endpoints that do not yet have a dedicated helper. It accepts a relative
+API `path`, an HTTP `method`, an optional JSON `body`, and the usual auth
+options. Pass `options.accept` when a GitHub preview or alternate JSON media
+type is required.
+
+The monitor source helpers return `std/monitors` source dicts. They poll GitHub
+REST for authoritative state and set `prefers_push = true` so inbound
+`deployment_status`, `check_run`, and `pull_request` webhooks can wake the
+monitor before the next poll interval. The `wait_until_*` helpers wrap those
+sources with common success conditions; pass monitor options such as `timeout`
+and `poll_interval` alongside the usual GitHub auth options.
 
 ## Rate limiting
 

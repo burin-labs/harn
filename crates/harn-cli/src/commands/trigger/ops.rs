@@ -760,6 +760,12 @@ fn normalized_event_payload(payload: &ProviderPayload) -> JsonValue {
                 harn_vm::triggers::event::GitHubEventPayload::WorkflowRun(value) => {
                     value.common.raw.clone()
                 }
+                harn_vm::triggers::event::GitHubEventPayload::DeploymentStatus(value) => {
+                    value.common.raw.clone()
+                }
+                harn_vm::triggers::event::GitHubEventPayload::CheckRun(value) => {
+                    value.common.raw.clone()
+                }
                 harn_vm::triggers::event::GitHubEventPayload::Other(value) => value.raw.clone(),
             }
         }

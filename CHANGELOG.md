@@ -16,6 +16,22 @@ granular archaeology.
   through the ACP stdio integration. ACP session ids are bound to the
   runtime session store so prompts and forks operate on the same
   transcript state.
+- **`std/monitors` `wait_for` primitive (#303, #405).** A durable
+  monitor-wait builtin that records `monitor_wait_started` /
+  `monitor_wait_matched` / `monitor_wait_timed_out` events to the event
+  log, supports push-driven wakeups from the trigger inbox with
+  poll-interval fallback, and replays recorded terminal results during
+  dispatch replays for deterministic reruns.
+
+### Fixed
+
+- **Event-log subscription scheduling.** `EventLog::subscribe` now
+  forwards history and live events on a tokio task instead of a
+  detached `std::thread::spawn` + `futures::executor::block_on`. The
+  old implementation was invisible to tokio's paused-time auto-advance
+  and raced with auto-advanced timers under load; the tokio task
+  participates in runtime scheduling and is cancelled cleanly on
+  shutdown.
 
 ## v0.7.26
 

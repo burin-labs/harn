@@ -596,6 +596,10 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("nil")),
     },
     BuiltinSig {
+        name: "monitor_wait_for_native",
+        return_type: None,
+    },
+    BuiltinSig {
         name: "pair",
         return_type: Some(BuiltinReturn::Named("pair")),
     },

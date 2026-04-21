@@ -122,9 +122,11 @@ import {
   configure,
   create_comment,
   graphql,
+  issue_state_source,
   list_issues,
   search,
   update_issue,
+  wait_until_issue_state,
 } from "std/connectors/linear"
 ```
 
@@ -166,6 +168,17 @@ The generic `graphql(query, variables = nil, options = nil)` escape hatch
 returns the raw GraphQL `data` plus response metadata. The connector also
 surfaces complexity metadata from Linear's rate-limit headers, including the
 observed complexity when the server reports `X-Complexity`.
+
+## Monitor Helpers
+
+`issue_state_source(issue_id, target_state, options = nil)` creates a
+`std/monitors` source for waiting on a Linear issue state. It polls Linear's
+GraphQL API and also wakes early from `issue` webhooks when the pushed issue
+matches `issue_id` and the state `id`, `name`, or `type` matches
+`target_state`.
+
+Use `wait_until_issue_state(issue_id, target_state, options = nil)` for the
+common case where the condition is simply reaching the target state.
 
 ## Webhook registration
 

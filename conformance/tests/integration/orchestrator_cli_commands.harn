@@ -17,6 +17,21 @@ fn wait_for_listener_url(log_path) {
   return url
 }
 
+fn wait_for_log_contains(log_path, needle) {
+  var attempts = 0
+  while attempts < 300 {
+    if file_exists(log_path) {
+      let log = exec("cat", log_path).stdout
+      if contains(log, needle) {
+        return true
+      }
+    }
+    sleep(50ms)
+    attempts = attempts + 1
+  }
+  return false
+}
+
 fn wait_for_exit(pid) {
   var attempts = 0
   while attempts < 200 {
@@ -79,7 +94,13 @@ pipeline test(task) {
   assert(pid != "", "missing orchestrator pid")
   let url = wait_for_listener_url(path_join(root, "orchestrator.log"))
   assert(url != nil, "listener URL did not appear in log")
-  sleep(2500ms)
+  assert(
+    wait_for_log_contains(
+    path_join(root, "orchestrator.log"),
+    "activated connectors: a2a-push(2), cron(1)",
+  ),
+    "connectors did not activate",
+  )
   let _ = shell("kill -TERM " + pid)
   assert(wait_for_exit(pid), "orchestrator did not exit")
   let state_dir = path_join(root, "state")
@@ -106,10 +127,10 @@ pipeline test(task) {
   let inspect_data = json_parse(inspect_json.stdout)
   println(
     inspect_json.success
-    && len(inspect_data.bindings ?? []) == 3
+    && len(inspect_data.triggers ?? []) == 3
     && inspect_data.snapshot?.status == "stopped"
     && inspect_data.snapshot?.bind != nil
-    && contains(json_stringify(inspect_data.bindings ?? []), "\"id\":\"manual-replay\"")
+    && contains(json_stringify(inspect_data.triggers ?? []), "\"id\":\"manual-replay\"")
     && contains(json_stringify(inspect_data.activations ?? []), "\"provider\":\"cron\""),
   )
   let fire_replay = exec(

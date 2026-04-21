@@ -1132,6 +1132,8 @@ fn github_raw(payload: &harn_vm::triggers::event::GitHubEventPayload) -> &JsonVa
         harn_vm::triggers::event::GitHubEventPayload::PullRequestReview(inner) => &inner.common.raw,
         harn_vm::triggers::event::GitHubEventPayload::Push(inner) => &inner.common.raw,
         harn_vm::triggers::event::GitHubEventPayload::WorkflowRun(inner) => &inner.common.raw,
+        harn_vm::triggers::event::GitHubEventPayload::DeploymentStatus(inner) => &inner.common.raw,
+        harn_vm::triggers::event::GitHubEventPayload::CheckRun(inner) => &inner.common.raw,
         harn_vm::triggers::event::GitHubEventPayload::Other(common) => &common.raw,
     }
 }

@@ -107,8 +107,12 @@ Example:
 import {
   add_reaction,
   configure,
+  message_source,
   post_message,
+  reaction_source,
   user_info,
+  wait_for_message,
+  wait_for_reaction,
 } from "std/connectors/slack"
 
 pipeline default() {
@@ -121,6 +125,21 @@ pipeline default() {
   add_reaction("C123ABC456", posted.ts, "thumbsup")
 }
 ```
+
+## Monitor helpers
+
+`std/connectors/slack` includes push-driven monitor sources for Slack arrivals:
+
+- `message_source(channel = nil, options = nil)` matches `message`,
+  `message.*`, and `app_mention` events. Options can include `user`,
+  `thread_ts`, and `text_contains`.
+- `reaction_source(channel = nil, reaction = nil, options = nil)` matches
+  `reaction_added` events.
+- `wait_for_message(...)` and `wait_for_reaction(...)` wrap those sources with
+  `std/monitors::wait_for`.
+
+These sources use Slack Events API webhooks as the state source, so enable the
+corresponding event subscriptions on the app.
 
 ## Recommended scopes
 

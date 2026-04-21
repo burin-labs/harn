@@ -2357,6 +2357,9 @@ fn manifest_has_git_dependencies(manifest: &Manifest) -> bool {
 fn ensure_git_available() -> Result<(), String> {
     process::Command::new("git")
         .arg("--version")
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .env_remove("GIT_INDEX_FILE")
         .output()
         .map(|_| ())
         .map_err(|_| "git is required for git dependencies but was not found in PATH".to_string())
@@ -2720,6 +2723,9 @@ where
         command.current_dir(dir);
     }
     command
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .env_remove("GIT_INDEX_FILE")
         .output()
         .map_err(|error| format!("failed to run git: {error}"))
 }
@@ -3633,11 +3639,7 @@ mod tests {
     }
 
     fn run_git(repo: &Path, args: &[&str]) -> String {
-        let output = process::Command::new("git")
-            .args(args)
-            .current_dir(repo)
-            .output()
-            .unwrap();
+        let output = test_git_command(repo).args(args).output().unwrap();
         if !output.status.success() {
             panic!(
                 "git {:?} failed: {}",
@@ -3648,21 +3650,26 @@ mod tests {
         String::from_utf8_lossy(&output.stdout).trim().to_string()
     }
 
+    fn test_git_command(repo: &Path) -> process::Command {
+        let mut command = process::Command::new("git");
+        command
+            .current_dir(repo)
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env_remove("GIT_INDEX_FILE");
+        command
+    }
+
     fn create_git_package_repo() -> (tempfile::TempDir, PathBuf, String) {
         let tmp = tempfile::tempdir().unwrap();
         let repo = tmp.path().join("acme-lib");
         fs::create_dir_all(&repo).unwrap();
-        let init = process::Command::new("git")
+        let init = test_git_command(&repo)
             .args(["init", "-b", "main"])
-            .current_dir(&repo)
             .output()
             .unwrap();
         if !init.status.success() {
-            let fallback = process::Command::new("git")
-                .arg("init")
-                .current_dir(&repo)
-                .output()
-                .unwrap();
+            let fallback = test_git_command(&repo).arg("init").output().unwrap();
             assert!(
                 fallback.status.success(),
                 "git init failed: {}",

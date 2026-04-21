@@ -3,6 +3,7 @@ set -e
 
 echo "=== Pre-commit: auto-formatting ==="
 cargo fmt --all
+make fmt-harn-fix
 # Re-stage any files that were reformatted
 git diff --name-only | xargs -r git add
 echo "    Formatting OK."
