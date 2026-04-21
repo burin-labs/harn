@@ -100,3 +100,14 @@ let grouped = trust_query({
   grouped_by_trace: true,
 })
 ```
+
+`self_review(...)` also writes trust records with action `pr.self_review`.
+Its metadata currently includes:
+
+- `rubric` and `rubric_preset`
+- `requested_rounds` and `completed_rounds`
+- `finding_count` and `blocking_finding_count`
+- `secret_scan_finding_count`
+- `finding_categories`
+- `summary`
+- `diff_bytes` and `diff_sha256`

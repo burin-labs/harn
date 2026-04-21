@@ -80,7 +80,7 @@ code or inside any pipeline.
 `import "std/..."` is only needed for the Harn-written helper modules
 described below (`std/text`, `std/json`, `std/math`, `std/collections`,
 `std/path`, `std/context`, `std/agent_state`, `std/agents`, `std/runtime`,
-`std/project`, `std/worktree`, `std/checkpoint`). These add layered
+`std/review`, `std/project`, `std/worktree`, `std/checkpoint`). These add layered
 utilities on top of the core builtins; the core builtins themselves are
 always available.
 
@@ -98,6 +98,7 @@ import "std/json"
 import "std/context"
 import "std/agent_state"
 import "std/agents"
+import "std/review"
 ```
 
 ### std/text
@@ -281,6 +282,21 @@ Generic host/runtime helpers that are useful across many hosts:
 | `interaction_ask(question)` | Ask the host/user a question through the typed interaction contract |
 | `interaction_ask_with_kind(question, kind)` | Ask the host/user a question with an explicit interaction kind |
 | `record_run_metadata(run, workflow_name)` | Persist normalized workflow run metadata through the runtime contract |
+
+### std/review
+
+Typed review helpers that pair with the global `self_review(...)` builtin:
+
+| Function | Description |
+|---|---|
+| `review_rubrics()` | Return the built-in rubric library as a dict keyed by preset name |
+| `review_rubric(name)` | Return one rubric preset body, or `nil` when the preset is unknown |
+
+Type aliases:
+
+- `ReviewFinding`
+- `ReviewRound`
+- `ReviewResult`
 
 ### std/project
 

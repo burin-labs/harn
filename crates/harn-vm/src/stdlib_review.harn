@@ -1,0 +1,54 @@
+import "std/triggers"
+
+type ReviewSeverity = "blocking" | "warning" | "info"
+
+type ReviewFinding = {
+  id: string,
+  severity: ReviewSeverity,
+  category: string,
+  title: string,
+  detail: string,
+  suggestion: string | nil,
+  file: string | nil,
+  line_start: int | nil,
+  line_end: int | nil,
+  source: string
+}
+
+type ReviewRound = {
+  round: int,
+  summary: string,
+  findings: list<ReviewFinding>,
+  has_blocking_findings: bool,
+  model: string | nil,
+  provider: string | nil,
+  input_tokens: int | nil,
+  output_tokens: int | nil
+}
+
+type ReviewResult = {
+  rubric: string,
+  rubric_preset: string | nil,
+  max_rounds: int,
+  summary: string,
+  findings: list<ReviewFinding>,
+  has_blocking_findings: bool,
+  rounds: list<ReviewRound>,
+  secret_scan_findings: list<dict>,
+  trust_record: TrustRecord | nil
+}
+
+pub fn review_rubrics() {
+  return {
+    default: "Review for correctness, test coverage, security, and style conformance. Prefer high-signal findings only. Block on correctness bugs, missing coverage for risky changes, or credential exposure.",
+    code: "Review for correctness, regressions, missing tests, unsafe assumptions, and API compatibility. Block if the diff is likely wrong or under-tested.",
+    docs: "Review for factual accuracy, drift from implementation, broken examples, missing migration notes, and unclear wording that could mislead users.",
+    infra: "Review for rollout safety, observability, failure modes, config drift, missing rollback notes, and operational regressions.",
+    security: "Review for credential exposure, authz/authn gaps, unsafe data handling, injection risk, and high-signal hardening gaps."
+  }
+}
+
+pub fn review_rubric(name) {
+  let rubrics = review_rubrics()
+  return rubrics[name] ?? nil
+}

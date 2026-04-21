@@ -13,6 +13,7 @@ pub fn get_stdlib_source(module: &str) -> Option<&'static str> {
         "testing" => Some(include_str!("stdlib_testing.harn")),
         "context" => Some(include_str!("stdlib_context.harn")),
         "runtime" => Some(include_str!("stdlib_runtime.harn")),
+        "review" => Some(include_str!("stdlib_review.harn")),
         "project" => Some(include_str!("stdlib_project.harn")),
         "async" => Some(include_str!("stdlib_async.harn")),
         "agents" => Some(include_str!("stdlib_agents.harn")),

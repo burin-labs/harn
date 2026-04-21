@@ -24,6 +24,7 @@ mod project;
 mod project_catalog;
 mod project_enrich;
 mod regex;
+mod review;
 pub mod secret_scan;
 mod sets;
 mod shapes;
@@ -81,6 +82,7 @@ pub fn register_io_stdlib(vm: &mut Vm) {
 pub fn register_agent_stdlib(vm: &mut Vm) {
     concurrency::register_concurrency_builtins(vm);
     connectors::register_connector_builtins(vm);
+    review::register_review_builtins(vm);
     secret_scan::register_secret_scan_builtins(vm);
     tools::register_tool_builtins(vm);
     skills::register_skill_builtins(vm);
