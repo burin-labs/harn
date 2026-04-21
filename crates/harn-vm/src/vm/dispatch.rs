@@ -104,26 +104,53 @@ impl Vm {
     /// `VmValue::BuiltinRef`, so builtin names passed by reference (e.g.
     /// `dict.rekey(snake_to_camel)`) dispatch through the same code path as
     /// user-defined closures.
-    #[allow(clippy::manual_async_fn)]
-    pub(crate) fn call_callable_value<'a>(
-        &'a mut self,
-        callable: &'a VmValue,
-        args: &'a [VmValue],
-        functions: &'a [CompiledFunction],
-    ) -> Pin<Box<dyn Future<Output = Result<VmValue, VmError>> + 'a>> {
-        Box::pin(async move {
-            match callable {
-                VmValue::Closure(closure) => self.call_closure(closure, args, functions).await,
-                VmValue::BuiltinRef(name) => {
-                    let name_owned = name.to_string();
-                    self.call_named_builtin(&name_owned, args.to_vec()).await
+    pub(crate) async fn call_callable_value(
+        &mut self,
+        callable: &VmValue,
+        args: &[VmValue],
+        functions: &[CompiledFunction],
+    ) -> Result<VmValue, VmError> {
+        match callable {
+            VmValue::Closure(closure) => self.call_closure(closure, args, functions).await,
+            VmValue::BuiltinRef(name) => {
+                if let Some(result) = self.call_sync_builtin_by_ref(name, args) {
+                    result
+                } else {
+                    self.call_named_builtin(name, args.to_vec()).await
                 }
-                other => Err(VmError::TypeError(format!(
-                    "expected callable, got {}",
-                    other.type_name()
-                ))),
             }
-        })
+            other => Err(VmError::TypeError(format!(
+                "expected callable, got {}",
+                other.type_name()
+            ))),
+        }
+    }
+
+    fn call_sync_builtin_by_ref(
+        &mut self,
+        name: &str,
+        args: &[VmValue],
+    ) -> Option<Result<VmValue, VmError>> {
+        let builtin = self.builtins.get(name).cloned()?;
+
+        let span_kind = match name {
+            "llm_call" | "llm_stream" | "agent_loop" => Some(crate::tracing::SpanKind::LlmCall),
+            "mcp_call" => Some(crate::tracing::SpanKind::ToolCall),
+            _ => None,
+        };
+        let _span = span_kind.map(|kind| ScopeSpan::new(kind, name.to_string()));
+
+        if self.denied_builtins.contains(name) {
+            return Some(Err(VmError::CategorizedError {
+                message: format!("Tool '{}' is not permitted.", name),
+                category: ErrorCategory::ToolRejected,
+            }));
+        }
+        if let Err(err) = crate::orchestration::enforce_current_policy_for_builtin(name, args) {
+            return Some(Err(err));
+        }
+
+        Some(builtin(args, &mut self.output))
     }
 
     /// Returns true if `v` is callable via `call_callable_value`.

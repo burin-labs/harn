@@ -27,7 +27,11 @@ impl crate::vm::Vm {
             "to_string" => Ok(VmValue::String(std::rc::Rc::from(obj.display()))),
             _ => {
                 let lifted = iter_from_value(obj.clone())?;
-                self.call_method(lifted, method, args, functions).await
+                let VmValue::Iter(handle) = lifted else {
+                    unreachable!("iter_from_value returns Iter for ranges")
+                };
+                self.call_iter_method(&handle, method, args, functions)
+                    .await
             }
         }
     }
