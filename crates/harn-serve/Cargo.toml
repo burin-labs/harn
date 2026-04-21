@@ -19,6 +19,6 @@ tracing = "0.1"
 [dev-dependencies]
 base64 = "0.22"
 hex = "0.4"
-hmac = "0.12"
+hmac = "0.13"
 sha2 = "0.10"
 tempfile = "3"

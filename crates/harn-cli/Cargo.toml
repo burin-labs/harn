@@ -72,5 +72,5 @@ tracing = "0.1"
 fs2 = "0.4"
 
 [dev-dependencies]
-hmac = "0.12"
+hmac = "0.13"
 rcgen = "0.13"
