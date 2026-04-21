@@ -20,6 +20,7 @@ pub(crate) fn get_stdlib_source(module: &str) -> Option<&'static str> {
         "json" => Some(include_str!("../../harn-vm/src/stdlib_json.harn")),
         "schema" => Some(include_str!("../../harn-vm/src/stdlib_schema.harn")),
         "testing" => Some(include_str!("../../harn-vm/src/stdlib_testing.harn")),
+        "vision" => Some(include_str!("../../harn-vm/src/stdlib_vision.harn")),
         "context" => Some(include_str!("../../harn-vm/src/stdlib_context.harn")),
         "runtime" => Some(include_str!("../../harn-vm/src/stdlib_runtime.harn")),
         "review" => Some(include_str!("../../harn-vm/src/stdlib_review.harn")),

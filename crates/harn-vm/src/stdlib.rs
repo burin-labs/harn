@@ -37,6 +37,7 @@ pub mod tracing;
 mod transcript_compact;
 mod triggers_stdlib;
 mod types;
+mod vision;
 
 use crate::http::register_http_builtins;
 use crate::llm::register_llm_builtins;
@@ -71,6 +72,7 @@ pub fn register_io_stdlib(vm: &mut Vm) {
     io::register_io_builtins(vm);
     host::register_host_builtins(vm);
     fs::register_fs_builtins(vm);
+    vision::register_vision_builtins(vm);
     agent_state::register_agent_state_builtins(vm);
     process::register_process_builtins(vm);
     process::register_path_builtins(vm);
@@ -141,6 +143,7 @@ pub fn reset_stdlib_state() {
     hitl::reset_hitl_state();
     agents::records::reset_eval_metrics();
     tools::clear_current_tool_registry();
+    vision::reset_vision_state();
     crate::skills::clear_current_skill_registry();
     template::reset_prompt_registry();
 }

@@ -11,6 +11,7 @@ pub fn get_stdlib_source(module: &str) -> Option<&'static str> {
         "json" => Some(include_str!("stdlib_json.harn")),
         "schema" => Some(include_str!("stdlib_schema.harn")),
         "testing" => Some(include_str!("stdlib_testing.harn")),
+        "vision" => Some(include_str!("stdlib_vision.harn")),
         "context" => Some(include_str!("stdlib_context.harn")),
         "runtime" => Some(include_str!("stdlib_runtime.harn")),
         "review" => Some(include_str!("stdlib_review.harn")),

@@ -79,8 +79,9 @@ code or inside any pipeline.
 
 `import "std/..."` is only needed for the Harn-written helper modules
 described below (`std/text`, `std/json`, `std/math`, `std/collections`,
-`std/path`, `std/context`, `std/agent_state`, `std/agents`, `std/runtime`,
-`std/review`, `std/project`, `std/worktree`, `std/checkpoint`). These add layered
+`std/path`, `std/vision`, `std/context`, `std/agent_state`, `std/agents`,
+`std/runtime`, `std/review`, `std/project`, `std/worktree`,
+`std/checkpoint`). These add layered
 utilities on top of the core builtins; the core builtins themselves are
 always available.
 
@@ -94,6 +95,7 @@ import "std/text"
 import "std/collections"
 import "std/math"
 import "std/path"
+import "std/vision"
 import "std/json"
 import "std/context"
 import "std/agent_state"
@@ -213,6 +215,24 @@ println(workspace_normalize("/packages/app/SKILL.md", cwd())) // "packages/app/S
 
 let files = list_files("src")
 let dirs = list_dirs(".")
+```
+
+### std/vision
+
+Deterministic OCR helpers layered on top of the runtime's `vision_ocr(...)`
+builtin:
+
+| Function | Description |
+|---|---|
+| `ocr(image, options?)` | Run OCR over an image path or image payload and return `StructuredText` with text, blocks, lines, tokens, source metadata, backend info, and counts |
+
+```harn
+import "std/vision"
+
+let structured = ocr("fixtures/ui.png")
+println(structured.text)
+println(structured.lines[0]?.text)
+println(structured.tokens[0]?.bbox.left)
 ```
 
 ### std/json

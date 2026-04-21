@@ -148,6 +148,10 @@ enforcement.
   `schema_parse(...)`, `schema_is(...)`, JSON Schema/OpenAPI conversion, and
   schema composition helpers, plus a lazy `std/schema` builder module for
   ergonomic schema authoring when imported.
+- Deterministic vision OCR via `vision_ocr(...)` and `import "std/vision"`:
+  image path / payload normalization, structured text output
+  (`blocks`, `lines`, `tokens`), and event-log-backed OCR audit records for
+  replayable agent/tool flows.
 - Manifest-backed extension ABI: packages can publish stable module entry
   points via `[exports]` and ship provider/alias adapters declaratively via
   `[llm]` in `harn.toml`, without editing core runtime registration code.
