@@ -1,6 +1,8 @@
-// std/monitors - wait for changing external state with poll-to-push optimization.
-//
-// Import with: `import "std/monitors"`.
+/**
+ * std/monitors - wait for changing external state with poll-to-push optimization.
+ *
+ * Import with: `import "std/monitors"`.
+ */
 type MonitorWaitStatus = "matched" | "timed_out" | "interrupted"
 
 type MonitorPollContext = {wait_id: string, poll_count: int, last_push_event: any}

@@ -4,7 +4,7 @@ pipeline test(task) {
   let result = wait_for(
     {
     wait_id: "conformance-monitor-timeout",
-    timeout: 20ms,
+    timeout: 0ms,
     poll_interval: 5ms,
     source: {label: "conformance-timeout", poll: { _ -> return {ready: false} }},
     condition: { state -> state.ready },

@@ -9,6 +9,7 @@ use std::sync::Once;
 use std::thread;
 use std::time::{Duration, Instant};
 
+use futures::StreamExt;
 use rcgen::generate_simple_self_signed;
 use rustls::pki_types::{CertificateDer, PrivatePkcs8KeyDer};
 use rustls::{ServerConfig, ServerConnection, StreamOwned};
@@ -2243,13 +2244,16 @@ import { wait_for } from "std/monitors"
 
 pub fn coordinated_handler(event: TriggerEvent) -> string {
   if event.dedupe_key == "delivery-monitor-wait-1" {
-    let ready_at = timestamp() * 1000 + 60
     let result = wait_for({
       wait_id: "monitor-singleton",
       timeout: 500ms,
-      poll_interval: 20ms,
-      source: {label: "monitor-singleton", poll: { ->
-        return {ready: timestamp() * 1000 >= ready_at}
+      poll_interval: 1h,
+      source: {label: "monitor-singleton", poll: { ctx ->
+        return {
+          ready: ctx.last_push_event?.payload?.event?.dedupe_key == "delivery-monitor-wait-2"
+        }
+      }, prefers_push: true, push_filter: { event ->
+        event.payload.event.dedupe_key == "delivery-monitor-wait-2"
       }},
       condition: { state -> state.ready },
     })
@@ -2268,6 +2272,13 @@ pub fn coordinated_handler(event: TriggerEvent) -> string {
             )
             .await;
 
+            let singleton_topic =
+                Topic::new("trigger.singleton.github-new-issue_v1__global").unwrap();
+            let mut singleton_events = log
+                .clone()
+                .subscribe(&singleton_topic, None)
+                .await
+                .expect("subscribe singleton events");
             let dispatcher_for_task = dispatcher.clone();
             let first = tokio::task::spawn_local(async move {
                 dispatcher_for_task
@@ -2276,10 +2287,20 @@ pub fn coordinated_handler(event: TriggerEvent) -> string {
                     .expect("first dispatch succeeds")
             });
 
-            tokio::time::sleep(Duration::from_millis(20)).await;
+            while let Some(event) = singleton_events.next().await {
+                let (_, event) = event.expect("singleton event");
+                if event.kind == "singleton_released" {
+                    break;
+                }
+            }
 
+            let second_event = trigger_event("issues.opened", "delivery-monitor-wait-2");
+            dispatcher
+                .enqueue(second_event.clone())
+                .await
+                .expect("enqueue second event for monitor push wakeup");
             let second = dispatcher
-                .dispatch_event(trigger_event("issues.opened", "delivery-monitor-wait-2"))
+                .dispatch_event(second_event)
                 .await
                 .expect("second dispatch completes");
             let first = first.await.expect("join waiting monitor leader");

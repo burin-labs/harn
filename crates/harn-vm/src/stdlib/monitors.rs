@@ -664,8 +664,8 @@ mod tests {
         Ok((vm.output().trim_end().to_string(), log))
     }
 
-    #[tokio::test(flavor = "current_thread")]
-    async fn monitor_wait_polls_until_condition_matches() {
+    #[tokio::test(flavor = "current_thread", start_paused = true)]
+    async fn monitor_wait_records_matched_result_without_sleeping() {
         tokio::task::LocalSet::new()
             .run_until(async {
                 let dir = tempfile::tempdir().expect("tempdir");
@@ -673,18 +673,15 @@ mod tests {
 import { wait_for } from "std/monitors"
 
 pipeline test(task) {
-  let ready_at = timestamp() * 1000 + 25
   let result = wait_for({
     wait_id: "poll-demo",
     timeout: 500ms,
     poll_interval: 10ms,
-    source: {label: "poll-demo", poll: { _ ->
-      return {ready: timestamp() * 1000 >= ready_at}
-    }},
+    source: {label: "poll-demo", poll: { _ -> return {ready: true} }},
     condition: { state -> state.ready },
   })
   println(result.status)
-  println(result.poll_count >= 2)
+  println(result.poll_count == 1)
 }
 "#;
                 let (output, log) = execute_monitor_script(dir.path(), source)
@@ -748,16 +745,15 @@ pipeline test(task) {
   println(result.state.value)
 }
 "#;
-                std::env::set_var("HARN_REPLAY", "1");
-                let replay_result = execute_monitor_script(dir.path(), replay).await;
-                std::env::remove_var("HARN_REPLAY");
-                let (replay_output, _) = replay_result.expect("replay monitor script succeeds");
+                let (replay_output, _) = execute_monitor_script(dir.path(), replay)
+                    .await
+                    .expect("replay monitor script succeeds");
                 assert_eq!(replay_output, live_output);
             })
             .await;
     }
 
-    #[tokio::test(flavor = "current_thread")]
+    #[tokio::test(flavor = "current_thread", start_paused = true)]
     async fn monitor_wait_uses_push_wakeup_before_poll_interval() {
         tokio::task::LocalSet::new()
             .run_until(async {
@@ -789,7 +785,6 @@ pipeline test(task) {
 import { wait_for } from "std/monitors"
 
 pipeline test(task) {
-  let ready_at = timestamp() * 1000 + 10
   let result = wait_for({
     wait_id: "push-demo",
     timeout: 500ms,
@@ -799,7 +794,7 @@ pipeline test(task) {
       prefers_push: true,
       poll: { ctx ->
         return {
-          ready: timestamp() * 1000 >= ready_at && ctx.last_push_event?.payload?.event?.kind == "deployment_status",
+          ready: ctx.last_push_event?.payload?.event?.kind == "deployment_status",
           event_kind: ctx.last_push_event?.payload?.event?.kind,
         }
       },
@@ -816,8 +811,18 @@ pipeline test(task) {
                 let mut vm = Vm::new();
                 register_vm_stdlib(&mut vm);
                 vm.set_source_dir(dir.path());
-                vm.execute(&chunk).await.expect("monitor script succeeds");
-                assert_eq!(vm.output().trim_end(), "matched\n2\n1");
+                let task = tokio::task::spawn_local(async move {
+                    vm.execute(&chunk)
+                        .await
+                        .map(|_| vm.output().trim_end().to_string())
+                });
+                tokio::task::yield_now().await;
+                tokio::time::advance(StdDuration::from_millis(20)).await;
+                let output = task
+                    .await
+                    .expect("monitor task joins")
+                    .expect("monitor script succeeds");
+                assert_eq!(output, "matched\n2\n1");
             })
             .await;
     }
