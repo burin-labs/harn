@@ -14,6 +14,7 @@ use serde_json::{json, Value as JsonValue};
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 use time::OffsetDateTime;
+use tokio::sync::{mpsc, oneshot};
 
 use harn_vm::event_log::{AnyEventLog, EventLog, LogEvent, Topic};
 use harn_vm::secrets::{SecretId, SecretProvider, SecretVersion};
@@ -24,6 +25,7 @@ use crate::commands::orchestrator::tls::{ServerRuntime, TlsFiles};
 use crate::package::{CollectedManifestTrigger, TriggerKind};
 
 const DEFAULT_MAX_BODY_BYTES: usize = 10 * 1024 * 1024;
+const ADMIN_RELOAD_PATH: &str = "/admin/reload";
 const PENDING_TOPIC: &str = "orchestrator.triggers.pending";
 const REQUEST_DELAY_ENV: &str = "HARN_ORCHESTRATOR_TEST_REQUEST_DELAY_MS";
 const API_KEYS_ENV: &str = "HARN_ORCHESTRATOR_API_KEYS";
@@ -39,6 +41,7 @@ pub(crate) struct ListenerConfig {
     pub(crate) allowed_origins: OriginAllowList,
     pub(crate) max_body_bytes: usize,
     pub(crate) metrics_registry: Arc<harn_vm::MetricsRegistry>,
+    pub(crate) admin_reload: Option<AdminReloadHandle>,
     pub(crate) routes: Vec<RouteConfig>,
 }
 
@@ -51,6 +54,44 @@ impl ListenerConfig {
 pub(crate) struct ListenerRuntime {
     server: ServerRuntime,
     routes: Arc<RouteRegistry>,
+}
+
+pub(crate) struct AdminReloadRequest {
+    pub(crate) source: String,
+    pub(crate) response_tx: Option<oneshot::Sender<Result<JsonValue, String>>>,
+}
+
+#[derive(Clone)]
+pub(crate) struct AdminReloadHandle {
+    tx: mpsc::UnboundedSender<AdminReloadRequest>,
+}
+
+impl AdminReloadHandle {
+    pub(crate) fn channel() -> (Self, mpsc::UnboundedReceiver<AdminReloadRequest>) {
+        let (tx, rx) = mpsc::unbounded_channel();
+        (Self { tx }, rx)
+    }
+
+    pub(crate) fn trigger(&self, source: impl Into<String>) -> Result<(), String> {
+        self.tx
+            .send(AdminReloadRequest {
+                source: source.into(),
+                response_tx: None,
+            })
+            .map_err(|_| "reload channel is closed".to_string())
+    }
+
+    pub(crate) async fn request(&self, source: impl Into<String>) -> Result<JsonValue, String> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(AdminReloadRequest {
+                source: source.into(),
+                response_tx: Some(tx),
+            })
+            .map_err(|_| "reload channel is closed".to_string())?;
+        rx.await
+            .map_err(|_| "reload response channel closed".to_string())?
+    }
 }
 
 impl ListenerRuntime {
@@ -74,6 +115,13 @@ impl ListenerRuntime {
             .filter(|value| *value > 0)
             .map(Duration::from_millis);
         let origin_state = Arc::new(config.allowed_origins.clone());
+        let admin_state = config.admin_reload.clone().map(|reload| {
+            Arc::new(AdminReloadState {
+                event_log: config.event_log.clone(),
+                auth: auth.clone(),
+                reload,
+            })
+        });
         let routes = Arc::new(RouteRegistry::new(
             config.routes,
             config.event_log.clone(),
@@ -84,7 +132,7 @@ impl ListenerRuntime {
             pending_topic.clone(),
             request_delay,
         )?);
-        let app = Router::new()
+        let mut app = Router::new()
             .route(
                 "/health",
                 get(|| async move { (StatusCode::OK, "ok").into_response() }),
@@ -100,11 +148,17 @@ impl ListenerRuntime {
             .route(
                 "/metrics",
                 get(metrics_endpoint).layer(Extension(config.metrics_registry.clone())),
-            )
-            .route(
-                "/{*path}",
-                post(ingest_trigger).layer(Extension(routes.clone())),
             );
+        if let Some(admin_state) = admin_state {
+            app = app.route(
+                ADMIN_RELOAD_PATH,
+                post(admin_reload_endpoint).layer(Extension(admin_state)),
+            );
+        }
+        let app = app.route(
+            "/{*path}",
+            post(ingest_trigger).layer(Extension(routes.clone())),
+        );
 
         let app = app
             .layer(DefaultBodyLimit::max(config.max_body_bytes))
@@ -243,6 +297,13 @@ struct RouteContext {
     pending_topic: Topic,
     request_delay: Option<Duration>,
     metrics: Arc<RouteRuntimeMetrics>,
+}
+
+#[derive(Clone)]
+struct AdminReloadState {
+    event_log: Arc<AnyEventLog>,
+    auth: Arc<ListenerAuth>,
+    reload: AdminReloadHandle,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -573,6 +634,60 @@ async fn metrics_endpoint(
         )],
         metrics.render_prometheus(),
     )
+}
+
+async fn admin_reload_endpoint(
+    Extension(state): Extension<Arc<AdminReloadState>>,
+    method: Method,
+    OriginalUri(uri): OriginalUri,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let normalized_headers = normalize_headers(&headers);
+    if state
+        .auth
+        .authorize(
+            state.event_log.as_ref(),
+            method.as_str(),
+            uri.path(),
+            &normalized_headers,
+            &body,
+        )
+        .await
+        .is_err()
+    {
+        return HttpError::unauthorized("auth failed").into_response();
+    }
+    let source = serde_json::from_slice::<JsonValue>(&body)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("source")
+                .and_then(JsonValue::as_str)
+                .map(ToString::to_string)
+        })
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "admin_api".to_string());
+    match state.reload.request(source.clone()).await {
+        Ok(summary) => (
+            StatusCode::OK,
+            axum::Json(json!({
+                "status": "ok",
+                "source": source,
+                "summary": summary,
+            })),
+        )
+            .into_response(),
+        Err(error) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            axum::Json(json!({
+                "status": "error",
+                "source": source,
+                "error": error,
+            })),
+        )
+            .into_response(),
+    }
 }
 
 async fn authorize_request(
@@ -1336,6 +1451,7 @@ mod tests {
             allowed_origins: OriginAllowList::wildcard(),
             max_body_bytes: DEFAULT_MAX_BODY_BYTES,
             metrics_registry: Arc::new(harn_vm::MetricsRegistry::default()),
+            admin_reload: None,
             routes: vec![route("/a2a/v1", 1)],
         })
         .await
@@ -1449,6 +1565,7 @@ mod tests {
             allowed_origins: OriginAllowList::wildcard(),
             max_body_bytes: DEFAULT_MAX_BODY_BYTES,
             metrics_registry: Arc::new(harn_vm::MetricsRegistry::default()),
+            admin_reload: None,
             routes: vec![webhook_route("/hooks/github")],
         })
         .await
@@ -1509,6 +1626,7 @@ mod tests {
             allowed_origins: OriginAllowList::wildcard(),
             max_body_bytes: DEFAULT_MAX_BODY_BYTES,
             metrics_registry: Arc::new(harn_vm::MetricsRegistry::default()),
+            admin_reload: None,
             routes: vec![webhook_route("/hooks/github")],
         })
         .await
