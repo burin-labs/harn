@@ -221,6 +221,10 @@ pub(crate) struct RouteConfig {
 }
 
 impl RouteConfig {
+    fn dedupe_ttl(&self) -> Duration {
+        Duration::from_secs(u64::from(self.dedupe_retention_days.max(1)) * 24 * 60 * 60)
+    }
+
     pub(crate) fn from_trigger(
         trigger: &CollectedManifestTrigger,
         binding_version: u32,
@@ -530,14 +534,11 @@ async fn ingest_trigger(
         .await;
         let response = match result {
             Ok(NormalizedRequest::Event(event)) => {
-                let dedupe_ttl = Duration::from_secs(
-                    u64::from(context.route.dedupe_retention_days.max(1)) * 24 * 60 * 60,
-                );
                 let postprocess = harn_vm::postprocess_normalized_event(
                     context.inbox.as_ref(),
                     &context.route.trigger_id,
                     context.route.dedupe_key_template.is_some(),
-                    dedupe_ttl,
+                    context.route.dedupe_ttl(),
                     *event,
                 )
                 .await;
@@ -1426,6 +1427,23 @@ mod tests {
             .expect("read pending events")
     }
 
+    async fn claim_events(log: &Arc<AnyEventLog>) -> Vec<(u64, harn_vm::event_log::LogEvent)> {
+        log.read_range(
+            &Topic::new(harn_vm::TRIGGER_INBOX_CLAIMS_TOPIC).expect("claims topic"),
+            None,
+            16,
+        )
+        .await
+        .expect("read claim events")
+    }
+
+    fn unix_now_ms() -> i64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time after unix epoch")
+            .as_millis() as i64
+    }
+
     #[allow(clippy::await_holding_lock)]
     #[tokio::test(flavor = "current_thread")]
     async fn reload_swaps_routes_without_losing_inflight_request() {
@@ -1671,6 +1689,74 @@ mod tests {
 
         let events = pending_events(&log).await;
         assert_eq!(events.len(), 1);
+
+        listener
+            .shutdown(Duration::from_secs(5))
+            .await
+            .expect("shutdown listener");
+        reset_active_event_log();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn webhook_dedupe_claim_uses_route_retention_days() {
+        let _guard = lock_harn_state();
+        reset_active_event_log();
+        let dir = tempdir().expect("tempdir");
+        let log = install_default_for_base_dir(dir.path()).expect("install event log");
+        let mut route = webhook_route("/hooks/github");
+        route.dedupe_retention_days = 3;
+        let listener = ListenerRuntime::start(ListenerConfig {
+            bind: "127.0.0.1:0".parse().expect("bind addr"),
+            tls: None,
+            event_log: log.clone(),
+            secrets: Arc::new(StaticSecretProvider {
+                secret_id: SecretId::new("github", "test-signing-secret"),
+                secret: "topsecret".to_string(),
+            }),
+            allowed_origins: OriginAllowList::wildcard(),
+            max_body_bytes: DEFAULT_MAX_BODY_BYTES,
+            metrics_registry: Arc::new(harn_vm::MetricsRegistry::default()),
+            admin_reload: None,
+            routes: vec![route],
+        })
+        .await
+        .expect("start listener");
+
+        let body = br#"{"action":"opened","issue":{"number":1}}"#;
+        let before_ms = unix_now_ms();
+        let response = reqwest::Client::new()
+            .post(format!("http://{}/hooks/github", listener.local_addr()))
+            .header("X-GitHub-Event", "issues")
+            .header("X-GitHub-Delivery", "delivery-ttl")
+            .header("X-Hub-Signature-256", github_signature("topsecret", body))
+            .header("Content-Type", "application/json")
+            .body(body.to_vec())
+            .send()
+            .await
+            .expect("send webhook");
+        let after_ms = unix_now_ms();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let claims = claim_events(&log).await;
+        assert_eq!(claims.len(), 1);
+        let claim = &claims[0].1.payload;
+        assert_eq!(
+            claim.get("binding_id").and_then(JsonValue::as_str),
+            Some("github-webhook")
+        );
+        assert_eq!(
+            claim.get("dedupe_key").and_then(JsonValue::as_str),
+            Some("delivery-ttl")
+        );
+        let expires_at_ms = claim
+            .get("expires_at_ms")
+            .and_then(JsonValue::as_i64)
+            .expect("claim expires_at_ms");
+        let ttl_ms = 3 * 24 * 60 * 60 * 1000;
+        assert!(
+            (before_ms + ttl_ms..=after_ms + ttl_ms).contains(&expires_at_ms),
+            "expires_at_ms {expires_at_ms} should use 3 day route retention"
+        );
 
         listener
             .shutdown(Duration::from_secs(5))
