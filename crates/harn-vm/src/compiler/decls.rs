@@ -1,4 +1,4 @@
-use harn_parser::{Attribute, DictEntry, Node, SNode, TypedParam};
+use harn_parser::{Attribute, DictEntry, Node, SNode, StructField, TypedParam};
 
 use crate::chunk::{CompiledFunction, Constant, Op};
 
@@ -65,7 +65,13 @@ impl Compiler {
         }
         self.chunk
             .emit_u16(Op::BuildDict, fields.len() as u16, self.line);
-        self.chunk.emit_u8(Op::Call, 2, self.line);
+        let arg_count = if let Some(field_names) = self.struct_layouts.get(struct_name).cloned() {
+            self.emit_string_list(&field_names);
+            3
+        } else {
+            2
+        };
+        self.chunk.emit_u8(Op::Call, arg_count, self.line);
         Ok(())
     }
 
@@ -87,6 +93,7 @@ impl Compiler {
                 fn_compiler.enum_names = self.enum_names.clone();
                 fn_compiler.interface_methods = self.interface_methods.clone();
                 fn_compiler.type_aliases = self.type_aliases.clone();
+                fn_compiler.struct_layouts = self.struct_layouts.clone();
                 fn_compiler.record_param_types(params);
                 fn_compiler.emit_default_preamble(params)?;
                 fn_compiler.emit_type_checks(params);
@@ -119,12 +126,17 @@ impl Compiler {
         Ok(())
     }
 
-    pub(super) fn compile_struct_decl(&mut self, name: &str) -> Result<(), CompileError> {
+    pub(super) fn compile_struct_decl(
+        &mut self,
+        name: &str,
+        fields: &[StructField],
+    ) -> Result<(), CompileError> {
         // Emit a constructor: StructName({field: val, ...}) -> StructInstance.
         let mut fn_compiler = Compiler::for_nested_body();
         fn_compiler.enum_names = self.enum_names.clone();
         fn_compiler.interface_methods = self.interface_methods.clone();
         fn_compiler.type_aliases = self.type_aliases.clone();
+        fn_compiler.struct_layouts = self.struct_layouts.clone();
         let params = vec![TypedParam::untyped("__fields")];
         fn_compiler.emit_default_preamble(&params)?;
 
@@ -146,7 +158,9 @@ impl Compiler {
         fn_compiler
             .chunk
             .emit_u16(Op::GetVar, fields_idx, self.line);
-        fn_compiler.chunk.emit_u8(Op::Call, 2, self.line);
+        let field_names: Vec<String> = fields.iter().map(|field| field.name.clone()).collect();
+        fn_compiler.emit_string_list(&field_names);
+        fn_compiler.chunk.emit_u8(Op::Call, 3, self.line);
         fn_compiler.chunk.emit(Op::Return, self.line);
 
         let func = CompiledFunction {
@@ -163,6 +177,15 @@ impl Compiler {
         let name_idx = self.chunk.add_constant(Constant::String(name.to_string()));
         self.chunk.emit_u16(Op::DefLet, name_idx, self.line);
         Ok(())
+    }
+
+    pub(super) fn emit_string_list(&mut self, values: &[String]) {
+        for value in values {
+            let idx = self.chunk.add_constant(Constant::String(value.clone()));
+            self.chunk.emit_u16(Op::Constant, idx, self.line);
+        }
+        self.chunk
+            .emit_u16(Op::BuildList, values.len() as u16, self.line);
     }
 
     pub(super) fn compile_attributed_decl(

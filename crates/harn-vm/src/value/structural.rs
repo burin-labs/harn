@@ -185,19 +185,23 @@ pub fn values_equal(a: &VmValue, b: &VmValue) -> bool {
         }
         (
             VmValue::StructInstance {
-                struct_name: a_s,
-                fields: a_f,
+                layout: a_layout,
+                fields: a_fields,
             },
             VmValue::StructInstance {
-                struct_name: b_s,
-                fields: b_f,
+                layout: b_layout,
+                fields: b_fields,
             },
         ) => {
-            a_s == b_s
-                && a_f.len() == b_f.len()
-                && a_f
+            if a_layout.struct_name() != b_layout.struct_name() {
+                return false;
+            }
+            let a_map = super::struct_fields_to_map(a_layout, a_fields);
+            let b_map = super::struct_fields_to_map(b_layout, b_fields);
+            a_map.len() == b_map.len()
+                && a_map
                     .iter()
-                    .zip(b_f.iter())
+                    .zip(b_map.iter())
                     .all(|((k1, v1), (k2, v2))| k1 == k2 && values_equal(v1, v2))
         }
         (VmValue::Set(a), VmValue::Set(b)) => {

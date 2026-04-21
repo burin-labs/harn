@@ -22,6 +22,7 @@ impl Compiler {
         fn_compiler.enum_names = self.enum_names.clone();
         fn_compiler.interface_methods = self.interface_methods.clone();
         fn_compiler.type_aliases = self.type_aliases.clone();
+        fn_compiler.struct_layouts = self.struct_layouts.clone();
         fn_compiler.record_param_types(params);
         fn_compiler.emit_default_preamble(params)?;
         fn_compiler.emit_type_checks(params);
@@ -64,6 +65,7 @@ impl Compiler {
         fn_compiler.enum_names = self.enum_names.clone();
         fn_compiler.interface_methods = self.interface_methods.clone();
         fn_compiler.type_aliases = self.type_aliases.clone();
+        fn_compiler.struct_layouts = self.struct_layouts.clone();
         fn_compiler.record_param_types(params);
         fn_compiler.emit_default_preamble(params)?;
         fn_compiler.emit_type_checks(params);
@@ -251,6 +253,7 @@ impl Compiler {
         fn_compiler.enum_names = self.enum_names.clone();
         fn_compiler.interface_methods = self.interface_methods.clone();
         fn_compiler.type_aliases = self.type_aliases.clone();
+        fn_compiler.struct_layouts = self.struct_layouts.clone();
         fn_compiler.record_param_types(params);
         fn_compiler.emit_default_preamble(params)?;
         fn_compiler.emit_type_checks(params);

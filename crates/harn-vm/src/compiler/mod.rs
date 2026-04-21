@@ -60,6 +60,8 @@ pub struct Compiler {
     column: u32,
     /// Track enum type names so PropertyAccess on them can produce EnumVariant.
     enum_names: std::collections::HashSet<String>,
+    /// Track struct type names to declared field order for indexed instances.
+    struct_layouts: std::collections::HashMap<String, Vec<String>>,
     /// Track interface names → method names for runtime enforcement.
     interface_methods: std::collections::HashMap<String, Vec<String>>,
     /// Stack of active loop contexts for break/continue.
@@ -429,8 +431,8 @@ impl Compiler {
             Node::ImplBlock { type_name, methods } => {
                 self.compile_impl_block(type_name, methods)?;
             }
-            Node::StructDecl { name, .. } => {
-                self.compile_struct_decl(name)?;
+            Node::StructDecl { name, fields, .. } => {
+                self.compile_struct_decl(name, fields)?;
             }
             // Metadata-only declarations (no runtime effect).
             Node::Pipeline { .. }

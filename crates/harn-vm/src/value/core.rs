@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 use std::sync::atomic::Ordering;
 use std::{cell::RefCell, future::Future, pin::Pin};
@@ -11,6 +11,66 @@ use super::{VmAtomicHandle, VmChannelHandle, VmClosure, VmError, VmGenerator, Vm
 /// An async builtin function for the VM.
 pub type VmAsyncBuiltinFn =
     Rc<dyn Fn(Vec<VmValue>) -> Pin<Box<dyn Future<Output = Result<VmValue, VmError>>>>>;
+
+/// Indexed runtime layout for a Harn struct instance.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StructLayout {
+    struct_name: String,
+    field_names: Vec<String>,
+    field_indexes: HashMap<String, usize>,
+}
+
+impl StructLayout {
+    pub fn new(struct_name: impl Into<String>, field_names: Vec<String>) -> Self {
+        let mut deduped = Vec::with_capacity(field_names.len());
+        let mut field_indexes = HashMap::with_capacity(field_names.len());
+        for field_name in field_names {
+            if field_indexes.contains_key(&field_name) {
+                continue;
+            }
+            let index = deduped.len();
+            field_indexes.insert(field_name.clone(), index);
+            deduped.push(field_name);
+        }
+
+        Self {
+            struct_name: struct_name.into(),
+            field_names: deduped,
+            field_indexes,
+        }
+    }
+
+    pub fn from_map(struct_name: impl Into<String>, fields: &BTreeMap<String, VmValue>) -> Self {
+        Self::new(struct_name, fields.keys().cloned().collect())
+    }
+
+    pub fn struct_name(&self) -> &str {
+        &self.struct_name
+    }
+
+    pub fn field_names(&self) -> &[String] {
+        &self.field_names
+    }
+
+    pub fn field_index(&self, field_name: &str) -> Option<usize> {
+        if self.field_names.len() <= 8 {
+            return self
+                .field_names
+                .iter()
+                .position(|candidate| candidate == field_name);
+        }
+        self.field_indexes.get(field_name).copied()
+    }
+
+    pub fn with_appended_field(&self, field_name: String) -> Self {
+        if self.field_indexes.contains_key(&field_name) {
+            return self.clone();
+        }
+        let mut field_names = self.field_names.clone();
+        field_names.push(field_name);
+        Self::new(self.struct_name.clone(), field_names)
+    }
+}
 
 /// VM runtime value.
 ///
@@ -46,8 +106,8 @@ pub enum VmValue {
         fields: Rc<Vec<VmValue>>,
     },
     StructInstance {
-        struct_name: Rc<str>,
-        fields: Rc<BTreeMap<String, VmValue>>,
+        layout: Rc<StructLayout>,
+        fields: Rc<Vec<Option<VmValue>>>,
     },
     TaskHandle(String),
     Channel(VmChannelHandle),
@@ -82,10 +142,7 @@ impl VmValue {
         struct_name: impl Into<Rc<str>>,
         fields: BTreeMap<String, VmValue>,
     ) -> Self {
-        VmValue::StructInstance {
-            struct_name: struct_name.into(),
-            fields: Rc::new(fields),
-        }
+        Self::struct_instance_from_map(struct_name.into().to_string(), fields)
     }
 
     pub fn is_truthy(&self) -> bool {
@@ -144,6 +201,96 @@ impl VmValue {
             VmValue::Iter(_) => "iter",
             VmValue::Pair(_) => "pair",
         }
+    }
+
+    pub fn struct_name(&self) -> Option<&str> {
+        match self {
+            VmValue::StructInstance { layout, .. } => Some(layout.struct_name()),
+            _ => None,
+        }
+    }
+
+    pub fn struct_field(&self, field_name: &str) -> Option<&VmValue> {
+        match self {
+            VmValue::StructInstance { layout, fields } => layout
+                .field_index(field_name)
+                .and_then(|index| fields.get(index))
+                .and_then(Option::as_ref),
+            _ => None,
+        }
+    }
+
+    pub fn struct_fields_map(&self) -> Option<BTreeMap<String, VmValue>> {
+        match self {
+            VmValue::StructInstance { layout, fields } => {
+                Some(struct_fields_to_map(layout, fields))
+            }
+            _ => None,
+        }
+    }
+
+    pub fn struct_instance_from_map(
+        struct_name: impl Into<String>,
+        fields: BTreeMap<String, VmValue>,
+    ) -> Self {
+        let layout = Rc::new(StructLayout::from_map(struct_name, &fields));
+        let slots = layout
+            .field_names()
+            .iter()
+            .map(|name| fields.get(name).cloned())
+            .collect();
+        VmValue::StructInstance {
+            layout,
+            fields: Rc::new(slots),
+        }
+    }
+
+    pub fn struct_instance_with_layout(
+        struct_name: impl Into<String>,
+        field_names: Vec<String>,
+        field_values: BTreeMap<String, VmValue>,
+    ) -> Self {
+        let layout = Rc::new(StructLayout::new(struct_name, field_names));
+        let fields = layout
+            .field_names()
+            .iter()
+            .map(|name| field_values.get(name).cloned())
+            .collect();
+        VmValue::StructInstance {
+            layout,
+            fields: Rc::new(fields),
+        }
+    }
+
+    pub fn struct_instance_with_property(
+        &self,
+        field_name: String,
+        value: VmValue,
+    ) -> Option<Self> {
+        let VmValue::StructInstance { layout, fields } = self else {
+            return None;
+        };
+
+        let mut new_fields = fields.as_ref().clone();
+        let layout = match layout.field_index(&field_name) {
+            Some(index) => {
+                if index >= new_fields.len() {
+                    new_fields.resize(index + 1, None);
+                }
+                new_fields[index] = Some(value);
+                Rc::clone(layout)
+            }
+            None => {
+                let new_layout = Rc::new(layout.with_appended_field(field_name));
+                new_fields.push(Some(value));
+                new_layout
+            }
+        };
+
+        Some(VmValue::StructInstance {
+            layout,
+            fields: Rc::new(new_fields),
+        })
     }
 
     pub fn display(&self) -> String {
@@ -243,12 +390,9 @@ impl VmValue {
                     out.push(')');
                 }
             }
-            VmValue::StructInstance {
-                struct_name,
-                fields,
-            } => {
-                let _ = write!(out, "{struct_name} {{");
-                for (i, (k, v)) in fields.iter().enumerate() {
+            VmValue::StructInstance { layout, fields } => {
+                let _ = write!(out, "{} {{", layout.struct_name());
+                for (i, (k, v)) in struct_fields_to_map(layout, fields).iter().enumerate() {
                     if i > 0 {
                         out.push_str(", ");
                     }
@@ -336,6 +480,23 @@ impl VmValue {
             None
         }
     }
+}
+
+pub fn struct_fields_to_map(
+    layout: &StructLayout,
+    fields: &[Option<VmValue>],
+) -> BTreeMap<String, VmValue> {
+    layout
+        .field_names()
+        .iter()
+        .enumerate()
+        .filter_map(|(index, name)| {
+            fields
+                .get(index)
+                .and_then(Option::as_ref)
+                .map(|value| (name.clone(), value.clone()))
+        })
+        .collect()
 }
 
 /// Sync builtin function for the VM.

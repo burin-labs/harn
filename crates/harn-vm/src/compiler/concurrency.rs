@@ -51,6 +51,7 @@ impl Compiler {
         fn_compiler.enum_names = self.enum_names.clone();
         fn_compiler.interface_methods = self.interface_methods.clone();
         fn_compiler.type_aliases = self.type_aliases.clone();
+        fn_compiler.struct_layouts = self.struct_layouts.clone();
         if let Some(param_name) = params.first() {
             fn_compiler
                 .record_binding_type(&BindingPattern::Identifier(param_name.clone()), param_type);
@@ -82,6 +83,7 @@ impl Compiler {
         fn_compiler.enum_names = self.enum_names.clone();
         fn_compiler.interface_methods = self.interface_methods.clone();
         fn_compiler.type_aliases = self.type_aliases.clone();
+        fn_compiler.struct_layouts = self.struct_layouts.clone();
         fn_compiler.compile_block(body)?;
         fn_compiler.chunk.emit(Op::Return, self.line);
         let func = CompiledFunction {

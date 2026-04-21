@@ -52,6 +52,9 @@ pub fn vm_value_to_json(val: &VmValue) -> serde_json::Value {
             serde_json::Value::Array(list.iter().map(vm_value_to_json).collect())
         }
         VmValue::Dict(d) => vm_value_dict_to_json(d),
+        VmValue::StructInstance { .. } => {
+            vm_value_dict_to_json(&val.struct_fields_map().unwrap_or_default())
+        }
         _ => serde_json::json!(val.display()),
     }
 }

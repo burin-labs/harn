@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
-use crate::value::{values_equal, VmValue};
+use crate::value::{values_equal, StructLayout, VmValue};
 
 use super::canonicalize::resolve_canonical_ref;
 use super::result::ValidationResult;
@@ -134,18 +134,10 @@ fn validate_against_schema(
             normalized = next_value;
             errors.extend(next_errors);
         }
-        VmValue::StructInstance {
-            struct_name,
-            fields,
-        } => {
-            let (next_value, next_errors) = validate_object_fields(
-                fields,
-                Some(struct_name.as_ref()),
-                schema,
-                root_schema,
-                path,
-                options,
-            );
+        VmValue::StructInstance { layout, .. } => {
+            let fields = value.struct_fields_map().unwrap_or_default();
+            let (next_value, next_errors) =
+                validate_object_fields(&fields, Some(layout), schema, root_schema, path, options);
             normalized = next_value;
             errors.extend(next_errors);
         }
@@ -272,7 +264,7 @@ fn validate_against_schema(
 
 fn validate_object_fields(
     fields: &BTreeMap<String, VmValue>,
-    struct_name: Option<&str>,
+    struct_layout: Option<&StructLayout>,
     schema: &BTreeMap<String, VmValue>,
     root_schema: &BTreeMap<String, VmValue>,
     path: &str,
@@ -381,8 +373,14 @@ fn validate_object_fields(
         _ => {}
     }
 
-    let normalized = if let Some(struct_name) = struct_name {
-        VmValue::struct_instance(struct_name, merged)
+    let normalized = if let Some(layout) = struct_layout {
+        let mut field_names = layout.field_names().to_vec();
+        for key in merged.keys() {
+            if layout.field_index(key).is_none() {
+                field_names.push(key.clone());
+            }
+        }
+        VmValue::struct_instance_with_layout(layout.struct_name().to_string(), field_names, merged)
     } else {
         VmValue::Dict(Rc::new(merged))
     };
@@ -485,14 +483,14 @@ pub(super) fn first_param_validation_error(
     }
 
     if schema_is_object_like(schema) {
+        let struct_fields;
         let fields = match value {
-            VmValue::Dict(map) => Some(map.as_ref()),
-            VmValue::StructInstance { fields, .. } => Some(fields.as_ref()),
-            _ => None,
-        };
-        let fields = match fields {
-            Some(fields) => fields,
-            None => {
+            VmValue::Dict(map) => map.as_ref(),
+            VmValue::StructInstance { .. } => {
+                struct_fields = value.struct_fields_map().unwrap_or_default();
+                &struct_fields
+            }
+            _ => {
                 return Some(format!(
                     "parameter '{}': expected dict or struct, got {}",
                     param_name,

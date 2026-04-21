@@ -103,9 +103,11 @@ impl super::super::Vm {
                 "fields" => VmValue::List(fields.clone()),
                 _ => VmValue::Nil,
             },
-            VmValue::StructInstance { fields, .. } => {
-                fields.get(name).cloned().unwrap_or(VmValue::Nil)
-            }
+            VmValue::StructInstance { layout, fields } => layout
+                .field_index(name)
+                .and_then(|index| fields.get(index))
+                .and_then(Clone::clone)
+                .unwrap_or(VmValue::Nil),
             VmValue::Pair(p) => match name {
                 "first" => p.0.clone(),
                 "second" => p.1.clone(),
@@ -372,14 +374,11 @@ impl super::super::Vm {
                         self.env
                             .assign(&var_name, VmValue::Dict(Rc::new(new_map)))?;
                     }
-                    VmValue::StructInstance {
-                        struct_name,
-                        fields,
-                    } => {
-                        let mut new_fields = fields.as_ref().clone();
-                        new_fields.insert(prop_name, new_value);
-                        self.env
-                            .assign(&var_name, VmValue::struct_instance(struct_name, new_fields))?;
+                    VmValue::StructInstance { .. } => {
+                        let new_obj = obj
+                            .struct_instance_with_property(prop_name, new_value)
+                            .expect("struct instance matched above");
+                        self.env.assign(&var_name, new_obj)?;
                     }
                     _ => {
                         return Err(VmError::TypeError(format!(

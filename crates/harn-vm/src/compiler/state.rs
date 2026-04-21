@@ -17,6 +17,7 @@ impl Compiler {
             line: 1,
             column: 1,
             enum_names: std::collections::HashSet::new(),
+            struct_layouts: std::collections::HashMap::new(),
             interface_methods: std::collections::HashMap::new(),
             loop_stack: Vec::new(),
             handler_depth: 0,
@@ -142,6 +143,7 @@ impl Compiler {
         // even when the enum is declared inside a pipeline.
         Self::collect_enum_names(program, &mut self.enum_names);
         self.enum_names.insert("Result".to_string());
+        Self::collect_struct_layouts(program, &mut self.struct_layouts);
         Self::collect_interface_methods(program, &mut self.interface_methods);
         self.collect_type_aliases(program);
 
@@ -206,6 +208,8 @@ impl Compiler {
         pipeline_name: &str,
     ) -> Result<Chunk, CompileError> {
         Self::collect_enum_names(program, &mut self.enum_names);
+        self.enum_names.insert("Result".to_string());
+        Self::collect_struct_layouts(program, &mut self.struct_layouts);
         Self::collect_interface_methods(program, &mut self.interface_methods);
         self.collect_type_aliases(program);
 
@@ -807,6 +811,39 @@ impl Compiler {
         }
     }
 
+    pub(super) fn collect_struct_layouts(
+        nodes: &[SNode],
+        layouts: &mut std::collections::HashMap<String, Vec<String>>,
+    ) {
+        for sn in nodes {
+            match &sn.node {
+                Node::StructDecl { name, fields, .. } => {
+                    layouts.insert(
+                        name.clone(),
+                        fields.iter().map(|field| field.name.clone()).collect(),
+                    );
+                }
+                Node::Pipeline { body, .. }
+                | Node::FnDecl { body, .. }
+                | Node::ToolDecl { body, .. } => {
+                    Self::collect_struct_layouts(body, layouts);
+                }
+                Node::SkillDecl { fields, .. } => {
+                    for (_k, v) in fields {
+                        Self::collect_struct_layouts(std::slice::from_ref(v), layouts);
+                    }
+                }
+                Node::Block(stmts) => {
+                    Self::collect_struct_layouts(stmts, layouts);
+                }
+                Node::AttributedDecl { inner, .. } => {
+                    Self::collect_struct_layouts(std::slice::from_ref(inner), layouts);
+                }
+                _ => {}
+            }
+        }
+    }
+
     pub(super) fn collect_interface_methods(
         nodes: &[SNode],
         interfaces: &mut std::collections::HashMap<String, Vec<String>>,
@@ -861,6 +898,7 @@ impl Compiler {
         fn_compiler.enum_names = self.enum_names.clone();
         fn_compiler.interface_methods = self.interface_methods.clone();
         fn_compiler.type_aliases = self.type_aliases.clone();
+        fn_compiler.struct_layouts = self.struct_layouts.clone();
         fn_compiler.record_param_types(params);
         fn_compiler.emit_default_preamble(params)?;
         fn_compiler.emit_type_checks(params);

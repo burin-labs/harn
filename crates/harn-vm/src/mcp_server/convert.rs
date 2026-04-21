@@ -114,6 +114,13 @@ pub(super) fn vm_value_to_json(value: &VmValue) -> serde_json::Value {
             }
             serde_json::Value::Object(map)
         }
+        VmValue::StructInstance { .. } => {
+            let mut map = serde_json::Map::new();
+            for (k, v) in value.struct_fields_map().unwrap_or_default().iter() {
+                map.insert(k.clone(), vm_value_to_json(v));
+            }
+            serde_json::Value::Object(map)
+        }
         _ => serde_json::json!(value.display()),
     }
 }

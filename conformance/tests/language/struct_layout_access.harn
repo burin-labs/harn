@@ -1,0 +1,24 @@
+pipeline test(task) {
+  struct Point {
+    x: int
+    y: int
+    z?: int
+  }
+  var point = Point {x: 1, y: 2}
+  assert_eq(point.x, 1, "struct field read")
+  assert_eq(point.z, nil, "missing optional struct field reads nil")
+  point.y = 5
+  point.z = 9
+  assert_eq(point.y + point.z, 14, "struct field assignment")
+  let same = Point {z: 9, y: 5, x: 1}
+  assert_eq(point, same, "struct equality ignores construction order")
+  assert_eq("${point}", "Point {x: 1, y: 5, z: 9}", "struct display")
+  assert_eq(json_stringify(point), "{\"x\":1,\"y\":5,\"z\":9}", "struct JSON")
+  let schema = {
+    type: "dict",
+    properties: {x: {type: "int"}, y: {type: "int"}, z: {type: "int"}, label: {type: "string", default: "origin"}},
+  }
+  let normalized = unwrap(schema_parse(point, schema))
+  assert_eq(normalized.label, "origin", "schema defaults preserve struct access")
+  log("struct layout access: all tests passed")
+}

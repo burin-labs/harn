@@ -53,13 +53,11 @@ impl Debugger {
                     (self.alloc_var_ref(children), display)
                 }
             }
-            VmValue::StructInstance {
-                struct_name,
-                fields,
-            } => {
+            VmValue::StructInstance { layout, .. } => {
+                let fields = val.struct_fields_map().unwrap_or_default();
                 let children: Vec<(String, VmValue)> =
                     fields.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-                let display = struct_name.to_string();
+                let display = layout.struct_name().to_string();
                 if children.is_empty() {
                     (0, display)
                 } else {
@@ -457,7 +455,7 @@ impl Debugger {
             current = match seg {
                 PathSegment::Field(f) => match &current {
                     VmValue::Dict(map) => map.get(f.as_str())?.clone(),
-                    VmValue::StructInstance { fields, .. } => fields.get(f.as_str())?.clone(),
+                    VmValue::StructInstance { .. } => current.struct_field(f.as_str())?.clone(),
                     _ => return None,
                 },
                 PathSegment::Index(i) => match &current {

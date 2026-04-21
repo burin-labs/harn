@@ -9,11 +9,11 @@ impl crate::vm::Vm {
         args: &[VmValue],
         functions: &[CompiledFunction],
     ) -> Result<VmValue, VmError> {
-        let VmValue::StructInstance { struct_name, .. } = obj else {
+        let VmValue::StructInstance { layout, .. } = obj else {
             unreachable!("struct instance dispatch only calls struct instance handler");
         };
 
-        let impl_key = format!("__impl_{}", struct_name);
+        let impl_key = format!("__impl_{}", layout.struct_name());
         if let Some(VmValue::Dict(impl_dict)) = self.env.get(&impl_key) {
             if let Some(VmValue::Closure(closure)) = impl_dict.get(method) {
                 let mut full_args = vec![obj.clone()];

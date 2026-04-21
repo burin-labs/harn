@@ -48,7 +48,7 @@ pub(crate) fn register_shape_builtins(vm: &mut Vm) {
         let methods_csv = args.get(3).map(|a| a.display()).unwrap_or_default();
 
         let struct_name = match &val {
-            VmValue::StructInstance { struct_name, .. } => struct_name.clone(),
+            VmValue::StructInstance { layout, .. } => layout.struct_name().to_string(),
             _ => {
                 return Err(VmError::TypeError(format!(
                     "parameter '{}': expected value satisfying interface '{}', got {}",
@@ -105,14 +105,14 @@ pub(crate) fn register_shape_builtins(vm: &mut Vm) {
             _ => return Ok(VmValue::Nil),
         };
 
-        let fields: Option<&BTreeMap<String, VmValue>> = match &val {
-            VmValue::Dict(map) => Some(map.as_ref()),
-            VmValue::StructInstance { fields, .. } => Some(fields.as_ref()),
-            _ => None,
-        };
-        let fields = match fields {
-            Some(f) => f,
-            None => {
+        let struct_fields;
+        let fields = match &val {
+            VmValue::Dict(map) => map.as_ref(),
+            VmValue::StructInstance { .. } => {
+                struct_fields = val.struct_fields_map().unwrap_or_default();
+                &struct_fields
+            }
+            _ => {
                 return Err(VmError::TypeError(format!(
                     "parameter '{}': expected dict or struct, got {}",
                     param_name,
@@ -166,11 +166,45 @@ pub(crate) fn register_shape_builtins(vm: &mut Vm) {
     vm.register_builtin("__make_struct", |args, _out| {
         let struct_name = args.first().map(|a| a.display()).unwrap_or_default();
         let fields_dict = args.get(1).cloned().unwrap_or(VmValue::Nil);
+        let layout_fields = args.get(2).and_then(field_names_from_value);
         match fields_dict {
-            VmValue::Dict(d) => Ok(VmValue::struct_instance(struct_name, d.as_ref().clone())),
-            _ => Ok(VmValue::struct_instance(struct_name, BTreeMap::new())),
+            VmValue::Dict(d) => match layout_fields {
+                Some(field_names) => Ok(VmValue::struct_instance_with_layout(
+                    struct_name,
+                    field_names,
+                    (*d).clone(),
+                )),
+                None => Ok(VmValue::struct_instance_from_map(struct_name, (*d).clone())),
+            },
+            _ => match layout_fields {
+                Some(field_names) => Ok(VmValue::struct_instance_with_layout(
+                    struct_name,
+                    field_names,
+                    BTreeMap::new(),
+                )),
+                None => Ok(VmValue::struct_instance_from_map(
+                    struct_name,
+                    BTreeMap::new(),
+                )),
+            },
         }
     });
+}
+
+fn field_names_from_value(value: &VmValue) -> Option<Vec<String>> {
+    let VmValue::List(items) = value else {
+        return None;
+    };
+
+    Some(
+        items
+            .iter()
+            .filter_map(|item| match item {
+                VmValue::String(name) => Some(name.to_string()),
+                _ => None,
+            })
+            .collect(),
+    )
 }
 
 /// Parse a shape spec string and validate fields against it.
@@ -204,17 +238,14 @@ fn assert_shape_fields(
             Some(val) => {
                 if type_spec.starts_with('{') && type_spec.ends_with('}') {
                     let inner_spec = &type_spec[1..type_spec.len() - 1];
-                    let nested_fields: Option<&BTreeMap<String, VmValue>> = match val {
-                        VmValue::Dict(map) => Some(map.as_ref()),
-                        VmValue::StructInstance { fields, .. } => Some(fields.as_ref()),
-                        _ => None,
-                    };
-                    match nested_fields {
-                        Some(nf) => {
-                            let nested_param = format!("{}.{}", param_name, field_name);
-                            assert_shape_fields(nf, &nested_param, inner_spec)?;
+                    let nested_struct_fields;
+                    let nested_fields = match val {
+                        VmValue::Dict(map) => map.as_ref(),
+                        VmValue::StructInstance { .. } => {
+                            nested_struct_fields = val.struct_fields_map().unwrap_or_default();
+                            &nested_struct_fields
                         }
-                        None => {
+                        _ => {
                             return Err(VmError::TypeError(format!(
                                 "parameter '{}': field '{}' expected dict or struct, got {}",
                                 param_name,
@@ -222,6 +253,10 @@ fn assert_shape_fields(
                                 val.type_name()
                             )));
                         }
+                    };
+                    {
+                        let nested_param = format!("{}.{}", param_name, field_name);
+                        assert_shape_fields(nested_fields, &nested_param, inner_spec)?;
                     }
                 } else if type_spec.contains('|') {
                     let actual_type = val.type_name();
