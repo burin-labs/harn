@@ -23,6 +23,7 @@ pub(super) async fn run(args: OrchestratorResumeArgs) -> Result<(), String> {
         reason: args.reason.clone(),
         metadata: None,
         responded_at: None,
+        signature: None,
     };
     harn_vm::append_hitl_response(None, response).await?;
 

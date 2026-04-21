@@ -7,6 +7,7 @@ use std::time::Duration as StdDuration;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
+use sha2::Digest;
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 use uuid::Uuid;
@@ -28,6 +29,7 @@ use crate::vm::{clone_async_builtin_child_vm, Vm};
 
 const HITL_EVENT_LOG_QUEUE_DEPTH: usize = 128;
 const HITL_APPROVAL_TIMEOUT_MS: u64 = 24 * 60 * 60 * 1000;
+const HITL_QUESTION_TIMEOUT_MS: u64 = 24 * 60 * 60 * 1000;
 
 pub const HITL_QUESTIONS_TOPIC: &str = "hitl.questions";
 pub const HITL_APPROVALS_TOPIC: &str = "hitl.approvals";
@@ -113,6 +115,8 @@ pub struct HitlHostResponse {
     pub metadata: Option<JsonValue>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub responded_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signature: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -160,8 +164,16 @@ struct ApprovalOptions {
 #[derive(Clone, Debug)]
 struct ApprovalProgress {
     reviewers: BTreeSet<String>,
+    signatures: Vec<ApprovalSignature>,
     reason: Option<String>,
     approved_at: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct ApprovalSignature {
+    reviewer: String,
+    signed_at: String,
+    signature: String,
 }
 
 #[derive(Clone, Debug)]
@@ -476,6 +488,7 @@ async fn escalate_to_impl(args: &[VmValue]) -> Result<VmValue, VmError> {
         payload: json!({
             "role": role,
             "reason": reason,
+            "capability_policy": escalation_capability_policy(),
         }),
     };
     create_request_waitpoint(&log, &request).await?;
@@ -755,6 +768,7 @@ async fn resolve_approval_state(
         .collect::<BTreeSet<_>>();
     let mut progress = ApprovalProgress {
         reviewers: BTreeSet::new(),
+        signatures: Vec::new(),
         reason: None,
         approved_at: None,
     };
@@ -781,7 +795,21 @@ async fn resolve_approval_state(
         }
         if response.approved.unwrap_or(false) {
             if let Some(reviewer) = response.reviewer.clone() {
-                progress.reviewers.insert(reviewer);
+                let signed_at = response.responded_at.clone().unwrap_or_else(now_rfc3339);
+                progress.reviewers.insert(reviewer.clone());
+                progress.signatures.push(ApprovalSignature {
+                    reviewer: reviewer.clone(),
+                    signed_at: signed_at.clone(),
+                    signature: response.signature.clone().unwrap_or_else(|| {
+                        approval_receipt_signature(
+                            &request.request_id,
+                            &reviewer,
+                            &signed_at,
+                            true,
+                            response.reason.as_deref(),
+                        )
+                    }),
+                });
             }
             progress.reason = response.reason.clone();
             progress.approved_at = response.responded_at.clone();
@@ -844,7 +872,24 @@ fn approval_record_json(progress: &ApprovalProgress) -> JsonValue {
         "reviewers": progress.reviewers.iter().cloned().collect::<Vec<_>>(),
         "approved_at": progress.approved_at.clone().unwrap_or_else(now_rfc3339),
         "reason": progress.reason,
+        "signatures": progress.signatures,
     })
+}
+
+fn approval_receipt_signature(
+    request_id: &str,
+    reviewer: &str,
+    signed_at: &str,
+    approved: bool,
+    reason: Option<&str>,
+) -> String {
+    let material = format!(
+        "harn-hitl-approval-v1\nrequest_id:{request_id}\nreviewer:{reviewer}\nsigned_at:{signed_at}\napproved:{approved}\nreason:{}\n",
+        reason.unwrap_or("")
+    );
+    let hash = sha2::Sha256::digest(material.as_bytes());
+    let hex: String = hash.iter().map(|byte| format!("{byte:02x}")).collect();
+    format!("sha256:{hex}")
 }
 
 fn approval_record_from_waitpoint(
@@ -878,6 +923,7 @@ async fn approval_wait_error(
                     reason: record.reason.clone(),
                     metadata: record.metadata.clone(),
                     responded_at: record.cancelled_at.clone(),
+                    signature: None,
                 },
             );
         }
@@ -1058,6 +1104,7 @@ fn parse_hitl_response_dict(
             .get("metadata")
             .map(crate::llm::vm_value_to_json),
         responded_at: response_dict.get("responded_at").map(VmValue::display),
+        signature: response_dict.get("signature").map(VmValue::display),
     })
 }
 
@@ -1075,7 +1122,7 @@ fn parse_ask_user_options(value: Option<&VmValue>) -> Result<AskUserOptions, VmE
     let Some(value) = value else {
         return Ok(AskUserOptions {
             schema: None,
-            timeout: None,
+            timeout: Some(default_question_timeout()),
             default: None,
         });
     };
@@ -1087,12 +1134,26 @@ fn parse_ask_user_options(value: Option<&VmValue>) -> Result<AskUserOptions, VmE
             .get("schema")
             .cloned()
             .filter(|value| !matches!(value, VmValue::Nil)),
-        timeout: dict.get("timeout").map(parse_duration_value).transpose()?,
+        timeout: dict
+            .get("timeout")
+            .map(parse_duration_value)
+            .transpose()?
+            .or_else(|| Some(default_question_timeout())),
         default: dict
             .get("default")
             .cloned()
             .filter(|value| !matches!(value, VmValue::Nil)),
     })
+}
+
+fn default_question_timeout() -> StdDuration {
+    StdDuration::from_millis(HITL_QUESTION_TIMEOUT_MS)
+}
+
+fn escalation_capability_policy() -> JsonValue {
+    crate::orchestration::current_execution_policy()
+        .and_then(|policy| serde_json::to_value(policy).ok())
+        .unwrap_or(JsonValue::Null)
 }
 
 fn parse_approval_options(

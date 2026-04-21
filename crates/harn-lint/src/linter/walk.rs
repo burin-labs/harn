@@ -633,7 +633,9 @@ impl<'a> Linter<'a> {
 
             Node::TryExpr { body } => {
                 self.push_scope();
+                self.value_block_depth += 1;
                 self.lint_block(body);
+                self.value_block_depth -= 1;
                 self.pop_scope();
             }
 

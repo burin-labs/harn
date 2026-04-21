@@ -456,7 +456,9 @@ in Harn.
   resolution from recorded responses, a shared `std/hitl` type catalog,
   and host ingress via `harn.hitl.respond` on the ACP/MCP bridge. Added
   HITL unit/conformance coverage, `docs/src/hitl.md`, quickref/spec
-  documentation, and `harn orchestrator resume <request_id>` for manual
+  documentation, signed approval timestamp receipts that replay
+  deterministically, strict-mode lint coverage for discarded approval
+  records, and `harn orchestrator resume <request_id>` for manual
   escalation acceptance.
 
 - **LLM-gated trigger predicates with replay-safe cost governance

@@ -845,7 +845,7 @@ These are typed stdlib primitives, not language syntax. Shared type aliases
 live in `std/hitl`; the builtins themselves are always available.
 
 - `ask_user<T>(prompt, {schema?: Schema<T>, timeout?: duration, default?: T}) -> T`
-- `request_approval(action, {detail?, quorum?, reviewers?, deadline?}) -> {approved, reviewers, approved_at, reason}`
+- `request_approval(action, {detail?, quorum?, reviewers?, deadline?}) -> {approved, reviewers, approved_at, reason, signatures}`
 - `dual_control<T>(n, m, action: fn() -> T, approvers?) -> T`
 - `escalate_to(role, reason) -> {request_id, role, reason, trace_id, status, accepted_at, reviewer}`
 - `hitl_pending({since?, until?, kinds?, agent?, limit?} | nil)

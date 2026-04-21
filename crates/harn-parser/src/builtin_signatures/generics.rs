@@ -322,6 +322,31 @@ fn approval_record_type() -> TypeExpr {
             ]),
             optional: false,
         },
+        ShapeField {
+            name: "signatures".into(),
+            type_expr: TypeExpr::List(Box::new(approval_signature_type())),
+            optional: false,
+        },
+    ])
+}
+
+fn approval_signature_type() -> TypeExpr {
+    TypeExpr::Shape(vec![
+        ShapeField {
+            name: "reviewer".into(),
+            type_expr: TypeExpr::Named("string".into()),
+            optional: false,
+        },
+        ShapeField {
+            name: "signed_at".into(),
+            type_expr: TypeExpr::Named("string".into()),
+            optional: false,
+        },
+        ShapeField {
+            name: "signature".into(),
+            type_expr: TypeExpr::Named("string".into()),
+            optional: false,
+        },
     ])
 }
 

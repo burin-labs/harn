@@ -17,6 +17,7 @@ Pause the current dispatch until the host returns a typed response.
 - If `schema` is present, the returned value must satisfy it.
 - If `default` is present and no schema is supplied, Harn coerces the host
   response toward the default's type when possible.
+- `timeout` defaults to 24 hours.
 - If the wait times out, Harn returns `default` when present; otherwise it
   throws `HumanTimeoutError`.
 - Event log:
@@ -58,8 +59,19 @@ type ApprovalRecord = {
   reviewers: list<string>,
   approved_at: string,
   reason: string | nil,
+  signatures: list<ApprovalSignature>,
+}
+
+type ApprovalSignature = {
+  reviewer: string,
+  signed_at: string,
+  signature: string,
 }
 ```
+
+Each counted approval contributes one signature receipt. Hosts may provide a
+signature directly; otherwise the VM records a deterministic receipt signature
+over the request id, reviewer, approval decision, reason, and signed timestamp.
 
 ### `dual_control<T>(n: int, m: int, action: fn() -> T, approvers?: list<string>) -> T`
 
@@ -82,6 +94,9 @@ Raise the current dispatch to a higher-trust role and block until the host
 accepts the escalation.
 
 - The request is persisted before the dispatch pauses.
+- The request payload includes the active capability policy when one is
+  installed, so hosts can route or resolve the requested role against the same
+  capability ceiling the VM is enforcing.
 - The host resolves it by appending an acceptance event.
 - If nobody accepts it, the dispatch remains paused until a host or operator
   resumes it explicitly.
@@ -175,6 +190,8 @@ Replay is event-log-driven.
 
 This makes `trigger_replay(...)` and `harn trigger replay <event-id>` replay-safe
 for HITL flows as long as the original run recorded the HITL response events.
+Approval reviewer identities, signed timestamps, and receipt signatures are
+reused from those events during replay.
 
 ## Patterns
 

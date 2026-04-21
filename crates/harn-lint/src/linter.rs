@@ -75,6 +75,9 @@ pub(crate) struct Linter<'a> {
     /// Threshold above which the cyclomatic-complexity rule fires.
     /// Configurable via `[lint].complexity_threshold` in `harn.toml`.
     pub(crate) complexity_threshold: usize,
+    /// Suppress the discarded-approval-result lint for the final expression
+    /// in value-producing blocks such as `try { ... }`.
+    pub(super) value_block_depth: usize,
 }
 
 impl<'a> Linter<'a> {
@@ -104,6 +107,7 @@ impl<'a> Linter<'a> {
             return_type_stack: Vec::new(),
             complexity_suppression_depth: 0,
             complexity_threshold: DEFAULT_COMPLEXITY_THRESHOLD,
+            value_block_depth: 0,
         }
     }
 
@@ -137,6 +141,10 @@ impl<'a> Linter<'a> {
 
     pub(super) fn is_assert_builtin(name: &str) -> bool {
         matches!(name, "assert" | "assert_eq" | "assert_ne")
+    }
+
+    pub(super) fn is_approval_record_builtin(name: &str) -> bool {
+        name == "request_approval"
     }
 
     /// Score the body of a function/tool and emit a
@@ -758,7 +766,7 @@ impl<'a> Linter<'a> {
 
         let mut found_terminator = false;
 
-        for node in nodes {
+        for (idx, node) in nodes.iter().enumerate() {
             if found_terminator {
                 self.diagnostics.push(LintDiagnostic {
                     rule: "unreachable-code",
@@ -772,12 +780,37 @@ impl<'a> Linter<'a> {
                 break;
             }
 
+            let final_value_expr = self.value_block_depth > 0 && idx + 1 == nodes.len();
+            if !final_value_expr {
+                self.check_discarded_approval_result(node);
+            }
+
             self.lint_node(node);
 
             if stmt_definitely_exits(node) {
                 found_terminator = true;
             }
         }
+    }
+
+    fn check_discarded_approval_result(&mut self, node: &SNode) {
+        let Node::FunctionCall { name, .. } = &node.node else {
+            return;
+        };
+        if !Self::is_approval_record_builtin(name) {
+            return;
+        }
+        self.diagnostics.push(LintDiagnostic {
+            rule: "unhandled-approval-result",
+            message: format!("approval result from `{name}` is discarded"),
+            span: node.span,
+            severity: LintSeverity::Warning,
+            suggestion: Some(
+                "bind the result, inspect its signed approver receipts, or explicitly assign it to `_`"
+                    .to_string(),
+            ),
+            fix: None,
+        });
     }
 
     /// Run post-walk analysis and finalize diagnostics.
