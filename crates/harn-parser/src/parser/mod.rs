@@ -162,6 +162,34 @@ pipeline test(task) {
     }
 
     #[test]
+    fn parses_struct_literal_syntax_without_prior_struct_decl() {
+        let source = r#"
+pipeline test(task) {
+  let point = Point { x: 3, y: 4 }
+}
+"#;
+
+        let program = parse_source(source).expect("should parse");
+        let pipeline = program
+            .iter()
+            .find(|node| matches!(node.node, Node::Pipeline { .. }))
+            .expect("pipeline node");
+        let body = match &pipeline.node {
+            Node::Pipeline { body, .. } => body,
+            _ => unreachable!(),
+        };
+        assert!(matches!(
+            &body[0].node,
+            Node::LetBinding { value, .. }
+                if matches!(
+                    value.node,
+                    Node::StructConstruct { ref struct_name, ref fields }
+                        if struct_name == "Point" && fields.len() == 2
+                )
+        ));
+    }
+
+    #[test]
     fn parses_exponentiation_as_right_associative() {
         let mut lexer = Lexer::new("a ** b ** c");
         let tokens = lexer.tokenize().expect("tokens");

@@ -287,6 +287,16 @@ impl TypeScope {
         names
     }
 
+    /// Collect every struct name visible through this scope chain.
+    /// Used for typo suggestions on struct construction sites.
+    pub(super) fn all_struct_names(&self) -> Vec<String> {
+        let mut names: Vec<String> = self.structs.keys().cloned().collect();
+        if let Some(parent) = &self.parent {
+            names.extend(parent.all_struct_names());
+        }
+        names
+    }
+
     pub(super) fn get_fn(&self, name: &str) -> Option<&FnSignature> {
         self.functions
             .get(name)

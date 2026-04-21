@@ -109,7 +109,7 @@ impl TypeChecker {
                 type_ann,
                 value,
             } => {
-                self.check_binops(value, scope);
+                self.check_node(value, scope);
                 let inferred = self.infer_type(value, scope);
                 if let BindingPattern::Identifier(name) = pattern {
                     if let Some(expected) = type_ann {
@@ -164,7 +164,7 @@ impl TypeChecker {
                 type_ann,
                 value,
             } => {
-                self.check_binops(value, scope);
+                self.check_node(value, scope);
                 let inferred = self.infer_type(value, scope);
                 if let BindingPattern::Identifier(name) = pattern {
                     if let Some(expected) = type_ann {
@@ -1176,6 +1176,33 @@ impl TypeChecker {
                                 entry.value.span,
                             );
                         }
+                    }
+                } else {
+                    let suggestion = crate::diagnostic::find_closest_match(
+                        struct_name,
+                        scope.all_struct_names().iter().map(|name| name.as_str()),
+                        2,
+                    )
+                    .map(|candidate| candidate.to_string());
+                    let message = match &suggestion {
+                        Some(candidate) => format!(
+                            "unknown struct type `{struct_name}` — did you mean `{candidate}`?"
+                        ),
+                        None => format!("unknown struct type `{struct_name}`"),
+                    };
+                    match suggestion {
+                        Some(candidate) => self.error_at_with_help(
+                            message,
+                            span,
+                            format!("declare `struct {candidate} {{ ... }}` or fix the type name"),
+                        ),
+                        None => self.error_at_with_help(
+                            message,
+                            span,
+                            format!(
+                                "declare `struct {struct_name} {{ ... }}` before constructing it"
+                            ),
+                        ),
                     }
                 }
             }
