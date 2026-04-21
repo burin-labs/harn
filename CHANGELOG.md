@@ -381,9 +381,9 @@ in Harn.
   deliveries are dropped instead of being enqueued twice. This
   replaces the temporary `block_on` bridge inside
   `GenericWebhookConnector::normalize_inbound` with a proper async
-  post-processing step on the dispatch path, keeping the connector
-  trait sync. The cron connector keeps its existing async dedupe path
-  and explicitly avoids double-claiming the same inbox key.
+  post-processing step on the dispatch path. The cron connector keeps
+  its existing async dedupe path and explicitly avoids double-claiming
+  the same inbox key.
 
 - **Replay-scoped `HARN_REPLAY` no longer races across concurrent
   dispatches (harn#244).** Replay handlers still observe
