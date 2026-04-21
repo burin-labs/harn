@@ -65,7 +65,7 @@ pub fn format_source_opts(source: &str, opts: &FmtOptions) -> Result<String, Str
     let mut parser = Parser::new(parser_tokens);
     let program = parser.parse().map_err(|e| e.to_string())?;
 
-    let mut fmt = Formatter::new(comments, opts.line_width, opts.separator_width);
+    let mut fmt = Formatter::new(source, comments, opts.line_width, opts.separator_width);
     fmt.format_program(&program);
     Ok(fmt.finish())
 }

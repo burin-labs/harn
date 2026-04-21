@@ -1,0 +1,17 @@
+pipeline test(task) {
+  let template = """
+// Auto-generated code - do not edit.
+pub fn {{ fn_name }}() -> dict {
+  return {}
+}
+"""
+  let name = "build"
+  let report = """
+root:
+  title: ${name}
+  nested:
+    keep: exact  
+"""
+  log(template)
+  log(report)
+}

@@ -6,7 +6,7 @@ use crate::helpers::{
 
 use super::Formatter;
 
-impl Formatter {
+impl Formatter<'_> {
     /// Hybrid context (closure / block bodies): only handles node types that
     /// need multi-line treatment different from `format_expr`.
     pub(super) fn format_expr_or_stmt(&self, node: &SNode, indent_level: usize) -> String {

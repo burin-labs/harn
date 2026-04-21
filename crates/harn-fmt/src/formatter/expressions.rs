@@ -5,12 +5,12 @@ use crate::helpers::*;
 
 use super::Formatter;
 
-impl Formatter {
+impl Formatter<'_> {
     pub(crate) fn format_expr(&self, node: &SNode) -> String {
         match &node.node {
             Node::StringLiteral(s) => {
                 if node.span.line != node.span.end_line {
-                    format_multiline_triple_quoted(s, self.indent)
+                    self.source_slice(node).to_string()
                 } else {
                     let escaped = escape_string(s);
                     format!("\"{escaped}\"")
@@ -21,16 +21,7 @@ impl Formatter {
             }
             Node::InterpolatedString(segments) => {
                 if node.span.line != node.span.end_line {
-                    let mut body = String::new();
-                    for seg in segments {
-                        match seg {
-                            StringSegment::Literal(s) => body.push_str(s),
-                            StringSegment::Expression(e, _, _) => {
-                                body.push_str(&format!("${{{e}}}"));
-                            }
-                        }
-                    }
-                    return format_multiline_triple_quoted(&body, self.indent);
+                    return self.source_slice(node).to_string();
                 }
                 let mut result = String::from("\"");
                 for seg in segments {

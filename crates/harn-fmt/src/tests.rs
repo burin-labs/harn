@@ -1210,16 +1210,12 @@ fn test_section_header_respects_custom_separator_width() {
 }
 
 #[test]
-fn test_multiline_string_preserves_indent() {
-    let source = "pipeline test(task) {\n  let g = \"\"\"\n    hello world\n    second line\n    \"\"\"\n  log(g)\n}\n";
+fn test_multiline_string_preserves_verbatim_body() {
+    let source = "pipeline test(task) {\n  let template = \"\"\"\n// Auto-generated code - do not edit.\npub fn {{ fn_name }}() -> dict {\n  return {}\n}\n\"\"\"\n  log(template)\n}\n";
     let out = format_source(source).unwrap();
-    assert!(
-        out.contains("    hello world"),
-        "multiline string body should keep indent, got:\n{out}"
-    );
-    assert!(
-        out.contains("    \"\"\""),
-        "closing \"\"\" should be indented one level deeper than the let, got:\n{out}"
+    assert_eq!(
+        out, source,
+        "formatter should preserve triple-quoted strings verbatim"
     );
     let out2 = format_source(&out).unwrap();
     assert_eq!(
@@ -1229,12 +1225,12 @@ fn test_multiline_string_preserves_indent() {
 }
 
 #[test]
-fn test_multiline_interpolated_string_preserves_indent() {
-    let source = "pipeline test(task) {\n  let name = \"x\"\n  let g = \"\"\"\n    hi ${name}\n    \"\"\"\n  log(g)\n}\n";
+fn test_multiline_interpolated_string_preserves_verbatim_body() {
+    let source = "pipeline test(task) {\n  let name = \"x\"\n  let g = \"\"\"\n  root:\n    name: ${name}  \n    nested:\n      keep: exact\n\"\"\"\n  log(g)\n}\n";
     let out = format_source(source).unwrap();
-    assert!(
-        out.contains("    hi ${name}"),
-        "interpolated body should keep indent, got:\n{out}"
+    assert_eq!(
+        out, source,
+        "formatter should preserve interpolated triple-quoted strings verbatim"
     );
     let out2 = format_source(&out).unwrap();
     assert_eq!(out, out2, "formatter should be idempotent");

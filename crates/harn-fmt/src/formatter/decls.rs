@@ -7,7 +7,7 @@ use crate::helpers::{
 
 use super::Formatter;
 
-impl Formatter {
+impl Formatter<'_> {
     pub(super) fn format_node(&mut self, node: &SNode) {
         let node_line = node.span.line;
         match &node.node {
