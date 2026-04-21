@@ -424,6 +424,16 @@ async fn dispatch_handle_from_outcome(
             error: outcome.error,
             result: None,
         }),
+        crate::triggers::DispatchStatus::Waiting => Ok(DispatchHandleRecord {
+            event_id: event_id.to_string(),
+            binding_id: binding.id.clone(),
+            binding_version: binding.version,
+            status: "waiting".to_string(),
+            replay_of_event_id,
+            dlq_entry_id: None,
+            error: None,
+            result: outcome.result,
+        }),
     }
 }
 

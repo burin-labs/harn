@@ -34,6 +34,7 @@ const CRON_TICK_TOPIC: &str = "connectors.cron.tick";
 const TEST_PUMP_DELAY_ENV: &str = "HARN_TEST_ORCHESTRATOR_PUMP_DELAY_MS";
 const TEST_INBOX_TASK_DELAY_ENV: &str = "HARN_TEST_ORCHESTRATOR_INBOX_TASK_DELAY_MS";
 const TEST_FAIL_PENDING_PUMP_ENV: &str = "HARN_TEST_ORCHESTRATOR_FAIL_PENDING_PUMP";
+const WAITPOINT_SERVICE_INTERVAL: Duration = Duration::from_millis(250);
 
 pub(crate) async fn run(args: OrchestratorServeArgs) -> Result<(), String> {
     let local = tokio::task::LocalSet::new();
@@ -173,6 +174,9 @@ async fn run_local(args: OrchestratorServeArgs) -> Result<(), String> {
     let pending_pump = spawn_pending_pump(event_log.clone(), dispatcher.clone())?;
     let cron_pump = spawn_cron_pump(event_log.clone(), dispatcher.clone())?;
     let inbox_pump = spawn_inbox_pump(event_log.clone(), dispatcher.clone())?;
+    let waitpoint_pump = spawn_waitpoint_resume_pump(event_log.clone(), dispatcher.clone())?;
+    let waitpoint_cancel_pump = spawn_waitpoint_cancel_pump(event_log.clone(), dispatcher.clone())?;
+    let waitpoint_sweeper = spawn_waitpoint_sweeper(dispatcher.clone());
 
     let listener = ListenerRuntime::start(ListenerConfig {
         bind: args.bind,
@@ -306,6 +310,9 @@ async fn run_local(args: OrchestratorServeArgs) -> Result<(), String> {
         pending_pump,
         cron_pump,
         inbox_pump,
+        waitpoint_pump,
+        waitpoint_cancel_pump,
+        waitpoint_sweeper,
     )
     .await;
     if let Err(error) = observability.shutdown() {
@@ -750,6 +757,21 @@ impl PumpHandle {
     }
 }
 
+struct WaitpointSweepHandle {
+    stop_tx: watch::Sender<bool>,
+    join: tokio::task::JoinHandle<Result<(), String>>,
+}
+
+impl WaitpointSweepHandle {
+    async fn shutdown(self) -> Result<(), String> {
+        let _ = self.stop_tx.send(true);
+        match self.join.await {
+            Ok(result) => result,
+            Err(error) => Err(format!("waitpoint sweeper join failed: {error}")),
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 struct PendingTriggerRecord {
     trigger_id: String,
@@ -958,6 +980,64 @@ fn spawn_inbox_pump(
     Ok(PumpHandle { mode_tx, join })
 }
 
+fn spawn_waitpoint_resume_pump(
+    event_log: Arc<harn_vm::event_log::AnyEventLog>,
+    dispatcher: harn_vm::Dispatcher,
+) -> Result<PumpHandle, String> {
+    let topic = harn_vm::event_log::Topic::new(harn_vm::WAITPOINT_RESUME_TOPIC)
+        .map_err(|error| error.to_string())?;
+    spawn_topic_pump(event_log, topic, move |logged| {
+        let dispatcher = dispatcher.clone();
+        async move { harn_vm::process_waitpoint_resume_event(&dispatcher, logged).await }
+    })
+}
+
+fn spawn_waitpoint_cancel_pump(
+    event_log: Arc<harn_vm::event_log::AnyEventLog>,
+    dispatcher: harn_vm::Dispatcher,
+) -> Result<PumpHandle, String> {
+    let topic = harn_vm::event_log::Topic::new(harn_vm::TRIGGER_CANCEL_REQUESTS_TOPIC)
+        .map_err(|error| error.to_string())?;
+    spawn_topic_pump(event_log, topic, move |logged| {
+        let dispatcher = dispatcher.clone();
+        async move {
+            if logged.kind != "dispatch_cancel_requested" {
+                return Ok(false);
+            }
+            harn_vm::service_waitpoints_once(&dispatcher, None)
+                .await
+                .map_err(|error| {
+                    format!("failed to service waitpoints after cancel request: {error}")
+                })?;
+            Ok(true)
+        }
+    })
+}
+
+fn spawn_waitpoint_sweeper(dispatcher: harn_vm::Dispatcher) -> WaitpointSweepHandle {
+    let (stop_tx, mut stop_rx) = watch::channel(false);
+    let join = tokio::task::spawn_local(async move {
+        let mut interval = tokio::time::interval(WAITPOINT_SERVICE_INTERVAL);
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            tokio::select! {
+                changed = stop_rx.changed() => {
+                    if changed.is_err() || *stop_rx.borrow() {
+                        break;
+                    }
+                }
+                _ = interval.tick() => {
+                    harn_vm::service_waitpoints_once(&dispatcher, None)
+                        .await
+                        .map_err(|error| format!("failed to service waitpoints on sweep: {error}"))?;
+                }
+            }
+        }
+        Ok(())
+    });
+    WaitpointSweepHandle { stop_tx, join }
+}
+
 fn spawn_topic_pump<F, Fut>(
     event_log: Arc<harn_vm::event_log::AnyEventLog>,
     topic: harn_vm::event_log::Topic,
@@ -1086,6 +1166,9 @@ async fn graceful_shutdown(
     pending_pump: PumpHandle,
     cron_pump: PumpHandle,
     inbox_pump: PumpHandle,
+    waitpoint_pump: PumpHandle,
+    waitpoint_cancel_pump: PumpHandle,
+    waitpoint_sweeper: WaitpointSweepHandle,
 ) -> Result<(), String> {
     eprintln!("[harn] signal received, starting graceful shutdown...");
     let listener_in_flight = listener
@@ -1163,6 +1246,35 @@ async fn graceful_shutdown(
         ctx.drain_config,
     )
     .await?;
+    let waitpoint_stats = waitpoint_pump
+        .drain(
+            topic_latest_id(ctx.event_log, harn_vm::WAITPOINT_RESUME_TOPIC).await?,
+            ctx.drain_config,
+            deadline,
+        )
+        .await?;
+    emit_drain_truncated(
+        ctx.event_log,
+        harn_vm::WAITPOINT_RESUME_TOPIC,
+        waitpoint_stats,
+        ctx.drain_config,
+    )
+    .await?;
+    let waitpoint_cancel_stats = waitpoint_cancel_pump
+        .drain(
+            topic_latest_id(ctx.event_log, harn_vm::TRIGGER_CANCEL_REQUESTS_TOPIC).await?,
+            ctx.drain_config,
+            deadline,
+        )
+        .await?;
+    emit_drain_truncated(
+        ctx.event_log,
+        harn_vm::TRIGGER_CANCEL_REQUESTS_TOPIC,
+        waitpoint_cancel_stats,
+        ctx.drain_config,
+    )
+    .await?;
+    waitpoint_sweeper.shutdown().await?;
     let drain_report = dispatcher
         .drain(remaining_budget(deadline))
         .await
@@ -1187,6 +1299,8 @@ async fn graceful_shutdown(
             "pending_events_drained": pending_stats.stats.processed,
             "cron_events_drained": cron_stats.stats.processed,
             "inbox_events_drained": inbox_stats.stats.processed,
+            "waitpoint_events_drained": waitpoint_stats.stats.processed,
+            "waitpoint_cancel_events_drained": waitpoint_cancel_stats.stats.processed,
             "timed_out": timed_out,
         }),
     )
@@ -1292,6 +1406,17 @@ async fn emit_drain_truncated(
         }),
     )
     .await
+}
+
+async fn topic_latest_id(
+    log: &Arc<harn_vm::event_log::AnyEventLog>,
+    topic_name: &str,
+) -> Result<u64, String> {
+    let topic = harn_vm::event_log::Topic::new(topic_name).map_err(|error| error.to_string())?;
+    log.latest(&topic)
+        .await
+        .map(|value| value.unwrap_or(0))
+        .map_err(|error| format!("failed to read topic head for {topic_name}: {error}"))
 }
 
 async fn drain_pump_best_effort(

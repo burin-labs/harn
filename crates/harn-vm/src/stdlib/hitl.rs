@@ -3,9 +3,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
-use std::time::{Duration as StdDuration, Instant};
+use std::time::Duration as StdDuration;
 
-use futures::{pin_mut, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
 use time::format_description::well_known::Rfc3339;
@@ -18,6 +17,11 @@ use crate::event_log::{
 };
 use crate::schema::schema_expect_value;
 use crate::stdlib::host::dispatch_mock_host_call;
+use crate::stdlib::waitpoint::{
+    cancel_waitpoint_on, complete_waitpoint_on, create_waitpoint_on, inspect_waitpoint_on,
+    wait_on_waitpoints, WaitpointRecord, WaitpointStatus, WaitpointWaitFailure,
+    WaitpointWaitOptions,
+};
 use crate::triggers::dispatcher::current_dispatch_context;
 use crate::value::{categorized_error, ErrorCategory, VmError, VmValue};
 use crate::vm::{clone_async_builtin_child_vm, Vm};
@@ -161,9 +165,21 @@ struct ApprovalProgress {
 }
 
 #[derive(Clone, Debug)]
-enum WaitOutcome {
-    Response(HitlHostResponse),
+enum ApprovalResolution {
+    Pending,
+    Approved(ApprovalProgress),
+    Denied(HitlHostResponse),
+}
+
+#[derive(Clone, Debug)]
+enum WaitpointOutcome {
+    Completed(WaitpointRecord),
     Timeout,
+    Cancelled {
+        wait_id: String,
+        waitpoint_ids: Vec<String>,
+        reason: Option<String>,
+    },
 }
 
 pub(crate) fn register_hitl_builtins(vm: &mut Vm) {
@@ -212,19 +228,22 @@ pub async fn append_hitl_response(
     let log = ensure_hitl_event_log_for(base_dir)?;
     let headers = response_headers(&response.request_id);
     let topic = Topic::new(kind.topic()).map_err(|error| error.to_string())?;
-    log.append(
-        &topic,
-        LogEvent::new(
-            match kind {
-                HitlRequestKind::Escalation => "hitl.escalation_accepted",
-                _ => "hitl.response_received",
-            },
-            serde_json::to_value(response).map_err(|error| error.to_string())?,
+    let event_id = log
+        .append(
+            &topic,
+            LogEvent::new(
+                match kind {
+                    HitlRequestKind::Escalation => "hitl.escalation_accepted",
+                    _ => "hitl.response_received",
+                },
+                serde_json::to_value(&response).map_err(|error| error.to_string())?,
+            )
+            .with_headers(headers),
         )
-        .with_headers(headers),
-    )
-    .await
-    .map_err(|error| error.to_string())
+        .await
+        .map_err(|error| error.to_string())?;
+    finalize_hitl_response(&log, kind, &response).await?;
+    Ok(event_id)
 }
 
 async fn ask_user_impl(args: &[VmValue]) -> Result<VmValue, VmError> {
@@ -253,28 +272,15 @@ async fn ask_user_impl(args: &[VmValue]) -> Result<VmValue, VmError> {
             "timeout_ms": options.timeout.map(|timeout| timeout.as_millis() as u64),
         }),
     };
+    create_request_waitpoint(&log, &request).await?;
     append_request(&log, &request).await?;
     maybe_notify_host(&request);
     maybe_apply_mock_response(HitlRequestKind::Question, &request_id, &request.payload).await?;
 
-    match wait_for_terminal_event(
-        &log,
-        HitlRequestKind::Question,
-        &request_id,
-        options.timeout,
-        &trace_id,
-    )
-    .await?
-    {
-        WaitOutcome::Timeout => {
-            if let Some(default) = options.default {
-                return Ok(default);
-            }
-            Err(timeout_error(&request_id, HitlRequestKind::Question))
-        }
-        WaitOutcome::Response(response) => {
-            let answer = response
-                .answer
+    match wait_for_request_waitpoint(&request_id, options.timeout).await? {
+        WaitpointOutcome::Completed(record) => {
+            let answer = record
+                .value
                 .as_ref()
                 .map(crate::stdlib::json_to_vm_value)
                 .unwrap_or(VmValue::Nil);
@@ -286,6 +292,24 @@ async fn ask_user_impl(args: &[VmValue]) -> Result<VmValue, VmError> {
             }
             Ok(answer)
         }
+        WaitpointOutcome::Timeout => {
+            append_timeout_once(&log, HitlRequestKind::Question, &request_id, &trace_id).await?;
+            if let Some(default) = options.default {
+                return Ok(default);
+            }
+            Err(timeout_error(&request_id, HitlRequestKind::Question))
+        }
+        WaitpointOutcome::Cancelled {
+            wait_id,
+            waitpoint_ids,
+            reason,
+        } => Err(hitl_cancelled_error(
+            &request_id,
+            HitlRequestKind::Question,
+            &wait_id,
+            &waitpoint_ids,
+            reason,
+        )),
     }
 }
 
@@ -316,35 +340,23 @@ async fn request_approval_impl(args: &[VmValue]) -> Result<VmValue, VmError> {
             "deadline_ms": options.deadline.as_millis() as u64,
         }),
     };
+    create_request_waitpoint(&log, &request).await?;
     append_request(&log, &request).await?;
     maybe_notify_host(&request);
     maybe_apply_mock_response(HitlRequestKind::Approval, &request_id, &request.payload).await?;
 
-    let record = wait_for_approval_quorum(
-        &log,
-        HitlRequestKind::Approval,
-        &request_id,
-        options.quorum,
-        &options.reviewers,
-        options.deadline,
-        &trace_id,
-    )
-    .await?;
-
-    append_named_event(
-        &log,
-        HitlRequestKind::Approval,
-        "hitl.approval_approved",
-        &request_id,
-        &trace_id,
-        json!({
-            "request_id": request_id,
-            "record": crate::llm::vm_value_to_json(&record),
-        }),
-    )
-    .await?;
-
-    Ok(record)
+    match wait_for_request_waitpoint(&request_id, Some(options.deadline)).await? {
+        WaitpointOutcome::Completed(record) => {
+            approval_record_from_waitpoint(&record, "request_approval")
+        }
+        WaitpointOutcome::Timeout => {
+            append_timeout_once(&log, HitlRequestKind::Approval, &request_id, &trace_id).await?;
+            Err(timeout_error(&request_id, HitlRequestKind::Approval))
+        }
+        WaitpointOutcome::Cancelled { .. } => {
+            Err(approval_wait_error(&log, HitlRequestKind::Approval, &request_id).await)
+        }
+    }
 }
 
 async fn dual_control_impl(args: &[VmValue]) -> Result<VmValue, VmError> {
@@ -399,53 +411,47 @@ async fn dual_control_impl(args: &[VmValue]) -> Result<VmValue, VmError> {
             "deadline_ms": HITL_APPROVAL_TIMEOUT_MS,
         }),
     };
+    create_request_waitpoint(&log, &request).await?;
     append_request(&log, &request).await?;
     maybe_notify_host(&request);
     maybe_apply_mock_response(HitlRequestKind::DualControl, &request_id, &request.payload).await?;
 
-    let record = wait_for_approval_quorum(
-        &log,
-        HitlRequestKind::DualControl,
+    match wait_for_request_waitpoint(
         &request_id,
-        n as u32,
-        &approvers,
-        StdDuration::from_millis(HITL_APPROVAL_TIMEOUT_MS),
-        &trace_id,
+        Some(StdDuration::from_millis(HITL_APPROVAL_TIMEOUT_MS)),
     )
-    .await?;
+    .await?
+    {
+        WaitpointOutcome::Completed(record) => {
+            let _ = approval_record_from_waitpoint(&record, "dual_control")?;
+            let mut vm = clone_async_builtin_child_vm().ok_or_else(|| {
+                VmError::Runtime("dual_control requires an async builtin VM context".to_string())
+            })?;
+            let result = vm.call_closure_pub(&action, &[], &[]).await?;
 
-    append_named_event(
-        &log,
-        HitlRequestKind::DualControl,
-        "hitl.dual_control_approved",
-        &request_id,
-        &trace_id,
-        json!({
-            "request_id": request_id,
-            "record": crate::llm::vm_value_to_json(&record),
-        }),
-    )
-    .await?;
+            append_named_event(
+                &log,
+                HitlRequestKind::DualControl,
+                "hitl.dual_control_executed",
+                &request_id,
+                &trace_id,
+                json!({
+                    "request_id": request_id,
+                    "result": crate::llm::vm_value_to_json(&result),
+                }),
+            )
+            .await?;
 
-    let mut vm = clone_async_builtin_child_vm().ok_or_else(|| {
-        VmError::Runtime("dual_control requires an async builtin VM context".to_string())
-    })?;
-    let result = vm.call_closure_pub(&action, &[], &[]).await?;
-
-    append_named_event(
-        &log,
-        HitlRequestKind::DualControl,
-        "hitl.dual_control_executed",
-        &request_id,
-        &trace_id,
-        json!({
-            "request_id": request_id,
-            "result": crate::llm::vm_value_to_json(&result),
-        }),
-    )
-    .await?;
-
-    Ok(result)
+            Ok(result)
+        }
+        WaitpointOutcome::Timeout => {
+            append_timeout_once(&log, HitlRequestKind::DualControl, &request_id, &trace_id).await?;
+            Err(timeout_error(&request_id, HitlRequestKind::DualControl))
+        }
+        WaitpointOutcome::Cancelled { .. } => {
+            Err(approval_wait_error(&log, HitlRequestKind::DualControl, &request_id).await)
+        }
+    }
 }
 
 async fn escalate_to_impl(args: &[VmValue]) -> Result<VmValue, VmError> {
@@ -472,101 +478,295 @@ async fn escalate_to_impl(args: &[VmValue]) -> Result<VmValue, VmError> {
             "reason": reason,
         }),
     };
+    create_request_waitpoint(&log, &request).await?;
     append_request(&log, &request).await?;
     maybe_notify_host(&request);
     maybe_apply_mock_response(HitlRequestKind::Escalation, &request_id, &request.payload).await?;
 
-    match wait_for_terminal_event(
-        &log,
-        HitlRequestKind::Escalation,
-        &request_id,
-        None,
-        &trace_id,
-    )
-    .await?
-    {
-        WaitOutcome::Timeout => Err(timeout_error(&request_id, HitlRequestKind::Escalation)),
-        WaitOutcome::Response(response) => Ok(crate::stdlib::json_to_vm_value(&json!({
-            "request_id": request_id,
-            "role": role,
-            "reason": reason,
-            "trace_id": trace_id,
-            "status": if response.accepted.unwrap_or(false) { "accepted" } else { "pending" },
-            "accepted_at": response.responded_at,
-            "reviewer": response.reviewer,
-        }))),
+    match wait_for_request_waitpoint(&request_id, None).await? {
+        WaitpointOutcome::Completed(record) => {
+            let accepted_at = record.completed_at.clone();
+            let reviewer = record.completed_by.clone();
+            let accepted = record
+                .value
+                .as_ref()
+                .and_then(|value| value.get("accepted"))
+                .and_then(JsonValue::as_bool)
+                .unwrap_or(true);
+            Ok(crate::stdlib::json_to_vm_value(&json!({
+                "request_id": request_id,
+                "role": role,
+                "reason": reason,
+                "trace_id": trace_id,
+                "status": if accepted { "accepted" } else { "pending" },
+                "accepted_at": accepted_at,
+                "reviewer": reviewer,
+            })))
+        }
+        WaitpointOutcome::Timeout => Err(timeout_error(&request_id, HitlRequestKind::Escalation)),
+        WaitpointOutcome::Cancelled {
+            wait_id,
+            waitpoint_ids,
+            reason,
+        } => Err(hitl_cancelled_error(
+            &request_id,
+            HitlRequestKind::Escalation,
+            &wait_id,
+            &waitpoint_ids,
+            reason,
+        )),
     }
 }
 
-async fn wait_for_approval_quorum(
+async fn create_request_waitpoint(
+    log: &Arc<AnyEventLog>,
+    request: &HitlRequestEnvelope,
+) -> Result<(), VmError> {
+    create_waitpoint_on(
+        log,
+        Some(request.request_id.clone()),
+        Some(json!({
+            "kind": request.kind.as_str(),
+            "agent": request.agent.clone(),
+            "trace_id": request.trace_id.clone(),
+            "requested_at": request.requested_at.clone(),
+            "payload": request.payload.clone(),
+        })),
+    )
+    .await?;
+    Ok(())
+}
+
+async fn wait_for_request_waitpoint(
+    request_id: &str,
+    timeout: Option<StdDuration>,
+) -> Result<WaitpointOutcome, VmError> {
+    match wait_on_waitpoints(
+        vec![request_id.to_string()],
+        WaitpointWaitOptions { timeout },
+    )
+    .await
+    {
+        Ok(records) => Ok(WaitpointOutcome::Completed(
+            records
+                .into_iter()
+                .next()
+                .expect("single waitpoint wait result"),
+        )),
+        Err(WaitpointWaitFailure::Timeout { .. }) => Ok(WaitpointOutcome::Timeout),
+        Err(WaitpointWaitFailure::Cancelled {
+            wait_id,
+            waitpoint_ids,
+            reason,
+        }) => Ok(WaitpointOutcome::Cancelled {
+            wait_id,
+            waitpoint_ids,
+            reason,
+        }),
+        Err(WaitpointWaitFailure::Vm(error)) => {
+            if let Some(outcome) = waitpoint_outcome_from_vm_error(&error) {
+                return Ok(outcome);
+            }
+            Err(error)
+        }
+    }
+}
+
+fn waitpoint_outcome_from_vm_error(error: &VmError) -> Option<WaitpointOutcome> {
+    let VmError::Thrown(VmValue::Dict(dict)) = error else {
+        return None;
+    };
+    let name = dict.get("name").and_then(vm_string)?;
+    match name {
+        "WaitpointTimeoutError" => Some(WaitpointOutcome::Timeout),
+        "WaitpointCancelledError" => Some(WaitpointOutcome::Cancelled {
+            wait_id: dict
+                .get("wait_id")
+                .and_then(vm_string)
+                .unwrap_or_default()
+                .to_string(),
+            waitpoint_ids: dict
+                .get("waitpoint_ids")
+                .and_then(vm_string_list)
+                .unwrap_or_default(),
+            reason: dict
+                .get("reason")
+                .and_then(vm_string)
+                .map(ToString::to_string),
+        }),
+        _ => None,
+    }
+}
+
+async fn finalize_hitl_response(
+    log: &Arc<AnyEventLog>,
+    kind: HitlRequestKind,
+    response: &HitlHostResponse,
+) -> Result<(), String> {
+    match kind {
+        HitlRequestKind::Question => {
+            if waitpoint_is_terminal(log, &response.request_id).await? {
+                return Ok(());
+            }
+            complete_waitpoint_on(
+                log,
+                &response.request_id,
+                response.answer.clone(),
+                response.reviewer.clone(),
+                response.reason.clone(),
+                response.metadata.clone(),
+            )
+            .await
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+        }
+        HitlRequestKind::Escalation => {
+            if !response.accepted.unwrap_or(false)
+                || waitpoint_is_terminal(log, &response.request_id).await?
+            {
+                return Ok(());
+            }
+            complete_waitpoint_on(
+                log,
+                &response.request_id,
+                Some(json!({
+                    "accepted": true,
+                    "reviewer": response.reviewer,
+                    "reason": response.reason,
+                    "responded_at": response.responded_at,
+                })),
+                response.reviewer.clone(),
+                response.reason.clone(),
+                response.metadata.clone(),
+            )
+            .await
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+        }
+        HitlRequestKind::Approval | HitlRequestKind::DualControl => {
+            if waitpoint_is_terminal(log, &response.request_id).await? {
+                return Ok(());
+            }
+            let request = load_request_envelope(log, kind, &response.request_id)
+                .await
+                .map_err(|error| error.to_string())?;
+            match resolve_approval_state(log, kind, &request)
+                .await
+                .map_err(|error| error.to_string())?
+            {
+                ApprovalResolution::Pending => Ok(()),
+                ApprovalResolution::Approved(progress) => {
+                    let record = approval_record_json(&progress);
+                    append_named_event(
+                        log,
+                        kind,
+                        approved_event_kind(kind),
+                        &request.request_id,
+                        &request.trace_id,
+                        json!({
+                            "request_id": request.request_id.clone(),
+                            "record": record.clone(),
+                        }),
+                    )
+                    .await
+                    .map_err(|error| error.to_string())?;
+                    complete_waitpoint_on(
+                        log,
+                        &request.request_id,
+                        Some(record),
+                        response.reviewer.clone(),
+                        progress.reason.clone(),
+                        response.metadata.clone(),
+                    )
+                    .await
+                    .map(|_| ())
+                    .map_err(|error| error.to_string())
+                }
+                ApprovalResolution::Denied(denied) => {
+                    append_named_event(
+                        log,
+                        kind,
+                        denied_event_kind(kind),
+                        &request.request_id,
+                        &request.trace_id,
+                        json!({
+                            "request_id": request.request_id.clone(),
+                            "reviewer": denied.reviewer.clone(),
+                            "reason": denied.reason.clone(),
+                        }),
+                    )
+                    .await
+                    .map_err(|error| error.to_string())?;
+                    cancel_waitpoint_on(
+                        log,
+                        &request.request_id,
+                        denied.reviewer.clone(),
+                        denied.reason.clone(),
+                        denied.metadata.clone(),
+                    )
+                    .await
+                    .map(|_| ())
+                    .map_err(|error| error.to_string())
+                }
+            }
+        }
+    }
+}
+
+async fn waitpoint_is_terminal(log: &Arc<AnyEventLog>, request_id: &str) -> Result<bool, String> {
+    Ok(inspect_waitpoint_on(log, request_id)
+        .await
+        .map_err(|error| error.to_string())?
+        .is_some_and(|record| record.status != WaitpointStatus::Open))
+}
+
+async fn load_request_envelope(
     log: &Arc<AnyEventLog>,
     kind: HitlRequestKind,
     request_id: &str,
-    quorum: u32,
-    reviewers: &[String],
-    timeout: StdDuration,
-    trace_id: &str,
-) -> Result<VmValue, VmError> {
-    let deadline = Instant::now() + timeout;
+) -> Result<HitlRequestEnvelope, VmError> {
+    let topic = topic(kind)?;
+    let events = log
+        .read_range(&topic, None, usize::MAX)
+        .await
+        .map_err(log_error)?;
+    events
+        .into_iter()
+        .filter(|(_, event)| event.kind == kind.request_event_kind())
+        .find_map(|(_, event)| {
+            if !event_matches_request(&event, request_id) {
+                return None;
+            }
+            serde_json::from_value::<HitlRequestEnvelope>(event.payload).ok()
+        })
+        .ok_or_else(|| {
+            VmError::Runtime(format!("missing HITL request envelope for '{request_id}'"))
+        })
+}
+
+async fn resolve_approval_state(
+    log: &Arc<AnyEventLog>,
+    kind: HitlRequestKind,
+    request: &HitlRequestEnvelope,
+) -> Result<ApprovalResolution, VmError> {
+    let quorum = approval_quorum_from_request(kind, request)?;
+    let allowed_reviewers = approval_reviewers_from_request(kind, request)
+        .into_iter()
+        .collect::<BTreeSet<_>>();
     let mut progress = ApprovalProgress {
         reviewers: BTreeSet::new(),
         reason: None,
         approved_at: None,
     };
-    let allowed_reviewers: BTreeSet<&str> = reviewers.iter().map(String::as_str).collect();
     let topic = topic(kind)?;
-
-    process_existing_approval_events(
-        log,
-        &topic,
-        request_id,
-        quorum,
-        &allowed_reviewers,
-        &mut progress,
-        trace_id,
-    )
-    .await?;
-    if progress.reviewers.len() as u32 >= quorum {
-        return Ok(approval_record_value(&progress));
-    }
-    if is_replay() {
-        return Err(VmError::Runtime(format!(
-            "replay is missing recorded HITL approvals for '{request_id}'"
-        )));
-    }
-
-    let start_from = log.latest(&topic).await.map_err(log_error)?;
-    let stream = log
-        .clone()
-        .subscribe(&topic, start_from)
+    let events = log
+        .read_range(&topic, None, usize::MAX)
         .await
         .map_err(log_error)?;
-    pin_mut!(stream);
-    loop {
-        let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
-            append_timeout(log, kind, request_id, trace_id).await?;
-            return Err(timeout_error(request_id, kind));
-        };
-        let next = tokio::time::timeout(remaining, stream.next()).await;
-        let event = match next {
-            Ok(Some(Ok((_, event)))) => event,
-            Ok(Some(Err(error))) => return Err(log_error(error)),
-            Ok(None) => {
-                append_timeout(log, kind, request_id, trace_id).await?;
-                return Err(timeout_error(request_id, kind));
-            }
-            Err(_) => {
-                append_timeout(log, kind, request_id, trace_id).await?;
-                return Err(timeout_error(request_id, kind));
-            }
-        };
-        if !event_matches_request(&event, request_id) {
-            continue;
-        }
-        if event.kind == "hitl.timeout" {
-            return Err(timeout_error(request_id, kind));
-        }
-        if event.kind != "hitl.response_received" {
+    for (_, event) in events {
+        if !event_matches_request(&event, &request.request_id)
+            || event.kind != "hitl.response_received"
+        {
             continue;
         }
         let response: HitlHostResponse = serde_json::from_value(event.payload)
@@ -580,193 +780,166 @@ async fn wait_for_approval_quorum(
             }
         }
         if response.approved.unwrap_or(false) {
-            if let Some(reviewer) = response.reviewer {
+            if let Some(reviewer) = response.reviewer.clone() {
                 progress.reviewers.insert(reviewer);
             }
-            progress.reason = response.reason;
-            progress.approved_at = response.responded_at;
+            progress.reason = response.reason.clone();
+            progress.approved_at = response.responded_at.clone();
             if progress.reviewers.len() as u32 >= quorum {
-                return Ok(approval_record_value(&progress));
+                return Ok(ApprovalResolution::Approved(progress));
             }
             continue;
         }
-
-        append_named_event(
-            log,
-            kind,
-            match kind {
-                HitlRequestKind::DualControl => "hitl.dual_control_denied",
-                _ => "hitl.approval_denied",
-            },
-            request_id,
-            trace_id,
-            json!({
-                "request_id": request_id,
-                "reviewer": response.reviewer,
-                "reason": response.reason,
-            }),
-        )
-        .await?;
-        return Err(approval_denied_error(request_id, response));
+        return Ok(ApprovalResolution::Denied(response));
     }
+    Ok(ApprovalResolution::Pending)
 }
 
-async fn process_existing_approval_events(
-    log: &Arc<AnyEventLog>,
-    topic: &Topic,
-    request_id: &str,
-    quorum: u32,
-    allowed_reviewers: &BTreeSet<&str>,
-    progress: &mut ApprovalProgress,
-    trace_id: &str,
-) -> Result<(), VmError> {
-    let existing = log
-        .read_range(topic, None, usize::MAX)
-        .await
-        .map_err(log_error)?;
-    for (_, event) in existing {
-        if !event_matches_request(&event, request_id) {
-            continue;
-        }
-        if event.kind == "hitl.timeout" {
-            return Err(timeout_error(request_id, kind_from_topic(topic)?));
-        }
-        if event.kind != "hitl.response_received" {
-            continue;
-        }
-        let response: HitlHostResponse = serde_json::from_value(event.payload)
-            .map_err(|error| VmError::Runtime(error.to_string()))?;
-        let Some(reviewer) = response.reviewer.as_deref() else {
-            continue;
-        };
-        if !allowed_reviewers.is_empty() && !allowed_reviewers.contains(reviewer) {
-            continue;
-        }
-        if !response.approved.unwrap_or(false) {
-            let kind = kind_from_topic(topic)?;
-            append_named_event(
-                log,
-                kind,
-                match kind {
-                    HitlRequestKind::DualControl => "hitl.dual_control_denied",
-                    _ => "hitl.approval_denied",
-                },
-                request_id,
-                trace_id,
-                json!({
-                    "request_id": request_id,
-                    "reviewer": response.reviewer,
-                    "reason": response.reason,
-                }),
-            )
-            .await?;
-            return Err(approval_denied_error(request_id, response));
-        }
-        if progress.reviewers.insert(reviewer.to_string()) {
-            progress.reason = response.reason;
-            progress.approved_at = response.responded_at;
-        }
-        if progress.reviewers.len() as u32 >= quorum {
-            break;
-        }
-    }
-    Ok(())
+fn approval_quorum_from_request(
+    kind: HitlRequestKind,
+    request: &HitlRequestEnvelope,
+) -> Result<u32, VmError> {
+    let key = match kind {
+        HitlRequestKind::DualControl => "n",
+        _ => "quorum",
+    };
+    let quorum = request
+        .payload
+        .get(key)
+        .and_then(JsonValue::as_u64)
+        .unwrap_or(1);
+    u32::try_from(quorum).map_err(|_| {
+        VmError::Runtime(format!(
+            "invalid quorum in HITL request '{}'",
+            request.request_id
+        ))
+    })
 }
 
-async fn wait_for_terminal_event(
+fn approval_reviewers_from_request(
+    kind: HitlRequestKind,
+    request: &HitlRequestEnvelope,
+) -> Vec<String> {
+    let key = match kind {
+        HitlRequestKind::DualControl => "approvers",
+        _ => "reviewers",
+    };
+    request
+        .payload
+        .get(key)
+        .and_then(JsonValue::as_array)
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(JsonValue::as_str)
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn approval_record_json(progress: &ApprovalProgress) -> JsonValue {
+    json!({
+        "approved": true,
+        "reviewers": progress.reviewers.iter().cloned().collect::<Vec<_>>(),
+        "approved_at": progress.approved_at.clone().unwrap_or_else(now_rfc3339),
+        "reason": progress.reason,
+    })
+}
+
+fn approval_record_from_waitpoint(
+    record: &WaitpointRecord,
+    builtin: &str,
+) -> Result<VmValue, VmError> {
+    record
+        .value
+        .as_ref()
+        .map(crate::stdlib::json_to_vm_value)
+        .ok_or_else(|| VmError::Runtime(format!("{builtin}: missing approval record")))
+}
+
+async fn approval_wait_error(
     log: &Arc<AnyEventLog>,
     kind: HitlRequestKind,
     request_id: &str,
-    timeout: Option<StdDuration>,
-    trace_id: &str,
-) -> Result<WaitOutcome, VmError> {
-    let topic = topic(kind)?;
-    if let Some(outcome) = find_existing_terminal_event(log, &topic, request_id).await? {
-        return Ok(outcome);
+) -> VmError {
+    if let Ok(Some(record)) = inspect_waitpoint_on(log, request_id).await {
+        if record.status == WaitpointStatus::Cancelled
+            && record.reason.as_deref() != Some("upstream_cancelled")
+        {
+            return approval_denied_error(
+                request_id,
+                HitlHostResponse {
+                    request_id: request_id.to_string(),
+                    answer: None,
+                    approved: Some(false),
+                    accepted: None,
+                    reviewer: record.cancelled_by.clone(),
+                    reason: record.reason.clone(),
+                    metadata: record.metadata.clone(),
+                    responded_at: record.cancelled_at.clone(),
+                },
+            );
+        }
+        if record.status == WaitpointStatus::Cancelled {
+            return hitl_cancelled_error(
+                request_id,
+                kind,
+                "",
+                &[request_id.to_string()],
+                record.reason.clone(),
+            );
+        }
     }
-    if is_replay() {
-        return Err(VmError::Runtime(format!(
-            "replay is missing a recorded HITL response for '{request_id}'"
-        )));
-    }
+    hitl_cancelled_error(
+        request_id,
+        kind,
+        "",
+        &[request_id.to_string()],
+        Some("upstream_cancelled".to_string()),
+    )
+}
 
-    let start_from = log.latest(&topic).await.map_err(log_error)?;
-    let stream = log
-        .clone()
-        .subscribe(&topic, start_from)
+async fn append_timeout_once(
+    log: &Arc<AnyEventLog>,
+    kind: HitlRequestKind,
+    request_id: &str,
+    trace_id: &str,
+) -> Result<(), VmError> {
+    if hitl_event_exists(log, kind, request_id, "hitl.timeout").await? {
+        return Ok(());
+    }
+    append_timeout(log, kind, request_id, trace_id).await
+}
+
+async fn hitl_event_exists(
+    log: &Arc<AnyEventLog>,
+    kind: HitlRequestKind,
+    request_id: &str,
+    event_kind: &str,
+) -> Result<bool, VmError> {
+    let topic = topic(kind)?;
+    let events = log
+        .read_range(&topic, None, usize::MAX)
         .await
         .map_err(log_error)?;
-    pin_mut!(stream);
-    let deadline = timeout.map(|timeout| Instant::now() + timeout);
+    Ok(events
+        .into_iter()
+        .any(|(_, event)| event.kind == event_kind && event_matches_request(&event, request_id)))
+}
 
-    loop {
-        let next_event = if let Some(deadline) = deadline {
-            let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
-                append_timeout(log, kind, request_id, trace_id).await?;
-                return Ok(WaitOutcome::Timeout);
-            };
-            match tokio::time::timeout(remaining, stream.next()).await {
-                Ok(next) => next,
-                Err(_) => {
-                    append_timeout(log, kind, request_id, trace_id).await?;
-                    return Ok(WaitOutcome::Timeout);
-                }
-            }
-        } else {
-            stream.next().await
-        };
-
-        let Some(received) = next_event else {
-            return Err(VmError::Runtime(format!(
-                "HITL wait for '{request_id}' ended before the host responded"
-            )));
-        };
-        let (_, event) = received.map_err(log_error)?;
-        if !event_matches_request(&event, request_id) {
-            continue;
-        }
-        match event.kind.as_str() {
-            "hitl.timeout" => return Ok(WaitOutcome::Timeout),
-            "hitl.response_received" | "hitl.escalation_accepted" => {
-                let response: HitlHostResponse = serde_json::from_value(event.payload)
-                    .map_err(|error| VmError::Runtime(error.to_string()))?;
-                if kind == HitlRequestKind::Escalation && !response.accepted.unwrap_or(false) {
-                    continue;
-                }
-                return Ok(WaitOutcome::Response(response));
-            }
-            _ => {}
-        }
+fn approved_event_kind(kind: HitlRequestKind) -> &'static str {
+    match kind {
+        HitlRequestKind::DualControl => "hitl.dual_control_approved",
+        _ => "hitl.approval_approved",
     }
 }
 
-async fn find_existing_terminal_event(
-    log: &Arc<AnyEventLog>,
-    topic: &Topic,
-    request_id: &str,
-) -> Result<Option<WaitOutcome>, VmError> {
-    let events = log
-        .read_range(topic, None, usize::MAX)
-        .await
-        .map_err(log_error)?;
-    for (_, event) in events {
-        if !event_matches_request(&event, request_id) {
-            continue;
-        }
-        match event.kind.as_str() {
-            "hitl.timeout" => return Ok(Some(WaitOutcome::Timeout)),
-            "hitl.response_received" | "hitl.escalation_accepted" => {
-                let response: HitlHostResponse = serde_json::from_value(event.payload)
-                    .map_err(|error| VmError::Runtime(error.to_string()))?;
-                if event.kind == "hitl.escalation_accepted" && !response.accepted.unwrap_or(false) {
-                    continue;
-                }
-                return Ok(Some(WaitOutcome::Response(response)));
-            }
-            _ => {}
-        }
+fn denied_event_kind(kind: HitlRequestKind) -> &'static str {
+    match kind {
+        HitlRequestKind::DualControl => "hitl.dual_control_denied",
+        _ => "hitl.approval_denied",
     }
-    Ok(None)
 }
 
 async fn append_request(
@@ -1073,16 +1246,6 @@ fn topic(kind: HitlRequestKind) -> Result<Topic, VmError> {
     Topic::new(kind.topic()).map_err(|error| VmError::Runtime(error.to_string()))
 }
 
-fn kind_from_topic(topic: &Topic) -> Result<HitlRequestKind, VmError> {
-    match topic.as_str() {
-        HITL_QUESTIONS_TOPIC => Ok(HitlRequestKind::Question),
-        HITL_APPROVALS_TOPIC => Ok(HitlRequestKind::Approval),
-        HITL_DUAL_CONTROL_TOPIC => Ok(HitlRequestKind::DualControl),
-        HITL_ESCALATIONS_TOPIC => Ok(HitlRequestKind::Escalation),
-        other => Err(VmError::Runtime(format!("unknown HITL topic '{other}'"))),
-    }
-}
-
 fn event_matches_request(event: &LogEvent, request_id: &str) -> bool {
     event
         .headers
@@ -1095,15 +1258,6 @@ fn event_matches_request(event: &LogEvent, request_id: &str) -> bool {
             .is_some_and(|value| value == request_id)
 }
 
-fn approval_record_value(progress: &ApprovalProgress) -> VmValue {
-    crate::stdlib::json_to_vm_value(&json!({
-        "approved": true,
-        "reviewers": progress.reviewers.iter().cloned().collect::<Vec<_>>(),
-        "approved_at": progress.approved_at.clone().unwrap_or_else(now_rfc3339),
-        "reason": progress.reason,
-    }))
-}
-
 fn approval_denied_error(request_id: &str, response: HitlHostResponse) -> VmError {
     VmError::Thrown(crate::stdlib::json_to_vm_value(&json!({
         "name": "ApprovalDeniedError",
@@ -1112,6 +1266,29 @@ fn approval_denied_error(request_id: &str, response: HitlHostResponse) -> VmErro
         "request_id": request_id,
         "reviewers": response.reviewer.into_iter().collect::<Vec<_>>(),
         "reason": response.reason,
+    })))
+}
+
+fn hitl_cancelled_error(
+    request_id: &str,
+    kind: HitlRequestKind,
+    wait_id: &str,
+    waitpoint_ids: &[String],
+    reason: Option<String>,
+) -> VmError {
+    let _ = categorized_error("HITL cancelled", ErrorCategory::Cancelled);
+    let message = reason
+        .clone()
+        .unwrap_or_else(|| format!("{} cancelled", kind.as_str()));
+    VmError::Thrown(crate::stdlib::json_to_vm_value(&json!({
+        "name": "HumanCancelledError",
+        "category": ErrorCategory::Cancelled.as_str(),
+        "message": message,
+        "request_id": request_id,
+        "kind": kind.as_str(),
+        "wait_id": wait_id,
+        "waitpoint_ids": waitpoint_ids,
+        "reason": reason,
     })))
 }
 
@@ -1173,12 +1350,6 @@ fn log_error(error: impl std::fmt::Display) -> VmError {
     VmError::Runtime(error.to_string())
 }
 
-fn is_replay() -> bool {
-    std::env::var("HARN_REPLAY")
-        .ok()
-        .is_some_and(|value| !value.trim().is_empty() && value != "0")
-}
-
 fn now_rfc3339() -> String {
     OffsetDateTime::now_utc()
         .format(&Rfc3339)
@@ -1192,6 +1363,20 @@ fn new_trace_id() -> String {
 fn vm_bool(value: &VmValue) -> Option<bool> {
     match value {
         VmValue::Bool(flag) => Some(*flag),
+        _ => None,
+    }
+}
+
+fn vm_string(value: &VmValue) -> Option<&str> {
+    match value {
+        VmValue::String(text) => Some(text.as_ref()),
+        _ => None,
+    }
+}
+
+fn vm_string_list(value: &VmValue) -> Option<Vec<String>> {
+    match value {
+        VmValue::List(values) => Some(values.iter().map(VmValue::display).collect()),
         _ => None,
     }
 }

@@ -4,6 +4,22 @@ use super::{BuiltinReturn, BuiltinSig, UNION_STRING_NIL};
 
 pub(crate) const SIGNATURES: &[BuiltinSig] = &[
     BuiltinSig {
+        name: "__waitpoint_cancel",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
+        name: "__waitpoint_complete",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
+        name: "__waitpoint_create",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
+        name: "__waitpoint_wait",
+        return_type: None,
+    },
+    BuiltinSig {
         name: "abs",
         return_type: None,
     },

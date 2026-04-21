@@ -63,6 +63,8 @@ tokio::task_local! {
 pub(crate) struct DispatchContext {
     pub trigger_event: TriggerEvent,
     pub replay_of_event_id: Option<String>,
+    pub binding_id: String,
+    pub binding_version: u32,
     pub agent_id: String,
     pub action: String,
     pub autonomy_tier: AutonomyTier,
@@ -148,6 +150,7 @@ pub enum DispatchStatus {
     Failed,
     Dlq,
     Skipped,
+    Waiting,
     Cancelled,
 }
 
@@ -158,6 +161,7 @@ impl DispatchStatus {
             Self::Failed => "failed",
             Self::Dlq => "dlq",
             Self::Skipped => "skipped",
+            Self::Waiting => "waiting",
             Self::Cancelled => "cancelled",
         }
     }
@@ -402,6 +406,7 @@ pub enum DispatchError {
     A2a(String),
     Denied(String),
     Timeout(String),
+    Waiting(String),
     Cancelled(String),
     NotImplemented(String),
 }
@@ -416,6 +421,7 @@ impl std::fmt::Display for DispatchError {
             | Self::A2a(message)
             | Self::Denied(message)
             | Self::Timeout(message)
+            | Self::Waiting(message)
             | Self::Cancelled(message)
             | Self::NotImplemented(message) => f.write_str(message),
         }
@@ -428,7 +434,7 @@ impl DispatchError {
     fn retryable(&self) -> bool {
         !matches!(
             self,
-            Self::Cancelled(_) | Self::Denied(_) | Self::NotImplemented(_)
+            Self::Cancelled(_) | Self::Denied(_) | Self::NotImplemented(_) | Self::Waiting(_)
         )
     }
 }
@@ -468,6 +474,10 @@ pub async fn append_dispatch_cancel_request(
 }
 
 impl Dispatcher {
+    pub fn event_log_handle(&self) -> Arc<AnyEventLog> {
+        self.event_log.clone()
+    }
+
     pub fn new(base_vm: Vm) -> Result<Self, DispatchError> {
         let event_log = active_event_log().ok_or_else(|| {
             DispatchError::EventLog("dispatcher requires an active event log".to_string())
@@ -762,6 +772,7 @@ impl Dispatcher {
                     DispatchStatus::Succeeded | DispatchStatus::Skipped => {
                         metrics.record_dispatch_succeeded();
                     }
+                    DispatchStatus::Waiting => {}
                     _ => metrics.record_dispatch_failed(),
                 },
                 Err(_) => metrics.record_dispatch_failed(),
@@ -776,6 +787,7 @@ impl Dispatcher {
                 Ok(dispatch_outcome) => match dispatch_outcome.status {
                     DispatchStatus::Succeeded => "succeeded",
                     DispatchStatus::Skipped => "skipped",
+                    DispatchStatus::Waiting => "waiting",
                     DispatchStatus::Cancelled => "cancelled",
                     DispatchStatus::Failed => "failed",
                     DispatchStatus::Dlq => "dlq",
@@ -1004,7 +1016,7 @@ impl Dispatcher {
             source_node_id = predicate_node_id;
         }
 
-        let (event, acquired_flow) = match self
+        let (event, mut acquired_flow) = match self
             .apply_flow_control(binding, &event, replay_of_event_id.as_ref())
             .await?
         {
@@ -1321,6 +1333,69 @@ impl Dispatcher {
                         replay_of_event_id.as_ref(),
                     )
                     .await?;
+                    if let DispatchError::Waiting(message) = &error {
+                        self.append_lifecycle_event(
+                            "DispatchWaiting",
+                            &event,
+                            binding,
+                            serde_json::json!({
+                                "event_id": event.id.0,
+                                "attempt": attempt,
+                                "handler_kind": route.kind(),
+                                "target_uri": route.target_uri(),
+                                "message": message,
+                                "replay_of_event_id": replay_of_event_id,
+                            }),
+                            replay_of_event_id.as_ref(),
+                        )
+                        .await?;
+                        self.append_topic_event(
+                            TRIGGER_OUTBOX_TOPIC,
+                            "dispatch_waiting",
+                            &event,
+                            Some(binding),
+                            Some(attempt),
+                            serde_json::json!({
+                                "event_id": event.id.0,
+                                "attempt": attempt,
+                                "trigger_id": binding.id.as_str(),
+                                "binding_key": binding.binding_key(),
+                                "handler_kind": route.kind(),
+                                "target_uri": route.target_uri(),
+                                "message": message,
+                                "replay_of_event_id": replay_of_event_id,
+                            }),
+                            replay_of_event_id.as_ref(),
+                        )
+                        .await?;
+                        finish_in_flight(
+                            binding.id.as_str(),
+                            binding.version,
+                            TriggerDispatchOutcome::Dispatched,
+                        )
+                        .await
+                        .map_err(|registry_error| {
+                            DispatchError::Registry(registry_error.to_string())
+                        })?;
+                        self.release_flow_control(&mut acquired_flow).await?;
+                        decrement_in_flight(&self.state);
+                        return Ok(DispatchOutcome {
+                            trigger_id: binding.id.as_str().to_string(),
+                            binding_key: binding.binding_key(),
+                            event_id: event.id.0,
+                            attempt_count: attempt,
+                            status: DispatchStatus::Waiting,
+                            handler_kind: route.kind().to_string(),
+                            target_uri: route.target_uri(),
+                            replay_of_event_id,
+                            result: Some(serde_json::json!({
+                                "waiting": true,
+                                "message": message,
+                            })),
+                            error: None,
+                        });
+                    }
+
                     self.append_lifecycle_event(
                         "DispatchFailed",
                         &event,
@@ -2081,10 +2156,13 @@ impl Dispatcher {
         let args = [arg];
         let future = vm.call_closure_pub(closure, &args, &[]);
         pin_mut!(future);
+        let (binding_id, binding_version) = split_binding_key(binding_key);
         let prior_context = ACTIVE_DISPATCH_CONTEXT.with(|slot| {
             slot.borrow_mut().replace(DispatchContext {
                 trigger_event: event.clone(),
                 replay_of_event_id: replay_of_event_id.cloned(),
+                binding_id,
+                binding_version,
                 agent_id: agent_id.to_string(),
                 action: action.to_string(),
                 autonomy_tier,
@@ -2873,6 +2951,9 @@ pub fn clear_dispatcher_state() {
 }
 
 fn dispatch_error_from_vm_error(error: VmError) -> DispatchError {
+    if let Some(wait_id) = crate::stdlib::waitpoint::is_waitpoint_suspension(&error) {
+        return DispatchError::Waiting(format!("waitpoint suspended: {wait_id}"));
+    }
     if is_cancelled_vm_error(&error) {
         return DispatchError::Cancelled("dispatcher shutdown cancelled local handler".to_string());
     }
@@ -2893,6 +2974,7 @@ fn dispatch_error_label(error: &DispatchError) -> &'static str {
     match error {
         DispatchError::Denied(_) => "denied",
         DispatchError::Timeout(_) => "timeout",
+        DispatchError::Waiting(_) => "waiting",
         DispatchError::Cancelled(_) => "cancelled",
         _ => "failed",
     }
@@ -3159,6 +3241,14 @@ fn current_predicate_daily_cost(binding: &TriggerBinding) -> f64 {
         .cost_today_usd_micros
         .load(Ordering::Relaxed) as f64
         / 1_000_000.0
+}
+
+fn split_binding_key(binding_key: &str) -> (String, u32) {
+    let Some((binding_id, suffix)) = binding_key.rsplit_once("@v") else {
+        return (binding_key.to_string(), 0);
+    };
+    let version = suffix.parse::<u32>().unwrap_or(0);
+    (binding_id.to_string(), version)
 }
 
 fn is_cancelled_vm_error(error: &VmError) -> bool {
