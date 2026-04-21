@@ -34,7 +34,7 @@ over stdin/stdout using the Language Server Protocol.
 
 | Feature | Description |
 |---------|-------------|
-| **Diagnostics** | Real-time parse errors, type errors (including cross-module undefined-call errors), and warnings. Shares the same module graph used by `harn check` and `harn run`. |
+| **Diagnostics** | Real-time parse errors, type errors (including cross-module undefined-call errors), lint warnings, and `@invariant(...)` violations. Shares the same module graph used by `harn check` and `harn run`, so `harn check --invariants` and editor squiggles stay aligned. |
 | **Completions** | Scope-aware: pipelines, functions, variables, parameters, enums, structs, interfaces. Dot-completions for methods plus inferred shape fields, struct members, and enum payload fields. Builtins and keywords. |
 | **Go-to-definition** | Jump to the declaration of pipelines, functions, variables, enums, structs, and interfaces. Cross-file navigation walks the recursive module graph (relative paths and `.harn/packages/`), so symbols reachable through any number of transitive imports resolve. |
 | **Find references** | Locate all usages of a symbol across the document |

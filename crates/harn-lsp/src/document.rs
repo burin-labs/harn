@@ -12,6 +12,7 @@ pub(crate) struct DocumentState {
     pub(crate) diagnostics: Vec<Diagnostic>,
     pub(crate) lint_diagnostics: Vec<harn_lint::LintDiagnostic>,
     pub(crate) type_diagnostics: Vec<harn_parser::TypeDiagnostic>,
+    pub(crate) invariant_diagnostics: Vec<harn_ir::InvariantDiagnostic>,
     pub(crate) inlay_hints: Vec<harn_parser::InlayHintInfo>,
     pub(crate) dirty: bool,
 }
@@ -25,6 +26,7 @@ impl DocumentState {
             diagnostics: Vec::new(),
             lint_diagnostics: Vec::new(),
             type_diagnostics: Vec::new(),
+            invariant_diagnostics: Vec::new(),
             inlay_hints: Vec::new(),
             dirty: true,
         };
@@ -45,6 +47,7 @@ impl DocumentState {
         self.diagnostics.clear();
         self.lint_diagnostics.clear();
         self.type_diagnostics.clear();
+        self.invariant_diagnostics.clear();
         self.inlay_hints.clear();
         self.symbols.clear();
         self.cached_ast = None;
@@ -98,6 +101,19 @@ impl DocumentState {
         }
         self.type_diagnostics = type_diags;
 
+        let invariant_report = harn_ir::analyze_program(&program);
+        for diag in &invariant_report.diagnostics {
+            let range = span_to_range(&diag.span);
+            self.diagnostics.push(Diagnostic {
+                range,
+                severity: Some(DiagnosticSeverity::ERROR),
+                source: Some("harn-invariant".to_string()),
+                message: format!("[{}] {}", diag.invariant, diag.message),
+                ..Default::default()
+            });
+        }
+        self.invariant_diagnostics = invariant_report.diagnostics;
+
         let lint_diags = harn_lint::lint_with_source(&program, &self.source);
         for ld in &lint_diags {
             let severity = match ld.severity {
@@ -146,6 +162,32 @@ mod tests {
         assert!(
             !state.diagnostics.is_empty(),
             "invalid source should produce diagnostics after reparse"
+        );
+    }
+
+    #[test]
+    fn invariant_violations_surface_as_lsp_diagnostics() {
+        let state = DocumentState::new(
+            r#"
+@invariant("approval.reachability")
+fn handler() {
+  write_file("src/main.rs", "unsafe")
+}
+"#
+            .to_string(),
+        );
+
+        assert!(
+            state
+                .diagnostics
+                .iter()
+                .any(|diag| diag.source.as_deref() == Some("harn-invariant")),
+            "expected invariant diagnostics, got {:?}",
+            state
+                .diagnostics
+                .iter()
+                .map(|diag| (&diag.source, &diag.message))
+                .collect::<Vec<_>>()
         );
     }
 }

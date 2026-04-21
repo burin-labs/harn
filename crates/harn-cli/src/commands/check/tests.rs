@@ -9,7 +9,9 @@ use harn_parser::{Parser, SNode};
 use crate::package::CheckConfig;
 
 use super::bundle::build_bundle_manifest;
+use super::check_cmd::check_file_inner;
 use super::config::collect_harn_targets;
+use super::config::{build_module_graph, collect_cross_file_imports};
 use super::host_capabilities::parse_host_capability_value;
 use super::preflight::{collect_preflight_diagnostics, is_preflight_allowed};
 
@@ -214,6 +216,74 @@ pipeline main() {
             .all(|d| !d.message.contains("unknown host capability")),
         "unexpected host cap diagnostic: {:?}",
         diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn check_file_inner_enforces_invariants_when_requested() {
+    let dir = unique_temp_dir("harn-check-invariants");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("main.harn");
+    std::fs::write(
+        &file,
+        r#"
+@invariant("fs.writes", "src/**")
+fn handler() {
+  write_file("/tmp/out.txt", "unsafe")
+}
+"#,
+    )
+    .unwrap();
+
+    let files = vec![file.clone()];
+    let module_graph = build_module_graph(&files);
+    let cross_file_imports = collect_cross_file_imports(&module_graph);
+    let outcome = check_file_inner(
+        &file,
+        &CheckConfig::default(),
+        &cross_file_imports,
+        &module_graph,
+        true,
+    );
+
+    assert!(
+        outcome.has_error,
+        "expected invariant violation to fail check"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn check_file_inner_skips_invariants_when_disabled() {
+    let dir = unique_temp_dir("harn-check-invariants-off");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("main.harn");
+    std::fs::write(
+        &file,
+        r#"
+@invariant("fs.writes", "src/**")
+fn handler() {
+  write_file("/tmp/out.txt", "unsafe")
+}
+"#,
+    )
+    .unwrap();
+
+    let files = vec![file.clone()];
+    let module_graph = build_module_graph(&files);
+    let cross_file_imports = collect_cross_file_imports(&module_graph);
+    let outcome = check_file_inner(
+        &file,
+        &CheckConfig::default(),
+        &cross_file_imports,
+        &module_graph,
+        false,
+    );
+
+    assert!(
+        !outcome.has_error,
+        "invariants should only run behind --invariants"
     );
     let _ = std::fs::remove_dir_all(&dir);
 }

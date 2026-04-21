@@ -32,6 +32,7 @@ path = "src/main.rs"
 [dependencies]
 harn-lexer = { path = "../harn-lexer", version = "0.7" }
 harn-parser = { path = "../harn-parser", version = "0.7" }
+harn-ir = { path = "../harn-ir", version = "0.7" }
 harn-vm = { path = "../harn-vm", version = "0.7", features = ["otel"] }
 harn-lint = { path = "../harn-lint", version = "0.7" }
 harn-modules = { path = "../harn-modules", version = "0.7" }

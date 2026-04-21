@@ -183,11 +183,18 @@ async fn main() {
                     &config,
                     &cross_file_imports,
                     &module_graph,
+                    args.invariants,
                 );
                 should_fail |= outcome.should_fail(config.strict);
             }
             if should_fail {
                 process::exit(1);
+            }
+        }
+        Command::Explain(args) => {
+            let code = commands::explain::run_explain(&args);
+            if code != 0 {
+                process::exit(code);
             }
         }
         Command::Contracts(args) => {

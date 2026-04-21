@@ -133,8 +133,13 @@ fn bundle_contract_value(args: &ContractsBundleArgs) -> (serde_json::Value, bool
             if let Some(path) = args.bundle_root.as_ref() {
                 file_config.bundle_root = Some(path.clone());
             }
-            let outcome =
-                check::check_file_inner(file, &file_config, &cross_file_imports, &module_graph);
+            let outcome = check::check_file_inner(
+                file,
+                &file_config,
+                &cross_file_imports,
+                &module_graph,
+                false,
+            );
             failed |= outcome.should_fail(file_config.strict);
         }
     }
