@@ -1,8 +1,9 @@
 # OpenTrustGraph v0
 
 `OpenTrustGraph` is a portable event schema for recording autonomy and approval
-decisions around agent dispatch. Harn emits these records onto `trust.graph`
-plus the per-agent topic `trust.graph.<agent_id>`, but the format is designed to
+decisions around agent dispatch. Harn emits these records onto `trust_graph`
+plus the per-agent topic `trust_graph.<agent_id>` (`trust.graph` is still read
+for compatibility), but the format is designed to
 be runtime-neutral so other schedulers and workflow engines can adopt the same
 stream shape.
 
@@ -28,6 +29,9 @@ Each dispatch or control-plane autonomy change appends one `TrustRecord`.
   "autonomy_tier": "act_with_approval",
   "timestamp": "2026-04-19T18:42:11Z",
   "cost_usd": 0.0124,
+  "chain_index": 7,
+  "previous_hash": "sha256:12b6...",
+  "entry_hash": "sha256:f00d...",
   "metadata": {
     "provider": "github",
     "binding_version": 3
@@ -48,6 +52,10 @@ Fields:
 - `autonomy_tier`: autonomy mode in force for this dispatch.
 - `timestamp`: RFC3339 UTC timestamp for the record append time.
 - `cost_usd`: optional marginal cost attributed to the action.
+- `chain_index`: 1-based position in the append-only trust graph chain.
+- `previous_hash`: prior record's `entry_hash`, or `null` for the first record.
+- `entry_hash`: SHA-256 hash over the canonical record with `entry_hash`
+  removed. Harn stores it with the `sha256:` prefix.
 - `metadata`: extensible runtime-specific detail bag.
 
 Outcome enum:
@@ -82,6 +90,9 @@ Autonomy tier enum:
     "trace_id",
     "autonomy_tier",
     "timestamp",
+    "chain_index",
+    "previous_hash",
+    "entry_hash",
     "metadata"
   ],
   "properties": {
@@ -122,6 +133,18 @@ Autonomy tier enum:
     "cost_usd": {
       "type": ["number", "null"]
     },
+    "chain_index": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "previous_hash": {
+      "type": ["string", "null"],
+      "pattern": "^(sha256:[0-9a-f]{64})$"
+    },
+    "entry_hash": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
     "metadata": {
       "type": "object"
     }
@@ -144,6 +167,9 @@ Autonomy tier enum:
     "autonomy_tier": "shadow",
     "timestamp": "2026-04-19T18:42:11Z",
     "cost_usd": null,
+    "chain_index": 1,
+    "previous_hash": null,
+    "entry_hash": "sha256:bd9f5d07cd3185d88cc15b255a491e09b46b7bbdd095b795f45a709e4bb74f8f",
     "metadata": {
       "terminal_status": "failed",
       "reason": "shadow tier blocks direct mutation"
@@ -160,6 +186,9 @@ Autonomy tier enum:
     "autonomy_tier": "act_auto",
     "timestamp": "2026-04-19T18:43:02Z",
     "cost_usd": null,
+    "chain_index": 2,
+    "previous_hash": "sha256:bd9f5d07cd3185d88cc15b255a491e09b46b7bbdd095b795f45a709e4bb74f8f",
+    "entry_hash": "sha256:75955793c1806c9e56248b5b756f5d909ed4f1680c780f83075738c7552b93af",
     "metadata": {
       "control": true
     }
@@ -175,6 +204,9 @@ Autonomy tier enum:
     "autonomy_tier": "act_auto",
     "timestamp": "2026-04-19T18:43:10Z",
     "cost_usd": 0.0041,
+    "chain_index": 3,
+    "previous_hash": "sha256:75955793c1806c9e56248b5b756f5d909ed4f1680c780f83075738c7552b93af",
+    "entry_hash": "sha256:bea6b8da017bc3639ff8c1e8cf704fbbb57a2a662a45639d6fed4b30a538ec41",
     "metadata": {
       "provider": "github",
       "binding_version": 4,
@@ -188,6 +220,8 @@ Autonomy tier enum:
 
 - The schema is append-only friendly. New consumers should ignore unknown
   fields inside `metadata`.
+- Chain verification is local and deterministic: recompute each `entry_hash`
+  with `entry_hash` removed and compare `previous_hash` with the prior record.
 - A runtime can project the same record into Kafka, Temporal histories,
   Inngest events, or an internal append-only audit log without changing the
   core contract.

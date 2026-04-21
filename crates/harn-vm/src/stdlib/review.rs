@@ -612,7 +612,7 @@ async fn append_review_trust_record(
         "diff_sha256".to_string(),
         serde_json::json!(sha256_hex(input.diff.as_bytes())),
     );
-    append_trust_record(log, &record)
+    let record = append_trust_record(log, &record)
         .await
         .map_err(|error| VmError::Runtime(format!("self_review: {error}")))?;
     Ok(record)

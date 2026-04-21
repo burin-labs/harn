@@ -134,9 +134,11 @@ pub use triggers::{
 };
 pub use trust_graph::{
     append_active_trust_record, append_trust_record, group_trust_records_by_trace,
-    query_trust_records, resolve_agent_autonomy_tier, summarize_trust_records, topic_for_agent,
-    AutonomyTier, TrustAgentSummary, TrustOutcome, TrustQueryFilters, TrustRecord, TrustTraceGroup,
-    OPENTRUSTGRAPH_SCHEMA_V0, TRUST_GRAPH_GLOBAL_TOPIC, TRUST_GRAPH_TOPIC_PREFIX,
+    policy_for_agent, query_trust_records, resolve_agent_autonomy_tier, summarize_trust_records,
+    topic_for_agent, trust_score_for, verify_trust_chain, AutonomyTier, TrustAgentSummary,
+    TrustChainReport, TrustOutcome, TrustQueryFilters, TrustRecord, TrustScore, TrustTraceGroup,
+    OPENTRUSTGRAPH_SCHEMA_V0, TRUST_GRAPH_GLOBAL_TOPIC, TRUST_GRAPH_LEGACY_GLOBAL_TOPIC,
+    TRUST_GRAPH_LEGACY_TOPIC_PREFIX, TRUST_GRAPH_TOPIC_PREFIX,
 };
 pub use value::*;
 pub use vm::*;

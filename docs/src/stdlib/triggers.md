@@ -188,6 +188,28 @@ Outside trigger dispatch, the builtin returns `nil`.
 Append a manual `TrustRecord` to the trust graph. Scripts usually rely on the
 dispatcher's automatic end-of-handler records, but this builtin is available for
 control-plane events such as promotions, demotions, or manual audit entries.
+The returned record includes `chain_index`, `previous_hash`, and `entry_hash`.
+
+### `trust_graph_record(decision)`
+
+Append a decision dict to the trust graph and return its `TrustEntryId`
+(`record_id`). The dict accepts `agent`, `action`, `approver`, `outcome`,
+`trace_id`, `autonomy_tier` (or `tier`), `cost_usd`, and `metadata`.
+
+### `trust_graph_query(agent, action)`
+
+Return a `TrustScore` for an agent and optional action. Scores include outcome
+counts, success rate, latest outcome, effective autonomy tier, and a capability
+policy that handlers can use as a gate.
+
+### `trust_graph_policy_for(agent)`
+
+Return only the derived `CapabilityPolicy` for an agent.
+
+### `trust_graph_verify_chain()`
+
+Verify the active trust graph hash chain and return a report with `verified`,
+`root_hash`, `broken_at_event_id`, and `errors`.
 
 ### `trust_query(filters)`
 

@@ -37,8 +37,10 @@ export function useLaunchData() {
   }, [])
 
   useEffect(() => {
-    void loadPortalOptions()
-    void loadLaunchData()
+    queueMicrotask(() => {
+      void loadPortalOptions()
+      void loadLaunchData()
+    })
   }, [loadLaunchData, loadPortalOptions])
 
   const hasRunningLaunches = useMemo(

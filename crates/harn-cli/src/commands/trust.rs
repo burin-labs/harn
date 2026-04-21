@@ -4,11 +4,12 @@ use std::path::Path;
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
-use crate::cli::{TrustArgs, TrustCommand, TrustQueryArgs};
+use crate::cli::{TrustArgs, TrustCommand, TrustQueryArgs, TrustVerifyChainArgs};
 
 pub(crate) async fn handle(args: TrustArgs) -> Result<(), String> {
     match args.command {
         TrustCommand::Query(args) => run_query(args).await,
+        TrustCommand::VerifyChain(args) => run_verify_chain(args).await,
         TrustCommand::Promote(args) => run_control_change(args.agent, args.to.into(), None).await,
         TrustCommand::Demote(args) => {
             run_control_change(args.agent, args.to.into(), Some(args.reason)).await
@@ -107,6 +108,41 @@ async fn run_query(args: TrustQueryArgs) -> Result<(), String> {
             record.trace_id,
             record.approver.unwrap_or_else(|| "-".to_string()),
         );
+    }
+    Ok(())
+}
+
+async fn run_verify_chain(args: TrustVerifyChainArgs) -> Result<(), String> {
+    let log = open_trust_log()?;
+    let report = harn_vm::verify_trust_chain(&log)
+        .await
+        .map_err(|error| format!("failed to verify trust graph chain: {error}"))?;
+    if args.json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&report).map_err(|error| error.to_string())?
+        );
+    } else if report.verified {
+        println!(
+            "verified topic={} records={} root_hash={}",
+            report.topic,
+            report.total,
+            report.root_hash.unwrap_or_else(|| "-".to_string())
+        );
+    } else {
+        println!(
+            "failed topic={} records={} broken_at_event_id={}",
+            report.topic,
+            report.total,
+            report
+                .broken_at_event_id
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "-".to_string())
+        );
+        for error in &report.errors {
+            println!("  {error}");
+        }
+        return Err("trust graph chain verification failed".to_string());
     }
     Ok(())
 }

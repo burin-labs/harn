@@ -158,27 +158,31 @@ export function LaunchPanel({ meta, llmOptions, targets, jobs, onLaunch, onOpenR
 
   useEffect(() => {
     if (!llmOptions) {return}
-    if (!provider && llmOptions.preferred_provider) {
-      setProvider(llmOptions.preferred_provider)
-    } else if (!provider) {
-      const fallbackProvider =
-        llmOptions.providers.find((item) => item.local && item.viable) ??
-        llmOptions.providers.find((item) => item.viable) ??
-        null
-      if (fallbackProvider) {
-        setProvider(fallbackProvider.name)
+    queueMicrotask(() => {
+      if (!provider && llmOptions.preferred_provider) {
+        setProvider(llmOptions.preferred_provider)
+      } else if (!provider) {
+        const fallbackProvider =
+          llmOptions.providers.find((item) => item.local && item.viable) ??
+          llmOptions.providers.find((item) => item.viable) ??
+          null
+        if (fallbackProvider) {
+          setProvider(fallbackProvider.name)
+        }
       }
-    }
-    if (!model && llmOptions.preferred_model) {
-      setModel(llmOptions.preferred_model)
-    }
+      if (!model && llmOptions.preferred_model) {
+        setModel(llmOptions.preferred_model)
+      }
+    })
   }, [llmOptions, model, provider])
 
   useEffect(() => {
     if (!selectedProvider) {return}
-    if (!endpointUrl) {
-      setEndpointUrl(selectedProvider.base_url)
-    }
+    queueMicrotask(() => {
+      if (!endpointUrl) {
+        setEndpointUrl(selectedProvider.base_url)
+      }
+    })
   }, [endpointUrl, selectedProvider])
 
   async function handleLaunch() {

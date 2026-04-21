@@ -26,6 +26,54 @@ export type PortalStats = {
   avg_duration_ms: number
 }
 
+export type TrustRecord = {
+  schema: string
+  record_id: string
+  agent: string
+  action: string
+  approver: string | null
+  outcome: "success" | "failure" | "denied" | "timeout"
+  trace_id: string
+  autonomy_tier: "shadow" | "suggest" | "act_with_approval" | "act_auto"
+  timestamp: string
+  cost_usd: number | null
+  chain_index: number
+  previous_hash: string | null
+  entry_hash: string
+  metadata: Record<string, unknown>
+}
+
+export type TrustTraceGroup = {
+  trace_id: string
+  records: TrustRecord[]
+}
+
+export type TrustAgentSummary = {
+  agent: string
+  total: number
+  success_rate: number
+  mean_cost_usd: number | null
+  tier_distribution: Record<string, number>
+  outcome_distribution: Record<string, number>
+}
+
+export type TrustChainReport = {
+  topic: string
+  total: number
+  verified: boolean
+  root_hash: string | null
+  broken_at_event_id: number | null
+  errors: string[]
+}
+
+export type PortalTrustGraphResponse = {
+  records: TrustRecord[]
+  groups: TrustTraceGroup[] | null
+  summary: TrustAgentSummary[]
+  chain: TrustChainReport
+  topics: string[]
+}
+
 export type PortalListResponse = {
   stats: PortalStats
   filtered_count: number

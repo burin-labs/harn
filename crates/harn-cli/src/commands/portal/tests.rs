@@ -32,6 +32,19 @@ fn test_portal_state(run_dir: &Path) -> Arc<PortalState> {
     })
 }
 
+fn test_portal_state_with_event_log(
+    run_dir: &Path,
+    event_log: Arc<harn_vm::event_log::AnyEventLog>,
+) -> Arc<PortalState> {
+    Arc::new(PortalState {
+        run_dir: run_dir.to_path_buf(),
+        workspace_root: run_dir.to_path_buf(),
+        event_log: Some(event_log),
+        launch_program: PathBuf::from("harn"),
+        launch_jobs: Arc::new(Mutex::new(HashMap::new())),
+    })
+}
+
 #[test]
 fn resolve_run_path_rejects_parent_segments() {
     let temp = tempfile::tempdir().unwrap();
@@ -292,6 +305,47 @@ async fn api_runs_returns_json() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn api_trust_graph_returns_records_and_chain() {
+    let temp = tempfile::tempdir().unwrap();
+    let log = Arc::new(harn_vm::event_log::AnyEventLog::Memory(
+        harn_vm::event_log::MemoryEventLog::new(16),
+    ));
+    harn_vm::append_trust_record(
+        &log,
+        &harn_vm::TrustRecord::new(
+            "agent-a",
+            "issue.label",
+            None,
+            harn_vm::TrustOutcome::Success,
+            "trace-a",
+            harn_vm::AutonomyTier::Suggest,
+        ),
+    )
+    .await
+    .unwrap();
+
+    let app = build_router(test_portal_state_with_event_log(temp.path(), log));
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/trust-graph?agent=agent-a&grouped_by_trace=true")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(payload["records"].as_array().unwrap().len(), 1);
+    assert_eq!(payload["chain"]["verified"], true);
+    assert_eq!(payload["topics"][0], harn_vm::TRUST_GRAPH_GLOBAL_TOPIC);
 }
 
 #[test]

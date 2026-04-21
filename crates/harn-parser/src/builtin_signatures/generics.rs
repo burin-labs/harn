@@ -16,6 +16,10 @@ pub(crate) fn lookup_generic_builtin_sig(name: &str) -> Option<BuiltinGenericSig
         "schema_parse" | "schema_check" => Some(schema_parse_generic_sig()),
         "schema_expect" => Some(schema_expect_generic_sig()),
         "handler_context" => Some(handler_context_builtin_sig()),
+        "trust_graph_policy_for" => Some(trust_graph_policy_for_builtin_sig()),
+        "trust_graph_query" => Some(trust_graph_query_builtin_sig()),
+        "trust_graph_record" => Some(trust_graph_record_builtin_sig()),
+        "trust_graph_verify_chain" => Some(trust_graph_verify_chain_builtin_sig()),
         "trust_query" => Some(trust_query_builtin_sig()),
         "trust_record" => Some(trust_record_builtin_sig()),
         "trigger_fire" => Some(trigger_fire_builtin_sig()),
@@ -455,6 +459,44 @@ fn trust_query_builtin_sig() -> BuiltinGenericSig {
             TypeExpr::Named("nil".into()),
         ])],
         return_type: TypeExpr::Named("list".into()),
+    }
+}
+
+fn trust_graph_record_builtin_sig() -> BuiltinGenericSig {
+    BuiltinGenericSig {
+        type_params: vec![],
+        params: vec![TypeExpr::Named("dict".into())],
+        return_type: TypeExpr::Named("TrustEntryId".into()),
+    }
+}
+
+fn trust_graph_query_builtin_sig() -> BuiltinGenericSig {
+    BuiltinGenericSig {
+        type_params: vec![],
+        params: vec![
+            TypeExpr::Named("string".into()),
+            TypeExpr::Union(vec![
+                TypeExpr::Named("string".into()),
+                TypeExpr::Named("nil".into()),
+            ]),
+        ],
+        return_type: TypeExpr::Named("TrustScore".into()),
+    }
+}
+
+fn trust_graph_policy_for_builtin_sig() -> BuiltinGenericSig {
+    BuiltinGenericSig {
+        type_params: vec![],
+        params: vec![TypeExpr::Named("string".into())],
+        return_type: TypeExpr::Named("CapabilityPolicy".into()),
+    }
+}
+
+fn trust_graph_verify_chain_builtin_sig() -> BuiltinGenericSig {
+    BuiltinGenericSig {
+        type_params: vec![],
+        params: vec![],
+        return_type: TypeExpr::Named("TrustChainReport".into()),
     }
 }
 

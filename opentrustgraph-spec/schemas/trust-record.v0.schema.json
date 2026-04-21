@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/opentrustgraph/v0/trust-record.schema.json",
+  "title": "OpenTrustGraph TrustRecord",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "record_id",
+    "agent",
+    "action",
+    "outcome",
+    "trace_id",
+    "autonomy_tier",
+    "timestamp",
+    "chain_index",
+    "previous_hash",
+    "entry_hash",
+    "metadata"
+  ],
+  "properties": {
+    "schema": {
+      "const": "opentrustgraph/v0"
+    },
+    "record_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Globally unique record id. UUIDv7 is recommended."
+    },
+    "agent": {
+      "type": "string",
+      "minLength": 1
+    },
+    "action": {
+      "type": "string",
+      "minLength": 1
+    },
+    "approver": {
+      "type": ["string", "null"]
+    },
+    "outcome": {
+      "type": "string",
+      "enum": ["success", "failure", "denied", "timeout"]
+    },
+    "trace_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "autonomy_tier": {
+      "type": "string",
+      "enum": ["shadow", "suggest", "act_with_approval", "act_auto"]
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "cost_usd": {
+      "type": ["number", "null"]
+    },
+    "chain_index": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "previous_hash": {
+      "type": ["string", "null"],
+      "pattern": "^(sha256:[0-9a-f]{64})$"
+    },
+    "entry_hash": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "metadata": {
+      "type": "object"
+    }
+  }
+}

@@ -1,8 +1,9 @@
 # Trust graph
 
 Harn's trust graph is the runtime-owned event stream for autonomy decisions.
-Every trigger dispatch now appends a `TrustRecord` to `trust.graph` plus the
-per-agent topic `trust.graph.<agent_id>`. The same stream also carries explicit
+Every trigger dispatch now appends a `TrustRecord` to `trust_graph` plus the
+per-agent topic `trust_graph.<agent_id>`. Harn still reads and mirrors the older
+`trust.graph` topic names for compatibility. The same stream also carries explicit
 promotion and demotion events recorded by `harn trust promote` and
 `harn trust demote`.
 
@@ -20,6 +21,9 @@ Each record carries:
 - `autonomy_tier`
 - `timestamp`
 - `cost_usd`
+- `chain_index`
+- `previous_hash`
+- `entry_hash`
 - `metadata`
 
 See [`spec/opentrustgraph.md`](../../spec/opentrustgraph.md) for the normative
@@ -49,6 +53,7 @@ Query the trust graph:
 harn trust query --agent github-triage-bot
 harn trust query --agent github-triage-bot --outcome denied --json
 harn trust query --summary
+harn trust-graph verify-chain
 ```
 
 Promote or demote an agent:
@@ -72,9 +77,16 @@ Import `std/triggers` and use:
 - `handler_context()` to inspect the current dispatch context, including
   `agent`, `action`, `trace_id`, and `autonomy_tier`
 - `trust_record(agent, action, approver, outcome, tier)` to append a manual
-  trust record
+  trust record and return the full finalized record
+- `trust_graph_record(decision)` to append a decision dict and return its
+  `TrustEntryId`
 - `trust_query(filters)` to query historical records from Harn code, including
   server-side `limit` and `grouped_by_trace` options
+- `trust_graph_query(agent, action)` to return a `TrustScore` summary for
+  handler-side policy decisions
+- `trust_graph_policy_for(agent)` to return a capability policy derived from
+  the agent's effective tier and recent outcomes
+- `trust_graph_verify_chain()` to verify the local hash chain
 
 Example:
 
@@ -111,3 +123,11 @@ Its metadata currently includes:
 - `finding_categories`
 - `summary`
 - `diff_bytes` and `diff_sha256`
+
+## Portal API
+
+The portal exposes `GET /api/trust-graph` for external UIs. Query parameters
+mirror the CLI filters: `agent`, `action`, `limit`, and `grouped_by_trace`.
+The response includes flat records, optional trace groups, per-agent summary
+rows, the current chain verification report, and the topic names the portal is
+reading.

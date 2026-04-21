@@ -389,7 +389,7 @@ async fn main() {
                 process::exit(1);
             }
         }
-        Command::Trust(args) => {
+        Command::Trust(args) | Command::TrustGraph(args) => {
             if let Err(error) = commands::trust::handle(args).await {
                 eprintln!("error: {error}");
                 process::exit(1);
