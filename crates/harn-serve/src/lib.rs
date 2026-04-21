@@ -1,4 +1,5 @@
 mod adapter;
+pub mod adapters;
 mod auth;
 mod core;
 mod error;
@@ -6,6 +7,9 @@ mod exports;
 mod replay;
 
 pub use adapter::{AdapterDescriptor, TransportAdapter};
+pub use adapters::mcp::{
+    McpHttpServeOptions, McpServer, McpServerConfig, McpStdioServer, MCP_PROTOCOL_VERSION,
+};
 pub use auth::{
     ApiKeyAuthConfig, AuthMethodConfig, AuthPolicy, AuthRequest, AuthenticatedPrincipal,
     AuthorizationDecision, HmacAuthConfig, OAuth21AuthConfig, OAuthClaims,

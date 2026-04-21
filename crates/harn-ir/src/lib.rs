@@ -327,22 +327,22 @@ impl Invariant for ApprovalReachability {
                     CallClassification::ApprovalGate => {
                         next_state.explicit_approval = true;
                     }
-                    CallClassification::FsWrite { .. } | CallClassification::SideEffect => {
-                        if !state.is_approved() && reported.insert(node_id) {
-                            diagnostics.push(InvariantDiagnostic {
-                                invariant: self.name().to_string(),
-                                handler: ir.name.clone(),
-                                message: format!(
-                                    "side-effecting call `{}` is reachable before any approval gate",
-                                    call.display_name
-                                ),
-                                span: node.span,
-                                help: Some(
-                                    "call `request_approval(...)` earlier on every path, or move the side effect into a `dual_control(...)` closure".to_string(),
-                                ),
-                                path: path.clone(),
-                            });
-                        }
+                    CallClassification::FsWrite { .. } | CallClassification::SideEffect
+                        if !state.is_approved() && reported.insert(node_id) =>
+                    {
+                        diagnostics.push(InvariantDiagnostic {
+                            invariant: self.name().to_string(),
+                            handler: ir.name.clone(),
+                            message: format!(
+                                "side-effecting call `{}` is reachable before any approval gate",
+                                call.display_name
+                            ),
+                            span: node.span,
+                            help: Some(
+                                "call `request_approval(...)` earlier on every path, or move the side effect into a `dual_control(...)` closure".to_string(),
+                            ),
+                            path: path.clone(),
+                        });
                     }
                     _ => {}
                 },
@@ -492,7 +492,7 @@ fn parse_invariant_specs(
             Ok(spec) => specs.push(spec),
             Err(mut diag) => {
                 diag.handler = handler_name.to_string();
-                diagnostics.push(diag);
+                diagnostics.push(*diag);
             }
         }
     }
@@ -500,20 +500,20 @@ fn parse_invariant_specs(
     (specs, diagnostics)
 }
 
-fn parse_invariant_spec(attribute: &Attribute) -> Result<InvariantSpec, InvariantDiagnostic> {
+fn parse_invariant_spec(attribute: &Attribute) -> Result<InvariantSpec, Box<InvariantDiagnostic>> {
     let mut named = BTreeMap::new();
     let mut positionals = Vec::new();
 
     for arg in &attribute.args {
         let Some(value) = attribute_arg_string(arg) else {
-            return Err(InvariantDiagnostic {
+            return Err(Box::new(InvariantDiagnostic {
                 invariant: "invariant".to_string(),
                 handler: String::new(),
                 message: "`@invariant(...)` arguments must be strings, identifiers, numbers, bools, or nil".to_string(),
                 span: arg.span,
                 help: Some("use strings for invariant names and configuration values".to_string()),
                 path: Vec::new(),
-            });
+            }));
         };
         if let Some(name) = &arg.name {
             named.insert(name.clone(), value);
@@ -525,7 +525,7 @@ fn parse_invariant_spec(attribute: &Attribute) -> Result<InvariantSpec, Invarian
     let raw_name = named
         .remove("name")
         .or_else(|| positionals.first().cloned())
-        .ok_or_else(|| InvariantDiagnostic {
+        .ok_or_else(|| Box::new(InvariantDiagnostic {
             invariant: "invariant".to_string(),
             handler: String::new(),
             message: "`@invariant(...)` requires an invariant name as the first positional argument or `name:`".to_string(),
@@ -534,17 +534,19 @@ fn parse_invariant_spec(attribute: &Attribute) -> Result<InvariantSpec, Invarian
                 "for example: `@invariant(\"fs.writes\", \"src/**\")`".to_string(),
             ),
             path: Vec::new(),
-        })?;
-    let name = normalize_invariant_name(&raw_name).ok_or_else(|| InvariantDiagnostic {
-        invariant: raw_name.clone(),
-        handler: String::new(),
-        message: format!("unknown invariant `{raw_name}`"),
-        span: attribute.span,
-        help: Some(
-            "known invariants are `fs.writes`, `budget.remaining`, and `approval.reachability`"
-                .to_string(),
-        ),
-        path: Vec::new(),
+        }))?;
+    let name = normalize_invariant_name(&raw_name).ok_or_else(|| {
+        Box::new(InvariantDiagnostic {
+            invariant: raw_name.clone(),
+            handler: String::new(),
+            message: format!("unknown invariant `{raw_name}`"),
+            span: attribute.span,
+            help: Some(
+                "known invariants are `fs.writes`, `budget.remaining`, and `approval.reachability`"
+                    .to_string(),
+            ),
+            path: Vec::new(),
+        })
     })?;
 
     let remaining_positionals = if named.contains_key("name") {

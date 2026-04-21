@@ -897,6 +897,7 @@ mod tests {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn word(
         page: i64,
         block: i64,

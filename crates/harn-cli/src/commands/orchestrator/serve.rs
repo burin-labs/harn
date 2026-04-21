@@ -1159,6 +1159,7 @@ fn trigger_kind_name(kind: crate::package::TriggerKind) -> &'static str {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn graceful_shutdown(
     ctx: GracefulShutdownCtx<'_>,
     listener: ListenerRuntime,

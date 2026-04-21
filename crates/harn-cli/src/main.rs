@@ -16,15 +16,15 @@ use std::sync::Arc;
 use std::{env, fs, process};
 
 use cli::{
-    Cli, Command, ConnectCommand, RunsCommand, SkillCommand, SkillKeyCommand, SkillTrustCommand,
-    SkillsCommand,
+    Cli, Command, ConnectCommand, RunsCommand, ServeCommand, SkillCommand, SkillKeyCommand,
+    SkillTrustCommand, SkillsCommand,
 };
 use harn_lexer::Lexer;
 use harn_parser::{DiagnosticSeverity, Parser, TypeChecker};
 
 #[tokio::main]
 async fn main() {
-    let raw_args: Vec<String> = env::args().collect();
+    let raw_args = normalize_serve_args(env::args().collect());
     if raw_args.len() == 2 && raw_args[1].ends_with(".harn") {
         commands::run::run_file(
             &raw_args[1],
@@ -362,7 +362,14 @@ async fn main() {
             commands::init::init_project(args.name.as_deref(), args.template)
         }
         Command::Doctor(args) => commands::doctor::run_doctor(!args.no_network).await,
-        Command::Serve(args) => a2a::run_a2a_server(&args.file, args.port).await,
+        Command::Serve(args) => match args.command {
+            ServeCommand::A2a(args) => a2a::run_a2a_server(&args.file, args.port).await,
+            ServeCommand::Mcp(args) => {
+                if let Err(error) = commands::serve::run_mcp_server(&args).await {
+                    command_error(&error);
+                }
+            }
+        },
         Command::Acp(args) => acp::run_acp_server(args.pipeline.as_deref()).await,
         Command::McpServe(args) => {
             commands::run::run_file_mcp_serve(&args.file, args.card.as_deref()).await
@@ -446,6 +453,19 @@ async fn main() {
             commands::dump_highlight_keywords::run(&args.output, args.check);
         }
     }
+}
+
+fn normalize_serve_args(mut raw_args: Vec<String>) -> Vec<String> {
+    if raw_args.len() > 2
+        && raw_args.get(1).is_some_and(|arg| arg == "serve")
+        && !matches!(
+            raw_args.get(2).map(String::as_str),
+            Some("a2a" | "mcp" | "-h" | "--help")
+        )
+    {
+        raw_args.insert(2, "a2a".to_string());
+    }
+    raw_args
 }
 
 fn print_version() {
@@ -1134,5 +1154,51 @@ fn connector_secret_namespace(base_dir: &Path) -> String {
                 .unwrap_or("workspace");
             format!("harn/{leaf}")
         }
+    }
+}
+
+#[cfg(test)]
+mod main_tests {
+    use super::normalize_serve_args;
+
+    #[test]
+    fn normalize_serve_args_inserts_a2a_for_legacy_shape() {
+        let args = normalize_serve_args(vec![
+            "harn".to_string(),
+            "serve".to_string(),
+            "--port".to_string(),
+            "3000".to_string(),
+            "agent.harn".to_string(),
+        ]);
+        assert_eq!(
+            args,
+            vec![
+                "harn".to_string(),
+                "serve".to_string(),
+                "a2a".to_string(),
+                "--port".to_string(),
+                "3000".to_string(),
+                "agent.harn".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn normalize_serve_args_preserves_explicit_subcommands() {
+        let args = normalize_serve_args(vec![
+            "harn".to_string(),
+            "serve".to_string(),
+            "mcp".to_string(),
+            "server.harn".to_string(),
+        ]);
+        assert_eq!(
+            args,
+            vec![
+                "harn".to_string(),
+                "serve".to_string(),
+                "mcp".to_string(),
+                "server.harn".to_string(),
+            ]
+        );
     }
 }

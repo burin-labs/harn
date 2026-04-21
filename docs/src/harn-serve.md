@@ -54,6 +54,25 @@ Mapping:
 - Harn type annotations become tool input/output schemas
 - replay keys map naturally to idempotent tool invocations
 
+Run it with:
+
+```bash
+harn serve mcp server.harn
+harn serve mcp --transport http server.harn
+```
+
+Behavior today:
+
+- stdio transport for local subprocess-style MCP clients
+- Streamable HTTP `POST` / `GET` endpoint at `--path`
+- legacy SSE compatibility endpoints at `--sse-path` and `--messages-path`
+- progress notifications when the caller provides `_meta.progressToken`
+- cooperative cancel propagation from `notifications/cancelled`
+- HTTP auth hooks built on the shared `AuthPolicy` surface:
+  API keys
+  HMAC canonical-request signatures
+  OAuth 2.1 claims injected by a hosting transport
+
 ### A2A
 
 Choose A2A when the caller wants a peer agent rather than a bag of tools.

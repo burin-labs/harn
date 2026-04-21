@@ -41,7 +41,6 @@ in Harn.
 
 ### Added
 
-<<<<<<< HEAD
 - **`project_fingerprint()` now returns a normalized repo profile for
   autonomous personas (#218).** The shallow detector now exposes stable
   primary tags for package manager, test runner, build tool, VCS, and CI
@@ -58,6 +57,13 @@ in Harn.
   matching workflow control methods so external callers can signal, query,
   update, pause, resume, and roll generations forward through the same durable
   runtime state.
+- **`harn serve mcp` workflow adapter for exported `pub fn` entrypoints
+  (#293).** The shared `harn-serve` core now ships its first transport
+  adapter: MCP. Any `.harn` module with exported `pub fn` entrypoints
+  can now be served directly as MCP tools with input/output schemas
+  derived from Harn types, cooperative cancellation, out-of-band
+  progress notifications, stdio + Streamable HTTP + legacy SSE
+  transports, and HTTP auth hooks for API-key / HMAC deployments.
 - **Git-backed package manager v0 (#345, #355).** Typed lockfile with
   content hashes, `harn add/install/update/remove/lock` commands, shared
   cache, ref resolution, frozen/refetch flows, and import resolution

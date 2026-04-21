@@ -1153,6 +1153,7 @@ dependencies = [
  "harn-lint",
  "harn-modules",
  "harn-parser",
+ "harn-serve",
  "harn-vm",
  "hmac",
  "include_dir",
@@ -1263,7 +1264,9 @@ name = "harn-serve"
 version = "0.7.26"
 dependencies = [
  "async-trait",
+ "axum",
  "base64",
+ "futures",
  "harn-parser",
  "harn-vm",
  "hex",
@@ -1275,6 +1278,8 @@ dependencies = [
  "time",
  "tokio",
  "tracing",
+ "url",
+ "uuid",
 ]
 
 [[package]]

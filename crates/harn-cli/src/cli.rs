@@ -69,7 +69,7 @@ SCRIPTING
     Doctor(DoctorArgs),
     /// Register outbound connector resources with a provider.
     Connect(ConnectArgs),
-    /// Serve a .harn agent over HTTP using A2A.
+    /// Serve a Harn workflow over a transport adapter.
     Serve(ServeArgs),
     /// Start the ACP server on stdio.
     Acp(AcpArgs),
@@ -430,10 +430,60 @@ pub(crate) struct BenchArgs {
 
 #[derive(Debug, Args)]
 pub(crate) struct ServeArgs {
+    #[command(subcommand)]
+    pub command: ServeCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum ServeCommand {
+    /// Serve a .harn agent over HTTP using A2A.
+    A2a(A2aServeArgs),
+    /// Serve exported `pub fn` entrypoints as MCP tools.
+    Mcp(ServeMcpArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct A2aServeArgs {
     /// Port to bind the A2A server to.
     #[arg(long, default_value_t = 8080)]
     pub port: u16,
     /// Path to the .harn file to serve.
+    pub file: String,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ServeMcpArgs {
+    /// Transport to expose for MCP clients.
+    #[arg(long, value_enum, default_value_t = McpServeTransport::Stdio)]
+    pub transport: McpServeTransport,
+    /// Socket address to bind when serving over HTTP.
+    #[arg(
+        long,
+        env = "HARN_SERVE_MCP_BIND",
+        default_value = "127.0.0.1:8765",
+        value_name = "ADDR"
+    )]
+    pub bind: SocketAddr,
+    /// Streamable HTTP endpoint path.
+    #[arg(long, default_value = "/mcp", value_name = "PATH")]
+    pub path: String,
+    /// Legacy SSE endpoint path for older MCP clients.
+    #[arg(long = "sse-path", default_value = "/sse", value_name = "PATH")]
+    pub sse_path: String,
+    /// Legacy SSE POST endpoint path for older MCP clients.
+    #[arg(
+        long = "messages-path",
+        default_value = "/messages",
+        value_name = "PATH"
+    )]
+    pub messages_path: String,
+    /// Static API keys accepted over HTTP via `Authorization: Bearer` or `X-API-Key`.
+    #[arg(long = "api-key", env = "HARN_SERVE_API_KEY", value_delimiter = ',')]
+    pub api_key: Vec<String>,
+    /// Shared secret for HMAC request signing on HTTP transports.
+    #[arg(long = "hmac-secret", env = "HARN_SERVE_HMAC_SECRET")]
+    pub hmac_secret: Option<String>,
+    /// Path to the `.harn` file whose exported `pub fn` entrypoints are served.
     pub file: String,
 }
 
@@ -1438,6 +1488,45 @@ mod tests {
         assert_eq!(serve.path, "/rpc");
         assert_eq!(serve.sse_path, "/events");
         assert_eq!(serve.messages_path, "/legacy/messages");
+    }
+
+    #[test]
+    fn test_parses_serve_mcp_flags() {
+        let cli = Cli::parse_from([
+            "harn",
+            "serve",
+            "mcp",
+            "--transport",
+            "http",
+            "--bind",
+            "127.0.0.1:9001",
+            "--path",
+            "/rpc",
+            "--sse-path",
+            "/events",
+            "--messages-path",
+            "/legacy/messages",
+            "--api-key",
+            "alpha,beta",
+            "--hmac-secret",
+            "shared",
+            "server.harn",
+        ]);
+
+        let Command::Serve(args) = cli.command.unwrap() else {
+            panic!("expected serve command");
+        };
+        let crate::cli::ServeCommand::Mcp(serve) = args.command else {
+            panic!("expected serve mcp");
+        };
+        assert_eq!(serve.transport, crate::cli::McpServeTransport::Http);
+        assert_eq!(serve.bind.to_string(), "127.0.0.1:9001");
+        assert_eq!(serve.path, "/rpc");
+        assert_eq!(serve.sse_path, "/events");
+        assert_eq!(serve.messages_path, "/legacy/messages");
+        assert_eq!(serve.api_key, vec!["alpha".to_string(), "beta".to_string()]);
+        assert_eq!(serve.hmac_secret.as_deref(), Some("shared"));
+        assert_eq!(serve.file, "server.harn");
     }
 
     #[test]
