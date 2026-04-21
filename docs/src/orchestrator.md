@@ -67,19 +67,27 @@ the queue with `harn orchestrator queue drain triage`. See
 `HARN_ORCHESTRATOR_STATE_DIR`, `HARN_ORCHESTRATOR_CERT`, and
 `HARN_ORCHESTRATOR_KEY`.
 
-On Unix, `SIGHUP` reloads manifest-backed HTTP trigger bindings without
-rebinding the socket. The orchestrator reparses `harn.toml`,
-re-collects manifest triggers, installs a new manifest binding version
-for changed `webhook` / `a2a-push` entries, and swaps the live listener
-route table in place. Requests already in flight keep the binding
-version they started with; new requests route to the newest active
-binding version. The orchestrator records `reload_succeeded` /
-`reload_failed` events on `orchestrator.manifest` and refreshes
-`orchestrator-state.json` after a successful reload.
+Hot reload now supports four equivalent entrypoints:
 
-Current reload scope is intentionally narrow: listener-wide settings
-such as `--bind`, TLS files, `allowed_origins`, `max_body_bytes`, and
-connector-managed trigger changes still require a full restart.
+- `SIGHUP` on Unix
+- `harn orchestrator reload`
+- authenticated `POST /admin/reload`
+- `harn orchestrator serve --watch` for manifest file changes
+
+Each path reparses `harn.toml`, re-collects manifest triggers, prepares
+connector changes off to the side, then swaps the live binding set in
+place. Requests already in flight keep the binding version they started
+with; new requests route to the newest active binding version. If the
+new manifest is invalid, a handler export no longer resolves, or a
+connector cannot initialize/activate, the reload is rejected and the
+existing bindings stay live.
+
+The orchestrator records `reload_succeeded` / `reload_failed` events on
+`orchestrator.manifest`, refreshes `orchestrator-state.json` after a
+successful reload, and now includes `listener_url` in that snapshot so
+local tooling can target the running admin API. See
+[Hot reload](./orchestrator/hot-reload.md) for the full workflow and
+operator-facing details.
 
 ## Recovery
 

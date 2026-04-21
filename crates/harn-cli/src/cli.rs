@@ -821,6 +821,8 @@ pub(crate) struct OrchestratorLocalArgs {
 pub(crate) enum OrchestratorCommand {
     /// Load manifests, initialize registries, and idle until shutdown.
     Serve(OrchestratorServeArgs),
+    /// Request a hot reload from a running orchestrator.
+    Reload(OrchestratorReloadArgs),
     /// Inspect orchestrator state.
     Inspect(OrchestratorInspectArgs),
     /// Inject a synthetic event for a specific binding.
@@ -865,6 +867,9 @@ pub(crate) struct OrchestratorServeArgs {
     /// Seconds to wait for each pump drain before truncating remaining backlog.
     #[arg(long = "drain-deadline", value_name = "SECS")]
     pub drain_deadline: Option<u64>,
+    /// Watch the manifest file and trigger reloads on changes.
+    #[arg(long)]
+    pub watch: bool,
     /// Runtime role to boot. Multi-tenant is a stub for now.
     #[arg(
         long,
@@ -873,6 +878,21 @@ pub(crate) struct OrchestratorServeArgs {
         default_value_t = crate::commands::orchestrator::role::OrchestratorRole::SingleTenant
     )]
     pub role: crate::commands::orchestrator::role::OrchestratorRole,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct OrchestratorReloadArgs {
+    #[command(flatten)]
+    pub local: OrchestratorLocalArgs,
+    /// Explicit admin base URL. Defaults to the running listener URL from the state snapshot.
+    #[arg(long = "admin-url", value_name = "URL")]
+    pub admin_url: Option<String>,
+    /// Request timeout in seconds.
+    #[arg(long, default_value_t = 10, value_name = "SECS")]
+    pub timeout: u64,
+    /// Emit JSON instead of human-readable output.
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Debug, Args)]

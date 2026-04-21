@@ -788,8 +788,8 @@ pub fn on_ok(event: TriggerEvent) -> dict {
             trace_id: harn_vm::TraceId::new(),
             tenant_id: None,
             headers: BTreeMap::from([(String::from("tenant"), tenant.to_string())]),
-            batch: None,
             raw_body: None,
+            batch: None,
             provider_payload: harn_vm::ProviderPayload::Known(
                 harn_vm::triggers::event::KnownProviderPayload::Cron(
                     harn_vm::triggers::CronEventPayload {

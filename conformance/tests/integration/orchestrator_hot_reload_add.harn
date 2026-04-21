@@ -1,0 +1,147 @@
+import "../_common"
+
+pipeline default() {
+  let unique = uuid()
+  let repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+  let base = path_join(temp_dir(), "harn-orchestrator-hot-reload-add-" + unique)
+  let workspace = path_join(base, "workspace")
+  let state_dir = path_join(base, "state")
+  let binary = env_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(repo_root))
+  assert(file_exists(binary), "missing built harn binary at " + binary)
+  let script = """
+    set -eu
+
+    base="${base}"
+    workspace="${workspace}"
+    state_dir="${state_dir}"
+    binary="${binary}"
+
+    mkdir -p "$workspace" "$state_dir"
+
+    cat > "$workspace/harn.toml" <<'EOF'
+    [package]
+    name = "orchestrator_hot_reload_add"
+    EOF
+
+    cat > "$workspace/harn.toml.next" <<'EOF'
+    [package]
+    name = "orchestrator_hot_reload_add"
+
+    [[triggers]]
+    id = "incoming-review-task"
+    kind = "a2a-push"
+    provider = "a2a-push"
+    path = "/a2a/v1"
+    match = { events = ["a2a.task.received"] }
+    handler = "worker://triage"
+    EOF
+
+    log_path="$base/orchestrator.log"
+    snapshot_path="$state_dir/orchestrator-state.json"
+    result_path="$base/result.json"
+
+    HARN_ORCHESTRATOR_API_KEYS="hot-reload-test-key" \
+    HARN_ORCHESTRATOR_HMAC_SECRET="hot-reload-test-hmac-secret" \
+      "$binary" orchestrator serve \
+        --config "$workspace/harn.toml" \
+        --state-dir "$state_dir" \
+        --bind 127.0.0.1:0 \
+        --role single-tenant \
+        >"$log_path" 2>&1 &
+    pid=$!
+
+    cleanup() {
+      kill "$pid" 2>/dev/null || true
+      wait "$pid" 2>/dev/null || true
+    }
+    trap cleanup EXIT
+
+    bind=$(python3 - "$snapshot_path" "$log_path" <<'PY'
+    import json, pathlib, sys, time
+    snapshot = pathlib.Path(sys.argv[1])
+    log = pathlib.Path(sys.argv[2])
+    deadline = time.time() + 120
+    while time.time() < deadline:
+        if snapshot.exists():
+            data = json.loads(snapshot.read_text())
+            bind = data.get("bind")
+            if bind:
+                print(bind)
+                raise SystemExit(0)
+        time.sleep(0.05)
+    tail = log.read_text()[-4000:] if log.exists() else "(missing orchestrator log)"
+    raise SystemExit(f"timed out waiting for orchestrator snapshot; stderr:\\n{tail}")
+    PY
+    )
+
+    (
+      sleep 0.2
+      mv "$workspace/harn.toml.next" "$workspace/harn.toml"
+      kill -HUP "$pid"
+    ) &
+
+    python3 - "$snapshot_path" <<'PY'
+    import json, pathlib, sys, time
+    path = pathlib.Path(sys.argv[1])
+    deadline = time.time() + 15
+    while time.time() < deadline:
+        if path.exists():
+            data = json.loads(path.read_text())
+            triggers = data.get("triggers") or []
+            if len(triggers) == 1 and triggers[0].get("version") == 1:
+                raise SystemExit(0)
+        time.sleep(0.05)
+    raise SystemExit("timed out waiting for add reload")
+    PY
+
+    python3 - "http://$bind/a2a/v1" "$result_path" <<'PY'
+    import json, pathlib, sys, urllib.request
+    url = sys.argv[1]
+    out = pathlib.Path(sys.argv[2])
+    payload = json.dumps({"task_id": "task-add", "sender": "alpha"}).encode()
+    request = urllib.request.Request(
+        url,
+        data=payload,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": "Bearer hot-reload-test-key",
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=10) as response:
+        out.write_text(json.dumps({"status": response.status, "body": json.loads(response.read().decode())}))
+    PY
+
+    python3 - "$state_dir" "$snapshot_path" "$result_path" <<'PY'
+    import glob
+    import json
+    import pathlib
+    import sqlite3
+    import sys
+
+    state_dir, snapshot_path, result_path = sys.argv[1:]
+    snapshot = json.loads(pathlib.Path(snapshot_path).read_text())
+    result = json.loads(pathlib.Path(result_path).read_text())
+    dbs = glob.glob(str(pathlib.Path(state_dir) / "**" / "*.sqlite"), recursive=True)
+    assert dbs, "missing sqlite event log"
+    conn = sqlite3.connect(dbs[0])
+    rows = conn.execute(
+        "SELECT payload FROM events WHERE topic = ? ORDER BY event_id",
+        ("orchestrator.triggers.pending",),
+    ).fetchall()
+    events = [json.loads(row[0]) for row in rows]
+    assert result["status"] == 200, result
+    assert len(snapshot["triggers"]) == 1, snapshot
+    assert snapshot["triggers"][0]["version"] == 1, snapshot
+    assert len(events) == 1, events
+    assert events[0]["binding_version"] == 1, events
+    print(json.dumps({"status": result["status"], "version": snapshot["triggers"][0]["version"]}))
+    PY
+    """
+  let result = shell(script)
+  assert(result?.success, result?.stderr)
+  let summary = json_parse(result?.stdout)
+  assert(summary.status == 200, "new route accepts after add reload")
+  assert(summary.version == 1, "added binding starts at version 1")
+  log("orchestrator hot reload add status: " + to_string(summary.status))
+}

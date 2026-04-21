@@ -61,6 +61,7 @@
 - [Orchestrator MCP server](./mcp-server.md)
 - [Harn portal](./portal.md)
 - [Orchestrator](./orchestrator.md)
+- [Hot reload](./orchestrator/hot-reload.md)
 - [Worker dispatch](./orchestrator/worker-dispatch.md)
 - [Orchestrator secrets](./orchestrator/secrets.md)
 
