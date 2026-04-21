@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { defineMessages, useIntl } from "react-intl"
 
-import { fetchRunCompare } from "../lib/api"
+import { fetchRunCompare, replayTriggerEvent } from "../lib/api"
 import { formatDuration, formatNumber, pct, statusClass } from "../lib/format"
 import type { PortalRunDetail, PortalRunDiff, RunSummary } from "../types"
 import { SkillObservability } from "./SkillObservability"
@@ -240,6 +240,210 @@ function daemonKindLabel(kind: PortalRunDetail["observability"]["daemon_events"]
   }
 }
 
+type ActionGraphNode = PortalRunDetail["observability"]["action_graph_nodes"][number]
+
+function nodeMeta(node: ActionGraphNode, key: string): unknown {
+  return node.metadata?.[key]
+}
+
+function nodeMetaString(node: ActionGraphNode, key: string) {
+  const value = nodeMeta(node, key)
+  return typeof value === "string" ? value : null
+}
+
+function nodeMetaNumber(node: ActionGraphNode, key: string) {
+  const value = nodeMeta(node, key)
+  return typeof value === "number" ? value : null
+}
+
+function nodeMetaBoolean(node: ActionGraphNode, key: string) {
+  const value = nodeMeta(node, key)
+  return typeof value === "boolean" ? value : null
+}
+
+function actionNodeAccent(kind: string) {
+  switch (kind) {
+    case "trigger":
+      return "action-node-trigger"
+    case "predicate":
+    case "trigger_predicate":
+      return "action-node-predicate"
+    case "a2a_hop":
+      return "action-node-a2a"
+    case "worker_enqueue":
+      return "action-node-worker"
+    case "dlq":
+      return "action-node-dlq"
+    case "retry":
+      return "action-node-retry"
+    default:
+      return "action-node-dispatch"
+  }
+}
+
+function actionNodeEyebrow(kind: string) {
+  switch (kind) {
+    case "trigger":
+      return "Inbound trigger"
+    case "predicate":
+    case "trigger_predicate":
+      return "Predicate gate"
+    case "dispatch":
+      return "Local dispatch"
+    case "a2a_hop":
+      return "A2A hop"
+    case "worker_enqueue":
+      return "Worker enqueue"
+    case "retry":
+      return "Retry"
+    case "dlq":
+      return "DLQ"
+    default:
+      return kind
+  }
+}
+
+function replayEventIdForNode(node: ActionGraphNode) {
+  return nodeMetaString(node, "event_id") ?? (node.kind === "trigger" ? node.id.replace(/^trigger:/, "") : null)
+}
+
+function actionNodeFacts(node: ActionGraphNode) {
+  const facts: string[] = []
+  switch (node.kind) {
+    case "trigger": {
+      const provider = nodeMetaString(node, "provider")
+      const eventKind = nodeMetaString(node, "event_kind")
+      const signature = nodeMetaString(node, "signature_status")
+      if (provider && eventKind) {
+        facts.push(`${provider}:${eventKind}`)
+      }
+      if (signature) {
+        facts.push(`signature ${signature}`)
+      }
+      break
+    }
+    case "predicate":
+    case "trigger_predicate": {
+      const result = nodeMetaBoolean(node, "result")
+      const costUsd = nodeMetaNumber(node, "cost_usd")
+      const latencyMs = nodeMetaNumber(node, "latency_ms")
+      if (result != null) {
+        facts.push(result ? "passed" : "blocked")
+      }
+      if (costUsd != null) {
+        facts.push(`$${costUsd.toFixed(4)}`)
+      }
+      if (latencyMs != null) {
+        facts.push(`${latencyMs} ms`)
+      }
+      break
+    }
+    case "dispatch":
+    case "a2a_hop":
+    case "worker_enqueue": {
+      const targetUri = nodeMetaString(node, "target_uri")
+      const targetAgent = nodeMetaString(node, "target_agent")
+      const queueName = nodeMetaString(node, "queue_name")
+      const taskId = nodeMetaString(node, "task_id")
+      const attempt = nodeMetaNumber(node, "attempt")
+      if (queueName) {
+        facts.push(`queue ${queueName}`)
+      } else if (targetAgent) {
+        facts.push(`agent ${targetAgent}`)
+      } else if (targetUri) {
+        facts.push(targetUri)
+      }
+      if (attempt != null) {
+        facts.push(`attempt ${attempt}`)
+      }
+      if (taskId) {
+        facts.push(`task ${taskId}`)
+      }
+      break
+    }
+    case "retry": {
+      const delayMs = nodeMetaNumber(node, "delay_ms")
+      if (delayMs != null) {
+        facts.push(`delay ${delayMs} ms`)
+      }
+      break
+    }
+    case "dlq": {
+      const attempts = nodeMetaNumber(node, "attempt_count")
+      if (attempts != null) {
+        facts.push(`${attempts} attempts`)
+      }
+      break
+    }
+    default:
+      break
+  }
+  if (node.trace_id) {
+    facts.push(`trace ${node.trace_id}`)
+  }
+  return facts
+}
+
+function actionNodeDetail(node: ActionGraphNode) {
+  switch (node.kind) {
+    case "predicate":
+    case "trigger_predicate":
+      return nodeMetaString(node, "reason") ?? nodeMetaString(node, "predicate")
+    case "a2a_hop":
+      return nodeMetaString(node, "target_uri")
+    case "worker_enqueue":
+      return nodeMetaString(node, "response_topic")
+    case "retry":
+    case "dlq":
+      return nodeMetaString(node, "error") ?? nodeMetaString(node, "final_error")
+    default:
+      return nodeMetaString(node, "dedupe_key")
+    }
+}
+
+function ActionGraphNodeCard({
+  node,
+  replayingEventId,
+  onReplay,
+}: {
+  node: ActionGraphNode
+  replayingEventId: string | null
+  onReplay: (eventId: string) => void
+}) {
+  const replayEventId = replayEventIdForNode(node)
+  const details = actionNodeDetail(node)
+  const facts = actionNodeFacts(node)
+
+  return (
+    <div className={`action-node-card ${actionNodeAccent(node.kind)}`} title={JSON.stringify(node.metadata ?? {}, null, 2)}>
+      <div className="row">
+        <div>
+          <div className="eyebrow">{actionNodeEyebrow(node.kind)}</div>
+          <strong>{node.label}</strong>
+        </div>
+        <span className={`pill ${statusClass(node.status)}`}>{node.status}</span>
+      </div>
+      <div className="meta">
+        {node.outcome}
+        {facts.length ? ` • ${facts.join(" • ")}` : ""}
+      </div>
+      {details ? <div className="meta">{details}</div> : null}
+      {replayEventId && (node.kind === "dlq" || node.kind === "trigger") ? (
+        <div className="action-node-actions">
+          <button
+            className="action-button action-button-inline"
+            disabled={replayingEventId === replayEventId}
+            onClick={() => onReplay(replayEventId)}
+            type="button"
+          >
+            {replayingEventId === replayEventId ? "Replaying…" : "Replay trigger"}
+          </button>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 function StageDetail({ label, value, open = false }: { label: string; value: string | null; open?: boolean }) {
   if (!value) {return null}
   return (
@@ -253,6 +457,8 @@ function StageDetail({ label, value, open = false }: { label: string; value: str
 export function RunDetail({ detail, runs, onSelectRun }: RunDetailProps) {
   const intl = useIntl()
   const [compareBaselinePath, setCompareBaselinePath] = useState<string | null>(null)
+  const [replayingEventId, setReplayingEventId] = useState<string | null>(null)
+  const [replayStatus, setReplayStatus] = useState<string | null>(null)
   const [compareResult, setCompareResult] = useState<{
     requestKey: string
     diff: PortalRunDiff | null
@@ -365,6 +571,10 @@ export function RunDetail({ detail, runs, onSelectRun }: RunDetailProps) {
         ? intl.formatMessage(messages.validationPassed)
         : intl.formatMessage(messages.validationFailed)
   const graphNodeLabels = new Map(detail.observability.action_graph_nodes.map((node) => [node.id, node.label]))
+  const actionGraphNodes = [...detail.observability.action_graph_nodes].sort((left, right) => {
+    const order = ["trigger", "predicate", "trigger_predicate", "dispatch", "a2a_hop", "worker_enqueue", "retry", "dlq"]
+    return order.indexOf(left.kind) - order.indexOf(right.kind)
+  })
   const compareRows = compareDiff
     ? [
         ...compareDiff.stage_diffs.map((item) => (
@@ -641,6 +851,40 @@ export function RunDetail({ detail, runs, onSelectRun }: RunDetailProps) {
           </div>
         </div>
         <div className="flow-grid">
+          <div className="flow-item">
+            <div className="row">
+              <strong>Action graph nodes</strong>
+              <span className="turn-chip">{detail.observability.action_graph_nodes.length}</span>
+            </div>
+            {replayStatus ? <div className="meta">{replayStatus}</div> : null}
+            {actionGraphNodes.length ? (
+              <div className="action-node-grid">
+                {actionGraphNodes.map((node) => (
+                  <ActionGraphNodeCard
+                    key={`${node.id}-${node.status}-${node.outcome}`}
+                    node={node}
+                    replayingEventId={replayingEventId}
+                    onReplay={(eventId) => {
+                      setReplayingEventId(eventId)
+                      setReplayStatus(null)
+                      void replayTriggerEvent(eventId)
+                        .then((job) => {
+                          setReplayStatus(`Queued ${job.target_label}`)
+                        })
+                        .catch((error) => {
+                          setReplayStatus(error instanceof Error ? error.message : String(error))
+                        })
+                        .finally(() => {
+                          setReplayingEventId(null)
+                        })
+                    }}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="muted">{intl.formatMessage(messages.noTransitions)}</div>
+            )}
+          </div>
           <div className="flow-item">
             <div className="row">
               <strong>Graph edges</strong>

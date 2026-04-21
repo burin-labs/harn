@@ -109,6 +109,82 @@ pub(super) async fn create_launch_job(
     Ok(job)
 }
 
+pub(super) async fn create_trigger_replay_job(
+    state: &Arc<PortalState>,
+    event_id: &str,
+) -> Result<PortalLaunchJob, (StatusCode, Json<ErrorResponse>)> {
+    let event_id = event_id.trim();
+    if event_id.is_empty() {
+        return Err(bad_request_error("event_id is required"));
+    }
+
+    let job_id = portal_timestamp_id("job");
+    let started_at = portal_timestamp_id("started");
+    let job = PortalLaunchJob {
+        id: job_id.clone(),
+        mode: "trigger_replay".to_string(),
+        target_label: format!("trigger replay {event_id}"),
+        status: "running".to_string(),
+        started_at,
+        finished_at: None,
+        exit_code: None,
+        logs: String::new(),
+        discovered_run_paths: Vec::new(),
+        workspace_dir: None,
+        transcript_path: None,
+    };
+    state
+        .launch_jobs
+        .lock()
+        .await
+        .insert(job_id.clone(), job.clone());
+
+    let jobs = state.launch_jobs.clone();
+    let launch_program = state.launch_program.clone();
+    let workspace_root = state.workspace_root.clone();
+    let event_id = event_id.to_string();
+    tokio::spawn(async move {
+        let output = Command::new(&launch_program)
+            .arg("trigger")
+            .arg("replay")
+            .arg(&event_id)
+            .current_dir(&workspace_root)
+            .output()
+            .await;
+
+        let mut jobs = jobs.lock().await;
+        if let Some(job) = jobs.get_mut(&job_id) {
+            match output {
+                Ok(output) => {
+                    let mut logs = String::new();
+                    logs.push_str(&String::from_utf8_lossy(&output.stdout));
+                    if !output.stderr.is_empty() {
+                        if !logs.is_empty() {
+                            logs.push('\n');
+                        }
+                        logs.push_str(&String::from_utf8_lossy(&output.stderr));
+                    }
+                    job.logs = logs;
+                    job.exit_code = output.status.code();
+                    job.status = if output.status.success() {
+                        "completed".to_string()
+                    } else {
+                        "failed".to_string()
+                    };
+                    job.finished_at = Some(portal_timestamp_id("finished"));
+                }
+                Err(error) => {
+                    job.status = "failed".to_string();
+                    job.finished_at = Some(portal_timestamp_id("finished"));
+                    job.logs = format!("failed to start trigger replay: {error}");
+                }
+            }
+        }
+    });
+
+    Ok(job)
+}
+
 pub(super) fn validate_launch_request(
     request: &PortalLaunchRequest,
 ) -> Result<(), (StatusCode, Json<ErrorResponse>)> {

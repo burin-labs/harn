@@ -26,6 +26,7 @@ fn test_portal_state(run_dir: &Path) -> Arc<PortalState> {
     Arc::new(PortalState {
         run_dir: run_dir.to_path_buf(),
         workspace_root: run_dir.to_path_buf(),
+        event_log: None,
         launch_program: PathBuf::from("harn"),
         launch_jobs: Arc::new(Mutex::new(HashMap::new())),
     })

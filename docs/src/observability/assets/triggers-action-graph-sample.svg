@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="540" viewBox="0 0 980 540" role="img" aria-labelledby="title desc">
+  <title id="title">Trigger action-graph portal sample</title>
+  <desc id="desc">A sample portal panel showing trigger, predicate, A2A hop, worker enqueue, retry, and DLQ cards.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#121820"/>
+      <stop offset="100%" stop-color="#0a0f15"/>
+    </linearGradient>
+  </defs>
+  <rect width="980" height="540" fill="url(#bg)"/>
+  <rect x="28" y="24" width="924" height="492" rx="18" fill="#141c25" stroke="#223142"/>
+  <text x="54" y="68" fill="#9fb4c8" font-family="Menlo, monospace" font-size="13">ACTION GRAPH</text>
+  <text x="54" y="98" fill="#f6fbff" font-family="Menlo, monospace" font-size="24">Trigger observability for trace trace_123</text>
+
+  <g font-family="Menlo, monospace">
+    <rect x="54" y="126" width="268" height="98" rx="12" fill="#17212c" stroke="#4da3ff" stroke-width="2"/>
+    <text x="72" y="152" fill="#7eb8ff" font-size="12">INBOUND TRIGGER</text>
+    <text x="72" y="178" fill="#f6fbff" font-size="18">github:issue.opened</text>
+    <text x="72" y="202" fill="#bcd0e2" font-size="12">signature verified • trace trace_123</text>
+
+    <rect x="344" y="126" width="268" height="98" rx="12" fill="#1f2117" stroke="#f3b13d" stroke-width="2"/>
+    <text x="362" y="152" fill="#f3b13d" font-size="12">PREDICATE GATE</text>
+    <text x="362" y="178" fill="#f6fbff" font-size="18">should_handle(event)</text>
+    <text x="362" y="202" fill="#d7d5bc" font-size="12">passed • $0.0021 • 184 ms</text>
+
+    <rect x="634" y="126" width="268" height="98" rx="12" fill="#17212c" stroke="#7dd3fc" stroke-width="2" stroke-dasharray="8 6"/>
+    <text x="652" y="152" fill="#7dd3fc" font-size="12">A2A HOP</text>
+    <text x="652" y="178" fill="#f6fbff" font-size="18">triage agent</text>
+    <text x="652" y="202" fill="#bcd0e2" font-size="12">task task-inline • A2A-Trace-Id trace_123</text>
+
+    <rect x="54" y="252" width="268" height="98" rx="12" fill="#152117" stroke="#63cf72" stroke-width="2"/>
+    <text x="72" y="278" fill="#63cf72" font-size="12">WORKER ENQUEUE</text>
+    <text x="72" y="304" fill="#f6fbff" font-size="18">worker://triage</text>
+    <text x="72" y="328" fill="#c4e2c8" font-size="12">queue triage • job_event_id 42</text>
+
+    <rect x="344" y="252" width="268" height="98" rx="12" fill="#241c14" stroke="#f59e0b" stroke-width="2"/>
+    <text x="362" y="278" fill="#f59e0b" font-size="12">RETRY</text>
+    <text x="362" y="304" fill="#f6fbff" font-size="18">retry in 250 ms</text>
+    <text x="362" y="328" fill="#e6d2bb" font-size="12">attempt 2 • timeout</text>
+
+    <rect x="634" y="252" width="268" height="98" rx="12" fill="#261415" stroke="#ef4444" stroke-width="2"/>
+    <text x="652" y="278" fill="#ef4444" font-size="12">DLQ</text>
+    <text x="652" y="304" fill="#f6fbff" font-size="18">github-a2a-review</text>
+    <text x="652" y="328" fill="#ebc4c4" font-size="12">2 attempts • final_error boom</text>
+
+    <rect x="634" y="366" width="160" height="40" rx="999" fill="#24374a" stroke="#7eb8ff"/>
+    <text x="682" y="391" fill="#f6fbff" font-size="13">Replay trigger</text>
+  </g>
+
+  <g stroke="#4f6478" stroke-width="2" fill="none">
+    <path d="M322 175 H344"/>
+    <path d="M612 175 H634"/>
+    <path d="M322 301 H344"/>
+    <path d="M612 301 H634"/>
+  </g>
+</svg>

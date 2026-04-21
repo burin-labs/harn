@@ -356,6 +356,11 @@ pub(super) struct PortalLaunchRequest {
     pub(super) env: Option<BTreeMap<String, String>>,
 }
 
+#[derive(Debug, Deserialize)]
+pub(super) struct PortalTriggerReplayRequest {
+    pub(super) event_id: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(super) struct PortalRunDiff {
     pub(super) left_path: String,

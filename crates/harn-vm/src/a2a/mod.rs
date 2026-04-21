@@ -105,7 +105,7 @@ pub async fn dispatch_trigger_event(
         }),
     );
 
-    let body = send_jsonrpc(&endpoint.rpc_url, &request, cancel_rx).await?;
+    let body = send_jsonrpc(&endpoint.rpc_url, &request, &event.trace_id.0, cancel_rx).await?;
     let result = body.get("result").cloned().ok_or_else(|| {
         if let Some(error) = body.get("error") {
             let message = error
@@ -470,6 +470,7 @@ fn url_authority(url: &Url) -> Result<String, A2aClientError> {
 async fn send_jsonrpc(
     rpc_url: &str,
     request: &Value,
+    trace_id: &str,
     cancel_rx: &mut broadcast::Receiver<()>,
 ) -> Result<Value, A2aClientError> {
     let response = send_http(
@@ -477,6 +478,7 @@ async fn send_jsonrpc(
             .post(rpc_url)
             .header(reqwest::header::CONTENT_TYPE, "application/json")
             .header("A2A-Version", A2A_PROTOCOL_VERSION)
+            .header("A2A-Trace-Id", trace_id)
             .json(request),
         cancel_rx,
         "A2A task dispatch cancelled",

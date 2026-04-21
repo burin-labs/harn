@@ -123,3 +123,27 @@ export async function launchRun(payload: {
   }
   throw new Error(message)
 }
+
+export async function replayTriggerEvent(event_id: string): Promise<PortalLaunchJob> {
+  const response = await fetch("/api/trigger/replay", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ event_id }),
+  })
+  if (response.ok) {
+    return response.json() as Promise<PortalLaunchJob>
+  }
+
+  let message = `Request failed: ${response.status}`
+  try {
+    const payload = (await response.json()) as { error?: string }
+    if (payload.error) {
+      message = `${message} ${payload.error}`
+    }
+  } catch {
+    // Keep status-based fallback.
+  }
+  throw new Error(message)
+}
