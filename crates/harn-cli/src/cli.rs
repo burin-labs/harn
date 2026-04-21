@@ -821,6 +821,8 @@ pub(crate) struct OrchestratorLocalArgs {
 pub(crate) enum OrchestratorCommand {
     /// Load manifests, initialize registries, and idle until shutdown.
     Serve(OrchestratorServeArgs),
+    /// Generate and run a cloud deploy for a manifest-driven orchestrator.
+    Deploy(OrchestratorDeployArgs),
     /// Request a hot reload from a running orchestrator.
     Reload(OrchestratorReloadArgs),
     /// Inspect orchestrator state.
@@ -878,6 +880,100 @@ pub(crate) struct OrchestratorServeArgs {
         default_value_t = crate::commands::orchestrator::role::OrchestratorRole::SingleTenant
     )]
     pub role: crate::commands::orchestrator::role::OrchestratorRole,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct OrchestratorDeployArgs {
+    /// Cloud provider target.
+    #[arg(long, value_enum)]
+    pub provider: OrchestratorDeployProvider,
+    /// Path to the root manifest to validate and deploy.
+    #[arg(
+        long,
+        visible_alias = "config",
+        env = "HARN_ORCHESTRATOR_MANIFEST",
+        default_value = "harn.toml",
+        value_name = "PATH"
+    )]
+    pub manifest: PathBuf,
+    /// Service/app name used in generated provider templates.
+    #[arg(long, default_value = "harn-orchestrator", value_name = "NAME")]
+    pub name: String,
+    /// Container image to deploy, or the tag to build/push when --build is set.
+    #[arg(
+        long,
+        default_value = "ghcr.io/burin-labs/harn:latest",
+        value_name = "IMAGE"
+    )]
+    pub image: String,
+    /// Directory where provider deploy bundles are written.
+    #[arg(long = "deploy-dir", default_value = "deploy", value_name = "DIR")]
+    pub deploy_dir: PathBuf,
+    /// Internal HTTP port the orchestrator listens on in the container.
+    #[arg(long, default_value_t = 8080, value_name = "PORT")]
+    pub port: u16,
+    /// Persistent data mount path inside the container.
+    #[arg(long = "data-dir", default_value = "/data", value_name = "PATH")]
+    pub data_dir: String,
+    /// Persistent disk or volume size in GiB where the provider supports it.
+    #[arg(long = "disk-size-gb", default_value_t = 10, value_name = "GB")]
+    pub disk_size_gb: u16,
+    /// Graceful shutdown timeout, passed through to orchestrator serve.
+    #[arg(long = "shutdown-timeout", default_value_t = 30, value_name = "SECS")]
+    pub shutdown_timeout: u64,
+    /// Optional provider region for templates and deploy commands that support it.
+    #[arg(long, value_name = "REGION")]
+    pub region: Option<String>,
+    /// Render service id/name to redeploy with `render deploys create`.
+    #[arg(long = "render-service", value_name = "SERVICE")]
+    pub render_service: Option<String>,
+    /// Railway service id/name for variable sync and deploy targeting.
+    #[arg(long = "railway-service", value_name = "SERVICE")]
+    pub railway_service: Option<String>,
+    /// Railway environment id/name for variable sync and deploy targeting.
+    #[arg(long = "railway-environment", value_name = "ENV")]
+    pub railway_environment: Option<String>,
+    /// Build and push the deploy image before running the provider deploy.
+    #[arg(long)]
+    pub build: bool,
+    /// Build locally without pushing when --build is set.
+    #[arg(long = "no-push")]
+    pub no_push: bool,
+    /// Extra runtime environment variable to include and sync, as KEY=VALUE.
+    #[arg(long = "env", value_name = "KEY=VALUE")]
+    pub env: Vec<String>,
+    /// Extra runtime secret to sync through the provider CLI, as KEY=VALUE.
+    #[arg(long = "secret", value_name = "KEY=VALUE")]
+    pub secret: Vec<String>,
+    /// Skip provider CLI secret synchronization.
+    #[arg(long = "no-secret-sync")]
+    pub no_secret_sync: bool,
+    /// Generate files and print commands without invoking provider CLIs.
+    #[arg(long)]
+    pub dry_run: bool,
+    /// Print the generated provider spec to stdout.
+    #[arg(long)]
+    pub print: bool,
+    /// Health URL to probe after the deploy command completes.
+    #[arg(long = "health-url", value_name = "URL")]
+    pub health_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum OrchestratorDeployProvider {
+    Render,
+    Fly,
+    Railway,
+}
+
+impl OrchestratorDeployProvider {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Render => "render",
+            Self::Fly => "fly",
+            Self::Railway => "railway",
+        }
+    }
 }
 
 #[derive(Debug, Args)]
@@ -1408,9 +1504,10 @@ mod tests {
     use std::time::Duration as StdDuration;
 
     use super::{
-        Cli, Command, McpCommand, OrchestratorCommand, OrchestratorQueueCommand, ProjectTemplate,
-        RunsCommand, SkillCommand, SkillKeyCommand, SkillTrustCommand, SkillsCommand,
-        TriggerCommand, TrustCommand, TrustOutcomeArg, TrustTierArg,
+        Cli, Command, McpCommand, OrchestratorCommand, OrchestratorDeployProvider,
+        OrchestratorQueueCommand, ProjectTemplate, RunsCommand, SkillCommand, SkillKeyCommand,
+        SkillTrustCommand, SkillsCommand, TriggerCommand, TrustCommand, TrustOutcomeArg,
+        TrustTierArg,
     };
     use clap::Parser;
 
@@ -1795,6 +1892,62 @@ mod tests {
         assert_eq!(serve.local.config, PathBuf::from("/etc/harn/triggers.toml"));
         assert_eq!(serve.local.state_dir, PathBuf::from("/var/lib/harn/state"));
         assert_eq!(serve.bind.to_string(), "0.0.0.0:8080");
+    }
+
+    #[test]
+    fn test_parses_orchestrator_deploy_args() {
+        let cli = Cli::parse_from([
+            "harn",
+            "orchestrator",
+            "deploy",
+            "--provider",
+            "fly",
+            "--manifest",
+            "workspace/harn.toml",
+            "--name",
+            "harn-prod",
+            "--image",
+            "ghcr.io/acme/harn-prod:latest",
+            "--deploy-dir",
+            "ops/deploy",
+            "--port",
+            "8443",
+            "--data-dir",
+            "/data",
+            "--disk-size-gb",
+            "20",
+            "--shutdown-timeout",
+            "60",
+            "--region",
+            "sjc",
+            "--build",
+            "--env",
+            "RUST_LOG=debug",
+            "--secret",
+            "OPENAI_API_KEY=sk-test",
+            "--dry-run",
+        ]);
+
+        let Command::Orchestrator(args) = cli.command.unwrap() else {
+            panic!("expected orchestrator command");
+        };
+        let OrchestratorCommand::Deploy(deploy) = args.command else {
+            panic!("expected orchestrator deploy");
+        };
+        assert_eq!(deploy.provider, OrchestratorDeployProvider::Fly);
+        assert_eq!(deploy.manifest, PathBuf::from("workspace/harn.toml"));
+        assert_eq!(deploy.name, "harn-prod");
+        assert_eq!(deploy.image, "ghcr.io/acme/harn-prod:latest");
+        assert_eq!(deploy.deploy_dir, PathBuf::from("ops/deploy"));
+        assert_eq!(deploy.port, 8443);
+        assert_eq!(deploy.data_dir, "/data");
+        assert_eq!(deploy.disk_size_gb, 20);
+        assert_eq!(deploy.shutdown_timeout, 60);
+        assert_eq!(deploy.region.as_deref(), Some("sjc"));
+        assert!(deploy.build);
+        assert_eq!(deploy.env, vec!["RUST_LOG=debug".to_string()]);
+        assert_eq!(deploy.secret, vec!["OPENAI_API_KEY=sk-test".to_string()]);
+        assert!(deploy.dry_run);
     }
 
     #[test]

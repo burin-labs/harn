@@ -65,6 +65,9 @@
 - [Hot reload](./orchestrator/hot-reload.md)
 - [Worker dispatch](./orchestrator/worker-dispatch.md)
 - [Orchestrator secrets](./orchestrator/secrets.md)
+- [Deploy to Render](./deploy/render.md)
+- [Deploy to Fly.io](./deploy/fly.md)
+- [Deploy to Railway](./deploy/railway.md)
 
 # Reference
 

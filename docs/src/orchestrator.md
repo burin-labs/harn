@@ -235,6 +235,22 @@ The image healthcheck issues `GET /health` against the local listener, so
 it works with Docker, BuildKit smoke tests, and most container platforms
 without requiring curl inside the distroless runtime.
 
+For managed cloud deploys, use `harn orchestrator deploy` to validate the
+manifest, generate a provider deploy bundle, optionally build/push an image,
+sync locally available secrets, and run the provider CLI:
+
+```bash
+harn orchestrator deploy --provider fly --manifest ./harn.toml --build
+harn orchestrator deploy --provider render --manifest ./harn.toml --render-service srv-...
+harn orchestrator deploy --provider railway --manifest ./harn.toml
+```
+
+Provider-specific templates and notes live under:
+
+- [Render](./deploy/render.md)
+- [Fly.io](./deploy/fly.md)
+- [Railway](./deploy/railway.md)
+
 ### Trigger examples
 
 ```toml

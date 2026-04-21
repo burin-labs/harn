@@ -22,6 +22,10 @@ granular archaeology.
   log, supports push-driven wakeups from the trigger inbox with
   poll-interval fallback, and replays recorded terminal results during
   dispatch replays for deterministic reruns.
+- **`harn orchestrator deploy` helper (#188, #414).** Generate and run
+  manifest-driven orchestrator deploys against Fly, Railway, or Render
+  from the CLI, with provider-specific starter configs shipped under
+  `deploy/` for quick onboarding.
 
 ### Fixed
 

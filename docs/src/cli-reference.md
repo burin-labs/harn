@@ -514,6 +514,9 @@ harn orchestrator queue --config harn.toml --state-dir ./.harn/orchestrator drai
 
 # Drop ready jobs from a worker queue.
 harn orchestrator queue --config harn.toml --state-dir ./.harn/orchestrator purge <queue> --confirm
+
+# Generate and run a cloud deploy bundle.
+harn orchestrator deploy --provider fly --manifest ./harn.toml --build --dry-run
 ```
 
 `harn orchestrator inspect/fire/replay/dlq/queue` are offline
@@ -523,6 +526,11 @@ directory. Environment variables `HARN_ORCHESTRATOR_MANIFEST`,
 `HARN_ORCHESTRATOR_LISTEN`, `HARN_ORCHESTRATOR_STATE_DIR`,
 `HARN_ORCHESTRATOR_API_KEYS`, and `HARN_ORCHESTRATOR_HMAC_SECRET`
 configure the serve entry point for container deployments.
+`harn orchestrator deploy` accepts `--provider render|fly|railway`,
+validates the manifest with the orchestrator runtime, writes provider files
+under `deploy/<provider>/`, optionally builds/pushes `--image` with
+`--build`, and syncs locally available secrets unless `--no-secret-sync` is
+set.
 
 ## harn trigger replay
 
