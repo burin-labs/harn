@@ -192,6 +192,16 @@ impl TypeChecker {
             }
 
             Node::FunctionCall { name, args } => {
+                if name == "schema_of" && args.len() == 1 {
+                    if let Node::Identifier(alias) = &args[0].node {
+                        if let Some(resolved) = scope.resolve_type(alias) {
+                            return Some(TypeExpr::Applied {
+                                name: "Schema".into(),
+                                args: vec![resolved.clone()],
+                            });
+                        }
+                    }
+                }
                 // Struct constructor calls return the struct type
                 if let Some(struct_info) = scope.get_struct(name) {
                     return Some(Self::applied_type_or_name(

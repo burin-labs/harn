@@ -1,7 +1,7 @@
 import { complete, create, wait } from "std/waitpoint"
 
 pipeline test(task) {
-  let wp = create("fan-in")
+  let wp = create("fan-in-" + uuid())
   let first = spawn {
     wait(wp).value + "-1"
   }
@@ -17,7 +17,6 @@ pipeline test(task) {
   let fifth = spawn {
     wait(wp).value + "-5"
   }
-  sleep(10ms)
   complete(wp, "go")
   println(await(first))
   println(await(second))

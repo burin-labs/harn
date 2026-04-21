@@ -1,1 +1,1 @@
-TypeError: parameter 'a' expected int, got string (hello)
+Argument 1 ('a'): expected int, got string

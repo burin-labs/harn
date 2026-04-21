@@ -551,6 +551,14 @@ fn first_object_param_error(
         for key_value in required_keys.iter() {
             let key = key_value.display();
             if !fields.contains_key(&key) {
+                let key_initial = key.chars().next();
+                let suggestion = crate::value::closest_match(
+                    &key,
+                    fields
+                        .keys()
+                        .map(String::as_str)
+                        .filter(|candidate| candidate.chars().next() == key_initial),
+                );
                 let expected = schema
                     .get("properties")
                     .and_then(VmValue::as_dict)
@@ -558,6 +566,12 @@ fn first_object_param_error(
                     .and_then(VmValue::as_dict)
                     .map(schema_expected_label)
                     .unwrap_or_else(|| "value".to_string());
+                if let Some(suggestion) = suggestion {
+                    return Some(format!(
+                        "parameter '{}': missing field '{}' ({}), did you mean '{}'?",
+                        param_name, key, expected, suggestion
+                    ));
+                }
                 return Some(format!(
                     "parameter '{}': missing field '{}' ({})",
                     param_name, key, expected
