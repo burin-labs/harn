@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use harn_parser::{Attribute, DictEntry, Node, SNode, StructField, TypedParam};
 
 use crate::chunk::{CompiledFunction, Constant, Op};
@@ -105,12 +107,12 @@ impl Compiler {
                     name: format!("{}.{}", type_name, name),
                     params: TypedParam::names(params),
                     default_start: TypedParam::default_start(params),
-                    chunk: fn_compiler.chunk,
+                    chunk: Rc::new(fn_compiler.chunk),
                     is_generator: false,
                     has_rest_param: false,
                 };
                 let fn_idx = self.chunk.functions.len();
-                self.chunk.functions.push(func);
+                self.chunk.functions.push(Rc::new(func));
                 self.chunk.emit_u16(Op::Closure, fn_idx as u16, self.line);
             }
         }
@@ -167,12 +169,12 @@ impl Compiler {
             name: name.to_string(),
             params: TypedParam::names(&params),
             default_start: None,
-            chunk: fn_compiler.chunk,
+            chunk: Rc::new(fn_compiler.chunk),
             is_generator: false,
             has_rest_param: false,
         };
         let fn_idx = self.chunk.functions.len();
-        self.chunk.functions.push(func);
+        self.chunk.functions.push(Rc::new(func));
         self.chunk.emit_u16(Op::Closure, fn_idx as u16, self.line);
         let name_idx = self.chunk.add_constant(Constant::String(name.to_string()));
         self.chunk.emit_u16(Op::DefLet, name_idx, self.line);

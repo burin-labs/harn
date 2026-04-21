@@ -221,7 +221,7 @@ impl McpServer {
             .unwrap_or(serde_json::json!({}));
         let args_vm = json_to_vm_value(&arguments);
 
-        let result = vm.call_closure_pub(&tool.handler, &[args_vm], &[]).await;
+        let result = vm.call_closure_pub(&tool.handler, &[args_vm]).await;
 
         match result {
             Ok(value) => {
@@ -388,7 +388,7 @@ impl McpServer {
         for tmpl in &self.resource_templates {
             if let Some(args) = match_uri_template(&tmpl.uri_template, uri) {
                 let args_vm = json_to_vm_value(&serde_json::json!(args));
-                let result = vm.call_closure_pub(&tmpl.handler, &[args_vm], &[]).await;
+                let result = vm.call_closure_pub(&tmpl.handler, &[args_vm]).await;
                 return match result {
                     Ok(value) => {
                         let mut content = serde_json::json!({
@@ -542,7 +542,7 @@ impl McpServer {
             .unwrap_or(serde_json::json!({}));
         let args_vm = json_to_vm_value(&arguments);
 
-        let result = vm.call_closure_pub(&prompt.handler, &[args_vm], &[]).await;
+        let result = vm.call_closure_pub(&prompt.handler, &[args_vm]).await;
 
         match result {
             Ok(value) => {

@@ -71,8 +71,7 @@ impl super::super::Vm {
             if let Some(handle) = vm_iter_handle {
                 // Safe for recursive VM reentry via closures as long as they
                 // don't re-enter the same iter handle.
-                let functions = self.frames.last().unwrap().chunk.functions.clone();
-                let next_val = crate::vm::iter::next_handle(&handle, self, &functions).await?;
+                let next_val = crate::vm::iter::next_handle(&handle, self).await?;
                 match next_val {
                     Some(v) => self.stack.push(v),
                     None => {

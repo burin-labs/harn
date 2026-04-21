@@ -1,6 +1,5 @@
 use std::rc::Rc;
 
-use crate::chunk::CompiledFunction;
 use crate::value::{VmClosure, VmEnv, VmError, VmValue};
 
 use super::{CallFrame, Vm};
@@ -68,7 +67,6 @@ impl Vm {
         &mut self,
         closure: &VmClosure,
         args: &[VmValue],
-        _parent_functions: &[CompiledFunction],
     ) -> Result<(), VmError> {
         if self.frames.len() >= Self::MAX_FRAMES {
             return Err(VmError::StackOverflow);
@@ -127,7 +125,7 @@ impl Vm {
         }
 
         self.frames.push(CallFrame {
-            chunk: closure.func.chunk.clone(),
+            chunk: Rc::clone(&closure.func.chunk),
             ip: 0,
             stack_base: self.stack.len(),
             saved_env,
@@ -184,7 +182,7 @@ impl Vm {
         }
         child.env = call_env;
 
-        let chunk = closure.func.chunk.clone();
+        let chunk = Rc::clone(&closure.func.chunk);
         let saved_source_dir = if let Some(ref dir) = closure.source_dir {
             let prev = crate::stdlib::process::VM_SOURCE_DIR.with(|sd| sd.borrow().clone());
             crate::stdlib::set_thread_source_dir(dir);
@@ -199,8 +197,8 @@ impl Vm {
         // The task will execute until return, sending yielded values through the channel.
         tokio::task::spawn_local(async move {
             let _ = child
-                .run_chunk_entry(
-                    &chunk,
+                .run_chunk_ref(
+                    chunk,
                     argc,
                     saved_source_dir,
                     module_functions,

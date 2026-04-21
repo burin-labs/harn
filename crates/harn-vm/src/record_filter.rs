@@ -53,7 +53,7 @@ fn {FILTER_FN_NAME}(record) {{
         })?;
         let result = self
             .vm
-            .call_closure_pub(closure, &[json_to_vm_value(record)], &[])
+            .call_closure_pub(closure, &[json_to_vm_value(record)])
             .await?;
         Ok(result.is_truthy())
     }

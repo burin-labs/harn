@@ -2164,7 +2164,7 @@ impl Dispatcher {
         vm.install_cancel_token(cancel_token.clone());
         let arg = event_to_handler_value(event)?;
         let args = [arg];
-        let future = vm.call_closure_pub(closure, &args, &[]);
+        let future = vm.call_closure_pub(closure, &args);
         pin_mut!(future);
         let (binding_id, binding_version) = split_binding_key(binding_key);
         let prior_context = ACTIVE_DISPATCH_CONTEXT.with(|slot| {

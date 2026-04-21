@@ -327,7 +327,7 @@ pub(crate) async fn apply_structural_experiment(
             interpret_closure_result(
                 &current_messages,
                 current_system.as_deref(),
-                &vm.call_closure_pub(closure, &[VmValue::Dict(std::rc::Rc::new(ctx))], &[])
+                &vm.call_closure_pub(closure, &[VmValue::Dict(std::rc::Rc::new(ctx))])
                     .await?,
                 &config,
             )?

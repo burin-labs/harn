@@ -1,4 +1,3 @@
-use crate::chunk::CompiledFunction;
 use crate::value::{VmError, VmValue};
 
 impl crate::vm::Vm {
@@ -7,7 +6,6 @@ impl crate::vm::Vm {
         obj: &VmValue,
         method: &str,
         args: &[VmValue],
-        functions: &[CompiledFunction],
     ) -> Result<VmValue, VmError> {
         let VmValue::StructInstance { layout, .. } = obj else {
             unreachable!("struct instance dispatch only calls struct instance handler");
@@ -18,7 +16,7 @@ impl crate::vm::Vm {
             if let Some(VmValue::Closure(closure)) = impl_dict.get(method) {
                 let mut full_args = vec![obj.clone()];
                 full_args.extend_from_slice(args);
-                return self.call_closure(closure, &full_args, functions).await;
+                return self.call_closure(closure, &full_args).await;
             }
         }
 

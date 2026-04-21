@@ -62,7 +62,7 @@ pub(crate) async fn emit_agent_event(event: &AgentEvent) {
         let arg = crate::stdlib::json_to_vm_value(&payload);
         // Log but don't propagate: one broken subscriber must not tear
         // down the agent loop.
-        if let Err(err) = vm.call_closure_pub(&closure, &[arg], &[]).await {
+        if let Err(err) = vm.call_closure_pub(&closure, &[arg]).await {
             crate::events::log_warn(
                 "agent.subscriber",
                 &format!(

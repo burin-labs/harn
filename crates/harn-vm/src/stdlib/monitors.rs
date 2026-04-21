@@ -478,7 +478,7 @@ async fn call_closure(
     closure: &Rc<VmClosure>,
     args: &[VmValue],
 ) -> Result<VmValue, VmError> {
-    vm.call_closure_pub(closure, args, &[]).await
+    vm.call_closure_pub(closure, args).await
 }
 
 async fn append_monitor_started(

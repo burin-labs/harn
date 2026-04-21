@@ -330,7 +330,7 @@ impl Vm {
                     .compile_fn_body(params, body, module_source_file)
                     .map_err(|e| VmError::Runtime(format!("Import compile error: {e}")))?;
                 let closure = Rc::new(VmClosure {
-                    func: func_chunk,
+                    func: Rc::new(func_chunk),
                     env: module_env.clone(),
                     source_dir: source_dir.clone(),
                     module_functions: Some(Rc::clone(&registry)),

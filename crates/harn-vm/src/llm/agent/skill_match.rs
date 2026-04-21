@@ -350,7 +350,7 @@ async fn run_skill_hook(
     let Some(mut vm) = crate::vm::clone_async_builtin_child_vm() else {
         return Ok(());
     };
-    if let Err(err) = vm.call_closure_pub(&closure, &[], &[]).await {
+    if let Err(err) = vm.call_closure_pub(&closure, &[]).await {
         crate::events::log_warn(
             "agent.skill_hook",
             &format!("skill={skill_name} hook={hook_key} error: {err}"),

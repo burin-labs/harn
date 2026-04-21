@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::rc::Rc;
 use std::time::Instant;
 
-use crate::chunk::{Chunk, Constant};
+use crate::chunk::{Chunk, ChunkRef, Constant};
 use crate::value::{
     ModuleFunctionRegistry, VmAsyncBuiltinFn, VmBuiltinFn, VmEnv, VmError, VmTaskHandle, VmValue,
 };
@@ -28,7 +28,7 @@ impl Drop for ScopeSpan {
 
 /// Call frame for function execution.
 pub(crate) struct CallFrame {
-    pub(crate) chunk: Chunk,
+    pub(crate) chunk: ChunkRef,
     pub(crate) ip: usize,
     pub(crate) stack_base: usize,
     pub(crate) saved_env: VmEnv,
@@ -251,7 +251,7 @@ impl Vm {
     pub fn start(&mut self, chunk: &Chunk) {
         let initial_env = self.env.clone();
         self.frames.push(CallFrame {
-            chunk: chunk.clone(),
+            chunk: Rc::new(chunk.clone()),
             ip: 0,
             stack_base: self.stack.len(),
             saved_env: self.env.clone(),

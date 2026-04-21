@@ -212,7 +212,6 @@ impl super::super::Vm {
         &mut self,
         name: &str,
         args: Vec<VmValue>,
-        functions: &[crate::chunk::CompiledFunction],
         direct_id: Option<BuiltinId>,
     ) -> Result<(), VmError> {
         if self.try_call_special_name(name, &args).await? {
@@ -223,7 +222,7 @@ impl super::super::Vm {
                 let gen = self.create_generator(&closure, &args);
                 self.stack.push(gen);
             } else {
-                self.push_closure_frame(&closure, &args, functions)?;
+                self.push_closure_frame(&closure, &args)?;
             }
         } else {
             let result = if let Some(id) = direct_id {
@@ -241,30 +240,27 @@ impl super::super::Vm {
             let frame = self.frames.last_mut().unwrap();
             let argc = frame.chunk.code[frame.ip] as usize;
             frame.ip += 1;
-            // Avoid borrowing frame across the call.
-            let functions = frame.chunk.functions.clone();
 
             let args: Vec<VmValue> = self.stack.split_off(self.stack.len().saturating_sub(argc));
             let callee = self.pop()?;
 
             match callee {
                 VmValue::String(name) => {
-                    self.call_named_value(&name, args, &functions, None).await?;
+                    self.call_named_value(&name, args, None).await?;
                 }
                 VmValue::Closure(closure) => {
                     if closure.func.is_generator {
                         let gen = self.create_generator(&closure, &args);
                         self.stack.push(gen);
                     } else {
-                        self.push_closure_frame(&closure, &args, &functions)?;
+                        self.push_closure_frame(&closure, &args)?;
                     }
                 }
                 VmValue::BuiltinRef(name) => {
-                    self.call_named_value(&name, args, &functions, None).await?;
+                    self.call_named_value(&name, args, None).await?;
                 }
                 VmValue::BuiltinRefId { id, name } => {
-                    self.call_named_value(&name, args, &functions, Some(id))
-                        .await?;
+                    self.call_named_value(&name, args, Some(id)).await?;
                 }
                 _ => {
                     return Err(VmError::TypeError(format!(
@@ -284,26 +280,23 @@ impl super::super::Vm {
                     ))
                 }
             };
-            let functions = self.frames.last().unwrap().chunk.functions.clone();
-
             match callee {
                 VmValue::String(name) => {
-                    self.call_named_value(&name, args, &functions, None).await?;
+                    self.call_named_value(&name, args, None).await?;
                 }
                 VmValue::Closure(closure) => {
                     if closure.func.is_generator {
                         let gen = self.create_generator(&closure, &args);
                         self.stack.push(gen);
                     } else {
-                        self.push_closure_frame(&closure, &args, &functions)?;
+                        self.push_closure_frame(&closure, &args)?;
                     }
                 }
                 VmValue::BuiltinRef(name) => {
-                    self.call_named_value(&name, args, &functions, None).await?;
+                    self.call_named_value(&name, args, None).await?;
                 }
                 VmValue::BuiltinRefId { id, name } => {
-                    self.call_named_value(&name, args, &functions, Some(id))
-                        .await?;
+                    self.call_named_value(&name, args, Some(id)).await?;
                 }
                 _ => {
                     return Err(VmError::TypeError(format!(
@@ -372,7 +365,7 @@ impl super::super::Vm {
 
                 let argc = args.len();
                 self.frames.push(CallFrame {
-                    chunk: closure.func.chunk.clone(),
+                    chunk: Rc::clone(&closure.func.chunk),
                     ip: 0,
                     stack_base,
                     saved_env: parent_env,
@@ -407,10 +400,8 @@ impl super::super::Vm {
             let argc = frame.chunk.code[frame.ip] as usize;
             frame.ip += 1;
             let name = Self::const_string(&frame.chunk.constants[name_idx])?;
-            let functions = frame.chunk.functions.clone();
             let args: Vec<VmValue> = self.stack.split_off(self.stack.len().saturating_sub(argc));
-            self.call_named_value(&name, args, &functions, Some(id))
-                .await?;
+            self.call_named_value(&name, args, Some(id)).await?;
         } else if op == Op::CallBuiltinSpread as u8 {
             let frame = self.frames.last_mut().unwrap();
             let id = BuiltinId::from_raw(frame.chunk.read_u64(frame.ip));
@@ -418,7 +409,6 @@ impl super::super::Vm {
             let name_idx = frame.chunk.read_u16(frame.ip) as usize;
             frame.ip += 2;
             let name = Self::const_string(&frame.chunk.constants[name_idx])?;
-            let functions = frame.chunk.functions.clone();
             let args_val = self.pop()?;
             let args = match args_val {
                 VmValue::List(items) => (*items).clone(),
@@ -428,8 +418,7 @@ impl super::super::Vm {
                     ))
                 }
             };
-            self.call_named_value(&name, args, &functions, Some(id))
-                .await?;
+            self.call_named_value(&name, args, Some(id)).await?;
         } else if op == Op::Return as u8 {
             let val = self.pop().unwrap_or(VmValue::Nil);
             return Err(VmError::Return(val));
@@ -437,7 +426,7 @@ impl super::super::Vm {
             let frame = self.frames.last_mut().unwrap();
             let fn_idx = frame.chunk.read_u16(frame.ip) as usize;
             frame.ip += 2;
-            let func = frame.chunk.functions[fn_idx].clone();
+            let func = Rc::clone(&frame.chunk.functions[fn_idx]);
             let closure = VmClosure {
                 func,
                 env: self.env.clone(),
@@ -482,8 +471,7 @@ impl super::super::Vm {
                     Self::const_string(&frame.chunk.constants[name_idx as usize])?
                 };
                 let cache_target = Self::method_cache_target(&obj, &method, args.len());
-                let functions = self.frames.last().unwrap().chunk.functions.clone();
-                let result = self.call_method(obj, &method, &args, &functions).await?;
+                let result = self.call_method(obj, &method, &args).await?;
                 if let (Some(slot), Some(target)) = (cache_slot, cache_target) {
                     let frame = self.frames.last().unwrap();
                     frame.chunk.set_inline_cache_entry(
@@ -528,8 +516,7 @@ impl super::super::Vm {
                     Self::const_string(&frame.chunk.constants[name_idx as usize])?
                 };
                 let cache_target = Self::method_cache_target(&obj, &method, args.len());
-                let functions = self.frames.last().unwrap().chunk.functions.clone();
-                let result = self.call_method(obj, &method, &args, &functions).await?;
+                let result = self.call_method(obj, &method, &args).await?;
                 if let (Some(slot), Some(target)) = (cache_slot, cache_target) {
                     let frame = self.frames.last().unwrap();
                     frame.chunk.set_inline_cache_entry(
@@ -546,22 +533,18 @@ impl super::super::Vm {
         } else if op == Op::Pipe as u8 {
             let callable = self.pop()?;
             let value = self.pop()?;
-            let functions = self.frames.last().unwrap().chunk.functions.clone();
             match callable {
                 VmValue::Closure(closure) => {
-                    self.push_closure_frame(&closure, &[value], &functions)?;
+                    self.push_closure_frame(&closure, &[value])?;
                 }
                 VmValue::String(name) => {
-                    self.call_named_value(&name, vec![value], &functions, None)
-                        .await?;
+                    self.call_named_value(&name, vec![value], None).await?;
                 }
                 VmValue::BuiltinRef(name) => {
-                    self.call_named_value(&name, vec![value], &functions, None)
-                        .await?;
+                    self.call_named_value(&name, vec![value], None).await?;
                 }
                 VmValue::BuiltinRefId { id, name } => {
-                    self.call_named_value(&name, vec![value], &functions, Some(id))
-                        .await?;
+                    self.call_named_value(&name, vec![value], Some(id)).await?;
                 }
                 _ => {
                     return Err(VmError::TypeError(format!(

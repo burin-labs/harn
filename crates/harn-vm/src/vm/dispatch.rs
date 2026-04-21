@@ -2,7 +2,6 @@ use std::future::Future;
 use std::pin::Pin;
 use std::rc::Rc;
 
-use crate::chunk::CompiledFunction;
 use crate::value::{ErrorCategory, VmClosure, VmError, VmValue};
 use crate::BuiltinId;
 
@@ -93,7 +92,6 @@ impl Vm {
         &'a mut self,
         closure: &'a VmClosure,
         args: &'a [VmValue],
-        _parent_functions: &'a [CompiledFunction],
     ) -> Pin<Box<dyn Future<Output = Result<VmValue, VmError>> + 'a>> {
         Box::pin(async move {
             let saved_env = self.env.clone();
@@ -136,8 +134,8 @@ impl Vm {
                 None
             };
             let result = self
-                .run_chunk_entry(
-                    &closure.func.chunk,
+                .run_chunk_ref(
+                    Rc::clone(&closure.func.chunk),
                     argc,
                     saved_source_dir,
                     closure.module_functions.clone(),
@@ -159,29 +157,31 @@ impl Vm {
     /// `VmValue::BuiltinRef`, so builtin names passed by reference (e.g.
     /// `dict.rekey(snake_to_camel)`) dispatch through the same code path as
     /// user-defined closures.
-    pub(crate) async fn call_callable_value(
-        &mut self,
-        callable: &VmValue,
-        args: &[VmValue],
-        functions: &[CompiledFunction],
-    ) -> Result<VmValue, VmError> {
-        match callable {
-            VmValue::Closure(closure) => self.call_closure(closure, args, functions).await,
-            VmValue::BuiltinRef(name) => {
-                if let Some(result) = self.call_sync_builtin_by_ref(name, args) {
-                    result
-                } else {
-                    self.call_named_builtin(name, args.to_vec()).await
+    #[allow(clippy::manual_async_fn)]
+    pub(crate) fn call_callable_value<'a>(
+        &'a mut self,
+        callable: &'a VmValue,
+        args: &'a [VmValue],
+    ) -> Pin<Box<dyn Future<Output = Result<VmValue, VmError>> + 'a>> {
+        Box::pin(async move {
+            match callable {
+                VmValue::Closure(closure) => self.call_closure(closure, args).await,
+                VmValue::BuiltinRef(name) => {
+                    if let Some(result) = self.call_sync_builtin_by_ref(name, args) {
+                        result
+                    } else {
+                        self.call_named_builtin(name, args.to_vec()).await
+                    }
                 }
+                VmValue::BuiltinRefId { id, name } => {
+                    self.call_builtin_id_or_name(*id, name, args.to_vec()).await
+                }
+                other => Err(VmError::TypeError(format!(
+                    "expected callable, got {}",
+                    other.type_name()
+                ))),
             }
-            VmValue::BuiltinRefId { id, name } => {
-                self.call_builtin_id_or_name(*id, name, args.to_vec()).await
-            }
-            other => Err(VmError::TypeError(format!(
-                "expected callable, got {}",
-                other.type_name()
-            ))),
-        }
+        })
     }
 
     fn call_sync_builtin_by_ref(
@@ -225,9 +225,8 @@ impl Vm {
         &mut self,
         closure: &VmClosure,
         args: &[VmValue],
-        functions: &[CompiledFunction],
     ) -> Result<VmValue, VmError> {
-        self.call_closure(closure, args, functions).await
+        self.call_closure(closure, args).await
     }
 
     /// Resolve a named builtin: sync builtins → async builtins → bridge → error.

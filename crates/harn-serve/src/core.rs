@@ -280,7 +280,7 @@ impl DispatchCore {
                     )));
                 };
                 let args = build_vm_args(&request.arguments, function)?;
-                let result = vm.call_closure_pub(closure, &args, &[]).await;
+                let result = vm.call_closure_pub(closure, &args).await;
 
                 match previous_log {
                     Some(log) => {

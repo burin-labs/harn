@@ -39,12 +39,12 @@ impl Compiler {
             name: name.to_string(),
             params: TypedParam::names(params),
             default_start: TypedParam::default_start(params),
-            chunk: fn_compiler.chunk,
+            chunk: Rc::new(fn_compiler.chunk),
             is_generator: is_gen,
             has_rest_param: params.last().is_some_and(|p| p.rest),
         };
         let fn_idx = self.chunk.functions.len();
-        self.chunk.functions.push(func);
+        self.chunk.functions.push(Rc::new(func));
 
         self.chunk.emit_u16(Op::Closure, fn_idx as u16, self.line);
         let name_idx = self.chunk.add_constant(Constant::String(name.to_string()));
@@ -80,12 +80,12 @@ impl Compiler {
             name: name.to_string(),
             params: TypedParam::names(params),
             default_start: TypedParam::default_start(params),
-            chunk: fn_compiler.chunk,
+            chunk: Rc::new(fn_compiler.chunk),
             is_generator: false,
             has_rest_param: params.last().is_some_and(|p| p.rest),
         };
         let fn_idx = self.chunk.functions.len();
-        self.chunk.functions.push(func);
+        self.chunk.functions.push(Rc::new(func));
 
         let define_name = self
             .chunk
@@ -269,12 +269,12 @@ impl Compiler {
             name: "<closure>".to_string(),
             params: TypedParam::names(params),
             default_start: TypedParam::default_start(params),
-            chunk: fn_compiler.chunk,
+            chunk: Rc::new(fn_compiler.chunk),
             is_generator: is_gen,
             has_rest_param: false,
         };
         let fn_idx = self.chunk.functions.len();
-        self.chunk.functions.push(func);
+        self.chunk.functions.push(Rc::new(func));
 
         self.chunk.emit_u16(Op::Closure, fn_idx as u16, self.line);
         Ok(())

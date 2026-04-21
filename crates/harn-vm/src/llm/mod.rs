@@ -552,7 +552,7 @@ pub fn register_llm_builtins(vm: &mut Vm) {
             let mut child_vm = crate::vm::clone_async_builtin_child_vm().ok_or_else(|| {
                 VmError::Runtime("with_rate_limit requires an async builtin VM context".to_string())
             })?;
-            match child_vm.call_closure_pub(&closure, &[], &[]).await {
+            match child_vm.call_closure_pub(&closure, &[]).await {
                 Ok(v) => return Ok(v),
                 Err(err) => {
                     let cat = crate::value::error_to_category(&err);

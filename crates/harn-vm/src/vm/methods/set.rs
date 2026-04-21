@@ -1,6 +1,5 @@
 use std::rc::Rc;
 
-use crate::chunk::CompiledFunction;
 use crate::value::{values_equal, VmError, VmValue};
 
 impl crate::vm::Vm {
@@ -9,7 +8,6 @@ impl crate::vm::Vm {
         items: &Rc<Vec<VmValue>>,
         method: &str,
         args: &[VmValue],
-        functions: &[CompiledFunction],
     ) -> Result<VmValue, VmError> {
         match method {
             "count" | "len" => Ok(VmValue::Int(items.len() as i64)),
@@ -127,9 +125,7 @@ impl crate::vm::Vm {
                 if let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) {
                     let mut result = Vec::new();
                     for item in items.iter() {
-                        let mapped = self
-                            .call_callable_value(callable, &[item.clone()], functions)
-                            .await?;
+                        let mapped = self.call_callable_value(callable, &[item.clone()]).await?;
                         if !result.iter().any(|x| values_equal(x, &mapped)) {
                             result.push(mapped);
                         }
@@ -143,9 +139,7 @@ impl crate::vm::Vm {
                 if let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) {
                     let mut result = Vec::new();
                     for item in items.iter() {
-                        let keep = self
-                            .call_callable_value(callable, &[item.clone()], functions)
-                            .await?;
+                        let keep = self.call_callable_value(callable, &[item.clone()]).await?;
                         if keep.is_truthy() {
                             result.push(item.clone());
                         }
@@ -158,9 +152,7 @@ impl crate::vm::Vm {
             "any" => {
                 if let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) {
                     for item in items.iter() {
-                        let result = self
-                            .call_callable_value(callable, &[item.clone()], functions)
-                            .await?;
+                        let result = self.call_callable_value(callable, &[item.clone()]).await?;
                         if result.is_truthy() {
                             return Ok(VmValue::Bool(true));
                         }
@@ -173,9 +165,7 @@ impl crate::vm::Vm {
             "all" | "every" => {
                 if let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) {
                     for item in items.iter() {
-                        let result = self
-                            .call_callable_value(callable, &[item.clone()], functions)
-                            .await?;
+                        let result = self.call_callable_value(callable, &[item.clone()]).await?;
                         if !result.is_truthy() {
                             return Ok(VmValue::Bool(false));
                         }
