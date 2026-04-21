@@ -162,6 +162,10 @@ enforcement.
 - Manifest-backed extension ABI: packages can publish stable module entry
   points via `[exports]` and ship provider/alias adapters declaratively via
   `[llm]` in `harn.toml`, without editing core runtime registration code.
+  Local sibling packages can be added with `harn add ../harn-openapi`;
+  Harn derives the alias from the dependency's `harn.toml` and live-links
+  directory path dependencies into `.harn/packages/` for fast multi-repo
+  development.
 - Design-by-contract and project/runtime helpers: `require ...`,
   metadata/scanner runtime builtins, `import "std/project"` for
   freshness-aware metadata and scan state, and `import "std/runtime"` for
