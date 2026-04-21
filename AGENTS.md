@@ -4,10 +4,11 @@ This repository implements Harn, a programming language and runtime for orchestr
 
 ## Dev Environment Tips
 
-- Run `make setup` on a fresh clone. It configures `.githooks/`, installs `cargo-nextest` and
-  `sccache`, installs repo-local Node tooling including the portal frontend when `npm` is
-  available, enables the sccache rustc wrapper, writes a per-worktree temp Cargo `target-dir`
-  when `CODEX_WORKTREE_PATH` is set, and runs `cargo check --workspace`.
+- Run `make setup` on a fresh clone. It configures `.githooks/`, installs `cargo-nextest`,
+  `sccache`, and `actionlint` when their toolchains are available, installs repo-local Node
+  tooling including the portal frontend when `npm` is available, enables the sccache rustc wrapper,
+  writes a per-worktree temp Cargo `target-dir` when `CODEX_WORKTREE_PATH` is set, and runs
+  `cargo check --workspace`.
 - Use `make test` for workspace Rust tests. It runs `cargo nextest` when available and falls back
   to `cargo test --workspace`. Use `make test-cargo` when you explicitly need baseline Cargo
   behavior.
@@ -20,8 +21,9 @@ This repository implements Harn, a programming language and runtime for orchestr
   because portal deps have not been installed in a fresh worktree yet.
 - `crates/harn-wasm` is excluded from the Cargo workspace. Build it separately with
   `cd crates/harn-wasm && wasm-pack build`.
-- Installed hooks are worth keeping on: pre-commit runs `cargo fmt`, clippy, markdown lint, and
-  portal lint; pre-push runs workspace tests plus markdown, portal, and conformance format checks.
+- Installed hooks are worth keeping on: pre-commit runs `cargo fmt`, clippy, markdown lint,
+  actionlint, and portal lint; pre-push runs workspace tests plus markdown, actionlint, portal, and
+  conformance format checks.
 
 ## Repository Map
 
@@ -52,6 +54,7 @@ This repository implements Harn, a programming language and runtime for orchestr
 - Check formatting: `cargo run --bin harn -- fmt --check <path>`
 - Workspace tests: `make test`
 - Explicit Cargo fallback: `make test-cargo`
+- GitHub Actions workflow lint: `make lint-actions`
 - Conformance suite: `cargo run --bin harn -- test conformance`
 - Targeted conformance case: `cargo run --bin harn -- test conformance --filter <name>`
 - Full repo gate: `make all`

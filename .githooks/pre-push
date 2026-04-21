@@ -9,6 +9,8 @@ if command -v npx >/dev/null 2>&1; then
   npx markdownlint-cli2 "**/*.md"
 fi
 
+make lint-actions
+
 if command -v npm >/dev/null 2>&1; then
   ./scripts/ensure_portal_deps.sh
   npm run portal:lint

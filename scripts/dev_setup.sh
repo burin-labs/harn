@@ -121,6 +121,17 @@ for tool_spec in "cargo-nextest:cargo-nextest --locked" "sccache:sccache --locke
   fi
 done
 
+if ! command -v actionlint >/dev/null 2>&1; then
+  if command -v go >/dev/null 2>&1; then
+    echo "Installing actionlint..."
+    go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 || echo "warning: failed to install actionlint (non-fatal)"
+  else
+    echo "warning: go not found; skipping actionlint install"
+  fi
+else
+  echo "actionlint already installed."
+fi
+
 target_dir="${HARN_DEV_TARGET_DIR:-}"
 if [[ -z "${target_dir}" ]]; then
   target_dir="$(derive_target_dir || true)"

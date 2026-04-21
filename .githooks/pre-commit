@@ -25,6 +25,10 @@ else
   echo "=== Pre-commit: skipping markdown lint (npx not found) ==="
 fi
 
+echo "=== Pre-commit: checking GitHub Actions workflows ==="
+make lint-actions
+echo "    GitHub Actions workflows OK."
+
 if command -v npm >/dev/null 2>&1; then
   echo "=== Pre-commit: linting portal frontend ==="
   ./scripts/ensure_portal_deps.sh
