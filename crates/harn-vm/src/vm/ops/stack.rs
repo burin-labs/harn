@@ -40,7 +40,9 @@ impl super::super::Vm {
             Constant::String(s) => s.clone(),
             _ => return Err(VmError::TypeError("expected string constant".into())),
         };
-        if let Some(val) = self.env.get(&name) {
+        if let Some(val) = self.active_local_slot_value(&name) {
+            self.stack.push(val);
+        } else if let Some(val) = self.env.get(&name) {
             self.stack.push(val);
         } else if let Some(val) = self
             .frames
@@ -63,7 +65,7 @@ impl super::super::Vm {
             self.stack
                 .push(VmValue::BuiltinRef(Rc::from(name.as_str())));
         } else {
-            let mut all_vars = self.env.all_variables();
+            let mut all_vars = self.visible_variables();
             for (k, v) in &self.globals {
                 all_vars.entry(k.clone()).or_insert_with(|| v.clone());
             }
@@ -89,6 +91,7 @@ impl super::super::Vm {
         frame.ip += 2;
         let name = Self::const_string(&frame.chunk.constants[idx])?;
         let val = self.pop()?;
+        self.sync_current_frame_locals_to_env();
         self.env.define(&name, val, false)
     }
 
@@ -98,15 +101,94 @@ impl super::super::Vm {
         frame.ip += 2;
         let name = Self::const_string(&frame.chunk.constants[idx])?;
         let val = self.pop()?;
+        self.sync_current_frame_locals_to_env();
         self.env.define(&name, val, true)
     }
 
     pub(super) fn execute_push_scope(&mut self) {
         self.env.push_scope();
+        if let Some(frame) = self.frames.last_mut() {
+            frame.local_scope_depth += 1;
+        }
     }
 
     pub(super) fn execute_pop_scope(&mut self) {
         self.env.pop_scope();
+        if let Some(frame) = self.frames.last_mut() {
+            frame.local_scope_depth = frame.local_scope_depth.saturating_sub(1);
+        }
+    }
+
+    pub(super) fn execute_get_local_slot(&mut self) -> Result<(), VmError> {
+        let frame = self.frames.last_mut().unwrap();
+        let slot_idx = frame.chunk.read_u16(frame.ip) as usize;
+        frame.ip += 2;
+        let name = frame
+            .chunk
+            .local_slots
+            .get(slot_idx)
+            .map(|info| info.name.clone())
+            .unwrap_or_else(|| format!("<slot {slot_idx}>"));
+        let Some(slot) = frame.local_slots.get(slot_idx) else {
+            return Err(VmError::Runtime(format!(
+                "Invalid local slot index: {slot_idx}"
+            )));
+        };
+        if !slot.initialized {
+            return Err(VmError::UndefinedVariable(name));
+        }
+        self.stack.push(slot.value.clone());
+        Ok(())
+    }
+
+    pub(super) fn execute_def_local_slot(&mut self) -> Result<(), VmError> {
+        let slot_idx = {
+            let frame = self.frames.last_mut().unwrap();
+            let slot_idx = frame.chunk.read_u16(frame.ip) as usize;
+            frame.ip += 2;
+            slot_idx
+        };
+        let val = self.pop()?;
+        let frame = self.frames.last_mut().unwrap();
+        let Some(slot) = frame.local_slots.get_mut(slot_idx) else {
+            return Err(VmError::Runtime(format!(
+                "Invalid local slot index: {slot_idx}"
+            )));
+        };
+        slot.value = val;
+        slot.initialized = true;
+        slot.synced = false;
+        Ok(())
+    }
+
+    pub(super) fn execute_set_local_slot(&mut self) -> Result<(), VmError> {
+        let slot_idx = {
+            let frame = self.frames.last_mut().unwrap();
+            let slot_idx = frame.chunk.read_u16(frame.ip) as usize;
+            frame.ip += 2;
+            slot_idx
+        };
+        let val = self.pop()?;
+        let frame = self.frames.last_mut().unwrap();
+        let Some(info) = frame.chunk.local_slots.get(slot_idx) else {
+            return Err(VmError::Runtime(format!(
+                "Invalid local slot index: {slot_idx}"
+            )));
+        };
+        if !info.mutable {
+            return Err(VmError::ImmutableAssignment(info.name.clone()));
+        }
+        let Some(slot) = frame.local_slots.get_mut(slot_idx) else {
+            return Err(VmError::Runtime(format!(
+                "Invalid local slot index: {slot_idx}"
+            )));
+        };
+        if !slot.initialized {
+            return Err(VmError::UndefinedVariable(info.name.clone()));
+        }
+        slot.value = val;
+        slot.synced = false;
+        Ok(())
     }
 
     pub(super) fn execute_set_var(&mut self) -> Result<(), VmError> {
@@ -118,7 +200,9 @@ impl super::super::Vm {
         // Local scope wins; otherwise route to the closure's shared
         // module_state. Fall through to env.assign only when neither
         // has it, so UndefinedVariable / ImmutableAssignment surface.
-        if self.env.get(&name).is_some() {
+        if self.assign_active_local_slot(&name, val.clone(), false)? {
+            // Slot locals are the active binding for compiler-resolved names.
+        } else if self.env.get(&name).is_some() {
             self.env.assign(&name, val)?;
         } else if let Some(ms) = self
             .frames

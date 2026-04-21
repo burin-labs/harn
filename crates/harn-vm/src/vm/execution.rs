@@ -4,7 +4,7 @@ use std::time::Instant;
 use crate::chunk::{Chunk, ChunkRef};
 use crate::value::{ModuleFunctionRegistry, VmError, VmValue};
 
-use super::{CallFrame, Vm};
+use super::{CallFrame, LocalSlot, Vm};
 
 impl Vm {
     /// Execute a compiled chunk.
@@ -71,7 +71,7 @@ impl Vm {
     }
 
     pub(crate) async fn run_chunk(&mut self, chunk: &Chunk) -> Result<VmValue, VmError> {
-        self.run_chunk_entry(chunk, 0, None, None, None).await
+        self.run_chunk_entry(chunk, 0, None, None, None, None).await
     }
 
     pub(crate) async fn run_chunk_entry(
@@ -81,6 +81,7 @@ impl Vm {
         saved_source_dir: Option<std::path::PathBuf>,
         module_functions: Option<ModuleFunctionRegistry>,
         module_state: Option<crate::value::ModuleState>,
+        local_slots: Option<Vec<LocalSlot>>,
     ) -> Result<VmValue, VmError> {
         self.run_chunk_ref(
             Rc::new(chunk.clone()),
@@ -88,6 +89,7 @@ impl Vm {
             saved_source_dir,
             module_functions,
             module_state,
+            local_slots,
         )
         .await
     }
@@ -99,20 +101,27 @@ impl Vm {
         saved_source_dir: Option<std::path::PathBuf>,
         module_functions: Option<ModuleFunctionRegistry>,
         module_state: Option<crate::value::ModuleState>,
+        local_slots: Option<Vec<LocalSlot>>,
     ) -> Result<VmValue, VmError> {
         let initial_env = self.env.clone();
+        let local_slots = local_slots.unwrap_or_else(|| Self::fresh_local_slots(&chunk));
+        let initial_local_slots = local_slots.clone();
         self.frames.push(CallFrame {
             chunk,
             ip: 0,
             stack_base: self.stack.len(),
             saved_env: self.env.clone(),
             initial_env: Some(initial_env),
+            initial_local_slots: Some(initial_local_slots),
             saved_iterator_depth: self.iterators.len(),
             fn_name: String::new(),
             argc,
             saved_source_dir,
             module_functions,
             module_state,
+            local_slots,
+            local_scope_base: self.env.scope_depth().saturating_sub(1),
+            local_scope_depth: 0,
         });
 
         loop {

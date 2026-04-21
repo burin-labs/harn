@@ -26,6 +26,7 @@ impl Compiler {
             scope_depth: 0,
             type_aliases: std::collections::HashMap::new(),
             type_scopes: vec![std::collections::HashMap::new()],
+            local_scopes: vec![std::collections::HashMap::new()],
             module_level: true,
         }
     }
@@ -288,10 +289,7 @@ impl Compiler {
                 // JumpIfTrue doesn't pop its boolean operand.
                 self.chunk.emit(Op::Pop, self.line);
                 self.compile_node(default_expr)?;
-                let name_idx = self
-                    .chunk
-                    .add_constant(Constant::String(param.name.clone()));
-                self.chunk.emit_u16(Op::DefLet, name_idx, self.line);
+                self.emit_init_or_define_binding(&param.name, false);
                 let end_jump = self.chunk.emit_jump(Op::Jump, self.line);
                 self.chunk.patch_jump(skip_jump);
                 self.chunk.emit(Op::Pop, self.line);
@@ -309,15 +307,12 @@ impl Compiler {
         for param in params {
             if let Some(type_expr) = &param.type_expr {
                 if let harn_parser::TypeExpr::Named(name) = type_expr {
-                    if let Some(methods) = self.interface_methods.get(name) {
+                    if let Some(methods) = self.interface_methods.get(name).cloned() {
                         let fn_idx = self
                             .chunk
                             .add_constant(Constant::String("__assert_interface".into()));
                         self.chunk.emit_u16(Op::Constant, fn_idx, self.line);
-                        let var_idx = self
-                            .chunk
-                            .add_constant(Constant::String(param.name.clone()));
-                        self.chunk.emit_u16(Op::GetVar, var_idx, self.line);
+                        self.emit_get_binding(&param.name);
                         let name_idx = self
                             .chunk
                             .add_constant(Constant::String(param.name.clone()));
@@ -338,10 +333,7 @@ impl Compiler {
                         .chunk
                         .add_constant(Constant::String("__assert_schema".into()));
                     self.chunk.emit_u16(Op::Constant, fn_idx, self.line);
-                    let var_idx = self
-                        .chunk
-                        .add_constant(Constant::String(param.name.clone()));
-                    self.chunk.emit_u16(Op::GetVar, var_idx, self.line);
+                    self.emit_get_binding(&param.name);
                     let name_idx = self
                         .chunk
                         .add_constant(Constant::String(param.name.clone()));
@@ -541,8 +533,7 @@ impl Compiler {
         error_var: &Option<String>,
     ) -> Result<(), CompileError> {
         if let Some(var_name) = error_var {
-            let idx = self.chunk.add_constant(Constant::String(var_name.clone()));
-            self.chunk.emit_u16(Op::DefLet, idx, self.line);
+            self.emit_define_binding(var_name, false);
         } else {
             self.chunk.emit(Op::Pop, self.line);
         }
@@ -619,18 +610,97 @@ impl Compiler {
     pub(super) fn compile_plain_rethrow(&mut self) -> Result<(), CompileError> {
         self.temp_counter += 1;
         let temp_name = format!("__finally_err_{}__", self.temp_counter);
-        let err_idx = self.chunk.add_constant(Constant::String(temp_name.clone()));
-        self.chunk.emit_u16(Op::DefVar, err_idx, self.line);
-        let get_idx = self.chunk.add_constant(Constant::String(temp_name));
-        self.chunk.emit_u16(Op::GetVar, get_idx, self.line);
+        self.emit_define_binding(&temp_name, true);
+        self.emit_get_binding(&temp_name);
         self.chunk.emit(Op::Throw, self.line);
         Ok(())
+    }
+
+    pub(super) fn declare_param_slots(&mut self, params: &[TypedParam]) {
+        for param in params {
+            self.define_local_slot(&param.name, false);
+        }
+    }
+
+    fn define_local_slot(&mut self, name: &str, mutable: bool) -> Option<u16> {
+        if self.module_level || harn_parser::is_discard_name(name) {
+            return None;
+        }
+        let current = self.local_scopes.last_mut()?;
+        if let Some(existing) = current.get_mut(name) {
+            if existing.mutable || mutable {
+                if mutable {
+                    existing.mutable = true;
+                    if let Some(info) = self.chunk.local_slots.get_mut(existing.slot as usize) {
+                        info.mutable = true;
+                    }
+                }
+                return Some(existing.slot);
+            }
+            return None;
+        }
+        let slot = self
+            .chunk
+            .add_local_slot(name.to_string(), mutable, self.scope_depth);
+        current.insert(name.to_string(), super::LocalBinding { slot, mutable });
+        Some(slot)
+    }
+
+    pub(super) fn resolve_local_slot(&self, name: &str) -> Option<super::LocalBinding> {
+        if self.module_level {
+            return None;
+        }
+        self.local_scopes
+            .iter()
+            .rev()
+            .find_map(|scope| scope.get(name).copied())
+    }
+
+    pub(super) fn emit_get_binding(&mut self, name: &str) {
+        if let Some(binding) = self.resolve_local_slot(name) {
+            self.chunk
+                .emit_u16(Op::GetLocalSlot, binding.slot, self.line);
+        } else {
+            let idx = self.chunk.add_constant(Constant::String(name.to_string()));
+            self.chunk.emit_u16(Op::GetVar, idx, self.line);
+        }
+    }
+
+    pub(super) fn emit_define_binding(&mut self, name: &str, mutable: bool) {
+        if let Some(slot) = self.define_local_slot(name, mutable) {
+            self.chunk.emit_u16(Op::DefLocalSlot, slot, self.line);
+        } else {
+            let idx = self.chunk.add_constant(Constant::String(name.to_string()));
+            let op = if mutable { Op::DefVar } else { Op::DefLet };
+            self.chunk.emit_u16(op, idx, self.line);
+        }
+    }
+
+    pub(super) fn emit_init_or_define_binding(&mut self, name: &str, mutable: bool) {
+        if let Some(binding) = self.resolve_local_slot(name) {
+            self.chunk
+                .emit_u16(Op::DefLocalSlot, binding.slot, self.line);
+        } else {
+            self.emit_define_binding(name, mutable);
+        }
+    }
+
+    pub(super) fn emit_set_binding(&mut self, name: &str) {
+        if let Some(binding) = self.resolve_local_slot(name) {
+            let _ = binding.mutable;
+            self.chunk
+                .emit_u16(Op::SetLocalSlot, binding.slot, self.line);
+        } else {
+            let idx = self.chunk.add_constant(Constant::String(name.to_string()));
+            self.chunk.emit_u16(Op::SetVar, idx, self.line);
+        }
     }
 
     pub(super) fn begin_scope(&mut self) {
         self.chunk.emit(Op::PushScope, self.line);
         self.scope_depth += 1;
         self.type_scopes.push(std::collections::HashMap::new());
+        self.local_scopes.push(std::collections::HashMap::new());
     }
 
     pub(super) fn end_scope(&mut self) {
@@ -638,6 +708,7 @@ impl Compiler {
             self.chunk.emit(Op::PopScope, self.line);
             self.scope_depth -= 1;
             self.type_scopes.pop();
+            self.local_scopes.pop();
         }
     }
 
@@ -646,6 +717,7 @@ impl Compiler {
             self.chunk.emit(Op::PopScope, self.line);
             self.scope_depth -= 1;
             self.type_scopes.pop();
+            self.local_scopes.pop();
         }
     }
 
@@ -899,6 +971,7 @@ impl Compiler {
         fn_compiler.interface_methods = self.interface_methods.clone();
         fn_compiler.type_aliases = self.type_aliases.clone();
         fn_compiler.struct_layouts = self.struct_layouts.clone();
+        fn_compiler.declare_param_slots(params);
         fn_compiler.record_param_types(params);
         fn_compiler.emit_default_preamble(params)?;
         fn_compiler.emit_type_checks(params);

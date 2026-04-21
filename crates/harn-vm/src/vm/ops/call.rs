@@ -362,6 +362,7 @@ impl super::super::Vm {
                 let gen = self.create_generator(&closure, &args);
                 return Err(VmError::Return(gen));
             }
+            let mut call_env = self.closure_call_env_for_current_frame(&closure);
             // TCO: reuse the current frame's stack_base / saved_env.
             let popped = self.frames.pop().unwrap();
             let stack_base = popped.stack_base;
@@ -381,38 +382,30 @@ impl super::super::Vm {
                 None
             };
 
-            // Pass parent env so closure_call_env merges locally-defined
-            // recursive fns.
-            let mut call_env = Self::closure_call_env(&parent_env, &closure);
             call_env.push_scope();
-            let default_start = closure
-                .func
-                .default_start
-                .unwrap_or(closure.func.params.len());
-            for (i, param) in closure.func.params.iter().enumerate() {
-                if i < args.len() {
-                    call_env.define(param, args[i].clone(), false)?;
-                } else if i < default_start {
-                    call_env.define(param, VmValue::Nil, false)?;
-                }
-                // else: has default, preamble will DefLet
-            }
             let initial_env = call_env.clone();
             self.env = call_env;
+            let mut local_slots = Self::fresh_local_slots(&closure.func.chunk);
+            Self::bind_param_slots(&mut local_slots, &closure.func, &args, false);
+            let initial_local_slots = local_slots.clone();
 
             let argc = args.len();
             self.frames.push(CallFrame {
-                chunk: closure.func.chunk.clone(),
+                chunk: Rc::clone(&closure.func.chunk),
                 ip: 0,
                 stack_base,
                 saved_env: parent_env,
                 initial_env: Some(initial_env),
+                initial_local_slots: Some(initial_local_slots),
                 saved_iterator_depth: self.iterators.len(),
                 fn_name: closure.func.name.clone(),
                 argc,
                 saved_source_dir,
                 module_functions: closure.module_functions.clone(),
                 module_state: closure.module_state.clone(),
+                local_slots,
+                local_scope_base: self.env.scope_depth().saturating_sub(1),
+                local_scope_depth: 0,
             });
         } else {
             match callee {
@@ -437,6 +430,7 @@ impl super::super::Vm {
     }
 
     pub(super) fn execute_closure(&mut self) {
+        self.sync_current_frame_locals_to_env();
         let frame = self.frames.last_mut().unwrap();
         let fn_idx = frame.chunk.read_u16(frame.ip) as usize;
         frame.ip += 2;

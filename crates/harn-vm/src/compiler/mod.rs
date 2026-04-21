@@ -53,6 +53,12 @@ struct LoopContext {
     scope_depth: usize,
 }
 
+#[derive(Clone, Copy, Debug)]
+struct LocalBinding {
+    slot: u16,
+    mutable: bool,
+}
+
 /// Compiles an AST into bytecode.
 pub struct Compiler {
     chunk: Chunk,
@@ -92,6 +98,10 @@ pub struct Compiler {
     /// from the parser's diagnostic type checker so compile-only callers keep
     /// working without a required type-check pass.
     type_scopes: Vec<std::collections::HashMap<String, TypeExpr>>,
+    /// Lexical variable slots for the current compiled frame. The compiler
+    /// only consults this for names declared inside the current function-like
+    /// body; all unresolved names stay on the existing dynamic/name path.
+    local_scopes: Vec<std::collections::HashMap<String, LocalBinding>>,
     /// True when this compiler is emitting code outside any function-like
     /// scope (module top-level statements). `try*` is rejected here
     /// because the rethrow has no enclosing function to live in.
@@ -129,8 +139,7 @@ impl Compiler {
                 self.chunk.emit_u16(Op::Constant, idx, self.line);
             }
             Node::Identifier(name) => {
-                let idx = self.chunk.add_constant(Constant::String(name.clone()));
-                self.chunk.emit_u16(Op::GetVar, idx, self.line);
+                self.emit_get_binding(name);
             }
             Node::LetBinding { pattern, value, .. } => {
                 let binding_type = match &snode.node {

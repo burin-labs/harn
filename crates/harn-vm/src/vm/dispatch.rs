@@ -95,37 +95,18 @@ impl Vm {
     ) -> Pin<Box<dyn Future<Output = Result<VmValue, VmError>> + 'a>> {
         Box::pin(async move {
             let saved_env = self.env.clone();
+            let mut call_env = self.closure_call_env_for_current_frame(closure);
             let saved_frames = std::mem::take(&mut self.frames);
             let saved_handlers = std::mem::take(&mut self.exception_handlers);
             let saved_iterators = std::mem::take(&mut self.iterators);
             let saved_deadlines = std::mem::take(&mut self.deadlines);
 
-            let mut call_env = Self::closure_call_env(&saved_env, closure);
             call_env.push_scope();
-
-            let default_start = closure
-                .func
-                .default_start
-                .unwrap_or(closure.func.params.len());
-            let param_count = closure.func.params.len();
-            for (i, param) in closure.func.params.iter().enumerate() {
-                if closure.func.has_rest_param && i == param_count - 1 {
-                    let rest_args = if i < args.len() {
-                        args[i..].to_vec()
-                    } else {
-                        Vec::new()
-                    };
-                    let _ =
-                        call_env.define(param, VmValue::List(std::rc::Rc::new(rest_args)), false);
-                } else if i < args.len() {
-                    let _ = call_env.define(param, args[i].clone(), false);
-                } else if i < default_start {
-                    let _ = call_env.define(param, VmValue::Nil, false);
-                }
-            }
 
             self.env = call_env;
             let argc = args.len();
+            let mut local_slots = Self::fresh_local_slots(&closure.func.chunk);
+            Self::bind_param_slots(&mut local_slots, &closure.func, args, false);
             let saved_source_dir = if let Some(ref dir) = closure.source_dir {
                 let prev = crate::stdlib::process::VM_SOURCE_DIR.with(|sd| sd.borrow().clone());
                 crate::stdlib::set_thread_source_dir(dir);
@@ -140,6 +121,7 @@ impl Vm {
                     saved_source_dir,
                     closure.module_functions.clone(),
                     closure.module_state.clone(),
+                    Some(local_slots),
                 )
                 .await;
 

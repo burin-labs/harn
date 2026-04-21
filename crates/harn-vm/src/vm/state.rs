@@ -26,6 +26,13 @@ impl Drop for ScopeSpan {
     }
 }
 
+#[derive(Clone)]
+pub(crate) struct LocalSlot {
+    pub(crate) value: VmValue,
+    pub(crate) initialized: bool,
+    pub(crate) synced: bool,
+}
+
 /// Call frame for function execution.
 pub(crate) struct CallFrame {
     pub(crate) chunk: ChunkRef,
@@ -40,6 +47,7 @@ pub(crate) struct CallFrame {
     /// scratch frames (evaluate, import init) where restart isn't
     /// meaningful.
     pub(crate) initial_env: Option<VmEnv>,
+    pub(crate) initial_local_slots: Option<Vec<LocalSlot>>,
     /// Iterator stack depth to restore when this frame unwinds.
     pub(crate) saved_iterator_depth: usize,
     /// Function name for stack traces (empty for top-level pipeline).
@@ -57,6 +65,12 @@ pub(crate) struct CallFrame {
     /// its own live static state that persists across calls. See the
     /// `module_state` field on `VmClosure` for the full rationale.
     pub(crate) module_state: Option<crate::value::ModuleState>,
+    /// Slot-indexed locals for compiler-resolved names in this frame.
+    pub(crate) local_slots: Vec<LocalSlot>,
+    /// Env scope index that corresponds to compiler local scope depth 0.
+    pub(crate) local_scope_base: usize,
+    /// Current compiler local scope depth, updated by PushScope/PopScope.
+    pub(crate) local_scope_depth: usize,
 }
 
 /// Exception handler for try/catch.
@@ -192,6 +206,160 @@ pub struct Vm {
 }
 
 impl Vm {
+    pub(crate) fn fresh_local_slots(chunk: &Chunk) -> Vec<LocalSlot> {
+        chunk
+            .local_slots
+            .iter()
+            .map(|_| LocalSlot {
+                value: VmValue::Nil,
+                initialized: false,
+                synced: false,
+            })
+            .collect()
+    }
+
+    pub(crate) fn bind_param_slots(
+        slots: &mut [LocalSlot],
+        func: &crate::chunk::CompiledFunction,
+        args: &[VmValue],
+        synced: bool,
+    ) {
+        let default_start = func.default_start.unwrap_or(func.params.len());
+        let param_count = func.params.len();
+        for (i, _param) in func.params.iter().enumerate() {
+            if i >= slots.len() {
+                break;
+            }
+            if func.has_rest_param && i == param_count - 1 {
+                let rest_args = if i < args.len() {
+                    args[i..].to_vec()
+                } else {
+                    Vec::new()
+                };
+                slots[i].value = VmValue::List(Rc::new(rest_args));
+                slots[i].initialized = true;
+                slots[i].synced = synced;
+            } else if i < args.len() {
+                slots[i].value = args[i].clone();
+                slots[i].initialized = true;
+                slots[i].synced = synced;
+            } else if i < default_start {
+                slots[i].value = VmValue::Nil;
+                slots[i].initialized = true;
+                slots[i].synced = synced;
+            }
+        }
+    }
+
+    pub(crate) fn visible_variables(&self) -> BTreeMap<String, VmValue> {
+        let mut vars = self.env.all_variables();
+        let Some(frame) = self.frames.last() else {
+            return vars;
+        };
+        for (slot, info) in frame.local_slots.iter().zip(frame.chunk.local_slots.iter()) {
+            if slot.initialized && info.scope_depth <= frame.local_scope_depth {
+                vars.insert(info.name.clone(), slot.value.clone());
+            }
+        }
+        vars
+    }
+
+    pub(crate) fn sync_current_frame_locals_to_env(&mut self) {
+        let Some(frame) = self.frames.last_mut() else {
+            return;
+        };
+        let local_scope_base = frame.local_scope_base;
+        let local_scope_depth = frame.local_scope_depth;
+        let entries = frame
+            .local_slots
+            .iter_mut()
+            .zip(frame.chunk.local_slots.iter())
+            .filter_map(|(slot, info)| {
+                if slot.initialized && !slot.synced && info.scope_depth <= local_scope_depth {
+                    slot.synced = true;
+                    Some((
+                        local_scope_base + info.scope_depth,
+                        info.name.clone(),
+                        slot.value.clone(),
+                        info.mutable,
+                    ))
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        for (scope_idx, name, value, mutable) in entries {
+            while self.env.scopes.len() <= scope_idx {
+                self.env.push_scope();
+            }
+            self.env.scopes[scope_idx]
+                .vars
+                .insert(name, (value, mutable));
+        }
+    }
+
+    pub(crate) fn closure_call_env_for_current_frame(
+        &self,
+        closure: &crate::value::VmClosure,
+    ) -> VmEnv {
+        if closure.module_state.is_some() {
+            return closure.env.clone();
+        }
+        let mut call_env = Self::closure_call_env(&self.env, closure);
+        let Some(frame) = self.frames.last() else {
+            return call_env;
+        };
+        for (slot, info) in frame
+            .local_slots
+            .iter()
+            .zip(frame.chunk.local_slots.iter())
+            .filter(|(slot, info)| slot.initialized && info.scope_depth <= frame.local_scope_depth)
+        {
+            if matches!(slot.value, VmValue::Closure(_)) && call_env.get(&info.name).is_none() {
+                let _ = call_env.define(&info.name, slot.value.clone(), info.mutable);
+            }
+        }
+        call_env
+    }
+
+    pub(crate) fn active_local_slot_value(&self, name: &str) -> Option<VmValue> {
+        let frame = self.frames.last()?;
+        for (idx, info) in frame.chunk.local_slots.iter().enumerate().rev() {
+            if info.name == name && info.scope_depth <= frame.local_scope_depth {
+                let slot = frame.local_slots.get(idx)?;
+                if slot.initialized {
+                    return Some(slot.value.clone());
+                }
+            }
+        }
+        None
+    }
+
+    pub(crate) fn assign_active_local_slot(
+        &mut self,
+        name: &str,
+        value: VmValue,
+        debug: bool,
+    ) -> Result<bool, VmError> {
+        let Some(frame) = self.frames.last_mut() else {
+            return Ok(false);
+        };
+        for (idx, info) in frame.chunk.local_slots.iter().enumerate().rev() {
+            if info.name == name && info.scope_depth <= frame.local_scope_depth {
+                if !debug && !info.mutable {
+                    return Err(VmError::ImmutableAssignment(name.to_string()));
+                }
+                if let Some(slot) = frame.local_slots.get_mut(idx) {
+                    slot.value = value;
+                    slot.initialized = true;
+                    slot.synced = false;
+                    return Ok(true);
+                }
+            }
+        }
+        Ok(false)
+    }
+
     pub fn new() -> Self {
         Self {
             stack: Vec::with_capacity(256),
@@ -260,12 +428,16 @@ impl Vm {
             // pre-pipeline state — basically "restart session" in
             // debugger terms.
             initial_env: Some(initial_env),
+            initial_local_slots: Some(Self::fresh_local_slots(chunk)),
             saved_iterator_depth: self.iterators.len(),
             fn_name: String::new(),
             argc: 0,
             saved_source_dir: None,
             module_functions: None,
             module_state: None,
+            local_slots: Self::fresh_local_slots(chunk),
+            local_scope_base: self.env.scope_depth().saturating_sub(1),
+            local_scope_depth: 0,
         });
     }
 

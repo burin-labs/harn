@@ -25,5 +25,5 @@ pub use modules::resolve_module_import_path;
 pub use state::Vm;
 
 pub(crate) use state::{
-    CallFrame, ExceptionHandler, IterState, ScopeSpan, VmBuiltinDispatch, VmBuiltinEntry,
+    CallFrame, ExceptionHandler, IterState, LocalSlot, ScopeSpan, VmBuiltinDispatch, VmBuiltinEntry,
 };

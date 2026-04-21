@@ -376,19 +376,27 @@ impl super::super::Vm {
         let prop_name = Self::const_string(&frame.chunk.constants[prop_idx])?;
         let var_name = Self::const_string(&frame.chunk.constants[var_idx])?;
         let new_value = self.pop()?;
-        if let Some(obj) = self.env.get(&var_name) {
+        if let Some(obj) = self
+            .active_local_slot_value(&var_name)
+            .or_else(|| self.env.get(&var_name))
+        {
+            let assign_value = |vm: &mut Self, value: VmValue| -> Result<(), VmError> {
+                if !vm.assign_active_local_slot(&var_name, value.clone(), false)? {
+                    vm.env.assign(&var_name, value)?;
+                }
+                Ok(())
+            };
             match obj {
                 VmValue::Dict(map) => {
                     let mut new_map = (*map).clone();
                     new_map.insert(prop_name, new_value);
-                    self.env
-                        .assign(&var_name, VmValue::Dict(Rc::new(new_map)))?;
+                    assign_value(self, VmValue::Dict(Rc::new(new_map)))?;
                 }
                 VmValue::StructInstance { .. } => {
                     let new_obj = obj
                         .struct_instance_with_property(prop_name, new_value)
                         .expect("struct instance matched above");
-                    self.env.assign(&var_name, new_obj)?;
+                    assign_value(self, new_obj)?;
                 }
                 _ => {
                     return Err(VmError::TypeError(format!(
@@ -408,7 +416,16 @@ impl super::super::Vm {
         let var_name = Self::const_string(&frame.chunk.constants[var_idx])?;
         let index = self.pop()?;
         let new_value = self.pop()?;
-        if let Some(obj) = self.env.get(&var_name) {
+        if let Some(obj) = self
+            .active_local_slot_value(&var_name)
+            .or_else(|| self.env.get(&var_name))
+        {
+            let assign_value = |vm: &mut Self, value: VmValue| -> Result<(), VmError> {
+                if !vm.assign_active_local_slot(&var_name, value.clone(), false)? {
+                    vm.env.assign(&var_name, value)?;
+                }
+                Ok(())
+            };
             match obj {
                 VmValue::List(items) => {
                     if let Some(i) = index.as_int() {
@@ -420,8 +437,7 @@ impl super::super::Vm {
                         };
                         if idx < new_items.len() {
                             new_items[idx] = new_value;
-                            self.env
-                                .assign(&var_name, VmValue::List(Rc::new(new_items)))?;
+                            assign_value(self, VmValue::List(Rc::new(new_items)))?;
                         } else {
                             return Err(VmError::Runtime(format!(
                                 "Index {} out of bounds for list of length {}",
@@ -435,8 +451,7 @@ impl super::super::Vm {
                     let key = index.display();
                     let mut new_map = (*map).clone();
                     new_map.insert(key, new_value);
-                    self.env
-                        .assign(&var_name, VmValue::Dict(Rc::new(new_map)))?;
+                    assign_value(self, VmValue::Dict(Rc::new(new_map)))?;
                 }
                 _ => {}
             }
