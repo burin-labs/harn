@@ -10,7 +10,9 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use harn_vm::event_log::{EventLog, EventLogBackendKind, EventLogConfig, LogEvent, Topic};
+use harn_vm::event_log::{
+    ConsumerId, EventLog, EventLogBackendKind, EventLogConfig, LogEvent, Topic,
+};
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
 use tempfile::TempDir;
 
@@ -208,6 +210,40 @@ fn read_topic_events(
     let log = harn_vm::event_log::open_event_log(&config).unwrap();
     let topic = Topic::new(topic_name).unwrap();
     futures::executor::block_on(log.read_range(&topic, None, usize::MAX)).unwrap()
+}
+
+fn open_state_event_log(state_dir: &Path) -> Arc<harn_vm::event_log::AnyEventLog> {
+    let mut config = EventLogConfig::for_base_dir(state_dir).unwrap();
+    let file_dir = state_dir.join("events");
+    if file_dir.join("topics").is_dir() {
+        config.backend = EventLogBackendKind::File;
+        config.file_dir = file_dir;
+    }
+    harn_vm::event_log::open_event_log(&config).unwrap()
+}
+
+async fn wait_for_consumer_cursor(
+    state_dir: &Path,
+    topic_name: &str,
+    consumer: &str,
+    at_least: u64,
+) {
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let log = open_state_event_log(state_dir);
+    let topic = Topic::new(topic_name).unwrap();
+    let consumer = ConsumerId::new(consumer).unwrap();
+    while Instant::now() < deadline {
+        let cursor = log
+            .consumer_cursor(&topic, &consumer)
+            .await
+            .unwrap()
+            .unwrap_or(0);
+        if cursor >= at_least {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    panic!("timed out waiting for consumer cursor {consumer} on {topic_name} to reach {at_least}");
 }
 
 fn seed_legacy_inbox_records(temp: &TempDir) {
@@ -474,6 +510,170 @@ pub fn on_task(event: TriggerEvent) -> string {
     let snapshot_contents =
         fs::read_to_string(temp.path().join("state/orchestrator-state.json")).unwrap();
     assert!(snapshot_contents.contains("\"status\": \"stopped\""));
+    assert!(
+        snapshot_contents.contains("\"in_flight\": 0"),
+        "snapshot={snapshot_contents}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn graceful_shutdown_continues_after_pump_error_and_persists_stopped_state() {
+    let temp = TempDir::new().unwrap();
+    write_file(
+        temp.path(),
+        "harn.toml",
+        r#"
+[package]
+name = "fixture"
+
+[exports]
+handlers = "lib.harn"
+
+[[triggers]]
+id = "incoming-review-task"
+kind = "a2a-push"
+provider = "a2a-push"
+path = "/a2a/review"
+match = { events = ["a2a.task.received"] }
+handler = "handlers::on_task"
+"#,
+    );
+    write_file(
+        temp.path(),
+        "lib.harn",
+        r#"
+import "std/triggers"
+
+pub fn on_task(event: TriggerEvent) -> string {
+  return event.kind
+}
+"#,
+    );
+
+    let envs = [
+        ("HARN_EVENT_LOG_BACKEND", "file"),
+        ("HARN_ORCHESTRATOR_API_KEYS", "test-key"),
+        ("HARN_ORCHESTRATOR_HMAC_SECRET", "unused-shared-secret"),
+        ("HARN_TEST_ORCHESTRATOR_FAIL_PENDING_PUMP", "1"),
+    ];
+    let (mut child, rx, handle) =
+        spawn_orchestrator_with(&temp, &["--shutdown-timeout", "5"], &envs);
+    let base_url = wait_for_listener_url(&mut child, &rx);
+    let state_dir = temp.path().join("state");
+
+    let body = br#"{"kind":"a2a.task.received","task":{"id":"task-240"}}"#;
+    let response = reqwest::Client::new()
+        .post(format!("{base_url}/a2a/review"))
+        .headers(bearer_headers())
+        .body(body.to_vec())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    send_sigterm(&child);
+    wait_for_exit(&mut child);
+    let stderr = handle.join().expect("stderr collector thread");
+
+    assert!(
+        stderr.contains("pump drain error for orchestrator.triggers.pending"),
+        "stderr={stderr}"
+    );
+    assert!(stderr.contains(SHUTDOWN_NEEDLE), "stderr={stderr}");
+
+    let lifecycle = read_topic_events(&state_dir, "orchestrator.lifecycle");
+    assert!(
+        lifecycle.iter().any(|(_, event)| event.kind == "stopped"),
+        "lifecycle={lifecycle:?}"
+    );
+
+    let snapshot_contents =
+        fs::read_to_string(temp.path().join("state/orchestrator-state.json")).unwrap();
+    assert!(snapshot_contents.contains("\"status\": \"stopped\""));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn graceful_shutdown_waits_for_spawned_inbox_dispatch_tasks() {
+    let temp = TempDir::new().unwrap();
+    write_file(
+        temp.path(),
+        "harn.toml",
+        r#"
+[package]
+name = "fixture"
+
+[exports]
+handlers = "lib.harn"
+
+[[triggers]]
+id = "incoming-review-task"
+kind = "a2a-push"
+provider = "a2a-push"
+path = "/a2a/review"
+match = { events = ["a2a.task.received"] }
+handler = "handlers::on_task"
+"#,
+    );
+    write_file(
+        temp.path(),
+        "lib.harn",
+        r#"
+import "std/triggers"
+
+pub fn on_task(event: TriggerEvent) -> string {
+  return event.kind
+}
+"#,
+    );
+
+    let envs = [
+        ("HARN_EVENT_LOG_BACKEND", "file"),
+        ("HARN_ORCHESTRATOR_API_KEYS", "test-key"),
+        ("HARN_ORCHESTRATOR_HMAC_SECRET", "unused-shared-secret"),
+        ("HARN_TEST_ORCHESTRATOR_INBOX_TASK_DELAY_MS", "1000"),
+    ];
+    let (mut child, rx, handle) =
+        spawn_orchestrator_with(&temp, &["--shutdown-timeout", "5"], &envs);
+    let base_url = wait_for_listener_url(&mut child, &rx);
+    let state_dir = temp.path().join("state");
+
+    let body = br#"{"kind":"a2a.task.received","task":{"id":"task-241"}}"#;
+    let response = reqwest::Client::new()
+        .post(format!("{base_url}/a2a/review"))
+        .headers(bearer_headers())
+        .body(body.to_vec())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+
+    wait_for_consumer_cursor(
+        &state_dir,
+        harn_vm::TRIGGER_INBOX_ENVELOPES_TOPIC,
+        &format!(
+            "orchestrator-pump.{}",
+            harn_vm::TRIGGER_INBOX_ENVELOPES_TOPIC
+        ),
+        1,
+    )
+    .await;
+
+    send_sigterm(&child);
+    wait_for_exit(&mut child);
+    let stderr = handle.join().expect("stderr collector thread");
+    assert!(stderr.contains(SHUTDOWN_NEEDLE), "stderr={stderr}");
+
+    let outbox = read_topic_events(&state_dir, "trigger.outbox");
+    assert!(
+        outbox
+            .iter()
+            .any(|(_, event)| event.kind == "dispatch_succeeded"),
+        "outbox={outbox:?}"
+    );
+
+    let snapshot_contents =
+        fs::read_to_string(temp.path().join("state/orchestrator-state.json")).unwrap();
     assert!(
         snapshot_contents.contains("\"in_flight\": 0"),
         "snapshot={snapshot_contents}"

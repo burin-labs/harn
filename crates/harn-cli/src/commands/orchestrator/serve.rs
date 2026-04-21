@@ -11,6 +11,7 @@ use serde_json::{json, Value as JsonValue};
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 use tokio::sync::watch;
+use tokio::task::JoinSet;
 
 use harn_vm::event_log::{ConsumerId, EventLog};
 
@@ -31,6 +32,8 @@ const STATE_SNAPSHOT_FILE: &str = "orchestrator-state.json";
 const PENDING_TOPIC: &str = "orchestrator.triggers.pending";
 const CRON_TICK_TOPIC: &str = "connectors.cron.tick";
 const TEST_PUMP_DELAY_ENV: &str = "HARN_TEST_ORCHESTRATOR_PUMP_DELAY_MS";
+const TEST_INBOX_TASK_DELAY_ENV: &str = "HARN_TEST_ORCHESTRATOR_INBOX_TASK_DELAY_MS";
+const TEST_FAIL_PENDING_PUMP_ENV: &str = "HARN_TEST_ORCHESTRATOR_FAIL_PENDING_PUMP";
 
 pub(crate) async fn run(args: OrchestratorServeArgs) -> Result<(), String> {
     let local = tokio::task::LocalSet::new();
@@ -678,6 +681,7 @@ enum PumpDrainStopReason {
     Drained,
     MaxItems,
     Deadline,
+    Error,
 }
 
 impl PumpDrainStopReason {
@@ -686,6 +690,7 @@ impl PumpDrainStopReason {
             Self::Drained => "drained",
             Self::MaxItems => "max_items",
             Self::Deadline => "deadline",
+            Self::Error => "error",
         }
     }
 }
@@ -707,12 +712,13 @@ struct PumpDrainReport {
     stats: PumpStats,
     drain_items: u64,
     remaining_queued: u64,
+    outstanding_tasks: usize,
     stop_reason: PumpDrainStopReason,
 }
 
 impl PumpDrainReport {
     fn truncated(self) -> bool {
-        self.remaining_queued > 0
+        self.remaining_queued > 0 || self.outstanding_tasks > 0
     }
 }
 
@@ -759,6 +765,9 @@ fn spawn_pending_pump(
     spawn_topic_pump(event_log, topic, move |logged| {
         let dispatcher = dispatcher.clone();
         async move {
+            if pending_pump_test_should_fail() {
+                return Err("test pending pump failure".to_string());
+            }
             if logged.kind != "trigger_event" {
                 return Ok(false);
             }
@@ -812,21 +821,141 @@ fn spawn_inbox_pump(
 ) -> Result<PumpHandle, String> {
     let topic = harn_vm::event_log::Topic::new(harn_vm::TRIGGER_INBOX_ENVELOPES_TOPIC)
         .map_err(|error| error.to_string())?;
-    spawn_topic_pump(event_log, topic, move |logged| {
-        let dispatcher = dispatcher.clone();
-        async move {
-            if logged.kind != "event_ingested" {
-                return Ok(false);
+    let consumer = pump_consumer_id(&topic)?;
+    let test_delay = pump_test_delay();
+    let inbox_task_delay = inbox_task_test_delay();
+    let (mode_tx, mut mode_rx) = watch::channel(PumpMode::Running);
+    let join = tokio::task::spawn_local(async move {
+        let start_from = event_log
+            .consumer_cursor(&topic, &consumer)
+            .await
+            .map_err(|error| format!("failed to read consumer cursor for {topic}: {error}"))?
+            .or(event_log
+                .latest(&topic)
+                .await
+                .map_err(|error| format!("failed to read topic head {topic}: {error}"))?);
+        let mut stream = event_log
+            .clone()
+            .subscribe(&topic, start_from)
+            .await
+            .map_err(|error| format!("failed to subscribe topic {topic}: {error}"))?;
+        let mut stats = PumpStats {
+            last_seen: start_from.unwrap_or(0),
+            processed: 0,
+        };
+        let mut drain_progress = None;
+        let mut tasks = JoinSet::new();
+
+        loop {
+            if let Some(progress) = drain_progress {
+                if let Some(report) = maybe_finish_pump_drain(stats, progress, tasks.len()) {
+                    return Ok(report);
+                }
             }
-            let envelope: harn_vm::triggers::dispatcher::InboxEnvelope =
-                serde_json::from_value(logged.payload)
-                    .map_err(|error| format!("failed to decode dispatcher inbox event: {error}"))?;
-            tokio::task::spawn_local(async move {
-                let _ = dispatcher.dispatch_inbox_envelope(envelope).await;
+
+            let deadline = drain_progress.map(|progress| progress.request.deadline);
+            let mut deadline_wait = Box::pin(async move {
+                if let Some(deadline) = deadline {
+                    tokio::time::sleep_until(deadline).await;
+                } else {
+                    std::future::pending::<()>().await;
+                }
             });
-            Ok(true)
+
+            tokio::select! {
+                changed = mode_rx.changed() => {
+                    if changed.is_err() {
+                        break;
+                    }
+                    if let PumpMode::Draining(request) = *mode_rx.borrow() {
+                        drain_progress.get_or_insert(PumpDrainProgress {
+                            request,
+                            start_seen: stats.last_seen,
+                        });
+                    }
+                }
+                _ = &mut deadline_wait => {
+                    if let Some(progress) = drain_progress {
+                        return Ok(pump_drain_report(
+                            stats,
+                            progress.start_seen,
+                            progress.request.up_to,
+                            tasks.len(),
+                            PumpDrainStopReason::Deadline,
+                        ));
+                    }
+                }
+                joined = tasks.join_next(), if !tasks.is_empty() => {
+                    match joined {
+                        Some(Ok(())) => {}
+                        Some(Err(error)) => {
+                            return Err(format!("inbox dispatch task join failed: {error}"));
+                        }
+                        None => {}
+                    }
+                }
+                received = stream.next() => {
+                    let Some(received) = received else {
+                        break;
+                    };
+                    let (event_id, logged) = received
+                        .map_err(|error| format!("topic pump read failed for {topic}: {error}"))?;
+                    if let Some(delay) = test_delay {
+                        tokio::time::sleep(delay).await;
+                    }
+                    if logged.kind != "event_ingested" {
+                        stats.last_seen = event_id;
+                        event_log
+                            .ack(&topic, &consumer, event_id)
+                            .await
+                            .map_err(|error| format!("failed to ack topic pump cursor for {topic}: {error}"))?;
+                        continue;
+                    }
+                    let envelope: harn_vm::triggers::dispatcher::InboxEnvelope =
+                        serde_json::from_value(logged.payload)
+                            .map_err(|error| format!("failed to decode dispatcher inbox event: {error}"))?;
+                    let dispatcher = dispatcher.clone();
+                    tasks.spawn_local(async move {
+                        if let Some(delay) = inbox_task_delay {
+                            tokio::time::sleep(delay).await;
+                        }
+                        if let Err(error) = dispatcher.dispatch_inbox_envelope(envelope).await {
+                            eprintln!("[harn] inbox dispatch warning: {error}");
+                        }
+                    });
+                    stats.last_seen = event_id;
+                    stats.processed += 1;
+                    event_log
+                        .ack(&topic, &consumer, event_id)
+                        .await
+                        .map_err(|error| format!("failed to ack topic pump cursor for {topic}: {error}"))?;
+                }
+            }
         }
-    })
+
+        while let Some(joined) = tasks.join_next().await {
+            joined.map_err(|error| format!("inbox dispatch task join failed: {error}"))?;
+        }
+
+        Ok(drain_progress
+            .map(|progress| {
+                pump_drain_report(
+                    stats,
+                    progress.start_seen,
+                    progress.request.up_to,
+                    0,
+                    PumpDrainStopReason::Drained,
+                )
+            })
+            .unwrap_or_else(|| PumpDrainReport {
+                stats,
+                drain_items: 0,
+                remaining_queued: 0,
+                outstanding_tasks: 0,
+                stop_reason: PumpDrainStopReason::Drained,
+            }))
+    });
+    Ok(PumpHandle { mode_tx, join })
 }
 
 fn spawn_topic_pump<F, Fut>(
@@ -862,7 +991,7 @@ where
         let mut drain_progress = None;
         loop {
             if let Some(progress) = drain_progress {
-                if let Some(report) = maybe_finish_pump_drain(stats, progress) {
+                if let Some(report) = maybe_finish_pump_drain(stats, progress, 0) {
                     return Ok(report);
                 }
             }
@@ -892,6 +1021,7 @@ where
                             stats,
                             progress.start_seen,
                             progress.request.up_to,
+                            0,
                             PumpDrainStopReason::Deadline,
                         ));
                     }
@@ -923,6 +1053,7 @@ where
                     stats,
                     progress.start_seen,
                     progress.request.up_to,
+                    0,
                     PumpDrainStopReason::Drained,
                 )
             })
@@ -930,6 +1061,7 @@ where
                 stats,
                 drain_items: 0,
                 remaining_queued: 0,
+                outstanding_tasks: 0,
                 stop_reason: PumpDrainStopReason::Drained,
             }))
     });
@@ -992,13 +1124,14 @@ async fn graceful_shutdown(
         }
     }
 
-    let pending_stats = pending_pump
-        .drain(
-            topic_latest_id(ctx.event_log, PENDING_TOPIC).await?,
-            ctx.drain_config,
-            deadline,
-        )
-        .await?;
+    let pending_stats = drain_pump_best_effort(
+        ctx.event_log,
+        PENDING_TOPIC,
+        pending_pump,
+        ctx.drain_config,
+        deadline,
+    )
+    .await?;
     emit_drain_truncated(
         ctx.event_log,
         PENDING_TOPIC,
@@ -1006,21 +1139,23 @@ async fn graceful_shutdown(
         ctx.drain_config,
     )
     .await?;
-    let cron_stats = cron_pump
-        .drain(
-            topic_latest_id(ctx.event_log, CRON_TICK_TOPIC).await?,
-            ctx.drain_config,
-            deadline,
-        )
-        .await?;
+    let cron_stats = drain_pump_best_effort(
+        ctx.event_log,
+        CRON_TICK_TOPIC,
+        cron_pump,
+        ctx.drain_config,
+        deadline,
+    )
+    .await?;
     emit_drain_truncated(ctx.event_log, CRON_TICK_TOPIC, cron_stats, ctx.drain_config).await?;
-    let inbox_stats = inbox_pump
-        .drain(
-            topic_latest_id(ctx.event_log, harn_vm::TRIGGER_INBOX_ENVELOPES_TOPIC).await?,
-            ctx.drain_config,
-            deadline,
-        )
-        .await?;
+    let inbox_stats = drain_pump_best_effort(
+        ctx.event_log,
+        harn_vm::TRIGGER_INBOX_ENVELOPES_TOPIC,
+        inbox_pump,
+        ctx.drain_config,
+        deadline,
+    )
+    .await?;
     emit_drain_truncated(
         ctx.event_log,
         harn_vm::TRIGGER_INBOX_ENVELOPES_TOPIC,
@@ -1150,6 +1285,7 @@ async fn emit_drain_truncated(
             "topic": topic_name,
             "remaining_queued": report.remaining_queued,
             "drain_items": report.drain_items,
+            "outstanding_tasks": report.outstanding_tasks,
             "max_items": config.max_items,
             "deadline_secs": config.deadline.as_secs(),
             "reason": report.stop_reason.as_str(),
@@ -1158,15 +1294,77 @@ async fn emit_drain_truncated(
     .await
 }
 
-async fn topic_latest_id(
+async fn drain_pump_best_effort(
     log: &Arc<harn_vm::event_log::AnyEventLog>,
     topic_name: &str,
-) -> Result<u64, String> {
+    pump: PumpHandle,
+    config: DrainConfig,
+    overall_deadline: tokio::time::Instant,
+) -> Result<PumpDrainReport, String> {
     let topic = harn_vm::event_log::Topic::new(topic_name).map_err(|error| error.to_string())?;
-    log.latest(&topic)
+    let consumer = pump_consumer_id(&topic)?;
+    let start_seen = log
+        .consumer_cursor(&topic, &consumer)
         .await
-        .map(|value| value.unwrap_or(0))
-        .map_err(|error| format!("failed to read topic head for {topic_name}: {error}"))
+        .map_err(|error| format!("failed to read consumer cursor for {topic_name}: {error}"))?
+        .unwrap_or(0);
+    let up_to = log
+        .latest(&topic)
+        .await
+        .map_err(|error| format!("failed to read topic head for {topic_name}: {error}"))?
+        .unwrap_or(0);
+    let budget = remaining_budget(overall_deadline);
+
+    match tokio::time::timeout(budget, pump.drain(up_to, config, overall_deadline)).await {
+        Ok(Ok(report)) => Ok(report),
+        Ok(Err(error)) => {
+            eprintln!("[harn] warning: pump drain error for {topic_name}: {error}");
+            best_effort_pump_report(
+                log,
+                &topic,
+                &consumer,
+                start_seen,
+                up_to,
+                PumpDrainStopReason::Error,
+            )
+            .await
+        }
+        Err(_) => {
+            eprintln!(
+                "[harn] warning: pump drain timed out for {topic_name} after {:?}",
+                budget
+            );
+            best_effort_pump_report(
+                log,
+                &topic,
+                &consumer,
+                start_seen,
+                up_to,
+                PumpDrainStopReason::Deadline,
+            )
+            .await
+        }
+    }
+}
+
+async fn best_effort_pump_report(
+    log: &Arc<harn_vm::event_log::AnyEventLog>,
+    topic: &harn_vm::event_log::Topic,
+    consumer: &ConsumerId,
+    start_seen: u64,
+    up_to: u64,
+    stop_reason: PumpDrainStopReason,
+) -> Result<PumpDrainReport, String> {
+    let last_seen = log
+        .consumer_cursor(topic, consumer)
+        .await
+        .map_err(|error| format!("failed to read consumer cursor for {topic}: {error}"))?
+        .unwrap_or(start_seen);
+    let stats = PumpStats {
+        last_seen,
+        processed: last_seen.saturating_sub(start_seen),
+    };
+    Ok(pump_drain_report(stats, start_seen, up_to, 0, stop_reason))
 }
 
 fn remaining_budget(deadline: tokio::time::Instant) -> Duration {
@@ -1176,12 +1374,14 @@ fn remaining_budget(deadline: tokio::time::Instant) -> Duration {
 fn maybe_finish_pump_drain(
     stats: PumpStats,
     progress: PumpDrainProgress,
+    outstanding_tasks: usize,
 ) -> Option<PumpDrainReport> {
-    if stats.last_seen >= progress.request.up_to {
+    if stats.last_seen >= progress.request.up_to && outstanding_tasks == 0 {
         return Some(pump_drain_report(
             stats,
             progress.start_seen,
             progress.request.up_to,
+            outstanding_tasks,
             PumpDrainStopReason::Drained,
         ));
     }
@@ -1191,6 +1391,7 @@ fn maybe_finish_pump_drain(
             stats,
             progress.start_seen,
             progress.request.up_to,
+            outstanding_tasks,
             PumpDrainStopReason::MaxItems,
         ));
     }
@@ -1199,6 +1400,7 @@ fn maybe_finish_pump_drain(
             stats,
             progress.start_seen,
             progress.request.up_to,
+            outstanding_tasks,
             PumpDrainStopReason::Deadline,
         ));
     }
@@ -1209,12 +1411,14 @@ fn pump_drain_report(
     stats: PumpStats,
     start_seen: u64,
     up_to: u64,
+    outstanding_tasks: usize,
     stop_reason: PumpDrainStopReason,
 ) -> PumpDrainReport {
     PumpDrainReport {
         stats,
         drain_items: stats.last_seen.saturating_sub(start_seen),
         remaining_queued: up_to.saturating_sub(stats.last_seen),
+        outstanding_tasks,
         stop_reason,
     }
 }
@@ -1230,6 +1434,20 @@ fn pump_test_delay() -> Option<Duration> {
         .and_then(|value| value.trim().parse::<u64>().ok())
         .map(Duration::from_millis)
         .filter(|delay| !delay.is_zero())
+}
+
+fn inbox_task_test_delay() -> Option<Duration> {
+    std::env::var(TEST_INBOX_TASK_DELAY_ENV)
+        .ok()
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .map(Duration::from_millis)
+        .filter(|delay| !delay.is_zero())
+}
+
+fn pending_pump_test_should_fail() -> bool {
+    std::env::var(TEST_FAIL_PENDING_PUMP_ENV)
+        .ok()
+        .is_some_and(|value| value != "0")
 }
 
 struct RuntimeSignalCtx<'a> {
