@@ -1,10 +1,137 @@
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
-use crate::chunk::Op;
+use crate::chunk::{InlineCacheEntry, Op, PropertyCacheTarget};
 use crate::value::{VmError, VmValue};
 
 impl super::super::Vm {
+    fn try_cached_property(
+        cache: &InlineCacheEntry,
+        name_idx: u16,
+        obj: &VmValue,
+    ) -> Option<VmValue> {
+        let InlineCacheEntry::Property {
+            name_idx: cached_name_idx,
+            target,
+        } = cache
+        else {
+            return None;
+        };
+        if *cached_name_idx != name_idx {
+            return None;
+        }
+
+        match (target, obj) {
+            (PropertyCacheTarget::ListCount, VmValue::List(items)) => {
+                Some(VmValue::Int(items.len() as i64))
+            }
+            (PropertyCacheTarget::ListEmpty, VmValue::List(items)) => {
+                Some(VmValue::Bool(items.is_empty()))
+            }
+            (PropertyCacheTarget::ListFirst, VmValue::List(items)) => {
+                Some(items.first().cloned().unwrap_or(VmValue::Nil))
+            }
+            (PropertyCacheTarget::ListLast, VmValue::List(items)) => {
+                Some(items.last().cloned().unwrap_or(VmValue::Nil))
+            }
+            (PropertyCacheTarget::StringCount, VmValue::String(s)) => {
+                Some(VmValue::Int(s.chars().count() as i64))
+            }
+            (PropertyCacheTarget::StringEmpty, VmValue::String(s)) => {
+                Some(VmValue::Bool(s.is_empty()))
+            }
+            (PropertyCacheTarget::PairFirst, VmValue::Pair(p)) => Some(p.0.clone()),
+            (PropertyCacheTarget::PairSecond, VmValue::Pair(p)) => Some(p.1.clone()),
+            (PropertyCacheTarget::EnumVariant, VmValue::EnumVariant { variant, .. }) => {
+                Some(VmValue::String(Rc::from(variant.as_str())))
+            }
+            (PropertyCacheTarget::EnumFields, VmValue::EnumVariant { fields, .. }) => {
+                Some(VmValue::List(Rc::new(fields.clone())))
+            }
+            _ => None,
+        }
+    }
+
+    fn property_cache_target(obj: &VmValue, name: &str) -> Option<PropertyCacheTarget> {
+        match obj {
+            VmValue::List(_) => match name {
+                "count" => Some(PropertyCacheTarget::ListCount),
+                "empty" => Some(PropertyCacheTarget::ListEmpty),
+                "first" => Some(PropertyCacheTarget::ListFirst),
+                "last" => Some(PropertyCacheTarget::ListLast),
+                _ => None,
+            },
+            VmValue::String(_) => match name {
+                "count" => Some(PropertyCacheTarget::StringCount),
+                "empty" => Some(PropertyCacheTarget::StringEmpty),
+                _ => None,
+            },
+            VmValue::Pair(_) => match name {
+                "first" => Some(PropertyCacheTarget::PairFirst),
+                "second" => Some(PropertyCacheTarget::PairSecond),
+                _ => None,
+            },
+            VmValue::EnumVariant { .. } => match name {
+                "variant" => Some(PropertyCacheTarget::EnumVariant),
+                "fields" => Some(PropertyCacheTarget::EnumFields),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    fn resolve_property(obj: &VmValue, name: &str, optional: bool) -> Result<VmValue, VmError> {
+        let result = match obj {
+            VmValue::Nil if optional => VmValue::Nil,
+            VmValue::Dict(map) => map.get(name).cloned().unwrap_or(VmValue::Nil),
+            VmValue::List(items) => match name {
+                "count" => VmValue::Int(items.len() as i64),
+                "empty" => VmValue::Bool(items.is_empty()),
+                "first" => items.first().cloned().unwrap_or(VmValue::Nil),
+                "last" => items.last().cloned().unwrap_or(VmValue::Nil),
+                _ => VmValue::Nil,
+            },
+            VmValue::String(s) => match name {
+                "count" => VmValue::Int(s.chars().count() as i64),
+                "empty" => VmValue::Bool(s.is_empty()),
+                _ => VmValue::Nil,
+            },
+            VmValue::EnumVariant {
+                variant, fields, ..
+            } => match name {
+                "variant" => VmValue::String(Rc::from(variant.as_str())),
+                "fields" => VmValue::List(Rc::new(fields.clone())),
+                _ => VmValue::Nil,
+            },
+            VmValue::StructInstance { fields, .. } => {
+                fields.get(name).cloned().unwrap_or(VmValue::Nil)
+            }
+            VmValue::Pair(p) => match name {
+                "first" => p.0.clone(),
+                "second" => p.1.clone(),
+                _ if optional => VmValue::Nil,
+                _ => {
+                    return Err(VmError::TypeError(format!(
+                        "cannot access property `{name}` on pair (expected `first` or `second`)"
+                    )));
+                }
+            },
+            VmValue::Nil => {
+                return Err(VmError::TypeError(format!(
+                    "cannot access property `{name}` on nil"
+                )));
+            }
+            _ if optional => VmValue::Nil,
+            _ => {
+                return Err(VmError::TypeError(format!(
+                    "cannot access property `{name}` on {}",
+                    obj.type_name()
+                )));
+            }
+        };
+        Ok(result)
+    }
+
     pub(super) fn try_execute_collections_op(&mut self, op: u8) -> Result<bool, VmError> {
         if op == Op::BuildList as u8 {
             let frame = self.frames.last_mut().unwrap();
@@ -191,97 +318,43 @@ impl super::super::Vm {
                 }
             };
             self.stack.push(result);
-        } else if op == Op::GetProperty as u8 {
-            let frame = self.frames.last_mut().unwrap();
-            let idx = frame.chunk.read_u16(frame.ip) as usize;
-            frame.ip += 2;
-            let name = Self::const_string(&frame.chunk.constants[idx])?;
-            let obj = self.pop()?;
-            let result = match &obj {
-                VmValue::Dict(map) => map.get(&name).cloned().unwrap_or(VmValue::Nil),
-                VmValue::List(items) => match name.as_str() {
-                    "count" => VmValue::Int(items.len() as i64),
-                    "empty" => VmValue::Bool(items.is_empty()),
-                    "first" => items.first().cloned().unwrap_or(VmValue::Nil),
-                    "last" => items.last().cloned().unwrap_or(VmValue::Nil),
-                    _ => VmValue::Nil,
-                },
-                VmValue::String(s) => match name.as_str() {
-                    "count" => VmValue::Int(s.chars().count() as i64),
-                    "empty" => VmValue::Bool(s.is_empty()),
-                    _ => VmValue::Nil,
-                },
-                VmValue::EnumVariant {
-                    variant, fields, ..
-                } => match name.as_str() {
-                    "variant" => VmValue::String(Rc::from(variant.as_str())),
-                    "fields" => VmValue::List(Rc::new(fields.clone())),
-                    _ => VmValue::Nil,
-                },
-                VmValue::StructInstance { fields, .. } => {
-                    fields.get(&name).cloned().unwrap_or(VmValue::Nil)
-                }
-                VmValue::Pair(p) => match name.as_str() {
-                    "first" => p.0.clone(),
-                    "second" => p.1.clone(),
-                    _ => {
-                        return Err(VmError::TypeError(format!(
-                            "cannot access property `{name}` on pair (expected `first` or `second`)"
-                        )));
-                    }
-                },
-                VmValue::Nil => {
-                    return Err(VmError::TypeError(format!(
-                        "cannot access property `{name}` on nil"
-                    )));
-                }
-                _ => {
-                    return Err(VmError::TypeError(format!(
-                        "cannot access property `{name}` on {}",
-                        obj.type_name()
-                    )));
-                }
+        } else if op == Op::GetProperty as u8 || op == Op::GetPropertyOpt as u8 {
+            let optional = op == Op::GetPropertyOpt as u8;
+            let (name_idx, cache_slot, cache_entry) = {
+                let frame = self.frames.last_mut().unwrap();
+                let op_offset = frame.ip.saturating_sub(1);
+                let name_idx = frame.chunk.read_u16(frame.ip);
+                frame.ip += 2;
+                let cache_slot = frame.chunk.inline_cache_slot(op_offset);
+                let cache_entry = cache_slot
+                    .map(|slot| frame.chunk.inline_cache_entry(slot))
+                    .unwrap_or(InlineCacheEntry::Empty);
+                (name_idx, cache_slot, cache_entry)
             };
-            self.stack.push(result);
-        } else if op == Op::GetPropertyOpt as u8 {
-            let frame = self.frames.last_mut().unwrap();
-            let idx = frame.chunk.read_u16(frame.ip) as usize;
-            frame.ip += 2;
-            let name = Self::const_string(&frame.chunk.constants[idx])?;
+
             let obj = self.pop()?;
-            let result = match &obj {
-                VmValue::Nil => VmValue::Nil,
-                VmValue::Dict(map) => map.get(&name).cloned().unwrap_or(VmValue::Nil),
-                VmValue::List(items) => match name.as_str() {
-                    "count" => VmValue::Int(items.len() as i64),
-                    "empty" => VmValue::Bool(items.is_empty()),
-                    "first" => items.first().cloned().unwrap_or(VmValue::Nil),
-                    "last" => items.last().cloned().unwrap_or(VmValue::Nil),
-                    _ => VmValue::Nil,
-                },
-                VmValue::String(s) => match name.as_str() {
-                    "count" => VmValue::Int(s.chars().count() as i64),
-                    "empty" => VmValue::Bool(s.is_empty()),
-                    _ => VmValue::Nil,
-                },
-                VmValue::EnumVariant {
-                    variant, fields, ..
-                } => match name.as_str() {
-                    "variant" => VmValue::String(Rc::from(variant.as_str())),
-                    "fields" => VmValue::List(Rc::new(fields.clone())),
-                    _ => VmValue::Nil,
-                },
-                VmValue::StructInstance { fields, .. } => {
-                    fields.get(&name).cloned().unwrap_or(VmValue::Nil)
+            if optional && matches!(obj, VmValue::Nil) {
+                self.stack.push(VmValue::Nil);
+            } else if let Some(result) = Self::try_cached_property(&cache_entry, name_idx, &obj) {
+                self.stack.push(result);
+            } else {
+                let name = {
+                    let frame = self.frames.last().unwrap();
+                    Self::const_string(&frame.chunk.constants[name_idx as usize])?
+                };
+                let result = Self::resolve_property(&obj, &name, optional)?;
+
+                if let (Some(slot), Some(target)) =
+                    (cache_slot, Self::property_cache_target(&obj, &name))
+                {
+                    let frame = self.frames.last().unwrap();
+                    frame.chunk.set_inline_cache_entry(
+                        slot,
+                        InlineCacheEntry::Property { name_idx, target },
+                    );
                 }
-                VmValue::Pair(p) => match name.as_str() {
-                    "first" => p.0.clone(),
-                    "second" => p.1.clone(),
-                    _ => VmValue::Nil,
-                },
-                _ => VmValue::Nil,
-            };
-            self.stack.push(result);
+                self.stack.push(result);
+            }
         } else if op == Op::SetProperty as u8 {
             let frame = self.frames.last_mut().unwrap();
             let prop_idx = frame.chunk.read_u16(frame.ip) as usize;

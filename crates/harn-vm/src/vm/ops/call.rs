@@ -1,11 +1,102 @@
 use std::rc::Rc;
 
-use crate::chunk::Op;
+use crate::chunk::{InlineCacheEntry, MethodCacheTarget, Op};
 use crate::value::{VmClosure, VmError, VmValue};
 
 use super::super::CallFrame;
 
 impl super::super::Vm {
+    fn try_cached_method(
+        cache: &InlineCacheEntry,
+        name_idx: u16,
+        argc: usize,
+        obj: &VmValue,
+    ) -> Option<VmValue> {
+        let InlineCacheEntry::Method {
+            name_idx: cached_name_idx,
+            argc: cached_argc,
+            target,
+        } = cache
+        else {
+            return None;
+        };
+        if *cached_name_idx != name_idx || *cached_argc != argc {
+            return None;
+        }
+
+        match (target, obj) {
+            (MethodCacheTarget::ListCount, VmValue::List(items)) => {
+                Some(VmValue::Int(items.len() as i64))
+            }
+            (MethodCacheTarget::ListEmpty, VmValue::List(items)) => {
+                Some(VmValue::Bool(items.is_empty()))
+            }
+            (MethodCacheTarget::StringCount, VmValue::String(s)) => {
+                Some(VmValue::Int(s.chars().count() as i64))
+            }
+            (MethodCacheTarget::StringEmpty, VmValue::String(s)) => {
+                Some(VmValue::Bool(s.is_empty()))
+            }
+            (MethodCacheTarget::DictCount, VmValue::Dict(map)) => {
+                Some(VmValue::Int(map.len() as i64))
+            }
+            (MethodCacheTarget::RangeCount | MethodCacheTarget::RangeLen, VmValue::Range(r)) => {
+                Some(VmValue::Int(r.len()))
+            }
+            (MethodCacheTarget::RangeEmpty, VmValue::Range(r)) => Some(VmValue::Bool(r.is_empty())),
+            (MethodCacheTarget::RangeFirst, VmValue::Range(r)) => {
+                Some(r.first().map(VmValue::Int).unwrap_or(VmValue::Nil))
+            }
+            (MethodCacheTarget::RangeLast, VmValue::Range(r)) => {
+                Some(r.last().map(VmValue::Int).unwrap_or(VmValue::Nil))
+            }
+            (MethodCacheTarget::SetCount | MethodCacheTarget::SetLen, VmValue::Set(items)) => {
+                Some(VmValue::Int(items.len() as i64))
+            }
+            (MethodCacheTarget::SetEmpty, VmValue::Set(items)) => {
+                Some(VmValue::Bool(items.is_empty()))
+            }
+            _ => None,
+        }
+    }
+
+    fn method_cache_target(obj: &VmValue, method: &str, argc: usize) -> Option<MethodCacheTarget> {
+        if argc != 0 {
+            return None;
+        }
+        match obj {
+            VmValue::List(_) => match method {
+                "count" => Some(MethodCacheTarget::ListCount),
+                "empty" => Some(MethodCacheTarget::ListEmpty),
+                _ => None,
+            },
+            VmValue::String(_) => match method {
+                "count" | "len" => Some(MethodCacheTarget::StringCount),
+                "empty" => Some(MethodCacheTarget::StringEmpty),
+                _ => None,
+            },
+            VmValue::Dict(_) => match method {
+                "count" => Some(MethodCacheTarget::DictCount),
+                _ => None,
+            },
+            VmValue::Range(_) => match method {
+                "count" => Some(MethodCacheTarget::RangeCount),
+                "len" => Some(MethodCacheTarget::RangeLen),
+                "empty" => Some(MethodCacheTarget::RangeEmpty),
+                "first" => Some(MethodCacheTarget::RangeFirst),
+                "last" => Some(MethodCacheTarget::RangeLast),
+                _ => None,
+            },
+            VmValue::Set(_) => match method {
+                "count" => Some(MethodCacheTarget::SetCount),
+                "len" => Some(MethodCacheTarget::SetLen),
+                "empty" => Some(MethodCacheTarget::SetEmpty),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
     pub(super) async fn try_execute_call_op(&mut self, op: u8) -> Result<bool, VmError> {
         if op == Op::Call as u8 {
             let frame = self.frames.last_mut().unwrap();
@@ -325,27 +416,59 @@ impl super::super::Vm {
             self.stack.push(VmValue::Closure(Rc::new(closure)));
         } else if op == Op::MethodCall as u8 || op == Op::MethodCallOpt as u8 {
             let optional = op == Op::MethodCallOpt as u8;
-            let frame = self.frames.last_mut().unwrap();
-            let name_idx = frame.chunk.read_u16(frame.ip) as usize;
-            frame.ip += 2;
-            let argc = frame.chunk.code[frame.ip] as usize;
-            frame.ip += 1;
-            let method = Self::const_string(&frame.chunk.constants[name_idx])?;
-            let functions = frame.chunk.functions.clone();
+            let (name_idx, argc, cache_slot, cache_entry) = {
+                let frame = self.frames.last_mut().unwrap();
+                let op_offset = frame.ip.saturating_sub(1);
+                let name_idx = frame.chunk.read_u16(frame.ip);
+                frame.ip += 2;
+                let argc = frame.chunk.code[frame.ip] as usize;
+                frame.ip += 1;
+                let cache_slot = frame.chunk.inline_cache_slot(op_offset);
+                let cache_entry = cache_slot
+                    .map(|slot| frame.chunk.inline_cache_entry(slot))
+                    .unwrap_or(InlineCacheEntry::Empty);
+                (name_idx, argc, cache_slot, cache_entry)
+            };
             let args: Vec<VmValue> = self.stack.split_off(self.stack.len().saturating_sub(argc));
             let obj = self.pop()?;
             if optional && matches!(obj, VmValue::Nil) {
                 self.stack.push(VmValue::Nil);
+            } else if let Some(result) = Self::try_cached_method(&cache_entry, name_idx, argc, &obj)
+            {
+                self.stack.push(result);
             } else {
+                let method = {
+                    let frame = self.frames.last().unwrap();
+                    Self::const_string(&frame.chunk.constants[name_idx as usize])?
+                };
+                let cache_target = Self::method_cache_target(&obj, &method, args.len());
+                let functions = self.frames.last().unwrap().chunk.functions.clone();
                 let result = self.call_method(obj, &method, &args, &functions).await?;
+                if let (Some(slot), Some(target)) = (cache_slot, cache_target) {
+                    let frame = self.frames.last().unwrap();
+                    frame.chunk.set_inline_cache_entry(
+                        slot,
+                        InlineCacheEntry::Method {
+                            name_idx,
+                            argc,
+                            target,
+                        },
+                    );
+                }
                 self.stack.push(result);
             }
         } else if op == Op::MethodCallSpread as u8 {
-            let frame = self.frames.last_mut().unwrap();
-            let name_idx = frame.chunk.read_u16(frame.ip) as usize;
-            frame.ip += 2;
-            let method = Self::const_string(&frame.chunk.constants[name_idx])?;
-            let functions = frame.chunk.functions.clone();
+            let (name_idx, cache_slot, cache_entry) = {
+                let frame = self.frames.last_mut().unwrap();
+                let op_offset = frame.ip.saturating_sub(1);
+                let name_idx = frame.chunk.read_u16(frame.ip);
+                frame.ip += 2;
+                let cache_slot = frame.chunk.inline_cache_slot(op_offset);
+                let cache_entry = cache_slot
+                    .map(|slot| frame.chunk.inline_cache_entry(slot))
+                    .unwrap_or(InlineCacheEntry::Empty);
+                (name_idx, cache_slot, cache_entry)
+            };
             let args_val = self.pop()?;
             let obj = self.pop()?;
             let args = match args_val {
@@ -356,8 +479,30 @@ impl super::super::Vm {
                     ))
                 }
             };
-            let result = self.call_method(obj, &method, &args, &functions).await?;
-            self.stack.push(result);
+            if let Some(result) = Self::try_cached_method(&cache_entry, name_idx, args.len(), &obj)
+            {
+                self.stack.push(result);
+            } else {
+                let method = {
+                    let frame = self.frames.last().unwrap();
+                    Self::const_string(&frame.chunk.constants[name_idx as usize])?
+                };
+                let cache_target = Self::method_cache_target(&obj, &method, args.len());
+                let functions = self.frames.last().unwrap().chunk.functions.clone();
+                let result = self.call_method(obj, &method, &args, &functions).await?;
+                if let (Some(slot), Some(target)) = (cache_slot, cache_target) {
+                    let frame = self.frames.last().unwrap();
+                    frame.chunk.set_inline_cache_entry(
+                        slot,
+                        InlineCacheEntry::Method {
+                            name_idx,
+                            argc: args.len(),
+                            target,
+                        },
+                    );
+                }
+                self.stack.push(result);
+            }
         } else if op == Op::Pipe as u8 {
             let callable = self.pop()?;
             let value = self.pop()?;

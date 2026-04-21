@@ -3,7 +3,7 @@ use std::path::Path;
 
 use crate::compiler::Compiler;
 use crate::stdlib::register_vm_stdlib;
-use crate::{VmError, VmValue};
+use crate::{Chunk, InlineCacheEntry, MethodCacheTarget, PropertyCacheTarget, VmError, VmValue};
 use harn_lexer::Lexer;
 use harn_parser::Parser;
 
@@ -28,6 +28,30 @@ fn run_harn(source: &str) -> (String, VmValue) {
                 register_vm_stdlib(&mut vm);
                 let result = vm.execute(&chunk).await.unwrap();
                 (vm.output().to_string(), result)
+            })
+            .await
+    })
+}
+
+fn run_harn_with_chunk(source: &str) -> (Chunk, String, VmValue) {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let mut lexer = Lexer::new(source);
+                let tokens = lexer.tokenize().unwrap();
+                let mut parser = Parser::new(tokens);
+                let program = parser.parse().unwrap();
+                let chunk = Compiler::new().compile(&program).unwrap();
+
+                let mut vm = Vm::new();
+                register_vm_stdlib(&mut vm);
+                let result = vm.execute(&chunk).await.unwrap();
+                (chunk, vm.output().to_string(), result)
             })
             .await
     })
@@ -360,6 +384,161 @@ fn test_list_properties() {
         "pipeline t(task) { let list = [1, 2, 3]\nlog(list.count)\nlog(list.empty)\nlog(list.first)\nlog(list.last) }",
     );
     assert_eq!(out, "[harn] 3\n[harn] false\n[harn] 1\n[harn] 3");
+}
+
+#[test]
+fn test_inline_cache_warms_property_sites() {
+    let (chunk, out, _) = run_harn_with_chunk(
+        r#"pipeline t(task) {
+let list = [1, 2, 3]
+let text = ""
+let p = pair("left", "right")
+var i = 0
+var total = 0
+while i < 3 {
+  total = total + list.count
+  if text.empty {
+    total = total + 1
+  }
+  log(p.second)
+  i = i + 1
+}
+log(total)
+}"#,
+    );
+
+    assert_eq!(
+        out.trim_end(),
+        "[harn] right\n[harn] right\n[harn] right\n[harn] 12"
+    );
+    let entries = chunk.inline_cache_entries();
+    assert!(
+        entries.iter().any(|entry| matches!(
+            entry,
+            InlineCacheEntry::Property {
+                target: PropertyCacheTarget::ListCount,
+                ..
+            }
+        )),
+        "{entries:?}"
+    );
+    assert!(
+        entries.iter().any(|entry| matches!(
+            entry,
+            InlineCacheEntry::Property {
+                target: PropertyCacheTarget::StringEmpty,
+                ..
+            }
+        )),
+        "{entries:?}"
+    );
+    assert!(
+        entries.iter().any(|entry| matches!(
+            entry,
+            InlineCacheEntry::Property {
+                target: PropertyCacheTarget::PairSecond,
+                ..
+            }
+        )),
+        "{entries:?}"
+    );
+}
+
+#[test]
+fn test_inline_cache_replaces_polymorphic_property_site() {
+    let (chunk, out, _) = run_harn_with_chunk(
+        r#"pipeline t(task) {
+for value in [[1, 2], "ab"] {
+  log(value.count)
+}
+}"#,
+    );
+
+    assert_eq!(out.trim_end(), "[harn] 2\n[harn] 2");
+    let entries = chunk.inline_cache_entries();
+    assert!(
+        entries.iter().any(|entry| matches!(
+            entry,
+            InlineCacheEntry::Property {
+                target: PropertyCacheTarget::StringCount,
+                ..
+            }
+        )),
+        "{entries:?}"
+    );
+}
+
+#[test]
+fn test_inline_cache_warms_method_sites() {
+    let (chunk, out, _) = run_harn_with_chunk(
+        r#"pipeline t(task) {
+let list = [1, 2, 3]
+let text = "abc"
+let dict = {a: 1, b: 2}
+let range = 1 to 3
+let values = set(1, 2)
+var i = 0
+var total = 0
+while i < 3 {
+  total = total + list.count()
+  total = total + text.count()
+  total = total + dict.count()
+  total = total + range.first()
+  total = total + values.count()
+  i = i + 1
+}
+log(total)
+}"#,
+    );
+
+    assert_eq!(out.trim_end(), "[harn] 33");
+    let entries = chunk.inline_cache_entries();
+    for target in [
+        MethodCacheTarget::ListCount,
+        MethodCacheTarget::StringCount,
+        MethodCacheTarget::DictCount,
+        MethodCacheTarget::RangeFirst,
+        MethodCacheTarget::SetCount,
+    ] {
+        assert!(
+            entries.iter().any(|entry| matches!(
+                entry,
+                InlineCacheEntry::Method {
+                    target: cached_target,
+                    ..
+                } if *cached_target == target
+            )),
+            "missing {target:?} in {entries:?}"
+        );
+    }
+}
+
+#[test]
+fn test_inline_cache_warms_spread_method_site() {
+    let (chunk, out, _) = run_harn_with_chunk(
+        r#"pipeline t(task) {
+let list = [1, 2, 3]
+let args = []
+var i = 0
+while i < 3 {
+  log(list.count(...args))
+  i = i + 1
+}
+}"#,
+    );
+
+    assert_eq!(out.trim_end(), "[harn] 3\n[harn] 3\n[harn] 3");
+    let entries = chunk.inline_cache_entries();
+    assert!(
+        entries.iter().any(|entry| matches!(
+            entry,
+            InlineCacheEntry::Method {
+                target: MethodCacheTarget::ListCount,
+                ..
+            }
+        )),
+        "{entries:?}"
+    );
 }
 
 #[test]

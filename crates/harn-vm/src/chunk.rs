@@ -1,4 +1,7 @@
+use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::fmt;
+use std::rc::Rc;
 
 /// Bytecode opcodes for the Harn VM.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -208,6 +211,58 @@ pub enum Constant {
     Duration(u64),
 }
 
+/// Monomorphic inline-cache state for bytecode instructions that repeatedly
+/// resolve the same property or builtin method. Cache guards are intentionally
+/// conservative: each entry is tied to the instruction's name constant index
+/// and a single receiver variant. Harn collection values are immutable or
+/// copy-on-write at the VM level, so list/string/pair/range/set/dict receiver
+/// kind caches do not need invalidation; dynamic dict fields and struct fields
+/// are left on the generic path until they have stable layout metadata.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum InlineCacheEntry {
+    Empty,
+    Property {
+        name_idx: u16,
+        target: PropertyCacheTarget,
+    },
+    Method {
+        name_idx: u16,
+        argc: usize,
+        target: MethodCacheTarget,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PropertyCacheTarget {
+    ListCount,
+    ListEmpty,
+    ListFirst,
+    ListLast,
+    StringCount,
+    StringEmpty,
+    PairFirst,
+    PairSecond,
+    EnumVariant,
+    EnumFields,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MethodCacheTarget {
+    ListCount,
+    ListEmpty,
+    StringCount,
+    StringEmpty,
+    DictCount,
+    RangeCount,
+    RangeLen,
+    RangeEmpty,
+    RangeFirst,
+    RangeLast,
+    SetCount,
+    SetLen,
+    SetEmpty,
+}
+
 impl fmt::Display for Constant {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -242,6 +297,12 @@ pub struct Chunk {
     current_col: u32,
     /// Compiled function bodies (for closures).
     pub functions: Vec<CompiledFunction>,
+    /// Instruction offset to inline-cache slot. Slots are assigned at emit time
+    /// for cacheable instructions while bytecode bytes remain immutable.
+    inline_cache_slots: BTreeMap<usize, usize>,
+    /// Shared cache entries so cloned chunks in call frames warm the same side
+    /// table as the compiled chunk used by tests/debugging.
+    inline_caches: Rc<RefCell<Vec<InlineCacheEntry>>>,
 }
 
 /// A compiled function (closure body).
@@ -268,6 +329,8 @@ impl Chunk {
             source_file: None,
             current_col: 0,
             functions: Vec::new(),
+            inline_cache_slots: BTreeMap::new(),
+            inline_caches: Rc::new(RefCell::new(Vec::new())),
         }
     }
 
@@ -299,6 +362,7 @@ impl Chunk {
     /// Emit an instruction with a u16 argument.
     pub fn emit_u16(&mut self, op: Op, arg: u16, line: u32) {
         let col = self.current_col;
+        let op_offset = self.code.len();
         self.code.push(op as u8);
         self.code.push((arg >> 8) as u8);
         self.code.push((arg & 0xFF) as u8);
@@ -308,6 +372,12 @@ impl Chunk {
         self.columns.push(col);
         self.columns.push(col);
         self.columns.push(col);
+        if matches!(
+            op,
+            Op::GetProperty | Op::GetPropertyOpt | Op::MethodCallSpread
+        ) {
+            self.register_inline_cache(op_offset);
+        }
     }
 
     /// Emit an instruction with a u8 argument.
@@ -333,6 +403,7 @@ impl Chunk {
 
     fn emit_method_call_inner(&mut self, op: Op, name_idx: u16, arg_count: u8, line: u32) {
         let col = self.current_col;
+        let op_offset = self.code.len();
         self.code.push(op as u8);
         self.code.push((name_idx >> 8) as u8);
         self.code.push((name_idx & 0xFF) as u8);
@@ -345,6 +416,7 @@ impl Chunk {
         self.columns.push(col);
         self.columns.push(col);
         self.columns.push(col);
+        self.register_inline_cache(op_offset);
     }
 
     /// Current code offset (for jump patching).
@@ -385,6 +457,39 @@ impl Chunk {
     /// Read a u16 argument at the given position.
     pub fn read_u16(&self, pos: usize) -> u16 {
         ((self.code[pos] as u16) << 8) | (self.code[pos + 1] as u16)
+    }
+
+    fn register_inline_cache(&mut self, op_offset: usize) {
+        if self.inline_cache_slots.contains_key(&op_offset) {
+            return;
+        }
+        let mut entries = self.inline_caches.borrow_mut();
+        let slot = entries.len();
+        entries.push(InlineCacheEntry::Empty);
+        self.inline_cache_slots.insert(op_offset, slot);
+    }
+
+    pub(crate) fn inline_cache_slot(&self, op_offset: usize) -> Option<usize> {
+        self.inline_cache_slots.get(&op_offset).copied()
+    }
+
+    pub(crate) fn inline_cache_entry(&self, slot: usize) -> InlineCacheEntry {
+        self.inline_caches
+            .borrow()
+            .get(slot)
+            .cloned()
+            .unwrap_or(InlineCacheEntry::Empty)
+    }
+
+    pub(crate) fn set_inline_cache_entry(&self, slot: usize, entry: InlineCacheEntry) {
+        if let Some(existing) = self.inline_caches.borrow_mut().get_mut(slot) {
+            *existing = entry;
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn inline_cache_entries(&self) -> Vec<InlineCacheEntry> {
+        self.inline_caches.borrow().clone()
     }
 
     /// Disassemble for debugging.
