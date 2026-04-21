@@ -417,13 +417,8 @@ impl EventLog for AnyEventLog {
                 log.queue_depth,
             ),
         };
-        Ok(stream_from_broadcast(
-            self,
-            topic.clone(),
-            from,
-            rx,
-            queue_depth,
-        ))
+        let history = self.read_range(topic, from, usize::MAX).await?;
+        Ok(stream_from_broadcast(history, from, rx, queue_depth))
     }
 
     async fn ack(
@@ -492,52 +487,45 @@ impl BroadcastMap {
     }
 }
 
-fn stream_from_broadcast<L>(
-    log: Arc<L>,
-    topic: Topic,
+fn stream_from_broadcast(
+    history: Vec<(EventId, LogEvent)>,
     from: Option<EventId>,
     mut live_rx: broadcast::Receiver<(EventId, LogEvent)>,
     queue_depth: usize,
-) -> BoxStream<'static, Result<(EventId, LogEvent), LogError>>
-where
-    L: EventLog + 'static,
-{
+) -> BoxStream<'static, Result<(EventId, LogEvent), LogError>> {
     let (tx, rx) = mpsc::channel(queue_depth.max(1));
-    std::thread::spawn(move || {
-        futures::executor::block_on(async move {
-            let history = match log.read_range(&topic, from, usize::MAX).await {
-                Ok(history) => history,
-                Err(error) => {
-                    let _ = tx.send(Err(error)).await;
-                    return;
-                }
-            };
-
-            let mut last_seen = from.unwrap_or(0);
-            for (event_id, event) in history {
-                last_seen = event_id;
-                if tx.send(Ok((event_id, event))).await.is_err() {
-                    return;
-                }
+    // Run the subscription forwarder as a tokio task rather than a detached
+    // OS thread. A dedicated thread running under `futures::executor::block_on`
+    // is invisible to the tokio runtime, so tests that use `start_paused = true`
+    // race against auto-advanced timers while the thread catches up in real
+    // time. Spawning on tokio makes the forwarder participate in runtime
+    // scheduling (including paused-time quiescence) and ties its lifetime to
+    // the runtime's shutdown.
+    tokio::spawn(async move {
+        let mut last_seen = from.unwrap_or(0);
+        for (event_id, event) in history {
+            last_seen = event_id;
+            if tx.send(Ok((event_id, event))).await.is_err() {
+                return;
             }
+        }
 
-            loop {
-                match live_rx.recv().await {
-                    Ok((event_id, event)) if event_id > last_seen => {
-                        last_seen = event_id;
-                        if tx.send(Ok((event_id, event))).await.is_err() {
-                            return;
-                        }
-                    }
-                    Ok(_) => {}
-                    Err(broadcast::error::RecvError::Closed) => return,
-                    Err(broadcast::error::RecvError::Lagged(_)) => {
-                        let _ = tx.try_send(Err(LogError::ConsumerLagged(last_seen)));
+        loop {
+            match live_rx.recv().await {
+                Ok((event_id, event)) if event_id > last_seen => {
+                    last_seen = event_id;
+                    if tx.send(Ok((event_id, event))).await.is_err() {
                         return;
                     }
                 }
+                Ok(_) => {}
+                Err(broadcast::error::RecvError::Closed) => return,
+                Err(broadcast::error::RecvError::Lagged(_)) => {
+                    let _ = tx.try_send(Err(LogError::ConsumerLagged(last_seen)));
+                    return;
+                }
             }
-        });
+        }
     });
     Box::pin(ReceiverStream::new(rx))
 }
@@ -620,13 +608,8 @@ impl EventLog for MemoryEventLog {
         from: Option<EventId>,
     ) -> Result<BoxStream<'static, Result<(EventId, LogEvent), LogError>>, LogError> {
         let rx = self.broadcasts.subscribe(topic, self.queue_depth);
-        Ok(stream_from_broadcast(
-            self.clone(),
-            topic.clone(),
-            from,
-            rx,
-            self.queue_depth,
-        ))
+        let history = self.read_range(topic, from, usize::MAX).await?;
+        Ok(stream_from_broadcast(history, from, rx, self.queue_depth))
     }
 
     async fn ack(
@@ -848,13 +831,8 @@ impl EventLog for FileEventLog {
         from: Option<EventId>,
     ) -> Result<BoxStream<'static, Result<(EventId, LogEvent), LogError>>, LogError> {
         let rx = self.broadcasts.subscribe(topic, self.queue_depth);
-        Ok(stream_from_broadcast(
-            self.clone(),
-            topic.clone(),
-            from,
-            rx,
-            self.queue_depth,
-        ))
+        let history = self.read_range_sync(topic, from, usize::MAX)?;
+        Ok(stream_from_broadcast(history, from, rx, self.queue_depth))
     }
 
     async fn ack(
@@ -1152,13 +1130,8 @@ impl EventLog for SqliteEventLog {
         from: Option<EventId>,
     ) -> Result<BoxStream<'static, Result<(EventId, LogEvent), LogError>>, LogError> {
         let rx = self.broadcasts.subscribe(topic, self.queue_depth);
-        Ok(stream_from_broadcast(
-            self.clone(),
-            topic.clone(),
-            from,
-            rx,
-            self.queue_depth,
-        ))
+        let history = self.read_range(topic, from, usize::MAX).await?;
+        Ok(stream_from_broadcast(history, from, rx, self.queue_depth))
     }
 
     async fn ack(
