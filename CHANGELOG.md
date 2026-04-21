@@ -7,7 +7,17 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
-## Unreleased
+## v0.7.27
+
+This release rounds out the trigger + orchestration surface with two
+new moat primitives — durable `monitor.wait_for` with push-driven
+wakeups, and first-class stream-trigger manifests for Kafka / NATS /
+Pulsar / Postgres CDC / email / WebSocket connectors — alongside
+ACP `session/fork`, the manifest-driven `harn orchestrator deploy`
+helper, and a reproducible VM microbenchmark suite with a baseline
+table. Also fixes an `EventLog::subscribe` scheduling bug where the
+detached forwarder thread was invisible to tokio paused-time
+auto-advance and could race with auto-advanced timers under load.
 
 ### Added
 
