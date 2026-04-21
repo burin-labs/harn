@@ -183,6 +183,33 @@ Inside a trigger handler, the returned record includes:
 
 Outside trigger dispatch, the builtin returns `nil`.
 
+## Stream helpers
+
+`std/triggers` includes small declarative helpers for stream handlers:
+
+- `stream_fork(source, branches)` returns a `StreamForkPlan`
+- `stream_join(source, join?)` returns a `StreamJoinPlan`
+- `window_by(events, window)` returns a `StreamWindowPlan`
+- `llm_classify(input, labels, options?)` returns a `StreamLlmClassifyPlan`
+
+These helpers do not start broker consumers by themselves. They give handlers a
+typed, serializable plan shape for fan-out/fan-in, manifest-aligned windowing,
+and cached classifier steps.
+
+```harn
+import "std/triggers"
+
+pub fn on_quotes(event: TriggerEvent) -> dict {
+  let forked = stream_fork([event.provider_payload.raw], ["risk", "ledger"])
+  let windowed = window_by(
+    [event.provider_payload.raw],
+    {mode: "sliding", key: "event.provider_payload.key", size: "5m", every: "1m", gap: nil, max_items: 500},
+  )
+  let classified = llm_classify(event.provider_payload.raw, ["ignore", "review"], {cache: "quotes:v1"})
+  return {forked: forked, windowed: windowed, classified: classified}
+}
+```
+
 ### `trust_record(agent, action, approver, outcome, tier)`
 
 Append a manual `TrustRecord` to the trust graph. Scripts usually rely on the

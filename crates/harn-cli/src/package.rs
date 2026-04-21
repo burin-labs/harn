@@ -139,12 +139,16 @@ fn default_hook_pattern() -> String {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TriggerManifestEntry {
     pub id: String,
-    pub kind: TriggerKind,
-    pub provider: harn_vm::ProviderId,
+    #[serde(default)]
+    pub kind: Option<TriggerKind>,
+    #[serde(default)]
+    pub provider: Option<harn_vm::ProviderId>,
     #[serde(default)]
     pub autonomy_tier: harn_vm::AutonomyTier,
-    #[serde(rename = "match")]
-    pub match_: TriggerMatchExpr,
+    #[serde(default, rename = "match")]
+    pub match_: Option<TriggerMatchExpr>,
+    #[serde(default)]
+    pub sources: Vec<TriggerSourceManifestEntry>,
     #[serde(default)]
     pub when: Option<String>,
     #[serde(default)]
@@ -170,6 +174,46 @@ pub struct TriggerManifestEntry {
     pub singleton: Option<TriggerSingletonManifestSpec>,
     #[serde(default)]
     pub batch: Option<TriggerBatchManifestSpec>,
+    #[serde(default)]
+    pub window: Option<TriggerStreamWindowManifestSpec>,
+    #[serde(default)]
+    pub secrets: BTreeMap<String, String>,
+    #[serde(default)]
+    pub filter: Option<String>,
+    #[serde(flatten, default)]
+    pub kind_specific: BTreeMap<String, toml::Value>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TriggerSourceManifestEntry {
+    #[serde(default)]
+    pub id: Option<String>,
+    pub kind: TriggerKind,
+    pub provider: harn_vm::ProviderId,
+    #[serde(default, rename = "match")]
+    pub match_: Option<TriggerMatchExpr>,
+    #[serde(default)]
+    pub dedupe_key: Option<String>,
+    #[serde(default)]
+    pub retry: Option<TriggerRetrySpec>,
+    #[serde(default)]
+    pub priority: Option<TriggerPriorityField>,
+    #[serde(default)]
+    pub budget: Option<TriggerBudgetSpec>,
+    #[serde(default)]
+    pub concurrency: Option<TriggerConcurrencyManifestSpec>,
+    #[serde(default)]
+    pub throttle: Option<TriggerThrottleManifestSpec>,
+    #[serde(default)]
+    pub rate_limit: Option<TriggerRateLimitManifestSpec>,
+    #[serde(default)]
+    pub debounce: Option<TriggerDebounceManifestSpec>,
+    #[serde(default)]
+    pub singleton: Option<TriggerSingletonManifestSpec>,
+    #[serde(default)]
+    pub batch: Option<TriggerBatchManifestSpec>,
+    #[serde(default)]
+    pub window: Option<TriggerStreamWindowManifestSpec>,
     #[serde(default)]
     pub secrets: BTreeMap<String, String>,
     #[serde(default)]
@@ -311,6 +355,29 @@ pub struct TriggerPriorityManifestSpec {
     pub key: String,
     #[serde(default)]
     pub order: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum TriggerStreamWindowMode {
+    Tumbling,
+    Sliding,
+    Session,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TriggerStreamWindowManifestSpec {
+    pub mode: TriggerStreamWindowMode,
+    #[serde(default)]
+    pub key: Option<String>,
+    #[serde(default)]
+    pub size: Option<String>,
+    #[serde(default)]
+    pub every: Option<String>,
+    #[serde(default)]
+    pub gap: Option<String>,
+    #[serde(default)]
+    pub max_items: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -625,6 +692,7 @@ pub struct ResolvedTriggerConfig {
     pub debounce: Option<TriggerDebounceManifestSpec>,
     pub singleton: Option<TriggerSingletonManifestSpec>,
     pub batch: Option<TriggerBatchManifestSpec>,
+    pub window: Option<TriggerStreamWindowManifestSpec>,
     pub priority_flow: Option<TriggerPriorityManifestSpec>,
     pub secrets: BTreeMap<String, String>,
     pub filter: Option<String>,
@@ -634,6 +702,7 @@ pub struct ResolvedTriggerConfig {
     pub package_name: Option<String>,
     pub exports: HashMap<String, String>,
     pub table_index: usize,
+    pub shape_error: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -866,40 +935,188 @@ fn resolved_triggers_from_manifest(
         .triggers
         .iter()
         .enumerate()
-        .map(|(table_index, trigger)| {
-            let (dispatch_priority, priority_flow) =
-                split_trigger_priority(trigger.priority.clone());
-            ResolvedTriggerConfig {
-                id: trigger.id.clone(),
-                kind: trigger.kind,
-                provider: trigger.provider.clone(),
-                autonomy_tier: trigger.autonomy_tier,
-                match_: trigger.match_.clone(),
-                when: trigger.when.clone(),
-                when_budget: trigger.when_budget.clone(),
-                handler: trigger.handler.clone(),
-                dedupe_key: trigger.dedupe_key.clone(),
-                retry: trigger.retry.clone(),
-                dispatch_priority,
-                budget: trigger.budget.clone(),
-                concurrency: trigger.concurrency.clone(),
-                throttle: trigger.throttle.clone(),
-                rate_limit: trigger.rate_limit.clone(),
-                debounce: trigger.debounce.clone(),
-                singleton: trigger.singleton.clone(),
-                batch: trigger.batch.clone(),
-                priority_flow,
-                secrets: trigger.secrets.clone(),
-                filter: trigger.filter.clone(),
-                kind_specific: trigger.kind_specific.clone(),
-                manifest_dir: manifest_dir.to_path_buf(),
-                manifest_path: manifest_path.clone(),
-                package_name: package_name.clone(),
-                exports: manifest.exports.clone(),
+        .flat_map(|(table_index, trigger)| {
+            resolved_trigger_entries_from_manifest_table(
+                trigger,
+                manifest_dir,
+                &manifest_path,
+                package_name.clone(),
+                manifest.exports.clone(),
                 table_index,
-            }
+            )
         })
         .collect()
+}
+
+fn resolved_trigger_entries_from_manifest_table(
+    trigger: &TriggerManifestEntry,
+    manifest_dir: &Path,
+    manifest_path: &Path,
+    package_name: Option<String>,
+    exports: HashMap<String, String>,
+    table_index: usize,
+) -> Vec<ResolvedTriggerConfig> {
+    if trigger.sources.is_empty() {
+        return vec![resolved_single_trigger_entry(
+            trigger,
+            manifest_dir,
+            manifest_path,
+            package_name,
+            exports,
+            table_index,
+        )];
+    }
+
+    trigger
+        .sources
+        .iter()
+        .enumerate()
+        .map(|(source_index, source)| {
+            resolved_trigger_source_entry(
+                trigger,
+                source,
+                manifest_dir,
+                manifest_path,
+                package_name.clone(),
+                exports.clone(),
+                table_index,
+                source_index,
+            )
+        })
+        .collect()
+}
+
+fn resolved_single_trigger_entry(
+    trigger: &TriggerManifestEntry,
+    manifest_dir: &Path,
+    manifest_path: &Path,
+    package_name: Option<String>,
+    exports: HashMap<String, String>,
+    table_index: usize,
+) -> ResolvedTriggerConfig {
+    let shape_error = match (&trigger.kind, &trigger.provider) {
+        (None, None) => {
+            Some("trigger table must set kind/provider or declare one or more sources".to_string())
+        }
+        (None, Some(_)) => Some("trigger table missing kind".to_string()),
+        (Some(_), None) => Some("trigger table missing provider".to_string()),
+        (Some(_), Some(_)) => None,
+    }
+    .or_else(|| {
+        trigger
+            .match_
+            .is_none()
+            .then_some("trigger table missing match".to_string())
+    });
+    let (dispatch_priority, priority_flow) = split_trigger_priority(trigger.priority.clone());
+    ResolvedTriggerConfig {
+        id: trigger.id.clone(),
+        kind: trigger.kind.unwrap_or(TriggerKind::Webhook),
+        provider: trigger
+            .provider
+            .clone()
+            .unwrap_or_else(|| harn_vm::ProviderId::from("")),
+        autonomy_tier: trigger.autonomy_tier,
+        match_: trigger.match_.clone().unwrap_or_default(),
+        when: trigger.when.clone(),
+        when_budget: trigger.when_budget.clone(),
+        handler: trigger.handler.clone(),
+        dedupe_key: trigger.dedupe_key.clone(),
+        retry: trigger.retry.clone(),
+        dispatch_priority,
+        budget: trigger.budget.clone(),
+        concurrency: trigger.concurrency.clone(),
+        throttle: trigger.throttle.clone(),
+        rate_limit: trigger.rate_limit.clone(),
+        debounce: trigger.debounce.clone(),
+        singleton: trigger.singleton.clone(),
+        batch: trigger.batch.clone(),
+        window: trigger.window.clone(),
+        priority_flow,
+        secrets: trigger.secrets.clone(),
+        filter: trigger.filter.clone(),
+        kind_specific: trigger.kind_specific.clone(),
+        manifest_dir: manifest_dir.to_path_buf(),
+        manifest_path: manifest_path.to_path_buf(),
+        package_name,
+        exports,
+        table_index,
+        shape_error,
+    }
+}
+
+fn resolved_trigger_source_entry(
+    trigger: &TriggerManifestEntry,
+    source: &TriggerSourceManifestEntry,
+    manifest_dir: &Path,
+    manifest_path: &Path,
+    package_name: Option<String>,
+    exports: HashMap<String, String>,
+    table_index: usize,
+    source_index: usize,
+) -> ResolvedTriggerConfig {
+    let (dispatch_priority, priority_flow) =
+        split_trigger_priority(source.priority.clone().or_else(|| trigger.priority.clone()));
+    let mut kind_specific = trigger.kind_specific.clone();
+    kind_specific.extend(source.kind_specific.clone());
+    let mut secrets = trigger.secrets.clone();
+    secrets.extend(source.secrets.clone());
+    let source_label = source
+        .id
+        .clone()
+        .unwrap_or_else(|| format!("source-{}", source_index + 1));
+    ResolvedTriggerConfig {
+        id: format!("{}.{}", trigger.id, source_label),
+        kind: source.kind,
+        provider: source.provider.clone(),
+        autonomy_tier: trigger.autonomy_tier,
+        match_: source.match_.clone().unwrap_or_default(),
+        when: trigger.when.clone(),
+        when_budget: trigger.when_budget.clone(),
+        handler: trigger.handler.clone(),
+        dedupe_key: source
+            .dedupe_key
+            .clone()
+            .or_else(|| trigger.dedupe_key.clone()),
+        retry: source
+            .retry
+            .clone()
+            .unwrap_or_else(|| trigger.retry.clone()),
+        dispatch_priority,
+        budget: source
+            .budget
+            .clone()
+            .unwrap_or_else(|| trigger.budget.clone()),
+        concurrency: source
+            .concurrency
+            .clone()
+            .or_else(|| trigger.concurrency.clone()),
+        throttle: source.throttle.clone().or_else(|| trigger.throttle.clone()),
+        rate_limit: source
+            .rate_limit
+            .clone()
+            .or_else(|| trigger.rate_limit.clone()),
+        debounce: source.debounce.clone().or_else(|| trigger.debounce.clone()),
+        singleton: source
+            .singleton
+            .clone()
+            .or_else(|| trigger.singleton.clone()),
+        batch: source.batch.clone().or_else(|| trigger.batch.clone()),
+        window: source.window.clone().or_else(|| trigger.window.clone()),
+        priority_flow,
+        secrets,
+        filter: source.filter.clone().or_else(|| trigger.filter.clone()),
+        kind_specific,
+        manifest_dir: manifest_dir.to_path_buf(),
+        manifest_path: manifest_path.to_path_buf(),
+        package_name,
+        exports,
+        table_index,
+        shape_error: source
+            .match_
+            .is_none()
+            .then(|| format!("trigger source '{source_label}' missing match")),
+    }
 }
 
 fn resolved_provider_connectors_from_manifest(
@@ -1151,6 +1368,9 @@ fn parse_duration_millis(raw: &str) -> Result<u64, String> {
 }
 
 fn validate_static_trigger_config(trigger: &ResolvedTriggerConfig) -> Result<(), String> {
+    if let Some(message) = &trigger.shape_error {
+        return Err(trigger_error(trigger, message));
+    }
     if trigger.id.trim().is_empty() {
         return Err(trigger_error(trigger, "id cannot be empty"));
     }
@@ -1367,6 +1587,117 @@ fn validate_static_trigger_config(trigger: &ResolvedTriggerConfig) -> Result<(),
                     format!("invalid cron timezone '{timezone}': {error}"),
                 )
             })?;
+        }
+    }
+    if matches!(trigger.kind, TriggerKind::Stream) {
+        validate_stream_trigger_config(trigger)?;
+    } else if trigger.window.is_some() {
+        return Err(trigger_error(
+            trigger,
+            "window is only valid for stream triggers",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_stream_trigger_config(trigger: &ResolvedTriggerConfig) -> Result<(), String> {
+    if let Some(window) = &trigger.window {
+        validate_stream_window(trigger, window)?;
+    }
+    let provider = trigger.provider.as_str();
+    let has_any = |fields: &[&str]| {
+        fields.iter().any(|field| {
+            extract_kind_field(trigger, field).is_some_and(|value| {
+                value.as_str().is_some_and(|text| !text.trim().is_empty())
+                    || value.as_array().is_some_and(|items| !items.is_empty())
+                    || value.as_table().is_some_and(|table| !table.is_empty())
+            })
+        })
+    };
+    let required = match provider {
+        "kafka" => (!has_any(&["topic", "topics"])).then_some("topic or topics"),
+        "nats" => (!has_any(&["subject", "subjects"])).then_some("subject or subjects"),
+        "pulsar" => (!has_any(&["topic", "topics"])).then_some("topic or topics"),
+        "postgres-cdc" => (!has_any(&["slot"])).then_some("slot"),
+        "email" => {
+            (!has_any(&["address", "domain", "routing"])).then_some("address, domain, or routing")
+        }
+        "websocket" => (!has_any(&["url", "path"])).then_some("url or path"),
+        _ => None,
+    };
+    if let Some(required) = required {
+        return Err(trigger_error(
+            trigger,
+            format!("stream provider '{provider}' requires {required}"),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_stream_window(
+    trigger: &ResolvedTriggerConfig,
+    window: &TriggerStreamWindowManifestSpec,
+) -> Result<(), String> {
+    if window.max_items == Some(0) {
+        return Err(trigger_error(
+            trigger,
+            "window.max_items must be greater than or equal to 1",
+        ));
+    }
+    if let Some(size) = window.size.as_deref() {
+        harn_vm::parse_flow_control_duration(size)
+            .map_err(|error| trigger_error(trigger, format!("window.size {error}")))?;
+    }
+    if let Some(every) = window.every.as_deref() {
+        harn_vm::parse_flow_control_duration(every)
+            .map_err(|error| trigger_error(trigger, format!("window.every {error}")))?;
+    }
+    if let Some(gap) = window.gap.as_deref() {
+        harn_vm::parse_flow_control_duration(gap)
+            .map_err(|error| trigger_error(trigger, format!("window.gap {error}")))?;
+    }
+    match window.mode {
+        TriggerStreamWindowMode::Tumbling => {
+            if window.size.is_none() {
+                return Err(trigger_error(
+                    trigger,
+                    "tumbling stream windows require window.size",
+                ));
+            }
+            if window.every.is_some() || window.gap.is_some() {
+                return Err(trigger_error(
+                    trigger,
+                    "tumbling stream windows cannot set window.every or window.gap",
+                ));
+            }
+        }
+        TriggerStreamWindowMode::Sliding => {
+            if window.size.is_none() || window.every.is_none() {
+                return Err(trigger_error(
+                    trigger,
+                    "sliding stream windows require window.size and window.every",
+                ));
+            }
+            if window.gap.is_some() {
+                return Err(trigger_error(
+                    trigger,
+                    "sliding stream windows cannot set window.gap",
+                ));
+            }
+        }
+        TriggerStreamWindowMode::Session => {
+            if window.gap.is_none() {
+                return Err(trigger_error(
+                    trigger,
+                    "session stream windows require window.gap",
+                ));
+            }
+            if window.every.is_some() {
+                return Err(trigger_error(
+                    trigger,
+                    "session stream windows cannot set window.every",
+                ));
+            }
         }
     }
     Ok(())
@@ -2183,6 +2514,7 @@ pub fn manifest_trigger_binding_spec(
             "batch": config.batch,
             "priority": config.priority_flow,
         },
+        "window": config.window,
         "secrets": config.secrets,
         "filter": &filter,
         "kind_specific": config.kind_specific,
@@ -4274,6 +4606,58 @@ secrets = { signing_secret = "github/webhook-secret" }
     }
 
     #[test]
+    fn trigger_manifest_entries_round_trip_stream_sources() {
+        let source = r#"
+[[triggers]]
+id = "market-fan-in"
+handler = "handlers::on_market_event"
+when = "handlers::should_handle"
+debounce = { key = "event.provider + \":\" + event.kind", period = "2s" }
+
+[[triggers.sources]]
+id = "open"
+kind = "cron"
+provider = "cron"
+match = { events = ["cron.tick"] }
+schedule = "0 14 * * 1-5"
+timezone = "America/New_York"
+
+[[triggers.sources]]
+id = "quotes"
+kind = "stream"
+provider = "kafka"
+match = { events = ["quote.tick"] }
+topic = "quotes"
+consumer_group = "harn-market"
+window = { mode = "sliding", key = "event.provider_payload.key", size = "5m", every = "1m", max_items = 5000 }
+"#;
+        let parsed: TriggerTables = toml::from_str(source).expect("trigger tables parse");
+        assert_eq!(parsed.triggers.len(), 1);
+        assert_eq!(parsed.triggers[0].sources.len(), 2);
+        let encoded = toml::to_string(&parsed).expect("trigger tables encode");
+        let reparsed: TriggerTables = toml::from_str(&encoded).expect("trigger tables reparse");
+        assert_eq!(reparsed, parsed);
+    }
+
+    #[test]
+    fn trigger_manifest_entries_parse_inline_sources() {
+        let source = r#"
+[[triggers]]
+id = "ops-fan-in"
+handler = "handlers::on_event"
+sources = [
+  { id = "tick", kind = "cron", provider = "cron", match = { events = ["cron.tick"] }, schedule = "*/5 * * * *", timezone = "UTC" },
+  { id = "alerts", kind = "stream", provider = "nats", match = { events = ["alert.received"] }, subject = "alerts.>" },
+]
+"#;
+        let parsed: TriggerTables = toml::from_str(source).expect("trigger tables parse");
+        assert_eq!(parsed.triggers.len(), 1);
+        assert_eq!(parsed.triggers[0].sources.len(), 2);
+        assert_eq!(parsed.triggers[0].sources[1].provider.as_str(), "nats");
+        assert_eq!(parsed.triggers[0].sources[1].kind, TriggerKind::Stream);
+    }
+
+    #[test]
     fn load_runtime_extensions_ignores_package_triggers() {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
@@ -4562,6 +4946,160 @@ pub fn on_new_issue(event: TriggerEvent) -> string {
                 .as_ref()
                 .map(|config| config.timeout),
             Some(std::time::Duration::from_secs(30))
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn collect_manifest_triggers_expands_stream_sources() {
+        let tmp = tempfile::tempdir().unwrap();
+        let harn_file = write_trigger_project(
+            tmp.path(),
+            r#"
+[package]
+name = "workspace"
+
+[exports]
+handlers = "lib.harn"
+
+[[triggers]]
+id = "market-fan-in"
+handler = "handlers::on_market_event"
+when = "handlers::should_handle"
+debounce = { key = "event.provider + \":\" + event.kind", period = "2s" }
+
+[[triggers.sources]]
+id = "open"
+kind = "cron"
+provider = "cron"
+match = { events = ["cron.tick"] }
+schedule = "0 14 * * 1-5"
+timezone = "America/New_York"
+
+[[triggers.sources]]
+id = "quotes"
+kind = "stream"
+provider = "kafka"
+match = { events = ["quote.tick"] }
+topic = "quotes"
+consumer_group = "harn-market"
+window = { mode = "sliding", key = "event.provider_payload.key", size = "5m", every = "1m", max_items = 5000 }
+"#,
+            Some(
+                r#"
+import "std/triggers"
+
+pub fn should_handle(event: TriggerEvent) -> bool {
+  return event.provider == "cron" || event.provider == "kafka"
+}
+
+pub fn on_market_event(event: TriggerEvent) -> string {
+  return event.kind
+}
+"#,
+            ),
+        );
+        let mut vm = test_vm();
+        let collected = collect_manifest_triggers(&mut vm, &load_runtime_extensions(&harn_file))
+            .await
+            .expect("trigger collection succeeds");
+        assert_eq!(collected.len(), 2);
+        assert_eq!(collected[0].config.id, "market-fan-in.open");
+        assert_eq!(collected[0].config.kind, TriggerKind::Cron);
+        assert_eq!(collected[1].config.id, "market-fan-in.quotes");
+        assert_eq!(collected[1].config.kind, TriggerKind::Stream);
+        assert_eq!(collected[1].config.provider.as_str(), "kafka");
+        assert_eq!(
+            collected[1]
+                .config
+                .window
+                .as_ref()
+                .map(|window| window.mode),
+            Some(TriggerStreamWindowMode::Sliding)
+        );
+        assert_eq!(
+            collected[1]
+                .flow_control
+                .debounce
+                .as_ref()
+                .map(|config| config.period),
+            Some(std::time::Duration::from_secs(2))
+        );
+        assert!(collected.iter().all(|trigger| trigger.when.is_some()));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn collect_manifest_triggers_rejects_missing_trigger_match() {
+        let tmp = tempfile::tempdir().unwrap();
+        let harn_file = write_trigger_project(
+            tmp.path(),
+            r#"
+[package]
+name = "workspace"
+
+[exports]
+handlers = "lib.harn"
+
+[[triggers]]
+id = "github-new-issue"
+kind = "webhook"
+provider = "github"
+handler = "handlers::on_new_issue"
+secrets = { signing_secret = "github/webhook-secret" }
+"#,
+            Some(
+                r#"
+import "std/triggers"
+
+pub fn on_new_issue(event: TriggerEvent) -> string {
+  return event.kind
+}
+"#,
+            ),
+        );
+        let error = collect_manifest_triggers(&mut test_vm(), &load_runtime_extensions(&harn_file))
+            .await
+            .expect_err("missing match should be rejected");
+        assert!(error.contains("trigger table missing match"), "{error}");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn collect_manifest_triggers_rejects_missing_source_match() {
+        let tmp = tempfile::tempdir().unwrap();
+        let harn_file = write_trigger_project(
+            tmp.path(),
+            r#"
+[package]
+name = "workspace"
+
+[exports]
+handlers = "lib.harn"
+
+[[triggers]]
+id = "market-fan-in"
+handler = "handlers::on_market_event"
+
+[[triggers.sources]]
+id = "quotes"
+kind = "stream"
+provider = "kafka"
+topic = "quotes"
+"#,
+            Some(
+                r#"
+import "std/triggers"
+
+pub fn on_market_event(event: TriggerEvent) -> string {
+  return event.kind
+}
+"#,
+            ),
+        );
+        let error = collect_manifest_triggers(&mut test_vm(), &load_runtime_extensions(&harn_file))
+            .await
+            .expect_err("missing source match should be rejected");
+        assert!(
+            error.contains("trigger source 'quotes' missing match"),
+            "{error}"
         );
     }
 

@@ -4,6 +4,25 @@ pipeline test(task) {
   let providers: list<ProviderCatalogEntry> = list_providers()
   let builtin = providers.filter({ provider -> provider.runtime.kind == "builtin" })
   assert(len(builtin) == 6, "expected exactly six builtin trigger providers")
+  let stream_providers = providers.filter({ provider -> provider.kinds.any({ kind -> kind == "stream" }) })
+  assert(len(stream_providers) == 6, "expected six stream trigger providers")
+  assert(
+    stream_providers.all({ provider -> provider.schema_name == "StreamEventPayload" }),
+    "stream providers should publish the shared stream payload schema",
+  )
+  assert(
+    stream_providers.all({ provider -> provider.runtime.kind == "placeholder" }),
+    "stream providers should be cataloged before concrete connector activation lands",
+  )
+  assert(
+    stream_providers.any({ provider -> provider.provider == "kafka" })
+    && stream_providers.any({ provider -> provider.provider == "nats" })
+    && stream_providers.any({ provider -> provider.provider == "pulsar" })
+    && stream_providers.any({ provider -> provider.provider == "postgres-cdc" })
+    && stream_providers.any({ provider -> provider.provider == "email" })
+    && stream_providers.any({ provider -> provider.provider == "websocket" }),
+    "catalog should include every STREAM-01 provider",
+  )
   let cron = builtin.find({ provider -> provider.provider == "cron" })
   assert(cron?.schema_name == "CronEventPayload", "cron schema should be cataloged")
   assert(cron?.runtime?.connector == "cron", "cron should use the cron connector")

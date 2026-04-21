@@ -551,6 +551,20 @@ pub struct A2aPushPayload {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct StreamEventPayload {
+    pub event: String,
+    pub source: Option<String>,
+    pub stream: Option<String>,
+    pub partition: Option<String>,
+    pub offset: Option<String>,
+    pub key: Option<String>,
+    pub timestamp: Option<String>,
+    #[serde(default)]
+    pub headers: BTreeMap<String, String>,
+    pub raw: JsonValue,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ExtensionProviderPayload {
     pub provider: String,
     pub schema_name: String,
@@ -603,6 +617,18 @@ pub enum KnownProviderPayload {
     Webhook(GenericWebhookPayload),
     #[serde(rename = "a2a-push")]
     A2aPush(A2aPushPayload),
+    #[serde(rename = "kafka")]
+    Kafka(StreamEventPayload),
+    #[serde(rename = "nats")]
+    Nats(StreamEventPayload),
+    #[serde(rename = "pulsar")]
+    Pulsar(StreamEventPayload),
+    #[serde(rename = "postgres-cdc")]
+    PostgresCdc(StreamEventPayload),
+    #[serde(rename = "email")]
+    Email(StreamEventPayload),
+    #[serde(rename = "websocket")]
+    Websocket(StreamEventPayload),
 }
 
 impl KnownProviderPayload {
@@ -615,6 +641,12 @@ impl KnownProviderPayload {
             Self::Cron(_) => "cron",
             Self::Webhook(_) => "webhook",
             Self::A2aPush(_) => "a2a-push",
+            Self::Kafka(_) => "kafka",
+            Self::Nats(_) => "nats",
+            Self::Pulsar(_) => "pulsar",
+            Self::PostgresCdc(_) => "postgres-cdc",
+            Self::Email(_) => "email",
+            Self::Websocket(_) => "websocket",
         }
     }
 }
@@ -1282,7 +1314,33 @@ fn default_provider_schemas() -> Vec<Arc<dyn ProviderSchema>> {
             ),
             normalize: a2a_push_payload,
         }),
+        Arc::new(stream_provider_schema("kafka", kafka_payload)),
+        Arc::new(stream_provider_schema("nats", nats_payload)),
+        Arc::new(stream_provider_schema("pulsar", pulsar_payload)),
+        Arc::new(stream_provider_schema("postgres-cdc", postgres_cdc_payload)),
+        Arc::new(stream_provider_schema("email", email_payload)),
+        Arc::new(stream_provider_schema("websocket", websocket_payload)),
     ]
+}
+
+fn stream_provider_schema(
+    provider_id: &'static str,
+    normalize: fn(&str, &BTreeMap<String, String>, JsonValue) -> ProviderPayload,
+) -> BuiltinProviderSchema {
+    BuiltinProviderSchema {
+        provider_id,
+        harn_schema_name: "StreamEventPayload",
+        metadata: provider_metadata_entry(
+            provider_id,
+            &["stream"],
+            "StreamEventPayload",
+            &[],
+            SignatureVerificationMetadata::None,
+            Vec::new(),
+            ProviderRuntimeMetadata::Placeholder,
+        ),
+        normalize,
+    }
 }
 
 fn github_payload(
@@ -1844,6 +1902,94 @@ fn a2a_push_payload(
     }))
 }
 
+fn kafka_payload(
+    kind: &str,
+    headers: &BTreeMap<String, String>,
+    raw: JsonValue,
+) -> ProviderPayload {
+    ProviderPayload::Known(KnownProviderPayload::Kafka(stream_payload(
+        kind, headers, raw,
+    )))
+}
+
+fn nats_payload(kind: &str, headers: &BTreeMap<String, String>, raw: JsonValue) -> ProviderPayload {
+    ProviderPayload::Known(KnownProviderPayload::Nats(stream_payload(
+        kind, headers, raw,
+    )))
+}
+
+fn pulsar_payload(
+    kind: &str,
+    headers: &BTreeMap<String, String>,
+    raw: JsonValue,
+) -> ProviderPayload {
+    ProviderPayload::Known(KnownProviderPayload::Pulsar(stream_payload(
+        kind, headers, raw,
+    )))
+}
+
+fn postgres_cdc_payload(
+    kind: &str,
+    headers: &BTreeMap<String, String>,
+    raw: JsonValue,
+) -> ProviderPayload {
+    ProviderPayload::Known(KnownProviderPayload::PostgresCdc(stream_payload(
+        kind, headers, raw,
+    )))
+}
+
+fn email_payload(
+    kind: &str,
+    headers: &BTreeMap<String, String>,
+    raw: JsonValue,
+) -> ProviderPayload {
+    ProviderPayload::Known(KnownProviderPayload::Email(stream_payload(
+        kind, headers, raw,
+    )))
+}
+
+fn websocket_payload(
+    kind: &str,
+    headers: &BTreeMap<String, String>,
+    raw: JsonValue,
+) -> ProviderPayload {
+    ProviderPayload::Known(KnownProviderPayload::Websocket(stream_payload(
+        kind, headers, raw,
+    )))
+}
+
+fn stream_payload(
+    kind: &str,
+    headers: &BTreeMap<String, String>,
+    raw: JsonValue,
+) -> StreamEventPayload {
+    StreamEventPayload {
+        event: kind.to_string(),
+        source: json_stringish(&raw, &["source", "connector", "origin"]),
+        stream: json_stringish(
+            &raw,
+            &["stream", "topic", "subject", "channel", "mailbox", "slot"],
+        ),
+        partition: json_stringish(&raw, &["partition", "shard", "consumer"]),
+        offset: json_stringish(&raw, &["offset", "sequence", "lsn", "message_id"]),
+        key: json_stringish(&raw, &["key", "message_key", "id", "event_id"]),
+        timestamp: json_stringish(&raw, &["timestamp", "occurred_at", "received_at", "ts"]),
+        headers: headers.clone(),
+        raw,
+    }
+}
+
+fn json_stringish(raw: &JsonValue, fields: &[&str]) -> Option<String> {
+    fields.iter().find_map(|field| {
+        let value = raw.get(*field)?;
+        value
+            .as_str()
+            .map(ToString::to_string)
+            .or_else(|| parse_json_i64ish(value).map(|number| number.to_string()))
+            .or_else(|| value.as_u64().map(|number| number.to_string()))
+    })
+}
+
 fn parse_rfc3339(text: &str) -> Option<OffsetDateTime> {
     OffsetDateTime::parse(text, &time::format_description::well_known::Rfc3339).ok()
 }
@@ -1935,6 +2081,16 @@ mod tests {
         assert!(builtin.iter().any(|entry| entry.provider == "notion"));
         assert!(builtin.iter().any(|entry| entry.provider == "slack"));
         assert!(builtin.iter().any(|entry| entry.provider == "webhook"));
+        let kafka = entries
+            .iter()
+            .find(|entry| entry.provider == "kafka")
+            .expect("kafka stream provider");
+        assert_eq!(kafka.kinds, vec!["stream".to_string()]);
+        assert_eq!(kafka.schema_name, "StreamEventPayload");
+        assert!(matches!(
+            kafka.runtime,
+            ProviderRuntimeMetadata::Placeholder
+        ));
     }
 
     #[test]
@@ -1990,5 +2146,31 @@ mod tests {
             error,
             ProviderCatalogError::UnknownProvider("custom-provider".to_string())
         );
+    }
+
+    #[test]
+    fn provider_normalizes_stream_payloads() {
+        let payload = ProviderPayload::normalize(
+            &ProviderId::from("kafka"),
+            "quote.tick",
+            &BTreeMap::from([("x-source".to_string(), "feed".to_string())]),
+            serde_json::json!({
+                "topic": "quotes",
+                "partition": 7,
+                "offset": "42",
+                "key": "AAPL",
+                "timestamp": "2026-04-21T12:00:00Z"
+            }),
+        )
+        .expect("stream payload");
+        let ProviderPayload::Known(KnownProviderPayload::Kafka(payload)) = payload else {
+            panic!("expected kafka stream payload")
+        };
+        assert_eq!(payload.event, "quote.tick");
+        assert_eq!(payload.stream.as_deref(), Some("quotes"));
+        assert_eq!(payload.partition.as_deref(), Some("7"));
+        assert_eq!(payload.offset.as_deref(), Some("42"));
+        assert_eq!(payload.key.as_deref(), Some("AAPL"));
+        assert_eq!(payload.timestamp.as_deref(), Some("2026-04-21T12:00:00Z"));
     }
 }

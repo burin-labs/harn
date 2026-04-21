@@ -362,6 +362,7 @@ mod tests {
             debounce: None,
             singleton: None,
             batch: None,
+            window: None,
             priority_flow: None,
             secrets: Default::default(),
             filter: None,
@@ -371,6 +372,7 @@ mod tests {
             package_name: None,
             exports: Default::default(),
             table_index: 0,
+            shape_error: None,
         };
         let resource_types = derive_linear_resource_types(&[manifest]).expect("resource types");
         assert_eq!(
