@@ -1,12 +1,18 @@
 # Prompt templating
 
 Harn ships a small template language for rendering `.harn.prompt` and `.prompt`
-asset files. It is invoked by the `render(path, bindings?)` and
-`render_prompt(path, bindings?)` builtins (and, equivalently, via the
+asset files or inline template strings. It is invoked by the
+`render(path, bindings?)`, `render_prompt(path, bindings?)`, and
+`render_string(template, bindings?)` builtins (and, equivalently, via the
 `template.render` host capability). The engine is intentionally minimal — a
 rendering layer for prompts, not a scripting language — but it covers the
 ergonomics most prompt authors reach for: conditionals with `else`/`elif`,
 loops, includes, filters, comments, and whitespace control.
+
+Use `render_string(...)` when the template should live inline in source. Use
+`render(...)` / `render_prompt(...)` when the template should be loaded from a
+separate file relative to the calling module. The template syntax and error
+shape are identical across both entrypoints.
 
 This page is the reference. The one-page [quickref](./llm/harn-quickref.md)
 has a condensed version for agents writing Harn.
@@ -243,8 +249,11 @@ Typical cases:
 
 `harn check` parses every template referenced by a literal `render(...)` /
 `render_prompt(...)` call and surfaces syntax errors before you run the
-pipeline. Catches things like an unterminated `{{ for }}` block at static
-time rather than at first render.
+pipeline. `render_string(...)` is available to the checker as a builtin, but
+its template body is evaluated at runtime because it comes from normal string
+expressions rather than a source-relative asset path. This catches things like
+an unterminated `{{ for }}` block at static time for file-backed templates,
+rather than at first render.
 
 ## Back-compat
 

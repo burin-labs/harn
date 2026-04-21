@@ -1035,8 +1035,10 @@ in-flight work. Use both when batching LLM calls at scale.
 
 ## Prompt templates (`.harn.prompt` / `.prompt`)
 
-Load via `render("path.prompt", bindings)` or `render_prompt(...)`. Paths
-resolve relative to the calling module's directory.
+Load file-backed templates via `render("path.prompt", bindings)` or
+`render_prompt(...)`. Use `render_string(template, bindings)` when the
+template source lives inline in a string literal. File paths resolve relative
+to the calling module's directory.
 
 - `{{ name }}` — interpolation; nested with `{{ a.b[0] }}`.
 - `{{ if expr }}..{{ elif expr }}..{{ else }}..{{ end }}` — expression

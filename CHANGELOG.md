@@ -96,6 +96,13 @@ in Harn.
   `subtle::ConstantTimeEq` so scripts can compare signatures without
   leaking byte positions through timing. Covered by RFC 4231 and
   GitHub's documented webhook test vectors.
+- **`render_string(template, bindings?)` for inline prompt/codegen
+  templates (#357).** The stdlib template engine can now render
+  triple-quoted inline strings with the same `{{ if }}`, `{{ for }}`,
+  filters, includes, whitespace trimming, and error behavior as the
+  existing file-backed `render(...)` / `render_prompt(...)` helpers,
+  so one-file-loadable libraries no longer need to ship a separate
+  `.prompt` asset or reimplement the template engine in pure Harn.
 
 - **`trust_query(filters)` now supports `limit` and `grouped_by_trace`
   (#338).** Trust-graph queries can now cap results to the newest N
