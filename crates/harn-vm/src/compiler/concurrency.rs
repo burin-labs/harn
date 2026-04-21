@@ -1,4 +1,4 @@
-use harn_parser::{ParallelMode, SNode, SelectCase};
+use harn_parser::{BindingPattern, ParallelMode, SNode, SelectCase, TypeExpr};
 
 use crate::chunk::{CompiledFunction, Constant, Op};
 
@@ -28,11 +28,6 @@ impl Compiler {
             let zero_idx = self.chunk.add_constant(Constant::Int(0));
             self.chunk.emit_u16(Op::Constant, zero_idx, self.line);
         }
-        self.compile_node(expr)?;
-        let mut fn_compiler = Compiler::for_nested_body();
-        fn_compiler.enum_names = self.enum_names.clone();
-        fn_compiler.compile_block(body)?;
-        fn_compiler.chunk.emit(Op::Return, self.line);
         let (fn_name, params) = match mode {
             ParallelMode::Count => (
                 "<parallel>",
@@ -47,6 +42,21 @@ impl Compiler {
                 vec![variable.clone().unwrap_or_else(|| "__item__".to_string())],
             ),
         };
+        let param_type = match mode {
+            ParallelMode::Count => Some(TypeExpr::Named("int".into())),
+            ParallelMode::Each | ParallelMode::Settle => self.infer_for_item_type(expr),
+        };
+        self.compile_node(expr)?;
+        let mut fn_compiler = Compiler::for_nested_body();
+        fn_compiler.enum_names = self.enum_names.clone();
+        fn_compiler.interface_methods = self.interface_methods.clone();
+        fn_compiler.type_aliases = self.type_aliases.clone();
+        if let Some(param_name) = params.first() {
+            fn_compiler
+                .record_binding_type(&BindingPattern::Identifier(param_name.clone()), param_type);
+        }
+        fn_compiler.compile_block(body)?;
+        fn_compiler.chunk.emit(Op::Return, self.line);
         let func = CompiledFunction {
             name: fn_name.to_string(),
             params,
@@ -70,6 +80,8 @@ impl Compiler {
     pub(super) fn compile_spawn_expr(&mut self, body: &[SNode]) -> Result<(), CompileError> {
         let mut fn_compiler = Compiler::for_nested_body();
         fn_compiler.enum_names = self.enum_names.clone();
+        fn_compiler.interface_methods = self.interface_methods.clone();
+        fn_compiler.type_aliases = self.type_aliases.clone();
         fn_compiler.compile_block(body)?;
         fn_compiler.chunk.emit(Op::Return, self.line);
         let func = CompiledFunction {

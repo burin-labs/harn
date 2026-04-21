@@ -150,6 +150,20 @@ fn test_mixed_arithmetic() {
 }
 
 #[test]
+fn test_typed_opcode_drift_reports_type_error() {
+    let err = run_vm_err(
+        r#"pipeline t(task) {
+  let x: int = "bad"
+  log(x + 1)
+}"#,
+    );
+    assert!(
+        err.contains("Typed int add expected int operands"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
 fn test_exponentiation() {
     let out = run_output(
         "pipeline t(task) { log(2 ** 8)\nlog(2 * 3 ** 2)\nlog(2 ** 3 ** 2)\nlog(2 ** -1) }",

@@ -85,6 +85,9 @@ impl Compiler {
 
                 let mut fn_compiler = Compiler::for_nested_body();
                 fn_compiler.enum_names = self.enum_names.clone();
+                fn_compiler.interface_methods = self.interface_methods.clone();
+                fn_compiler.type_aliases = self.type_aliases.clone();
+                fn_compiler.record_param_types(params);
                 fn_compiler.emit_default_preamble(params)?;
                 fn_compiler.emit_type_checks(params);
                 fn_compiler.compile_block(body)?;
@@ -120,6 +123,8 @@ impl Compiler {
         // Emit a constructor: StructName({field: val, ...}) -> StructInstance.
         let mut fn_compiler = Compiler::for_nested_body();
         fn_compiler.enum_names = self.enum_names.clone();
+        fn_compiler.interface_methods = self.interface_methods.clone();
+        fn_compiler.type_aliases = self.type_aliases.clone();
         let params = vec![TypedParam::untyped("__fields")];
         fn_compiler.emit_default_preamble(&params)?;
 

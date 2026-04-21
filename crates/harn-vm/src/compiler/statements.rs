@@ -15,13 +15,26 @@ impl Compiler {
         if let Node::Identifier(name) = &target.node {
             let idx = self.chunk.add_constant(Constant::String(name.clone()));
             if let Some(op) = op {
+                let left_type = self.infer_expr_type(target);
+                let right_type = self.infer_expr_type(value);
+                let result_type =
+                    self.infer_binary_result_type(op, left_type.as_ref(), right_type.as_ref());
                 self.chunk.emit_u16(Op::GetVar, idx, self.line);
                 self.compile_node(value)?;
-                self.emit_compound_op(op)?;
+                if let Some(typed_op) =
+                    self.specialized_binary_op(op, left_type.as_ref(), right_type.as_ref())
+                {
+                    self.chunk.emit(typed_op, self.line);
+                } else {
+                    self.emit_compound_op(op)?;
+                }
                 self.chunk.emit_u16(Op::SetVar, idx, self.line);
+                self.assign_type_fact(name, result_type);
             } else {
+                let value_type = self.infer_expr_type(value);
                 self.compile_node(value)?;
                 self.chunk.emit_u16(Op::SetVar, idx, self.line);
+                self.assign_type_fact(name, value_type);
             }
         } else if let Node::PropertyAccess { object, property } = &target.node {
             if let Some(var_name) = self.root_var_name(object) {
@@ -134,6 +147,7 @@ impl Compiler {
         iterable: &SNode,
         body: &[SNode],
     ) -> Result<(), CompileError> {
+        let item_type = self.infer_for_item_type(iterable);
         self.compile_node(iterable)?;
         self.chunk.emit(Op::IterInit, self.line);
         let loop_start = self.chunk.current_offset();
@@ -149,6 +163,7 @@ impl Compiler {
         let exit_jump_pos = self.chunk.emit_jump(Op::IterNext, self.line);
         self.begin_scope();
         self.compile_destructuring(pattern, true)?;
+        self.record_binding_type(pattern, item_type);
         for sn in body {
             self.compile_node(sn)?;
             if Self::produces_value(&sn.node) {

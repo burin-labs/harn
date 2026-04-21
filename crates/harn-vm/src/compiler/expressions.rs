@@ -76,8 +76,21 @@ impl Compiler {
             _ => {}
         }
 
+        let left_type = self.infer_expr_type(left);
+        let right_type = self.infer_expr_type(right);
         self.compile_node(left)?;
         self.compile_node(right)?;
+        if let Some(typed_op) =
+            self.specialized_binary_op(op, left_type.as_ref(), right_type.as_ref())
+        {
+            self.chunk.emit(typed_op, self.line);
+            return Ok(());
+        }
+        self.emit_generic_binary_op(op)?;
+        Ok(())
+    }
+
+    pub(super) fn emit_generic_binary_op(&mut self, op: &str) -> Result<(), CompileError> {
         match op {
             "+" => self.chunk.emit(Op::Add, self.line),
             "-" => self.chunk.emit(Op::Sub, self.line),
