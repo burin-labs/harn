@@ -688,6 +688,12 @@ pub(crate) struct TrustQueryArgs {
     /// Filter by trust outcome.
     #[arg(long, value_enum)]
     pub outcome: Option<TrustOutcomeArg>,
+    /// Limit results to the newest N matching records.
+    #[arg(long)]
+    pub limit: Option<usize>,
+    /// Group results into trace buckets instead of returning a flat list.
+    #[arg(long)]
+    pub grouped_by_trace: bool,
     /// Emit JSON instead of human-readable output.
     #[arg(long)]
     pub json: bool,
@@ -1509,6 +1515,9 @@ mod tests {
             "act-auto",
             "--outcome",
             "success",
+            "--limit",
+            "500",
+            "--grouped-by-trace",
             "--json",
             "--summary",
         ]);
@@ -1525,6 +1534,8 @@ mod tests {
         assert_eq!(query.until.as_deref(), Some("2026-04-19T19:00:00Z"));
         assert!(matches!(query.tier, Some(TrustTierArg::ActAuto)));
         assert!(matches!(query.outcome, Some(TrustOutcomeArg::Success)));
+        assert_eq!(query.limit, Some(500));
+        assert!(query.grouped_by_trace);
         assert!(query.json);
         assert!(query.summary);
     }

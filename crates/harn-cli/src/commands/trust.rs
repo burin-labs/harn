@@ -17,6 +17,9 @@ pub(crate) async fn handle(args: TrustArgs) -> Result<(), String> {
 }
 
 async fn run_query(args: TrustQueryArgs) -> Result<(), String> {
+    if args.summary && args.grouped_by_trace {
+        return Err("--grouped-by-trace cannot be combined with --summary".to_string());
+    }
     let log = open_trust_log()?;
     let filters = harn_vm::TrustQueryFilters {
         agent: args.agent,
@@ -25,6 +28,8 @@ async fn run_query(args: TrustQueryArgs) -> Result<(), String> {
         until: args.until.as_deref().map(parse_timestamp).transpose()?,
         tier: args.tier.map(Into::into),
         outcome: args.outcome.map(Into::into),
+        limit: args.limit,
+        grouped_by_trace: args.grouped_by_trace,
     };
     let records = harn_vm::query_trust_records(&log, &filters)
         .await
@@ -58,10 +63,36 @@ async fn run_query(args: TrustQueryArgs) -> Result<(), String> {
     }
 
     if args.json {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&records).map_err(|error| error.to_string())?
-        );
+        if args.grouped_by_trace {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&harn_vm::group_trust_records_by_trace(&records))
+                    .map_err(|error| error.to_string())?
+            );
+        } else {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&records).map_err(|error| error.to_string())?
+            );
+        }
+        return Ok(());
+    }
+
+    if args.grouped_by_trace {
+        for group in harn_vm::group_trust_records_by_trace(&records) {
+            println!("trace_id={} count={}", group.trace_id, group.records.len());
+            for record in group.records {
+                println!(
+                    "  {} agent={} action={} outcome={} tier={} approver={}",
+                    format_timestamp(record.timestamp),
+                    record.agent,
+                    record.action,
+                    record.outcome.as_str(),
+                    record.autonomy_tier.as_str(),
+                    record.approver.unwrap_or_else(|| "-".to_string()),
+                );
+            }
+        }
         return Ok(());
     }
 

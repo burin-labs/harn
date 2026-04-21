@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
@@ -107,6 +107,15 @@ pub struct TrustQueryFilters {
     pub until: Option<OffsetDateTime>,
     pub tier: Option<AutonomyTier>,
     pub outcome: Option<TrustOutcome>,
+    pub limit: Option<usize>,
+    pub grouped_by_trace: bool,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TrustTraceGroup {
+    pub trace_id: String,
+    pub records: Vec<TrustRecord>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -162,7 +171,8 @@ pub async fn query_trust_records(
     log: &Arc<AnyEventLog>,
     filters: &TrustQueryFilters,
 ) -> Result<Vec<TrustRecord>, LogError> {
-    let events = log.read_range(&global_topic()?, None, usize::MAX).await?;
+    let topic = query_topic(filters)?;
+    let events = log.read_range(&topic, None, usize::MAX).await?;
     let mut records = Vec::new();
     for (_, event) in events {
         if event.kind != "trust_recorded" {
@@ -182,7 +192,25 @@ pub async fn query_trust_records(
             .then(left.agent.cmp(&right.agent))
             .then(left.record_id.cmp(&right.record_id))
     });
+    apply_record_limit(&mut records, filters.limit);
     Ok(records)
+}
+
+pub fn group_trust_records_by_trace(records: &[TrustRecord]) -> Vec<TrustTraceGroup> {
+    let mut groups: Vec<TrustTraceGroup> = Vec::new();
+    let mut positions: HashMap<String, usize> = HashMap::new();
+    for record in records {
+        if let Some(index) = positions.get(record.trace_id.as_str()).copied() {
+            groups[index].records.push(record.clone());
+            continue;
+        }
+        positions.insert(record.trace_id.clone(), groups.len());
+        groups.push(TrustTraceGroup {
+            trace_id: record.trace_id.clone(),
+            records: vec![record.clone()],
+        });
+    }
+    groups
 }
 
 pub fn summarize_trust_records(records: &[TrustRecord]) -> Vec<TrustAgentSummary> {
@@ -293,10 +321,29 @@ fn matches_filters(record: &TrustRecord, filters: &TrustQueryFilters) -> bool {
     true
 }
 
+fn query_topic(filters: &TrustQueryFilters) -> Result<Topic, LogError> {
+    match filters.agent.as_deref() {
+        Some(agent) => topic_for_agent(agent),
+        None => global_topic(),
+    }
+}
+
+fn apply_record_limit(records: &mut Vec<TrustRecord>, limit: Option<usize>) {
+    let Some(limit) = limit else {
+        return;
+    };
+    if records.len() <= limit {
+        return;
+    }
+    let keep_from = records.len() - limit;
+    records.drain(0..keep_from);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::event_log::MemoryEventLog;
+    use time::Duration;
 
     #[tokio::test]
     async fn append_and_query_round_trip() {
@@ -361,5 +408,65 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(tier, AutonomyTier::Shadow);
+    }
+
+    #[tokio::test]
+    async fn query_limit_keeps_newest_matching_records() {
+        let log: Arc<AnyEventLog> = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(16)));
+        let base = OffsetDateTime::now_utc();
+        for (offset, action) in ["first", "second", "third"].into_iter().enumerate() {
+            let mut record = TrustRecord::new(
+                "bot",
+                action,
+                None,
+                TrustOutcome::Success,
+                format!("trace-{action}"),
+                AutonomyTier::ActAuto,
+            );
+            record.timestamp = base + Duration::seconds(offset as i64);
+            append_trust_record(&log, &record).await.unwrap();
+        }
+
+        let records = query_trust_records(
+            &log,
+            &TrustQueryFilters {
+                agent: Some("bot".to_string()),
+                limit: Some(2),
+                ..TrustQueryFilters::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].action, "second");
+        assert_eq!(records[1].action, "third");
+    }
+
+    #[test]
+    fn group_by_trace_preserves_chronological_group_order() {
+        let make_record = |trace_id: &str, action: &str| TrustRecord {
+            trace_id: trace_id.to_string(),
+            action: action.to_string(),
+            ..TrustRecord::new(
+                "bot",
+                action,
+                None,
+                TrustOutcome::Success,
+                trace_id,
+                AutonomyTier::ActAuto,
+            )
+        };
+        let grouped = group_trust_records_by_trace(&[
+            make_record("trace-1", "first"),
+            make_record("trace-2", "second"),
+            make_record("trace-1", "third"),
+        ]);
+
+        assert_eq!(grouped.len(), 2);
+        assert_eq!(grouped[0].trace_id, "trace-1");
+        assert_eq!(grouped[0].records.len(), 2);
+        assert_eq!(grouped[0].records[1].action, "third");
+        assert_eq!(grouped[1].trace_id, "trace-2");
     }
 }

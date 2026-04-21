@@ -19,7 +19,8 @@ use crate::triggers::{
     TRIGGERS_LIFECYCLE_TOPIC, TRIGGER_DLQ_TOPIC,
 };
 use crate::trust_graph::{
-    query_trust_records, AutonomyTier, TrustOutcome, TrustQueryFilters, TrustRecord,
+    group_trust_records_by_trace, query_trust_records, AutonomyTier, TrustOutcome,
+    TrustQueryFilters, TrustRecord,
 };
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
@@ -219,6 +220,9 @@ pub(crate) fn register_trigger_builtins(vm: &mut Vm) {
         let records = query_trust_records(&log, &filters)
             .await
             .map_err(|error| VmError::Runtime(format!("trust_query: {error}")))?;
+        if filters.grouped_by_trace {
+            return Ok(value_from_serde(&group_trust_records_by_trace(&records)));
+        }
         Ok(VmValue::List(Rc::new(
             records
                 .into_iter()
@@ -900,7 +904,37 @@ fn parse_trust_query_filters(value: &VmValue) -> Result<TrustQueryFilters, VmErr
             .transpose()?,
         tier: map.get("tier").map(parse_autonomy_tier).transpose()?,
         outcome: map.get("outcome").map(parse_trust_outcome).transpose()?,
+        limit: map.get("limit").map(parse_trust_query_limit).transpose()?,
+        grouped_by_trace: map
+            .get("grouped_by_trace")
+            .map(parse_trust_query_grouped_flag)
+            .transpose()?
+            .unwrap_or(false),
     })
+}
+
+fn parse_trust_query_limit(value: &VmValue) -> Result<usize, VmError> {
+    let limit = value.as_int().ok_or_else(|| {
+        VmError::Runtime(format!(
+            "trust_query: limit must be an int, got {}",
+            value.type_name()
+        ))
+    })?;
+    usize::try_from(limit).map_err(|_| {
+        VmError::Runtime(format!(
+            "trust_query: limit must be non-negative, got {limit}"
+        ))
+    })
+}
+
+fn parse_trust_query_grouped_flag(value: &VmValue) -> Result<bool, VmError> {
+    match value {
+        VmValue::Bool(flag) => Ok(*flag),
+        other => Err(VmError::Runtime(format!(
+            "trust_query: grouped_by_trace must be a bool, got {}",
+            other.type_name()
+        ))),
+    }
 }
 
 fn parse_query_timestamp(builtin: &str, field: &str, raw: &str) -> Result<OffsetDateTime, VmError> {

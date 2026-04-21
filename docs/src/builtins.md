@@ -782,7 +782,7 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 | `trigger_test_harness(fixture)` | fixture: string or `{fixture: string}` | dict | Run a named trigger-system harness fixture and return a structured report. Intended for Rust/unit/conformance coverage of cron, webhook, retry, DLQ, dedupe, rate-limit, cost-guard, recovery, and dead-man-switch scenarios |
 | `handler_context()` | — | dict or nil | Return the active trigger dispatch context (`agent`, `action`, `trace_id`, `replay_of_event_id`, `autonomy_tier`, `trigger_event`) or `nil` outside dispatch |
 | `trust_record(agent, action, approver, outcome, tier)` | agent: string, action: string, approver: string or nil, outcome: string, tier: string | dict | Append a manual `TrustRecord` to `trust.graph` and `trust.graph.<agent>` |
-| `trust_query(filters)` | filters: dict | list | Query trust-graph records by `agent`, `action`, `since`, `until`, `tier`, and/or `outcome` |
+| `trust_query(filters)` | filters: dict | list | Query trust-graph records by `agent`, `action`, `since`, `until`, `tier`, `outcome`, `limit`, and/or `grouped_by_trace` |
 | `llm_info()` | — | dict | Current LLM config: `{provider, model, api_key_set}` |
 | `llm_usage()` | — | dict | Cumulative usage: `{input_tokens, output_tokens, total_duration_ms, call_count, total_calls}` |
 | `llm_resolve_model(alias)` | alias: string | dict | Resolve model alias to `{id, provider}` via providers.toml |

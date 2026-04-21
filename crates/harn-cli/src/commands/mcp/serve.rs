@@ -14,6 +14,7 @@ use futures::channel::mpsc::{unbounded, UnboundedSender};
 use futures::{stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
+use time::OffsetDateTime;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
@@ -195,7 +196,21 @@ struct SecretScanRequest {
 #[derive(Clone, Debug, Deserialize)]
 struct TrustQueryRequest {
     #[serde(default)]
-    query: Option<String>,
+    agent: Option<String>,
+    #[serde(default)]
+    action: Option<String>,
+    #[serde(default)]
+    since: Option<String>,
+    #[serde(default)]
+    until: Option<String>,
+    #[serde(default)]
+    tier: Option<harn_vm::AutonomyTier>,
+    #[serde(default)]
+    outcome: Option<harn_vm::TrustOutcome>,
+    #[serde(default)]
+    limit: Option<usize>,
+    #[serde(default)]
+    grouped_by_trace: bool,
 }
 
 pub(crate) async fn run(args: &McpServeArgs) -> Result<(), String> {
@@ -452,18 +467,32 @@ impl McpOrchestratorService {
                     ),
                     tool_def(
                         "harn.trust.query",
-                        "Reserved trust-graph query surface. Returns an empty result set for now.",
+                        "Query trust-graph records with the same filters exposed by trust_query(filters).",
                         json!({
                             "type": "object",
                             "properties": {
-                                "query": { "type": "string" }
+                                "agent": { "type": "string" },
+                                "action": { "type": "string" },
+                                "since": { "type": "string" },
+                                "until": { "type": "string" },
+                                "tier": {
+                                    "type": "string",
+                                    "enum": ["shadow", "suggest", "act_with_approval", "act_auto"]
+                                },
+                                "outcome": {
+                                    "type": "string",
+                                    "enum": ["success", "failure", "denied", "timeout"]
+                                },
+                                "limit": { "type": "integer", "minimum": 0 },
+                                "grouped_by_trace": { "type": "boolean" }
                             },
                             "additionalProperties": false,
                         }),
                         Some(json!({
                             "type": "object",
-                            "required": ["results"],
+                            "required": ["grouped_by_trace", "results"],
                             "properties": {
+                                "grouped_by_trace": { "type": "boolean" },
                                 "results": { "type": "array" },
                             },
                         })),
@@ -738,8 +767,39 @@ impl McpOrchestratorService {
 
     async fn tool_trust_query(&self, arguments: JsonValue) -> Result<JsonValue, String> {
         let request: TrustQueryRequest =
-            serde_json::from_value(arguments).unwrap_or(TrustQueryRequest { query: None });
-        Ok(json!({ "query": request.query, "results": [] }))
+            serde_json::from_value(arguments).map_err(|error| error.to_string())?;
+        let filters = harn_vm::TrustQueryFilters {
+            agent: request.agent,
+            action: request.action,
+            since: request
+                .since
+                .as_deref()
+                .map(parse_trust_query_timestamp)
+                .transpose()?,
+            until: request
+                .until
+                .as_deref()
+                .map(parse_trust_query_timestamp)
+                .transpose()?,
+            tier: request.tier,
+            outcome: request.outcome,
+            limit: request.limit,
+            grouped_by_trace: request.grouped_by_trace,
+        };
+        let ctx = load_local_runtime(&self.local_args()).await?;
+        let records = harn_vm::query_trust_records(&ctx.event_log, &filters)
+            .await
+            .map_err(|error| error.to_string())?;
+        let results = if filters.grouped_by_trace {
+            serde_json::to_value(harn_vm::group_trust_records_by_trace(&records))
+                .map_err(|error| error.to_string())?
+        } else {
+            serde_json::to_value(records).map_err(|error| error.to_string())?
+        };
+        Ok(json!({
+            "grouped_by_trace": filters.grouped_by_trace,
+            "results": results,
+        }))
     }
 
     async fn list_resources(&self) -> Result<Vec<JsonValue>, String> {
@@ -917,6 +977,23 @@ impl McpOrchestratorService {
             .map(|_| ())
             .map_err(|error| error.to_string())
     }
+}
+
+fn parse_trust_query_timestamp(raw: &str) -> Result<OffsetDateTime, String> {
+    if let Ok(parsed) = OffsetDateTime::parse(raw, &time::format_description::well_known::Rfc3339) {
+        return Ok(parsed);
+    }
+    if let Ok(unix) = raw.parse::<i64>() {
+        let parsed = if raw.len() > 10 {
+            OffsetDateTime::from_unix_timestamp_nanos(unix as i128 * 1_000_000)
+        } else {
+            OffsetDateTime::from_unix_timestamp(unix)
+        };
+        return parsed.map_err(|error| format!("invalid timestamp '{raw}': {error}"));
+    }
+    Err(format!(
+        "invalid timestamp '{raw}': expected RFC3339 or unix seconds/milliseconds"
+    ))
 }
 
 async fn run_stdio(service: Arc<McpOrchestratorService>) -> Result<(), String> {
@@ -1798,22 +1875,69 @@ pub fn on_fail(event: TriggerEvent) -> any {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn trust_query_returns_empty_results() {
+    async fn trust_query_returns_filtered_trace_groups() {
         let _guard = lock_harn_state();
         let temp = TempDir::new().unwrap();
         write_fixture(&temp);
         let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
         let mut session = init_session(&service).await;
 
+        let ctx = load_local_runtime(&service.local_args()).await.unwrap();
+        harn_vm::append_trust_record(
+            &ctx.event_log,
+            &harn_vm::TrustRecord::new(
+                "ide-bot",
+                "issue.opened",
+                None,
+                harn_vm::TrustOutcome::Success,
+                "trace-1",
+                harn_vm::AutonomyTier::ActAuto,
+            ),
+        )
+        .await
+        .unwrap();
+        harn_vm::append_trust_record(
+            &ctx.event_log,
+            &harn_vm::TrustRecord::new(
+                "ide-bot",
+                "issue.closed",
+                None,
+                harn_vm::TrustOutcome::Success,
+                "trace-2",
+                harn_vm::AutonomyTier::ActAuto,
+            ),
+        )
+        .await
+        .unwrap();
+        harn_vm::append_trust_record(
+            &ctx.event_log,
+            &harn_vm::TrustRecord::new(
+                "ide-bot",
+                "issue.commented",
+                None,
+                harn_vm::TrustOutcome::Failure,
+                "trace-2",
+                harn_vm::AutonomyTier::ActAuto,
+            ),
+        )
+        .await
+        .unwrap();
+
         let result = call_tool(
             &service,
             &mut session,
             "harn.trust.query",
-            json!({ "query": "anything" }),
+            json!({
+                "agent": "ide-bot",
+                "grouped_by_trace": true,
+                "limit": 2
+            }),
         )
         .await;
-        assert_eq!(result["results"], json!([]));
-        assert_eq!(result["query"], "anything");
+        assert_eq!(result["grouped_by_trace"], json!(true));
+        assert_eq!(result["results"].as_array().unwrap().len(), 1);
+        assert_eq!(result["results"][0]["trace_id"], "trace-2");
+        assert_eq!(result["results"][0]["records"].as_array().unwrap().len(), 2);
     }
 
     #[tokio::test(flavor = "current_thread")]

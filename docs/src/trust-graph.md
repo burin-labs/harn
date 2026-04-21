@@ -73,7 +73,8 @@ Import `std/triggers` and use:
   `agent`, `action`, `trace_id`, and `autonomy_tier`
 - `trust_record(agent, action, approver, outcome, tier)` to append a manual
   trust record
-- `trust_query(filters)` to query historical records from Harn code
+- `trust_query(filters)` to query historical records from Harn code, including
+  server-side `limit` and `grouped_by_trace` options
 
 Example:
 
@@ -84,5 +85,18 @@ let records = trust_query({
   agent: "github-triage-bot",
   outcome: "success",
   tier: "act_auto",
+  limit: 100,
+})
+```
+
+Grouped queries return trace buckets:
+
+```harn
+import "std/triggers"
+
+let grouped = trust_query({
+  since: "2026-04-19T18:00:00Z",
+  limit: 500,
+  grouped_by_trace: true,
 })
 ```

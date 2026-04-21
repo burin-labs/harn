@@ -347,11 +347,21 @@ fn mcp_server_stdio_roundtrips_tools_and_resources() {
             "method": "tools/call",
             "params": {
                 "name": "harn.trust.query",
-                "arguments": { "query": "test" }
+                "arguments": { "agent": "cron-ok", "limit": 2 }
             }
         }),
     );
-    assert_eq!(trust["result"]["structuredContent"]["results"], json!([]));
+    assert_eq!(
+        trust["result"]["structuredContent"]["grouped_by_trace"],
+        json!(false)
+    );
+    let trust_results = trust["result"]["structuredContent"]["results"]
+        .as_array()
+        .unwrap();
+    assert_eq!(trust_results.len(), 2);
+    assert!(trust_results
+        .iter()
+        .all(|record| record["agent"] == json!("cron-ok")));
 
     let manifest = send_request(
         &mut stdin,

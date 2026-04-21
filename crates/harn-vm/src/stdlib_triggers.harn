@@ -173,7 +173,9 @@ type DlqEntry = {id: string, event_id: string, binding_id: string, binding_versi
 
 type TrustRecord = {schema: string, record_id: string, agent: string, action: string, approver: string | nil, outcome: TrustOutcome, trace_id: string, autonomy_tier: AutonomyTier, timestamp: string, cost_usd: float | nil, metadata: dict}
 
-type TrustQueryFilters = {agent: string | nil, action: string | nil, since: string | nil, until: string | nil, tier: AutonomyTier | nil, outcome: TrustOutcome | nil}
+type TrustTraceGroup = {trace_id: string, records: list<TrustRecord>}
+
+type TrustQueryFilters = {agent: string | nil, action: string | nil, since: string | nil, until: string | nil, tier: AutonomyTier | nil, outcome: TrustOutcome | nil, limit: int | nil, grouped_by_trace: bool | nil}
 
 type HandlerContext = {agent: string, action: string, trace_id: string, replay_of_event_id: string | nil, autonomy_tier: AutonomyTier, trigger_event: TriggerEvent}
 

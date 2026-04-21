@@ -201,6 +201,12 @@ Supported filter keys:
 - `until`
 - `tier`
 - `outcome`
+- `limit`
+- `grouped_by_trace`
+
+`limit` keeps only the newest N matching records. When `grouped_by_trace` is
+`true`, the builtin returns `list<{trace_id, records}>` trace buckets instead of
+the default flat `list<TrustRecord>`.
 
 ## Example
 
