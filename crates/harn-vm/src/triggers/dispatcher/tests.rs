@@ -1681,6 +1681,75 @@ pub fn wait_for_cancel(event: TriggerEvent) -> string {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn external_cancel_request_interrupts_waitpoint_waiting_handler() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (_dir, log, dispatcher) = dispatcher_fixture(
+                r#"
+import "std/triggers"
+
+pub fn wait_for_signal(event: TriggerEvent) -> string {
+  waitpoint_create("cancel-demo")
+  let result = waitpoint_wait("cancel-demo", {wait_id: "wait-cancel"})
+  return result.status
+}
+"#,
+                "wait_for_signal",
+                None,
+                TriggerRetryConfig::new(1, RetryPolicy::Linear { delay_ms: 0 }),
+            )
+            .await;
+
+            let binding = resolve_live_trigger_binding("github-new-issue", None)
+                .expect("resolve binding for external cancel");
+            let event = trigger_event("issues.opened", "delivery-waitpoint-cancel");
+            let event_id = event.id.0.clone();
+            let binding_key = binding.binding_key();
+
+            let run_dispatcher = dispatcher.clone();
+            let handle = tokio::task::spawn_local(async move {
+                run_dispatcher
+                    .dispatch(&binding, event)
+                    .await
+                    .expect("dispatch completes")
+            });
+
+            tokio::time::sleep(Duration::from_millis(25)).await;
+            append_dispatch_cancel_request(
+                &log,
+                &DispatchCancelRequest {
+                    binding_key: binding_key.clone(),
+                    event_id: event_id.clone(),
+                    requested_at: time::OffsetDateTime::now_utc(),
+                    requested_by: Some("test".to_string()),
+                    audit_id: Some("audit-test".to_string()),
+                },
+            )
+            .await
+            .expect("append external cancel request");
+
+            let outcome = handle.await.expect("join local dispatch");
+            assert_eq!(outcome.status, DispatchStatus::Cancelled);
+            assert!(
+                outcome
+                    .error
+                    .as_deref()
+                    .is_some_and(|message| message.contains("trigger cancel request")),
+                "{outcome:?}"
+            );
+
+            let wait_events =
+                read_topic(log.clone(), crate::waitpoints::WAITPOINT_WAITS_TOPIC).await;
+            assert!(wait_events.iter().any(|(_, event)| {
+                event.kind == "waitpoint_wait_interrupted"
+                    && event.headers.get("wait_id").map(String::as_str) == Some("wait-cancel")
+            }));
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn run_skips_historical_inbox_entries_on_startup() {
     let local = tokio::task::LocalSet::new();
     local
@@ -2085,6 +2154,80 @@ pub fn slow_handler(event: TriggerEvent) -> string {
             assert!(events
                 .iter()
                 .any(|(_, event)| event.kind == "singleton_skipped"));
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn waitpoint_wait_releases_singleton_flow_control_while_waiting() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (_dir, log, dispatcher) = dispatcher_fixture_with_flow_control(
+                r#"
+import "std/triggers"
+
+pub fn coordinated_handler(event: TriggerEvent) -> string {
+  if event.dedupe_key == "delivery-singleton-wait-1" {
+    waitpoint_create("singleton-demo")
+    let result = waitpoint_wait("singleton-demo", {wait_id: "wait-singleton"})
+    return "first:" + result.status
+  }
+  let record = waitpoint_complete("singleton-demo")
+  return "second:" + record.status
+}
+"#,
+                "coordinated_handler",
+                None,
+                TriggerRetryConfig::default(),
+                crate::triggers::TriggerFlowControlConfig {
+                    singleton: Some(crate::triggers::TriggerSingletonConfig { key: None }),
+                    ..Default::default()
+                },
+            )
+            .await;
+
+            let dispatcher_for_task = dispatcher.clone();
+            let first = tokio::task::spawn_local(async move {
+                dispatcher_for_task
+                    .dispatch_event(trigger_event("issues.opened", "delivery-singleton-wait-1"))
+                    .await
+                    .expect("first dispatch succeeds")
+            });
+
+            tokio::time::sleep(Duration::from_millis(20)).await;
+
+            let second = dispatcher
+                .dispatch_event(trigger_event("issues.opened", "delivery-singleton-wait-2"))
+                .await
+                .expect("second dispatch completes");
+            let first = first.await.expect("join waiting singleton leader");
+
+            assert_eq!(first[0].status, DispatchStatus::Succeeded);
+            assert_eq!(second[0].status, DispatchStatus::Succeeded);
+            assert_eq!(first[0].result, Some(serde_json::json!("first:completed")));
+            assert_eq!(
+                second[0].result,
+                Some(serde_json::json!("second:completed"))
+            );
+
+            let events =
+                read_topic(log.clone(), "trigger.singleton.github-new-issue_v1__global").await;
+            let event_kinds = events
+                .into_iter()
+                .map(|(_, event)| event.kind)
+                .collect::<Vec<_>>();
+            assert_eq!(
+                event_kinds,
+                vec![
+                    "singleton_acquired".to_string(),
+                    "singleton_released".to_string(),
+                    "singleton_acquired".to_string(),
+                    "singleton_released".to_string(),
+                    "singleton_acquired".to_string(),
+                    "singleton_released".to_string(),
+                ]
+            );
         })
         .await;
 }

@@ -213,6 +213,15 @@ impl FlowControlManager {
         Ok(acquired)
     }
 
+    pub async fn acquire_singleton(&self, gate: &str) -> Result<(), LogError> {
+        loop {
+            if self.try_acquire_singleton(gate).await? {
+                return Ok(());
+            }
+            self.notify.notified().await;
+        }
+    }
+
     pub async fn release_singleton(&self, gate: &str) -> Result<(), LogError> {
         {
             let mut state = self.state.lock().await;

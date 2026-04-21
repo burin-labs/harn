@@ -36,6 +36,7 @@ pub mod trust_graph;
 pub mod value;
 pub mod visible_text;
 mod vm;
+pub mod waitpoints;
 pub mod workspace_path;
 
 pub use checkpoint::register_checkpoint_builtins;
