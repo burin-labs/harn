@@ -1876,6 +1876,20 @@ pub fn local_fn(event: TriggerEvent) -> string {
             assert!(events
                 .iter()
                 .any(|(_, event)| event.kind == "rate_limit_blocked"));
+
+            let outbox = read_topic(log.clone(), "trigger.outbox").await;
+            let skipped = outbox
+                .iter()
+                .find(|(_, event)| event.kind == "dispatch_skipped")
+                .expect("rate-limited dispatch emits skipped outbox record");
+            assert_eq!(
+                skipped.1.payload["skip_stage"],
+                serde_json::json!("flow_control")
+            );
+            assert_eq!(
+                skipped.1.payload["detail"]["flow_control"],
+                serde_json::json!("rate_limited")
+            );
         })
         .await;
 }

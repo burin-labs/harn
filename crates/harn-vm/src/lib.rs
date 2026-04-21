@@ -77,6 +77,7 @@ pub use mcp_server::{
 };
 pub use metadata::{register_metadata_builtins, register_scan_builtins};
 pub use record_filter::{normalize_record_filter_expression, CompiledRecordFilter};
+pub use schema::json_to_vm_value;
 pub use stdlib::hitl::{
     append_hitl_response, HitlHostResponse, HITL_APPROVALS_TOPIC, HITL_DUAL_CONTROL_TOPIC,
     HITL_ESCALATIONS_TOPIC, HITL_QUESTIONS_TOPIC,

@@ -186,8 +186,8 @@ Retries one DLQ entry by id.
 
 ### `harn.orchestrator.inspect`
 
-Returns the dispatcher snapshot, bindings, persisted orchestrator snapshot, and
-recent dispatch records.
+Returns the dispatcher snapshot, trigger-centric inspect data, persisted
+orchestrator snapshot, flow-control state, and recent dispatch records.
 
 ### `harn.trust.query`
 

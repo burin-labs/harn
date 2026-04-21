@@ -16,8 +16,9 @@ use super::role::OrchestratorRole;
 
 pub(crate) const STATE_SNAPSHOT_FILE: &str = "orchestrator-state.json";
 pub(crate) use harn_vm::{
-    TRIGGER_ATTEMPTS_TOPIC, TRIGGER_DLQ_TOPIC, TRIGGER_INBOX_CLAIMS_TOPIC,
-    TRIGGER_INBOX_ENVELOPES_TOPIC, TRIGGER_INBOX_LEGACY_TOPIC, TRIGGER_OUTBOX_TOPIC,
+    TRIGGERS_LIFECYCLE_TOPIC, TRIGGER_ATTEMPTS_TOPIC, TRIGGER_DLQ_TOPIC,
+    TRIGGER_INBOX_CLAIMS_TOPIC, TRIGGER_INBOX_ENVELOPES_TOPIC, TRIGGER_INBOX_LEGACY_TOPIC,
+    TRIGGER_OUTBOX_TOPIC,
 };
 
 pub(crate) struct LoadedOrchestratorContext {
@@ -32,9 +33,29 @@ pub(crate) struct PersistedStateSnapshot {
     pub status: String,
     pub bind: String,
     #[serde(default)]
+    pub triggers: Vec<PersistedTriggerStateSnapshot>,
+    #[serde(default)]
     pub connectors: Vec<String>,
     #[serde(default)]
     pub activations: Vec<ConnectorActivationSnapshot>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub(crate) struct PersistedTriggerStateSnapshot {
+    pub id: String,
+    pub provider: String,
+    pub kind: String,
+    pub handler: String,
+    pub version: Option<u32>,
+    pub state: Option<String>,
+    #[serde(default)]
+    pub received: u64,
+    #[serde(default)]
+    pub dispatched: u64,
+    #[serde(default)]
+    pub failed: u64,
+    #[serde(default)]
+    pub in_flight: u64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

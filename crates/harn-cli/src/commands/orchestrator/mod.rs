@@ -2,6 +2,7 @@ pub(crate) mod common;
 mod dlq;
 mod fire;
 mod inspect;
+pub(crate) mod inspect_data;
 pub(crate) mod listener;
 mod origin_guard;
 mod queue;
