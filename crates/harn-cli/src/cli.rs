@@ -872,6 +872,14 @@ pub(crate) struct OrchestratorServeArgs {
     /// Watch the manifest file and trigger reloads on changes.
     #[arg(long)]
     pub watch: bool,
+    /// Log output format for orchestrator process logs.
+    #[arg(
+        long = "log-format",
+        env = "HARN_ORCHESTRATOR_LOG_FORMAT",
+        value_enum,
+        default_value_t = OrchestratorLogFormat::Text
+    )]
+    pub log_format: OrchestratorLogFormat,
     /// Runtime role to boot. Multi-tenant is a stub for now.
     #[arg(
         long,
@@ -880,6 +888,13 @@ pub(crate) struct OrchestratorServeArgs {
         default_value_t = crate::commands::orchestrator::role::OrchestratorRole::SingleTenant
     )]
     pub role: crate::commands::orchestrator::role::OrchestratorRole,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum OrchestratorLogFormat {
+    Text,
+    Pretty,
+    Json,
 }
 
 #[derive(Debug, Args)]
@@ -1505,9 +1520,9 @@ mod tests {
 
     use super::{
         Cli, Command, McpCommand, OrchestratorCommand, OrchestratorDeployProvider,
-        OrchestratorQueueCommand, ProjectTemplate, RunsCommand, SkillCommand, SkillKeyCommand,
-        SkillTrustCommand, SkillsCommand, TriggerCommand, TrustCommand, TrustOutcomeArg,
-        TrustTierArg,
+        OrchestratorLogFormat, OrchestratorQueueCommand, ProjectTemplate, RunsCommand,
+        SkillCommand, SkillKeyCommand, SkillTrustCommand, SkillsCommand, TriggerCommand,
+        TrustCommand, TrustOutcomeArg, TrustTierArg,
     };
     use clap::Parser;
 
@@ -1845,6 +1860,8 @@ mod tests {
             "256",
             "--drain-deadline",
             "9",
+            "--log-format",
+            "json",
             "--role",
             "single-tenant",
         ]);
@@ -1863,6 +1880,7 @@ mod tests {
         assert_eq!(serve.shutdown_timeout, 45);
         assert_eq!(serve.drain_max_items, Some(256));
         assert_eq!(serve.drain_deadline, Some(9));
+        assert_eq!(serve.log_format, OrchestratorLogFormat::Json);
         assert_eq!(
             serve.role,
             crate::commands::orchestrator::role::OrchestratorRole::SingleTenant

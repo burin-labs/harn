@@ -607,6 +607,12 @@ pub(crate) async fn observed_llm_call(
                     output_tokens: result.output_tokens,
                     duration_ms,
                 });
+                if let Some(metrics) = crate::active_metrics_registry() {
+                    metrics.record_llm_call(&result.provider, &result.model, "succeeded", 0.0);
+                    if result.cache_read_tokens > 0 {
+                        metrics.record_llm_cache_hit(&result.provider);
+                    }
+                }
                 super::trace::emit_agent_event(super::trace::AgentTraceEvent::LlmCall {
                     call_id: call_id.clone(),
                     model: result.model.clone(),
@@ -650,6 +656,9 @@ pub(crate) async fn observed_llm_call(
                     );
                 }
                 if !can_retry {
+                    if let Some(metrics) = crate::active_metrics_registry() {
+                        metrics.record_llm_call(&opts.provider, &opts.model, status, 0.0);
+                    }
                     return Err(error);
                 }
                 if is_empty_completion_retry_error(&error) {

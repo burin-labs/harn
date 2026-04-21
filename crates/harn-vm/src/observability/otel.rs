@@ -1,15 +1,20 @@
 use std::collections::BTreeMap;
 #[cfg(feature = "otel")]
 use std::collections::HashMap;
+use std::fs::{self, OpenOptions};
+use std::io::{self, Write};
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
 #[cfg(feature = "otel")]
 use sha2::{Digest, Sha256};
-use tracing::level_filters::LevelFilter;
 #[cfg(feature = "otel")]
 use tracing_subscriber::filter::filter_fn;
+use tracing_subscriber::fmt::MakeWriter;
 use tracing_subscriber::layer::SubscriberExt;
 #[cfg(feature = "otel")]
 use tracing_subscriber::Layer as _;
+use tracing_subscriber::{filter::LevelFilter, EnvFilter};
 
 use crate::TraceId;
 
@@ -19,6 +24,19 @@ pub const OTEL_TRACESTATE_HEADER: &str = "tracestate";
 
 static OBSERVABILITY_INIT: std::sync::OnceLock<()> = std::sync::OnceLock::new();
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LogFormat {
+    Text,
+    Pretty,
+    Json,
+}
+
+#[derive(Clone, Debug)]
+pub struct OrchestratorObservabilityConfig {
+    pub log_format: LogFormat,
+    pub state_dir: Option<PathBuf>,
+}
+
 pub struct ObservabilityGuard {
     #[cfg(feature = "otel")]
     tracer_provider: Option<opentelemetry_sdk::trace::SdkTracerProvider>,
@@ -26,6 +44,15 @@ pub struct ObservabilityGuard {
 
 impl ObservabilityGuard {
     pub fn install_orchestrator_subscriber_from_env() -> Result<Self, String> {
+        Self::install_orchestrator_subscriber(OrchestratorObservabilityConfig {
+            log_format: LogFormat::Text,
+            state_dir: None,
+        })
+    }
+
+    pub fn install_orchestrator_subscriber(
+        config: OrchestratorObservabilityConfig,
+    ) -> Result<Self, String> {
         if OBSERVABILITY_INIT.get().is_some() {
             return Ok(Self {
                 #[cfg(feature = "otel")]
@@ -38,19 +65,70 @@ impl ObservabilityGuard {
             if let Some(provider) = build_tracer_provider_from_env()? {
                 use opentelemetry::trace::TracerProvider as _;
 
-                let tracer = provider.tracer("harn.orchestrator");
-                let telemetry = tracing_opentelemetry::layer()
-                    .with_tracer(tracer)
-                    .with_filter(filter_fn(|metadata| {
-                        metadata.is_span() && metadata.target().starts_with("harn")
-                    }));
-                let subscriber = tracing_subscriber::registry()
-                    .with(LevelFilter::INFO)
-                    .with(fmt_layer())
-                    .with(telemetry);
-                tracing::subscriber::set_global_default(subscriber).map_err(|error| {
-                    format!("failed to install global tracing subscriber: {error}")
-                })?;
+                let writer = log_writer(&config)?;
+                match config.log_format {
+                    LogFormat::Json => {
+                        let tracer = provider.tracer("harn.orchestrator");
+                        let telemetry = tracing_opentelemetry::layer()
+                            .with_tracer(tracer)
+                            .with_filter(filter_fn(|metadata| {
+                                metadata.is_span() && metadata.target().starts_with("harn")
+                            }));
+                        let subscriber = tracing_subscriber::registry()
+                            .with(env_filter())
+                            .with(
+                                tracing_subscriber::fmt::layer()
+                                    .json()
+                                    .flatten_event(true)
+                                    .with_current_span(true)
+                                    .with_writer(writer),
+                            )
+                            .with(telemetry);
+                        tracing::subscriber::set_global_default(subscriber).map_err(|error| {
+                            format!("failed to install global tracing subscriber: {error}")
+                        })?;
+                    }
+                    LogFormat::Pretty => {
+                        let tracer = provider.tracer("harn.orchestrator");
+                        let telemetry = tracing_opentelemetry::layer()
+                            .with_tracer(tracer)
+                            .with_filter(filter_fn(|metadata| {
+                                metadata.is_span() && metadata.target().starts_with("harn")
+                            }));
+                        let subscriber = tracing_subscriber::registry()
+                            .with(env_filter())
+                            .with(
+                                tracing_subscriber::fmt::layer()
+                                    .pretty()
+                                    .with_writer(writer),
+                            )
+                            .with(telemetry);
+                        tracing::subscriber::set_global_default(subscriber).map_err(|error| {
+                            format!("failed to install global tracing subscriber: {error}")
+                        })?;
+                    }
+                    LogFormat::Text => {
+                        let tracer = provider.tracer("harn.orchestrator");
+                        let telemetry = tracing_opentelemetry::layer()
+                            .with_tracer(tracer)
+                            .with_filter(filter_fn(|metadata| {
+                                metadata.is_span() && metadata.target().starts_with("harn")
+                            }));
+                        let subscriber = tracing_subscriber::registry()
+                            .with(env_filter())
+                            .with(
+                                tracing_subscriber::fmt::layer()
+                                    .compact()
+                                    .with_target(false)
+                                    .with_ansi(std::io::IsTerminal::is_terminal(&std::io::stderr()))
+                                    .with_writer(writer),
+                            )
+                            .with(telemetry);
+                        tracing::subscriber::set_global_default(subscriber).map_err(|error| {
+                            format!("failed to install global tracing subscriber: {error}")
+                        })?;
+                    }
+                }
                 let _ = OBSERVABILITY_INIT.set(());
                 return Ok(Self {
                     tracer_provider: Some(provider),
@@ -70,11 +148,43 @@ impl ObservabilityGuard {
             );
         }
 
-        let subscriber = tracing_subscriber::registry()
-            .with(LevelFilter::INFO)
-            .with(fmt_layer());
-        tracing::subscriber::set_global_default(subscriber)
-            .map_err(|error| format!("failed to install global tracing subscriber: {error}"))?;
+        let writer = log_writer(&config)?;
+        match config.log_format {
+            LogFormat::Json => {
+                let subscriber = tracing_subscriber::registry().with(env_filter()).with(
+                    tracing_subscriber::fmt::layer()
+                        .json()
+                        .flatten_event(true)
+                        .with_current_span(true)
+                        .with_writer(writer),
+                );
+                tracing::subscriber::set_global_default(subscriber).map_err(|error| {
+                    format!("failed to install global tracing subscriber: {error}")
+                })?;
+            }
+            LogFormat::Pretty => {
+                let subscriber = tracing_subscriber::registry().with(env_filter()).with(
+                    tracing_subscriber::fmt::layer()
+                        .pretty()
+                        .with_writer(writer),
+                );
+                tracing::subscriber::set_global_default(subscriber).map_err(|error| {
+                    format!("failed to install global tracing subscriber: {error}")
+                })?;
+            }
+            LogFormat::Text => {
+                let subscriber = tracing_subscriber::registry().with(env_filter()).with(
+                    tracing_subscriber::fmt::layer()
+                        .compact()
+                        .with_target(false)
+                        .with_ansi(std::io::IsTerminal::is_terminal(&std::io::stderr()))
+                        .with_writer(writer),
+                );
+                tracing::subscriber::set_global_default(subscriber).map_err(|error| {
+                    format!("failed to install global tracing subscriber: {error}")
+                })?;
+            }
+        }
         let _ = OBSERVABILITY_INIT.set(());
         Ok(Self {
             #[cfg(feature = "otel")]
@@ -94,6 +204,145 @@ impl ObservabilityGuard {
                 .map_err(|error| format!("failed to shut down OTel tracer provider: {error}"))?;
         }
         Ok(())
+    }
+}
+
+fn env_filter() -> EnvFilter {
+    EnvFilter::builder()
+        .with_default_directive(LevelFilter::INFO.into())
+        .from_env_lossy()
+}
+
+fn log_writer(config: &OrchestratorObservabilityConfig) -> Result<OrchestratorLogWriter, String> {
+    let file = if let Some(state_dir) = config.state_dir.as_ref() {
+        let log_dir = state_dir.join("logs");
+        fs::create_dir_all(&log_dir).map_err(|error| {
+            format!(
+                "failed to create orchestrator log dir {}: {error}",
+                log_dir.display()
+            )
+        })?;
+        Some(Arc::new(Mutex::new(RotatingFile::open(
+            log_dir.join("orchestrator.log"),
+        )?)))
+    } else {
+        None
+    };
+    Ok(OrchestratorLogWriter {
+        format: config.log_format,
+        file,
+    })
+}
+
+#[derive(Clone)]
+struct OrchestratorLogWriter {
+    format: LogFormat,
+    file: Option<Arc<Mutex<RotatingFile>>>,
+}
+
+impl<'a> MakeWriter<'a> for OrchestratorLogWriter {
+    type Writer = OrchestratorLogLineWriter;
+
+    fn make_writer(&'a self) -> Self::Writer {
+        OrchestratorLogLineWriter {
+            format: self.format,
+            file: self.file.clone(),
+        }
+    }
+}
+
+struct OrchestratorLogLineWriter {
+    format: LogFormat,
+    file: Option<Arc<Mutex<RotatingFile>>>,
+}
+
+impl Write for OrchestratorLogLineWriter {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        match self.format {
+            LogFormat::Json => io::stdout().write_all(buf)?,
+            LogFormat::Text | LogFormat::Pretty => io::stderr().write_all(buf)?,
+        }
+        if let Some(file) = self.file.as_ref() {
+            file.lock()
+                .expect("orchestrator log file poisoned")
+                .write_all(buf)?;
+        }
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        match self.format {
+            LogFormat::Json => io::stdout().flush()?,
+            LogFormat::Text | LogFormat::Pretty => io::stderr().flush()?,
+        }
+        if let Some(file) = self.file.as_ref() {
+            file.lock()
+                .expect("orchestrator log file poisoned")
+                .flush()?;
+        }
+        Ok(())
+    }
+}
+
+struct RotatingFile {
+    path: PathBuf,
+    file: fs::File,
+    bytes_written: u64,
+}
+
+impl RotatingFile {
+    const MAX_BYTES: u64 = 10 * 1024 * 1024;
+
+    fn open(path: PathBuf) -> Result<Self, String> {
+        let bytes_written = fs::metadata(&path)
+            .map(|metadata| metadata.len())
+            .unwrap_or(0);
+        let file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .map_err(|error| {
+                format!(
+                    "failed to open orchestrator log {}: {error}",
+                    path.display()
+                )
+            })?;
+        Ok(Self {
+            path,
+            file,
+            bytes_written,
+        })
+    }
+
+    fn rotate_if_needed(&mut self, next_write_bytes: usize) -> io::Result<()> {
+        if self.bytes_written + next_write_bytes as u64 <= Self::MAX_BYTES {
+            return Ok(());
+        }
+        self.file.flush()?;
+        let rotated = self.path.with_extension("log.1");
+        let _ = fs::remove_file(&rotated);
+        if self.path.exists() {
+            fs::rename(&self.path, rotated)?;
+        }
+        self.file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.path)?;
+        self.bytes_written = 0;
+        Ok(())
+    }
+}
+
+impl Write for RotatingFile {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.rotate_if_needed(buf.len())?;
+        let written = self.file.write(buf)?;
+        self.bytes_written += written as u64;
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.file.flush()
     }
 }
 
@@ -225,18 +474,6 @@ pub fn set_span_parent_from_headers(
     _fallback_parent_span_id: Option<&str>,
 ) -> Result<(), String> {
     Ok(())
-}
-
-fn fmt_layer<S>() -> impl tracing_subscriber::Layer<S> + Send + Sync
-where
-    S: tracing::Subscriber,
-    for<'span> S: tracing_subscriber::registry::LookupSpan<'span>,
-{
-    tracing_subscriber::fmt::layer()
-        .with_target(false)
-        .with_ansi(std::io::IsTerminal::is_terminal(&std::io::stderr()))
-        .with_writer(std::io::stderr)
-        .compact()
 }
 
 #[cfg(feature = "otel")]

@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, Extension, OriginalUri, Query};
@@ -489,6 +489,15 @@ async fn ingest_trigger(
 
     context.metrics.received.fetch_add(1, Ordering::Relaxed);
     context.metrics.in_flight.fetch_add(1, Ordering::Relaxed);
+    context
+        .metrics_registry
+        .record_trigger_received(&context.route.trigger_id, context.route.provider.as_str());
+    context.metrics_registry.set_trigger_inflight(
+        &context.route.trigger_id,
+        context.metrics.in_flight.load(Ordering::Relaxed),
+    );
+    let request_started = Instant::now();
+    let body_size_bytes = body.len();
 
     let trace_id = harn_vm::TraceId::new();
     let span = tracing::info_span!(
@@ -517,7 +526,19 @@ async fn ingest_trigger(
         {
             context.metrics.failed.fetch_add(1, Ordering::Relaxed);
             context.metrics.in_flight.fetch_sub(1, Ordering::Relaxed);
-            return finalize_response(&context, error.into_response());
+            context.metrics_registry.set_trigger_inflight(
+                &context.route.trigger_id,
+                context.metrics.in_flight.load(Ordering::Relaxed),
+            );
+            let response = finalize_response(&context, error.into_response());
+            context.metrics_registry.record_http_request(
+                &context.route.path,
+                method.as_str(),
+                response.status().as_u16(),
+                request_started.elapsed(),
+                body_size_bytes,
+            );
+            return response;
         }
 
         if let Some(delay) = context.request_delay {
@@ -545,6 +566,13 @@ async fn ingest_trigger(
                 match postprocess {
                     Ok(harn_vm::PostNormalizeOutcome::DuplicateDropped) => {
                         context.metrics.in_flight.fetch_sub(1, Ordering::Relaxed);
+                        context
+                            .metrics_registry
+                            .record_trigger_deduped(&context.route.trigger_id, "inbox_duplicate");
+                        context.metrics_registry.set_trigger_inflight(
+                            &context.route.trigger_id,
+                            context.metrics.in_flight.load(Ordering::Relaxed),
+                        );
                         (
                             StatusCode::OK,
                             axum::Json(json!({
@@ -564,6 +592,10 @@ async fn ingest_trigger(
                         let mut pending_headers = BTreeMap::new();
                         pending_headers.insert("trace_id".to_string(), event.trace_id.0.clone());
                         pending_headers.extend(span_context_headers.clone());
+                        let append_started = Instant::now();
+                        let payload_size_bytes = serde_json::to_vec(&payload)
+                            .map(|bytes| bytes.len())
+                            .unwrap_or(0);
 
                         match context
                             .event_log
@@ -575,8 +607,24 @@ async fn ingest_trigger(
                             .await
                         {
                             Ok(event_id) => {
+                                context.metrics_registry.record_event_log_append(
+                                    context.pending_topic.as_str(),
+                                    append_started.elapsed(),
+                                    payload_size_bytes,
+                                );
+                                tracing::info!(
+                                    component = "listener",
+                                    trace_id = %event.trace_id.0,
+                                    trigger_id = %context.route.trigger_id,
+                                    event_id = %event_id,
+                                    "trigger event accepted"
+                                );
                                 context.metrics.dispatched.fetch_add(1, Ordering::Relaxed);
                                 context.metrics.in_flight.fetch_sub(1, Ordering::Relaxed);
+                                context.metrics_registry.set_trigger_inflight(
+                                    &context.route.trigger_id,
+                                    context.metrics.in_flight.load(Ordering::Relaxed),
+                                );
                                 (
                                     StatusCode::OK,
                                     axum::Json(json!({
@@ -590,6 +638,10 @@ async fn ingest_trigger(
                             Err(error) => {
                                 context.metrics.failed.fetch_add(1, Ordering::Relaxed);
                                 context.metrics.in_flight.fetch_sub(1, Ordering::Relaxed);
+                                context.metrics_registry.set_trigger_inflight(
+                                    &context.route.trigger_id,
+                                    context.metrics.in_flight.load(Ordering::Relaxed),
+                                );
                                 (
                                     StatusCode::INTERNAL_SERVER_ERROR,
                                     format!(
@@ -603,6 +655,10 @@ async fn ingest_trigger(
                     Err(error) => {
                         context.metrics.failed.fetch_add(1, Ordering::Relaxed);
                         context.metrics.in_flight.fetch_sub(1, Ordering::Relaxed);
+                        context.metrics_registry.set_trigger_inflight(
+                            &context.route.trigger_id,
+                            context.metrics.in_flight.load(Ordering::Relaxed),
+                        );
                         HttpError::from_connector(error).into_response()
                     }
                 }
@@ -610,15 +666,31 @@ async fn ingest_trigger(
             Ok(NormalizedRequest::Immediate(response)) => {
                 context.metrics.dispatched.fetch_add(1, Ordering::Relaxed);
                 context.metrics.in_flight.fetch_sub(1, Ordering::Relaxed);
+                context.metrics_registry.set_trigger_inflight(
+                    &context.route.trigger_id,
+                    context.metrics.in_flight.load(Ordering::Relaxed),
+                );
                 response
             }
             Err(error) => {
                 context.metrics.failed.fetch_add(1, Ordering::Relaxed);
                 context.metrics.in_flight.fetch_sub(1, Ordering::Relaxed);
+                context.metrics_registry.set_trigger_inflight(
+                    &context.route.trigger_id,
+                    context.metrics.in_flight.load(Ordering::Relaxed),
+                );
                 error.into_response()
             }
         };
-        finalize_response(&context, response)
+        let response = finalize_response(&context, response);
+        context.metrics_registry.record_http_request(
+            &context.route.path,
+            method.as_str(),
+            response.status().as_u16(),
+            request_started.elapsed(),
+            body_size_bytes,
+        );
+        response
     }
     .instrument(span)
     .await

@@ -9,7 +9,7 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration as StdDuration;
 
 use async_trait::async_trait;
@@ -275,6 +275,36 @@ pub struct ConnectorMetricsSnapshot {
     pub slack_delivery_failure_total: u64,
 }
 
+type MetricLabels = BTreeMap<String, String>;
+
+#[derive(Clone, Debug, Default, PartialEq)]
+struct HistogramMetric {
+    buckets: BTreeMap<String, u64>,
+    count: u64,
+    sum: f64,
+}
+
+static ACTIVE_METRICS_REGISTRY: OnceLock<Mutex<Option<Arc<MetricsRegistry>>>> = OnceLock::new();
+
+pub fn install_active_metrics_registry(metrics: Arc<MetricsRegistry>) {
+    let slot = ACTIVE_METRICS_REGISTRY.get_or_init(|| Mutex::new(None));
+    *slot.lock().expect("active metrics registry poisoned") = Some(metrics);
+}
+
+pub fn clear_active_metrics_registry() {
+    if let Some(slot) = ACTIVE_METRICS_REGISTRY.get() {
+        *slot.lock().expect("active metrics registry poisoned") = None;
+    }
+}
+
+pub fn active_metrics_registry() -> Option<Arc<MetricsRegistry>> {
+    ACTIVE_METRICS_REGISTRY.get().and_then(|slot| {
+        slot.lock()
+            .expect("active metrics registry poisoned")
+            .clone()
+    })
+}
+
 /// Shared metrics surface for connector-local counters and timings.
 #[derive(Debug, Default)]
 pub struct MetricsRegistry {
@@ -291,9 +321,17 @@ pub struct MetricsRegistry {
     slack_delivery_success_total: AtomicU64,
     slack_delivery_failure_total: AtomicU64,
     custom_counters: Mutex<BTreeMap<String, u64>>,
+    counters: Mutex<BTreeMap<(String, MetricLabels), f64>>,
+    gauges: Mutex<BTreeMap<(String, MetricLabels), f64>>,
+    histograms: Mutex<BTreeMap<(String, MetricLabels), HistogramMetric>>,
 }
 
 impl MetricsRegistry {
+    const DURATION_BUCKETS: [f64; 9] = [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 5.0];
+    const SIZE_BUCKETS: [f64; 9] = [
+        128.0, 512.0, 1024.0, 4096.0, 16384.0, 65536.0, 262144.0, 1048576.0, 10485760.0,
+    ];
+
     pub fn snapshot(&self) -> ConnectorMetricsSnapshot {
         ConnectorMetricsSnapshot {
             inbox_claims_written: self.inbox_claims_written.load(Ordering::Relaxed),
@@ -380,6 +418,220 @@ impl MetricsRegistry {
         *counters.entry(name.to_string()).or_default() += amount;
     }
 
+    pub fn record_http_request(
+        &self,
+        endpoint: &str,
+        method: &str,
+        status: u16,
+        duration: StdDuration,
+        body_size_bytes: usize,
+    ) {
+        self.increment_counter(
+            "harn_http_requests_total",
+            labels([
+                ("endpoint", endpoint),
+                ("method", method),
+                ("status", &status.to_string()),
+            ]),
+            1,
+        );
+        self.observe_histogram(
+            "harn_http_request_duration_seconds",
+            labels([("endpoint", endpoint)]),
+            duration.as_secs_f64(),
+            &Self::DURATION_BUCKETS,
+        );
+        self.observe_histogram(
+            "harn_http_body_size_bytes",
+            labels([("endpoint", endpoint)]),
+            body_size_bytes as f64,
+            &Self::SIZE_BUCKETS,
+        );
+    }
+
+    pub fn record_trigger_received(&self, trigger_id: &str, provider: &str) {
+        self.increment_counter(
+            "harn_trigger_received_total",
+            labels([("trigger_id", trigger_id), ("provider", provider)]),
+            1,
+        );
+    }
+
+    pub fn record_trigger_deduped(&self, trigger_id: &str, reason: &str) {
+        self.increment_counter(
+            "harn_trigger_deduped_total",
+            labels([("trigger_id", trigger_id), ("reason", reason)]),
+            1,
+        );
+    }
+
+    pub fn record_trigger_predicate_evaluation(
+        &self,
+        trigger_id: &str,
+        result: bool,
+        cost_usd: f64,
+    ) {
+        self.increment_counter(
+            "harn_trigger_predicate_evaluations_total",
+            labels([
+                ("trigger_id", trigger_id),
+                ("result", if result { "true" } else { "false" }),
+            ]),
+            1,
+        );
+        self.observe_histogram(
+            "harn_trigger_predicate_cost_usd",
+            labels([("trigger_id", trigger_id)]),
+            cost_usd.max(0.0),
+            &[0.0, 0.001, 0.01, 0.05, 0.1, 1.0],
+        );
+    }
+
+    pub fn record_trigger_dispatched(&self, trigger_id: &str, handler_kind: &str, outcome: &str) {
+        self.increment_counter(
+            "harn_trigger_dispatched_total",
+            labels([
+                ("trigger_id", trigger_id),
+                ("handler_kind", handler_kind),
+                ("outcome", outcome),
+            ]),
+            1,
+        );
+    }
+
+    pub fn record_trigger_retry(&self, trigger_id: &str, attempt: u32) {
+        self.increment_counter(
+            "harn_trigger_retries_total",
+            labels([
+                ("trigger_id", trigger_id),
+                ("attempt", &attempt.to_string()),
+            ]),
+            1,
+        );
+    }
+
+    pub fn record_trigger_dlq(&self, trigger_id: &str, reason: &str) {
+        self.increment_counter(
+            "harn_trigger_dlq_total",
+            labels([("trigger_id", trigger_id), ("reason", reason)]),
+            1,
+        );
+    }
+
+    pub fn set_trigger_inflight(&self, trigger_id: &str, count: u64) {
+        self.set_gauge(
+            "harn_trigger_inflight",
+            labels([("trigger_id", trigger_id)]),
+            count as f64,
+        );
+    }
+
+    pub fn set_trigger_budget_cost_today(&self, trigger_id: &str, cost_usd: f64) {
+        self.set_gauge(
+            "harn_trigger_budget_cost_today_usd",
+            labels([("trigger_id", trigger_id)]),
+            cost_usd.max(0.0),
+        );
+    }
+
+    pub fn record_trigger_budget_exhausted(&self, trigger_id: &str, strategy: &str) {
+        self.increment_counter(
+            "harn_trigger_budget_exhausted_total",
+            labels([("trigger_id", trigger_id), ("strategy", strategy)]),
+            1,
+        );
+    }
+
+    pub fn record_event_log_append(
+        &self,
+        topic: &str,
+        duration: StdDuration,
+        payload_bytes: usize,
+    ) {
+        self.observe_histogram(
+            "harn_event_log_append_duration_seconds",
+            labels([("topic", topic)]),
+            duration.as_secs_f64(),
+            &Self::DURATION_BUCKETS,
+        );
+        self.set_gauge(
+            "harn_event_log_topic_size_bytes",
+            labels([("topic", topic)]),
+            payload_bytes as f64,
+        );
+    }
+
+    pub fn set_event_log_consumer_lag(&self, topic: &str, consumer: &str, lag: u64) {
+        self.set_gauge(
+            "harn_event_log_consumer_lag",
+            labels([("topic", topic), ("consumer", consumer)]),
+            lag as f64,
+        );
+    }
+
+    pub fn record_a2a_hop(&self, target: &str, outcome: &str, duration: StdDuration) {
+        self.increment_counter(
+            "harn_a2a_hops_total",
+            labels([("target", target), ("outcome", outcome)]),
+            1,
+        );
+        self.observe_histogram(
+            "harn_a2a_hop_duration_seconds",
+            labels([("target", target)]),
+            duration.as_secs_f64(),
+            &Self::DURATION_BUCKETS,
+        );
+    }
+
+    pub fn set_worker_queue_depth(&self, queue: &str, depth: u64) {
+        self.set_gauge(
+            "harn_worker_queue_depth",
+            labels([("queue", queue)]),
+            depth as f64,
+        );
+    }
+
+    pub fn record_worker_queue_claim_age(&self, queue: &str, age_seconds: f64) {
+        self.observe_histogram(
+            "harn_worker_queue_claim_age_seconds",
+            labels([("queue", queue)]),
+            age_seconds.max(0.0),
+            &Self::DURATION_BUCKETS,
+        );
+    }
+
+    pub fn record_llm_call(&self, provider: &str, model: &str, outcome: &str, cost_usd: f64) {
+        self.increment_counter(
+            "harn_llm_calls_total",
+            labels([
+                ("provider", provider),
+                ("model", model),
+                ("outcome", outcome),
+            ]),
+            1,
+        );
+        if cost_usd > 0.0 {
+            self.increment_counter(
+                "harn_llm_cost_usd_total",
+                labels([("provider", provider), ("model", model)]),
+                cost_usd,
+            );
+        } else {
+            self.ensure_counter(
+                "harn_llm_cost_usd_total",
+                labels([("provider", provider), ("model", model)]),
+            );
+        }
+    }
+
+    pub fn record_llm_cache_hit(&self, provider: &str) {
+        self.increment_counter(
+            "harn_llm_cache_hits_total",
+            labels([("provider", provider)]),
+            1,
+        );
+    }
+
     pub fn render_prometheus(&self) -> String {
         let snapshot = self.snapshot();
         let counters = [
@@ -441,7 +693,217 @@ impl MetricsRegistry {
         rendered.push_str("slack_events_auto_disable_min_success_ratio 0.05\n");
         rendered.push_str("# TYPE slack_events_auto_disable_min_events_per_hour gauge\n");
         rendered.push_str("slack_events_auto_disable_min_events_per_hour 1000\n");
+        self.render_generic_metrics(&mut rendered);
         rendered
+    }
+
+    fn increment_counter(&self, name: &str, labels: MetricLabels, amount: impl Into<f64>) {
+        let amount = amount.into();
+        if amount <= 0.0 || !amount.is_finite() {
+            return;
+        }
+        let mut counters = self.counters.lock().expect("metrics counters poisoned");
+        *counters.entry((name.to_string(), labels)).or_default() += amount;
+    }
+
+    fn ensure_counter(&self, name: &str, labels: MetricLabels) {
+        let mut counters = self.counters.lock().expect("metrics counters poisoned");
+        counters.entry((name.to_string(), labels)).or_default();
+    }
+
+    fn set_gauge(&self, name: &str, labels: MetricLabels, value: f64) {
+        let mut gauges = self.gauges.lock().expect("metrics gauges poisoned");
+        gauges.insert((name.to_string(), labels), value);
+    }
+
+    fn observe_histogram(
+        &self,
+        name: &str,
+        labels: MetricLabels,
+        value: f64,
+        bucket_bounds: &[f64],
+    ) {
+        if !value.is_finite() {
+            return;
+        }
+        let mut histograms = self.histograms.lock().expect("metrics histograms poisoned");
+        let histogram = histograms
+            .entry((name.to_string(), labels))
+            .or_insert_with(|| HistogramMetric {
+                buckets: bucket_bounds
+                    .iter()
+                    .map(|bound| (prometheus_float(*bound), 0))
+                    .chain(std::iter::once(("+Inf".to_string(), 0)))
+                    .collect(),
+                count: 0,
+                sum: 0.0,
+            });
+        histogram.count += 1;
+        histogram.sum += value;
+        for bound in bucket_bounds {
+            if value <= *bound {
+                let key = prometheus_float(*bound);
+                *histogram.buckets.entry(key).or_default() += 1;
+            }
+        }
+        *histogram.buckets.entry("+Inf".to_string()).or_default() += 1;
+    }
+
+    fn render_generic_metrics(&self, rendered: &mut String) {
+        let counters = self
+            .counters
+            .lock()
+            .expect("metrics counters poisoned")
+            .clone();
+        let gauges = self.gauges.lock().expect("metrics gauges poisoned").clone();
+        let histograms = self
+            .histograms
+            .lock()
+            .expect("metrics histograms poisoned")
+            .clone();
+
+        for name in metric_family_names(MetricKind::Counter) {
+            rendered.push_str("# TYPE ");
+            rendered.push_str(name);
+            rendered.push_str(" counter\n");
+            for ((sample_name, labels), value) in counters.iter().filter(|((n, _), _)| n == name) {
+                render_sample(rendered, sample_name, labels, *value);
+            }
+        }
+        for name in metric_family_names(MetricKind::Gauge) {
+            rendered.push_str("# TYPE ");
+            rendered.push_str(name);
+            rendered.push_str(" gauge\n");
+            for ((sample_name, labels), value) in gauges.iter().filter(|((n, _), _)| n == name) {
+                render_sample(rendered, sample_name, labels, *value);
+            }
+        }
+        for name in metric_family_names(MetricKind::Histogram) {
+            rendered.push_str("# TYPE ");
+            rendered.push_str(name);
+            rendered.push_str(" histogram\n");
+            for ((sample_name, labels), histogram) in
+                histograms.iter().filter(|((n, _), _)| n == name)
+            {
+                for (le, value) in &histogram.buckets {
+                    let mut bucket_labels = labels.clone();
+                    bucket_labels.insert("le".to_string(), le.clone());
+                    render_sample(
+                        rendered,
+                        &format!("{sample_name}_bucket"),
+                        &bucket_labels,
+                        *value as f64,
+                    );
+                }
+                render_sample(
+                    rendered,
+                    &format!("{sample_name}_sum"),
+                    labels,
+                    histogram.sum,
+                );
+                render_sample(
+                    rendered,
+                    &format!("{sample_name}_count"),
+                    labels,
+                    histogram.count as f64,
+                );
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum MetricKind {
+    Counter,
+    Gauge,
+    Histogram,
+}
+
+fn metric_family_names(kind: MetricKind) -> &'static [&'static str] {
+    match kind {
+        MetricKind::Counter => &[
+            "harn_http_requests_total",
+            "harn_trigger_received_total",
+            "harn_trigger_deduped_total",
+            "harn_trigger_predicate_evaluations_total",
+            "harn_trigger_dispatched_total",
+            "harn_trigger_retries_total",
+            "harn_trigger_dlq_total",
+            "harn_trigger_budget_exhausted_total",
+            "harn_a2a_hops_total",
+            "harn_llm_calls_total",
+            "harn_llm_cost_usd_total",
+            "harn_llm_cache_hits_total",
+        ],
+        MetricKind::Gauge => &[
+            "harn_trigger_inflight",
+            "harn_event_log_topic_size_bytes",
+            "harn_event_log_consumer_lag",
+            "harn_trigger_budget_cost_today_usd",
+            "harn_worker_queue_depth",
+        ],
+        MetricKind::Histogram => &[
+            "harn_http_request_duration_seconds",
+            "harn_http_body_size_bytes",
+            "harn_trigger_predicate_cost_usd",
+            "harn_event_log_append_duration_seconds",
+            "harn_a2a_hop_duration_seconds",
+            "harn_worker_queue_claim_age_seconds",
+        ],
+    }
+}
+
+fn labels<const N: usize>(pairs: [(&str, &str); N]) -> MetricLabels {
+    pairs
+        .into_iter()
+        .map(|(name, value)| (name.to_string(), value.to_string()))
+        .collect()
+}
+
+fn render_sample(rendered: &mut String, name: &str, labels: &MetricLabels, value: f64) {
+    rendered.push_str(name);
+    if !labels.is_empty() {
+        rendered.push('{');
+        for (index, (label, label_value)) in labels.iter().enumerate() {
+            if index > 0 {
+                rendered.push(',');
+            }
+            rendered.push_str(label);
+            rendered.push_str("=\"");
+            rendered.push_str(&escape_label_value(label_value));
+            rendered.push('"');
+        }
+        rendered.push('}');
+    }
+    rendered.push(' ');
+    rendered.push_str(&prometheus_float(value));
+    rendered.push('\n');
+}
+
+fn escape_label_value(value: &str) -> String {
+    value
+        .chars()
+        .flat_map(|ch| match ch {
+            '\\' => "\\\\".chars().collect::<Vec<_>>(),
+            '"' => "\\\"".chars().collect::<Vec<_>>(),
+            '\n' => "\\n".chars().collect::<Vec<_>>(),
+            other => vec![other],
+        })
+        .collect()
+}
+
+fn prometheus_float(value: f64) -> String {
+    if value.is_infinite() && value.is_sign_positive() {
+        return "+Inf".to_string();
+    }
+    if value.fract() == 0.0 {
+        format!("{value:.0}")
+    } else {
+        let rendered = format!("{value:.6}");
+        rendered
+            .trim_end_matches('0')
+            .trim_end_matches('.')
+            .to_string()
     }
 }
 
@@ -1125,5 +1587,66 @@ mod tests {
         assert!(providers.contains(&ProviderId::from("cron")));
         assert!(providers.contains(&ProviderId::from("github")));
         assert!(providers.contains(&ProviderId::from("webhook")));
+    }
+
+    #[test]
+    fn metrics_registry_exports_orchestrator_metric_families() {
+        let metrics = MetricsRegistry::default();
+        metrics.record_http_request(
+            "/triggers/github",
+            "POST",
+            200,
+            StdDuration::from_millis(25),
+            512,
+        );
+        metrics.record_trigger_received("github-new-issue", "github");
+        metrics.record_trigger_deduped("github-new-issue", "inbox_duplicate");
+        metrics.record_trigger_predicate_evaluation("github-new-issue", true, 0.002);
+        metrics.record_trigger_dispatched("github-new-issue", "local", "succeeded");
+        metrics.record_trigger_retry("github-new-issue", 2);
+        metrics.record_trigger_dlq("github-new-issue", "retry_exhausted");
+        metrics.set_trigger_inflight("github-new-issue", 0);
+        metrics.record_event_log_append(
+            "orchestrator.triggers.pending",
+            StdDuration::from_millis(1),
+            2048,
+        );
+        metrics.set_event_log_consumer_lag("orchestrator.triggers.pending", "orchestrator-pump", 0);
+        metrics.set_trigger_budget_cost_today("github-new-issue", 0.002);
+        metrics.record_trigger_budget_exhausted("github-new-issue", "daily_budget_exceeded");
+        metrics.record_a2a_hop("agent.example", "succeeded", StdDuration::from_millis(10));
+        metrics.set_worker_queue_depth("triage", 1);
+        metrics.record_worker_queue_claim_age("triage", 3.0);
+        metrics.record_llm_call("mock", "mock", "succeeded", 0.01);
+        metrics.record_llm_cache_hit("mock");
+
+        let rendered = metrics.render_prometheus();
+        for needle in [
+            "harn_http_requests_total{endpoint=\"/triggers/github\",method=\"POST\",status=\"200\"} 1",
+            "harn_http_request_duration_seconds_bucket{endpoint=\"/triggers/github\",le=\"0.05\"} 1",
+            "harn_http_body_size_bytes_bucket{endpoint=\"/triggers/github\",le=\"512\"} 1",
+            "harn_trigger_received_total{provider=\"github\",trigger_id=\"github-new-issue\"} 1",
+            "harn_trigger_deduped_total{reason=\"inbox_duplicate\",trigger_id=\"github-new-issue\"} 1",
+            "harn_trigger_predicate_evaluations_total{result=\"true\",trigger_id=\"github-new-issue\"} 1",
+            "harn_trigger_predicate_cost_usd_bucket{le=\"0.01\",trigger_id=\"github-new-issue\"} 1",
+            "harn_trigger_dispatched_total{handler_kind=\"local\",outcome=\"succeeded\",trigger_id=\"github-new-issue\"} 1",
+            "harn_trigger_retries_total{attempt=\"2\",trigger_id=\"github-new-issue\"} 1",
+            "harn_trigger_dlq_total{reason=\"retry_exhausted\",trigger_id=\"github-new-issue\"} 1",
+            "harn_trigger_inflight{trigger_id=\"github-new-issue\"} 0",
+            "harn_event_log_append_duration_seconds_bucket{le=\"0.005\",topic=\"orchestrator.triggers.pending\"} 1",
+            "harn_event_log_topic_size_bytes{topic=\"orchestrator.triggers.pending\"} 2048",
+            "harn_event_log_consumer_lag{consumer=\"orchestrator-pump\",topic=\"orchestrator.triggers.pending\"} 0",
+            "harn_trigger_budget_cost_today_usd{trigger_id=\"github-new-issue\"} 0.002",
+            "harn_trigger_budget_exhausted_total{strategy=\"daily_budget_exceeded\",trigger_id=\"github-new-issue\"} 1",
+            "harn_a2a_hops_total{outcome=\"succeeded\",target=\"agent.example\"} 1",
+            "harn_a2a_hop_duration_seconds_bucket{le=\"0.01\",target=\"agent.example\"} 1",
+            "harn_worker_queue_depth{queue=\"triage\"} 1",
+            "harn_worker_queue_claim_age_seconds_bucket{le=\"5\",queue=\"triage\"} 1",
+            "harn_llm_calls_total{model=\"mock\",outcome=\"succeeded\",provider=\"mock\"} 1",
+            "harn_llm_cost_usd_total{model=\"mock\",provider=\"mock\"} 0.01",
+            "harn_llm_cache_hits_total{provider=\"mock\"} 1",
+        ] {
+            assert!(rendered.contains(needle), "missing {needle}\n{rendered}");
+        }
     }
 }

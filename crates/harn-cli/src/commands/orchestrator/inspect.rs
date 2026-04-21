@@ -17,7 +17,7 @@ pub(super) async fn run(args: OrchestratorInspectArgs) -> Result<(), String> {
     } else {
         for trigger in &payload.triggers {
             println!(
-                "- {} provider={} kind={} state={} version={}",
+                "- {} provider={} kind={} state={} version={} metrics=received:{} dispatched:{} failed:{} in_flight:{}",
                 trigger.id,
                 trigger.provider,
                 trigger.kind,
@@ -25,7 +25,11 @@ pub(super) async fn run(args: OrchestratorInspectArgs) -> Result<(), String> {
                 trigger
                     .version
                     .map(|version| version.to_string())
-                    .unwrap_or_else(|| "-".to_string())
+                    .unwrap_or_else(|| "-".to_string()),
+                trigger.metrics.received,
+                trigger.metrics.dispatched,
+                trigger.metrics.failed,
+                trigger.metrics.in_flight
             );
         }
     }

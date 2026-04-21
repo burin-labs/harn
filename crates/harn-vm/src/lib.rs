@@ -43,19 +43,20 @@ pub use checkpoint::register_checkpoint_builtins;
 pub use chunk::*;
 pub use compiler::*;
 pub use connectors::{
-    active_connector_client, clear_active_connector_clients,
+    active_connector_client, active_metrics_registry, clear_active_connector_clients,
+    clear_active_metrics_registry,
     cron::{CatchupMode, CronConnector},
     harn_module::{
         load_contract as load_harn_connector_contract, HarnConnector, HarnConnectorContract,
     },
     hmac::verify_hmac_signed,
-    install_active_connector_clients, load_pending_webhook_handshakes,
-    postprocess_normalized_event, ActivationHandle, ClientError, Connector, ConnectorClient,
-    ConnectorCtx, ConnectorError, ConnectorMetricsSnapshot, ConnectorRegistry,
-    GenericWebhookConnector, GitHubConnector, LinearConnector, MetricsRegistry, NotionConnector,
-    PersistedNotionWebhookHandshake, PostNormalizeOutcome, ProviderPayloadSchema, RateLimitConfig,
-    RateLimiterFactory, RawInbound, SlackConnector, TriggerBinding, TriggerKind, TriggerRegistry,
-    WebhookSignatureVariant,
+    install_active_connector_clients, install_active_metrics_registry,
+    load_pending_webhook_handshakes, postprocess_normalized_event, ActivationHandle, ClientError,
+    Connector, ConnectorClient, ConnectorCtx, ConnectorError, ConnectorMetricsSnapshot,
+    ConnectorRegistry, GenericWebhookConnector, GitHubConnector, LinearConnector, MetricsRegistry,
+    NotionConnector, PersistedNotionWebhookHandshake, PostNormalizeOutcome, ProviderPayloadSchema,
+    RateLimitConfig, RateLimiterFactory, RawInbound, SlackConnector, TriggerBinding, TriggerKind,
+    TriggerRegistry, WebhookSignatureVariant,
 };
 pub use http::{register_http_builtins, reset_http_state};
 pub use llm::register_llm_builtins;

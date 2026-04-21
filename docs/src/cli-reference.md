@@ -488,7 +488,11 @@ harn orchestrator serve \
   --config harn.toml \
   --state-dir .harn/orchestrator \
   --bind 0.0.0.0:8080 \
+  --log-format json \
   --role single-tenant
+
+# Scrape Prometheus metrics from the live listener.
+curl http://127.0.0.1:8080/metrics
 
 # Inspect the running orchestrator state, trigger flow-control state, and recent dispatches.
 harn orchestrator inspect --state-dir .harn/orchestrator

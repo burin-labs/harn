@@ -23,7 +23,7 @@ use super::listener::{
 use super::origin_guard::OriginAllowList;
 use super::role::OrchestratorRole;
 use super::tls::TlsFiles;
-use crate::cli::OrchestratorServeArgs;
+use crate::cli::{OrchestratorLogFormat, OrchestratorServeArgs};
 use crate::package::{
     self, CollectedManifestTrigger, CollectedTriggerHandler, Manifest,
     ResolvedProviderConnectorConfig, ResolvedProviderConnectorKind, ResolvedTriggerConfig,
@@ -45,9 +45,6 @@ pub(crate) async fn run(args: OrchestratorServeArgs) -> Result<(), String> {
 }
 
 async fn run_local(args: OrchestratorServeArgs) -> Result<(), String> {
-    let observability =
-        harn_vm::observability::otel::ObservabilityGuard::install_orchestrator_subscriber_from_env(
-        )?;
     harn_vm::reset_thread_local_state();
 
     // Install signal streams BEFORE any startup log a supervisor (test harness,
@@ -81,6 +78,13 @@ async fn run_local(args: OrchestratorServeArgs) -> Result<(), String> {
             state_dir.display()
         )
     })?;
+    let observability =
+        harn_vm::observability::otel::ObservabilityGuard::install_orchestrator_subscriber(
+            harn_vm::observability::otel::OrchestratorObservabilityConfig {
+                log_format: log_format(args.log_format),
+                state_dir: Some(state_dir.clone()),
+            },
+        )?;
 
     let workspace_root = manifest_dir.clone();
     let startup_started_at = now_rfc3339()?;
@@ -100,6 +104,14 @@ async fn run_local(args: OrchestratorServeArgs) -> Result<(), String> {
         args.role.registry_mode()
     );
     eprintln!("[harn] orchestrator state dir: {}", state_dir.display());
+    tracing::info!(
+        component = "orchestrator",
+        trace_id = "",
+        role = args.role.as_str(),
+        state_dir = %state_dir.display(),
+        manifest = %config_path.display(),
+        "orchestrator starting"
+    );
 
     let mut vm = args
         .role
@@ -133,6 +145,7 @@ async fn run_local(args: OrchestratorServeArgs) -> Result<(), String> {
 
     let extensions = package::load_runtime_extensions(&config_path);
     let metrics_registry = Arc::new(harn_vm::MetricsRegistry::default());
+    harn_vm::install_active_metrics_registry(metrics_registry.clone());
     let collected_triggers = package::collect_manifest_triggers(&mut vm, &extensions)
         .await
         .map_err(|error| format!("failed to collect manifest triggers: {error}"))?;
@@ -209,6 +222,12 @@ async fn run_local(args: OrchestratorServeArgs) -> Result<(), String> {
         None
     };
     eprintln!("[harn] HTTP listener ready on {}", listener.url());
+    tracing::info!(
+        component = "orchestrator",
+        trace_id = "",
+        listener_url = %listener.url(),
+        "HTTP listener ready"
+    );
 
     connector_runtime.activations = connector_runtime
         .registry
@@ -339,7 +358,16 @@ async fn run_local(args: OrchestratorServeArgs) -> Result<(), String> {
         }
         eprintln!("[harn] observability shutdown warning: {error}");
     }
+    harn_vm::clear_active_metrics_registry();
     shutdown
+}
+
+fn log_format(format: OrchestratorLogFormat) -> harn_vm::observability::otel::LogFormat {
+    match format {
+        OrchestratorLogFormat::Text => harn_vm::observability::otel::LogFormat::Text,
+        OrchestratorLogFormat::Pretty => harn_vm::observability::otel::LogFormat::Pretty,
+        OrchestratorLogFormat::Json => harn_vm::observability::otel::LogFormat::Json,
+    }
 }
 
 struct ConnectorRuntime {
@@ -1192,6 +1220,12 @@ async fn graceful_shutdown(
     waitpoint_sweeper: WaitpointSweepHandle,
 ) -> Result<(), String> {
     eprintln!("[harn] signal received, starting graceful shutdown...");
+    tracing::info!(
+        component = "orchestrator",
+        trace_id = "",
+        shutdown_timeout_secs = ctx.shutdown_timeout.as_secs(),
+        "signal received, starting graceful shutdown"
+    );
     let listener_in_flight = listener
         .trigger_metrics()
         .into_values()
@@ -1370,6 +1404,11 @@ async fn graceful_shutdown(
         );
     }
     eprintln!("[harn] graceful shutdown complete");
+    tracing::info!(
+        component = "orchestrator",
+        trace_id = "",
+        "graceful shutdown complete"
+    );
     Ok(())
 }
 
