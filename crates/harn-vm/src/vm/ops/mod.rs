@@ -11,6 +11,7 @@ mod misc;
 mod parallel;
 mod stack;
 
+use crate::chunk::Op;
 use crate::value::{VmError, VmValue};
 
 impl super::Vm {
@@ -22,6 +23,17 @@ impl super::Vm {
         if self.try_execute_stack_op(op)? {
             return Ok(None);
         }
+        if op >= Op::AddInt as u8 {
+            if op <= Op::ModFloat as u8 {
+                self.execute_typed_arithmetic_op(op)?;
+                return Ok(None);
+            }
+            if op <= Op::NotEqualString as u8 {
+                self.execute_typed_comparison_op(op)?;
+                return Ok(None);
+            }
+        }
+
         if self.try_execute_arithmetic_op(op)? {
             return Ok(None);
         }

@@ -12,6 +12,7 @@ mod state;
 mod statements;
 #[cfg(test)]
 mod tests;
+mod type_facts;
 mod yield_scan;
 
 pub use error::CompileError;
@@ -84,6 +85,11 @@ pub struct Compiler {
     /// Top-level `type` aliases, used to lower `schema_of(T)` and
     /// `output_schema: T` into constant JSON-Schema dicts at compile time.
     type_aliases: std::collections::HashMap<String, TypeExpr>,
+    /// Lightweight compiler-side type facts used only for conservative
+    /// bytecode specialization. This mirrors lexical scopes and is separate
+    /// from the parser's diagnostic type checker so compile-only callers keep
+    /// working without a required type-check pass.
+    type_scopes: Vec<std::collections::HashMap<String, TypeExpr>>,
     /// True when this compiler is emitting code outside any function-like
     /// scope (module top-level statements). `try*` is rejected here
     /// because the rethrow has no enclosing function to live in.
@@ -125,12 +131,28 @@ impl Compiler {
                 self.chunk.emit_u16(Op::GetVar, idx, self.line);
             }
             Node::LetBinding { pattern, value, .. } => {
+                let binding_type = match &snode.node {
+                    Node::LetBinding {
+                        type_ann: Some(type_ann),
+                        ..
+                    } => Some(type_ann.clone()),
+                    _ => self.infer_expr_type(value),
+                };
                 self.compile_node(value)?;
                 self.compile_destructuring(pattern, false)?;
+                self.record_binding_type(pattern, binding_type);
             }
             Node::VarBinding { pattern, value, .. } => {
+                let binding_type = match &snode.node {
+                    Node::VarBinding {
+                        type_ann: Some(type_ann),
+                        ..
+                    } => Some(type_ann.clone()),
+                    _ => self.infer_expr_type(value),
+                };
                 self.compile_node(value)?;
                 self.compile_destructuring(pattern, true)?;
+                self.record_binding_type(pattern, binding_type);
             }
             Node::Assignment {
                 target, value, op, ..

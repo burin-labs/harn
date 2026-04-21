@@ -20,6 +20,68 @@ fn test_compile_arithmetic() {
 }
 
 #[test]
+fn test_compile_typed_int_loop_ops() {
+    let chunk = compile_source(
+        "pipeline test(task) {
+  var i = 0
+  var total = 0
+  while i < 10 {
+    total = total + (i + 3) * 2 - 1
+    i = i + 1
+  }
+}",
+    );
+    let disasm = chunk.disassemble("test");
+    assert!(disasm.contains("LESS_INT"));
+    assert!(disasm.contains("ADD_INT"));
+    assert!(disasm.contains("MUL_INT"));
+    assert!(disasm.contains("SUB_INT"));
+}
+
+#[test]
+fn test_compile_typed_float_ops() {
+    let chunk = compile_source(
+        "pipeline test(task) {
+  let a = 1.0
+  let b = 2.0
+  let c = a + b
+  log(c < 4.0)
+}",
+    );
+    let disasm = chunk.disassemble("test");
+    assert!(disasm.contains("ADD_FLOAT"));
+    assert!(disasm.contains("LESS_FLOAT"));
+}
+
+#[test]
+fn test_compile_typed_equality_ops() {
+    let chunk = compile_source(
+        r#"pipeline test(task) {
+  log(true == false)
+  log("a" != "b")
+}"#,
+    );
+    let disasm = chunk.disassemble("test");
+    assert!(disasm.contains("EQUAL_BOOL"));
+    assert!(disasm.contains("NOT_EQUAL_STRING"));
+}
+
+#[test]
+fn test_compile_generic_ops_for_overloaded_or_mixed_cases() {
+    let chunk = compile_source(
+        r#"pipeline test(task) {
+  log("a" + "b")
+  log(1 + 2.0)
+  log([1] + [2])
+}"#,
+    );
+    let disasm = chunk.disassemble("test");
+    assert!(disasm.contains("ADD"));
+    assert!(!disasm.contains("ADD_INT"));
+    assert!(!disasm.contains("ADD_FLOAT"));
+}
+
+#[test]
 fn test_compile_function_call() {
     let chunk = compile_source("pipeline test(task) { log(42) }");
     let disasm = chunk.disassemble("test");

@@ -24,6 +24,7 @@ impl Compiler {
             temp_counter: 0,
             scope_depth: 0,
             type_aliases: std::collections::HashMap::new(),
+            type_scopes: vec![std::collections::HashMap::new()],
             module_level: true,
         }
     }
@@ -625,12 +626,14 @@ impl Compiler {
     pub(super) fn begin_scope(&mut self) {
         self.chunk.emit(Op::PushScope, self.line);
         self.scope_depth += 1;
+        self.type_scopes.push(std::collections::HashMap::new());
     }
 
     pub(super) fn end_scope(&mut self) {
         if self.scope_depth > 0 {
             self.chunk.emit(Op::PopScope, self.line);
             self.scope_depth -= 1;
+            self.type_scopes.pop();
         }
     }
 
@@ -638,6 +641,7 @@ impl Compiler {
         while self.scope_depth > target_depth {
             self.chunk.emit(Op::PopScope, self.line);
             self.scope_depth -= 1;
+            self.type_scopes.pop();
         }
     }
 
@@ -855,6 +859,9 @@ impl Compiler {
     ) -> Result<CompiledFunction, CompileError> {
         let mut fn_compiler = Compiler::for_nested_body();
         fn_compiler.enum_names = self.enum_names.clone();
+        fn_compiler.interface_methods = self.interface_methods.clone();
+        fn_compiler.type_aliases = self.type_aliases.clone();
+        fn_compiler.record_param_types(params);
         fn_compiler.emit_default_preamble(params)?;
         fn_compiler.emit_type_checks(params);
         let is_gen = body_contains_yield(body);
