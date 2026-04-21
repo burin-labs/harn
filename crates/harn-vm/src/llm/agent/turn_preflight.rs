@@ -184,6 +184,13 @@ pub(super) async fn run_turn_preflight(
         }));
     }
 
+    opts.messages = call_messages;
+    opts.system = call_system;
+    let _ =
+        crate::llm::structural_experiments::apply_structural_experiment(opts, Some(ctx.iteration))
+            .await?;
+    call_messages = opts.messages.clone();
+
     crate::llm::api::debug_log_message_shapes(
         &format!("agent iteration={} preflight", ctx.iteration),
         &call_messages,
@@ -197,7 +204,6 @@ pub(super) async fn run_turn_preflight(
     state.rebuild_scoped_native_tools(opts);
 
     opts.messages = call_messages;
-    opts.system = call_system;
     Ok(())
 }
 

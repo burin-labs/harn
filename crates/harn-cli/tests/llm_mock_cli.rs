@@ -617,3 +617,57 @@ pipeline default() {
     );
     assert!(stdout(&output).contains("matched summary"));
 }
+
+#[test]
+fn eval_runs_baseline_and_structural_variant_for_pipeline_file() {
+    let temp = TempDir::new().unwrap();
+    let script = write_file(
+        temp.path(),
+        "eval_structural.harn",
+        r#"
+import "std/agents"
+
+pipeline default() {
+  let flow = workflow({
+    name: "structural-eval",
+    persistent: false,
+    act: {mode: "llm"},
+  })
+  let result = task_run("alpha\n\nbeta", flow, {provider: env_or("TEST_PROVIDER", "mock")})
+  println(result?.status)
+}
+"#,
+    );
+    let fixtures = write_file(
+        temp.path(),
+        "fixtures.jsonl",
+        r#"{"text":"baseline","model":"fixture-model"}
+{"text":"variant","model":"fixture-model"}
+"#,
+    );
+
+    let output = run_harn(
+        &temp,
+        &[
+            "eval",
+            "--llm-mock",
+            &fixtures,
+            "--structural-experiment",
+            "doubled_prompt",
+            &script,
+        ],
+        &[("TEST_PROVIDER", "anthropic")],
+    );
+
+    assert!(
+        output.status.success(),
+        "status={:?}\nstdout={}\nstderr={}",
+        output.status.code(),
+        stdout(&output),
+        stderr(&output)
+    );
+    let out = stdout(&output);
+    assert!(out.contains("Structural experiment: doubled_prompt"));
+    assert!(out.contains("Baseline 1 / 1 passed"));
+    assert!(out.contains("Variant 1 / 1 passed"));
+}

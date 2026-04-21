@@ -24,6 +24,7 @@ pub(crate) mod daemon;
 pub(crate) mod helpers;
 pub(crate) mod ledger;
 pub(crate) mod mock;
+pub(crate) mod structural_experiments;
 pub(crate) mod tool_search;
 mod transcript_stats;
 
@@ -382,6 +383,7 @@ pub(crate) async fn execute_llm_call(
     mut opts: api::LlmCallOptions,
     options: Option<std::collections::BTreeMap<String, VmValue>>,
 ) -> Result<VmValue, VmError> {
+    let _ = structural_experiments::apply_structural_experiment(&mut opts, None).await?;
     // Default `llm_retries` to 2 for resilience against transient
     // HTTP / provider failures. Pass `llm_retries: 0` to opt out.
     let retry_config = agent_observe::LlmRetryConfig {
@@ -1024,6 +1026,8 @@ mod tests {
             idle_timeout: None,
             provider_overrides: None,
             prefill: None,
+            structural_experiment: None,
+            applied_structural_experiment: None,
         }
     }
 

@@ -33,6 +33,7 @@ pub fn workflow_options(config) {
     tool_choice: config?.tool_choice,
     cache: config?.cache,
     timeout: config?.timeout,
+    structural_experiment: config?.structural_experiment,
     persistent: config?.persistent,
     max_iterations: config?.max_iterations,
     max_nudges: config?.max_nudges,

@@ -1,0 +1,56 @@
+import "std/experiments"
+
+pipeline main() {
+  llm_mock({text: "one"})
+  llm_mock({text: "two"})
+  llm_mock({text: "three"})
+  llm_mock({text: "four"})
+  llm_mock({text: "five"})
+
+  let custom_exp = custom(
+    "tail_echo",
+    { ctx ->
+      let latest = latest_string_user_message(ctx.messages)
+      let rewritten = replace_message(
+        ctx.messages,
+        latest.index,
+        message("user", latest.message.content + "\n\nTAIL"),
+      )
+      return {messages: rewritten, metadata: {kind: "tail_echo"}}
+    },
+  )
+
+  llm_call("alpha\n\nbeta\n\ngamma", nil, {
+    provider: "mock",
+    structural_experiment: "prompt_order_permutation(seed: 42)",
+  })
+  llm_call("hello", nil, {
+    provider: "mock",
+    structural_experiment: "doubled_prompt",
+  })
+  llm_call("user prompt", "system prompt", {
+    provider: "mock",
+    structural_experiment: "inverted_system",
+  })
+  llm_call("final answer", nil, {
+    provider: "mock",
+    structural_experiment: chain_of_draft(),
+  })
+  let custom_result = llm_call("custom body", nil, {
+    provider: "mock",
+    structural_experiment: custom_exp,
+  })
+
+  let calls = llm_mock_calls()
+  println(calls[0].messages[0].content != "alpha\n\nbeta\n\ngamma")
+  println(len(calls[1].messages) == 3)
+  println(calls[1].messages[0].content == "hello")
+  println(calls[1].messages[2].content == "hello")
+  println(calls[2].system == "user prompt")
+  println(calls[2].messages[0].content == "system prompt")
+  println(contains(calls[3].messages[0].content, "<draft>"))
+  println(contains(calls[4].messages[0].content, "TAIL"))
+
+  let provider_events = transcript_events_by_kind(custom_result.transcript, "provider_payload")
+  println(provider_events[0].metadata.structural_experiment.label == "tail_echo")
+}

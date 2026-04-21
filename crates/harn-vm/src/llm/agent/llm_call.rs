@@ -121,6 +121,7 @@ pub(super) async fn run_llm_call(
             "output_tokens": result.output_tokens,
             "tool_calls": result.tool_calls,
             "tool_calling_mode": ctx.tool_format,
+            "structural_experiment": opts.applied_structural_experiment.as_ref(),
         })),
     ));
     if let Some(thinking) = result.thinking.clone() {

@@ -253,6 +253,13 @@ pub(crate) struct LlmCallOptions {
     /// See `llm::providers::anthropic` and `llm::providers::openai_compat`
     /// for provider-specific plumbing.
     pub prefill: Option<String>,
+    /// Optional prompt-structure transform applied immediately before
+    /// each provider call.
+    pub structural_experiment:
+        Option<crate::llm::structural_experiments::StructuralExperimentConfig>,
+    /// Metadata for the transform actually applied to this call.
+    pub applied_structural_experiment:
+        Option<crate::llm::structural_experiments::AppliedStructuralExperiment>,
 }
 
 /// Resolve effective request timeout: explicit value > `HARN_LLM_TIMEOUT` env > 120s default.
@@ -373,6 +380,8 @@ pub(super) fn base_opts(provider: &str) -> LlmCallOptions {
         idle_timeout: None,
         provider_overrides: Some(serde_json::json!({"custom_flag": true})),
         prefill: None,
+        structural_experiment: None,
+        applied_structural_experiment: None,
     }
 }
 

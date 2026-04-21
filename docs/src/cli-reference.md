@@ -459,6 +459,7 @@ harn eval .harn-runs/<run>.json
 harn eval .harn-runs/<run>.json --compare baseline.json
 harn eval .harn-runs/
 harn eval evals/regression.json
+harn eval --llm-mock fixtures.jsonl --structural-experiment doubled_prompt pipeline.harn
 ```
 
 `harn eval` accepts three inputs:
@@ -466,6 +467,12 @@ harn eval evals/regression.json
 - a single run record JSON file
 - a directory of run record JSON files
 - an eval suite manifest JSON file with grouped cases and optional baseline comparisons
+
+When `path` is a `.harn` pipeline file, `--structural-experiment <spec>` runs
+the pipeline twice in isolated temp run directories: once as the baseline and
+once with `HARN_STRUCTURAL_EXPERIMENT=<spec>`. The CLI then evaluates both run
+sets against their embedded replay fixtures and prints a paired A/B summary.
+Use `--llm-mock <fixture.jsonl>` to keep the two runs deterministic.
 
 ## harn orchestrator
 

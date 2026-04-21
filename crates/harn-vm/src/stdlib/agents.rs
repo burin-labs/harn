@@ -187,6 +187,7 @@ pub(crate) fn register_agent_builtins(vm: &mut Vm) {
             "tools",
             "max_iterations",
             "tool_format",
+            "structural_experiment",
             "context_callback",
             "context_filter",
             "tool_retries",

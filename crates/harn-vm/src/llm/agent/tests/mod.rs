@@ -70,6 +70,8 @@ pub(super) fn base_opts(messages: Vec<serde_json::Value>) -> LlmCallOptions {
         stream: true,
         provider_overrides: None,
         prefill: None,
+        structural_experiment: None,
+        applied_structural_experiment: None,
     }
 }
 
