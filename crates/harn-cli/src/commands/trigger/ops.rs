@@ -827,6 +827,16 @@ fn normalized_event_payload(payload: &ProviderPayload) -> JsonValue {
         ProviderPayload::Known(harn_vm::triggers::event::KnownProviderPayload::A2aPush(
             payload,
         )) => payload.raw.clone(),
+        ProviderPayload::Known(harn_vm::triggers::event::KnownProviderPayload::Kafka(payload))
+        | ProviderPayload::Known(harn_vm::triggers::event::KnownProviderPayload::Nats(payload))
+        | ProviderPayload::Known(harn_vm::triggers::event::KnownProviderPayload::Pulsar(payload))
+        | ProviderPayload::Known(harn_vm::triggers::event::KnownProviderPayload::PostgresCdc(
+            payload,
+        ))
+        | ProviderPayload::Known(harn_vm::triggers::event::KnownProviderPayload::Email(payload))
+        | ProviderPayload::Known(harn_vm::triggers::event::KnownProviderPayload::Websocket(
+            payload,
+        )) => payload.raw.clone(),
         ProviderPayload::Extension(payload) => payload.raw.clone(),
     }
 }

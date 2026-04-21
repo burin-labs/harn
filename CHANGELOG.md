@@ -30,6 +30,11 @@ granular archaeology.
   fixture set under `perf/vm/` plus `scripts/bench_vm.sh` and a
   `make bench-vm` target, with a `perf/vm/BASELINE.md` baseline table
   the script can diff against to catch VM performance regressions.
+- **Stream trigger manifest primitives (#416).** First-class manifest
+  support for streaming providers — Kafka, NATS, Pulsar, Postgres CDC,
+  email, and WebSocket — with package-level schema validation,
+  trigger-inbox plumbing, and a `stream-fan-in` example under
+  `examples/triggers/`.
 
 ### Fixed
 

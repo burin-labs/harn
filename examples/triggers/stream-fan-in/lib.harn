@@ -1,0 +1,23 @@
+import "std/triggers"
+
+/** Decide whether the shared market fan-in handler should process an event. */
+pub fn should_handle(event: TriggerEvent) -> bool {
+  return event.provider == "cron" || event.provider == "kafka"
+}
+
+/** Normalize cron and quote stream events into a shared planning result. */
+pub fn on_market_event(event: TriggerEvent) -> dict {
+  let windowed = window_by(
+    [event.provider_payload.raw],
+    {
+    mode: "sliding",
+    key: "event.provider_payload.key",
+    size: "5m",
+    every: "1m",
+    gap: nil,
+    max_items: 5000,
+  },
+  )
+  let classified = llm_classify(event.provider_payload.raw, ["ignore", "review"], {cache: "market-fan-in:v1"})
+  return {provider: event.provider, kind: event.kind, windowed: windowed, classified: classified}
+}

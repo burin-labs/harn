@@ -12,6 +12,11 @@ Use the trigger surface that matches how you want to manage the binding:
 - `trigger_fire(...)` / `trigger_replay(...)` when tests or operators need to
   inject or replay events manually
 
+Manifest triggers support one source per binding or a parent handler with
+multiple `[[triggers.sources]]` entries. `kind = "stream"` covers cataloged
+continuous sources such as Kafka, NATS JetStream, Pulsar, Postgres CDC, email,
+and WebSocket ingest, including tumbling, sliding, and session window metadata.
+
 ## LLM predicates
 
 Trigger predicates let a binding decide whether an event should dispatch before

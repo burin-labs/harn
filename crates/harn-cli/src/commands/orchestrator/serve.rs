@@ -467,6 +467,12 @@ fn connector_binding_config(config: &ResolvedTriggerConfig) -> Result<JsonValue,
             "secrets": config.secrets,
             "poll": config.kind_specific,
         })),
+        crate::package::TriggerKind::Stream => Ok(serde_json::json!({
+            "match": config.match_,
+            "secrets": config.secrets,
+            "stream": config.kind_specific,
+            "window": config.window,
+        })),
         _ => Ok(JsonValue::Null),
     }
     // Dedupe retention lives on the connector TriggerBinding rather than in

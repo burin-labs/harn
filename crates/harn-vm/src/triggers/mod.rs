@@ -19,8 +19,8 @@ pub use event::{
     LinearEventPayload, NotionEventPayload, NotionPolledChangeEvent, ProviderCatalog,
     ProviderCatalogError, ProviderId, ProviderMetadata, ProviderOutboundMethod, ProviderPayload,
     ProviderRuntimeMetadata, ProviderSchema, ProviderSecretRequirement, SignatureStatus,
-    SignatureVerificationMetadata, SlackEventPayload, TenantId, TraceId, TriggerEvent,
-    TriggerEventId,
+    SignatureVerificationMetadata, SlackEventPayload, StreamEventPayload, TenantId, TraceId,
+    TriggerEvent, TriggerEventId,
 };
 pub use flow_control::{
     parse_flow_control_duration, TriggerBatchConfig, TriggerConcurrencyConfig,

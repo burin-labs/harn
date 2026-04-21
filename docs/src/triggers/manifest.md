@@ -12,6 +12,10 @@ Each entry declares:
 - a delivery `handler`
 - optional dedupe, retry, budget, flow-control, secret, and predicate settings
 
+A single handler can also declare `sources` instead of top-level `kind` /
+`provider`. Each source expands into its own concrete trigger binding with an id
+of `<trigger-id>.<source-id>`, while sharing the parent handler and predicate.
+
 ## Shape
 
 ```toml
@@ -106,6 +110,71 @@ The manifest loader rejects invalid trigger declarations before execution:
 
 Errors include the manifest path plus the `[[triggers]]` table index so the bad
 entry is easy to locate.
+
+## Multi-source handlers
+
+Use `sources` when one handler should receive events from several trigger
+transports:
+
+```toml
+[[triggers]]
+id = "market-fan-in"
+handler = "handlers::on_market_event"
+when = "handlers::should_handle"
+debounce = { key = "event.provider + \":\" + event.kind", period = "2s" }
+
+[[triggers.sources]]
+id = "open"
+kind = "cron"
+provider = "cron"
+match = { events = ["cron.tick"] }
+schedule = "0 14 * * 1-5"
+timezone = "America/New_York"
+
+[[triggers.sources]]
+id = "quotes"
+kind = "stream"
+provider = "kafka"
+match = { events = ["quote.tick"] }
+topic = "quotes"
+consumer_group = "harn-market"
+window = { mode = "sliding", key = "event.provider_payload.key", size = "5m", every = "1m" }
+```
+
+The loader registers `market-fan-in.open` and `market-fan-in.quotes`. Source
+tables inherit parent `when`, `when_budget`, flow-control, retry, dedupe,
+filter, and secrets unless the source overrides the same field.
+
+For compact manifests, `sources = [{ ... }, { ... }]` inline arrays are accepted
+with the same source fields.
+
+## Stream triggers
+
+`kind = "stream"` registers continuous event sources. The built-in provider
+catalog currently recognizes these STREAM-01 providers:
+
+- `kafka`
+- `nats`
+- `pulsar`
+- `postgres-cdc`
+- `email`
+- `websocket`
+
+Stream providers are cataloged with a shared `StreamEventPayload` typed payload.
+Concrete broker/email/WebSocket connector loops are represented as placeholder
+connectors until a deployment supplies a Harn connector override or a future
+native connector lands.
+
+Windowing is declared with `window = { ... }`:
+
+- tumbling: `window = { mode = "tumbling", size = "1m" }`
+- sliding: `window = { mode = "sliding", size = "5m", every = "1m" }`
+- session: `window = { mode = "session", gap = "30s" }`
+
+All window modes accept optional `key` and `max_items`. Durations use the same
+compact suffixes as flow control: `s`, `m`, `h`, `d`, `w`. Stream triggers can
+also use regular `debounce`, `concurrency`, `throttle`, `rate_limit`,
+`singleton`, and keyed `priority` controls.
 
 ## LLM-gated predicates
 
@@ -244,3 +313,4 @@ See the example manifests under [`examples/triggers`](../../../examples/triggers
 - [`cron-daily-digest`](../../../examples/triggers/cron-daily-digest/harn.toml)
 - [`github-new-issue`](../../../examples/triggers/github-new-issue/harn.toml)
 - [`a2a-reviewer-fanout`](../../../examples/triggers/a2a-reviewer-fanout/harn.toml)
+- [`stream-fan-in`](../../../examples/triggers/stream-fan-in/harn.toml)

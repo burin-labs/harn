@@ -1,0 +1,26 @@
+import "std/triggers"
+
+pipeline test(task) {
+  let events = [
+    {provider: "kafka", key: "acct-1", value: {amount: 10}},
+    {provider: "nats", key: "acct-2", value: {amount: 20}},
+  ]
+  let forked: StreamForkPlan = stream_fork(events, ["risk", "ledger"])
+  assert(forked.kind == "stream.fork", "stream_fork should tag plans")
+  assert(len(forked.branches) == 2, "stream_fork should preserve branches")
+  let joined: StreamJoinPlan = stream_join(forked, {on: "key"})
+  assert(joined.kind == "stream.join", "stream_join should tag plans")
+  assert(joined.join.on == "key", "stream_join should preserve join options")
+  let windowed: StreamWindowPlan = window_by(
+    events,
+    {mode: "sliding", key: "event.key", size: "5m", every: "1m", gap: nil, max_items: 500},
+  )
+  assert(windowed.kind == "stream.window", "window_by should tag plans")
+  assert(windowed.window.mode == "sliding", "window_by should preserve window mode")
+  assert(windowed.window.every == "1m", "window_by should preserve slide interval")
+  let classified: StreamLlmClassifyPlan = llm_classify(events[0], ["ignore", "review"], {cache: "stream:risk:v1", model: "fast"})
+  assert(classified.kind == "stream.llm_classify", "llm_classify should tag plans")
+  assert(classified.cache == "stream:risk:v1", "llm_classify should preserve cache key")
+  assert(classified.options.model == "fast", "llm_classify should preserve options")
+  log("trigger_stream_combinators tests passed")
+}

@@ -6,7 +6,7 @@
 // provider-tagged payload union. Connector-specific payloads intentionally
 // start with a small normalized surface plus `raw: dict`; provider tickets can
 // refine these aliases later without changing the top-level TriggerEvent shape.
-type ProviderId = "github" | "slack" | "linear" | "notion" | "cron" | "webhook" | "a2a-push" | string
+type ProviderId = "github" | "slack" | "linear" | "notion" | "cron" | "webhook" | "a2a-push" | "kafka" | "nats" | "pulsar" | "postgres-cdc" | "email" | "websocket" | string
 
 type SignatureVerified = {state: "verified"}
 
@@ -115,9 +115,11 @@ type GenericWebhookPayload = {provider: "webhook", source: string | nil, content
 
 type A2aPushPayload = {provider: "a2a-push", task_id: string | nil, sender: string | nil, raw: dict}
 
+type StreamEventPayload = {provider: "kafka" | "nats" | "pulsar" | "postgres-cdc" | "email" | "websocket", event: string, source: string | nil, stream: string | nil, partition: string | nil, offset: string | nil, key: string | nil, timestamp: string | nil, headers: dict, raw: dict}
+
 type ExtensionProviderPayload = {provider: string, schema_name: string, raw: dict}
 
-type ProviderPayload = GitHubEventPayload | SlackEventPayload | LinearEventPayload | NotionEventPayload | CronEventPayload | GenericWebhookPayload | A2aPushPayload | ExtensionProviderPayload
+type ProviderPayload = GitHubEventPayload | SlackEventPayload | LinearEventPayload | NotionEventPayload | CronEventPayload | GenericWebhookPayload | A2aPushPayload | StreamEventPayload | ExtensionProviderPayload
 
 type ProviderSecretRequirement = {name: string, required: bool, namespace: string}
 
@@ -183,7 +185,40 @@ type TrustQueryFilters = {agent: string | nil, action: string | nil, since: stri
 
 type HandlerContext = {agent: string, action: string, trace_id: string, replay_of_event_id: string | nil, autonomy_tier: AutonomyTier, trigger_event: TriggerEvent}
 
+type StreamWindowMode = "tumbling" | "sliding" | "session"
+
+type StreamWindowSpec = {mode: StreamWindowMode, key: string | nil, size: string | nil, every: string | nil, gap: string | nil, max_items: int | nil}
+
+type StreamForkPlan = {kind: "stream.fork", source: any, branches: list<any>}
+
+type StreamJoinPlan = {kind: "stream.join", source: any, join: dict}
+
+type StreamWindowPlan = {kind: "stream.window", events: list<any>, window: StreamWindowSpec}
+
+type StreamLlmClassifyPlan = {kind: "stream.llm_classify", input: any, labels: list<string>, cache: string | nil, options: dict}
+
 /** list_providers. */
 pub fn list_providers() -> list<ProviderCatalogEntry> {
   return list_providers_native()
+}
+
+/** stream_fork returns a declarative fan-out plan for stream handlers. */
+pub fn stream_fork(source, branches = []) -> StreamForkPlan {
+  return {kind: "stream.fork", source: source, branches: branches}
+}
+
+/** stream_join returns a declarative fan-in plan for stream handlers. */
+pub fn stream_join(source, join = nil) -> StreamJoinPlan {
+  return {kind: "stream.join", source: source, join: join ?? {}}
+}
+
+/** window_by groups stream events with the same manifest window shape. */
+pub fn window_by(events, window: StreamWindowSpec) -> StreamWindowPlan {
+  return {kind: "stream.window", events: events, window: window}
+}
+
+/** llm_classify describes a cached classifier step without forcing a provider call during planning. */
+pub fn llm_classify(input, labels, options = nil) -> StreamLlmClassifyPlan {
+  let config = options ?? {}
+  return {kind: "stream.llm_classify", input: input, labels: labels, cache: config?.cache, options: config}
 }
