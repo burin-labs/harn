@@ -654,7 +654,7 @@ For testing pipelines that make HTTP calls without hitting real servers.
 |---|---|---|---|
 | `http_mock(method, url_pattern, response)` | method: string, url_pattern: string, response: dict | nil | Register a mock. Use `*` in url_pattern for glob matching (supports multiple `*` wildcards, e.g., `https://api.example.com/*/items/*`). `response` may be a single `{status, body, headers}` dict or `{responses: [...]}` to script retries. |
 | `http_mock_clear()` | none | nil | Clear all mocks and recorded calls |
-| `http_mock_calls()` | none | list | Return list of `{method, url, body}` for all intercepted calls |
+| `http_mock_calls()` | none | list | Return list of `{method, url, headers, body}` for all intercepted calls |
 
 ```harn
 http_mock("GET", "https://api.example.com/users", {

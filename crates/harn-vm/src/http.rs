@@ -26,6 +26,7 @@ struct HttpMock {
 struct HttpMockCall {
     method: String,
     url: String,
+    headers: BTreeMap<String, VmValue>,
     body: Option<String>,
 }
 
@@ -186,7 +187,12 @@ fn parse_mock_responses(response: &BTreeMap<String, VmValue>) -> Vec<MockRespons
     }
 }
 
-fn consume_http_mock(method: &str, url: &str, body: Option<String>) -> Option<MockResponse> {
+fn consume_http_mock(
+    method: &str,
+    url: &str,
+    headers: BTreeMap<String, VmValue>,
+    body: Option<String>,
+) -> Option<MockResponse> {
     let response = HTTP_MOCKS.with(|mocks| {
         let mut mocks = mocks.borrow_mut();
         for mock in mocks.iter_mut() {
@@ -211,6 +217,7 @@ fn consume_http_mock(method: &str, url: &str, body: Option<String>) -> Option<Mo
         calls.borrow_mut().push(HttpMockCall {
             method: method.to_string(),
             url: url.to_string(),
+            headers,
             body,
         });
     });
@@ -267,7 +274,7 @@ pub fn register_http_builtins(vm: &mut Vm) {
         Ok(VmValue::Nil)
     });
 
-    // http_mock_calls() -> list of {method, url, body}
+    // http_mock_calls() -> list of {method, url, headers, body}
     vm.register_builtin("http_mock_calls", |_args, _out| {
         let calls = HTTP_MOCK_CALLS.with(|calls| calls.borrow().clone());
         let result: Vec<VmValue> = calls
@@ -279,6 +286,10 @@ pub fn register_http_builtins(vm: &mut Vm) {
                     VmValue::String(Rc::from(c.method.as_str())),
                 );
                 dict.insert("url".to_string(), VmValue::String(Rc::from(c.url.as_str())));
+                dict.insert(
+                    "headers".to_string(),
+                    VmValue::Dict(Rc::new(c.headers.clone())),
+                );
                 dict.insert(
                     "body".to_string(),
                     match &c.body {
@@ -546,6 +557,7 @@ async fn vm_execute_http_request(
     })?;
 
     let mut header_map = reqwest::header::HeaderMap::new();
+    let mut recorded_headers = BTreeMap::new();
 
     if let Some(auth_val) = options.get("auth") {
         match auth_val {
@@ -556,10 +568,15 @@ async fn vm_execute_http_request(
                     ))))
                 })?;
                 header_map.insert(reqwest::header::AUTHORIZATION, hv);
+                recorded_headers.insert(
+                    "Authorization".to_string(),
+                    VmValue::String(Rc::from(s.as_ref())),
+                );
             }
             VmValue::Dict(d) => {
                 if let Some(bearer) = d.get("bearer") {
                     let token = bearer.display();
+                    let authorization = format!("Bearer {token}");
                     let hv = reqwest::header::HeaderValue::from_str(&format!("Bearer {token}"))
                         .map_err(|e| {
                             VmError::Thrown(VmValue::String(Rc::from(format!(
@@ -567,6 +584,10 @@ async fn vm_execute_http_request(
                             ))))
                         })?;
                     header_map.insert(reqwest::header::AUTHORIZATION, hv);
+                    recorded_headers.insert(
+                        "Authorization".to_string(),
+                        VmValue::String(Rc::from(authorization)),
+                    );
                 } else if let Some(VmValue::Dict(basic)) = d.get("basic") {
                     let user = basic.get("user").map(|v| v.display()).unwrap_or_default();
                     let password = basic
@@ -576,13 +597,18 @@ async fn vm_execute_http_request(
                     use base64::Engine;
                     let encoded = base64::engine::general_purpose::STANDARD
                         .encode(format!("{user}:{password}"));
-                    let hv = reqwest::header::HeaderValue::from_str(&format!("Basic {encoded}"))
-                        .map_err(|e| {
+                    let authorization = format!("Basic {encoded}");
+                    let hv =
+                        reqwest::header::HeaderValue::from_str(&authorization).map_err(|e| {
                             VmError::Thrown(VmValue::String(Rc::from(format!(
                                 "http: invalid basic auth: {e}"
                             ))))
                         })?;
                     header_map.insert(reqwest::header::AUTHORIZATION, hv);
+                    recorded_headers.insert(
+                        "Authorization".to_string(),
+                        VmValue::String(Rc::from(authorization)),
+                    );
                 }
             }
             _ => {}
@@ -602,13 +628,16 @@ async fn vm_execute_http_request(
                 ))))
             })?;
             header_map.insert(name, val);
+            recorded_headers.insert(k.clone(), VmValue::String(Rc::from(v.display())));
         }
     }
 
     let body_str = options.get("body").map(|v| v.display());
 
     for attempt in 0..=config.retry.max {
-        if let Some(mock_response) = consume_http_mock(method, url, body_str.clone()) {
+        if let Some(mock_response) =
+            consume_http_mock(method, url, recorded_headers.clone(), body_str.clone())
+        {
             let status = mock_response.status.clamp(0, u16::MAX as i64) as u16;
             if should_retry_response(&config, &req_method, status, attempt) {
                 let retry_after = if config.retry.respect_retry_after {
