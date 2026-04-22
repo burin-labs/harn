@@ -19,7 +19,9 @@ pub(crate) use options::{
 #[cfg(test)]
 pub(crate) use provider::reset_provider_key_cache;
 pub use provider::resolve_api_key;
-pub(crate) use provider::{vm_resolve_model, vm_resolve_provider, ResolvedProvider};
+pub(crate) use provider::{
+    provider_key_available, vm_resolve_model, vm_resolve_provider, ResolvedProvider,
+};
 pub(crate) use transcript::{
     is_transcript_value, new_transcript_with, new_transcript_with_events,
     normalize_transcript_asset, transcript_asset_list, transcript_event,

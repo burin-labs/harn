@@ -330,6 +330,7 @@ mod tests {
             provider: "anthropic".to_string(),
             model: "claude-sonnet-4-6".to_string(),
             api_key: String::new(),
+            fallback_chain: Vec::new(),
             messages: vec![serde_json::json!({"role": "user", "content": "hello"})],
             system: Some("system prompt".to_string()),
             max_tokens: 64,

@@ -183,6 +183,57 @@ impl ToolSearchConfig {
     }
 }
 
+/// First-class cost/latency routing policy for `llm_call`.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum LlmRoutePolicy {
+    /// Keep the historical provider/model resolution path.
+    Manual,
+    /// Pin to a concrete alias, model id, or `provider:model` selector.
+    Always(String),
+    /// Pick the lowest-cost available candidate at or above the requested
+    /// quality tier.
+    CheapestOverQuality(String),
+    /// Pick the lowest-latency available candidate at or above the requested
+    /// quality tier.
+    FastestOverQuality(String),
+}
+
+impl LlmRoutePolicy {
+    pub(crate) fn as_label(&self) -> String {
+        match self {
+            Self::Manual => "manual".to_string(),
+            Self::Always(target) => format!("always({target})"),
+            Self::CheapestOverQuality(target) => format!("cheapest_over_quality({target})"),
+            Self::FastestOverQuality(target) => format!("fastest_over_quality({target})"),
+        }
+    }
+}
+
+/// One considered route in a routing decision.
+#[derive(Clone, Debug, serde::Serialize, PartialEq)]
+pub(crate) struct LlmRouteAlternative {
+    pub provider: String,
+    pub model: String,
+    pub quality_tier: String,
+    pub available: bool,
+    pub selected: bool,
+    pub cost_per_1k_in: Option<f64>,
+    pub cost_per_1k_out: Option<f64>,
+    pub latency_p50_ms: Option<u64>,
+    pub reason: String,
+}
+
+/// Serializable route decision kept for transcript/replay fidelity and portal
+/// post-hoc scoring.
+#[derive(Clone, Debug, serde::Serialize, PartialEq)]
+pub(crate) struct LlmRoutingDecision {
+    pub policy: String,
+    pub requested_quality: Option<String>,
+    pub selected_provider: String,
+    pub selected_model: String,
+    pub alternatives: Vec<LlmRouteAlternative>,
+}
+
 /// All options for an LLM API call, extracted once from user-facing args.
 #[derive(Clone)]
 pub(crate) struct LlmCallOptions {
@@ -190,6 +241,9 @@ pub(crate) struct LlmCallOptions {
     pub provider: String,
     pub model: String,
     pub api_key: String,
+    pub route_policy: LlmRoutePolicy,
+    pub fallback_chain: Vec<String>,
+    pub routing_decision: Option<LlmRoutingDecision>,
 
     // --- Conversation ---
     pub messages: Vec<serde_json::Value>,
@@ -284,6 +338,7 @@ pub(crate) struct LlmRequestPayload {
     pub provider: String,
     pub model: String,
     pub api_key: String,
+    pub fallback_chain: Vec<String>,
     pub messages: Vec<serde_json::Value>,
     pub system: Option<String>,
     pub max_tokens: i64,
@@ -318,6 +373,7 @@ impl From<&LlmCallOptions> for LlmRequestPayload {
             provider: opts.provider.clone(),
             model: opts.model.clone(),
             api_key: opts.api_key.clone(),
+            fallback_chain: opts.fallback_chain.clone(),
             messages: opts.messages.clone(),
             system: opts.system.clone(),
             max_tokens: opts.max_tokens,
@@ -349,6 +405,9 @@ pub(super) fn base_opts(provider: &str) -> LlmCallOptions {
         provider: provider.to_string(),
         model: "test-model".to_string(),
         api_key: String::new(),
+        route_policy: LlmRoutePolicy::Manual,
+        fallback_chain: Vec::new(),
+        routing_decision: None,
         messages: vec![serde_json::json!({"role": "user", "content": "hello"})],
         system: None,
         transcript_summary: Some("summary".to_string()),

@@ -5,6 +5,7 @@ use axum::Router;
 
 use super::assets::{asset, index};
 use super::handlers::compare::compare_runs_handler;
+use super::handlers::costs::cost_report_handler;
 use super::handlers::launch::{
     launch_run_handler, list_launch_jobs_handler, list_launch_targets_handler,
     trigger_replay_handler,
@@ -21,6 +22,7 @@ pub(super) fn build_router(state: Arc<PortalState>) -> Router {
         .route("/api/meta", get(portal_meta_handler))
         .route("/api/highlight/keywords", get(highlight_keywords_handler))
         .route("/api/llm/options", get(llm_options_handler))
+        .route("/api/costs", get(cost_report_handler))
         .route("/api/runs", get(list_runs_handler))
         .route("/api/trust-graph", get(trust_graph_handler))
         .route("/api/run", get(run_detail_handler))

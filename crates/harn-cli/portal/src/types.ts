@@ -127,6 +127,37 @@ export type PortalInsight = {
   detail: string
 }
 
+export type PortalCostSummary = {
+  total_cost_usd: number
+  call_count: number
+  input_tokens: number
+  output_tokens: number
+}
+
+export type PortalCostTrendPoint = {
+  date: string
+  pipeline: string
+  cost_usd: number
+  call_count: number
+  input_tokens: number
+  output_tokens: number
+}
+
+export type PortalProviderCostBreakdown = {
+  provider: string
+  model: string
+  cost_usd: number
+  call_count: number
+  input_tokens: number
+  output_tokens: number
+}
+
+export type PortalCostReport = {
+  summary: PortalCostSummary
+  trend: PortalCostTrendPoint[]
+  provider_breakdown: PortalProviderCostBreakdown[]
+}
+
 export type PortalStageDebug = {
   call_count: number
   input_tokens: number

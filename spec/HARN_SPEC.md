@@ -2501,6 +2501,28 @@ let r = llm_call(prompt, nil, {
 })
 ```
 
+`llm_call` can also express routing intent without pinning a single
+provider/model pair. The `route_policy` option accepts:
+
+- `"manual"` (default): use the normal `provider` / `model` / env resolution.
+- `"always(id)"`: pin to a model alias, model id, or `provider:model` selector.
+- `"cheapest_over_quality(t)"`: select the lowest-cost available catalog
+  candidate whose model tier is at least `t`.
+- `"fastest_over_quality(t)"`: select the lowest-latency available catalog
+  candidate whose model tier is at least `t`.
+
+The optional `fallback_chain` is an ordered list of provider ids to try when
+the selected provider fails availability or transport. Routing decisions are
+recorded in LLM transcript events with the selected route plus all considered
+alternatives so costs can be re-scored later:
+
+```harn
+let r = llm_call(prompt, nil, {
+  route_policy: "cheapest_over_quality(mid)",
+  fallback_chain: ["local", "ollama", "openai"],
+})
+```
+
 The emitted schema follows canonical JSON-Schema conventions (objects
 with `properties`/`required`, arrays with `items`, literal unions as
 `{type, enum}`) so it is compatible with structured-output validators
@@ -3491,6 +3513,9 @@ chat_endpoint = "/chat/completions"
 completion_endpoint = "/completions"
 auth_style = "bearer"
 auth_env = "MY_PROXY_API_KEY"
+cost_per_1k_in = 0.0002
+cost_per_1k_out = 0.0006
+latency_p50_ms = 900
 
 [llm.aliases]
 my-fast = { id = "vendor/model-fast", provider = "my_proxy" }

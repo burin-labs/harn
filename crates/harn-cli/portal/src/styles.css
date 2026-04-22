@@ -606,6 +606,53 @@ textarea {
   word-break: break-word;
 }
 
+.cost-summary-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.cost-sections {
+  display: grid;
+  gap: 24px;
+}
+
+.cost-trend-list {
+  display: grid;
+  gap: 10px;
+}
+
+.cost-trend-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(180px, 2fr) minmax(86px, auto);
+  gap: 14px;
+  align-items: center;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(11, 19, 31, 0.72);
+}
+
+.cost-bar {
+  height: 10px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.cost-bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--green), var(--accent));
+}
+
+.cost-amount {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  text-align: right;
+}
+
 .pagination-bar {
   display: flex;
   justify-content: space-between;
@@ -923,6 +970,15 @@ pre {
 
   .runs-toolbar {
     grid-template-columns: 1fr 1fr;
+  }
+
+  .cost-summary-grid,
+  .cost-trend-row {
+    grid-template-columns: 1fr;
+  }
+
+  .cost-amount {
+    text-align: left;
   }
 
   .pagination-bar,

@@ -34,8 +34,9 @@ pub use context_window::fetch_provider_max_context;
 pub(crate) use ollama::{ollama_keep_alive_override, ollama_num_ctx_override};
 pub(crate) use openai_normalize::{debug_log_message_shapes, normalize_openai_style_messages};
 pub(crate) use options::{
-    DeltaSender, LlmCallOptions, LlmRequestPayload, ThinkingConfig, ToolSearchConfig,
-    ToolSearchMode, ToolSearchStrategy, ToolSearchVariant,
+    DeltaSender, LlmCallOptions, LlmRequestPayload, LlmRouteAlternative, LlmRoutePolicy,
+    LlmRoutingDecision, ThinkingConfig, ToolSearchConfig, ToolSearchMode, ToolSearchStrategy,
+    ToolSearchVariant,
 };
 pub(crate) use result::{vm_build_llm_result, LlmResult};
 pub(crate) use transport::vm_call_llm_api_with_body;
@@ -148,7 +149,12 @@ async fn vm_call_llm_full_inner_request(
     super::trigger_predicate::note_result(request, &result);
     record_cli_llm_result(&result);
 
-    super::cost::accumulate_cost(&result.model, result.input_tokens, result.output_tokens)?;
+    super::cost::accumulate_cost_for_provider(
+        &result.provider,
+        &result.model,
+        result.input_tokens,
+        result.output_tokens,
+    )?;
 
     Ok(result)
 }
@@ -203,8 +209,13 @@ async fn vm_call_llm_full_inner_offthread(
     super::trigger_predicate::note_result(request, &result);
     record_cli_llm_result(&result);
 
-    super::cost::accumulate_cost(&result.model, result.input_tokens, result.output_tokens)
-        .map_err(|err| err.to_string())?;
+    super::cost::accumulate_cost_for_provider(
+        &result.provider,
+        &result.model,
+        result.input_tokens,
+        result.output_tokens,
+    )
+    .map_err(|err| err.to_string())?;
 
     Ok(result)
 }
@@ -216,25 +227,42 @@ async fn try_fallback_provider(
     request: &LlmRequestPayload,
     primary_message: String,
 ) -> Result<LlmResult, String> {
-    let Some(pdef) = crate::llm_config::provider_config(&request.provider) else {
-        return Err(primary_message);
-    };
-    let Some(ref fallback_provider) = pdef.fallback else {
-        return Err(primary_message);
-    };
-
-    let fb_key = super::helpers::resolve_api_key(fallback_provider).unwrap_or_default();
-    if fb_key.is_empty() {
+    let mut fallback_providers = Vec::<String>::new();
+    for provider in &request.fallback_chain {
+        if provider != &request.provider && !fallback_providers.contains(provider) {
+            fallback_providers.push(provider.clone());
+        }
+    }
+    if let Some(pdef) = crate::llm_config::provider_config(&request.provider) {
+        if let Some(fallback_provider) = pdef.fallback {
+            if fallback_provider != request.provider
+                && !fallback_providers.contains(&fallback_provider)
+            {
+                fallback_providers.push(fallback_provider);
+            }
+        }
+    }
+    if fallback_providers.is_empty() {
         return Err(primary_message);
     }
 
-    let mut fb_request = request.clone();
-    fb_request.provider = fallback_provider.clone();
-    fb_request.api_key = fb_key;
-    super::ensure_real_llm_allowed(&fb_request.provider).map_err(|_| primary_message.clone())?;
-    vm_call_llm_api(&fb_request, None)
-        .await
-        .map_err(|_| primary_message)
+    for fallback_provider in fallback_providers {
+        let Ok(fb_key) = super::helpers::resolve_api_key(&fallback_provider) else {
+            continue;
+        };
+
+        let mut fb_request = request.clone();
+        fb_request.provider = fallback_provider;
+        fb_request.api_key = fb_key;
+        if super::ensure_real_llm_allowed(&fb_request.provider).is_err() {
+            continue;
+        }
+        if let Ok(result) = vm_call_llm_api(&fb_request, None).await {
+            return Ok(result);
+        }
+    }
+
+    Err(primary_message)
 }
 
 #[cfg(test)]

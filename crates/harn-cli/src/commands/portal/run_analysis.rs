@@ -7,8 +7,9 @@ use axum::http::StatusCode;
 use axum::Json;
 
 use super::dto::{
-    PortalActivity, PortalArtifact, PortalCheckpoint, PortalChildRun, PortalExecutionSummary,
-    PortalInsight, PortalPolicySummary, PortalReplayAssertion, PortalReplaySummary,
+    PortalActivity, PortalArtifact, PortalCheckpoint, PortalChildRun, PortalCostReport,
+    PortalCostSummary, PortalCostTrendPoint, PortalExecutionSummary, PortalInsight,
+    PortalPolicySummary, PortalProviderCostBreakdown, PortalReplayAssertion, PortalReplaySummary,
     PortalRunDetail, PortalRunSummary, PortalSpan, PortalStage, PortalStageDebug, PortalStats,
     PortalStorySection, PortalTranscriptStep, PortalTransition,
 };
@@ -48,6 +49,138 @@ pub(super) fn scan_runs(run_dir: &Path) -> Result<Vec<PortalRunSummary>, String>
             .then_with(|| b.updated_at_ms.cmp(&a.updated_at_ms))
     });
     Ok(runs)
+}
+
+pub(super) fn build_cost_report(run_dir: &Path) -> Result<PortalCostReport, String> {
+    let mut files = Vec::new();
+    collect_run_files(run_dir, run_dir, &mut files)?;
+
+    let mut trend = HashMap::<(String, String), PortalCostTrendPoint>::new();
+    let mut provider_breakdown = HashMap::<(String, String), PortalProviderCostBreakdown>::new();
+    let mut summary = PortalCostSummary {
+        total_cost_usd: 0.0,
+        call_count: 0,
+        input_tokens: 0,
+        output_tokens: 0,
+    };
+
+    for (path, _) in files {
+        let Ok(run) = harn_vm::orchestration::load_run_record(&path) else {
+            continue;
+        };
+        let pipeline = run
+            .workflow_name
+            .clone()
+            .unwrap_or_else(|| run.workflow_id.clone());
+        let date = run
+            .started_at
+            .split(['T', ' '])
+            .next()
+            .filter(|value| !value.is_empty())
+            .unwrap_or("unknown")
+            .to_string();
+
+        for span in run
+            .trace_spans
+            .iter()
+            .filter(|span| span.kind == "llm_call")
+        {
+            let provider = span
+                .metadata
+                .get("provider")
+                .and_then(|value| value.as_str())
+                .unwrap_or("unknown")
+                .to_string();
+            let model = span
+                .metadata
+                .get("model")
+                .and_then(|value| value.as_str())
+                .unwrap_or("unknown")
+                .to_string();
+            let input_tokens = span
+                .metadata
+                .get("input_tokens")
+                .and_then(|value| value.as_i64())
+                .unwrap_or(0);
+            let output_tokens = span
+                .metadata
+                .get("output_tokens")
+                .and_then(|value| value.as_i64())
+                .unwrap_or(0);
+            let cost_usd = span
+                .metadata
+                .get("cost_usd")
+                .and_then(|value| value.as_f64())
+                .unwrap_or_else(|| {
+                    harn_vm::llm::calculate_cost_for_provider(
+                        &provider,
+                        &model,
+                        input_tokens,
+                        output_tokens,
+                    )
+                });
+            if cost_usd <= 0.0 && input_tokens == 0 && output_tokens == 0 {
+                continue;
+            }
+
+            summary.total_cost_usd += cost_usd;
+            summary.call_count += 1;
+            summary.input_tokens += input_tokens;
+            summary.output_tokens += output_tokens;
+
+            let trend_entry = trend
+                .entry((date.clone(), pipeline.clone()))
+                .or_insert_with(|| PortalCostTrendPoint {
+                    date: date.clone(),
+                    pipeline: pipeline.clone(),
+                    cost_usd: 0.0,
+                    call_count: 0,
+                    input_tokens: 0,
+                    output_tokens: 0,
+                });
+            trend_entry.cost_usd += cost_usd;
+            trend_entry.call_count += 1;
+            trend_entry.input_tokens += input_tokens;
+            trend_entry.output_tokens += output_tokens;
+
+            let provider_entry = provider_breakdown
+                .entry((provider.clone(), model.clone()))
+                .or_insert_with(|| PortalProviderCostBreakdown {
+                    provider: provider.clone(),
+                    model: model.clone(),
+                    cost_usd: 0.0,
+                    call_count: 0,
+                    input_tokens: 0,
+                    output_tokens: 0,
+                });
+            provider_entry.cost_usd += cost_usd;
+            provider_entry.call_count += 1;
+            provider_entry.input_tokens += input_tokens;
+            provider_entry.output_tokens += output_tokens;
+        }
+    }
+
+    let mut trend = trend.into_values().collect::<Vec<_>>();
+    trend.sort_by(|left, right| {
+        left.date
+            .cmp(&right.date)
+            .then_with(|| left.pipeline.cmp(&right.pipeline))
+    });
+    let mut provider_breakdown = provider_breakdown.into_values().collect::<Vec<_>>();
+    provider_breakdown.sort_by(|left, right| {
+        right
+            .cost_usd
+            .partial_cmp(&left.cost_usd)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| left.provider.cmp(&right.provider))
+            .then_with(|| left.model.cmp(&right.model))
+    });
+
+    Ok(PortalCostReport {
+        summary,
+        trend,
+        provider_breakdown,
+    })
 }
 
 pub(super) fn filter_and_sort_runs(

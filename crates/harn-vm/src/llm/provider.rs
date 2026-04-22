@@ -121,6 +121,9 @@ pub(crate) fn register_default_providers() {
             "fireworks",
             "huggingface",
             "local",
+            "vllm",
+            "tgi",
+            "dashscope",
         ] {
             names.insert(name.to_string());
         }

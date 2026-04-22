@@ -17,6 +17,7 @@ to inspect:
 - transcript/story sections
 - delegated child runs
 - token/call usage
+- LLM cost trend and provider breakdown
 
 ## Start the portal
 
@@ -91,6 +92,8 @@ The UI is organized around a few simple ideas:
 
 - `Launch` is a dedicated workspace for playground runs and script execution
 - `Runs` is a dedicated paginated library for persisted run records
+- `Costs` summarizes model spend by pipeline and provider from `llm_call`
+  trace metadata
 - `Run detail` is a separate inspector page for one run at a time
 - the top of the detail view is the quick read
 - the action-graph panel is the "debug this run from one artifact" view:

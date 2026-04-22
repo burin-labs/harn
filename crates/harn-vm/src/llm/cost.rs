@@ -21,7 +21,7 @@ pub fn peek_total_cost() -> f64 {
 }
 
 /// Pricing per million tokens (input, output) in USD, as of early 2026.
-fn model_pricing(model: &str) -> Option<(f64, f64)> {
+fn model_pricing_per_million(model: &str) -> Option<(f64, f64)> {
     match model {
         // Anthropic
         m if m.contains("claude-3-5-haiku") || m.contains("claude-haiku-4") => Some((0.80, 4.00)),
@@ -48,9 +48,29 @@ fn model_pricing(model: &str) -> Option<(f64, f64)> {
     }
 }
 
+/// Pricing per 1k tokens (input, output) in USD.
+pub(crate) fn model_pricing_per_1k(model: &str) -> Option<(f64, f64)> {
+    model_pricing_per_million(model).map(|(input, output)| (input / 1000.0, output / 1000.0))
+}
+
+pub(crate) fn pricing_per_1k_for(provider: &str, model: &str) -> Option<(f64, f64)> {
+    model_pricing_per_1k(model).or_else(|| {
+        let (input, output, _) = crate::llm_config::provider_economics(provider);
+        match (input, output) {
+            (Some(input), Some(output)) => Some((input, output)),
+            _ => None,
+        }
+    })
+}
+
+pub(crate) fn latency_p50_ms_for(provider: &str) -> Option<u64> {
+    let (_, _, latency) = crate::llm_config::provider_economics(provider);
+    latency
+}
+
 /// Calculate cost for a given model and token counts.
 pub fn calculate_cost(model: &str, input_tokens: i64, output_tokens: i64) -> f64 {
-    match model_pricing(model) {
+    match model_pricing_per_million(model) {
         Some((input_rate, output_rate)) => {
             (input_tokens as f64 * input_rate + output_tokens as f64 * output_rate) / 1_000_000.0
         }
@@ -58,13 +78,29 @@ pub fn calculate_cost(model: &str, input_tokens: i64, output_tokens: i64) -> f64
     }
 }
 
-/// Accumulate cost after an LLM call. Returns error if budget exceeded.
-pub(crate) fn accumulate_cost(
+/// Calculate cost using model-specific pricing first, then provider catalog
+/// economics when the model is not in the static table.
+pub fn calculate_cost_for_provider(
+    provider: &str,
+    model: &str,
+    input_tokens: i64,
+    output_tokens: i64,
+) -> f64 {
+    match pricing_per_1k_for(provider, model) {
+        Some((input_rate, output_rate)) => {
+            (input_tokens as f64 * input_rate + output_tokens as f64 * output_rate) / 1000.0
+        }
+        None => 0.0,
+    }
+}
+
+pub(crate) fn accumulate_cost_for_provider(
+    provider: &str,
     model: &str,
     input_tokens: i64,
     output_tokens: i64,
 ) -> Result<(), VmError> {
-    let cost = calculate_cost(model, input_tokens, output_tokens);
+    let cost = calculate_cost_for_provider(provider, model, input_tokens, output_tokens);
     if cost == 0.0 {
         return Ok(());
     }
