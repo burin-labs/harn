@@ -468,10 +468,37 @@ can import sibling packages through the workspace-level `.harn/packages`
 root instead of relying on brittle relative paths.
 
 `harn add`, `harn install`, and `harn lock` populate
-`.harn/packages/` from `harn.lock`. Git dependencies are resolved once
-to a commit, cached under the user cache directory, and copied back into
-the workspace as needed. Path dependencies are copied directly from the
-declared local source.
+`.harn/packages/` from `harn.lock`. Git dependencies must specify `rev`
+or `branch`; Harn resolves them to commits, records content hashes, caches
+them under the user cache directory, and copies them back into the
+workspace as needed. Package dependencies are flattened into the same
+workspace package root, so a connector package can import an SDK package
+declared in its own `harn.toml` without requiring a sibling checkout.
+Directory path dependencies are live-linked when possible and are meant
+for local development; git-installed packages cannot publish transitive
+path dependencies.
+
+Canonical bootstrap for first-party packages:
+
+```bash
+cargo install harn-cli
+harn init connector-app
+cd connector-app
+harn add github.com/burin-labs/harn-openapi@v1.2.3
+harn add github.com/burin-labs/notion-sdk-harn@v1.2.3
+harn add github.com/burin-labs/notion-connector-harn@v1.2.3
+harn install --frozen
+harn check main.harn
+```
+
+Equivalent manifest entries:
+
+```toml
+[dependencies]
+harn-openapi = { git = "https://github.com/burin-labs/harn-openapi", rev = "v1.2.3" }
+notion-sdk-harn = { git = "https://github.com/burin-labs/notion-sdk-harn", rev = "v1.2.3" }
+notion-connector-harn = { git = "https://github.com/burin-labs/notion-connector-harn", rev = "v1.2.3" }
+```
 
 Installed package code is importable, but package manifests do not
 automatically inject host runtime configuration. Runtime tables such as

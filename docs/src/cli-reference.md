@@ -841,15 +841,21 @@ sequence are exposed individually:
 Add a dependency to `harn.toml`.
 
 ```bash
-harn add https://github.com/user/my-lib@v1.2.3
-harn add https://github.com/user/my-lib --alias my-lib
+harn add github.com/burin-labs/harn-openapi@v1.2.3
+harn add https://github.com/user/my-lib --alias my-lib --rev v1.2.3
+harn add https://github.com/user/my-lib --alias my-lib --branch main
 harn add my-lib --git https://github.com/user/my-lib --rev v1.2.3   # legacy form
 ```
+
+Git dependencies must specify a stable `rev` or an explicit `branch`.
+`harn.lock` records the resolved commit and content hash used for
+reproducible installs.
 
 ## harn install
 
 Install dependencies declared in `harn.toml`, writing or reusing
-`harn.lock` and materializing `.harn/packages/`.
+`harn.lock` and materializing direct plus transitive package
+dependencies into `.harn/packages/`.
 
 ```bash
 harn install
