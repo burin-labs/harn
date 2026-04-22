@@ -1,7 +1,76 @@
 use std::rc::Rc;
 
+use jsonwebtoken::{Algorithm, EncodingKey, Header};
+use zeroize::Zeroizing;
+
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
+
+fn jwt_error(message: impl Into<String>) -> VmError {
+    VmError::Runtime(format!("jwt_sign: {}", message.into()))
+}
+
+fn jwt_algorithm(name: &str) -> Result<Algorithm, VmError> {
+    match name {
+        "ES256" => Ok(Algorithm::ES256),
+        "RS256" => Ok(Algorithm::RS256),
+        other => Err(jwt_error(format!(
+            "unsupported algorithm `{other}`; expected ES256 or RS256"
+        ))),
+    }
+}
+
+fn jwt_encoding_key(algorithm: Algorithm, pem: &str) -> Result<EncodingKey, VmError> {
+    match algorithm {
+        Algorithm::ES256 => EncodingKey::from_ec_pem(pem.as_bytes())
+            .map_err(|error| jwt_error(format!("invalid ES256 PEM private key: {error}"))),
+        Algorithm::RS256 => EncodingKey::from_rsa_pem(pem.as_bytes())
+            .map_err(|error| jwt_error(format!("invalid RS256 PEM private key: {error}"))),
+        _ => Err(jwt_error("unsupported algorithm")),
+    }
+}
+
+fn jwt_sign_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
+    if args.len() != 3 {
+        return Err(jwt_error("requires 3 arguments: alg, claims, private_key"));
+    }
+
+    let alg = match &args[0] {
+        VmValue::String(value) => value.as_ref(),
+        other => {
+            return Err(jwt_error(format!(
+                "alg must be a string, got {}",
+                other.type_name()
+            )));
+        }
+    };
+    let algorithm = jwt_algorithm(alg)?;
+
+    if !matches!(args[1], VmValue::Dict(_)) {
+        return Err(jwt_error(format!(
+            "claims must be a dict, got {}",
+            args[1].type_name()
+        )));
+    }
+    let claims_json = super::json::vm_value_to_json(&args[1]);
+    let claims: serde_json::Value = serde_json::from_str(&claims_json)
+        .map_err(|error| jwt_error(format!("claims are not JSON-serializable: {error}")))?;
+
+    let private_key = match &args[2] {
+        VmValue::String(value) => Zeroizing::new(value.to_string()),
+        other => {
+            return Err(jwt_error(format!(
+                "private_key must be a PEM string, got {}",
+                other.type_name()
+            )));
+        }
+    };
+    let key = jwt_encoding_key(algorithm, private_key.as_ref())?;
+    let token = jsonwebtoken::encode(&Header::new(algorithm), &claims, &key)
+        .map_err(|error| jwt_error(format!("signing failed: {error}")))?;
+
+    Ok(VmValue::String(Rc::from(token)))
+}
 
 pub(crate) fn register_crypto_builtins(vm: &mut Vm) {
     fn display_arg(args: &[VmValue]) -> String {
@@ -129,6 +198,8 @@ pub(crate) fn register_crypto_builtins(vm: &mut Vm) {
         )))
     });
 
+    vm.register_builtin("jwt_sign", |args, _out| jwt_sign_builtin(args));
+
     // Constant-time string equality. The variable-time `==` operator can leak
     // the position of the first differing byte through timing, which lets an
     // attacker recover an HMAC signature byte-by-byte. Always use this for
@@ -186,7 +257,19 @@ pub(crate) fn register_crypto_builtins(vm: &mut Vm) {
 mod tests {
     use super::*;
     use crate::vm::Vm;
+    use std::collections::BTreeMap;
     use std::rc::Rc;
+
+    const ES256_PRIVATE_KEY: &str = "-----BEGIN PRIVATE KEY-----\n\
+MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgWTFfCGljY6aw3Hrt\n\
+kHmPRiazukxPLb6ilpRAewjW8nihRANCAATDskChT+Altkm9X7MI69T3IUmrQU0L\n\
+950IxEzvw/x5BMEINRMrXLBJhqzO9Bm+d6JbqA21YQmd1Kt4RzLJR1W+\n\
+-----END PRIVATE KEY-----\n";
+
+    const ES256_PUBLIC_KEY: &str = "-----BEGIN PUBLIC KEY-----\n\
+MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEw7JAoU/gJbZJvV+zCOvU9yFJq0FN\n\
+C/edCMRM78P8eQTBCDUTK1ywSYaszvQZvneiW6gNtWEJndSreEcyyUdVvg==\n\
+-----END PUBLIC KEY-----\n";
 
     fn vm() -> Vm {
         let mut vm = Vm::new();
@@ -202,6 +285,14 @@ mod tests {
 
     fn s(v: &str) -> VmValue {
         VmValue::String(Rc::from(v))
+    }
+
+    fn jwt_claims() -> VmValue {
+        VmValue::Dict(Rc::new(BTreeMap::from([
+            ("exp".to_string(), VmValue::Int(4_102_444_800)),
+            ("iat".to_string(), VmValue::Int(1_700_000_000)),
+            ("iss".to_string(), s("12345")),
+        ])))
     }
 
     #[test]
@@ -507,6 +598,61 @@ mod tests {
             result.display(),
             "b613679a0814d9ec772f95d778c35fc5ff1697c493715653c6c712144292c5ad"
         );
+    }
+
+    #[test]
+    fn jwt_sign_es256_produces_verifiable_compact_jws() {
+        let mut vm = vm();
+        let token = call(
+            &mut vm,
+            "jwt_sign",
+            vec![s("ES256"), jwt_claims(), s(ES256_PRIVATE_KEY)],
+        )
+        .unwrap()
+        .display();
+
+        let parts: Vec<&str> = token.split('.').collect();
+        assert_eq!(parts.len(), 3);
+
+        let mut validation = jsonwebtoken::Validation::new(Algorithm::ES256);
+        validation.validate_exp = false;
+        let decoded = jsonwebtoken::decode::<serde_json::Value>(
+            &token,
+            &jsonwebtoken::DecodingKey::from_ec_pem(ES256_PUBLIC_KEY.as_bytes()).unwrap(),
+            &validation,
+        )
+        .unwrap();
+        assert_eq!(decoded.header.alg, Algorithm::ES256);
+        assert_eq!(decoded.claims["iss"], "12345");
+        assert_eq!(decoded.claims["iat"], 1_700_000_000);
+    }
+
+    #[test]
+    fn jwt_sign_rejects_unsupported_algorithm() {
+        let mut vm = vm();
+        let result = call(
+            &mut vm,
+            "jwt_sign",
+            vec![s("HS256"), jwt_claims(), s("secret")],
+        );
+        let Err(VmError::Runtime(message)) = result else {
+            panic!("expected runtime error");
+        };
+        assert!(message.contains("unsupported algorithm `HS256`"));
+    }
+
+    #[test]
+    fn jwt_sign_requires_dict_claims() {
+        let mut vm = vm();
+        let result = call(
+            &mut vm,
+            "jwt_sign",
+            vec![s("ES256"), s("not a dict"), s(ES256_PRIVATE_KEY)],
+        );
+        let Err(VmError::Runtime(message)) = result else {
+            panic!("expected runtime error");
+        };
+        assert!(message.contains("claims must be a dict"));
     }
 
     #[test]
