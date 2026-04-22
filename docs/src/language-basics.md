@@ -616,10 +616,17 @@ let result = items
 let valid = check_a()
   && check_b()
   || fallback()
+
+let name = nil
+  ?? "unknown"
+
+let same = 1
+  == 1
 ```
 
 Note: `-` does not continue across lines because it doubles as unary
-negation.
+negation. Keyword operators `in`, `not in`, and `to` also require an explicit
+backslash continuation.
 
 A backslash at the end of a line forces the next line to continue the
 current expression, even when no operator is present:

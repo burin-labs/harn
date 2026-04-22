@@ -419,6 +419,33 @@ fn test_subtraction_uses_backslash_continuation() {
 }
 
 #[test]
+fn test_line_leading_safe_operators_do_not_use_backslash_continuation() {
+    let source = r#"pipeline default(task) {
+  let fallback = first_really_long_variable_name ?? second_really_long_variable_name
+  let same = first_really_long_variable_name == second_really_long_variable_name
+}"#;
+    let result = fmt_opts(source, 40);
+    assert!(
+        result.contains("\n    ?? ") && result.contains("\n    == "),
+        "Expected line-leading ?? and == operators, got:\n{result}"
+    );
+    assert!(
+        !result.contains("\\\n"),
+        "Expected no backslash continuation for newline-safe operators, got:\n{result}"
+    );
+
+    let mut lexer = Lexer::new(&result);
+    let tokens = lexer
+        .tokenize()
+        .unwrap_or_else(|e| panic!("Formatted output failed to lex:\n{result}\nError: {e}"));
+    let mut parser = Parser::new(tokens);
+    parser
+        .parse()
+        .unwrap_or_else(|e| panic!("Formatted output failed to parse:\n{result}\nError: {e}"));
+    assert_eq!(result, fmt_opts(&result, 40));
+}
+
+#[test]
 fn test_nested_function_call_wrapping() {
     let source = r#"pipeline default(task) {
   let x = outer_function(inner_function(very_long_argument_name_one, very_long_argument_name_two, very_long_argument_name_three), another_really_long_argument_name)

@@ -3844,8 +3844,22 @@
             "name": "_expression"
           },
           {
+            "type": "REPEAT",
+            "content": {
+              "type": "SYMBOL",
+              "name": "_newline"
+            }
+          },
+          {
             "type": "STRING",
             "value": "??"
+          },
+          {
+            "type": "REPEAT",
+            "content": {
+              "type": "SYMBOL",
+              "name": "_newline"
+            }
           },
           {
             "type": "SYMBOL",
@@ -3938,6 +3952,13 @@
                 "name": "_expression"
               },
               {
+                "type": "REPEAT",
+                "content": {
+                  "type": "SYMBOL",
+                  "name": "_newline"
+                }
+              },
+              {
                 "type": "CHOICE",
                 "members": [
                   {
@@ -3949,6 +3970,13 @@
                     "value": "!="
                   }
                 ]
+              },
+              {
+                "type": "REPEAT",
+                "content": {
+                  "type": "SYMBOL",
+                  "name": "_newline"
+                }
               },
               {
                 "type": "SYMBOL",
@@ -3966,6 +3994,13 @@
               {
                 "type": "SYMBOL",
                 "name": "_expression"
+              },
+              {
+                "type": "REPEAT",
+                "content": {
+                  "type": "SYMBOL",
+                  "name": "_newline"
+                }
               },
               {
                 "type": "CHOICE",
@@ -3987,6 +4022,13 @@
                     "value": ">="
                   }
                 ]
+              },
+              {
+                "type": "REPEAT",
+                "content": {
+                  "type": "SYMBOL",
+                  "name": "_newline"
+                }
               },
               {
                 "type": "SYMBOL",
@@ -7502,6 +7544,14 @@
       "property_access"
     ],
     [
+      "skill_declaration",
+      "pipe_expression",
+      "nil_coalescing_expression",
+      "binary_expression",
+      "method_call",
+      "property_access"
+    ],
+    [
       "pipe_expression",
       "binary_expression",
       "unary_expression",
@@ -7532,6 +7582,30 @@
       "pipe_expression",
       "range_expression",
       "binary_expression",
+      "method_call",
+      "property_access"
+    ],
+    [
+      "pipe_expression",
+      "nil_coalescing_expression",
+      "binary_expression",
+      "range_expression",
+      "method_call",
+      "property_access"
+    ],
+    [
+      "pipe_expression",
+      "ternary_expression",
+      "nil_coalescing_expression",
+      "binary_expression",
+      "method_call",
+      "property_access"
+    ],
+    [
+      "pipe_expression",
+      "nil_coalescing_expression",
+      "binary_expression",
+      "unary_expression",
       "method_call",
       "property_access"
     ]

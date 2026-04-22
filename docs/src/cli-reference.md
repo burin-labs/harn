@@ -163,9 +163,9 @@ contexts, but they are not preserved in formatter output.
   trailing commas.
 - **Binary operator chains** — long expressions like `a + b + c + d` break
   before the operator. Operators that the parser cannot resume across a bare
-  newline (`-`, `==`, `!=`, `<`, `>`, `<=`, `>=`, `in`, `not in`, `??`)
-  get an automatic backslash continuation (`\`); other operators (`+`, `*`,
-  `/`, `%`, `||`, `&&`, `|>`) break without one.
+  newline (`-`, `in`, `not in`) get an automatic backslash continuation (`\`);
+  other operators (`+`, `*`, `/`, `%`, `||`, `&&`, `|>`, `==`, `!=`, `<`,
+  `>`, `<=`, `>=`, `??`) break without one.
 - **Operator precedence parentheses** — the formatter inserts parentheses
   to preserve semantics when the AST drops them (e.g. `a * (b + c)` stays
   parenthesised) and for clarity when mixing `&&` / `||`

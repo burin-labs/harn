@@ -40,6 +40,22 @@ pipeline p() {
     }
 
     #[test]
+    fn parses_line_leading_infix_continuation_operators() {
+        let source = r#"
+pipeline p() {
+  let fallback = nil
+    ?? "fallback"
+  let same = 1
+    == 1
+  let smaller = 1
+    < 2
+}
+"#;
+
+        assert!(parse_source(source).is_ok());
+    }
+
+    #[test]
     fn parses_public_declarations_and_generic_interfaces() {
         let source = r#"
 pub pipeline build(task) extends base {

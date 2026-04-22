@@ -82,7 +82,7 @@ impl Parser {
     // so `xs?.count ?? 0 > 0` parses as `(xs?.count ?? 0) > 0`.
     pub(super) fn parse_nil_coalescing(&mut self) -> Result<SNode, ParserError> {
         let mut left = self.parse_multiplicative()?;
-        while self.check(&TokenKind::NilCoal) {
+        while self.check_skip_newlines(&TokenKind::NilCoal) {
             let start = left.span;
             self.advance();
             let right = self.parse_multiplicative()?;
@@ -136,7 +136,8 @@ impl Parser {
 
     pub(super) fn parse_equality(&mut self) -> Result<SNode, ParserError> {
         let mut left = self.parse_comparison()?;
-        while self.check(&TokenKind::Eq) || self.check(&TokenKind::Neq) {
+        while self.check_skip_newlines(&TokenKind::Eq) || self.check_skip_newlines(&TokenKind::Neq)
+        {
             let start = left.span;
             let op = if self.check(&TokenKind::Eq) {
                 "=="
@@ -160,10 +161,10 @@ impl Parser {
     pub(super) fn parse_comparison(&mut self) -> Result<SNode, ParserError> {
         let mut left = self.parse_additive()?;
         loop {
-            if self.check(&TokenKind::Lt)
-                || self.check(&TokenKind::Gt)
-                || self.check(&TokenKind::Lte)
-                || self.check(&TokenKind::Gte)
+            if self.check_skip_newlines(&TokenKind::Lt)
+                || self.check_skip_newlines(&TokenKind::Gt)
+                || self.check_skip_newlines(&TokenKind::Lte)
+                || self.check_skip_newlines(&TokenKind::Gte)
             {
                 let start = left.span;
                 let op = match self.current().map(|t| &t.kind) {

@@ -120,10 +120,26 @@ pub(crate) fn child_needs_parens(parent_op: &str, child: &Node, is_right: bool) 
     false
 }
 
-/// Operators for which the Harn lexer/parser uses `check_skip_newlines`;
-/// a line break before them is safe without a backslash continuation.
+/// Operators for which the Harn parser accepts a line break before the
+/// operator without a backslash continuation.
 pub(crate) fn op_safe_after_newline(op: &str) -> bool {
-    matches!(op, "|>" | "||" | "&&" | "+" | "*" | "/" | "%" | "**")
+    matches!(
+        op,
+        "|>" | "||"
+            | "&&"
+            | "=="
+            | "!="
+            | "<"
+            | ">"
+            | "<="
+            | ">="
+            | "??"
+            | "+"
+            | "*"
+            | "/"
+            | "%"
+            | "**"
+    )
 }
 
 /// Format a binding pattern to a string.

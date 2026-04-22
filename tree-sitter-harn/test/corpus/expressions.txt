@@ -55,3 +55,48 @@ pipeline test(task) {
         value: (binary_expression
           (identifier)
           (identifier))))))
+
+==================
+Line Leading Infix Operators
+==================
+
+pipeline test(task) {
+  let fallback = nil
+    ?? "fallback"
+  let same = 1
+    == 1
+  let different = 1
+    != 2
+  let larger = 2
+    >= 1
+}
+
+---
+
+(source_file
+  (pipeline_declaration
+    name: (identifier)
+    (parameter_list
+      (typed_parameter
+        name: (identifier)))
+    (block
+      (let_binding
+        name: (identifier)
+        value: (nil_coalescing_expression
+          (nil)
+          (string_literal)))
+      (let_binding
+        name: (identifier)
+        value: (binary_expression
+          (integer_literal)
+          (integer_literal)))
+      (let_binding
+        name: (identifier)
+        value: (binary_expression
+          (integer_literal)
+          (integer_literal)))
+      (let_binding
+        name: (identifier)
+        value: (binary_expression
+          (integer_literal)
+          (integer_literal))))))
