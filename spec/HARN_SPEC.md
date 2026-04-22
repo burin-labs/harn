@@ -584,7 +584,7 @@ Note: `-` does not support multiline continuation because it is also a unary
 negation prefix. Keyword operators `in`, `not in`, and `to` also require an
 explicit backslash continuation.
 
-```harn
+```harn,ignore
 let result = items
   .filter({ x -> x > 0 })
   .map({ x -> x * 2 })
@@ -2023,7 +2023,7 @@ Interfaces can be used as parameter types. At compile time, the type
 checker verifies that any struct passed to such a parameter satisfies
 the interface:
 
-```harn
+```harn,ignore
 fn show(item: Displayable) {
   println(item.display())
 }
