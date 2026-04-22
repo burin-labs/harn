@@ -13,6 +13,7 @@ pub(crate) async fn vm_stream_llm(
     use tokio_stream::StreamExt;
 
     let provider = &opts.provider;
+    super::ensure_real_llm_allowed(provider)?;
     let client = super::shared_streaming_client().clone();
 
     let resolved = ResolvedProvider::resolve(provider);

@@ -1,0 +1,3 @@
+pipeline default() {
+  llm_call("hello", nil, {provider: "local", model: "stub-model"})
+}

@@ -1,5 +1,5 @@
 pipeline default() {
   deadline 10ms {
-    sleep(1000)
+    sleep(25ms)
   }
 }

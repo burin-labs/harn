@@ -35,6 +35,7 @@ pipeline test(task) {
     model: "mock-model",
     cache_key: "retry-v1",
     schema_retries: 1,
+    include_operator_meta: false,
   },
   )
   let calls = llm_mock_calls()

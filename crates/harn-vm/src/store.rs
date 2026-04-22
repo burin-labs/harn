@@ -140,8 +140,10 @@ fn json_to_vm(jv: &serde_json::Value) -> VmValue {
 /// on first mutation. In bridge mode, register these **before** bridge
 /// builtins so the host can override them.
 pub fn register_store_builtins(vm: &mut Vm, base_dir: &Path) {
-    if let Err(error) = crate::event_log::install_default_for_base_dir(base_dir) {
-        crate::events::log_warn("event_log.init", &error.to_string());
+    if crate::event_log::active_event_log().is_none() {
+        if let Err(error) = crate::event_log::install_default_for_base_dir(base_dir) {
+            crate::events::log_warn("event_log.init", &error.to_string());
+        }
     }
     let state = Rc::new(RefCell::new(StoreState::new(base_dir)));
 
@@ -190,4 +192,28 @@ pub fn register_store_builtins(vm: &mut Vm, base_dir: &Path) {
         s.borrow_mut().clear().map_err(VmError::Runtime)?;
         Ok(VmValue::Nil)
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use super::*;
+    use crate::event_log::{
+        active_event_log, install_memory_for_current_thread, reset_active_event_log,
+    };
+
+    #[test]
+    fn register_store_builtins_preserves_existing_event_log() {
+        reset_active_event_log();
+        let existing = install_memory_for_current_thread(8);
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let mut vm = Vm::new();
+
+        register_store_builtins(&mut vm, temp_dir.path());
+
+        let active = active_event_log().expect("active event log");
+        assert!(Arc::ptr_eq(&active, &existing));
+        reset_active_event_log();
+    }
 }

@@ -3,6 +3,7 @@ mod acp;
 mod cli;
 mod commands;
 mod config;
+mod env_guard;
 mod package;
 mod skill_loader;
 mod skill_provenance;
@@ -1310,6 +1311,9 @@ pub(crate) async fn execute(source: &str, source_path: Option<&Path>) -> Result<
                 .to_string_lossy()
                 .into_owned();
             let source_dir = source_parent.to_string_lossy().into_owned();
+            if source_path.is_some_and(is_conformance_path) {
+                harn_vm::event_log::install_memory_for_current_thread(64);
+            }
             harn_vm::register_store_builtins(&mut vm, store_base);
             harn_vm::register_metadata_builtins(&mut vm, store_base);
             let pipeline_name = source_path
@@ -1359,11 +1363,19 @@ pub(crate) async fn execute(source: &str, source_path: Option<&Path>) -> Result<
                     .await
                     .map_err(|error| format!("failed to install manifest hooks: {error}"))?;
             }
-            install_default_connector_clients(store_base)
-                .await
-                .map_err(|error| format!("failed to initialize connector clients: {error}"))?;
+            let _event_log = harn_vm::event_log::active_event_log()
+                .unwrap_or_else(|| harn_vm::event_log::install_memory_for_current_thread(64));
+            let connector_clients_installed =
+                should_install_default_connector_clients(source, source_path);
+            if connector_clients_installed {
+                install_default_connector_clients(store_base)
+                    .await
+                    .map_err(|error| format!("failed to initialize connector clients: {error}"))?;
+            }
             let execution_result = vm.execute(&chunk).await.map_err(|e| e.to_string());
-            harn_vm::clear_active_connector_clients();
+            if connector_clients_installed {
+                harn_vm::clear_active_connector_clients();
+            }
             harn_vm::stdlib::process::set_thread_execution_context(None);
             execution_result?;
             let mut output = String::new();
@@ -1375,6 +1387,20 @@ pub(crate) async fn execute(source: &str, source_path: Option<&Path>) -> Result<
             Ok(output)
         })
         .await
+}
+
+fn should_install_default_connector_clients(source: &str, source_path: Option<&Path>) -> bool {
+    if !source_path.is_some_and(is_conformance_path) {
+        return true;
+    }
+    source.contains("connector_call")
+        || source.contains("std/connectors")
+        || source.contains("connectors/")
+}
+
+fn is_conformance_path(path: &Path) -> bool {
+    path.components()
+        .any(|component| component.as_os_str() == "conformance")
 }
 
 async fn install_default_connector_clients(base_dir: &Path) -> Result<(), String> {
@@ -1424,7 +1450,8 @@ fn connector_secret_namespace(base_dir: &Path) -> String {
 
 #[cfg(test)]
 mod main_tests {
-    use super::normalize_serve_args;
+    use super::{normalize_serve_args, should_install_default_connector_clients};
+    use std::path::Path;
 
     #[test]
     fn normalize_serve_args_inserts_a2a_for_legacy_shape() {
@@ -1465,5 +1492,26 @@ mod main_tests {
                 "server.harn".to_string(),
             ]
         );
+    }
+
+    #[test]
+    fn conformance_skips_connector_clients_unless_fixture_uses_connectors() {
+        let path = Path::new("conformance/tests/language/basic.harn");
+        assert!(!should_install_default_connector_clients(
+            "println(1)",
+            Some(path)
+        ));
+        assert!(!should_install_default_connector_clients(
+            "trust_graph_verify_chain()",
+            Some(path)
+        ));
+        assert!(should_install_default_connector_clients(
+            "import { post_message } from \"std/connectors/slack\"",
+            Some(path)
+        ));
+        assert!(should_install_default_connector_clients(
+            "println(1)",
+            Some(Path::new("examples/demo.harn"))
+        ));
     }
 }

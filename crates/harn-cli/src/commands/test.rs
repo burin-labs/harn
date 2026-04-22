@@ -5,6 +5,7 @@ use std::process;
 use regex::Regex;
 
 use crate::commands::run::{install_cli_llm_mock_mode, CliLlmMockMode};
+use crate::env_guard::ScopedEnvVar;
 use crate::execute;
 use crate::test_runner;
 
@@ -210,6 +211,7 @@ pub(crate) async fn run_conformance_tests(
     timing: bool,
 ) {
     let show_timing = verbose || timing;
+    let _disable_llm_calls = ScopedEnvVar::set(harn_vm::llm::LLM_CALLS_DISABLED_ENV, "1");
     let dir_path = PathBuf::from(dir);
     if !dir_path.exists() {
         eprintln!("Directory not found: {dir}");

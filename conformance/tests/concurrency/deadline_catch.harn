@@ -1,7 +1,7 @@
 pipeline test(task) {
   try {
     deadline 50ms {
-      sleep(5000)
+      sleep(75ms)
     }
   } catch (e) {
     log("caught deadline")

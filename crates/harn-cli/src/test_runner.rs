@@ -4,6 +4,8 @@ use std::time::Instant;
 use harn_lexer::Lexer;
 use harn_parser::{Node, Parser};
 
+use crate::env_guard::ScopedEnvVar;
+
 pub struct TestResult {
     pub name: String,
     pub file: String,
@@ -216,10 +218,8 @@ pub async fn run_tests(
     parallel: bool,
 ) -> TestSummary {
     // Default LLM provider to "mock" in test mode unless caller overrides.
-    let prev_provider = std::env::var("HARN_LLM_PROVIDER").ok();
-    if prev_provider.is_none() {
-        std::env::set_var("HARN_LLM_PROVIDER", "mock");
-    }
+    let _default_llm_provider = ScopedEnvVar::set_if_unset("HARN_LLM_PROVIDER", "mock");
+    let _disable_llm_calls = ScopedEnvVar::set(harn_vm::llm::LLM_CALLS_DISABLED_ENV, "1");
 
     let start = Instant::now();
     let mut all_results = Vec::new();
@@ -284,11 +284,6 @@ pub async fn run_tests(
                 }
             }
         }
-    }
-
-    match prev_provider {
-        Some(val) => std::env::set_var("HARN_LLM_PROVIDER", val),
-        None => std::env::remove_var("HARN_LLM_PROVIDER"),
     }
 
     let passed = all_results.iter().filter(|r| r.passed).count();
