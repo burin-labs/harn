@@ -65,6 +65,21 @@ jobs:
         working-directory: crates/harn-cli/portal
         run: npm ci
 
+      - name: Install ripgrep
+        # security-audit lane greps the repo via `rg` — install it
+        # explicitly so the runner matches the local dev expectation.
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
+
+      - name: Build tree-sitter grammar
+        # grammar-audit's verify_tree_sitter_parse.py loads the
+        # compiled grammar from tree-sitter-harn/harn.{so,dylib}.
+        # `npm run build` runs `tree-sitter generate && tree-sitter
+        # build`, which produces harn.so on Linux.
+        working-directory: tree-sitter-harn
+        run: |
+          npm ci
+          npm run build
+
       - name: Configure git identity
         run: |
           git config --global user.name "github-actions[bot]"
