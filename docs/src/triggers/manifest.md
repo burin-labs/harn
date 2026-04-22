@@ -8,7 +8,7 @@ Each entry declares:
 - a stable trigger `id`
 - a trigger `kind` such as `webhook`, `cron`, or `a2a-push`
 - a `provider` from the registered trigger provider catalog
-- an `autonomy_tier` that defines the default execution mode
+- an `autonomy_tier` (or `tier`) that defines the default execution mode
 - a delivery `handler`
 - optional dedupe, retry, budget, flow-control, secret, and predicate settings
 
@@ -23,7 +23,7 @@ of `<trigger-id>.<source-id>`, while sharing the parent handler and predicate.
 id = "github-new-issue"
 kind = "webhook"
 provider = "github"
-autonomy_tier = "act_with_approval"
+tier = "act_with_approval"
 match = { events = ["issues.opened"] }
 when = "handlers::should_handle"
 when_budget = { max_cost_usd = 0.001, tokens_max = 500, timeout = "5s" }
@@ -31,7 +31,7 @@ handler = "handlers::on_new_issue"
 dedupe_key = "event.dedupe_key"
 retry = { max = 7, backoff = "svix", retention_days = 7 }
 priority = "normal"
-budget = { max_cost_usd = 0.001, max_tokens = 500, hourly_cost_usd = 1.00, daily_cost_usd = 5.00, on_budget_exhausted = "false" }
+budget = { max_cost_usd = 0.001, max_tokens = 500, hourly_cost_usd = 1.00, daily_cost_usd = 5.00, max_autonomous_decisions_per_hour = 25, max_autonomous_decisions_per_day = 100, on_budget_exhausted = "false" }
 concurrency = { max = 10 }
 secrets = { signing_secret = "github/webhook-secret" }
 filter = "event.kind"
@@ -104,6 +104,8 @@ The manifest loader rejects invalid trigger declarations before execution:
 - `retry.retention_days` defaults to `7` and must be `>= 1`
 - `budget.max_cost_usd`, `budget.hourly_cost_usd`, and
   `budget.daily_cost_usd` must be `>= 0`
+- `budget.max_autonomous_decisions_per_hour` and
+  `budget.max_autonomous_decisions_per_day` must be `>= 1` when present
 - `budget.max_tokens` and `budget.max_concurrent` must be `>= 1` when present
 - cron triggers must declare a parseable `schedule`
 - cron `timezone` must be a valid IANA timezone name

@@ -260,22 +260,15 @@ fn enforce_dispatch_autonomy_for_builtin(name: &str, args: &[VmValue]) -> Result
         return Ok(());
     }
     match context.autonomy_tier {
-        AutonomyTier::ActAuto => Ok(()),
-        AutonomyTier::ActWithApproval => reject_policy(format!(
-            "mutating builtin '{name}' is blocked for autonomy tier 'act_with_approval'; route the action through an approval-aware host/tool path"
-        )),
         AutonomyTier::Shadow => {
             emit_autonomy_proposal_event(AutonomyTier::Shadow, name, args)?;
-            reject_policy(format!(
-                "mutating builtin '{name}' is blocked for autonomy tier 'shadow'; proposal event emitted instead"
-            ))
+            Ok(())
         }
         AutonomyTier::Suggest => {
             emit_autonomy_proposal_event(AutonomyTier::Suggest, name, args)?;
-            reject_policy(format!(
-                "mutating builtin '{name}' is blocked for autonomy tier 'suggest'; proposal event emitted and approval is required"
-            ))
+            Ok(())
         }
+        AutonomyTier::ActWithApproval | AutonomyTier::ActAuto => Ok(()),
     }
 }
 

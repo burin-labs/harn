@@ -211,6 +211,8 @@ async fn dispatcher_fixture_with_budget_strategy(
         filter: None,
         daily_cost_usd,
         hourly_cost_usd,
+        max_autonomous_decisions_per_hour: None,
+        max_autonomous_decisions_per_day: None,
         on_budget_exhausted,
         max_concurrent: None,
         flow_control,
@@ -261,6 +263,8 @@ async fn a2a_dispatcher_fixture(
         filter: None,
         daily_cost_usd: None,
         hourly_cost_usd: None,
+        max_autonomous_decisions_per_hour: None,
+        max_autonomous_decisions_per_day: None,
         on_budget_exhausted: crate::TriggerBudgetExhaustionStrategy::False,
         max_concurrent: None,
         flow_control: crate::triggers::TriggerFlowControlConfig::default(),
@@ -308,6 +312,8 @@ async fn worker_dispatcher_fixture(
         filter: None,
         daily_cost_usd: None,
         hourly_cost_usd: None,
+        max_autonomous_decisions_per_hour: None,
+        max_autonomous_decisions_per_day: None,
         on_budget_exhausted: crate::TriggerBudgetExhaustionStrategy::False,
         max_concurrent: None,
         flow_control: crate::triggers::TriggerFlowControlConfig::default(),
@@ -2592,6 +2598,8 @@ pub fn local_fn(event: TriggerEvent) -> string {
                 filter: None,
                 daily_cost_usd: None,
                 hourly_cost_usd: None,
+                max_autonomous_decisions_per_hour: None,
+                max_autonomous_decisions_per_day: None,
                 on_budget_exhausted: crate::TriggerBudgetExhaustionStrategy::False,
                 max_concurrent: None,
                 flow_control,
@@ -2785,6 +2793,8 @@ pub fn slow_handler(event: TriggerEvent) -> string {
                 filter: None,
                 daily_cost_usd: None,
                 hourly_cost_usd: None,
+                max_autonomous_decisions_per_hour: None,
+                max_autonomous_decisions_per_day: None,
                 on_budget_exhausted: crate::TriggerBudgetExhaustionStrategy::False,
                 max_concurrent: None,
                 flow_control,
@@ -2857,6 +2867,187 @@ pub fn slow_handler(event: TriggerEvent) -> string {
             assert_eq!(started, vec![bronze_first_id, gold_id, bronze_second_id]);
         })
         .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn autonomy_budget_routes_act_auto_to_approval() {
+    crate::reset_thread_local_state();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let log = install_default_for_base_dir(dir.path()).expect("install event log");
+    let lib_path = dir.path().join("lib.harn");
+    std::fs::write(
+        &lib_path,
+        r#"
+import "std/triggers"
+
+pub fn local_fn(event: TriggerEvent) -> dict {
+  return {ok: true, event_id: event.id}
+}
+"#,
+    )
+    .expect("write module source");
+
+    let mut vm = Vm::new();
+    register_vm_stdlib(&mut vm);
+    vm.set_source_dir(dir.path());
+    let exports = vm
+        .load_module_exports(&lib_path)
+        .await
+        .expect("load handler exports");
+    install_manifest_triggers(vec![TriggerBindingSpec {
+        id: "github-new-issue".to_string(),
+        source: TriggerBindingSource::Manifest,
+        kind: "webhook".to_string(),
+        provider: ProviderId::from("github"),
+        autonomy_tier: crate::AutonomyTier::ActAuto,
+        handler: TriggerHandlerSpec::Local {
+            raw: "local_fn".to_string(),
+            closure: exports["local_fn"].clone(),
+        },
+        dispatch_priority: crate::WorkerQueuePriority::Normal,
+        when: None,
+        when_budget: None,
+        retry: TriggerRetryConfig::default(),
+        match_events: vec!["issues.opened".to_string()],
+        dedupe_key: Some("event.dedupe_key".to_string()),
+        dedupe_retention_days: crate::triggers::DEFAULT_INBOX_RETENTION_DAYS,
+        filter: None,
+        daily_cost_usd: None,
+        hourly_cost_usd: None,
+        max_autonomous_decisions_per_hour: None,
+        max_autonomous_decisions_per_day: Some(1),
+        on_budget_exhausted: crate::TriggerBudgetExhaustionStrategy::False,
+        max_concurrent: None,
+        flow_control: crate::triggers::TriggerFlowControlConfig::default(),
+        manifest_path: None,
+        package_name: Some("workspace".to_string()),
+        definition_fingerprint: "fp:autonomy-budget".to_string(),
+    }])
+    .await
+    .expect("install trigger binding");
+    let dispatcher = Dispatcher::with_event_log(vm, log.clone());
+
+    let first = dispatcher
+        .dispatch_event(trigger_event("issues.opened", "delivery-auto-1"))
+        .await
+        .expect("first dispatch succeeds");
+    assert_eq!(first[0].status, DispatchStatus::Succeeded);
+
+    let second = dispatcher
+        .dispatch_event(trigger_event("issues.opened", "delivery-auto-2"))
+        .await
+        .expect("second dispatch waits for approval");
+    assert_eq!(second[0].status, DispatchStatus::Waiting);
+    let result = second[0].result.as_ref().expect("approval result");
+    assert_eq!(result["approval_required"], true);
+    assert_eq!(result["reason"], "daily_autonomy_budget_exceeded");
+
+    let approvals = read_topic(log.clone(), crate::HITL_APPROVALS_TOPIC).await;
+    assert_eq!(approvals.len(), 1);
+    assert_eq!(
+        approvals[0].1.payload["payload"]["reviewers"][0],
+        super::DEFAULT_AUTONOMY_BUDGET_REVIEWER
+    );
+
+    let lifecycle = read_topic(log.clone(), crate::TRIGGERS_LIFECYCLE_TOPIC).await;
+    assert!(lifecycle
+        .iter()
+        .any(|(_, event)| event.kind == "autonomy.budget_exceeded"));
+
+    let action_graph = read_topic(log.clone(), "observability.action_graph").await;
+    let (node_kinds, edge_kinds) = flatten_action_graph(&action_graph);
+    assert!(node_kinds.iter().any(|kind| kind == "approval"));
+    assert!(edge_kinds.iter().any(|kind| kind == "approval_gate"));
+
+    let trust_records = crate::query_trust_records(
+        &log,
+        &crate::TrustQueryFilters {
+            agent: Some("github-new-issue".to_string()),
+            action: Some("autonomy.tier_transition".to_string()),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("query trust records");
+    assert_eq!(trust_records.len(), 1);
+    assert_eq!(
+        trust_records[0].metadata["to_tier"],
+        crate::AutonomyTier::ActWithApproval.as_str()
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn handler_tier_is_enforced_through_capability_policy() {
+    crate::reset_thread_local_state();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let log = install_default_for_base_dir(dir.path()).expect("install event log");
+    let lib_path = dir.path().join("lib.harn");
+    std::fs::write(
+        &lib_path,
+        r#"
+import "std/triggers"
+
+pub fn local_fn(event: TriggerEvent) {
+  write_file(path_join(temp_dir(), "blocked.txt"), "blocked")
+}
+"#,
+    )
+    .expect("write module source");
+
+    let mut vm = Vm::new();
+    register_vm_stdlib(&mut vm);
+    vm.set_source_dir(dir.path());
+    let exports = vm
+        .load_module_exports(&lib_path)
+        .await
+        .expect("load handler exports");
+    install_manifest_triggers(vec![TriggerBindingSpec {
+        id: "github-new-issue".to_string(),
+        source: TriggerBindingSource::Manifest,
+        kind: "webhook".to_string(),
+        provider: ProviderId::from("github"),
+        autonomy_tier: crate::AutonomyTier::Suggest,
+        handler: TriggerHandlerSpec::Local {
+            raw: "local_fn".to_string(),
+            closure: exports["local_fn"].clone(),
+        },
+        dispatch_priority: crate::WorkerQueuePriority::Normal,
+        when: None,
+        when_budget: None,
+        retry: TriggerRetryConfig::default(),
+        match_events: vec!["issues.opened".to_string()],
+        dedupe_key: Some("event.dedupe_key".to_string()),
+        dedupe_retention_days: crate::triggers::DEFAULT_INBOX_RETENTION_DAYS,
+        filter: None,
+        daily_cost_usd: None,
+        hourly_cost_usd: None,
+        max_autonomous_decisions_per_hour: None,
+        max_autonomous_decisions_per_day: None,
+        on_budget_exhausted: crate::TriggerBudgetExhaustionStrategy::False,
+        max_concurrent: None,
+        flow_control: crate::triggers::TriggerFlowControlConfig::default(),
+        manifest_path: None,
+        package_name: Some("workspace".to_string()),
+        definition_fingerprint: "fp:tier-policy".to_string(),
+    }])
+    .await
+    .expect("install trigger binding");
+    let dispatcher = Dispatcher::with_event_log(vm, log.clone());
+
+    let outcomes = dispatcher
+        .dispatch_event(trigger_event("issues.opened", "delivery-suggest-1"))
+        .await
+        .expect("dispatch completes with handler failure");
+    assert_eq!(outcomes[0].status, DispatchStatus::Failed);
+    assert!(outcomes[0]
+        .error
+        .as_deref()
+        .is_some_and(|error| error.contains("workspace write ceiling")));
+
+    let outbox = read_topic(log.clone(), crate::TRIGGER_OUTBOX_TOPIC).await;
+    assert!(outbox
+        .iter()
+        .any(|(_, event)| event.kind == "dispatch_proposed"));
 }
 
 #[test]

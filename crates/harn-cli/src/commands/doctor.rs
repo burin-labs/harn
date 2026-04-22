@@ -844,6 +844,9 @@ mod tests {
             cost_total_usd_micros: 0,
             cost_today_usd_micros: 0,
             cost_hour_usd_micros: 0,
+            autonomous_decisions_total: 0,
+            autonomous_decisions_today: 0,
+            autonomous_decisions_hour: 0,
         });
         assert_eq!(
             rendered,

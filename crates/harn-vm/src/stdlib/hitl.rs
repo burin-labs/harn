@@ -258,6 +258,36 @@ pub async fn append_hitl_response(
     Ok(event_id)
 }
 
+pub async fn append_approval_request_on(
+    log: &Arc<AnyEventLog>,
+    agent: impl Into<String>,
+    trace_id: impl Into<String>,
+    action: impl Into<String>,
+    detail: JsonValue,
+    reviewers: Vec<String>,
+) -> Result<String, VmError> {
+    let request_id = next_request_id(HitlRequestKind::Approval, current_dispatch_keys().as_ref());
+    let trace_id = trace_id.into();
+    let request = HitlRequestEnvelope {
+        request_id: request_id.clone(),
+        kind: HitlRequestKind::Approval,
+        agent: agent.into(),
+        trace_id: trace_id.clone(),
+        requested_at: now_rfc3339(),
+        payload: json!({
+            "action": action.into(),
+            "detail": detail,
+            "quorum": 1,
+            "reviewers": reviewers,
+            "deadline_ms": HITL_APPROVAL_TIMEOUT_MS,
+        }),
+    };
+    create_request_waitpoint(log, &request).await?;
+    append_request(log, &request).await?;
+    maybe_notify_host(&request);
+    Ok(request_id)
+}
+
 async fn ask_user_impl(args: &[VmValue]) -> Result<VmValue, VmError> {
     let prompt = required_string_arg(args, 0, "ask_user")?;
     let options = parse_ask_user_options(args.get(1))?;

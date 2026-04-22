@@ -44,6 +44,11 @@ Trigger manifests and dynamic trigger registrations can set
 At runtime, handlers can inspect the effective tier with
 `handler_context().autonomy_tier`. Harn resolves that effective tier from the
 manifest default plus the latest trust-graph control record for the agent.
+The dispatcher enforces the tier by translating it into a capability policy
+before handler code runs: `shadow` denies side effects, `suggest` and
+`act_with_approval` are read-only for direct builtins, and `act_auto` keeps the
+normal network-capable ceiling. Shadow and suggest rejections also emit proposal
+metadata for operators.
 
 ## CLI
 

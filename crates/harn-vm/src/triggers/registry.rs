@@ -207,6 +207,8 @@ pub struct TriggerBindingSpec {
     pub filter: Option<String>,
     pub daily_cost_usd: Option<f64>,
     pub hourly_cost_usd: Option<f64>,
+    pub max_autonomous_decisions_per_hour: Option<u64>,
+    pub max_autonomous_decisions_per_day: Option<u64>,
     pub on_budget_exhausted: TriggerBudgetExhaustionStrategy,
     pub max_concurrent: Option<u32>,
     pub flow_control: TriggerFlowControlConfig,
@@ -225,6 +227,9 @@ pub struct TriggerMetrics {
     pub cost_total_usd_micros: AtomicU64,
     pub cost_today_usd_micros: AtomicU64,
     pub cost_hour_usd_micros: AtomicU64,
+    pub autonomous_decisions_total: AtomicU64,
+    pub autonomous_decisions_today: AtomicU64,
+    pub autonomous_decisions_hour: AtomicU64,
 }
 
 impl Default for TriggerMetrics {
@@ -238,6 +243,9 @@ impl Default for TriggerMetrics {
             cost_total_usd_micros: AtomicU64::new(0),
             cost_today_usd_micros: AtomicU64::new(0),
             cost_hour_usd_micros: AtomicU64::new(0),
+            autonomous_decisions_total: AtomicU64::new(0),
+            autonomous_decisions_today: AtomicU64::new(0),
+            autonomous_decisions_hour: AtomicU64::new(0),
         }
     }
 }
@@ -253,6 +261,9 @@ pub struct TriggerMetricsSnapshot {
     pub cost_total_usd_micros: u64,
     pub cost_today_usd_micros: u64,
     pub cost_hour_usd_micros: u64,
+    pub autonomous_decisions_total: u64,
+    pub autonomous_decisions_today: u64,
+    pub autonomous_decisions_hour: u64,
 }
 
 pub struct TriggerBinding {
@@ -273,6 +284,8 @@ pub struct TriggerBinding {
     pub filter: Option<String>,
     pub daily_cost_usd: Option<f64>,
     pub hourly_cost_usd: Option<f64>,
+    pub max_autonomous_decisions_per_hour: Option<u64>,
+    pub max_autonomous_decisions_per_day: Option<u64>,
     pub on_budget_exhausted: TriggerBudgetExhaustionStrategy,
     pub max_concurrent: Option<u32>,
     pub flow_control: TriggerFlowControlConfig,
@@ -323,6 +336,8 @@ impl TriggerBinding {
             metrics: self.metrics_snapshot(),
             daily_cost_usd: self.daily_cost_usd,
             hourly_cost_usd: self.hourly_cost_usd,
+            max_autonomous_decisions_per_hour: self.max_autonomous_decisions_per_hour,
+            max_autonomous_decisions_per_day: self.max_autonomous_decisions_per_day,
             on_budget_exhausted: self.on_budget_exhausted,
         }
     }
@@ -346,6 +361,8 @@ impl TriggerBinding {
             filter: spec.filter,
             daily_cost_usd: spec.daily_cost_usd,
             hourly_cost_usd: spec.hourly_cost_usd,
+            max_autonomous_decisions_per_hour: spec.max_autonomous_decisions_per_hour,
+            max_autonomous_decisions_per_day: spec.max_autonomous_decisions_per_day,
             on_budget_exhausted: spec.on_budget_exhausted,
             max_concurrent: spec.max_concurrent,
             flow_control: spec.flow_control,
@@ -383,6 +400,18 @@ impl TriggerBinding {
             cost_total_usd_micros: self.metrics.cost_total_usd_micros.load(Ordering::Relaxed),
             cost_today_usd_micros: self.metrics.cost_today_usd_micros.load(Ordering::Relaxed),
             cost_hour_usd_micros: self.metrics.cost_hour_usd_micros.load(Ordering::Relaxed),
+            autonomous_decisions_total: self
+                .metrics
+                .autonomous_decisions_total
+                .load(Ordering::Relaxed),
+            autonomous_decisions_today: self
+                .metrics
+                .autonomous_decisions_today
+                .load(Ordering::Relaxed),
+            autonomous_decisions_hour: self
+                .metrics
+                .autonomous_decisions_hour
+                .load(Ordering::Relaxed),
         }
     }
 }
@@ -400,6 +429,8 @@ pub struct TriggerBindingSnapshot {
     pub metrics: TriggerMetricsSnapshot,
     pub daily_cost_usd: Option<f64>,
     pub hourly_cost_usd: Option<f64>,
+    pub max_autonomous_decisions_per_hour: Option<u64>,
+    pub max_autonomous_decisions_per_day: Option<u64>,
     pub on_budget_exhausted: TriggerBudgetExhaustionStrategy,
 }
 
@@ -570,12 +601,20 @@ pub fn reset_binding_budget_windows(binding: &TriggerBinding) {
             .metrics
             .cost_today_usd_micros
             .store(0, Ordering::Relaxed);
+        binding
+            .metrics
+            .autonomous_decisions_today
+            .store(0, Ordering::Relaxed);
     }
     if state.budget_hour_utc != Some(hour) {
         state.budget_hour_utc = Some(hour);
         binding
             .metrics
             .cost_hour_usd_micros
+            .store(0, Ordering::Relaxed);
+        binding
+            .metrics
+            .autonomous_decisions_hour
             .store(0, Ordering::Relaxed);
     }
 }
@@ -608,6 +647,53 @@ pub fn binding_budget_would_exceed(
         return Some("daily_budget_exceeded");
     }
     None
+}
+
+pub fn binding_autonomy_budget_would_exceed(binding: &TriggerBinding) -> Option<&'static str> {
+    reset_binding_budget_windows(binding);
+    if binding
+        .max_autonomous_decisions_per_hour
+        .is_some_and(|limit| {
+            binding
+                .metrics
+                .autonomous_decisions_hour
+                .load(Ordering::Relaxed)
+                .saturating_add(1)
+                > limit
+        })
+    {
+        return Some("hourly_autonomy_budget_exceeded");
+    }
+    if binding
+        .max_autonomous_decisions_per_day
+        .is_some_and(|limit| {
+            binding
+                .metrics
+                .autonomous_decisions_today
+                .load(Ordering::Relaxed)
+                .saturating_add(1)
+                > limit
+        })
+    {
+        return Some("daily_autonomy_budget_exceeded");
+    }
+    None
+}
+
+pub fn note_autonomous_decision(binding: &TriggerBinding) {
+    reset_binding_budget_windows(binding);
+    binding
+        .metrics
+        .autonomous_decisions_total
+        .fetch_add(1, Ordering::Relaxed);
+    binding
+        .metrics
+        .autonomous_decisions_today
+        .fetch_add(1, Ordering::Relaxed);
+    binding
+        .metrics
+        .autonomous_decisions_hour
+        .fetch_add(1, Ordering::Relaxed);
 }
 
 pub fn expected_predicate_cost_usd_micros(binding: &TriggerBinding) -> u64 {
@@ -1421,6 +1507,8 @@ mod tests {
             filter: Some("event.kind".to_string()),
             daily_cost_usd: Some(5.0),
             hourly_cost_usd: None,
+            max_autonomous_decisions_per_hour: None,
+            max_autonomous_decisions_per_day: None,
             on_budget_exhausted: crate::TriggerBudgetExhaustionStrategy::False,
             max_concurrent: Some(10),
             flow_control: crate::triggers::TriggerFlowControlConfig::default(),
@@ -1450,6 +1538,8 @@ mod tests {
             filter: None,
             daily_cost_usd: None,
             hourly_cost_usd: None,
+            max_autonomous_decisions_per_hour: None,
+            max_autonomous_decisions_per_day: None,
             on_budget_exhausted: crate::TriggerBudgetExhaustionStrategy::False,
             max_concurrent: None,
             flow_control: crate::triggers::TriggerFlowControlConfig::default(),
