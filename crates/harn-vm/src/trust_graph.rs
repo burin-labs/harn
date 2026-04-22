@@ -470,21 +470,29 @@ fn matches_filters(record: &TrustRecord, filters: &TrustQueryFilters) -> bool {
 
 fn query_topics(filters: &TrustQueryFilters) -> Result<Vec<Topic>, LogError> {
     match filters.agent.as_deref() {
-        Some(agent) => Ok(vec![
+        Some(agent) => unique_topics(vec![
             topic_for_agent(agent)?,
             legacy_topic_for_agent(agent)?,
         ]),
-        None => Ok(vec![global_topic()?, legacy_global_topic()?]),
+        None => unique_topics(vec![global_topic()?, legacy_global_topic()?]),
     }
 }
 
 fn append_topics_for_record(record: &TrustRecord) -> Result<Vec<Topic>, LogError> {
-    Ok(vec![
+    unique_topics(vec![
         global_topic()?,
         legacy_global_topic()?,
         topic_for_agent(&record.agent)?,
         legacy_topic_for_agent(&record.agent)?,
     ])
+}
+
+fn unique_topics(topics: Vec<Topic>) -> Result<Vec<Topic>, LogError> {
+    let mut seen = HashSet::new();
+    Ok(topics
+        .into_iter()
+        .filter(|topic| seen.insert(topic.as_str().to_string()))
+        .collect())
 }
 
 async fn finalize_trust_record(

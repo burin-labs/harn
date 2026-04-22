@@ -94,7 +94,7 @@ pipeline test(task) {
   assert(restart.success && restart_pid != "", "failed to restart orchestrator")
   let restart_url = wait_for_listener_url(path_join(root, "orchestrator-restart.log"))
   assert(restart_url != nil, "restart listener URL did not appear in log")
-  sleep(500ms)
+  sleep(50ms)
   let state_dir = path_join(root, "state")
   let config_path = path_join(root, "harn.toml")
   let queue = shell_at(

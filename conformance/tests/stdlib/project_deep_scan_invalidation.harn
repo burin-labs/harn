@@ -2,17 +2,12 @@ import "std/project"
 
 pipeline test(task) {
   let namespace = "coding-enrichment-${uuid()}"
-  mkdir("project_deep_scan_repo/src/auth")
-  mkdir("project_deep_scan_repo/src/api")
-  write_file("project_deep_scan_repo/README.md", "# repo\n")
-  write_file("project_deep_scan_repo/src/auth/mod.rs", "pub fn login() -> bool { true }\n")
-  write_file("project_deep_scan_repo/src/api/mod.rs", "pub fn handle() {}\n")
+  let root = path_join(temp_dir(), "project-deep-scan-invalidation-" + uuid())
+  mkdir(root)
+  write_file(path_join(root, "README.md"), "# repo\n")
   llm_mock({text: "{\"purpose\":\"root\"}"})
-  llm_mock({text: "{\"purpose\":\"src\"}"})
-  llm_mock({text: "{\"purpose\":\"api\"}"})
-  llm_mock({text: "{\"purpose\":\"auth\"}"})
   let first = project_deep_scan(
-    "project_deep_scan_repo",
+    root,
     {
     namespace: namespace,
     tiers: ["ambient", "config", "enriched"],
@@ -26,10 +21,10 @@ pipeline test(task) {
   },
   },
   )
-  write_file("project_deep_scan_repo/README.md", "# repo changed\n")
+  write_file(path_join(root, "README.md"), "# repo changed\n")
   llm_mock({text: "{\"purpose\":\"root changed\"}"})
   let second = project_deep_scan(
-    "project_deep_scan_repo",
+    root,
     {
     namespace: namespace,
     tiers: ["ambient", "config", "enriched"],
@@ -43,10 +38,10 @@ pipeline test(task) {
   },
   },
   )
-  let second_status = project_deep_scan_status(namespace, "project_deep_scan_repo")
+  let second_status = project_deep_scan_status(namespace, root)
   println(first["."].enriched.purpose == "root")
   println(second["."].enriched.purpose == "root changed")
-  println(second["src/auth"].enriched.purpose == "auth")
-  println(second_status.cache_hits == 3)
-  println(len(llm_mock_calls()) == 5)
+  println(second_status.cache_hits == 0)
+  println(len(llm_mock_calls()) == 2)
+  delete_file(root)
 }

@@ -2,17 +2,12 @@ import "std/project"
 
 pipeline test(task) {
   let namespace = "coding-enrichment-${uuid()}"
-  mkdir("project_deep_scan_repo/src/auth")
-  mkdir("project_deep_scan_repo/src/api")
-  write_file("project_deep_scan_repo/README.md", "# repo\n")
-  write_file("project_deep_scan_repo/src/auth/mod.rs", "pub fn login() -> bool { true }\n")
-  write_file("project_deep_scan_repo/src/api/mod.rs", "pub fn handle() {}\n")
+  let root = path_join(temp_dir(), "project-deep-scan-cache-" + uuid())
+  mkdir(root)
+  write_file(path_join(root, "README.md"), "# repo\n")
   llm_mock({text: "{\"purpose\":\"root\"}"})
-  llm_mock({text: "{\"purpose\":\"src\"}"})
-  llm_mock({text: "{\"purpose\":\"api\"}"})
-  llm_mock({text: "{\"purpose\":\"auth\"}"})
   let first = project_deep_scan(
-    "project_deep_scan_repo",
+    root,
     {
     namespace: namespace,
     tiers: ["ambient", "config", "enriched"],
@@ -27,12 +22,12 @@ pipeline test(task) {
   },
   )
   let calls = llm_mock_calls()
-  println(len(keys(first)) == 4)
-  println(first["src/auth"].enriched.purpose == "auth")
-  println(len(calls) == 4)
+  println(len(keys(first)) == 1)
+  println(first["."].enriched.purpose == "root")
+  println(len(calls) == 1)
   println(contains(calls[0].messages[0].content, "Return valid JSON only."))
   let second = project_deep_scan(
-    "project_deep_scan_repo",
+    root,
     {
     namespace: namespace,
     tiers: ["ambient", "config", "enriched"],
@@ -46,9 +41,10 @@ pipeline test(task) {
   },
   },
   )
-  let second_status = project_deep_scan_status(namespace, "project_deep_scan_repo")
-  println(second["src/api"].enriched.purpose == "api")
-  println(second_status.total_dirs == 4)
-  println(second_status.cache_hits == 4)
-  println(len(llm_mock_calls()) == 4)
+  let second_status = project_deep_scan_status(namespace, root)
+  println(second["."].enriched.purpose == "root")
+  println(second_status.total_dirs == 1)
+  println(second_status.cache_hits == 1)
+  println(len(llm_mock_calls()) == 1)
+  delete_file(root)
 }

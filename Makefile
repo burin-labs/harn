@@ -27,16 +27,16 @@ lint:
 # `cargo test --workspace` when nextest is not installed.
 test:
 	@if command -v cargo-nextest >/dev/null 2>&1; then \
-		cargo nextest run --workspace; \
+		HARN_LLM_CALLS_DISABLED=1 cargo nextest run --workspace; \
 	else \
 		echo "cargo-nextest not installed; falling back to cargo test --workspace"; \
 		echo "hint: run 'make setup' or 'cargo install cargo-nextest --locked'"; \
-		cargo test --workspace; \
+		HARN_LLM_CALLS_DISABLED=1 cargo test --workspace; \
 	fi
 
 # Run the baseline Cargo workspace test command explicitly.
 test-cargo:
-	cargo test --workspace
+	HARN_LLM_CALLS_DISABLED=1 cargo test --workspace
 
 # Compatibility alias for the smarter default `make test`.
 test-fast:
@@ -44,7 +44,7 @@ test-fast:
 
 # Run Harn conformance test suite
 conformance:
-	cargo run --bin harn -- test conformance
+	HARN_LLM_CALLS_DISABLED=1 cargo run --bin harn -- test conformance
 
 bench-vm:
 	./scripts/bench_vm.sh

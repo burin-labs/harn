@@ -112,6 +112,23 @@ pub(crate) fn env_lock() -> &'static std::sync::Mutex<()> {
     LOCK.get_or_init(|| Mutex::new(()))
 }
 
+pub const LLM_CALLS_DISABLED_ENV: &str = "HARN_LLM_CALLS_DISABLED";
+
+pub(crate) fn llm_calls_disabled() -> bool {
+    std::env::var(LLM_CALLS_DISABLED_ENV)
+        .ok()
+        .is_some_and(|value| matches!(value.as_str(), "1" | "true" | "yes" | "on"))
+}
+
+pub(crate) fn ensure_real_llm_allowed(provider: &str) -> Result<(), crate::value::VmError> {
+    if !llm_calls_disabled() || provider == "mock" {
+        return Ok(());
+    }
+    Err(crate::value::VmError::Runtime(format!(
+        "LLM calls are disabled by {LLM_CALLS_DISABLED_ENV}; provider `{provider}` would make a real LLM request"
+    )))
+}
+
 use std::rc::Rc;
 use std::sync::Arc;
 

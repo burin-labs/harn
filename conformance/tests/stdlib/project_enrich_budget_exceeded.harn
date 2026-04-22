@@ -25,6 +25,7 @@ pipeline test(task) {
     provider: "mock",
     model: "mock-model",
     cache_key: "budget-v1",
+    include_operator_meta: false,
   },
   )
   println(result.budget_exceeded == true)

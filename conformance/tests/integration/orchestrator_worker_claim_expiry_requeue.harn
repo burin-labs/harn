@@ -59,7 +59,7 @@ pipeline default(task) {
     "--consumer-id",
     "consumer-a",
     "--claim-ttl",
-    "1s",
+    "50ms",
     "--json",
   )
   let first_data = json_parse(first.stdout)
@@ -72,7 +72,7 @@ pipeline default(task) {
     && first_data.responses[0].outcome?.status == "dlq"
     && first_data.responses[0].outcome?.error != nil,
   )
-  sleep(2200ms)
+  sleep(120ms)
   let second = exec(
     harn_bin,
     "orchestrator",

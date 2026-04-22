@@ -48,7 +48,7 @@ pipeline default() {
   let retried = agent_loop(
     "Finish the task",
     "You are helpful",
-    {provider: "mock", persistent: true, max_iterations: 1},
+    {provider: "mock", persistent: true, max_iterations: 1, llm_retries: 1},
   )
   println(retried?.trace?.empty_completion_retries == 1)
 }

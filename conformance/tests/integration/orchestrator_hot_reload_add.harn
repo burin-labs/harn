@@ -75,7 +75,7 @@ pipeline default() {
     )
 
     (
-      sleep 0.2
+      sleep 0.03
       mv "$workspace/harn.toml.next" "$workspace/harn.toml"
       kill -HUP "$pid"
     ) &

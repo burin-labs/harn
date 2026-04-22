@@ -35,6 +35,7 @@ pipeline test(task) {
     provider: "mock",
     model: "mock-model",
     cache_key: "cache-v1",
+    include_operator_meta: false,
   },
   )
   let second = project_enrich(
@@ -47,6 +48,7 @@ pipeline test(task) {
     provider: "mock",
     model: "mock-model",
     cache_key: "cache-v1",
+    include_operator_meta: false,
   },
   )
   let calls = llm_mock_calls()

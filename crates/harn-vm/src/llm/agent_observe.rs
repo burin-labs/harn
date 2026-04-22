@@ -478,6 +478,18 @@ impl Default for LlmRetryConfig {
     }
 }
 
+fn llm_retry_backoff_ms(
+    error: &VmError,
+    retry_config: &LlmRetryConfig,
+    attempt: usize,
+    provider: &str,
+) -> u64 {
+    if crate::llm::providers::MockProvider::should_intercept(provider) {
+        return 0;
+    }
+    extract_retry_after_ms(error).unwrap_or(retry_config.backoff_ms * (1 << attempt.min(4)) as u64)
+}
+
 // ---------------------------------------------------------------------------
 // observed_llm_call — shared single-LLM-call wrapper with full observability
 // ---------------------------------------------------------------------------
@@ -684,8 +696,7 @@ pub(crate) async fn observed_llm_call(
                     );
                 }
                 attempt += 1;
-                let backoff = extract_retry_after_ms(&error)
-                    .unwrap_or(retry_config.backoff_ms * (1 << attempt.min(4)) as u64);
+                let backoff = llm_retry_backoff_ms(&error, retry_config, attempt, &opts.provider);
                 crate::events::log_warn(
                     "llm",
                     &format!(
@@ -693,7 +704,9 @@ pub(crate) async fn observed_llm_call(
                         error, backoff, attempt, retry_config.retries
                     ),
                 );
-                tokio::time::sleep(std::time::Duration::from_millis(backoff)).await;
+                if backoff > 0 {
+                    tokio::time::sleep(std::time::Duration::from_millis(backoff)).await;
+                }
             }
         }
     }
@@ -714,6 +727,18 @@ mod retry_tests {
             message: msg.to_string(),
             category,
         }
+    }
+
+    #[test]
+    fn mock_provider_retry_backoff_is_zero() {
+        let config = LlmRetryConfig {
+            retries: 1,
+            backoff_ms: 2000,
+        };
+        assert_eq!(
+            llm_retry_backoff_ms(&thrown("HTTP 503"), &config, 1, "mock"),
+            0
+        );
     }
 
     #[test]

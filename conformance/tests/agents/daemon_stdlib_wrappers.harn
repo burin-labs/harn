@@ -2,7 +2,7 @@ fn wait_for_iterations(handle, min_iterations) {
   var attempts = 0
   var snap = daemon_snapshot(handle)
   while attempts < 200 && snap?.total_iterations ?? 0 < min_iterations {
-    sleep(10ms)
+    sleep(2ms)
     snap = daemon_snapshot(handle)
     attempts = attempts + 1
   }
@@ -23,7 +23,8 @@ pipeline test(task) {
     system: "You are a daemon reviewer.",
     provider: "mock",
     persist_path: root,
-    max_iterations: 8,
+    wake_interval_ms: 5,
+    max_iterations: 200,
   },
   )
   let first = daemon_snapshot(daemon)

@@ -42,8 +42,6 @@ pub(crate) use transport::vm_call_llm_api_with_body;
 
 use transport::vm_call_llm_api;
 
-// ─── Chat entry points ──────────────────────────────────────────────────
-
 /// Execute an LLM call. Always goes through the streaming path with a
 /// discarding receiver so all callers share one code path for status/error
 /// handling; non-streaming callers just drop the receiver.
@@ -130,6 +128,8 @@ async fn vm_call_llm_full_inner_request(
         )))));
     }
 
+    super::ensure_real_llm_allowed(&request.provider)?;
+
     let result = vm_call_llm_api(request, delta_tx).await;
 
     // Surface the error as a String so it can cross the off-thread await.
@@ -187,6 +187,8 @@ async fn vm_call_llm_full_inner_offthread(
             });
     }
 
+    super::ensure_real_llm_allowed(&request.provider).map_err(|err| err.to_string())?;
+
     let result = vm_call_llm_api(request, delta_tx)
         .await
         .map_err(|err| err.to_string());
@@ -229,6 +231,7 @@ async fn try_fallback_provider(
     let mut fb_request = request.clone();
     fb_request.provider = fallback_provider.clone();
     fb_request.api_key = fb_key;
+    super::ensure_real_llm_allowed(&fb_request.provider).map_err(|_| primary_message.clone())?;
     vm_call_llm_api(&fb_request, None)
         .await
         .map_err(|_| primary_message)
@@ -237,8 +240,46 @@ async fn try_fallback_provider(
 #[cfg(test)]
 mod tests {
     use super::options::base_opts;
-    use super::{vm_call_llm_full_streaming_offthread, LlmRequestPayload, ThinkingConfig};
+    use super::{
+        vm_call_llm_full, vm_call_llm_full_streaming_offthread, LlmRequestPayload, ThinkingConfig,
+    };
     use crate::llm::env_lock;
+
+    struct ScopedEnvVar {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl ScopedEnvVar {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            unsafe {
+                std::env::set_var(key, value);
+            }
+            Self { key, previous }
+        }
+
+        fn remove(key: &'static str) -> Self {
+            let previous = std::env::var(key).ok();
+            unsafe {
+                std::env::remove_var(key);
+            }
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for ScopedEnvVar {
+        fn drop(&mut self) {
+            match &self.previous {
+                Some(value) => unsafe { std::env::set_var(self.key, value) },
+                None => unsafe { std::env::remove_var(self.key) },
+            }
+        }
+    }
+
+    fn allow_stubbed_llm_transport() -> ScopedEnvVar {
+        ScopedEnvVar::remove(crate::llm::LLM_CALLS_DISABLED_ENV)
+    }
 
     #[test]
     fn openai_compat_prefill_appends_assistant_and_sets_chat_template_kwargs() {
@@ -349,6 +390,38 @@ mod tests {
         assert_eq!(body["temperature"].as_f64(), Some(0.2));
         assert_eq!(body["top_p"].as_f64(), Some(0.8));
         assert_eq!(body["top_k"].as_i64(), Some(40));
+    }
+
+    #[test]
+    fn disabled_llm_calls_reject_real_provider_before_transport() {
+        let _guard = env_lock().lock().expect("env lock");
+        let _disabled = ScopedEnvVar::set(crate::llm::LLM_CALLS_DISABLED_ENV, "1");
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+
+        let err = runtime
+            .block_on(vm_call_llm_full(&base_opts("local")))
+            .expect_err("local provider should be blocked before transport");
+        let message = err.to_string();
+        assert!(message.contains("HARN_LLM_CALLS_DISABLED"), "{message}");
+        assert!(message.contains("provider `local`"), "{message}");
+    }
+
+    #[test]
+    fn disabled_llm_calls_still_allow_mock_provider() {
+        let _guard = env_lock().lock().expect("env lock");
+        let _disabled = ScopedEnvVar::set(crate::llm::LLM_CALLS_DISABLED_ENV, "1");
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+
+        let result = runtime
+            .block_on(vm_call_llm_full(&base_opts("mock")))
+            .expect("mock provider remains available");
+        assert_eq!(result.provider, "mock");
     }
 
     #[test]
@@ -533,6 +606,7 @@ mod tests {
     #[test]
     fn offthread_streaming_completes_inside_localset() {
         let _guard = env_lock().lock().expect("env lock");
+        let _allow_llm_transport = allow_stubbed_llm_transport();
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .worker_threads(2)
@@ -590,6 +664,7 @@ mod tests {
     #[test]
     fn ollama_chat_applies_env_runtime_overrides() {
         let _guard = env_lock().lock().expect("env lock");
+        let _allow_llm_transport = allow_stubbed_llm_transport();
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .worker_threads(2)
@@ -712,6 +787,7 @@ mod tests {
         body: &'static str,
     ) -> String {
         let _guard = env_lock().lock().expect("env lock");
+        let _allow_llm_transport = allow_stubbed_llm_transport();
         let (addr, server) = spawn_openai_error_stub(status_line, extra_headers, body);
         let prev = std::env::var("LOCAL_LLM_BASE_URL").ok();
         unsafe {

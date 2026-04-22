@@ -4,12 +4,12 @@ pipeline test(task) {
   let suffix = uuid()
   let alpha_namespace = "alpha-${suffix}"
   let beta_namespace = "beta-${suffix}"
-  mkdir("project_deep_scan_ns/src")
-  write_file("project_deep_scan_ns/src/lib.rs", "pub fn ping() {}\n")
+  let root = path_join(temp_dir(), "project-deep-scan-ns-" + suffix)
+  mkdir(root)
+  write_file(path_join(root, "README.md"), "# repo\n")
   llm_mock({text: "{\"purpose\":\"alpha root\"}"})
-  llm_mock({text: "{\"purpose\":\"alpha src\"}"})
   let alpha = project_deep_scan(
-    "project_deep_scan_ns",
+    root,
     {
     namespace: alpha_namespace,
     tiers: ["ambient", "enriched"],
@@ -19,9 +19,8 @@ pipeline test(task) {
   },
   )
   llm_mock({text: "{\"purpose\":\"beta root\"}"})
-  llm_mock({text: "{\"purpose\":\"beta src\"}"})
   let beta = project_deep_scan(
-    "project_deep_scan_ns",
+    root,
     {
     namespace: beta_namespace,
     tiers: ["ambient", "enriched"],
@@ -31,7 +30,7 @@ pipeline test(task) {
   },
   )
   let alpha_cached = project_deep_scan(
-    "project_deep_scan_ns",
+    root,
     {
     namespace: alpha_namespace,
     tiers: ["ambient", "enriched"],
@@ -41,7 +40,7 @@ pipeline test(task) {
   },
   )
   let beta_cached = project_deep_scan(
-    "project_deep_scan_ns",
+    root,
     {
     namespace: beta_namespace,
     tiers: ["ambient", "enriched"],
@@ -50,11 +49,12 @@ pipeline test(task) {
     enrichment: {prompt: "Return valid JSON only.", provider: "mock", schema: {purpose: "string"}},
   },
   )
-  println(alpha["src"].enriched.purpose == "alpha src")
-  println(beta["src"].enriched.purpose == "beta src")
-  println(alpha_cached["src"].enriched.purpose == "alpha src")
-  println(beta_cached["src"].enriched.purpose == "beta src")
-  println(project_deep_scan_status(alpha_namespace, "project_deep_scan_ns").cache_hits == 2)
-  println(project_deep_scan_status(beta_namespace, "project_deep_scan_ns").cache_hits == 2)
-  println(len(llm_mock_calls()) == 4)
+  println(alpha["."].enriched.purpose == "alpha root")
+  println(beta["."].enriched.purpose == "beta root")
+  println(alpha_cached["."].enriched.purpose == "alpha root")
+  println(beta_cached["."].enriched.purpose == "beta root")
+  println(project_deep_scan_status(alpha_namespace, root).cache_hits == 1)
+  println(project_deep_scan_status(beta_namespace, root).cache_hits == 1)
+  println(len(llm_mock_calls()) == 2)
+  delete_file(root)
 }

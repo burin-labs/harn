@@ -396,6 +396,7 @@ fn __project_deep_scan_enrichment_options(namespace, entry, evidence, options) {
     temperature: options?.temperature ?? nil,
     budget_tokens: options?.budget_tokens_per_dir ?? nil,
     cache_key: "${namespace}/${entry.path}",
+    include_operator_meta: options?.include_operator_meta ?? false,
   }
 }
 
