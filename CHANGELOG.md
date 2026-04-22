@@ -7,6 +7,87 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
+## v0.7.31
+
+### Added
+
+- **`jwt_sign` crypto builtin (#454).** New
+  `jwt_sign(alg, claims, private_key)` stdlib builtin produces compact
+  JWT/JWS tokens signed with ES256 (P-256 PEM) or RS256 (RSA PEM) keys,
+  including parser/LSP builtin metadata, spec text, highlight keyword
+  generation, and conformance fixtures.
+- **Orchestrator analytics stats (#304, #455).** `harn orchestrator
+  stats` rolls durable trigger, predicate, DLQ, handler latency, and
+  LLM cost/token telemetry into top-N summaries and persists each
+  snapshot back to the `orchestrator.analytics.stats` EventLog topic
+  for dashboards and audits. LLM transcript records carried inside
+  trigger handlers are enriched with provider, estimated cost, and
+  trigger/tenant context.
+- **Generic stream trigger ingress (#280, #456).** A built-in generic
+  `stream` connector normalizes unsigned HTTP ingress into stream
+  trigger events, and the provider catalog advertises stream ingress
+  for Kafka, NATS, Pulsar, Postgres CDC, email, and WebSocket
+  providers. Native long-running broker/email consumer loops remain
+  future work via provider-specific connectors or Harn connector
+  overrides.
+- **`harn-serve` A2A adapter (#316, #457).** `harn serve a2a` now
+  runs on the shared `DispatchCore` with agent-card skill
+  advertisement, task send/send-and-wait, SSE streaming and
+  resubscribe, push callbacks, cancellation, shared HTTP auth, and
+  optional signed agent cards. The old CLI-local A2A server is
+  removed.
+- **Guided connector OAuth CLI (#176, #458).** A new `harn connect`
+  surface captures GitHub App installation metadata and optional
+  webhook secret material, runs OAuth authorization-code setup with
+  PKCE and loopback callbacks for Slack, Linear, and Notion, and
+  supports `harn connect generic <provider> <url>` with OAuth
+  protected-resource / authorization-server discovery, dynamic client
+  registration, and resource indicators. `--list`, `--refresh`, and
+  `--revoke` manage keyring-backed connector credentials.
+- **Cost-aware LLM routing (#278, #459).** `llm_call` gains
+  `route_policy` and `fallback_chain` handling, with `manual`,
+  `always(id)`, `cheapest_over_quality(t)`, and
+  `fastest_over_quality(t)` policy forms. Route decisions are recorded
+  as first-class transcript events. Provider catalog metadata carries
+  adapter cost/latency fields and OpenAI-compatible provider entries
+  for vLLM, TGI, Groq, DeepSeek, Fireworks, DashScope, HuggingFace,
+  local, and Ollama, plus existing hosted providers. The portal gains
+  a Costs page and a cost report endpoint.
+- **Package dependency management v1 (#469, #475).** Transitive Harn
+  package dependencies are flattened from installed package manifests
+  into the root `harn.lock` and `.harn/packages/`. Git package
+  dependencies now require `rev` or `branch`, including
+  `harn add github.com/...@ref`, with clear errors on unpinned Git
+  dependencies. Transitive `path` dependencies from Git-installed
+  packages are rejected so publishable packages do not depend on
+  sibling checkouts.
+- **Connector `NormalizeResult` v1 (#464, #476).** A
+  `ConnectorNormalizeResult` contract lets connector `normalize`
+  exports return `event`, `batch`, `immediate_response`, or `reject`
+  outcomes. The orchestrator listener enqueues zero, one, or many
+  normalized events and returns connector-specified HTTP responses for
+  ack-first or reject paths. The legacy direct event dict shape is
+  preserved with a transition warning.
+- **Connector `poll_tick` scheduler (#465, #481).** Orchestrator now
+  drives Harn connector poll bindings via a `poll_tick` export,
+  persists connector cursor/state, and routes returned events through
+  inbox dedupe and envelope handling. Poll binding config knobs and
+  the `poll_tick` export contract are documented.
+- **Runtime context introspection (#482, #485).** Native
+  `runtime_context()` / `task_current()` builtins expose logical Harn
+  task identity and trigger/workflow/worker/agent/trace fields,
+  cancellation state, and debug metadata. Parent/root/task group
+  context propagates deterministically through `spawn`, `parallel`,
+  `parallel each`, and `parallel settle`, including task-local context
+  value snapshot inheritance. Conformance covers spawn/parallel lineage
+  and context-local isolation.
+- **Bounded orchestrator topic pumps (#478, #486).** Per-topic
+  dispatch is now bounded by `--pump-max-outstanding` and
+  `[orchestrator] pumps.max_outstanding`. The inbox pump stops reading
+  and acking event-log work while admitted dispatch tasks are at
+  capacity. Pump lifecycle events plus backlog, outstanding, and
+  admission-delay Prometheus metrics are exported.
+
 ## v0.7.30
 
 ### Added
@@ -22,11 +103,6 @@ granular archaeology.
 - **A2A push notification connector (#436).** Harn can now receive A2A
   push completion callbacks through the trigger inbox, with replay
   protections and conformance coverage for accepted and rejected flows.
-- **`harn-serve` A2A adapter (#316).** `harn serve a2a` now uses the
-  shared dispatch core for exported `pub fn` entrypoints, with agent-card
-  skill advertisement, task send/send-and-wait, SSE streaming and
-  resubscribe, push callbacks, cancellation, shared HTTP auth, and
-  optional signed agent cards.
 - **OpenTrustGraph chain support (#420).** Added trust graph chain
   primitives, schemas, fixtures, stdlib APIs, CLI plumbing, and docs for
   recording and validating provenance-linked decisions.
@@ -37,10 +113,6 @@ granular archaeology.
   portal and orchestrator inspection paths now expose richer run,
   launch, trust, and observability data, including a starter dashboard
   for operators.
-- **Orchestrator analytics stats (#304).** `harn orchestrator stats`
-  now rolls durable trigger, predicate, DLQ, handler latency, and
-  LLM cost/token telemetry into top-N summaries and persists each
-  snapshot back to the EventLog for dashboards and audits.
 
 ### Changed
 
