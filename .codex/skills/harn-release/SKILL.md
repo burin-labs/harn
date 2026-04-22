@@ -26,8 +26,11 @@ intentionally does not automate: analyzing pending local work and producing
 the "Prepare vX.Y.Z release" PR. Once that PR lands through the merge queue,
 `release_ship.sh --bump patch` handles audit, dry-run publish, bump-branch
 creation, version-bump commit, branch push, and PR creation. After the bump PR
-lands through the merge queue, `release_ship.sh --finalize` tags `main`,
-publishes crates, renders notes, and creates/updates the GitHub release.
+lands through the merge queue, the `Finalize Release` GitHub Action
+(`.github/workflows/finalize-release.yml`) runs `release_ship.sh --finalize`
+automatically, which tags `main`, publishes crates, renders notes, and
+creates/updates the GitHub release. Local `release_ship.sh --finalize` remains
+the recovery path when the workflow fails.
 
 ## Merge-queue mode
 
@@ -39,14 +42,20 @@ merge-queue-reviewed PRs:
 2. `Bump version to X.Y.Z` — `Cargo.toml` + `Cargo.lock` only, opened by
    `./scripts/release_ship.sh --bump patch`.
 
-Only after the bump PR lands should you run `./scripts/release_ship.sh
---finalize` from an up-to-date `main`. Finalize creates/pushes the tag before
-`cargo publish` so release-binary workflows and downstream fetchers can still
-start in parallel with crates.io publication.
+Once the bump PR lands, the `Finalize Release` GitHub Action runs
+`./scripts/release_ship.sh --finalize` against updated `main` automatically.
+It fires on `push` to `main` when the head commit starts with
+the prefix `Bump version to` (which is exactly what `release_ship.sh --bump patch`
+writes), and also exposes `workflow_dispatch` for manual re-runs. Finalize
+creates/pushes the tag before `cargo publish` so release-binary workflows
+and downstream fetchers can still start in parallel with crates.io
+publication. Only run `--finalize` locally when the workflow fails and a
+human has to recover — the script is idempotent once the tag exists at HEAD.
 
 Both script phases run the release audit and stop on the first failed gate.
-Check the exit code when they return; if non-zero, the step names in stdout
-tell you which gate tripped.
+Check the exit code when the bump script returns locally; for the finalize
+workflow, check the job status on the `Finalize Release` Actions page.
+If non-zero, the step names in stdout tell you which gate tripped.
 
 Typical wall-clock: ~6–10 min cold, ~2–4 min warm (sccache hot). Do not
 babysit it. Start the command and work on other things. Failure modes,
@@ -59,7 +68,10 @@ roughly in frequency order:
 - bump PR creation failure → the release bump branch has usually already been
   pushed; create the PR manually from `release/vX.Y.Z` into `main`.
 - `cargo publish` rate-limit / transient network during finalize → re-run
-  `release_ship.sh --finalize`; it is idempotent once the tag exists at HEAD.
+  the `Finalize Release` workflow via
+  `gh workflow run finalize-release.yml --ref main` (or run
+  `./scripts/release_ship.sh --finalize` locally); both are idempotent once
+  the tag exists at HEAD.
 - `gh release create` failure during finalize → the release is already on
   crates.io and tagged; finish manually with
   `gh release create <tag> --title <tag> --notes-file <rendered>`.
@@ -128,10 +140,13 @@ installs the binaries directly. Release batching exists to control the
    run `./scripts/release_ship.sh --bump patch` (or `minor`/`major`). The
    script runs audit, dry-run publish, creates `release/vX.Y.Z`, commits the
    Cargo version bump, pushes that branch, and opens the bump PR.
-10. After the bump PR lands through the merge queue, sync `main` and run
-    `./scripts/release_ship.sh --finalize`. The script runs audit, dry-run
-    publish, creates/pushes the tag, publishes to crates.io, renders notes,
-    and creates/updates the GitHub release.
+10. After the bump PR lands through the merge queue, the `Finalize Release`
+    GitHub Action runs `./scripts/release_ship.sh --finalize` automatically
+    against updated `main`. The workflow runs audit, dry-run publish,
+    creates/pushes the tag, publishes to crates.io, renders notes, and
+    creates/updates the GitHub release. Watch the run on the Actions page;
+    only run `--finalize` locally as a recovery step if the workflow
+    fails (it is idempotent once the tag exists at HEAD).
 11. For an all-in-one dry run that stops before any destructive action, use
     `./scripts/release_gate.sh full --bump patch --dry-run`.
 12. Only fall back to the piecewise `release_gate.sh prepare` / `publish` /
@@ -178,6 +193,14 @@ installs the binaries directly. Release batching exists to control the
   fetchers (e.g. `burin-code`'s `fetch-harn`) can start working in parallel
   with crates.io publication. The GitHub release body is created last so it
   reflects the final crates.io + git state.
+- The `Finalize Release` workflow
+  (`.github/workflows/finalize-release.yml`) runs `--finalize` inside
+  GitHub Actions whenever a `Bump version to X.Y.Z` commit lands on
+  `main`. It authenticates to crates.io with repo secret
+  `CARGO_REGISTRY_TOKEN` and to GitHub with the default `GITHUB_TOKEN`.
+  `workflow_dispatch` is the manual re-trigger. Running `--finalize`
+  locally is still supported for recovery but is not the default
+  post-bump step.
 - A real release has exactly two release commits on `main`, both landed via
   PR/merge queue: `Prepare vX.Y.Z release` (code + docs + `CHANGELOG.md`)
   followed by `Bump version to X.Y.Z` (Cargo.toml + Cargo.lock only).

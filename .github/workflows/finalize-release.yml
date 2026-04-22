@@ -1,0 +1,77 @@
+name: Finalize Release
+
+# Fires when a "Bump version to X.Y.Z" commit lands on main through the merge
+# queue. Runs ./scripts/release_ship.sh --finalize, which audits, dry-run
+# publishes, tags, publishes to crates.io, and creates/updates the GitHub
+# release. The tag push cascades to .github/workflows/release.yml for binary
+# artifacts.
+#
+# workflow_dispatch is kept as a manual recovery path — if this workflow
+# fails mid-run (e.g. crates.io rate limit), re-run it; release_ship.sh is
+# idempotent once the tag exists at HEAD.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: finalize-release
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  SCCACHE_GHA_ENABLED: "true"
+
+jobs:
+  finalize:
+    name: Finalize release
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      startsWith(github.event.head_commit.message, 'Bump version to ')
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          ref: main
+
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          components: clippy, rustfmt
+
+      - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+
+      - uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1 # v2.9.1
+        with:
+          shared-key: workspace
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@5f57d6cb7cd20b14a8a27f522884c4bc8a187458 # v2.75.19
+        continue-on-error: true
+        with:
+          tool: nextest@0.9.133
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: crates/harn-cli/portal/package-lock.json
+
+      - name: Install portal dependencies
+        working-directory: crates/harn-cli/portal
+        run: npm ci
+
+      - name: Configure git identity
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Finalize release
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./scripts/release_ship.sh --finalize
