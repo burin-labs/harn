@@ -34,6 +34,7 @@ pub mod hmac;
 pub mod linear;
 pub mod notion;
 pub mod slack;
+pub mod stream;
 #[cfg(test)]
 pub(crate) mod test_util;
 pub mod webhook;
@@ -58,6 +59,7 @@ pub use notion::{
     load_pending_webhook_handshakes, NotionConnector, PersistedNotionWebhookHandshake,
 };
 pub use slack::SlackConnector;
+pub use stream::StreamConnector;
 use webhook::WebhookProviderProfile;
 pub use webhook::{GenericWebhookConnector, WebhookSignatureVariant};
 
@@ -1323,6 +1325,10 @@ fn default_connector_for_provider(provider: &ProviderMetadata) -> Box<dyn Connec
             default_signature_variant,
         } => match connector.as_str() {
             "cron" => Box::new(CronConnector::new()),
+            "stream" => Box::new(StreamConnector::new(
+                ProviderId::from(provider.provider.clone()),
+                provider.schema_name.clone(),
+            )),
             "webhook" => {
                 let variant = WebhookSignatureVariant::parse(default_signature_variant.as_deref())
                     .expect("catalog webhook signature variant must be valid");

@@ -57,8 +57,8 @@ pub use connectors::{
     Connector, ConnectorClient, ConnectorCtx, ConnectorError, ConnectorMetricsSnapshot,
     ConnectorRegistry, GenericWebhookConnector, GitHubConnector, LinearConnector, MetricsRegistry,
     NotionConnector, PersistedNotionWebhookHandshake, PostNormalizeOutcome, ProviderPayloadSchema,
-    RateLimitConfig, RateLimiterFactory, RawInbound, SlackConnector, TriggerBinding, TriggerKind,
-    TriggerRegistry, WebhookSignatureVariant,
+    RateLimitConfig, RateLimiterFactory, RawInbound, SlackConnector, StreamConnector,
+    TriggerBinding, TriggerKind, TriggerRegistry, WebhookSignatureVariant,
 };
 pub use http::{register_http_builtins, reset_http_state};
 pub use llm::register_llm_builtins;

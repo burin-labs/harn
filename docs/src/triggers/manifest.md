@@ -165,9 +165,10 @@ catalog currently recognizes these STREAM-01 providers:
 - `websocket`
 
 Stream providers are cataloged with a shared `StreamEventPayload` typed payload.
-Concrete broker/email/WebSocket connector loops are represented as placeholder
-connectors until a deployment supplies a Harn connector override or a future
-native connector lands.
+The built-in `stream` connector normalizes unsigned HTTP ingress for stream
+triggers that declare `path = "/..."`. Native long-running broker/email
+consumer loops are still supplied through Harn connector overrides until
+provider-specific Rust consumers land.
 
 Windowing is declared with `window = { ... }`:
 
