@@ -1,5 +1,7 @@
 #![cfg(unix)]
 
+mod support;
+
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::{BufRead, BufReader};
@@ -117,12 +119,15 @@ fn wait_for_listener_url(child: &mut Child, rx: &Receiver<String>) -> String {
     while Instant::now() < deadline {
         match rx.recv_timeout(Duration::from_millis(25)) {
             Ok(line) if line.contains(STARTUP_NEEDLE) => {
-                return line
+                let url = line
                     .split(STARTUP_NEEDLE)
                     .nth(1)
                     .expect("startup URL suffix")
                     .trim()
                     .to_string();
+                support::wait_for_readyz(child, &url, PROCESS_FAIL_FAST_TIMEOUT)
+                    .unwrap_or_else(|error| panic!("{error}"));
+                return url;
             }
             Ok(_) => continue,
             Err(mpsc::RecvTimeoutError::Timeout) => {
@@ -135,6 +140,8 @@ fn wait_for_listener_url(child: &mut Child, rx: &Receiver<String>) -> String {
             }
         }
     }
+    let _ = child.kill();
+    let _ = child.wait();
     panic!("timed out waiting for listener URL");
 }
 
@@ -409,6 +416,7 @@ fn wait_for_sqlite_event_count(state_dir: &Path, topic_name: &str, kind: &str, e
 
 #[test]
 fn orchestrator_serve_starts_and_shuts_down_cleanly() {
+    let _lock = support::lock_orchestrator_process_tests();
     let temp = TempDir::new().unwrap();
     write_file(
         temp.path(),
@@ -469,6 +477,7 @@ pub fn on_issue(event: TriggerEvent) {
 // terminal `dispatch_succeeded` lifecycle event instead of a shutdown failure.
 #[tokio::test(flavor = "multi_thread")]
 async fn graceful_shutdown_drains_in_flight_dispatch_and_emits_lifecycle_events() {
+    let _lock = support::lock_orchestrator_process_tests();
     let temp = TempDir::new().unwrap();
     let handler_release_path = temp.path().join("release-handler");
     write_file(
@@ -556,6 +565,7 @@ handler = "handlers::on_task"
 
 #[tokio::test(flavor = "multi_thread")]
 async fn graceful_shutdown_continues_after_pump_error_and_persists_stopped_state() {
+    let _lock = support::lock_orchestrator_process_tests();
     let temp = TempDir::new().unwrap();
     write_file(
         temp.path(),
@@ -632,6 +642,7 @@ pub fn on_task(event: TriggerEvent) -> string {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn graceful_shutdown_waits_for_spawned_inbox_dispatch_tasks() {
+    let _lock = support::lock_orchestrator_process_tests();
     let temp = TempDir::new().unwrap();
     let inbox_release_file = temp.path().join("release-inbox-dispatch");
     let inbox_release_value = inbox_release_file.to_string_lossy().into_owned();
@@ -725,6 +736,7 @@ pub fn on_task(event: TriggerEvent) -> string {
 
 #[test]
 fn orchestrator_queue_soft_migrates_legacy_inbox_topics() {
+    let _lock = support::lock_orchestrator_process_tests();
     let temp = TempDir::new().unwrap();
     write_file(
         temp.path(),
@@ -801,6 +813,7 @@ pub fn on_event(event: TriggerEvent) {
 // next orchestrator run replay the remaining backlog to completion.
 #[tokio::test(flavor = "multi_thread")]
 async fn bounded_pump_drain_truncates_and_replays_remaining_backlog_after_restart() {
+    let _lock = support::lock_orchestrator_process_tests();
     const TOTAL_EVENTS: usize = 60;
 
     let temp = TempDir::new().unwrap();
@@ -926,6 +939,7 @@ pub fn on_task(event: TriggerEvent) -> string {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn restart_surfaces_stranded_envelopes_and_recover_replays_them_explicitly() {
+    let _lock = support::lock_orchestrator_process_tests();
     let temp = TempDir::new().unwrap();
     write_file(
         temp.path(),

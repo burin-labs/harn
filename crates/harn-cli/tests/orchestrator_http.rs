@@ -6,12 +6,14 @@
 // is overly strict for this use case, so allow it at the module level.
 #![allow(clippy::await_holding_lock)]
 
+mod support;
+
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{self, Receiver};
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -40,13 +42,8 @@ const EVENT_FAIL_FAST_TIMEOUT: Duration = Duration::from_secs(2);
 
 type HmacSha256 = Hmac<Sha256>;
 
-static ORCHESTRATOR_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-
-fn lock_orchestrator_tests() -> MutexGuard<'static, ()> {
-    ORCHESTRATOR_TEST_LOCK
-        .get_or_init(|| Mutex::new(()))
-        .lock()
-        .unwrap()
+fn lock_orchestrator_tests() -> support::OrchestratorProcessTestLock {
+    support::lock_orchestrator_process_tests()
 }
 
 fn write_file(dir: &Path, relative: &str, contents: &str) {
@@ -401,6 +398,11 @@ impl OrchestratorProcess {
             match self.rx.recv_timeout(Duration::from_millis(25)) {
                 Ok(line) if line.contains(STARTUP_NEEDLE) => {
                     if let Some(url) = listener_url_from_line(&line) {
+                        support::wait_for_readyz(&mut self.child, &url, PROCESS_FAIL_FAST_TIMEOUT)
+                            .unwrap_or_else(|error| {
+                                let stderr = self.shutdown_and_join_stderr();
+                                panic!("{error}\nstderr={stderr}");
+                            });
                         return url;
                     }
                 }
