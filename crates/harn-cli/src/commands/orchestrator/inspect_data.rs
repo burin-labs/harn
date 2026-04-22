@@ -16,10 +16,25 @@ const GLOBAL_FLOW_KEY: &str = "_global";
 #[derive(Clone, Debug, Serialize)]
 pub(crate) struct OrchestratorInspectData {
     pub triggers: Vec<TriggerInspectRecord>,
+    pub budget: OrchestratorBudgetInspect,
     pub connectors: Vec<String>,
     pub activations: Vec<ConnectorActivationSnapshot>,
     pub snapshot: Option<PersistedStateSnapshot>,
     pub recent_dispatches: Vec<RecentDispatchRecord>,
+}
+
+#[derive(Clone, Debug, Default, Serialize)]
+pub(crate) struct OrchestratorBudgetInspect {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub daily_limit_usd: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hourly_limit_usd: Option<f64>,
+    pub used_today_usd: f64,
+    pub used_hour_usd: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remaining_today_usd: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remaining_hour_usd: Option<f64>,
 }
 
 #[derive(Clone, Debug, Default, Serialize)]
@@ -120,8 +135,17 @@ pub(crate) struct PriorityInspect {
 
 #[derive(Clone, Debug, Default, Serialize)]
 pub(crate) struct CostBudgetInspect {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub daily_limit_usd: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hourly_limit_usd: Option<f64>,
     pub limit_usd: f64,
     pub used_usd: f64,
+    pub used_hour_usd: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remaining_today_usd: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remaining_hour_usd: Option<f64>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -195,11 +219,11 @@ pub(crate) async fn collect_orchestrator_inspect_data(
     }
 
     let today_start = utc_day_start();
+    let hour_start = utc_hour_start();
     let mut cost_by_binding_key = BTreeMap::<String, f64>::new();
+    let mut hourly_cost_by_binding_key = BTreeMap::<String, f64>::new();
     for (_, event) in lifecycle {
-        if event.kind != "predicate.evaluated"
-            || event.occurred_at_ms < today_start.unix_timestamp() * 1000
-        {
+        if event.kind != "predicate.evaluated" {
             continue;
         }
         let Some(binding_key) = event.headers.get("binding_key").cloned() else {
@@ -211,7 +235,12 @@ pub(crate) async fn collect_orchestrator_inspect_data(
             .and_then(|value| value.as_f64())
             .unwrap_or_default();
         if cost > 0.0 {
-            *cost_by_binding_key.entry(binding_key).or_default() += cost;
+            if event.occurred_at_ms >= today_start.unix_timestamp() * 1000 {
+                *cost_by_binding_key.entry(binding_key.clone()).or_default() += cost;
+            }
+            if event.occurred_at_ms >= hour_start.unix_timestamp() * 1000 {
+                *hourly_cost_by_binding_key.entry(binding_key).or_default() += cost;
+            }
         }
     }
 
@@ -246,6 +275,7 @@ pub(crate) async fn collect_orchestrator_inspect_data(
             &ingested_events,
             &skipped,
             &cost_by_binding_key,
+            &hourly_cost_by_binding_key,
         )
         .await?;
 
@@ -265,6 +295,7 @@ pub(crate) async fn collect_orchestrator_inspect_data(
 
     Ok(OrchestratorInspectData {
         triggers,
+        budget: orchestrator_budget_inspect(),
         connectors: snapshot
             .as_ref()
             .map(|state| state.connectors.clone())
@@ -349,6 +380,7 @@ async fn build_flow_control_inspect(
     ingested_events: &[harn_vm::TriggerEvent],
     skipped: &BTreeMap<(String, String), SkipDisposition>,
     cost_by_binding_key: &BTreeMap<String, f64>,
+    hourly_cost_by_binding_key: &BTreeMap<String, f64>,
 ) -> Result<TriggerFlowControlInspect, String> {
     let flow = &trigger.flow_control;
     let mut inspect = TriggerFlowControlInspect::default();
@@ -417,15 +449,34 @@ async fn build_flow_control_inspect(
             order: priority.order.clone(),
         });
     }
-    if let (Some(binding_key), Some(limit_usd)) =
-        (binding_key, trigger.config.budget.daily_cost_usd)
-    {
+    if let Some(binding_key) = binding_key.filter(|_| {
+        trigger.config.budget.daily_cost_usd.is_some()
+            || trigger.config.budget.hourly_cost_usd.is_some()
+    }) {
+        let used_today = cost_by_binding_key
+            .get(binding_key)
+            .copied()
+            .unwrap_or_default();
+        let used_hour = hourly_cost_by_binding_key
+            .get(binding_key)
+            .copied()
+            .unwrap_or_default();
         inspect.cost_budget = Some(CostBudgetInspect {
-            limit_usd,
-            used_usd: cost_by_binding_key
-                .get(binding_key)
-                .copied()
-                .unwrap_or_default(),
+            daily_limit_usd: trigger.config.budget.daily_cost_usd,
+            hourly_limit_usd: trigger.config.budget.hourly_cost_usd,
+            limit_usd: trigger.config.budget.daily_cost_usd.unwrap_or_default(),
+            used_usd: used_today,
+            used_hour_usd: used_hour,
+            remaining_today_usd: trigger
+                .config
+                .budget
+                .daily_cost_usd
+                .map(|limit| (limit - used_today).max(0.0)),
+            remaining_hour_usd: trigger
+                .config
+                .budget
+                .hourly_cost_usd
+                .map(|limit| (limit - used_hour).max(0.0)),
         });
     }
 
@@ -717,6 +768,34 @@ fn utc_day_start() -> OffsetDateTime {
         .and_then(|value| value.replace_microsecond(0))
         .and_then(|value| value.replace_nanosecond(0))
         .unwrap_or(now)
+}
+
+fn utc_hour_start() -> OffsetDateTime {
+    let now = OffsetDateTime::now_utc();
+    now.replace_minute(0)
+        .and_then(|value| value.replace_second(0))
+        .and_then(|value| value.replace_millisecond(0))
+        .and_then(|value| value.replace_microsecond(0))
+        .and_then(|value| value.replace_nanosecond(0))
+        .unwrap_or(now)
+}
+
+fn orchestrator_budget_inspect() -> OrchestratorBudgetInspect {
+    let snapshot = harn_vm::snapshot_orchestrator_budget();
+    let used_today = harn_vm::micros_to_usd(snapshot.cost_today_usd_micros);
+    let used_hour = harn_vm::micros_to_usd(snapshot.cost_hour_usd_micros);
+    OrchestratorBudgetInspect {
+        daily_limit_usd: snapshot.daily_cost_usd,
+        hourly_limit_usd: snapshot.hourly_cost_usd,
+        used_today_usd: used_today,
+        used_hour_usd: used_hour,
+        remaining_today_usd: snapshot
+            .daily_cost_usd
+            .map(|limit| (limit - used_today).max(0.0)),
+        remaining_hour_usd: snapshot
+            .hourly_cost_usd
+            .map(|limit| (limit - used_hour).max(0.0)),
+    }
 }
 
 #[cfg(test)]

@@ -1381,6 +1381,8 @@ mod tests {
             dedupe_retention_days: harn_vm::DEFAULT_INBOX_RETENTION_DAYS,
             filter: None,
             daily_cost_usd: None,
+            hourly_cost_usd: None,
+            on_budget_exhausted: harn_vm::TriggerBudgetExhaustionStrategy::False,
             max_concurrent: None,
             flow_control: harn_vm::TriggerFlowControlConfig::default(),
             manifest_path: None,

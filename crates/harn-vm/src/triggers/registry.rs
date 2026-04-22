@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -71,6 +71,64 @@ impl TriggerBindingSource {
         match self {
             Self::Manifest => "manifest",
             Self::Dynamic => "dynamic",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TriggerBudgetExhaustionStrategy {
+    #[default]
+    False,
+    RetryLater,
+    Fail,
+    Warn,
+}
+
+impl TriggerBudgetExhaustionStrategy {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::False => "false",
+            Self::RetryLater => "retry_later",
+            Self::Fail => "fail",
+            Self::Warn => "warn",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct OrchestratorBudgetConfig {
+    pub daily_cost_usd: Option<f64>,
+    pub hourly_cost_usd: Option<f64>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct OrchestratorBudgetSnapshot {
+    pub daily_cost_usd: Option<f64>,
+    pub hourly_cost_usd: Option<f64>,
+    pub cost_today_usd_micros: u64,
+    pub cost_hour_usd_micros: u64,
+    pub day_utc: i32,
+    pub hour_utc: i64,
+}
+
+#[derive(Debug)]
+struct OrchestratorBudgetState {
+    config: OrchestratorBudgetConfig,
+    day_utc: i32,
+    hour_utc: i64,
+    cost_today_usd_micros: u64,
+    cost_hour_usd_micros: u64,
+}
+
+impl Default for OrchestratorBudgetState {
+    fn default() -> Self {
+        Self {
+            config: OrchestratorBudgetConfig::default(),
+            day_utc: utc_day_key(),
+            hour_utc: utc_hour_key(),
+            cost_today_usd_micros: 0,
+            cost_hour_usd_micros: 0,
         }
     }
 }
@@ -148,6 +206,8 @@ pub struct TriggerBindingSpec {
     pub dedupe_retention_days: u32,
     pub filter: Option<String>,
     pub daily_cost_usd: Option<f64>,
+    pub hourly_cost_usd: Option<f64>,
+    pub on_budget_exhausted: TriggerBudgetExhaustionStrategy,
     pub max_concurrent: Option<u32>,
     pub flow_control: TriggerFlowControlConfig,
     pub manifest_path: Option<PathBuf>,
@@ -164,6 +224,7 @@ pub struct TriggerMetrics {
     pub last_received_ms: Mutex<Option<i64>>,
     pub cost_total_usd_micros: AtomicU64,
     pub cost_today_usd_micros: AtomicU64,
+    pub cost_hour_usd_micros: AtomicU64,
 }
 
 impl Default for TriggerMetrics {
@@ -176,6 +237,7 @@ impl Default for TriggerMetrics {
             last_received_ms: Mutex::new(None),
             cost_total_usd_micros: AtomicU64::new(0),
             cost_today_usd_micros: AtomicU64::new(0),
+            cost_hour_usd_micros: AtomicU64::new(0),
         }
     }
 }
@@ -190,6 +252,7 @@ pub struct TriggerMetricsSnapshot {
     pub last_received_ms: Option<i64>,
     pub cost_total_usd_micros: u64,
     pub cost_today_usd_micros: u64,
+    pub cost_hour_usd_micros: u64,
 }
 
 pub struct TriggerBinding {
@@ -209,6 +272,8 @@ pub struct TriggerBinding {
     pub dedupe_retention_days: u32,
     pub filter: Option<String>,
     pub daily_cost_usd: Option<f64>,
+    pub hourly_cost_usd: Option<f64>,
+    pub on_budget_exhausted: TriggerBudgetExhaustionStrategy,
     pub max_concurrent: Option<u32>,
     pub flow_control: TriggerFlowControlConfig,
     pub manifest_path: Option<PathBuf>,
@@ -224,8 +289,10 @@ pub struct TriggerBinding {
 #[derive(Clone, Debug, Default)]
 pub struct TriggerPredicateState {
     pub budget_day_utc: Option<i32>,
+    pub budget_hour_utc: Option<i64>,
     pub consecutive_failures: u32,
     pub breaker_open_until_ms: Option<i64>,
+    pub recent_cost_usd_micros: VecDeque<u64>,
 }
 
 impl std::fmt::Debug for TriggerBinding {
@@ -254,6 +321,9 @@ impl TriggerBinding {
             handler_kind: self.handler.kind().to_string(),
             state: self.state_snapshot(),
             metrics: self.metrics_snapshot(),
+            daily_cost_usd: self.daily_cost_usd,
+            hourly_cost_usd: self.hourly_cost_usd,
+            on_budget_exhausted: self.on_budget_exhausted,
         }
     }
 
@@ -275,6 +345,8 @@ impl TriggerBinding {
             dedupe_retention_days: spec.dedupe_retention_days,
             filter: spec.filter,
             daily_cost_usd: spec.daily_cost_usd,
+            hourly_cost_usd: spec.hourly_cost_usd,
+            on_budget_exhausted: spec.on_budget_exhausted,
             max_concurrent: spec.max_concurrent,
             flow_control: spec.flow_control,
             manifest_path: spec.manifest_path,
@@ -310,11 +382,12 @@ impl TriggerBinding {
                 .expect("trigger metrics poisoned"),
             cost_total_usd_micros: self.metrics.cost_total_usd_micros.load(Ordering::Relaxed),
             cost_today_usd_micros: self.metrics.cost_today_usd_micros.load(Ordering::Relaxed),
+            cost_hour_usd_micros: self.metrics.cost_hour_usd_micros.load(Ordering::Relaxed),
         }
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TriggerBindingSnapshot {
     pub id: String,
     pub version: u32,
@@ -325,6 +398,9 @@ pub struct TriggerBindingSnapshot {
     pub handler_kind: String,
     pub state: TriggerState,
     pub metrics: TriggerMetricsSnapshot,
+    pub daily_cost_usd: Option<f64>,
+    pub hourly_cost_usd: Option<f64>,
+    pub on_budget_exhausted: TriggerBudgetExhaustionStrategy,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -370,9 +446,15 @@ thread_local! {
     static TRIGGER_REGISTRY: RefCell<TriggerRegistry> = RefCell::new(TriggerRegistry::default());
 }
 
+thread_local! {
+    static ORCHESTRATOR_BUDGET: RefCell<OrchestratorBudgetState> =
+        RefCell::new(OrchestratorBudgetState::default());
+}
+
 const TERMINATED_VERSION_RETENTION_LIMIT: usize = 2;
 
 const TRIGGERS_LIFECYCLE_TOPIC: &str = "triggers.lifecycle";
+const PREDICATE_COST_WINDOW: usize = 100;
 
 #[derive(Clone, Debug, Deserialize)]
 struct LifecycleStateTransitionRecord {
@@ -405,6 +487,189 @@ pub fn clear_trigger_registry() {
     TRIGGER_REGISTRY.with(|slot| {
         *slot.borrow_mut() = TriggerRegistry::default();
     });
+    clear_orchestrator_budget();
+}
+
+pub fn install_orchestrator_budget(config: OrchestratorBudgetConfig) {
+    ORCHESTRATOR_BUDGET.with(|slot| {
+        let mut state = slot.borrow_mut();
+        rollover_orchestrator_budget(&mut state);
+        state.config = config;
+    });
+}
+
+pub fn clear_orchestrator_budget() {
+    ORCHESTRATOR_BUDGET.with(|slot| {
+        *slot.borrow_mut() = OrchestratorBudgetState::default();
+    });
+}
+
+pub fn snapshot_orchestrator_budget() -> OrchestratorBudgetSnapshot {
+    ORCHESTRATOR_BUDGET.with(|slot| {
+        let mut state = slot.borrow_mut();
+        rollover_orchestrator_budget(&mut state);
+        OrchestratorBudgetSnapshot {
+            daily_cost_usd: state.config.daily_cost_usd,
+            hourly_cost_usd: state.config.hourly_cost_usd,
+            cost_today_usd_micros: state.cost_today_usd_micros,
+            cost_hour_usd_micros: state.cost_hour_usd_micros,
+            day_utc: state.day_utc,
+            hour_utc: state.hour_utc,
+        }
+    })
+}
+
+pub fn note_orchestrator_budget_cost(cost_usd_micros: u64) {
+    if cost_usd_micros == 0 {
+        return;
+    }
+    ORCHESTRATOR_BUDGET.with(|slot| {
+        let mut state = slot.borrow_mut();
+        rollover_orchestrator_budget(&mut state);
+        state.cost_today_usd_micros = state.cost_today_usd_micros.saturating_add(cost_usd_micros);
+        state.cost_hour_usd_micros = state.cost_hour_usd_micros.saturating_add(cost_usd_micros);
+    });
+}
+
+pub fn orchestrator_budget_would_exceed(expected_cost_usd_micros: u64) -> Option<&'static str> {
+    ORCHESTRATOR_BUDGET.with(|slot| {
+        let mut state = slot.borrow_mut();
+        rollover_orchestrator_budget(&mut state);
+        if state.config.hourly_cost_usd.is_some_and(|limit| {
+            micros_to_usd(
+                state
+                    .cost_hour_usd_micros
+                    .saturating_add(expected_cost_usd_micros),
+            ) > limit
+        }) {
+            return Some("orchestrator_hourly_budget_exceeded");
+        }
+        if state.config.daily_cost_usd.is_some_and(|limit| {
+            micros_to_usd(
+                state
+                    .cost_today_usd_micros
+                    .saturating_add(expected_cost_usd_micros),
+            ) > limit
+        }) {
+            return Some("orchestrator_daily_budget_exceeded");
+        }
+        None
+    })
+}
+
+pub fn reset_binding_budget_windows(binding: &TriggerBinding) {
+    let today = utc_day_key();
+    let hour = utc_hour_key();
+    let mut state = binding
+        .predicate_state
+        .lock()
+        .expect("trigger predicate state poisoned");
+    if state.budget_day_utc != Some(today) {
+        state.budget_day_utc = Some(today);
+        binding
+            .metrics
+            .cost_today_usd_micros
+            .store(0, Ordering::Relaxed);
+    }
+    if state.budget_hour_utc != Some(hour) {
+        state.budget_hour_utc = Some(hour);
+        binding
+            .metrics
+            .cost_hour_usd_micros
+            .store(0, Ordering::Relaxed);
+    }
+}
+
+pub fn binding_budget_would_exceed(
+    binding: &TriggerBinding,
+    expected_cost_usd_micros: u64,
+) -> Option<&'static str> {
+    reset_binding_budget_windows(binding);
+    if binding.hourly_cost_usd.is_some_and(|limit| {
+        micros_to_usd(
+            binding
+                .metrics
+                .cost_hour_usd_micros
+                .load(Ordering::Relaxed)
+                .saturating_add(expected_cost_usd_micros),
+        ) > limit
+    }) {
+        return Some("hourly_budget_exceeded");
+    }
+    if binding.daily_cost_usd.is_some_and(|limit| {
+        micros_to_usd(
+            binding
+                .metrics
+                .cost_today_usd_micros
+                .load(Ordering::Relaxed)
+                .saturating_add(expected_cost_usd_micros),
+        ) > limit
+    }) {
+        return Some("daily_budget_exceeded");
+    }
+    None
+}
+
+pub fn expected_predicate_cost_usd_micros(binding: &TriggerBinding) -> u64 {
+    let state = binding
+        .predicate_state
+        .lock()
+        .expect("trigger predicate state poisoned");
+    if !state.recent_cost_usd_micros.is_empty() {
+        let total: u64 = state.recent_cost_usd_micros.iter().copied().sum();
+        return total / state.recent_cost_usd_micros.len() as u64;
+    }
+    binding
+        .when_budget
+        .as_ref()
+        .and_then(|budget| budget.max_cost_usd)
+        .map(usd_to_micros)
+        .unwrap_or_default()
+}
+
+pub fn record_predicate_cost_sample(binding: &TriggerBinding, cost_usd_micros: u64) {
+    let mut state = binding
+        .predicate_state
+        .lock()
+        .expect("trigger predicate state poisoned");
+    state.recent_cost_usd_micros.push_back(cost_usd_micros);
+    while state.recent_cost_usd_micros.len() > PREDICATE_COST_WINDOW {
+        state.recent_cost_usd_micros.pop_front();
+    }
+}
+
+pub fn usd_to_micros(value: f64) -> u64 {
+    if !value.is_finite() || value <= 0.0 {
+        return 0;
+    }
+    (value * 1_000_000.0).ceil() as u64
+}
+
+pub fn micros_to_usd(value: u64) -> f64 {
+    value as f64 / 1_000_000.0
+}
+
+fn rollover_orchestrator_budget(state: &mut OrchestratorBudgetState) {
+    let today = utc_day_key();
+    let hour = utc_hour_key();
+    if state.day_utc != today {
+        state.day_utc = today;
+        state.cost_today_usd_micros = 0;
+    }
+    if state.hour_utc != hour {
+        state.hour_utc = hour;
+        state.cost_hour_usd_micros = 0;
+    }
+}
+
+fn utc_day_key() -> i32 {
+    (clock::now_utc().date()
+        - time::Date::from_calendar_date(1970, time::Month::January, 1).expect("valid epoch date"))
+    .whole_days() as i32
+}
+
+fn utc_hour_key() -> i64 {
+    clock::now_utc().unix_timestamp() / 3_600
 }
 
 pub fn snapshot_trigger_bindings() -> Vec<TriggerBindingSnapshot> {
@@ -1155,6 +1420,8 @@ mod tests {
             dedupe_retention_days: crate::triggers::DEFAULT_INBOX_RETENTION_DAYS,
             filter: Some("event.kind".to_string()),
             daily_cost_usd: Some(5.0),
+            hourly_cost_usd: None,
+            on_budget_exhausted: crate::TriggerBudgetExhaustionStrategy::False,
             max_concurrent: Some(10),
             flow_control: crate::triggers::TriggerFlowControlConfig::default(),
             manifest_path: None,
@@ -1182,6 +1449,8 @@ mod tests {
             dedupe_retention_days: crate::triggers::DEFAULT_INBOX_RETENTION_DAYS,
             filter: None,
             daily_cost_usd: None,
+            hourly_cost_usd: None,
+            on_budget_exhausted: crate::TriggerBudgetExhaustionStrategy::False,
             max_concurrent: None,
             flow_control: crate::triggers::TriggerFlowControlConfig::default(),
             manifest_path: None,

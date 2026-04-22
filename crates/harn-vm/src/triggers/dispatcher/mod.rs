@@ -31,8 +31,12 @@ use crate::value::{error_to_category, ErrorCategory, VmError, VmValue};
 use crate::vm::Vm;
 
 use self::uri::DispatchUri;
-use super::registry::matching_bindings;
-use super::registry::{TriggerBinding, TriggerHandlerSpec};
+use super::registry::{
+    binding_budget_would_exceed, expected_predicate_cost_usd_micros, matching_bindings,
+    micros_to_usd, note_orchestrator_budget_cost, orchestrator_budget_would_exceed,
+    record_predicate_cost_sample, reset_binding_budget_windows, usd_to_micros, TriggerBinding,
+    TriggerBudgetExhaustionStrategy, TriggerHandlerSpec,
+};
 use super::{
     begin_in_flight, finish_in_flight, TriggerDispatchOutcome, TriggerEvent,
     TRIGGERS_LIFECYCLE_TOPIC, TRIGGER_ATTEMPTS_TOPIC, TRIGGER_CANCEL_REQUESTS_TOPIC,
@@ -85,6 +89,7 @@ struct PredicateEvaluationRecord {
     latency_ms: u64,
     cached: bool,
     reason: Option<String>,
+    exhaustion_strategy: Option<TriggerBudgetExhaustionStrategy>,
 }
 
 pub(crate) fn current_dispatch_context() -> Option<DispatchContext> {
@@ -974,6 +979,102 @@ impl Dispatcher {
             .await?;
 
             if !passed {
+                if evaluation.exhaustion_strategy == Some(TriggerBudgetExhaustionStrategy::Fail) {
+                    let final_error = format!(
+                        "trigger budget exhausted: {}",
+                        evaluation.reason.as_deref().unwrap_or("budget_exhausted")
+                    );
+                    self.move_budget_exhausted_to_dlq(
+                        binding,
+                        &route,
+                        &event,
+                        replay_of_event_id.as_ref(),
+                        &final_error,
+                    )
+                    .await?;
+                    finish_in_flight(
+                        binding.id.as_str(),
+                        binding.version,
+                        TriggerDispatchOutcome::Dlq,
+                    )
+                    .await
+                    .map_err(|error| DispatchError::Registry(error.to_string()))?;
+                    decrement_in_flight(&self.state);
+                    self.append_dispatch_trust_record(
+                        binding,
+                        &route,
+                        &event,
+                        replay_of_event_id.as_ref(),
+                        autonomy_tier,
+                        TrustOutcome::Failure,
+                        "dlq",
+                        0,
+                        Some(final_error.clone()),
+                    )
+                    .await?;
+                    return Ok(DispatchOutcome {
+                        trigger_id: binding.id.as_str().to_string(),
+                        binding_key: binding.binding_key(),
+                        event_id: event.id.0,
+                        attempt_count: 0,
+                        status: DispatchStatus::Dlq,
+                        handler_kind: route.kind().to_string(),
+                        target_uri: route.target_uri(),
+                        replay_of_event_id,
+                        result: None,
+                        error: Some(final_error),
+                    });
+                }
+
+                if evaluation.exhaustion_strategy
+                    == Some(TriggerBudgetExhaustionStrategy::RetryLater)
+                {
+                    self.append_budget_deferred_event(
+                        binding,
+                        &route,
+                        &event,
+                        replay_of_event_id.as_ref(),
+                        evaluation.reason.as_deref().unwrap_or("budget_exhausted"),
+                    )
+                    .await?;
+                    finish_in_flight(
+                        binding.id.as_str(),
+                        binding.version,
+                        TriggerDispatchOutcome::Dispatched,
+                    )
+                    .await
+                    .map_err(|error| DispatchError::Registry(error.to_string()))?;
+                    decrement_in_flight(&self.state);
+                    self.append_dispatch_trust_record(
+                        binding,
+                        &route,
+                        &event,
+                        replay_of_event_id.as_ref(),
+                        autonomy_tier,
+                        TrustOutcome::Denied,
+                        "waiting",
+                        0,
+                        evaluation.reason.clone(),
+                    )
+                    .await?;
+                    return Ok(DispatchOutcome {
+                        trigger_id: binding.id.as_str().to_string(),
+                        binding_key: binding.binding_key(),
+                        event_id: event.id.0,
+                        attempt_count: 0,
+                        status: DispatchStatus::Waiting,
+                        handler_kind: route.kind().to_string(),
+                        target_uri: route.target_uri(),
+                        replay_of_event_id,
+                        result: Some(serde_json::json!({
+                            "deferred": true,
+                            "predicate": predicate.raw,
+                            "reason": evaluation.reason,
+                        })),
+                        error: None,
+                    });
+                }
+
                 self.append_skipped_outbox_event(
                     binding,
                     &route,
@@ -2251,20 +2352,13 @@ impl Dispatcher {
         let event_id = event.id.0.clone();
         let trigger_id = binding.id.as_str().to_string();
         let now_ms = now_unix_ms();
-        let today = utc_day_key();
+        reset_binding_budget_windows(binding);
 
         let breaker_open_until = {
-            let mut state = binding
+            let state = binding
                 .predicate_state
                 .lock()
                 .expect("trigger predicate state poisoned");
-            if state.budget_day_utc != Some(today) {
-                state.budget_day_utc = Some(today);
-                binding
-                    .metrics
-                    .cost_today_usd_micros
-                    .store(0, Ordering::Relaxed);
-            }
             if state
                 .breaker_open_until_ms
                 .is_some_and(|until_ms| until_ms > now_ms)
@@ -2298,27 +2392,23 @@ impl Dispatcher {
             return Ok(record);
         }
 
-        if binding
-            .daily_cost_usd
-            .is_some_and(|limit| current_predicate_daily_cost(binding) > limit)
+        let expected_cost = expected_predicate_cost_usd_micros(binding);
+        if let Some(reason) = binding_budget_would_exceed(binding, expected_cost)
+            .or_else(|| orchestrator_budget_would_exceed(expected_cost))
         {
-            self.append_lifecycle_event(
-                "predicate.daily_budget_exceeded",
-                event,
+            self.append_budget_exhausted_event(
                 binding,
-                serde_json::json!({
-                    "trigger_id": binding.id.as_str(),
-                    "event_id": event.id.0,
-                    "limit_usd": binding.daily_cost_usd,
-                    "cost_today_usd": current_predicate_daily_cost(binding),
-                    "replay_of_event_id": replay_of_event_id,
-                }),
+                event,
+                reason,
+                expected_cost,
+                None,
                 replay_of_event_id,
             )
             .await?;
             let record = PredicateEvaluationRecord {
-                result: false,
-                reason: Some("daily_budget_exceeded".to_string()),
+                result: binding.on_budget_exhausted == TriggerBudgetExhaustionStrategy::Warn,
+                reason: Some(reason.to_string()),
+                exhaustion_strategy: Some(binding.on_budget_exhausted),
                 ..Default::default()
             };
             self.append_predicate_evaluated_event(binding, event, &record, replay_of_event_id)
@@ -2364,6 +2454,7 @@ impl Dispatcher {
             latency_ms,
             cached: capture.cached,
             reason: None,
+            exhaustion_strategy: None,
         };
 
         let mut count_failure = false;
@@ -2395,6 +2486,12 @@ impl Dispatcher {
                 .metrics
                 .cost_today_usd_micros
                 .fetch_add(cost_usd_micros, Ordering::Relaxed);
+            binding
+                .metrics
+                .cost_hour_usd_micros
+                .fetch_add(cost_usd_micros, Ordering::Relaxed);
+            note_orchestrator_budget_cost(cost_usd_micros);
+            record_predicate_cost_sample(binding, cost_usd_micros);
         }
 
         let timed_out = matches!(
@@ -2402,10 +2499,24 @@ impl Dispatcher {
             Some("predicate evaluation timed out")
         );
         if capture.budget_exceeded || timed_out {
-            record.result = false;
+            if binding.on_budget_exhausted != TriggerBudgetExhaustionStrategy::Warn {
+                record.result = false;
+            } else if timed_out {
+                record.result = true;
+            }
             record.reason = Some("budget_exceeded".to_string());
+            record.exhaustion_strategy = Some(binding.on_budget_exhausted);
+            self.append_budget_exhausted_event(
+                binding,
+                event,
+                "budget_exceeded",
+                cost_usd_micros,
+                Some(record.tokens),
+                replay_of_event_id,
+            )
+            .await?;
             self.append_lifecycle_event(
-                "predicate.budget_exceeded",
+                "predicate.invocation_budget_exceeded",
                 event,
                 binding,
                 serde_json::json!({
@@ -2422,26 +2533,16 @@ impl Dispatcher {
             .await?;
         }
 
-        if binding
-            .daily_cost_usd
-            .is_some_and(|limit| current_predicate_daily_cost(binding) > limit)
+        if let Some(reason) =
+            binding_budget_would_exceed(binding, 0).or_else(|| orchestrator_budget_would_exceed(0))
         {
-            record.result = false;
-            record.reason = Some("daily_budget_exceeded".to_string());
-            self.append_lifecycle_event(
-                "predicate.daily_budget_exceeded",
-                event,
-                binding,
-                serde_json::json!({
-                    "trigger_id": binding.id.as_str(),
-                    "event_id": event.id.0,
-                    "limit_usd": binding.daily_cost_usd,
-                    "cost_today_usd": current_predicate_daily_cost(binding),
-                    "replay_of_event_id": replay_of_event_id,
-                }),
-                replay_of_event_id,
-            )
-            .await?;
+            if binding.on_budget_exhausted != TriggerBudgetExhaustionStrategy::Warn {
+                record.result = false;
+            }
+            record.reason = Some(reason.to_string());
+            record.exhaustion_strategy = Some(binding.on_budget_exhausted);
+            self.append_budget_exhausted_event(binding, event, reason, 0, None, replay_of_event_id)
+                .await?;
         }
 
         {
@@ -2449,13 +2550,6 @@ impl Dispatcher {
                 .predicate_state
                 .lock()
                 .expect("trigger predicate state poisoned");
-            if state.budget_day_utc != Some(today) {
-                state.budget_day_utc = Some(today);
-                binding
-                    .metrics
-                    .cost_today_usd_micros
-                    .store(cost_usd_micros, Ordering::Relaxed);
-            }
             if count_failure {
                 state.consecutive_failures = state.consecutive_failures.saturating_add(1);
                 if state.consecutive_failures >= 3 {
@@ -2546,11 +2640,20 @@ impl Dispatcher {
             );
             if matches!(
                 record.reason.as_deref(),
-                Some("budget_exceeded" | "daily_budget_exceeded")
+                Some(
+                    "budget_exceeded"
+                        | "daily_budget_exceeded"
+                        | "hourly_budget_exceeded"
+                        | "orchestrator_daily_budget_exceeded"
+                        | "orchestrator_hourly_budget_exceeded"
+                )
             ) {
                 metrics.record_trigger_budget_exhausted(
                     binding.id.as_str(),
-                    record.reason.as_deref().unwrap_or("predicate"),
+                    record
+                        .exhaustion_strategy
+                        .map(TriggerBudgetExhaustionStrategy::as_str)
+                        .unwrap_or_else(|| record.reason.as_deref().unwrap_or("predicate")),
                 );
             }
         }
@@ -2567,6 +2670,7 @@ impl Dispatcher {
                 "latency_ms": record.latency_ms,
                 "cached": record.cached,
                 "reason": record.reason,
+                "on_budget_exhausted": record.exhaustion_strategy.map(TriggerBudgetExhaustionStrategy::as_str),
                 "replay_of_event_id": replay_of_event_id,
             }),
             replay_of_event_id,
@@ -2720,6 +2824,182 @@ impl Dispatcher {
             Some(binding),
             None,
             payload,
+            replay_of_event_id,
+        )
+        .await
+    }
+
+    async fn append_budget_exhausted_event(
+        &self,
+        binding: &TriggerBinding,
+        event: &TriggerEvent,
+        reason: &str,
+        expected_cost_usd_micros: u64,
+        tokens: Option<u64>,
+        replay_of_event_id: Option<&String>,
+    ) -> Result<(), DispatchError> {
+        let payload = serde_json::json!({
+            "trigger_id": binding.id.as_str(),
+            "event_id": event.id.0,
+            "reason": reason,
+            "strategy": binding.on_budget_exhausted.as_str(),
+            "expected_cost_usd": micros_to_usd(expected_cost_usd_micros),
+            "cost_usd": micros_to_usd(expected_cost_usd_micros),
+            "tokens": tokens,
+            "daily_limit_usd": binding.daily_cost_usd,
+            "hourly_limit_usd": binding.hourly_cost_usd,
+            "cost_today_usd": current_predicate_daily_cost(binding),
+            "cost_hour_usd": current_predicate_hourly_cost(binding),
+            "replay_of_event_id": replay_of_event_id,
+        });
+        self.append_lifecycle_event(
+            "predicate.budget_exceeded",
+            event,
+            binding,
+            payload.clone(),
+            replay_of_event_id,
+        )
+        .await?;
+        let legacy_kind = match reason {
+            "daily_budget_exceeded" => Some("predicate.daily_budget_exceeded"),
+            "hourly_budget_exceeded" => Some("predicate.hourly_budget_exceeded"),
+            "orchestrator_daily_budget_exceeded" => {
+                Some("predicate.orchestrator_daily_budget_exceeded")
+            }
+            "orchestrator_hourly_budget_exceeded" => {
+                Some("predicate.orchestrator_hourly_budget_exceeded")
+            }
+            _ => None,
+        };
+        if let Some(kind) = legacy_kind {
+            self.append_lifecycle_event(kind, event, binding, payload, replay_of_event_id)
+                .await?;
+        }
+        Ok(())
+    }
+
+    async fn append_budget_deferred_event(
+        &self,
+        binding: &TriggerBinding,
+        route: &DispatchUri,
+        event: &TriggerEvent,
+        replay_of_event_id: Option<&String>,
+        reason: &str,
+    ) -> Result<(), DispatchError> {
+        self.append_topic_event(
+            TRIGGER_ATTEMPTS_TOPIC,
+            "budget_deferred",
+            event,
+            Some(binding),
+            None,
+            serde_json::json!({
+                "event_id": event.id.0,
+                "trigger_id": binding.id.as_str(),
+                "binding_key": binding.binding_key(),
+                "handler_kind": route.kind(),
+                "target_uri": route.target_uri(),
+                "reason": reason,
+                "retry_at": next_budget_reset_rfc3339(binding),
+                "replay_of_event_id": replay_of_event_id,
+            }),
+            replay_of_event_id,
+        )
+        .await?;
+        self.append_skipped_outbox_event(
+            binding,
+            route,
+            event,
+            replay_of_event_id,
+            DispatchSkipStage::Predicate,
+            serde_json::json!({
+                "deferred": true,
+                "reason": reason,
+                "retry_at": next_budget_reset_rfc3339(binding),
+            }),
+        )
+        .await
+    }
+
+    async fn move_budget_exhausted_to_dlq(
+        &self,
+        binding: &TriggerBinding,
+        route: &DispatchUri,
+        event: &TriggerEvent,
+        replay_of_event_id: Option<&String>,
+        final_error: &str,
+    ) -> Result<(), DispatchError> {
+        let dlq_entry = DlqEntry {
+            trigger_id: binding.id.as_str().to_string(),
+            binding_key: binding.binding_key(),
+            event: event.clone(),
+            attempt_count: 0,
+            final_error: final_error.to_string(),
+            attempts: Vec::new(),
+        };
+        self.state
+            .dlq
+            .lock()
+            .expect("dispatcher dlq poisoned")
+            .push(dlq_entry.clone());
+        if let Some(metrics) = self.metrics.as_ref() {
+            metrics.record_trigger_dlq(binding.id.as_str(), "budget_exhausted");
+        }
+        self.emit_action_graph(
+            event,
+            vec![RunActionGraphNodeRecord {
+                id: format!("dlq:{}:{}", binding.binding_key(), event.id.0),
+                label: binding.id.as_str().to_string(),
+                kind: ACTION_GRAPH_NODE_KIND_DLQ.to_string(),
+                status: "queued".to_string(),
+                outcome: "budget_exhausted".to_string(),
+                trace_id: Some(event.trace_id.0.clone()),
+                stage_id: None,
+                node_id: None,
+                worker_id: None,
+                run_id: None,
+                run_path: None,
+                metadata: dlq_node_metadata(binding, event, 0, final_error),
+            }],
+            vec![RunActionGraphEdgeRecord {
+                from_id: format!("predicate:{}:{}", binding.binding_key(), event.id.0),
+                to_id: format!("dlq:{}:{}", binding.binding_key(), event.id.0),
+                kind: ACTION_GRAPH_EDGE_KIND_DLQ_MOVE.to_string(),
+                label: Some("budget exhausted".to_string()),
+            }],
+            serde_json::json!({
+                "source": "dispatcher",
+                "trigger_id": binding.id.as_str(),
+                "binding_key": binding.binding_key(),
+                "event_id": event.id.0,
+                "handler_kind": route.kind(),
+                "target_uri": route.target_uri(),
+                "final_error": final_error,
+                "replay_of_event_id": replay_of_event_id,
+            }),
+        )
+        .await?;
+        self.append_lifecycle_event(
+            "DlqMoved",
+            event,
+            binding,
+            serde_json::json!({
+                "event_id": event.id.0,
+                "attempt_count": 0,
+                "final_error": final_error,
+                "reason": "budget_exhausted",
+                "replay_of_event_id": replay_of_event_id,
+            }),
+            replay_of_event_id,
+        )
+        .await?;
+        self.append_topic_event(
+            TRIGGER_DLQ_TOPIC,
+            "dlq_moved",
+            event,
+            Some(binding),
+            None,
+            serde_json::to_value(&dlq_entry)
+                .map_err(|serde_error| DispatchError::Serde(serde_error.to_string()))?,
             replay_of_event_id,
         )
         .await
@@ -3272,19 +3552,17 @@ fn predicate_value_as_bool(value: VmValue) -> Result<bool, String> {
     }
 }
 
-fn usd_to_micros(value: f64) -> u64 {
-    if !value.is_finite() || value <= 0.0 {
-        return 0;
-    }
-    (value * 1_000_000.0).round() as u64
+fn current_predicate_daily_cost(binding: &TriggerBinding) -> f64 {
+    micros_to_usd(
+        binding
+            .metrics
+            .cost_today_usd_micros
+            .load(Ordering::Relaxed),
+    )
 }
 
-fn current_predicate_daily_cost(binding: &TriggerBinding) -> f64 {
-    binding
-        .metrics
-        .cost_today_usd_micros
-        .load(Ordering::Relaxed) as f64
-        / 1_000_000.0
+fn current_predicate_hourly_cost(binding: &TriggerBinding) -> f64 {
+    micros_to_usd(binding.metrics.cost_hour_usd_micros.load(Ordering::Relaxed))
 }
 
 fn split_binding_key(binding_key: &str) -> (String, u32) {
@@ -3361,12 +3639,22 @@ fn now_rfc3339() -> String {
         .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())
 }
 
-fn now_unix_ms() -> i64 {
-    (time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000) as i64
+fn next_budget_reset_rfc3339(binding: &TriggerBinding) -> String {
+    let now = time::OffsetDateTime::now_utc();
+    let reset = if binding.hourly_cost_usd.is_some() {
+        let next_hour = (now.unix_timestamp() / 3_600 + 1) * 3_600;
+        time::OffsetDateTime::from_unix_timestamp(next_hour).unwrap_or(now)
+    } else {
+        let next_day = ((now.unix_timestamp() / 86_400) + 1) * 86_400;
+        time::OffsetDateTime::from_unix_timestamp(next_day).unwrap_or(now)
+    };
+    reset
+        .format(&time::format_description::well_known::Rfc3339)
+        .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())
 }
 
-fn utc_day_key() -> i32 {
-    time::OffsetDateTime::now_utc().date().to_julian_day()
+fn now_unix_ms() -> i64 {
+    (time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000) as i64
 }
 
 fn cancelled_dispatch_outcome(

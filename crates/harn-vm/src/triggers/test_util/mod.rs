@@ -1692,6 +1692,8 @@ fn manifest_spec(id: &str, fingerprint: &str) -> TriggerBindingSpec {
         dedupe_retention_days: DEFAULT_INBOX_RETENTION_DAYS,
         filter: None,
         daily_cost_usd: Some(5.0),
+        hourly_cost_usd: None,
+        on_budget_exhausted: crate::TriggerBudgetExhaustionStrategy::False,
         max_concurrent: Some(2),
         flow_control: crate::triggers::TriggerFlowControlConfig::default(),
         manifest_path: Some(PathBuf::from("runtime://trigger-harness")),
