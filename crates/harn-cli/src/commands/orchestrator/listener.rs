@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
-use axum::body::Bytes;
+use axum::body::{Body, Bytes};
 use axum::extract::{DefaultBodyLimit, Extension, OriginalUri, Query};
 use axum::http::{HeaderMap, Method, StatusCode};
 use axum::middleware;
@@ -635,103 +635,19 @@ async fn ingest_trigger(
         )
         .await;
         let response = match result {
-            Ok(NormalizedRequest::Event(event)) => {
-                let postprocess = harn_vm::postprocess_normalized_event(
-                    context.inbox.as_ref(),
-                    &context.route.trigger_id,
-                    context.route.dedupe_key_template.is_some(),
-                    context.route.dedupe_ttl(),
-                    *event,
-                )
-                .await;
-                match postprocess {
-                    Ok(harn_vm::PostNormalizeOutcome::DuplicateDropped) => {
-                        context.metrics.in_flight.fetch_sub(1, Ordering::Relaxed);
+            Ok(NormalizedRequest::Events(events)) => {
+                match enqueue_normalized_events(&context, events, &span_context_headers).await {
+                    Ok(summary) => {
                         context
-                            .metrics_registry
-                            .record_trigger_deduped(&context.route.trigger_id, "inbox_duplicate");
+                            .metrics
+                            .dispatched
+                            .fetch_add(summary.accepted as u64, Ordering::Relaxed);
+                        context.metrics.in_flight.fetch_sub(1, Ordering::Relaxed);
                         context.metrics_registry.set_trigger_inflight(
                             &context.route.trigger_id,
                             context.metrics.in_flight.load(Ordering::Relaxed),
                         );
-                        (
-                            StatusCode::OK,
-                            axum::Json(json!({
-                                "status": "duplicate_dropped",
-                                "trigger_id": context.route.trigger_id,
-                            })),
-                        )
-                            .into_response()
-                    }
-                    Ok(harn_vm::PostNormalizeOutcome::Ready(event)) => {
-                        let event = *event;
-                        let payload = json!({
-                            "trigger_id": context.route.trigger_id,
-                            "binding_version": context.route.binding_version,
-                            "event": event,
-                        });
-                        let mut pending_headers = BTreeMap::new();
-                        pending_headers.insert("trace_id".to_string(), event.trace_id.0.clone());
-                        pending_headers.extend(span_context_headers.clone());
-                        let append_started = Instant::now();
-                        let payload_size_bytes = serde_json::to_vec(&payload)
-                            .map(|bytes| bytes.len())
-                            .unwrap_or(0);
-
-                        match context
-                            .event_log
-                            .append(
-                                &context.pending_topic,
-                                LogEvent::new("trigger_event", payload)
-                                    .with_headers(pending_headers),
-                            )
-                            .await
-                        {
-                            Ok(event_id) => {
-                                context.metrics_registry.record_event_log_append(
-                                    context.pending_topic.as_str(),
-                                    append_started.elapsed(),
-                                    payload_size_bytes,
-                                );
-                                tracing::info!(
-                                    component = "listener",
-                                    trace_id = %event.trace_id.0,
-                                    trigger_id = %context.route.trigger_id,
-                                    event_id = %event_id,
-                                    "trigger event accepted"
-                                );
-                                context.metrics.dispatched.fetch_add(1, Ordering::Relaxed);
-                                context.metrics.in_flight.fetch_sub(1, Ordering::Relaxed);
-                                context.metrics_registry.set_trigger_inflight(
-                                    &context.route.trigger_id,
-                                    context.metrics.in_flight.load(Ordering::Relaxed),
-                                );
-                                (
-                                    StatusCode::OK,
-                                    axum::Json(json!({
-                                        "status": "accepted",
-                                        "event_id": event_id,
-                                        "trigger_id": context.route.trigger_id,
-                                    })),
-                                )
-                                    .into_response()
-                            }
-                            Err(error) => {
-                                context.metrics.failed.fetch_add(1, Ordering::Relaxed);
-                                context.metrics.in_flight.fetch_sub(1, Ordering::Relaxed);
-                                context.metrics_registry.set_trigger_inflight(
-                                    &context.route.trigger_id,
-                                    context.metrics.in_flight.load(Ordering::Relaxed),
-                                );
-                                (
-                                    StatusCode::INTERNAL_SERVER_ERROR,
-                                    format!(
-                                        "failed to append trigger event to pending log: {error}"
-                                    ),
-                                )
-                                    .into_response()
-                            }
-                        }
+                        enqueue_summary_response(&context, summary)
                     }
                     Err(error) => {
                         context.metrics.failed.fetch_add(1, Ordering::Relaxed);
@@ -740,12 +656,37 @@ async fn ingest_trigger(
                             &context.route.trigger_id,
                             context.metrics.in_flight.load(Ordering::Relaxed),
                         );
-                        HttpError::from_connector(error).into_response()
+                        error.into_response()
                     }
                 }
             }
-            Ok(NormalizedRequest::Immediate(response)) => {
-                context.metrics.dispatched.fetch_add(1, Ordering::Relaxed);
+            Ok(NormalizedRequest::Immediate { response, events }) => {
+                match enqueue_normalized_events(&context, events, &span_context_headers).await {
+                    Ok(summary) => {
+                        context.metrics.dispatched.fetch_add(
+                            std::cmp::max(summary.accepted, 1) as u64,
+                            Ordering::Relaxed,
+                        );
+                        context.metrics.in_flight.fetch_sub(1, Ordering::Relaxed);
+                        context.metrics_registry.set_trigger_inflight(
+                            &context.route.trigger_id,
+                            context.metrics.in_flight.load(Ordering::Relaxed),
+                        );
+                        response
+                    }
+                    Err(error) => {
+                        context.metrics.failed.fetch_add(1, Ordering::Relaxed);
+                        context.metrics.in_flight.fetch_sub(1, Ordering::Relaxed);
+                        context.metrics_registry.set_trigger_inflight(
+                            &context.route.trigger_id,
+                            context.metrics.in_flight.load(Ordering::Relaxed),
+                        );
+                        error.into_response()
+                    }
+                }
+            }
+            Ok(NormalizedRequest::Rejected(response)) => {
+                context.metrics.failed.fetch_add(1, Ordering::Relaxed);
                 context.metrics.in_flight.fetch_sub(1, Ordering::Relaxed);
                 context.metrics_registry.set_trigger_inflight(
                     &context.route.trigger_id,
@@ -878,27 +819,13 @@ async fn normalize_request(
             "binding_version": context.route.binding_version,
             "path": context.route.path,
         });
-        let mut event = connector
+        let result = connector
             .lock()
             .await
-            .normalize_inbound(raw)
+            .normalize_inbound_result(raw)
             .await
             .map_err(HttpError::from_connector)?;
-        if let Some(challenge) = slack_url_verification_challenge(&event) {
-            return Ok(NormalizedRequest::Immediate(
-                (
-                    StatusCode::OK,
-                    [("content-type", "text/plain; charset=utf-8")],
-                    challenge,
-                )
-                    .into_response(),
-            ));
-        }
-        if let Some(response) = notion_subscription_verification_response(&event) {
-            return Ok(NormalizedRequest::Immediate(response));
-        }
-        event.trace_id = trace_id.clone();
-        return Ok(NormalizedRequest::Event(Box::new(event)));
+        return connector_normalize_result_to_request(result, trace_id);
     }
 
     let normalized_body = normalize_body(body, normalized_headers);
@@ -951,7 +878,7 @@ async fn normalize_request(
     )
     .map_err(|error| HttpError::unprocessable(error.to_string()))?;
 
-    Ok(NormalizedRequest::Event(Box::new(harn_vm::TriggerEvent {
+    Ok(NormalizedRequest::Events(vec![harn_vm::TriggerEvent {
         id: harn_vm::TriggerEventId::new(),
         provider,
         kind: trigger_kind,
@@ -969,12 +896,243 @@ async fn normalize_request(
         provider_payload,
         signature_status,
         dedupe_claimed: false,
-    })))
+    }]))
 }
 
 enum NormalizedRequest {
-    Event(Box<harn_vm::TriggerEvent>),
-    Immediate(Response),
+    Events(Vec<harn_vm::TriggerEvent>),
+    Immediate {
+        response: Response,
+        events: Vec<harn_vm::TriggerEvent>,
+    },
+    Rejected(Response),
+}
+
+struct EnqueueSummary {
+    accepted: usize,
+    duplicates: usize,
+    first_event_id: Option<String>,
+}
+
+fn connector_normalize_result_to_request(
+    result: harn_vm::ConnectorNormalizeResult,
+    trace_id: harn_vm::TraceId,
+) -> Result<NormalizedRequest, HttpError> {
+    match result {
+        harn_vm::ConnectorNormalizeResult::Event(event) => {
+            let mut event = *event;
+            if let Some(challenge) = slack_url_verification_challenge(&event) {
+                return Ok(NormalizedRequest::Immediate {
+                    response: (
+                        StatusCode::OK,
+                        [("content-type", "text/plain; charset=utf-8")],
+                        challenge,
+                    )
+                        .into_response(),
+                    events: Vec::new(),
+                });
+            }
+            if let Some(response) = notion_subscription_verification_response(&event) {
+                return Ok(NormalizedRequest::Immediate {
+                    response,
+                    events: Vec::new(),
+                });
+            }
+            event.trace_id = trace_id;
+            Ok(NormalizedRequest::Events(vec![event]))
+        }
+        harn_vm::ConnectorNormalizeResult::Batch(mut events) => {
+            set_trace_id(&mut events, trace_id);
+            Ok(NormalizedRequest::Events(events))
+        }
+        harn_vm::ConnectorNormalizeResult::ImmediateResponse {
+            response,
+            mut events,
+        } => {
+            set_trace_id(&mut events, trace_id);
+            Ok(NormalizedRequest::Immediate {
+                response: connector_http_response_to_response(response)?,
+                events,
+            })
+        }
+        harn_vm::ConnectorNormalizeResult::Reject(response) => Ok(NormalizedRequest::Rejected(
+            connector_http_response_to_response(response)?,
+        )),
+    }
+}
+
+fn set_trace_id(events: &mut [harn_vm::TriggerEvent], trace_id: harn_vm::TraceId) {
+    for event in events {
+        event.trace_id = trace_id.clone();
+    }
+}
+
+fn connector_http_response_to_response(
+    response: harn_vm::ConnectorHttpResponse,
+) -> Result<Response, HttpError> {
+    let status = StatusCode::from_u16(response.status).map_err(|error| {
+        HttpError::internal(format!(
+            "connector returned invalid HTTP status {}: {error}",
+            response.status
+        ))
+    })?;
+    let mut builder = Response::builder().status(status);
+    let has_content_type = response
+        .headers
+        .keys()
+        .any(|key| key.eq_ignore_ascii_case("content-type"));
+    for (name, value) in response.headers {
+        let name = axum::http::HeaderName::from_bytes(name.as_bytes()).map_err(|error| {
+            HttpError::internal(format!(
+                "connector returned invalid response header name: {error}"
+            ))
+        })?;
+        let value = axum::http::HeaderValue::from_str(&value).map_err(|error| {
+            HttpError::internal(format!(
+                "connector returned invalid response header value for '{}': {error}",
+                name.as_str()
+            ))
+        })?;
+        builder = builder.header(name, value);
+    }
+
+    let body = match response.body {
+        JsonValue::Null => Body::empty(),
+        JsonValue::String(value) => {
+            if !has_content_type {
+                builder = builder.header(
+                    axum::http::header::CONTENT_TYPE,
+                    "text/plain; charset=utf-8",
+                );
+            }
+            Body::from(value)
+        }
+        value => {
+            if !has_content_type {
+                builder = builder.header(axum::http::header::CONTENT_TYPE, "application/json");
+            }
+            let bytes = serde_json::to_vec(&value)
+                .map_err(|error| HttpError::internal(error.to_string()))?;
+            Body::from(bytes)
+        }
+    };
+
+    builder
+        .body(body)
+        .map_err(|error| HttpError::internal(error.to_string()))
+}
+
+async fn enqueue_normalized_events(
+    context: &RouteContext,
+    events: Vec<harn_vm::TriggerEvent>,
+    span_context_headers: &BTreeMap<String, String>,
+) -> Result<EnqueueSummary, HttpError> {
+    let mut summary = EnqueueSummary {
+        accepted: 0,
+        duplicates: 0,
+        first_event_id: None,
+    };
+
+    for event in events {
+        let postprocess = harn_vm::postprocess_normalized_event(
+            context.inbox.as_ref(),
+            &context.route.trigger_id,
+            context.route.dedupe_key_template.is_some(),
+            context.route.dedupe_ttl(),
+            event,
+        )
+        .await
+        .map_err(HttpError::from_connector)?;
+        match postprocess {
+            harn_vm::PostNormalizeOutcome::DuplicateDropped => {
+                summary.duplicates += 1;
+                context
+                    .metrics_registry
+                    .record_trigger_deduped(&context.route.trigger_id, "inbox_duplicate");
+            }
+            harn_vm::PostNormalizeOutcome::Ready(event) => {
+                let event = *event;
+                let payload = json!({
+                    "trigger_id": context.route.trigger_id,
+                    "binding_version": context.route.binding_version,
+                    "event": event,
+                });
+                let mut pending_headers = BTreeMap::new();
+                pending_headers.insert("trace_id".to_string(), event.trace_id.0.clone());
+                pending_headers.extend(span_context_headers.clone());
+                let append_started = Instant::now();
+                let payload_size_bytes = serde_json::to_vec(&payload)
+                    .map(|bytes| bytes.len())
+                    .unwrap_or(0);
+                let event_id = context
+                    .event_log
+                    .append(
+                        &context.pending_topic,
+                        LogEvent::new("trigger_event", payload).with_headers(pending_headers),
+                    )
+                    .await
+                    .map_err(|error| {
+                        HttpError::internal(format!(
+                            "failed to append trigger event to pending log: {error}"
+                        ))
+                    })?;
+                context.metrics_registry.record_event_log_append(
+                    context.pending_topic.as_str(),
+                    append_started.elapsed(),
+                    payload_size_bytes,
+                );
+                tracing::info!(
+                    component = "listener",
+                    trace_id = %event.trace_id.0,
+                    trigger_id = %context.route.trigger_id,
+                    event_id = %event_id,
+                    "trigger event accepted"
+                );
+                summary.accepted += 1;
+                if summary.first_event_id.is_none() {
+                    summary.first_event_id = Some(event_id.to_string());
+                }
+            }
+        }
+    }
+
+    Ok(summary)
+}
+
+fn enqueue_summary_response(context: &RouteContext, summary: EnqueueSummary) -> Response {
+    if summary.accepted == 0 && summary.duplicates > 0 {
+        return (
+            StatusCode::OK,
+            axum::Json(json!({
+                "status": "duplicate_dropped",
+                "trigger_id": context.route.trigger_id,
+            })),
+        )
+            .into_response();
+    }
+
+    if summary.accepted == 1 && summary.duplicates == 0 {
+        return (
+            StatusCode::OK,
+            axum::Json(json!({
+                "status": "accepted",
+                "event_id": summary.first_event_id,
+                "trigger_id": context.route.trigger_id,
+            })),
+        )
+            .into_response();
+    }
+
+    (
+        StatusCode::OK,
+        axum::Json(json!({
+            "status": "accepted",
+            "events_accepted": summary.accepted,
+            "duplicates_dropped": summary.duplicates,
+            "trigger_id": context.route.trigger_id,
+        })),
+    )
+        .into_response()
 }
 
 fn trigger_path(trigger: &CollectedManifestTrigger) -> Result<String, String> {

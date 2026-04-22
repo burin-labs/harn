@@ -75,6 +75,69 @@ pub fn normalize_inbound(raw) -> dict
 
 `normalize_inbound(raw)` returns a dict with:
 
+- `type`: one of `"event"`, `"batch"`, `"immediate_response"`, or `"reject"`
+
+For a single event, return:
+
+```harn
+{
+  type: "event",
+  event: {
+    kind: "echo.received",
+    occurred_at: raw.received_at,
+    dedupe_key: "echo:" + body.id,
+    payload: body,
+  },
+}
+```
+
+For multiple events, return:
+
+```harn
+{
+  type: "batch",
+  events: [
+    {
+      kind: "echo.received",
+      dedupe_key: "echo:" + first.id,
+      payload: first,
+    },
+    {
+      kind: "echo.received",
+      dedupe_key: "echo:" + second.id,
+      payload: second,
+    },
+  ],
+}
+```
+
+For ack-first webhooks such as URL verification handshakes, return an
+immediate HTTP response and optionally include `event` or `events` to enqueue
+after normalization:
+
+```harn
+{
+  type: "immediate_response",
+  immediate_response: {
+    status: 200,
+    headers: {"content-type": "text/plain; charset=utf-8"},
+    body: body.challenge,
+  },
+}
+```
+
+For unsupported or failed verification inputs, return:
+
+```harn
+{
+  type: "reject",
+  status: 403,
+  body: {error: "verification_failed"},
+}
+```
+
+Each event dict contains:
+
 - `kind`: normalized trigger kind
 - `dedupe_key`: stable delivery key
 - `payload`: provider payload dict preserved as `event.provider_payload.raw`
@@ -117,13 +180,16 @@ pub fn normalize_inbound(raw) {
     binding_id: raw.binding_id,
   })
   return {
-    kind: "echo.received",
-    occurred_at: raw.received_at,
-    dedupe_key: "echo:" + body.id,
-    payload: {
-      body: body,
-      token: token,
-      binding_id: raw.binding_id,
+    type: "event",
+    event: {
+      kind: "echo.received",
+      occurred_at: raw.received_at,
+      dedupe_key: "echo:" + body.id,
+      payload: {
+        body: body,
+        token: token,
+        binding_id: raw.binding_id,
+      },
     },
   }
 }

@@ -21,8 +21,9 @@ use crate::value::{VmClosure, VmError, VmValue};
 use crate::vm::Vm;
 use crate::{
     redact_headers, ClientError, Connector, ConnectorClient, ConnectorCtx, ConnectorError,
-    HeaderRedactionPolicy, ProviderId, ProviderPayload, ProviderPayloadSchema, SignatureStatus,
-    TenantId, TraceId, TriggerBinding, TriggerEvent, TriggerEventId, TriggerKind,
+    ConnectorHttpResponse, ConnectorNormalizeResult, HeaderRedactionPolicy, ProviderId,
+    ProviderPayload, ProviderPayloadSchema, SignatureStatus, TenantId, TraceId, TriggerBinding,
+    TriggerEvent, TriggerEventId, TriggerKind,
 };
 
 thread_local! {
@@ -97,6 +98,16 @@ struct HarnNormalizeResult {
     headers: Option<BTreeMap<String, String>>,
     #[serde(default)]
     batch: Option<Vec<JsonValue>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct HarnHttpResponse {
+    #[serde(default = "default_ok_status")]
+    status: u16,
+    #[serde(default)]
+    headers: BTreeMap<String, String>,
+    #[serde(default)]
+    body: JsonValue,
 }
 
 impl HarnConnector {
@@ -362,50 +373,52 @@ impl Connector for HarnConnector {
         &self,
         raw: crate::RawInbound,
     ) -> Result<TriggerEvent, ConnectorError> {
+        let result = self.normalize_inbound_result(raw).await?;
+        match result {
+            ConnectorNormalizeResult::Event(event) => Ok(*event),
+            ConnectorNormalizeResult::Batch(events) => {
+                Err(ConnectorError::HarnRuntime(format!(
+                    "connector '{}' returned a NormalizeResult batch where a single event was expected ({} events)",
+                    self.provider_id.as_str(),
+                    events.len()
+                )))
+            }
+            ConnectorNormalizeResult::ImmediateResponse { events, .. } => {
+                let mut events = events.into_iter();
+                let Some(event) = events.next() else {
+                    return Err(ConnectorError::HarnRuntime(format!(
+                        "connector '{}' returned an immediate_response without an event where a single event was expected",
+                        self.provider_id.as_str()
+                    )));
+                };
+                if events.next().is_some() {
+                    return Err(ConnectorError::HarnRuntime(format!(
+                        "connector '{}' returned an immediate_response with multiple events where a single event was expected",
+                        self.provider_id.as_str()
+                    )));
+                }
+                Ok(event)
+            }
+            ConnectorNormalizeResult::Reject(response) => Err(ConnectorError::Unsupported(format!(
+                "connector '{}' rejected inbound request with HTTP {}",
+                self.provider_id.as_str(),
+                response.status
+            ))),
+        }
+    }
+
+    async fn normalize_inbound_result(
+        &self,
+        raw: crate::RawInbound,
+    ) -> Result<ConnectorNormalizeResult, ConnectorError> {
         let raw_json = raw_inbound_to_json(&raw);
-        let event = self
+        let value = self
             .shared
             .worker()?
             .call_export("normalize_inbound", vec![raw_json], true)
             .await?
             .expect("required export returns a value");
-        let normalized: HarnNormalizeResult = serde_json::from_value(event)
-            .map_err(|error| ConnectorError::HarnRuntime(error.to_string()))?;
-        let occurred_at = normalized
-            .occurred_at
-            .as_deref()
-            .map(parse_rfc3339)
-            .transpose()?;
-        let tenant_id = normalized.tenant_id.map(TenantId::new);
-        let headers = redact_headers(
-            &normalized.headers.unwrap_or_else(|| raw.headers.clone()),
-            &HeaderRedactionPolicy::default(),
-        );
-        let provider_payload = ProviderPayload::normalize(
-            &self.provider_id,
-            &normalized.kind,
-            &raw.headers,
-            normalized.payload,
-        )
-        .map_err(|error| ConnectorError::HarnRuntime(error.to_string()))?;
-        Ok(TriggerEvent {
-            id: TriggerEventId::new(),
-            provider: self.provider_id.clone(),
-            kind: normalized.kind,
-            received_at: raw.received_at,
-            occurred_at,
-            dedupe_key: normalized.dedupe_key,
-            trace_id: TraceId::new(),
-            tenant_id: tenant_id.or_else(|| raw.tenant_id.clone()),
-            headers,
-            batch: normalized.batch,
-            provider_payload,
-            raw_body: Some(raw.body.clone()),
-            signature_status: normalized
-                .signature_status
-                .unwrap_or(SignatureStatus::Unsigned),
-            dedupe_claimed: false,
-        })
+        parse_normalize_result(&self.provider_id, &raw, value)
     }
 
     fn payload_schema(&self) -> ProviderPayloadSchema {
@@ -437,6 +450,179 @@ impl ConnectorClient for HarnConnectorClient {
         };
         Ok(result)
     }
+}
+
+fn parse_normalize_result(
+    provider_id: &ProviderId,
+    raw: &crate::RawInbound,
+    value: JsonValue,
+) -> Result<ConnectorNormalizeResult, ConnectorError> {
+    let result_type = value
+        .get("type")
+        .and_then(JsonValue::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+
+    match result_type {
+        Some("event") => {
+            let event_value = value.get("event").cloned().unwrap_or(value);
+            parse_harn_normalized_event(provider_id, raw, event_value)
+                .map(ConnectorNormalizeResult::event)
+        }
+        Some("batch") => {
+            let events = parse_events_field(provider_id, raw, &value, "events")?;
+            if events.is_empty() {
+                return Err(ConnectorError::HarnRuntime(
+                    "NormalizeResult batch must contain at least one event".to_string(),
+                ));
+            }
+            Ok(ConnectorNormalizeResult::Batch(events))
+        }
+        Some("immediate_response") => {
+            let response = parse_http_response(&value, "immediate_response", 200)?;
+            let events = parse_optional_embedded_events(provider_id, raw, &value)?;
+            Ok(ConnectorNormalizeResult::ImmediateResponse { response, events })
+        }
+        Some("reject") => {
+            parse_http_response(&value, "reject", 400).map(ConnectorNormalizeResult::Reject)
+        }
+        Some(other) => Err(ConnectorError::HarnRuntime(format!(
+            "unsupported NormalizeResult type '{other}'"
+        ))),
+        None => {
+            tracing::warn!(
+                provider = provider_id.as_str(),
+                "Harn connector normalize_inbound returned a legacy direct event shape; return NormalizeResult v1 instead"
+            );
+            parse_harn_normalized_event(provider_id, raw, value)
+                .map(ConnectorNormalizeResult::event)
+        }
+    }
+}
+
+fn parse_optional_embedded_events(
+    provider_id: &ProviderId,
+    raw: &crate::RawInbound,
+    value: &JsonValue,
+) -> Result<Vec<TriggerEvent>, ConnectorError> {
+    let has_event = value.get("event").is_some();
+    let has_events = value.get("events").is_some();
+    if has_event && has_events {
+        return Err(ConnectorError::HarnRuntime(
+            "NormalizeResult immediate_response must use either 'event' or 'events', not both"
+                .to_string(),
+        ));
+    }
+    if has_event {
+        let event = value
+            .get("event")
+            .cloned()
+            .expect("checked immediate_response event field");
+        return parse_harn_normalized_event(provider_id, raw, event).map(|event| vec![event]);
+    }
+    if has_events {
+        return parse_events_field(provider_id, raw, value, "events");
+    }
+    Ok(Vec::new())
+}
+
+fn parse_events_field(
+    provider_id: &ProviderId,
+    raw: &crate::RawInbound,
+    value: &JsonValue,
+    field: &str,
+) -> Result<Vec<TriggerEvent>, ConnectorError> {
+    let events = value
+        .get(field)
+        .and_then(JsonValue::as_array)
+        .ok_or_else(|| {
+            ConnectorError::HarnRuntime(format!("NormalizeResult missing array field '{field}'"))
+        })?;
+    events
+        .iter()
+        .cloned()
+        .map(|event| parse_harn_normalized_event(provider_id, raw, event))
+        .collect()
+}
+
+fn parse_harn_normalized_event(
+    provider_id: &ProviderId,
+    raw: &crate::RawInbound,
+    value: JsonValue,
+) -> Result<TriggerEvent, ConnectorError> {
+    let normalized: HarnNormalizeResult = serde_json::from_value(value)
+        .map_err(|error| ConnectorError::HarnRuntime(error.to_string()))?;
+    let occurred_at = normalized
+        .occurred_at
+        .as_deref()
+        .map(parse_rfc3339)
+        .transpose()?;
+    let tenant_id = normalized.tenant_id.map(TenantId::new);
+    let headers = redact_headers(
+        &normalized.headers.unwrap_or_else(|| raw.headers.clone()),
+        &HeaderRedactionPolicy::default(),
+    );
+    let provider_payload = ProviderPayload::normalize(
+        provider_id,
+        &normalized.kind,
+        &raw.headers,
+        normalized.payload,
+    )
+    .map_err(|error| ConnectorError::HarnRuntime(error.to_string()))?;
+    Ok(TriggerEvent {
+        id: TriggerEventId::new(),
+        provider: provider_id.clone(),
+        kind: normalized.kind,
+        received_at: raw.received_at,
+        occurred_at,
+        dedupe_key: normalized.dedupe_key,
+        trace_id: TraceId::new(),
+        tenant_id: tenant_id.or_else(|| raw.tenant_id.clone()),
+        headers,
+        batch: normalized.batch,
+        provider_payload,
+        raw_body: Some(raw.body.clone()),
+        signature_status: normalized
+            .signature_status
+            .unwrap_or(SignatureStatus::Unsigned),
+        dedupe_claimed: false,
+    })
+}
+
+fn parse_http_response(
+    value: &JsonValue,
+    nested_field: &str,
+    default_status: u16,
+) -> Result<ConnectorHttpResponse, ConnectorError> {
+    let response_value = value
+        .get(nested_field)
+        .or_else(|| value.get("response"))
+        .unwrap_or(value);
+    let source_has_status = response_value.get("status").is_some();
+    let mut response: HarnHttpResponse = serde_json::from_value(response_value.clone())
+        .map_err(|error| ConnectorError::HarnRuntime(error.to_string()))?;
+    if !source_has_status {
+        response.status = default_status;
+    }
+    validate_http_status(response.status)?;
+    Ok(ConnectorHttpResponse::new(
+        response.status,
+        response.headers,
+        response.body,
+    ))
+}
+
+fn validate_http_status(status: u16) -> Result<(), ConnectorError> {
+    if (100..=599).contains(&status) {
+        return Ok(());
+    }
+    Err(ConnectorError::HarnRuntime(format!(
+        "NormalizeResult HTTP status {status} is outside 100..=599"
+    )))
+}
+
+fn default_ok_status() -> u16 {
+    200
 }
 
 async fn load_module_runtime(
@@ -654,4 +840,165 @@ fn raw_inbound_to_json(raw: &crate::RawInbound) -> JsonValue {
         }
     }
     payload
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn raw_inbound(body: JsonValue) -> crate::RawInbound {
+        let mut headers = BTreeMap::new();
+        headers.insert("content-type".to_string(), "application/json".to_string());
+        let mut raw = crate::RawInbound::new(
+            "",
+            headers,
+            serde_json::to_vec(&body).expect("json body serializes"),
+        );
+        raw.received_at = OffsetDateTime::parse("2026-04-22T12:34:56Z", &Rfc3339).unwrap();
+        raw
+    }
+
+    fn event_value(kind: &str, dedupe_key: &str, id: &str) -> JsonValue {
+        json!({
+            "kind": kind,
+            "occurred_at": "2026-04-22T12:30:00Z",
+            "dedupe_key": dedupe_key,
+            "payload": {
+                "id": id,
+                "type": kind,
+            },
+            "signature_status": {
+                "state": "verified",
+            },
+        })
+    }
+
+    #[test]
+    fn normalize_result_v1_event_parses_normal_event() {
+        let provider = ProviderId::new("webhook");
+        let raw = raw_inbound(json!({"id": "evt-1"}));
+        let result = parse_normalize_result(
+            &provider,
+            &raw,
+            json!({
+                "type": "event",
+                "event": event_value("webhook.received", "webhook:evt-1", "evt-1"),
+            }),
+        )
+        .unwrap();
+
+        let ConnectorNormalizeResult::Event(event) = result else {
+            panic!("expected event result");
+        };
+        assert_eq!(event.provider, provider);
+        assert_eq!(event.kind, "webhook.received");
+        assert_eq!(event.dedupe_key, "webhook:evt-1");
+        assert_eq!(event.signature_status, SignatureStatus::Verified);
+        assert!(event.raw_body.is_some());
+    }
+
+    #[test]
+    fn normalize_result_v1_batch_parses_multiple_events() {
+        let provider = ProviderId::new("webhook");
+        let raw = raw_inbound(json!({"items": [{"id": "a"}, {"id": "b"}]}));
+        let result = parse_normalize_result(
+            &provider,
+            &raw,
+            json!({
+                "type": "batch",
+                "events": [
+                    event_value("webhook.received", "webhook:a", "a"),
+                    event_value("webhook.received", "webhook:b", "b"),
+                ],
+            }),
+        )
+        .unwrap();
+
+        let ConnectorNormalizeResult::Batch(events) = result else {
+            panic!("expected batch result");
+        };
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].dedupe_key, "webhook:a");
+        assert_eq!(events[1].dedupe_key, "webhook:b");
+    }
+
+    #[test]
+    fn normalize_result_v1_immediate_response_covers_slack_url_verification_fixture() {
+        let provider = ProviderId::new("slack");
+        let raw = raw_inbound(json!({
+            "type": "url_verification",
+            "challenge": "challenge-token",
+        }));
+        let result = parse_normalize_result(
+            &provider,
+            &raw,
+            json!({
+                "type": "immediate_response",
+                "immediate_response": {
+                    "status": 200,
+                    "headers": {
+                        "content-type": "text/plain; charset=utf-8",
+                    },
+                    "body": "challenge-token",
+                },
+            }),
+        )
+        .unwrap();
+
+        let ConnectorNormalizeResult::ImmediateResponse { response, events } = result else {
+            panic!("expected immediate_response result");
+        };
+        assert_eq!(response.status, 200);
+        assert_eq!(
+            response.headers.get("content-type").map(String::as_str),
+            Some("text/plain; charset=utf-8")
+        );
+        assert_eq!(
+            response.body,
+            JsonValue::String("challenge-token".to_string())
+        );
+        assert!(events.is_empty());
+    }
+
+    #[test]
+    fn normalize_result_v1_reject_parses_http_rejection() {
+        let provider = ProviderId::new("webhook");
+        let raw = raw_inbound(json!({"id": "evt-1"}));
+        let result = parse_normalize_result(
+            &provider,
+            &raw,
+            json!({
+                "type": "reject",
+                "status": 403,
+                "body": {
+                    "error": "verification_failed",
+                },
+            }),
+        )
+        .unwrap();
+
+        let ConnectorNormalizeResult::Reject(response) = result else {
+            panic!("expected reject result");
+        };
+        assert_eq!(response.status, 403);
+        assert_eq!(response.body["error"], "verification_failed");
+    }
+
+    #[test]
+    fn legacy_direct_normalize_result_still_parses_during_transition() {
+        let provider = ProviderId::new("webhook");
+        let raw = raw_inbound(json!({"id": "legacy"}));
+        let result = parse_normalize_result(
+            &provider,
+            &raw,
+            event_value("webhook.received", "webhook:legacy", "legacy"),
+        )
+        .unwrap();
+
+        let ConnectorNormalizeResult::Event(event) = result else {
+            panic!("expected legacy event result");
+        };
+        assert_eq!(event.kind, "webhook.received");
+        assert_eq!(event.dedupe_key, "webhook:legacy");
+    }
 }

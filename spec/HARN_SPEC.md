@@ -3106,9 +3106,23 @@ provider integrations.
 
 Harn-backed connector modules are loaded through manifest `[[providers]]`
 entries and must export `provider_id()`, `kinds()`, and `payload_schema()`.
-Inbound providers also export `normalize_inbound(raw)`, which returns a dict
-with `kind`, `dedupe_key`, and `payload` plus optional metadata such as
-`occurred_at`, `tenant_id`, `headers`, `batch`, and `signature_status`.
+Inbound providers also export `normalize_inbound(raw)`, which returns a
+`NormalizeResult` v1 dict. The top-level `type` field is one of:
+
+- `"event"` with `event: {kind, dedupe_key, payload, ...}` for one normalized
+  event.
+- `"batch"` with `events: [{kind, dedupe_key, payload, ...}, ...]` for multiple
+  normalized events.
+- `"immediate_response"` with `immediate_response: {status, headers?, body?}`
+  and optional `event` or `events` fields for ack-first webhook responses that
+  may still enqueue normalized events.
+- `"reject"` with `status`, `headers?`, and `body?` for explicit verification
+  or unsupported-input rejection.
+
+Each normalized event includes `kind`, `dedupe_key`, and `payload` plus optional
+metadata such as `occurred_at`, `tenant_id`, `headers`, `batch`, and
+`signature_status`. During the transition to NormalizeResult v1, runtimes also
+accept the legacy direct event dict shape.
 
 ## Iterator protocol
 

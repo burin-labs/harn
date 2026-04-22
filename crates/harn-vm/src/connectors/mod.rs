@@ -97,11 +97,66 @@ pub trait Connector: Send + Sync {
     /// Verify + normalize a provider-native inbound request into `TriggerEvent`.
     async fn normalize_inbound(&self, raw: RawInbound) -> Result<TriggerEvent, ConnectorError>;
 
+    /// Verify + normalize a provider-native inbound request into the richer
+    /// connector result contract used by ack-first webhook adapters.
+    async fn normalize_inbound_result(
+        &self,
+        raw: RawInbound,
+    ) -> Result<ConnectorNormalizeResult, ConnectorError> {
+        self.normalize_inbound(raw)
+            .await
+            .map(ConnectorNormalizeResult::event)
+    }
+
     /// Payload schema surfaced to future trigger-type narrowing.
     fn payload_schema(&self) -> ProviderPayloadSchema;
 
     /// Outbound API wrapper exposed to handlers.
     fn client(&self) -> Arc<dyn ConnectorClient>;
+}
+
+/// Provider-supplied HTTP response returned before or instead of trigger dispatch.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ConnectorHttpResponse {
+    pub status: u16,
+    pub headers: BTreeMap<String, String>,
+    pub body: JsonValue,
+}
+
+impl ConnectorHttpResponse {
+    pub fn new(status: u16, headers: BTreeMap<String, String>, body: JsonValue) -> Self {
+        Self {
+            status,
+            headers,
+            body,
+        }
+    }
+}
+
+/// Normalized inbound result accepted by the runtime connector adapter.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ConnectorNormalizeResult {
+    Event(Box<TriggerEvent>),
+    Batch(Vec<TriggerEvent>),
+    ImmediateResponse {
+        response: ConnectorHttpResponse,
+        events: Vec<TriggerEvent>,
+    },
+    Reject(ConnectorHttpResponse),
+}
+
+impl ConnectorNormalizeResult {
+    pub fn event(event: TriggerEvent) -> Self {
+        Self::Event(Box::new(event))
+    }
+
+    pub fn into_events(self) -> Vec<TriggerEvent> {
+        match self {
+            Self::Event(event) => vec![*event],
+            Self::Batch(events) | Self::ImmediateResponse { events, .. } => events,
+            Self::Reject(_) => Vec::new(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
