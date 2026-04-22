@@ -843,6 +843,7 @@ mod tests {
             last_received_ms: None,
             cost_total_usd_micros: 0,
             cost_today_usd_micros: 0,
+            cost_hour_usd_micros: 0,
         });
         assert_eq!(
             rendered,

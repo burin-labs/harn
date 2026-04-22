@@ -166,7 +166,7 @@ type TriggerPredicate = fn(TriggerEvent) -> bool | Result<bool, any>
 
 type TriggerMatch = {events: list<string> | nil}
 
-type TriggerBudget = {daily_cost_usd: float | nil, max_concurrent: int | nil}
+type TriggerBudget = {max_cost_usd: float | nil, max_tokens: int | nil, daily_cost_usd: float | nil, hourly_cost_usd: float | nil, max_concurrent: int | nil, on_budget_exhausted: string | nil}
 
 type TriggerWhenBudget = {max_cost_usd: float | nil, tokens_max: int | nil, timeout: string | nil}
 
@@ -180,9 +180,9 @@ type TrustOutcome = "success" | "failure" | "denied" | "timeout"
 
 type TriggerConfig = {id: string | nil, kind: string, provider: ProviderId, autonomy_tier: AutonomyTier | nil, handler: TriggerHandler, when: TriggerPredicate | nil, when_budget: TriggerWhenBudget | nil, retry: TriggerRetry | nil, match: TriggerMatch | nil, events: list<string> | nil, dedupe_key: string | nil, filter: string | nil, allow_cleartext: bool | nil, budget: TriggerBudget | nil, manifest_path: string | nil, package_name: string | nil}
 
-type TriggerMetrics = {received: int, dispatched: int, failed: int, dlq: int, in_flight: int, last_received_ms: int | nil, cost_total_usd_micros: int, cost_today_usd_micros: int}
+type TriggerMetrics = {received: int, dispatched: int, failed: int, dlq: int, in_flight: int, last_received_ms: int | nil, cost_total_usd_micros: int, cost_today_usd_micros: int, cost_hour_usd_micros: int}
 
-type TriggerBinding = {id: string, version: int, source: TriggerBindingSource, kind: string, provider: string, autonomy_tier: AutonomyTier, handler_kind: string, state: TriggerState, metrics: TriggerMetrics}
+type TriggerBinding = {id: string, version: int, source: TriggerBindingSource, kind: string, provider: string, autonomy_tier: AutonomyTier, handler_kind: string, state: TriggerState, metrics: TriggerMetrics, daily_cost_usd: float | nil, hourly_cost_usd: float | nil, on_budget_exhausted: string}
 
 type TriggerHandle = TriggerBinding
 

@@ -34,6 +34,7 @@
 - [Transcript architecture](./transcript-architecture.md)
 - [Workflow runtime](./workflow-runtime.md)
 - [Trigger manifests](./triggers/manifest.md)
+- [Trigger budgets](./triggers/budgets.md)
 - [Trigger event schema](./triggers/event-schema.md)
 - [Trigger dispatcher](./triggers/dispatcher.md)
 - [Trigger observability in the action graph](./observability/triggers-in-action-graph.md)

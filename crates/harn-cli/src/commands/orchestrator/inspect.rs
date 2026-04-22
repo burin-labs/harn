@@ -34,6 +34,27 @@ pub(super) async fn run(args: OrchestratorInspectArgs) -> Result<(), String> {
         }
     }
 
+    if payload.budget.daily_limit_usd.is_some() || payload.budget.hourly_limit_usd.is_some() {
+        println!();
+        println!("Budget:");
+        if let Some(limit) = payload.budget.daily_limit_usd {
+            println!(
+                "- daily used=${:.6} remaining=${:.6} limit=${:.6}",
+                payload.budget.used_today_usd,
+                payload.budget.remaining_today_usd.unwrap_or_default(),
+                limit
+            );
+        }
+        if let Some(limit) = payload.budget.hourly_limit_usd {
+            println!(
+                "- hourly used=${:.6} remaining=${:.6} limit=${:.6}",
+                payload.budget.used_hour_usd,
+                payload.budget.remaining_hour_usd.unwrap_or_default(),
+                limit
+            );
+        }
+    }
+
     println!();
     println!("Connectors:");
     if !payload.activations.is_empty() {

@@ -135,6 +135,36 @@ async fn dispatcher_fixture_with_options(
     Arc<crate::event_log::AnyEventLog>,
     Dispatcher,
 ) {
+    dispatcher_fixture_with_budget_strategy(
+        source,
+        handler_name,
+        when_name,
+        when_budget,
+        daily_cost_usd,
+        None,
+        crate::TriggerBudgetExhaustionStrategy::False,
+        retry,
+        flow_control,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn dispatcher_fixture_with_budget_strategy(
+    source: &str,
+    handler_name: &str,
+    when_name: Option<&str>,
+    when_budget: Option<TriggerPredicateBudget>,
+    daily_cost_usd: Option<f64>,
+    hourly_cost_usd: Option<f64>,
+    on_budget_exhausted: crate::TriggerBudgetExhaustionStrategy,
+    retry: TriggerRetryConfig,
+    flow_control: crate::triggers::TriggerFlowControlConfig,
+) -> (
+    tempfile::TempDir,
+    Arc<crate::event_log::AnyEventLog>,
+    Dispatcher,
+) {
     crate::reset_thread_local_state();
     let dir = tempfile::tempdir().expect("tempdir");
     let log = install_default_for_base_dir(dir.path()).expect("install event log");
@@ -180,6 +210,8 @@ async fn dispatcher_fixture_with_options(
         dedupe_retention_days: crate::triggers::DEFAULT_INBOX_RETENTION_DAYS,
         filter: None,
         daily_cost_usd,
+        hourly_cost_usd,
+        on_budget_exhausted,
         max_concurrent: None,
         flow_control,
         manifest_path: None,
@@ -228,6 +260,8 @@ async fn a2a_dispatcher_fixture(
         dedupe_retention_days: crate::triggers::DEFAULT_INBOX_RETENTION_DAYS,
         filter: None,
         daily_cost_usd: None,
+        hourly_cost_usd: None,
+        on_budget_exhausted: crate::TriggerBudgetExhaustionStrategy::False,
         max_concurrent: None,
         flow_control: crate::triggers::TriggerFlowControlConfig::default(),
         manifest_path: None,
@@ -273,6 +307,8 @@ async fn worker_dispatcher_fixture(
         dedupe_retention_days: crate::triggers::DEFAULT_INBOX_RETENTION_DAYS,
         filter: None,
         daily_cost_usd: None,
+        hourly_cost_usd: None,
+        on_budget_exhausted: crate::TriggerBudgetExhaustionStrategy::False,
         max_concurrent: None,
         flow_control: crate::triggers::TriggerFlowControlConfig::default(),
         manifest_path: None,
@@ -874,6 +910,162 @@ pub fn should_handle(event: TriggerEvent) -> bool {
                 evaluated[1]["reason"],
                 serde_json::json!("daily_budget_exceeded")
             );
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn predicate_budget_warn_strategy_proceeds_without_llm_spend() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (_dir, log, dispatcher) = dispatcher_fixture_with_budget_strategy(
+                r#"
+import "std/triggers"
+
+pub fn local_fn(event: TriggerEvent) -> string {
+  return "handled:" + event.kind
+}
+
+pub fn should_handle(event: TriggerEvent) -> bool {
+  let result = llm_call(
+    "warn gate " + event.kind,
+    nil,
+    {provider: "mock", model: "gpt-4o-mini", llm_retries: 0},
+  )
+  return contains(result.text, "yes")
+}
+"#,
+                "local_fn",
+                Some("should_handle"),
+                Some(TriggerPredicateBudget {
+                    max_cost_usd: Some(0.001),
+                    tokens_max: None,
+                    timeout_ms: None,
+                }),
+                Some(0.0),
+                None,
+                crate::TriggerBudgetExhaustionStrategy::Warn,
+                TriggerRetryConfig::default(),
+                crate::triggers::TriggerFlowControlConfig::default(),
+            )
+            .await;
+
+            let outcome = dispatcher
+                .dispatch_event(trigger_event("issues.opened", "delivery-budget-warn"))
+                .await
+                .expect("dispatch succeeds")
+                .into_iter()
+                .next()
+                .expect("dispatch outcome");
+
+            assert_eq!(outcome.status, DispatchStatus::Succeeded);
+            assert_eq!(get_llm_mock_calls().len(), 0);
+            let lifecycle = read_topic(log.clone(), "triggers.lifecycle").await;
+            let evaluated = lifecycle_payloads(&lifecycle, "predicate.evaluated");
+            assert_eq!(evaluated[0]["result"], serde_json::json!(true));
+            assert_eq!(
+                evaluated[0]["on_budget_exhausted"],
+                serde_json::json!("warn")
+            );
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn predicate_budget_fail_strategy_moves_to_dlq() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (_dir, log, dispatcher) = dispatcher_fixture_with_budget_strategy(
+                r#"
+import "std/triggers"
+
+pub fn local_fn(event: TriggerEvent) -> string {
+  return "handled:" + event.kind
+}
+
+pub fn should_handle(event: TriggerEvent) -> bool {
+  return true
+}
+"#,
+                "local_fn",
+                Some("should_handle"),
+                Some(TriggerPredicateBudget {
+                    max_cost_usd: Some(0.001),
+                    tokens_max: None,
+                    timeout_ms: None,
+                }),
+                Some(0.0),
+                None,
+                crate::TriggerBudgetExhaustionStrategy::Fail,
+                TriggerRetryConfig::default(),
+                crate::triggers::TriggerFlowControlConfig::default(),
+            )
+            .await;
+
+            let outcome = dispatcher
+                .dispatch_event(trigger_event("issues.opened", "delivery-budget-fail"))
+                .await
+                .expect("dispatch succeeds")
+                .into_iter()
+                .next()
+                .expect("dispatch outcome");
+
+            assert_eq!(outcome.status, DispatchStatus::Dlq);
+            assert_eq!(dispatcher.dlq_entries().len(), 1);
+            let dlq = read_topic(log.clone(), "trigger.dlq").await;
+            assert_eq!(dlq.len(), 1);
+            assert_eq!(dlq[0].1.kind, "dlq_moved");
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn predicate_budget_retry_later_strategy_defers_event() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (_dir, log, dispatcher) = dispatcher_fixture_with_budget_strategy(
+                r#"
+import "std/triggers"
+
+pub fn local_fn(event: TriggerEvent) -> string {
+  return "handled:" + event.kind
+}
+
+pub fn should_handle(event: TriggerEvent) -> bool {
+  return true
+}
+"#,
+                "local_fn",
+                Some("should_handle"),
+                Some(TriggerPredicateBudget {
+                    max_cost_usd: Some(0.001),
+                    tokens_max: None,
+                    timeout_ms: None,
+                }),
+                Some(0.0),
+                None,
+                crate::TriggerBudgetExhaustionStrategy::RetryLater,
+                TriggerRetryConfig::default(),
+                crate::triggers::TriggerFlowControlConfig::default(),
+            )
+            .await;
+
+            let outcome = dispatcher
+                .dispatch_event(trigger_event("issues.opened", "delivery-budget-retry"))
+                .await
+                .expect("dispatch succeeds")
+                .into_iter()
+                .next()
+                .expect("dispatch outcome");
+
+            assert_eq!(outcome.status, DispatchStatus::Waiting);
+            let attempts = read_topic(log.clone(), "trigger.attempts").await;
+            assert!(attempts
+                .iter()
+                .any(|(_, event)| event.kind == "budget_deferred"));
         })
         .await;
 }
@@ -2399,6 +2591,8 @@ pub fn local_fn(event: TriggerEvent) -> string {
                 dedupe_retention_days: crate::triggers::DEFAULT_INBOX_RETENTION_DAYS,
                 filter: None,
                 daily_cost_usd: None,
+                hourly_cost_usd: None,
+                on_budget_exhausted: crate::TriggerBudgetExhaustionStrategy::False,
                 max_concurrent: None,
                 flow_control,
                 manifest_path: None,
@@ -2590,6 +2784,8 @@ pub fn slow_handler(event: TriggerEvent) -> string {
                 dedupe_retention_days: crate::triggers::DEFAULT_INBOX_RETENTION_DAYS,
                 filter: None,
                 daily_cost_usd: None,
+                hourly_cost_usd: None,
+                on_budget_exhausted: crate::TriggerBudgetExhaustionStrategy::False,
                 max_concurrent: None,
                 flow_control,
                 manifest_path: None,

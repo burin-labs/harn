@@ -746,6 +746,28 @@ fn parse_trigger_config(config: &BTreeMap<String, VmValue>) -> Result<TriggerBin
     let daily_cost_usd = budget
         .and_then(|map| map.get("daily_cost_usd"))
         .and_then(number_value);
+    let hourly_cost_usd = budget
+        .and_then(|map| map.get("hourly_cost_usd"))
+        .and_then(number_value);
+    let on_budget_exhausted = match budget.and_then(|map| map.get("on_budget_exhausted")) {
+        Some(VmValue::String(text)) => match text.as_ref() {
+            "false" => crate::TriggerBudgetExhaustionStrategy::False,
+            "retry_later" => crate::TriggerBudgetExhaustionStrategy::RetryLater,
+            "fail" => crate::TriggerBudgetExhaustionStrategy::Fail,
+            "warn" => crate::TriggerBudgetExhaustionStrategy::Warn,
+            raw => {
+                return Err(VmError::Runtime(format!(
+                    "trigger_register: unsupported budget.on_budget_exhausted '{raw}'"
+                )))
+            }
+        },
+        Some(_) => {
+            return Err(VmError::Runtime(
+                "trigger_register: budget.on_budget_exhausted must be a string".to_string(),
+            ))
+        }
+        None => crate::TriggerBudgetExhaustionStrategy::False,
+    };
     let max_concurrent = budget
         .and_then(|map| map.get("max_concurrent"))
         .and_then(VmValue::as_int)
@@ -769,6 +791,27 @@ fn parse_trigger_config(config: &BTreeMap<String, VmValue>) -> Result<TriggerBin
             })
         })
         .transpose()?;
+    let when_budget = {
+        let mut merged = when_budget;
+        if let Some(map) = budget {
+            let max_cost_usd = map.get("max_cost_usd").and_then(number_value);
+            let max_tokens = map
+                .get("max_tokens")
+                .or_else(|| map.get("tokens_max"))
+                .and_then(VmValue::as_int)
+                .map(|value| value.max(0) as u64);
+            if max_cost_usd.is_some() || max_tokens.is_some() {
+                let budget = merged.get_or_insert_with(TriggerPredicateBudget::default);
+                if budget.max_cost_usd.is_none() {
+                    budget.max_cost_usd = max_cost_usd;
+                }
+                if budget.tokens_max.is_none() {
+                    budget.tokens_max = max_tokens;
+                }
+            }
+        }
+        merged
+    };
     if when_budget.is_some() && when.is_none() {
         return Err(VmError::Runtime(
             "trigger_register: when_budget requires a when predicate".to_string(),
@@ -794,6 +837,8 @@ fn parse_trigger_config(config: &BTreeMap<String, VmValue>) -> Result<TriggerBin
         "filter": filter,
         "allow_cleartext": allow_cleartext,
         "daily_cost_usd": daily_cost_usd,
+        "hourly_cost_usd": hourly_cost_usd,
+        "on_budget_exhausted": on_budget_exhausted.as_str(),
         "max_concurrent": max_concurrent,
         "manifest_path": manifest_path.as_ref().map(|path| path.display().to_string()),
         "package_name": package_name,
@@ -816,6 +861,8 @@ fn parse_trigger_config(config: &BTreeMap<String, VmValue>) -> Result<TriggerBin
         dedupe_retention_days: crate::triggers::DEFAULT_INBOX_RETENTION_DAYS,
         filter,
         daily_cost_usd,
+        hourly_cost_usd,
+        on_budget_exhausted,
         max_concurrent,
         flow_control: crate::triggers::TriggerFlowControlConfig::default(),
         manifest_path,
@@ -1431,6 +1478,8 @@ mod tests {
             dedupe_retention_days: crate::triggers::DEFAULT_INBOX_RETENTION_DAYS,
             filter: None,
             daily_cost_usd: None,
+            hourly_cost_usd: None,
+            on_budget_exhausted: crate::TriggerBudgetExhaustionStrategy::False,
             max_concurrent: None,
             flow_control: crate::triggers::TriggerFlowControlConfig::default(),
             manifest_path: None,

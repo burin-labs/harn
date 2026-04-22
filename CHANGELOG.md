@@ -9,6 +9,14 @@ granular archaeology.
 
 ## v0.7.29
 
+### Added
+
+- **Trigger budget governance (#162).** Trigger predicates now support
+  per-call cost/token ceilings, hourly and daily trigger spend caps,
+  global orchestrator budget caps, budget exhaustion strategies
+  (`false`, `retry_later`, `fail`, `warn`), budget metrics, and
+  `harn orchestrator inspect` budget usage.
+
 ### Fixed
 
 - **Stable script source directories.** `harn run` now stores source

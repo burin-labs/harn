@@ -31,7 +31,7 @@ handler = "handlers::on_new_issue"
 dedupe_key = "event.dedupe_key"
 retry = { max = 7, backoff = "svix", retention_days = 7 }
 priority = "normal"
-budget = { daily_cost_usd = 5.00 }
+budget = { max_cost_usd = 0.001, max_tokens = 500, hourly_cost_usd = 1.00, daily_cost_usd = 5.00, on_budget_exhausted = "false" }
 concurrency = { max = 10 }
 secrets = { signing_secret = "github/webhook-secret" }
 filter = "event.kind"
@@ -102,7 +102,9 @@ The manifest loader rejects invalid trigger declarations before execution:
 - `dedupe_key` and `filter` must parse as JMESPath expressions
 - `retry.max` must be `<= 100`
 - `retry.retention_days` defaults to `7` and must be `>= 1`
-- `budget.daily_cost_usd` must be `>= 0`
+- `budget.max_cost_usd`, `budget.hourly_cost_usd`, and
+  `budget.daily_cost_usd` must be `>= 0`
+- `budget.max_tokens` and `budget.max_concurrent` must be `>= 1` when present
 - cron triggers must declare a parseable `schedule`
 - cron `timezone` must be a valid IANA timezone name
 - secret references must use `<namespace>/<name>` syntax and the namespace must

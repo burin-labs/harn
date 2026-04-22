@@ -93,7 +93,17 @@ pub struct OrchestratorConfig {
     #[serde(default, alias = "max-body-bytes")]
     pub max_body_bytes: Option<usize>,
     #[serde(default)]
+    pub budget: OrchestratorBudgetSpec,
+    #[serde(default)]
     pub drain: OrchestratorDrainConfig,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OrchestratorBudgetSpec {
+    #[serde(default)]
+    pub daily_cost_usd: Option<f64>,
+    #[serde(default)]
+    pub hourly_cost_usd: Option<f64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -292,9 +302,17 @@ pub enum TriggerPriorityField {
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TriggerBudgetSpec {
     #[serde(default)]
+    pub max_cost_usd: Option<f64>,
+    #[serde(default, alias = "tokens_max")]
+    pub max_tokens: Option<u64>,
+    #[serde(default)]
     pub daily_cost_usd: Option<f64>,
     #[serde(default)]
+    pub hourly_cost_usd: Option<f64>,
+    #[serde(default)]
     pub max_concurrent: Option<u32>,
+    #[serde(default)]
+    pub on_budget_exhausted: harn_vm::TriggerBudgetExhaustionStrategy,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
@@ -1432,6 +1450,34 @@ fn validate_static_trigger_config(trigger: &ResolvedTriggerConfig) -> Result<(),
             ));
         }
     }
+    if let Some(hourly_cost_usd) = trigger.budget.hourly_cost_usd {
+        if hourly_cost_usd.is_sign_negative() {
+            return Err(trigger_error(
+                trigger,
+                "budget.hourly_cost_usd must be greater than or equal to 0",
+            ));
+        }
+    }
+    if let Some(max_cost_usd) = trigger.budget.max_cost_usd {
+        if max_cost_usd.is_sign_negative() {
+            return Err(trigger_error(
+                trigger,
+                "budget.max_cost_usd must be greater than or equal to 0",
+            ));
+        }
+    }
+    if trigger.budget.max_tokens == Some(0) {
+        return Err(trigger_error(
+            trigger,
+            "budget.max_tokens must be greater than or equal to 1",
+        ));
+    }
+    if trigger.budget.max_concurrent == Some(0) {
+        return Err(trigger_error(
+            trigger,
+            "budget.max_concurrent must be greater than or equal to 1",
+        ));
+    }
     if let Some(when_budget) = trigger.when_budget.as_ref() {
         if when_budget
             .max_cost_usd
@@ -1596,6 +1642,33 @@ fn validate_static_trigger_config(trigger: &ResolvedTriggerConfig) -> Result<(),
             trigger,
             "window is only valid for stream triggers",
         ));
+    }
+    Ok(())
+}
+
+fn validate_orchestrator_budget(manifest: Option<&Manifest>) -> Result<(), String> {
+    let Some(manifest) = manifest else {
+        return Ok(());
+    };
+    if manifest
+        .orchestrator
+        .budget
+        .daily_cost_usd
+        .is_some_and(|value| value.is_sign_negative())
+    {
+        return Err(
+            "orchestrator.budget.daily_cost_usd must be greater than or equal to 0".to_string(),
+        );
+    }
+    if manifest
+        .orchestrator
+        .budget
+        .hourly_cost_usd
+        .is_some_and(|value| value.is_sign_negative())
+    {
+        return Err(
+            "orchestrator.budget.hourly_cost_usd must be greater than or equal to 0".to_string(),
+        );
     }
     Ok(())
 }
@@ -2024,6 +2097,19 @@ pub fn load_runtime_extensions(anchor: &Path) -> RuntimeExtensions {
 pub fn install_runtime_extensions(extensions: &RuntimeExtensions) {
     harn_vm::llm_config::set_user_overrides(extensions.llm.clone());
     harn_vm::llm::capabilities::set_user_overrides(extensions.capabilities.clone());
+    install_orchestrator_budget(extensions);
+}
+
+pub fn install_orchestrator_budget(extensions: &RuntimeExtensions) {
+    let budget = extensions
+        .root_manifest
+        .as_ref()
+        .map(|manifest| harn_vm::OrchestratorBudgetConfig {
+            daily_cost_usd: manifest.orchestrator.budget.daily_cost_usd,
+            hourly_cost_usd: manifest.orchestrator.budget.hourly_cost_usd,
+        })
+        .unwrap_or_default();
+    harn_vm::install_orchestrator_budget(budget);
 }
 
 pub async fn install_manifest_hooks(
@@ -2079,6 +2165,7 @@ pub async fn collect_manifest_triggers(
     extensions: &RuntimeExtensions,
 ) -> Result<Vec<CollectedManifestTrigger>, String> {
     install_manifest_provider_schemas(extensions).await?;
+    validate_orchestrator_budget(extensions.root_manifest.as_ref())?;
     validate_static_trigger_configs(&extensions.triggers)?;
     let mut loaded_exports: HashMap<ManifestModuleCacheKey, ManifestModuleExports> = HashMap::new();
     let mut module_signatures: HashMap<PathBuf, BTreeMap<String, TriggerFunctionSignature>> =
@@ -2456,7 +2543,7 @@ pub fn manifest_trigger_binding_spec(
         raw: predicate.reference.raw,
         closure: predicate.closure,
     });
-    let when_budget = config
+    let mut when_budget = config
         .when_budget
         .as_ref()
         .map(|budget| {
@@ -2472,6 +2559,15 @@ pub fn manifest_trigger_binding_spec(
         })
         .transpose()
         .unwrap_or_default();
+    if config.budget.max_cost_usd.is_some() || config.budget.max_tokens.is_some() {
+        let budget = when_budget.get_or_insert_with(harn_vm::TriggerPredicateBudget::default);
+        if budget.max_cost_usd.is_none() {
+            budget.max_cost_usd = config.budget.max_cost_usd;
+        }
+        if budget.tokens_max.is_none() {
+            budget.tokens_max = config.budget.max_tokens;
+        }
+    }
     let id = config.id.clone();
     let kind = trigger_kind_label(config.kind).to_string();
     let provider = config.provider.clone();
@@ -2488,6 +2584,8 @@ pub fn manifest_trigger_binding_spec(
     let filter = config.filter.clone();
     let dedupe_retention_days = config.retry.retention_days;
     let daily_cost_usd = config.budget.daily_cost_usd;
+    let hourly_cost_usd = config.budget.hourly_cost_usd;
+    let on_budget_exhausted = config.budget.on_budget_exhausted;
     let max_concurrent = flow_control.concurrency.as_ref().map(|config| config.max);
     let manifest_path = Some(config.manifest_path.clone());
     let package_name = config.package_name.clone();
@@ -2539,6 +2637,8 @@ pub fn manifest_trigger_binding_spec(
         filter,
         dedupe_retention_days,
         daily_cost_usd,
+        hourly_cost_usd,
+        on_budget_exhausted,
         max_concurrent,
         flow_control,
         manifest_path,
@@ -2551,6 +2651,7 @@ pub async fn install_manifest_triggers(
     vm: &mut harn_vm::Vm,
     extensions: &RuntimeExtensions,
 ) -> Result<(), String> {
+    install_orchestrator_budget(extensions);
     let collected = collect_manifest_triggers(vm, extensions).await?;
     install_collected_manifest_triggers(&collected).await
 }
@@ -4778,7 +4879,7 @@ handler = "handlers::on_new_issue"
 dedupe_key = "event.dedupe_key"
 retry = { max = 7, backoff = "svix", retention_days = 7 }
 priority = "high"
-budget = { daily_cost_usd = 5.0, max_concurrent = 10 }
+budget = { max_cost_usd = 0.001, max_tokens = 500, hourly_cost_usd = 1.0, daily_cost_usd = 5.0, max_concurrent = 10, on_budget_exhausted = "retry_later" }
 secrets = { signing_secret = "github/webhook-secret" }
 filter = "event.kind"
 
@@ -4939,6 +5040,10 @@ name = "workspace"
 [exports]
 handlers = "lib.harn"
 
+[orchestrator.budget]
+hourly_cost_usd = 1.0
+daily_cost_usd = 5.0
+
 [[triggers]]
 id = "github-new-issue"
 kind = "webhook"
@@ -4951,7 +5056,7 @@ handler = "handlers::on_new_issue"
 dedupe_key = "event.dedupe_key"
 retry = { max = 7, backoff = "svix", retention_days = 7 }
 priority = "normal"
-budget = { daily_cost_usd = 5.0, max_concurrent = 10 }
+budget = { max_cost_usd = 0.002, max_tokens = 250, hourly_cost_usd = 1.0, daily_cost_usd = 5.0, max_concurrent = 10, on_budget_exhausted = "fail" }
 secrets = { signing_secret = "github/webhook-secret" }
 filter = "event.kind"
 "#,
@@ -4970,6 +5075,13 @@ pub fn should_handle(event: TriggerEvent) -> Result<bool, string> {
             ),
         );
         let extensions = load_runtime_extensions(&harn_file);
+        assert_eq!(
+            extensions
+                .root_manifest
+                .as_ref()
+                .and_then(|manifest| manifest.orchestrator.budget.hourly_cost_usd),
+            Some(1.0)
+        );
         let mut vm = test_vm();
         let collected = collect_manifest_triggers(&mut vm, &extensions)
             .await
@@ -5003,6 +5115,11 @@ pub fn should_handle(event: TriggerEvent) -> Result<bool, string> {
                 .as_ref()
                 .and_then(|budget| budget.tokens_max),
             Some(500)
+        );
+        assert_eq!(collected[0].config.budget.hourly_cost_usd, Some(1.0));
+        assert_eq!(
+            collected[0].config.budget.on_budget_exhausted,
+            harn_vm::TriggerBudgetExhaustionStrategy::Fail
         );
     }
 
