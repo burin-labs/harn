@@ -1,150 +1,180 @@
 use std::rc::Rc;
 
-use crate::chunk::Op;
 use crate::value::{compare_values, values_equal, VmError, VmValue};
 
 impl super::super::Vm {
-    pub(super) fn execute_typed_comparison_op(&mut self, op: u8) -> Result<(), VmError> {
-        if op == Op::LessInt as u8 {
-            let b = self.pop()?;
-            let a = self.pop()?;
-            let (x, y) = typed_int_pair("less-than", a, b)?;
-            self.stack.push(VmValue::Bool(x < y));
-        } else if op == Op::GreaterEqualInt as u8 {
-            let b = self.pop()?;
-            let a = self.pop()?;
-            let (x, y) = typed_int_pair("greater-equal", a, b)?;
-            self.stack.push(VmValue::Bool(x >= y));
-        } else if op == Op::LessEqualInt as u8 {
-            let b = self.pop()?;
-            let a = self.pop()?;
-            let (x, y) = typed_int_pair("less-equal", a, b)?;
-            self.stack.push(VmValue::Bool(x <= y));
-        } else if op == Op::EqualInt as u8 {
-            let b = self.pop()?;
-            let a = self.pop()?;
-            let (x, y) = typed_int_pair("equal", a, b)?;
-            self.stack.push(VmValue::Bool(x == y));
-        } else if op == Op::NotEqualInt as u8 {
-            let b = self.pop()?;
-            let a = self.pop()?;
-            let (x, y) = typed_int_pair("not-equal", a, b)?;
-            self.stack.push(VmValue::Bool(x != y));
-        } else if op == Op::GreaterInt as u8 {
-            let b = self.pop()?;
-            let a = self.pop()?;
-            let (x, y) = typed_int_pair("greater-than", a, b)?;
-            self.stack.push(VmValue::Bool(x > y));
-        } else if op == Op::EqualFloat as u8 {
-            let b = self.pop()?;
-            let a = self.pop()?;
-            let (x, y) = typed_float_pair("equal", a, b)?;
-            self.stack.push(VmValue::Bool(x == y));
-        } else if op == Op::NotEqualFloat as u8 {
-            let b = self.pop()?;
-            let a = self.pop()?;
-            let (x, y) = typed_float_pair("not-equal", a, b)?;
-            self.stack.push(VmValue::Bool(x != y));
-        } else if op == Op::LessFloat as u8 {
-            let b = self.pop()?;
-            let a = self.pop()?;
-            let (x, y) = typed_float_pair("less-than", a, b)?;
-            self.stack.push(VmValue::Bool(x < y));
-        } else if op == Op::GreaterFloat as u8 {
-            let b = self.pop()?;
-            let a = self.pop()?;
-            let (x, y) = typed_float_pair("greater-than", a, b)?;
-            self.stack.push(VmValue::Bool(x > y));
-        } else if op == Op::LessEqualFloat as u8 {
-            let b = self.pop()?;
-            let a = self.pop()?;
-            let (x, y) = typed_float_pair("less-equal", a, b)?;
-            self.stack.push(VmValue::Bool(x <= y));
-        } else if op == Op::GreaterEqualFloat as u8 {
-            let b = self.pop()?;
-            let a = self.pop()?;
-            let (x, y) = typed_float_pair("greater-equal", a, b)?;
-            self.stack.push(VmValue::Bool(x >= y));
-        } else if op == Op::EqualBool as u8 {
-            let b = self.pop()?;
-            let a = self.pop()?;
-            let (x, y) = typed_bool_pair("equal", a, b)?;
-            self.stack.push(VmValue::Bool(x == y));
-        } else if op == Op::NotEqualBool as u8 {
-            let b = self.pop()?;
-            let a = self.pop()?;
-            let (x, y) = typed_bool_pair("not-equal", a, b)?;
-            self.stack.push(VmValue::Bool(x != y));
-        } else if op == Op::EqualString as u8 {
-            let b = self.pop()?;
-            let a = self.pop()?;
-            let (x, y) = typed_string_pair("equal", a, b)?;
-            self.stack.push(VmValue::Bool(x == y));
-        } else if op == Op::NotEqualString as u8 {
-            let b = self.pop()?;
-            let a = self.pop()?;
-            let (x, y) = typed_string_pair("not-equal", a, b)?;
-            self.stack.push(VmValue::Bool(x != y));
-        } else {
-            return Err(VmError::InvalidInstruction(op));
-        }
+    fn push_compare_result(
+        &mut self,
+        f: impl FnOnce(VmValue, VmValue) -> Result<bool, VmError>,
+    ) -> Result<(), VmError> {
+        let b = self.pop()?;
+        let a = self.pop()?;
+        self.stack.push(VmValue::Bool(f(a, b)?));
         Ok(())
     }
 
-    pub(super) fn try_execute_comparison_op(&mut self, op: u8) -> Result<bool, VmError> {
-        if op == Op::Equal as u8 {
-            let b = self.pop()?;
-            let a = self.pop()?;
-            self.stack.push(VmValue::Bool(values_equal(&a, &b)));
-        } else if op == Op::NotEqual as u8 {
-            let b = self.pop()?;
-            let a = self.pop()?;
-            self.stack.push(VmValue::Bool(!values_equal(&a, &b)));
-        } else if op == Op::Less as u8 {
-            let b = self.pop()?;
-            let a = self.pop()?;
-            self.stack.push(VmValue::Bool(compare_values(&a, &b) < 0));
-        } else if op == Op::Greater as u8 {
-            let b = self.pop()?;
-            let a = self.pop()?;
-            self.stack.push(VmValue::Bool(compare_values(&a, &b) > 0));
-        } else if op == Op::LessEqual as u8 {
-            let b = self.pop()?;
-            let a = self.pop()?;
-            self.stack.push(VmValue::Bool(compare_values(&a, &b) <= 0));
-        } else if op == Op::GreaterEqual as u8 {
-            let b = self.pop()?;
-            let a = self.pop()?;
-            self.stack.push(VmValue::Bool(compare_values(&a, &b) >= 0));
-        } else if op == Op::Contains as u8 {
-            let collection = self.pop()?;
-            let item = self.pop()?;
-            let result = match &collection {
-                VmValue::List(items) => items.iter().any(|v| values_equal(v, &item)),
-                VmValue::Dict(map) => {
-                    let key = item.display();
-                    map.contains_key(&key)
-                }
-                VmValue::Set(items) => items.iter().any(|v| values_equal(v, &item)),
-                VmValue::Range(r) => match &item {
-                    VmValue::Int(n) => r.contains(*n),
-                    _ => false,
-                },
-                VmValue::String(s) => {
-                    if let VmValue::String(substr) = &item {
-                        s.contains(&**substr)
-                    } else {
-                        let substr = item.display();
-                        s.contains(&substr)
-                    }
-                }
+    pub(super) fn execute_equal(&mut self) -> Result<(), VmError> {
+        self.push_compare_result(|a, b| Ok(values_equal(&a, &b)))
+    }
+
+    pub(super) fn execute_not_equal(&mut self) -> Result<(), VmError> {
+        self.push_compare_result(|a, b| Ok(!values_equal(&a, &b)))
+    }
+
+    pub(super) fn execute_less(&mut self) -> Result<(), VmError> {
+        self.push_compare_result(|a, b| Ok(compare_values(&a, &b) < 0))
+    }
+
+    pub(super) fn execute_greater(&mut self) -> Result<(), VmError> {
+        self.push_compare_result(|a, b| Ok(compare_values(&a, &b) > 0))
+    }
+
+    pub(super) fn execute_less_equal(&mut self) -> Result<(), VmError> {
+        self.push_compare_result(|a, b| Ok(compare_values(&a, &b) <= 0))
+    }
+
+    pub(super) fn execute_greater_equal(&mut self) -> Result<(), VmError> {
+        self.push_compare_result(|a, b| Ok(compare_values(&a, &b) >= 0))
+    }
+
+    pub(super) fn execute_contains(&mut self) -> Result<(), VmError> {
+        let collection = self.pop()?;
+        let item = self.pop()?;
+        let result = match &collection {
+            VmValue::List(items) => items.iter().any(|v| values_equal(v, &item)),
+            VmValue::Dict(map) => {
+                let key = item.display();
+                map.contains_key(&key)
+            }
+            VmValue::Set(items) => items.iter().any(|v| values_equal(v, &item)),
+            VmValue::Range(r) => match &item {
+                VmValue::Int(n) => r.contains(*n),
                 _ => false,
-            };
-            self.stack.push(VmValue::Bool(result));
-        } else {
-            return Ok(false);
-        }
-        Ok(true)
+            },
+            VmValue::String(s) => {
+                if let VmValue::String(substr) = &item {
+                    s.contains(&**substr)
+                } else {
+                    let substr = item.display();
+                    s.contains(&substr)
+                }
+            }
+            _ => false,
+        };
+        self.stack.push(VmValue::Bool(result));
+        Ok(())
+    }
+
+    pub(super) fn execute_equal_int(&mut self) -> Result<(), VmError> {
+        self.push_compare_result(|a, b| {
+            let (x, y) = typed_int_pair("equal", a, b)?;
+            Ok(x == y)
+        })
+    }
+
+    pub(super) fn execute_not_equal_int(&mut self) -> Result<(), VmError> {
+        self.push_compare_result(|a, b| {
+            let (x, y) = typed_int_pair("not-equal", a, b)?;
+            Ok(x != y)
+        })
+    }
+
+    pub(super) fn execute_less_int(&mut self) -> Result<(), VmError> {
+        self.push_compare_result(|a, b| {
+            let (x, y) = typed_int_pair("less-than", a, b)?;
+            Ok(x < y)
+        })
+    }
+
+    pub(super) fn execute_greater_int(&mut self) -> Result<(), VmError> {
+        self.push_compare_result(|a, b| {
+            let (x, y) = typed_int_pair("greater-than", a, b)?;
+            Ok(x > y)
+        })
+    }
+
+    pub(super) fn execute_less_equal_int(&mut self) -> Result<(), VmError> {
+        self.push_compare_result(|a, b| {
+            let (x, y) = typed_int_pair("less-equal", a, b)?;
+            Ok(x <= y)
+        })
+    }
+
+    pub(super) fn execute_greater_equal_int(&mut self) -> Result<(), VmError> {
+        self.push_compare_result(|a, b| {
+            let (x, y) = typed_int_pair("greater-equal", a, b)?;
+            Ok(x >= y)
+        })
+    }
+
+    pub(super) fn execute_equal_float(&mut self) -> Result<(), VmError> {
+        self.push_compare_result(|a, b| {
+            let (x, y) = typed_float_pair("equal", a, b)?;
+            Ok(x == y)
+        })
+    }
+
+    pub(super) fn execute_not_equal_float(&mut self) -> Result<(), VmError> {
+        self.push_compare_result(|a, b| {
+            let (x, y) = typed_float_pair("not-equal", a, b)?;
+            Ok(x != y)
+        })
+    }
+
+    pub(super) fn execute_less_float(&mut self) -> Result<(), VmError> {
+        self.push_compare_result(|a, b| {
+            let (x, y) = typed_float_pair("less-than", a, b)?;
+            Ok(x < y)
+        })
+    }
+
+    pub(super) fn execute_greater_float(&mut self) -> Result<(), VmError> {
+        self.push_compare_result(|a, b| {
+            let (x, y) = typed_float_pair("greater-than", a, b)?;
+            Ok(x > y)
+        })
+    }
+
+    pub(super) fn execute_less_equal_float(&mut self) -> Result<(), VmError> {
+        self.push_compare_result(|a, b| {
+            let (x, y) = typed_float_pair("less-equal", a, b)?;
+            Ok(x <= y)
+        })
+    }
+
+    pub(super) fn execute_greater_equal_float(&mut self) -> Result<(), VmError> {
+        self.push_compare_result(|a, b| {
+            let (x, y) = typed_float_pair("greater-equal", a, b)?;
+            Ok(x >= y)
+        })
+    }
+
+    pub(super) fn execute_equal_bool(&mut self) -> Result<(), VmError> {
+        self.push_compare_result(|a, b| {
+            let (x, y) = typed_bool_pair("equal", a, b)?;
+            Ok(x == y)
+        })
+    }
+
+    pub(super) fn execute_not_equal_bool(&mut self) -> Result<(), VmError> {
+        self.push_compare_result(|a, b| {
+            let (x, y) = typed_bool_pair("not-equal", a, b)?;
+            Ok(x != y)
+        })
+    }
+
+    pub(super) fn execute_equal_string(&mut self) -> Result<(), VmError> {
+        self.push_compare_result(|a, b| {
+            let (x, y) = typed_string_pair("equal", a, b)?;
+            Ok(x == y)
+        })
+    }
+
+    pub(super) fn execute_not_equal_string(&mut self) -> Result<(), VmError> {
+        self.push_compare_result(|a, b| {
+            let (x, y) = typed_string_pair("not-equal", a, b)?;
+            Ok(x != y)
+        })
     }
 }
 

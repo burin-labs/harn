@@ -1,116 +1,145 @@
 use std::rc::Rc;
 
-use crate::chunk::Op;
 use crate::value::{VmError, VmValue};
 
 impl super::super::Vm {
-    pub(super) fn execute_typed_arithmetic_op(&mut self, op: u8) -> Result<(), VmError> {
-        if op == Op::AddInt as u8 {
-            let b = self.pop()?;
-            let a = self.pop()?;
-            let (x, y) = typed_int_pair("add", a, b)?;
-            self.stack.push(VmValue::Int(x.wrapping_add(y)));
-        } else if op == Op::SubInt as u8 {
-            let b = self.pop()?;
-            let a = self.pop()?;
-            let (x, y) = typed_int_pair("subtract", a, b)?;
-            self.stack.push(VmValue::Int(x.wrapping_sub(y)));
-        } else if op == Op::MulInt as u8 {
-            let b = self.pop()?;
-            let a = self.pop()?;
-            let (x, y) = typed_int_pair("multiply", a, b)?;
-            self.stack.push(VmValue::Int(x.wrapping_mul(y)));
-        } else if op == Op::DivInt as u8 {
-            let b = self.pop()?;
-            let a = self.pop()?;
-            let (x, y) = typed_int_pair("divide", a, b)?;
-            if y == 0 {
-                return Err(VmError::DivisionByZero);
-            }
-            self.stack.push(VmValue::Int(x / y));
-        } else if op == Op::ModInt as u8 {
-            let b = self.pop()?;
-            let a = self.pop()?;
-            let (x, y) = typed_int_pair("modulo", a, b)?;
-            if y == 0 {
-                return Err(VmError::DivisionByZero);
-            }
-            self.stack.push(VmValue::Int(x % y));
-        } else if op == Op::AddFloat as u8 {
-            let b = self.pop()?;
-            let a = self.pop()?;
-            let (x, y) = typed_float_pair("add", a, b)?;
-            self.stack.push(VmValue::Float(x + y));
-        } else if op == Op::SubFloat as u8 {
-            let b = self.pop()?;
-            let a = self.pop()?;
-            let (x, y) = typed_float_pair("subtract", a, b)?;
-            self.stack.push(VmValue::Float(x - y));
-        } else if op == Op::MulFloat as u8 {
-            let b = self.pop()?;
-            let a = self.pop()?;
-            let (x, y) = typed_float_pair("multiply", a, b)?;
-            self.stack.push(VmValue::Float(x * y));
-        } else if op == Op::DivFloat as u8 {
-            let b = self.pop()?;
-            let a = self.pop()?;
-            let (x, y) = typed_float_pair("divide", a, b)?;
-            self.stack.push(VmValue::Float(x / y));
-        } else if op == Op::ModFloat as u8 {
-            let b = self.pop()?;
-            let a = self.pop()?;
-            let (x, y) = typed_float_pair("modulo", a, b)?;
-            if y == 0.0 {
-                return Err(VmError::DivisionByZero);
-            }
-            self.stack.push(VmValue::Float(x % y));
-        } else {
-            return Err(VmError::InvalidInstruction(op));
-        }
+    fn push_binary_result(
+        &mut self,
+        f: impl FnOnce(&Self, VmValue, VmValue) -> Result<VmValue, VmError>,
+    ) -> Result<(), VmError> {
+        let b = self.pop()?;
+        let a = self.pop()?;
+        let result = f(self, a, b)?;
+        self.stack.push(result);
         Ok(())
     }
 
-    pub(super) fn try_execute_arithmetic_op(&mut self, op: u8) -> Result<bool, VmError> {
-        if op == Op::Add as u8 {
-            let b = self.pop()?;
-            let a = self.pop()?;
-            self.stack.push(self.add(a, b)?);
-        } else if op == Op::Sub as u8 {
-            let b = self.pop()?;
-            let a = self.pop()?;
-            self.stack.push(self.sub(a, b)?);
-        } else if op == Op::Mul as u8 {
-            let b = self.pop()?;
-            let a = self.pop()?;
-            self.stack.push(self.mul(a, b)?);
-        } else if op == Op::Div as u8 {
-            let b = self.pop()?;
-            let a = self.pop()?;
-            self.stack.push(self.div(a, b)?);
-        } else if op == Op::Mod as u8 {
-            let b = self.pop()?;
-            let a = self.pop()?;
-            self.stack.push(self.modulo(a, b)?);
-        } else if op == Op::Pow as u8 {
-            let b = self.pop()?;
-            let a = self.pop()?;
-            self.stack.push(self.pow(a, b)?);
-        } else if op == Op::Negate as u8 {
-            let v = self.pop()?;
-            self.stack.push(match v {
-                VmValue::Int(n) => VmValue::Int(n.wrapping_neg()),
-                VmValue::Float(n) => VmValue::Float(-n),
-                _ => {
-                    return Err(VmError::Runtime(format!(
-                        "Cannot negate value of type {}",
-                        v.type_name()
-                    )))
-                }
-            });
-        } else {
-            return Ok(false);
+    pub(super) fn execute_add(&mut self) -> Result<(), VmError> {
+        self.push_binary_result(Self::add)
+    }
+
+    pub(super) fn execute_sub(&mut self) -> Result<(), VmError> {
+        self.push_binary_result(Self::sub)
+    }
+
+    pub(super) fn execute_mul(&mut self) -> Result<(), VmError> {
+        self.push_binary_result(Self::mul)
+    }
+
+    pub(super) fn execute_div(&mut self) -> Result<(), VmError> {
+        self.push_binary_result(Self::div)
+    }
+
+    pub(super) fn execute_mod(&mut self) -> Result<(), VmError> {
+        self.push_binary_result(Self::modulo)
+    }
+
+    pub(super) fn execute_pow(&mut self) -> Result<(), VmError> {
+        self.push_binary_result(Self::pow)
+    }
+
+    pub(super) fn execute_negate(&mut self) -> Result<(), VmError> {
+        let v = self.pop()?;
+        self.stack.push(match v {
+            VmValue::Int(n) => VmValue::Int(n.wrapping_neg()),
+            VmValue::Float(n) => VmValue::Float(-n),
+            _ => {
+                return Err(VmError::Runtime(format!(
+                    "Cannot negate value of type {}",
+                    v.type_name()
+                )))
+            }
+        });
+        Ok(())
+    }
+
+    pub(super) fn execute_add_int(&mut self) -> Result<(), VmError> {
+        let b = self.pop()?;
+        let a = self.pop()?;
+        let (x, y) = typed_int_pair("add", a, b)?;
+        self.stack.push(VmValue::Int(x.wrapping_add(y)));
+        Ok(())
+    }
+
+    pub(super) fn execute_sub_int(&mut self) -> Result<(), VmError> {
+        let b = self.pop()?;
+        let a = self.pop()?;
+        let (x, y) = typed_int_pair("subtract", a, b)?;
+        self.stack.push(VmValue::Int(x.wrapping_sub(y)));
+        Ok(())
+    }
+
+    pub(super) fn execute_mul_int(&mut self) -> Result<(), VmError> {
+        let b = self.pop()?;
+        let a = self.pop()?;
+        let (x, y) = typed_int_pair("multiply", a, b)?;
+        self.stack.push(VmValue::Int(x.wrapping_mul(y)));
+        Ok(())
+    }
+
+    pub(super) fn execute_div_int(&mut self) -> Result<(), VmError> {
+        let b = self.pop()?;
+        let a = self.pop()?;
+        let (x, y) = typed_int_pair("divide", a, b)?;
+        if y == 0 {
+            return Err(VmError::DivisionByZero);
         }
-        Ok(true)
+        self.stack.push(VmValue::Int(x / y));
+        Ok(())
+    }
+
+    pub(super) fn execute_mod_int(&mut self) -> Result<(), VmError> {
+        let b = self.pop()?;
+        let a = self.pop()?;
+        let (x, y) = typed_int_pair("modulo", a, b)?;
+        if y == 0 {
+            return Err(VmError::DivisionByZero);
+        }
+        self.stack.push(VmValue::Int(x % y));
+        Ok(())
+    }
+
+    pub(super) fn execute_add_float(&mut self) -> Result<(), VmError> {
+        let b = self.pop()?;
+        let a = self.pop()?;
+        let (x, y) = typed_float_pair("add", a, b)?;
+        self.stack.push(VmValue::Float(x + y));
+        Ok(())
+    }
+
+    pub(super) fn execute_sub_float(&mut self) -> Result<(), VmError> {
+        let b = self.pop()?;
+        let a = self.pop()?;
+        let (x, y) = typed_float_pair("subtract", a, b)?;
+        self.stack.push(VmValue::Float(x - y));
+        Ok(())
+    }
+
+    pub(super) fn execute_mul_float(&mut self) -> Result<(), VmError> {
+        let b = self.pop()?;
+        let a = self.pop()?;
+        let (x, y) = typed_float_pair("multiply", a, b)?;
+        self.stack.push(VmValue::Float(x * y));
+        Ok(())
+    }
+
+    pub(super) fn execute_div_float(&mut self) -> Result<(), VmError> {
+        let b = self.pop()?;
+        let a = self.pop()?;
+        let (x, y) = typed_float_pair("divide", a, b)?;
+        self.stack.push(VmValue::Float(x / y));
+        Ok(())
+    }
+
+    pub(super) fn execute_mod_float(&mut self) -> Result<(), VmError> {
+        let b = self.pop()?;
+        let a = self.pop()?;
+        let (x, y) = typed_float_pair("modulo", a, b)?;
+        if y == 0.0 {
+            return Err(VmError::DivisionByZero);
+        }
+        self.stack.push(VmValue::Float(x % y));
+        Ok(())
     }
 
     fn add(&self, a: VmValue, b: VmValue) -> Result<VmValue, VmError> {

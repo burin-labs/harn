@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use crate::chunk::{InlineCacheEntry, MethodCacheTarget, Op};
+use crate::chunk::{InlineCacheEntry, MethodCacheTarget};
 use crate::value::{VmClosure, VmError, VmValue};
 use crate::BuiltinId;
 
@@ -235,327 +235,343 @@ impl super::super::Vm {
         Ok(())
     }
 
-    pub(super) async fn try_execute_call_op(&mut self, op: u8) -> Result<bool, VmError> {
-        if op == Op::Call as u8 {
-            let frame = self.frames.last_mut().unwrap();
-            let argc = frame.chunk.code[frame.ip] as usize;
-            frame.ip += 1;
+    pub(super) async fn execute_call(&mut self) -> Result<(), VmError> {
+        let frame = self.frames.last_mut().unwrap();
+        let argc = frame.chunk.code[frame.ip] as usize;
+        frame.ip += 1;
 
-            let args: Vec<VmValue> = self.stack.split_off(self.stack.len().saturating_sub(argc));
-            let callee = self.pop()?;
+        let args: Vec<VmValue> = self.stack.split_off(self.stack.len().saturating_sub(argc));
+        let callee = self.pop()?;
 
-            match callee {
-                VmValue::String(name) => {
-                    self.call_named_value(&name, args, None).await?;
-                }
-                VmValue::Closure(closure) => {
-                    if closure.func.is_generator {
-                        let gen = self.create_generator(&closure, &args);
-                        self.stack.push(gen);
-                    } else {
-                        self.push_closure_frame(&closure, &args)?;
-                    }
-                }
-                VmValue::BuiltinRef(name) => {
-                    self.call_named_value(&name, args, None).await?;
-                }
-                VmValue::BuiltinRefId { id, name } => {
-                    self.call_named_value(&name, args, Some(id)).await?;
-                }
-                _ => {
-                    return Err(VmError::TypeError(format!(
-                        "Cannot call {}",
-                        callee.display()
-                    )));
-                }
+        match callee {
+            VmValue::String(name) => {
+                self.call_named_value(&name, args, None).await?;
             }
-        } else if op == Op::CallSpread as u8 {
-            let args_val = self.pop()?;
-            let callee = self.pop()?;
-            let args = match args_val {
-                VmValue::List(items) => (*items).clone(),
-                _ => {
-                    return Err(VmError::TypeError(
-                        "spread call requires list arguments".into(),
-                    ))
-                }
-            };
-            match callee {
-                VmValue::String(name) => {
-                    self.call_named_value(&name, args, None).await?;
-                }
-                VmValue::Closure(closure) => {
-                    if closure.func.is_generator {
-                        let gen = self.create_generator(&closure, &args);
-                        self.stack.push(gen);
-                    } else {
-                        self.push_closure_frame(&closure, &args)?;
-                    }
-                }
-                VmValue::BuiltinRef(name) => {
-                    self.call_named_value(&name, args, None).await?;
-                }
-                VmValue::BuiltinRefId { id, name } => {
-                    self.call_named_value(&name, args, Some(id)).await?;
-                }
-                _ => {
-                    return Err(VmError::TypeError(format!(
-                        "Cannot call {}",
-                        callee.display()
-                    )));
-                }
-            }
-        } else if op == Op::TailCall as u8 {
-            let frame = self.frames.last_mut().unwrap();
-            let argc = frame.chunk.code[frame.ip] as usize;
-            frame.ip += 1;
-
-            let args: Vec<VmValue> = self.stack.split_off(self.stack.len().saturating_sub(argc));
-            let callee = self.pop()?;
-
-            let resolved_closure = match &callee {
-                VmValue::Closure(cl) => Some(Rc::clone(cl)),
-                VmValue::String(name) => self.resolve_named_closure(name),
-                _ => None,
-            };
-
-            if let Some(closure) = resolved_closure {
+            VmValue::Closure(closure) => {
                 if closure.func.is_generator {
-                    // Generators cannot be tail-call optimized.
                     let gen = self.create_generator(&closure, &args);
-                    return Err(VmError::Return(gen));
-                }
-                // TCO: reuse the current frame's stack_base / saved_env.
-                let popped = self.frames.pop().unwrap();
-                let stack_base = popped.stack_base;
-                let parent_env = popped.saved_env;
-
-                if let Some(ref dir) = popped.saved_source_dir {
-                    crate::stdlib::set_thread_source_dir(dir);
-                }
-
-                self.stack.truncate(stack_base);
-
-                let saved_source_dir = if let Some(ref dir) = closure.source_dir {
-                    let prev = crate::stdlib::process::VM_SOURCE_DIR.with(|sd| sd.borrow().clone());
-                    crate::stdlib::set_thread_source_dir(dir);
-                    prev
+                    self.stack.push(gen);
                 } else {
-                    None
-                };
+                    self.push_closure_frame(&closure, &args)?;
+                }
+            }
+            VmValue::BuiltinRef(name) => {
+                self.call_named_value(&name, args, None).await?;
+            }
+            VmValue::BuiltinRefId { id, name } => {
+                self.call_named_value(&name, args, Some(id)).await?;
+            }
+            _ => {
+                return Err(VmError::TypeError(format!(
+                    "Cannot call {}",
+                    callee.display()
+                )))
+            }
+        }
+        Ok(())
+    }
 
-                // Pass parent env so closure_call_env merges locally-defined
-                // recursive fns.
-                let mut call_env = Self::closure_call_env(&parent_env, &closure);
-                call_env.push_scope();
-                let default_start = closure
-                    .func
-                    .default_start
-                    .unwrap_or(closure.func.params.len());
-                for (i, param) in closure.func.params.iter().enumerate() {
-                    if i < args.len() {
-                        call_env.define(param, args[i].clone(), false)?;
-                    } else if i < default_start {
-                        call_env.define(param, VmValue::Nil, false)?;
-                    }
-                    // else: has default, preamble will DefLet
+    pub(super) async fn execute_call_spread(&mut self) -> Result<(), VmError> {
+        let args_val = self.pop()?;
+        let callee = self.pop()?;
+        let args = match args_val {
+            VmValue::List(items) => (*items).clone(),
+            _ => {
+                return Err(VmError::TypeError(
+                    "spread call requires list arguments".into(),
+                ))
+            }
+        };
+        match callee {
+            VmValue::String(name) => {
+                self.call_named_value(&name, args, None).await?;
+            }
+            VmValue::Closure(closure) => {
+                if closure.func.is_generator {
+                    let gen = self.create_generator(&closure, &args);
+                    self.stack.push(gen);
+                } else {
+                    self.push_closure_frame(&closure, &args)?;
                 }
-                let initial_env = call_env.clone();
-                self.env = call_env;
+            }
+            VmValue::BuiltinRef(name) => {
+                self.call_named_value(&name, args, None).await?;
+            }
+            VmValue::BuiltinRefId { id, name } => {
+                self.call_named_value(&name, args, Some(id)).await?;
+            }
+            _ => {
+                return Err(VmError::TypeError(format!(
+                    "Cannot call {}",
+                    callee.display()
+                )))
+            }
+        }
+        Ok(())
+    }
 
-                let argc = args.len();
-                self.frames.push(CallFrame {
-                    chunk: Rc::clone(&closure.func.chunk),
-                    ip: 0,
-                    stack_base,
-                    saved_env: parent_env,
-                    initial_env: Some(initial_env),
-                    saved_iterator_depth: self.iterators.len(),
-                    fn_name: closure.func.name.clone(),
-                    argc,
-                    saved_source_dir,
-                    module_functions: closure.module_functions.clone(),
-                    module_state: closure.module_state.clone(),
-                });
-            } else {
-                match callee {
-                    VmValue::String(name) => {
-                        let result = self.call_named_builtin(&name, args).await?;
-                        self.stack.push(result);
-                    }
-                    _ => {
-                        return Err(VmError::TypeError(format!(
-                            "Cannot call {}",
-                            callee.display()
-                        )));
-                    }
-                }
+    pub(super) async fn execute_call_builtin(&mut self) -> Result<(), VmError> {
+        let frame = self.frames.last_mut().unwrap();
+        let id = BuiltinId::from_raw(frame.chunk.read_u64(frame.ip));
+        frame.ip += 8;
+        let name_idx = frame.chunk.read_u16(frame.ip) as usize;
+        frame.ip += 2;
+        let argc = frame.chunk.code[frame.ip] as usize;
+        frame.ip += 1;
+        let name = Self::const_string(&frame.chunk.constants[name_idx])?;
+        let args: Vec<VmValue> = self.stack.split_off(self.stack.len().saturating_sub(argc));
+        self.call_named_value(&name, args, Some(id)).await
+    }
+
+    pub(super) async fn execute_call_builtin_spread(&mut self) -> Result<(), VmError> {
+        let frame = self.frames.last_mut().unwrap();
+        let id = BuiltinId::from_raw(frame.chunk.read_u64(frame.ip));
+        frame.ip += 8;
+        let name_idx = frame.chunk.read_u16(frame.ip) as usize;
+        frame.ip += 2;
+        let name = Self::const_string(&frame.chunk.constants[name_idx])?;
+        let args_val = self.pop()?;
+        let args = match args_val {
+            VmValue::List(items) => (*items).clone(),
+            _ => {
+                return Err(VmError::TypeError(
+                    "spread call requires list arguments".into(),
+                ))
             }
-        } else if op == Op::CallBuiltin as u8 {
-            let frame = self.frames.last_mut().unwrap();
-            let id = BuiltinId::from_raw(frame.chunk.read_u64(frame.ip));
-            frame.ip += 8;
-            let name_idx = frame.chunk.read_u16(frame.ip) as usize;
-            frame.ip += 2;
-            let argc = frame.chunk.code[frame.ip] as usize;
-            frame.ip += 1;
-            let name = Self::const_string(&frame.chunk.constants[name_idx])?;
-            let args: Vec<VmValue> = self.stack.split_off(self.stack.len().saturating_sub(argc));
-            self.call_named_value(&name, args, Some(id)).await?;
-        } else if op == Op::CallBuiltinSpread as u8 {
-            let frame = self.frames.last_mut().unwrap();
-            let id = BuiltinId::from_raw(frame.chunk.read_u64(frame.ip));
-            frame.ip += 8;
-            let name_idx = frame.chunk.read_u16(frame.ip) as usize;
-            frame.ip += 2;
-            let name = Self::const_string(&frame.chunk.constants[name_idx])?;
-            let args_val = self.pop()?;
-            let args = match args_val {
-                VmValue::List(items) => (*items).clone(),
-                _ => {
-                    return Err(VmError::TypeError(
-                        "spread call requires list arguments".into(),
-                    ))
-                }
-            };
-            self.call_named_value(&name, args, Some(id)).await?;
-        } else if op == Op::Return as u8 {
-            let val = self.pop().unwrap_or(VmValue::Nil);
-            return Err(VmError::Return(val));
-        } else if op == Op::Closure as u8 {
-            let frame = self.frames.last_mut().unwrap();
-            let fn_idx = frame.chunk.read_u16(frame.ip) as usize;
-            frame.ip += 2;
-            let func = Rc::clone(&frame.chunk.functions[fn_idx]);
-            let closure = VmClosure {
-                func,
-                env: self.env.clone(),
-                source_dir: None,
-                module_functions: self
-                    .frames
-                    .last()
-                    .and_then(|frame| frame.module_functions.clone()),
-                // Inherit module state so closures created inside a module
-                // function see and mutate the same module-level vars.
-                module_state: self
-                    .frames
-                    .last()
-                    .and_then(|frame| frame.module_state.clone()),
-            };
-            self.stack.push(VmValue::Closure(Rc::new(closure)));
-        } else if op == Op::MethodCall as u8 || op == Op::MethodCallOpt as u8 {
-            let optional = op == Op::MethodCallOpt as u8;
-            let (name_idx, argc, cache_slot, cache_entry) = {
-                let frame = self.frames.last_mut().unwrap();
-                let op_offset = frame.ip.saturating_sub(1);
-                let name_idx = frame.chunk.read_u16(frame.ip);
-                frame.ip += 2;
-                let argc = frame.chunk.code[frame.ip] as usize;
-                frame.ip += 1;
-                let cache_slot = frame.chunk.inline_cache_slot(op_offset);
-                let cache_entry = cache_slot
-                    .map(|slot| frame.chunk.inline_cache_entry(slot))
-                    .unwrap_or(InlineCacheEntry::Empty);
-                (name_idx, argc, cache_slot, cache_entry)
-            };
-            let args: Vec<VmValue> = self.stack.split_off(self.stack.len().saturating_sub(argc));
-            let obj = self.pop()?;
-            if optional && matches!(obj, VmValue::Nil) {
-                self.stack.push(VmValue::Nil);
-            } else if let Some(result) = Self::try_cached_method(&cache_entry, name_idx, argc, &obj)
-            {
-                self.stack.push(result);
-            } else {
-                let method = {
-                    let frame = self.frames.last().unwrap();
-                    Self::const_string(&frame.chunk.constants[name_idx as usize])?
-                };
-                let cache_target = Self::method_cache_target(&obj, &method, args.len());
-                let result = self.call_method(obj, &method, &args).await?;
-                if let (Some(slot), Some(target)) = (cache_slot, cache_target) {
-                    let frame = self.frames.last().unwrap();
-                    frame.chunk.set_inline_cache_entry(
-                        slot,
-                        InlineCacheEntry::Method {
-                            name_idx,
-                            argc,
-                            target,
-                        },
-                    );
-                }
-                self.stack.push(result);
+        };
+        self.call_named_value(&name, args, Some(id)).await
+    }
+
+    pub(super) async fn execute_tail_call(&mut self) -> Result<(), VmError> {
+        let frame = self.frames.last_mut().unwrap();
+        let argc = frame.chunk.code[frame.ip] as usize;
+        frame.ip += 1;
+
+        let args: Vec<VmValue> = self.stack.split_off(self.stack.len().saturating_sub(argc));
+        let callee = self.pop()?;
+
+        let resolved_closure = match &callee {
+            VmValue::Closure(cl) => Some(Rc::clone(cl)),
+            VmValue::String(name) => self.resolve_named_closure(name),
+            _ => None,
+        };
+
+        if let Some(closure) = resolved_closure {
+            if closure.func.is_generator {
+                // Generators cannot be tail-call optimized.
+                let gen = self.create_generator(&closure, &args);
+                return Err(VmError::Return(gen));
             }
-        } else if op == Op::MethodCallSpread as u8 {
-            let (name_idx, cache_slot, cache_entry) = {
-                let frame = self.frames.last_mut().unwrap();
-                let op_offset = frame.ip.saturating_sub(1);
-                let name_idx = frame.chunk.read_u16(frame.ip);
-                frame.ip += 2;
-                let cache_slot = frame.chunk.inline_cache_slot(op_offset);
-                let cache_entry = cache_slot
-                    .map(|slot| frame.chunk.inline_cache_entry(slot))
-                    .unwrap_or(InlineCacheEntry::Empty);
-                (name_idx, cache_slot, cache_entry)
-            };
-            let args_val = self.pop()?;
-            let obj = self.pop()?;
-            let args = match args_val {
-                VmValue::List(items) => (*items).clone(),
-                _ => {
-                    return Err(VmError::TypeError(
-                        "spread method call requires list arguments".into(),
-                    ))
-                }
-            };
-            if let Some(result) = Self::try_cached_method(&cache_entry, name_idx, args.len(), &obj)
-            {
-                self.stack.push(result);
-            } else {
-                let method = {
-                    let frame = self.frames.last().unwrap();
-                    Self::const_string(&frame.chunk.constants[name_idx as usize])?
-                };
-                let cache_target = Self::method_cache_target(&obj, &method, args.len());
-                let result = self.call_method(obj, &method, &args).await?;
-                if let (Some(slot), Some(target)) = (cache_slot, cache_target) {
-                    let frame = self.frames.last().unwrap();
-                    frame.chunk.set_inline_cache_entry(
-                        slot,
-                        InlineCacheEntry::Method {
-                            name_idx,
-                            argc: args.len(),
-                            target,
-                        },
-                    );
-                }
-                self.stack.push(result);
+            // TCO: reuse the current frame's stack_base / saved_env.
+            let popped = self.frames.pop().unwrap();
+            let stack_base = popped.stack_base;
+            let parent_env = popped.saved_env;
+
+            if let Some(ref dir) = popped.saved_source_dir {
+                crate::stdlib::set_thread_source_dir(dir);
             }
-        } else if op == Op::Pipe as u8 {
-            let callable = self.pop()?;
-            let value = self.pop()?;
-            match callable {
-                VmValue::Closure(closure) => {
-                    self.push_closure_frame(&closure, &[value])?;
+
+            self.stack.truncate(stack_base);
+
+            let saved_source_dir = if let Some(ref dir) = closure.source_dir {
+                let prev = crate::stdlib::process::VM_SOURCE_DIR.with(|sd| sd.borrow().clone());
+                crate::stdlib::set_thread_source_dir(dir);
+                prev
+            } else {
+                None
+            };
+
+            // Pass parent env so closure_call_env merges locally-defined
+            // recursive fns.
+            let mut call_env = Self::closure_call_env(&parent_env, &closure);
+            call_env.push_scope();
+            let default_start = closure
+                .func
+                .default_start
+                .unwrap_or(closure.func.params.len());
+            for (i, param) in closure.func.params.iter().enumerate() {
+                if i < args.len() {
+                    call_env.define(param, args[i].clone(), false)?;
+                } else if i < default_start {
+                    call_env.define(param, VmValue::Nil, false)?;
                 }
+                // else: has default, preamble will DefLet
+            }
+            let initial_env = call_env.clone();
+            self.env = call_env;
+
+            let argc = args.len();
+            self.frames.push(CallFrame {
+                chunk: closure.func.chunk.clone(),
+                ip: 0,
+                stack_base,
+                saved_env: parent_env,
+                initial_env: Some(initial_env),
+                saved_iterator_depth: self.iterators.len(),
+                fn_name: closure.func.name.clone(),
+                argc,
+                saved_source_dir,
+                module_functions: closure.module_functions.clone(),
+                module_state: closure.module_state.clone(),
+            });
+        } else {
+            match callee {
                 VmValue::String(name) => {
-                    self.call_named_value(&name, vec![value], None).await?;
-                }
-                VmValue::BuiltinRef(name) => {
-                    self.call_named_value(&name, vec![value], None).await?;
-                }
-                VmValue::BuiltinRefId { id, name } => {
-                    self.call_named_value(&name, vec![value], Some(id)).await?;
+                    let result = self.call_named_builtin(&name, args).await?;
+                    self.stack.push(result);
                 }
                 _ => {
                     return Err(VmError::TypeError(format!(
-                        "cannot pipe into {}",
-                        callable.type_name()
-                    )));
+                        "Cannot call {}",
+                        callee.display()
+                    )))
                 }
             }
-        } else {
-            return Ok(false);
         }
-        Ok(true)
+        Ok(())
+    }
+
+    pub(super) fn execute_return(&mut self) -> VmError {
+        let val = self.pop().unwrap_or(VmValue::Nil);
+        VmError::Return(val)
+    }
+
+    pub(super) fn execute_closure(&mut self) {
+        let frame = self.frames.last_mut().unwrap();
+        let fn_idx = frame.chunk.read_u16(frame.ip) as usize;
+        frame.ip += 2;
+        let func = frame.chunk.functions[fn_idx].clone();
+        let closure = VmClosure {
+            func,
+            env: self.env.clone(),
+            source_dir: None,
+            module_functions: self
+                .frames
+                .last()
+                .and_then(|frame| frame.module_functions.clone()),
+            // Inherit module state so closures created inside a module function
+            // see and mutate the same module-level vars.
+            module_state: self
+                .frames
+                .last()
+                .and_then(|frame| frame.module_state.clone()),
+        };
+        self.stack.push(VmValue::Closure(Rc::new(closure)));
+    }
+
+    pub(super) async fn execute_method_call(&mut self, optional: bool) -> Result<(), VmError> {
+        let (name_idx, argc, cache_slot, cache_entry) = {
+            let frame = self.frames.last_mut().unwrap();
+            let op_offset = frame.ip.saturating_sub(1);
+            let name_idx = frame.chunk.read_u16(frame.ip);
+            frame.ip += 2;
+            let argc = frame.chunk.code[frame.ip] as usize;
+            frame.ip += 1;
+            let cache_slot = frame.chunk.inline_cache_slot(op_offset);
+            let cache_entry = cache_slot
+                .map(|slot| frame.chunk.inline_cache_entry(slot))
+                .unwrap_or(InlineCacheEntry::Empty);
+            (name_idx, argc, cache_slot, cache_entry)
+        };
+        let args: Vec<VmValue> = self.stack.split_off(self.stack.len().saturating_sub(argc));
+        let obj = self.pop()?;
+        if optional && matches!(obj, VmValue::Nil) {
+            self.stack.push(VmValue::Nil);
+        } else if let Some(result) = Self::try_cached_method(&cache_entry, name_idx, argc, &obj) {
+            self.stack.push(result);
+        } else {
+            let method = {
+                let frame = self.frames.last().unwrap();
+                Self::const_string(&frame.chunk.constants[name_idx as usize])?
+            };
+            let cache_target = Self::method_cache_target(&obj, &method, args.len());
+            let result = self.call_method(obj, &method, &args).await?;
+            if let (Some(slot), Some(target)) = (cache_slot, cache_target) {
+                let frame = self.frames.last().unwrap();
+                frame.chunk.set_inline_cache_entry(
+                    slot,
+                    InlineCacheEntry::Method {
+                        name_idx,
+                        argc,
+                        target,
+                    },
+                );
+            }
+            self.stack.push(result);
+        }
+        Ok(())
+    }
+
+    pub(super) async fn execute_method_call_spread(&mut self) -> Result<(), VmError> {
+        let (name_idx, cache_slot, cache_entry) = {
+            let frame = self.frames.last_mut().unwrap();
+            let op_offset = frame.ip.saturating_sub(1);
+            let name_idx = frame.chunk.read_u16(frame.ip);
+            frame.ip += 2;
+            let cache_slot = frame.chunk.inline_cache_slot(op_offset);
+            let cache_entry = cache_slot
+                .map(|slot| frame.chunk.inline_cache_entry(slot))
+                .unwrap_or(InlineCacheEntry::Empty);
+            (name_idx, cache_slot, cache_entry)
+        };
+        let args_val = self.pop()?;
+        let obj = self.pop()?;
+        let args = match args_val {
+            VmValue::List(items) => (*items).clone(),
+            _ => {
+                return Err(VmError::TypeError(
+                    "spread method call requires list arguments".into(),
+                ))
+            }
+        };
+        if let Some(result) = Self::try_cached_method(&cache_entry, name_idx, args.len(), &obj) {
+            self.stack.push(result);
+        } else {
+            let method = {
+                let frame = self.frames.last().unwrap();
+                Self::const_string(&frame.chunk.constants[name_idx as usize])?
+            };
+            let cache_target = Self::method_cache_target(&obj, &method, args.len());
+            let result = self.call_method(obj, &method, &args).await?;
+            if let (Some(slot), Some(target)) = (cache_slot, cache_target) {
+                let frame = self.frames.last().unwrap();
+                frame.chunk.set_inline_cache_entry(
+                    slot,
+                    InlineCacheEntry::Method {
+                        name_idx,
+                        argc: args.len(),
+                        target,
+                    },
+                );
+            }
+            self.stack.push(result);
+        }
+        Ok(())
+    }
+
+    pub(super) async fn execute_pipe(&mut self) -> Result<(), VmError> {
+        let callable = self.pop()?;
+        let value = self.pop()?;
+        match callable {
+            VmValue::Closure(closure) => {
+                self.push_closure_frame(&closure, &[value])?;
+            }
+            VmValue::String(name) => {
+                self.call_named_value(&name, vec![value], None).await?;
+            }
+            VmValue::BuiltinRef(name) => {
+                self.call_named_value(&name, vec![value], None).await?;
+            }
+            VmValue::BuiltinRefId { id, name } => {
+                self.call_named_value(&name, vec![value], Some(id)).await?;
+            }
+            _ => {
+                return Err(VmError::TypeError(format!(
+                    "cannot pipe into {}",
+                    callable.type_name()
+                )));
+            }
+        }
+        Ok(())
     }
 }
