@@ -281,15 +281,23 @@ execution plus explicit host approval for destructive operations.
 ## Release Workflow
 
 Once the release content (code + docs + `CHANGELOG.md` entry for the next
-version) is committed and the tree is clean, maintainers run the full
-release ritual through:
+version) lands on `main` through the merge queue, maintainers open the
+automated version-bump PR with:
 
 ```bash
 ./scripts/release_ship.sh --bump patch
 ```
 
-This runs audit → dry-run publish → bump → commit → tag → push branch and
-tag → `cargo publish` → GitHub release creation in that order. The push
+After that PR lands through the merge queue, finalize the release from an
+up-to-date `main`:
+
+```bash
+./scripts/release_ship.sh --finalize
+```
+
+The first command runs audit → dry-run publish → bump → commit → push
+`release/vX.Y.Z` → open PR. The finalize command runs audit → dry-run publish
+→ tag → push tag → `cargo publish` → GitHub release creation. The tag push
 happens **before** `cargo publish` so downstream consumers and GitHub
 release-binary workflows can start working in parallel with crates.io.
 

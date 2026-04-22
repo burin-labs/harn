@@ -1,39 +1,52 @@
 ---
 name: harn-release
-description: Use this skill when asked to analyze pending Harn release work, fold dirty or untracked changes into a release, update CHANGELOG.md, bump the version, publish crates, tag, push, or prepare GitHub release notes for this repository.
+description: Use this skill for Harn release prep, bump PRs, publishing, tagging, and release notes.
 ---
 
 # Harn Release Gate
 
 Use this skill when asked to run the final Harn release workflow, including
 analysis of pending local changes, repo-wide consistency updates, changelog
-prep, version bumping, crates.io publication, tagging, and release-note
-rendering.
+prep, version-bump PR creation, crates.io publication, tagging, and
+release-note rendering.
 
 ## Source of truth
 
 Always prefer the repo scripts:
 
 ```bash
-./scripts/release_ship.sh --bump patch                     # full release
+./scripts/release_ship.sh --bump patch                     # open bump PR
+./scripts/release_ship.sh --finalize                       # tag/publish after merge
 ./scripts/release_gate.sh <audit|prepare|publish|notes|full> ...  # piecewise
 ```
 
 Do not re-invent the release ritual from memory if `release_ship.sh` can do
 it. Use normal git commands only for the parts that the release gate
 intentionally does not automate: analyzing pending local work and producing
-the "Prepare vX.Y.Z release" commit. Once that commit is in place and the
-tree is clean, `release_ship.sh` handles audit, bump, tag, push, publish,
-and GitHub release creation.
+the "Prepare vX.Y.Z release" PR. Once that PR lands through the merge queue,
+`release_ship.sh --bump patch` handles audit, dry-run publish, bump-branch
+creation, version-bump commit, branch push, and PR creation. After the bump PR
+lands through the merge queue, `release_ship.sh --finalize` tags `main`,
+publishes crates, renders notes, and creates/updates the GitHub release.
 
-## Fire-and-forget mode
+## Merge-queue mode
 
-Once the "Prepare vX.Y.Z release" commit is in place and the tree is clean,
-`./scripts/release_ship.sh --bump patch` is a **fire-and-forget** command:
-it performs audit → dry-run publish → bump → commit → tag → push branch+tag
-→ `cargo publish` → release notes → GitHub release, then exits. Check the
-exit code when it returns; if non-zero, the step names in its stdout tell
-you which gate tripped.
+Direct pushes to `main` are not part of the release flow. The release has two
+merge-queue-reviewed PRs:
+
+1. `Prepare vX.Y.Z release` — code + docs + `CHANGELOG.md`, no Cargo version
+   bump.
+2. `Bump version to X.Y.Z` — `Cargo.toml` + `Cargo.lock` only, opened by
+   `./scripts/release_ship.sh --bump patch`.
+
+Only after the bump PR lands should you run `./scripts/release_ship.sh
+--finalize` from an up-to-date `main`. Finalize creates/pushes the tag before
+`cargo publish` so release-binary workflows and downstream fetchers can still
+start in parallel with crates.io publication.
+
+Both script phases run the release audit and stop on the first failed gate.
+Check the exit code when they return; if non-zero, the step names in stdout
+tell you which gate tripped.
 
 Typical wall-clock: ~6–10 min cold, ~2–4 min warm (sccache hot). Do not
 babysit it. Start the command and work on other things. Failure modes,
@@ -43,26 +56,29 @@ roughly in frequency order:
   into the same "Prepare vX.Y.Z release" commit (amend), re-run.
 - `publish --dry-run` failure → usually a missing `include = [...]` file
   in a crate manifest; fix and re-commit.
-- `cargo publish` rate-limit / transient network → re-run; it's idempotent
-  once the tag exists.
-- `gh release create` failure → the release is already on crates.io and
-  tagged; finish manually with
+- bump PR creation failure → the release bump branch has usually already been
+  pushed; create the PR manually from `release/vX.Y.Z` into `main`.
+- `cargo publish` rate-limit / transient network during finalize → re-run
+  `release_ship.sh --finalize`; it is idempotent once the tag exists at HEAD.
+- `gh release create` failure during finalize → the release is already on
+  crates.io and tagged; finish manually with
   `gh release create <tag> --title <tag> --notes-file <rendered>`.
 
 ## Batching multiple tickets in one release
 
 When several unrelated tickets are ready to ship together:
 
-1. Merge each ticket's PR to `main` individually (each may carry a
+1. Merge each ticket's PR to `main` through the merge queue (each may carry a
    one-line CHANGELOG addition under an "Unreleased" heading — that is
    fine).
 2. Immediately before releasing, consolidate the CHANGELOG: promote the
    "Unreleased" section to `## [vX.Y.Z] - YYYY-MM-DD` with the grouped
    entries and reference each closed ticket by number.
-3. Commit that consolidation as the "Prepare vX.Y.Z release" commit
+3. Open and land a "Prepare vX.Y.Z release" PR with that consolidation
    (docs/spec edits ride along if needed).
-4. Run `release_ship.sh --bump patch` once. The release covers all the
-   batched tickets.
+4. From updated `main`, run `release_ship.sh --bump patch` once to open the
+   version-bump PR. The release covers all the batched tickets.
+5. After the bump PR lands, run `release_ship.sh --finalize`.
 
 Prefer larger batches over many small releases when the tickets are
 topically related (e.g. the "iteration unblocker" pair, the "evidence
@@ -104,26 +120,29 @@ installs the binaries directly. Release batching exists to control the
 7. Run `cargo fmt --all` once so the upcoming release content commit is
    formatting-clean. `release_gate.sh audit` runs `cargo fmt -- --check` and
    will reject drift later; catching it here avoids re-doing commits.
-8. Stage and commit the release content with
-   `git commit -m "Prepare vX.Y.Z release"`. Include every file that ships in
-   this version, including `CHANGELOG.md` and docs updates. Do **not** touch
-   `Cargo.toml` / `Cargo.lock` version strings — `release_ship.sh` produces
-   the "Bump version to X.Y.Z" commit separately.
-9. With the release content committed and the tree clean, run
-   `./scripts/release_ship.sh --bump patch` (or `minor`/`major`). The script
-   runs audit, dry-run publish, bump, commit, tag, push branch + tag,
-   `cargo publish`, and GitHub release creation in that order.
-10. For an all-in-one dry run that stops before any destructive action, use
+8. Stage, commit, push, and open a "Prepare vX.Y.Z release" PR. Include every
+   file that ships in this version, including `CHANGELOG.md` and docs updates.
+   Do **not** touch `Cargo.toml` / `Cargo.lock` version strings — the bump PR
+   is separate.
+9. After the release-content PR lands through the merge queue, sync `main` and
+   run `./scripts/release_ship.sh --bump patch` (or `minor`/`major`). The
+   script runs audit, dry-run publish, creates `release/vX.Y.Z`, commits the
+   Cargo version bump, pushes that branch, and opens the bump PR.
+10. After the bump PR lands through the merge queue, sync `main` and run
+    `./scripts/release_ship.sh --finalize`. The script runs audit, dry-run
+    publish, creates/pushes the tag, publishes to crates.io, renders notes,
+    and creates/updates the GitHub release.
+11. For an all-in-one dry run that stops before any destructive action, use
     `./scripts/release_gate.sh full --bump patch --dry-run`.
-11. Only fall back to the piecewise `release_gate.sh prepare` / `publish` /
+12. Only fall back to the piecewise `release_gate.sh prepare` / `publish` /
     `notes` commands when `release_ship.sh` cannot do what you need
     (e.g. recovering a partial release).
 
 ## Expectations
 
 - Report failures clearly and stop on the first failed gate.
-- Summarize the resulting version, publish status, release notes, and required
-  tag/release follow-up.
+- Summarize the resulting version, bump PR or publish status, release notes,
+  and required tag/release follow-up.
 - If `mdbook` is not installed, mention that the docs audit skipped mdBook build.
 - If the tree is dirty, do not work around it silently for `prepare`; either
   stop or commit the intended release content first.
@@ -153,20 +172,21 @@ installs the binaries directly. Release batching exists to control the
   `scripts/render_release_notes.py` or `./scripts/release_gate.sh notes` to
   produce the exact GitHub release body from it.
 - GitHub release artifacts are produced by the existing release workflow once
-  the tag is pushed.
-- `release_ship.sh` pushes the branch and tag **before** running
+  the tag is pushed during finalize.
+- `release_ship.sh --finalize` pushes the tag **before** running
   `cargo publish`, so the GitHub release-binary workflow and downstream
   fetchers (e.g. `burin-code`'s `fetch-harn`) can start working in parallel
   with crates.io publication. The GitHub release body is created last so it
   reflects the final crates.io + git state.
-- A real release has exactly two commits on top of the previous release:
-  `Prepare vX.Y.Z release` (code + docs + `CHANGELOG.md`) followed by
-  `Bump version to X.Y.Z` (Cargo.toml + Cargo.lock only). `release_ship.sh`
-  creates the second commit automatically; the human/agent creates the
-  first.
-- `scripts/release_ship.sh` assumes the real release content, including docs
-  consistency updates, has already been committed and the tree is clean
-  before it starts.
+- A real release has exactly two release commits on `main`, both landed via
+  PR/merge queue: `Prepare vX.Y.Z release` (code + docs + `CHANGELOG.md`)
+  followed by `Bump version to X.Y.Z` (Cargo.toml + Cargo.lock only).
+  `release_ship.sh --bump patch` creates and opens the second PR
+  automatically; the human/agent creates the first.
+- `scripts/release_ship.sh --bump patch` assumes the real release content,
+  including docs consistency updates, has already landed through the merge
+  queue and the local `main` tree is clean before it starts. `--finalize`
+  assumes the automated bump PR has landed through the merge queue.
 - `verify_release_metadata.py` (run from `release_gate.sh audit`) accepts the
   pre-bump state: it passes when the top `CHANGELOG.md` entry is exactly one
   patch/minor/major step ahead of `Cargo.toml`. Running audit on a "Prepare

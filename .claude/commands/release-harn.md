@@ -1,16 +1,17 @@
-Run the full Harn release workflow from the repo source of truth.
+Run the merge-queue-safe Harn release workflow from the repo source of truth.
 
 ## TL;DR
 
 ```bash
-# From a clean checkout, with release content + CHANGELOG entry already in HEAD:
+# From updated main, after the release-content PR has landed:
 ./scripts/release_ship.sh --bump patch
 ```
 
-`release_ship.sh` handles audit, dry-run publish, bump, tag, push, crates.io
-publish, and GitHub release creation in the right order. Run it once the
-release content commit is in place; do not re-invent the sequence manually
-unless the script cannot do what you need.
+`release_ship.sh --bump patch` handles audit, dry-run publish, version bump,
+branch push, and automated bump PR creation. After that PR lands through the
+merge queue, run `./scripts/release_ship.sh --finalize` from updated `main` to
+tag, publish to crates.io, and create/update the GitHub release. Do not
+re-invent the sequence manually unless the script cannot do what you need.
 
 ## Default workflow
 
@@ -46,22 +47,24 @@ unless the script cannot do what you need.
    truth.
 6. Update `CHANGELOG.md` before bumping the version. The new top entry must
    describe the actual pending code changes that will ship.
-7. Run `cargo fmt --all` once so the upcoming release content commit is
+7. Run `cargo fmt --all` once so the upcoming release content PR is
    formatting-clean. `release_gate.sh audit` runs `cargo fmt -- --check` and
    will reject drift later; catching it here avoids re-doing commits.
-8. Stage and commit the release content:
-   `git commit -m "Prepare vX.Y.Z release"`. Include every file that ships in
-   this version, including `CHANGELOG.md` and doc updates. Do **not** include
-   `Cargo.toml` / `Cargo.lock` version bumps in this commit — the ship script
-   produces those in a separate "Bump version to X.Y.Z" commit.
-9. With the release content committed and the worktree clean, run
-   `./scripts/release_ship.sh --bump patch` (or `minor`/`major`). The script
-   audits, dry-run publishes, bumps `Cargo.toml`, commits the bump, tags,
-   pushes branch + tag, publishes to crates.io, and creates the GitHub
-   release in that order.
-10. For an all-in-one dry run that stops before any destructive action,
+8. Stage, commit, push, and open a "Prepare vX.Y.Z release" PR. Include every
+   file that ships in this version, including `CHANGELOG.md` and doc updates.
+   Do **not** include `Cargo.toml` / `Cargo.lock` version bumps in this PR —
+   the ship script produces those in a separate "Bump version to X.Y.Z" PR.
+9. After the release-content PR lands through the merge queue, sync `main` and
+   run `./scripts/release_ship.sh --bump patch` (or `minor`/`major`). The
+   script audits, dry-run publishes, bumps `Cargo.toml`, commits the bump,
+   pushes `release/vX.Y.Z`, and opens the bump PR.
+10. After the bump PR lands through the merge queue, sync `main` and run
+    `./scripts/release_ship.sh --finalize`. The script audits, dry-run
+    publishes, creates/pushes the tag, publishes to crates.io, and
+    creates/updates the GitHub release.
+11. For an all-in-one dry run that stops before any destructive action,
     use `./scripts/release_gate.sh full --bump patch --dry-run`.
-11. Only drop down to the piecewise `release_gate.sh prepare` / `publish` /
+12. Only drop down to the piecewise `release_gate.sh prepare` / `publish` /
     `notes` commands when `release_ship.sh` cannot do what you need
     (e.g. recovering a partial release).
 
@@ -72,20 +75,21 @@ Always prefer the repo scripts:
 ```bash
 ./scripts/release_gate.sh <audit|prepare|publish|notes|full> ...
 ./scripts/release_ship.sh --bump patch
+./scripts/release_ship.sh --finalize
 ```
 
 Do not re-invent the release ritual from memory if the script can do it.
 Use normal git commands for the parts that the release gate intentionally does
-not automate, such as analyzing pending local work, making release commits, and
-pushing `main` and tags. Once the release content is committed and the tree is
-clean, prefer `./scripts/release_ship.sh` for the deterministic release
-mechanics.
+not automate, such as analyzing pending local work and opening the
+"Prepare vX.Y.Z release" PR. Once that PR lands and the tree is clean, prefer
+`./scripts/release_ship.sh --bump patch` for the bump PR and
+`./scripts/release_ship.sh --finalize` for tag/publish mechanics.
 
 ## Rules
 
 - Report failures clearly and stop on the first failed gate.
-- Summarize the resulting version, publish status, release notes, and required
-  tag/release follow-up.
+- Summarize the resulting version, bump PR or publish status, release notes,
+  and required tag/release follow-up.
 - If `mdbook` is not installed, mention that the docs audit skipped mdBook build.
 - If the tree is dirty, do not work around it silently for `prepare`; either
   stop or commit the intended release content first.
@@ -107,24 +111,24 @@ mechanics.
 - The grammar/spec audit also includes `scripts/verify_tree_sitter_parse.py`,
   which sweeps positive `.harn` programs through the executable tree-sitter
   grammar. Treat failures there as parser/grammar divergence.
-- A real release has exactly two commits on top of the previous release:
-  `Prepare vX.Y.Z release` (code + docs + `CHANGELOG.md`) followed by
-  `Bump version to X.Y.Z` (Cargo.toml + Cargo.lock only). `release_ship.sh`
-  creates the second commit automatically; the human/agent creates the
-  first.
-- `scripts/release_ship.sh` assumes the real release content, including docs
-  consistency updates, has already been committed and the tree is clean before
-  it starts.
+- A real release has exactly two release commits on `main`, both landed via
+  PR/merge queue: `Prepare vX.Y.Z release` (code + docs + `CHANGELOG.md`)
+  followed by `Bump version to X.Y.Z` (Cargo.toml + Cargo.lock only).
+  `release_ship.sh --bump patch` creates and opens the second PR
+  automatically; the human/agent creates the first.
+- `scripts/release_ship.sh --bump patch` assumes the real release content,
+  including docs consistency updates, has already landed through the merge
+  queue and the local `main` tree is clean before it starts.
 - `verify_release_metadata.py` accepts the pre-bump state — it passes when
   the top `CHANGELOG.md` entry is exactly one patch/minor/major step ahead
-  of `Cargo.toml`. That means running `release_ship.sh` on a "Prepare
-  vX.Y.Z release" commit is fine even though Cargo.toml still points at the
-  previous version.
-- `release_ship.sh` pushes the branch and tag **before** calling
-  `cargo publish`, so GitHub release binary workflows and downstream
-  fetchers (e.g. `burin-code`'s `fetch-harn`) start working in parallel
-  with crates.io publication. The GitHub release body is created last so
-  it can reference the final crates.io state.
+  of `Cargo.toml`. That means running `release_ship.sh --bump patch` on a
+  "Prepare vX.Y.Z release" commit is fine even though Cargo.toml still points
+  at the previous version.
+- `release_ship.sh --finalize` pushes the tag **before** calling
+  `cargo publish`, so GitHub release binary workflows and downstream fetchers
+  (e.g. `burin-code`'s `fetch-harn`) start working in parallel with crates.io
+  publication. The GitHub release body is created last so it can reference the
+  final crates.io state.
 - `CHANGELOG.md` is the release-language source of truth. Use
   `scripts/render_release_notes.py` or `./scripts/release_gate.sh notes` to
   produce the exact GitHub release body from it.
@@ -148,6 +152,7 @@ phase stretch to ~12 min while fighting `rust-audit`'s clippy+nextest for
 
 ```bash
 ./scripts/release_ship.sh --bump patch
+./scripts/release_ship.sh --finalize
 ./scripts/release_gate.sh full --bump patch --dry-run
 ./scripts/release_gate.sh notes
 ```
