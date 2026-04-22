@@ -3151,6 +3151,18 @@ metadata such as `occurred_at`, `tenant_id`, `headers`, `batch`, and
 `signature_status`. During the transition to NormalizeResult v1, runtimes also
 accept the legacy direct event dict shape.
 
+Poll-capable providers export `poll_tick(ctx)`. The orchestrator invokes this
+hook for `kind = "poll"` bindings using the binding's `poll` configuration:
+`interval`/`interval_ms`/`interval_secs`, optional
+`jitter`/`jitter_ms`/`jitter_secs`, `state_key` or `cursor_state_key`,
+`tenant_id`, `lease_id`, and `max_batch_size`. `ctx` contains the activated
+binding, `binding_id`, RFC3339 `tick_at`, prior `cursor`, prior connector
+`state`, `state_key`, optional `tenant_id`, `{id, tenant_id}` lease metadata,
+and optional `max_batch_size`. `poll_tick` returns either a list of normalized
+event dicts or `{events, cursor?, state?}`. Returned events enter the same
+post-normalize dedupe and trigger inbox path as connector ingress events, and
+the returned cursor/state is persisted for the next tick.
+
 ## Iterator protocol
 
 Harn provides a lazy iterator protocol layered over the eager

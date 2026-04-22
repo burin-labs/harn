@@ -2,33 +2,41 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::Duration as StdDuration;
 
 use async_trait::async_trait;
 use base64::Engine as _;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot, Notify};
 
 use crate::bridge::json_result_to_vm_value;
+use crate::event_log::{EventLog, LogEvent, Topic};
 use crate::llm::vm_value_to_json;
 use crate::stdlib::register_vm_stdlib;
+use crate::triggers::dispatcher::InboxEnvelope;
 use crate::value::{VmClosure, VmError, VmValue};
 use crate::vm::Vm;
 use crate::{
-    redact_headers, ClientError, Connector, ConnectorClient, ConnectorCtx, ConnectorError,
-    ConnectorHttpResponse, ConnectorNormalizeResult, HeaderRedactionPolicy, ProviderId,
-    ProviderPayload, ProviderPayloadSchema, SignatureStatus, TenantId, TraceId, TriggerBinding,
-    TriggerEvent, TriggerEventId, TriggerKind,
+    postprocess_normalized_event, redact_headers, ClientError, Connector, ConnectorClient,
+    ConnectorCtx, ConnectorError, ConnectorHttpResponse, ConnectorNormalizeResult,
+    HeaderRedactionPolicy, PostNormalizeOutcome, ProviderId, ProviderPayload,
+    ProviderPayloadSchema, SignatureStatus, TenantId, TraceId, TriggerBinding, TriggerEvent,
+    TriggerEventId, TriggerKind,
 };
 
 thread_local! {
     static ACTIVE_HARN_CONNECTOR_CTX: RefCell<Vec<ConnectorCtx>> = const { RefCell::new(Vec::new()) };
 }
+
+const HARN_CONNECTOR_POLL_STATE_TOPIC: &str = "connectors.harn.poll.state";
+const HARN_CONNECTOR_POLL_STATE_KIND: &str = "harn.poll.state";
+const DEFAULT_POLL_INTERVAL: StdDuration = StdDuration::from_secs(300);
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct HarnConnectorContract {
@@ -36,6 +44,7 @@ pub struct HarnConnectorContract {
     pub provider_id: ProviderId,
     pub kinds: Vec<TriggerKind>,
     pub payload_schema: ProviderPayloadSchema,
+    pub has_poll_tick: bool,
 }
 
 pub struct HarnConnector {
@@ -43,6 +52,7 @@ pub struct HarnConnector {
     kinds: Vec<TriggerKind>,
     payload_schema: ProviderPayloadSchema,
     module_path: PathBuf,
+    has_poll_tick: bool,
     shared: Arc<HarnConnectorShared>,
 }
 
@@ -53,6 +63,9 @@ struct HarnConnectorClient {
 struct HarnConnectorShared {
     provider_id: ProviderId,
     worker: Mutex<Option<Arc<HarnConnectorWorker>>>,
+    ctx: Mutex<Option<ConnectorCtx>>,
+    poll_tasks: Mutex<Vec<tokio::task::JoinHandle<()>>>,
+    poll_shutdown: Mutex<Arc<PollShutdownSignal>>,
 }
 
 struct HarnConnectorWorker {
@@ -83,6 +96,27 @@ struct LocalHarnConnectorRuntime {
     ctx: ConnectorCtx,
 }
 
+#[derive(Debug, Default)]
+struct PollShutdownSignal {
+    stopped: AtomicBool,
+    notify: Notify,
+}
+
+impl PollShutdownSignal {
+    fn request_stop(&self) {
+        self.stopped.store(true, Ordering::SeqCst);
+        self.notify.notify_waiters();
+    }
+
+    fn is_stopped(&self) -> bool {
+        self.stopped.load(Ordering::SeqCst)
+    }
+
+    async fn cancelled(&self) {
+        self.notify.notified().await;
+    }
+}
+
 #[derive(Debug, Deserialize)]
 struct HarnNormalizeResult {
     kind: String,
@@ -110,18 +144,86 @@ struct HarnHttpResponse {
     body: JsonValue,
 }
 
+#[derive(Debug, Deserialize)]
+struct HarnPollTickResult {
+    #[serde(default)]
+    events: Vec<HarnNormalizeResult>,
+    #[serde(default)]
+    cursor: Option<JsonValue>,
+    #[serde(default)]
+    state: Option<JsonValue>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+struct HarnPollStateRecord {
+    provider: String,
+    binding_id: String,
+    state_key: String,
+    #[serde(default)]
+    cursor: Option<JsonValue>,
+    #[serde(default)]
+    state: Option<JsonValue>,
+    #[serde(with = "time::serde::rfc3339")]
+    updated_at: OffsetDateTime,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+struct HarnPollBindingConfigEnvelope {
+    #[serde(default)]
+    poll: HarnPollBindingConfig,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+struct HarnPollBindingConfig {
+    #[serde(default)]
+    interval: Option<String>,
+    #[serde(default)]
+    interval_ms: Option<u64>,
+    #[serde(default)]
+    interval_secs: Option<u64>,
+    #[serde(default)]
+    jitter: Option<String>,
+    #[serde(default)]
+    jitter_ms: Option<u64>,
+    #[serde(default)]
+    jitter_secs: Option<u64>,
+    #[serde(default, alias = "cursor_state_key")]
+    state_key: Option<String>,
+    #[serde(default)]
+    lease_id: Option<String>,
+    #[serde(default)]
+    tenant_id: Option<String>,
+    #[serde(default)]
+    max_batch_size: Option<usize>,
+}
+
+#[derive(Clone, Debug)]
+struct ResolvedHarnPollBinding {
+    binding: TriggerBinding,
+    interval: StdDuration,
+    jitter: StdDuration,
+    state_key: String,
+    lease_id: String,
+    tenant_id: Option<TenantId>,
+    max_batch_size: Option<usize>,
+}
+
 impl HarnConnector {
     pub async fn load(module_path: &Path) -> Result<Self, ConnectorError> {
         let contract = load_contract(module_path).await?;
         let shared = Arc::new(HarnConnectorShared {
             provider_id: contract.provider_id.clone(),
             worker: Mutex::new(None),
+            ctx: Mutex::new(None),
+            poll_tasks: Mutex::new(Vec::new()),
+            poll_shutdown: Mutex::new(Arc::new(PollShutdownSignal::default())),
         });
         Ok(Self {
             provider_id: contract.provider_id,
             kinds: contract.kinds,
             payload_schema: contract.payload_schema,
             module_path: contract.module_path,
+            has_poll_tick: contract.has_poll_tick,
             shared,
         })
     }
@@ -130,6 +232,51 @@ impl HarnConnector {
 impl HarnConnectorShared {
     fn install_worker(&self, worker: Arc<HarnConnectorWorker>) {
         *self.worker.lock().expect("worker mutex poisoned") = Some(worker);
+    }
+
+    fn set_ctx(&self, ctx: ConnectorCtx) {
+        *self.ctx.lock().expect("ctx mutex poisoned") = Some(ctx);
+    }
+
+    fn ctx(&self) -> Result<ConnectorCtx, ConnectorError> {
+        self.ctx
+            .lock()
+            .expect("ctx mutex poisoned")
+            .clone()
+            .ok_or_else(|| {
+                ConnectorError::HarnRuntime(format!(
+                    "connector runtime for provider '{}' is not initialized",
+                    self.provider_id.as_str()
+                ))
+            })
+    }
+
+    fn start_poll_tasks(&self, tasks: Vec<tokio::task::JoinHandle<()>>) {
+        self.poll_tasks
+            .lock()
+            .expect("poll tasks poisoned")
+            .extend(tasks);
+    }
+
+    fn reset_poll_shutdown(&self) -> Arc<PollShutdownSignal> {
+        let shutdown = Arc::new(PollShutdownSignal::default());
+        *self.poll_shutdown.lock().expect("poll shutdown poisoned") = shutdown.clone();
+        shutdown
+    }
+
+    fn stop_poll_tasks(&self) {
+        self.poll_shutdown
+            .lock()
+            .expect("poll shutdown poisoned")
+            .request_stop();
+        for task in self
+            .poll_tasks
+            .lock()
+            .expect("poll tasks poisoned")
+            .drain(..)
+        {
+            task.abort();
+        }
     }
 
     fn worker(&self) -> Result<Arc<HarnConnectorWorker>, ConnectorError> {
@@ -317,6 +464,7 @@ pub async fn load_contract(module_path: &Path) -> Result<HarnConnectorContract, 
         provider_id,
         kinds,
         payload_schema,
+        has_poll_tick: exports.contains_key("poll_tick"),
     })
 }
 
@@ -333,6 +481,7 @@ impl Connector for HarnConnector {
     async fn init(&mut self, ctx: ConnectorCtx) -> Result<(), ConnectorError> {
         let worker =
             HarnConnectorWorker::spawn(self.provider_id.clone(), self.module_path.clone())?;
+        self.shared.set_ctx(ctx.clone());
         let init_payload = json!({
             "provider_id": self.provider_id.as_str(),
             "module_path": self.module_path.display().to_string(),
@@ -351,20 +500,68 @@ impl Connector for HarnConnector {
         &self,
         bindings: &[TriggerBinding],
     ) -> Result<crate::ActivationHandle, ConnectorError> {
+        let poll_bindings = bindings
+            .iter()
+            .filter(|binding| binding.kind.as_str() == "poll")
+            .map(resolve_poll_binding)
+            .collect::<Result<Vec<_>, _>>()?;
+        if !poll_bindings.is_empty() && !self.has_poll_tick {
+            return Err(ConnectorError::Activation(format!(
+                "Harn connector '{}' has poll binding(s) but does not export poll_tick(ctx)",
+                self.provider_id.as_str()
+            )));
+        }
         let bindings_json = JsonValue::Array(bindings.iter().map(binding_to_json).collect());
         self.shared
             .worker()?
             .call_export("activate", vec![bindings_json], false)
             .await?;
+        if poll_bindings.is_empty() {
+            self.shared.stop_poll_tasks();
+        } else {
+            self.shared.stop_poll_tasks();
+            let ctx = self.shared.ctx()?;
+            let worker = self.shared.worker()?;
+            let shutdown = self.shared.reset_poll_shutdown();
+            let tasks = poll_bindings
+                .into_iter()
+                .map(|binding| {
+                    let worker = worker.clone();
+                    let ctx = ctx.clone();
+                    let shutdown = shutdown.clone();
+                    let provider_id = self.provider_id.clone();
+                    tokio::spawn(async move {
+                        if let Err(error) =
+                            run_poll_loop(provider_id, worker, ctx, binding, shutdown).await
+                        {
+                            eprintln!("[harn] Harn connector poll warning: {error}");
+                        }
+                    })
+                })
+                .collect();
+            self.shared.start_poll_tasks(tasks);
+        }
         Ok(crate::ActivationHandle::new(
             self.provider_id.clone(),
             bindings.len(),
         ))
     }
 
-    async fn shutdown(&self, _deadline: StdDuration) -> Result<(), ConnectorError> {
+    async fn shutdown(&self, deadline: StdDuration) -> Result<(), ConnectorError> {
+        self.shared.stop_poll_tasks();
         if let Some(worker) = self.shared.take_worker() {
-            worker.shutdown().await?;
+            if deadline.is_zero() {
+                worker.shutdown().await?;
+            } else {
+                tokio::time::timeout(deadline, worker.shutdown())
+                    .await
+                    .map_err(|_| {
+                        ConnectorError::HarnRuntime(format!(
+                            "connector worker shutdown exceeded {}s",
+                            deadline.as_secs()
+                        ))
+                    })??;
+            }
         }
         Ok(())
     }
@@ -797,6 +994,402 @@ fn binding_to_json(binding: &TriggerBinding) -> JsonValue {
     })
 }
 
+fn resolve_poll_binding(
+    binding: &TriggerBinding,
+) -> Result<ResolvedHarnPollBinding, ConnectorError> {
+    let config: HarnPollBindingConfigEnvelope = if binding.config.is_null() {
+        HarnPollBindingConfigEnvelope::default()
+    } else {
+        serde_json::from_value(binding.config.clone()).map_err(|error| {
+            ConnectorError::Activation(format!(
+                "poll binding '{}' has invalid connector config: {error}",
+                binding.binding_id
+            ))
+        })?
+    };
+    let interval = duration_from_config(
+        config.poll.interval.as_deref(),
+        config.poll.interval_ms,
+        config.poll.interval_secs,
+    )
+    .transpose()
+    .map_err(|error| {
+        ConnectorError::Activation(format!(
+            "poll binding '{}' interval {error}",
+            binding.binding_id
+        ))
+    })?
+    .unwrap_or(DEFAULT_POLL_INTERVAL);
+    if interval.is_zero() {
+        return Err(ConnectorError::Activation(format!(
+            "poll binding '{}' requires interval > 0",
+            binding.binding_id
+        )));
+    }
+    let jitter = duration_from_config(
+        config.poll.jitter.as_deref(),
+        config.poll.jitter_ms,
+        config.poll.jitter_secs,
+    )
+    .transpose()
+    .map_err(|error| {
+        ConnectorError::Activation(format!(
+            "poll binding '{}' jitter {error}",
+            binding.binding_id
+        ))
+    })?
+    .unwrap_or(StdDuration::ZERO);
+    let state_key = config
+        .poll
+        .state_key
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| binding.binding_id.clone());
+    let lease_id = config
+        .poll
+        .lease_id
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| format!("{}:{}", binding.provider.as_str(), binding.binding_id));
+    let tenant_id = config
+        .poll
+        .tenant_id
+        .filter(|value| !value.trim().is_empty())
+        .map(TenantId::new);
+    Ok(ResolvedHarnPollBinding {
+        binding: binding.clone(),
+        interval,
+        jitter,
+        state_key,
+        lease_id,
+        tenant_id,
+        max_batch_size: config.poll.max_batch_size,
+    })
+}
+
+fn duration_from_config(
+    text: Option<&str>,
+    millis: Option<u64>,
+    secs: Option<u64>,
+) -> Option<Result<StdDuration, String>> {
+    if let Some(text) = text {
+        return Some(parse_duration(text));
+    }
+    if let Some(millis) = millis {
+        return Some(Ok(StdDuration::from_millis(millis)));
+    }
+    secs.map(|secs| Ok(StdDuration::from_secs(secs)))
+}
+
+fn parse_duration(raw: &str) -> Result<StdDuration, String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err("cannot be empty".to_string());
+    }
+    let (amount, unit) = trimmed
+        .char_indices()
+        .find(|(_, ch)| !ch.is_ascii_digit())
+        .map(|(index, _)| (&trimmed[..index], trimmed[index..].trim()))
+        .unwrap_or((trimmed, "ms"));
+    let amount = amount
+        .parse::<u64>()
+        .map_err(|_| format!("'{raw}' is not a valid duration"))?;
+    match unit {
+        "ms" => Ok(StdDuration::from_millis(amount)),
+        "s" => Ok(StdDuration::from_secs(amount)),
+        "m" => Ok(StdDuration::from_secs(amount.saturating_mul(60))),
+        "h" => Ok(StdDuration::from_secs(amount.saturating_mul(60 * 60))),
+        _ => Err(format!(
+            "'{raw}' uses unsupported unit '{unit}'; expected ms, s, m, or h"
+        )),
+    }
+}
+
+async fn run_poll_loop(
+    provider_id: ProviderId,
+    worker: Arc<HarnConnectorWorker>,
+    ctx: ConnectorCtx,
+    binding: ResolvedHarnPollBinding,
+    shutdown: Arc<PollShutdownSignal>,
+) -> Result<(), ConnectorError> {
+    let mut first_tick = true;
+    loop {
+        if shutdown.is_stopped() {
+            return Ok(());
+        }
+        if first_tick {
+            first_tick = false;
+        } else {
+            let delay = binding
+                .interval
+                .saturating_add(deterministic_jitter(&binding));
+            let sleep = tokio::time::sleep(delay);
+            tokio::pin!(sleep);
+            tokio::select! {
+                _ = &mut sleep => {}
+                _ = shutdown.cancelled() => return Ok(()),
+            }
+        }
+        if shutdown.is_stopped() {
+            return Ok(());
+        }
+        let tick = run_poll_tick(
+            &provider_id,
+            worker.clone(),
+            &ctx,
+            &binding,
+            shutdown.clone(),
+        );
+        tokio::pin!(tick);
+        tokio::select! {
+            result = &mut tick => result?,
+            _ = shutdown.cancelled() => return Ok(()),
+        }
+    }
+}
+
+async fn run_poll_tick(
+    provider_id: &ProviderId,
+    worker: Arc<HarnConnectorWorker>,
+    ctx: &ConnectorCtx,
+    binding: &ResolvedHarnPollBinding,
+    shutdown: Arc<PollShutdownSignal>,
+) -> Result<(), ConnectorError> {
+    let prior = load_poll_state(
+        ctx.event_log.as_ref(),
+        provider_id.as_str(),
+        &binding.binding.binding_id,
+        &binding.state_key,
+    )
+    .await?;
+    let tick_at = OffsetDateTime::now_utc();
+    let input = json!({
+        "provider_id": provider_id.as_str(),
+        "binding": binding_to_json(&binding.binding),
+        "binding_id": binding.binding.binding_id,
+        "state_key": binding.state_key,
+        "tick_at": tick_at.format(&Rfc3339).ok(),
+        "cursor": prior.as_ref().and_then(|record| record.cursor.clone()),
+        "state": prior.as_ref().and_then(|record| record.state.clone()),
+        "tenant_id": binding.tenant_id.as_ref().map(|tenant| tenant.0.clone()),
+        "lease": {
+            "id": binding.lease_id,
+            "tenant_id": binding.tenant_id.as_ref().map(|tenant| tenant.0.clone()),
+        },
+        "max_batch_size": binding.max_batch_size,
+    });
+    let raw_result = worker
+        .call_export("poll_tick", vec![input], true)
+        .await?
+        .expect("required export returns a value");
+    if shutdown.is_stopped() {
+        return Ok(());
+    }
+    let result = parse_poll_tick_result(raw_result)?;
+    let events = result
+        .events
+        .into_iter()
+        .take(binding.max_batch_size.unwrap_or(usize::MAX))
+        .collect::<Vec<_>>();
+    for normalized in events {
+        let event = trigger_event_from_normalized(
+            provider_id,
+            normalized,
+            tick_at,
+            binding.tenant_id.clone(),
+            None,
+        )?;
+        match postprocess_normalized_event(
+            ctx.inbox.as_ref(),
+            &binding.binding.binding_id,
+            binding.binding.dedupe_key.is_some(),
+            StdDuration::from_secs(
+                u64::from(binding.binding.dedupe_retention_days.max(1)) * 24 * 60 * 60,
+            ),
+            event,
+        )
+        .await?
+        {
+            PostNormalizeOutcome::DuplicateDropped => {
+                ctx.metrics
+                    .record_trigger_deduped(&binding.binding.binding_id, "inbox_duplicate");
+            }
+            PostNormalizeOutcome::Ready(event) => {
+                enqueue_poll_event(ctx, &binding.binding.binding_id, *event).await?;
+            }
+        }
+    }
+    if result.cursor.is_some() || result.state.is_some() {
+        persist_poll_state(
+            ctx.event_log.as_ref(),
+            &HarnPollStateRecord {
+                provider: provider_id.as_str().to_string(),
+                binding_id: binding.binding.binding_id.clone(),
+                state_key: binding.state_key.clone(),
+                cursor: result.cursor,
+                state: result.state,
+                updated_at: OffsetDateTime::now_utc(),
+            },
+        )
+        .await?;
+    }
+    Ok(())
+}
+
+fn deterministic_jitter(binding: &ResolvedHarnPollBinding) -> StdDuration {
+    if binding.jitter.is_zero() {
+        return StdDuration::ZERO;
+    }
+    let max_ms = binding.jitter.as_millis();
+    if max_ms == 0 {
+        return StdDuration::ZERO;
+    }
+    let seed = binding
+        .binding
+        .binding_id
+        .bytes()
+        .chain(binding.state_key.bytes())
+        .fold(0u128, |acc, byte| {
+            acc.wrapping_mul(16777619) ^ u128::from(byte)
+        });
+    StdDuration::from_millis((seed % (max_ms + 1)).min(u128::from(u64::MAX)) as u64)
+}
+
+fn parse_poll_tick_result(value: JsonValue) -> Result<HarnPollTickResult, ConnectorError> {
+    if value.is_array() {
+        let events: Vec<HarnNormalizeResult> =
+            serde_json::from_value(value).map_err(poll_result_error)?;
+        return Ok(HarnPollTickResult {
+            events,
+            cursor: None,
+            state: None,
+        });
+    }
+    serde_json::from_value(value).map_err(poll_result_error)
+}
+
+fn poll_result_error(error: serde_json::Error) -> ConnectorError {
+    ConnectorError::HarnRuntime(format!(
+        "poll_tick(ctx) returned an invalid result: {error}"
+    ))
+}
+
+fn trigger_event_from_normalized(
+    provider_id: &ProviderId,
+    normalized: HarnNormalizeResult,
+    received_at: OffsetDateTime,
+    fallback_tenant_id: Option<TenantId>,
+    raw_body: Option<Vec<u8>>,
+) -> Result<TriggerEvent, ConnectorError> {
+    let occurred_at = normalized
+        .occurred_at
+        .as_deref()
+        .map(parse_rfc3339)
+        .transpose()?;
+    let tenant_id = normalized.tenant_id.map(TenantId::new);
+    let source_headers = normalized.headers.unwrap_or_default();
+    let headers = redact_headers(&source_headers, &HeaderRedactionPolicy::default());
+    let provider_payload = ProviderPayload::normalize(
+        provider_id,
+        &normalized.kind,
+        &source_headers,
+        normalized.payload,
+    )
+    .map_err(|error| ConnectorError::HarnRuntime(error.to_string()))?;
+    Ok(TriggerEvent {
+        id: TriggerEventId::new(),
+        provider: provider_id.clone(),
+        kind: normalized.kind,
+        received_at,
+        occurred_at,
+        dedupe_key: normalized.dedupe_key,
+        trace_id: TraceId::new(),
+        tenant_id: tenant_id.or(fallback_tenant_id),
+        headers,
+        batch: normalized.batch,
+        provider_payload,
+        raw_body,
+        signature_status: normalized
+            .signature_status
+            .unwrap_or(SignatureStatus::Unsigned),
+        dedupe_claimed: false,
+    })
+}
+
+async fn enqueue_poll_event(
+    ctx: &ConnectorCtx,
+    binding_id: &str,
+    event: TriggerEvent,
+) -> Result<(), ConnectorError> {
+    let topic = Topic::new(crate::triggers::TRIGGER_INBOX_ENVELOPES_TOPIC)
+        .expect("trigger inbox envelopes topic must be valid");
+    let payload = serde_json::to_value(InboxEnvelope {
+        trigger_id: Some(binding_id.to_string()),
+        binding_version: None,
+        event: event.clone(),
+    })
+    .map_err(ConnectorError::from)?;
+    let headers = BTreeMap::from([
+        ("event_id".to_string(), event.id.0.clone()),
+        ("trace_id".to_string(), event.trace_id.0.clone()),
+        ("provider".to_string(), event.provider.as_str().to_string()),
+        ("kind".to_string(), event.kind.clone()),
+        ("trigger_id".to_string(), binding_id.to_string()),
+    ]);
+    ctx.event_log
+        .append(
+            &topic,
+            LogEvent::new("event_ingested", payload).with_headers(headers),
+        )
+        .await
+        .map(|_| ())
+        .map_err(ConnectorError::from)
+}
+
+async fn load_poll_state(
+    event_log: &crate::event_log::AnyEventLog,
+    provider: &str,
+    binding_id: &str,
+    state_key: &str,
+) -> Result<Option<HarnPollStateRecord>, ConnectorError> {
+    let topic = Topic::new(HARN_CONNECTOR_POLL_STATE_TOPIC)
+        .expect("Harn connector poll state topic is valid");
+    let records = event_log
+        .read_range(&topic, None, usize::MAX)
+        .await
+        .map_err(ConnectorError::from)?;
+    let mut latest = None;
+    for (_, event) in records {
+        if event.kind != HARN_CONNECTOR_POLL_STATE_KIND {
+            continue;
+        }
+        let record: HarnPollStateRecord =
+            serde_json::from_value(event.payload).map_err(ConnectorError::from)?;
+        if record.provider == provider
+            && record.binding_id == binding_id
+            && record.state_key == state_key
+        {
+            latest = Some(record);
+        }
+    }
+    Ok(latest)
+}
+
+async fn persist_poll_state(
+    event_log: &crate::event_log::AnyEventLog,
+    record: &HarnPollStateRecord,
+) -> Result<(), ConnectorError> {
+    let topic = Topic::new(HARN_CONNECTOR_POLL_STATE_TOPIC)
+        .expect("Harn connector poll state topic is valid");
+    let payload = serde_json::to_value(record).map_err(ConnectorError::from)?;
+    event_log
+        .append(
+            &topic,
+            LogEvent::new(HARN_CONNECTOR_POLL_STATE_KIND, payload),
+        )
+        .await
+        .map(|_| ())
+        .map_err(ConnectorError::from)
+}
+
 fn raw_inbound_to_json(raw: &crate::RawInbound) -> JsonValue {
     let binding_id = raw
         .metadata
@@ -845,6 +1438,14 @@ fn raw_inbound_to_json(raw: &crate::RawInbound) -> JsonValue {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use tempfile::TempDir;
+
+    use crate::event_log::{AnyEventLog, MemoryEventLog};
+    use crate::secrets::{
+        RotationHandle, SecretBytes, SecretError, SecretId, SecretMeta, SecretProvider,
+    };
+    use crate::{InboxIndex, MetricsRegistry, RateLimiterFactory};
 
     fn raw_inbound(body: JsonValue) -> crate::RawInbound {
         let mut headers = BTreeMap::new();
@@ -1000,5 +1601,211 @@ mod tests {
         };
         assert_eq!(event.kind, "webhook.received");
         assert_eq!(event.dedupe_key, "webhook:legacy");
+    }
+
+    struct EmptySecretProvider;
+
+    #[async_trait]
+    impl SecretProvider for EmptySecretProvider {
+        async fn get(&self, id: &SecretId) -> Result<SecretBytes, SecretError> {
+            Err(SecretError::NotFound {
+                provider: self.namespace().to_string(),
+                id: id.clone(),
+            })
+        }
+
+        async fn put(&self, _id: &SecretId, _value: SecretBytes) -> Result<(), SecretError> {
+            Ok(())
+        }
+
+        async fn rotate(&self, id: &SecretId) -> Result<RotationHandle, SecretError> {
+            Ok(RotationHandle {
+                provider: self.namespace().to_string(),
+                id: id.clone(),
+                from_version: None,
+                to_version: None,
+            })
+        }
+
+        async fn list(&self, _prefix: &SecretId) -> Result<Vec<SecretMeta>, SecretError> {
+            Ok(Vec::new())
+        }
+
+        fn namespace(&self) -> &str {
+            "test"
+        }
+
+        fn supports_versions(&self) -> bool {
+            false
+        }
+    }
+
+    async fn ctx(log: Arc<AnyEventLog>) -> ConnectorCtx {
+        let metrics = Arc::new(MetricsRegistry::default());
+        ConnectorCtx {
+            inbox: Arc::new(InboxIndex::new(log.clone(), metrics.clone()).await.unwrap()),
+            event_log: log,
+            secrets: Arc::new(EmptySecretProvider),
+            metrics,
+            rate_limiter: Arc::new(RateLimiterFactory::default()),
+        }
+    }
+
+    fn write_poll_connector() -> (TempDir, PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("poll_connector.harn");
+        std::fs::write(
+            &path,
+            r#"
+pub fn provider_id() {
+  return "webhook"
+}
+
+pub fn kinds() {
+  return ["poll"]
+}
+
+pub fn payload_schema() {
+  return "GenericWebhookPayload"
+}
+
+pub fn poll_tick(ctx) {
+  var previous = 0
+  if ctx.cursor != nil && ctx.cursor.count != nil {
+    previous = ctx.cursor.count
+  }
+  let next = previous + 1
+  return {
+    cursor: {count: next},
+    state: {last_lease_id: ctx.lease.id, tenant_id: ctx.tenant_id},
+    events: [
+      {
+        kind: "webhook.poll",
+        dedupe_key: "poll-" + to_string(next),
+        payload: {
+          count: next,
+          previous: previous,
+          max_batch_size: ctx.max_batch_size,
+          tenant_id: ctx.tenant_id,
+          lease_id: ctx.lease.id,
+        },
+      },
+    ],
+  }
+}
+"#,
+        )
+        .unwrap();
+        (dir, path)
+    }
+
+    async fn read_topic(
+        log: &Arc<AnyEventLog>,
+        topic: &str,
+    ) -> Vec<(u64, crate::event_log::LogEvent)> {
+        let topic = Topic::new(topic).unwrap();
+        log.read_range(&topic, None, usize::MAX).await.unwrap()
+    }
+
+    async fn wait_for_topic_count(log: &Arc<AnyEventLog>, topic: &str, expected: usize) {
+        for _ in 0..1000 {
+            if read_topic(log, topic).await.len() >= expected {
+                return;
+            }
+            tokio::time::advance(StdDuration::from_millis(1)).await;
+            tokio::task::yield_now().await;
+        }
+        panic!("topic {topic} did not reach {expected} records");
+    }
+
+    #[tokio::test(flavor = "current_thread", start_paused = true)]
+    async fn poll_tick_emits_inbox_events_and_persists_cursor_state() {
+        let (_dir, module_path) = write_poll_connector();
+        let log = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(128)));
+        let mut connector = HarnConnector::load(&module_path).await.unwrap();
+        connector.init(ctx(log.clone()).await).await.unwrap();
+
+        let mut binding = TriggerBinding::new(ProviderId::from("webhook"), "poll", "poll-source");
+        binding.dedupe_key = Some("event.dedupe_key".to_string());
+        binding.config = json!({
+            "poll": {
+                "interval_ms": 1000,
+                "state_key": "tenant-a-source",
+                "lease_id": "lease-a",
+                "tenant_id": "tenant-a",
+                "max_batch_size": 1,
+            }
+        });
+
+        connector.activate(&[binding]).await.unwrap();
+        wait_for_topic_count(&log, crate::triggers::TRIGGER_INBOX_ENVELOPES_TOPIC, 1).await;
+
+        tokio::time::advance(StdDuration::from_millis(1000)).await;
+        wait_for_topic_count(&log, crate::triggers::TRIGGER_INBOX_ENVELOPES_TOPIC, 2).await;
+        connector.shutdown(StdDuration::ZERO).await.unwrap();
+
+        let inbox = read_topic(&log, crate::triggers::TRIGGER_INBOX_ENVELOPES_TOPIC).await;
+        let envelopes = inbox
+            .into_iter()
+            .map(|(_, event)| serde_json::from_value::<InboxEnvelope>(event.payload).unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(envelopes[0].trigger_id.as_deref(), Some("poll-source"));
+        assert_eq!(envelopes[0].event.dedupe_key, "poll-1");
+        assert_eq!(envelopes[1].event.dedupe_key, "poll-2");
+        assert_eq!(
+            envelopes[1]
+                .event
+                .tenant_id
+                .as_ref()
+                .map(|tenant| tenant.0.as_str()),
+            Some("tenant-a")
+        );
+        match &envelopes[1].event.provider_payload {
+            ProviderPayload::Known(crate::triggers::event::KnownProviderPayload::Webhook(
+                payload,
+            )) => {
+                assert_eq!(payload.raw["previous"], 1);
+                assert_eq!(payload.raw["max_batch_size"], 1);
+                assert_eq!(payload.raw["tenant_id"], "tenant-a");
+                assert_eq!(payload.raw["lease_id"], "lease-a");
+            }
+            other => panic!("unexpected provider payload: {other:?}"),
+        }
+
+        let states = read_topic(&log, HARN_CONNECTOR_POLL_STATE_TOPIC).await;
+        assert_eq!(states.len(), 2);
+        let latest: HarnPollStateRecord =
+            serde_json::from_value(states.last().unwrap().1.payload.clone()).unwrap();
+        assert_eq!(latest.provider, "webhook");
+        assert_eq!(latest.binding_id, "poll-source");
+        assert_eq!(latest.state_key, "tenant-a-source");
+        assert_eq!(latest.cursor.unwrap()["count"], 2);
+        assert_eq!(latest.state.unwrap()["last_lease_id"], "lease-a");
+    }
+
+    #[tokio::test]
+    async fn poll_binding_requires_poll_tick_export() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("missing_poll.harn");
+        std::fs::write(
+            &path,
+            r#"
+pub fn provider_id() { return "webhook" }
+pub fn kinds() { return ["poll"] }
+pub fn payload_schema() { return "GenericWebhookPayload" }
+"#,
+        )
+        .unwrap();
+        let log = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(32)));
+        let mut connector = HarnConnector::load(&path).await.unwrap();
+        connector.init(ctx(log).await).await.unwrap();
+        let binding = TriggerBinding::new(ProviderId::from("webhook"), "poll", "poll-source");
+
+        let error = connector.activate(&[binding]).await.unwrap_err();
+        assert!(
+            error.to_string().contains("does not export poll_tick(ctx)"),
+            "{error}"
+        );
+        connector.shutdown(StdDuration::from_secs(1)).await.unwrap();
     }
 }

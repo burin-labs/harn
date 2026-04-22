@@ -52,7 +52,7 @@ handler = "handlers::on_echo"
 
 The referenced `.harn` module must export:
 
-```harn
+```harn,ignore
 pub fn provider_id() -> string
 pub fn kinds() -> list
 pub fn payload_schema() -> dict
@@ -60,16 +60,17 @@ pub fn payload_schema() -> dict
 
 Optional lifecycle exports:
 
-```harn
+```harn,ignore
 pub fn init(ctx)
 pub fn activate(bindings)
 pub fn shutdown()
 pub fn call(method, args)
+pub fn poll_tick(ctx)
 ```
 
 Inbound providers must also export:
 
-```harn
+```harn,ignore
 pub fn normalize_inbound(raw) -> dict
 ```
 
@@ -205,6 +206,47 @@ pub fn call(method, args) {
 `raw` includes normalized request metadata such as `headers`, `query`,
 `body_text`, `body_json` when the body is valid JSON, `received_at`,
 `binding_id`, `binding_version`, and `binding_path`.
+
+Poll-based Harn connectors declare a manifest `kind = "poll"` trigger and
+export `poll_tick(ctx)`. The orchestrator calls `poll_tick` on the configured
+interval and passes:
+
+- `binding`: the activated trigger binding, including its connector config
+- `binding_id`: the trigger binding id
+- `tick_at`: the scheduled tick time as RFC3339 text
+- `cursor`: the last persisted cursor for the binding/state key, or `nil`
+- `state`: connector-owned persisted state for the binding/state key, or `nil`
+- `state_key`: the durable cursor/state key
+- `tenant_id`: optional configured tenant identity
+- `lease`: `{ id, tenant_id }` identity metadata for the tick owner
+- `max_batch_size`: optional configured event cap
+
+The `poll` config accepts `interval`, `interval_ms`, or `interval_secs`;
+`jitter`, `jitter_ms`, or `jitter_secs`; `state_key` (also accepted as
+`cursor_state_key`); `tenant_id`; `lease_id`; and `max_batch_size`.
+Durations use `ms`, `s`, `m`, or `h` suffixes when supplied as strings.
+
+`poll_tick(ctx)` returns either a list of normalized event dicts or:
+
+```harn
+{
+  events: [
+    {
+      kind: "example.changed",
+      dedupe_key: "example:42",
+      payload: {id: "42"},
+    },
+  ],
+  cursor: {after: "opaque-provider-cursor"},
+  state: {last_seen_id: "42"},
+}
+```
+
+Returned events use the same normalized shape as `normalize_inbound`. The
+runtime applies the binding dedupe key policy, writes accepted events through
+the trigger inbox envelope path, and persists `cursor`/`state` so the next
+tick sees them. Shutdown requests cancel future ticks and prevent long-running
+poll exports from blocking clean orchestrator shutdown.
 
 ## Rust connectors
 
