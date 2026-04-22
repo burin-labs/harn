@@ -52,6 +52,41 @@ pub(super) struct PortalInsight {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub(super) struct PortalCostSummary {
+    pub(super) total_cost_usd: f64,
+    pub(super) call_count: i64,
+    pub(super) input_tokens: i64,
+    pub(super) output_tokens: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(super) struct PortalCostTrendPoint {
+    pub(super) date: String,
+    pub(super) pipeline: String,
+    pub(super) cost_usd: f64,
+    pub(super) call_count: i64,
+    pub(super) input_tokens: i64,
+    pub(super) output_tokens: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(super) struct PortalProviderCostBreakdown {
+    pub(super) provider: String,
+    pub(super) model: String,
+    pub(super) cost_usd: f64,
+    pub(super) call_count: i64,
+    pub(super) input_tokens: i64,
+    pub(super) output_tokens: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(super) struct PortalCostReport {
+    pub(super) summary: PortalCostSummary,
+    pub(super) trend: Vec<PortalCostTrendPoint>,
+    pub(super) provider_breakdown: Vec<PortalProviderCostBreakdown>,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub(super) struct PortalStage {
     pub(super) id: String,
     pub(super) node_id: String,

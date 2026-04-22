@@ -371,6 +371,21 @@ pub(super) fn dump_llm_request(
         .transpose()
         .unwrap_or(None)
         .unwrap_or(serde_json::Value::Null);
+    if let Some(decision) = opts.routing_decision.as_ref() {
+        append_llm_transcript_entry(&serde_json::json!({
+            "type": "routing_decision",
+            "iteration": iteration,
+            "call_id": call_id,
+            "span_id": crate::tracing::current_span_id(),
+            "timestamp": chrono_now(),
+            "policy": decision.policy.clone(),
+            "requested_quality": decision.requested_quality.clone(),
+            "selected_provider": decision.selected_provider.clone(),
+            "selected_model": decision.selected_model.clone(),
+            "fallback_chain": opts.fallback_chain.clone(),
+            "alternatives": decision.alternatives.clone(),
+        }));
+    }
     append_llm_transcript_entry(&serde_json::json!({
         "type": "provider_call_request",
         "iteration": iteration,
@@ -386,6 +401,9 @@ pub(super) fn dump_llm_request(
         "native_tool_count": opts.native_tools.as_ref().map(|tools| tools.len()).unwrap_or(0),
         "message_count": opts.messages.len(),
         "structural_experiment": structural_experiment,
+        "route_policy": opts.route_policy.as_label(),
+        "fallback_chain": opts.fallback_chain.clone(),
+        "routing_decision": opts.routing_decision.clone(),
     }));
 }
 
@@ -396,8 +414,6 @@ pub(super) fn dump_llm_response(
     response_ms: u64,
     structural_experiment: Option<&crate::llm::structural_experiments::AppliedStructuralExperiment>,
 ) {
-    let cost_usd =
-        super::cost::calculate_cost(&result.model, result.input_tokens, result.output_tokens);
     let structural_experiment = structural_experiment
         .map(serde_json::to_value)
         .transpose()
@@ -415,7 +431,12 @@ pub(super) fn dump_llm_response(
         "tool_calls": result.tool_calls,
         "input_tokens": result.input_tokens,
         "output_tokens": result.output_tokens,
-        "cost_usd": cost_usd,
+        "cost_usd": crate::llm::cost::calculate_cost_for_provider(
+            &result.provider,
+            &result.model,
+            result.input_tokens,
+            result.output_tokens,
+        ),
         "cache_read_tokens": result.cache_read_tokens,
         "cache_write_tokens": result.cache_write_tokens,
         // Explicit bool for easy cache-regression spotting in tailed logs.
@@ -552,7 +573,18 @@ pub(crate) async fn observed_llm_call(
             ("model", serde_json::json!(opts.model.clone())),
             ("provider", serde_json::json!(opts.provider.clone())),
             ("prompt_chars", serde_json::json!(prompt_chars)),
+            (
+                "route_policy",
+                serde_json::json!(opts.route_policy.as_label()),
+            ),
+            (
+                "fallback_chain",
+                serde_json::json!(opts.fallback_chain.clone()),
+            ),
         ];
+        if let Some(decision) = opts.routing_decision.as_ref() {
+            span_meta.push(("routing_decision", serde_json::json!(decision)));
+        }
         if let Some(iter) = iteration {
             span_meta.push(("iteration", serde_json::json!(iter)));
             span_meta.push(("llm_attempt", serde_json::json!(attempt)));
@@ -601,6 +633,15 @@ pub(crate) async fn observed_llm_call(
                     ("status", serde_json::json!("ok")),
                     ("input_tokens", serde_json::json!(result.input_tokens)),
                     ("output_tokens", serde_json::json!(result.output_tokens)),
+                    (
+                        "cost_usd",
+                        serde_json::json!(crate::llm::cost::calculate_cost_for_provider(
+                            &result.provider,
+                            &result.model,
+                            result.input_tokens,
+                            result.output_tokens,
+                        )),
+                    ),
                 ]);
                 dump_llm_response(
                     iteration.unwrap_or(0),

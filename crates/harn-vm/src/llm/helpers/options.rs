@@ -7,8 +7,9 @@ use std::collections::BTreeMap;
 use crate::value::{VmError, VmValue};
 
 use super::{
-    opt_bool, opt_float, opt_int, opt_str, resolve_api_key, vm_messages_to_json, vm_resolve_model,
-    vm_resolve_provider, vm_value_dict_to_json, vm_value_to_json,
+    opt_bool, opt_float, opt_int, opt_str, provider_key_available, resolve_api_key,
+    vm_messages_to_json, vm_resolve_model, vm_resolve_provider, vm_value_dict_to_json,
+    vm_value_to_json,
 };
 
 pub(crate) fn extract_json(text: &str) -> String {
@@ -19,6 +20,241 @@ pub(crate) fn expects_structured_output(opts: &crate::llm::api::LlmCallOptions) 
     opts.response_format.as_deref() == Some("json")
         || opts.json_schema.is_some()
         || opts.output_schema.is_some()
+}
+
+fn quality_rank(tier: &str) -> i32 {
+    match tier.to_ascii_lowercase().as_str() {
+        "small" => 0,
+        "mid" | "medium" => 1,
+        "frontier" | "large" => 2,
+        _ => 1,
+    }
+}
+
+fn route_target_from_short(target: &str) -> Result<(String, String), crate::value::VmError> {
+    let target = target.trim();
+    if target.is_empty() {
+        return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+            "route_policy: target must not be empty",
+        ))));
+    }
+    if let Some((provider, model)) = target.split_once(':') {
+        let provider_known = crate::llm_config::provider_config(provider).is_some()
+            || crate::llm::provider::is_provider_registered(provider);
+        if provider_known && !model.trim().is_empty() {
+            let (resolved_model, _) = crate::llm_config::resolve_model(model.trim());
+            return Ok((resolved_model, provider.trim().to_string()));
+        }
+    }
+    let (model, provider) = crate::llm_config::resolve_model(target);
+    let provider = provider.unwrap_or_else(|| crate::llm_config::infer_provider(&model));
+    Ok((model, provider))
+}
+
+fn parse_route_policy_text(text: &str) -> Result<crate::llm::api::LlmRoutePolicy, VmError> {
+    use crate::llm::api::LlmRoutePolicy;
+    let text = text.trim();
+    let lower = text.to_ascii_lowercase();
+    let arg = |name: &str| -> Option<String> {
+        lower
+            .strip_prefix(name)
+            .and_then(|rest| rest.strip_prefix('('))
+            .and_then(|rest| rest.strip_suffix(')'))
+            .map(|_| text[name.len() + 1..text.len() - 1].trim().to_string())
+    };
+    if text.is_empty() || lower == "manual" {
+        return Ok(LlmRoutePolicy::Manual);
+    }
+    if let Some(target) = arg("always") {
+        return Ok(LlmRoutePolicy::Always(target));
+    }
+    if let Some(target) = arg("cheapest_over_quality") {
+        return Ok(LlmRoutePolicy::CheapestOverQuality(target));
+    }
+    if let Some(target) = arg("fastest_over_quality") {
+        return Ok(LlmRoutePolicy::FastestOverQuality(target));
+    }
+    Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(format!(
+        "route_policy: expected manual, always(id), cheapest_over_quality(t), or fastest_over_quality(t), got {text:?}"
+    )))))
+}
+
+fn parse_route_policy_option(
+    options: Option<&BTreeMap<String, VmValue>>,
+) -> Result<crate::llm::api::LlmRoutePolicy, VmError> {
+    use crate::llm::api::LlmRoutePolicy;
+    let Some(raw) = options.and_then(|o| o.get("route_policy")) else {
+        return Ok(LlmRoutePolicy::Manual);
+    };
+    match raw {
+        VmValue::Nil => Ok(LlmRoutePolicy::Manual),
+        VmValue::Bool(false) => Ok(LlmRoutePolicy::Manual),
+        VmValue::String(text) => parse_route_policy_text(text),
+        VmValue::Dict(d) => {
+            let mode = d
+                .get("mode")
+                .map(|value| value.display())
+                .unwrap_or_else(|| "manual".to_string());
+            let target = d
+                .get("target")
+                .or_else(|| d.get("quality"))
+                .or_else(|| d.get("id"))
+                .map(|value| value.display())
+                .unwrap_or_default();
+            match mode.as_str() {
+                "manual" => Ok(LlmRoutePolicy::Manual),
+                "always" => Ok(LlmRoutePolicy::Always(target)),
+                "cheapest_over_quality" => Ok(LlmRoutePolicy::CheapestOverQuality(target)),
+                "fastest_over_quality" => Ok(LlmRoutePolicy::FastestOverQuality(target)),
+                other => Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+                    format!("route_policy.mode: unsupported value {other:?}"),
+                )))),
+            }
+        }
+        _ => Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+            "route_policy: expected string or dict",
+        )))),
+    }
+}
+
+fn parse_fallback_chain_option(options: Option<&BTreeMap<String, VmValue>>) -> Vec<String> {
+    let Some(raw) = options.and_then(|o| o.get("fallback_chain")) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    let mut push = |value: String| {
+        let value = value.trim().to_string();
+        if !value.is_empty() && !out.iter().any(|existing| existing == &value) {
+            out.push(value);
+        }
+    };
+    match raw {
+        VmValue::List(list) => {
+            for item in list.iter() {
+                push(item.display());
+            }
+        }
+        VmValue::String(text) => {
+            for item in text.split(',') {
+                push(item.to_string());
+            }
+        }
+        _ => {}
+    }
+    out
+}
+
+fn route_alternative(
+    provider: String,
+    model: String,
+    selected: bool,
+    reason: String,
+) -> crate::llm::api::LlmRouteAlternative {
+    let quality_tier = crate::llm_config::model_tier(&model);
+    let pricing = crate::llm::cost::pricing_per_1k_for(&provider, &model);
+    crate::llm::api::LlmRouteAlternative {
+        available: provider_key_available(&provider),
+        cost_per_1k_in: pricing.map(|p| p.0),
+        cost_per_1k_out: pricing.map(|p| p.1),
+        latency_p50_ms: crate::llm::cost::latency_p50_ms_for(&provider),
+        provider,
+        model,
+        quality_tier,
+        selected,
+        reason,
+    }
+}
+
+fn resolve_route_policy(
+    policy: &crate::llm::api::LlmRoutePolicy,
+    current_provider: &str,
+    current_model: &str,
+) -> Result<Option<crate::llm::api::LlmRoutingDecision>, VmError> {
+    use crate::llm::api::{LlmRoutePolicy, LlmRoutingDecision};
+
+    match policy {
+        LlmRoutePolicy::Manual => Ok(None),
+        LlmRoutePolicy::Always(target) => {
+            let (model, provider) = route_target_from_short(target)?;
+            Ok(Some(LlmRoutingDecision {
+                policy: policy.as_label(),
+                requested_quality: None,
+                selected_provider: provider.clone(),
+                selected_model: model.clone(),
+                alternatives: vec![route_alternative(
+                    provider,
+                    model,
+                    true,
+                    "pinned by always".to_string(),
+                )],
+            }))
+        }
+        LlmRoutePolicy::CheapestOverQuality(target)
+        | LlmRoutePolicy::FastestOverQuality(target) => {
+            let requested_rank = quality_rank(target);
+            let mut alternatives = crate::llm_config::all_model_candidates()
+                .into_iter()
+                .filter(|(model, _)| {
+                    quality_rank(&crate::llm_config::model_tier(model)) >= requested_rank
+                })
+                .map(|(model, provider)| {
+                    route_alternative(provider, model, false, "candidate".to_string())
+                })
+                .collect::<Vec<_>>();
+
+            if alternatives.is_empty() {
+                alternatives.push(route_alternative(
+                    current_provider.to_string(),
+                    current_model.to_string(),
+                    false,
+                    "fallback_current_route".to_string(),
+                ));
+            }
+
+            let score_cost = |alt: &crate::llm::api::LlmRouteAlternative| -> f64 {
+                alt.cost_per_1k_in.unwrap_or(f64::INFINITY)
+                    + alt.cost_per_1k_out.unwrap_or(f64::INFINITY)
+            };
+            let selected_idx = alternatives
+                .iter()
+                .enumerate()
+                .filter(|(_, alt)| alt.available)
+                .min_by(|(_, left), (_, right)| {
+                    let left_score = match policy {
+                        LlmRoutePolicy::CheapestOverQuality(_) => score_cost(left),
+                        LlmRoutePolicy::FastestOverQuality(_) => {
+                            left.latency_p50_ms.unwrap_or(u64::MAX) as f64
+                        }
+                        _ => unreachable!(),
+                    };
+                    let right_score = match policy {
+                        LlmRoutePolicy::CheapestOverQuality(_) => score_cost(right),
+                        LlmRoutePolicy::FastestOverQuality(_) => {
+                            right.latency_p50_ms.unwrap_or(u64::MAX) as f64
+                        }
+                        _ => unreachable!(),
+                    };
+                    left_score
+                        .partial_cmp(&right_score)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                        .then_with(|| left.provider.cmp(&right.provider))
+                        .then_with(|| left.model.cmp(&right.model))
+                })
+                .map(|(idx, _)| idx)
+                .unwrap_or(0);
+
+            alternatives[selected_idx].selected = true;
+            alternatives[selected_idx].reason = "selected".to_string();
+            let selected = alternatives[selected_idx].clone();
+            Ok(Some(LlmRoutingDecision {
+                policy: policy.as_label(),
+                requested_quality: Some(target.clone()),
+                selected_provider: selected.provider,
+                selected_model: selected.model,
+                alternatives,
+            }))
+        }
+    }
 }
 
 /// Three-way resolution of `tool_search.mode` against the provider's
@@ -89,8 +325,15 @@ pub(crate) fn extract_llm_options(
     });
     let options = args.get(2).and_then(|a| a.as_dict()).cloned();
 
-    let provider = vm_resolve_provider(&options);
-    let model = vm_resolve_model(&options, &provider);
+    let route_policy = parse_route_policy_option(options.as_ref())?;
+    let mut provider = vm_resolve_provider(&options);
+    let mut model = vm_resolve_model(&options, &provider);
+    let routing_decision = resolve_route_policy(&route_policy, &provider, &model)?;
+    if let Some(decision) = routing_decision.as_ref() {
+        provider = decision.selected_provider.clone();
+        model = decision.selected_model.clone();
+    }
+    let fallback_chain = parse_fallback_chain_option(options.as_ref());
     let api_key = resolve_api_key(&provider)?;
 
     // Apply providers.toml model_defaults as fallbacks for unspecified params
@@ -405,6 +648,9 @@ pub(crate) fn extract_llm_options(
         provider,
         model,
         api_key,
+        route_policy,
+        fallback_chain,
+        routing_decision,
         messages,
         system,
         transcript_summary: None,
@@ -667,5 +913,127 @@ fn validate_options(opts: &crate::llm::api::LlmCallOptions) {
             }
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod routing_tests {
+    use super::*;
+    use crate::llm_config::{AliasDef, AuthEnv, ProviderDef, ProvidersConfig, TierRule};
+    use std::rc::Rc;
+
+    fn install_test_routes() {
+        let mut overlay = ProvidersConfig::default();
+        overlay.providers.insert(
+            "cheap".to_string(),
+            ProviderDef {
+                base_url: "https://cheap.example/v1".to_string(),
+                auth_style: "none".to_string(),
+                auth_env: AuthEnv::None,
+                chat_endpoint: "/chat/completions".to_string(),
+                cost_per_1k_in: Some(0.0),
+                cost_per_1k_out: Some(0.0),
+                latency_p50_ms: Some(2200),
+                ..Default::default()
+            },
+        );
+        overlay.providers.insert(
+            "fast".to_string(),
+            ProviderDef {
+                base_url: "https://fast.example/v1".to_string(),
+                auth_style: "none".to_string(),
+                auth_env: AuthEnv::None,
+                chat_endpoint: "/chat/completions".to_string(),
+                cost_per_1k_in: Some(0.01),
+                cost_per_1k_out: Some(0.02),
+                latency_p50_ms: Some(250),
+                ..Default::default()
+            },
+        );
+        overlay.aliases.insert(
+            "cheap-mid".to_string(),
+            AliasDef {
+                id: "cheap-mid-model".to_string(),
+                provider: "cheap".to_string(),
+                tool_format: None,
+            },
+        );
+        overlay.aliases.insert(
+            "fast-mid".to_string(),
+            AliasDef {
+                id: "fast-mid-model".to_string(),
+                provider: "fast".to_string(),
+                tool_format: None,
+            },
+        );
+        overlay.tier_rules.push(TierRule {
+            exact: Some("cheap-mid-model".to_string()),
+            pattern: None,
+            contains: None,
+            tier: "mid".to_string(),
+        });
+        overlay.tier_rules.push(TierRule {
+            exact: Some("fast-mid-model".to_string()),
+            pattern: None,
+            contains: None,
+            tier: "mid".to_string(),
+        });
+        crate::llm_config::set_user_overrides(Some(overlay));
+        super::super::reset_provider_key_cache();
+    }
+
+    fn extract_with_policy(policy: &str) -> crate::llm::api::LlmCallOptions {
+        let mut options = BTreeMap::new();
+        options.insert(
+            "route_policy".to_string(),
+            VmValue::String(Rc::from(policy.to_string())),
+        );
+        options.insert(
+            "fallback_chain".to_string(),
+            VmValue::List(Rc::new(vec![VmValue::String(Rc::from("fast".to_string()))])),
+        );
+        extract_llm_options(&[
+            VmValue::String(Rc::from("hello".to_string())),
+            VmValue::Nil,
+            VmValue::Dict(Rc::new(options)),
+        ])
+        .expect("options")
+    }
+
+    #[test]
+    fn cheapest_over_quality_selects_lowest_cost_available_candidate() {
+        install_test_routes();
+        let opts = extract_with_policy("cheapest_over_quality(mid)");
+        assert_eq!(opts.provider, "cheap");
+        assert_eq!(opts.model, "cheap-mid-model");
+        assert_eq!(opts.fallback_chain, vec!["fast".to_string()]);
+        let decision = opts.routing_decision.expect("routing decision");
+        assert!(decision.alternatives.iter().any(|alt| alt.selected));
+        assert!(decision
+            .alternatives
+            .iter()
+            .any(|alt| alt.provider == "fast"));
+        crate::llm_config::clear_user_overrides();
+        super::super::reset_provider_key_cache();
+    }
+
+    #[test]
+    fn fastest_over_quality_selects_lowest_latency_available_candidate() {
+        install_test_routes();
+        let opts = extract_with_policy("fastest_over_quality(mid)");
+        assert_eq!(opts.provider, "fast");
+        assert_eq!(opts.model, "fast-mid-model");
+        crate::llm_config::clear_user_overrides();
+        super::super::reset_provider_key_cache();
+    }
+
+    #[test]
+    fn always_policy_accepts_provider_model_selector() {
+        install_test_routes();
+        let opts = extract_with_policy("always(fast:fast-mid-model)");
+        assert_eq!(opts.provider, "fast");
+        assert_eq!(opts.model, "fast-mid-model");
+        crate::llm_config::clear_user_overrides();
+        super::super::reset_provider_key_cache();
     }
 }

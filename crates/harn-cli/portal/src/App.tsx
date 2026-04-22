@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from "react-router-dom"
 
 import { Sidebar } from "./components/Sidebar"
+import { CostsPage } from "./pages/CostsPage"
 import { LaunchPage } from "./pages/LaunchPage"
 import { RunDetailPage } from "./pages/RunDetailPage"
 import { RunsPage } from "./pages/RunsPage"
@@ -33,6 +34,7 @@ function PortalLayout() {
           <Route path="/launch" element={<LaunchPage />} />
           <Route path="/runs" element={<RunsPage />} />
           <Route path="/runs/detail" element={<RunDetailPage />} />
+          <Route path="/costs" element={<CostsPage />} />
         </Routes>
       </main>
     </div>

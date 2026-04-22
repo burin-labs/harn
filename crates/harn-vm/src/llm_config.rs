@@ -102,6 +102,15 @@ pub struct ProviderDef {
     /// Maximum requests per minute. None = unlimited.
     #[serde(default)]
     pub rpm: Option<u32>,
+    /// Provider/catalog pricing in USD per 1k input tokens.
+    #[serde(default)]
+    pub cost_per_1k_in: Option<f64>,
+    /// Provider/catalog pricing in USD per 1k output tokens.
+    #[serde(default)]
+    pub cost_per_1k_out: Option<f64>,
+    /// Observed or configured p50 latency in milliseconds.
+    #[serde(default)]
+    pub latency_p50_ms: Option<u64>,
 }
 
 impl Default for ProviderDef {
@@ -121,6 +130,9 @@ impl Default for ProviderDef {
             retry_count: None,
             retry_delay_ms: None,
             rpm: None,
+            cost_per_1k_in: None,
+            cost_per_1k_out: None,
+            latency_p50_ms: None,
         }
     }
 }
@@ -389,6 +401,15 @@ pub fn provider_has_feature(provider: &str, feature: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Provider-level catalog pricing/latency. Model-specific static pricing in
+/// `llm::cost` still wins when available; this is the adapter-level fallback
+/// used by routing and portal summaries.
+pub fn provider_economics(provider: &str) -> (Option<f64>, Option<f64>, Option<u64>) {
+    provider_config(provider)
+        .map(|p| (p.cost_per_1k_in, p.cost_per_1k_out, p.latency_p50_ms))
+        .unwrap_or((None, None, None))
+}
+
 /// Resolve the default tool format for a model+provider combination.
 /// Priority: alias `tool_format` (matched by model ID) > provider feature > "text".
 pub fn default_tool_format(model: &str, provider: &str) -> String {
@@ -467,6 +488,28 @@ pub fn tier_candidates(target: &str) -> Vec<(String, String)> {
     candidates
 }
 
+/// Return all configured alias-backed model/provider pairs. Used by routing
+/// policies that need to compare alternatives across tiers.
+pub fn all_model_candidates() -> Vec<(String, String)> {
+    let config = effective_config();
+    let mut seen = std::collections::BTreeSet::new();
+    let mut candidates = Vec::new();
+
+    for alias in config.aliases.values() {
+        let pair = (alias.id.clone(), alias.provider.clone());
+        if seen.insert(pair.clone()) {
+            candidates.push(pair);
+        }
+    }
+
+    candidates.sort_by(|(model_a, provider_a), (model_b, provider_b)| {
+        provider_a
+            .cmp(provider_b)
+            .then_with(|| model_a.cmp(model_b))
+    });
+    candidates
+}
+
 /// Simple glob matching for patterns like "claude-*", "qwen/*", "ollama:*".
 fn glob_match(pattern: &str, input: &str) -> bool {
     if let Some(prefix) = pattern.strip_suffix('*') {
@@ -530,6 +573,9 @@ fn default_config() -> ProvidersConfig {
                 ),
             }),
             features: vec!["prompt_caching".to_string(), "thinking".to_string()],
+            cost_per_1k_in: Some(0.003),
+            cost_per_1k_out: Some(0.015),
+            latency_p50_ms: Some(2500),
             ..Default::default()
         },
     );
@@ -549,6 +595,9 @@ fn default_config() -> ProvidersConfig {
                 url: None,
                 body: None,
             }),
+            cost_per_1k_in: Some(0.0025),
+            cost_per_1k_out: Some(0.010),
+            latency_p50_ms: Some(1800),
             ..Default::default()
         },
     );
@@ -568,6 +617,9 @@ fn default_config() -> ProvidersConfig {
                 url: None,
                 body: None,
             }),
+            cost_per_1k_in: Some(0.003),
+            cost_per_1k_out: Some(0.015),
+            latency_p50_ms: Some(2200),
             ..Default::default()
         },
     );
@@ -590,6 +642,9 @@ fn default_config() -> ProvidersConfig {
                 path: None,
                 body: None,
             }),
+            cost_per_1k_in: Some(0.0002),
+            cost_per_1k_out: Some(0.0006),
+            latency_p50_ms: Some(2400),
             ..Default::default()
         },
     );
@@ -616,6 +671,9 @@ fn default_config() -> ProvidersConfig {
                 url: None,
                 body: None,
             }),
+            cost_per_1k_in: Some(0.0),
+            cost_per_1k_out: Some(0.0),
+            latency_p50_ms: Some(1200),
             ..Default::default()
         },
     );
@@ -636,6 +694,101 @@ fn default_config() -> ProvidersConfig {
                 url: None,
                 body: None,
             }),
+            cost_per_1k_in: Some(0.0002),
+            cost_per_1k_out: Some(0.0006),
+            latency_p50_ms: Some(1600),
+            ..Default::default()
+        },
+    );
+
+    // Groq (OpenAI-compatible)
+    config.providers.insert(
+        "groq".to_string(),
+        ProviderDef {
+            base_url: "https://api.groq.com/openai/v1".to_string(),
+            base_url_env: Some("GROQ_BASE_URL".to_string()),
+            auth_style: "bearer".to_string(),
+            auth_env: AuthEnv::Single("GROQ_API_KEY".to_string()),
+            chat_endpoint: "/chat/completions".to_string(),
+            completion_endpoint: Some("/completions".to_string()),
+            healthcheck: Some(HealthcheckDef {
+                method: "GET".to_string(),
+                path: Some("/models".to_string()),
+                url: None,
+                body: None,
+            }),
+            cost_per_1k_in: Some(0.0001),
+            cost_per_1k_out: Some(0.0003),
+            latency_p50_ms: Some(450),
+            ..Default::default()
+        },
+    );
+
+    // DeepSeek (OpenAI-compatible)
+    config.providers.insert(
+        "deepseek".to_string(),
+        ProviderDef {
+            base_url: "https://api.deepseek.com/v1".to_string(),
+            base_url_env: Some("DEEPSEEK_BASE_URL".to_string()),
+            auth_style: "bearer".to_string(),
+            auth_env: AuthEnv::Single("DEEPSEEK_API_KEY".to_string()),
+            chat_endpoint: "/chat/completions".to_string(),
+            completion_endpoint: Some("/completions".to_string()),
+            healthcheck: Some(HealthcheckDef {
+                method: "GET".to_string(),
+                path: Some("/models".to_string()),
+                url: None,
+                body: None,
+            }),
+            cost_per_1k_in: Some(0.00014),
+            cost_per_1k_out: Some(0.00028),
+            latency_p50_ms: Some(1800),
+            ..Default::default()
+        },
+    );
+
+    // Fireworks (OpenAI-compatible open-weight hosting)
+    config.providers.insert(
+        "fireworks".to_string(),
+        ProviderDef {
+            base_url: "https://api.fireworks.ai/inference/v1".to_string(),
+            base_url_env: Some("FIREWORKS_BASE_URL".to_string()),
+            auth_style: "bearer".to_string(),
+            auth_env: AuthEnv::Single("FIREWORKS_API_KEY".to_string()),
+            chat_endpoint: "/chat/completions".to_string(),
+            completion_endpoint: Some("/completions".to_string()),
+            healthcheck: Some(HealthcheckDef {
+                method: "GET".to_string(),
+                path: Some("/models".to_string()),
+                url: None,
+                body: None,
+            }),
+            cost_per_1k_in: Some(0.0002),
+            cost_per_1k_out: Some(0.0006),
+            latency_p50_ms: Some(1400),
+            ..Default::default()
+        },
+    );
+
+    // Alibaba DashScope (OpenAI-compatible Qwen host)
+    config.providers.insert(
+        "dashscope".to_string(),
+        ProviderDef {
+            base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1".to_string(),
+            base_url_env: Some("DASHSCOPE_BASE_URL".to_string()),
+            auth_style: "bearer".to_string(),
+            auth_env: AuthEnv::Single("DASHSCOPE_API_KEY".to_string()),
+            chat_endpoint: "/chat/completions".to_string(),
+            completion_endpoint: Some("/completions".to_string()),
+            healthcheck: Some(HealthcheckDef {
+                method: "GET".to_string(),
+                path: Some("/models".to_string()),
+                url: None,
+                body: None,
+            }),
+            cost_per_1k_in: Some(0.0003),
+            cost_per_1k_out: Some(0.0012),
+            latency_p50_ms: Some(1600),
             ..Default::default()
         },
     );
@@ -655,6 +808,53 @@ fn default_config() -> ProvidersConfig {
                 url: None,
                 body: None,
             }),
+            cost_per_1k_in: Some(0.0),
+            cost_per_1k_out: Some(0.0),
+            latency_p50_ms: Some(900),
+            ..Default::default()
+        },
+    );
+
+    // vLLM OpenAI-compatible server.
+    config.providers.insert(
+        "vllm".to_string(),
+        ProviderDef {
+            base_url: "http://localhost:8000".to_string(),
+            base_url_env: Some("VLLM_BASE_URL".to_string()),
+            auth_style: "none".to_string(),
+            chat_endpoint: "/v1/chat/completions".to_string(),
+            completion_endpoint: Some("/v1/completions".to_string()),
+            healthcheck: Some(HealthcheckDef {
+                method: "GET".to_string(),
+                path: Some("/v1/models".to_string()),
+                url: None,
+                body: None,
+            }),
+            cost_per_1k_in: Some(0.0),
+            cost_per_1k_out: Some(0.0),
+            latency_p50_ms: Some(800),
+            ..Default::default()
+        },
+    );
+
+    // HuggingFace Text Generation Inference OpenAI-compatible endpoint.
+    config.providers.insert(
+        "tgi".to_string(),
+        ProviderDef {
+            base_url: "http://localhost:8080".to_string(),
+            base_url_env: Some("TGI_BASE_URL".to_string()),
+            auth_style: "none".to_string(),
+            chat_endpoint: "/v1/chat/completions".to_string(),
+            completion_endpoint: Some("/v1/completions".to_string()),
+            healthcheck: Some(HealthcheckDef {
+                method: "GET".to_string(),
+                path: Some("/health".to_string()),
+                url: None,
+                body: None,
+            }),
+            cost_per_1k_in: Some(0.0),
+            cost_per_1k_out: Some(0.0),
+            latency_p50_ms: Some(950),
             ..Default::default()
         },
     );

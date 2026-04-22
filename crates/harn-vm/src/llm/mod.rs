@@ -361,7 +361,7 @@ pub(crate) use self::agent_config::{agent_loop_result_from_llm, AgentLoopConfig}
 pub use self::agent_config::{register_agent_loop_with_bridge, register_llm_call_with_bridge};
 pub use self::api::fetch_provider_max_context;
 pub(crate) use self::api::vm_call_llm_full;
-pub use self::cost::peek_total_cost;
+pub use self::cost::{calculate_cost_for_provider, peek_total_cost};
 pub(crate) use self::helpers::extract_llm_options;
 pub use self::helpers::resolve_api_key;
 pub use self::helpers::vm_value_to_json;
@@ -1012,6 +1012,9 @@ mod tests {
             provider: "mock".to_string(),
             model: "mock".to_string(),
             api_key: String::new(),
+            route_policy: super::api::LlmRoutePolicy::Manual,
+            fallback_chain: Vec::new(),
+            routing_decision: None,
             messages: Vec::new(),
             system: None,
             transcript_summary: None,

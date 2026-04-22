@@ -1,5 +1,6 @@
 import type {
   PortalHighlightKeywords,
+  PortalCostReport,
   PortalLaunchJob,
   PortalLaunchJobList,
   PortalLlmOptions,
@@ -74,6 +75,10 @@ export function fetchHighlightKeywords(): Promise<PortalHighlightKeywords> {
 
 export function fetchLlmOptions(): Promise<PortalLlmOptions> {
   return fetchJson<PortalLlmOptions>("/api/llm/options")
+}
+
+export function fetchCostReport(): Promise<PortalCostReport> {
+  return fetchJson<PortalCostReport>("/api/costs")
 }
 
 export function fetchRunDetail(path: string): Promise<PortalRunDetail> {

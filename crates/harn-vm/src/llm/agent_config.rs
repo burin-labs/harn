@@ -125,6 +125,14 @@ pub(crate) fn agent_loop_result_from_llm(
             "input_tokens": result.input_tokens,
             "output_tokens": result.output_tokens,
             "tool_calls": result.tool_calls.clone(),
+            "cost_usd": crate::llm::cost::calculate_cost_for_provider(
+                &result.provider,
+                &result.model,
+                result.input_tokens,
+                result.output_tokens,
+            ),
+            "route_policy": opts.route_policy.as_label(),
+            "routing_decision": opts.routing_decision.as_ref(),
             "structural_experiment": opts.applied_structural_experiment.as_ref(),
         })),
     )];

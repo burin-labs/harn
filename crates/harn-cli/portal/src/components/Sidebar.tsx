@@ -21,6 +21,10 @@ const messages = defineMessages({
     id: "portal.sidebar.runs",
     defaultMessage: "Runs",
   },
+  costs: {
+    id: "portal.sidebar.costs",
+    defaultMessage: "Costs",
+  },
   refreshNow: {
     id: "portal.sidebar.refreshNow",
     defaultMessage: "Refresh stats",
@@ -94,6 +98,9 @@ export function Sidebar({ stats, loading, lastRefreshAt, lastError, onRefresh }:
         </NavLink>
         <NavLink className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`} to="/runs">
           {intl.formatMessage(messages.runs)}
+        </NavLink>
+        <NavLink className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`} to="/costs">
+          {intl.formatMessage(messages.costs)}
         </NavLink>
       </nav>
 
