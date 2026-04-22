@@ -32,11 +32,20 @@ Default assumptions:
 
 - Adjust `patch` to `minor` or `major` if requested. This opens the automated
   version-bump PR.
-- After the version-bump PR lands through the merge queue, sync `main` and
-  finalize:
+- After the version-bump PR lands through the merge queue, the
+  `Finalize Release` GitHub Action
+  (`.github/workflows/finalize-release.yml`) runs `release_ship.sh --finalize`
+  automatically against updated `main`. Do not run the local `--finalize`
+  command as a default step. Only fall back to running it locally if the
+  workflow fails and a human has to recover, or re-trigger the workflow
+  via the GitHub Actions UI (it exposes a `workflow_dispatch` input):
 
 ```bash
+# Recovery path only — normally, the workflow does this for you.
 ./scripts/release_ship.sh --finalize
+
+# Or re-trigger the workflow manually:
+gh workflow run finalize-release.yml --ref main
 ```
 
 Rules:
@@ -51,6 +60,14 @@ Rules:
   **before** `cargo publish` so GitHub release-binary workflows and downstream
   fetchers (e.g. `burin-code`'s `fetch-harn`) start in parallel with crates.io.
   The GitHub release body is created last.
+- Finalize runs inside GitHub Actions via
+  `.github/workflows/finalize-release.yml`. The workflow fires on push to
+  `main` when the head commit starts with the prefix `Bump version to` (the convention
+  `release_ship.sh --bump` writes), and also exposes `workflow_dispatch` for
+  manual re-runs. It uses repo secret `CARGO_REGISTRY_TOKEN` for crates.io
+  and the default `GITHUB_TOKEN` for tag push + release creation. Local
+  `release_ship.sh --finalize` remains the recovery path and is idempotent
+  once the tag exists at HEAD.
 - `verify_release_metadata.py` accepts the pre-bump state — it passes when
   `CHANGELOG.md` top is exactly one patch/minor/major step ahead of
   `Cargo.toml`. That is why running `release_ship.sh --bump patch` on a

@@ -9,9 +9,12 @@ Run the merge-queue-safe Harn release workflow from the repo source of truth.
 
 `release_ship.sh --bump patch` handles audit, dry-run publish, version bump,
 branch push, and automated bump PR creation. After that PR lands through the
-merge queue, run `./scripts/release_ship.sh --finalize` from updated `main` to
-tag, publish to crates.io, and create/update the GitHub release. Do not
-re-invent the sequence manually unless the script cannot do what you need.
+merge queue, **the `Finalize Release` GitHub Action (`.github/workflows/finalize-release.yml`) runs `release_ship.sh --finalize` automatically** — it
+audits, tags, publishes to crates.io, and creates/updates the GitHub release.
+The human release path ends at opening the bump PR; the tag + publish are
+automated. Only run `./scripts/release_ship.sh --finalize` locally to recover
+from a failed workflow run, or manually re-trigger the workflow via "Run
+workflow" on the `Finalize Release` GitHub Actions page.
 
 ## Default workflow
 
@@ -58,10 +61,14 @@ re-invent the sequence manually unless the script cannot do what you need.
    run `./scripts/release_ship.sh --bump patch` (or `minor`/`major`). The
    script audits, dry-run publishes, bumps `Cargo.toml`, commits the bump,
    pushes `release/vX.Y.Z`, and opens the bump PR.
-10. After the bump PR lands through the merge queue, sync `main` and run
-    `./scripts/release_ship.sh --finalize`. The script audits, dry-run
-    publishes, creates/pushes the tag, publishes to crates.io, and
-    creates/updates the GitHub release.
+10. After the bump PR lands through the merge queue, the `Finalize Release`
+    GitHub Action runs `./scripts/release_ship.sh --finalize` automatically
+    against updated `main`. It audits, dry-run publishes, creates/pushes the
+    tag, publishes to crates.io, and creates/updates the GitHub release. Do
+    not run `--finalize` locally as a default step; only do so if the
+    workflow fails and the tree needs to be recovered manually. The
+    workflow also exposes a `workflow_dispatch` trigger for manual
+    re-runs from the GitHub Actions UI.
 11. For an all-in-one dry run that stops before any destructive action,
     use `./scripts/release_gate.sh full --bump patch --dry-run`.
 12. Only drop down to the piecewise `release_gate.sh prepare` / `publish` /
@@ -129,6 +136,15 @@ not automate, such as analyzing pending local work and opening the
   (e.g. `burin-code`'s `fetch-harn`) start working in parallel with crates.io
   publication. The GitHub release body is created last so it can reference the
   final crates.io state.
+- Finalize runs inside GitHub Actions via
+  `.github/workflows/finalize-release.yml`. The workflow fires on push to
+  `main` when the head commit starts with the prefix `Bump version to` (the
+  convention `release_ship.sh --bump` writes), and also exposes
+  `workflow_dispatch` for manual re-runs. It uses the repo secret
+  `CARGO_REGISTRY_TOKEN` for crates.io and the default `GITHUB_TOKEN` for
+  tag push + release creation. Running `release_ship.sh --finalize`
+  locally is only needed when the workflow fails and a human has to
+  recover — it is idempotent once the tag exists at HEAD.
 - `CHANGELOG.md` is the release-language source of truth. Use
   `scripts/render_release_notes.py` or `./scripts/release_gate.sh notes` to
   produce the exact GitHub release body from it.
@@ -151,8 +167,11 @@ phase stretch to ~12 min while fighting `rust-audit`'s clippy+nextest for
 ## Useful shortcuts
 
 ```bash
-./scripts/release_ship.sh --bump patch
-./scripts/release_ship.sh --finalize
+./scripts/release_ship.sh --bump patch               # open the bump PR
+./scripts/release_ship.sh --finalize                 # recovery only
 ./scripts/release_gate.sh full --bump patch --dry-run
 ./scripts/release_gate.sh notes
+
+# Manual re-trigger of the finalize workflow:
+gh workflow run finalize-release.yml --ref main
 ```
