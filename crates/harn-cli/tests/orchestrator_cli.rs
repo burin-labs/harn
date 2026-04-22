@@ -216,6 +216,30 @@ fn bearer_headers() -> HeaderMap {
     headers
 }
 
+async fn wait_for_metrics_contains(
+    client: &reqwest::Client,
+    base_url: &str,
+    needles: &[&str],
+) -> String {
+    let deadline = Instant::now() + EVENT_FAIL_FAST_TIMEOUT;
+    let mut last = String::new();
+    while Instant::now() < deadline {
+        last = client
+            .get(format!("{base_url}/metrics"))
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap();
+        if needles.iter().all(|needle| last.contains(needle)) {
+            return last;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    panic!("timed out waiting for metrics samples {needles:?}; last={last}");
+}
+
 fn run_harn_with_env(temp: &TempDir, args: &[&str], envs: &[(&str, &str)]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_harn"));
     command.current_dir(temp.path()).args(args);
@@ -367,6 +391,21 @@ fn wait_for_topic_event(state_dir: &Path, topic_name: &str, predicate: impl Fn(&
         thread::sleep(Duration::from_millis(25));
     }
     panic!("timed out waiting for matching {topic_name} event");
+}
+
+fn wait_for_topic_event_count(state_dir: &Path, topic_name: &str, kind: &str, expected: usize) {
+    let deadline = Instant::now() + EVENT_FAIL_FAST_TIMEOUT;
+    while Instant::now() < deadline {
+        let count = read_topic_events(state_dir, topic_name)
+            .iter()
+            .filter(|(_, event)| event.kind == kind)
+            .count();
+        if count >= expected {
+            return;
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
+    panic!("timed out waiting for {topic_name}/{kind} count {expected}");
 }
 
 fn sqlite_event_count(state_dir: &Path, topic_name: &str, kind: &str) -> usize {
@@ -732,6 +771,148 @@ pub fn on_task(event: TriggerEvent) -> string {
         snapshot_contents.contains("\"in_flight\": 0"),
         "snapshot={snapshot_contents}"
     );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn inbox_pump_backpressures_before_ack_when_outstanding_limit_is_full() {
+    let _lock = support::lock_orchestrator_process_tests();
+    let temp = TempDir::new().unwrap();
+    let inbox_release_file = temp.path().join("release-inbox-dispatch");
+    let inbox_release_value = inbox_release_file.to_string_lossy().into_owned();
+    write_file(
+        temp.path(),
+        "harn.toml",
+        r#"
+[package]
+name = "fixture"
+
+[exports]
+handlers = "lib.harn"
+
+[[triggers]]
+id = "incoming-review-task"
+kind = "a2a-push"
+provider = "a2a-push"
+path = "/a2a/review"
+match = { events = ["a2a.task.received"] }
+handler = "handlers::on_task"
+"#,
+    );
+    write_file(
+        temp.path(),
+        "lib.harn",
+        r#"
+import "std/triggers"
+
+pub fn on_task(event: TriggerEvent) -> string {
+  return event.kind
+}
+"#,
+    );
+
+    let envs = [
+        ("HARN_EVENT_LOG_BACKEND", "file"),
+        ("HARN_ORCHESTRATOR_API_KEYS", "test-key"),
+        ("HARN_ORCHESTRATOR_HMAC_SECRET", "unused-shared-secret"),
+        (
+            "HARN_TEST_ORCHESTRATOR_INBOX_TASK_RELEASE_FILE",
+            inbox_release_value.as_str(),
+        ),
+    ];
+    let extra_args = ["--shutdown-timeout", "5", "--pump-max-outstanding", "1"];
+    let (mut child, rx, handle) = spawn_orchestrator_with(&temp, &extra_args, &envs);
+    let base_url = wait_for_listener_url(&mut child, &rx);
+    let state_dir = temp.path().join("state");
+    let client = reqwest::Client::new();
+
+    for id in ["task-478-a", "task-478-b"] {
+        let body = serde_json::json!({
+            "kind": "a2a.task.received",
+            "task": {"id": id},
+        });
+        let response = client
+            .post(format!("{base_url}/a2a/review"))
+            .headers(bearer_headers())
+            .body(body.to_string())
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), reqwest::StatusCode::OK);
+    }
+
+    wait_for_consumer_cursor(
+        &state_dir,
+        harn_vm::TRIGGER_INBOX_ENVELOPES_TOPIC,
+        &format!(
+            "orchestrator-pump.{}",
+            harn_vm::TRIGGER_INBOX_ENVELOPES_TOPIC
+        ),
+        1,
+    )
+    .await;
+    wait_for_topic_event(&state_dir, "orchestrator.lifecycle", |event| {
+        event.kind == "pump_admitted" && event.payload["event_log_id"] == serde_json::json!(1)
+    });
+    wait_for_topic_event_count(
+        &state_dir,
+        harn_vm::TRIGGER_INBOX_ENVELOPES_TOPIC,
+        "event_ingested",
+        2,
+    );
+
+    let log = open_state_event_log(&state_dir);
+    let topic = Topic::new(harn_vm::TRIGGER_INBOX_ENVELOPES_TOPIC).unwrap();
+    let consumer = ConsumerId::new(format!(
+        "orchestrator-pump.{}",
+        harn_vm::TRIGGER_INBOX_ENVELOPES_TOPIC
+    ))
+    .unwrap();
+    let cursor = log.consumer_cursor(&topic, &consumer).await.unwrap();
+    assert_eq!(
+        cursor,
+        Some(1),
+        "second inbox event was acked before admission"
+    );
+
+    let _metrics = wait_for_metrics_contains(
+        &client,
+        &base_url,
+        &[
+            "harn_orchestrator_pump_outstanding{topic=\"trigger.inbox.envelopes\"} 1",
+            "harn_orchestrator_pump_backlog{topic=\"trigger.inbox.envelopes\"} 1",
+        ],
+    )
+    .await;
+
+    send_sigterm(&child);
+    fs::write(&inbox_release_file, b"release").unwrap();
+    wait_for_exit(&mut child);
+    let stderr = handle.join().expect("stderr collector thread");
+    assert!(stderr.contains(SHUTDOWN_NEEDLE), "stderr={stderr}");
+
+    let outbox = read_topic_events(&state_dir, "trigger.outbox");
+    assert_eq!(
+        outbox
+            .iter()
+            .filter(|(_, event)| event.kind == "dispatch_succeeded")
+            .count(),
+        2,
+        "outbox={outbox:?}"
+    );
+    let lifecycle = read_topic_events(&state_dir, "orchestrator.lifecycle");
+    for kind in [
+        "pump_received",
+        "pump_eligible",
+        "pump_admitted",
+        "pump_dispatch_started",
+        "pump_dispatch_completed",
+        "pump_acked",
+    ] {
+        assert!(
+            lifecycle.iter().any(|(_, event)| event.kind == kind),
+            "missing {kind}: lifecycle={lifecycle:?}"
+        );
+    }
 }
 
 #[test]

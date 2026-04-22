@@ -131,6 +131,14 @@ Harn v0.7.23 also soft-reads the legacy mixed `trigger.inbox` topic on
 startup so older event logs keep working while new writes go only to the
 split topics.
 
+The long-running orchestrator inbox pump admits a bounded number of
+outstanding dispatch tasks. A full pump stops reading new inbox envelopes
+and leaves their source cursor unacked until capacity is available. Pump
+state is visible through `orchestrator.lifecycle` events such as
+`pump_received`, `pump_eligible`, `pump_admitted`, `pump_dispatch_started`,
+`pump_dispatch_completed`, and `pump_acked`, plus Prometheus metrics for
+backlog, outstanding count, and admission delay.
+
 Flow-control topics record per-gate admission decisions and waits. For example,
 `concurrency = { key = "event.headers.tenant", max = 2 }` writes records under
 `trigger.concurrency.<binding-and-gate>`, while `debounce` and `batch` emit the

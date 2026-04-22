@@ -553,6 +553,7 @@ harn orchestrator serve \
   --config harn.toml \
   --state-dir .harn/orchestrator \
   --bind 0.0.0.0:8080 \
+  --pump-max-outstanding 64 \
   --log-format json \
   --role single-tenant
 

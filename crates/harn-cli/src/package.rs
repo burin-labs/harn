@@ -96,6 +96,8 @@ pub struct OrchestratorConfig {
     pub budget: OrchestratorBudgetSpec,
     #[serde(default)]
     pub drain: OrchestratorDrainConfig,
+    #[serde(default)]
+    pub pumps: OrchestratorPumpConfig,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
@@ -132,6 +134,27 @@ fn default_orchestrator_drain_max_items() -> usize {
 
 fn default_orchestrator_drain_deadline_seconds() -> u64 {
     30
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct OrchestratorPumpConfig {
+    #[serde(
+        default = "default_orchestrator_pump_max_outstanding",
+        alias = "max-outstanding"
+    )]
+    pub max_outstanding: usize,
+}
+
+impl Default for OrchestratorPumpConfig {
+    fn default() -> Self {
+        Self {
+            max_outstanding: default_orchestrator_pump_max_outstanding(),
+        }
+    }
+}
+
+fn default_orchestrator_pump_max_outstanding() -> usize {
+    64
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -4400,6 +4423,7 @@ name = "fixture"
         .unwrap();
         assert_eq!(default_manifest.orchestrator.drain.max_items, 1024);
         assert_eq!(default_manifest.orchestrator.drain.deadline_seconds, 30);
+        assert_eq!(default_manifest.orchestrator.pumps.max_outstanding, 64);
 
         let configured: Manifest = toml::from_str(
             r#"
@@ -4409,11 +4433,13 @@ name = "fixture"
 [orchestrator]
 drain.max_items = 77
 drain.deadline_seconds = 12
+pumps.max_outstanding = 3
 "#,
         )
         .unwrap();
         assert_eq!(configured.orchestrator.drain.max_items, 77);
         assert_eq!(configured.orchestrator.drain.deadline_seconds, 12);
+        assert_eq!(configured.orchestrator.pumps.max_outstanding, 3);
     }
 
     #[test]
