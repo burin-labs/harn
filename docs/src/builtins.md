@@ -797,6 +797,8 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 | `trigger_fire(handle, event)` | handle: dict or string, event: dict | dict | Fire a synthetic event into a trigger and return a `DispatchHandle`; execution routes through the trigger dispatcher |
 | `trigger_replay(event_id)` | event_id: string | dict | Fetch a historical event from `triggers.events`, re-dispatch it through the trigger dispatcher, and thread `replay_of_event_id` through the returned `DispatchHandle` |
 | `trigger_inspect_dlq()` | — | list | Return the current DLQ snapshot as `list<DlqEntry>` with retry history |
+| `trigger_inspect_lifecycle(kind?)` | kind: string or nil | list | Return trigger lifecycle event-log records, optionally filtered by event kind |
+| `trigger_inspect_action_graph(trace_id?)` | trace_id: string or nil | list | Return streamed `observability.action_graph` records, optionally filtered to one trace id |
 | `trigger_test_harness(fixture)` | fixture: string or `{fixture: string}` | dict | Run a named trigger-system harness fixture and return a structured report. Intended for Rust/unit/conformance coverage of cron, webhook, retry, DLQ, dedupe, rate-limit, cost-guard, recovery, and dead-man-switch scenarios |
 | `handler_context()` | — | dict or nil | Return the active trigger dispatch context (`agent`, `action`, `trace_id`, `replay_of_event_id`, `autonomy_tier`, `trigger_event`) or `nil` outside dispatch |
 | `trust_record(agent, action, approver, outcome, tier)` | agent: string, action: string, approver: string or nil, outcome: string, tier: string | dict | Append a manual hash-chained `TrustRecord` to `trust_graph` and per-agent topics |

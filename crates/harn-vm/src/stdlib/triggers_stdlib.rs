@@ -26,6 +26,7 @@ use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 use crate::TriggerPredicateBudget;
 
+const ACTION_GRAPH_TOPIC: &str = "observability.action_graph";
 const TRIGGER_EVENTS_TOPIC: &str = "triggers.events";
 const TRIGGER_EVENT_LOG_QUEUE_DEPTH: usize = 128;
 
@@ -73,6 +74,13 @@ struct DlqEntryRecord {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct LifecycleEventRecord {
+    kind: String,
+    headers: BTreeMap<String, String>,
+    payload: serde_json::Value,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct ActionGraphEventRecord {
     kind: String,
     headers: BTreeMap<String, String>,
     payload: serde_json::Value,
@@ -161,6 +169,21 @@ pub(crate) fn register_trigger_builtins(vm: &mut Vm) {
             _ => None,
         });
         let entries = inspect_lifecycle_events(kind.as_deref()).await?;
+        Ok(VmValue::List(Rc::new(
+            entries
+                .into_iter()
+                .map(|entry| value_from_serde(&entry))
+                .collect(),
+        )))
+    });
+
+    vm.register_async_builtin("trigger_inspect_action_graph", |args| async move {
+        let trace_id = args.first().and_then(|value| match value {
+            VmValue::String(text) => Some(text.to_string()),
+            VmValue::Nil => None,
+            _ => None,
+        });
+        let entries = inspect_action_graph_events(trace_id.as_deref()).await?;
         Ok(VmValue::List(Rc::new(
             entries
                 .into_iter()
@@ -539,6 +562,42 @@ async fn inspect_lifecycle_events(
                 return None;
             }
             Some(LifecycleEventRecord {
+                kind: event.kind,
+                headers: event.headers,
+                payload: event.payload,
+            })
+        })
+        .collect())
+}
+
+async fn inspect_action_graph_events(
+    trace_id_filter: Option<&str>,
+) -> Result<Vec<ActionGraphEventRecord>, VmError> {
+    let log = ensure_trigger_event_log();
+    let topic = Topic::new(ACTION_GRAPH_TOPIC)
+        .map_err(|error| VmError::Runtime(format!("trigger_inspect_action_graph: {error}")))?;
+    let events = log
+        .read_range(&topic, None, usize::MAX)
+        .await
+        .map_err(|error| VmError::Runtime(format!("trigger_inspect_action_graph: {error}")))?;
+    Ok(events
+        .into_iter()
+        .filter_map(|(_, event)| {
+            if let Some(expected) = trace_id_filter {
+                let matches_trace = event
+                    .headers
+                    .get("trace_id")
+                    .is_some_and(|trace| trace == expected)
+                    || event
+                        .payload
+                        .get("trace_id")
+                        .and_then(|value| value.as_str())
+                        == Some(expected);
+                if !matches_trace {
+                    return None;
+                }
+            }
+            Some(ActionGraphEventRecord {
                 kind: event.kind,
                 headers: event.headers,
                 payload: event.payload,

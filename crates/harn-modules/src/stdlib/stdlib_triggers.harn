@@ -55,20 +55,35 @@ type SlackEventPayload = SlackMessageEventPayload | SlackAppMentionEventPayload 
 type LinearEventCommon = {provider: "linear", event: string, action: string | nil, delivery_id: string | nil, organization_id: string | nil, webhook_timestamp: int | nil, webhook_id: string | nil, url: string | nil, created_at: string | nil, actor: dict | nil, raw: dict}
 
 type LinearIssueTitleChange = {field_name: "title", previous: string | nil}
+
 type LinearIssueDescriptionChange = {field_name: "description", previous: string | nil}
+
 type LinearIssuePriorityChange = {field_name: "priority", previous: int | nil}
+
 type LinearIssueEstimateChange = {field_name: "estimate", previous: int | nil}
+
 type LinearIssueStateIdChange = {field_name: "state_id", previous: string | nil}
+
 type LinearIssueTeamIdChange = {field_name: "team_id", previous: string | nil}
+
 type LinearIssueAssigneeIdChange = {field_name: "assignee_id", previous: string | nil}
+
 type LinearIssueProjectIdChange = {field_name: "project_id", previous: string | nil}
+
 type LinearIssueCycleIdChange = {field_name: "cycle_id", previous: string | nil}
+
 type LinearIssueDueDateChange = {field_name: "due_date", previous: string | nil}
+
 type LinearIssueParentIdChange = {field_name: "parent_id", previous: string | nil}
+
 type LinearIssueSortOrderChange = {field_name: "sort_order", previous: float | nil}
+
 type LinearIssueLabelIdsChange = {field_name: "label_ids", previous: list<string>}
+
 type LinearIssueCompletedAtChange = {field_name: "completed_at", previous: string | nil}
+
 type LinearIssueOtherChange = {field_name: "other", field: string, previous: any}
+
 type LinearIssueChange = LinearIssueTitleChange | LinearIssueDescriptionChange | LinearIssuePriorityChange | LinearIssueEstimateChange | LinearIssueStateIdChange | LinearIssueTeamIdChange | LinearIssueAssigneeIdChange | LinearIssueProjectIdChange | LinearIssueCycleIdChange | LinearIssueDueDateChange | LinearIssueParentIdChange | LinearIssueSortOrderChange | LinearIssueLabelIdsChange | LinearIssueCompletedAtChange | LinearIssueOtherChange
 
 type LinearIssueEventPayload = {provider: "linear", event: "issue", action: string | nil, delivery_id: string | nil, organization_id: string | nil, webhook_timestamp: int | nil, webhook_id: string | nil, url: string | nil, created_at: string | nil, actor: dict | nil, issue: dict, changes: list<LinearIssueChange>, raw: dict}
@@ -177,6 +192,8 @@ type DlqAttempt = {attempt: int, at: string, status: string, error: string | nil
 
 type DlqEntry = {id: string, event_id: string, binding_id: string, binding_version: int, provider: string, kind: string, state: string, error: string, event: TriggerEvent, retry_history: list<DlqAttempt>}
 
+type TriggerActionGraphEvent = {kind: string, headers: dict, payload: dict}
+
 type TrustRecord = {schema: string, record_id: string, agent: string, action: string, approver: string | nil, outcome: TrustOutcome, trace_id: string, autonomy_tier: AutonomyTier, timestamp: string, cost_usd: float | nil, metadata: dict}
 
 type TrustTraceGroup = {trace_id: string, records: list<TrustRecord>}
@@ -217,7 +234,9 @@ pub fn window_by(events, window: StreamWindowSpec) -> StreamWindowPlan {
   return {kind: "stream.window", events: events, window: window}
 }
 
-/** llm_classify describes a cached classifier step without forcing a provider call during planning. */
+/**
+ * llm_classify describes a cached classifier step without forcing a provider call during planning.
+ */
 pub fn llm_classify(input, labels, options = nil) -> StreamLlmClassifyPlan {
   let config = options ?? {}
   return {kind: "stream.llm_classify", input: input, labels: labels, cache: config?.cache, options: config}

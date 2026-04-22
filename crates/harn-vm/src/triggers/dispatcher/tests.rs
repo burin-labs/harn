@@ -632,7 +632,7 @@ pub fn should_handle(event: TriggerEvent) -> bool {
             let graph = read_topic(log.clone(), "observability.action_graph").await;
             let (node_kinds, edge_kinds) = flatten_action_graph(&graph);
             assert!(node_kinds.iter().any(|kind| kind == "trigger"));
-            assert!(node_kinds.iter().any(|kind| kind == "trigger_predicate"));
+            assert!(node_kinds.iter().any(|kind| kind == "predicate"));
             assert!(node_kinds.iter().any(|kind| kind == "dispatch"));
             assert!(edge_kinds.iter().any(|kind| kind == "trigger_dispatch"));
             assert!(edge_kinds.iter().any(|kind| kind == "predicate_gate"));
