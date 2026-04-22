@@ -1,0 +1,20 @@
+[package]
+name = "notion-connector-contract-fixture"
+version = "0.1.0"
+
+[[providers]]
+id = "notion"
+connector = { harn = "./lib.harn" }
+
+[connector_contract]
+version = 1
+
+[[connector_contract.fixtures]]
+provider = "notion"
+name = "page webhook"
+kind = "webhook"
+headers = { "content-type" = "application/json" }
+body_json = { id = "notion-evt-1", type = "page.updated", page_id = "page-1" }
+expect_type = "event"
+expect_kind = "notion.page.updated"
+expect_event_count = 1

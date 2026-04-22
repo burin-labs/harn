@@ -1,0 +1,32 @@
+pub fn provider_id() {
+  return "linear"
+}
+
+pub fn kinds() {
+  return ["webhook"]
+}
+
+pub fn payload_schema() {
+  return {harn_schema_name: "LinearEventPayload", json_schema: {type: "object", additionalProperties: true}}
+}
+
+pub fn activate(bindings) {
+  metrics_inc("linear_contract_activations", len(bindings))
+}
+
+pub fn normalize_inbound(raw) {
+  let body = raw.body_json ?? json_parse(raw.body_text)
+  event_log_emit("connectors.linear.contract", "normalize", {action: body.action})
+  return {
+    type: "event",
+    event: {
+    kind: "linear.issue." + body.action,
+    dedupe_key: "linear:" + body.id,
+    payload: {id: body.data.id, title: body.data.title, action: body.action},
+  },
+  }
+}
+
+pub fn call(method, _args) {
+  throw "method_not_found:" + method
+}

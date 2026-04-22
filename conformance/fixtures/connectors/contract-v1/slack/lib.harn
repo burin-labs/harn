@@ -1,0 +1,43 @@
+pub fn provider_id() {
+  return "slack"
+}
+
+pub fn kinds() {
+  return ["webhook"]
+}
+
+pub fn payload_schema() {
+  return {harn_schema_name: "SlackEventPayload", json_schema: {type: "object", additionalProperties: true}}
+}
+
+pub fn init(ctx) {
+  if !ctx.capabilities.metrics_inc {
+    throw "metrics_inc capability missing"
+  }
+}
+
+pub fn activate(bindings) {
+  metrics_inc("slack_contract_activations", len(bindings))
+}
+
+pub fn normalize_inbound(raw) {
+  let body = raw.body_json ?? json_parse(raw.body_text)
+  if body.type == "url_verification" {
+    return {
+      type: "immediate_response",
+      immediate_response: {status: 200, headers: {["content-type"]: "text/plain; charset=utf-8"}, body: body.challenge},
+    }
+  }
+  return {
+    type: "event",
+    event: {
+    kind: "slack." + body.event.type,
+    dedupe_key: "slack:" + body.event_id,
+    payload: {event_id: body.event_id, event: body.event},
+  },
+  }
+}
+
+pub fn call(method, _args) {
+  throw "method_not_found:" + method
+}

@@ -1,0 +1,58 @@
+var active_bindings = []
+
+pub fn provider_id() {
+  return "github"
+}
+
+pub fn kinds() {
+  return ["webhook"]
+}
+
+pub fn payload_schema() {
+  return {harn_schema_name: "GitHubEventPayload", json_schema: {type: "object", additionalProperties: true}}
+}
+
+pub fn init(ctx) {
+  if ctx.provider_id != "github" {
+    throw "unexpected provider id"
+  }
+  if !ctx.capabilities.event_log_emit {
+    throw "event_log_emit capability missing"
+  }
+}
+
+pub fn activate(bindings) {
+  active_bindings = bindings
+  metrics_inc("github_contract_activations", len(bindings))
+}
+
+pub fn shutdown() {
+  metrics_inc("github_contract_shutdown")
+}
+
+pub fn normalize_inbound(raw) {
+  let body = raw.body_json ?? json_parse(raw.body_text)
+  let token = secret_get("github/contract-token")
+  event_log_emit(
+    "connectors.github.contract",
+    "normalize",
+    {event: raw.headers["x-github-event"], token: token},
+  )
+  return {
+    type: "event",
+    event: {
+    kind: "github.issues." + body.action,
+    dedupe_key: "github:" + body.id,
+    payload: {
+    delivery_id: body.id,
+    issue_number: body.issue.number,
+    title: body.issue.title,
+    binding_id: raw.binding_id,
+  },
+  },
+  }
+}
+
+pub fn call(method, _args) {
+  throw "method_not_found:" + method
+}

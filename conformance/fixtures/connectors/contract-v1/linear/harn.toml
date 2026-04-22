@@ -1,0 +1,20 @@
+[package]
+name = "linear-connector-contract-fixture"
+version = "0.1.0"
+
+[[providers]]
+id = "linear"
+connector = { harn = "./lib.harn" }
+
+[connector_contract]
+version = 1
+
+[[connector_contract.fixtures]]
+provider = "linear"
+name = "issue update webhook"
+kind = "webhook"
+headers = { "content-type" = "application/json" }
+body_json = { id = "lin-evt-1", type = "Issue", action = "update", data = { id = "ISS-1", title = "Contract fixture" } }
+expect_type = "event"
+expect_kind = "linear.issue.update"
+expect_event_count = 1

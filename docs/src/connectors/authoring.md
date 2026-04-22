@@ -155,6 +155,71 @@ execution:
 - `event_log_emit(topic, kind, payload, headers?)` appends to the active event log
 - `metrics_inc(name, amount?)` increments a Prometheus counter rendered as `connector_custom_<name>_total`
 
+## Connector contract check
+
+Pure-Harn connector packages should run the package-level contract harness in
+CI:
+
+```bash
+harn connector check .
+```
+
+The command loads the package through its `harn.toml` `[[providers]]` entries,
+uses the normal Harn-backed connector adapter, and checks connector contract
+v1:
+
+| Export | Required | Checked behavior |
+|---|---:|---|
+| `provider_id()` | Yes | Returns a non-empty string matching the manifest provider id |
+| `kinds()` | Yes | Returns at least one non-empty trigger kind string |
+| `payload_schema()` | Yes | Returns `{harn_schema_name, json_schema?}` compatible with `ProviderPayloadSchema` |
+| `normalize_inbound(raw)` | For inbound fixtures | Returns a supported `NormalizeResult` v1 shape |
+| `init(ctx)` | No | Runs with in-memory event log, secrets, metrics, inbox, and rate-limit handles |
+| `activate(bindings)` | No | Accepts deterministic bindings for non-poll kinds |
+| `shutdown()` | No | Runs after checks so connector cleanup paths are exercised |
+| `call(method, args)` | No | May return data or throw `method_not_found:<method>` for an unknown probe method |
+| `poll_tick(ctx)` | Required for `poll` kind | Presence is checked by default; pass `--run-poll-tick` to execute the first tick |
+
+The harness catches common drift such as returning a raw schema object with a
+`name` field instead of `harn_schema_name`, or returning an ack wrapper like
+`{ immediate_response, event }` without the required `type =
+"immediate_response"` discriminator.
+
+Packages can declare deterministic normalize fixtures in `harn.toml`:
+
+```toml
+[connector_contract]
+version = 1
+
+[[connector_contract.fixtures]]
+provider = "slack"
+name = "url verification"
+kind = "webhook"
+headers = { "content-type" = "application/json" }
+body_json = { type = "url_verification", challenge = "challenge-token" }
+expect_type = "immediate_response"
+expect_event_count = 0
+```
+
+Fixture fields:
+
+| Field | Description |
+|---|---|
+| `provider` | Manifest provider id to exercise |
+| `name` | Optional display name for failures and JSON output |
+| `kind` | Raw inbound kind passed to the connector, defaulting to `webhook` |
+| `headers` | Request headers as a TOML table |
+| `query` | Optional query parameters as a TOML table |
+| `metadata` | Optional raw inbound metadata; defaults include binding id/version/path |
+| `body` | Raw request body text |
+| `body_json` | JSON request body encoded as TOML |
+| `expect_type` | Optional expected NormalizeResult type: `event`, `batch`, `immediate_response`, or `reject` |
+| `expect_kind` | Optional expected normalized event kind |
+| `expect_event_count` | Optional expected number of normalized events |
+
+Use `--provider <id>` to check one provider from a multi-provider package and
+`--json` for machine-readable CI output.
+
 Minimal example:
 
 ```harn
