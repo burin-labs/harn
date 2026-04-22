@@ -318,13 +318,16 @@ pub fn normalize_inbound(raw) {
     message: body.message,
   })
   return {
-    kind: "echo.received",
-    occurred_at: raw.received_at,
-    dedupe_key: "echo:" + body.id,
-    payload: {
-      body: body,
-      token: token,
-      binding_id: raw.binding_id,
+    type: "event",
+    event: {
+      kind: "echo.received",
+      occurred_at: raw.received_at,
+      dedupe_key: "echo:" + body.id,
+      payload: {
+        body: body,
+        token: token,
+        binding_id: raw.binding_id,
+      },
     },
   }
 }
