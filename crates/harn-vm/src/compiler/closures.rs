@@ -23,6 +23,7 @@ impl Compiler {
         fn_compiler.interface_methods = self.interface_methods.clone();
         fn_compiler.type_aliases = self.type_aliases.clone();
         fn_compiler.struct_layouts = self.struct_layouts.clone();
+        fn_compiler.declare_param_slots(params);
         fn_compiler.record_param_types(params);
         fn_compiler.emit_default_preamble(params)?;
         fn_compiler.emit_type_checks(params);
@@ -47,8 +48,7 @@ impl Compiler {
         self.chunk.functions.push(Rc::new(func));
 
         self.chunk.emit_u16(Op::Closure, fn_idx as u16, self.line);
-        let name_idx = self.chunk.add_constant(Constant::String(name.to_string()));
-        self.chunk.emit_u16(Op::DefLet, name_idx, self.line);
+        self.emit_define_binding(name, false);
         Ok(())
     }
 
@@ -66,6 +66,7 @@ impl Compiler {
         fn_compiler.interface_methods = self.interface_methods.clone();
         fn_compiler.type_aliases = self.type_aliases.clone();
         fn_compiler.struct_layouts = self.struct_layouts.clone();
+        fn_compiler.declare_param_slots(params);
         fn_compiler.record_param_types(params);
         fn_compiler.emit_default_preamble(params)?;
         fn_compiler.emit_type_checks(params);
@@ -192,8 +193,7 @@ impl Compiler {
 
         self.chunk.emit_u8(Op::Call, 4, self.line);
 
-        let bind_idx = self.chunk.add_constant(Constant::String(name.to_string()));
-        self.chunk.emit_u16(Op::DefLet, bind_idx, self.line);
+        self.emit_define_binding(name, false);
         Ok(())
     }
 
@@ -239,8 +239,7 @@ impl Compiler {
         self.chunk.emit_u8(Op::Call, 3, self.line);
 
         // Bind result to skill name as a variable.
-        let bind_idx = self.chunk.add_constant(Constant::String(name.to_string()));
-        self.chunk.emit_u16(Op::DefLet, bind_idx, self.line);
+        self.emit_define_binding(name, false);
         Ok(())
     }
 
@@ -254,6 +253,7 @@ impl Compiler {
         fn_compiler.interface_methods = self.interface_methods.clone();
         fn_compiler.type_aliases = self.type_aliases.clone();
         fn_compiler.struct_layouts = self.struct_layouts.clone();
+        fn_compiler.declare_param_slots(params);
         fn_compiler.record_param_types(params);
         fn_compiler.emit_default_preamble(params)?;
         fn_compiler.emit_type_checks(params);

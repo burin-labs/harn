@@ -232,6 +232,14 @@ pub enum Op {
 
     /// Yield a value from a generator. Pops value, sends through channel, suspends.
     Yield,
+
+    // --- Slot-indexed locals ---
+    /// Get a frame-local slot. arg: u16 slot index.
+    GetLocalSlot,
+    /// Define or initialize a frame-local slot. Pops value from stack.
+    DefLocalSlot,
+    /// Assign an existing frame-local slot. Pops value from stack.
+    SetLocalSlot,
 }
 
 impl Op {
@@ -333,6 +341,9 @@ impl Op {
         Op::EqualString,
         Op::NotEqualString,
         Op::Yield,
+        Op::GetLocalSlot,
+        Op::DefLocalSlot,
+        Op::SetLocalSlot,
     ];
 
     pub(crate) fn from_byte(byte: u8) -> Option<Self> {
@@ -403,6 +414,14 @@ pub(crate) enum MethodCacheTarget {
     SetEmpty,
 }
 
+/// Debug metadata for a slot-indexed local in a compiled chunk.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocalSlotInfo {
+    pub name: String,
+    pub mutable: bool,
+    pub scope_depth: usize,
+}
+
 impl fmt::Display for Constant {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -443,6 +462,8 @@ pub struct Chunk {
     /// Shared cache entries so cloned chunks in call frames warm the same side
     /// table as the compiled chunk used by tests/debugging.
     inline_caches: Rc<RefCell<Vec<InlineCacheEntry>>>,
+    /// Source-name metadata for slot-indexed locals in this chunk.
+    pub(crate) local_slots: Vec<LocalSlotInfo>,
 }
 
 pub type ChunkRef = Rc<Chunk>;
@@ -474,6 +495,7 @@ impl Chunk {
             functions: Vec::new(),
             inline_cache_slots: BTreeMap::new(),
             inline_caches: Rc::new(RefCell::new(Vec::new())),
+            local_slots: Vec::new(),
         }
     }
 
@@ -663,6 +685,21 @@ impl Chunk {
         }
     }
 
+    pub(crate) fn add_local_slot(
+        &mut self,
+        name: String,
+        mutable: bool,
+        scope_depth: usize,
+    ) -> u16 {
+        let idx = self.local_slots.len();
+        self.local_slots.push(LocalSlotInfo {
+            name,
+            mutable,
+            scope_depth,
+        });
+        idx as u16
+    }
+
     #[cfg(test)]
     pub(crate) fn inline_cache_entries(&self) -> Vec<InlineCacheEntry> {
         self.inline_caches.borrow().clone()
@@ -733,6 +770,33 @@ impl Chunk {
                         "SET_VAR {:>4} ({})\n",
                         idx, self.constants[idx as usize]
                     ));
+                }
+                x if x == Op::GetLocalSlot as u8 => {
+                    let slot = self.read_u16(ip);
+                    ip += 2;
+                    out.push_str(&format!("GET_LOCAL_SLOT {:>4}", slot));
+                    if let Some(info) = self.local_slots.get(slot as usize) {
+                        out.push_str(&format!(" ({})", info.name));
+                    }
+                    out.push('\n');
+                }
+                x if x == Op::DefLocalSlot as u8 => {
+                    let slot = self.read_u16(ip);
+                    ip += 2;
+                    out.push_str(&format!("DEF_LOCAL_SLOT {:>4}", slot));
+                    if let Some(info) = self.local_slots.get(slot as usize) {
+                        out.push_str(&format!(" ({})", info.name));
+                    }
+                    out.push('\n');
+                }
+                x if x == Op::SetLocalSlot as u8 => {
+                    let slot = self.read_u16(ip);
+                    ip += 2;
+                    out.push_str(&format!("SET_LOCAL_SLOT {:>4}", slot));
+                    if let Some(info) = self.local_slots.get(slot as usize) {
+                        out.push_str(&format!(" ({})", info.name));
+                    }
+                    out.push('\n');
                 }
                 x if x == Op::PushScope as u8 => out.push_str("PUSH_SCOPE\n"),
                 x if x == Op::PopScope as u8 => out.push_str("POP_SCOPE\n"),

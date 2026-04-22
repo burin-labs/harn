@@ -154,7 +154,7 @@ impl Vm {
     /// Get the current debug state (variables, line, etc.).
     pub fn debug_state(&self) -> DebugState {
         let line = self.current_line();
-        let variables = self.env.all_variables();
+        let variables = self.visible_variables();
         let frame_name = if self.frames.len() > 1 {
             format!("frame_{}", self.frames.len() - 1)
         } else {
@@ -260,7 +260,7 @@ impl Vm {
     /// `completions` (#109) so the REPL autocomplete surfaces
     /// everything the unified evaluator can reach.
     pub fn identifiers_in_scope(&self, _frame_id: usize) -> Vec<String> {
-        let mut out: Vec<String> = self.env.all_variables().keys().cloned().collect();
+        let mut out: Vec<String> = self.visible_variables().keys().cloned().collect();
         out.extend(self.builtins.keys().cloned());
         out.extend(self.async_builtins.keys().cloned());
         out.sort();
@@ -411,6 +411,7 @@ impl Vm {
                     .into(),
             ));
         };
+        let initial_local_slots = self.frames[frame_id].initial_local_slots.clone();
         // Drop every frame above the target. Each pop restores its
         // saved_iterator_depth into `self.iterators` so iterator state
         // unwinds consistently.
@@ -428,6 +429,10 @@ impl Vm {
         let saved_iter_depth = frame.saved_iterator_depth;
         self.stack.truncate(stack_base);
         self.iterators.truncate(saved_iter_depth);
+        if let Some(initial_local_slots) = initial_local_slots {
+            frame.local_slots = initial_local_slots;
+            frame.local_scope_depth = 0;
+        }
         self.env = initial_env;
         self.last_line = 0;
         self.stopped = false;
@@ -455,14 +460,16 @@ impl Vm {
         // almost every pipeline binding is `let`. The underlying
         // binding's mutability flag is preserved so runtime behavior
         // after the override is unchanged.
-        self.env
-            .assign_debug(name, value.clone())
-            .map_err(|e| match e {
-                VmError::UndefinedVariable(n) => {
-                    VmError::Runtime(format!("setVariable: '{n}' is not in the current scope"))
-                }
-                other => other,
-            })?;
+        if !self.assign_active_local_slot(name, value.clone(), true)? {
+            self.env
+                .assign_debug(name, value.clone())
+                .map_err(|e| match e {
+                    VmError::UndefinedVariable(n) => {
+                        VmError::Runtime(format!("setVariable: '{n}' is not in the current scope"))
+                    }
+                    other => other,
+                })?;
+        }
         Ok(value)
     }
 
@@ -520,6 +527,7 @@ impl Vm {
         // depth, iterator depth, and the line-change baseline all
         // restore on exit so the paused session continues exactly as
         // before the user typed an expression into the REPL.
+        self.sync_current_frame_locals_to_env();
         let saved_stack_len = self.stack.len();
         let saved_frame_count = self.frames.len();
         let saved_iter_depth = self.iterators.len();
@@ -535,6 +543,7 @@ impl Vm {
         self.step_mode = false;
         self.stopped = false;
 
+        let local_slots = Self::fresh_local_slots(&chunk);
         self.frames.push(CallFrame {
             chunk: Rc::new(chunk),
             ip: 0,
@@ -544,12 +553,16 @@ impl Vm {
             // REPL/watch user expects read-only inspection semantics,
             // not replay — so skip the clone.
             initial_env: None,
+            initial_local_slots: None,
             saved_iterator_depth: saved_iter_depth,
             fn_name: "<eval>".to_string(),
             argc: 0,
             saved_source_dir: self.source_dir.clone(),
             module_functions: None,
             module_state: None,
+            local_slots,
+            local_scope_base: self.env.scope_depth().saturating_sub(1),
+            local_scope_depth: 0,
         });
 
         // Drive one op at a time with a fixed budget. A pure expression

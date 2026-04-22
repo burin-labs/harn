@@ -53,6 +53,9 @@ impl Vm {
     }
 
     pub(crate) fn resolve_named_closure(&self, name: &str) -> Option<Rc<VmClosure>> {
+        if let Some(VmValue::Closure(closure)) = self.active_local_slot_value(name) {
+            return Some(closure);
+        }
         if let Some(VmValue::Closure(closure)) = self.env.get(name) {
             return Some(closure);
         }
@@ -84,35 +87,14 @@ impl Vm {
             None
         };
 
-        let mut call_env = Self::closure_call_env(&saved_env, closure);
+        let mut call_env = self.closure_call_env_for_current_frame(closure);
         call_env.push_scope();
 
-        let default_start = closure
-            .func
-            .default_start
-            .unwrap_or(closure.func.params.len());
-        let param_count = closure.func.params.len();
-        for (i, param) in closure.func.params.iter().enumerate() {
-            if closure.func.has_rest_param && i == param_count - 1 {
-                // Rest parameter: collect remaining args into a list
-                let rest_args = if i < args.len() {
-                    args[i..].to_vec()
-                } else {
-                    Vec::new()
-                };
-                let _ = call_env.define(param, VmValue::List(std::rc::Rc::new(rest_args)), false);
-            } else if i < args.len() {
-                let _ = call_env.define(param, args[i].clone(), false);
-            } else if i < default_start {
-                let _ = call_env.define(param, VmValue::Nil, false);
-            }
-        }
-
-        // Snapshot the env *after* argument binding so restartFrame
-        // can rewind this function to its entry state with the same
-        // args re-applied. Cheap relative to the call itself.
         let initial_env = call_env.clone();
         self.env = call_env;
+        let mut local_slots = Self::fresh_local_slots(&closure.func.chunk);
+        Self::bind_param_slots(&mut local_slots, &closure.func, args, false);
+        let initial_local_slots = local_slots.clone();
 
         // Function-name breakpoint latch: record the name so the step
         // loop can raise a single "function breakpoint" stop on the
@@ -130,12 +112,16 @@ impl Vm {
             stack_base: self.stack.len(),
             saved_env,
             initial_env: Some(initial_env),
+            initial_local_slots: Some(initial_local_slots),
             saved_iterator_depth: self.iterators.len(),
             fn_name: closure.func.name.clone(),
             argc: args.len(),
             saved_source_dir,
             module_functions: closure.module_functions.clone(),
             module_state: closure.module_state.clone(),
+            local_slots,
+            local_scope_base: self.env.scope_depth().saturating_sub(1),
+            local_scope_depth: 0,
         });
 
         Ok(())
@@ -152,35 +138,12 @@ impl Vm {
         let mut child = self.child_vm();
         child.yield_sender = Some(tx);
 
-        // Set up the environment for the generator body. The generator
-        // body runs in its own child VM; closure_call_env walks the
-        // current (parent) env so locally-defined generator closures
-        // can self-reference via the narrow closure-only merge. See
-        // `Vm::closure_call_env`.
-        let parent_env = self.env.clone();
-        let mut call_env = Self::closure_call_env(&parent_env, closure);
+        let mut call_env = self.closure_call_env_for_current_frame(closure);
         call_env.push_scope();
 
-        let default_start = closure
-            .func
-            .default_start
-            .unwrap_or(closure.func.params.len());
-        let param_count = closure.func.params.len();
-        for (i, param) in closure.func.params.iter().enumerate() {
-            if closure.func.has_rest_param && i == param_count - 1 {
-                let rest_args = if i < args.len() {
-                    args[i..].to_vec()
-                } else {
-                    Vec::new()
-                };
-                let _ = call_env.define(param, VmValue::List(std::rc::Rc::new(rest_args)), false);
-            } else if i < args.len() {
-                let _ = call_env.define(param, args[i].clone(), false);
-            } else if i < default_start {
-                let _ = call_env.define(param, VmValue::Nil, false);
-            }
-        }
         child.env = call_env;
+        let mut local_slots = Self::fresh_local_slots(&closure.func.chunk);
+        Self::bind_param_slots(&mut local_slots, &closure.func, args, false);
 
         let chunk = Rc::clone(&closure.func.chunk);
         let saved_source_dir = if let Some(ref dir) = closure.source_dir {
@@ -203,6 +166,7 @@ impl Vm {
                     saved_source_dir,
                     module_functions,
                     module_state,
+                    Some(local_slots),
                 )
                 .await;
             // When the generator body finishes (return or fall-through),

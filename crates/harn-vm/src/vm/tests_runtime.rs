@@ -740,6 +740,64 @@ fn test_direct_builtin_call_falls_back_to_bridge() {
     assert_eq!(out, "[harn] bridge:ok");
 }
 
+#[test]
+fn test_slot_locals_preserve_shadowing_and_assignment() {
+    let out = run_output(
+        r#"pipeline t(task) {
+var x = 1
+if true {
+  var x = 10
+  x = x + 1
+  log(x)
+}
+x = x + 2
+log(x)
+}"#,
+    );
+    assert_eq!(out, "[harn] 11\n[harn] 3");
+}
+
+#[test]
+fn test_slot_params_and_recursive_function_calls() {
+    let out = run_output(
+        r#"pipeline t(task) {
+fn sum_to(n, acc = 0) {
+  if n <= 0 {
+    return acc
+  }
+  return sum_to(n - 1, acc + n)
+}
+log(sum_to(5))
+}"#,
+    );
+    assert_eq!(out, "[harn] 15");
+}
+
+#[test]
+fn test_slot_locals_sync_for_closure_capture() {
+    let out = run_output(
+        r#"pipeline t(task) {
+var x = 1
+x = 7
+let f = { -> x + 1 }
+log(f())
+}"#,
+    );
+    assert_eq!(out, "[harn] 8");
+}
+
+#[test]
+fn test_slot_property_assignment_updates_slot_value() {
+    let out = run_output(
+        r#"pipeline t(task) {
+var d = {count: 1}
+d.count = d.count + 2
+log(d.count)
+}"#,
+    );
+    assert_eq!(out, "[harn] 3");
+}
+
 // --- Error handling tests ---
 
 #[test]

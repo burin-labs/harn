@@ -17,13 +17,11 @@ impl Compiler {
             self.compile_node(value)?;
             self.temp_counter += 1;
             let temp_name = format!("__throw_val_{}__", self.temp_counter);
-            let save_idx = self.chunk.add_constant(Constant::String(temp_name.clone()));
-            self.chunk.emit_u16(Op::DefVar, save_idx, self.line);
+            self.emit_define_binding(&temp_name, true);
             for fb in &pending {
                 self.compile_finally_inline(fb)?;
             }
-            let restore_idx = self.chunk.add_constant(Constant::String(temp_name));
-            self.chunk.emit_u16(Op::GetVar, restore_idx, self.line);
+            self.emit_get_binding(&temp_name);
             self.chunk.emit(Op::Throw, self.line);
         } else {
             self.compile_node(value)?;
@@ -60,13 +58,11 @@ impl Compiler {
         } else {
             self.temp_counter += 1;
             let temp_name = format!("__try_star_err_{}__", self.temp_counter);
-            let save_idx = self.chunk.add_constant(Constant::String(temp_name.clone()));
-            self.chunk.emit_u16(Op::DefVar, save_idx, self.line);
+            self.emit_define_binding(&temp_name, true);
             for fb in &pending {
                 self.compile_finally_inline(fb)?;
             }
-            let restore_idx = self.chunk.add_constant(Constant::String(temp_name));
-            self.chunk.emit_u16(Op::GetVar, restore_idx, self.line);
+            self.emit_get_binding(&temp_name);
             self.chunk.emit(Op::Throw, self.line);
         }
 
@@ -252,18 +248,12 @@ impl Compiler {
     ) -> Result<(), CompileError> {
         self.compile_node(count)?;
         let counter_name = "__retry_counter__";
-        let counter_idx = self
-            .chunk
-            .add_constant(Constant::String(counter_name.to_string()));
-        self.chunk.emit_u16(Op::DefVar, counter_idx, self.line);
+        self.emit_define_binding(counter_name, true);
 
         // Store last error for re-throwing after retries are exhausted.
         self.chunk.emit(Op::Nil, self.line);
         let err_name = "__retry_last_error__";
-        let err_idx = self
-            .chunk
-            .add_constant(Constant::String(err_name.to_string()));
-        self.chunk.emit_u16(Op::DefVar, err_idx, self.line);
+        self.emit_define_binding(err_name, true);
 
         let loop_start = self.chunk.current_offset();
 
@@ -286,15 +276,15 @@ impl Compiler {
 
         self.chunk.patch_jump(catch_jump);
         self.chunk.emit(Op::Dup, self.line);
-        self.chunk.emit_u16(Op::SetVar, err_idx, self.line);
+        self.emit_set_binding(err_name);
         self.chunk.emit(Op::Pop, self.line);
 
-        self.chunk.emit_u16(Op::GetVar, counter_idx, self.line);
+        self.emit_get_binding(counter_name);
         let one_idx = self.chunk.add_constant(Constant::Int(1));
         self.chunk.emit_u16(Op::Constant, one_idx, self.line);
         self.chunk.emit(Op::Sub, self.line);
         self.chunk.emit(Op::Dup, self.line);
-        self.chunk.emit_u16(Op::SetVar, counter_idx, self.line);
+        self.emit_set_binding(counter_name);
 
         let zero_idx = self.chunk.add_constant(Constant::Int(0));
         self.chunk.emit_u16(Op::Constant, zero_idx, self.line);
@@ -306,7 +296,7 @@ impl Compiler {
         // Retries exhausted — re-throw the last error.
         self.chunk.patch_jump(retry_jump);
         self.chunk.emit(Op::Pop, self.line);
-        self.chunk.emit_u16(Op::GetVar, err_idx, self.line);
+        self.emit_get_binding(err_name);
         self.chunk.emit(Op::Throw, self.line);
 
         self.chunk.patch_jump(end_jump);

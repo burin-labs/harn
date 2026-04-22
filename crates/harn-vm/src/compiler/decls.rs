@@ -96,6 +96,7 @@ impl Compiler {
                 fn_compiler.interface_methods = self.interface_methods.clone();
                 fn_compiler.type_aliases = self.type_aliases.clone();
                 fn_compiler.struct_layouts = self.struct_layouts.clone();
+                fn_compiler.declare_param_slots(params);
                 fn_compiler.record_param_types(params);
                 fn_compiler.emit_default_preamble(params)?;
                 fn_compiler.emit_type_checks(params);
@@ -123,8 +124,7 @@ impl Compiler {
         self.chunk
             .emit_u16(Op::BuildDict, method_count as u16, self.line);
         let impl_name = format!("__impl_{}", type_name);
-        let name_idx = self.chunk.add_constant(Constant::String(impl_name));
-        self.chunk.emit_u16(Op::DefLet, name_idx, self.line);
+        self.emit_define_binding(&impl_name, false);
         Ok(())
     }
 
@@ -140,6 +140,7 @@ impl Compiler {
         fn_compiler.type_aliases = self.type_aliases.clone();
         fn_compiler.struct_layouts = self.struct_layouts.clone();
         let params = vec![TypedParam::untyped("__fields")];
+        fn_compiler.declare_param_slots(&params);
         fn_compiler.emit_default_preamble(&params)?;
 
         let make_idx = fn_compiler
@@ -154,12 +155,7 @@ impl Compiler {
         fn_compiler
             .chunk
             .emit_u16(Op::Constant, sname_idx, self.line);
-        let fields_idx = fn_compiler
-            .chunk
-            .add_constant(Constant::String("__fields".into()));
-        fn_compiler
-            .chunk
-            .emit_u16(Op::GetVar, fields_idx, self.line);
+        fn_compiler.emit_get_binding("__fields");
         let field_names: Vec<String> = fields.iter().map(|field| field.name.clone()).collect();
         fn_compiler.emit_string_list(&field_names);
         fn_compiler.chunk.emit_u8(Op::Call, 3, self.line);
@@ -176,8 +172,7 @@ impl Compiler {
         let fn_idx = self.chunk.functions.len();
         self.chunk.functions.push(Rc::new(func));
         self.chunk.emit_u16(Op::Closure, fn_idx as u16, self.line);
-        let name_idx = self.chunk.add_constant(Constant::String(name.to_string()));
-        self.chunk.emit_u16(Op::DefLet, name_idx, self.line);
+        self.emit_define_binding(name, false);
         Ok(())
     }
 
@@ -269,10 +264,7 @@ impl Compiler {
         // Build config dict: { handler: <fn>, annotations: {...} }
         let handler_key = self.chunk.add_constant(Constant::String("handler".into()));
         self.chunk.emit_u16(Op::Constant, handler_key, self.line);
-        let fn_name_const = self
-            .chunk
-            .add_constant(Constant::String(fn_name.to_string()));
-        self.chunk.emit_u16(Op::GetVar, fn_name_const, self.line);
+        self.emit_get_binding(fn_name);
 
         // Annotations dict from named args (skip "name").
         let mut ann_count: u16 = 0;
@@ -361,10 +353,7 @@ impl Compiler {
             .chunk
             .add_constant(Constant::String("on_activate".into()));
         self.chunk.emit_u16(Op::Constant, activate_key, self.line);
-        let fn_name_const = self
-            .chunk
-            .add_constant(Constant::String(fn_name.to_string()));
-        self.chunk.emit_u16(Op::GetVar, fn_name_const, self.line);
+        self.emit_get_binding(fn_name);
         entries += 1;
 
         self.chunk.emit_u16(Op::BuildDict, entries, self.line);

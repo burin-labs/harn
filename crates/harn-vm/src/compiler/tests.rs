@@ -107,6 +107,41 @@ fn test_compile_while() {
 }
 
 #[test]
+fn test_compile_locals_to_slots() {
+    let chunk = compile_source(
+        "pipeline test(task) {
+  let a = 1
+  var i = 0
+  while i < 3 {
+    i = i + a
+  }
+}",
+    );
+    let disasm = chunk.disassemble("test");
+    assert!(disasm.contains("DEF_LOCAL_SLOT"));
+    assert!(disasm.contains("GET_LOCAL_SLOT"));
+    assert!(disasm.contains("SET_LOCAL_SLOT"));
+    assert!(!disasm.contains("GET_VAR"));
+    assert!(!disasm.contains("SET_VAR"));
+}
+
+#[test]
+fn test_compile_function_params_to_slots() {
+    let chunk = compile_source(
+        "pipeline test(task) {
+  fn add(a, b = 1) {
+    return a + b
+  }
+  log(add(2))
+}",
+    );
+    let disasm = chunk.functions[0].chunk.disassemble("add");
+    assert!(disasm.contains("GET_LOCAL_SLOT"));
+    assert!(disasm.contains("DEF_LOCAL_SLOT"));
+    assert!(!disasm.contains("GET_VAR"));
+}
+
+#[test]
 fn test_compile_closure() {
     let chunk = compile_source("pipeline test(task) { let f = { x -> x * 2 } }");
     assert!(!chunk.functions.is_empty());

@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use harn_parser::{BindingPattern, ParallelMode, SNode, SelectCase, TypeExpr};
+use harn_parser::{BindingPattern, ParallelMode, SNode, SelectCase, TypeExpr, TypedParam};
 
 use crate::chunk::{CompiledFunction, Constant, Op};
 
@@ -53,6 +53,8 @@ impl Compiler {
         fn_compiler.enum_names = self.enum_names.clone();
         fn_compiler.interface_methods = self.interface_methods.clone();
         fn_compiler.type_aliases = self.type_aliases.clone();
+        let typed_params = params.iter().map(TypedParam::untyped).collect::<Vec<_>>();
+        fn_compiler.declare_param_slots(&typed_params);
         fn_compiler.struct_layouts = self.struct_layouts.clone();
         if let Some(param_name) = params.first() {
             fn_compiler
@@ -140,18 +142,12 @@ impl Compiler {
 
         self.temp_counter += 1;
         let result_name = format!("__sel_result_{}__", self.temp_counter);
-        let result_idx = self
-            .chunk
-            .add_constant(Constant::String(result_name.clone()));
-        self.chunk.emit_u16(Op::DefVar, result_idx, self.line);
+        self.emit_define_binding(&result_name, true);
 
         let mut end_jumps = Vec::new();
 
         for (i, case) in cases.iter().enumerate() {
-            let get_r = self
-                .chunk
-                .add_constant(Constant::String(result_name.clone()));
-            self.chunk.emit_u16(Op::GetVar, get_r, self.line);
+            self.emit_get_binding(&result_name);
             let idx_prop = self.chunk.add_constant(Constant::String("index".into()));
             self.chunk.emit_u16(Op::GetProperty, idx_prop, self.line);
             let case_i = self.chunk.add_constant(Constant::Int(i as i64));
@@ -161,16 +157,10 @@ impl Compiler {
             self.chunk.emit(Op::Pop, self.line);
             self.begin_scope();
 
-            let get_r2 = self
-                .chunk
-                .add_constant(Constant::String(result_name.clone()));
-            self.chunk.emit_u16(Op::GetVar, get_r2, self.line);
+            self.emit_get_binding(&result_name);
             let val_prop = self.chunk.add_constant(Constant::String("value".into()));
             self.chunk.emit_u16(Op::GetProperty, val_prop, self.line);
-            let var_idx = self
-                .chunk
-                .add_constant(Constant::String(case.variable.clone()));
-            self.chunk.emit_u16(Op::DefLet, var_idx, self.line);
+            self.emit_define_binding(&case.variable, false);
 
             self.compile_try_body(&case.body)?;
             self.end_scope();

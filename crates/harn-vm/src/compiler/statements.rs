@@ -13,13 +13,12 @@ impl Compiler {
         op: &Option<String>,
     ) -> Result<(), CompileError> {
         if let Node::Identifier(name) = &target.node {
-            let idx = self.chunk.add_constant(Constant::String(name.clone()));
             if let Some(op) = op {
                 let left_type = self.infer_expr_type(target);
                 let right_type = self.infer_expr_type(value);
                 let result_type =
                     self.infer_binary_result_type(op, left_type.as_ref(), right_type.as_ref());
-                self.chunk.emit_u16(Op::GetVar, idx, self.line);
+                self.emit_get_binding(name);
                 self.compile_node(value)?;
                 if let Some(typed_op) =
                     self.specialized_binary_op(op, left_type.as_ref(), right_type.as_ref())
@@ -28,12 +27,12 @@ impl Compiler {
                 } else {
                     self.emit_compound_op(op)?;
                 }
-                self.chunk.emit_u16(Op::SetVar, idx, self.line);
+                self.emit_set_binding(name);
                 self.assign_type_fact(name, result_type);
             } else {
                 let value_type = self.infer_expr_type(value);
                 self.compile_node(value)?;
-                self.chunk.emit_u16(Op::SetVar, idx, self.line);
+                self.emit_set_binding(name);
                 self.assign_type_fact(name, value_type);
             }
         } else if let Node::PropertyAccess { object, property } = &target.node {
@@ -198,15 +197,13 @@ impl Compiler {
             }
             self.temp_counter += 1;
             let temp_name = format!("__return_val_{}__", self.temp_counter);
-            let save_idx = self.chunk.add_constant(Constant::String(temp_name.clone()));
-            self.chunk.emit_u16(Op::DefVar, save_idx, self.line);
+            self.emit_define_binding(&temp_name, true);
             // Innermost finally first; skip catch barriers since
             // return transfers past local handlers.
             for fb in self.all_pending_finallys() {
                 self.compile_finally_inline(&fb)?;
             }
-            let restore_idx = self.chunk.add_constant(Constant::String(temp_name));
-            self.chunk.emit_u16(Op::GetVar, restore_idx, self.line);
+            self.emit_get_binding(&temp_name);
             self.chunk.emit(Op::Return, self.line);
         } else {
             // No pending finally — use tail-call optimization when possible.
