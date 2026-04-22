@@ -11,6 +11,10 @@ granular archaeology.
 
 ### Added
 
+- **Package cache integrity tooling (#472).** `harn install --locked
+  --offline` now performs reproducible cache-only installs, and
+  `harn package cache list/clean/verify` exposes shared package cache
+  inspection, cleanup, and lockfile hash verification.
 - **Trigger budget governance and autonomy budgets (#162, #435,
   #437).** Trigger predicates now support per-call cost/token ceilings,
   hourly and daily trigger spend caps, global orchestrator budget caps,

@@ -15,7 +15,9 @@ use std::str::FromStr;
 use url::Url;
 
 const CONTENT_HASH_FILE: &str = ".harn-content-hash";
+const CACHE_METADATA_FILE: &str = ".harn-package-cache.toml";
 const HARN_CACHE_DIR_ENV: &str = "HARN_CACHE_DIR";
+const CACHE_METADATA_VERSION: u32 = 1;
 const LOCK_FILE_VERSION: u32 = 1;
 const PKG_DIR: &str = ".harn/packages";
 const MANIFEST: &str = "harn.toml";
@@ -811,6 +813,15 @@ struct LockEntry {
     commit: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     content_hash: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct PackageCacheMetadata {
+    version: u32,
+    source: String,
+    commit: String,
+    content_hash: String,
+    cached_at_unix_ms: u128,
 }
 
 impl LockFile {
@@ -2919,6 +2930,53 @@ fn write_cached_content_hash(dir: &Path, hash: &str) -> Result<(), String> {
     })
 }
 
+fn read_cache_metadata(dir: &Path) -> Result<Option<PackageCacheMetadata>, String> {
+    let path = dir.join(CACHE_METADATA_FILE);
+    let content = match fs::read_to_string(&path) {
+        Ok(content) => content,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(format!("failed to read {}: {error}", path.display())),
+    };
+    let metadata = toml::from_str::<PackageCacheMetadata>(&content)
+        .map_err(|error| format!("failed to parse {}: {error}", path.display()))?;
+    if metadata.version != CACHE_METADATA_VERSION {
+        return Err(format!(
+            "unsupported {} version {} (expected {})",
+            path.display(),
+            metadata.version,
+            CACHE_METADATA_VERSION
+        ));
+    }
+    Ok(Some(metadata))
+}
+
+fn write_cache_metadata(
+    dir: &Path,
+    source: &str,
+    commit: &str,
+    content_hash: &str,
+) -> Result<(), String> {
+    let cached_at_unix_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| format!("system clock error: {error}"))?
+        .as_millis();
+    let metadata = PackageCacheMetadata {
+        version: CACHE_METADATA_VERSION,
+        source: source.to_string(),
+        commit: commit.to_string(),
+        content_hash: content_hash.to_string(),
+        cached_at_unix_ms,
+    };
+    let body = toml::to_string_pretty(&metadata)
+        .map_err(|error| format!("failed to encode cache metadata: {error}"))?;
+    fs::write(dir.join(CACHE_METADATA_FILE), body).map_err(|error| {
+        format!(
+            "failed to write {}: {error}",
+            dir.join(CACHE_METADATA_FILE).display()
+        )
+    })
+}
+
 fn normalized_relative_path(path: &Path) -> String {
     path.components()
         .map(|component| component.as_os_str().to_string_lossy())
@@ -2944,6 +3002,7 @@ fn collect_hashable_files(
         if name == OsStr::new(".git")
             || name == OsStr::new(".gitignore")
             || name == OsStr::new(CONTENT_HASH_FILE)
+            || name == OsStr::new(CACHE_METADATA_FILE)
         {
             continue;
         }
@@ -2977,14 +3036,7 @@ fn compute_content_hash(dir: &Path) -> Result<String, String> {
 }
 
 fn verify_content_hash_or_compute(dir: &Path, expected: &str) -> Result<(), String> {
-    let actual = match read_cached_content_hash(dir)? {
-        Some(value) => value,
-        None => {
-            let computed = compute_content_hash(dir)?;
-            write_cached_content_hash(dir, &computed)?;
-            computed
-        }
-    };
+    let actual = compute_content_hash(dir)?;
     if actual != expected {
         return Err(format!(
             "content hash mismatch for {}: expected {}, got {}",
@@ -2992,6 +3044,9 @@ fn verify_content_hash_or_compute(dir: &Path, expected: &str) -> Result<(), Stri
             expected,
             actual
         ));
+    }
+    if read_cached_content_hash(dir)?.as_deref() != Some(expected) {
+        write_cached_content_hash(dir, expected)?;
     }
     Ok(())
 }
@@ -3008,7 +3063,10 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
             .file_type()
             .map_err(|error| format!("failed to stat {}: {error}", entry.path().display()))?;
         let name = entry.file_name();
-        if name == OsStr::new(".git") || name == OsStr::new(CONTENT_HASH_FILE) {
+        if name == OsStr::new(".git")
+            || name == OsStr::new(CONTENT_HASH_FILE)
+            || name == OsStr::new(CACHE_METADATA_FILE)
+        {
             continue;
         }
         let dest_path = dst.join(entry.file_name());
@@ -3456,6 +3514,7 @@ fn ensure_git_cache_populated(
     commit: &str,
     expected_hash: Option<&str>,
     refetch: bool,
+    offline: bool,
 ) -> Result<String, String> {
     let cache_dir = git_cache_dir(source, commit)?;
     let _lock = acquire_git_cache_lock(source, commit)?;
@@ -3466,18 +3525,19 @@ fn ensure_git_cache_populated(
     if cache_dir.exists() {
         if let Some(expected) = expected_hash {
             verify_content_hash_or_compute(&cache_dir, expected)?;
+            write_cache_metadata(&cache_dir, source, commit, expected)?;
             return Ok(expected.to_string());
         }
-        let hash = match read_cached_content_hash(&cache_dir)? {
-            Some(hash) => hash,
-            None => {
-                let computed = compute_content_hash(&cache_dir)?;
-                write_cached_content_hash(&cache_dir, &computed)?;
-                computed
-            }
-        };
+        let hash = compute_content_hash(&cache_dir)?;
         write_cached_content_hash(&cache_dir, &hash)?;
+        write_cache_metadata(&cache_dir, source, commit, &hash)?;
         return Ok(hash);
+    }
+
+    if offline {
+        return Err(format!(
+            "package cache entry for {source} at {commit} is missing; cannot fetch in offline mode"
+        ));
     }
 
     let parent = cache_dir
@@ -3497,6 +3557,7 @@ fn ensure_git_cache_populated(
         }
     }
     write_cached_content_hash(&temp_dir, &hash)?;
+    write_cache_metadata(&temp_dir, source, commit, &hash)?;
     fs::rename(&temp_dir, &cache_dir).map_err(|error| {
         format!(
             "failed to move {} to {}: {error}",
@@ -3616,6 +3677,7 @@ fn build_lockfile(
     refresh_alias: Option<&str>,
     refresh_all: bool,
     allow_resolve: bool,
+    offline: bool,
 ) -> Result<LockFile, String> {
     if manifest_has_git_dependencies(&ctx.manifest) {
         ensure_git_available()?;
@@ -3672,6 +3734,7 @@ fn build_lockfile(
                         commit,
                         None,
                         false,
+                        offline,
                     )?);
                 }
                 let inserted = replace_lock_entry(&mut lock, entry.clone())?;
@@ -3691,6 +3754,7 @@ fn build_lockfile(
                         commit,
                         Some(expected_hash),
                         false,
+                        offline,
                     )?;
                     if inserted {
                         let cache_dir = git_cache_dir(&entry.source, commit)?;
@@ -3762,8 +3826,14 @@ fn build_lockfile(
             let source = format!("git+{normalized_url}");
             let commit =
                 resolve_git_commit(&normalized_url, dependency.rev(), dependency.branch())?;
-            let content_hash =
-                ensure_git_cache_populated(&normalized_url, &source, &commit, None, false)?;
+            let content_hash = ensure_git_cache_populated(
+                &normalized_url,
+                &source,
+                &commit,
+                None,
+                false,
+                offline,
+            )?;
             let entry = LockEntry {
                 name: alias.clone(),
                 source: source.clone(),
@@ -3792,6 +3862,7 @@ fn materialize_dependencies_from_lock(
     ctx: &ManifestContext,
     lock: &LockFile,
     refetch: Option<&str>,
+    offline: bool,
 ) -> Result<usize, String> {
     let packages_dir = ctx.packages_dir();
     fs::create_dir_all(&packages_dir)
@@ -3818,7 +3889,14 @@ fn materialize_dependencies_from_lock(
         let source = entry.source.clone();
         let url = source.trim_start_matches("git+");
         let refetch_this = refetch == Some("all") || refetch == Some(alias.as_str());
-        ensure_git_cache_populated(url, &source, commit, Some(expected_hash), refetch_this)?;
+        ensure_git_cache_populated(
+            url,
+            &source,
+            commit,
+            Some(expected_hash),
+            refetch_this,
+            offline,
+        )?;
         let cache_dir = git_cache_dir(&source, commit)?;
         let dest_dir = packages_dir.join(alias);
         if !dest_dir.exists() || !materialized_hash_matches(&dest_dir, expected_hash) {
@@ -3849,6 +3927,295 @@ fn validate_lock_matches_manifest(ctx: &ManifestContext, lock: &LockFile) -> Res
     Ok(())
 }
 
+#[derive(Debug, Clone)]
+struct PackageCacheEntry {
+    path: PathBuf,
+    source_hash: String,
+    commit: String,
+    metadata: Option<PackageCacheMetadata>,
+}
+
+fn git_cache_root() -> Result<PathBuf, String> {
+    Ok(cache_root()?.join("git"))
+}
+
+fn discover_git_cache_entries() -> Result<Vec<PackageCacheEntry>, String> {
+    let root = git_cache_root()?;
+    let mut entries = Vec::new();
+    let source_dirs = match fs::read_dir(&root) {
+        Ok(source_dirs) => source_dirs,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(entries),
+        Err(error) => return Err(format!("failed to read {}: {error}", root.display())),
+    };
+    for source_dir in source_dirs {
+        let source_dir = source_dir
+            .map_err(|error| format!("failed to read {} entry: {error}", root.display()))?;
+        let source_type = source_dir
+            .file_type()
+            .map_err(|error| format!("failed to stat {}: {error}", source_dir.path().display()))?;
+        if !source_type.is_dir() {
+            continue;
+        }
+        let source_hash = source_dir.file_name().to_string_lossy().to_string();
+        let commit_dirs = fs::read_dir(source_dir.path())
+            .map_err(|error| format!("failed to read {}: {error}", source_dir.path().display()))?;
+        for commit_dir in commit_dirs {
+            let commit_dir = commit_dir.map_err(|error| {
+                format!(
+                    "failed to read {} entry: {error}",
+                    source_dir.path().display()
+                )
+            })?;
+            let commit_type = commit_dir.file_type().map_err(|error| {
+                format!("failed to stat {}: {error}", commit_dir.path().display())
+            })?;
+            if !commit_type.is_dir() {
+                continue;
+            }
+            let commit = commit_dir.file_name().to_string_lossy().to_string();
+            if commit.starts_with("tmp-") || commit.ends_with(".full-clone") {
+                continue;
+            }
+            let metadata = read_cache_metadata(&commit_dir.path())?;
+            entries.push(PackageCacheEntry {
+                path: commit_dir.path(),
+                source_hash: source_hash.clone(),
+                commit,
+                metadata,
+            });
+        }
+    }
+    entries.sort_by(|left, right| {
+        left.source_hash
+            .cmp(&right.source_hash)
+            .then_with(|| left.commit.cmp(&right.commit))
+    });
+    Ok(entries)
+}
+
+fn locked_git_cache_paths(lock: &LockFile) -> Result<HashSet<PathBuf>, String> {
+    let mut keep = HashSet::new();
+    for entry in &lock.packages {
+        if !entry.source.starts_with("git+") {
+            continue;
+        }
+        let commit = entry
+            .commit
+            .as_deref()
+            .ok_or_else(|| format!("missing locked commit for {}", entry.name))?;
+        keep.insert(git_cache_dir(&entry.source, commit)?);
+    }
+    Ok(keep)
+}
+
+fn verify_lock_entry_cache(entry: &LockEntry) -> Result<bool, String> {
+    if !entry.source.starts_with("git+") {
+        if entry.source.starts_with("path+") {
+            let path = path_from_source_uri(&entry.source)?;
+            if !path.exists() {
+                return Err(format!(
+                    "path dependency {} source is missing: {}",
+                    entry.name,
+                    path.display()
+                ));
+            }
+        }
+        return Ok(false);
+    }
+    let commit = entry
+        .commit
+        .as_deref()
+        .ok_or_else(|| format!("missing locked commit for {}", entry.name))?;
+    let expected_hash = entry
+        .content_hash
+        .as_deref()
+        .ok_or_else(|| format!("missing content hash for {}", entry.name))?;
+    let cache_dir = git_cache_dir(&entry.source, commit)?;
+    if !cache_dir.is_dir() {
+        return Err(format!(
+            "package cache entry for {} is missing: {}",
+            entry.name,
+            cache_dir.display()
+        ));
+    }
+    verify_content_hash_or_compute(&cache_dir, expected_hash)?;
+    match read_cache_metadata(&cache_dir)? {
+        Some(metadata)
+            if metadata.source == entry.source
+                && metadata.commit == commit
+                && metadata.content_hash == expected_hash => {}
+        Some(metadata) => {
+            return Err(format!(
+                "package cache metadata mismatch for {}: expected {} {} {}, got {} {} {}",
+                entry.name,
+                entry.source,
+                commit,
+                expected_hash,
+                metadata.source,
+                metadata.commit,
+                metadata.content_hash
+            ));
+        }
+        None => write_cache_metadata(&cache_dir, &entry.source, commit, expected_hash)?,
+    }
+    Ok(true)
+}
+
+fn verify_materialized_lock_entry(
+    ctx: &ManifestContext,
+    entry: &LockEntry,
+) -> Result<bool, String> {
+    let packages_dir = ctx.packages_dir();
+    if entry.source.starts_with("path+") {
+        let dir = packages_dir.join(&entry.name);
+        let file = packages_dir.join(format!("{}.harn", entry.name));
+        if !dir.exists() && !file.exists() {
+            return Err(format!(
+                "materialized path dependency {} is missing under {}",
+                entry.name,
+                packages_dir.display()
+            ));
+        }
+        return Ok(true);
+    }
+    if !entry.source.starts_with("git+") {
+        return Ok(false);
+    }
+    let expected_hash = entry
+        .content_hash
+        .as_deref()
+        .ok_or_else(|| format!("missing content hash for {}", entry.name))?;
+    let dest_dir = packages_dir.join(&entry.name);
+    if !dest_dir.is_dir() {
+        return Err(format!(
+            "materialized package {} is missing: {}",
+            entry.name,
+            dest_dir.display()
+        ));
+    }
+    verify_content_hash_or_compute(&dest_dir, expected_hash)?;
+    Ok(true)
+}
+
+fn verify_package_cache_impl(materialized: bool) -> Result<usize, String> {
+    let ctx = load_current_manifest_context()?;
+    let lock = LockFile::load(&ctx.lock_path())?
+        .ok_or_else(|| format!("{} is missing", ctx.lock_path().display()))?;
+    validate_lock_matches_manifest(&ctx, &lock)?;
+    let mut verified = 0usize;
+    for entry in &lock.packages {
+        if verify_lock_entry_cache(entry)? {
+            verified += 1;
+        }
+        if materialized && verify_materialized_lock_entry(&ctx, entry)? {
+            verified += 1;
+        }
+    }
+    Ok(verified)
+}
+
+fn clean_package_cache_impl(all: bool) -> Result<usize, String> {
+    let entries = discover_git_cache_entries()?;
+    if entries.is_empty() {
+        return Ok(0);
+    }
+    if all {
+        let root = cache_root()?;
+        for child in ["git", "locks"] {
+            let path = root.join(child);
+            if path.exists() {
+                fs::remove_dir_all(&path)
+                    .map_err(|error| format!("failed to remove {}: {error}", path.display()))?;
+            }
+        }
+        return Ok(entries.len());
+    }
+
+    let ctx = load_current_manifest_context()?;
+    let lock = LockFile::load(&ctx.lock_path())?.ok_or_else(|| {
+        format!(
+            "{} is missing; pass --all to clean every cache entry",
+            LOCK_FILE
+        )
+    })?;
+    validate_lock_matches_manifest(&ctx, &lock)?;
+    let keep = locked_git_cache_paths(&lock)?;
+    let mut removed = 0usize;
+    for entry in entries {
+        if keep.contains(&entry.path) {
+            continue;
+        }
+        fs::remove_dir_all(&entry.path)
+            .map_err(|error| format!("failed to remove {}: {error}", entry.path.display()))?;
+        removed += 1;
+        if let Some(parent) = entry.path.parent() {
+            let is_empty = fs::read_dir(parent)
+                .map(|mut children| children.next().is_none())
+                .unwrap_or(false);
+            if is_empty {
+                fs::remove_dir(parent)
+                    .map_err(|error| format!("failed to remove {}: {error}", parent.display()))?;
+            }
+        }
+    }
+    Ok(removed)
+}
+
+pub fn list_package_cache() {
+    let result = (|| -> Result<(PathBuf, Vec<PackageCacheEntry>), String> {
+        Ok((cache_root()?, discover_git_cache_entries()?))
+    })();
+
+    match result {
+        Ok((root, entries)) => {
+            println!("Cache root: {}", root.display());
+            if entries.is_empty() {
+                println!("No cached git packages.");
+                return;
+            }
+            println!("commit\tcontent_hash\tsource\tpath");
+            for entry in entries {
+                let (source, content_hash) = entry
+                    .metadata
+                    .as_ref()
+                    .map(|metadata| (metadata.source.as_str(), metadata.content_hash.as_str()))
+                    .unwrap_or(("(unknown)", "(unknown)"));
+                println!(
+                    "{}\t{}\t{}\t{}",
+                    entry.commit,
+                    content_hash,
+                    source,
+                    entry.path.display()
+                );
+            }
+        }
+        Err(error) => {
+            eprintln!("error: {error}");
+            process::exit(1);
+        }
+    }
+}
+
+pub fn clean_package_cache(all: bool) {
+    match clean_package_cache_impl(all) {
+        Ok(removed) => println!("Removed {removed} cached package entries."),
+        Err(error) => {
+            eprintln!("error: {error}");
+            process::exit(1);
+        }
+    }
+}
+
+pub fn verify_package_cache(materialized: bool) {
+    match verify_package_cache_impl(materialized) {
+        Ok(verified) => println!("Verified {verified} package cache entries."),
+        Err(error) => {
+            eprintln!("error: {error}");
+            process::exit(1);
+        }
+    }
+}
+
 pub fn ensure_dependencies_materialized(anchor: &Path) -> Result<(), String> {
     let Some((manifest, dir)) = find_nearest_manifest(anchor) else {
         return Ok(());
@@ -3864,7 +4231,7 @@ pub fn ensure_dependencies_materialized(anchor: &Path) -> Result<(), String> {
         )
     })?;
     validate_lock_matches_manifest(&ctx, &lock)?;
-    materialize_dependencies_from_lock(&ctx, &lock, None)?;
+    materialize_dependencies_from_lock(&ctx, &lock, None, false)?;
     Ok(())
 }
 
@@ -3985,7 +4352,11 @@ fn remove_dependency_from_manifest(manifest_path: &Path, alias: &str) -> Result<
     Ok(removed)
 }
 
-fn install_packages_impl(frozen: bool, refetch: Option<&str>) -> Result<usize, String> {
+fn install_packages_impl(
+    frozen: bool,
+    refetch: Option<&str>,
+    offline: bool,
+) -> Result<usize, String> {
     let ctx = load_current_manifest_context()?;
     let existing = LockFile::load(&ctx.lock_path())?;
     if ctx.manifest.dependencies.is_empty() {
@@ -3995,12 +4366,19 @@ fn install_packages_impl(frozen: bool, refetch: Option<&str>) -> Result<usize, S
         return Ok(0);
     }
 
-    if frozen && existing.is_none() {
+    if (frozen || offline) && existing.is_none() {
         return Err(format!("{} is missing", ctx.lock_path().display()));
     }
 
-    let desired = build_lockfile(&ctx, existing.as_ref(), None, false, !frozen)?;
-    if frozen {
+    let desired = build_lockfile(
+        &ctx,
+        existing.as_ref(),
+        None,
+        false,
+        !frozen && !offline,
+        offline,
+    )?;
+    if frozen || offline {
         if existing.as_ref() != Some(&desired) {
             return Err(format!(
                 "{} would need to change",
@@ -4010,11 +4388,11 @@ fn install_packages_impl(frozen: bool, refetch: Option<&str>) -> Result<usize, S
     } else {
         desired.save(&ctx.lock_path())?;
     }
-    materialize_dependencies_from_lock(&ctx, &desired, refetch)
+    materialize_dependencies_from_lock(&ctx, &desired, refetch, offline)
 }
 
-pub fn install_packages(frozen: bool, refetch: Option<&str>) {
-    match install_packages_impl(frozen, refetch) {
+pub fn install_packages(frozen: bool, refetch: Option<&str>, offline: bool) {
+    match install_packages_impl(frozen, refetch, offline) {
         Ok(0) => println!("No dependencies to install."),
         Ok(installed) => println!("Installed {installed} package(s) to {PKG_DIR}/"),
         Err(error) => {
@@ -4028,7 +4406,7 @@ pub fn lock_packages() {
     let result = (|| -> Result<usize, String> {
         let ctx = load_current_manifest_context()?;
         let existing = LockFile::load(&ctx.lock_path())?;
-        let lock = build_lockfile(&ctx, existing.as_ref(), None, true, true)?;
+        let lock = build_lockfile(&ctx, existing.as_ref(), None, true, true, false)?;
         lock.save(&ctx.lock_path())?;
         Ok(lock.packages.len())
     })();
@@ -4056,9 +4434,9 @@ pub fn update_packages(alias: Option<&str>, all: bool) {
             }
         }
         let existing = LockFile::load(&ctx.lock_path())?;
-        let lock = build_lockfile(&ctx, existing.as_ref(), alias, all, true)?;
+        let lock = build_lockfile(&ctx, existing.as_ref(), alias, all, true, false)?;
         lock.save(&ctx.lock_path())?;
-        materialize_dependencies_from_lock(&ctx, &lock, None)
+        materialize_dependencies_from_lock(&ctx, &lock, None, false)
     })();
 
     match result {
@@ -4215,7 +4593,7 @@ pub fn add_package(
         let (alias, dependency) =
             normalize_add_request(name_or_spec, alias, git_url, tag, rev, branch, local_path)?;
         upsert_dependency_in_manifest(&manifest_path, &alias, &dependency)?;
-        let installed = install_packages_impl(false, None)?;
+        let installed = install_packages_impl(false, None, false)?;
         Ok((alias, installed))
     })();
 
@@ -4823,7 +5201,7 @@ acme-lib = {{ git = "{git}", branch = "{branch}" }}
         .unwrap();
 
         with_test_env(root, &cache_dir, || {
-            let installed = install_packages_impl(false, None).unwrap();
+            let installed = install_packages_impl(false, None, false).unwrap();
             assert_eq!(installed, 1);
             let first_lock = LockFile::load(&root.join(LOCK_FILE)).unwrap().unwrap();
             let first_commit = first_lock
@@ -4956,8 +5334,150 @@ acme-lib = {{ git = "{git}", rev = "v1.0.0" }}
         .unwrap();
 
         with_test_env(root, &cache_dir, || {
-            let error = install_packages_impl(true, None).unwrap_err();
+            let error = install_packages_impl(true, None, false).unwrap_err();
             assert!(error.contains(LOCK_FILE));
+        });
+    }
+
+    #[test]
+    fn offline_locked_install_materializes_from_cache_without_source_repo() {
+        let (_repo_tmp, repo, _branch) = create_git_package_repo();
+        let project_tmp = tempfile::tempdir().unwrap();
+        let root = project_tmp.path();
+        let cache_dir = root.join(".cache");
+        fs::create_dir_all(root.join(".git")).unwrap();
+        let git = normalize_git_url(repo.to_string_lossy().as_ref()).unwrap();
+        fs::write(
+            root.join(MANIFEST),
+            format!(
+                r#"
+[package]
+name = "workspace"
+version = "0.1.0"
+
+[dependencies]
+acme-lib = {{ git = "{git}", rev = "v1.0.0" }}
+"#
+            ),
+        )
+        .unwrap();
+
+        with_test_env(root, &cache_dir, || {
+            let installed = install_packages_impl(false, None, false).unwrap();
+            assert_eq!(installed, 1);
+            fs::remove_dir_all(root.join(PKG_DIR)).unwrap();
+            fs::remove_dir_all(&repo).unwrap();
+
+            let installed = install_packages_impl(true, None, true).unwrap();
+            assert_eq!(installed, 1);
+            assert!(root
+                .join(PKG_DIR)
+                .join("acme-lib")
+                .join("lib.harn")
+                .is_file());
+        });
+    }
+
+    #[test]
+    fn offline_locked_install_fails_when_cache_is_missing() {
+        let (_repo_tmp, repo, _branch) = create_git_package_repo();
+        let project_tmp = tempfile::tempdir().unwrap();
+        let root = project_tmp.path();
+        let cache_dir = root.join(".cache");
+        fs::create_dir_all(root.join(".git")).unwrap();
+        let git = normalize_git_url(repo.to_string_lossy().as_ref()).unwrap();
+        fs::write(
+            root.join(MANIFEST),
+            format!(
+                r#"
+[package]
+name = "workspace"
+version = "0.1.0"
+
+[dependencies]
+acme-lib = {{ git = "{git}", rev = "v1.0.0" }}
+"#
+            ),
+        )
+        .unwrap();
+
+        with_test_env(root, &cache_dir, || {
+            install_packages_impl(false, None, false).unwrap();
+            fs::remove_dir_all(cache_dir.join("git")).unwrap();
+            let error = install_packages_impl(true, None, true).unwrap_err();
+            assert!(error.contains("offline mode"));
+        });
+    }
+
+    #[test]
+    fn package_cache_verify_detects_tampering_even_with_stale_marker() {
+        let (_repo_tmp, repo, _branch) = create_git_package_repo();
+        let project_tmp = tempfile::tempdir().unwrap();
+        let root = project_tmp.path();
+        let cache_dir = root.join(".cache");
+        fs::create_dir_all(root.join(".git")).unwrap();
+        let git = normalize_git_url(repo.to_string_lossy().as_ref()).unwrap();
+        fs::write(
+            root.join(MANIFEST),
+            format!(
+                r#"
+[package]
+name = "workspace"
+version = "0.1.0"
+
+[dependencies]
+acme-lib = {{ git = "{git}", rev = "v1.0.0" }}
+"#
+            ),
+        )
+        .unwrap();
+
+        with_test_env(root, &cache_dir, || {
+            install_packages_impl(false, None, false).unwrap();
+            let lock = LockFile::load(&root.join(LOCK_FILE)).unwrap().unwrap();
+            let entry = lock.find("acme-lib").unwrap();
+            let cache_dir = git_cache_dir(&entry.source, entry.commit.as_deref().unwrap()).unwrap();
+            fs::write(
+                cache_dir.join("lib.harn"),
+                "pub fn value() { return \"pwned\" }\n",
+            )
+            .unwrap();
+
+            let error = verify_package_cache_impl(false).unwrap_err();
+            assert!(error.contains("content hash mismatch"));
+        });
+    }
+
+    #[test]
+    fn package_cache_clean_all_removes_cached_git_entries() {
+        let (_repo_tmp, repo, _branch) = create_git_package_repo();
+        let project_tmp = tempfile::tempdir().unwrap();
+        let root = project_tmp.path();
+        let cache_dir = root.join(".cache");
+        fs::create_dir_all(root.join(".git")).unwrap();
+        let git = normalize_git_url(repo.to_string_lossy().as_ref()).unwrap();
+        fs::write(
+            root.join(MANIFEST),
+            format!(
+                r#"
+[package]
+name = "workspace"
+version = "0.1.0"
+
+[dependencies]
+acme-lib = {{ git = "{git}", rev = "v1.0.0" }}
+"#
+            ),
+        )
+        .unwrap();
+
+        with_test_env(root, &cache_dir, || {
+            install_packages_impl(false, None, false).unwrap();
+            assert_eq!(discover_git_cache_entries().unwrap().len(), 1);
+
+            let removed = clean_package_cache_impl(true).unwrap();
+            assert_eq!(removed, 1);
+            assert!(discover_git_cache_entries().unwrap().is_empty());
         });
     }
 
@@ -5043,7 +5563,7 @@ notion-connector-harn = {{ git = "{connector_git}", rev = "v1.0.0" }}
         .unwrap();
 
         with_test_env(root, &cache_dir, || {
-            let installed = install_packages_impl(false, None).unwrap();
+            let installed = install_packages_impl(false, None, false).unwrap();
             assert_eq!(installed, 2);
 
             let lock = LockFile::load(&root.join(LOCK_FILE)).unwrap().unwrap();
@@ -5108,7 +5628,7 @@ notion-connector-harn = {{ git = "{connector_git}", rev = "v1.0.0" }}
         .unwrap();
 
         with_test_env(root, &cache_dir, || {
-            let error = install_packages_impl(false, None).unwrap_err();
+            let error = install_packages_impl(false, None, false).unwrap_err();
             assert!(
                 error.contains("path dependencies are not supported inside git-installed packages")
             );

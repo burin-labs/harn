@@ -115,6 +115,8 @@ SCRIPTING
     Remove(RemoveArgs),
     /// Resolve dependencies and write harn.lock without materializing packages.
     Lock,
+    /// Manage Harn package caches and integrity verification.
+    Package(PackageArgs),
     /// Print resolved metadata for a model alias or model id as JSON.
     ModelInfo(ModelInfoArgs),
     /// Manage and inspect Harn skills (list, inspect, match, install, new).
@@ -1469,6 +1471,12 @@ pub(crate) struct InstallArgs {
     /// Fail if harn.lock would need to change.
     #[arg(long, default_value_t = false, action = ArgAction::SetTrue)]
     pub frozen: bool,
+    /// Alias for --frozen, intended for CI and production installs.
+    #[arg(long, default_value_t = false, action = ArgAction::SetTrue)]
+    pub locked: bool,
+    /// Do not fetch from package sources; use only harn.lock and the local cache.
+    #[arg(long, default_value_t = false, action = ArgAction::SetTrue, conflicts_with = "refetch")]
+    pub offline: bool,
     /// Force refetching one dependency (or every dependency with `--refetch all`).
     #[arg(long, value_name = "ALIAS|all")]
     pub refetch: Option<String>,
@@ -1511,6 +1519,48 @@ pub(crate) struct UpdateArgs {
 pub(crate) struct RemoveArgs {
     /// Dependency alias to remove from harn.toml and harn.lock.
     pub alias: String,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct PackageArgs {
+    #[command(subcommand)]
+    pub command: PackageCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum PackageCommand {
+    /// Inspect, clean, and verify the shared package cache.
+    Cache(PackageCacheArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct PackageCacheArgs {
+    #[command(subcommand)]
+    pub command: PackageCacheCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum PackageCacheCommand {
+    /// List cached git package entries.
+    List,
+    /// Remove cached git package entries not referenced by harn.lock, or every entry with --all.
+    Clean(PackageCacheCleanArgs),
+    /// Verify cached package contents against harn.lock.
+    Verify(PackageCacheVerifyArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct PackageCacheCleanArgs {
+    /// Remove every package cache entry instead of only entries unused by the current harn.lock.
+    #[arg(long, default_value_t = false, action = ArgAction::SetTrue)]
+    pub all: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct PackageCacheVerifyArgs {
+    /// Also verify materialized packages under .harn/packages/.
+    #[arg(long, default_value_t = false, action = ArgAction::SetTrue)]
+    pub materialized: bool,
 }
 
 #[derive(Debug, Args)]
@@ -1705,9 +1755,9 @@ mod tests {
 
     use super::{
         Cli, Command, ConnectCommand, McpCommand, OrchestratorCommand, OrchestratorDeployProvider,
-        OrchestratorLogFormat, OrchestratorQueueCommand, ProjectTemplate, RunsCommand,
-        SkillCommand, SkillKeyCommand, SkillTrustCommand, SkillsCommand, TriggerCommand,
-        TrustCommand, TrustOutcomeArg, TrustTierArg,
+        OrchestratorLogFormat, OrchestratorQueueCommand, PackageCacheCommand, PackageCommand,
+        ProjectTemplate, RunsCommand, SkillCommand, SkillKeyCommand, SkillTrustCommand,
+        SkillsCommand, TriggerCommand, TrustCommand, TrustOutcomeArg, TrustTierArg,
     };
     use clap::Parser;
 
@@ -2589,6 +2639,48 @@ mod tests {
             panic!("expected doctor command");
         };
         assert!(args.no_network);
+    }
+
+    #[test]
+    fn test_parses_install_integrity_flags() {
+        let cli = Cli::parse_from(["harn", "install", "--locked", "--offline"]);
+
+        let Command::Install(args) = cli.command.unwrap() else {
+            panic!("expected install command");
+        };
+        assert!(!args.frozen);
+        assert!(args.locked);
+        assert!(args.offline);
+    }
+
+    #[test]
+    fn test_parses_package_cache_subcommands() {
+        let cli = Cli::parse_from(["harn", "package", "cache", "list"]);
+        let Command::Package(args) = cli.command.unwrap() else {
+            panic!("expected package command");
+        };
+        let PackageCommand::Cache(cache) = args.command;
+        assert!(matches!(cache.command, PackageCacheCommand::List));
+
+        let cli = Cli::parse_from(["harn", "package", "cache", "clean", "--all"]);
+        let Command::Package(args) = cli.command.unwrap() else {
+            panic!("expected package command");
+        };
+        let PackageCommand::Cache(cache) = args.command;
+        let PackageCacheCommand::Clean(clean) = cache.command else {
+            panic!("expected package cache clean");
+        };
+        assert!(clean.all);
+
+        let cli = Cli::parse_from(["harn", "package", "cache", "verify", "--materialized"]);
+        let Command::Package(args) = cli.command.unwrap() else {
+            panic!("expected package command");
+        };
+        let PackageCommand::Cache(cache) = args.command;
+        let PackageCacheCommand::Verify(verify) = cache.command else {
+            panic!("expected package cache verify");
+        };
+        assert!(verify.materialized);
     }
 
     #[test]
