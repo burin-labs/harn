@@ -16,8 +16,15 @@ pub struct ExportedParam {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub enum ExportedCallableKind {
+    Function,
+    Pipeline,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct ExportedFunction {
     pub name: String,
+    pub kind: ExportedCallableKind,
     pub params: Vec<ExportedParam>,
     pub return_type: Option<TypeExpr>,
     pub input_schema: serde_json::Value,
@@ -56,26 +63,12 @@ impl ExportCatalog {
                 continue;
             }
 
-            let exported_params = params
-                .iter()
-                .map(|param| ExportedParam {
-                    name: param.name.clone(),
-                    type_expr: param.type_expr.clone(),
-                    input_schema: param
-                        .type_expr
-                        .as_ref()
-                        .and_then(harn_vm::json_schema_for_type_expr)
-                        .unwrap_or_else(|| serde_json::json!({})),
-                    has_default: param.default_value.is_some(),
-                    rest: param.rest,
-                })
-                .collect::<Vec<_>>();
-
             functions.insert(
                 name.clone(),
                 ExportedFunction {
                     name: name.clone(),
-                    params: exported_params,
+                    kind: ExportedCallableKind::Function,
+                    params: exported_params(params),
                     return_type: return_type.clone(),
                     input_schema: harn_vm::json_schema_for_typed_params(params),
                     output_schema: return_type
@@ -83,6 +76,36 @@ impl ExportCatalog {
                         .and_then(harn_vm::json_schema_for_type_expr),
                 },
             );
+        }
+
+        let has_public_exports = !functions.is_empty();
+        for node in &program {
+            let (_, inner) = harn_parser::peel_attributes(node);
+            let Node::Pipeline {
+                name,
+                params,
+                return_type,
+                is_pub,
+                ..
+            } = &inner.node
+            else {
+                continue;
+            };
+            if has_public_exports && !*is_pub {
+                continue;
+            }
+            functions
+                .entry(name.clone())
+                .or_insert_with(|| ExportedFunction {
+                    name: name.clone(),
+                    kind: ExportedCallableKind::Pipeline,
+                    params: pipeline_exported_params(params),
+                    return_type: return_type.clone(),
+                    input_schema: pipeline_input_schema(params),
+                    output_schema: return_type
+                        .as_ref()
+                        .and_then(harn_vm::json_schema_for_type_expr),
+                });
         }
 
         Ok(Self {
@@ -94,6 +117,47 @@ impl ExportCatalog {
     pub fn function(&self, name: &str) -> Option<&ExportedFunction> {
         self.functions.get(name)
     }
+}
+
+fn exported_params(params: &[harn_parser::TypedParam]) -> Vec<ExportedParam> {
+    params
+        .iter()
+        .map(|param| ExportedParam {
+            name: param.name.clone(),
+            type_expr: param.type_expr.clone(),
+            input_schema: param
+                .type_expr
+                .as_ref()
+                .and_then(harn_vm::json_schema_for_type_expr)
+                .unwrap_or_else(|| serde_json::json!({})),
+            has_default: param.default_value.is_some(),
+            rest: param.rest,
+        })
+        .collect()
+}
+
+fn pipeline_exported_params(params: &[String]) -> Vec<ExportedParam> {
+    params
+        .iter()
+        .map(|name| ExportedParam {
+            name: name.clone(),
+            type_expr: None,
+            input_schema: serde_json::json!({}),
+            has_default: false,
+            rest: false,
+        })
+        .collect()
+}
+
+fn pipeline_input_schema(params: &[String]) -> serde_json::Value {
+    serde_json::json!({
+        "type": "object",
+        "properties": params
+            .iter()
+            .map(|name| (name.clone(), serde_json::json!({})))
+            .collect::<serde_json::Map<_, _>>(),
+        "required": params,
+    })
 }
 
 #[cfg(test)]
@@ -125,5 +189,25 @@ pub fn greet(name: string, excited: bool = false) -> string {
             greet.output_schema.as_ref().expect("output")["type"],
             "string"
         );
+    }
+
+    #[test]
+    fn export_catalog_falls_back_to_legacy_pipelines_without_public_exports() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("server.harn");
+        std::fs::write(
+            &path,
+            r#"
+pipeline default(task) {
+  println(task)
+}
+"#,
+        )
+        .expect("write script");
+
+        let catalog = ExportCatalog::from_path(&path).expect("catalog");
+        let default = catalog.function("default").expect("default pipeline");
+        assert_eq!(default.kind, ExportedCallableKind::Pipeline);
+        assert_eq!(default.params[0].name, "task");
     }
 }

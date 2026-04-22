@@ -1,19 +1,63 @@
 #!/bin/sh
 set -e
 
-echo "=== Pre-push: running fast release-quality checks ==="
-make test
-make fmt-harn
+hook_dir=$(dirname "$0")
+. "$hook_dir/lib.sh"
 
-if command -v npx >/dev/null 2>&1; then
-  npx markdownlint-cli2 "**/*.md"
+changed=$(mktemp)
+harn_format_files=$(mktemp)
+harn_lint_files=$(mktemp)
+trap 'rm -f "$changed" "$harn_format_files" "$harn_lint_files"' EXIT
+hook_write_push_files "$changed"
+
+echo "=== Pre-push: running fast release-quality checks ==="
+if hook_paths_match "$changed" "$HOOK_TEST_PATTERN"; then
+  make test
+else
+  echo "=== Pre-push: skipping Rust/Harn tests (no code changes) ==="
 fi
 
-make lint-actions
+if hook_paths_match "$changed" "$HOOK_HARN_PATTERN"; then
+  hook_write_harn_format_files "$changed" "$harn_format_files"
+  if [ -s "$harn_format_files" ]; then
+    echo "=== Pre-push: checking affected Harn formatting ==="
+    xargs -0 cargo run --quiet --bin harn -- fmt --check < "$harn_format_files"
+  else
+    echo "=== Pre-push: skipping Harn format check (no format-supported Harn files) ==="
+  fi
 
-if command -v npm >/dev/null 2>&1; then
+  hook_write_harn_lint_files "$changed" "$harn_lint_files"
+  if [ -s "$harn_lint_files" ]; then
+    echo "=== Pre-push: linting affected Harn files ==="
+    xargs -0 cargo run --quiet --bin harn -- lint < "$harn_lint_files"
+  else
+    echo "=== Pre-push: skipping Harn lint (no lint-supported Harn files) ==="
+  fi
+else
+  echo "=== Pre-push: skipping Harn format/lint (no Harn changes) ==="
+fi
+
+if hook_paths_match "$changed" "$HOOK_MARKDOWN_PATTERN" && command -v npx >/dev/null 2>&1; then
+  make lint-md
+elif hook_paths_match "$changed" "$HOOK_MARKDOWN_PATTERN"; then
+  echo "=== Pre-push: skipping markdown lint (npx not found) ==="
+else
+  echo "=== Pre-push: skipping markdown lint (no markdown changes) ==="
+fi
+
+if hook_paths_match "$changed" "$HOOK_ACTIONS_PATTERN"; then
+  make lint-actions
+else
+  echo "=== Pre-push: skipping GitHub Actions lint (no workflow/hook changes) ==="
+fi
+
+if hook_paths_match "$changed" "$HOOK_PORTAL_PATTERN" && command -v npm >/dev/null 2>&1; then
   ./scripts/ensure_portal_deps.sh
   npm run portal:lint
+elif hook_paths_match "$changed" "$HOOK_PORTAL_PATTERN"; then
+  echo "=== Pre-push: skipping portal lint (npm not found) ==="
+else
+  echo "=== Pre-push: skipping portal lint (no portal changes) ==="
 fi
 
 echo "=== Pre-push checks passed. ==="

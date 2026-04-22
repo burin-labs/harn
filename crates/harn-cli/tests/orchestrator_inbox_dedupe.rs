@@ -1,6 +1,7 @@
 #![cfg(unix)]
 
-mod support;
+#[path = "support/process.rs"]
+mod process_support;
 
 use std::collections::HashMap;
 use std::fs;
@@ -178,7 +179,7 @@ async fn wait_for_tick_count(temp: &TempDir, min_count: usize) -> HashMap<String
 
 #[tokio::test(flavor = "current_thread")]
 async fn restart_after_emit_does_not_duplicate_cron_dispatch() {
-    let _lock = support::lock_orchestrator_process_tests();
+    let _lock = process_support::lock_harn_process_tests();
     let temp = TempDir::new().unwrap();
     seed_fixture(&temp);
 

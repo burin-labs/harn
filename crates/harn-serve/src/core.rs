@@ -8,7 +8,7 @@ use std::time::Instant;
 
 use async_trait::async_trait;
 use harn_vm::event_log::{
-    active_event_log, install_active_event_log, install_default_for_base_dir,
+    active_event_log, install_active_event_log, install_default_for_base_dir, AnyEventLog,
 };
 use harn_vm::llm::vm_value_to_json;
 use harn_vm::trust_graph::{append_trust_record, AutonomyTier, TrustOutcome, TrustRecord};
@@ -18,7 +18,30 @@ use tracing::Instrument;
 
 use crate::auth::{AuthPolicy, AuthRequest, AuthorizationDecision};
 use crate::replay::{InMemoryReplayCache, ReplayCache, ReplayCacheEntry, ReplayKey};
-use crate::{DispatchError, ExportCatalog};
+use crate::{DispatchError, ExportCatalog, ExportedCallableKind};
+
+struct ActiveEventLogGuard {
+    previous: Option<Arc<AnyEventLog>>,
+}
+
+impl Drop for ActiveEventLogGuard {
+    fn drop(&mut self) {
+        match self.previous.take() {
+            Some(log) => {
+                install_active_event_log(log);
+            }
+            None => {
+                harn_vm::event_log::reset_active_event_log();
+            }
+        }
+    }
+}
+
+fn install_scoped_event_log(log: Arc<AnyEventLog>) -> ActiveEventLogGuard {
+    let previous = active_event_log();
+    install_active_event_log(log);
+    ActiveEventLogGuard { previous }
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum CallArguments {
@@ -179,7 +202,10 @@ impl DispatchCore {
 
         let started = Instant::now();
         let invocation = async {
-            let value = self.invoke_function(&request, function).await?;
+            let value = match function.kind {
+                ExportedCallableKind::Function => self.invoke_function(&request, function).await?,
+                ExportedCallableKind::Pipeline => self.invoke_pipeline(&request, function).await?,
+            };
             Ok::<_, DispatchError>(value)
         }
         .instrument(span)
@@ -255,8 +281,7 @@ impl DispatchCore {
         let local = LocalSet::new();
         local
             .run_until(async move {
-                let previous_log = active_event_log();
-                install_active_event_log(self.event_log.clone());
+                let _event_log = install_scoped_event_log(self.event_log.clone());
 
                 let mut vm = Vm::new();
                 harn_vm::register_vm_stdlib(&mut vm);
@@ -282,17 +307,73 @@ impl DispatchCore {
                 let args = build_vm_args(&request.arguments, function)?;
                 let result = vm.call_closure_pub(closure, &args).await;
 
-                match previous_log {
-                    Some(log) => {
-                        install_active_event_log(log);
-                    }
-                    None => {
-                        harn_vm::event_log::reset_active_event_log();
-                    }
-                }
-
                 match result {
                     Ok(value) => Ok((vm_value_to_json(&value), vm.output().to_string())),
+                    Err(error) => {
+                        let message = error.to_string();
+                        if message.contains("cancelled") {
+                            Err(DispatchError::Cancelled(message))
+                        } else {
+                            Err(DispatchError::Execution(message))
+                        }
+                    }
+                }
+            })
+            .await
+    }
+
+    async fn invoke_pipeline(
+        &self,
+        request: &CallRequest,
+        function: &crate::ExportedFunction,
+    ) -> Result<(serde_json::Value, String), DispatchError> {
+        let source = fs::read_to_string(&self.config.script_path).map_err(|error| {
+            DispatchError::Io(format!(
+                "failed to read {}: {error}",
+                self.config.script_path.display()
+            ))
+        })?;
+        let program = harn_parser::parse_source(&source).map_err(|error| {
+            DispatchError::Validation(format!(
+                "failed to parse {}: {error}",
+                self.config.script_path.display()
+            ))
+        })?;
+        let chunk = harn_vm::Compiler::new()
+            .compile_named(&program, &function.name)
+            .map_err(|error| DispatchError::Validation(format!("compile error: {error}")))?;
+        let globals = build_pipeline_globals(&request.arguments, function)?;
+        let script_path = self.config.script_path.clone();
+        let cancel_token = request
+            .cancel_token
+            .clone()
+            .unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
+
+        let local = LocalSet::new();
+        local
+            .run_until(async move {
+                let _event_log = install_scoped_event_log(self.event_log.clone());
+
+                let mut vm = Vm::new();
+                harn_vm::register_vm_stdlib(&mut vm);
+                let store_base = script_path.parent().unwrap_or(Path::new("."));
+                harn_vm::register_store_builtins(&mut vm, store_base);
+                harn_vm::register_metadata_builtins(&mut vm, store_base);
+                vm.set_source_info(&script_path.display().to_string(), &source);
+                vm.set_source_dir(store_base);
+                vm.install_cancel_token(cancel_token);
+                self.config.vm_configurator.configure(&mut vm)?;
+                for (name, value) in globals {
+                    vm.set_global(&name, value);
+                }
+
+                let result = vm.execute(&chunk).await;
+
+                match result {
+                    Ok(_) => {
+                        let output = vm.output().to_string();
+                        Ok((serde_json::Value::String(output.clone()), output))
+                    }
                     Err(error) => {
                         let message = error.to_string();
                         if message.contains("cancelled") {
@@ -381,6 +462,48 @@ fn build_vm_args(
     }
 }
 
+fn build_pipeline_globals(
+    arguments: &CallArguments,
+    function: &crate::ExportedFunction,
+) -> Result<BTreeMap<String, VmValue>, DispatchError> {
+    let mut globals = BTreeMap::new();
+    match arguments {
+        CallArguments::Positional(values) => {
+            for (index, param) in function.params.iter().enumerate() {
+                match values.get(index) {
+                    Some(value) => {
+                        globals.insert(param.name.clone(), json_to_vm_value(value));
+                    }
+                    None if param.has_default => {}
+                    None => {
+                        return Err(DispatchError::Validation(format!(
+                            "missing required argument '{}' for '{}'",
+                            param.name, function.name
+                        )));
+                    }
+                }
+            }
+        }
+        CallArguments::Named(values) => {
+            for param in &function.params {
+                match values.get(&param.name) {
+                    Some(value) => {
+                        globals.insert(param.name.clone(), json_to_vm_value(value));
+                    }
+                    None if param.has_default => {}
+                    None => {
+                        return Err(DispatchError::Validation(format!(
+                            "missing required argument '{}' for '{}'",
+                            param.name, function.name
+                        )));
+                    }
+                }
+            }
+        }
+    }
+    Ok(globals)
+}
+
 fn trim_trailing_defaults(mut args: Vec<VmValue>) -> Vec<VmValue> {
     let mut tail = VecDeque::from(args);
     while matches!(tail.back(), Some(VmValue::Nil)) {
@@ -451,6 +574,47 @@ pub fn greet(name: string) -> string {
 
         assert_eq!(response.value, serde_json::json!("alice"));
         assert!(!response.cached);
+    }
+
+    #[tokio::test]
+    async fn dispatch_executes_legacy_pipeline_when_no_public_exports() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let script = dir.path().join("server.harn");
+        std::fs::write(
+            &script,
+            r#"
+pipeline default(task) {
+  println(json_stringify({task: task}))
+}
+"#,
+        )
+        .expect("write script");
+
+        let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
+        let response = core
+            .dispatch(CallRequest {
+                adapter: "a2a".to_string(),
+                function: "default".to_string(),
+                arguments: CallArguments::Named(BTreeMap::from([(
+                    "task".to_string(),
+                    serde_json::json!("payload"),
+                )])),
+                auth: AuthRequest::default(),
+                caller: "tester".to_string(),
+                replay_key: None,
+                trace_id: None,
+                parent_span_id: None,
+                metadata: BTreeMap::new(),
+                cancel_token: None,
+            })
+            .await
+            .expect("dispatch");
+
+        assert_eq!(
+            response.value,
+            serde_json::json!("{\"task\":\"payload\"}\n")
+        );
+        assert_eq!(response.printed_output, "{\"task\":\"payload\"}\n");
     }
 
     #[tokio::test]

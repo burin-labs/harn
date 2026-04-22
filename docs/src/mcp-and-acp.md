@@ -570,8 +570,9 @@ builtins.
 
 ## A2A (Agent-to-Agent Protocol)
 
-A2A exposes a Harn pipeline as an HTTP server that other agents can
-interact with. The server implements A2A protocol version 1.0.0.
+A2A exposes exported Harn functions as a peer-agent HTTP server that other
+agents can interact with. The server implements A2A protocol version 1.0.0 and
+uses the shared `harn-serve` dispatch core.
 
 ### Running the server
 
@@ -583,32 +584,48 @@ harn serve a2a --port 3000 agent.harn
 
 ### Agent card
 
-The server publishes an agent card at `GET /.well-known/agent.json`
-describing the agent's capabilities. MCP clients and other A2A agents
-use this to discover the agent.
+The server publishes an agent card at `GET /.well-known/a2a-agent`, with
+compatibility aliases at `GET /.well-known/agent.json` and `GET /agent/card`.
+The card advertises each exported `pub fn` as an A2A skill. Set
+`--card-signing-secret` or `HARN_SERVE_A2A_CARD_SECRET` to attach an HS256
+signature envelope to the card.
 
 ### Task submission
 
-Submit a task with a POST request:
+Submit a task with a JSON-RPC request:
 
 ```text
-POST /message/send
+POST /
 Content-Type: application/json
 
 {
-  "message": {
-    "role": "user",
-    "parts": [{"type": "text", "text": "Analyze this codebase"}]
+  "jsonrpc": "2.0",
+  "id": "task-1",
+  "method": "tasks/send_and_wait",
+  "params": {
+    "function": "triage",
+    "message": {
+      "role": "user",
+      "parts": [{"type": "text", "text": "Analyze this codebase"}]
+    }
   }
 }
 ```
+
+Use `tasks/send` for an asynchronous task, `tasks/send_and_wait` for a blocking
+task, and `a2a.SendStreamingMessage` or `tasks/resubscribe` for SSE task
+updates. If the served file exports exactly one function, the function selector
+can be omitted.
 
 ### Task status
 
 Check the status of a submitted task:
 
 ```text
-GET /task/get?id=<task-id>
+POST /
+Content-Type: application/json
+
+{"jsonrpc":"2.0","id":"get-1","method":"tasks/get","params":{"id":"<task-id>"}}
 ```
 
 Task states follow the A2A protocol lifecycle: `submitted`, `working`,

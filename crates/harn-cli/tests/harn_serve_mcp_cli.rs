@@ -1,13 +1,17 @@
 #![cfg(unix)]
-// These integration tests serialize process/port use with a synchronous guard.
-// Holding it across awaits is intentional so child-server lifetimes do not overlap.
+// These integration tests serialize CLI child processes with a cross-process
+// file lock. Nextest runs each test in a separate process, so a static mutex
+// would not prevent several heavyweight `harn` servers from cold-starting at
+// once and racing the protocol-level readiness assertions.
 #![allow(clippy::await_holding_lock)]
+
+#[path = "support/mcp.rs"]
+mod mcp_support;
 
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
 use std::sync::mpsc::{self, Receiver};
-use std::sync::{Mutex, MutexGuard, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -15,14 +19,10 @@ use serde_json::{json, Value as JsonValue};
 use tempfile::TempDir;
 use tokio::sync::oneshot;
 
-static HARN_SERVE_MCP_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 const TEST_TIMEOUT: Duration = Duration::from_secs(2);
 
-fn lock_harn_serve_mcp_tests() -> MutexGuard<'static, ()> {
-    HARN_SERVE_MCP_TEST_LOCK
-        .get_or_init(|| Mutex::new(()))
-        .lock()
-        .unwrap()
+fn lock_harn_serve_mcp_tests() -> mcp_support::HarnProcessTestLock {
+    mcp_support::lock_mcp_process_tests()
 }
 
 fn write_fixture(temp: &TempDir) {
@@ -83,29 +83,13 @@ where
 }
 
 fn wait_for_http_listener(child: &mut std::process::Child, rx: &Receiver<String>) -> String {
-    let deadline = Instant::now() + TEST_TIMEOUT;
-    while Instant::now() < deadline {
-        match rx.recv_timeout(Duration::from_millis(25)) {
-            Ok(line) if line.contains("MCP workflow server ready on ") => {
-                return line
-                    .split("MCP workflow server ready on ")
-                    .nth(1)
-                    .unwrap()
-                    .trim()
-                    .to_string();
-            }
-            Ok(_) => continue,
-            Err(mpsc::RecvTimeoutError::Timeout) => {
-                if let Some(status) = child.try_wait().unwrap() {
-                    panic!("HTTP MCP server exited early: {status}");
-                }
-            }
-            Err(mpsc::RecvTimeoutError::Disconnected) => {
-                panic!("HTTP MCP stderr stream closed");
-            }
-        }
-    }
-    panic!("timed out waiting for HTTP listener");
+    mcp_support::wait_for_child_log_suffix(
+        child,
+        rx,
+        "MCP workflow server ready on ",
+        TEST_TIMEOUT,
+        "HTTP MCP server",
+    )
 }
 
 fn parse_sse_messages(body: &str) -> Vec<JsonValue> {
@@ -308,14 +292,7 @@ async fn serve_mcp_http_streams_progress_and_enforces_api_keys() {
         .spawn()
         .unwrap();
 
-    let stderr = child.stderr.take().unwrap();
-    let (tx, rx) = mpsc::channel();
-    let handle = thread::spawn(move || {
-        for line in BufReader::new(stderr).lines() {
-            let line = line.unwrap();
-            let _ = tx.send(line);
-        }
-    });
+    let (rx, handle) = mcp_support::spawn_stderr_reader(child.stderr.take().unwrap());
     let url = wait_for_http_listener(&mut child, &rx);
     let client = reqwest::Client::new();
 

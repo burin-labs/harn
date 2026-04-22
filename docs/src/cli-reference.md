@@ -745,9 +745,12 @@ derived from Harn type annotations. With `--transport http`, the server also
 supports Streamable HTTP on `--path` plus the legacy SSE compatibility
 endpoints `--sse-path` and `--messages-path`.
 
-`harn serve a2a` exposes the older A2A HTTP server. The legacy shorthand
-`harn serve <file>` is preserved and rewrites internally to `harn serve a2a
-<file>`.
+`harn serve a2a` uses the shared `harn-serve` dispatch core and exposes each
+exported `pub fn` in the target module as an A2A skill. The adapter publishes an
+agent card at `/.well-known/a2a-agent` and supports task send, send-and-wait,
+streaming/resubscribe, push callback registration, and cancel propagation. The
+legacy shorthand `harn serve <file>` is preserved and rewrites internally to
+`harn serve a2a <file>`.
 
 See [MCP and ACP Integration](./mcp-and-acp.md) and
 [Outbound workflow server](./harn-serve.md) for protocol details.

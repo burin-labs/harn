@@ -1,4 +1,3 @@
-mod a2a;
 mod acp;
 mod cli;
 mod commands;
@@ -361,7 +360,11 @@ async fn main() {
         }
         Command::Doctor(args) => commands::doctor::run_doctor(!args.no_network).await,
         Command::Serve(args) => match args.command {
-            ServeCommand::A2a(args) => a2a::run_a2a_server(&args.file, args.port).await,
+            ServeCommand::A2a(args) => {
+                if let Err(error) = commands::serve::run_a2a_server(&args).await {
+                    command_error(&error);
+                }
+            }
             ServeCommand::Mcp(args) => {
                 if let Err(error) = commands::serve::run_mcp_server(&args).await {
                     command_error(&error);

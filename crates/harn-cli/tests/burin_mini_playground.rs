@@ -57,7 +57,17 @@ fn stderr(output: &Output) -> String {
 }
 
 fn read_json(path: &Path) -> serde_json::Value {
-    serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap()
+    let contents = fs::read_to_string(path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
+    serde_json::from_str(&contents)
+        .unwrap_or_else(|error| panic!("failed to parse {} as JSON: {error}", path.display()))
+}
+
+fn generated_report_path(experiment_root: &Path, output: &Output, fallback_name: &str) -> PathBuf {
+    stdout(output)
+        .lines()
+        .find_map(|line| line.strip_prefix("report=").map(PathBuf::from))
+        .unwrap_or_else(|| experiment_root.join("evals/generated").join(fallback_name))
 }
 
 fn run_case(task: &str, fixture_name: &str) -> (TempDir, PathBuf, Output) {
@@ -84,15 +94,7 @@ fn run_case(task: &str, fixture_name: &str) -> (TempDir, PathBuf, Output) {
     (temp, experiment_root, output)
 }
 
-// Ignored on CI: passes locally (both `cargo test` and `cargo nextest`) but
-// intermittently fails under Linux CI runners with a `NotFound` panic when
-// the pipeline's `write_report` step doesn't produce the -latest.json before
-// the assertion reads it. The Burin Mini experiment is scheduled to be
-// replaced by the second-iteration playground in the next PR, so this test
-// is being parked rather than debugged deeper. Run explicitly with
-// `cargo test -p harn-cli --test burin_mini_playground -- --ignored`.
 #[test]
-#[ignore]
 fn burin_mini_explain_repo_fixture_run_passes() {
     let (_temp, experiment_root, output) =
         run_case("Explain this repo to me in simple terms", "explain.jsonl");
@@ -105,7 +107,7 @@ fn burin_mini_explain_repo_fixture_run_passes() {
     );
 
     let stdout = stdout(&output);
-    let report = experiment_root.join("evals/generated/explain_repo-latest.json");
+    let report = generated_report_path(&experiment_root, &output, "explain_repo-latest.json");
     let report_json = read_json(&report);
     assert!(stdout.contains("task_id=explain_repo"), "stdout={stdout}");
     assert!(
@@ -128,7 +130,7 @@ fn burin_mini_comment_file_fixture_run_updates_workspace_copy() {
 
     let stdout = stdout(&output);
     assert!(stdout.contains("task_id=comment_file"), "stdout={stdout}");
-    let report = experiment_root.join("evals/generated/comment_file-latest.json");
+    let report = generated_report_path(&experiment_root, &output, "comment_file-latest.json");
     let report_json = read_json(&report);
     assert_eq!(report_json["verdict"], "pass");
     assert_eq!(report_json["workflow_status"], "completed");
@@ -171,7 +173,6 @@ fn burin_mini_comment_file_fixture_run_updates_workspace_copy() {
 }
 
 #[test]
-#[ignore]
 fn burin_mini_rate_limit_fixture_run_wires_middleware() {
     let (_temp, experiment_root, output) = run_case(
         "Add rate limiting middleware to the auth module",
@@ -190,7 +191,7 @@ fn burin_mini_rate_limit_fixture_run_wires_middleware() {
         stdout.contains("task_id=rate_limit_auth"),
         "stdout={stdout}"
     );
-    let report = experiment_root.join("evals/generated/rate_limit_auth-latest.json");
+    let report = generated_report_path(&experiment_root, &output, "rate_limit_auth-latest.json");
     let report_json = read_json(&report);
     assert_eq!(report_json["verdict"], "pass");
     assert_eq!(report_json["workflow_status"], "completed");
@@ -288,7 +289,6 @@ fn burin_mini_rate_limit_fixture_run_wires_middleware() {
 }
 
 #[test]
-#[ignore]
 fn burin_mini_rate_limit_liveish_fixture_ignores_redundant_read_actions() {
     let (_temp, experiment_root, output) = run_case(
         "Add rate limiting middleware to the auth module",
@@ -312,7 +312,7 @@ fn burin_mini_rate_limit_liveish_fixture_ignores_redundant_read_actions() {
         "stdout={stdout}\nstderr={}",
         stderr(&output)
     );
-    let report = experiment_root.join("evals/generated/rate_limit_auth-latest.json");
+    let report = generated_report_path(&experiment_root, &output, "rate_limit_auth-latest.json");
     let report_json = read_json(&report);
     assert_eq!(report_json["verdict"], "pass");
     assert_eq!(report_json["workflow_status"], "completed");
@@ -339,7 +339,6 @@ fn burin_mini_rate_limit_liveish_fixture_ignores_redundant_read_actions() {
 }
 
 #[test]
-#[ignore]
 fn burin_mini_rate_limit_weak_verify_plan_normalizes_to_single_verify_action() {
     let (_temp, experiment_root, output) = run_case(
         "Add rate limiting middleware to the auth module",
@@ -363,7 +362,7 @@ fn burin_mini_rate_limit_weak_verify_plan_normalizes_to_single_verify_action() {
         "stdout={stdout}\nstderr={}",
         stderr(&output)
     );
-    let report = experiment_root.join("evals/generated/rate_limit_auth-latest.json");
+    let report = generated_report_path(&experiment_root, &output, "rate_limit_auth-latest.json");
     let report_json = read_json(&report);
     assert_eq!(report_json["verdict"], "pass");
     assert_eq!(report_json["workflow_status"], "completed");
@@ -410,7 +409,6 @@ fn burin_mini_rate_limit_weak_verify_plan_normalizes_to_single_verify_action() {
 }
 
 #[test]
-#[ignore]
 fn burin_mini_rate_limit_overresearch_planner_commits_final_action_graph() {
     let (_temp, experiment_root, output) = run_case(
         "Add rate limiting middleware to the auth module",
@@ -429,7 +427,7 @@ fn burin_mini_rate_limit_overresearch_planner_commits_final_action_graph() {
         stdout.contains("task_id=rate_limit_auth"),
         "stdout={stdout}"
     );
-    let report = experiment_root.join("evals/generated/rate_limit_auth-latest.json");
+    let report = generated_report_path(&experiment_root, &output, "rate_limit_auth-latest.json");
     let report_json = read_json(&report);
     assert_eq!(report_json["verdict"], "pass");
     assert_eq!(report_json["workflow_status"], "completed");
@@ -457,23 +455,11 @@ fn burin_mini_rate_limit_overresearch_planner_commits_final_action_graph() {
 }
 
 #[test]
-#[ignore]
 fn burin_mini_semantic_evaluator_heuristic_passes_for_rate_limit_fixture() {
-    let (temp, experiment_root, output) = run_case(
-        "Add rate limiting middleware to the auth module",
-        "rate-limit.jsonl",
-    );
-
-    assert!(
-        output.status.success(),
-        "status={:?}\nstderr={}",
-        output.status.code(),
-        stderr(&output)
-    );
-
+    let (temp, experiment_root) = setup_experiment_copy();
     let evaluator = experiment_root.join("evaluator.harn");
-    let report = experiment_root.join("evals/generated/rate_limit_auth-latest.json");
-    let semantic = experiment_root.join("evals/generated/rate_limit_auth.semantic.json");
+    let report = experiment_root.join("evals/fixtures/rate_limit_auth-report.json");
+    let semantic = temp.path().join("rate_limit_auth.semantic.json");
     let eval_output = run_harn_with_env(
         temp.path(),
         &[
