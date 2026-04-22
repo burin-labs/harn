@@ -858,8 +858,8 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn expired_claim_allows_reclaim() {
         let log = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(32)));
-        let queue = WorkerQueue::new(log);
-        queue
+        let queue = WorkerQueue::new(log.clone());
+        let receipt = queue
             .enqueue(&test_job(
                 "triage",
                 "incoming-review-task",
@@ -868,19 +868,26 @@ mod tests {
             ))
             .await
             .unwrap();
-        let first = queue
-            .claim_next("triage", "consumer-a", StdDuration::from_millis(15))
-            .await
-            .unwrap()
-            .unwrap();
-        tokio::time::sleep(StdDuration::from_millis(30)).await;
+        let expired_claim = WorkerQueueClaimRecord {
+            job_event_id: receipt.job_event_id,
+            claim_id: "expired-claim".to_string(),
+            consumer_id: "consumer-a".to_string(),
+            claimed_at_ms: now_ms().saturating_sub(2),
+            expires_at_ms: now_ms().saturating_sub(1),
+        };
+        log.append(
+            &claims_topic("triage").unwrap(),
+            LogEvent::new("job_claimed", serde_json::to_value(&expired_claim).unwrap()),
+        )
+        .await
+        .unwrap();
         let second = queue
             .claim_next("triage", "consumer-b", StdDuration::from_secs(60))
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(first.job.event.id.0, second.job.event.id.0);
-        assert_ne!(first.handle.claim_id, second.handle.claim_id);
+        assert_eq!(second.job.event.id.0, "evt-1");
+        assert_ne!(second.handle.claim_id, expired_claim.claim_id);
         assert_eq!(second.handle.consumer_id, "consumer-b");
     }
 

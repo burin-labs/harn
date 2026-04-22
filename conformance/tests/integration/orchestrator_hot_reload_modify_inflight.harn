@@ -36,13 +36,17 @@ pipeline default() {
     first_path="$base/first.json"
     second_path="$base/second.json"
     old_path="$base/old.json"
+    request_entered_path="$base/request-entered"
+    request_release_path="$base/request-release"
+    rm -f "$request_entered_path" "$request_release_path"
 
     # #224 made a2a-push routes require bearer+HMAC auth at startup; supply
     # dummy credentials so the orchestrator can finish booting. This test
     # doesn't exercise auth — the bearer credential just has to exist and
     # the HMAC secret just has to be non-empty (the test uses the bearer
     # path for all POSTs).
-    HARN_ORCHESTRATOR_TEST_REQUEST_DELAY_MS=250 \
+    HARN_ORCHESTRATOR_TEST_REQUEST_ENTERED_FILE="$request_entered_path" \
+    HARN_ORCHESTRATOR_TEST_REQUEST_RELEASE_FILE="$request_release_path" \
     HARN_ORCHESTRATOR_API_KEYS="hot-reload-test-key" \
     HARN_ORCHESTRATOR_HMAC_SECRET="hot-reload-test-hmac-secret" \
       "$binary" orchestrator serve \
@@ -92,24 +96,7 @@ pipeline default() {
 
     base_url="http://$bind"
 
-    (
-      sleep 0.12
-      cat > "$workspace/harn.toml" <<'EOF'
-    [package]
-    name = "orchestrator_hot_reload"
-
-    [[triggers]]
-    id = "incoming-review-task"
-    kind = "a2a-push"
-    provider = "a2a-push"
-    path = "/a2a/v2"
-    match = { events = ["a2a.task.received"] }
-    handler = "worker://triage"
-    EOF
-      kill -HUP "$pid"
-    ) &
-
-    python3 - "$base_url/a2a/v1" "$first_path" <<'PY'
+    python3 - "$base_url/a2a/v1" "$first_path" <<'PY' &
     import json, pathlib, sys, urllib.error, urllib.request
     url = sys.argv[1]
     out = pathlib.Path(sys.argv[2])
@@ -131,6 +118,34 @@ pipeline default() {
         body = error.read().decode()
         out.write_text(json.dumps({"status": error.code, "body": body}))
     PY
+    first_request_pid=$!
+
+    python3 - "$request_entered_path" "$log_path" <<'PY'
+    import pathlib, sys, time
+    marker = pathlib.Path(sys.argv[1])
+    log = pathlib.Path(sys.argv[2])
+    deadline = time.time() + 15
+    while time.time() < deadline:
+        if marker.exists():
+            raise SystemExit(0)
+        time.sleep(0.05)
+    tail = log.read_text()[-4000:] if log.exists() else "(missing log)"
+    raise SystemExit(f"timed out waiting for first request to enter listener\n{tail}")
+    PY
+
+    cat > "$workspace/harn.toml" <<'EOF'
+    [package]
+    name = "orchestrator_hot_reload"
+
+    [[triggers]]
+    id = "incoming-review-task"
+    kind = "a2a-push"
+    provider = "a2a-push"
+    path = "/a2a/v2"
+    match = { events = ["a2a.task.received"] }
+    handler = "worker://triage"
+    EOF
+    kill -HUP "$pid"
 
     python3 - "$snapshot_path" <<'PY'
     import json, pathlib, sys, time
@@ -145,6 +160,9 @@ pipeline default() {
         time.sleep(0.05)
     raise SystemExit("timed out waiting for manifest reload")
     PY
+
+    : > "$request_release_path"
+    wait "$first_request_pid"
 
     python3 - "$base_url/a2a/v2" "$second_path" <<'PY'
     import json, pathlib, sys, urllib.error, urllib.request

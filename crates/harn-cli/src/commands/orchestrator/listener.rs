@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
@@ -27,7 +28,8 @@ use crate::package::{CollectedManifestTrigger, TriggerKind};
 const DEFAULT_MAX_BODY_BYTES: usize = 10 * 1024 * 1024;
 const ADMIN_RELOAD_PATH: &str = "/admin/reload";
 const PENDING_TOPIC: &str = "orchestrator.triggers.pending";
-const REQUEST_DELAY_ENV: &str = "HARN_ORCHESTRATOR_TEST_REQUEST_DELAY_MS";
+const REQUEST_ENTERED_FILE_ENV: &str = "HARN_ORCHESTRATOR_TEST_REQUEST_ENTERED_FILE";
+const REQUEST_RELEASE_FILE_ENV: &str = "HARN_ORCHESTRATOR_TEST_REQUEST_RELEASE_FILE";
 const API_KEYS_ENV: &str = "HARN_ORCHESTRATOR_API_KEYS";
 const HMAC_SECRET_ENV: &str = "HARN_ORCHESTRATOR_HMAC_SECRET";
 const AUTH_TIMESTAMP_WINDOW_SECS: i64 = 5 * 60;
@@ -109,11 +111,10 @@ impl ListenerRuntime {
             .iter()
             .any(|route| route.auth_mode.requires_credentials());
         let auth = Arc::new(ListenerAuth::from_env(requires_auth)?);
-        let request_delay = std::env::var(REQUEST_DELAY_ENV)
-            .ok()
-            .and_then(|value| value.parse::<u64>().ok())
-            .filter(|value| *value > 0)
-            .map(Duration::from_millis);
+        let request_gate = TestRequestGate {
+            entered_file: test_file_from_env(REQUEST_ENTERED_FILE_ENV),
+            release_file: test_file_from_env(REQUEST_RELEASE_FILE_ENV),
+        };
         let origin_state = Arc::new(config.allowed_origins.clone());
         let admin_state = config.admin_reload.clone().map(|reload| {
             Arc::new(AdminReloadState {
@@ -130,7 +131,7 @@ impl ListenerRuntime {
             config.metrics_registry.clone(),
             auth.clone(),
             pending_topic.clone(),
-            request_delay,
+            request_gate,
         )?);
         let mut app = Router::new()
             .route(
@@ -333,8 +334,14 @@ struct RouteContext {
     metrics_registry: Arc<harn_vm::MetricsRegistry>,
     auth: Arc<ListenerAuth>,
     pending_topic: Topic,
-    request_delay: Option<Duration>,
+    request_gate: TestRequestGate,
     metrics: Arc<RouteRuntimeMetrics>,
+}
+
+#[derive(Clone, Default)]
+struct TestRequestGate {
+    entered_file: Option<PathBuf>,
+    release_file: Option<PathBuf>,
 }
 
 #[derive(Clone)]
@@ -365,7 +372,7 @@ struct RouteRegistry {
     metrics_registry: Arc<harn_vm::MetricsRegistry>,
     auth: Arc<ListenerAuth>,
     pending_topic: Topic,
-    request_delay: Option<Duration>,
+    request_gate: TestRequestGate,
 }
 
 impl RouteRegistry {
@@ -377,7 +384,7 @@ impl RouteRegistry {
         metrics_registry: Arc<harn_vm::MetricsRegistry>,
         auth: Arc<ListenerAuth>,
         pending_topic: Topic,
-        request_delay: Option<Duration>,
+        request_gate: TestRequestGate,
     ) -> Result<Self, String> {
         let registry = Self {
             routes_by_path: RwLock::new(BTreeMap::new()),
@@ -388,7 +395,7 @@ impl RouteRegistry {
             metrics_registry,
             auth,
             pending_topic,
-            request_delay,
+            request_gate,
         };
         registry.reload(routes)?;
         Ok(registry)
@@ -416,7 +423,7 @@ impl RouteRegistry {
                     metrics_registry: self.metrics_registry.clone(),
                     auth: self.auth.clone(),
                     pending_topic: self.pending_topic.clone(),
-                    request_delay: self.request_delay,
+                    request_gate: self.request_gate.clone(),
                     metrics,
                 }),
             );
@@ -575,8 +582,30 @@ async fn ingest_trigger(
             return response;
         }
 
-        if let Some(delay) = context.request_delay {
-            tokio::time::sleep(delay).await;
+        if let Some(path) = context.request_gate.entered_file.as_ref() {
+            if let Err(error) = mark_test_file(path).await {
+                context.metrics.failed.fetch_add(1, Ordering::Relaxed);
+                context.metrics.in_flight.fetch_sub(1, Ordering::Relaxed);
+                context.metrics_registry.set_trigger_inflight(
+                    &context.route.trigger_id,
+                    context.metrics.in_flight.load(Ordering::Relaxed),
+                );
+                let response = finalize_response(
+                    &context,
+                    (StatusCode::INTERNAL_SERVER_ERROR, error).into_response(),
+                );
+                context.metrics_registry.record_http_request(
+                    &context.route.path,
+                    method.as_str(),
+                    response.status().as_u16(),
+                    request_started.elapsed(),
+                    body_size_bytes,
+                );
+                return response;
+            }
+        }
+        if let Some(path) = context.request_gate.release_file.as_ref() {
+            wait_for_test_release_file(path).await;
         }
 
         let result = normalize_request(
@@ -1373,6 +1402,29 @@ impl IntoResponse for HttpError {
     }
 }
 
+fn test_file_from_env(key: &str) -> Option<PathBuf> {
+    std::env::var_os(key)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+}
+
+async fn wait_for_test_release_file(path: &Path) {
+    while tokio::fs::metadata(path).await.is_err() {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
+async fn mark_test_file(path: &Path) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
+    }
+    tokio::fs::write(path, b"1")
+        .await
+        .map_err(|error| format!("failed to write {}: {error}", path.display()))
+}
+
 #[cfg(test)]
 // Tests below hold the shared `lock_harn_state` guard across `.await`
 // points; the guard is dropped when each `#[tokio::test]` future resolves
@@ -1572,7 +1624,10 @@ mod tests {
         .await
         .expect("install v1 binding");
 
-        std::env::set_var(REQUEST_DELAY_ENV, "200");
+        let request_entered_path = dir.path().join("request-entered");
+        let request_release_path = dir.path().join("request-release");
+        std::env::set_var(REQUEST_ENTERED_FILE_ENV, &request_entered_path);
+        std::env::set_var(REQUEST_RELEASE_FILE_ENV, &request_release_path);
         let listener = ListenerRuntime::start(ListenerConfig {
             bind: "127.0.0.1:0".parse().expect("bind addr"),
             tls: None,
@@ -1606,7 +1661,7 @@ mod tests {
             })
         };
 
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        wait_for_test_release_file(&request_entered_path).await;
         harn_vm::install_manifest_triggers(vec![manifest_binding_spec(
             "incoming-review-task",
             "v2",
@@ -1616,6 +1671,9 @@ mod tests {
         listener
             .reload_routes(vec![route("/a2a/v2", 2)])
             .expect("reload listener routes");
+        tokio::fs::write(&request_release_path, b"release")
+            .await
+            .expect("release first request");
 
         assert_eq!(
             first_request.await.expect("join first request"),
@@ -1675,7 +1733,8 @@ mod tests {
             .shutdown(Duration::from_secs(5))
             .await
             .expect("shutdown listener");
-        std::env::remove_var(REQUEST_DELAY_ENV);
+        std::env::remove_var(REQUEST_ENTERED_FILE_ENV);
+        std::env::remove_var(REQUEST_RELEASE_FILE_ENV);
         reset_active_event_log();
         harn_vm::clear_trigger_registry();
     }

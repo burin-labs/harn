@@ -307,12 +307,11 @@ mod tests {
         let metrics = Arc::new(MetricsRegistry::default());
         let index = InboxIndex::new(log.clone(), metrics.clone()).await.unwrap();
         assert!(index
-            .insert_if_new("binding", "delivery-1", StdDuration::from_millis(10))
+            .insert_if_new("binding", "delivery-1", StdDuration::ZERO)
             .await
             .unwrap());
-        tokio::time::sleep(StdDuration::from_millis(25)).await;
         assert!(index
-            .insert_if_new("binding", "delivery-1", StdDuration::from_millis(10))
+            .insert_if_new("binding", "delivery-1", StdDuration::ZERO)
             .await
             .unwrap());
 

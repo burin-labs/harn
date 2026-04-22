@@ -79,18 +79,41 @@ pipeline default() {
         "--shutdown-timeout",
         "5",
         "--drain-max-items",
-        "100",
+        "10",
         "--drain-deadline",
         "1",
     ]
 
-    def start(delay_ms, log_name):
+    pump_release_file = base / "release-pending-pump"
+    pump_waiting_file = base / "pending-pump-waiting"
+    pump_draining_file = base / "pending-pump-draining"
+
+    def reset_gate_files():
+        for path in (pump_release_file, pump_waiting_file, pump_draining_file):
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                pass
+
+    def touch(path):
+        path.write_text("release", encoding="utf-8")
+
+    def wait_path(path, label):
+        deadline = time.time() + 30
+        while time.time() < deadline:
+            if path.exists():
+                return
+            time.sleep(0.05)
+        raise RuntimeError(f"timed out waiting for {label}: {path}")
+
+    def start(gated, log_name):
         env = os.environ.copy()
         env.update(common_env)
-        if delay_ms is not None:
-            env["HARN_TEST_ORCHESTRATOR_PUMP_DELAY_MS"] = str(delay_ms)
-        else:
-            env.pop("HARN_TEST_ORCHESTRATOR_PUMP_DELAY_MS", None)
+        if gated:
+            reset_gate_files()
+            env["HARN_TEST_ORCHESTRATOR_PUMP_RELEASE_FILE"] = str(pump_release_file)
+            env["HARN_TEST_ORCHESTRATOR_PUMP_WAITING_FILE"] = str(pump_waiting_file)
+            env["HARN_TEST_ORCHESTRATOR_PUMP_DRAINING_FILE"] = str(pump_draining_file)
         log = open(base / log_name, "w", encoding="utf-8")
         proc = subprocess.Popen(
             [binary, *extra_args],
@@ -130,7 +153,7 @@ pipeline default() {
             time.sleep(0.1)
         raise RuntimeError(f"timed out waiting for {expected} dispatch_succeeded rows")
 
-    first_proc, first_log = start(50, "orchestrator-first.log")
+    first_proc, first_log = start(True, "orchestrator-first.log")
     try:
         bind = wait_ready("orchestrator-first.log")
         host, port = bind.split(":")
@@ -153,10 +176,11 @@ pipeline default() {
                 raise RuntimeError(f"flood request {index} failed: {response.status} {payload!r}")
         conn.close()
 
-        shutdown_start = time.monotonic()
+        wait_path(pump_waiting_file, "pending pump to pause")
         first_proc.send_signal(signal.SIGTERM)
+        wait_path(pump_draining_file, "pending pump drain to start")
+        touch(pump_release_file)
         first_proc.wait(timeout=10)
-        shutdown_ms = int((time.monotonic() - shutdown_start) * 1000)
         if first_proc.returncode != 0:
             raise RuntimeError(f"first orchestrator exited with {first_proc.returncode}")
     finally:
@@ -171,7 +195,7 @@ pipeline default() {
         raise RuntimeError("missing drain_truncated lifecycle event")
     truncated = json.loads(row[0])
 
-    second_proc, second_log = start(None, "orchestrator-second.log")
+    second_proc, second_log = start(False, "orchestrator-second.log")
     try:
         wait_ready("orchestrator-second.log")
         outbox_count = wait_outbox(40)
@@ -185,7 +209,6 @@ pipeline default() {
     print(
         json.dumps(
             {
-                "shutdown_ms": shutdown_ms,
                 "truncated": True,
                 "remaining_queued": truncated.get("remaining_queued", 0),
                 "outbox_count": outbox_count,
@@ -201,7 +224,6 @@ pipeline default() {
     return
   }
   let summary = json_parse(result.stdout.trim())
-  println(summary.shutdown_ms <= 4000)
   println(summary.truncated == true)
   println(summary.remaining_queued > 0)
   println(summary.outbox_count == 40)

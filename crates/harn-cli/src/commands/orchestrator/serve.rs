@@ -34,8 +34,9 @@ const MANIFEST_TOPIC: &str = "orchestrator.manifest";
 const STATE_SNAPSHOT_FILE: &str = "orchestrator-state.json";
 const PENDING_TOPIC: &str = "orchestrator.triggers.pending";
 const CRON_TICK_TOPIC: &str = "connectors.cron.tick";
-const TEST_PUMP_DELAY_ENV: &str = "HARN_TEST_ORCHESTRATOR_PUMP_DELAY_MS";
-const TEST_INBOX_TASK_DELAY_ENV: &str = "HARN_TEST_ORCHESTRATOR_INBOX_TASK_DELAY_MS";
+const TEST_PUMP_RELEASE_FILE_ENV: &str = "HARN_TEST_ORCHESTRATOR_PUMP_RELEASE_FILE";
+const TEST_PUMP_WAITING_FILE_ENV: &str = "HARN_TEST_ORCHESTRATOR_PUMP_WAITING_FILE";
+const TEST_PUMP_DRAINING_FILE_ENV: &str = "HARN_TEST_ORCHESTRATOR_PUMP_DRAINING_FILE";
 const TEST_INBOX_TASK_RELEASE_FILE_ENV: &str = "HARN_TEST_ORCHESTRATOR_INBOX_TASK_RELEASE_FILE";
 const TEST_FAIL_PENDING_PUMP_ENV: &str = "HARN_TEST_ORCHESTRATOR_FAIL_PENDING_PUMP";
 const WAITPOINT_SERVICE_INTERVAL: Duration = Duration::from_millis(250);
@@ -822,6 +823,9 @@ impl PumpHandle {
             config,
             deadline: drain_deadline,
         }));
+        if let Some(path) = pump_test_draining_file() {
+            mark_test_file(&path).await?;
+        }
         match self.join.await {
             Ok(result) => result,
             Err(error) => Err(format!("pump task join failed: {error}")),
@@ -916,8 +920,6 @@ fn spawn_inbox_pump(
     let topic = harn_vm::event_log::Topic::new(harn_vm::TRIGGER_INBOX_ENVELOPES_TOPIC)
         .map_err(|error| error.to_string())?;
     let consumer = pump_consumer_id(&topic)?;
-    let test_delay = pump_test_delay();
-    let inbox_task_delay = inbox_task_test_delay();
     let inbox_task_release_file = inbox_task_test_release_file();
     let (mode_tx, mut mode_rx) = watch::channel(PumpMode::Running);
     let join = tokio::task::spawn_local(async move {
@@ -995,9 +997,6 @@ fn spawn_inbox_pump(
                     };
                     let (event_id, logged) = received
                         .map_err(|error| format!("topic pump read failed for {topic}: {error}"))?;
-                    if let Some(delay) = test_delay {
-                        tokio::time::sleep(delay).await;
-                    }
                     if logged.kind != "event_ingested" {
                         stats.last_seen = event_id;
                         event_log
@@ -1013,10 +1012,7 @@ fn spawn_inbox_pump(
                     let inbox_task_release_file = inbox_task_release_file.clone();
                     tasks.spawn_local(async move {
                         if let Some(path) = inbox_task_release_file.as_ref() {
-                            wait_for_inbox_task_release_file(path).await;
-                        }
-                        if let Some(delay) = inbox_task_delay {
-                            tokio::time::sleep(delay).await;
+                            wait_for_test_release_file(path).await;
                         }
                         if let Err(error) = dispatcher.dispatch_inbox_envelope(envelope).await {
                             eprintln!("[harn] inbox dispatch warning: {error}");
@@ -1125,7 +1121,8 @@ where
     Fut: std::future::Future<Output = Result<bool, String>> + 'static,
 {
     let consumer = pump_consumer_id(&topic)?;
-    let test_delay = pump_test_delay();
+    let test_release_file = pump_test_release_file();
+    let test_waiting_file = pump_test_waiting_file();
     let (mode_tx, mut mode_rx) = watch::channel(PumpMode::Running);
     let join = tokio::task::spawn_local(async move {
         let start_from = event_log
@@ -1189,8 +1186,11 @@ where
                     };
                     let (event_id, logged) = received
                         .map_err(|error| format!("topic pump read failed for {topic}: {error}"))?;
-                    if let Some(delay) = test_delay {
-                        tokio::time::sleep(delay).await;
+                    if let Some(path) = test_release_file.as_ref() {
+                        if let Some(waiting_path) = test_waiting_file.as_ref() {
+                            mark_test_file(waiting_path).await?;
+                        }
+                        wait_for_test_release_file(path).await;
                     }
                     let handled = process(logged).await?;
                     stats.last_seen = event_id;
@@ -1643,32 +1643,43 @@ fn pump_consumer_id(topic: &harn_vm::event_log::Topic) -> Result<ConsumerId, Str
         .map_err(|error| format!("failed to create consumer id for {topic}: {error}"))
 }
 
-fn pump_test_delay() -> Option<Duration> {
-    std::env::var(TEST_PUMP_DELAY_ENV)
-        .ok()
-        .and_then(|value| value.trim().parse::<u64>().ok())
-        .map(Duration::from_millis)
-        .filter(|delay| !delay.is_zero())
+fn pump_test_release_file() -> Option<PathBuf> {
+    test_file_from_env(TEST_PUMP_RELEASE_FILE_ENV)
 }
 
-fn inbox_task_test_delay() -> Option<Duration> {
-    std::env::var(TEST_INBOX_TASK_DELAY_ENV)
-        .ok()
-        .and_then(|value| value.trim().parse::<u64>().ok())
-        .map(Duration::from_millis)
-        .filter(|delay| !delay.is_zero())
+fn pump_test_waiting_file() -> Option<PathBuf> {
+    test_file_from_env(TEST_PUMP_WAITING_FILE_ENV)
+}
+
+fn pump_test_draining_file() -> Option<PathBuf> {
+    test_file_from_env(TEST_PUMP_DRAINING_FILE_ENV)
 }
 
 fn inbox_task_test_release_file() -> Option<PathBuf> {
-    std::env::var_os(TEST_INBOX_TASK_RELEASE_FILE_ENV)
+    test_file_from_env(TEST_INBOX_TASK_RELEASE_FILE_ENV)
+}
+
+fn test_file_from_env(key: &str) -> Option<PathBuf> {
+    std::env::var_os(key)
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
 }
 
-async fn wait_for_inbox_task_release_file(path: &Path) {
+async fn wait_for_test_release_file(path: &Path) {
     while tokio::fs::metadata(path).await.is_err() {
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
+}
+
+async fn mark_test_file(path: &Path) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
+    }
+    tokio::fs::write(path, b"1")
+        .await
+        .map_err(|error| format!("failed to write {}: {error}", path.display()))
 }
 
 fn pending_pump_test_should_fail() -> bool {

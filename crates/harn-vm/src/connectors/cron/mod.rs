@@ -30,6 +30,7 @@ mod tests;
 
 pub const CRON_TICK_TOPIC: &str = "connectors.cron.tick";
 const TEST_FAIL_AFTER_EMIT_ENV: &str = "HARN_TEST_CRON_FAIL_AFTER_EMIT";
+const TEST_SINGLE_TICK_AT_ENV: &str = "HARN_TEST_CRON_SINGLE_TICK_AT";
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -197,6 +198,16 @@ impl Connector for CronConnector {
                 sink,
                 state_store,
             });
+            if let Some(tick_at) = test_single_tick_at()? {
+                let task = tokio::spawn(async move {
+                    let _ = handler.on_tick(tick_at, false).await;
+                });
+                self.tasks
+                    .lock()
+                    .expect("cron connector tasks mutex poisoned")
+                    .push(task);
+                continue;
+            }
             let shutdown = shutdown.clone();
             let task = tokio::spawn(async move {
                 let _ = run_tick_loop(
@@ -467,4 +478,23 @@ fn maybe_fail_after_emit() {
     if std::env::var_os(TEST_FAIL_AFTER_EMIT_ENV).is_some() {
         std::process::exit(86);
     }
+}
+
+fn test_single_tick_at() -> Result<Option<OffsetDateTime>, ConnectorError> {
+    let Some(raw) = std::env::var_os(TEST_SINGLE_TICK_AT_ENV) else {
+        return Ok(None);
+    };
+    let raw = raw.to_string_lossy();
+    let timestamp = raw.parse::<i64>().map_err(|error| {
+        ConnectorError::Activation(format!(
+            "invalid {TEST_SINGLE_TICK_AT_ENV} unix timestamp '{raw}': {error}"
+        ))
+    })?;
+    OffsetDateTime::from_unix_timestamp(timestamp)
+        .map(Some)
+        .map_err(|error| {
+            ConnectorError::Activation(format!(
+                "invalid {TEST_SINGLE_TICK_AT_ENV} unix timestamp '{raw}': {error}"
+            ))
+        })
 }
