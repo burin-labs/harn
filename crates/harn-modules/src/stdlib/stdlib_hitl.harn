@@ -36,11 +36,18 @@ type ApprovalOptions = {
   deadline?: duration,
 }
 
+type ApprovalSignature = {
+  reviewer: string,
+  signed_at: string,
+  signature: string,
+}
+
 type ApprovalRecord = {
   approved: bool,
   reviewers: list<string>,
   approved_at: string,
   reason: string | nil,
+  signatures: list<ApprovalSignature>,
 }
 
 type EscalationStatus = "pending" | "accepted"

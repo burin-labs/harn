@@ -194,11 +194,19 @@ type DlqEntry = {id: string, event_id: string, binding_id: string, binding_versi
 
 type TriggerActionGraphEvent = {kind: string, headers: dict, payload: dict}
 
-type TrustRecord = {schema: string, record_id: string, agent: string, action: string, approver: string | nil, outcome: TrustOutcome, trace_id: string, autonomy_tier: AutonomyTier, timestamp: string, cost_usd: float | nil, metadata: dict}
+type TrustEntryId = string
+
+type CapabilityPolicy = {tools: list<string>, capabilities: dict, workspace_roots: list<string>, side_effect_level: string | nil, recursion_limit: int | nil, tool_arg_constraints: list<dict>, tool_annotations: dict}
+
+type TrustRecord = {schema: string, record_id: string, agent: string, action: string, approver: string | nil, outcome: TrustOutcome, trace_id: string, autonomy_tier: AutonomyTier, timestamp: string, cost_usd: float | nil, chain_index: int, previous_hash: string | nil, entry_hash: string, metadata: dict}
 
 type TrustTraceGroup = {trace_id: string, records: list<TrustRecord>}
 
 type TrustQueryFilters = {agent: string | nil, action: string | nil, since: string | nil, until: string | nil, tier: AutonomyTier | nil, outcome: TrustOutcome | nil, limit: int | nil, grouped_by_trace: bool | nil}
+
+type TrustScore = {agent: string, action: string | nil, total: int, successes: int, failures: int, denied: int, timeouts: int, success_rate: float, latest_outcome: TrustOutcome | nil, latest_timestamp: string | nil, effective_tier: AutonomyTier, policy: CapabilityPolicy}
+
+type TrustChainReport = {topic: string, total: int, verified: bool, root_hash: string | nil, broken_at_event_id: int | nil, errors: list<string>}
 
 type HandlerContext = {agent: string, action: string, trace_id: string, replay_of_event_id: string | nil, autonomy_tier: AutonomyTier, trigger_event: TriggerEvent}
 

@@ -7,21 +7,62 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
-## v0.7.29
+## v0.7.30
 
 ### Added
 
-- **Trigger budget governance (#162).** Trigger predicates now support
-  per-call cost/token ceilings, hourly and daily trigger spend caps,
-  global orchestrator budget caps, budget exhaustion strategies
-  (`false`, `retry_later`, `fail`, `warn`), budget metrics, and
-  `harn orchestrator inspect` budget usage.
+- **Trigger budget governance and autonomy budgets (#162, #435,
+  #437).** Trigger predicates now support per-call cost/token ceilings,
+  hourly and daily trigger spend caps, global orchestrator budget caps,
+  budget exhaustion strategies (`false`, `retry_later`, `fail`,
+  `warn`), budget metrics, and `harn orchestrator inspect` budget usage.
+- **Trigger action graph observability (#434).** Dispatch records now
+  expose richer action graph node kinds and runtime metadata so trigger
+  execution can be inspected and audited after the fact.
+- **A2A push notification connector (#436).** Harn can now receive A2A
+  push completion callbacks through the trigger inbox, with replay
+  protections and conformance coverage for accepted and rejected flows.
+- **OpenTrustGraph chain support (#420).** Added trust graph chain
+  primitives, schemas, fixtures, stdlib APIs, CLI plumbing, and docs for
+  recording and validating provenance-linked decisions.
+- **HITL typed supervision receipts (#418).** Human-in-the-loop approval
+  records now include typed signed receipt data that replays
+  deterministically, with stricter lint and conformance coverage.
+- **Portal and orchestrator observability surfaces (#419).** The
+  portal and orchestrator inspection paths now expose richer run,
+  launch, trust, and observability data, including a starter dashboard
+  for operators.
+
+### Changed
+
+- **VM execution pipeline performance (#421-#431).** The compiler and VM
+  now use typed opcodes, builtin ids, inline caches, local slots,
+  indexed struct layouts, leaner value storage, and flatter opcode
+  dispatch to reduce cloning, allocation, and call overhead.
+- **Local and CI release workflow (#439, #440).** Local setup, hooks,
+  Makefile targets, CI, and the release scripts now prefer nextest where
+  available, lint GitHub Actions, support merge-queue-safe release
+  branches, and document the two-PR release flow.
+- **Conformance and test isolation (#438).** Conformance runs are
+  faster and test execution disables real LLM calls by default unless a
+  test explicitly opts in.
 
 ### Fixed
 
 - **Line-leading nil-coalescing continuations.** Expressions can now
   continue on a following line that starts with `??`, equality, or
   comparison operators, matching the formatter and tree-sitter grammar.
+- **HTTP mock call headers (#432).** Mocked HTTP calls now record
+  request headers, making replay and conformance assertions cover the
+  full call shape.
+- **Webhook dedupe retention coverage (#417).** Webhook dedupe handling
+  has stronger regression coverage for retained deliveries and duplicate
+  suppression.
+
+## v0.7.29
+
+### Fixed
+
 - **Stable script source directories.** `harn run` now stores source
   directories as absolute paths before exposing them through
   `source_dir()`. Scripts can safely derive sibling paths from
