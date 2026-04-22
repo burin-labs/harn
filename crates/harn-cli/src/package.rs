@@ -2863,6 +2863,10 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
         let ty = entry
             .file_type()
             .map_err(|error| format!("failed to stat {}: {error}", entry.path().display()))?;
+        let name = entry.file_name();
+        if name == OsStr::new(".git") || name == OsStr::new(CONTENT_HASH_FILE) {
+            continue;
+        }
         let dest_path = dst.join(entry.file_name());
         if ty.is_dir() {
             copy_dir_recursive(&entry.path(), &dest_path)?;
@@ -2885,36 +2889,95 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
 
 fn remove_materialized_package(packages_dir: &Path, alias: &str) -> Result<(), String> {
     let dir = packages_dir.join(alias);
-    if dir.exists() {
-        fs::remove_dir_all(&dir)
-            .map_err(|error| format!("failed to remove {}: {error}", dir.display()))?;
+    match fs::symlink_metadata(&dir) {
+        Ok(metadata) if metadata.file_type().is_symlink() || metadata.is_file() => {
+            fs::remove_file(&dir)
+                .map_err(|error| format!("failed to remove {}: {error}", dir.display()))?;
+        }
+        Ok(metadata) if metadata.is_dir() => {
+            fs::remove_dir_all(&dir)
+                .map_err(|error| format!("failed to remove {}: {error}", dir.display()))?;
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(format!("failed to stat {}: {error}", dir.display())),
     }
     let file = packages_dir.join(format!("{alias}.harn"));
-    if file.exists() {
-        fs::remove_file(&file)
-            .map_err(|error| format!("failed to remove {}: {error}", file.display()))?;
+    match fs::symlink_metadata(&file) {
+        Ok(metadata) if metadata.file_type().is_symlink() || metadata.is_file() => {
+            fs::remove_file(&file)
+                .map_err(|error| format!("failed to remove {}: {error}", file.display()))?;
+        }
+        Ok(metadata) if metadata.is_dir() => {
+            fs::remove_dir_all(&file)
+                .map_err(|error| format!("failed to remove {}: {error}", file.display()))?;
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(format!("failed to stat {}: {error}", file.display())),
     }
     Ok(())
 }
 
-fn copy_path_dependency(source: &Path, dest_root: &Path, alias: &str) -> Result<(), String> {
+#[cfg(unix)]
+fn symlink_path_dependency(source: &Path, dest: &Path) -> Result<(), String> {
+    std::os::unix::fs::symlink(source, dest).map_err(|error| {
+        format!(
+            "failed to symlink {} to {}: {error}",
+            source.display(),
+            dest.display()
+        )
+    })
+}
+
+#[cfg(windows)]
+fn symlink_path_dependency(source: &Path, dest: &Path) -> Result<(), String> {
+    if source.is_dir() {
+        std::os::windows::fs::symlink_dir(source, dest)
+    } else {
+        std::os::windows::fs::symlink_file(source, dest)
+    }
+    .map_err(|error| {
+        format!(
+            "failed to symlink {} to {}: {error}",
+            source.display(),
+            dest.display()
+        )
+    })
+}
+
+#[cfg(not(any(unix, windows)))]
+fn symlink_path_dependency(_source: &Path, _dest: &Path) -> Result<(), String> {
+    Err("symlinks are not supported on this platform".to_string())
+}
+
+fn materialize_path_dependency(source: &Path, dest_root: &Path, alias: &str) -> Result<(), String> {
     remove_materialized_package(dest_root, alias)?;
     if source.is_dir() {
-        copy_dir_recursive(source, &dest_root.join(alias))
+        let dest = dest_root.join(alias);
+        match symlink_path_dependency(source, &dest) {
+            Ok(()) => Ok(()),
+            Err(_) => copy_dir_recursive(source, &dest),
+        }
     } else {
         let dest = dest_root.join(format!("{alias}.harn"));
         if let Some(parent) = dest.parent() {
             fs::create_dir_all(parent)
                 .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
         }
-        fs::copy(source, &dest).map_err(|error| {
-            format!(
-                "failed to copy {} to {}: {error}",
-                source.display(),
-                dest.display()
-            )
-        })?;
-        Ok(())
+        match symlink_path_dependency(source, &dest) {
+            Ok(()) => Ok(()),
+            Err(_) => {
+                fs::copy(source, &dest).map_err(|error| {
+                    format!(
+                        "failed to copy {} to {}: {error}",
+                        source.display(),
+                        dest.display()
+                    )
+                })?;
+                Ok(())
+            }
+        }
     }
 }
 
@@ -3038,6 +3101,57 @@ fn parse_positional_git_spec(spec: &str) -> (&str, Option<&str>) {
         }
     }
     (spec, None)
+}
+
+fn existing_local_path_spec(spec: &str) -> Option<PathBuf> {
+    if spec.trim().is_empty() || spec.contains("://") || spec.starts_with("git@") {
+        return None;
+    }
+    let candidate = PathBuf::from(spec);
+    if candidate.exists() {
+        return Some(candidate);
+    }
+    if candidate.extension().is_none() {
+        let with_ext = candidate.with_extension("harn");
+        if with_ext.exists() {
+            return Some(with_ext);
+        }
+    }
+    if is_probable_shorthand_git_url(spec) {
+        return None;
+    }
+    None
+}
+
+fn package_manifest_name(path: &Path) -> Option<String> {
+    let manifest_path = if path.is_dir() {
+        path.join(MANIFEST)
+    } else {
+        path.parent()?.join(MANIFEST)
+    };
+    let manifest = read_manifest_from_path(&manifest_path).ok()?;
+    manifest
+        .package
+        .and_then(|pkg| pkg.name)
+        .map(|name| name.trim().to_string())
+        .filter(|name| !name.is_empty())
+}
+
+fn derive_package_alias_from_path(path: &Path) -> Result<String, String> {
+    if let Some(name) = package_manifest_name(path) {
+        return Ok(name);
+    }
+    let fallback = if path.is_dir() {
+        path.file_name()
+    } else {
+        path.file_stem()
+    };
+    fallback
+        .and_then(|name| name.to_str())
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| format!("failed to derive package alias from {}", path.display()))
 }
 
 fn is_full_git_sha(value: &str) -> bool {
@@ -3399,7 +3513,7 @@ fn materialize_dependencies_from_lock(
 
         if entry.source.starts_with("path+") {
             let source = path_from_source_uri(&entry.source)?;
-            copy_path_dependency(&source, &packages_dir, &alias)?;
+            materialize_path_dependency(&source, &packages_dir, &alias)?;
             installed += 1;
             continue;
         }
@@ -3706,9 +3820,35 @@ fn normalize_add_request(
     if local_path.is_some() && (rev.is_some() || tag.is_some() || branch.is_some()) {
         return Err("path dependencies do not accept --rev, --tag, or --branch".to_string());
     }
+    if git_url.is_none()
+        && local_path.is_none()
+        && rev.is_none()
+        && tag.is_none()
+        && branch.is_none()
+    {
+        if let Some(path) = existing_local_path_spec(name_or_spec) {
+            let alias = alias
+                .map(str::to_string)
+                .map(Ok)
+                .unwrap_or_else(|| derive_package_alias_from_path(&path))?;
+            return Ok((
+                alias,
+                Dependency::Table(DepTable {
+                    git: None,
+                    tag: None,
+                    rev: None,
+                    branch: None,
+                    path: Some(name_or_spec.to_string()),
+                    package: None,
+                }),
+            ));
+        }
+    }
     if git_url.is_some() || local_path.is_some() {
-        let alias = alias.unwrap_or(name_or_spec).to_string();
         if let Some(path) = local_path {
+            let alias = alias
+                .map(str::to_string)
+                .unwrap_or_else(|| name_or_spec.to_string());
             return Ok((
                 alias,
                 Dependency::Table(DepTable {
@@ -3721,6 +3861,7 @@ fn normalize_add_request(
                 }),
             ));
         }
+        let alias = alias.unwrap_or(name_or_spec).to_string();
         let git = normalize_git_url(git_url.ok_or_else(|| "missing --git URL".to_string())?)?;
         let package_name = derive_repo_name_from_source(&git)?;
         return Ok((
@@ -4393,6 +4534,89 @@ acme-lib = {{ git = "{git}", branch = "{branch}" }}
                 .and_then(|entry| entry.commit.clone())
                 .unwrap();
             assert_ne!(first_commit, second_commit);
+        });
+    }
+
+    #[test]
+    fn add_positional_local_path_dependency_uses_manifest_name_and_live_link() {
+        let dependency_tmp = tempfile::tempdir().unwrap();
+        let dependency_root = dependency_tmp.path().join("harn-openapi");
+        fs::create_dir_all(&dependency_root).unwrap();
+        fs::write(
+            dependency_root.join(MANIFEST),
+            r#"
+[package]
+name = "openapi"
+version = "0.1.0"
+"#,
+        )
+        .unwrap();
+        fs::write(
+            dependency_root.join("lib.harn"),
+            "pub fn version() -> string { return \"v1\" }\n",
+        )
+        .unwrap();
+
+        let project_tmp = tempfile::tempdir().unwrap();
+        let root = project_tmp.path();
+        let cache_dir = root.join(".cache");
+        fs::create_dir_all(root.join(".git")).unwrap();
+        fs::write(
+            root.join(MANIFEST),
+            r#"
+[package]
+name = "workspace"
+version = "0.1.0"
+"#,
+        )
+        .unwrap();
+
+        with_test_env(root, &cache_dir, || {
+            add_package(
+                dependency_root.to_string_lossy().as_ref(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            );
+
+            let manifest = fs::read_to_string(root.join(MANIFEST)).unwrap();
+            assert!(
+                manifest.contains("openapi = { path = "),
+                "manifest should use package.name as alias: {manifest}"
+            );
+            let lock = LockFile::load(&root.join(LOCK_FILE)).unwrap().unwrap();
+            let entry = lock.find("openapi").expect("openapi lock entry");
+            assert!(entry.source.starts_with("path+file://"));
+            let materialized = root.join(PKG_DIR).join("openapi");
+            assert!(materialized.join("lib.harn").is_file());
+
+            #[cfg(unix)]
+            assert!(
+                fs::symlink_metadata(&materialized)
+                    .unwrap()
+                    .file_type()
+                    .is_symlink(),
+                "path dependencies should be live-linked on Unix"
+            );
+
+            fs::write(
+                dependency_root.join("lib.harn"),
+                "pub fn version() -> string { return \"v2\" }\n",
+            )
+            .unwrap();
+            let live_source = fs::read_to_string(materialized.join("lib.harn")).unwrap();
+            #[cfg(unix)]
+            assert!(
+                live_source.contains("v2"),
+                "materialized path dependency should reflect sibling repo edits"
+            );
+
+            remove_package("openapi");
+            assert!(!materialized.exists());
+            assert!(dependency_root.join("lib.harn").exists());
         });
     }
 

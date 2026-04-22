@@ -1303,7 +1303,7 @@ pub(crate) struct InstallArgs {
 
 #[derive(Debug, Args)]
 pub(crate) struct AddArgs {
-    /// Git URL/ref spec (preferred) or dependency name in the legacy `--git/--path` form.
+    /// Git URL/ref spec, local package path, or dependency name in the legacy `--git/--path` form.
     pub name_or_spec: String,
     /// Override the dependency alias written under `[dependencies]`.
     #[arg(long)]

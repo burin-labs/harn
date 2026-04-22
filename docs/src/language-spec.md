@@ -3435,7 +3435,19 @@ resolve without filesystem-relative hacks.
 - `package` documents the upstream package name when the local alias
   differs from the repository name.
 - `path` installs a local directory or `.harn` file without using the
-  shared git cache.
+  shared git cache. Directory path dependencies are live-linked into
+  `.harn/packages/<alias>` when the platform supports symlinks, with a
+  copy fallback for restricted filesystems. This makes sibling-repo
+  development ergonomic for layouts such as `~/projects/{burin-code,
+  harn-cloud,harn-openapi}`: editing `../harn-openapi/lib.harn` is
+  immediately visible to imports in the consuming project.
+
+`harn add ../harn-openapi` treats an existing local path as a path
+dependency and derives the default alias from that package's
+`[package].name` in `harn.toml`, falling back to the directory or file
+stem. Use `harn add <alias> --path ../repo` for the legacy explicit
+alias form, or `harn add <alias> --git ../repo` when a local git checkout
+should be pinned by commit instead of live-linked.
 
 `harn.lock` is a typed TOML file with `version = 1` and one `[[package]]`
 entry per dependency. Each git entry records:
