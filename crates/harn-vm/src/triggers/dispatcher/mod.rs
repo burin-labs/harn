@@ -22,8 +22,8 @@ use crate::orchestration::{
     ACTION_GRAPH_EDGE_KIND_PREDICATE_GATE, ACTION_GRAPH_EDGE_KIND_REPLAY_CHAIN,
     ACTION_GRAPH_EDGE_KIND_RETRY, ACTION_GRAPH_EDGE_KIND_TRIGGER_DISPATCH,
     ACTION_GRAPH_NODE_KIND_A2A_HOP, ACTION_GRAPH_NODE_KIND_DISPATCH, ACTION_GRAPH_NODE_KIND_DLQ,
-    ACTION_GRAPH_NODE_KIND_RETRY, ACTION_GRAPH_NODE_KIND_TRIGGER,
-    ACTION_GRAPH_NODE_KIND_TRIGGER_PREDICATE, ACTION_GRAPH_NODE_KIND_WORKER_ENQUEUE,
+    ACTION_GRAPH_NODE_KIND_PREDICATE, ACTION_GRAPH_NODE_KIND_RETRY, ACTION_GRAPH_NODE_KIND_TRIGGER,
+    ACTION_GRAPH_NODE_KIND_WORKER_ENQUEUE,
 };
 use crate::stdlib::json_to_vm_value;
 use crate::trust_graph::{append_trust_record, AutonomyTier, TrustOutcome, TrustRecord};
@@ -940,7 +940,7 @@ impl Dispatcher {
                 vec![RunActionGraphNodeRecord {
                     id: predicate_node_id.clone(),
                     label: predicate.raw.clone(),
-                    kind: ACTION_GRAPH_NODE_KIND_TRIGGER_PREDICATE.to_string(),
+                    kind: ACTION_GRAPH_NODE_KIND_PREDICATE.to_string(),
                     status: "completed".to_string(),
                     outcome: passed.to_string(),
                     trace_id: Some(event.trace_id.0.clone()),

@@ -304,6 +304,10 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("dict")),
     },
     BuiltinSig {
+        name: "trigger_inspect_action_graph",
+        return_type: Some(BuiltinReturn::Named("list")),
+    },
+    BuiltinSig {
         name: "trigger_inspect_dlq",
         return_type: Some(BuiltinReturn::Named("list")),
     },

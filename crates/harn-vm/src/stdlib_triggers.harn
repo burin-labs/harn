@@ -192,6 +192,8 @@ type DlqAttempt = {attempt: int, at: string, status: string, error: string | nil
 
 type DlqEntry = {id: string, event_id: string, binding_id: string, binding_version: int, provider: string, kind: string, state: string, error: string, event: TriggerEvent, retry_history: list<DlqAttempt>}
 
+type TriggerActionGraphEvent = {kind: string, headers: dict, payload: dict}
+
 type TrustEntryId = string
 
 type CapabilityPolicy = {tools: list<string>, capabilities: dict, workspace_roots: list<string>, side_effect_level: string | nil, recursion_limit: int | nil, tool_arg_constraints: list<dict>, tool_annotations: dict}
@@ -240,7 +242,9 @@ pub fn window_by(events, window: StreamWindowSpec) -> StreamWindowPlan {
   return {kind: "stream.window", events: events, window: window}
 }
 
-/** llm_classify describes a cached classifier step without forcing a provider call during planning. */
+/**
+ * llm_classify describes a cached classifier step without forcing a provider call during planning.
+ */
 pub fn llm_classify(input, labels, options = nil) -> StreamLlmClassifyPlan {
   let config = options ?? {}
   return {kind: "stream.llm_classify", input: input, labels: labels, cache: config?.cache, options: config}

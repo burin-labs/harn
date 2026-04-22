@@ -168,6 +168,13 @@ records. Pass a kind such as `predicate.evaluated`,
 `predicate.budget_exceeded`, or `DispatchStarted` to filter on the runtime
 side.
 
+### `trigger_inspect_action_graph(trace_id?)`
+
+Return streamed `observability.action_graph` records as a list of
+`{kind, headers, payload}` records. Pass a `trace_id` to filter the stream to
+one trigger delivery and its downstream predicate, dispatch, retry, worker,
+A2A, and DLQ nodes.
+
 ### `handler_context()`
 
 Return the current dispatch context as `HandlerContext | nil`.
