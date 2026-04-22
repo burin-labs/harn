@@ -230,6 +230,23 @@ fn append_llm_transcript_event_log(entry: &serde_json::Value) {
     if let Some(span_id) = entry.get("span_id").and_then(|value| value.as_u64()) {
         headers.insert("span_id".to_string(), span_id.to_string());
     }
+    if let Some(context) = crate::triggers::dispatcher::current_dispatch_context() {
+        headers.insert("trigger_id".to_string(), context.binding_id.clone());
+        headers.insert(
+            "binding_key".to_string(),
+            format!("{}@v{}", context.binding_id, context.binding_version),
+        );
+        headers.insert("event_id".to_string(), context.trigger_event.id.0.clone());
+        headers.insert(
+            "trace_id".to_string(),
+            context.trigger_event.trace_id.0.clone(),
+        );
+        headers.insert("pipeline".to_string(), context.binding_id);
+        headers.insert("action".to_string(), context.action);
+        if let Some(tenant_id) = context.trigger_event.tenant_id {
+            headers.insert("tenant_id".to_string(), tenant_id.0);
+        }
+    }
     let event = crate::event_log::LogEvent::new(kind, entry.clone()).with_headers(headers);
     if let Ok(handle) = tokio::runtime::Handle::try_current() {
         handle.spawn(async move {
@@ -379,6 +396,8 @@ pub(super) fn dump_llm_response(
     response_ms: u64,
     structural_experiment: Option<&crate::llm::structural_experiments::AppliedStructuralExperiment>,
 ) {
+    let cost_usd =
+        super::cost::calculate_cost(&result.model, result.input_tokens, result.output_tokens);
     let structural_experiment = structural_experiment
         .map(serde_json::to_value)
         .transpose()
@@ -390,11 +409,13 @@ pub(super) fn dump_llm_response(
         "call_id": call_id,
         "span_id": crate::tracing::current_span_id(),
         "timestamp": chrono_now(),
+        "provider": result.provider,
         "model": result.model,
         "text": result.text,
         "tool_calls": result.tool_calls,
         "input_tokens": result.input_tokens,
         "output_tokens": result.output_tokens,
+        "cost_usd": cost_usd,
         "cache_read_tokens": result.cache_read_tokens,
         "cache_write_tokens": result.cache_write_tokens,
         // Explicit bool for easy cache-regression spotting in tailed logs.
@@ -620,7 +641,16 @@ pub(crate) async fn observed_llm_call(
                     duration_ms,
                 });
                 if let Some(metrics) = crate::active_metrics_registry() {
-                    metrics.record_llm_call(&result.provider, &result.model, "succeeded", 0.0);
+                    metrics.record_llm_call(
+                        &result.provider,
+                        &result.model,
+                        "succeeded",
+                        super::cost::calculate_cost(
+                            &result.model,
+                            result.input_tokens,
+                            result.output_tokens,
+                        ),
+                    );
                     if result.cache_read_tokens > 0 {
                         metrics.record_llm_cache_hit(&result.provider);
                     }
