@@ -262,6 +262,27 @@ impl super::super::Vm {
         Ok(())
     }
 
+    pub(super) async fn execute_sync_mutex_enter(&mut self) -> Result<(), VmError> {
+        let key = {
+            let frame = self.frames.last_mut().unwrap();
+            let idx = frame.chunk.read_u16(frame.ip) as usize;
+            frame.ip += 2;
+            Self::const_string(&frame.chunk.constants[idx])?
+        };
+        let permit = self
+            .sync_runtime
+            .acquire("mutex", &key, 1, 1, None, self.cancel_token.clone())
+            .await?
+            .ok_or_else(|| VmError::Runtime(format!("mutex '{key}' timed out")))?;
+        self.held_sync_guards
+            .push(crate::synchronization::VmSyncHeldGuard {
+                _permit: permit,
+                frame_depth: self.frames.len(),
+                env_scope_depth: self.env.scope_depth(),
+            });
+        Ok(())
+    }
+
     pub(super) fn execute_deadline_setup(&mut self) -> Result<(), VmError> {
         let dur_val = self.pop()?;
         let ms = match &dur_val {

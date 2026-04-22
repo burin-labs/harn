@@ -1,0 +1,9 @@
+pipeline test(task) {
+  let held = sync_semaphore_acquire("pool", 1, 1)
+  let timed_out = sync_semaphore_acquire("pool", 1, 1, 0)
+  println(timed_out == nil)
+  println(sync_release(held))
+  let reacquired = sync_semaphore_acquire("pool", 1, 1, 0)
+  println(reacquired != nil)
+  sync_release(reacquired)
+}

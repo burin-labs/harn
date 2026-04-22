@@ -29,6 +29,26 @@ pub struct VmAtomicHandle {
     pub value: Arc<AtomicI64>,
 }
 
+/// A held synchronization permit for mutex/semaphore/gate primitives.
+#[derive(Debug, Clone)]
+pub struct VmSyncPermitHandle {
+    pub(crate) lease: Arc<crate::synchronization::VmSyncLease>,
+}
+
+impl VmSyncPermitHandle {
+    pub(crate) fn release(&self) -> bool {
+        self.lease.release()
+    }
+
+    pub(crate) fn kind(&self) -> &str {
+        self.lease.kind()
+    }
+
+    pub(crate) fn key(&self) -> &str {
+        self.lease.key()
+    }
+}
+
 /// A lazy integer range — Python-style. Stores only `(start, end, inclusive)`
 /// so the in-memory footprint is O(1) regardless of the range's length.
 /// `len()`, indexing (`r[k]`), `.contains(x)`, `.first()`, `.last()` are all

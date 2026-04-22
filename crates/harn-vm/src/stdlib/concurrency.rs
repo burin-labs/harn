@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::Arc;
@@ -7,8 +7,6 @@ use std::time::Duration;
 
 use crate::value::{VmAtomicHandle, VmChannelHandle, VmError, VmValue};
 use crate::vm::Vm;
-
-use std::collections::BTreeMap;
 
 struct CircuitState {
     failures: usize,
@@ -69,7 +67,122 @@ fn cancelled_vm_error() -> VmError {
     )))
 }
 
+fn optional_timeout_ms(value: Option<&VmValue>) -> Option<u64> {
+    match value {
+        Some(VmValue::Int(n)) => Some((*n).max(0) as u64),
+        Some(VmValue::Duration(ms)) => Some(*ms),
+        Some(VmValue::Dict(dict)) => dict
+            .get("timeout_ms")
+            .or_else(|| dict.get("max_wait_ms"))
+            .and_then(|v| match v {
+                VmValue::Int(n) => Some((*n).max(0) as u64),
+                VmValue::Duration(ms) => Some(*ms),
+                _ => None,
+            }),
+        _ => None,
+    }
+}
+
+fn positive_u32_arg(
+    args: &[VmValue],
+    idx: usize,
+    default: u32,
+    name: &str,
+) -> Result<u32, VmError> {
+    let value = args
+        .get(idx)
+        .and_then(|v| v.as_int())
+        .unwrap_or(default as i64);
+    if value <= 0 {
+        return Err(VmError::Runtime(format!("{name}: value must be positive")));
+    }
+    Ok(value as u32)
+}
+
 pub(crate) fn register_concurrency_builtins(vm: &mut Vm) {
+    let sync_runtime = vm.sync_runtime.clone();
+    vm.register_async_builtin("sync_mutex_acquire", move |args| {
+        let sync_runtime = sync_runtime.clone();
+        async move {
+            let key = args
+                .first()
+                .map(|a| a.display())
+                .unwrap_or_else(|| "__default__".to_string());
+            let timeout_ms = optional_timeout_ms(args.get(1));
+            let cancel_token =
+                crate::vm::clone_async_builtin_child_vm().and_then(|vm| vm.cancel_token.clone());
+            Ok(sync_runtime
+                .acquire("mutex", &key, 1, 1, timeout_ms, cancel_token)
+                .await?
+                .map(VmValue::SyncPermit)
+                .unwrap_or(VmValue::Nil))
+        }
+    });
+
+    let sync_runtime = vm.sync_runtime.clone();
+    vm.register_async_builtin("sync_semaphore_acquire", move |args| {
+        let sync_runtime = sync_runtime.clone();
+        async move {
+            let key = args
+                .first()
+                .map(|a| a.display())
+                .unwrap_or_else(|| "default".to_string());
+            let capacity = positive_u32_arg(&args, 1, 1, "sync_semaphore_acquire")?;
+            let permits = positive_u32_arg(&args, 2, 1, "sync_semaphore_acquire")?;
+            let timeout_ms = optional_timeout_ms(args.get(3));
+            let cancel_token =
+                crate::vm::clone_async_builtin_child_vm().and_then(|vm| vm.cancel_token.clone());
+            Ok(sync_runtime
+                .acquire(
+                    "semaphore",
+                    &key,
+                    capacity,
+                    permits,
+                    timeout_ms,
+                    cancel_token,
+                )
+                .await?
+                .map(VmValue::SyncPermit)
+                .unwrap_or(VmValue::Nil))
+        }
+    });
+
+    let sync_runtime = vm.sync_runtime.clone();
+    vm.register_async_builtin("sync_gate_acquire", move |args| {
+        let sync_runtime = sync_runtime.clone();
+        async move {
+            let key = args
+                .first()
+                .map(|a| a.display())
+                .unwrap_or_else(|| "default".to_string());
+            let limit = positive_u32_arg(&args, 1, 1, "sync_gate_acquire")?;
+            let timeout_ms = optional_timeout_ms(args.get(2));
+            let cancel_token =
+                crate::vm::clone_async_builtin_child_vm().and_then(|vm| vm.cancel_token.clone());
+            Ok(sync_runtime
+                .acquire("gate", &key, limit, 1, timeout_ms, cancel_token)
+                .await?
+                .map(VmValue::SyncPermit)
+                .unwrap_or(VmValue::Nil))
+        }
+    });
+
+    vm.register_builtin("sync_release", |args, _out| {
+        let Some(VmValue::SyncPermit(permit)) = args.first() else {
+            return Err(VmError::Runtime(
+                "sync_release: first argument must be a sync permit".to_string(),
+            ));
+        };
+        Ok(VmValue::Bool(permit.release()))
+    });
+
+    let sync_runtime = vm.sync_runtime.clone();
+    vm.register_builtin("sync_metrics", move |args, _out| {
+        let kind = args.first().map(|v| v.display());
+        let key = args.get(1).map(|v| v.display());
+        Ok(sync_runtime.metrics(kind.as_deref(), key.as_deref()))
+    });
+
     vm.register_builtin("channel", |args, _out| {
         let name = args
             .first()

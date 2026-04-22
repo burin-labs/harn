@@ -113,6 +113,7 @@ impl super::super::Vm {
     }
 
     pub(super) fn execute_pop_scope(&mut self) {
+        self.release_sync_guards_for_current_scope();
         self.env.pop_scope();
         if let Some(frame) = self.frames.last_mut() {
             frame.local_scope_depth = frame.local_scope_depth.saturating_sub(1);

@@ -6,7 +6,9 @@ use std::{cell::RefCell, future::Future, pin::Pin};
 use crate::mcp::VmMcpClientHandle;
 use crate::BuiltinId;
 
-use super::{VmAtomicHandle, VmChannelHandle, VmClosure, VmError, VmGenerator, VmRange};
+use super::{
+    VmAtomicHandle, VmChannelHandle, VmClosure, VmError, VmGenerator, VmRange, VmSyncPermitHandle,
+};
 
 /// An async builtin function for the VM.
 pub type VmAsyncBuiltinFn =
@@ -112,6 +114,7 @@ pub enum VmValue {
     TaskHandle(String),
     Channel(VmChannelHandle),
     Atomic(VmAtomicHandle),
+    SyncPermit(VmSyncPermitHandle),
     McpClient(VmMcpClientHandle),
     Set(Rc<Vec<VmValue>>),
     Generator(VmGenerator),
@@ -164,6 +167,7 @@ impl VmValue {
             VmValue::TaskHandle(_) => true,
             VmValue::Channel(_) => true,
             VmValue::Atomic(_) => true,
+            VmValue::SyncPermit(_) => true,
             VmValue::McpClient(_) => true,
             VmValue::Set(s) => !s.is_empty(),
             VmValue::Generator(_) => true,
@@ -194,6 +198,7 @@ impl VmValue {
             VmValue::TaskHandle(_) => "task_handle",
             VmValue::Channel(_) => "channel",
             VmValue::Atomic(_) => "atomic",
+            VmValue::SyncPermit(_) => "sync_permit",
             VmValue::McpClient(_) => "mcp_client",
             VmValue::Set(_) => "set",
             VmValue::Generator(_) => "generator",
@@ -410,6 +415,9 @@ impl VmValue {
             }
             VmValue::Atomic(a) => {
                 let _ = write!(out, "<atomic:{}>", a.value.load(Ordering::SeqCst));
+            }
+            VmValue::SyncPermit(p) => {
+                let _ = write!(out, "<sync_permit:{}:{}>", p.kind(), p.key());
             }
             VmValue::McpClient(c) => {
                 let _ = write!(out, "<mcp_client:{}>", c.name);

@@ -428,7 +428,9 @@ deadline 30s {
 MutexBlock { body: Vec<SNode> }
 ```
 
-Mutual exclusion block for concurrent access.
+Fair process-local default mutex block. The compiler emits a scoped mutex
+acquire before `body`; the VM releases the permit when the lexical scope or
+owning frame unwinds.
 
 ### `YieldExpr`
 

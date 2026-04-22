@@ -1,0 +1,10 @@
+pipeline test(task) {
+  let held = sync_gate_acquire("runner", 1)
+  let blocked = sync_gate_acquire("runner", 1, 0)
+  println(blocked == nil)
+  sync_release(held)
+  let metrics = sync_metrics("gate", "runner")
+  println(metrics?.acquisition_count)
+  println(metrics?.timeout_count)
+  println(metrics?.current_held)
+}

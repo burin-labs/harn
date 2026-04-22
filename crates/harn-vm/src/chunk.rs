@@ -136,6 +136,9 @@ pub enum Op {
     /// Store closure for deferred execution, push TaskHandle.
     /// Stack: closure → TaskHandle
     Spawn,
+    /// Acquire a process-local mutex for the current lexical scope.
+    /// arg: u16 constant index (key string).
+    SyncMutexEnter,
 
     // --- Imports ---
     /// Import a file. arg: u16 = constant index (path string).
@@ -297,6 +300,7 @@ impl Op {
         Op::ParallelMap,
         Op::ParallelSettle,
         Op::Spawn,
+        Op::SyncMutexEnter,
         Op::Import,
         Op::SelectiveImport,
         Op::DeadlineSetup,
@@ -953,6 +957,14 @@ impl Chunk {
                         self.constants[path_idx as usize],
                         names_idx,
                         self.constants[names_idx as usize]
+                    ));
+                }
+                x if x == Op::SyncMutexEnter as u8 => {
+                    let idx = self.read_u16(ip);
+                    ip += 2;
+                    out.push_str(&format!(
+                        "SYNC_MUTEX_ENTER {:>4} ({})\n",
+                        idx, self.constants[idx as usize]
                     ));
                 }
                 x if x == Op::DeadlineSetup as u8 => out.push_str("DEADLINE_SETUP\n"),

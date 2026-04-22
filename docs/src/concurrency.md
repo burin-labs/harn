@@ -168,13 +168,83 @@ Atomic operations return new atomic values (they don't mutate in place).
 
 ## Mutex
 
-Mutual exclusion for critical sections:
+`mutex { ... }` is a process-local, fair critical section inherited by
+`spawn` and `parallel` child VMs. It uses the default mutex key
+`"__default__"` and releases automatically when the lexical scope exits,
+including `throw`, `return`, `break`, and caught runtime errors.
 
 ```harn
 mutex {
   // only one task executes this block at a time
   var count = count + 1
 }
+```
+
+Use the named primitives when a workflow needs separate keys, timeouts,
+or observable permits:
+
+```harn
+fn update_index() { nil }
+
+let permit = sync_mutex_acquire("repo:index", 500ms)
+guard permit != nil else { throw "timed out waiting for repo index" }
+try {
+  update_index()
+} finally {
+  sync_release(permit)
+}
+```
+
+## Synchronization Taxonomy
+
+Harn synchronization is intentionally higher-level than OS locks:
+
+| Primitive | Scope | Fairness | Timeout/cancel | Use |
+|---|---|---|---|---|
+| `mutex { ... }` | process-local default key | FIFO | cancellable | Small critical-section updates |
+| `sync_mutex_acquire(key, timeout?)` | process-local named key | FIFO | returns `nil` on timeout, throws on cancellation | Named critical sections |
+| `sync_semaphore_acquire(key, capacity, permits?, timeout?)` | process-local named key | FIFO | returns `nil` on timeout, throws on cancellation | Bounded connector or model work |
+| `sync_gate_acquire(key, limit, timeout?)` | process-local named key | FIFO | returns `nil` on timeout, throws on cancellation | Fair runner admission |
+
+All permits are parking primitives, not spinlocks. A permit returned by
+`sync_*_acquire` must be passed to `sync_release(permit)`. Releasing twice
+returns `false`; the first release returns `true`.
+
+`sync_metrics(kind?, key?)` reports wait/held counters for matching
+primitives:
+
+```harn
+let m = sync_metrics("gate", "workflow-runner")
+println(m?.acquisition_count)
+println(m?.timeout_count)
+println(m?.current_queue_depth)
+```
+
+Metrics include `acquisition_count`, `timeout_count`,
+`cancellation_count`, `release_count`, `current_held`,
+`current_queue_depth`, `max_queue_depth`, `total_wait_ms`, and
+`total_held_ms`.
+
+Examples:
+
+```harn
+fn poll_connector() { nil }
+fn write_shared_state() { nil }
+
+// Connector polling: cap concurrent calls against one provider.
+let permit = sync_semaphore_acquire("connector:notion", 4, 1, 2s)
+guard permit != nil else { throw "connector poll saturated" }
+try { poll_connector() } finally { sync_release(permit) }
+
+// Fair workflow runner admission.
+let slot = sync_gate_acquire("workflow-runner", 8, 5s)
+guard slot != nil else { throw "runner queue timed out" }
+try { workflow_execute("task", {}, [], {}) } finally { sync_release(slot) }
+
+// Critical-section update.
+let lock = sync_mutex_acquire("state:account-42", 250ms)
+guard lock != nil else { throw "state lock timeout" }
+try { write_shared_state() } finally { sync_release(lock) }
 ```
 
 ## Deadline

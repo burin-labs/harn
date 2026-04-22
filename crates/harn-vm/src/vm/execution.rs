@@ -36,6 +36,8 @@ impl Vm {
                 }
             }
 
+            self.release_sync_guards_after_unwind(handler.frame_depth, handler.env_scope_depth);
+
             while self.frames.len() > handler.frame_depth {
                 if let Some(frame) = self.frames.pop() {
                     if let Some(ref dir) = frame.saved_source_dir {
@@ -144,6 +146,7 @@ impl Vm {
 
             if frame.ip >= frame.chunk.code.len() {
                 let val = self.stack.pop().unwrap_or(VmValue::Nil);
+                self.release_sync_guards_for_frame(self.frames.len());
                 let popped_frame = self.frames.pop().unwrap();
                 if let Some(ref dir) = popped_frame.saved_source_dir {
                     crate::stdlib::set_thread_source_dir(dir);
@@ -168,6 +171,7 @@ impl Vm {
                 Ok(None) => continue,
                 Err(VmError::Return(val)) => {
                     if let Some(popped_frame) = self.frames.pop() {
+                        self.release_sync_guards_for_frame(self.frames.len() + 1);
                         if let Some(ref dir) = popped_frame.saved_source_dir {
                             crate::stdlib::set_thread_source_dir(dir);
                         }
@@ -227,6 +231,7 @@ impl Vm {
 
         if frame.ip >= frame.chunk.code.len() {
             let val = self.stack.pop().unwrap_or(VmValue::Nil);
+            self.release_sync_guards_for_frame(self.frames.len());
             let popped_frame = self.frames.pop().unwrap();
             if self.frames.is_empty() {
                 return Ok(Some((val, false)));
@@ -247,6 +252,7 @@ impl Vm {
             Ok(None) => Ok(None),
             Err(VmError::Return(val)) => {
                 if let Some(popped_frame) = self.frames.pop() {
+                    self.release_sync_guards_for_frame(self.frames.len() + 1);
                     if let Some(ref dir) = popped_frame.saved_source_dir {
                         crate::stdlib::set_thread_source_dir(dir);
                     }
