@@ -35,6 +35,8 @@ use tokio::sync::oneshot;
 const STARTUP_PREFIX: &str = "[harn] HTTP listener ready on ";
 const STARTUP_NEEDLE: &str = "HTTP listener ready";
 const SHUTDOWN_NEEDLE: &str = "graceful shutdown complete";
+const PROCESS_FAIL_FAST_TIMEOUT: Duration = Duration::from_secs(5);
+const EVENT_FAIL_FAST_TIMEOUT: Duration = Duration::from_secs(2);
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -184,7 +186,6 @@ fn slack_handler_module(marker_path: &Path) -> String {
 import "std/triggers"
 
 pub fn on_slack(event: TriggerEvent) {{
-  sleep(100ms)
   write_file({marker:?}, event.kind)
 }}
 "#,
@@ -395,9 +396,9 @@ struct OrchestratorProcess {
 
 impl OrchestratorProcess {
     fn wait_for_listener_url(&mut self) -> String {
-        let deadline = Instant::now() + Duration::from_secs(30);
+        let deadline = Instant::now() + PROCESS_FAIL_FAST_TIMEOUT;
         while Instant::now() < deadline {
-            match self.rx.recv_timeout(Duration::from_millis(100)) {
+            match self.rx.recv_timeout(Duration::from_millis(25)) {
                 Ok(line) if line.contains(STARTUP_NEEDLE) => {
                     if let Some(url) = listener_url_from_line(&line) {
                         return url;
@@ -466,24 +467,24 @@ fn send_sigterm(child: &Child) {
 }
 
 fn wait_for_exit(child: &mut Child) {
-    let deadline = Instant::now() + Duration::from_secs(30);
+    let deadline = Instant::now() + PROCESS_FAIL_FAST_TIMEOUT;
     while Instant::now() < deadline {
         if let Some(status) = child.try_wait().unwrap() {
             assert!(status.success(), "child exited unsuccessfully: {status}");
             return;
         }
-        thread::sleep(Duration::from_millis(100));
+        thread::sleep(Duration::from_millis(25));
     }
     panic!("timed out waiting for orchestrator exit");
 }
 
 async fn wait_for_exit_async(child: &mut Child) -> std::process::ExitStatus {
-    let deadline = Instant::now() + Duration::from_secs(30);
+    let deadline = Instant::now() + PROCESS_FAIL_FAST_TIMEOUT;
     while Instant::now() < deadline {
         if let Some(status) = child.try_wait().unwrap() {
             return status;
         }
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        tokio::time::sleep(Duration::from_millis(25)).await;
     }
     panic!("timed out waiting for orchestrator exit");
 }
@@ -835,6 +836,8 @@ async fn slack_webhook_acknowledges_before_handler_finishes() {
     let _lock = lock_orchestrator_tests();
     let temp = TempDir::new().unwrap();
     let marker_path = temp.path().join("slack-handler.txt");
+    let release_path = temp.path().join("release-slack-dispatch");
+    let release_path_value = release_path.to_string_lossy().into_owned();
     write_file(temp.path(), "harn.toml", &slack_manifest(None));
     write_file(temp.path(), "lib.harn", &slack_handler_module(&marker_path));
 
@@ -842,6 +845,10 @@ async fn slack_webhook_acknowledges_before_handler_finishes() {
     let envs = [
         ("HARN_SECRET_PROVIDERS", "env"),
         ("HARN_SECRET_SLACK_SIGNING_SECRET", secret),
+        (
+            "HARN_TEST_ORCHESTRATOR_INBOX_TASK_RELEASE_FILE",
+            release_path_value.as_str(),
+        ),
     ];
     let mut process = spawn_orchestrator(&temp, &[], &envs);
     let base_url = process.wait_for_listener_url();
@@ -881,9 +888,10 @@ async fn slack_webhook_acknowledges_before_handler_finishes() {
     );
     assert!(
         !marker_path.exists(),
-        "handler should not have completed before the HTTP ack"
+        "dispatch should not have completed before the HTTP ack"
     );
-    wait_for_path(&marker_path, Duration::from_secs(10));
+    fs::write(&release_path, b"release").unwrap();
+    wait_for_path(&marker_path, EVENT_FAIL_FAST_TIMEOUT);
     let marker = fs::read_to_string(&marker_path).unwrap();
     assert_eq!(marker, "app_mention");
 
@@ -1157,7 +1165,7 @@ async fn notion_webhook_signed_delivery_is_dispatched() {
         .unwrap();
     assert_status(response, StatusCode::OK).await;
 
-    wait_for_path(&marker_path, Duration::from_secs(10));
+    wait_for_path(&marker_path, EVENT_FAIL_FAST_TIMEOUT);
     let marker = fs::read_to_string(&marker_path).unwrap();
     assert_eq!(marker, "page.content_updated");
 
@@ -1205,7 +1213,7 @@ async fn harn_connector_module_round_trips_inbound_and_client_calls() {
         .unwrap();
     assert_status(response, StatusCode::OK).await;
 
-    wait_for_path(&marker_path, Duration::from_secs(10));
+    wait_for_path(&marker_path, EVENT_FAIL_FAST_TIMEOUT);
     let marker: JsonValue =
         serde_json::from_str(&fs::read_to_string(&marker_path).unwrap()).unwrap();
     assert_eq!(
@@ -1519,7 +1527,7 @@ async fn watch_mode_reloads_manifest_changes() {
     let mut auth_headers = json_headers();
     auth_headers.insert(AUTHORIZATION, HeaderValue::from_static("Bearer reload-key"));
 
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + EVENT_FAIL_FAST_TIMEOUT;
     loop {
         let response = client
             .post(format!("{base_url}/a2a/review-watch"))
@@ -1533,7 +1541,7 @@ async fn watch_mode_reloads_manifest_changes() {
         }
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
         assert!(Instant::now() < deadline, "watch reload never applied");
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        tokio::time::sleep(Duration::from_millis(25)).await;
     }
 
     let retired = client
@@ -1732,6 +1740,10 @@ async fn oversized_request_body_is_rejected() {
 async fn graceful_shutdown_waits_for_in_flight_request() {
     let _lock = lock_orchestrator_tests();
     let temp = TempDir::new().unwrap();
+    let request_entered_path = temp.path().join("request-entered");
+    let request_release_path = temp.path().join("request-release");
+    let request_entered_value = request_entered_path.to_string_lossy().into_owned();
+    let request_release_value = request_release_path.to_string_lossy().into_owned();
     write_file(temp.path(), "harn.toml", &base_manifest(None));
     write_file(temp.path(), "lib.harn", handler_module());
 
@@ -1739,7 +1751,14 @@ async fn graceful_shutdown_waits_for_in_flight_request() {
     let envs = [
         ("HARN_SECRET_PROVIDERS", "env"),
         ("HARN_SECRET_GITHUB_WEBHOOK_SECRET", secret),
-        ("HARN_ORCHESTRATOR_TEST_REQUEST_DELAY_MS", "500"),
+        (
+            "HARN_ORCHESTRATOR_TEST_REQUEST_ENTERED_FILE",
+            request_entered_value.as_str(),
+        ),
+        (
+            "HARN_ORCHESTRATOR_TEST_REQUEST_RELEASE_FILE",
+            request_release_value.as_str(),
+        ),
     ];
     let mut process = spawn_orchestrator(&temp, &[], &envs);
     let base_url = process.wait_for_listener_url();
@@ -1752,8 +1771,9 @@ async fn graceful_shutdown_waits_for_in_flight_request() {
         async move { client.post(url).headers(headers).body(body).send().await }
     });
 
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    wait_for_path(&request_entered_path, EVENT_FAIL_FAST_TIMEOUT);
     send_sigterm(&process.child);
+    fs::write(&request_release_path, b"release").unwrap();
     let response = request.await.unwrap().unwrap();
     assert_status(response, StatusCode::OK).await;
 
@@ -1868,7 +1888,7 @@ async fn otel_exports_ingest_and_dispatch_spans_with_shared_trace_id() {
     assert!(status.success(), "status={status} stderr={stderr}");
     assert!(stderr.contains(SHUTDOWN_NEEDLE), "stderr={stderr}");
 
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + EVENT_FAIL_FAST_TIMEOUT;
     let spans = loop {
         let spans = collector.collected_spans();
         let has_ingest = spans.iter().any(|span| span.name == "ingest");
@@ -1886,7 +1906,7 @@ async fn otel_exports_ingest_and_dispatch_spans_with_shared_trace_id() {
                     .collect::<Vec<_>>()
             );
         }
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        tokio::time::sleep(Duration::from_millis(25)).await;
     };
 
     let ingest = spans.iter().find(|span| span.name == "ingest").unwrap();

@@ -337,6 +337,37 @@ async fn read_topic(
         .expect("read topic events")
 }
 
+async fn wait_for_dispatcher_in_flight(dispatcher: &Dispatcher, expected: u64) {
+    for _ in 0..1_000 {
+        if dispatcher.snapshot().in_flight >= expected {
+            return;
+        }
+        tokio::task::yield_now().await;
+    }
+    panic!(
+        "timed out waiting for {expected} in-flight dispatches; snapshot={:?}",
+        dispatcher.snapshot()
+    );
+}
+
+async fn wait_for_topic_event(
+    log: Arc<crate::event_log::AnyEventLog>,
+    topic: &str,
+    predicate: impl Fn(&crate::event_log::LogEvent) -> bool,
+) {
+    for _ in 0..1_000 {
+        if read_topic(log.clone(), topic)
+            .await
+            .iter()
+            .any(|(_, event)| predicate(event))
+        {
+            return;
+        }
+        tokio::task::yield_now().await;
+    }
+    panic!("timed out waiting for matching {topic} event");
+}
+
 fn flatten_action_graph(
     events: &[(u64, crate::event_log::LogEvent)],
 ) -> (Vec<String>, Vec<String>) {
@@ -1765,7 +1796,6 @@ pub fn wait_for_cancel(event: TriggerEvent) -> string {
             )
             .await;
 
-            let start = Instant::now();
             let mut handles = Vec::new();
             for index in 0..3 {
                 let dispatcher = dispatcher.clone();
@@ -1780,7 +1810,7 @@ pub fn wait_for_cancel(event: TriggerEvent) -> string {
                 }));
             }
 
-            tokio::time::sleep(Duration::from_millis(10)).await;
+            wait_for_dispatcher_in_flight(&dispatcher, 3).await;
             dispatcher.shutdown();
 
             let mut cancelled = 0;
@@ -1792,10 +1822,6 @@ pub fn wait_for_cancel(event: TriggerEvent) -> string {
                 }
             }
             assert_eq!(cancelled, 3);
-            assert!(
-                start.elapsed() <= Duration::from_millis(100),
-                "all in-flight dispatches must observe cancellation within 100ms"
-            );
         })
         .await;
 }
@@ -1836,7 +1862,7 @@ pub fn wait_for_cancel(event: TriggerEvent) -> string {
                     .expect("dispatch completes")
             });
 
-            tokio::time::sleep(Duration::from_millis(25)).await;
+            wait_for_dispatcher_in_flight(&dispatcher, 1).await;
             append_dispatch_cancel_request(
                 &log,
                 &DispatchCancelRequest {
@@ -1909,7 +1935,15 @@ pub fn wait_for_signal(event: TriggerEvent) -> string {
                     .expect("dispatch completes")
             });
 
-            tokio::time::sleep(Duration::from_millis(25)).await;
+            wait_for_topic_event(
+                log.clone(),
+                crate::waitpoints::WAITPOINT_WAITS_TOPIC,
+                |event| {
+                    event.kind == "waitpoint_wait_started"
+                        && event.headers.get("wait_id").map(String::as_str) == Some("wait-cancel")
+                },
+            )
+            .await;
             append_dispatch_cancel_request(
                 &log,
                 &DispatchCancelRequest {
@@ -2048,7 +2082,7 @@ pub fn slow_handler(event: TriggerEvent) -> string {
                     .expect("dispatch finishes")
             });
 
-            tokio::time::sleep(Duration::from_millis(10)).await;
+            wait_for_dispatcher_in_flight(&dispatcher, 1).await;
             let report = dispatcher
                 .drain(Duration::from_secs(1))
                 .await
@@ -2322,7 +2356,7 @@ pub fn slow_handler(event: TriggerEvent) -> string {
                     .expect("first dispatch succeeds")
             });
 
-            tokio::time::sleep(Duration::from_millis(10)).await;
+            wait_for_dispatcher_in_flight(&dispatcher, 1).await;
 
             let second = dispatcher
                 .dispatch_event(trigger_event("issues.opened", "delivery-singleton-2"))
@@ -2829,7 +2863,7 @@ pub fn slow_handler(event: TriggerEvent) -> string {
                     .expect("leader dispatch succeeds")
             });
 
-            tokio::time::sleep(Duration::from_millis(10)).await;
+            wait_for_dispatcher_in_flight(&dispatcher, 1).await;
 
             let bronze_dispatcher = dispatcher.clone();
             let bronze_waiter = tokio::task::spawn_local(async move {

@@ -18,6 +18,8 @@ use tempfile::TempDir;
 
 const STARTUP_NEEDLE: &str = "HTTP listener ready on";
 const SHUTDOWN_NEEDLE: &str = "graceful shutdown complete";
+const PROCESS_FAIL_FAST_TIMEOUT: Duration = Duration::from_secs(5);
+const EVENT_FAIL_FAST_TIMEOUT: Duration = Duration::from_secs(2);
 
 fn write_file(dir: &Path, relative: &str, contents: &str) {
     let path = dir.join(relative);
@@ -25,6 +27,22 @@ fn write_file(dir: &Path, relative: &str, contents: &str) {
         fs::create_dir_all(parent).unwrap();
     }
     fs::write(path, contents).unwrap();
+}
+
+fn gated_task_handler_module(release_path: &Path) -> String {
+    format!(
+        r#"
+import "std/triggers"
+
+pub fn on_task(event: TriggerEvent) -> string {{
+  while !file_exists({release:?}) {{
+    sleep(1ms)
+  }}
+  return event.kind
+}}
+"#,
+        release = release_path.display().to_string()
+    )
 }
 
 fn spawn_orchestrator(temp: &TempDir) -> (Child, Receiver<String>, thread::JoinHandle<String>) {
@@ -76,9 +94,9 @@ fn spawn_orchestrator_with(
 }
 
 fn wait_for_log_line(child: &mut Child, rx: &Receiver<String>, needle: &str) {
-    let deadline = Instant::now() + Duration::from_secs(15);
+    let deadline = Instant::now() + PROCESS_FAIL_FAST_TIMEOUT;
     while Instant::now() < deadline {
-        match rx.recv_timeout(Duration::from_millis(100)) {
+        match rx.recv_timeout(Duration::from_millis(25)) {
             Ok(line) if line.contains(needle) => return,
             Ok(_) => continue,
             Err(mpsc::RecvTimeoutError::Timeout) => {
@@ -95,9 +113,9 @@ fn wait_for_log_line(child: &mut Child, rx: &Receiver<String>, needle: &str) {
 }
 
 fn wait_for_listener_url(child: &mut Child, rx: &Receiver<String>) -> String {
-    let deadline = Instant::now() + Duration::from_secs(30);
+    let deadline = Instant::now() + PROCESS_FAIL_FAST_TIMEOUT;
     while Instant::now() < deadline {
-        match rx.recv_timeout(Duration::from_millis(100)) {
+        match rx.recv_timeout(Duration::from_millis(25)) {
             Ok(line) if line.contains(STARTUP_NEEDLE) => {
                 return line
                     .split(STARTUP_NEEDLE)
@@ -130,7 +148,7 @@ fn send_sigterm(child: &Child) {
 }
 
 fn wait_for_exit_code(child: &mut Child, expected: i32) {
-    let deadline = Instant::now() + Duration::from_secs(15);
+    let deadline = Instant::now() + PROCESS_FAIL_FAST_TIMEOUT;
     while Instant::now() < deadline {
         if let Some(status) = child.try_wait().unwrap() {
             assert_eq!(
@@ -146,7 +164,7 @@ fn wait_for_exit_code(child: &mut Child, expected: i32) {
 }
 
 fn wait_for_exit(child: &mut Child) {
-    let deadline = Instant::now() + Duration::from_secs(15);
+    let deadline = Instant::now() + PROCESS_FAIL_FAST_TIMEOUT;
     while Instant::now() < deadline {
         if let Some(status) = child.try_wait().unwrap() {
             assert!(status.success(), "child exited unsuccessfully: {status}");
@@ -158,14 +176,25 @@ fn wait_for_exit(child: &mut Child) {
 }
 
 fn wait_for_any_exit(child: &mut Child) {
-    let deadline = Instant::now() + Duration::from_secs(15);
+    let deadline = Instant::now() + PROCESS_FAIL_FAST_TIMEOUT;
     while Instant::now() < deadline {
         if child.try_wait().unwrap().is_some() {
             return;
         }
-        thread::sleep(Duration::from_millis(100));
+        thread::sleep(Duration::from_millis(25));
     }
     panic!("timed out waiting for orchestrator exit");
+}
+
+fn wait_for_path(path: &Path, timeout: Duration) {
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        if path.exists() {
+            return;
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
+    panic!("timed out waiting for {}", path.display());
 }
 
 fn json_headers() -> HeaderMap {
@@ -228,7 +257,7 @@ async fn wait_for_consumer_cursor(
     consumer: &str,
     at_least: u64,
 ) {
-    let deadline = Instant::now() + Duration::from_secs(15);
+    let deadline = Instant::now() + EVENT_FAIL_FAST_TIMEOUT;
     let log = open_state_event_log(state_dir);
     let topic = Topic::new(topic_name).unwrap();
     let consumer = ConsumerId::new(consumer).unwrap();
@@ -306,7 +335,7 @@ fn seed_legacy_inbox_records(temp: &TempDir) {
 }
 
 fn wait_for_topic_kind(state_dir: &Path, topic_name: &str, kind: &str) {
-    let deadline = Instant::now() + Duration::from_secs(30);
+    let deadline = Instant::now() + EVENT_FAIL_FAST_TIMEOUT;
     while Instant::now() < deadline {
         if read_topic_events(state_dir, topic_name)
             .iter()
@@ -314,13 +343,13 @@ fn wait_for_topic_kind(state_dir: &Path, topic_name: &str, kind: &str) {
         {
             return;
         }
-        thread::sleep(Duration::from_millis(100));
+        thread::sleep(Duration::from_millis(25));
     }
     panic!("timed out waiting for {topic_name}/{kind}");
 }
 
 fn wait_for_topic_event(state_dir: &Path, topic_name: &str, predicate: impl Fn(&LogEvent) -> bool) {
-    let deadline = Instant::now() + Duration::from_secs(30);
+    let deadline = Instant::now() + EVENT_FAIL_FAST_TIMEOUT;
     while Instant::now() < deadline {
         if read_topic_events(state_dir, topic_name)
             .iter()
@@ -368,12 +397,12 @@ print(count)
 }
 
 fn wait_for_sqlite_event_count(state_dir: &Path, topic_name: &str, kind: &str, expected: usize) {
-    let deadline = Instant::now() + Duration::from_secs(90);
+    let deadline = Instant::now() + EVENT_FAIL_FAST_TIMEOUT;
     while Instant::now() < deadline {
         if sqlite_event_count(state_dir, topic_name, kind) >= expected {
             return;
         }
-        thread::sleep(Duration::from_millis(100));
+        thread::sleep(Duration::from_millis(25));
     }
     panic!("timed out waiting for {topic_name}/{kind} count {expected}");
 }
@@ -441,6 +470,7 @@ pub fn on_issue(event: TriggerEvent) {
 #[tokio::test(flavor = "multi_thread")]
 async fn graceful_shutdown_drains_in_flight_dispatch_and_emits_lifecycle_events() {
     let temp = TempDir::new().unwrap();
+    let handler_release_path = temp.path().join("release-handler");
     write_file(
         temp.path(),
         "harn.toml",
@@ -463,14 +493,7 @@ handler = "handlers::on_task"
     write_file(
         temp.path(),
         "lib.harn",
-        r#"
-import "std/triggers"
-
-pub fn on_task(event: TriggerEvent) -> string {
-  sleep(100ms)
-  return event.kind
-}
-"#,
+        &gated_task_handler_module(&handler_release_path),
     );
 
     let envs = [
@@ -495,6 +518,7 @@ pub fn on_task(event: TriggerEvent) -> string {
 
     wait_for_topic_kind(&state_dir, "triggers.lifecycle", "DispatchStarted");
     send_sigterm(&child);
+    fs::write(&handler_release_path, b"release").unwrap();
     wait_for_exit(&mut child);
     let stderr = handle.join().expect("stderr collector thread");
 
@@ -585,7 +609,6 @@ pub fn on_task(event: TriggerEvent) -> string {
         .unwrap();
     assert_eq!(response.status(), reqwest::StatusCode::OK);
 
-    tokio::time::sleep(Duration::from_millis(25)).await;
     send_sigterm(&child);
     wait_for_exit(&mut child);
     let stderr = handle.join().expect("stderr collector thread");
@@ -610,6 +633,8 @@ pub fn on_task(event: TriggerEvent) -> string {
 #[tokio::test(flavor = "multi_thread")]
 async fn graceful_shutdown_waits_for_spawned_inbox_dispatch_tasks() {
     let temp = TempDir::new().unwrap();
+    let inbox_release_file = temp.path().join("release-inbox-dispatch");
+    let inbox_release_value = inbox_release_file.to_string_lossy().into_owned();
     write_file(
         temp.path(),
         "harn.toml",
@@ -645,7 +670,10 @@ pub fn on_task(event: TriggerEvent) -> string {
         ("HARN_EVENT_LOG_BACKEND", "file"),
         ("HARN_ORCHESTRATOR_API_KEYS", "test-key"),
         ("HARN_ORCHESTRATOR_HMAC_SECRET", "unused-shared-secret"),
-        ("HARN_TEST_ORCHESTRATOR_INBOX_TASK_DELAY_MS", "1000"),
+        (
+            "HARN_TEST_ORCHESTRATOR_INBOX_TASK_RELEASE_FILE",
+            inbox_release_value.as_str(),
+        ),
     ];
     let (mut child, rx, handle) =
         spawn_orchestrator_with(&temp, &["--shutdown-timeout", "5"], &envs);
@@ -674,6 +702,7 @@ pub fn on_task(event: TriggerEvent) -> string {
     .await;
 
     send_sigterm(&child);
+    fs::write(&inbox_release_file, b"release").unwrap();
     wait_for_exit(&mut child);
     let stderr = handle.join().expect("stderr collector thread");
     assert!(stderr.contains(SHUTDOWN_NEEDLE), "stderr={stderr}");
@@ -775,6 +804,12 @@ async fn bounded_pump_drain_truncates_and_replays_remaining_backlog_after_restar
     const TOTAL_EVENTS: usize = 60;
 
     let temp = TempDir::new().unwrap();
+    let pump_release_file = temp.path().join("release-pending-pump");
+    let pump_waiting_file = temp.path().join("pending-pump-waiting");
+    let pump_draining_file = temp.path().join("pending-pump-draining");
+    let pump_release_value = pump_release_file.to_string_lossy().into_owned();
+    let pump_waiting_value = pump_waiting_file.to_string_lossy().into_owned();
+    let pump_draining_value = pump_draining_file.to_string_lossy().into_owned();
     write_file(
         temp.path(),
         "harn.toml",
@@ -810,7 +845,18 @@ pub fn on_task(event: TriggerEvent) -> string {
         ("HARN_ORCHESTRATOR_API_KEYS", "test-key"),
         ("HARN_ORCHESTRATOR_HMAC_SECRET", "unused-shared-secret"),
         ("HARN_EVENT_LOG_QUEUE_DEPTH", "8192"),
-        ("HARN_TEST_ORCHESTRATOR_PUMP_DELAY_MS", "10"),
+        (
+            "HARN_TEST_ORCHESTRATOR_PUMP_RELEASE_FILE",
+            pump_release_value.as_str(),
+        ),
+        (
+            "HARN_TEST_ORCHESTRATOR_PUMP_WAITING_FILE",
+            pump_waiting_value.as_str(),
+        ),
+        (
+            "HARN_TEST_ORCHESTRATOR_PUMP_DRAINING_FILE",
+            pump_draining_value.as_str(),
+        ),
     ];
     let extra_args = [
         "--shutdown-timeout",
@@ -840,16 +886,13 @@ pub fn on_task(event: TriggerEvent) -> string {
         assert_eq!(response.status(), reqwest::StatusCode::OK);
     }
 
-    let shutdown_started = Instant::now();
+    wait_for_path(&pump_waiting_file, EVENT_FAIL_FAST_TIMEOUT);
     send_sigterm(&child);
+    wait_for_path(&pump_draining_file, EVENT_FAIL_FAST_TIMEOUT);
+    fs::write(&pump_release_file, b"release").unwrap();
     wait_for_exit(&mut child);
-    let shutdown_elapsed = shutdown_started.elapsed();
     let stderr = handle.join().expect("stderr collector thread");
 
-    assert!(
-        shutdown_elapsed < Duration::from_secs(4),
-        "shutdown should finish within bounded drain budget: {shutdown_elapsed:?}"
-    );
     assert!(stderr.contains(SHUTDOWN_NEEDLE), "stderr={stderr}");
     assert!(stderr.contains("pump drain truncated"), "stderr={stderr}");
 

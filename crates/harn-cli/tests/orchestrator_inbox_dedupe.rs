@@ -17,6 +17,8 @@ use tempfile::TempDir;
 // fail-after-emit test hook can terminate the process before the HTTP listener
 // readiness line is logged.
 const STARTUP_NEEDLE: &str = "activated connectors: cron(1)";
+const PROCESS_FAIL_FAST_TIMEOUT: Duration = Duration::from_secs(5);
+const EVENT_FAIL_FAST_TIMEOUT: Duration = Duration::from_secs(2);
 
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -42,13 +44,6 @@ fn copy_dir_recursive(source: &Path, destination: &Path) {
 fn seed_fixture(temp: &TempDir) {
     let fixture = repo_root().join("conformance/fixtures/triggers/inbox_dedupe_restart");
     copy_dir_recursive(&fixture, temp.path());
-    let manifest = temp.path().join("harn.toml");
-    let contents = fs::read_to_string(&manifest).unwrap();
-    fs::write(
-        &manifest,
-        contents.replace("*/2 * * * * *", "*/1 * * * * *"),
-    )
-    .unwrap();
 }
 
 fn spawn_orchestrator(
@@ -92,9 +87,9 @@ fn spawn_orchestrator(
 }
 
 fn wait_for_log_line(child: &mut Child, rx: &Receiver<String>, needle: &str) {
-    let deadline = Instant::now() + Duration::from_secs(15);
+    let deadline = Instant::now() + PROCESS_FAIL_FAST_TIMEOUT;
     while Instant::now() < deadline {
-        match rx.recv_timeout(Duration::from_millis(100)) {
+        match rx.recv_timeout(Duration::from_millis(25)) {
             Ok(line) if line.contains(needle) => return,
             Ok(_) => continue,
             Err(mpsc::RecvTimeoutError::Timeout) => {
@@ -111,7 +106,7 @@ fn wait_for_log_line(child: &mut Child, rx: &Receiver<String>, needle: &str) {
 }
 
 fn wait_for_exit_code(child: &mut Child, expected: i32) {
-    let deadline = Instant::now() + Duration::from_secs(15);
+    let deadline = Instant::now() + PROCESS_FAIL_FAST_TIMEOUT;
     while Instant::now() < deadline {
         if let Some(status) = child.try_wait().unwrap() {
             assert_eq!(
@@ -121,7 +116,7 @@ fn wait_for_exit_code(child: &mut Child, expected: i32) {
             );
             return;
         }
-        thread::sleep(Duration::from_millis(100));
+        thread::sleep(Duration::from_millis(25));
     }
     panic!("timed out waiting for orchestrator exit");
 }
@@ -136,13 +131,13 @@ fn send_sigterm(child: &Child) {
 }
 
 fn wait_for_successful_exit(child: &mut Child) {
-    let deadline = Instant::now() + Duration::from_secs(15);
+    let deadline = Instant::now() + PROCESS_FAIL_FAST_TIMEOUT;
     while Instant::now() < deadline {
         if let Some(status) = child.try_wait().unwrap() {
             assert!(status.success(), "child exited unsuccessfully: {status}");
             return;
         }
-        thread::sleep(Duration::from_millis(100));
+        thread::sleep(Duration::from_millis(25));
     }
     panic!("timed out waiting for orchestrator exit");
 }
@@ -165,7 +160,7 @@ async fn read_tick_dedupe_counts(temp: &TempDir) -> HashMap<String, usize> {
 }
 
 async fn wait_for_tick_count(temp: &TempDir, min_count: usize) -> HashMap<String, usize> {
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + EVENT_FAIL_FAST_TIMEOUT;
     loop {
         let counts = read_tick_dedupe_counts(temp).await;
         if counts.len() >= min_count {
@@ -184,8 +179,13 @@ async fn restart_after_emit_does_not_duplicate_cron_dispatch() {
     let temp = TempDir::new().unwrap();
     seed_fixture(&temp);
 
-    let (mut crashing_child, crashing_rx, crashing_handle) =
-        spawn_orchestrator(&temp, &[("HARN_TEST_CRON_FAIL_AFTER_EMIT", "1")]);
+    let (mut crashing_child, crashing_rx, crashing_handle) = spawn_orchestrator(
+        &temp,
+        &[
+            ("HARN_TEST_CRON_SINGLE_TICK_AT", "1800000000"),
+            ("HARN_TEST_CRON_FAIL_AFTER_EMIT", "1"),
+        ],
+    );
     drop(crashing_rx);
     wait_for_exit_code(&mut crashing_child, 86);
     let crashing_stderr = crashing_handle.join().expect("stderr collector thread");
@@ -199,7 +199,8 @@ async fn restart_after_emit_does_not_duplicate_cron_dispatch() {
         .expect("first crashed tick")
         .clone();
 
-    let (mut second_child, second_rx, second_handle) = spawn_orchestrator(&temp, &[]);
+    let (mut second_child, second_rx, second_handle) =
+        spawn_orchestrator(&temp, &[("HARN_TEST_CRON_SINGLE_TICK_AT", "1800000001")]);
     wait_for_log_line(&mut second_child, &second_rx, STARTUP_NEEDLE);
     let counts = wait_for_tick_count(&temp, 2).await;
     send_sigterm(&second_child);

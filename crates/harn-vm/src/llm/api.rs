@@ -739,10 +739,8 @@ mod tests {
             .set_nonblocking(true)
             .expect("set listener nonblocking");
         let handle = std::thread::spawn(move || {
-            // 15s accept window: shorter windows were flaky under parallel
-            // CI load (listener exiting before reqwest connects caused
-            // transport errors instead of the tested HTTP 500 payload).
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+            // Fail fast if the client never reaches the stub listener.
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
             let (mut stream, _) = loop {
                 match listener.accept() {
                     Ok(pair) => break pair,
@@ -811,8 +809,8 @@ mod tests {
                     opts.output_schema = None;
                     let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
                     let call = tokio::time::timeout(
-                        // Must stay under the stub's 15s accept window.
-                        std::time::Duration::from_secs(12),
+                        // Must stay inside the stub's fail-fast accept window.
+                        std::time::Duration::from_secs(2),
                         vm_call_llm_full_streaming_offthread(&opts, tx),
                     )
                     .await;

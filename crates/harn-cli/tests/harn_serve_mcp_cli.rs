@@ -13,9 +13,10 @@ use std::time::{Duration, Instant};
 
 use serde_json::{json, Value as JsonValue};
 use tempfile::TempDir;
+use tokio::sync::oneshot;
 
 static HARN_SERVE_MCP_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-const JSON_RPC_TIMEOUT: Duration = Duration::from_secs(30);
+const TEST_TIMEOUT: Duration = Duration::from_secs(2);
 
 fn lock_harn_serve_mcp_tests() -> MutexGuard<'static, ()> {
     HARN_SERVE_MCP_TEST_LOCK
@@ -82,9 +83,9 @@ where
 }
 
 fn wait_for_http_listener(child: &mut std::process::Child, rx: &Receiver<String>) -> String {
-    let deadline = Instant::now() + Duration::from_secs(30);
+    let deadline = Instant::now() + TEST_TIMEOUT;
     while Instant::now() < deadline {
-        match rx.recv_timeout(Duration::from_millis(100)) {
+        match rx.recv_timeout(Duration::from_millis(25)) {
             Ok(line) if line.contains("MCP workflow server ready on ") => {
                 return line
                     .split("MCP workflow server ready on ")
@@ -113,6 +114,25 @@ fn parse_sse_messages(body: &str) -> Vec<JsonValue> {
         .filter(|line| !line.is_empty())
         .filter_map(|line| serde_json::from_str(line).ok())
         .collect()
+}
+
+async fn collect_sse_body_after_progress(
+    mut response: reqwest::Response,
+    mut progress_seen: Option<oneshot::Sender<()>>,
+) -> String {
+    let mut body = String::new();
+    while let Some(chunk) = response.chunk().await.unwrap() {
+        let chunk = std::str::from_utf8(&chunk).unwrap();
+        body.push_str(chunk);
+        if progress_seen.is_some()
+            && parse_sse_messages(&body)
+                .iter()
+                .any(|message| message["method"] == "notifications/progress")
+        {
+            let _ = progress_seen.take().unwrap().send(());
+        }
+    }
+    body
 }
 
 #[test]
@@ -150,7 +170,7 @@ fn serve_mcp_stdio_lists_calls_and_cancels_exported_functions() {
         })
     )
     .unwrap();
-    let init = recv_until(&rx, JSON_RPC_TIMEOUT, |message| message["id"] == 1);
+    let init = recv_until(&rx, TEST_TIMEOUT, |message| message["id"] == 1);
     assert_eq!(init["result"]["serverInfo"]["name"], "server");
 
     writeln!(
@@ -164,7 +184,7 @@ fn serve_mcp_stdio_lists_calls_and_cancels_exported_functions() {
         })
     )
     .unwrap();
-    let tools = recv_until(&rx, JSON_RPC_TIMEOUT, |message| message["id"] == 2);
+    let tools = recv_until(&rx, TEST_TIMEOUT, |message| message["id"] == 2);
     let names = tools["result"]["tools"]
         .as_array()
         .unwrap()
@@ -187,7 +207,7 @@ fn serve_mcp_stdio_lists_calls_and_cancels_exported_functions() {
         })
     )
     .unwrap();
-    let greet = recv_until(&rx, JSON_RPC_TIMEOUT, |message| message["id"] == 3);
+    let greet = recv_until(&rx, TEST_TIMEOUT, |message| message["id"] == 3);
     assert_eq!(
         greet["result"]["structuredContent"]["message"],
         json!("Hello, alice!")
@@ -207,7 +227,7 @@ fn serve_mcp_stdio_lists_calls_and_cancels_exported_functions() {
         })
     )
     .unwrap();
-    let fail = recv_until(&rx, JSON_RPC_TIMEOUT, |message| message["id"] == 4);
+    let fail = recv_until(&rx, TEST_TIMEOUT, |message| message["id"] == 4);
     assert_eq!(fail["result"]["isError"], json!(true));
     assert!(fail.get("error").is_none());
 
@@ -226,7 +246,7 @@ fn serve_mcp_stdio_lists_calls_and_cancels_exported_functions() {
         })
     )
     .unwrap();
-    let progress = recv_until(&rx, JSON_RPC_TIMEOUT, |message| {
+    let progress = recv_until(&rx, TEST_TIMEOUT, |message| {
         message["method"] == "notifications/progress"
     });
     assert_eq!(progress["params"]["progressToken"], json!("spin-stdio"));
@@ -256,7 +276,7 @@ fn serve_mcp_stdio_lists_calls_and_cancels_exported_functions() {
         })
     )
     .unwrap();
-    let ping = recv_until(&rx, JSON_RPC_TIMEOUT, |message| message["id"] == 6);
+    let ping = recv_until(&rx, TEST_TIMEOUT, |message| message["id"] == 6);
     assert_eq!(ping["result"], json!({}));
 
     drop(stdin);
@@ -360,12 +380,13 @@ async fn serve_mcp_http_streams_progress_and_enforces_api_keys() {
     let unauthorized_messages = parse_sse_messages(&unauthorized_body);
     assert_eq!(unauthorized_messages[0]["error"]["code"], json!(-32001));
 
+    let (progress_tx, progress_rx) = oneshot::channel();
     let call_task = tokio::spawn({
         let client = client.clone();
         let url = url.clone();
         let session_id = session_id.clone();
         async move {
-            client
+            let response = client
                 .post(&url)
                 .header("Accept", "application/json, text/event-stream")
                 .header("mcp-session-id", &session_id)
@@ -382,14 +403,15 @@ async fn serve_mcp_http_streams_progress_and_enforces_api_keys() {
                 }))
                 .send()
                 .await
-                .unwrap()
-                .text()
-                .await
-                .unwrap()
+                .unwrap();
+            collect_sse_body_after_progress(response, Some(progress_tx)).await
         }
     });
 
-    tokio::time::sleep(Duration::from_millis(150)).await;
+    tokio::time::timeout(TEST_TIMEOUT, progress_rx)
+        .await
+        .expect("timed out waiting for streamed MCP progress notification")
+        .expect("streaming MCP request ended before emitting progress");
     let cancel = client
         .post(&url)
         .header("Accept", "application/json, text/event-stream")
@@ -407,7 +429,10 @@ async fn serve_mcp_http_streams_progress_and_enforces_api_keys() {
         .unwrap();
     assert_eq!(cancel.status(), reqwest::StatusCode::ACCEPTED);
 
-    let body = call_task.await.unwrap();
+    let body = tokio::time::timeout(TEST_TIMEOUT, call_task)
+        .await
+        .expect("timed out waiting for cancelled MCP stream to close")
+        .unwrap();
     let messages = parse_sse_messages(&body);
     assert!(messages
         .iter()

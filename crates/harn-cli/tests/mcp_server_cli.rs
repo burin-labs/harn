@@ -18,6 +18,7 @@ use serde_json::{json, Value as JsonValue};
 use tempfile::TempDir;
 
 static MCP_CLI_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+const TEST_TIMEOUT: Duration = Duration::from_secs(2);
 
 fn lock_mcp_cli_tests() -> MutexGuard<'static, ()> {
     MCP_CLI_TEST_LOCK
@@ -94,9 +95,9 @@ fn send_request(
 }
 
 fn wait_for_http_listener(child: &mut std::process::Child, rx: &Receiver<String>) -> String {
-    let deadline = Instant::now() + Duration::from_secs(30);
+    let deadline = Instant::now() + TEST_TIMEOUT;
     while Instant::now() < deadline {
-        match rx.recv_timeout(Duration::from_millis(100)) {
+        match rx.recv_timeout(Duration::from_millis(25)) {
             Ok(line) if line.contains("MCP HTTP listener ready on ") => {
                 return line
                     .split("MCP HTTP listener ready on ")
