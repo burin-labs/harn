@@ -1121,6 +1121,31 @@ propagate out (are not retried). After all attempts are exhausted, returns `nil`
 
 ## Concurrency
 
+### Runtime context
+
+`runtime_context()` returns the current logical runtime context as a dict.
+`task_current()` is an alias. This is Harn's stable task/thread identity
+surface; OS thread IDs are not exposed as the primary abstraction.
+
+The stable fields are always present, with unavailable values represented as
+`nil`: `task_id`, `parent_task_id`, `root_task_id`, `task_name`,
+`task_group_id`, `scope_id`, `workflow_id`, `run_id`, `stage_id`, `worker_id`,
+`agent_session_id`, `parent_agent_session_id`, `root_agent_session_id`,
+`agent_name`, `trigger_id`, `trigger_event_id`, `binding_key`, `tenant_id`,
+`provider`, `trace_id`, `span_id`, `scheduler_key`, `runner`,
+`capacity_class`, `context_values`, `cancelled`, and `debug`.
+
+`spawn`, `parallel`, `parallel each`, and `parallel settle` create child
+logical tasks. A child task receives a deterministic `task_id`, its
+`parent_task_id` is the creating task, and its `root_task_id` is inherited from
+the root task. `parallel` siblings share a `task_group_id`.
+
+Task-local values are managed with `runtime_context_values()`,
+`runtime_context_get(key, default?)`, `runtime_context_set(key, value)`, and
+`runtime_context_clear(key)`. Children inherit a snapshot of the parent's
+task-local values. Later child writes do not mutate the parent, and later parent
+writes do not affect already-created children.
+
 ### parallel
 
 ```harn
@@ -3592,7 +3617,9 @@ other builtins are denied.
 The following builtins are always allowed, even when using `--allow`:
 
 `println`, `print`, `log`, `type_of`, `to_string`, `to_int`, `to_float`,
-`len`, `assert`, `assert_eq`, `assert_ne`, `json_parse`, `json_stringify`
+`len`, `assert`, `assert_eq`, `assert_ne`, `json_parse`, `json_stringify`,
+`runtime_context`, `task_current`, `runtime_context_values`,
+`runtime_context_get`, `runtime_context_set`, `runtime_context_clear`
 
 ### Propagation
 

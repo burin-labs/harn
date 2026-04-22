@@ -253,6 +253,12 @@ impl Vm {
         }
         crate::orchestration::enforce_current_policy_for_builtin(name, &args)?;
 
+        if let Some(result) =
+            crate::runtime_context::dispatch_runtime_context_builtin(self, name, &args)
+        {
+            return result;
+        }
+
         if let Some(id) = direct_id {
             if let Some(entry) = self.builtins_by_id.get(&id).cloned() {
                 if entry.name.as_ref() == name {

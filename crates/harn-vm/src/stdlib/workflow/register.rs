@@ -431,6 +431,14 @@ pub(in crate::stdlib) async fn execute_workflow(
         let started_at = uuid::Uuid::now_v7().to_string();
         push_execution_policy(stage_policy.clone());
         crate::orchestration::push_approval_policy(stage_approval.clone());
+        let _runtime_context_guard = crate::runtime_context::install_runtime_context_overlay(
+            crate::runtime_context::RuntimeContextOverlay {
+                workflow_id: Some(run.workflow_id.clone()),
+                run_id: Some(run.id.clone()),
+                stage_id: Some(stage_id.clone()),
+                worker_id: None,
+            },
+        );
         let executed_result = if replay_mode.as_deref() == Some("deterministic") {
             match replay_stages.as_mut() {
                 Some(stages) => replay_stage(&current, stages),

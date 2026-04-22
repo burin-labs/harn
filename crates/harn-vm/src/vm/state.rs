@@ -148,6 +148,10 @@ pub struct Vm {
     pub(crate) spawned_tasks: BTreeMap<String, VmTaskHandle>,
     /// Counter for generating unique task IDs.
     pub(crate) task_counter: u64,
+    /// Counter for logical runtime-context task groups.
+    pub(crate) runtime_context_counter: u64,
+    /// Logical runtime task context visible through `runtime_context()`.
+    pub(crate) runtime_context: crate::runtime_context::RuntimeContext,
     /// Active deadline stack: (deadline_instant, frame_depth).
     pub(crate) deadlines: Vec<(Instant, usize)>,
     /// Breakpoints, keyed by source-file path so a breakpoint at line N
@@ -374,6 +378,8 @@ impl Vm {
             exception_handlers: Vec::new(),
             spawned_tasks: BTreeMap::new(),
             task_counter: 0,
+            runtime_context_counter: 0,
+            runtime_context: crate::runtime_context::RuntimeContext::root(),
             deadlines: Vec::new(),
             breakpoints: BTreeMap::new(),
             function_breakpoints: std::collections::BTreeSet::new(),
@@ -457,6 +463,8 @@ impl Vm {
             exception_handlers: Vec::new(),
             spawned_tasks: BTreeMap::new(),
             task_counter: 0,
+            runtime_context_counter: self.runtime_context_counter,
+            runtime_context: self.runtime_context.clone(),
             deadlines: self.deadlines.clone(),
             breakpoints: BTreeMap::new(),
             function_breakpoints: std::collections::BTreeSet::new(),

@@ -280,6 +280,14 @@ pub(in super::super) fn spawn_worker_task(state: Rc<RefCell<WorkerState>>) {
         if let Some(ref approval) = worker_approval {
             crate::orchestration::push_approval_policy(approval.clone());
         }
+        let _runtime_context_guard = crate::runtime_context::install_runtime_context_overlay(
+            crate::runtime_context::RuntimeContextOverlay {
+                workflow_id: None,
+                run_id: audit.run_id.clone(),
+                stage_id: None,
+                worker_id: Some(worker_id.clone()),
+            },
+        );
         let result =
             execute_worker_config(worker_id, task, config, prior_transcript, execution, audit)
                 .await;
