@@ -782,7 +782,7 @@ fn parse_trigger_config(config: &BTreeMap<String, VmValue>) -> Result<TriggerBin
         .map(parse_string_list)
         .transpose()?
         .unwrap_or_default();
-    let autonomy_tier = match config.get("autonomy_tier") {
+    let autonomy_tier = match config.get("autonomy_tier").or_else(|| config.get("tier")) {
         Some(VmValue::Nil) | None => AutonomyTier::default(),
         Some(value) => parse_autonomy_tier(value)?,
     };
@@ -808,6 +808,14 @@ fn parse_trigger_config(config: &BTreeMap<String, VmValue>) -> Result<TriggerBin
     let hourly_cost_usd = budget
         .and_then(|map| map.get("hourly_cost_usd"))
         .and_then(number_value);
+    let max_autonomous_decisions_per_hour = budget
+        .and_then(|map| map.get("max_autonomous_decisions_per_hour"))
+        .and_then(VmValue::as_int)
+        .map(|value| value.max(0) as u64);
+    let max_autonomous_decisions_per_day = budget
+        .and_then(|map| map.get("max_autonomous_decisions_per_day"))
+        .and_then(VmValue::as_int)
+        .map(|value| value.max(0) as u64);
     let on_budget_exhausted = match budget.and_then(|map| map.get("on_budget_exhausted")) {
         Some(VmValue::String(text)) => match text.as_ref() {
             "false" => crate::TriggerBudgetExhaustionStrategy::False,
@@ -831,6 +839,18 @@ fn parse_trigger_config(config: &BTreeMap<String, VmValue>) -> Result<TriggerBin
         .and_then(|map| map.get("max_concurrent"))
         .and_then(VmValue::as_int)
         .map(|value| value as u32);
+    if max_autonomous_decisions_per_hour == Some(0) {
+        return Err(VmError::Runtime(
+            "trigger_register: budget.max_autonomous_decisions_per_hour must be greater than or equal to 1"
+                .to_string(),
+        ));
+    }
+    if max_autonomous_decisions_per_day == Some(0) {
+        return Err(VmError::Runtime(
+            "trigger_register: budget.max_autonomous_decisions_per_day must be greater than or equal to 1"
+                .to_string(),
+        ));
+    }
     let when_budget = when_budget
         .map(|map| {
             Ok::<TriggerPredicateBudget, VmError>(TriggerPredicateBudget {
@@ -897,6 +917,8 @@ fn parse_trigger_config(config: &BTreeMap<String, VmValue>) -> Result<TriggerBin
         "allow_cleartext": allow_cleartext,
         "daily_cost_usd": daily_cost_usd,
         "hourly_cost_usd": hourly_cost_usd,
+        "max_autonomous_decisions_per_hour": max_autonomous_decisions_per_hour,
+        "max_autonomous_decisions_per_day": max_autonomous_decisions_per_day,
         "on_budget_exhausted": on_budget_exhausted.as_str(),
         "max_concurrent": max_concurrent,
         "manifest_path": manifest_path.as_ref().map(|path| path.display().to_string()),
@@ -921,6 +943,8 @@ fn parse_trigger_config(config: &BTreeMap<String, VmValue>) -> Result<TriggerBin
         filter,
         daily_cost_usd,
         hourly_cost_usd,
+        max_autonomous_decisions_per_hour,
+        max_autonomous_decisions_per_day,
         on_budget_exhausted,
         max_concurrent,
         flow_control: crate::triggers::TriggerFlowControlConfig::default(),
@@ -1541,6 +1565,8 @@ mod tests {
             filter: None,
             daily_cost_usd: None,
             hourly_cost_usd: None,
+            max_autonomous_decisions_per_hour: None,
+            max_autonomous_decisions_per_day: None,
             on_budget_exhausted: crate::TriggerBudgetExhaustionStrategy::False,
             max_concurrent: None,
             flow_control: crate::triggers::TriggerFlowControlConfig::default(),

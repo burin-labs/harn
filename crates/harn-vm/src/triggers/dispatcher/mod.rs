@@ -26,16 +26,19 @@ use crate::orchestration::{
     ACTION_GRAPH_NODE_KIND_WORKER_ENQUEUE,
 };
 use crate::stdlib::json_to_vm_value;
-use crate::trust_graph::{append_trust_record, AutonomyTier, TrustOutcome, TrustRecord};
+use crate::trust_graph::{
+    append_trust_record, policy_for_autonomy_tier, AutonomyTier, TrustOutcome, TrustRecord,
+};
 use crate::value::{error_to_category, ErrorCategory, VmError, VmValue};
 use crate::vm::Vm;
 
 use self::uri::DispatchUri;
 use super::registry::{
-    binding_budget_would_exceed, expected_predicate_cost_usd_micros, matching_bindings,
-    micros_to_usd, note_orchestrator_budget_cost, orchestrator_budget_would_exceed,
-    record_predicate_cost_sample, reset_binding_budget_windows, usd_to_micros, TriggerBinding,
-    TriggerBudgetExhaustionStrategy, TriggerHandlerSpec,
+    binding_autonomy_budget_would_exceed, binding_budget_would_exceed,
+    expected_predicate_cost_usd_micros, matching_bindings, micros_to_usd, note_autonomous_decision,
+    note_orchestrator_budget_cost, orchestrator_budget_would_exceed, record_predicate_cost_sample,
+    reset_binding_budget_windows, usd_to_micros, TriggerBinding, TriggerBudgetExhaustionStrategy,
+    TriggerHandlerSpec,
 };
 use super::{
     begin_in_flight, finish_in_flight, TriggerDispatchOutcome, TriggerEvent,
@@ -74,6 +77,14 @@ pub(crate) struct DispatchContext {
     pub autonomy_tier: AutonomyTier,
 }
 
+struct DispatchExecutionPolicyGuard;
+
+impl Drop for DispatchExecutionPolicyGuard {
+    fn drop(&mut self) {
+        crate::orchestration::pop_execution_policy();
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct PredicateCacheRecord {
     trigger_id: String,
@@ -91,6 +102,8 @@ struct PredicateEvaluationRecord {
     reason: Option<String>,
     exhaustion_strategy: Option<TriggerBudgetExhaustionStrategy>,
 }
+
+const DEFAULT_AUTONOMY_BUDGET_REVIEWER: &str = "operator";
 
 pub(crate) fn current_dispatch_context() -> Option<DispatchContext> {
     ACTIVE_DISPATCH_CONTEXT.with(|slot| slot.borrow().clone())
@@ -1126,6 +1139,78 @@ impl Dispatcher {
             }
 
             source_node_id = predicate_node_id;
+        }
+
+        if autonomy_tier == AutonomyTier::ActAuto {
+            if let Some(reason) = binding_autonomy_budget_would_exceed(binding) {
+                let request_id = self
+                    .append_autonomy_budget_approval_request(
+                        binding,
+                        &route,
+                        &event,
+                        replay_of_event_id.as_ref(),
+                        reason,
+                    )
+                    .await?;
+                self.emit_autonomy_budget_approval_action_graph(
+                    binding,
+                    &route,
+                    &event,
+                    &source_node_id,
+                    replay_of_event_id.as_ref(),
+                    reason,
+                    &request_id,
+                )
+                .await?;
+                finish_in_flight(
+                    binding.id.as_str(),
+                    binding.version,
+                    TriggerDispatchOutcome::Dispatched,
+                )
+                .await
+                .map_err(|error| DispatchError::Registry(error.to_string()))?;
+                decrement_in_flight(&self.state);
+                self.append_tier_transition_trust_record(
+                    binding,
+                    &event,
+                    replay_of_event_id.as_ref(),
+                    autonomy_tier,
+                    AutonomyTier::ActWithApproval,
+                    reason,
+                    &request_id,
+                )
+                .await?;
+                self.append_dispatch_trust_record(
+                    binding,
+                    &route,
+                    &event,
+                    replay_of_event_id.as_ref(),
+                    autonomy_tier,
+                    TrustOutcome::Denied,
+                    "waiting",
+                    0,
+                    Some(reason.to_string()),
+                )
+                .await?;
+                return Ok(DispatchOutcome {
+                    trigger_id: binding.id.as_str().to_string(),
+                    binding_key: binding.binding_key(),
+                    event_id: event.id.0,
+                    attempt_count: 0,
+                    status: DispatchStatus::Waiting,
+                    handler_kind: route.kind().to_string(),
+                    target_uri: route.target_uri(),
+                    replay_of_event_id,
+                    result: Some(serde_json::json!({
+                        "approval_required": true,
+                        "request_id": request_id,
+                        "reason": reason,
+                        "reviewers": [DEFAULT_AUTONOMY_BUDGET_REVIEWER],
+                    })),
+                    error: None,
+                });
+            }
+            note_autonomous_decision(binding);
         }
 
         let (event, acquired_flow) = match self
@@ -2265,6 +2350,15 @@ impl Dispatcher {
         vm.install_cancel_token(cancel_token.clone());
         let arg = event_to_handler_value(event)?;
         let args = [arg];
+        let tier_policy = policy_for_autonomy_tier(autonomy_tier);
+        let effective_policy = match crate::orchestration::current_execution_policy() {
+            Some(parent) => parent
+                .intersect(&tier_policy)
+                .map_err(|error| DispatchError::Local(error.to_string()))?,
+            None => tier_policy,
+        };
+        crate::orchestration::push_execution_policy(effective_policy);
+        let _policy_guard = DispatchExecutionPolicyGuard;
         let future = vm.call_closure_pub(closure, &args);
         pin_mut!(future);
         let (binding_id, binding_version) = split_binding_key(binding_key);
@@ -2876,6 +2970,195 @@ impl Dispatcher {
                 .await?;
         }
         Ok(())
+    }
+
+    async fn append_autonomy_budget_approval_request(
+        &self,
+        binding: &TriggerBinding,
+        route: &DispatchUri,
+        event: &TriggerEvent,
+        replay_of_event_id: Option<&String>,
+        reason: &str,
+    ) -> Result<String, DispatchError> {
+        let reviewers = vec![DEFAULT_AUTONOMY_BUDGET_REVIEWER.to_string()];
+        let detail = serde_json::json!({
+            "trigger_id": binding.id.as_str(),
+            "binding_key": binding.binding_key(),
+            "event_id": event.id.0,
+            "reason": reason,
+            "from_tier": AutonomyTier::ActAuto.as_str(),
+            "requested_tier": AutonomyTier::ActWithApproval.as_str(),
+            "handler_kind": route.kind(),
+            "target_uri": route.target_uri(),
+            "max_autonomous_decisions_per_hour": binding.max_autonomous_decisions_per_hour,
+            "max_autonomous_decisions_per_day": binding.max_autonomous_decisions_per_day,
+            "autonomous_decisions_hour": binding.metrics.autonomous_decisions_hour.load(Ordering::Relaxed),
+            "autonomous_decisions_today": binding.metrics.autonomous_decisions_today.load(Ordering::Relaxed),
+            "replay_of_event_id": replay_of_event_id,
+        });
+        let request_id = crate::stdlib::hitl::append_approval_request_on(
+            &self.event_log,
+            binding.id.as_str().to_string(),
+            event.trace_id.0.clone(),
+            format!(
+                "approve autonomous dispatch for trigger '{}' after {}",
+                binding.id.as_str(),
+                reason
+            ),
+            detail.clone(),
+            reviewers.clone(),
+        )
+        .await
+        .map_err(dispatch_error_from_vm_error)?;
+        self.append_lifecycle_event(
+            "autonomy.budget_exceeded",
+            event,
+            binding,
+            serde_json::json!({
+                "trigger_id": binding.id.as_str(),
+                "event_id": event.id.0,
+                "reason": reason,
+                "request_id": request_id,
+                "reviewers": reviewers,
+                "from_tier": AutonomyTier::ActAuto.as_str(),
+                "requested_tier": AutonomyTier::ActWithApproval.as_str(),
+                "replay_of_event_id": replay_of_event_id,
+            }),
+            replay_of_event_id,
+        )
+        .await?;
+        Ok(request_id)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn emit_autonomy_budget_approval_action_graph(
+        &self,
+        binding: &TriggerBinding,
+        route: &DispatchUri,
+        event: &TriggerEvent,
+        source_node_id: &str,
+        replay_of_event_id: Option<&String>,
+        reason: &str,
+        request_id: &str,
+    ) -> Result<(), DispatchError> {
+        let approval_node_id = format!("approval:{}:{}", binding.binding_key(), event.id.0);
+        self.emit_action_graph(
+            event,
+            vec![RunActionGraphNodeRecord {
+                id: approval_node_id.clone(),
+                label: format!("approval required: {reason}"),
+                kind: "approval".to_string(),
+                status: "waiting".to_string(),
+                outcome: "request_approval".to_string(),
+                trace_id: Some(event.trace_id.0.clone()),
+                stage_id: None,
+                node_id: None,
+                worker_id: None,
+                run_id: None,
+                run_path: None,
+                metadata: BTreeMap::from([
+                    (
+                        "trigger_id".to_string(),
+                        serde_json::json!(binding.id.as_str()),
+                    ),
+                    (
+                        "binding_key".to_string(),
+                        serde_json::json!(binding.binding_key()),
+                    ),
+                    ("event_id".to_string(), serde_json::json!(event.id.0)),
+                    ("reason".to_string(), serde_json::json!(reason)),
+                    ("request_id".to_string(), serde_json::json!(request_id)),
+                    (
+                        "reviewers".to_string(),
+                        serde_json::json!([DEFAULT_AUTONOMY_BUDGET_REVIEWER]),
+                    ),
+                    ("handler_kind".to_string(), serde_json::json!(route.kind())),
+                    (
+                        "target_uri".to_string(),
+                        serde_json::json!(route.target_uri()),
+                    ),
+                    (
+                        "from_tier".to_string(),
+                        serde_json::json!(AutonomyTier::ActAuto.as_str()),
+                    ),
+                    (
+                        "requested_tier".to_string(),
+                        serde_json::json!(AutonomyTier::ActWithApproval.as_str()),
+                    ),
+                    (
+                        "replay_of_event_id".to_string(),
+                        serde_json::json!(replay_of_event_id),
+                    ),
+                ]),
+            }],
+            vec![RunActionGraphEdgeRecord {
+                from_id: source_node_id.to_string(),
+                to_id: approval_node_id,
+                kind: "approval_gate".to_string(),
+                label: Some("autonomy budget".to_string()),
+            }],
+            serde_json::json!({
+                "source": "dispatcher",
+                "trigger_id": binding.id.as_str(),
+                "binding_key": binding.binding_key(),
+                "event_id": event.id.0,
+                "reason": reason,
+                "request_id": request_id,
+                "replay_of_event_id": replay_of_event_id,
+            }),
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn append_tier_transition_trust_record(
+        &self,
+        binding: &TriggerBinding,
+        event: &TriggerEvent,
+        replay_of_event_id: Option<&String>,
+        from_tier: AutonomyTier,
+        to_tier: AutonomyTier,
+        reason: &str,
+        request_id: &str,
+    ) -> Result<(), DispatchError> {
+        let mut record = TrustRecord::new(
+            binding.id.as_str().to_string(),
+            "autonomy.tier_transition",
+            Some(DEFAULT_AUTONOMY_BUDGET_REVIEWER.to_string()),
+            TrustOutcome::Denied,
+            event.trace_id.0.clone(),
+            to_tier,
+        );
+        record.metadata.insert(
+            "binding_key".to_string(),
+            serde_json::json!(binding.binding_key()),
+        );
+        record
+            .metadata
+            .insert("event_id".to_string(), serde_json::json!(event.id.0));
+        record.metadata.insert(
+            "from_tier".to_string(),
+            serde_json::json!(from_tier.as_str()),
+        );
+        record
+            .metadata
+            .insert("to_tier".to_string(), serde_json::json!(to_tier.as_str()));
+        record
+            .metadata
+            .insert("reason".to_string(), serde_json::json!(reason));
+        record
+            .metadata
+            .insert("request_id".to_string(), serde_json::json!(request_id));
+        if let Some(replay_of_event_id) = replay_of_event_id {
+            record.metadata.insert(
+                "replay_of_event_id".to_string(),
+                serde_json::json!(replay_of_event_id),
+            );
+        }
+        append_trust_record(&self.event_log, &record)
+            .await
+            .map(|_| ())
+            .map_err(DispatchError::from)
     }
 
     async fn append_budget_deferred_event(

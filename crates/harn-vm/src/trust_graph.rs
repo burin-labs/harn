@@ -593,18 +593,7 @@ fn score_from_records(
 }
 
 fn policy_from_score(score: &TrustScore) -> CapabilityPolicy {
-    let mut policy = CapabilityPolicy {
-        side_effect_level: Some(
-            match score.effective_tier {
-                AutonomyTier::Shadow => "none",
-                AutonomyTier::Suggest => "read_only",
-                AutonomyTier::ActWithApproval => "workspace_write",
-                AutonomyTier::ActAuto => "network",
-            }
-            .to_string(),
-        ),
-        ..CapabilityPolicy::default()
-    };
+    let mut policy = policy_for_autonomy_tier(score.effective_tier);
     let latest_bad = matches!(
         score.latest_outcome,
         Some(TrustOutcome::Denied | TrustOutcome::Failure | TrustOutcome::Timeout)
@@ -612,10 +601,23 @@ fn policy_from_score(score: &TrustScore) -> CapabilityPolicy {
     if latest_bad || (score.total >= 3 && score.success_rate < 0.5) {
         policy.side_effect_level = Some("read_only".to_string());
     }
-    if matches!(score.effective_tier, AutonomyTier::Shadow) {
-        policy.recursion_limit = Some(0);
-    }
     policy
+}
+
+pub fn policy_for_autonomy_tier(tier: AutonomyTier) -> CapabilityPolicy {
+    CapabilityPolicy {
+        side_effect_level: Some(
+            match tier {
+                AutonomyTier::Shadow => "none",
+                AutonomyTier::Suggest => "read_only",
+                AutonomyTier::ActWithApproval => "read_only",
+                AutonomyTier::ActAuto => "network",
+            }
+            .to_string(),
+        ),
+        recursion_limit: matches!(tier, AutonomyTier::Shadow).then_some(0),
+        ..CapabilityPolicy::default()
+    }
 }
 
 fn apply_record_limit(records: &mut Vec<TrustRecord>, limit: Option<usize>) {

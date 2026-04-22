@@ -25,6 +25,8 @@ budget = {
   max_tokens = 500,
   hourly_cost_usd = 1.00,
   daily_cost_usd = 5.00,
+  max_autonomous_decisions_per_hour = 25,
+  max_autonomous_decisions_per_day = 100,
   max_concurrent = 10,
   on_budget_exhausted = "false",
 }
@@ -37,6 +39,10 @@ Supported fields:
 - `max_tokens`: per-predicate token ceiling.
 - `hourly_cost_usd`: trigger-level UTC-hour spend ceiling.
 - `daily_cost_usd`: trigger-level UTC-day spend ceiling.
+- `max_autonomous_decisions_per_hour`: maximum `act_auto` handler dispatches
+  in a UTC hour before the next matching event is routed to approval.
+- `max_autonomous_decisions_per_day`: maximum `act_auto` handler dispatches in
+  a UTC day before the next matching event is routed to approval.
 - `max_concurrent`: deprecated alias for `concurrency = { max = ... }`.
 - `on_budget_exhausted`: one of `false`, `retry_later`, `fail`, or `warn`.
 
@@ -81,3 +87,9 @@ configured budget usage. Prometheus output includes:
 Lifecycle records use `predicate.budget_exceeded` and include the trigger id,
 event id, current spend, configured strategy, and whether the exhausted budget
 was trigger-local or global.
+
+Autonomy budget trips use `autonomy.budget_exceeded`. Instead of silently
+skipping the handler, Harn appends a `request_approval` HITL record with the
+default `operator` reviewer, adds an approval gate node to the action graph, and
+records an `autonomy.tier_transition` trust-graph audit entry from `act_auto` to
+`act_with_approval`.

@@ -1416,6 +1416,8 @@ mod tests {
             filter: None,
             daily_cost_usd: None,
             hourly_cost_usd: None,
+            max_autonomous_decisions_per_hour: None,
+            max_autonomous_decisions_per_day: None,
             on_budget_exhausted: harn_vm::TriggerBudgetExhaustionStrategy::False,
             max_concurrent: None,
             flow_control: harn_vm::TriggerFlowControlConfig::default(),

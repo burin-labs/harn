@@ -55,6 +55,9 @@ pub(crate) struct TriggerInspectMetrics {
     pub dispatched: u64,
     pub failed: u64,
     pub in_flight: u64,
+    pub autonomous_decisions_total: u64,
+    pub autonomous_decisions_hour: u64,
+    pub autonomous_decisions_today: u64,
 }
 
 #[derive(Clone, Debug, Default, Serialize)]
@@ -146,6 +149,10 @@ pub(crate) struct CostBudgetInspect {
     pub remaining_today_usd: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub remaining_hour_usd: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_autonomous_decisions_per_hour: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_autonomous_decisions_per_day: Option<u64>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -452,6 +459,16 @@ async fn build_flow_control_inspect(
     if let Some(binding_key) = binding_key.filter(|_| {
         trigger.config.budget.daily_cost_usd.is_some()
             || trigger.config.budget.hourly_cost_usd.is_some()
+            || trigger
+                .config
+                .budget
+                .max_autonomous_decisions_per_hour
+                .is_some()
+            || trigger
+                .config
+                .budget
+                .max_autonomous_decisions_per_day
+                .is_some()
     }) {
         let used_today = cost_by_binding_key
             .get(binding_key)
@@ -477,6 +494,14 @@ async fn build_flow_control_inspect(
                 .budget
                 .hourly_cost_usd
                 .map(|limit| (limit - used_hour).max(0.0)),
+            max_autonomous_decisions_per_hour: trigger
+                .config
+                .budget
+                .max_autonomous_decisions_per_hour,
+            max_autonomous_decisions_per_day: trigger
+                .config
+                .budget
+                .max_autonomous_decisions_per_day,
         });
     }
 
@@ -716,6 +741,9 @@ fn trigger_metrics_from_snapshot(
         dispatched: snapshot.dispatched,
         failed: snapshot.failed,
         in_flight: snapshot.in_flight,
+        autonomous_decisions_total: 0,
+        autonomous_decisions_hour: 0,
+        autonomous_decisions_today: 0,
     }
 }
 
@@ -727,6 +755,9 @@ fn trigger_metrics_from_runtime(
         dispatched: binding.metrics.dispatched,
         failed: binding.metrics.failed,
         in_flight: binding.metrics.in_flight,
+        autonomous_decisions_total: binding.metrics.autonomous_decisions_total,
+        autonomous_decisions_hour: binding.metrics.autonomous_decisions_hour,
+        autonomous_decisions_today: binding.metrics.autonomous_decisions_today,
     }
 }
 

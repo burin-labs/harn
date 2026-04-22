@@ -153,7 +153,7 @@ pub struct TriggerManifestEntry {
     pub kind: Option<TriggerKind>,
     #[serde(default)]
     pub provider: Option<harn_vm::ProviderId>,
-    #[serde(default)]
+    #[serde(default, alias = "tier")]
     pub autonomy_tier: harn_vm::AutonomyTier,
     #[serde(default, rename = "match")]
     pub match_: Option<TriggerMatchExpr>,
@@ -309,6 +309,10 @@ pub struct TriggerBudgetSpec {
     pub daily_cost_usd: Option<f64>,
     #[serde(default)]
     pub hourly_cost_usd: Option<f64>,
+    #[serde(default)]
+    pub max_autonomous_decisions_per_hour: Option<u64>,
+    #[serde(default)]
+    pub max_autonomous_decisions_per_day: Option<u64>,
     #[serde(default)]
     pub max_concurrent: Option<u32>,
     #[serde(default)]
@@ -1458,6 +1462,18 @@ fn validate_static_trigger_config(trigger: &ResolvedTriggerConfig) -> Result<(),
             ));
         }
     }
+    if trigger.budget.max_autonomous_decisions_per_hour == Some(0) {
+        return Err(trigger_error(
+            trigger,
+            "budget.max_autonomous_decisions_per_hour must be greater than or equal to 1",
+        ));
+    }
+    if trigger.budget.max_autonomous_decisions_per_day == Some(0) {
+        return Err(trigger_error(
+            trigger,
+            "budget.max_autonomous_decisions_per_day must be greater than or equal to 1",
+        ));
+    }
     if let Some(max_cost_usd) = trigger.budget.max_cost_usd {
         if max_cost_usd.is_sign_negative() {
             return Err(trigger_error(
@@ -2585,6 +2601,8 @@ pub fn manifest_trigger_binding_spec(
     let dedupe_retention_days = config.retry.retention_days;
     let daily_cost_usd = config.budget.daily_cost_usd;
     let hourly_cost_usd = config.budget.hourly_cost_usd;
+    let max_autonomous_decisions_per_hour = config.budget.max_autonomous_decisions_per_hour;
+    let max_autonomous_decisions_per_day = config.budget.max_autonomous_decisions_per_day;
     let on_budget_exhausted = config.budget.on_budget_exhausted;
     let max_concurrent = flow_control.concurrency.as_ref().map(|config| config.max);
     let manifest_path = Some(config.manifest_path.clone());
@@ -2638,6 +2656,8 @@ pub fn manifest_trigger_binding_spec(
         dedupe_retention_days,
         daily_cost_usd,
         hourly_cost_usd,
+        max_autonomous_decisions_per_hour,
+        max_autonomous_decisions_per_day,
         on_budget_exhausted,
         max_concurrent,
         flow_control,
@@ -5048,7 +5068,7 @@ daily_cost_usd = 5.0
 id = "github-new-issue"
 kind = "webhook"
 provider = "github"
-autonomy_tier = "suggest"
+tier = "suggest"
 match = { events = ["issues.opened"] }
 when = "handlers::should_handle"
 when_budget = { max_cost_usd = 0.001, tokens_max = 500, timeout = "5s" }
@@ -5056,7 +5076,7 @@ handler = "handlers::on_new_issue"
 dedupe_key = "event.dedupe_key"
 retry = { max = 7, backoff = "svix", retention_days = 7 }
 priority = "normal"
-budget = { max_cost_usd = 0.002, max_tokens = 250, hourly_cost_usd = 1.0, daily_cost_usd = 5.0, max_concurrent = 10, on_budget_exhausted = "fail" }
+budget = { max_cost_usd = 0.002, max_tokens = 250, hourly_cost_usd = 1.0, daily_cost_usd = 5.0, max_autonomous_decisions_per_hour = 25, max_autonomous_decisions_per_day = 100, max_concurrent = 10, on_budget_exhausted = "fail" }
 secrets = { signing_secret = "github/webhook-secret" }
 filter = "event.kind"
 "#,
@@ -5117,6 +5137,14 @@ pub fn should_handle(event: TriggerEvent) -> Result<bool, string> {
             Some(500)
         );
         assert_eq!(collected[0].config.budget.hourly_cost_usd, Some(1.0));
+        assert_eq!(
+            collected[0].config.budget.max_autonomous_decisions_per_hour,
+            Some(25)
+        );
+        assert_eq!(
+            collected[0].config.budget.max_autonomous_decisions_per_day,
+            Some(100)
+        );
         assert_eq!(
             collected[0].config.budget.on_budget_exhausted,
             harn_vm::TriggerBudgetExhaustionStrategy::Fail

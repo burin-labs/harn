@@ -276,6 +276,8 @@ function actionNodeAccent(kind: string) {
       return "action-node-dlq"
     case "retry":
       return "action-node-retry"
+    case "approval":
+      return "action-node-approval"
     default:
       return "action-node-dispatch"
   }
@@ -296,6 +298,8 @@ function actionNodeEyebrow(kind: string) {
       return "Worker enqueue"
     case "retry":
       return "Retry"
+    case "approval":
+      return "Approval gate"
     case "dlq":
       return "DLQ"
     default:
@@ -368,6 +372,21 @@ function actionNodeFacts(node: ActionGraphNode) {
       }
       break
     }
+    case "approval": {
+      const requestId = nodeMetaString(node, "request_id")
+      const reason = nodeMetaString(node, "reason")
+      const reviewer = Array.isArray(node.metadata.reviewers) ? node.metadata.reviewers[0] : null
+      if (requestId) {
+        facts.push(requestId)
+      }
+      if (reason) {
+        facts.push(reason)
+      }
+      if (typeof reviewer === "string") {
+        facts.push(`reviewer ${reviewer}`)
+      }
+      break
+    }
     case "dlq": {
       const attempts = nodeMetaNumber(node, "attempt_count")
       if (attempts != null) {
@@ -396,6 +415,8 @@ function actionNodeDetail(node: ActionGraphNode) {
     case "retry":
     case "dlq":
       return nodeMetaString(node, "error") ?? nodeMetaString(node, "final_error")
+    case "approval":
+      return nodeMetaString(node, "request_id") ?? nodeMetaString(node, "reason")
     default:
       return nodeMetaString(node, "dedupe_key")
     }
@@ -572,7 +593,7 @@ export function RunDetail({ detail, runs, onSelectRun }: RunDetailProps) {
         : intl.formatMessage(messages.validationFailed)
   const graphNodeLabels = new Map(detail.observability.action_graph_nodes.map((node) => [node.id, node.label]))
   const actionGraphNodes = [...detail.observability.action_graph_nodes].sort((left, right) => {
-    const order = ["trigger", "predicate", "trigger_predicate", "dispatch", "a2a_hop", "worker_enqueue", "retry", "dlq"]
+    const order = ["trigger", "predicate", "trigger_predicate", "approval", "dispatch", "a2a_hop", "worker_enqueue", "retry", "dlq"]
     return order.indexOf(left.kind) - order.indexOf(right.kind)
   })
   const compareRows = compareDiff

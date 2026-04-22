@@ -1771,6 +1771,8 @@ fn manifest_spec(id: &str, fingerprint: &str) -> TriggerBindingSpec {
         filter: None,
         daily_cost_usd: Some(5.0),
         hourly_cost_usd: None,
+        max_autonomous_decisions_per_hour: None,
+        max_autonomous_decisions_per_day: None,
         on_budget_exhausted: crate::TriggerBudgetExhaustionStrategy::False,
         max_concurrent: Some(2),
         flow_control: crate::triggers::TriggerFlowControlConfig::default(),

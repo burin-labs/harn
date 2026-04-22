@@ -794,6 +794,10 @@ textarea {
   border-left: 4px solid #f59e0b;
 }
 
+.action-node-approval {
+  border-left: 4px solid #c084fc;
+}
+
 .action-node-dlq {
   border-left: 4px solid #ef4444;
 }
