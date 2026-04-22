@@ -916,10 +916,11 @@ fn spawn_pending_pump(
                 let record: PendingTriggerRecord = serde_json::from_value(logged.payload)
                     .map_err(|error| format!("failed to decode pending trigger event: {error}"))?;
                 dispatcher
-                    .enqueue_targeted(
+                    .enqueue_targeted_with_headers(
                         Some(record.trigger_id),
                         Some(record.binding_version),
                         record.event,
+                        Some(&logged.headers),
                     )
                     .await
                     .map_err(|error| format!("failed to enqueue pending trigger event: {error}"))?;
@@ -957,7 +958,7 @@ fn spawn_cron_pump(
                     _ => None,
                 };
                 dispatcher
-                    .enqueue_targeted(trigger_id, None, event)
+                    .enqueue_targeted_with_headers(trigger_id, None, event, Some(&logged.headers))
                     .await
                     .map_err(|error| format!("failed to enqueue cron trigger event: {error}"))?;
                 Ok(true)
@@ -1086,6 +1087,7 @@ fn spawn_inbox_pump(
                     let trigger_id = envelope.trigger_id.clone();
                     let binding_version = envelope.binding_version;
                     let trigger_event_id = envelope.event.id.0.clone();
+                    let parent_headers = logged.headers.clone();
                     append_pump_lifecycle_event(
                         &event_log,
                         "pump_eligible",
@@ -1136,7 +1138,12 @@ fn spawn_inbox_pump(
                             }),
                         )
                         .await;
-                        let result = dispatcher.dispatch_inbox_envelope(envelope).await;
+                        let result = dispatcher
+                            .dispatch_inbox_envelope_with_parent_headers(
+                                envelope,
+                                &parent_headers,
+                            )
+                            .await;
                         let (status, error_message) = match result {
                             Ok(_) => ("completed", None),
                             Err(error) => {

@@ -1951,9 +1951,9 @@ async fn json_log_format_writes_structured_rotating_file_with_trace_ids() {
     );
 }
 
-// Regression coverage for harn#327: ingest should inject W3C trace-context
-// headers, and dispatch should adopt that remote parent so both spans share a
-// trace ID with `dispatch.parent_span_id == ingest.span_id`.
+// Regression coverage for harn#327 and harn#479: ingest should inject W3C
+// trace-context headers, queue append should preserve the trace, and dispatch
+// should adopt the queue append span as its remote parent.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn otel_exports_ingest_and_dispatch_spans_with_shared_trace_id() {
     let _lock = lock_orchestrator_tests();
@@ -1998,8 +1998,9 @@ async fn otel_exports_ingest_and_dispatch_spans_with_shared_trace_id() {
     let spans = loop {
         let spans = collector.collected_spans();
         let has_ingest = spans.iter().any(|span| span.name == "ingest");
+        let has_queue_append = spans.iter().any(|span| span.name == "queue_append");
         let has_dispatch = spans.iter().any(|span| span.name == "dispatch");
-        if has_ingest && has_dispatch {
+        if has_ingest && has_queue_append && has_dispatch {
             break spans;
         }
         if Instant::now() >= deadline {
@@ -2016,12 +2017,19 @@ async fn otel_exports_ingest_and_dispatch_spans_with_shared_trace_id() {
     };
 
     let ingest = spans.iter().find(|span| span.name == "ingest").unwrap();
+    let queue_append = spans
+        .iter()
+        .find(|span| span.name == "queue_append")
+        .unwrap();
     let dispatch = spans.iter().find(|span| span.name == "dispatch").unwrap();
+    assert_eq!(ingest.trace_id, queue_append.trace_id);
     assert_eq!(ingest.trace_id, dispatch.trace_id);
+    assert_ne!(ingest.span_id, queue_append.span_id);
     assert_ne!(ingest.span_id, dispatch.span_id);
+    assert!(queue_append.parent_span_id.is_some());
     assert_eq!(
         dispatch.parent_span_id.as_deref(),
-        ingest.parent_span_id.as_deref()
+        Some(queue_append.span_id.as_str())
     );
 
     let ingest_trace_id = attribute_string(ingest, "trace_id").unwrap();

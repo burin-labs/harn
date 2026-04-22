@@ -3,9 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
-#[cfg(feature = "otel")]
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use futures::{pin_mut, StreamExt};
 use serde::{Deserialize, Serialize};
@@ -53,6 +51,10 @@ pub mod retry;
 pub mod uri;
 
 pub use retry::{RetryPolicy, TriggerRetryConfig, DEFAULT_MAX_ATTEMPTS};
+
+pub const TRIGGER_ACCEPTED_AT_MS_HEADER: &str = "harn_trigger_accepted_at_ms";
+pub const TRIGGER_NORMALIZED_AT_MS_HEADER: &str = "harn_trigger_normalized_at_ms";
+pub const TRIGGER_QUEUE_APPENDED_AT_MS_HEADER: &str = "harn_trigger_queue_appended_at_ms";
 
 thread_local! {
     static ACTIVE_DISPATCHER_STATE: RefCell<Option<Arc<DispatcherRuntimeState>>> = const { RefCell::new(None) };
@@ -571,20 +573,75 @@ impl Dispatcher {
         binding_version: Option<u32>,
         event: TriggerEvent,
     ) -> Result<u64, DispatchError> {
+        self.enqueue_targeted_with_headers(trigger_id, binding_version, event, None)
+            .await
+    }
+
+    pub async fn enqueue_targeted_with_headers(
+        &self,
+        trigger_id: Option<String>,
+        binding_version: Option<u32>,
+        event: TriggerEvent,
+        parent_headers: Option<&BTreeMap<String, String>>,
+    ) -> Result<u64, DispatchError> {
         let topic = Topic::new(TRIGGER_INBOX_ENVELOPES_TOPIC)
             .expect("static trigger inbox envelopes topic is valid");
-        let headers = event_headers(&event, None, None, None);
+        let trigger_id_for_metrics = trigger_id.clone();
+        let mut headers = parent_headers.cloned().unwrap_or_default();
+        headers.extend(event_headers(&event, None, None, None));
+        if let Some(trigger_id) = trigger_id_for_metrics.as_ref() {
+            headers.insert("trigger_id".to_string(), trigger_id.clone());
+            headers.insert(
+                "binding_key".to_string(),
+                binding_key_from_parts(trigger_id, binding_version),
+            );
+        }
+        headers
+            .entry(TRIGGER_ACCEPTED_AT_MS_HEADER.to_string())
+            .or_insert_with(|| unix_ms(event.received_at).to_string());
         let payload = serde_json::to_value(InboxEnvelope {
             trigger_id,
             binding_version,
-            event,
+            event: event.clone(),
         })
         .map_err(|error| DispatchError::Serde(error.to_string()))?;
+        let mut log_event = LogEvent::new("event_ingested", payload);
+        let had_queue_appended_at = headers.contains_key(TRIGGER_QUEUE_APPENDED_AT_MS_HEADER);
+        let queue_appended_at_ms = headers
+            .get(TRIGGER_QUEUE_APPENDED_AT_MS_HEADER)
+            .and_then(|value| value.parse::<i64>().ok())
+            .unwrap_or(log_event.occurred_at_ms);
+        headers
+            .entry(TRIGGER_QUEUE_APPENDED_AT_MS_HEADER.to_string())
+            .or_insert_with(|| log_event.occurred_at_ms.to_string());
+        if let (Some(metrics), Some(trigger_id)) =
+            (self.metrics.as_ref(), trigger_id_for_metrics.as_ref())
+        {
+            let binding_key = binding_key_from_parts(trigger_id, binding_version);
+            let accepted_at_ms = accepted_at_ms(Some(&headers), &event);
+            if !had_queue_appended_at {
+                metrics.record_trigger_accepted_to_queue_append(
+                    trigger_id,
+                    &binding_key,
+                    event.provider.as_str(),
+                    tenant_id(&event),
+                    "queued",
+                    duration_between_ms(queue_appended_at_ms, accepted_at_ms),
+                );
+            }
+            metrics.note_trigger_pending_event(
+                event.id.0.as_str(),
+                trigger_id,
+                &binding_key,
+                event.provider.as_str(),
+                tenant_id(&event),
+                accepted_at_ms,
+                queue_appended_at_ms,
+            );
+        }
+        log_event.headers = headers;
         self.event_log
-            .append(
-                &topic,
-                LogEvent::new("event_ingested", payload).with_headers(headers),
-            )
+            .append(&topic, log_event)
             .await
             .map_err(DispatchError::from)
     }
@@ -665,6 +722,15 @@ impl Dispatcher {
             .await
     }
 
+    pub async fn dispatch_inbox_envelope_with_parent_headers(
+        &self,
+        envelope: InboxEnvelope,
+        parent_headers: &BTreeMap<String, String>,
+    ) -> Result<Vec<DispatchOutcome>, DispatchError> {
+        self.dispatch_inbox_envelope_with_headers(envelope, Some(parent_headers))
+            .await
+    }
+
     async fn dispatch_inbox_envelope_with_headers(
         &self,
         envelope: InboxEnvelope,
@@ -700,17 +766,29 @@ impl Dispatcher {
             ]);
         }
 
-        self.dispatch_event(envelope.event).await
+        self.dispatch_event_with_headers(envelope.event, parent_headers)
+            .await
     }
 
     pub async fn dispatch_event(
         &self,
         event: TriggerEvent,
     ) -> Result<Vec<DispatchOutcome>, DispatchError> {
+        self.dispatch_event_with_headers(event, None).await
+    }
+
+    async fn dispatch_event_with_headers(
+        &self,
+        event: TriggerEvent,
+        parent_headers: Option<&BTreeMap<String, String>>,
+    ) -> Result<Vec<DispatchOutcome>, DispatchError> {
         let bindings = matching_bindings(&event);
         let mut outcomes = Vec::new();
         for binding in bindings {
-            outcomes.push(self.dispatch(&binding, event.clone()).await?);
+            outcomes.push(
+                self.dispatch_with_replay(&binding, event.clone(), None, None, parent_headers)
+                    .await?,
+            );
         }
         Ok(outcomes)
     }
@@ -752,6 +830,28 @@ impl Dispatcher {
         parent_span_id: Option<String>,
         parent_headers: Option<&BTreeMap<String, String>>,
     ) -> Result<DispatchOutcome, DispatchError> {
+        let parent_headers_for_metrics = parent_headers.cloned();
+        let admitted_at_ms = current_unix_ms();
+        if let Some(metrics) = self.metrics.as_ref() {
+            let binding_key = binding.binding_key();
+            let queue_appended_at_ms = queue_appended_at_ms(parent_headers, &event);
+            metrics.record_trigger_queue_age_at_dispatch_admission(
+                binding.id.as_str(),
+                &binding_key,
+                event.provider.as_str(),
+                tenant_id(&event),
+                "admitted",
+                duration_between_ms(admitted_at_ms, queue_appended_at_ms),
+            );
+            metrics.clear_trigger_pending_event(
+                event.id.0.as_str(),
+                binding.id.as_str(),
+                &binding_key,
+                event.provider.as_str(),
+                tenant_id(&event),
+                admitted_at_ms,
+            );
+        }
         let span = tracing::info_span!(
             "dispatch",
             trigger_id = %binding.id.as_str(),
@@ -780,8 +880,13 @@ impl Dispatcher {
         let outcome = ACTIVE_DISPATCH_IS_REPLAY
             .scope(
                 replay_of_event_id.is_some(),
-                self.dispatch_with_replay_inner(binding, event, replay_of_event_id)
-                    .instrument(span),
+                self.dispatch_with_replay_inner(
+                    binding,
+                    event,
+                    replay_of_event_id,
+                    parent_headers_for_metrics,
+                )
+                .instrument(span),
             )
             .await;
         if let Some(metrics) = metrics.as_ref() {
@@ -835,6 +940,7 @@ impl Dispatcher {
         binding: &TriggerBinding,
         event: TriggerEvent,
         replay_of_event_id: Option<String>,
+        parent_headers: Option<BTreeMap<String, String>>,
     ) -> Result<DispatchOutcome, DispatchError> {
         let autonomy_tier = crate::resolve_agent_autonomy_tier(
             &self.event_log,
@@ -1287,6 +1393,34 @@ impl Dispatcher {
                 ));
             }
             maybe_fail_before_outbox();
+            let attempt_started_instant = Instant::now();
+            let attempt_started_at_ms = current_unix_ms();
+            let queue_age_at_start = duration_between_ms(
+                attempt_started_at_ms,
+                queue_appended_at_ms(parent_headers.as_ref(), &event),
+            );
+            if attempt == 1 {
+                if let Some(metrics) = self.metrics.as_ref() {
+                    metrics.record_trigger_queue_age_at_dispatch_start(
+                        binding.id.as_str(),
+                        &binding_key,
+                        event.provider.as_str(),
+                        tenant_id(&event),
+                        "started",
+                        queue_age_at_start,
+                    );
+                }
+            }
+            tracing::info!(
+                component = "dispatcher",
+                lifecycle = "dispatch_started",
+                trigger_id = %binding.id.as_str(),
+                binding_key = %binding_key,
+                event_id = %event.id.0,
+                attempt,
+                queue_age_ms = queue_age_at_start.as_millis(),
+                trace_id = %event.trace_id.0
+            );
             let started_at = now_rfc3339();
             let attempt_node_id = dispatch_node_id(&route, &binding_key, &event.id.0, attempt);
             self.append_lifecycle_event(
@@ -1383,6 +1517,29 @@ impl Dispatcher {
                     &mut self.cancel_tx.subscribe(),
                 )
                 .await;
+            let attempt_runtime = attempt_started_instant.elapsed();
+            let attempt_status = dispatch_result_status(&result);
+            if let Some(metrics) = self.metrics.as_ref() {
+                metrics.record_trigger_dispatch_runtime(
+                    binding.id.as_str(),
+                    &binding_key,
+                    event.provider.as_str(),
+                    tenant_id(&event),
+                    attempt_status,
+                    attempt_runtime,
+                );
+            }
+            tracing::info!(
+                component = "dispatcher",
+                lifecycle = "handler_completed",
+                trigger_id = %binding.id.as_str(),
+                binding_key = %binding_key,
+                event_id = %event.id.0,
+                attempt,
+                status = attempt_status,
+                runtime_ms = attempt_runtime.as_millis(),
+                trace_id = %event.trace_id.0
+            );
             let completed_at = now_rfc3339();
 
             match result {
@@ -1716,7 +1873,25 @@ impl Dispatcher {
                         if let Some(metrics) = self.metrics.as_ref() {
                             metrics.record_retry_scheduled();
                             metrics.record_trigger_retry(binding.id.as_str(), attempt + 1);
+                            metrics.record_trigger_retry_delay(
+                                binding.id.as_str(),
+                                &binding_key,
+                                event.provider.as_str(),
+                                tenant_id(&event),
+                                "scheduled",
+                                delay,
+                            );
                         }
+                        tracing::info!(
+                            component = "dispatcher",
+                            lifecycle = "retry_scheduled",
+                            trigger_id = %binding.id.as_str(),
+                            binding_key = %binding_key,
+                            event_id = %event.id.0,
+                            attempt = attempt + 1,
+                            delay_ms = delay.as_millis(),
+                            trace_id = %event.trace_id.0
+                        );
                         let retry_node_id = format!("retry:{binding_key}:{}:{attempt}", event.id.0);
                         previous_retry_node = Some(retry_node_id.clone());
                         self.emit_action_graph(
@@ -1857,7 +2032,28 @@ impl Dispatcher {
                         .push(dlq_entry.clone());
                     if let Some(metrics) = self.metrics.as_ref() {
                         metrics.record_trigger_dlq(binding.id.as_str(), "retry_exhausted");
+                        metrics.record_trigger_accepted_to_dlq(
+                            binding.id.as_str(),
+                            &binding_key,
+                            event.provider.as_str(),
+                            tenant_id(&event),
+                            "retry_exhausted",
+                            duration_between_ms(
+                                current_unix_ms(),
+                                accepted_at_ms(parent_headers.as_ref(), &event),
+                            ),
+                        );
                     }
+                    tracing::info!(
+                        component = "dispatcher",
+                        lifecycle = "dlq_moved",
+                        trigger_id = %binding.id.as_str(),
+                        binding_key = %binding_key,
+                        event_id = %event.id.0,
+                        attempt_count = attempt,
+                        reason = "retry_exhausted",
+                        trace_id = %event.trace_id.0
+                    );
                     self.emit_action_graph(
                         &event,
                         vec![RunActionGraphNodeRecord {
@@ -3226,7 +3422,24 @@ impl Dispatcher {
             .push(dlq_entry.clone());
         if let Some(metrics) = self.metrics.as_ref() {
             metrics.record_trigger_dlq(binding.id.as_str(), "budget_exhausted");
+            metrics.record_trigger_accepted_to_dlq(
+                binding.id.as_str(),
+                &binding.binding_key(),
+                event.provider.as_str(),
+                tenant_id(event),
+                "budget_exhausted",
+                duration_between_ms(current_unix_ms(), accepted_at_ms(None, event)),
+            );
         }
+        tracing::info!(
+            component = "dispatcher",
+            lifecycle = "dlq_moved",
+            trigger_id = %binding.id.as_str(),
+            binding_key = %binding.binding_key(),
+            event_id = %event.id.0,
+            reason = "budget_exhausted",
+            trace_id = %event.trace_id.0
+        );
         self.emit_action_graph(
             event,
             vec![RunActionGraphNodeRecord {
@@ -3854,6 +4067,56 @@ fn split_binding_key(binding_key: &str) -> (String, u32) {
     };
     let version = suffix.parse::<u32>().unwrap_or(0);
     (binding_id.to_string(), version)
+}
+
+fn binding_key_from_parts(trigger_id: &str, binding_version: Option<u32>) -> String {
+    match binding_version {
+        Some(version) => format!("{trigger_id}@v{version}"),
+        None => trigger_id.to_string(),
+    }
+}
+
+fn tenant_id(event: &TriggerEvent) -> Option<&str> {
+    event.tenant_id.as_ref().map(|tenant| tenant.0.as_str())
+}
+
+fn current_unix_ms() -> i64 {
+    unix_ms(time::OffsetDateTime::now_utc())
+}
+
+fn unix_ms(timestamp: time::OffsetDateTime) -> i64 {
+    (timestamp.unix_timestamp_nanos() / 1_000_000) as i64
+}
+
+fn accepted_at_ms(headers: Option<&BTreeMap<String, String>>, event: &TriggerEvent) -> i64 {
+    lifecycle_header_ms(headers, TRIGGER_ACCEPTED_AT_MS_HEADER)
+        .unwrap_or_else(|| unix_ms(event.received_at))
+}
+
+fn queue_appended_at_ms(headers: Option<&BTreeMap<String, String>>, event: &TriggerEvent) -> i64 {
+    lifecycle_header_ms(headers, TRIGGER_QUEUE_APPENDED_AT_MS_HEADER)
+        .unwrap_or_else(|| accepted_at_ms(headers, event))
+}
+
+fn lifecycle_header_ms(headers: Option<&BTreeMap<String, String>>, name: &str) -> Option<i64> {
+    headers
+        .and_then(|headers| headers.get(name))
+        .and_then(|value| value.parse::<i64>().ok())
+}
+
+fn duration_between_ms(later_ms: i64, earlier_ms: i64) -> Duration {
+    Duration::from_millis(later_ms.saturating_sub(earlier_ms).max(0) as u64)
+}
+
+fn dispatch_result_status(result: &Result<serde_json::Value, DispatchError>) -> &'static str {
+    match result {
+        Ok(_) => "succeeded",
+        Err(DispatchError::Waiting(_)) => "waiting",
+        Err(DispatchError::Cancelled(_)) => "cancelled",
+        Err(DispatchError::Denied(_)) => "denied",
+        Err(DispatchError::Timeout(_)) => "timeout",
+        Err(_) => "failed",
+    }
 }
 
 fn is_cancelled_vm_error(error: &VmError) -> bool {

@@ -383,10 +383,14 @@ pub struct MetricsRegistry {
     counters: Mutex<BTreeMap<(String, MetricLabels), f64>>,
     gauges: Mutex<BTreeMap<(String, MetricLabels), f64>>,
     histograms: Mutex<BTreeMap<(String, MetricLabels), HistogramMetric>>,
+    pending_trigger_events: Mutex<BTreeMap<MetricLabels, BTreeMap<String, i64>>>,
 }
 
 impl MetricsRegistry {
     const DURATION_BUCKETS: [f64; 9] = [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 5.0];
+    const TRIGGER_LATENCY_BUCKETS: [f64; 15] = [
+        0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0,
+    ];
     const SIZE_BUCKETS: [f64; 9] = [
         128.0, 512.0, 1024.0, 4096.0, 16384.0, 65536.0, 262144.0, 1048576.0, 10485760.0,
     ];
@@ -575,6 +579,174 @@ impl MetricsRegistry {
             labels([("trigger_id", trigger_id), ("reason", reason)]),
             1,
         );
+    }
+
+    pub fn record_trigger_accepted_to_normalized(
+        &self,
+        trigger_id: &str,
+        binding_key: &str,
+        provider: &str,
+        tenant_id: Option<&str>,
+        status: &str,
+        duration: StdDuration,
+    ) {
+        self.observe_histogram(
+            "harn_trigger_webhook_accepted_to_normalized_seconds",
+            trigger_lifecycle_labels(trigger_id, binding_key, provider, tenant_id, status),
+            duration.as_secs_f64(),
+            &Self::TRIGGER_LATENCY_BUCKETS,
+        );
+    }
+
+    pub fn record_trigger_accepted_to_queue_append(
+        &self,
+        trigger_id: &str,
+        binding_key: &str,
+        provider: &str,
+        tenant_id: Option<&str>,
+        status: &str,
+        duration: StdDuration,
+    ) {
+        self.observe_histogram(
+            "harn_trigger_webhook_accepted_to_queue_append_seconds",
+            trigger_lifecycle_labels(trigger_id, binding_key, provider, tenant_id, status),
+            duration.as_secs_f64(),
+            &Self::TRIGGER_LATENCY_BUCKETS,
+        );
+    }
+
+    pub fn record_trigger_queue_age_at_dispatch_admission(
+        &self,
+        trigger_id: &str,
+        binding_key: &str,
+        provider: &str,
+        tenant_id: Option<&str>,
+        status: &str,
+        age: StdDuration,
+    ) {
+        self.observe_histogram(
+            "harn_trigger_queue_age_at_dispatch_admission_seconds",
+            trigger_lifecycle_labels(trigger_id, binding_key, provider, tenant_id, status),
+            age.as_secs_f64(),
+            &Self::TRIGGER_LATENCY_BUCKETS,
+        );
+    }
+
+    pub fn record_trigger_queue_age_at_dispatch_start(
+        &self,
+        trigger_id: &str,
+        binding_key: &str,
+        provider: &str,
+        tenant_id: Option<&str>,
+        status: &str,
+        age: StdDuration,
+    ) {
+        self.observe_histogram(
+            "harn_trigger_queue_age_at_dispatch_start_seconds",
+            trigger_lifecycle_labels(trigger_id, binding_key, provider, tenant_id, status),
+            age.as_secs_f64(),
+            &Self::TRIGGER_LATENCY_BUCKETS,
+        );
+    }
+
+    pub fn record_trigger_dispatch_runtime(
+        &self,
+        trigger_id: &str,
+        binding_key: &str,
+        provider: &str,
+        tenant_id: Option<&str>,
+        status: &str,
+        duration: StdDuration,
+    ) {
+        self.observe_histogram(
+            "harn_trigger_dispatch_runtime_seconds",
+            trigger_lifecycle_labels(trigger_id, binding_key, provider, tenant_id, status),
+            duration.as_secs_f64(),
+            &Self::TRIGGER_LATENCY_BUCKETS,
+        );
+    }
+
+    pub fn record_trigger_retry_delay(
+        &self,
+        trigger_id: &str,
+        binding_key: &str,
+        provider: &str,
+        tenant_id: Option<&str>,
+        status: &str,
+        duration: StdDuration,
+    ) {
+        self.observe_histogram(
+            "harn_trigger_retry_delay_seconds",
+            trigger_lifecycle_labels(trigger_id, binding_key, provider, tenant_id, status),
+            duration.as_secs_f64(),
+            &Self::TRIGGER_LATENCY_BUCKETS,
+        );
+    }
+
+    pub fn record_trigger_accepted_to_dlq(
+        &self,
+        trigger_id: &str,
+        binding_key: &str,
+        provider: &str,
+        tenant_id: Option<&str>,
+        status: &str,
+        duration: StdDuration,
+    ) {
+        self.observe_histogram(
+            "harn_trigger_accepted_to_dlq_seconds",
+            trigger_lifecycle_labels(trigger_id, binding_key, provider, tenant_id, status),
+            duration.as_secs_f64(),
+            &Self::TRIGGER_LATENCY_BUCKETS,
+        );
+    }
+
+    pub fn note_trigger_pending_event(
+        &self,
+        event_id: &str,
+        trigger_id: &str,
+        binding_key: &str,
+        provider: &str,
+        tenant_id: Option<&str>,
+        accepted_at_ms: i64,
+        now_ms: i64,
+    ) {
+        let labels = trigger_pending_labels(trigger_id, binding_key, provider, tenant_id);
+        {
+            let mut pending = self
+                .pending_trigger_events
+                .lock()
+                .expect("pending trigger events poisoned");
+            pending
+                .entry(labels.clone())
+                .or_default()
+                .insert(event_id.to_string(), accepted_at_ms);
+        }
+        self.refresh_oldest_pending_gauge(labels, now_ms);
+    }
+
+    pub fn clear_trigger_pending_event(
+        &self,
+        event_id: &str,
+        trigger_id: &str,
+        binding_key: &str,
+        provider: &str,
+        tenant_id: Option<&str>,
+        now_ms: i64,
+    ) {
+        let labels = trigger_pending_labels(trigger_id, binding_key, provider, tenant_id);
+        {
+            let mut pending = self
+                .pending_trigger_events
+                .lock()
+                .expect("pending trigger events poisoned");
+            if let Some(events) = pending.get_mut(&labels) {
+                events.remove(event_id);
+                if events.is_empty() {
+                    pending.remove(&labels);
+                }
+            }
+        }
+        self.refresh_oldest_pending_gauge(labels, now_ms);
     }
 
     pub fn set_trigger_inflight(&self, trigger_id: &str, count: u64) {
@@ -833,6 +1005,23 @@ impl MetricsRegistry {
         *histogram.buckets.entry("+Inf".to_string()).or_default() += 1;
     }
 
+    fn refresh_oldest_pending_gauge(&self, labels: MetricLabels, now_ms: i64) {
+        let oldest_accepted_at_ms = self
+            .pending_trigger_events
+            .lock()
+            .expect("pending trigger events poisoned")
+            .get(&labels)
+            .and_then(|events| events.values().min().copied());
+        let age_seconds = oldest_accepted_at_ms
+            .map(|accepted_at_ms| millis_delta(now_ms, accepted_at_ms).as_secs_f64())
+            .unwrap_or(0.0);
+        self.set_gauge(
+            "harn_trigger_oldest_pending_age_seconds",
+            labels,
+            age_seconds,
+        );
+    }
+
     fn render_generic_metrics(&self, rendered: &mut String) {
         let counters = self
             .counters
@@ -927,6 +1116,7 @@ fn metric_family_names(kind: MetricKind) -> &'static [&'static str] {
             "harn_worker_queue_depth",
             "harn_orchestrator_pump_backlog",
             "harn_orchestrator_pump_outstanding",
+            "harn_trigger_oldest_pending_age_seconds",
         ],
         MetricKind::Histogram => &[
             "harn_http_request_duration_seconds",
@@ -936,6 +1126,13 @@ fn metric_family_names(kind: MetricKind) -> &'static [&'static str] {
             "harn_a2a_hop_duration_seconds",
             "harn_worker_queue_claim_age_seconds",
             "harn_orchestrator_pump_admission_delay_seconds",
+            "harn_trigger_webhook_accepted_to_normalized_seconds",
+            "harn_trigger_webhook_accepted_to_queue_append_seconds",
+            "harn_trigger_queue_age_at_dispatch_admission_seconds",
+            "harn_trigger_queue_age_at_dispatch_start_seconds",
+            "harn_trigger_dispatch_runtime_seconds",
+            "harn_trigger_retry_delay_seconds",
+            "harn_trigger_accepted_to_dlq_seconds",
         ],
     }
 }
@@ -945,6 +1142,47 @@ fn labels<const N: usize>(pairs: [(&str, &str); N]) -> MetricLabels {
         .into_iter()
         .map(|(name, value)| (name.to_string(), value.to_string()))
         .collect()
+}
+
+fn trigger_lifecycle_labels(
+    trigger_id: &str,
+    binding_key: &str,
+    provider: &str,
+    tenant_id: Option<&str>,
+    status: &str,
+) -> MetricLabels {
+    labels([
+        ("binding_key", binding_key),
+        ("provider", provider),
+        ("status", status),
+        ("tenant_id", tenant_label(tenant_id)),
+        ("trigger_id", trigger_id),
+    ])
+}
+
+fn trigger_pending_labels(
+    trigger_id: &str,
+    binding_key: &str,
+    provider: &str,
+    tenant_id: Option<&str>,
+) -> MetricLabels {
+    labels([
+        ("binding_key", binding_key),
+        ("provider", provider),
+        ("tenant_id", tenant_label(tenant_id)),
+        ("trigger_id", trigger_id),
+    ])
+}
+
+fn tenant_label(tenant_id: Option<&str>) -> &str {
+    tenant_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("none")
+}
+
+fn millis_delta(later_ms: i64, earlier_ms: i64) -> StdDuration {
+    StdDuration::from_millis(later_ms.saturating_sub(earlier_ms).max(0) as u64)
 }
 
 fn render_sample(rendered: &mut String, name: &str, labels: &MetricLabels, value: f64) {
@@ -1717,6 +1955,71 @@ mod tests {
             "trigger.inbox.envelopes",
             StdDuration::from_millis(50),
         );
+        metrics.record_trigger_accepted_to_normalized(
+            "github-new-issue",
+            "github-new-issue@v7",
+            "github",
+            Some("tenant-a"),
+            "normalized",
+            StdDuration::from_millis(25),
+        );
+        metrics.record_trigger_accepted_to_queue_append(
+            "github-new-issue",
+            "github-new-issue@v7",
+            "github",
+            Some("tenant-a"),
+            "queued",
+            StdDuration::from_millis(40),
+        );
+        metrics.record_trigger_queue_age_at_dispatch_admission(
+            "github-new-issue",
+            "github-new-issue@v7",
+            "github",
+            Some("tenant-a"),
+            "admitted",
+            StdDuration::from_millis(75),
+        );
+        metrics.record_trigger_queue_age_at_dispatch_start(
+            "github-new-issue",
+            "github-new-issue@v7",
+            "github",
+            Some("tenant-a"),
+            "started",
+            StdDuration::from_millis(125),
+        );
+        metrics.record_trigger_dispatch_runtime(
+            "github-new-issue",
+            "github-new-issue@v7",
+            "github",
+            Some("tenant-a"),
+            "succeeded",
+            StdDuration::from_millis(250),
+        );
+        metrics.record_trigger_retry_delay(
+            "github-new-issue",
+            "github-new-issue@v7",
+            "github",
+            Some("tenant-a"),
+            "scheduled",
+            StdDuration::from_secs(2),
+        );
+        metrics.record_trigger_accepted_to_dlq(
+            "github-new-issue",
+            "github-new-issue@v7",
+            "github",
+            Some("tenant-a"),
+            "retry_exhausted",
+            StdDuration::from_secs(45),
+        );
+        metrics.note_trigger_pending_event(
+            "evt-1",
+            "github-new-issue",
+            "github-new-issue@v7",
+            "github",
+            Some("tenant-a"),
+            1_000,
+            4_000,
+        );
         metrics.record_llm_call("mock", "mock", "succeeded", 0.01);
         metrics.record_llm_cache_hit("mock");
 
@@ -1745,6 +2048,14 @@ mod tests {
             "harn_orchestrator_pump_backlog{topic=\"trigger.inbox.envelopes\"} 2",
             "harn_orchestrator_pump_outstanding{topic=\"trigger.inbox.envelopes\"} 1",
             "harn_orchestrator_pump_admission_delay_seconds_bucket{le=\"0.05\",topic=\"trigger.inbox.envelopes\"} 1",
+            "harn_trigger_webhook_accepted_to_normalized_seconds_bucket{binding_key=\"github-new-issue@v7\",le=\"0.025\",provider=\"github\",status=\"normalized\",tenant_id=\"tenant-a\",trigger_id=\"github-new-issue\"} 1",
+            "harn_trigger_webhook_accepted_to_queue_append_seconds_bucket{binding_key=\"github-new-issue@v7\",le=\"0.05\",provider=\"github\",status=\"queued\",tenant_id=\"tenant-a\",trigger_id=\"github-new-issue\"} 1",
+            "harn_trigger_queue_age_at_dispatch_admission_seconds_bucket{binding_key=\"github-new-issue@v7\",le=\"0.1\",provider=\"github\",status=\"admitted\",tenant_id=\"tenant-a\",trigger_id=\"github-new-issue\"} 1",
+            "harn_trigger_queue_age_at_dispatch_start_seconds_bucket{binding_key=\"github-new-issue@v7\",le=\"0.25\",provider=\"github\",status=\"started\",tenant_id=\"tenant-a\",trigger_id=\"github-new-issue\"} 1",
+            "harn_trigger_dispatch_runtime_seconds_bucket{binding_key=\"github-new-issue@v7\",le=\"0.25\",provider=\"github\",status=\"succeeded\",tenant_id=\"tenant-a\",trigger_id=\"github-new-issue\"} 1",
+            "harn_trigger_retry_delay_seconds_bucket{binding_key=\"github-new-issue@v7\",le=\"2.5\",provider=\"github\",status=\"scheduled\",tenant_id=\"tenant-a\",trigger_id=\"github-new-issue\"} 1",
+            "harn_trigger_accepted_to_dlq_seconds_bucket{binding_key=\"github-new-issue@v7\",le=\"60\",provider=\"github\",status=\"retry_exhausted\",tenant_id=\"tenant-a\",trigger_id=\"github-new-issue\"} 1",
+            "harn_trigger_oldest_pending_age_seconds{binding_key=\"github-new-issue@v7\",provider=\"github\",tenant_id=\"tenant-a\",trigger_id=\"github-new-issue\"} 3",
             "harn_llm_calls_total{model=\"mock\",outcome=\"succeeded\",provider=\"mock\"} 1",
             "harn_llm_cost_usd_total{model=\"mock\",provider=\"mock\"} 0.01",
             "harn_llm_cache_hits_total{provider=\"mock\"} 1",
