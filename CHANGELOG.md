@@ -11,6 +11,9 @@ granular archaeology.
 
 ### Fixed
 
+- **Line-leading nil-coalescing continuations.** Expressions can now
+  continue on a following line that starts with `??`, equality, or
+  comparison operators, matching the formatter and tree-sitter grammar.
 - **Stable script source directories.** `harn run` now stores source
   directories as absolute paths before exposing them through
   `source_dir()`. Scripts can safely derive sibling paths from

@@ -29,11 +29,15 @@ module.exports = grammar({
     [$.interface_declaration],
     [$.match_statement],
     [$.skill_declaration, $.pipe_expression, $.binary_expression, $.method_call, $.property_access],
+    [$.skill_declaration, $.pipe_expression, $.nil_coalescing_expression, $.binary_expression, $.method_call, $.property_access],
     [$.pipe_expression, $.binary_expression, $.unary_expression, $.method_call, $.property_access],
     [$.pipe_expression, $.binary_expression, $.method_call, $.property_access],
     [$.pipe_expression, $.nil_coalescing_expression, $.binary_expression, $.method_call, $.property_access],
     [$.pipe_expression, $.ternary_expression, $.binary_expression, $.method_call, $.property_access],
     [$.pipe_expression, $.range_expression, $.binary_expression, $.method_call, $.property_access],
+    [$.pipe_expression, $.nil_coalescing_expression, $.binary_expression, $.range_expression, $.method_call, $.property_access],
+    [$.pipe_expression, $.ternary_expression, $.nil_coalescing_expression, $.binary_expression, $.method_call, $.property_access],
+    [$.pipe_expression, $.nil_coalescing_expression, $.binary_expression, $.unary_expression, $.method_call, $.property_access],
   ],
 
   word: ($) => $.identifier,
@@ -564,14 +568,14 @@ module.exports = grammar({
       prec.right(2, seq($._expression, "?", $._expression, ":", $._expression)),
 
     nil_coalescing_expression: ($) =>
-      prec.left(3, seq($._expression, "??", $._expression)),
+      prec.left(3, seq($._expression, repeat($._newline), "??", repeat($._newline), $._expression)),
 
     binary_expression: ($) =>
       choice(
         prec.left(4, seq($._expression, repeat($._newline), "||", repeat($._newline), $._expression)),
         prec.left(5, seq($._expression, repeat($._newline), "&&", repeat($._newline), $._expression)),
-        prec.left(6, seq($._expression, choice("==", "!="), $._expression)),
-        prec.left(7, seq($._expression, choice("<", ">", "<=", ">="), $._expression)),
+        prec.left(6, seq($._expression, repeat($._newline), choice("==", "!="), repeat($._newline), $._expression)),
+        prec.left(7, seq($._expression, repeat($._newline), choice("<", ">", "<=", ">="), repeat($._newline), $._expression)),
         prec.left(7, seq($._expression, "in", $._expression)),
         prec.left(7, seq($._expression, "not", "in", $._expression)),
         prec.left(8, seq($._expression, repeat($._newline), "+", repeat($._newline), $._expression)),

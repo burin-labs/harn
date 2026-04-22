@@ -576,14 +576,15 @@ From lowest to highest binding:
 
 ### Multiline expressions
 
-Binary operators `||`, `&&`, `+`, `*`, `/`, `%`, `**`, `|>` and the `.`
-member
-access operator can span multiple lines. The operator at the start of a
-continuation line causes the parser to treat it as a continuation of the
-previous expression rather than a new statement.
+Binary operators `|>`, `||`, `&&`, `==`, `!=`, `<`, `>`, `<=`, `>=`, `??`,
+`+`, `*`, `/`, `%`, `**`, and the `.` / `?.` member access operators can span
+multiple lines. The operator at the start of a continuation line causes the
+parser to treat it as a continuation of the previous expression rather than a
+new statement.
 
-Note: `-` does not support multiline continuation because it is also a
-unary negation prefix.
+Note: `-` does not support multiline continuation because it is also a unary
+negation prefix. Keyword operators `in`, `not in`, and `to` also require an
+explicit backslash continuation.
 
 ```harn
 let result = items

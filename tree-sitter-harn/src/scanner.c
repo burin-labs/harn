@@ -18,6 +18,10 @@ typedef struct {
 static bool is_ignored_separator_target(int32_t lookahead) {
   switch (lookahead) {
     case '.':
+    case '!':
+    case '=':
+    case '<':
+    case '>':
     case '|':
     case '&':
     case '+':
