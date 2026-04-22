@@ -370,6 +370,71 @@ harn doctor
 harn doctor --no-network
 ```
 
+## harn connect
+
+Authorize connector providers and store local connector secrets in the
+workspace keyring namespace.
+
+```bash
+harn connect github \
+  --app-slug my-harn-app \
+  --app-id 12345 \
+  --private-key-file app.pem
+harn connect slack \
+  --client-id "$SLACK_CLIENT_ID" \
+  --client-secret "$SLACK_CLIENT_SECRET" \
+  --scope "app_mentions:read chat:write"
+harn connect linear \
+  --client-id "$LINEAR_CLIENT_ID" \
+  --client-secret "$LINEAR_CLIENT_SECRET"
+harn connect notion \
+  --client-id "$NOTION_CLIENT_ID" \
+  --client-secret "$NOTION_CLIENT_SECRET"
+harn connect generic acme https://mcp.example.com/mcp
+harn connect --generic acme https://mcp.example.com/mcp
+harn connect --list
+harn connect --refresh notion
+harn connect --revoke slack
+```
+
+OAuth provider commands use a loopback callback bound to `127.0.0.1`. The
+default redirect URI uses port `0`, so Harn selects a random free localhost
+port and sends that exact URI in the authorization request. PKCE S256 is always
+enabled. Generic OAuth discovers protected-resource and authorization-server
+metadata when explicit endpoints are not supplied, attempts dynamic client
+registration when available, and sends the `resource` parameter to both the
+authorization and token endpoints.
+
+Stored OAuth tokens are written under connector-friendly secret ids:
+
+- `<provider>/access-token`
+- `<provider>/refresh-token` when the provider returns one
+- `<provider>/oauth-token` for the full local refresh metadata
+
+`harn connect --list` reads a small keyring index and shows token expiration
+and last-used metadata when known. `--refresh <provider>` forces a refresh-token
+grant. `--revoke <provider>` removes the local OAuth token, access token,
+refresh token, and index entry.
+
+Provider-specific OAuth flags:
+
+| Flag | Description |
+|---|---|
+| `--client-id <id>` | Pre-registered OAuth client id |
+| `--client-secret <secret>` | OAuth client secret |
+| `--scope <scopes>` | Requested scope string |
+| `--resource <resource>` | Override the OAuth resource indicator |
+| `--auth-url <url>` | Override the authorization endpoint |
+| `--token-url <url>` | Override the token endpoint |
+| `--token-auth-method <method>` | `none`, `client_secret_post`, or `client_secret_basic` |
+| `--redirect-uri <uri>` | Override the loopback callback URI |
+| `--no-open` | Print the authorization URL instead of opening a browser |
+
+The GitHub command captures GitHub App installation metadata. If `--app-id` and
+`--private-key-file` are supplied, it stores the private key as
+`github/app-<app-id>/private-key`. If `--webhook-secret` or
+`--webhook-secret-file` is supplied, it stores `github/webhook-secret`.
+
 ## harn connect linear
 
 Register a Linear webhook through the GraphQL `webhookCreate` mutation using

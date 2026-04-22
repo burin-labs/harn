@@ -366,21 +366,78 @@ pub(crate) struct DoctorArgs {
 
 #[derive(Debug, Args)]
 pub(crate) struct ConnectArgs {
+    /// Show authenticated connector tokens known to the local keyring.
+    #[arg(long)]
+    pub list: bool,
+    /// Remove locally stored OAuth material for a provider.
+    #[arg(long, value_name = "PROVIDER")]
+    pub revoke: Option<String>,
+    /// Force-refresh locally stored OAuth material for a provider.
+    #[arg(long, value_name = "PROVIDER")]
+    pub refresh: Option<String>,
+    /// Run the generic OAuth 2.1 flow for a provider/resource pair.
+    #[arg(long, value_names = ["PROVIDER", "URL"], num_args = 2)]
+    pub generic: Vec<String>,
+    /// Emit machine-readable JSON for list/connect management operations.
+    #[arg(long)]
+    pub json: bool,
     #[command(subcommand)]
-    pub command: ConnectCommand,
+    pub command: Option<ConnectCommand>,
 }
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum ConnectCommand {
-    /// Create or inspect a Linear webhook registration from manifest triggers.
+    /// Capture GitHub App installation metadata and optional app secrets.
+    Github(ConnectGithubArgs),
+    /// Authorize Linear using OAuth, or register a webhook when --url is supplied.
     Linear(ConnectLinearArgs),
+    /// Authorize Slack using OAuth and store connector tokens.
+    Slack(ConnectOAuthArgs),
+    /// Authorize Notion using OAuth and store connector tokens.
+    Notion(ConnectOAuthArgs),
+    /// Run the generic OAuth 2.1 flow for any compliant provider.
+    Generic(ConnectGenericArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ConnectGithubArgs {
+    /// GitHub App slug used to build the install URL.
+    #[arg(long)]
+    pub app_slug: Option<String>,
+    /// GitHub App id. Required when storing a private key.
+    #[arg(long)]
+    pub app_id: Option<String>,
+    /// Existing installation id. Skips waiting for the browser callback.
+    #[arg(long)]
+    pub installation_id: Option<String>,
+    /// Override the GitHub App installation URL.
+    #[arg(long)]
+    pub install_url: Option<String>,
+    /// Loopback callback URL. Port 0 binds a random localhost port.
+    #[arg(long, default_value = "http://127.0.0.1:0/gh-install-callback")]
+    pub redirect_uri: String,
+    /// PEM private-key file to store as github/app-<app_id>/private-key.
+    #[arg(long)]
+    pub private_key_file: Option<PathBuf>,
+    /// Inline webhook signing secret to store as github/webhook-secret.
+    #[arg(long, conflicts_with = "webhook_secret_file")]
+    pub webhook_secret: Option<String>,
+    /// Webhook signing secret file to store as github/webhook-secret.
+    #[arg(long, conflicts_with = "webhook_secret")]
+    pub webhook_secret_file: Option<PathBuf>,
+    /// Do not open the system browser; print the URL instead.
+    #[arg(long)]
+    pub no_open: bool,
+    /// Emit machine-readable JSON instead of a human summary.
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Debug, Args)]
 pub(crate) struct ConnectLinearArgs {
     /// Public HTTPS URL that Linear should deliver webhook events to.
     #[arg(long)]
-    pub url: String,
+    pub url: Option<String>,
     /// Optional path to an explicit `harn.toml`. Defaults to the nearest manifest from cwd.
     #[arg(long)]
     pub config: Option<String>,
@@ -408,9 +465,86 @@ pub(crate) struct ConnectLinearArgs {
     /// Secret id containing an OAuth access token (`namespace/name[@version]`).
     #[arg(long, conflicts_with_all = ["api_key", "api_key_secret", "access_token"])]
     pub access_token_secret: Option<String>,
+    /// Explicit OAuth client ID for guided Linear authorization.
+    #[arg(long = "client-id")]
+    pub client_id: Option<String>,
+    /// Explicit OAuth client secret for guided Linear authorization.
+    #[arg(long = "client-secret")]
+    pub client_secret: Option<String>,
+    /// Requested OAuth scope string for guided Linear authorization.
+    #[arg(long = "scope")]
+    pub scope: Option<String>,
+    /// Optional OAuth resource indicator.
+    #[arg(long = "resource")]
+    pub resource: Option<String>,
+    /// Override the authorization endpoint.
+    #[arg(long = "auth-url")]
+    pub auth_url: Option<String>,
+    /// Override the token endpoint.
+    #[arg(long = "token-url")]
+    pub token_url: Option<String>,
+    /// Override token endpoint auth method: none, client_secret_post, or client_secret_basic.
+    #[arg(long = "token-auth-method")]
+    pub token_auth_method: Option<String>,
+    /// Loopback callback URL. Port 0 binds a random localhost port.
+    #[arg(
+        long = "redirect-uri",
+        default_value = "http://127.0.0.1:0/oauth/callback"
+    )]
+    pub redirect_uri: String,
+    /// Do not open the system browser; print the URL instead.
+    #[arg(long)]
+    pub no_open: bool,
     /// Emit machine-readable JSON instead of a human summary.
     #[arg(long)]
     pub json: bool,
+}
+
+#[derive(Debug, Args, Clone)]
+pub(crate) struct ConnectOAuthArgs {
+    /// Explicit OAuth client ID.
+    #[arg(long = "client-id")]
+    pub client_id: Option<String>,
+    /// Explicit OAuth client secret.
+    #[arg(long = "client-secret")]
+    pub client_secret: Option<String>,
+    /// Requested OAuth scope string.
+    #[arg(long = "scope")]
+    pub scope: Option<String>,
+    /// Optional OAuth resource indicator.
+    #[arg(long = "resource")]
+    pub resource: Option<String>,
+    /// Override the authorization endpoint.
+    #[arg(long = "auth-url")]
+    pub auth_url: Option<String>,
+    /// Override the token endpoint.
+    #[arg(long = "token-url")]
+    pub token_url: Option<String>,
+    /// Override token endpoint auth method: none, client_secret_post, or client_secret_basic.
+    #[arg(long = "token-auth-method")]
+    pub token_auth_method: Option<String>,
+    /// Loopback callback URL. Port 0 binds a random localhost port.
+    #[arg(
+        long = "redirect-uri",
+        default_value = "http://127.0.0.1:0/oauth/callback"
+    )]
+    pub redirect_uri: String,
+    /// Do not open the system browser; print the URL instead.
+    #[arg(long)]
+    pub no_open: bool,
+    /// Emit machine-readable JSON instead of a human summary.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args, Clone)]
+pub(crate) struct ConnectGenericArgs {
+    /// Provider name used for local secret ids.
+    pub provider: String,
+    /// Protected resource URL. Used for OAuth discovery and resource indicators.
+    pub url: String,
+    #[command(flatten)]
+    pub oauth: ConnectOAuthArgs,
 }
 
 #[derive(Debug, Args)]
@@ -1551,7 +1685,7 @@ mod tests {
     use std::time::Duration as StdDuration;
 
     use super::{
-        Cli, Command, McpCommand, OrchestratorCommand, OrchestratorDeployProvider,
+        Cli, Command, ConnectCommand, McpCommand, OrchestratorCommand, OrchestratorDeployProvider,
         OrchestratorLogFormat, OrchestratorQueueCommand, ProjectTemplate, RunsCommand,
         SkillCommand, SkillKeyCommand, SkillTrustCommand, SkillsCommand, TriggerCommand,
         TrustCommand, TrustOutcomeArg, TrustTierArg,
@@ -1636,6 +1770,75 @@ mod tests {
         assert_eq!(login.target.as_deref(), Some("notion"));
         assert_eq!(login.url.as_deref(), Some("https://example.com/mcp"));
         assert_eq!(login.client_id.as_deref(), Some("abc"));
+    }
+
+    #[test]
+    fn test_parses_connect_oauth_flags() {
+        let cli = Cli::parse_from([
+            "harn",
+            "connect",
+            "slack",
+            "--client-id",
+            "client",
+            "--client-secret",
+            "secret",
+            "--scope",
+            "chat:write app_mentions:read",
+            "--no-open",
+        ]);
+
+        let Command::Connect(args) = cli.command.unwrap() else {
+            panic!("expected connect command");
+        };
+        let Some(ConnectCommand::Slack(slack)) = args.command else {
+            panic!("expected connect slack");
+        };
+        assert_eq!(slack.client_id.as_deref(), Some("client"));
+        assert_eq!(slack.client_secret.as_deref(), Some("secret"));
+        assert_eq!(slack.scope.as_deref(), Some("chat:write app_mentions:read"));
+        assert!(slack.no_open);
+
+        let cli = Cli::parse_from([
+            "harn",
+            "connect",
+            "linear",
+            "--client-id",
+            "linear-client",
+            "--client-secret",
+            "linear-secret",
+        ]);
+        let Command::Connect(args) = cli.command.unwrap() else {
+            panic!("expected connect command");
+        };
+        let Some(ConnectCommand::Linear(linear)) = args.command else {
+            panic!("expected connect linear");
+        };
+        assert!(linear.url.is_none());
+        assert_eq!(linear.client_id.as_deref(), Some("linear-client"));
+    }
+
+    #[test]
+    fn test_parses_connect_management_flags() {
+        let cli = Cli::parse_from(["harn", "connect", "--list", "--json"]);
+
+        let Command::Connect(args) = cli.command.unwrap() else {
+            panic!("expected connect command");
+        };
+        assert!(args.list);
+        assert!(args.json);
+        assert!(args.command.is_none());
+
+        let cli = Cli::parse_from([
+            "harn",
+            "connect",
+            "--generic",
+            "acme",
+            "https://mcp.example.com/mcp",
+        ]);
+        let Command::Connect(args) = cli.command.unwrap() else {
+            panic!("expected connect command");
+        };
+        assert_eq!(args.generic, vec!["acme", "https://mcp.example.com/mcp"]);
     }
 
     #[test]

@@ -17,8 +17,8 @@ use std::sync::Arc;
 use std::{env, fs, process};
 
 use cli::{
-    Cli, Command, ConnectCommand, RunsCommand, ServeCommand, SkillCommand, SkillKeyCommand,
-    SkillTrustCommand, SkillsCommand,
+    Cli, Command, RunsCommand, ServeCommand, SkillCommand, SkillKeyCommand, SkillTrustCommand,
+    SkillsCommand,
 };
 use harn_lexer::Lexer;
 use harn_parser::{DiagnosticSeverity, Parser, TypeChecker};
@@ -202,10 +202,7 @@ async fn main() {
             commands::contracts::handle_contracts_command(args).await;
         }
         Command::Connect(args) => {
-            commands::connect::run_connect(match args.command {
-                ConnectCommand::Linear(linear) => ConnectCommand::Linear(linear),
-            })
-            .await;
+            commands::connect::run_connect(args).await;
         }
         Command::Lint(args) => {
             let targets: Vec<&str> = args.targets.iter().map(String::as_str).collect();
