@@ -1343,7 +1343,10 @@ fn stream_provider_schema(
             &[],
             SignatureVerificationMetadata::None,
             Vec::new(),
-            ProviderRuntimeMetadata::Placeholder,
+            ProviderRuntimeMetadata::Builtin {
+                connector: "stream".to_string(),
+                default_signature_variant: None,
+            },
         ),
         normalize,
     }
@@ -2099,7 +2102,7 @@ mod tests {
             .filter(|entry| matches!(entry.runtime, ProviderRuntimeMetadata::Builtin { .. }))
             .collect();
 
-        assert_eq!(builtin.len(), 7);
+        assert_eq!(builtin.len(), 13);
         assert!(builtin.iter().any(|entry| entry.provider == "a2a-push"));
         assert!(builtin.iter().any(|entry| entry.provider == "cron"));
         assert!(builtin.iter().any(|entry| entry.provider == "github"));
@@ -2115,7 +2118,10 @@ mod tests {
         assert_eq!(kafka.schema_name, "StreamEventPayload");
         assert!(matches!(
             kafka.runtime,
-            ProviderRuntimeMetadata::Placeholder
+            ProviderRuntimeMetadata::Builtin {
+                ref connector,
+                default_signature_variant: None
+            } if connector == "stream"
         ));
     }
 

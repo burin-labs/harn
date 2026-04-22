@@ -3,7 +3,7 @@ import "std/triggers"
 pipeline test(task) {
   let providers: list<ProviderCatalogEntry> = list_providers()
   let builtin = providers.filter({ provider -> provider.runtime.kind == "builtin" })
-  assert(len(builtin) == 7, "expected exactly seven builtin trigger providers")
+  assert(len(builtin) == 13, "expected thirteen builtin trigger providers")
   let stream_providers = providers.filter({ provider -> provider.kinds.any({ kind -> kind == "stream" }) })
   assert(len(stream_providers) == 6, "expected six stream trigger providers")
   assert(
@@ -11,8 +11,11 @@ pipeline test(task) {
     "stream providers should publish the shared stream payload schema",
   )
   assert(
-    stream_providers.all({ provider -> provider.runtime.kind == "placeholder" }),
-    "stream providers should be cataloged before concrete connector activation lands",
+    stream_providers
+    .all(
+    { provider -> provider.runtime.kind == "builtin" && provider.runtime.connector == "stream" },
+  ),
+    "stream providers should use the generic stream ingress connector",
   )
   assert(
     stream_providers.any({ provider -> provider.provider == "kafka" })

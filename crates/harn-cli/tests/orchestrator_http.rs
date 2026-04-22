@@ -177,6 +177,31 @@ handler = "handlers::on_echo"
     manifest
 }
 
+fn stream_manifest(orchestrator_block: Option<&str>) -> String {
+    let mut manifest = r#"
+[package]
+name = "fixture"
+
+[exports]
+handlers = "lib.harn"
+
+[[triggers]]
+id = "ws-stream"
+kind = "stream"
+provider = "websocket"
+path = "/streams/ws"
+match = { events = ["quote.tick"] }
+handler = "handlers::on_stream"
+"#
+    .to_string();
+    if let Some(block) = orchestrator_block {
+        manifest.push('\n');
+        manifest.push_str(block);
+        manifest.push('\n');
+    }
+    manifest
+}
+
 fn slack_handler_module(marker_path: &Path) -> String {
     format!(
         r#"
@@ -218,6 +243,25 @@ pub fn on_echo(event: TriggerEvent) {{
     binding_id: event.provider_payload.raw.binding_id,
     echoed: ping.message,
     ping_token: ping.token,
+  }}))
+}}
+"#,
+        marker = marker_path.display().to_string()
+    )
+}
+
+fn stream_handler_module(marker_path: &Path) -> String {
+    format!(
+        r#"
+import "std/triggers"
+
+pub fn on_stream(event: TriggerEvent) {{
+  write_file({marker:?}, json_stringify({{
+    provider: event.provider,
+    kind: event.kind,
+    key: event.provider_payload.key,
+    stream: event.provider_payload.stream,
+    amount: event.provider_payload.raw.value.amount,
   }}))
 }}
 "#,
@@ -1306,6 +1350,65 @@ async fn harn_connector_module_round_trips_inbound_and_client_calls() {
             .get("message")
             .and_then(JsonValue::as_str),
         Some("hello from echo")
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn stream_trigger_route_uses_generic_stream_connector() {
+    let _lock = lock_orchestrator_tests();
+    let temp = TempDir::new().unwrap();
+    let marker_path = temp.path().join("stream-handler.json");
+    write_file(temp.path(), "harn.toml", &stream_manifest(None));
+    write_file(
+        temp.path(),
+        "lib.harn",
+        &stream_handler_module(&marker_path),
+    );
+
+    let mut process = spawn_orchestrator(&temp, &[], &[("HARN_SECRET_PROVIDERS", "env")]);
+    let base_url = process.wait_for_listener_url();
+
+    let response = reqwest::Client::new()
+        .post(format!("{base_url}/streams/ws"))
+        .header(CONTENT_TYPE, "application/json")
+        .json(&serde_json::json!({
+            "key": "acct-1",
+            "stream": "quotes",
+            "value": {"amount": 10}
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_status(response, StatusCode::OK).await;
+
+    wait_for_path(&marker_path, EVENT_FAIL_FAST_TIMEOUT);
+    let marker: JsonValue =
+        serde_json::from_str(&fs::read_to_string(&marker_path).unwrap()).unwrap();
+    assert_eq!(
+        marker.get("provider").and_then(JsonValue::as_str),
+        Some("websocket")
+    );
+    assert_eq!(
+        marker.get("kind").and_then(JsonValue::as_str),
+        Some("quote.tick")
+    );
+    assert_eq!(
+        marker.get("key").and_then(JsonValue::as_str),
+        Some("acct-1")
+    );
+    assert_eq!(
+        marker.get("stream").and_then(JsonValue::as_str),
+        Some("quotes")
+    );
+    assert_eq!(marker.get("amount").and_then(JsonValue::as_i64), Some(10));
+
+    send_sigterm(&process.child);
+    let status = wait_for_exit_async(&mut process.child).await;
+    let stderr = process.join_stderr();
+    assert!(status.success(), "status={status} stderr={stderr}");
+    assert!(
+        stderr.contains("activated connectors: websocket(1)"),
+        "stderr={stderr}"
     );
 }
 

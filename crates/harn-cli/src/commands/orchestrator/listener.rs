@@ -296,6 +296,24 @@ impl RouteConfig {
                     connector: None,
                 }))
             }
+            TriggerKind::Stream => {
+                if !trigger.config.kind_specific.contains_key("path") {
+                    return Ok(None);
+                }
+                Ok(Some(Self {
+                    trigger_id: trigger.config.id.clone(),
+                    binding_version,
+                    provider: trigger.config.provider.clone(),
+                    path: trigger_path(trigger)?,
+                    auth_mode: AuthMode::Public,
+                    signature_mode: SignatureMode::Unsigned,
+                    signing_secret: None,
+                    dedupe_key_template: trigger.config.dedupe_key.clone(),
+                    dedupe_retention_days: trigger.config.retry.retention_days,
+                    connector_ingress: true,
+                    connector: None,
+                }))
+            }
             _ => Ok(None),
         }
     }
