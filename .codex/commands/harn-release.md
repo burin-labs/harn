@@ -1,6 +1,6 @@
 # Harn Release Command
 
-Run the full Harn release workflow from the repo source of truth.
+Run the merge-queue-safe Harn release workflow from the repo source of truth.
 
 Default assumptions:
 
@@ -17,35 +17,45 @@ Default assumptions:
   `docs/src/`, `spec/HARN_SPEC.md`, `CHANGELOG.md`, `CONTRIBUTING.md`, and
   developer setup surfaces such as `scripts/dev_setup.sh`, `Makefile`,
   `.githooks/`, and `docs/src/portal.md`.
-- Run `cargo fmt --all` once so the upcoming release content commit is
+- Run `cargo fmt --all` once so the upcoming release content PR is
   formatting-clean — `release_gate.sh audit` runs `cargo fmt -- --check` and
   will reject drift later.
-- Commit the release content with `git commit -m "Prepare vX.Y.Z release"`.
-  Include every file that ships in this version (code + docs + `CHANGELOG.md`)
-  but **not** `Cargo.toml` / `Cargo.lock` — `release_ship.sh` creates the
-  "Bump version to X.Y.Z" commit separately.
-- Then run the deterministic ship script:
+- Open and land a "Prepare vX.Y.Z release" PR. Include every file that ships
+  in this version (code + docs + `CHANGELOG.md`) but **not** `Cargo.toml` /
+  `Cargo.lock` — `release_ship.sh` creates the "Bump version to X.Y.Z" PR
+  separately.
+- After that PR lands through the merge queue, sync `main` and run:
 
 ```bash
 ./scripts/release_ship.sh --bump patch
 ```
 
-- Adjust `patch` to `minor` or `major` if requested.
+- Adjust `patch` to `minor` or `major` if requested. This opens the automated
+  version-bump PR.
+- After the version-bump PR lands through the merge queue, sync `main` and
+  finalize:
+
+```bash
+./scripts/release_ship.sh --finalize
+```
 
 Rules:
 
-- `./scripts/release_ship.sh` is the default mechanical entry point once the
-  release content and docs are consistent and committed. It runs audit,
-  dry-run publish, bump, commit, tag, push branch + tag, `cargo publish`,
-  and GitHub release creation in that order. The push happens **before**
-  `cargo publish` so GitHub release-binary workflows and downstream
-  fetchers (e.g. `burin-code`'s `fetch-harn`) start in parallel with
-  crates.io. The GitHub release body is created last.
+- `./scripts/release_ship.sh --bump patch` is the default mechanical entry
+  point once the release content and docs are consistent and landed on `main`.
+  It runs audit, dry-run publish, bump, commit, pushes `release/vX.Y.Z`, and
+  opens the version-bump PR. It does not tag, publish, or push to `main`.
+- `./scripts/release_ship.sh --finalize` runs only after the bump PR lands on
+  `main`. It runs audit, dry-run publish, creates/pushes the tag, publishes to
+  crates.io, and creates/updates the GitHub release. The tag push happens
+  **before** `cargo publish` so GitHub release-binary workflows and downstream
+  fetchers (e.g. `burin-code`'s `fetch-harn`) start in parallel with crates.io.
+  The GitHub release body is created last.
 - `verify_release_metadata.py` accepts the pre-bump state — it passes when
   `CHANGELOG.md` top is exactly one patch/minor/major step ahead of
-  `Cargo.toml`. That is why running `release_ship.sh` on a "Prepare vX.Y.Z
-  release" commit is fine even though Cargo.toml still points at the
-  previous version.
+  `Cargo.toml`. That is why running `release_ship.sh --bump patch` on a
+  "Prepare vX.Y.Z release" commit is fine even though Cargo.toml still points
+  at the previous version.
 - Prefer `./scripts/release_gate.sh <audit|prepare|publish|notes|full>` over
   ad hoc release commands only when working below the ship script (e.g.
   recovering from a partial release).
@@ -57,7 +67,7 @@ Rules:
   `README.md`, `CLAUDE.md`, `CONTRIBUTING.md`, and mdBook pages that describe
   the changed surface.
 - Treat `CHANGELOG.md` as the source of truth for GitHub release notes.
-- Summarize the shipped version, the release-content commit, the bump commit,
+- Summarize the shipped version, the release-content PR, the bump PR/commit,
   publish status, and the exact notes body or compare link.
 - `release_gate.sh audit` begins with a serial `cargo build --workspace
   --all-targets` warm prebuild before spawning the five parallel lanes, so
@@ -69,6 +79,7 @@ Useful shortcuts:
 
 ```bash
 ./scripts/release_ship.sh --bump patch
+./scripts/release_ship.sh --finalize
 ./scripts/release_gate.sh full --bump patch --dry-run
 ./scripts/release_gate.sh notes
 ```

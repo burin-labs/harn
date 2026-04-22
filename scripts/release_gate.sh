@@ -292,8 +292,9 @@ cmd_prepare() {
   echo "Version updated: $current -> $next"
   echo "Next steps:"
   echo "  1. Review docs/release notes diff"
-  echo "  2. Commit: git commit -am 'Bump version to $next'"
-  echo "  3. Tag after merge or final verification: git tag v$next"
+  echo "  2. Commit on a release/v$next branch: git commit -am 'Bump version to $next'"
+  echo "  3. Open a PR into main and let it land through the merge queue"
+  echo "  4. Finalize after merge: ./scripts/release_ship.sh --finalize"
 }
 
 cmd_publish() {
@@ -317,10 +318,13 @@ cmd_publish() {
   ./scripts/publish.sh ${dry_run}
   local version
   version="$(current_version)"
+  if [[ -n "$dry_run" ]]; then
+    echo "Publish dry run complete for v$version"
+    return
+  fi
   echo "Publish phase complete for v$version"
   echo "Follow-up:"
-  echo "  git tag v$version"
-  echo "  git push origin v$version"
+  echo "  Ensure tag v$version has been pushed from the merge-queue-approved main commit"
   echo "  Review changelog-backed GitHub release notes"
 }
 

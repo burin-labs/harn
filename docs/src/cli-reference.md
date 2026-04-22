@@ -743,16 +743,25 @@ Security guidance:
 
 ## Release gate
 
-For repo maintainers, the deterministic full-release path is:
+For repo maintainers, the merge-queue-safe release path opens the automated
+version-bump PR after the release-content PR lands on `main`:
 
 ```bash
 ./scripts/release_ship.sh --bump patch
 ```
 
-This runs audit → dry-run publish → bump → commit → tag → push → `cargo publish`
-→ GitHub release in that order. Pushing happens before `cargo publish` so
-downstream consumers (GitHub release binary workflows, `burin-code`'s
-`fetch-harn`) start in parallel with crates.io.
+After that bump PR lands through the merge queue, finalize from an up-to-date
+`main`:
+
+```bash
+./scripts/release_ship.sh --finalize
+```
+
+The first command runs audit → dry-run publish → bump → commit → push
+`release/vX.Y.Z` → open PR. Finalize runs audit → dry-run publish → tag → push
+tag → `cargo publish` → GitHub release. The tag push happens before
+`cargo publish` so downstream consumers (GitHub release binary workflows,
+`burin-code`'s `fetch-harn`) start in parallel with crates.io.
 
 For piecewise work, the docs audit, verification gate, bump flow, and publish
 sequence are exposed individually:
