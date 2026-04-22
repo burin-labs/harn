@@ -73,6 +73,12 @@ async fn run_local(args: OrchestratorServeArgs) -> Result<(), String> {
                 .unwrap_or(manifest.orchestrator.drain.deadline_seconds),
         ),
     };
+    let pump_config = PumpConfig {
+        max_outstanding: args
+            .pump_max_outstanding
+            .unwrap_or(manifest.orchestrator.pumps.max_outstanding)
+            .max(1),
+    };
     let state_dir = absolutize_from_cwd(&args.local.state_dir)?;
     std::fs::create_dir_all(&state_dir).map_err(|error| {
         format!(
@@ -190,11 +196,36 @@ async fn run_local(args: OrchestratorServeArgs) -> Result<(), String> {
         event_log.clone(),
         Some(metrics_registry.clone()),
     );
-    let pending_pump = spawn_pending_pump(event_log.clone(), dispatcher.clone())?;
-    let cron_pump = spawn_cron_pump(event_log.clone(), dispatcher.clone())?;
-    let inbox_pump = spawn_inbox_pump(event_log.clone(), dispatcher.clone())?;
-    let waitpoint_pump = spawn_waitpoint_resume_pump(event_log.clone(), dispatcher.clone())?;
-    let waitpoint_cancel_pump = spawn_waitpoint_cancel_pump(event_log.clone(), dispatcher.clone())?;
+    let pending_pump = spawn_pending_pump(
+        event_log.clone(),
+        dispatcher.clone(),
+        pump_config,
+        metrics_registry.clone(),
+    )?;
+    let cron_pump = spawn_cron_pump(
+        event_log.clone(),
+        dispatcher.clone(),
+        pump_config,
+        metrics_registry.clone(),
+    )?;
+    let inbox_pump = spawn_inbox_pump(
+        event_log.clone(),
+        dispatcher.clone(),
+        pump_config,
+        metrics_registry.clone(),
+    )?;
+    let waitpoint_pump = spawn_waitpoint_resume_pump(
+        event_log.clone(),
+        dispatcher.clone(),
+        pump_config,
+        metrics_registry.clone(),
+    )?;
+    let waitpoint_cancel_pump = spawn_waitpoint_cancel_pump(
+        event_log.clone(),
+        dispatcher.clone(),
+        pump_config,
+        metrics_registry.clone(),
+    )?;
     let waitpoint_sweeper = spawn_waitpoint_sweeper(dispatcher.clone());
 
     let listener = ListenerRuntime::start(ListenerConfig {
@@ -285,6 +316,7 @@ async fn run_local(args: OrchestratorServeArgs) -> Result<(), String> {
             "shutdown_timeout_secs": shutdown_timeout.as_secs(),
             "drain_max_items": drain_config.max_items,
             "drain_deadline_secs": drain_config.deadline.as_secs(),
+            "pump_max_outstanding": pump_config.max_outstanding,
         }),
     )
     .await?;
@@ -750,6 +782,11 @@ struct DrainConfig {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct PumpConfig {
+    max_outstanding: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct PumpDrainRequest {
     up_to: u64,
     config: DrainConfig,
@@ -858,64 +895,82 @@ struct PendingTriggerRecord {
 fn spawn_pending_pump(
     event_log: Arc<harn_vm::event_log::AnyEventLog>,
     dispatcher: harn_vm::Dispatcher,
+    pump_config: PumpConfig,
+    metrics_registry: Arc<harn_vm::MetricsRegistry>,
 ) -> Result<PumpHandle, String> {
     let topic = harn_vm::event_log::Topic::new(PENDING_TOPIC).map_err(|error| error.to_string())?;
-    spawn_topic_pump(event_log, topic, move |logged| {
-        let dispatcher = dispatcher.clone();
-        async move {
-            if pending_pump_test_should_fail() {
-                return Err("test pending pump failure".to_string());
+    spawn_topic_pump(
+        event_log,
+        topic,
+        pump_config,
+        metrics_registry,
+        move |logged| {
+            let dispatcher = dispatcher.clone();
+            async move {
+                if pending_pump_test_should_fail() {
+                    return Err("test pending pump failure".to_string());
+                }
+                if logged.kind != "trigger_event" {
+                    return Ok(false);
+                }
+                let record: PendingTriggerRecord = serde_json::from_value(logged.payload)
+                    .map_err(|error| format!("failed to decode pending trigger event: {error}"))?;
+                dispatcher
+                    .enqueue_targeted(
+                        Some(record.trigger_id),
+                        Some(record.binding_version),
+                        record.event,
+                    )
+                    .await
+                    .map_err(|error| format!("failed to enqueue pending trigger event: {error}"))?;
+                Ok(true)
             }
-            if logged.kind != "trigger_event" {
-                return Ok(false);
-            }
-            let record: PendingTriggerRecord = serde_json::from_value(logged.payload)
-                .map_err(|error| format!("failed to decode pending trigger event: {error}"))?;
-            dispatcher
-                .enqueue_targeted(
-                    Some(record.trigger_id),
-                    Some(record.binding_version),
-                    record.event,
-                )
-                .await
-                .map_err(|error| format!("failed to enqueue pending trigger event: {error}"))?;
-            Ok(true)
-        }
-    })
+        },
+    )
 }
 
 fn spawn_cron_pump(
     event_log: Arc<harn_vm::event_log::AnyEventLog>,
     dispatcher: harn_vm::Dispatcher,
+    pump_config: PumpConfig,
+    metrics_registry: Arc<harn_vm::MetricsRegistry>,
 ) -> Result<PumpHandle, String> {
     let topic =
         harn_vm::event_log::Topic::new(CRON_TICK_TOPIC).map_err(|error| error.to_string())?;
-    spawn_topic_pump(event_log, topic, move |logged| {
-        let dispatcher = dispatcher.clone();
-        async move {
-            if logged.kind != "trigger_event" {
-                return Ok(false);
+    spawn_topic_pump(
+        event_log,
+        topic,
+        pump_config,
+        metrics_registry,
+        move |logged| {
+            let dispatcher = dispatcher.clone();
+            async move {
+                if logged.kind != "trigger_event" {
+                    return Ok(false);
+                }
+                let event: harn_vm::TriggerEvent = serde_json::from_value(logged.payload)
+                    .map_err(|error| format!("failed to decode cron trigger event: {error}"))?;
+                let trigger_id = match &event.provider_payload {
+                    harn_vm::ProviderPayload::Known(
+                        harn_vm::triggers::event::KnownProviderPayload::Cron(payload),
+                    ) => payload.cron_id.clone(),
+                    _ => None,
+                };
+                dispatcher
+                    .enqueue_targeted(trigger_id, None, event)
+                    .await
+                    .map_err(|error| format!("failed to enqueue cron trigger event: {error}"))?;
+                Ok(true)
             }
-            let event: harn_vm::TriggerEvent = serde_json::from_value(logged.payload)
-                .map_err(|error| format!("failed to decode cron trigger event: {error}"))?;
-            let trigger_id = match &event.provider_payload {
-                harn_vm::ProviderPayload::Known(
-                    harn_vm::triggers::event::KnownProviderPayload::Cron(payload),
-                ) => payload.cron_id.clone(),
-                _ => None,
-            };
-            dispatcher
-                .enqueue_targeted(trigger_id, None, event)
-                .await
-                .map_err(|error| format!("failed to enqueue cron trigger event: {error}"))?;
-            Ok(true)
-        }
-    })
+        },
+    )
 }
 
 fn spawn_inbox_pump(
     event_log: Arc<harn_vm::event_log::AnyEventLog>,
     dispatcher: harn_vm::Dispatcher,
+    pump_config: PumpConfig,
+    metrics_registry: Arc<harn_vm::MetricsRegistry>,
 ) -> Result<PumpHandle, String> {
     let topic = harn_vm::event_log::Topic::new(harn_vm::TRIGGER_INBOX_ENVELOPES_TOPIC)
         .map_err(|error| error.to_string())?;
@@ -923,6 +978,7 @@ fn spawn_inbox_pump(
     let inbox_task_release_file = inbox_task_test_release_file();
     let (mode_tx, mut mode_rx) = watch::channel(PumpMode::Running);
     let join = tokio::task::spawn_local(async move {
+        metrics_registry.set_orchestrator_pump_outstanding(topic.as_str(), 0);
         let start_from = event_log
             .consumer_cursor(&topic, &consumer)
             .await
@@ -940,6 +996,7 @@ fn spawn_inbox_pump(
             last_seen: start_from.unwrap_or(0),
             processed: 0,
         };
+        record_pump_backlog(&metrics_registry, &event_log, &topic, stats.last_seen).await;
         let mut drain_progress = None;
         let mut tasks = JoinSet::new();
 
@@ -984,14 +1041,20 @@ fn spawn_inbox_pump(
                 }
                 joined = tasks.join_next(), if !tasks.is_empty() => {
                     match joined {
-                        Some(Ok(())) => {}
+                        Some(Ok(())) => {
+                            metrics_registry
+                                .set_orchestrator_pump_outstanding(topic.as_str(), tasks.len());
+                        }
                         Some(Err(error)) => {
                             return Err(format!("inbox dispatch task join failed: {error}"));
                         }
                         None => {}
                     }
                 }
-                received = stream.next() => {
+                _ = tokio::time::sleep(Duration::from_millis(25)), if tasks.len() >= pump_config.max_outstanding => {
+                    record_pump_backlog(&metrics_registry, &event_log, &topic, stats.last_seen).await;
+                }
+                received = stream.next(), if tasks.len() < pump_config.max_outstanding => {
                     let Some(received) = received else {
                         break;
                     };
@@ -1003,20 +1066,96 @@ fn spawn_inbox_pump(
                             .ack(&topic, &consumer, event_id)
                             .await
                             .map_err(|error| format!("failed to ack topic pump cursor for {topic}: {error}"))?;
+                        record_pump_backlog(&metrics_registry, &event_log, &topic, stats.last_seen).await;
                         continue;
                     }
+                    append_pump_lifecycle_event(
+                        &event_log,
+                        "pump_received",
+                        json!({
+                            "topic": topic.as_str(),
+                            "event_log_id": event_id,
+                            "outstanding": tasks.len(),
+                            "max_outstanding": pump_config.max_outstanding,
+                        }),
+                    )
+                    .await?;
                     let envelope: harn_vm::triggers::dispatcher::InboxEnvelope =
                         serde_json::from_value(logged.payload)
                             .map_err(|error| format!("failed to decode dispatcher inbox event: {error}"))?;
+                    let trigger_id = envelope.trigger_id.clone();
+                    let binding_version = envelope.binding_version;
+                    let trigger_event_id = envelope.event.id.0.clone();
+                    append_pump_lifecycle_event(
+                        &event_log,
+                        "pump_eligible",
+                        json!({
+                            "topic": topic.as_str(),
+                            "event_log_id": event_id,
+                            "trigger_id": trigger_id.clone(),
+                            "binding_version": binding_version,
+                            "trigger_event_id": trigger_event_id,
+                        }),
+                    )
+                    .await?;
+                    metrics_registry.record_orchestrator_pump_admission_delay(
+                        topic.as_str(),
+                        admission_delay(logged.occurred_at_ms),
+                    );
+                    append_pump_lifecycle_event(
+                        &event_log,
+                        "pump_admitted",
+                        json!({
+                            "topic": topic.as_str(),
+                            "event_log_id": event_id,
+                            "outstanding_after_admit": tasks.len() + 1,
+                            "max_outstanding": pump_config.max_outstanding,
+                            "trigger_id": trigger_id.clone(),
+                            "binding_version": binding_version,
+                            "trigger_event_id": trigger_event_id,
+                        }),
+                    )
+                    .await?;
                     let dispatcher = dispatcher.clone();
+                    let task_event_log = event_log.clone();
+                    let task_topic = topic.as_str().to_string();
                     let inbox_task_release_file = inbox_task_release_file.clone();
                     tasks.spawn_local(async move {
                         if let Some(path) = inbox_task_release_file.as_ref() {
                             wait_for_test_release_file(path).await;
                         }
-                        if let Err(error) = dispatcher.dispatch_inbox_envelope(envelope).await {
-                            eprintln!("[harn] inbox dispatch warning: {error}");
-                        }
+                        let _ = append_pump_lifecycle_event(
+                            &task_event_log,
+                            "pump_dispatch_started",
+                            json!({
+                                "topic": task_topic.clone(),
+                                "event_log_id": event_id,
+                                "trigger_id": trigger_id,
+                                "binding_version": binding_version,
+                                "trigger_event_id": trigger_event_id,
+                            }),
+                        )
+                        .await;
+                        let result = dispatcher.dispatch_inbox_envelope(envelope).await;
+                        let (status, error_message) = match result {
+                            Ok(_) => ("completed", None),
+                            Err(error) => {
+                                let message = error.to_string();
+                                eprintln!("[harn] inbox dispatch warning: {message}");
+                                ("failed", Some(message))
+                            }
+                        };
+                        let _ = append_pump_lifecycle_event(
+                            &task_event_log,
+                            "pump_dispatch_completed",
+                            json!({
+                                "topic": task_topic,
+                                "event_log_id": event_id,
+                                "status": status,
+                                "error": error_message,
+                            }),
+                        )
+                        .await;
                     });
                     stats.last_seen = event_id;
                     stats.processed += 1;
@@ -1024,12 +1163,25 @@ fn spawn_inbox_pump(
                         .ack(&topic, &consumer, event_id)
                         .await
                         .map_err(|error| format!("failed to ack topic pump cursor for {topic}: {error}"))?;
+                    append_pump_lifecycle_event(
+                        &event_log,
+                        "pump_acked",
+                        json!({
+                            "topic": topic.as_str(),
+                            "event_log_id": event_id,
+                            "cursor": event_id,
+                        }),
+                    )
+                    .await?;
+                    metrics_registry.set_orchestrator_pump_outstanding(topic.as_str(), tasks.len());
+                    record_pump_backlog(&metrics_registry, &event_log, &topic, stats.last_seen).await;
                 }
             }
         }
 
         while let Some(joined) = tasks.join_next().await {
             joined.map_err(|error| format!("inbox dispatch task join failed: {error}"))?;
+            metrics_registry.set_orchestrator_pump_outstanding(topic.as_str(), tasks.len());
         }
 
         Ok(drain_progress
@@ -1056,35 +1208,51 @@ fn spawn_inbox_pump(
 fn spawn_waitpoint_resume_pump(
     event_log: Arc<harn_vm::event_log::AnyEventLog>,
     dispatcher: harn_vm::Dispatcher,
+    pump_config: PumpConfig,
+    metrics_registry: Arc<harn_vm::MetricsRegistry>,
 ) -> Result<PumpHandle, String> {
     let topic = harn_vm::event_log::Topic::new(harn_vm::WAITPOINT_RESUME_TOPIC)
         .map_err(|error| error.to_string())?;
-    spawn_topic_pump(event_log, topic, move |logged| {
-        let dispatcher = dispatcher.clone();
-        async move { harn_vm::process_waitpoint_resume_event(&dispatcher, logged).await }
-    })
+    spawn_topic_pump(
+        event_log,
+        topic,
+        pump_config,
+        metrics_registry,
+        move |logged| {
+            let dispatcher = dispatcher.clone();
+            async move { harn_vm::process_waitpoint_resume_event(&dispatcher, logged).await }
+        },
+    )
 }
 
 fn spawn_waitpoint_cancel_pump(
     event_log: Arc<harn_vm::event_log::AnyEventLog>,
     dispatcher: harn_vm::Dispatcher,
+    pump_config: PumpConfig,
+    metrics_registry: Arc<harn_vm::MetricsRegistry>,
 ) -> Result<PumpHandle, String> {
     let topic = harn_vm::event_log::Topic::new(harn_vm::TRIGGER_CANCEL_REQUESTS_TOPIC)
         .map_err(|error| error.to_string())?;
-    spawn_topic_pump(event_log, topic, move |logged| {
-        let dispatcher = dispatcher.clone();
-        async move {
-            if logged.kind != "dispatch_cancel_requested" {
-                return Ok(false);
+    spawn_topic_pump(
+        event_log,
+        topic,
+        pump_config,
+        metrics_registry,
+        move |logged| {
+            let dispatcher = dispatcher.clone();
+            async move {
+                if logged.kind != "dispatch_cancel_requested" {
+                    return Ok(false);
+                }
+                harn_vm::service_waitpoints_once(&dispatcher, None)
+                    .await
+                    .map_err(|error| {
+                        format!("failed to service waitpoints after cancel request: {error}")
+                    })?;
+                Ok(true)
             }
-            harn_vm::service_waitpoints_once(&dispatcher, None)
-                .await
-                .map_err(|error| {
-                    format!("failed to service waitpoints after cancel request: {error}")
-                })?;
-            Ok(true)
-        }
-    })
+        },
+    )
 }
 
 fn spawn_waitpoint_sweeper(dispatcher: harn_vm::Dispatcher) -> WaitpointSweepHandle {
@@ -1114,6 +1282,8 @@ fn spawn_waitpoint_sweeper(dispatcher: harn_vm::Dispatcher) -> WaitpointSweepHan
 fn spawn_topic_pump<F, Fut>(
     event_log: Arc<harn_vm::event_log::AnyEventLog>,
     topic: harn_vm::event_log::Topic,
+    _pump_config: PumpConfig,
+    metrics_registry: Arc<harn_vm::MetricsRegistry>,
     process: F,
 ) -> Result<PumpHandle, String>
 where
@@ -1125,6 +1295,7 @@ where
     let test_waiting_file = pump_test_waiting_file();
     let (mode_tx, mut mode_rx) = watch::channel(PumpMode::Running);
     let join = tokio::task::spawn_local(async move {
+        metrics_registry.set_orchestrator_pump_outstanding(topic.as_str(), 0);
         let start_from = event_log
             .consumer_cursor(&topic, &consumer)
             .await
@@ -1142,6 +1313,7 @@ where
             last_seen: start_from.unwrap_or(0),
             processed: 0,
         };
+        record_pump_backlog(&metrics_registry, &event_log, &topic, stats.last_seen).await;
         let mut drain_progress = None;
         loop {
             if let Some(progress) = drain_progress {
@@ -1186,6 +1358,11 @@ where
                     };
                     let (event_id, logged) = received
                         .map_err(|error| format!("topic pump read failed for {topic}: {error}"))?;
+                    metrics_registry.set_orchestrator_pump_outstanding(topic.as_str(), 1);
+                    metrics_registry.record_orchestrator_pump_admission_delay(
+                        topic.as_str(),
+                        admission_delay(logged.occurred_at_ms),
+                    );
                     if let Some(path) = test_release_file.as_ref() {
                         if let Some(waiting_path) = test_waiting_file.as_ref() {
                             mark_test_file(waiting_path).await?;
@@ -1201,6 +1378,8 @@ where
                         .ack(&topic, &consumer, event_id)
                         .await
                         .map_err(|error| format!("failed to ack topic pump cursor for {topic}: {error}"))?;
+                    metrics_registry.set_orchestrator_pump_outstanding(topic.as_str(), 0);
+                    record_pump_backlog(&metrics_registry, &event_log, &topic, stats.last_seen).await;
                 }
             }
         }
@@ -1454,6 +1633,32 @@ async fn append_lifecycle_event(
         .map_err(|error| format!("failed to append orchestrator lifecycle event: {error}"))
 }
 
+async fn append_pump_lifecycle_event(
+    log: &Arc<harn_vm::event_log::AnyEventLog>,
+    kind: &str,
+    payload: JsonValue,
+) -> Result<(), String> {
+    append_lifecycle_event(log, kind, payload).await
+}
+
+async fn record_pump_backlog(
+    metrics: &harn_vm::MetricsRegistry,
+    log: &Arc<harn_vm::event_log::AnyEventLog>,
+    topic: &harn_vm::event_log::Topic,
+    last_seen: u64,
+) {
+    let latest = log.latest(topic).await.ok().flatten().unwrap_or(last_seen);
+    metrics.set_orchestrator_pump_backlog(topic.as_str(), latest.saturating_sub(last_seen));
+}
+
+fn admission_delay(occurred_at_ms: i64) -> Duration {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64;
+    Duration::from_millis(now.saturating_sub(occurred_at_ms).max(0) as u64)
+}
+
 async fn append_manifest_event(
     log: &Arc<harn_vm::event_log::AnyEventLog>,
     kind: &str,
@@ -1599,6 +1804,18 @@ fn maybe_finish_pump_drain(
             outstanding_tasks,
             PumpDrainStopReason::Drained,
         ));
+    }
+    if outstanding_tasks > 0 {
+        if tokio::time::Instant::now() >= progress.request.deadline {
+            return Some(pump_drain_report(
+                stats,
+                progress.start_seen,
+                progress.request.up_to,
+                outstanding_tasks,
+                PumpDrainStopReason::Deadline,
+            ));
+        }
+        return None;
     }
     let drain_items = stats.last_seen.saturating_sub(progress.start_seen);
     if drain_items >= progress.request.config.max_items as u64 {

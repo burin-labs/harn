@@ -659,6 +659,31 @@ impl MetricsRegistry {
         );
     }
 
+    pub fn set_orchestrator_pump_backlog(&self, topic: &str, count: u64) {
+        self.set_gauge(
+            "harn_orchestrator_pump_backlog",
+            labels([("topic", topic)]),
+            count as f64,
+        );
+    }
+
+    pub fn set_orchestrator_pump_outstanding(&self, topic: &str, count: usize) {
+        self.set_gauge(
+            "harn_orchestrator_pump_outstanding",
+            labels([("topic", topic)]),
+            count as f64,
+        );
+    }
+
+    pub fn record_orchestrator_pump_admission_delay(&self, topic: &str, duration: StdDuration) {
+        self.observe_histogram(
+            "harn_orchestrator_pump_admission_delay_seconds",
+            labels([("topic", topic)]),
+            duration.as_secs_f64(),
+            &Self::DURATION_BUCKETS,
+        );
+    }
+
     pub fn record_llm_call(&self, provider: &str, model: &str, outcome: &str, cost_usd: f64) {
         self.increment_counter(
             "harn_llm_calls_total",
@@ -900,6 +925,8 @@ fn metric_family_names(kind: MetricKind) -> &'static [&'static str] {
             "harn_event_log_consumer_lag",
             "harn_trigger_budget_cost_today_usd",
             "harn_worker_queue_depth",
+            "harn_orchestrator_pump_backlog",
+            "harn_orchestrator_pump_outstanding",
         ],
         MetricKind::Histogram => &[
             "harn_http_request_duration_seconds",
@@ -908,6 +935,7 @@ fn metric_family_names(kind: MetricKind) -> &'static [&'static str] {
             "harn_event_log_append_duration_seconds",
             "harn_a2a_hop_duration_seconds",
             "harn_worker_queue_claim_age_seconds",
+            "harn_orchestrator_pump_admission_delay_seconds",
         ],
     }
 }
@@ -1683,6 +1711,12 @@ mod tests {
         metrics.record_a2a_hop("agent.example", "succeeded", StdDuration::from_millis(10));
         metrics.set_worker_queue_depth("triage", 1);
         metrics.record_worker_queue_claim_age("triage", 3.0);
+        metrics.set_orchestrator_pump_backlog("trigger.inbox.envelopes", 2);
+        metrics.set_orchestrator_pump_outstanding("trigger.inbox.envelopes", 1);
+        metrics.record_orchestrator_pump_admission_delay(
+            "trigger.inbox.envelopes",
+            StdDuration::from_millis(50),
+        );
         metrics.record_llm_call("mock", "mock", "succeeded", 0.01);
         metrics.record_llm_cache_hit("mock");
 
@@ -1708,6 +1742,9 @@ mod tests {
             "harn_a2a_hop_duration_seconds_bucket{le=\"0.01\",target=\"agent.example\"} 1",
             "harn_worker_queue_depth{queue=\"triage\"} 1",
             "harn_worker_queue_claim_age_seconds_bucket{le=\"5\",queue=\"triage\"} 1",
+            "harn_orchestrator_pump_backlog{topic=\"trigger.inbox.envelopes\"} 2",
+            "harn_orchestrator_pump_outstanding{topic=\"trigger.inbox.envelopes\"} 1",
+            "harn_orchestrator_pump_admission_delay_seconds_bucket{le=\"0.05\",topic=\"trigger.inbox.envelopes\"} 1",
             "harn_llm_calls_total{model=\"mock\",outcome=\"succeeded\",provider=\"mock\"} 1",
             "harn_llm_cost_usd_total{model=\"mock\",provider=\"mock\"} 0.01",
             "harn_llm_cache_hits_total{provider=\"mock\"} 1",

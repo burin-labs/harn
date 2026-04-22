@@ -29,6 +29,7 @@ harn orchestrator serve \
   --bind 0.0.0.0:8080 \
   --cert certs/dev.pem \
   --key certs/dev-key.pem \
+  --pump-max-outstanding 64 \
   --log-format json \
   --role single-tenant
 ```
@@ -41,6 +42,20 @@ triggers, registered connectors, and the actual bound listener URL. On
 SIGTERM, it stops accepting new requests, lets in-flight requests drain,
 appends lifecycle events to the EventLog, and persists a final
 `orchestrator-state.json` snapshot under `--state-dir`.
+
+Topic pumps are bounded. `--pump-max-outstanding` controls how many
+items each pump may admit at once; the same value can be configured in
+`harn.toml` as:
+
+```toml
+[orchestrator]
+pumps.max_outstanding = 64
+```
+
+When the inbox pump reaches that limit, it stops reading more
+`trigger.inbox.envelopes` records until an admitted dispatch finishes.
+The source cursor is advanced only after a record is admitted, and
+shutdown waits for admitted work before reporting a truncated drain.
 
 Startup no longer replays old `trigger.inbox` entries automatically.
 If the previous process died after writing an inbox envelope but before

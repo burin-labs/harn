@@ -1029,6 +1029,13 @@ pub(crate) struct OrchestratorServeArgs {
     /// Seconds to wait for each pump drain before truncating remaining backlog.
     #[arg(long = "drain-deadline", value_name = "SECS")]
     pub drain_deadline: Option<u64>,
+    /// Maximum outstanding items admitted by each topic pump.
+    #[arg(
+        long = "pump-max-outstanding",
+        env = "HARN_ORCHESTRATOR_PUMP_MAX_OUTSTANDING",
+        value_name = "COUNT"
+    )]
+    pub pump_max_outstanding: Option<usize>,
     /// Watch the manifest file and trigger reloads on changes.
     #[arg(long)]
     pub watch: bool,
@@ -2120,6 +2127,8 @@ mod tests {
             "256",
             "--drain-deadline",
             "9",
+            "--pump-max-outstanding",
+            "4",
             "--log-format",
             "json",
             "--role",
@@ -2140,6 +2149,7 @@ mod tests {
         assert_eq!(serve.shutdown_timeout, 45);
         assert_eq!(serve.drain_max_items, Some(256));
         assert_eq!(serve.drain_deadline, Some(9));
+        assert_eq!(serve.pump_max_outstanding, Some(4));
         assert_eq!(serve.log_format, OrchestratorLogFormat::Json);
         assert_eq!(
             serve.role,
