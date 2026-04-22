@@ -15,6 +15,42 @@ struct MockResponse {
     headers: BTreeMap<String, VmValue>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HttpMockResponse {
+    pub status: i64,
+    pub body: String,
+    pub headers: BTreeMap<String, String>,
+}
+
+impl HttpMockResponse {
+    pub fn new(status: i64, body: impl Into<String>) -> Self {
+        Self {
+            status,
+            body: body.into(),
+            headers: BTreeMap::new(),
+        }
+    }
+
+    pub fn with_header(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
+        self.headers.insert(name.into(), value.into());
+        self
+    }
+}
+
+impl From<HttpMockResponse> for MockResponse {
+    fn from(value: HttpMockResponse) -> Self {
+        Self {
+            status: value.status,
+            body: value.body,
+            headers: value
+                .headers
+                .into_iter()
+                .map(|(key, value)| (key, VmValue::String(Rc::from(value))))
+                .collect(),
+        }
+    }
+}
+
 struct HttpMock {
     method: String,
     url_pattern: String,
@@ -28,6 +64,14 @@ struct HttpMockCall {
     url: String,
     headers: BTreeMap<String, VmValue>,
     body: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HttpMockCallSnapshot {
+    pub method: String,
+    pub url: String,
+    pub headers: BTreeMap<String, String>,
+    pub body: Option<String>,
 }
 
 #[derive(Clone)]
@@ -62,6 +106,45 @@ thread_local! {
 pub fn reset_http_state() {
     HTTP_MOCKS.with(|m| m.borrow_mut().clear());
     HTTP_MOCK_CALLS.with(|c| c.borrow_mut().clear());
+}
+
+pub fn push_http_mock(
+    method: impl Into<String>,
+    url_pattern: impl Into<String>,
+    responses: Vec<HttpMockResponse>,
+) {
+    let responses = if responses.is_empty() {
+        vec![MockResponse::from(HttpMockResponse::new(200, ""))]
+    } else {
+        responses.into_iter().map(MockResponse::from).collect()
+    };
+    HTTP_MOCKS.with(|mocks| {
+        mocks.borrow_mut().push(HttpMock {
+            method: method.into(),
+            url_pattern: url_pattern.into(),
+            responses,
+            next_response: 0,
+        });
+    });
+}
+
+pub fn http_mock_calls_snapshot() -> Vec<HttpMockCallSnapshot> {
+    HTTP_MOCK_CALLS.with(|calls| {
+        calls
+            .borrow()
+            .iter()
+            .map(|call| HttpMockCallSnapshot {
+                method: call.method.clone(),
+                url: call.url.clone(),
+                headers: call
+                    .headers
+                    .iter()
+                    .map(|(key, value)| (key.clone(), value.display()))
+                    .collect(),
+                body: call.body.clone(),
+            })
+            .collect()
+    })
 }
 
 /// Check if a URL matches a mock pattern (exact or glob with `*`).
@@ -726,7 +809,12 @@ async fn vm_execute_http_request(
 
 #[cfg(test)]
 mod tests {
-    use super::{compute_retry_delay, parse_retry_after_value};
+    use super::{
+        compute_retry_delay, http_mock_calls_snapshot, parse_retry_after_value, push_http_mock,
+        reset_http_state, vm_execute_http_request, HttpMockResponse,
+    };
+    use crate::value::VmValue;
+    use std::collections::BTreeMap;
     use std::time::{Duration, SystemTime};
 
     #[test]
@@ -752,5 +840,35 @@ mod tests {
         let delay = compute_retry_delay(0, 1, Some(Duration::from_millis(250)));
         assert!(delay >= Duration::from_millis(250));
         assert!(delay <= Duration::from_secs(60));
+    }
+
+    #[tokio::test]
+    async fn typed_mock_api_drives_http_request_retries() {
+        reset_http_state();
+        push_http_mock(
+            "GET",
+            "https://api.example.com/retry",
+            vec![
+                HttpMockResponse::new(503, "busy").with_header("retry-after", "0"),
+                HttpMockResponse::new(200, "ok"),
+            ],
+        );
+        let result = vm_execute_http_request(
+            "GET",
+            "https://api.example.com/retry",
+            &BTreeMap::from([
+                ("retries".to_string(), VmValue::Int(1)),
+                ("backoff".to_string(), VmValue::Int(0)),
+            ]),
+        )
+        .await
+        .expect("mocked request should succeed after retry");
+
+        let dict = result.as_dict().expect("response dict");
+        assert_eq!(dict["status"].as_int(), Some(200));
+        let calls = http_mock_calls_snapshot();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].url, "https://api.example.com/retry");
+        reset_http_state();
     }
 }
