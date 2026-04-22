@@ -44,8 +44,13 @@ jobs:
       - uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1 # v2.9.1
         with:
           shared-key: workspace
+      - uses: taiki-e/install-action@5f57d6cb7cd20b14a8a27f522884c4bc8a187458 # v2.75.19
+        with:
+          tool: cargo-nextest
       - run: make lint
       - run: make test
+        env:
+          NEXTEST_PROFILE: ci
       - run: make conformance
       - run: make lint-harn
       - run: make fmt-harn
