@@ -915,11 +915,17 @@ pub fn on_task(event: TriggerEvent) -> string {
 "#,
     );
 
+    let inbox_release_file = temp.path().join("release-inbox-dispatch");
+    let inbox_release_file = inbox_release_file.to_string_lossy().into_owned();
     let envs = [
         ("HARN_EVENT_LOG_BACKEND", "file"),
         ("HARN_ORCHESTRATOR_API_KEYS", "test-key"),
         ("HARN_ORCHESTRATOR_HMAC_SECRET", "unused-shared-secret"),
         ("HARN_TEST_DISPATCHER_FAIL_BEFORE_OUTBOX", "1"),
+        (
+            "HARN_TEST_ORCHESTRATOR_INBOX_TASK_RELEASE_FILE",
+            inbox_release_file.as_str(),
+        ),
     ];
     let (mut crashing_child, crashing_rx, crashing_handle) =
         spawn_orchestrator_with(&temp, &[], &envs);
@@ -931,8 +937,9 @@ pub fn on_task(event: TriggerEvent) -> string {
         .headers(bearer_headers())
         .body(body.to_vec())
         .send()
-        .await
-        .unwrap();
+        .await;
+    fs::write(&inbox_release_file, b"release").unwrap();
+    let response = response.unwrap();
     assert_eq!(response.status(), reqwest::StatusCode::OK);
 
     wait_for_exit_code(&mut crashing_child, 86);

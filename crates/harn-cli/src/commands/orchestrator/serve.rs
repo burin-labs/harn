@@ -36,6 +36,7 @@ const PENDING_TOPIC: &str = "orchestrator.triggers.pending";
 const CRON_TICK_TOPIC: &str = "connectors.cron.tick";
 const TEST_PUMP_DELAY_ENV: &str = "HARN_TEST_ORCHESTRATOR_PUMP_DELAY_MS";
 const TEST_INBOX_TASK_DELAY_ENV: &str = "HARN_TEST_ORCHESTRATOR_INBOX_TASK_DELAY_MS";
+const TEST_INBOX_TASK_RELEASE_FILE_ENV: &str = "HARN_TEST_ORCHESTRATOR_INBOX_TASK_RELEASE_FILE";
 const TEST_FAIL_PENDING_PUMP_ENV: &str = "HARN_TEST_ORCHESTRATOR_FAIL_PENDING_PUMP";
 const WAITPOINT_SERVICE_INTERVAL: Duration = Duration::from_millis(250);
 
@@ -917,6 +918,7 @@ fn spawn_inbox_pump(
     let consumer = pump_consumer_id(&topic)?;
     let test_delay = pump_test_delay();
     let inbox_task_delay = inbox_task_test_delay();
+    let inbox_task_release_file = inbox_task_test_release_file();
     let (mode_tx, mut mode_rx) = watch::channel(PumpMode::Running);
     let join = tokio::task::spawn_local(async move {
         let start_from = event_log
@@ -1008,7 +1010,11 @@ fn spawn_inbox_pump(
                         serde_json::from_value(logged.payload)
                             .map_err(|error| format!("failed to decode dispatcher inbox event: {error}"))?;
                     let dispatcher = dispatcher.clone();
+                    let inbox_task_release_file = inbox_task_release_file.clone();
                     tasks.spawn_local(async move {
+                        if let Some(path) = inbox_task_release_file.as_ref() {
+                            wait_for_inbox_task_release_file(path).await;
+                        }
                         if let Some(delay) = inbox_task_delay {
                             tokio::time::sleep(delay).await;
                         }
@@ -1651,6 +1657,18 @@ fn inbox_task_test_delay() -> Option<Duration> {
         .and_then(|value| value.trim().parse::<u64>().ok())
         .map(Duration::from_millis)
         .filter(|delay| !delay.is_zero())
+}
+
+fn inbox_task_test_release_file() -> Option<PathBuf> {
+    std::env::var_os(TEST_INBOX_TASK_RELEASE_FILE_ENV)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+}
+
+async fn wait_for_inbox_task_release_file(path: &Path) {
+    while tokio::fs::metadata(path).await.is_err() {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
 }
 
 fn pending_pump_test_should_fail() -> bool {
