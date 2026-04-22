@@ -1,5 +1,7 @@
 #![cfg(unix)]
 
+mod support;
+
 use std::collections::HashMap;
 use std::fs;
 use std::io::{BufRead, BufReader};
@@ -176,6 +178,7 @@ async fn wait_for_tick_count(temp: &TempDir, min_count: usize) -> HashMap<String
 
 #[tokio::test(flavor = "current_thread")]
 async fn restart_after_emit_does_not_duplicate_cron_dispatch() {
+    let _lock = support::lock_orchestrator_process_tests();
     let temp = TempDir::new().unwrap();
     seed_fixture(&temp);
 

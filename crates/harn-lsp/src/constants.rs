@@ -412,6 +412,7 @@ pub(crate) const BUILTINS: &[(&str, &str)] = &[
     ("base64_decode", "base64_decode(str) -> string"),
     ("sha256", "sha256(str) -> string"),
     ("md5", "md5(str) -> string"),
+    ("jwt_sign", "jwt_sign(alg, claims, private_key) -> string"),
 ];
 
 /// Known keywords for completion.

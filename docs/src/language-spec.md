@@ -3021,6 +3021,7 @@ Sets are iterable with `for ... in` and support `len()`.
 | `bytes_eq(a, b)` | Constant-time byte equality check |
 | `sha256(str)` | Returns the hex-encoded SHA-256 hash of `str` |
 | `md5(str)` | Returns the hex-encoded MD5 hash of `str` |
+| `jwt_sign(alg, claims, private_key)` | Signs a compact JWT/JWS with a PEM private key. Supports `ES256` and `RS256` |
 
 ```harn
 let encoded = base64_encode("hello world")  // "aGVsbG8gd29ybGQ="
@@ -3030,6 +3031,11 @@ let text = hex_decode("68656c6c6f")         // "hello"
 let hash = sha256("hello")                  // hex string
 let md5hash = md5("hello")                  // hex string
 ```
+
+`jwt_sign` requires `claims` to be a dict so it can be serialized as a JSON
+claims object. `ES256` expects a P-256 EC private key in PEM form; `RS256`
+expects an RSA private key in PEM form. Unsupported algorithms, non-dict
+claims, and invalid PEM keys throw runtime errors.
 
 ### Regex builtins
 

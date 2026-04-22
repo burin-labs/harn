@@ -524,6 +524,10 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("bool")),
     },
     BuiltinSig {
+        name: "jwt_sign",
+        return_type: Some(BuiltinReturn::Named("string")),
+    },
+    BuiltinSig {
         name: "kebab_to_camel",
         return_type: Some(BuiltinReturn::Named("string")),
     },

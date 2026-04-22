@@ -581,6 +581,7 @@ println(md5("hello"))     // 5d41402abc4b2a76b9719d911017c592
 | `hmac_sha256(key, message)` | key: string, message: string | string | HMAC-SHA256 as a lowercase hex-encoded string. Most webhook providers (GitHub, Stripe) send signatures in this form |
 | `hmac_sha256_base64(key, message)` | key: string, message: string | string | HMAC-SHA256 as standard base64 (used by Slack-style signatures) |
 | `constant_time_eq(a, b)` | a: string, b: string | bool | Timing-safe string equality. Always use this to compare HMAC signatures — plain `==` can leak the signature byte-by-byte through timing differences |
+| `jwt_sign(alg, claims, private_key)` | alg: string, claims: dict, private_key: string | string | Sign a compact JWT/JWS using a PEM private key. Supports `ES256` with P-256 EC private keys and `RS256` with RSA private keys |
 
 Example (GitHub-style webhook signature verification):
 
@@ -589,6 +590,20 @@ let signature = "sha256=" + hmac_sha256(secret, raw_body)
 if !constant_time_eq(signature, request_signature) {
   throw "invalid signature"
 }
+```
+
+JWT signing expects `claims` to be a JSON object. The private key must be PEM encoded:
+`ES256` accepts PKCS#8 EC private keys such as `-----BEGIN PRIVATE KEY-----`;
+`RS256` accepts RSA private keys such as `-----BEGIN RSA PRIVATE KEY-----` or
+PKCS#8 private keys. Invalid algorithms, non-dict claims, and malformed PEM
+keys throw runtime errors.
+
+```harn
+let token = jwt_sign(
+  "ES256",
+  {iss: app_id, iat: timestamp(), exp: timestamp() + 600},
+  read_file("github-app-private-key.pem"),
+)
 ```
 
 ## Date/Time
