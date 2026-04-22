@@ -85,8 +85,41 @@ Typical fit:
 
 Mapping:
 
-- the shared dispatch core executes the same exported Harn function
-- the A2A adapter owns agent cards, task lifecycle, and resubscribe behavior
+- each exported `pub fn` is advertised as an A2A skill in the agent card
+- inbound task text is passed to the selected exported function
+- callers can select the exported function with `function`, `skillId`, or
+  `message.metadata.target_agent`; if there is only one export, that export is
+  selected automatically
+- the shared dispatch core executes the same exported Harn function as the MCP
+  adapter
+- the A2A adapter owns agent cards, task lifecycle, push callbacks,
+  cancellation, and resubscribe behavior
+
+Run it with:
+
+```bash
+harn serve a2a server.harn
+harn serve a2a --port 3000 server.harn
+```
+
+Behavior today:
+
+- HTTP JSON-RPC endpoint at `/`
+- agent cards at `/.well-known/a2a-agent`, `/.well-known/agent.json`, and
+  `/agent/card`
+- `a2a.SendMessage`, `a2a.SendStreamingMessage`, `a2a.GetTask`,
+  `a2a.CancelTask`, and `a2a.ListTasks`
+- A2A task aliases `tasks/send`, `tasks/send_and_wait`, `tasks/resubscribe`,
+  `tasks/cancel`, and `tasks/list`
+- REST-style POST aliases at `/tasks/send`, `/tasks/send_and_wait`,
+  `/tasks/resubscribe`, and `/tasks/cancel`
+- cooperative cancel propagation into the shared VM cancel token
+- push notification callbacks from caller-provided task configuration
+- HTTP auth hooks built on the shared `AuthPolicy` surface:
+  API keys
+  HMAC canonical-request signatures
+- optional HS256 agent-card signatures with
+  `--card-signing-secret` or `HARN_SERVE_A2A_CARD_SECRET`
 
 ### ACP
 

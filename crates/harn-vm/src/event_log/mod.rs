@@ -1493,33 +1493,20 @@ mod tests {
         assert!(file_size(&wal) == 0 || !wal.exists());
     }
 
-    // CI-flaky: the broadcast buffer's lag detection is timing-dependent and
-    // passes reliably under local single-threaded runtimes but occasionally
-    // observes all 10 ticks before the lag signal surfaces under Linux CI
-    // runners. Ignored on CI; still runs under `cargo test -- --ignored`.
     #[tokio::test(flavor = "current_thread")]
-    #[ignore]
-    async fn subscriber_reports_lag_when_broadcast_buffer_overflows() {
-        let log = Arc::new(MemoryEventLog::new(2));
-        let topic = Topic::new("lag.demo").unwrap();
-        let mut stream = log.clone().subscribe(&topic, None).await.unwrap();
+    async fn broadcast_forwarder_reports_lag_when_receiver_overflows() {
+        let (sender, rx) = broadcast::channel(2);
         for i in 0..10 {
-            log.append(&topic, LogEvent::new("tick", serde_json::json!({"i": i})))
-                .await
+            sender
+                .send((i + 1, LogEvent::new("tick", serde_json::json!({"i": i}))))
                 .unwrap();
         }
-        let mut saw_lag = false;
-        for _ in 0..4 {
-            match stream.next().await {
-                Some(Err(LogError::ConsumerLagged(_))) => {
-                    saw_lag = true;
-                    break;
-                }
-                Some(_) => {}
-                None => break,
-            }
+        let mut stream = stream_from_broadcast(Vec::new(), None, rx, 2);
+
+        match stream.next().await {
+            Some(Err(LogError::ConsumerLagged(last_seen))) => assert_eq!(last_seen, 0),
+            other => panic!("subscriber should surface lag, got {other:?}"),
         }
-        assert!(saw_lag, "subscriber should surface lag");
     }
 
     #[tokio::test(flavor = "current_thread")]

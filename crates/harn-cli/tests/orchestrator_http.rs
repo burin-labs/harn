@@ -1,9 +1,7 @@
 #![cfg(unix)]
-// Orchestrator HTTP tests serialize against a std::sync::Mutex to prevent
-// parallel binds of the same port. Each test holds the guard across .await
-// boundaries (spawn orchestrator, make requests, drain); that's the correct
-// pattern for this serialization. The clippy lint against await-holding-lock
-// is overly strict for this use case, so allow it at the module level.
+// Orchestrator HTTP tests serialize CLI child processes with the shared
+// cross-process file lock. Each test holds the guard across .await boundaries
+// while the child server is alive.
 #![allow(clippy::await_holding_lock)]
 
 mod support;

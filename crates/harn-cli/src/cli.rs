@@ -584,6 +584,18 @@ pub(crate) struct A2aServeArgs {
     /// Port to bind the A2A server to.
     #[arg(long, default_value_t = 8080)]
     pub port: u16,
+    /// Public URL advertised in the A2A agent card.
+    #[arg(long = "public-url", env = "HARN_SERVE_A2A_PUBLIC_URL")]
+    pub public_url: Option<String>,
+    /// Static API keys accepted via `Authorization: Bearer` or `X-API-Key`.
+    #[arg(long = "api-key", env = "HARN_SERVE_API_KEY", value_delimiter = ',')]
+    pub api_key: Vec<String>,
+    /// Shared secret for HMAC request signing.
+    #[arg(long = "hmac-secret", env = "HARN_SERVE_HMAC_SECRET")]
+    pub hmac_secret: Option<String>,
+    /// Shared secret used to attach an HS256 signature to the agent card.
+    #[arg(long = "card-signing-secret", env = "HARN_SERVE_A2A_CARD_SECRET")]
+    pub card_signing_secret: Option<String>,
     /// Path to the .harn file to serve.
     pub file: String,
 }

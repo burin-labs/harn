@@ -1,40 +1,17 @@
-use std::fs::{File, OpenOptions};
+mod process;
+
 use std::io::{Read, Write};
 use std::net::TcpStream;
-use std::path::PathBuf;
 use std::process::Child;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use fs2::FileExt;
-
-pub struct OrchestratorProcessTestLock {
-    file: File,
-}
-
-impl Drop for OrchestratorProcessTestLock {
-    fn drop(&mut self) {
-        let _ = self.file.unlock();
-    }
-}
+pub type OrchestratorProcessTestLock = process::HarnProcessTestLock;
 
 pub fn lock_orchestrator_process_tests() -> OrchestratorProcessTestLock {
-    let path = orchestrator_process_lock_path();
-    let file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-        .unwrap_or_else(|error| panic!("failed to open {}: {error}", path.display()));
-    file.lock_exclusive()
-        .unwrap_or_else(|error| panic!("failed to lock {}: {error}", path.display()));
-    OrchestratorProcessTestLock { file }
+    process::lock_harn_process_tests()
 }
 
-fn orchestrator_process_lock_path() -> PathBuf {
-    std::env::temp_dir().join("harn-orchestrator-process-tests.lock")
-}
-
-#[allow(dead_code)]
 pub fn wait_for_readyz(child: &mut Child, base_url: &str, timeout: Duration) -> Result<(), String> {
     let Some(target) = ReadyzTarget::parse(base_url)? else {
         return Ok(());

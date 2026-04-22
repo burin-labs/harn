@@ -22,6 +22,11 @@ granular archaeology.
 - **A2A push notification connector (#436).** Harn can now receive A2A
   push completion callbacks through the trigger inbox, with replay
   protections and conformance coverage for accepted and rejected flows.
+- **`harn-serve` A2A adapter (#316).** `harn serve a2a` now uses the
+  shared dispatch core for exported `pub fn` entrypoints, with agent-card
+  skill advertisement, task send/send-and-wait, SSE streaming and
+  resubscribe, push callbacks, cancellation, shared HTTP auth, and
+  optional signed agent cards.
 - **OpenTrustGraph chain support (#420).** Added trust graph chain
   primitives, schemas, fixtures, stdlib APIs, CLI plumbing, and docs for
   recording and validating provenance-linked decisions.
