@@ -26,6 +26,7 @@ use crate::triggers::{
     ProviderRuntimeMetadata, TenantId, TriggerEvent,
 };
 
+pub mod a2a_push;
 pub mod cron;
 pub mod github;
 pub mod harn_module;
@@ -37,6 +38,7 @@ pub mod slack;
 pub(crate) mod test_util;
 pub mod webhook;
 
+pub use a2a_push::A2aPushConnector;
 pub use cron::{CatchupMode, CronConnector};
 pub use github::GitHubConnector;
 pub use harn_module::{
@@ -1311,6 +1313,9 @@ fn default_connector_for_provider(provider: &ProviderMetadata) -> Box<dyn Connec
     }
     if provider.provider == "notion" {
         return Box::new(NotionConnector::new());
+    }
+    if provider.provider == "a2a-push" {
+        return Box::new(A2aPushConnector::new());
     }
     match &provider.runtime {
         ProviderRuntimeMetadata::Builtin {

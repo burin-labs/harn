@@ -12,6 +12,7 @@ use time::OffsetDateTime;
 use tokio::sync::Notify;
 use uuid::Uuid;
 
+use crate::connectors::a2a_push::A2aPushConnector;
 use crate::connectors::cron::{CatchupMode, CronConnector, CronEventSink};
 use crate::connectors::linear::LinearConnector;
 use crate::connectors::webhook::{
@@ -49,6 +50,8 @@ pub const TRIGGER_TEST_FIXTURES: &[&str] = &[
     "dedupe_swallows_duplicate_key",
     "dispatcher_retries_with_exponential_backoff",
     "dlq_on_permanent_failure",
+    "a2a_push_completed",
+    "a2a_push_rejects_replay",
     "manifest_hot_reload_preserves_in_flight",
     "multi_tenant_isolation_stub",
     "rate_limit_throttles",
@@ -224,6 +227,8 @@ impl TriggerTestHarness {
                 self.dispatcher_retries_with_exponential_backoff().await
             }
             "dlq_on_permanent_failure" => self.dlq_on_permanent_failure().await,
+            "a2a_push_completed" => self.a2a_push_completed().await,
+            "a2a_push_rejects_replay" => self.a2a_push_rejects_replay().await,
             "manifest_hot_reload_preserves_in_flight" => {
                 self.manifest_hot_reload_preserves_in_flight().await
             }
@@ -978,6 +983,79 @@ impl TriggerTestHarness {
                 "delivery_id": "delivery-123",
                 "first_appended": first_appended,
                 "second_appended": second_appended,
+            }),
+        })
+    }
+
+    async fn a2a_push_completed(self) -> Result<TriggerHarnessResult, String> {
+        let _guard = clock::install_override(self.clock.clone());
+        let (connector, _inbox) = a2a_push_fixture_connector().await?;
+        let event = connector
+            .normalize_inbound(a2a_push_raw("a2a-jti-completed"))
+            .await
+            .map_err(|error| error.to_string())?;
+        self.connector_registry.record_event(
+            "a2a.push.fixture",
+            1,
+            &event,
+            Some("completed"),
+            None,
+        );
+        let emitted = self.connector_registry.emitted();
+        let payload = match &event.provider_payload {
+            ProviderPayload::Known(KnownProviderPayload::A2aPush(payload)) => payload,
+            _ => return Err("expected a2a-push payload".to_string()),
+        };
+        Ok(TriggerHarnessResult {
+            fixture: "a2a_push_completed".to_string(),
+            ok: event.kind == "a2a.task.completed"
+                && event.dedupe_key == "a2a-jti-completed"
+                && event.dedupe_claimed()
+                && payload.task_id.as_deref() == Some("task-123")
+                && payload.task_state.as_deref() == Some("completed")
+                && emitted.len() == 1,
+            stub: false,
+            summary: "A2A push status updates normalize into task-state trigger events".to_string(),
+            emitted,
+            attempts: Vec::new(),
+            dlq: Vec::new(),
+            alerts: Vec::new(),
+            bindings: Vec::new(),
+            notes: Vec::new(),
+            details: json!({
+                "task_id": payload.task_id,
+                "task_state": payload.task_state,
+                "kind": event.kind,
+                "dedupe_claimed": event.dedupe_claimed(),
+            }),
+        })
+    }
+
+    async fn a2a_push_rejects_replay(self) -> Result<TriggerHarnessResult, String> {
+        let _guard = clock::install_override(self.clock.clone());
+        let (connector, _inbox) = a2a_push_fixture_connector().await?;
+        connector
+            .normalize_inbound(a2a_push_raw("a2a-jti-replay"))
+            .await
+            .map_err(|error| error.to_string())?;
+        let replay = connector
+            .normalize_inbound(a2a_push_raw("a2a-jti-replay"))
+            .await;
+        let rejected = matches!(replay, Err(ConnectorError::DuplicateDelivery(_)));
+        Ok(TriggerHarnessResult {
+            fixture: "a2a_push_rejects_replay".to_string(),
+            ok: rejected,
+            stub: false,
+            summary: "A2A push JWT jti values are single-use through the trigger inbox".to_string(),
+            emitted: Vec::new(),
+            attempts: Vec::new(),
+            dlq: Vec::new(),
+            alerts: Vec::new(),
+            bindings: Vec::new(),
+            notes: Vec::new(),
+            details: json!({
+                "jti": "a2a-jti-replay",
+                "replay_rejected": rejected,
             }),
         })
     }
@@ -1776,6 +1854,103 @@ fn synthetic_event(binding_id: &str, dedupe_key: &str, tenant_id: Option<&str>) 
         })),
         SignatureStatus::Unsigned,
     )
+}
+
+async fn a2a_push_fixture_connector() -> Result<(A2aPushConnector, Arc<InboxIndex>), String> {
+    let log = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(32)));
+    let inbox = build_inbox(&log).await;
+    let mut connector = A2aPushConnector::new();
+    connector
+        .init(connector_ctx(
+            log,
+            Arc::new(EmptySecretProvider),
+            inbox.clone(),
+        ))
+        .await
+        .map_err(|error| error.to_string())?;
+    connector
+        .activate(&[ConnectorTriggerBinding {
+            provider: ProviderId::from("a2a-push"),
+            kind: crate::connectors::TriggerKind::from("a2a-push"),
+            binding_id: "a2a.push.fixture".to_string(),
+            dedupe_key: None,
+            dedupe_retention_days: DEFAULT_INBOX_RETENTION_DAYS,
+            config: json!({
+                "a2a_push": {
+                    "expected_iss": "reviewer.prod",
+                    "expected_aud": "https://orchestrator.test/a2a/review",
+                    "expected_token": "opaque-token",
+                    "inline_jwks": {
+                        "keys": [{
+                            "kty": "oct",
+                            "kid": "test-key",
+                            "alg": "HS256",
+                            "k": "c2VjcmV0"
+                        }]
+                    }
+                }
+            }),
+        }])
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok((connector, inbox))
+}
+
+fn a2a_push_raw(jti: &str) -> RawInbound {
+    let mut headers = BTreeMap::new();
+    headers.insert(
+        "authorization".to_string(),
+        format!("Bearer {}", a2a_push_fixture_jwt(jti)),
+    );
+    headers.insert(
+        "content-type".to_string(),
+        "application/a2a+json".to_string(),
+    );
+    let mut raw = RawInbound::new(
+        "",
+        headers,
+        serde_json::to_vec(&json!({
+            "statusUpdate": {
+                "taskId": "task-123",
+                "contextId": "ctx-123",
+                "status": {"state": "completed"}
+            }
+        }))
+        .expect("serialize a2a push fixture"),
+    );
+    raw.metadata = json!({"binding_id": "a2a.push.fixture"});
+    raw
+}
+
+#[derive(Serialize)]
+struct A2aFixtureClaims {
+    iss: String,
+    aud: String,
+    iat: i64,
+    exp: i64,
+    jti: String,
+    token: String,
+    #[serde(rename = "taskId")]
+    task_id: String,
+}
+
+fn a2a_push_fixture_jwt(jti: &str) -> String {
+    let mut header = jsonwebtoken::Header::new(jsonwebtoken::Algorithm::HS256);
+    header.kid = Some("test-key".to_string());
+    jsonwebtoken::encode(
+        &header,
+        &A2aFixtureClaims {
+            iss: "reviewer.prod".to_string(),
+            aud: "https://orchestrator.test/a2a/review".to_string(),
+            iat: OffsetDateTime::now_utc().unix_timestamp(),
+            exp: OffsetDateTime::now_utc().unix_timestamp() + 300,
+            jti: jti.to_string(),
+            token: "opaque-token".to_string(),
+            task_id: "task-123".to_string(),
+        },
+        &jsonwebtoken::EncodingKey::from_secret(b"secret"),
+    )
+    .expect("encode fixture jwt")
 }
 
 fn parse_rfc3339(raw: &str) -> OffsetDateTime {

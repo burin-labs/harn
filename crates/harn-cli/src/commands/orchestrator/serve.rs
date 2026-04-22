@@ -501,10 +501,31 @@ fn connector_binding_config(config: &ResolvedTriggerConfig) -> Result<JsonValue,
             "stream": config.kind_specific,
             "window": config.window,
         })),
+        crate::package::TriggerKind::A2aPush => Ok(serde_json::json!({
+            "match": config.match_,
+            "secrets": config.secrets,
+            "a2a_push": a2a_push_connector_config(&config.kind_specific)?,
+        })),
         _ => Ok(JsonValue::Null),
     }
     // Dedupe retention lives on the connector TriggerBinding rather than in
     // connector-specific JSON, so no retention_days insertion is needed here.
+}
+
+fn a2a_push_connector_config(
+    kind_specific: &BTreeMap<String, toml::Value>,
+) -> Result<JsonValue, String> {
+    if let Some(nested) = kind_specific.get("a2a_push") {
+        return serde_json::to_value(nested)
+            .map_err(|error| format!("failed to encode a2a_push trigger config: {error}"));
+    }
+    let filtered = kind_specific
+        .iter()
+        .filter(|(key, _)| key.as_str() != "path")
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect::<BTreeMap<_, _>>();
+    serde_json::to_value(filtered)
+        .map_err(|error| format!("failed to encode a2a_push trigger config: {error}"))
 }
 
 fn connector_for(
@@ -586,7 +607,9 @@ fn attach_route_connectors(
             // HTTP listener path. Webhook/github routes stay on the
             // signature-based `normalize_request` flow in the listener so
             // their existing Option-2 post-processing dedupe keeps working.
-            if connector_owns_ingress(route.provider.as_str(), provider_overrides) {
+            if route.connector_ingress
+                || connector_owns_ingress(route.provider.as_str(), provider_overrides)
+            {
                 route.connector = Some(registry.get(&route.provider).ok_or_else(|| {
                     format!(
                         "connector registry is missing provider '{}'",

@@ -18,7 +18,7 @@ pub(super) fn agent_card(pipeline_name: &str, port: u16) -> serde_json::Value {
         "securitySchemes": [],
         "capabilities": {
             "streaming": true,
-            "pushNotifications": false,
+            "pushNotifications": true,
             "extendedAgentCard": false
         },
         "skills": [

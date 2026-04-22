@@ -1490,8 +1490,11 @@ fn default_provider_payload(
         "a2a-push" => serde_json::json!({
             "provider": "a2a-push",
             "task_id": serde_json::Value::Null,
+            "task_state": serde_json::Value::Null,
+            "artifact": serde_json::Value::Null,
             "sender": serde_json::Value::Null,
             "raw": raw_event,
+            "kind": "a2a.task.update",
         }),
         _ => serde_json::json!({
             "provider": provider,

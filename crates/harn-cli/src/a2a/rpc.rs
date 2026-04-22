@@ -2,8 +2,8 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use uuid::Uuid;
 
 use super::task::{
-    cancel_task, complete_task, create_task, fail_task, is_task_cancelled, list_tasks,
-    mark_task_working, TaskStore,
+    add_push_config, cancel_task, complete_task, create_task, delete_push_config, fail_task,
+    is_task_cancelled, list_tasks, mark_task_working, task_snapshot, TaskStore,
 };
 use super::{execute_pipeline, write_http_response, write_sse_event, write_sse_header};
 
@@ -116,10 +116,47 @@ pub(super) async fn handle_jsonrpc(pipeline_path: &str, body: &str, store: &Task
                     "Invalid params: no text part found in message",
                 )
             } else {
-                let task_id = create_task(store, &task_text, context_id);
+                let push_config = parsed
+                    .pointer("/params/configuration/pushNotificationConfig")
+                    .cloned();
+                let return_immediately = parsed
+                    .pointer("/params/configuration/returnImmediately")
+                    .and_then(serde_json::Value::as_bool)
+                    .or_else(|| {
+                        parsed
+                            .pointer("/params/configuration/blocking")
+                            .and_then(serde_json::Value::as_bool)
+                            .map(|blocking| !blocking)
+                    })
+                    .unwrap_or(false);
+                let task_id = create_task(store, &task_text, context_id, push_config);
                 mark_task_working(store, &task_id);
 
                 if is_task_cancelled(store, &task_id) {
+                    let task_json = store.lock().unwrap().get(&task_id).unwrap().to_json();
+                    task_rpc_response(&rpc_id, task_json)
+                } else if return_immediately {
+                    let pipeline = pipeline_path.to_string();
+                    let task_text = task_text.clone();
+                    let task_id_for_thread = task_id.clone();
+                    let store_for_thread = store.clone();
+                    std::thread::spawn(move || {
+                        let runtime = tokio::runtime::Builder::new_current_thread()
+                            .enable_all()
+                            .build()
+                            .expect("build A2A background runtime");
+                        let result = runtime.block_on(execute_pipeline(&pipeline, &task_text));
+                        match result {
+                            Ok(output) => {
+                                if !is_task_cancelled(&store_for_thread, &task_id_for_thread) {
+                                    complete_task(&store_for_thread, &task_id_for_thread, &output);
+                                }
+                            }
+                            Err(error) => {
+                                fail_task(&store_for_thread, &task_id_for_thread, &error);
+                            }
+                        }
+                    });
                     let task_json = store.lock().unwrap().get(&task_id).unwrap().to_json();
                     task_rpc_response(&rpc_id, task_json)
                 } else {
@@ -142,6 +179,81 @@ pub(super) async fn handle_jsonrpc(pipeline_path: &str, body: &str, store: &Task
                         }
                     }
                 }
+            }
+        }
+        "CreateTaskPushNotificationConfig" | "tasks/pushNotificationConfig/set" => {
+            let task_id = parsed
+                .pointer("/params/taskId")
+                .or_else(|| parsed.pointer("/params/task_id"))
+                .or_else(|| parsed.pointer("/params/id"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let config = parsed
+                .pointer("/params/pushNotificationConfig")
+                .or_else(|| parsed.pointer("/params/config"))
+                .cloned()
+                .unwrap_or(serde_json::Value::Null);
+            if task_id.is_empty() || !config.is_object() {
+                error_response(
+                    &rpc_id,
+                    -32602,
+                    "Invalid params: missing taskId or pushNotificationConfig",
+                )
+            } else {
+                match add_push_config(store, task_id, config) {
+                    Ok(config) => task_rpc_response(&rpc_id, config),
+                    Err(msg) => error_response(&rpc_id, A2A_TASK_NOT_FOUND, &msg),
+                }
+            }
+        }
+        "GetTaskPushNotificationConfig" => {
+            let task_id = parsed
+                .pointer("/params/taskId")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let config_id = parsed
+                .pointer("/params/id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let config = task_snapshot(store, task_id).and_then(|task| {
+                task.push_configs.into_iter().find(|config| {
+                    config.get("id").and_then(serde_json::Value::as_str) == Some(config_id)
+                })
+            });
+            match config {
+                Some(config) => task_rpc_response(&rpc_id, config),
+                None => error_response(
+                    &rpc_id,
+                    A2A_TASK_NOT_FOUND,
+                    "Push notification config not found",
+                ),
+            }
+        }
+        "ListTaskPushNotificationConfigs" => {
+            let task_id = parsed
+                .pointer("/params/taskId")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            match task_snapshot(store, task_id) {
+                Some(task) => task_rpc_response(
+                    &rpc_id,
+                    serde_json::json!({"configs": task.push_configs, "nextPageToken": ""}),
+                ),
+                None => error_response(&rpc_id, A2A_TASK_NOT_FOUND, "Task not found"),
+            }
+        }
+        "DeleteTaskPushNotificationConfig" => {
+            let task_id = parsed
+                .pointer("/params/taskId")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let config_id = parsed
+                .pointer("/params/id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            match delete_push_config(store, task_id, config_id) {
+                Ok(()) => task_rpc_response(&rpc_id, serde_json::json!({})),
+                Err(msg) => error_response(&rpc_id, A2A_TASK_NOT_FOUND, &msg),
             }
         }
         "a2a.GetTask" => {
@@ -348,7 +460,7 @@ pub(super) async fn handle_streaming_request(
         return;
     }
 
-    let task_id = create_task(store, &task_text, context_id);
+    let task_id = create_task(store, &task_text, context_id, None);
 
     if write_sse_header(stream).await.is_err() {
         return;
