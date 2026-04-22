@@ -13,6 +13,7 @@ mod replay;
 mod resume;
 pub(crate) mod role;
 mod serve;
+mod stats;
 mod tls;
 
 use crate::cli::{OrchestratorArgs, OrchestratorCommand};
@@ -23,6 +24,7 @@ pub(crate) async fn handle(args: OrchestratorArgs) -> Result<(), String> {
         OrchestratorCommand::Deploy(deploy_args) => deploy::run(deploy_args).await,
         OrchestratorCommand::Reload(reload_args) => reload::run(reload_args).await,
         OrchestratorCommand::Inspect(inspect_args) => inspect::run(inspect_args).await,
+        OrchestratorCommand::Stats(stats_args) => stats::run(stats_args).await,
         OrchestratorCommand::Fire(fire_args) => fire::run(fire_args).await,
         OrchestratorCommand::Replay(replay_args) => replay::run(replay_args).await,
         OrchestratorCommand::Resume(resume_args) => resume::run(resume_args).await,

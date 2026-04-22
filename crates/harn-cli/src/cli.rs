@@ -839,6 +839,8 @@ pub(crate) enum OrchestratorCommand {
     Reload(OrchestratorReloadArgs),
     /// Inspect orchestrator state.
     Inspect(OrchestratorInspectArgs),
+    /// Summarize trigger analytics and LLM cost/token telemetry.
+    Stats(OrchestratorStatsArgs),
     /// Inject a synthetic event for a specific binding.
     Fire(OrchestratorFireArgs),
     /// Replay orchestrator events.
@@ -1022,6 +1024,24 @@ pub(crate) struct OrchestratorReloadArgs {
 pub(crate) struct OrchestratorInspectArgs {
     #[command(flatten)]
     pub local: OrchestratorLocalArgs,
+    /// Emit JSON instead of human-readable output.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct OrchestratorStatsArgs {
+    #[command(flatten)]
+    pub local: OrchestratorLocalArgs,
+    /// Rolling window to summarize.
+    #[arg(long = "window", value_name = "DURATION", value_parser = parse_duration_arg, default_value = "24h")]
+    pub window: StdDuration,
+    /// Number of hot triggers/providers to show.
+    #[arg(long = "top", default_value_t = 10, value_name = "N")]
+    pub top: usize,
+    /// Restrict analytics to one tenant id.
+    #[arg(long = "tenant", value_name = "TENANT")]
+    pub tenant: Option<String>,
     /// Emit JSON instead of human-readable output.
     #[arg(long)]
     pub json: bool,

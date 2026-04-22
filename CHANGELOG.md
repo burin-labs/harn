@@ -32,6 +32,10 @@ granular archaeology.
   portal and orchestrator inspection paths now expose richer run,
   launch, trust, and observability data, including a starter dashboard
   for operators.
+- **Orchestrator analytics stats (#304).** `harn orchestrator stats`
+  now rolls durable trigger, predicate, DLQ, handler latency, and
+  LLM cost/token telemetry into top-N summaries and persists each
+  snapshot back to the EventLog for dashboards and audits.
 
 ### Changed
 
