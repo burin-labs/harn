@@ -3511,6 +3511,82 @@ fn compatible_locked_entry(
     Ok(false)
 }
 
+#[derive(Debug, Clone)]
+struct PendingDependency {
+    alias: String,
+    dependency: Dependency,
+    manifest_dir: PathBuf,
+    parent: Option<String>,
+    parent_is_git: bool,
+}
+
+fn git_rev_request(alias: &str, dependency: &Dependency) -> Result<String, String> {
+    dependency
+        .branch()
+        .or_else(|| dependency.rev())
+        .map(str::to_string)
+        .ok_or_else(|| {
+            format!(
+                "git dependency {alias} must specify `rev` or `branch`; use `harn add <url>@<tag-or-sha>` or add `rev = \"...\"` to {MANIFEST}"
+            )
+        })
+}
+
+fn dependency_manifest_dir(source: &Path) -> Option<PathBuf> {
+    if source.is_dir() {
+        return Some(source.to_path_buf());
+    }
+    source.parent().map(Path::to_path_buf)
+}
+
+fn read_package_manifest_from_dir(dir: &Path) -> Result<Option<Manifest>, String> {
+    let manifest_path = dir.join(MANIFEST);
+    if !manifest_path.exists() {
+        return Ok(None);
+    }
+    read_manifest_from_path(&manifest_path).map(Some)
+}
+
+fn dependency_conflict_message(existing: &LockEntry, candidate: &LockEntry) -> String {
+    format!(
+        "dependency alias '{}' resolves to multiple packages ({} and {}); use distinct aliases in {MANIFEST}",
+        candidate.name, existing.source, candidate.source
+    )
+}
+
+fn replace_lock_entry(lock: &mut LockFile, candidate: LockEntry) -> Result<bool, String> {
+    if let Some(existing) = lock.find(&candidate.name) {
+        if existing == &candidate {
+            return Ok(false);
+        }
+        return Err(dependency_conflict_message(existing, &candidate));
+    }
+    lock.replace(candidate);
+    Ok(true)
+}
+
+fn enqueue_manifest_dependencies(
+    pending: &mut Vec<PendingDependency>,
+    manifest: Manifest,
+    manifest_dir: PathBuf,
+    parent: String,
+    parent_is_git: bool,
+) {
+    let mut aliases: Vec<String> = manifest.dependencies.keys().cloned().collect();
+    aliases.sort();
+    for alias in aliases.into_iter().rev() {
+        if let Some(dependency) = manifest.dependencies.get(&alias).cloned() {
+            pending.push(PendingDependency {
+                alias,
+                dependency,
+                manifest_dir: manifest_dir.clone(),
+                parent: Some(parent.clone()),
+                parent_is_git,
+            });
+        }
+    }
+}
+
 fn build_lockfile(
     ctx: &ManifestContext,
     existing: Option<&LockFile>,
@@ -3522,18 +3598,44 @@ fn build_lockfile(
         ensure_git_available()?;
     }
 
+    let mut lock = LockFile::default();
+    let mut pending: Vec<PendingDependency> = Vec::new();
     let mut aliases: Vec<String> = ctx.manifest.dependencies.keys().cloned().collect();
     aliases.sort();
-    let mut lock = LockFile::default();
-    for alias in aliases {
+    for alias in aliases.into_iter().rev() {
         let dependency = ctx
             .manifest
             .dependencies
             .get(&alias)
-            .ok_or_else(|| format!("dependency {alias} disappeared while locking"))?;
+            .ok_or_else(|| format!("dependency {alias} disappeared while locking"))?
+            .clone();
+        pending.push(PendingDependency {
+            alias,
+            dependency,
+            manifest_dir: ctx.dir.clone(),
+            parent: None,
+            parent_is_git: false,
+        });
+    }
+
+    while let Some(next) = pending.pop() {
+        let alias = next.alias;
+        let dependency = next.dependency;
+        if dependency.local_path().is_some() && next.parent_is_git {
+            let parent = next.parent.as_deref().unwrap_or("a git package");
+            return Err(format!(
+                "package {parent} declares local path dependency {alias}, but path dependencies are not supported inside git-installed packages; publish {alias} as a git dependency with `rev` or `branch`"
+            ));
+        }
+        if dependency.git_url().is_some() {
+            ensure_git_available()?;
+            git_rev_request(&alias, &dependency)?;
+        }
         let refresh = refresh_all || refresh_alias == Some(alias.as_str());
         if let Some(existing_lock) = existing.and_then(|lock| lock.find(&alias)) {
-            if !refresh && compatible_locked_entry(&alias, dependency, existing_lock, &ctx.dir)? {
+            if !refresh
+                && compatible_locked_entry(&alias, &dependency, existing_lock, &next.manifest_dir)?
+            {
                 let mut entry = existing_lock.clone();
                 if entry.source.starts_with("git+") && entry.content_hash.is_none() {
                     let url = entry.source.trim_start_matches("git+");
@@ -3549,7 +3651,50 @@ fn build_lockfile(
                         false,
                     )?);
                 }
-                lock.replace(entry);
+                let inserted = replace_lock_entry(&mut lock, entry.clone())?;
+                if entry.source.starts_with("git+") {
+                    let url = entry.source.trim_start_matches("git+");
+                    let commit = entry
+                        .commit
+                        .as_deref()
+                        .ok_or_else(|| format!("missing locked commit for {alias}"))?;
+                    let expected_hash = entry
+                        .content_hash
+                        .as_deref()
+                        .ok_or_else(|| format!("missing content hash for {alias}"))?;
+                    ensure_git_cache_populated(
+                        url,
+                        &entry.source,
+                        commit,
+                        Some(expected_hash),
+                        false,
+                    )?;
+                    if inserted {
+                        let cache_dir = git_cache_dir(&entry.source, commit)?;
+                        if let Some(manifest) = read_package_manifest_from_dir(&cache_dir)? {
+                            enqueue_manifest_dependencies(
+                                &mut pending,
+                                manifest,
+                                cache_dir,
+                                alias,
+                                true,
+                            );
+                        }
+                    }
+                } else if inserted && entry.source.starts_with("path+") {
+                    let source = path_from_source_uri(&entry.source)?;
+                    if let Some(manifest_dir) = dependency_manifest_dir(&source) {
+                        if let Some(manifest) = read_package_manifest_from_dir(&manifest_dir)? {
+                            enqueue_manifest_dependencies(
+                                &mut pending,
+                                manifest,
+                                manifest_dir,
+                                alias,
+                                false,
+                            );
+                        }
+                    }
+                }
                 continue;
             }
         }
@@ -3562,35 +3707,54 @@ fn build_lockfile(
         }
 
         if let Some(path) = dependency.local_path() {
-            let source = resolve_path_dependency_source(&ctx.dir, path)?;
-            lock.replace(LockEntry {
-                name: alias,
+            let source = resolve_path_dependency_source(&next.manifest_dir, path)?;
+            let package_alias = alias.clone();
+            let entry = LockEntry {
+                name: alias.clone(),
                 source: path_source_uri(&source)?,
                 rev_request: None,
                 commit: None,
                 content_hash: None,
-            });
+            };
+            let inserted = replace_lock_entry(&mut lock, entry)?;
+            if inserted {
+                if let Some(manifest_dir) = dependency_manifest_dir(&source) {
+                    if let Some(manifest) = read_package_manifest_from_dir(&manifest_dir)? {
+                        enqueue_manifest_dependencies(
+                            &mut pending,
+                            manifest,
+                            manifest_dir,
+                            package_alias,
+                            false,
+                        );
+                    }
+                }
+            }
             continue;
         }
 
         if let Some(url) = dependency.git_url() {
+            let rev_request = git_rev_request(&alias, &dependency)?;
             let normalized_url = normalize_git_url(url)?;
             let source = format!("git+{normalized_url}");
-            let rev_request = dependency
-                .branch()
-                .map(str::to_string)
-                .or_else(|| dependency.rev().map(str::to_string));
             let commit =
                 resolve_git_commit(&normalized_url, dependency.rev(), dependency.branch())?;
             let content_hash =
                 ensure_git_cache_populated(&normalized_url, &source, &commit, None, false)?;
-            lock.replace(LockEntry {
-                name: alias,
-                source,
-                rev_request,
-                commit: Some(commit),
+            let entry = LockEntry {
+                name: alias.clone(),
+                source: source.clone(),
+                rev_request: Some(rev_request),
+                commit: Some(commit.clone()),
                 content_hash: Some(content_hash),
-            });
+            };
+            let inserted = replace_lock_entry(&mut lock, entry)?;
+            if inserted {
+                let cache_dir = git_cache_dir(&source, &commit)?;
+                if let Some(manifest) = read_package_manifest_from_dir(&cache_dir)? {
+                    enqueue_manifest_dependencies(&mut pending, manifest, cache_dir, alias, true);
+                }
+            }
             continue;
         }
 
@@ -3610,31 +3774,12 @@ fn materialize_dependencies_from_lock(
     fs::create_dir_all(&packages_dir)
         .map_err(|error| format!("failed to create {}: {error}", packages_dir.display()))?;
 
-    let mut aliases: Vec<String> = ctx.manifest.dependencies.keys().cloned().collect();
-    aliases.sort();
     let mut installed = 0usize;
-    for alias in aliases {
-        let dependency = ctx
-            .manifest
-            .dependencies
-            .get(&alias)
-            .ok_or_else(|| format!("dependency {alias} disappeared while installing"))?;
-        let entry = lock.find(&alias).ok_or_else(|| {
-            format!(
-                "{} is missing an entry for {alias}",
-                ctx.lock_path().display()
-            )
-        })?;
-        if !compatible_locked_entry(&alias, dependency, entry, &ctx.dir)? {
-            return Err(format!(
-                "{} is out of date for {alias}; run `harn install`",
-                ctx.lock_path().display()
-            ));
-        }
-
+    for entry in &lock.packages {
+        let alias = &entry.name;
         if entry.source.starts_with("path+") {
             let source = path_from_source_uri(&entry.source)?;
-            materialize_path_dependency(&source, &packages_dir, &alias)?;
+            materialize_path_dependency(&source, &packages_dir, alias)?;
             installed += 1;
             continue;
         }
@@ -3652,9 +3797,9 @@ fn materialize_dependencies_from_lock(
         let refetch_this = refetch == Some("all") || refetch == Some(alias.as_str());
         ensure_git_cache_populated(url, &source, commit, Some(expected_hash), refetch_this)?;
         let cache_dir = git_cache_dir(&source, commit)?;
-        let dest_dir = packages_dir.join(&alias);
+        let dest_dir = packages_dir.join(alias);
         if !dest_dir.exists() || !materialized_hash_matches(&dest_dir, expected_hash) {
-            remove_materialized_package(&packages_dir, &alias)?;
+            remove_materialized_package(&packages_dir, alias)?;
             copy_dir_recursive(&cache_dir, &dest_dir)?;
             write_cached_content_hash(&dest_dir, expected_hash)?;
         }
@@ -3983,6 +4128,11 @@ fn normalize_add_request(
             ));
         }
         let alias = alias.unwrap_or(name_or_spec).to_string();
+        if rev.is_none() && tag.is_none() && branch.is_none() {
+            return Err(format!(
+                "git dependency {alias} must specify `rev` or `branch`; use `harn add <url>@<tag-or-sha>` or pass `--rev`/`--branch`"
+            ));
+        }
         let git = normalize_git_url(git_url.ok_or_else(|| "missing --git URL".to_string())?)?;
         let package_name = derive_repo_name_from_source(&git)?;
         return Ok((
@@ -4008,6 +4158,11 @@ fn normalize_add_request(
     let git = normalize_git_url(raw_source)?;
     let package_name = derive_repo_name_from_source(&git)?;
     let alias = alias.unwrap_or(package_name.as_str()).to_string();
+    if inline_ref.is_none() && rev.is_none() && tag.is_none() && branch.is_none() {
+        return Err(format!(
+            "git dependency {alias} must specify `rev` or `branch`; use `harn add {raw_source}@<tag-or-sha>` or pass `--rev`/`--branch`"
+        ));
+    }
     Ok((
         alias.clone(),
         Dependency::Table(DepTable {
@@ -4254,9 +4409,13 @@ mod tests {
         command
     }
 
-    fn create_git_package_repo() -> (tempfile::TempDir, PathBuf, String) {
+    fn create_git_package_repo_with(
+        name: &str,
+        manifest_tail: &str,
+        lib_source: &str,
+    ) -> (tempfile::TempDir, PathBuf, String) {
         let tmp = tempfile::tempdir().unwrap();
-        let repo = tmp.path().join("acme-lib");
+        let repo = tmp.path().join(name);
         fs::create_dir_all(&repo).unwrap();
         let init = test_git_command(&repo)
             .args(["init", "-b", "main"])
@@ -4275,23 +4434,29 @@ mod tests {
         run_git(&repo, &["config", "core.hooksPath", "/dev/null"]);
         fs::write(
             repo.join(MANIFEST),
-            r#"
+            format!(
+                r#"
 [package]
-name = "acme-lib"
+name = "{name}"
 version = "0.1.0"
-"#,
+"#
+            ) + manifest_tail,
         )
         .unwrap();
-        fs::write(
-            repo.join("lib.harn"),
-            "pub fn value() -> string { return \"v1\" }\n",
-        )
-        .unwrap();
+        fs::write(repo.join("lib.harn"), lib_source).unwrap();
         run_git(&repo, &["add", "."]);
         run_git(&repo, &["commit", "-m", "initial"]);
         run_git(&repo, &["tag", "v1.0.0"]);
         let branch = run_git(&repo, &["branch", "--show-current"]);
         (tmp, repo, branch)
+    }
+
+    fn create_git_package_repo() -> (tempfile::TempDir, PathBuf, String) {
+        create_git_package_repo_with(
+            "acme-lib",
+            "",
+            "pub fn value() -> string { return \"v1\" }\n",
+        )
     }
 
     fn test_harn_connector_source(provider_id: &str) -> String {
@@ -4767,6 +4932,160 @@ acme-lib = {{ git = "{git}", rev = "v1.0.0" }}
         with_test_env(root, &cache_dir, || {
             let error = install_packages_impl(true, None).unwrap_err();
             assert!(error.contains(LOCK_FILE));
+        });
+    }
+
+    #[test]
+    fn add_github_shorthand_requires_version_or_ref() {
+        let error = normalize_add_request(
+            "github.com/burin-labs/harn-openapi",
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap_err();
+        assert!(error.contains("must specify `rev` or `branch`"));
+    }
+
+    #[test]
+    fn add_github_shorthand_with_ref_writes_git_dependency() {
+        let (alias, dependency) = normalize_add_request(
+            "github.com/burin-labs/harn-openapi@v1.2.3",
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(alias, "harn-openapi");
+        assert_eq!(
+            render_dependency_line(&alias, &dependency),
+            "harn-openapi = { git = \"https://github.com/burin-labs/harn-openapi\", rev = \"v1.2.3\" }"
+        );
+    }
+
+    #[test]
+    fn install_resolves_transitive_git_dependencies_from_clean_cache() {
+        let (_sdk_tmp, sdk_repo, _branch) = create_git_package_repo_with(
+            "notion-sdk-harn",
+            "",
+            "pub fn sdk_value() -> string { return \"sdk\" }\n",
+        );
+        let sdk_git = normalize_git_url(sdk_repo.to_string_lossy().as_ref()).unwrap();
+        let connector_tail = format!(
+            r#"
+
+[dependencies]
+notion-sdk-harn = {{ git = "{sdk_git}", rev = "v1.0.0" }}
+"#
+        );
+        let (_connector_tmp, connector_repo, _branch) = create_git_package_repo_with(
+            "notion-connector-harn",
+            &connector_tail,
+            r#"
+import "notion-sdk-harn"
+
+pub fn connector_value() -> string {
+  return "connector"
+}
+"#,
+        );
+
+        let project_tmp = tempfile::tempdir().unwrap();
+        let root = project_tmp.path();
+        let cache_dir = root.join(".cache");
+        fs::create_dir_all(root.join(".git")).unwrap();
+        let connector_git = normalize_git_url(connector_repo.to_string_lossy().as_ref()).unwrap();
+        fs::write(
+            root.join(MANIFEST),
+            format!(
+                r#"
+[package]
+name = "workspace"
+version = "0.1.0"
+
+[dependencies]
+notion-connector-harn = {{ git = "{connector_git}", rev = "v1.0.0" }}
+"#
+            ),
+        )
+        .unwrap();
+
+        with_test_env(root, &cache_dir, || {
+            let installed = install_packages_impl(false, None).unwrap();
+            assert_eq!(installed, 2);
+
+            let lock = LockFile::load(&root.join(LOCK_FILE)).unwrap().unwrap();
+            assert!(lock.find("notion-connector-harn").is_some());
+            assert!(lock.find("notion-sdk-harn").is_some());
+            assert!(root
+                .join(PKG_DIR)
+                .join("notion-connector-harn")
+                .join("lib.harn")
+                .is_file());
+            assert!(root
+                .join(PKG_DIR)
+                .join("notion-sdk-harn")
+                .join("lib.harn")
+                .is_file());
+
+            let mut vm = test_vm();
+            let exports = futures::executor::block_on(
+                vm.load_module_exports(
+                    &root
+                        .join(PKG_DIR)
+                        .join("notion-connector-harn")
+                        .join("lib.harn"),
+                ),
+            )
+            .expect("transitive import should load from the workspace package root");
+            assert!(exports.contains_key("connector_value"));
+        });
+    }
+
+    #[test]
+    fn git_packages_reject_transitive_path_dependencies() {
+        let connector_tail = r#"
+
+[dependencies]
+local-helper = { path = "../helper" }
+"#;
+        let (_connector_tmp, connector_repo, _branch) = create_git_package_repo_with(
+            "notion-connector-harn",
+            connector_tail,
+            "pub fn connector_value() -> string { return \"connector\" }\n",
+        );
+
+        let project_tmp = tempfile::tempdir().unwrap();
+        let root = project_tmp.path();
+        let cache_dir = root.join(".cache");
+        fs::create_dir_all(root.join(".git")).unwrap();
+        let connector_git = normalize_git_url(connector_repo.to_string_lossy().as_ref()).unwrap();
+        fs::write(
+            root.join(MANIFEST),
+            format!(
+                r#"
+[package]
+name = "workspace"
+version = "0.1.0"
+
+[dependencies]
+notion-connector-harn = {{ git = "{connector_git}", rev = "v1.0.0" }}
+"#
+            ),
+        )
+        .unwrap();
+
+        with_test_env(root, &cache_dir, || {
+            let error = install_packages_impl(false, None).unwrap_err();
+            assert!(
+                error.contains("path dependencies are not supported inside git-installed packages")
+            );
         });
     }
 

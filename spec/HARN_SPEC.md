@@ -3443,7 +3443,9 @@ directory when none is supplied).
 
 ```toml
 [dependencies]
+harn-openapi = { git = "https://github.com/burin-labs/harn-openapi", rev = "v1.2.3" }
 notion-sdk-harn = { git = "https://github.com/burin-labs/notion-sdk-harn", rev = "v1.2.3" }
+notion-connector-harn = { git = "https://github.com/burin-labs/notion-connector-harn", rev = "v1.2.3" }
 notion = { git = "https://github.com/burin-labs/notion-sdk-harn", rev = "v1.2.3", package = "notion-sdk-harn" }
 openapi = { git = "https://github.com/burin-labs/harn-openapi", branch = "main" }
 local-fixture = { path = "../fixture-lib" }
@@ -3456,6 +3458,7 @@ resolve without filesystem-relative hacks.
 - The table key is the local import alias.
 - `git` accepts HTTPS, SSH, `file://`, local-repo paths, and GitHub-style
   shorthand URLs.
+- Git dependencies must specify either `rev` or `branch`.
 - `rev` pins a tag, symbolic ref, or full commit SHA in the manifest.
 - `branch` records a moving ref in the manifest, but `harn.lock` still
   pins one resolved commit for reproducible installs.
@@ -3468,6 +3471,15 @@ resolve without filesystem-relative hacks.
   development ergonomic for layouts such as `~/projects/{burin-code,
   harn-cloud,harn-openapi}`: editing `../harn-openapi/lib.harn` is
   immediately visible to imports in the consuming project.
+
+Transitive package dependencies are resolved from installed package
+manifests and flattened into the root workspace `.harn/packages/`
+directory. For example, a connector package can depend on
+`notion-sdk-harn`, and that SDK can depend on `harn-openapi` helpers;
+`harn install` records all reachable packages in `harn.lock` and
+materializes them from a clean cache. Git-installed packages cannot
+declare transitive `path` dependencies, because publishable package
+installs must not depend on local sibling directories.
 
 `harn add ../harn-openapi` treats an existing local path as a path
 dependency and derives the default alias from that package's
