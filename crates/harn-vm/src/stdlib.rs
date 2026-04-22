@@ -56,6 +56,7 @@ pub(crate) fn set_thread_source_dir(dir: &std::path::Path) {
 
 /// Register core builtins: pure/deterministic, no I/O.
 pub fn register_core_stdlib(vm: &mut Vm) {
+    crate::runtime_context::register_runtime_context_builtins(vm);
     types::register_type_builtins(vm);
     math::register_math_builtins(vm);
     strings::register_string_builtins(vm);

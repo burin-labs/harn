@@ -31,6 +31,12 @@ const CORE_BUILTINS: &[&str] = &[
     "assert_ne",
     "json_parse",
     "json_stringify",
+    "runtime_context",
+    "task_current",
+    "runtime_context_values",
+    "runtime_context_get",
+    "runtime_context_set",
+    "runtime_context_clear",
 ];
 
 /// Build the set of denied builtin names from `--deny` or `--allow` flags.

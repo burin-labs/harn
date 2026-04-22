@@ -23,6 +23,7 @@ pub mod metadata;
 pub mod observability;
 pub mod orchestration;
 pub mod record_filter;
+pub mod runtime_context;
 pub mod runtime_paths;
 pub mod schema;
 pub mod secrets;

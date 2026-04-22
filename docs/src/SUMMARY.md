@@ -15,6 +15,7 @@
 - [Modules and imports](./modules.md)
 - [Concurrency](./concurrency.md)
 - [Language specification](./language-spec.md)
+- [Runtime context](./runtime-context.md)
 
 # Agents and workflows
 

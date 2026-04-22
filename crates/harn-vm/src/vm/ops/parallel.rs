@@ -85,9 +85,19 @@ impl super::super::Vm {
         };
         let cap = parallel_cap_from_value(&cap_val, count)?;
         if let VmValue::Closure(closure) = closure {
+            self.runtime_context_counter += 1;
+            let task_group_id = format!(
+                "{}:parallel:{}",
+                self.runtime_context.task_id, self.runtime_context_counter
+            );
             let mut futures: Vec<_> = Vec::with_capacity(count);
             for i in 0..count {
                 let mut child = self.child_vm();
+                child.runtime_context = self.runtime_context.child_task(
+                    format!("{task_group_id}:{i}"),
+                    "parallel",
+                    Some(task_group_id.clone()),
+                );
                 let closure = closure.clone();
                 futures.push(async move {
                     let result = child
@@ -118,9 +128,19 @@ impl super::super::Vm {
             (VmValue::List(items), VmValue::Closure(closure)) => {
                 let len = items.len();
                 let cap = parallel_cap_from_value(&cap_val, len)?;
+                self.runtime_context_counter += 1;
+                let task_group_id = format!(
+                    "{}:parallel_each:{}",
+                    self.runtime_context.task_id, self.runtime_context_counter
+                );
                 let mut futures = Vec::with_capacity(len);
-                for item in items.iter() {
+                for (i, item) in items.iter().enumerate() {
                     let mut child = self.child_vm();
+                    child.runtime_context = self.runtime_context.child_task(
+                        format!("{task_group_id}:{i}"),
+                        "parallel each",
+                        Some(task_group_id.clone()),
+                    );
                     let closure = closure.clone();
                     let item = item.clone();
                     futures.push(async move {
@@ -153,9 +173,19 @@ impl super::super::Vm {
             (VmValue::List(items), VmValue::Closure(closure)) => {
                 let len = items.len();
                 let cap = parallel_cap_from_value(&cap_val, len)?;
+                self.runtime_context_counter += 1;
+                let task_group_id = format!(
+                    "{}:parallel_settle:{}",
+                    self.runtime_context.task_id, self.runtime_context_counter
+                );
                 let mut futures = Vec::with_capacity(len);
-                for item in items.iter() {
+                for (i, item) in items.iter().enumerate() {
                     let mut child = self.child_vm();
+                    child.runtime_context = self.runtime_context.child_task(
+                        format!("{task_group_id}:{i}"),
+                        "parallel settle",
+                        Some(task_group_id.clone()),
+                    );
                     let closure = closure.clone();
                     let item = item.clone();
                     futures.push(async move {
@@ -204,6 +234,14 @@ impl super::super::Vm {
             self.task_counter += 1;
             let task_id = format!("vm_task_{}", self.task_counter);
             let mut child = self.child_vm();
+            child.runtime_context = self.runtime_context.child_task(
+                format!(
+                    "{}:spawn:{}",
+                    self.runtime_context.task_id, self.task_counter
+                ),
+                "spawn",
+                None,
+            );
             let cancel_token = Arc::new(std::sync::atomic::AtomicBool::new(false));
             child.cancel_token = Some(cancel_token.clone());
             let handle = tokio::task::spawn_local(async move {

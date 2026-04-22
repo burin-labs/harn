@@ -49,6 +49,15 @@ pub fn finish_span_from_args(args: &[VmValue]) -> Result<(String, String, String
     Ok((name, trace_id, span_id, duration_ms))
 }
 
+pub(crate) fn current_trace_context() -> Option<(String, String)> {
+    VM_TRACE_STACK.with(|stack| {
+        stack
+            .borrow()
+            .last()
+            .map(|trace| (trace.trace_id.clone(), trace.span_id.clone()))
+    })
+}
+
 pub(crate) fn register_tracing_builtins(vm: &mut Vm) {
     vm.register_builtin("trace_start", |args, _out| {
         use rand::RngExt;
@@ -103,8 +112,7 @@ pub(crate) fn register_tracing_builtins(vm: &mut Vm) {
     });
 
     vm.register_builtin("trace_id", |_args, _out| {
-        let id = VM_TRACE_STACK.with(|stack| stack.borrow().last().map(|t| t.trace_id.clone()));
-        match id {
+        match current_trace_context().map(|context| context.0) {
             Some(trace_id) => Ok(VmValue::String(Rc::from(trace_id))),
             None => Ok(VmValue::Nil),
         }

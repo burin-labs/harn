@@ -987,6 +987,24 @@ for i in 0 to 5 exclusive {
 }
 ```
 
+## Runtime Context
+
+Logical task, workflow, trigger, agent-session, and trace introspection.
+Use this instead of raw OS thread identity.
+
+| Function | Parameters | Returns | Description |
+|---|---|---|---|
+| `runtime_context()` | none | dict | Return the current logical runtime context with task, workflow, trigger, agent, trace, cancellation, debug, and task-local value fields |
+| `task_current()` | none | dict | Alias for `runtime_context()` |
+| `runtime_context_values()` | none | dict | Return task-local context values for the current logical task |
+| `runtime_context_get(key, default?)` | key: string, default: any | any | Return a task-local value, the provided default, or `nil` |
+| `runtime_context_set(key, value)` | key: string, value: any | any | Set a task-local value and return the previous value or `nil` |
+| `runtime_context_clear(key)` | key: string | any | Clear a task-local value and return the previous value or `nil` |
+
+Children created by `spawn`, `parallel`, `parallel each`, and
+`parallel settle` inherit a snapshot of task-local values. Child writes do not
+mutate the parent context.
+
 ## Tracing
 
 Distributed tracing primitives for instrumenting pipeline execution.

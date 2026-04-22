@@ -812,6 +812,26 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: None,
     },
     BuiltinSig {
+        name: "runtime_context",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
+        name: "runtime_context_clear",
+        return_type: None,
+    },
+    BuiltinSig {
+        name: "runtime_context_get",
+        return_type: None,
+    },
+    BuiltinSig {
+        name: "runtime_context_set",
+        return_type: None,
+    },
+    BuiltinSig {
+        name: "runtime_context_values",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
         name: "select",
         return_type: None,
     },
@@ -950,6 +970,10 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
     BuiltinSig {
         name: "tan",
         return_type: Some(BuiltinReturn::Named("float")),
+    },
+    BuiltinSig {
+        name: "task_current",
+        return_type: Some(BuiltinReturn::Named("dict")),
     },
     BuiltinSig {
         name: "temp_dir",
