@@ -46,6 +46,7 @@
 - [Notion connector](./connectors/notion.md)
 - [Slack Events connector](./connectors/slack-events.md)
 - [Generic webhook connector](./connectors/webhook.md)
+- [A2A push connector](./connectors/a2a-push.md)
 - [Cookbook](./cookbook.md)
 - [Tutorial: code review agent](./tutorial-code-review-agent.md)
 - [Tutorial: MCP server](./tutorial-mcp-server.md)

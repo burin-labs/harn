@@ -217,6 +217,7 @@ pub(crate) struct RouteConfig {
     pub(crate) signing_secret: Option<SecretId>,
     pub(crate) dedupe_key_template: Option<String>,
     pub(crate) dedupe_retention_days: u32,
+    pub(crate) connector_ingress: bool,
     pub(crate) connector: Option<harn_vm::connectors::ConnectorHandle>,
 }
 
@@ -270,24 +271,57 @@ impl RouteConfig {
                     ),
                     dedupe_key_template: trigger.config.dedupe_key.clone(),
                     dedupe_retention_days: trigger.config.retry.retention_days,
+                    connector_ingress: false,
                     connector: None,
                 }))
             }
-            TriggerKind::A2aPush => Ok(Some(Self {
-                trigger_id: trigger.config.id.clone(),
-                binding_version,
-                provider: harn_vm::ProviderId::from("a2a-push"),
-                path: trigger_path(trigger)?,
-                auth_mode: AuthMode::BearerOrHmac,
-                signature_mode: SignatureMode::Unsigned,
-                signing_secret: None,
-                dedupe_key_template: trigger.config.dedupe_key.clone(),
-                dedupe_retention_days: trigger.config.retry.retention_days,
-                connector: None,
-            })),
+            TriggerKind::A2aPush => {
+                let connector_ingress = a2a_push_connector_configured(trigger);
+                Ok(Some(Self {
+                    trigger_id: trigger.config.id.clone(),
+                    binding_version,
+                    provider: harn_vm::ProviderId::from("a2a-push"),
+                    path: trigger_path(trigger)?,
+                    auth_mode: if connector_ingress {
+                        AuthMode::Public
+                    } else {
+                        AuthMode::BearerOrHmac
+                    },
+                    signature_mode: SignatureMode::Unsigned,
+                    signing_secret: None,
+                    dedupe_key_template: trigger.config.dedupe_key.clone(),
+                    dedupe_retention_days: trigger.config.retry.retention_days,
+                    connector_ingress,
+                    connector: None,
+                }))
+            }
             _ => Ok(None),
         }
     }
+}
+
+fn a2a_push_connector_configured(trigger: &CollectedManifestTrigger) -> bool {
+    if !matches!(trigger.config.kind, TriggerKind::A2aPush) {
+        return false;
+    }
+    let config = &trigger.config.kind_specific;
+    if config
+        .get("a2a_push")
+        .and_then(toml::Value::as_table)
+        .is_some_and(|table| !table.is_empty())
+    {
+        return true;
+    }
+    [
+        "expected_iss",
+        "expected_aud",
+        "jwks_url",
+        "auth_scheme",
+        "expected_token",
+        "token",
+    ]
+    .iter()
+    .any(|field| config.contains_key(*field))
 }
 
 #[derive(Clone)]
@@ -1402,6 +1436,7 @@ mod tests {
             signing_secret: None,
             dedupe_key_template: None,
             dedupe_retention_days: harn_vm::DEFAULT_INBOX_RETENTION_DAYS,
+            connector_ingress: false,
             connector: None,
         }
     }
@@ -1462,6 +1497,7 @@ mod tests {
             signing_secret: Some(SecretId::new("github", "test-signing-secret")),
             dedupe_key_template: Some("event.dedupe_key".to_string()),
             dedupe_retention_days: harn_vm::DEFAULT_INBOX_RETENTION_DAYS,
+            connector_ingress: false,
             connector: None,
         }
     }

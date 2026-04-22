@@ -1,0 +1,6 @@
+pipeline test(task) {
+  let result = trigger_test_harness("a2a_push_rejects_replay")
+  println(result.ok)
+  println(result.details.jti == "a2a-jti-replay")
+  println(result.details.replay_rejected)
+}

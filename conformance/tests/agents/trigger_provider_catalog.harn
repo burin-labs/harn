@@ -3,7 +3,7 @@ import "std/triggers"
 pipeline test(task) {
   let providers: list<ProviderCatalogEntry> = list_providers()
   let builtin = providers.filter({ provider -> provider.runtime.kind == "builtin" })
-  assert(len(builtin) == 6, "expected exactly six builtin trigger providers")
+  assert(len(builtin) == 7, "expected exactly seven builtin trigger providers")
   let stream_providers = providers.filter({ provider -> provider.kinds.any({ kind -> kind == "stream" }) })
   assert(len(stream_providers) == 6, "expected six stream trigger providers")
   assert(
@@ -60,6 +60,22 @@ pipeline test(task) {
   let webhook_secret = webhook_secrets[0]
   assert(webhook_secret.name == "signing_secret", "webhook should require signing_secret")
   assert(webhook_secret.namespace == "webhook", "webhook secrets should stay namespaced to webhook")
+  let a2a_push = builtin.find({ provider -> provider.provider == "a2a-push" })
+  assert(a2a_push?.schema_name == "A2aPushPayload", "a2a-push schema should be cataloged")
+  assert(a2a_push?.runtime?.connector == "a2a-push", "a2a-push should use the a2a-push connector")
+  assert(
+    a2a_push?.signature_verification?.kind == "none",
+    "a2a-push should not require catalog-level signature verification",
+  )
+  assert(len(a2a_push?.secret_requirements ?? []) == 0, "a2a-push should not require catalog secrets")
+  assert(
+    len(a2a_push?.outbound_methods ?? []) == 0,
+    "a2a-push should not publish outbound methods yet",
+  )
+  assert(
+    (a2a_push?.kinds ?? []).any({ kind -> kind == "a2a-push" }),
+    "a2a-push should publish its trigger kind",
+  )
   let github = builtin.find({ provider -> provider.provider == "github" })
   assert(github?.schema_name == "GitHubEventPayload", "github schema should be cataloged")
   assert(

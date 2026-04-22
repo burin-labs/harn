@@ -8,6 +8,8 @@ use crate::triggers::TriggerEvent;
 
 const A2A_AGENT_CARD_PATH: &str = ".well-known/a2a-agent";
 const A2A_PROTOCOL_VERSION: &str = "1.0.0";
+const A2A_PUSH_URL_ENV: &str = "HARN_A2A_PUSH_URL";
+const A2A_PUSH_TOKEN_ENV: &str = "HARN_A2A_PUSH_TOKEN";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ResolvedA2aEndpoint {
@@ -94,29 +96,34 @@ pub async fn dispatch_trigger_event(
     });
     let text = serde_json::to_string(&envelope)
         .map_err(|error| A2aClientError::Protocol(format!("serialize A2A envelope: {error}")))?;
-    let request = crate::jsonrpc::request(
-        message_id.clone(),
-        "a2a.SendMessage",
-        serde_json::json!({
-            "contextId": event.trace_id.0,
-            "message": {
-                "messageId": message_id,
-                "role": "user",
-                "parts": [{
-                    "type": "text",
-                    "text": text,
-                }],
-                "metadata": {
-                    "kind": "harn.trigger.dispatch",
-                    "trace_id": event.trace_id.0,
-                    "event_id": event.id.0,
-                    "trigger_id": binding_id,
-                    "binding_key": binding_key,
-                    "target_agent": endpoint.target_agent,
-                },
+    let push_config = push_notification_config();
+    let mut params = serde_json::json!({
+        "contextId": event.trace_id.0,
+        "message": {
+            "messageId": message_id,
+            "role": "user",
+            "parts": [{
+                "type": "text",
+                "text": text,
+            }],
+            "metadata": {
+                "kind": "harn.trigger.dispatch",
+                "trace_id": event.trace_id.0,
+                "event_id": event.id.0,
+                "trigger_id": binding_id,
+                "binding_key": binding_key,
+                "target_agent": endpoint.target_agent,
             },
-        }),
-    );
+        },
+    });
+    if let Some(config) = push_config.clone() {
+        params["configuration"] = serde_json::json!({
+            "blocking": false,
+            "returnImmediately": true,
+            "pushNotificationConfig": config,
+        });
+    }
+    let request = crate::jsonrpc::request(message_id.clone(), "a2a.SendMessage", params);
 
     let body = match send_jsonrpc(&endpoint.rpc_url, &request, &event.trace_id.0, cancel_rx).await {
         Ok(body) => body,
@@ -175,6 +182,19 @@ pub async fn dispatch_trigger_event(
         ));
     }
 
+    if let Some(config) = push_config {
+        register_push_notification_config(
+            &endpoint.rpc_url,
+            &task_id,
+            config,
+            &event.trace_id.0,
+            cancel_rx,
+        )
+        .await
+        .inspect_err(|_| {
+            record_a2a_metric(raw_target, "failed", started.elapsed());
+        })?;
+    }
     record_a2a_metric(raw_target, "succeeded", started.elapsed());
     Ok((
         endpoint.clone(),
@@ -192,6 +212,51 @@ pub async fn dispatch_trigger_event(
             }),
         },
     ))
+}
+
+fn push_notification_config() -> Option<Value> {
+    let url = std::env::var(A2A_PUSH_URL_ENV)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())?;
+    let token = std::env::var(A2A_PUSH_TOKEN_ENV)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    let mut config = serde_json::json!({ "url": url });
+    if let Some(token) = token {
+        config["token"] = Value::String(token.clone());
+        config["authentication"] = serde_json::json!({
+            "scheme": "Bearer",
+            "credentials": token,
+        });
+    }
+    Some(config)
+}
+
+async fn register_push_notification_config(
+    rpc_url: &str,
+    task_id: &str,
+    config: Value,
+    trace_id: &str,
+    cancel_rx: &mut broadcast::Receiver<()>,
+) -> Result<(), A2aClientError> {
+    let request = crate::jsonrpc::request(
+        format!("{trace_id}.{task_id}.push-config"),
+        "CreateTaskPushNotificationConfig",
+        serde_json::json!({
+            "taskId": task_id,
+            "pushNotificationConfig": config,
+        }),
+    );
+    let response = send_jsonrpc(rpc_url, &request, trace_id, cancel_rx).await?;
+    if response.get("error").is_some() {
+        return Err(A2aClientError::Protocol(format!(
+            "A2A push notification registration failed: {}",
+            response["error"]
+        )));
+    }
+    Ok(())
 }
 
 fn record_a2a_metric(target: &str, outcome: &str, duration: std::time::Duration) {

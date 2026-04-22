@@ -1,0 +1,8 @@
+pipeline test(task) {
+  let result = trigger_test_harness("a2a_push_completed")
+  println(result.ok)
+  println(result.emitted[0].provider == "a2a-push")
+  println(result.emitted[0].kind == "a2a.task.completed")
+  println(result.details.task_id == "task-123")
+  println(result.details.task_state == "completed")
+}

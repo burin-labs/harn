@@ -128,7 +128,7 @@ type CronEventPayload = {provider: "cron", cron_id: string | nil, schedule: stri
 
 type GenericWebhookPayload = {provider: "webhook", source: string | nil, content_type: string | nil, raw: dict}
 
-type A2aPushPayload = {provider: "a2a-push", task_id: string | nil, sender: string | nil, raw: dict}
+type A2aPushPayload = {provider: "a2a-push", task_id: string | nil, task_state: string | nil, artifact: any | nil, sender: string | nil, raw: dict, kind: string}
 
 type StreamEventPayload = {provider: "kafka" | "nats" | "pulsar" | "postgres-cdc" | "email" | "websocket", event: string, source: string | nil, stream: string | nil, partition: string | nil, offset: string | nil, key: string | nil, timestamp: string | nil, headers: dict, raw: dict}
 

@@ -284,5 +284,7 @@ handler = "a2a://reviewer.prod/triage"
 GitHub webhook triggers verify the `X-Hub-Signature-256` HMAC against
 `secrets.signing_secret` before enqueueing. Generic `provider = "webhook"`
 triggers use the shared Standard Webhooks verifier. `a2a-push` routes
-require either `Authorization: Bearer <api-key>` or a valid
-`Authorization: HMAC-SHA256 ...` header before enqueueing.
+without `[triggers.a2a_push]` require either
+`Authorization: Bearer <api-key>` or a valid
+`Authorization: HMAC-SHA256 ...` header before enqueueing. Routes with
+`[triggers.a2a_push]` use the A2A push connector's JWT/JWKS verifier.

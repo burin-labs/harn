@@ -102,6 +102,7 @@ pub(super) struct TaskState {
     pub(super) status: TaskStatus,
     pub(super) history: Vec<TaskMessage>,
     pub(super) artifacts: Vec<Artifact>,
+    pub(super) push_configs: Vec<serde_json::Value>,
 }
 
 impl TaskState {
@@ -152,6 +153,7 @@ pub(super) fn create_task(
     store: &TaskStore,
     task_text: &str,
     context_id: Option<String>,
+    push_config: Option<serde_json::Value>,
 ) -> String {
     let task_id = Uuid::now_v7().to_string();
     let message_id = Uuid::now_v7().to_string();
@@ -165,9 +167,84 @@ pub(super) fn create_task(
             parts: vec![serde_json::json!({"type": "text", "text": task_text})],
         }],
         artifacts: Vec::new(),
+        push_configs: push_config.into_iter().collect(),
     };
     store.lock().unwrap().insert(task_id.clone(), task);
     task_id
+}
+
+pub(super) fn add_push_config(
+    store: &TaskStore,
+    task_id: &str,
+    mut config: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let mut map = store.lock().unwrap();
+    let task = map
+        .get_mut(task_id)
+        .ok_or_else(|| format!("TaskNotFoundError: {task_id}"))?;
+    if config.get("id").and_then(|value| value.as_str()).is_none() {
+        config["id"] = serde_json::Value::String(Uuid::now_v7().to_string());
+    }
+    config["taskId"] = serde_json::Value::String(task_id.to_string());
+    task.push_configs.push(config.clone());
+    Ok(config)
+}
+
+pub(super) fn delete_push_config(
+    store: &TaskStore,
+    task_id: &str,
+    config_id: &str,
+) -> Result<(), String> {
+    let mut map = store.lock().unwrap();
+    let task = map
+        .get_mut(task_id)
+        .ok_or_else(|| format!("TaskNotFoundError: {task_id}"))?;
+    task.push_configs
+        .retain(|config| config.get("id").and_then(serde_json::Value::as_str) != Some(config_id));
+    Ok(())
+}
+
+pub(super) fn task_snapshot(store: &TaskStore, task_id: &str) -> Option<TaskState> {
+    store.lock().unwrap().get(task_id).cloned()
+}
+
+pub(super) fn deliver_push_notifications(task: &TaskState) {
+    if task.push_configs.is_empty() {
+        return;
+    }
+    let payload = serde_json::json!({
+        "statusUpdate": {
+            "taskId": task.id,
+            "contextId": task.context_id.clone().unwrap_or_default(),
+            "status": {"state": task.status.as_str()},
+            "metadata": {"timestamp": time::OffsetDateTime::now_utc().format(&time::format_description::well_known::Rfc3339).unwrap_or_default()},
+        }
+    });
+    let client = reqwest::blocking::Client::new();
+    for config in &task.push_configs {
+        let Some(url) = config.get("url").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        let mut request = client
+            .post(url)
+            .header(reqwest::header::CONTENT_TYPE, "application/a2a+json")
+            .json(&payload);
+        if let Some(auth) = config.get("authentication") {
+            if let Some(scheme) = auth.get("scheme").and_then(serde_json::Value::as_str) {
+                let credentials = auth
+                    .get("credentials")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default();
+                if !credentials.is_empty() {
+                    request = request.header(
+                        reqwest::header::AUTHORIZATION,
+                        format!("{scheme} {credentials}"),
+                    );
+                }
+            }
+        }
+        let _ = request.send();
+    }
 }
 
 /// Transition a task to `working`.
@@ -197,6 +274,9 @@ pub(super) fn complete_task(store: &TaskStore, task_id: &str, output: &str) {
             parts: vec![serde_json::json!({"type": "text", "text": output.trim_end()})],
         });
     }
+    if let Some(task) = task_snapshot(store, task_id) {
+        deliver_push_notifications(&task);
+    }
 }
 
 /// Mark a task as failed with an error message.
@@ -209,6 +289,9 @@ pub(super) fn fail_task(store: &TaskStore, task_id: &str, error: &str) {
             role: "agent".to_string(),
             parts: vec![serde_json::json!({"type": "text", "text": error})],
         });
+    }
+    if let Some(task) = task_snapshot(store, task_id) {
+        deliver_push_notifications(&task);
     }
 }
 

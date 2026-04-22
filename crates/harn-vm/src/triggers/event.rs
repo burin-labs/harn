@@ -546,8 +546,11 @@ pub struct GenericWebhookPayload {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct A2aPushPayload {
     pub task_id: Option<String>,
+    pub task_state: Option<String>,
+    pub artifact: Option<JsonValue>,
     pub sender: Option<String>,
     pub raw: JsonValue,
+    pub kind: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1310,7 +1313,10 @@ fn default_provider_schemas() -> Vec<Arc<dyn ProviderSchema>> {
                 &[],
                 SignatureVerificationMetadata::None,
                 Vec::new(),
-                ProviderRuntimeMetadata::Placeholder,
+                ProviderRuntimeMetadata::Builtin {
+                    connector: "a2a-push".to_string(),
+                    default_signature_variant: None,
+                },
             ),
             normalize: a2a_push_payload,
         }),
@@ -1895,10 +1901,29 @@ fn a2a_push_payload(
         .get("sender")
         .and_then(JsonValue::as_str)
         .map(ToString::to_string);
+    let task_state = raw
+        .pointer("/status/state")
+        .or_else(|| raw.pointer("/statusUpdate/status/state"))
+        .and_then(JsonValue::as_str)
+        .map(|state| match state {
+            "cancelled" => "canceled".to_string(),
+            other => other.to_string(),
+        });
+    let artifact = raw
+        .pointer("/artifactUpdate/artifact")
+        .or_else(|| raw.get("artifact"))
+        .cloned();
+    let kind = task_state
+        .as_deref()
+        .map(|state| format!("a2a.task.{state}"))
+        .unwrap_or_else(|| "a2a.task.update".to_string());
     ProviderPayload::Known(KnownProviderPayload::A2aPush(A2aPushPayload {
         task_id,
+        task_state,
+        artifact,
         sender,
         raw,
+        kind,
     }))
 }
 
@@ -2074,7 +2099,8 @@ mod tests {
             .filter(|entry| matches!(entry.runtime, ProviderRuntimeMetadata::Builtin { .. }))
             .collect();
 
-        assert_eq!(builtin.len(), 6);
+        assert_eq!(builtin.len(), 7);
+        assert!(builtin.iter().any(|entry| entry.provider == "a2a-push"));
         assert!(builtin.iter().any(|entry| entry.provider == "cron"));
         assert!(builtin.iter().any(|entry| entry.provider == "github"));
         assert!(builtin.iter().any(|entry| entry.provider == "linear"));

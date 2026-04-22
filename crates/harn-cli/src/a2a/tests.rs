@@ -1,5 +1,8 @@
 use std::collections::HashMap;
+use std::io::{Read, Write};
+use std::net::TcpListener;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use super::card::{agent_card, pipeline_name_from_path};
 use super::http::{check_version_header, parse_http_request};
@@ -24,7 +27,7 @@ fn test_agent_card_v1_fields() {
     assert!(card["securitySchemes"].is_array());
     assert_eq!(card["securitySchemes"].as_array().unwrap().len(), 0);
     assert_eq!(card["capabilities"]["streaming"], true);
-    assert_eq!(card["capabilities"]["pushNotifications"], false);
+    assert_eq!(card["capabilities"]["pushNotifications"], true);
     assert_eq!(card["capabilities"]["extendedAgentCard"], false);
     // v0.3 fields should not be present
     assert!(card.get("defaultInputModes").is_none());
@@ -63,7 +66,7 @@ fn test_task_status_terminal() {
 #[test]
 fn test_create_task_generates_uuid() {
     let store: TaskStore = Arc::new(Mutex::new(HashMap::new()));
-    let id = create_task(&store, "hello", None);
+    let id = create_task(&store, "hello", None, None);
     // UUID v7 format: 8-4-4-4-12 hex chars
     assert_eq!(id.len(), 36);
     assert!(id.contains('-'));
@@ -81,7 +84,7 @@ fn test_create_task_generates_uuid() {
 #[test]
 fn test_create_task_with_context_id() {
     let store: TaskStore = Arc::new(Mutex::new(HashMap::new()));
-    let id = create_task(&store, "hello", Some("ctx-123".to_string()));
+    let id = create_task(&store, "hello", Some("ctx-123".to_string()), None);
     let map = store.lock().unwrap();
     let task = map.get(&id).unwrap();
     assert_eq!(task.context_id, Some("ctx-123".to_string()));
@@ -95,6 +98,7 @@ fn test_task_to_json_includes_context_id() {
         status: TaskStatus::Submitted,
         history: vec![],
         artifacts: vec![],
+        push_configs: vec![],
     };
     let json = task.to_json();
     assert_eq!(json["contextId"], "ctx-abc");
@@ -108,6 +112,7 @@ fn test_task_to_json_without_context_id() {
         status: TaskStatus::Submitted,
         history: vec![],
         artifacts: vec![],
+        push_configs: vec![],
     };
     let json = task.to_json();
     assert!(json.get("contextId").is_none());
@@ -125,6 +130,7 @@ fn test_task_message_includes_id() {
             parts: vec![serde_json::json!({"type": "text", "text": "hi"})],
         }],
         artifacts: vec![],
+        push_configs: vec![],
     };
     let json = task.to_json();
     assert_eq!(json["history"][0]["id"], "msg-abc");
@@ -178,6 +184,7 @@ fn test_task_to_json_includes_artifacts() {
             mime_type: None,
             parts: vec![serde_json::json!({"type": "text", "text": "output"})],
         }],
+        push_configs: vec![],
     };
     let json = task.to_json();
     assert_eq!(json["artifacts"][0]["id"], "art-1");
@@ -187,7 +194,7 @@ fn test_task_to_json_includes_artifacts() {
 #[test]
 fn test_cancel_task_success() {
     let store: TaskStore = Arc::new(Mutex::new(HashMap::new()));
-    let id = create_task(&store, "hello", None);
+    let id = create_task(&store, "hello", None, None);
     mark_task_working(&store, &id);
     let result = cancel_task(&store, &id);
     assert!(result.is_ok());
@@ -198,7 +205,7 @@ fn test_cancel_task_success() {
 #[test]
 fn test_cancel_task_terminal_fails() {
     let store: TaskStore = Arc::new(Mutex::new(HashMap::new()));
-    let id = create_task(&store, "hello", None);
+    let id = create_task(&store, "hello", None, None);
     complete_task(&store, &id, "done");
     let result = cancel_task(&store, &id);
     assert!(result.is_err());
@@ -224,8 +231,8 @@ fn test_list_tasks_empty() {
 #[test]
 fn test_list_tasks_returns_summaries() {
     let store: TaskStore = Arc::new(Mutex::new(HashMap::new()));
-    create_task(&store, "task1", Some("ctx-1".to_string()));
-    create_task(&store, "task2", None);
+    create_task(&store, "task1", Some("ctx-1".to_string()), None);
+    create_task(&store, "task2", None, None);
     let result = list_tasks(&store, None, None);
     let tasks = result["tasks"].as_array().unwrap();
     assert_eq!(tasks.len(), 2);
@@ -242,7 +249,7 @@ fn test_list_tasks_pagination() {
     let store: TaskStore = Arc::new(Mutex::new(HashMap::new()));
     let mut ids = Vec::new();
     for i in 0..5 {
-        ids.push(create_task(&store, &format!("task{i}"), None));
+        ids.push(create_task(&store, &format!("task{i}"), None, None));
     }
     // Get first 2
     let result = list_tasks(&store, None, Some(2));
@@ -264,6 +271,7 @@ fn test_task_summary_json() {
             parts: vec![serde_json::json!({"type": "text", "text": "hello"})],
         }],
         artifacts: vec![],
+        push_configs: vec![],
     };
     let summary = task.to_summary_json();
     assert_eq!(summary["id"], "task-1");
@@ -414,8 +422,8 @@ async fn test_handle_jsonrpc_get_task_not_found() {
 #[tokio::test]
 async fn test_handle_jsonrpc_list_tasks() {
     let store: TaskStore = Arc::new(Mutex::new(HashMap::new()));
-    create_task(&store, "test1", None);
-    create_task(&store, "test2", Some("ctx".to_string()));
+    create_task(&store, "test1", None, None);
+    create_task(&store, "test2", Some("ctx".to_string()), None);
     let body = r#"{"jsonrpc":"2.0","id":1,"method":"a2a.ListTasks","params":{}}"#;
     let resp = handle_jsonrpc("/nonexistent.harn", body, &store).await;
     let parsed: serde_json::Value = serde_json::from_str(&resp).unwrap();
@@ -432,6 +440,91 @@ async fn test_handle_jsonrpc_send_message_empty() {
     let resp = handle_jsonrpc("/nonexistent.harn", body, &store).await;
     let parsed: serde_json::Value = serde_json::from_str(&resp).unwrap();
     assert_eq!(parsed["error"]["code"], -32602);
+}
+
+#[tokio::test]
+async fn test_handle_jsonrpc_async_push_notification_loop() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(false).unwrap();
+    let addr = listener.local_addr().unwrap();
+    let capture = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut request = Vec::new();
+        let mut buf = [0u8; 512];
+        loop {
+            let read = stream.read(&mut buf).unwrap_or(0);
+            if read == 0 {
+                break;
+            }
+            request.extend_from_slice(&buf[..read]);
+            if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                let text = String::from_utf8_lossy(&request);
+                let content_length = text
+                    .lines()
+                    .find_map(|line| {
+                        line.to_ascii_lowercase()
+                            .strip_prefix("content-length:")
+                            .and_then(|value| value.trim().parse::<usize>().ok())
+                    })
+                    .unwrap_or(0);
+                let header_end = request
+                    .windows(4)
+                    .position(|window| window == b"\r\n\r\n")
+                    .map(|pos| pos + 4)
+                    .unwrap();
+                if request.len() >= header_end + content_length {
+                    break;
+                }
+            }
+        }
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+            .unwrap();
+        String::from_utf8(request).unwrap()
+    });
+
+    let dir = tempfile::tempdir().unwrap();
+    let pipeline = dir.path().join("server.harn");
+    std::fs::write(&pipeline, "pipeline default() {}\n").unwrap();
+    let store: TaskStore = Arc::new(Mutex::new(HashMap::new()));
+    let request = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "a2a.SendMessage",
+        "params": {
+            "contextId": "ctx-push",
+            "message": {
+                "parts": [{"type": "text", "text": "run async"}]
+            },
+            "configuration": {
+                "returnImmediately": true,
+                "pushNotificationConfig": {
+                    "url": format!("http://{addr}/a2a/push"),
+                    "authentication": {
+                        "scheme": "Bearer",
+                        "credentials": "push-token"
+                    }
+                }
+            }
+        }
+    });
+    let resp = handle_jsonrpc(
+        pipeline.to_str().unwrap(),
+        &serde_json::to_string(&request).unwrap(),
+        &store,
+    )
+    .await;
+    let parsed: serde_json::Value = serde_json::from_str(&resp).unwrap();
+    assert_eq!(parsed["result"]["status"]["state"], "working");
+
+    let captured = capture.join().unwrap();
+    assert!(captured.starts_with("POST /a2a/push HTTP/1.1"));
+    assert!(captured.contains("authorization: Bearer push-token"));
+    assert!(captured.contains(r#""status":{"state":"completed"}"#));
+    assert!(captured.contains(r#""taskId":"#));
 }
 
 #[tokio::test]
