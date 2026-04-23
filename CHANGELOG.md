@@ -7,6 +7,47 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
+## v0.7.33
+
+### Added
+
+- **Persona manifests and captain template packs (#460, #463, #514,
+  #519).** Adds `harn persona list` / `inspect --json`, validates
+  persona-manifest fields in `harn.toml`, and ships checked-in
+  `merge_captain`, `review_captain`, and `oncall_captain` template
+  packs with workflows, fixtures, evals, context packs, and operator
+  docs.
+- **Registry package discovery and typed delegation handoffs (#470,
+  #461, #515, #520).** Adds a first-party TOML package registry index
+  plus `harn package search` / `info`, teaches `harn add
+  <registry-name>@<version>` to resolve registry versions into the
+  existing Git dependency flow, and surfaces typed `HandoffArtifact`
+  metadata through receipts, ACP session updates, A2A responses, and
+  conformance fixtures.
+
+### Changed
+
+- **Docs and runtime policy refresh (#447, #473, #467, #513, #516,
+  #517).** Points docs, CLI metadata, quickrefs, and redirects at
+  `harnlang.com`, adds structured cancellation scopes for deadlines and
+  host cancellation, and enforces connector export-effect policy around
+  normalize/export calls with matching lint and contract-check
+  coverage.
+
+### Fixed
+
+- **Package resolution and sandbox hardening (#518).** Confines direct
+  imports, manifest exports, aliases, cache materialization, and Git
+  temp-dir handling to package roots, makes manifest provider schema
+  installation atomic under concurrent checks, and tightens macOS
+  process sandbox read/write scopes.
+- **Text-only agent loop completion and transcript surfaces (#521).**
+  No-tool persistent loops now honor only the plain visible done
+  sentinel instead of tagged `<done>` blocks, visible transcript text
+  keeps private reasoning hidden while preserving thinking metadata,
+  and higher-level agent config surfaces keep thinking settings wired
+  through local-model stages.
+
 ## v0.7.32
 
 ### Added
