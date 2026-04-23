@@ -1012,6 +1012,13 @@ println(session?.usage?.call_count)
 `worker_research_questions(worker)`, `worker_action_items(worker)`,
 `worker_workflow_stages(worker)`, and `worker_verification_steps(worker)`.
 
+For durable persona handoff, prefer a typed artifact over copying the child or
+parent transcript forward. Use `handoff(...)` to normalize a structured
+handoff payload, `handoff_artifact(...)` to carry it through the workflow
+artifact channel, and `handoff_context(...)` when a receiver needs a prompt-safe
+summary of the transferred task/evidence/budget fields. The handoff artifact is
+the product; the transcript stays on the source side of the boundary.
+
 This is the intended host integration boundary:
 
 - hosts persist chat tabs, titles, and durable asset files

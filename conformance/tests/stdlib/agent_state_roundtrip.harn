@@ -8,12 +8,30 @@ pipeline default() {
   agent_state_write(handle, "ledger.md", "hello state")
   agent_state_write(handle, "evidence/b.json", "{\"rank\":2}")
   agent_state_write(handle, "evidence/a.json", "{\"rank\":1}")
-  agent_state_handoff(handle, {status: "ready", artifacts: ["ledger.md"]})
+  agent_state_handoff(
+    handle,
+    {
+    source_persona: "merge_captain",
+    target_persona_or_human: {kind: "human", label: "maintainer"},
+    task: "Publish the release note and approve the rollout window",
+    reason: "Human sign-off is required before production side effects",
+    evidence_refs: [{label: "state ledger", path: "ledger.md"}],
+    files_or_entities_touched: ["ledger.md"],
+    open_questions: ["Should the rollout wait for EU business hours?"],
+    blocked_on: ["maintainer approval"],
+    requested_capabilities: ["release_signoff"],
+    allowed_side_effects: ["publish_release_notes"],
+    budget_remaining: {tokens: 400},
+    deadline_checkback: {checkback_at: "2026-04-24T09:00:00Z"},
+    confidence: 0.61,
+  },
+  )
   println(agent_state_read(handle, "ledger.md"))
   println(json_stringify(agent_state_list(handle)))
   let handoff = json_parse(agent_state_read(handle, agent_state_handoff_key()))
-  println(handoff.summary.status)
+  println(handoff.handoff.target_persona_or_human.kind)
   println(handoff.key == agent_state_handoff_key())
+  println(handoff.handoff.allowed_side_effects[0] == "publish_release_notes")
   agent_state_delete(handle, "ledger.md")
   println(agent_state_read(handle, "ledger.md") == nil)
   delete_file(root)

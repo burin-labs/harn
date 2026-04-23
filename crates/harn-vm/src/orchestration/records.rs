@@ -6,8 +6,8 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use super::{
-    default_run_dir, new_id, now_rfc3339, parse_json_payload, parse_json_value, ArtifactRecord,
-    CapabilityPolicy,
+    default_run_dir, new_id, now_rfc3339, parse_json_payload, parse_json_value, sync_run_handoffs,
+    ArtifactRecord, CapabilityPolicy, HandoffArtifact,
 };
 use crate::event_log::{active_event_log, EventLog, LogEvent as EventLogRecord, Topic};
 use crate::llm::vm_value_to_json;
@@ -407,6 +407,7 @@ pub struct RunRecord {
     pub completed_nodes: Vec<String>,
     pub child_runs: Vec<RunChildRecord>,
     pub artifacts: Vec<ArtifactRecord>,
+    pub handoffs: Vec<HandoffArtifact>,
     pub policy: CapabilityPolicy,
     pub execution: Option<RunExecutionRecord>,
     pub transcript: Option<serde_json::Value>,
@@ -1264,6 +1265,7 @@ pub fn normalize_run_record(value: &VmValue) -> Result<RunRecord, VmError> {
     if run.replay_fixture.is_none() {
         run.replay_fixture = Some(replay_fixture_from_run(&run));
     }
+    sync_run_handoffs(&mut run);
     if run.observability.is_none() {
         let persisted_path = run.persisted_path.clone();
         let persisted = persisted_path.as_deref().map(Path::new);
@@ -1479,6 +1481,7 @@ pub fn save_run_record(run: &RunRecord, path: Option<&str>) -> Result<String, Vm
         materialized.replay_fixture = Some(replay_fixture_from_run(&materialized));
     }
     materialized.persisted_path = Some(path.to_string_lossy().into_owned());
+    sync_run_handoffs(&mut materialized);
     refresh_run_observability(&mut materialized, Some(&path));
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
@@ -1511,6 +1514,7 @@ pub fn load_run_record(path: &Path) -> Result<RunRecord, VmError> {
     }
     run.persisted_path
         .get_or_insert_with(|| path.to_string_lossy().into_owned());
+    sync_run_handoffs(&mut run);
     refresh_run_observability(&mut run, Some(path));
     Ok(run)
 }

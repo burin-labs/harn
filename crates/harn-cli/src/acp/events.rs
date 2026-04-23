@@ -237,6 +237,21 @@ impl AgentEventSink for AcpAgentEventSink {
                     },
                 }));
             }
+            AgentEvent::Handoff {
+                session_id,
+                artifact_id,
+                handoff,
+            } => {
+                self.write_notification(serde_json::json!({
+                    "sessionId": session_id,
+                    "update": {
+                        "sessionUpdate": "handoff",
+                        "handoffId": handoff.id,
+                        "artifactId": artifact_id,
+                        "handoff": handoff,
+                    },
+                }));
+            }
             // Pipeline-loop milestones with no canonical ACP session/update
             // mapping; deliberately not forwarded.
             AgentEvent::TurnStart { .. }
@@ -246,5 +261,48 @@ impl AgentEventSink for AcpAgentEventSink {
             | AgentEvent::LoopStuck { .. }
             | AgentEvent::DaemonWatchdogTripped { .. } => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use harn_vm::agent_events::AgentEventSink;
+    use harn_vm::orchestration::{HandoffArtifact, HandoffTargetRecord};
+    use tokio::sync::mpsc;
+
+    use super::{AcpAgentEventSink, AcpOutput};
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn handoff_event_serializes_as_session_update() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let sink = AcpAgentEventSink::new(AcpOutput::Channel(tx));
+        sink.handle_event(&harn_vm::agent_events::AgentEvent::Handoff {
+            session_id: "session-1".to_string(),
+            artifact_id: "artifact-1".to_string(),
+            handoff: Box::new(
+                HandoffArtifact {
+                    id: "handoff-1".to_string(),
+                    source_persona: "merge_captain".to_string(),
+                    target_persona_or_human: HandoffTargetRecord {
+                        kind: "persona".to_string(),
+                        id: Some("review_captain".to_string()),
+                        label: Some("review_captain".to_string()),
+                    },
+                    task: "Review the patch".to_string(),
+                    reason: "Merge queue requires review".to_string(),
+                    ..Default::default()
+                }
+                .normalize(),
+            ),
+        });
+        let line = rx.recv().await.expect("acp handoff notification");
+        let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
+        assert_eq!(payload["method"], "session/update");
+        assert_eq!(payload["params"]["update"]["sessionUpdate"], "handoff");
+        assert_eq!(payload["params"]["update"]["handoffId"], "handoff-1");
+        assert_eq!(
+            payload["params"]["update"]["handoff"]["target_persona_or_human"]["label"],
+            "review_captain"
+        );
     }
 }

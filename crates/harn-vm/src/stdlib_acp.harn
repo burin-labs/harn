@@ -1,71 +1,31 @@
-// std/acp — Canonical Agent Client Protocol envelope types.
-//
-// These type aliases match the ACP `sessionUpdate` schema
-// byte-for-byte, so a pipeline that declares `-> SessionUpdate` (or
-// one of the concrete variants below) can be validated at the
-// Harn→ACP boundary by the Harn type checker instead of relying on
-// the host bridge as the only enforcement point.
-//
-// Import with: `import "std/acp"`. See `docs/src/mcp-and-acp.md`
-// ("Typed pipeline returns") for end-to-end usage.
+/**
+ * std/acp — Canonical Agent Client Protocol envelope types.
+ *
+ * These type aliases match the ACP `sessionUpdate` schema
+ * byte-for-byte, so a pipeline that declares `-> SessionUpdate` (or
+ * one of the concrete variants below) can be validated at the
+ * Harn→ACP boundary by the Harn type checker instead of relying on
+ * the host bridge as the only enforcement point.
+ *
+ * Import with: `import "std/acp"`. See `docs/src/mcp-and-acp.md`
+ * ("Typed pipeline returns") for end-to-end usage.
+ */
+type AgentMessageChunk = {sessionUpdate: string, content: {type: string, text: string | nil, annotations: dict | nil}}
 
-type AgentMessageChunk = {
-  sessionUpdate: string,
-  content: {
-    type: string,
-    text: string | nil,
-    annotations: dict | nil,
-  },
-}
+type ToolCall = {sessionUpdate: string, toolCallId: string, title: string | nil, kind: string | nil, status: string | nil, content: list<dict> | nil, locations: list<dict> | nil, rawInput: dict | nil, rawOutput: dict | nil}
 
-type ToolCall = {
-  sessionUpdate: string,
-  toolCallId: string,
-  title: string | nil,
-  kind: string | nil,
-  status: string | nil,
-  content: list<dict> | nil,
-  locations: list<dict> | nil,
-  rawInput: dict | nil,
-  rawOutput: dict | nil,
-}
+type ToolCallUpdate = {sessionUpdate: string, toolCallId: string, status: string | nil, title: string | nil, content: list<dict> | nil, locations: list<dict> | nil, rawOutput: dict | nil}
 
-type ToolCallUpdate = {
-  sessionUpdate: string,
-  toolCallId: string,
-  status: string | nil,
-  title: string | nil,
-  content: list<dict> | nil,
-  locations: list<dict> | nil,
-  rawOutput: dict | nil,
-}
+type Plan = {sessionUpdate: string, entries: list<{content: string, priority: string | nil, status: string | nil}>}
 
-type Plan = {
-  sessionUpdate: string,
-  entries: list<{
-    content: string,
-    priority: string | nil,
-    status: string | nil,
-  }>,
-}
+type Handoff = {sessionUpdate: string, handoffId: string, artifactId: string | nil, handoff: dict}
 
-type SessionUpdate = AgentMessageChunk | ToolCall | ToolCallUpdate | Plan
+type SessionUpdate = AgentMessageChunk | ToolCall | ToolCallUpdate | Plan | Handoff
 
-type PipelineResult = {
-  text: string | nil,
-  events: list<SessionUpdate> | nil,
-  run_record: dict | nil,
-}
+type PipelineResult = {text: string | nil, events: list<SessionUpdate> | nil, run_record: dict | nil}
 
 pub fn agent_message_chunk(text) {
-  return {
-    sessionUpdate: "agent_message_chunk",
-    content: {
-      type: "text",
-      text: text,
-      annotations: nil,
-    },
-  }
+  return {sessionUpdate: "agent_message_chunk", content: {type: "text", text: text, annotations: nil}}
 }
 
 pub fn tool_call(tool_call_id, title) {
@@ -95,8 +55,9 @@ pub fn tool_call_update(tool_call_id, status) {
 }
 
 pub fn plan(entries) {
-  return {
-    sessionUpdate: "plan",
-    entries: entries,
-  }
+  return {sessionUpdate: "plan", entries: entries}
+}
+
+pub fn handoff_update(handoff_id, artifact_id, handoff) {
+  return {sessionUpdate: "handoff", handoffId: handoff_id, artifactId: artifact_id, handoff: handoff}
 }

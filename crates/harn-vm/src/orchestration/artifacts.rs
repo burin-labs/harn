@@ -4,7 +4,10 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-use super::{microcompact_tool_output, new_id, now_rfc3339, ContextPolicy, VerificationContract};
+use super::{
+    handoff_artifact_record, handoff_from_json_value, microcompact_tool_output, new_id,
+    normalize_handoff_artifact_json, now_rfc3339, ContextPolicy, VerificationContract,
+};
 
 /// Snip an artifact's text to fit within a token budget.
 pub fn microcompact_artifact(artifact: &mut ArtifactRecord, max_tokens: usize) {
@@ -106,6 +109,7 @@ fn drop_stale_evidence_artifacts(artifacts: &mut Vec<ArtifactRecord>) {
 fn normalize_artifact_kind(kind: &str) -> String {
     match kind {
         "resource"
+        | "handoff"
         | "workspace_file"
         | "editor_selection"
         | "workspace_snapshot"
@@ -141,6 +145,7 @@ fn default_artifact_priority(kind: &str) -> i64 {
     match kind {
         "verification_result" | "test_result" => 100,
         "verification_bundle" => 95,
+        "handoff" => 92,
         "diff" | "git_diff" | "patch" | "patch_set" | "patch_proposal" | "diff_review"
         | "review_decision" | "apply_intent" => 90,
         "plan" => 80,
@@ -490,5 +495,24 @@ pub fn normalize_artifact(
     value: &crate::value::VmValue,
 ) -> Result<ArtifactRecord, crate::value::VmError> {
     let artifact: ArtifactRecord = super::parse_json_value(value)?;
-    Ok(artifact.normalize())
+    let artifact = artifact.normalize();
+    if artifact.kind == "handoff" {
+        let json = serde_json::to_value(&artifact).map_err(|error| {
+            crate::value::VmError::Runtime(format!("artifact handoff encode error: {error}"))
+        })?;
+        let handoff = handoff_from_json_value(&json)
+            .or_else(|| {
+                artifact
+                    .data
+                    .as_ref()
+                    .and_then(|data| normalize_handoff_artifact_json(data.clone()).ok())
+            })
+            .ok_or_else(|| {
+                crate::value::VmError::Runtime(
+                    "artifact handoff data must contain a valid handoff payload".to_string(),
+                )
+            })?;
+        return Ok(handoff_artifact_record(&handoff, Some(&artifact)));
+    }
+    Ok(artifact)
 }

@@ -113,6 +113,8 @@ fn register_handoff(vm: &mut Vm) {
                 "__agent_state_handoff: `summary` must be a JSON object".to_string(),
             ));
         };
+        let typed_handoff =
+            crate::orchestration::normalize_handoff_artifact_json(summary_json.clone()).ok();
         let scope = scope_from_handle(handle)?;
         let writer = writer_from_handle(handle);
         let envelope = serde_json::json!({
@@ -122,6 +124,7 @@ fn register_handoff(vm: &mut Vm) {
             "root": scope.root.to_string_lossy(),
             "key": HANDOFF_KEY,
             "summary": summary_json,
+            "handoff": typed_handoff,
             "writer": writer_json(&writer),
             "written_at": now_epoch_seconds(),
         });
