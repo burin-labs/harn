@@ -459,7 +459,7 @@ async fn main() {
             args.refetch.as_deref(),
             args.offline,
         ),
-        Command::Add(args) => package::add_package(
+        Command::Add(args) => package::add_package_with_registry(
             &args.name_or_spec,
             args.alias.as_deref(),
             args.git.as_deref(),
@@ -467,11 +467,20 @@ async fn main() {
             args.rev.as_deref(),
             args.branch.as_deref(),
             args.path.as_deref(),
+            args.registry.as_deref(),
         ),
         Command::Update(args) => package::update_packages(args.alias.as_deref(), args.all),
         Command::Remove(args) => package::remove_package(&args.alias),
         Command::Lock => package::lock_packages(),
         Command::Package(args) => match args.command {
+            PackageCommand::Search(search) => package::search_package_registry(
+                search.query.as_deref(),
+                search.registry.as_deref(),
+                search.json,
+            ),
+            PackageCommand::Info(info) => {
+                package::show_package_registry_info(&info.name, info.registry.as_deref(), info.json)
+            }
             PackageCommand::Cache(cache) => match cache.command {
                 PackageCacheCommand::List => package::list_package_cache(),
                 PackageCacheCommand::Clean(clean) => package::clean_package_cache(clean.all),

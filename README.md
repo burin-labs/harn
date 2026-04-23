@@ -168,7 +168,10 @@ enforcement.
   Local sibling packages can be added with `harn add ../harn-openapi`;
   Harn derives the alias from the dependency's `harn.toml` and live-links
   directory path dependencies into `.harn/packages/` for fast multi-repo
-  development.
+  development. Registry-backed discovery is available through
+  `harn package search`, `harn package info`, and
+  `harn add @burin/<name>@<version>`, which resolve through the package
+  index and then use the same git-backed install path as direct GitHub refs.
 - Design-by-contract and project/runtime helpers: `require ...`,
   metadata/scanner runtime builtins, `import "std/project"` for
   freshness-aware metadata and scan state, and `import "std/runtime"` for

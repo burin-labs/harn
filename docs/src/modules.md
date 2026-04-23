@@ -497,6 +497,20 @@ Directory path dependencies are live-linked when possible and are meant
 for local development; git-installed packages cannot publish transitive
 path dependencies.
 
+Use registry names for discoverable first-party and community packages:
+
+```bash
+harn package search notion
+harn package info @burin/notion-sdk
+harn add @burin/notion-sdk@1.2.3
+```
+
+Registry-name installs resolve through the package index and then write
+the same git dependency table as a direct GitHub install. Direct GitHub
+refs remain the right choice for private repos, unreleased commits,
+temporary pins, and local dogfood before a package is added to the
+shared index.
+
 Canonical bootstrap for first-party packages:
 
 ```bash

@@ -4,7 +4,7 @@ use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::{fs, process};
 
 use chrono_tz::Tz;
@@ -17,8 +17,11 @@ use url::Url;
 const CONTENT_HASH_FILE: &str = ".harn-content-hash";
 const CACHE_METADATA_FILE: &str = ".harn-package-cache.toml";
 const HARN_CACHE_DIR_ENV: &str = "HARN_CACHE_DIR";
+const HARN_PACKAGE_REGISTRY_ENV: &str = "HARN_PACKAGE_REGISTRY";
+const DEFAULT_PACKAGE_REGISTRY_URL: &str = "https://packages.harnlang.com/index.toml";
 const CACHE_METADATA_VERSION: u32 = 1;
 const LOCK_FILE_VERSION: u32 = 1;
+const REGISTRY_INDEX_VERSION: u32 = 1;
 const PKG_DIR: &str = ".harn/packages";
 const MANIFEST: &str = "harn.toml";
 const LOCK_FILE: &str = "harn.lock";
@@ -36,6 +39,11 @@ pub struct Manifest {
     pub check: CheckConfig,
     #[serde(default)]
     pub workspace: WorkspaceConfig,
+    /// `[registry]` table — lightweight package discovery index
+    /// configuration. The CLI also honors `HARN_PACKAGE_REGISTRY` and
+    /// `--registry` flags for one-off overrides.
+    #[serde(default)]
+    pub registry: PackageRegistryConfig,
     /// `[skills]` table — per-project skill discovery configuration
     /// (paths, lookup_order, disable).
     #[serde(default)]
@@ -728,6 +736,13 @@ pub struct WorkspaceConfig {
     pub pipelines: Vec<String>,
 }
 
+#[derive(Debug, Default, Clone, Deserialize)]
+pub struct PackageRegistryConfig {
+    /// URL or filesystem path to a TOML package index.
+    #[serde(default)]
+    pub url: Option<String>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct McpServerConfig {
     pub name: String,
@@ -1009,6 +1024,61 @@ struct PackageCacheMetadata {
     commit: String,
     content_hash: String,
     cached_at_unix_ms: u128,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct PackageRegistryIndex {
+    version: u32,
+    #[serde(default, rename = "package")]
+    packages: Vec<RegistryPackage>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct RegistryPackage {
+    name: String,
+    #[serde(default)]
+    description: Option<String>,
+    repository: String,
+    #[serde(default)]
+    license: Option<String>,
+    #[serde(default, alias = "harn_version", alias = "harn_version_range")]
+    harn: Option<String>,
+    #[serde(default)]
+    exports: Vec<String>,
+    #[serde(default, alias = "connector-contract")]
+    connector_contract: Option<String>,
+    #[serde(default)]
+    docs_url: Option<String>,
+    #[serde(default)]
+    checksum: Option<String>,
+    #[serde(default)]
+    provenance: Option<String>,
+    #[serde(default, rename = "version")]
+    versions: Vec<RegistryPackageVersion>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct RegistryPackageVersion {
+    version: String,
+    git: String,
+    #[serde(default)]
+    rev: Option<String>,
+    #[serde(default)]
+    branch: Option<String>,
+    #[serde(default)]
+    package: Option<String>,
+    #[serde(default)]
+    checksum: Option<String>,
+    #[serde(default)]
+    provenance: Option<String>,
+    #[serde(default)]
+    yanked: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct RegistryPackageInfo {
+    package: RegistryPackage,
+    selected_version: Option<RegistryPackageVersion>,
 }
 
 impl LockFile {
@@ -3959,6 +4029,332 @@ fn path_from_source_uri(source: &str) -> Result<PathBuf, String> {
     Ok(PathBuf::from(raw))
 }
 
+fn registry_file_url_or_path(raw: &str) -> Result<Option<PathBuf>, String> {
+    if let Ok(url) = Url::parse(raw) {
+        if url.scheme() == "file" {
+            return url
+                .to_file_path()
+                .map(Some)
+                .map_err(|_| format!("invalid file:// registry URL: {raw}"));
+        }
+        return Ok(None);
+    }
+    Ok(Some(PathBuf::from(raw)))
+}
+
+fn read_registry_source(source: &str) -> Result<String, String> {
+    if let Some(path) = registry_file_url_or_path(source)? {
+        return fs::read_to_string(&path).map_err(|error| {
+            format!(
+                "failed to read package registry {}: {error}",
+                path.display()
+            )
+        });
+    }
+
+    let url = Url::parse(source)
+        .map_err(|error| format!("invalid package registry URL {source:?}: {error}"))?;
+    match url.scheme() {
+        "http" | "https" => {}
+        other => return Err(format!("unsupported package registry URL scheme: {other}")),
+    }
+    let response = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(20))
+        .build()
+        .map_err(|error| format!("failed to build package registry client: {error}"))?
+        .get(url)
+        .send()
+        .map_err(|error| format!("failed to fetch package registry {source}: {error}"))?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(format!("GET {source} returned HTTP {status}"));
+    }
+    response
+        .text()
+        .map_err(|error| format!("failed to read package registry response: {error}"))
+}
+
+fn resolve_configured_registry_source(explicit: Option<&str>) -> Result<String, String> {
+    if let Some(explicit) = explicit.map(str::trim).filter(|value| !value.is_empty()) {
+        return Ok(explicit.to_string());
+    }
+    if let Ok(value) = std::env::var(HARN_PACKAGE_REGISTRY_ENV) {
+        let value = value.trim();
+        if !value.is_empty() {
+            return Ok(value.to_string());
+        }
+    }
+
+    let cwd = std::env::current_dir().map_err(|error| format!("failed to read cwd: {error}"))?;
+    if let Some((manifest, manifest_dir)) = find_nearest_manifest(&cwd) {
+        if let Some(raw) = manifest
+            .registry
+            .url
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            if Url::parse(raw).is_ok() || PathBuf::from(raw).is_absolute() {
+                return Ok(raw.to_string());
+            }
+            return Ok(manifest_dir.join(raw).display().to_string());
+        }
+    }
+
+    Ok(DEFAULT_PACKAGE_REGISTRY_URL.to_string())
+}
+
+fn is_valid_registry_segment(segment: &str) -> bool {
+    let mut chars = segment.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    first.is_ascii_alphanumeric()
+        && chars.all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.'))
+}
+
+fn is_valid_registry_package_name(name: &str) -> bool {
+    let trimmed = name.trim();
+    if trimmed != name || trimmed.is_empty() || trimmed.contains("://") || trimmed.ends_with('/') {
+        return false;
+    }
+    if let Some(scoped) = trimmed.strip_prefix('@') {
+        let Some((scope, package)) = scoped.split_once('/') else {
+            return false;
+        };
+        return !package.contains('/')
+            && is_valid_registry_segment(scope)
+            && is_valid_registry_segment(package);
+    }
+    !trimmed.contains('/') && is_valid_registry_segment(trimmed)
+}
+
+fn parse_registry_package_spec(spec: &str) -> Option<(&str, Option<&str>)> {
+    let trimmed = spec.trim();
+    if !trimmed.starts_with('@') {
+        if let Some((name, version)) = trimmed.rsplit_once('@') {
+            if is_valid_registry_package_name(name) && !version.trim().is_empty() {
+                return Some((name, Some(version)));
+            }
+        }
+        if is_valid_registry_package_name(trimmed) {
+            return Some((trimmed, None));
+        }
+        return None;
+    }
+
+    if let Some((name, version)) = trimmed.rsplit_once('@') {
+        if !name.is_empty()
+            && name != trimmed
+            && is_valid_registry_package_name(name)
+            && !version.trim().is_empty()
+        {
+            return Some((name, Some(version)));
+        }
+    }
+    if is_valid_registry_package_name(trimmed) {
+        return Some((trimmed, None));
+    }
+    None
+}
+
+fn parse_package_registry_index(
+    source: &str,
+    content: &str,
+) -> Result<PackageRegistryIndex, String> {
+    let mut index = toml::from_str::<PackageRegistryIndex>(content)
+        .map_err(|error| format!("failed to parse package registry {source}: {error}"))?;
+    if index.version != REGISTRY_INDEX_VERSION {
+        return Err(format!(
+            "unsupported package registry {source} version {} (expected {})",
+            index.version, REGISTRY_INDEX_VERSION
+        ));
+    }
+    validate_package_registry_index(source, &mut index)?;
+    Ok(index)
+}
+
+fn validate_package_registry_index(
+    source: &str,
+    index: &mut PackageRegistryIndex,
+) -> Result<(), String> {
+    let mut names = HashSet::new();
+    for package in &mut index.packages {
+        if !is_valid_registry_package_name(&package.name) {
+            return Err(format!(
+                "package registry {source} has invalid package name '{}'",
+                package.name
+            ));
+        }
+        if !names.insert(package.name.clone()) {
+            return Err(format!(
+                "package registry {source} declares '{}' more than once",
+                package.name
+            ));
+        }
+        normalize_git_url(&package.repository).map_err(|error| {
+            format!(
+                "package registry {source} has invalid repository for '{}': {error}",
+                package.name
+            )
+        })?;
+        let mut versions = HashSet::new();
+        for version in &package.versions {
+            if version.version.trim().is_empty() {
+                return Err(format!(
+                    "package registry {source} has empty version for '{}'",
+                    package.name
+                ));
+            }
+            if !versions.insert(version.version.clone()) {
+                return Err(format!(
+                    "package registry {source} declares '{}@{}' more than once",
+                    package.name, version.version
+                ));
+            }
+            if version.rev.is_none() && version.branch.is_none() {
+                return Err(format!(
+                    "package registry {source} entry '{}@{}' must specify rev or branch",
+                    package.name, version.version
+                ));
+            }
+            normalize_git_url(&version.git).map_err(|error| {
+                format!(
+                    "package registry {source} has invalid git source for '{}@{}': {error}",
+                    package.name, version.version
+                )
+            })?;
+        }
+    }
+    index
+        .packages
+        .sort_by(|left, right| left.name.cmp(&right.name));
+    Ok(())
+}
+
+fn load_package_registry(explicit: Option<&str>) -> Result<(String, PackageRegistryIndex), String> {
+    let source = resolve_configured_registry_source(explicit)?;
+    let content = read_registry_source(&source)?;
+    let index = parse_package_registry_index(&source, &content)?;
+    Ok((source, index))
+}
+
+fn registry_package_matches(package: &RegistryPackage, query: &str) -> bool {
+    if query.trim().is_empty() {
+        return true;
+    }
+    let query = query.to_ascii_lowercase();
+    package.name.to_ascii_lowercase().contains(&query)
+        || package
+            .description
+            .as_deref()
+            .is_some_and(|value| value.to_ascii_lowercase().contains(&query))
+        || package.repository.to_ascii_lowercase().contains(&query)
+        || package
+            .exports
+            .iter()
+            .any(|export| export.to_ascii_lowercase().contains(&query))
+}
+
+fn latest_registry_version(package: &RegistryPackage) -> Option<&RegistryPackageVersion> {
+    package
+        .versions
+        .iter()
+        .rev()
+        .find(|version| !version.yanked)
+}
+
+fn find_registry_package_version(
+    index: &PackageRegistryIndex,
+    name: &str,
+    version: Option<&str>,
+) -> Result<RegistryPackageInfo, String> {
+    let package = index
+        .packages
+        .iter()
+        .find(|package| package.name == name)
+        .ok_or_else(|| format!("package registry does not contain {name}"))?;
+    let selected_version = match version {
+        Some(version) => Some(
+            package
+                .versions
+                .iter()
+                .find(|entry| entry.version == version)
+                .ok_or_else(|| format!("package registry does not contain {name}@{version}"))?
+                .clone(),
+        ),
+        None => latest_registry_version(package).cloned(),
+    };
+    Ok(RegistryPackageInfo {
+        package: package.clone(),
+        selected_version,
+    })
+}
+
+fn search_package_registry_impl(
+    query: Option<&str>,
+    registry: Option<&str>,
+) -> Result<Vec<RegistryPackage>, String> {
+    let (_, index) = load_package_registry(registry)?;
+    Ok(index
+        .packages
+        .into_iter()
+        .filter(|package| registry_package_matches(package, query.unwrap_or("")))
+        .collect())
+}
+
+fn package_registry_info_impl(
+    spec: &str,
+    registry: Option<&str>,
+) -> Result<RegistryPackageInfo, String> {
+    let Some((name, version)) = parse_registry_package_spec(spec) else {
+        return Err(format!(
+            "invalid registry package name '{spec}'; use names like @burin/notion-sdk or acme-lib"
+        ));
+    };
+    let (_, index) = load_package_registry(registry)?;
+    find_registry_package_version(&index, name, version)
+}
+
+fn registry_dependency_from_spec(
+    spec: &str,
+    alias: Option<&str>,
+    registry: Option<&str>,
+) -> Result<(String, Dependency), String> {
+    let Some((name, Some(version))) = parse_registry_package_spec(spec) else {
+        return Err(format!(
+            "registry dependency '{spec}' must include a version, for example {spec}@1.2.3"
+        ));
+    };
+    let info = package_registry_info_impl(&format!("{name}@{version}"), registry)?;
+    let selected = info
+        .selected_version
+        .ok_or_else(|| format!("package registry does not contain {name}@{version}"))?;
+    if selected.yanked {
+        return Err(format!(
+            "{name}@{version} is yanked in the package registry"
+        ));
+    }
+    let git = normalize_git_url(&selected.git)?;
+    let package_name = selected
+        .package
+        .clone()
+        .map(Ok)
+        .unwrap_or_else(|| derive_repo_name_from_source(&git))?;
+    let alias = alias.unwrap_or(package_name.as_str()).to_string();
+    Ok((
+        alias.clone(),
+        Dependency::Table(DepTable {
+            git: Some(git),
+            tag: None,
+            rev: selected.rev,
+            branch: selected.branch,
+            path: None,
+            package: (alias != package_name).then_some(package_name),
+        }),
+    ))
+}
+
 fn is_probable_shorthand_git_url(raw: &str) -> bool {
     !raw.contains("://")
         && !raw.starts_with("git@")
@@ -4945,6 +5341,115 @@ pub fn verify_package_cache(materialized: bool) {
     }
 }
 
+pub fn search_package_registry(query: Option<&str>, registry: Option<&str>, json: bool) {
+    match search_package_registry_impl(query, registry) {
+        Ok(packages) if json => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&packages)
+                    .unwrap_or_else(|error| format!(r#"{{"error":"{error}"}}"#))
+            );
+        }
+        Ok(packages) => {
+            if packages.is_empty() {
+                println!("No packages found.");
+                return;
+            }
+            println!("name\tlatest\tharn\tcontract\tdescription");
+            for package in packages {
+                let latest = latest_registry_version(&package)
+                    .map(|version| version.version.as_str())
+                    .unwrap_or("-");
+                println!(
+                    "{}\t{}\t{}\t{}\t{}",
+                    package.name,
+                    latest,
+                    package.harn.as_deref().unwrap_or("-"),
+                    package.connector_contract.as_deref().unwrap_or("-"),
+                    package.description.as_deref().unwrap_or("")
+                );
+            }
+        }
+        Err(error) => {
+            eprintln!("error: {error}");
+            process::exit(1);
+        }
+    }
+}
+
+pub fn show_package_registry_info(spec: &str, registry: Option<&str>, json: bool) {
+    match package_registry_info_impl(spec, registry) {
+        Ok(info) if json => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&info)
+                    .unwrap_or_else(|error| format!(r#"{{"error":"{error}"}}"#))
+            );
+        }
+        Ok(info) => {
+            let package = info.package;
+            println!("{}", package.name);
+            if let Some(description) = package.description.as_deref() {
+                println!("description: {description}");
+            }
+            println!("repository: {}", package.repository);
+            if let Some(license) = package.license.as_deref() {
+                println!("license: {license}");
+            }
+            if let Some(harn) = package.harn.as_deref() {
+                println!("harn: {harn}");
+            }
+            if let Some(contract) = package.connector_contract.as_deref() {
+                println!("connector_contract: {contract}");
+            }
+            if let Some(docs) = package.docs_url.as_deref() {
+                println!("docs: {docs}");
+            }
+            if let Some(checksum) = package.checksum.as_deref() {
+                println!("checksum: {checksum}");
+            }
+            if let Some(provenance) = package.provenance.as_deref() {
+                println!("provenance: {provenance}");
+            }
+            if !package.exports.is_empty() {
+                println!("exports: {}", package.exports.join(", "));
+            }
+            if let Some(version) = info.selected_version {
+                println!("selected: {}", version.version);
+                println!("git: {}", version.git);
+                if let Some(rev) = version.rev.as_deref() {
+                    println!("rev: {rev}");
+                }
+                if let Some(branch) = version.branch.as_deref() {
+                    println!("branch: {branch}");
+                }
+                if let Some(package_name) = version.package.as_deref() {
+                    println!("package: {package_name}");
+                }
+            }
+            if !package.versions.is_empty() {
+                let versions = package
+                    .versions
+                    .iter()
+                    .map(|version| {
+                        if version.yanked {
+                            format!("{} (yanked)", version.version)
+                        } else {
+                            version.version.clone()
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                println!("versions: {versions}");
+            }
+        }
+        Err(error) => {
+            eprintln!("error: {error}");
+            process::exit(1);
+        }
+    }
+}
+
 pub fn ensure_dependencies_materialized(anchor: &Path) -> Result<(), String> {
     let Some((manifest, dir)) = find_nearest_manifest(anchor) else {
         return Ok(());
@@ -5212,6 +5717,7 @@ fn normalize_add_request(
     rev: Option<&str>,
     branch: Option<&str>,
     local_path: Option<&str>,
+    registry: Option<&str>,
 ) -> Result<(String, Dependency), String> {
     if local_path.is_some() && (rev.is_some() || tag.is_some() || branch.is_some()) {
         return Err("path dependencies do not accept --rev, --tag, or --branch".to_string());
@@ -5238,6 +5744,9 @@ fn normalize_add_request(
                     package: None,
                 }),
             ));
+        }
+        if parse_registry_package_spec(name_or_spec).is_some() {
+            return registry_dependency_from_spec(name_or_spec, alias, registry);
         }
     }
     if git_url.is_some() || local_path.is_some() {
@@ -5306,6 +5815,7 @@ fn normalize_add_request(
     ))
 }
 
+#[cfg(test)]
 pub fn add_package(
     name_or_spec: &str,
     alias: Option<&str>,
@@ -5315,12 +5825,42 @@ pub fn add_package(
     branch: Option<&str>,
     local_path: Option<&str>,
 ) {
+    add_package_with_registry(
+        name_or_spec,
+        alias,
+        git_url,
+        tag,
+        rev,
+        branch,
+        local_path,
+        None,
+    )
+}
+
+pub fn add_package_with_registry(
+    name_or_spec: &str,
+    alias: Option<&str>,
+    git_url: Option<&str>,
+    tag: Option<&str>,
+    rev: Option<&str>,
+    branch: Option<&str>,
+    local_path: Option<&str>,
+    registry: Option<&str>,
+) {
     let result = (|| -> Result<(String, usize), String> {
         let manifest_path = std::env::current_dir()
             .map_err(|error| format!("failed to read cwd: {error}"))?
             .join(MANIFEST);
-        let (alias, dependency) =
-            normalize_add_request(name_or_spec, alias, git_url, tag, rev, branch, local_path)?;
+        let (alias, dependency) = normalize_add_request(
+            name_or_spec,
+            alias,
+            git_url,
+            tag,
+            rev,
+            branch,
+            local_path,
+            registry,
+        )?;
         upsert_dependency_in_manifest(&manifest_path, &alias, &dependency)?;
         let installed = install_packages_impl(false, None, false)?;
         Ok((alias, installed))
@@ -5486,6 +6026,7 @@ mod tests {
     struct TestEnvGuard {
         previous_cwd: PathBuf,
         previous_cache: Option<std::ffi::OsString>,
+        previous_registry: Option<std::ffi::OsString>,
         _cwd_lock: MutexGuard<'static, ()>,
         _env_lock: MutexGuard<'static, ()>,
     }
@@ -5498,6 +6039,11 @@ mod tests {
             } else {
                 std::env::remove_var(HARN_CACHE_DIR_ENV);
             }
+            if let Some(value) = self.previous_registry.clone() {
+                std::env::set_var(HARN_PACKAGE_REGISTRY_ENV, value);
+            } else {
+                std::env::remove_var(HARN_PACKAGE_REGISTRY_ENV);
+            }
         }
     }
 
@@ -5507,11 +6053,13 @@ mod tests {
         let guard = TestEnvGuard {
             previous_cwd: std::env::current_dir().unwrap(),
             previous_cache: std::env::var_os(HARN_CACHE_DIR_ENV),
+            previous_registry: std::env::var_os(HARN_PACKAGE_REGISTRY_ENV),
             _cwd_lock: cwd_lock,
             _env_lock: env_lock,
         };
         std::env::set_current_dir(cwd).unwrap();
         std::env::set_var(HARN_CACHE_DIR_ENV, cache_dir);
+        std::env::remove_var(HARN_PACKAGE_REGISTRY_ENV);
         let result = f();
         drop(guard);
         result
@@ -5587,6 +6135,43 @@ version = "0.1.0"
             "",
             "pub fn value() -> string { return \"v1\" }\n",
         )
+    }
+
+    fn write_package_registry_index(
+        path: &Path,
+        registry_name: &str,
+        git: &str,
+        package_name: &str,
+    ) {
+        fs::write(
+            path,
+            format!(
+                r#"
+version = 1
+
+[[package]]
+name = "{registry_name}"
+description = "Acme package for registry tests"
+repository = "{git}"
+license = "MIT OR Apache-2.0"
+harn = ">=0.7,<0.8"
+exports = ["lib"]
+connector_contract = "v1"
+docs_url = "https://docs.example.test/acme"
+checksum = "sha256:index"
+provenance = "https://provenance.example.test/acme"
+
+[[package.version]]
+version = "1.0.0"
+git = "{git}"
+rev = "v1.0.0"
+package = "{package_name}"
+checksum = "sha256:package"
+provenance = "https://provenance.example.test/acme/1.0.0"
+"#
+            ),
+        )
+        .unwrap();
     }
 
     fn test_harn_connector_source(provider_id: &str) -> String {
@@ -6220,6 +6805,7 @@ acme-lib = {{ git = "{git}", rev = "v1.0.0" }}
             None,
             None,
             None,
+            None,
         )
         .unwrap_err();
         assert!(error.contains("must specify `rev` or `branch`"));
@@ -6235,6 +6821,7 @@ acme-lib = {{ git = "{git}", rev = "v1.0.0" }}
             None,
             None,
             None,
+            None,
         )
         .unwrap();
         assert_eq!(alias, "harn-openapi");
@@ -6242,6 +6829,126 @@ acme-lib = {{ git = "{git}", rev = "v1.0.0" }}
             render_dependency_line(&alias, &dependency),
             "harn-openapi = { git = \"https://github.com/burin-labs/harn-openapi\", rev = \"v1.2.3\" }"
         );
+    }
+
+    #[test]
+    fn registry_index_search_and_info_use_local_file_without_network() {
+        let (_repo_tmp, repo, _branch) = create_git_package_repo();
+        let project_tmp = tempfile::tempdir().unwrap();
+        let root = project_tmp.path();
+        let cache_dir = root.join(".cache");
+        let registry_path = root.join("index.toml");
+        let git = normalize_git_url(repo.to_string_lossy().as_ref()).unwrap();
+        write_package_registry_index(&registry_path, "@burin/acme-lib", &git, "acme-lib");
+        fs::create_dir_all(root.join(".git")).unwrap();
+        fs::write(
+            root.join(MANIFEST),
+            r#"
+[package]
+name = "workspace"
+version = "0.1.0"
+"#,
+        )
+        .unwrap();
+
+        with_test_env(root, &cache_dir, || {
+            let matches = search_package_registry_impl(Some("acme"), Some("index.toml")).unwrap();
+            assert_eq!(matches.len(), 1);
+            assert_eq!(matches[0].name, "@burin/acme-lib");
+            assert_eq!(matches[0].harn.as_deref(), Some(">=0.7,<0.8"));
+            assert_eq!(matches[0].connector_contract.as_deref(), Some("v1"));
+            assert_eq!(matches[0].exports, vec!["lib"]);
+
+            let info =
+                package_registry_info_impl("@burin/acme-lib@1.0.0", Some("index.toml")).unwrap();
+            assert_eq!(info.package.license.as_deref(), Some("MIT OR Apache-2.0"));
+            assert_eq!(
+                info.selected_version
+                    .as_ref()
+                    .map(|version| version.git.as_str()),
+                Some(git.as_str())
+            );
+        });
+    }
+
+    #[test]
+    fn add_registry_dependency_writes_existing_git_dependency_shape() {
+        let (_repo_tmp, repo, _branch) = create_git_package_repo();
+        let project_tmp = tempfile::tempdir().unwrap();
+        let root = project_tmp.path();
+        let cache_dir = root.join(".cache");
+        let registry_path = root.join("index.toml");
+        let git = normalize_git_url(repo.to_string_lossy().as_ref()).unwrap();
+        write_package_registry_index(&registry_path, "@burin/acme-lib", &git, "acme-lib");
+        fs::create_dir_all(root.join(".git")).unwrap();
+        fs::write(
+            root.join(MANIFEST),
+            r#"
+[package]
+name = "workspace"
+version = "0.1.0"
+"#,
+        )
+        .unwrap();
+
+        with_test_env(root, &cache_dir, || {
+            std::env::set_var(HARN_PACKAGE_REGISTRY_ENV, "index.toml");
+            add_package("@burin/acme-lib@1.0.0", None, None, None, None, None, None);
+
+            let manifest = fs::read_to_string(root.join(MANIFEST)).unwrap();
+            assert!(
+                manifest.contains(&format!(
+                    "acme-lib = {{ git = \"{git}\", rev = \"v1.0.0\" }}"
+                )),
+                "registry install should write the same dependency line as a direct git add: {manifest}"
+            );
+            let lock = LockFile::load(&root.join(LOCK_FILE)).unwrap().unwrap();
+            let entry = lock.find("acme-lib").unwrap();
+            assert_eq!(entry.source, format!("git+{git}"));
+            assert!(root
+                .join(PKG_DIR)
+                .join("acme-lib")
+                .join("lib.harn")
+                .is_file());
+        });
+    }
+
+    #[test]
+    fn registry_index_rejects_invalid_names_and_duplicate_versions() {
+        let content = r#"
+version = 1
+
+[[package]]
+name = "@bad/"
+repository = "https://github.com/acme/acme-lib"
+
+[[package.version]]
+version = "1.0.0"
+git = "https://github.com/acme/acme-lib"
+rev = "v1.0.0"
+"#;
+        let error = parse_package_registry_index("fixture", content).unwrap_err();
+        assert!(error.contains("invalid package name"));
+
+        let content = r#"
+version = 1
+
+[[package]]
+name = "@burin/acme-lib"
+repository = "https://github.com/acme/acme-lib"
+
+[[package.version]]
+version = "1.0.0"
+git = "https://github.com/acme/acme-lib"
+rev = "v1.0.0"
+
+[[package.version]]
+version = "1.0.0"
+git = "https://github.com/acme/acme-lib"
+rev = "v1.0.0"
+"#;
+        let error = parse_package_registry_index("fixture", content).unwrap_err();
+        assert!(error.contains("more than once"));
     }
 
     #[test]

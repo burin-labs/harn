@@ -1535,6 +1535,9 @@ pub(crate) struct AddArgs {
     /// Local path for a path dependency.
     #[arg(long, conflicts_with = "git")]
     pub path: Option<String>,
+    /// Package registry index URL or path for registry-name dependencies.
+    #[arg(long, value_name = "URL|PATH")]
+    pub registry: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -1560,8 +1563,36 @@ pub(crate) struct PackageArgs {
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum PackageCommand {
+    /// Search the package registry index.
+    Search(PackageSearchArgs),
+    /// Show package registry metadata for one package.
+    Info(PackageInfoArgs),
     /// Inspect, clean, and verify the shared package cache.
     Cache(PackageCacheArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct PackageSearchArgs {
+    /// Search query. Omit to list all registry packages.
+    pub query: Option<String>,
+    /// Package registry index URL or path.
+    #[arg(long, value_name = "URL|PATH")]
+    pub registry: Option<String>,
+    /// Emit JSON instead of a tab-separated table.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct PackageInfoArgs {
+    /// Registry package name, optionally with @version.
+    pub name: String,
+    /// Package registry index URL or path.
+    #[arg(long, value_name = "URL|PATH")]
+    pub registry: Option<String>,
+    /// Emit JSON instead of human-readable metadata.
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Debug, Args)]
@@ -2718,19 +2749,76 @@ mod tests {
     }
 
     #[test]
+    fn test_parses_add_registry_override() {
+        let cli = Cli::parse_from([
+            "harn",
+            "add",
+            "@burin/notion-sdk@1.2.3",
+            "--registry",
+            "index.toml",
+        ]);
+
+        let Command::Add(args) = cli.command.unwrap() else {
+            panic!("expected add command");
+        };
+        assert_eq!(args.name_or_spec, "@burin/notion-sdk@1.2.3");
+        assert_eq!(args.registry.as_deref(), Some("index.toml"));
+    }
+
+    #[test]
     fn test_parses_package_cache_subcommands() {
+        let cli = Cli::parse_from([
+            "harn",
+            "package",
+            "search",
+            "notion",
+            "--registry",
+            "index.toml",
+            "--json",
+        ]);
+        let Command::Package(args) = cli.command.unwrap() else {
+            panic!("expected package command");
+        };
+        let PackageCommand::Search(search) = args.command else {
+            panic!("expected package search");
+        };
+        assert_eq!(search.query.as_deref(), Some("notion"));
+        assert_eq!(search.registry.as_deref(), Some("index.toml"));
+        assert!(search.json);
+
+        let cli = Cli::parse_from([
+            "harn",
+            "package",
+            "info",
+            "@burin/notion-sdk@1.2.3",
+            "--registry",
+            "index.toml",
+        ]);
+        let Command::Package(args) = cli.command.unwrap() else {
+            panic!("expected package command");
+        };
+        let PackageCommand::Info(info) = args.command else {
+            panic!("expected package info");
+        };
+        assert_eq!(info.name, "@burin/notion-sdk@1.2.3");
+        assert_eq!(info.registry.as_deref(), Some("index.toml"));
+
         let cli = Cli::parse_from(["harn", "package", "cache", "list"]);
         let Command::Package(args) = cli.command.unwrap() else {
             panic!("expected package command");
         };
-        let PackageCommand::Cache(cache) = args.command;
+        let PackageCommand::Cache(cache) = args.command else {
+            panic!("expected package cache");
+        };
         assert!(matches!(cache.command, PackageCacheCommand::List));
 
         let cli = Cli::parse_from(["harn", "package", "cache", "clean", "--all"]);
         let Command::Package(args) = cli.command.unwrap() else {
             panic!("expected package command");
         };
-        let PackageCommand::Cache(cache) = args.command;
+        let PackageCommand::Cache(cache) = args.command else {
+            panic!("expected package cache");
+        };
         let PackageCacheCommand::Clean(clean) = cache.command else {
             panic!("expected package cache clean");
         };
@@ -2740,7 +2828,9 @@ mod tests {
         let Command::Package(args) = cli.command.unwrap() else {
             panic!("expected package command");
         };
-        let PackageCommand::Cache(cache) = args.command;
+        let PackageCommand::Cache(cache) = args.command else {
+            panic!("expected package cache");
+        };
         let PackageCacheCommand::Verify(verify) = cache.command else {
             panic!("expected package cache verify");
         };

@@ -867,6 +867,8 @@ Add a dependency to `harn.toml`.
 
 ```bash
 harn add github.com/burin-labs/harn-openapi@v1.2.3
+harn add @burin/notion-sdk@1.2.3
+harn add @burin/notion-sdk@1.2.3 --registry ./harn-package-index.toml
 harn add https://github.com/user/my-lib --alias my-lib --rev v1.2.3
 harn add https://github.com/user/my-lib --alias my-lib --branch main
 harn add my-lib --git https://github.com/user/my-lib --rev v1.2.3   # legacy form
@@ -874,7 +876,9 @@ harn add my-lib --git https://github.com/user/my-lib --rev v1.2.3   # legacy for
 
 Git dependencies must specify a stable `rev` or an explicit `branch`.
 `harn.lock` records the resolved commit and content hash used for
-reproducible installs.
+reproducible installs. Registry-name dependencies resolve through the
+package index and then write the same git dependency shape as direct
+GitHub installs.
 
 ## harn install
 
@@ -920,6 +924,31 @@ Remove one dependency from `harn.toml`, `harn.lock`, and
 ```bash
 harn remove my-lib
 ```
+
+## harn package search
+
+Search the configured package registry index.
+
+```bash
+harn package search notion
+harn package search --registry ./harn-package-index.toml --json
+```
+
+The registry source comes from `--registry`, `HARN_PACKAGE_REGISTRY`,
+`[registry].url` in `harn.toml`, or Harn's default hosted index.
+
+## harn package info
+
+Show registry metadata for one package, optionally at a specific version.
+
+```bash
+harn package info @burin/notion-sdk
+harn package info @burin/notion-sdk@1.2.3 --json
+```
+
+Metadata includes repository, license, Harn compatibility, exported
+modules, connector contract compatibility, docs URL, versions, and any
+checksum/provenance fields present in the index.
 
 ## harn package cache
 
