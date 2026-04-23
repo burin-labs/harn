@@ -1341,7 +1341,7 @@ let memo = shared_map({scope: "workflow_run", key: "memo"})
 let lock = sync_mutex_acquire("memo:customer-42", 250ms)
 guard lock != nil else { throw "state lock timeout" }
 try {
-  shared_map_set(memo, "customer-42", compute_customer_summary())
+  shared_map_set(memo, "customer-42", "summary")
 } finally {
   sync_release(lock)
 }
