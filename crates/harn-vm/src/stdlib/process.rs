@@ -410,9 +410,11 @@ fn exec_command(
 ) -> Result<std::process::Output, VmError> {
     let mut command = crate::stdlib::sandbox::std_command_for(cmd, args)?;
     apply_execution_context(&mut command, dir)?;
-    let output = command
-        .output()
-        .map_err(|e| VmError::Thrown(VmValue::String(Rc::from(format!("exec failed: {e}")))))?;
+    let output = command.output().map_err(|e| {
+        crate::stdlib::sandbox::process_spawn_error(&e).unwrap_or_else(|| {
+            VmError::Thrown(VmValue::String(Rc::from(format!("exec failed: {e}"))))
+        })
+    })?;
     if let Some(error) = crate::stdlib::sandbox::process_violation_error(&output) {
         return Err(error);
     }
@@ -428,9 +430,11 @@ fn exec_shell(
     let args = vec![flag.to_string(), script.to_string()];
     let mut command = crate::stdlib::sandbox::std_command_for(shell, &args)?;
     apply_execution_context(&mut command, dir)?;
-    let output = command
-        .output()
-        .map_err(|e| VmError::Thrown(VmValue::String(Rc::from(format!("shell failed: {e}")))))?;
+    let output = command.output().map_err(|e| {
+        crate::stdlib::sandbox::process_spawn_error(&e).unwrap_or_else(|| {
+            VmError::Thrown(VmValue::String(Rc::from(format!("shell failed: {e}"))))
+        })
+    })?;
     if let Some(error) = crate::stdlib::sandbox::process_violation_error(&output) {
         return Err(error);
     }

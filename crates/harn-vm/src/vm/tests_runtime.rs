@@ -1393,6 +1393,114 @@ fn test_macos_process_sandbox_surfaces_denial_as_typed_error() {
     assert!(!outside_file.exists());
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn test_linux_process_sandbox_catches_ten_process_escapes() {
+    let allowed = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let outside_file = outside.path().join("secret.txt");
+    let outside_new = outside.path().join("new.txt");
+    let outside_copy = outside.path().join("copy.txt");
+    let outside_dir = outside.path().join("new_dir");
+    let allowed_file = allowed.path().join("allowed.txt");
+    std::fs::write(&outside_file, "secret").unwrap();
+    std::fs::write(&allowed_file, "allowed").unwrap();
+
+    let previous = std::env::var("HARN_HANDLER_SANDBOX").ok();
+    std::env::set_var("HARN_HANDLER_SANDBOX", "enforce");
+
+    let policy = crate::orchestration::CapabilityPolicy {
+        capabilities: std::collections::BTreeMap::from([
+            ("process".to_string(), vec!["exec".to_string()]),
+            (
+                "workspace".to_string(),
+                vec![
+                    "read_text".to_string(),
+                    "list".to_string(),
+                    "exists".to_string(),
+                    "write_text".to_string(),
+                    "delete".to_string(),
+                ],
+            ),
+        ]),
+        workspace_roots: vec![allowed.path().display().to_string()],
+        side_effect_level: Some("process_exec".to_string()),
+        ..Default::default()
+    };
+
+    let escapes = [
+        format!("cat {}", shell_quote(&outside_file)),
+        format!("printf x > {}", shell_quote(&outside_new)),
+        format!("printf x >> {}", shell_quote(&outside_file)),
+        format!("mkdir {}", shell_quote(&outside_dir)),
+        format!("rm {}", shell_quote(&outside_file)),
+        format!(
+            "cp {} {}",
+            shell_quote(&outside_file),
+            shell_quote(&allowed.path().join("copy.txt"))
+        ),
+        format!(
+            "cp {} {}",
+            shell_quote(&allowed_file),
+            shell_quote(&outside_copy)
+        ),
+        format!(
+            "mv {} {}",
+            shell_quote(&allowed_file),
+            shell_quote(&outside.path().join("moved.txt"))
+        ),
+        format!(
+            "ln -s {} {} && cat {}",
+            shell_quote(&outside_file),
+            shell_quote(&allowed.path().join("link.txt")),
+            shell_quote(&allowed.path().join("link.txt"))
+        ),
+        format!("touch {}", shell_quote(&outside.path().join("touched.txt"))),
+    ];
+    assert_eq!(escapes.len(), 10);
+
+    for command in escapes {
+        let source = format!(
+            r#"pipeline t(task) {{ shell("{}") }}"#,
+            harn_string_escape(&command)
+        );
+        let err = run_harn_with_policy(&source, policy.clone()).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                VmError::CategorizedError {
+                    category: crate::value::ErrorCategory::ToolRejected,
+                    ..
+                }
+            ),
+            "expected tool_rejected for command {command}, got {err:?}"
+        );
+        assert!(
+            err.to_string().contains("sandbox violation"),
+            "expected sandbox violation for command {command}, got {err}"
+        );
+    }
+
+    match previous {
+        Some(value) => std::env::set_var("HARN_HANDLER_SANDBOX", value),
+        None => std::env::remove_var("HARN_HANDLER_SANDBOX"),
+    }
+    assert!(outside_file.exists());
+    assert!(!outside_new.exists());
+    assert!(!outside_copy.exists());
+    assert!(!outside_dir.exists());
+}
+
+#[cfg(target_os = "linux")]
+fn shell_quote(path: &std::path::Path) -> String {
+    format!("'{}'", path.display().to_string().replace('\'', "'\\''"))
+}
+
+#[cfg(target_os = "linux")]
+fn harn_string_escape(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
 #[test]
 fn test_if_else_has_lexical_block_scope() {
     let out = run_output(

@@ -1307,10 +1307,11 @@ pub async fn execute_stage_node(
                     process.envs(context.env);
                 }
             }
-            let output = process
-                .output()
-                .await
-                .map_err(|e| VmError::Runtime(format!("workflow verify exec failed: {e}")))?;
+            let output = process.output().await.map_err(|e| {
+                crate::stdlib::sandbox::process_spawn_error(&e).unwrap_or_else(|| {
+                    VmError::Runtime(format!("workflow verify exec failed: {e}"))
+                })
+            })?;
             if let Some(error) = crate::stdlib::sandbox::process_violation_error(&output) {
                 return Err(error);
             }
