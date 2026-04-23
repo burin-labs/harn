@@ -119,6 +119,8 @@ SCRIPTING
     Lock,
     /// Manage Harn package caches and integrity verification.
     Package(PackageArgs),
+    /// List and inspect durable agent persona manifests.
+    Persona(PersonaArgs),
     /// Print resolved metadata for a model alias or model id as JSON.
     ModelInfo(ModelInfoArgs),
     /// Manage and inspect Harn skills (list, inspect, match, install, new).
@@ -1576,6 +1578,39 @@ pub(crate) enum PackageCacheCommand {
     Clean(PackageCacheCleanArgs),
     /// Verify cached package contents against harn.lock.
     Verify(PackageCacheVerifyArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct PersonaArgs {
+    #[command(subcommand)]
+    pub command: PersonaCommand,
+    /// Explicit harn.toml path or directory. Defaults to nearest harn.toml from cwd.
+    #[arg(long, global = true, value_name = "PATH")]
+    pub manifest: Option<PathBuf>,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum PersonaCommand {
+    /// List personas declared in the resolved harn.toml.
+    List(PersonaListArgs),
+    /// Inspect one persona from the resolved harn.toml.
+    Inspect(PersonaInspectArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct PersonaListArgs {
+    /// Emit a stable JSON array instead of a human-readable table.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct PersonaInspectArgs {
+    /// Persona name to inspect.
+    pub name: String,
+    /// Emit stable JSON for Harn Cloud, Burin Code, or other hosts.
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Debug, Args)]

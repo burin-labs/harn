@@ -31,6 +31,7 @@
 - [Human in the loop](./hitl.md)
 - [Trust graph](./trust-graph.md)
 - [Skills](./skills.md)
+- [Personas](./personas.md)
 - [Skill provenance](./skill-provenance.md)
 - [Sessions](./sessions.md)
 - [Agent state](./agent-state.md)

@@ -1,0 +1,63 @@
+[package]
+name = "harn-persona-examples"
+version = "0.1.0"
+
+[[personas]]
+name = "merge_captain"
+version = "0.1.0"
+description = "Owns pull request readiness, CI triage, merge approvals, and receipt-backed merge decisions."
+entry_workflow = "workflows/merge_captain.harn#run"
+tools = ["github", "ci", "linear", "notion", "slack"]
+capabilities = ["git.get_diff", "project.test_commands", "process.exec", "runtime.record_run"]
+autonomy_tier = "act_with_approval"
+receipt_policy = "required"
+triggers = ["github.pr_opened", "github.check_failed"]
+schedules = ["*/30 * * * *"]
+handoffs = ["review_captain"]
+context_packs = ["repo_policy", "release_rules", "flaky_tests"]
+evals = ["merge_safety", "regression_triage", "reviewer_quality"]
+owner = "platform"
+budget = { daily_usd = 20.0, frontier_escalations = 3, max_tokens = 200000 }
+model_policy = { default_model = "gpt-5.4", escalation_model = "gpt-5.4", fallback_models = ["gpt-5.4-mini"], reasoning_effort = "medium" }
+rollout_policy = { mode = "shadow_then_approval", percentage = 25, cohorts = ["core-repos"] }
+package_source = { package = "harn-persona-examples", path = "examples/personas" }
+
+[[personas]]
+name = "review_captain"
+version = "0.1.0"
+description = "Keeps review quality high by routing reviewers, summarizing risk, and checking follow-up comments."
+entry_workflow = "workflows/review_captain.harn#run"
+tools = ["github", "slack", "notion"]
+capabilities = ["git.get_diff", "project.code_patterns", "runtime.record_run"]
+autonomy_tier = "suggest"
+receipt_policy = "required"
+triggers = ["github.review_requested", "github.review_comment_created"]
+schedules = ["0 */2 * * *"]
+handoffs = ["merge_captain"]
+context_packs = ["repo_policy", "review_rubric"]
+evals = ["reviewer_quality"]
+owner = "engineering"
+budget = { daily_usd = 8.0, frontier_escalations = 1, max_tokens = 100000 }
+model_policy = { default_model = "gpt-5.4-mini", escalation_model = "gpt-5.4", fallback_models = ["gpt-5.3-codex"], reasoning_effort = "medium" }
+rollout_policy = { mode = "approval_only", percentage = 100, cohorts = ["all-repos"] }
+package_source = { package = "harn-persona-examples", path = "examples/personas" }
+
+[[personas]]
+name = "oncall_captain"
+version = "0.1.0"
+description = "Coordinates incident intake, escalation, runbook context, and handoff receipts for the on-call rotation."
+entry_workflow = "workflows/oncall_captain.harn#run"
+tools = ["slack", "pagerduty", "notion", "github"]
+capabilities = ["interaction.ask", "project.lessons", "runtime.record_run", "session.changed_paths"]
+autonomy_tier = "act_with_approval"
+receipt_policy = "required"
+triggers = ["slack.incident_created", "pagerduty.incident_triggered"]
+schedules = ["*/15 * * * *"]
+handoffs = ["review_captain"]
+context_packs = ["incident_runbooks", "service_ownership", "release_rules"]
+evals = ["incident_triage", "handoff_quality"]
+owner = "sre"
+budget = { daily_usd = 15.0, frontier_escalations = 2, max_runtime_seconds = 900 }
+model_policy = { default_model = "gpt-5.4-mini", escalation_model = "gpt-5.4", fallback_models = ["gpt-5.2"], reasoning_effort = "high" }
+rollout_policy = { mode = "approval_only", percentage = 50, cohorts = ["primary-oncall"] }
+package_source = { package = "harn-persona-examples", path = "examples/personas" }
