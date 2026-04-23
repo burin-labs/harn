@@ -3723,6 +3723,71 @@ stem. Use `harn add <alias> --path ../repo` for the legacy explicit
 alias form, or `harn add <alias> --git ../repo` when a local git checkout
 should be pinned by commit instead of live-linked.
 
+### Package registry index
+
+`harn package search`, `harn package info`, and registry-name
+dependencies use a lightweight TOML index. The registry source is chosen
+in this order: a command `--registry` flag, `HARN_PACKAGE_REGISTRY`,
+`[registry].url` from the nearest manifest, then Harn's default hosted
+index URL. Registry URLs may be `https://`, `http://`, `file://`, or a
+filesystem path; relative manifest registry paths resolve from the
+manifest directory.
+
+Registry package names are either unscoped names such as `acme-lib` or
+scoped names such as `@burin/notion-sdk`. Segments must start with an
+ASCII alphanumeric character and may then contain ASCII alphanumerics,
+`-`, `_`, or `.`. First-party packages should use the `@burin/`
+namespace.
+
+Registry entries map discovery names to the existing git-backed package
+manager path; they do not introduce a second package install mechanism.
+For example, `harn add @burin/notion-sdk@1.2.3` reads the index entry,
+writes the equivalent `[dependencies]` git table, updates `harn.lock`,
+and materializes the same `.harn/packages/<package>/` tree that a direct
+GitHub install would use.
+
+```toml
+[registry]
+url = "https://packages.harnlang.com/index.toml"
+```
+
+Registry index format:
+
+```toml
+version = 1
+
+[[package]]
+name = "@burin/notion-sdk"
+description = "Notion SDK package for Harn connectors"
+repository = "https://github.com/burin-labs/notion-sdk-harn"
+license = "MIT OR Apache-2.0"
+harn = ">=0.7,<0.8"
+exports = ["client", "schema"]
+connector_contract = "v1"
+docs_url = "https://docs.harnlang.com/connectors/notion"
+checksum = "sha256:..."
+provenance = "https://github.com/burin-labs/notion-sdk-harn/releases/tag/v1.2.3"
+
+[[package.version]]
+version = "1.2.3"
+git = "https://github.com/burin-labs/notion-sdk-harn"
+rev = "v1.2.3"
+package = "notion-sdk-harn"
+checksum = "sha256:..."
+provenance = "https://github.com/burin-labs/notion-sdk-harn/releases/tag/v1.2.3"
+```
+
+Package-level metadata includes the registry name, version list,
+description, repository, license, Harn compatibility range, exported
+modules, connector contract compatibility, docs URL, and optional
+checksum/provenance fields. Version entries must specify `git` plus
+either `rev` or `branch`; `rev` is preferred for reproducible installs.
+
+Use registry names when developers should discover first-party or
+community packages by capability and stable name. Use direct GitHub refs
+for local dogfood, private repositories, unreleased commits, or temporary
+pins that are not ready for the shared index.
+
 `harn.lock` is a typed TOML file with `version = 1` and one `[[package]]`
 entry per dependency. Each git entry records:
 
