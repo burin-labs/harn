@@ -16,8 +16,8 @@ use std::sync::Arc;
 use std::{env, fs, process};
 
 use cli::{
-    Cli, Command, PackageCacheCommand, PackageCommand, RunsCommand, ServeCommand, SkillCommand,
-    SkillKeyCommand, SkillTrustCommand, SkillsCommand,
+    Cli, Command, PackageCacheCommand, PackageCommand, PersonaCommand, RunsCommand, ServeCommand,
+    SkillCommand, SkillKeyCommand, SkillTrustCommand, SkillsCommand,
 };
 use harn_lexer::Lexer;
 use harn_parser::{DiagnosticSeverity, Parser, TypeChecker};
@@ -479,6 +479,14 @@ async fn main() {
                     package::verify_package_cache(verify.materialized)
                 }
             },
+        },
+        Command::Persona(args) => match args.command {
+            PersonaCommand::List(list) => {
+                commands::persona::run_list(args.manifest.as_deref(), &list)
+            }
+            PersonaCommand::Inspect(inspect) => {
+                commands::persona::run_inspect(args.manifest.as_deref(), &inspect)
+            }
         },
         Command::ModelInfo(args) => print_model_info(&args.model).await,
         Command::Skills(args) => match args.command {

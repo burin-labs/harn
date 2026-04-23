@@ -133,6 +133,27 @@ harn viz main.harn --output docs/graph.mmd
 graph showing pipelines, functions, branches, loops, and other workflow-shaped
 control-flow nodes.
 
+## harn persona
+
+List and inspect durable agent persona manifests from `harn.toml`.
+
+```bash
+harn persona list
+harn persona list --json
+harn persona inspect merge_captain
+harn persona inspect merge_captain --json
+harn persona --manifest examples/personas/harn.toml inspect merge_captain --json
+```
+
+| Flag | Description |
+|---|---|
+| `--manifest <path>` | Use an explicit `harn.toml` path or directory containing one |
+| `--json` | Emit stable JSON for `list` or `inspect` |
+
+`harn persona` validates the manifest before printing. It rejects missing entry
+workflows, unknown capabilities, invalid budget fields, invalid schedules, and
+handoffs that point at undeclared personas.
+
 ## harn fmt
 
 Format `.harn` source files. Accepts files or directories.

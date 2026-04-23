@@ -3638,6 +3638,42 @@ each. Positional targets remain additive. The manifest is discovered by
 walking upward from the first positional target (or the current working
 directory when none is supplied).
 
+### `[[personas]]` — durable agent role manifests
+
+`[[personas]]` entries define durable agent roles in the package/workspace
+manifest. Persona v1 is static: tooling parses, validates, lists, and inspects
+the contract, while runtime scheduling and handoff execution remain separate
+runtime work.
+
+Required fields are `name`, `description`, `entry_workflow`, either `tools` or
+`capabilities`, `autonomy_tier`, and `receipt_policy`. Optional fields include
+`triggers`, `schedules`, `model_policy`, `budget`, `handoffs`, `context_packs`,
+`evals`, `owner`, `version`, `package_source`, and `rollout_policy`.
+
+```toml
+[[personas]]
+name = "merge_captain"
+version = "0.1.0"
+description = "Owns pull request readiness, CI triage, merge approvals, and receipts."
+entry_workflow = "workflows/merge_captain.harn#run"
+tools = ["github", "ci", "linear", "notion", "slack"]
+capabilities = ["git.get_diff", "project.test_commands", "process.exec"]
+autonomy_tier = "act_with_approval"
+receipt_policy = "required"
+triggers = ["github.pr_opened", "github.check_failed"]
+schedules = ["*/30 * * * *"]
+handoffs = ["review_captain"]
+context_packs = ["repo_policy", "release_rules", "flaky_tests"]
+evals = ["merge_safety", "regression_triage", "reviewer_quality"]
+budget = { daily_usd = 20.0, frontier_escalations = 3 }
+```
+
+Validation rejects missing required fields, malformed or unknown
+`capability.operation` entries, invalid cron schedules, unknown handoff targets,
+unknown budget/model/source/rollout fields, negative budget amounts, and invalid
+rollout percentages. `harn persona list` and `harn persona inspect <name>
+--json` expose the resolved schema for hosts such as Harn Cloud and Burin Code.
+
 ### `[dependencies]` and `harn.lock` — git-backed package installs
 
 ```toml

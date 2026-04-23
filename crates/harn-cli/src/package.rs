@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::ffi::OsStr;
 use std::fs::File;
 use std::path::{Path, PathBuf};
@@ -82,6 +82,11 @@ pub struct Manifest {
     /// connectors or `.harn` modules as connector implementations.
     #[serde(default)]
     pub providers: Vec<ProviderManifestEntry>,
+    /// `[[personas]]` array-of-tables — durable, non-executing agent role
+    /// manifests. Personas bind an entry workflow to tools, capabilities,
+    /// autonomy, budgets, receipts, handoffs, evals, and rollout metadata.
+    #[serde(default)]
+    pub personas: Vec<PersonaManifestEntry>,
     /// `[connector_contract]` table — deterministic package-local fixtures
     /// consumed by `harn connector check` for pure-Harn connector packages.
     #[serde(default, alias = "connector-contract")]
@@ -429,6 +434,151 @@ pub struct TriggerStreamWindowManifestSpec {
     pub gap: Option<String>,
     #[serde(default)]
     pub max_items: Option<u32>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct PersonaManifestEntry {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub version: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default, alias = "entry", alias = "entry_pipeline")]
+    pub entry_workflow: Option<String>,
+    #[serde(default)]
+    pub tools: Vec<String>,
+    #[serde(default)]
+    pub capabilities: Vec<String>,
+    #[serde(default, alias = "tier")]
+    pub autonomy_tier: Option<harn_vm::AutonomyTier>,
+    #[serde(default, alias = "receipts")]
+    pub receipt_policy: Option<PersonaReceiptPolicy>,
+    #[serde(default)]
+    pub triggers: Vec<String>,
+    #[serde(default)]
+    pub schedules: Vec<String>,
+    #[serde(default)]
+    pub model_policy: PersonaModelPolicy,
+    #[serde(default)]
+    pub budget: PersonaBudget,
+    #[serde(default)]
+    pub handoffs: Vec<String>,
+    #[serde(default)]
+    pub context_packs: Vec<String>,
+    #[serde(default, alias = "eval_packs")]
+    pub evals: Vec<String>,
+    #[serde(default)]
+    pub owner: Option<String>,
+    #[serde(default)]
+    pub package_source: PersonaPackageSource,
+    #[serde(default)]
+    pub rollout_policy: PersonaRolloutPolicy,
+    #[serde(flatten, default)]
+    pub extra: BTreeMap<String, toml::Value>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PersonaReceiptPolicy {
+    #[default]
+    Optional,
+    Required,
+    Disabled,
+}
+
+impl PersonaReceiptPolicy {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Optional => "optional",
+            Self::Required => "required",
+            Self::Disabled => "disabled",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct PersonaModelPolicy {
+    #[serde(default)]
+    pub default_model: Option<String>,
+    #[serde(default)]
+    pub escalation_model: Option<String>,
+    #[serde(default)]
+    pub fallback_models: Vec<String>,
+    #[serde(default)]
+    pub reasoning_effort: Option<String>,
+    #[serde(flatten, default)]
+    pub extra: BTreeMap<String, toml::Value>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct PersonaBudget {
+    #[serde(default)]
+    pub daily_usd: Option<f64>,
+    #[serde(default)]
+    pub hourly_usd: Option<f64>,
+    #[serde(default)]
+    pub run_usd: Option<f64>,
+    #[serde(default)]
+    pub frontier_escalations: Option<u32>,
+    #[serde(default)]
+    pub max_tokens: Option<u64>,
+    #[serde(default)]
+    pub max_runtime_seconds: Option<u64>,
+    #[serde(flatten, default)]
+    pub extra: BTreeMap<String, toml::Value>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct PersonaPackageSource {
+    #[serde(default)]
+    pub package: Option<String>,
+    #[serde(default)]
+    pub path: Option<String>,
+    #[serde(default)]
+    pub git: Option<String>,
+    #[serde(default)]
+    pub rev: Option<String>,
+    #[serde(flatten, default)]
+    pub extra: BTreeMap<String, toml::Value>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct PersonaRolloutPolicy {
+    #[serde(default)]
+    pub mode: Option<String>,
+    #[serde(default)]
+    pub percentage: Option<u8>,
+    #[serde(default)]
+    pub cohorts: Vec<String>,
+    #[serde(flatten, default)]
+    pub extra: BTreeMap<String, toml::Value>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ResolvedPersonaManifest {
+    pub manifest_path: PathBuf,
+    pub manifest_dir: PathBuf,
+    pub personas: Vec<PersonaManifestEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct PersonaValidationError {
+    pub manifest_path: PathBuf,
+    pub field_path: String,
+    pub message: String,
+}
+
+impl std::fmt::Display for PersonaValidationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{} {}: {}",
+            self.manifest_path.display(),
+            self.field_path,
+            self.message
+        )
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2850,6 +3000,540 @@ pub fn load_workspace_config(anchor: Option<&Path>) -> Option<(WorkspaceConfig, 
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
     let (manifest, dir) = find_nearest_manifest(&anchor)?;
     Some((manifest.workspace, dir))
+}
+
+pub fn load_personas_from_manifest_path(
+    manifest_path: &Path,
+) -> Result<ResolvedPersonaManifest, Vec<PersonaValidationError>> {
+    let manifest_path = if manifest_path.is_dir() {
+        manifest_path.join(MANIFEST)
+    } else {
+        manifest_path.to_path_buf()
+    };
+    let manifest_dir = manifest_path
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."));
+    let manifest = read_manifest_from_path(&manifest_path).map_err(|message| {
+        vec![PersonaValidationError {
+            manifest_path: manifest_path.clone(),
+            field_path: "harn.toml".to_string(),
+            message,
+        }]
+    })?;
+    validate_and_resolve_personas(manifest, manifest_path, manifest_dir)
+}
+
+pub fn load_personas_config(
+    anchor: Option<&Path>,
+) -> Result<Option<ResolvedPersonaManifest>, Vec<PersonaValidationError>> {
+    let anchor = anchor
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    let Some((manifest, dir)) = find_nearest_manifest(&anchor) else {
+        return Ok(None);
+    };
+    let manifest_path = dir.join(MANIFEST);
+    validate_and_resolve_personas(manifest, manifest_path, dir).map(Some)
+}
+
+fn validate_and_resolve_personas(
+    manifest: Manifest,
+    manifest_path: PathBuf,
+    manifest_dir: PathBuf,
+) -> Result<ResolvedPersonaManifest, Vec<PersonaValidationError>> {
+    let known_capabilities = known_persona_capabilities(&manifest, &manifest_dir);
+    let known_tools = known_persona_tools(&manifest);
+    let known_names: BTreeSet<String> = manifest
+        .personas
+        .iter()
+        .filter_map(|persona| persona.name.as_ref())
+        .filter(|name| !name.trim().is_empty())
+        .cloned()
+        .collect();
+    let mut errors = Vec::new();
+    for (index, persona) in manifest.personas.iter().enumerate() {
+        validate_persona(
+            persona,
+            index,
+            &manifest_path,
+            &known_capabilities,
+            &known_tools,
+            &known_names,
+            &mut errors,
+        );
+    }
+    if errors.is_empty() {
+        Ok(ResolvedPersonaManifest {
+            manifest_path,
+            manifest_dir,
+            personas: manifest.personas,
+        })
+    } else {
+        Err(errors)
+    }
+}
+
+fn validate_persona(
+    persona: &PersonaManifestEntry,
+    index: usize,
+    manifest_path: &Path,
+    known_capabilities: &BTreeSet<String>,
+    known_tools: &BTreeSet<String>,
+    known_names: &BTreeSet<String>,
+    errors: &mut Vec<PersonaValidationError>,
+) {
+    let root = format!("[[personas]][{index}]");
+    for field in persona.extra.keys() {
+        persona_error(
+            manifest_path,
+            format!("{root}.{field}"),
+            "unknown persona field",
+            errors,
+        );
+    }
+    let name = validate_required_string(
+        manifest_path,
+        &root,
+        "name",
+        persona.name.as_deref(),
+        errors,
+    );
+    if let Some(name) = name {
+        validate_tokenish(manifest_path, &root, "name", name, errors);
+    }
+    validate_required_string(
+        manifest_path,
+        &root,
+        "description",
+        persona.description.as_deref(),
+        errors,
+    );
+    validate_required_string(
+        manifest_path,
+        &root,
+        "entry_workflow",
+        persona.entry_workflow.as_deref(),
+        errors,
+    );
+    if persona.tools.is_empty() && persona.capabilities.is_empty() {
+        persona_error(
+            manifest_path,
+            format!("{root}.tools"),
+            "persona requires at least one tool or capability",
+            errors,
+        );
+    }
+    if persona.autonomy_tier.is_none() {
+        persona_error(
+            manifest_path,
+            format!("{root}.autonomy_tier"),
+            "missing required autonomy tier",
+            errors,
+        );
+    }
+    if persona.receipt_policy.is_none() {
+        persona_error(
+            manifest_path,
+            format!("{root}.receipt_policy"),
+            "missing required receipt policy",
+            errors,
+        );
+    }
+    validate_string_list(manifest_path, &root, "tools", &persona.tools, errors);
+    for tool in &persona.tools {
+        if !known_tools.contains(tool) {
+            persona_error(
+                manifest_path,
+                format!("{root}.tools"),
+                format!("unknown tool '{tool}'"),
+                errors,
+            );
+        }
+    }
+    for capability in &persona.capabilities {
+        let Some((cap, op)) = capability.split_once('.') else {
+            persona_error(
+                manifest_path,
+                format!("{root}.capabilities"),
+                format!("capability '{capability}' must use capability.operation syntax"),
+                errors,
+            );
+            continue;
+        };
+        if cap.trim().is_empty() || op.trim().is_empty() {
+            persona_error(
+                manifest_path,
+                format!("{root}.capabilities"),
+                format!("capability '{capability}' must use capability.operation syntax"),
+                errors,
+            );
+        } else if !known_capabilities.contains(capability) {
+            persona_error(
+                manifest_path,
+                format!("{root}.capabilities"),
+                format!("unknown capability '{capability}'"),
+                errors,
+            );
+        }
+    }
+    validate_string_list(
+        manifest_path,
+        &root,
+        "context_packs",
+        &persona.context_packs,
+        errors,
+    );
+    validate_string_list(manifest_path, &root, "evals", &persona.evals, errors);
+    for schedule in &persona.schedules {
+        if schedule.trim().is_empty() {
+            persona_error(
+                manifest_path,
+                format!("{root}.schedules"),
+                "schedule entries must not be empty",
+                errors,
+            );
+        } else if let Err(error) = croner::Cron::from_str(schedule) {
+            persona_error(
+                manifest_path,
+                format!("{root}.schedules"),
+                format!("invalid cron schedule '{schedule}': {error}"),
+                errors,
+            );
+        }
+    }
+    for trigger in &persona.triggers {
+        if !trigger.contains('.') {
+            persona_error(
+                manifest_path,
+                format!("{root}.triggers"),
+                format!("trigger '{trigger}' must use provider.event syntax"),
+                errors,
+            );
+        }
+    }
+    for handoff in &persona.handoffs {
+        if !known_names.contains(handoff) {
+            persona_error(
+                manifest_path,
+                format!("{root}.handoffs"),
+                format!("unknown handoff target '{handoff}'"),
+                errors,
+            );
+        }
+    }
+    validate_persona_budget(manifest_path, &root, &persona.budget, errors);
+    validate_persona_nested_extra(
+        manifest_path,
+        &root,
+        "model_policy",
+        &persona.model_policy.extra,
+        errors,
+    );
+    validate_persona_nested_extra(
+        manifest_path,
+        &root,
+        "package_source",
+        &persona.package_source.extra,
+        errors,
+    );
+    validate_persona_nested_extra(
+        manifest_path,
+        &root,
+        "rollout_policy",
+        &persona.rollout_policy.extra,
+        errors,
+    );
+    if let Some(percentage) = persona.rollout_policy.percentage {
+        if percentage > 100 {
+            persona_error(
+                manifest_path,
+                format!("{root}.rollout_policy.percentage"),
+                "rollout percentage must be between 0 and 100",
+                errors,
+            );
+        }
+    }
+}
+
+fn validate_required_string<'a>(
+    manifest_path: &Path,
+    root: &str,
+    field: &str,
+    value: Option<&'a str>,
+    errors: &mut Vec<PersonaValidationError>,
+) -> Option<&'a str> {
+    match value.map(str::trim) {
+        Some(value) if !value.is_empty() => Some(value),
+        _ => {
+            persona_error(
+                manifest_path,
+                format!("{root}.{field}"),
+                format!("missing required {field}"),
+                errors,
+            );
+            None
+        }
+    }
+}
+
+fn validate_string_list(
+    manifest_path: &Path,
+    root: &str,
+    field: &str,
+    values: &[String],
+    errors: &mut Vec<PersonaValidationError>,
+) {
+    for value in values {
+        if value.trim().is_empty() {
+            persona_error(
+                manifest_path,
+                format!("{root}.{field}"),
+                format!("{field} entries must not be empty"),
+                errors,
+            );
+        } else {
+            validate_tokenish(manifest_path, root, field, value, errors);
+        }
+    }
+}
+
+fn validate_tokenish(
+    manifest_path: &Path,
+    root: &str,
+    field: &str,
+    value: &str,
+    errors: &mut Vec<PersonaValidationError>,
+) {
+    if !value
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.' | '/'))
+    {
+        persona_error(
+            manifest_path,
+            format!("{root}.{field}"),
+            format!("'{value}' must contain only letters, numbers, '.', '-', '_', or '/'"),
+            errors,
+        );
+    }
+}
+
+fn validate_persona_budget(
+    manifest_path: &Path,
+    root: &str,
+    budget: &PersonaBudget,
+    errors: &mut Vec<PersonaValidationError>,
+) {
+    validate_persona_nested_extra(manifest_path, root, "budget", &budget.extra, errors);
+    for (field, value) in [
+        ("daily_usd", budget.daily_usd),
+        ("hourly_usd", budget.hourly_usd),
+        ("run_usd", budget.run_usd),
+    ] {
+        if value.is_some_and(|number| !number.is_finite() || number < 0.0) {
+            persona_error(
+                manifest_path,
+                format!("{root}.budget.{field}"),
+                "budget amounts must be finite non-negative numbers",
+                errors,
+            );
+        }
+    }
+}
+
+fn validate_persona_nested_extra(
+    manifest_path: &Path,
+    root: &str,
+    field: &str,
+    extra: &BTreeMap<String, toml::Value>,
+    errors: &mut Vec<PersonaValidationError>,
+) {
+    for key in extra.keys() {
+        persona_error(
+            manifest_path,
+            format!("{root}.{field}.{key}"),
+            format!("unknown {field} field"),
+            errors,
+        );
+    }
+}
+
+fn persona_error(
+    manifest_path: &Path,
+    field_path: String,
+    message: impl Into<String>,
+    errors: &mut Vec<PersonaValidationError>,
+) {
+    errors.push(PersonaValidationError {
+        manifest_path: manifest_path.to_path_buf(),
+        field_path,
+        message: message.into(),
+    });
+}
+
+fn known_persona_capabilities(manifest: &Manifest, manifest_dir: &Path) -> BTreeSet<String> {
+    let mut capabilities = BTreeSet::new();
+    for (capability, operations) in default_persona_capability_map() {
+        for operation in operations {
+            capabilities.insert(format!("{capability}.{operation}"));
+        }
+    }
+    for (capability, operations) in &manifest.check.host_capabilities {
+        for operation in operations {
+            capabilities.insert(format!("{capability}.{operation}"));
+        }
+    }
+    if let Some(path) = manifest.check.host_capabilities_path.as_deref() {
+        let path = PathBuf::from(path);
+        let path = if path.is_absolute() {
+            path
+        } else {
+            manifest_dir.join(path)
+        };
+        if let Ok(content) = fs::read_to_string(path) {
+            let parsed_json = serde_json::from_str::<serde_json::Value>(&content).ok();
+            let parsed_toml = toml::from_str::<toml::Value>(&content)
+                .ok()
+                .and_then(|value| serde_json::to_value(value).ok());
+            if let Some(value) = parsed_json.or(parsed_toml) {
+                collect_persona_capabilities_from_json(&value, &mut capabilities);
+            }
+        }
+    }
+    capabilities
+}
+
+fn collect_persona_capabilities_from_json(value: &serde_json::Value, out: &mut BTreeSet<String>) {
+    let root = value.get("capabilities").unwrap_or(value);
+    let Some(capabilities) = root.as_object() else {
+        return;
+    };
+    for (capability, entry) in capabilities {
+        if let Some(list) = entry.as_array() {
+            for item in list {
+                if let Some(operation) = item.as_str() {
+                    out.insert(format!("{capability}.{operation}"));
+                }
+            }
+        } else if let Some(obj) = entry.as_object() {
+            if let Some(list) = obj
+                .get("operations")
+                .or_else(|| obj.get("ops"))
+                .and_then(|v| v.as_array())
+            {
+                for item in list {
+                    if let Some(operation) = item.as_str() {
+                        out.insert(format!("{capability}.{operation}"));
+                    }
+                }
+            } else {
+                for (operation, enabled) in obj {
+                    if enabled.as_bool().unwrap_or(true) {
+                        out.insert(format!("{capability}.{operation}"));
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn default_persona_capability_map() -> BTreeMap<&'static str, Vec<&'static str>> {
+    BTreeMap::from([
+        (
+            "workspace",
+            vec![
+                "read_text",
+                "write_text",
+                "apply_edit",
+                "delete",
+                "exists",
+                "file_exists",
+                "list",
+                "project_root",
+                "roots",
+            ],
+        ),
+        ("process", vec!["exec"]),
+        ("template", vec!["render"]),
+        ("interaction", vec!["ask"]),
+        (
+            "runtime",
+            vec![
+                "approved_plan",
+                "dry_run",
+                "pipeline_input",
+                "record_run",
+                "set_result",
+                "task",
+            ],
+        ),
+        (
+            "project",
+            vec![
+                "agent_instructions",
+                "code_patterns",
+                "compute_content_hash",
+                "ide_context",
+                "lessons",
+                "mcp_config",
+                "metadata_get",
+                "metadata_refresh_hashes",
+                "metadata_save",
+                "metadata_set",
+                "metadata_stale",
+                "scan",
+                "scope_test_command",
+                "test_commands",
+            ],
+        ),
+        (
+            "session",
+            vec![
+                "active_roots",
+                "changed_paths",
+                "preread_get",
+                "preread_read_many",
+            ],
+        ),
+        (
+            "editor",
+            vec!["get_active_file", "get_selection", "get_visible_files"],
+        ),
+        ("diagnostics", vec!["get_causal_traces", "get_errors"]),
+        ("git", vec!["get_branch", "get_diff"]),
+        ("learning", vec!["get_learned_rules", "report_correction"]),
+    ])
+}
+
+fn known_persona_tools(manifest: &Manifest) -> BTreeSet<String> {
+    let mut tools = BTreeSet::from([
+        "a2a".to_string(),
+        "acp".to_string(),
+        "ci".to_string(),
+        "filesystem".to_string(),
+        "github".to_string(),
+        "linear".to_string(),
+        "mcp".to_string(),
+        "notion".to_string(),
+        "pagerduty".to_string(),
+        "shell".to_string(),
+        "slack".to_string(),
+    ]);
+    for server in &manifest.mcp {
+        tools.insert(server.name.clone());
+    }
+    for provider in &manifest.providers {
+        tools.insert(provider.id.as_str().to_string());
+    }
+    for trigger in &manifest.triggers {
+        if let Some(provider) = trigger.provider.as_ref() {
+            tools.insert(provider.as_str().to_string());
+        }
+        for source in &trigger.sources {
+            tools.insert(source.provider.as_str().to_string());
+        }
+    }
+    tools
 }
 
 #[derive(Debug, Clone)]
