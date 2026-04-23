@@ -1,0 +1,15 @@
+{
+  "event": "github.review_requested",
+  "repo": "burin-labs/harn",
+  "pr_number": 463,
+  "changed_files": [
+    "examples/personas/harn.toml",
+    "examples/personas/workflows/merge_captain.harn"
+  ],
+  "missing_tests": [
+    "template smoke for oncall_captain"
+  ],
+  "risky_paths": [
+    "examples/personas/harn.toml"
+  ]
+}

@@ -1,63 +1,88 @@
 [package]
-name = "harn-persona-examples"
+name = "harn-persona-template-pack"
 version = "0.1.0"
 
 [[personas]]
 name = "merge_captain"
 version = "0.1.0"
-description = "Owns pull request readiness, CI triage, merge approvals, and receipt-backed merge decisions."
+description = "Dry-run-first captain for pull request readiness, CI triage, release blockers, and receipt-backed merge plans."
 entry_workflow = "workflows/merge_captain.harn#run"
-tools = ["github", "ci", "linear", "notion", "slack"]
-capabilities = ["git.get_diff", "project.test_commands", "process.exec", "runtime.record_run"]
+tools = ["github", "ci", "linear", "notion", "slack", "mcp"]
+capabilities = [
+  "git.get_diff",
+  "project.scan",
+  "project.test_commands",
+  "runtime.approved_plan",
+  "runtime.dry_run",
+  "runtime.record_run",
+]
 autonomy_tier = "act_with_approval"
 receipt_policy = "required"
-triggers = ["github.pr_opened", "github.check_failed"]
+triggers = [
+  "github.pr_opened",
+  "github.check_failed",
+  "github.review_thread_stale",
+  "github.merge_conflict_detected",
+]
 schedules = ["*/30 * * * *"]
 handoffs = ["review_captain"]
-context_packs = ["repo_policy", "release_rules", "flaky_tests"]
-evals = ["merge_safety", "regression_triage", "reviewer_quality"]
+context_packs = ["repo_policy", "release_policy", "merge_policy"]
+evals = ["merge_captain_smoke"]
 owner = "platform"
-budget = { daily_usd = 20.0, frontier_escalations = 3, max_tokens = 200000 }
-model_policy = { default_model = "gpt-5.4", escalation_model = "gpt-5.4", fallback_models = ["gpt-5.4-mini"], reasoning_effort = "medium" }
-rollout_policy = { mode = "shadow_then_approval", percentage = 25, cohorts = ["core-repos"] }
-package_source = { package = "harn-persona-examples", path = "examples/personas" }
+budget = { daily_usd = 10.0, frontier_escalations = 1, max_tokens = 60000, max_runtime_seconds = 600 }
+model_policy = { default_model = "gpt-5.4-mini", escalation_model = "gpt-5.4", fallback_models = ["gpt-5.2"], reasoning_effort = "medium" }
+rollout_policy = { mode = "approval_only", percentage = 100, cohorts = ["template-pack"] }
+package_source = { package = "harn-persona-template-pack", path = "examples/personas" }
 
 [[personas]]
 name = "review_captain"
 version = "0.1.0"
-description = "Keeps review quality high by routing reviewers, summarizing risk, and checking follow-up comments."
+description = "Review specialist for regression spotting, missing tests, structured receipts, and human-risk handoff."
 entry_workflow = "workflows/review_captain.harn#run"
-tools = ["github", "slack", "notion"]
-capabilities = ["git.get_diff", "project.code_patterns", "runtime.record_run"]
+tools = ["github", "notion", "slack", "mcp"]
+capabilities = [
+  "git.get_diff",
+  "project.code_patterns",
+  "project.scan",
+  "runtime.dry_run",
+  "runtime.record_run",
+]
 autonomy_tier = "suggest"
 receipt_policy = "required"
-triggers = ["github.review_requested", "github.review_comment_created"]
+triggers = ["github.review_requested", "github.pull_request_synchronized"]
 schedules = ["0 */2 * * *"]
 handoffs = ["merge_captain"]
-context_packs = ["repo_policy", "review_rubric"]
-evals = ["reviewer_quality"]
+context_packs = ["repo_policy", "review_policy"]
+evals = ["review_captain_smoke"]
 owner = "engineering"
-budget = { daily_usd = 8.0, frontier_escalations = 1, max_tokens = 100000 }
-model_policy = { default_model = "gpt-5.4-mini", escalation_model = "gpt-5.4", fallback_models = ["gpt-5.3-codex"], reasoning_effort = "medium" }
-rollout_policy = { mode = "approval_only", percentage = 100, cohorts = ["all-repos"] }
-package_source = { package = "harn-persona-examples", path = "examples/personas" }
+budget = { daily_usd = 4.0, frontier_escalations = 1, max_tokens = 40000, max_runtime_seconds = 300 }
+model_policy = { default_model = "gpt-5.4-mini", escalation_model = "gpt-5.4", fallback_models = ["gpt-5.2"], reasoning_effort = "medium" }
+rollout_policy = { mode = "approval_only", percentage = 100, cohorts = ["template-pack"] }
+package_source = { package = "harn-persona-template-pack", path = "examples/personas" }
 
 [[personas]]
 name = "oncall_captain"
 version = "0.1.0"
-description = "Coordinates incident intake, escalation, runbook context, and handoff receipts for the on-call rotation."
+description = "Approval-first incident captain for intake, hypothesis verification, MCP-backed observability checks, and outcome receipts."
 entry_workflow = "workflows/oncall_captain.harn#run"
-tools = ["slack", "pagerduty", "notion", "github"]
-capabilities = ["interaction.ask", "project.lessons", "runtime.record_run", "session.changed_paths"]
+tools = ["pagerduty", "slack", "notion", "github", "mcp"]
+capabilities = [
+  "interaction.ask",
+  "project.lessons",
+  "runtime.approved_plan",
+  "runtime.dry_run",
+  "runtime.record_run",
+  "session.changed_paths",
+]
 autonomy_tier = "act_with_approval"
 receipt_policy = "required"
-triggers = ["slack.incident_created", "pagerduty.incident_triggered"]
+triggers = ["pagerduty.incident_triggered", "slack.oncall_message"]
 schedules = ["*/15 * * * *"]
 handoffs = ["review_captain"]
-context_packs = ["incident_runbooks", "service_ownership", "release_rules"]
-evals = ["incident_triage", "handoff_quality"]
+context_packs = ["oncall_runbook", "service_ownership", "release_policy"]
+evals = ["oncall_captain_smoke"]
 owner = "sre"
-budget = { daily_usd = 15.0, frontier_escalations = 2, max_runtime_seconds = 900 }
+budget = { daily_usd = 8.0, frontier_escalations = 1, max_tokens = 50000, max_runtime_seconds = 900 }
 model_policy = { default_model = "gpt-5.4-mini", escalation_model = "gpt-5.4", fallback_models = ["gpt-5.2"], reasoning_effort = "high" }
-rollout_policy = { mode = "approval_only", percentage = 50, cohorts = ["primary-oncall"] }
-package_source = { package = "harn-persona-examples", path = "examples/personas" }
+rollout_policy = { mode = "approval_only", percentage = 100, cohorts = ["template-pack"] }
+package_source = { package = "harn-persona-template-pack", path = "examples/personas" }

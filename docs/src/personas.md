@@ -101,6 +101,38 @@ consume. It includes name, version, tools, capabilities, autonomy tier, model
 policy, budget, triggers, handoffs, context packs, evals, receipt policy, and
 manifest source.
 
+## Template pack
+
+The first checked-in template pack lives under `examples/personas/`. It ships
+three starter personas:
+
+- `merge_captain`
+- `review_captain`
+- `oncall_captain`
+
+The pack is intentionally conservative:
+
+- dry-run and approval-first defaults for side-effecting roles
+- cheap default model routing with explicit escalation models
+- placeholder secrets only
+- checked-in context packs, fixtures, and smoke eval manifests
+
+Treat these as code and policy that your team forks and edits. They are not
+opaque hosted behavior.
+
+## Current v1 gaps
+
+Persona manifest v1 is a contract surface, not a scheduler. Harn currently
+parses, validates, lists, and inspects personas; it does not yet execute them
+from `[[personas]]` entries.
+
+That means template packs should stay honest about missing platform scope:
+
+- schedules validate now but are not runtime wakeups yet
+- handoffs validate now but are not typed persona-runtime dispatch yet
+- backend-specific systems such as Honeycomb and Splunk should be expressed
+  through current tool wiring such as MCP rather than invented manifest fields
+
 ## Skill Vs Persona Vs Workflow
 
 | Concept | What It Is | Main Unit | Executes? |

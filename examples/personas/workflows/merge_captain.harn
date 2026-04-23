@@ -1,0 +1,53 @@
+fn sample_pull_request() {
+  return {
+    repo: "burin-labs/harn",
+    number: 463,
+    title: "Persona template pack v0",
+    failing_checks: ["ci / rust"],
+    stale_threads: ["acceptance coverage"],
+    release_blockers: ["needs-human-release-note"],
+    merge_conflicts: false,
+  }
+}
+
+fn merge_risk(pr) {
+  if len(pr.failing_checks) > 0 || len(pr.stale_threads) > 0 || len(pr.release_blockers) > 0 {
+    return "high"
+  }
+  if pr.merge_conflicts {
+    return "high"
+  }
+  return "low"
+}
+
+pipeline run(task) {
+  let pr = sample_pull_request()
+  let risk = merge_risk(pr)
+  let handoff = if risk == "high" {
+    "review_captain"
+  } else {
+    nil
+  }
+  let result = {
+    persona: "merge_captain",
+    execution_mode: "dry_run",
+    approval_required: true,
+    repo: pr.repo,
+    pr_number: pr.number,
+    summary: "dry-run plan for PR #${pr.number}",
+    plan: [
+    "Summarize failing checks and stale review threads.",
+    "Ask for approval before posting receipts or mutating labels.",
+    "Hand off review risk when unresolved comments remain.",
+  ],
+    review_risk: risk,
+    receipt: {
+    kind: "merge_receipt",
+    status: "pending_approval",
+    blockers: pr.failing_checks + pr.stale_threads + pr.release_blockers,
+  },
+    handoff: handoff,
+  }
+  println(json_stringify(result))
+  return result
+}

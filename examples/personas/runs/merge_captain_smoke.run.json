@@ -1,0 +1,58 @@
+{
+  "_type": "run_record",
+  "id": "merge-captain-smoke",
+  "workflow_id": "run",
+  "workflow_name": "merge_captain",
+  "task": "template smoke",
+  "status": "completed",
+  "started_at": "2026-04-22T00:00:00Z",
+  "finished_at": "2026-04-22T00:00:01Z",
+  "stages": [
+    {
+      "id": "stage_1",
+      "node_id": "run",
+      "kind": "stage",
+      "status": "completed",
+      "outcome": "success",
+      "started_at": "2026-04-22T00:00:00Z",
+      "finished_at": "2026-04-22T00:00:01Z",
+      "visible_text": "merge_captain produced a dry-run plan and approval request for PR #463"
+    }
+  ],
+  "completed_nodes": [
+    "run"
+  ],
+  "policy": {
+    "tools": [],
+    "capabilities": {},
+    "workspace_roots": [],
+    "side_effect_level": "read_only",
+    "recursion_limit": null,
+    "tool_arg_constraints": [],
+    "tool_annotations": {}
+  },
+  "metadata": {
+    "persona": "merge_captain",
+    "fixture": "fixtures/merge_captain/event.json",
+    "dry_run": true,
+    "approval_required": true
+  },
+  "replay_fixture": {
+    "_type": "replay_fixture",
+    "id": "merge-captain-smoke-fixture",
+    "source_run_id": "merge-captain-smoke",
+    "workflow_id": "run",
+    "workflow_name": "merge_captain",
+    "created_at": "2026-04-22T00:00:01Z",
+    "expected_status": "completed",
+    "stage_assertions": [
+      {
+        "node_id": "run",
+        "expected_status": "completed",
+        "expected_outcome": "success",
+        "required_artifact_kinds": [],
+        "visible_text_contains": "dry-run plan"
+      }
+    ]
+  }
+}
