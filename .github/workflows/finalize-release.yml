@@ -34,10 +34,27 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       startsWith(github.event.head_commit.message, 'Bump version to ')
     steps:
+      # Mint a short-lived GitHub App installation token so the tag push
+      # below comes from the harn-release-bot identity instead of
+      # GITHUB_TOKEN. GHA suppresses workflow chains triggered by
+      # GITHUB_TOKEN-authenticated pushes, so a tag pushed under the
+      # default token would NOT fire .github/workflows/release.yml — and
+      # we'd ship to crates.io without binaries or a container image. An
+      # App token bypasses that suppression cleanly.
+      - name: Mint GitHub App installation token
+        id: app-token
+        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
           ref: main
+          # Persist the App token in .git/config so the later `git push`
+          # in release_ship.sh --finalize uses it for the tag push.
+          token: ${{ steps.app-token.outputs.token }}
 
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
@@ -88,5 +105,8 @@ jobs:
       - name: Finalize release
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # gh CLI inside release_ship.sh uses GH_TOKEN for `gh release`.
+          # Use the App token so the GitHub release author is the bot,
+          # consistent with the tag pusher.
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: ./scripts/release_ship.sh --finalize
