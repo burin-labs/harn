@@ -21,10 +21,10 @@ use std::time::Instant;
 use harn_vm::agent_events::{clear_session_sinks, register_sink};
 use harn_vm::visible_text::{sanitize_visible_assistant_text, VisibleTextState};
 use tokio::io::AsyncBufReadExt;
-use tokio::sync::{oneshot, Mutex};
+use tokio::sync::{mpsc, oneshot, Mutex};
 
 use events::AcpAgentEventSink;
-use io::{exit_after_fatal_prompt_error, send_json_response};
+use io::send_json_response;
 
 fn verbose_bridge_logs_enabled() -> bool {
     matches!(
@@ -84,42 +84,66 @@ struct Session {
     info: SessionInfo,
 }
 
-/// ACP server that reads JSON-RPC requests from stdin and writes
-/// responses / notifications to stdout.
+#[derive(Clone)]
+pub(super) enum AcpOutput {
+    Stdout(Arc<std::sync::Mutex<()>>),
+    Channel(mpsc::UnboundedSender<String>),
+}
+
+impl AcpOutput {
+    fn stdout() -> Self {
+        Self::Stdout(Arc::new(std::sync::Mutex::new(())))
+    }
+
+    pub(super) fn write_line(&self, line: &str) {
+        match self {
+            Self::Stdout(lock) => {
+                let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
+                let mut stdout = std::io::stdout().lock();
+                let _ = stdout.write_all(line.as_bytes());
+                let _ = stdout.write_all(b"\n");
+                let _ = stdout.flush();
+            }
+            Self::Channel(tx) => {
+                let _ = tx.send(line.to_string());
+            }
+        }
+    }
+}
+
+/// ACP server that reads JSON-RPC requests from a transport and writes
+/// responses / notifications back to that same transport.
 pub struct AcpServer {
     /// Optional pipeline file to execute on each `session/prompt`.
     pipeline: Option<String>,
     /// Active sessions keyed by session ID.
     sessions: HashMap<String, Session>,
-    /// Counter for generating unique session IDs.
-    session_counter: u64,
     /// Monotonically increasing JSON-RPC request ID for outgoing requests.
     next_id: AtomicU64,
     /// Pending outgoing request waiters, keyed by JSON-RPC id.
     pending: Arc<Mutex<HashMap<u64, oneshot::Sender<serde_json::Value>>>>,
-    /// Mutex protecting stdout writes to prevent interleaving.
-    stdout_lock: Arc<std::sync::Mutex<()>>,
+    /// Transport output sink.
+    output: AcpOutput,
 }
 
 impl AcpServer {
     fn new(pipeline: Option<String>) -> Self {
+        Self::new_with_output(pipeline, AcpOutput::stdout())
+    }
+
+    fn new_with_output(pipeline: Option<String>, output: AcpOutput) -> Self {
         Self {
             pipeline,
             sessions: HashMap::new(),
-            session_counter: 0,
             next_id: AtomicU64::new(1),
             pending: Arc::new(Mutex::new(HashMap::new())),
-            stdout_lock: Arc::new(std::sync::Mutex::new(())),
+            output,
         }
     }
 
-    /// Write a complete JSON-RPC line to stdout, serialized through a mutex.
+    /// Write a complete JSON-RPC message to the current transport.
     fn write_line(&self, line: &str) {
-        let _guard = self.stdout_lock.lock().unwrap_or_else(|e| e.into_inner());
-        let mut stdout = std::io::stdout().lock();
-        let _ = stdout.write_all(line.as_bytes());
-        let _ = stdout.write_all(b"\n");
-        let _ = stdout.flush();
+        self.output.write_line(line);
     }
 
     /// Send a JSON-RPC success response.
@@ -168,21 +192,15 @@ impl AcpServer {
         );
     }
 
+    fn send_prompt_error(&self, session_id: &str, id: &serde_json::Value, message: &str) {
+        self.send_update(session_id, &format!("Error: {message}\n"));
+        self.send_error(id, -32000, message);
+        eprintln!("{message}");
+    }
+
     /// Generate a unique session ID.
     fn next_session_id(&mut self) -> String {
-        self.session_counter += 1;
-        format!(
-            "{:08x}-{:04x}-{:04x}-{:04x}-{:012x}",
-            self.session_counter,
-            std::process::id() & 0xFFFF,
-            0x4000 | (self.session_counter & 0x0FFF),
-            0x8000 | ((self.session_counter >> 12) & 0x3FFF),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos()
-                & 0xFFFF_FFFF_FFFF
-        )
+        uuid::Uuid::new_v4().to_string()
     }
 
     fn handle_initialize(&self, id: &serde_json::Value) {
@@ -194,6 +212,7 @@ impl AcpServer {
                     "promptCapabilities": {},
                     "sessionCapabilities": {
                         "fork": {},
+                        "load": {},
                     },
                 },
                 "agentInfo": {
@@ -400,10 +419,6 @@ impl AcpServer {
         harn_vm::agent_sessions::open_or_create(Some(session_id.clone()));
         let _session_guard = harn_vm::agent_sessions::enter_current_session(session_id.clone());
 
-        let fatal_prompt_error = |message: String| -> ! {
-            exit_after_fatal_prompt_error(&self.stdout_lock, &session_id, id, &message)
-        };
-
         let (source, source_path) = if let Some(ref pipeline_path) = self.pipeline {
             let full_path = if std::path::Path::new(pipeline_path).is_absolute() {
                 PathBuf::from(pipeline_path)
@@ -412,10 +427,11 @@ impl AcpServer {
             };
             match std::fs::read_to_string(&full_path) {
                 Ok(src) => (src, Some(full_path)),
-                Err(e) => fatal_prompt_error(format!(
-                    "Failed to read pipeline {}: {e}",
-                    full_path.display()
-                )),
+                Err(e) => {
+                    let message = format!("Failed to read pipeline {}: {e}", full_path.display());
+                    self.send_prompt_error(&session_id, id, &message);
+                    return;
+                }
             }
         } else {
             // Wrap inline prompt source in a pipeline so the compiler has
@@ -424,7 +440,7 @@ impl AcpServer {
             (wrapped, None)
         };
 
-        let stdout_lock = self.stdout_lock.clone();
+        let output = self.output.clone();
         let pending = self.pending.clone();
         let next_id = &self.next_id;
         let sid = session_id.clone();
@@ -433,22 +449,26 @@ impl AcpServer {
         // the client observes tool lifecycle on the wire.
         register_sink(
             session_id.clone(),
-            Arc::new(AcpAgentEventSink::new(stdout_lock.clone())),
+            Arc::new(AcpAgentEventSink::new(output.clone())),
         );
 
         let bridge = Rc::new(AcpBridge {
             session_id: sid.clone(),
-            stdout_lock: stdout_lock.clone(),
+            output: output.clone(),
             pending: pending.clone(),
             next_id_counter: AtomicU64::new(next_id.fetch_add(1000, Ordering::SeqCst)),
             cancelled: cancelled.clone(),
             script_name: std::sync::Mutex::new(String::new()),
             assistant_state: std::sync::Mutex::new(VisibleTextState::default()),
         });
-        let host_bridge = Rc::new(harn_vm::bridge::HostBridge::from_parts(
+        let bridge_output = output.clone();
+        let host_bridge = Rc::new(harn_vm::bridge::HostBridge::from_parts_with_writer(
             bridge.pending.clone(),
             Arc::new(AtomicBool::new(false)),
-            bridge.stdout_lock.clone(),
+            Arc::new(move |line| {
+                bridge_output.write_line(line);
+                Ok(())
+            }),
             bridge.next_id_counter.fetch_add(10_000, Ordering::SeqCst),
         ));
         host_bridge.set_session_id(&bridge.session_id);
@@ -456,7 +476,10 @@ impl AcpServer {
         let compile_started = Instant::now();
         let chunk = match harn_vm::compile_source(&source) {
             Ok(c) => c,
-            Err(e) => fatal_prompt_error(format!("Compilation error: {e}")),
+            Err(e) => {
+                self.send_prompt_error(&session_id, id, &format!("Compilation error: {e}"));
+                return;
+            }
         };
         let compile_ms = compile_started.elapsed().as_millis() as u64;
         bridge.send_log(
@@ -475,7 +498,7 @@ impl AcpServer {
         }
 
         let id_owned = id.clone();
-        let send_lock = self.stdout_lock.clone();
+        let send_output = self.output.clone();
         let result = execute::execute_chunk(
             chunk,
             bridge.clone(),
@@ -499,7 +522,7 @@ impl AcpServer {
                     bridge.send_update(&output);
                 }
                 send_json_response(
-                    &send_lock,
+                    &send_output,
                     &id_owned,
                     serde_json::json!({"stopReason": "completed"}),
                 );
@@ -507,12 +530,12 @@ impl AcpServer {
             Err(e) => {
                 if cancelled.load(Ordering::SeqCst) {
                     send_json_response(
-                        &send_lock,
+                        &send_output,
                         &id_owned,
                         serde_json::json!({"stopReason": "cancelled"}),
                     );
                 } else {
-                    exit_after_fatal_prompt_error(&send_lock, &sid, &id_owned, &e);
+                    self.send_prompt_error(&sid, &id_owned, &e);
                 }
             }
         }
@@ -734,13 +757,159 @@ impl AcpServer {
             Err(error) => self.send_error(id, -32000, &error),
         }
     }
+
+    fn handle_session_load(&mut self, id: &serde_json::Value, params: &serde_json::Value) {
+        let Some(session_id) = params
+            .get("sessionId")
+            .or_else(|| params.get("session_id"))
+            .and_then(serde_json::Value::as_str)
+        else {
+            self.send_error(id, -32602, "session/load requires sessionId");
+            return;
+        };
+
+        let Some(session) = self.sessions.get(session_id) else {
+            self.send_error(id, -32004, &format!("Session not found: {session_id}"));
+            return;
+        };
+
+        let mut session_value = serde_json::json!({
+            "sessionId": session_id,
+            "cwd": session.cwd.display().to_string(),
+        });
+        if let Some(title) = session.info.title.as_ref() {
+            session_value["title"] = serde_json::json!(title);
+        }
+        if !session.info.meta.is_empty() {
+            session_value["_meta"] = serde_json::Value::Object(session.info.meta.clone());
+        }
+
+        self.send_response(
+            id,
+            serde_json::json!({
+                "session": session_value,
+                "replayed": [],
+            }),
+        );
+    }
+
+    async fn handle_incoming_message(&mut self, msg: serde_json::Value) {
+        if msg.get("method").is_none() && msg.get("id").is_some() {
+            if let Some(id) = msg["id"].as_u64() {
+                let mut pending = self.pending.lock().await;
+                if let Some(sender) = pending.remove(&id) {
+                    let _ = sender.send(msg);
+                }
+            }
+            return;
+        }
+
+        let method = match msg.get("method").and_then(|v| v.as_str()) {
+            Some(m) => m.to_string(),
+            None => return,
+        };
+        let id = msg.get("id").cloned().unwrap_or(serde_json::Value::Null);
+        let params = msg.get("params").cloned().unwrap_or(serde_json::json!({}));
+
+        match method.as_str() {
+            "initialize" => {
+                self.handle_initialize(&id);
+            }
+            "session/new" => {
+                self.handle_session_new(&id, &params);
+            }
+            "session/load" => {
+                self.handle_session_load(&id, &params);
+            }
+            "session/fork" => {
+                self.handle_session_fork(&id, &params);
+            }
+            "session/prompt" => {
+                self.handle_session_prompt(&id, &params).await;
+            }
+            "session/cancel" => {
+                self.handle_session_cancel(&params);
+            }
+            "session/input" | "user_message" | "agent/user_message" => {
+                self.handle_session_input(&params).await;
+            }
+            "agent/resume" => {
+                self.handle_agent_resume(&params);
+            }
+            "harn.hitl.respond" => {
+                self.handle_hitl_respond(&id, &params).await;
+            }
+            "workflow/signal" | "harn.workflow.signal" => {
+                self.handle_workflow_signal(&id, &params).await;
+            }
+            "workflow/query" | "harn.workflow.query" => {
+                self.handle_workflow_query(&id, &params);
+            }
+            "workflow/update" | "harn.workflow.update" => {
+                self.handle_workflow_update(&id, &params).await;
+            }
+            "workflow/pause" | "harn.workflow.pause" => {
+                self.handle_workflow_pause(&id, &params);
+            }
+            "workflow/resume" | "harn.workflow.resume" => {
+                self.handle_workflow_resume(&id, &params);
+            }
+            "session/list" => {
+                self.handle_session_list(&id);
+            }
+            _ => {
+                if !id.is_null() {
+                    self.send_error(&id, -32601, &format!("Method not found: {method}"));
+                }
+            }
+        }
+    }
+}
+
+pub(crate) async fn run_acp_channel_server(
+    pipeline: Option<String>,
+    mut request_rx: mpsc::UnboundedReceiver<serde_json::Value>,
+    response_tx: mpsc::UnboundedSender<String>,
+) {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async move {
+            let mut server = AcpServer::new_with_output(pipeline, AcpOutput::Channel(response_tx));
+            let pending_clone = server.pending.clone();
+            let (routed_tx, mut routed_rx) =
+                tokio::sync::mpsc::unbounded_channel::<serde_json::Value>();
+
+            tokio::task::spawn_local(async move {
+                while let Some(msg) = request_rx.recv().await {
+                    if msg.get("method").is_none() && msg.get("id").is_some() {
+                        if let Some(id) = msg["id"].as_u64() {
+                            let mut pending = pending_clone.lock().await;
+                            if let Some(sender) = pending.remove(&id) {
+                                let _ = sender.send(msg);
+                            }
+                        }
+                        continue;
+                    }
+
+                    let _ = routed_tx.send(msg);
+                }
+
+                let mut pending = pending_clone.lock().await;
+                pending.clear();
+            });
+
+            while let Some(msg) = routed_rx.recv().await {
+                server.handle_incoming_message(msg).await;
+            }
+        })
+        .await;
 }
 
 /// Shared state that bridge-style builtins use to communicate with the
 /// ACP client (editor) over JSON-RPC.
 pub(super) struct AcpBridge {
     pub(super) session_id: String,
-    pub(super) stdout_lock: Arc<std::sync::Mutex<()>>,
+    pub(super) output: AcpOutput,
     pub(super) pending: Arc<Mutex<HashMap<u64, oneshot::Sender<serde_json::Value>>>>,
     pub(super) next_id_counter: AtomicU64,
     pub(super) cancelled: Arc<AtomicBool>,
@@ -752,11 +921,7 @@ pub(super) struct AcpBridge {
 impl AcpBridge {
     /// Write a complete JSON-RPC line to stdout.
     fn write_line(&self, line: &str) {
-        let _guard = self.stdout_lock.lock().unwrap_or_else(|e| e.into_inner());
-        let mut stdout = std::io::stdout().lock();
-        let _ = stdout.write_all(line.as_bytes());
-        let _ = stdout.write_all(b"\n");
-        let _ = stdout.flush();
+        self.output.write_line(line);
     }
 
     /// Send a JSON-RPC notification.
@@ -966,62 +1131,7 @@ pub async fn run_acp_server(pipeline: Option<&str>) {
             });
 
             while let Some(msg) = request_rx.recv().await {
-                let method = match msg.get("method").and_then(|v| v.as_str()) {
-                    Some(m) => m.to_string(),
-                    None => continue,
-                };
-                let id = msg.get("id").cloned().unwrap_or(serde_json::Value::Null);
-                let params = msg.get("params").cloned().unwrap_or(serde_json::json!({}));
-
-                match method.as_str() {
-                    "initialize" => {
-                        server.handle_initialize(&id);
-                    }
-                    "session/new" => {
-                        server.handle_session_new(&id, &params);
-                    }
-                    "session/fork" => {
-                        server.handle_session_fork(&id, &params);
-                    }
-                    "session/prompt" => {
-                        server.handle_session_prompt(&id, &params).await;
-                    }
-                    "session/cancel" => {
-                        server.handle_session_cancel(&params);
-                    }
-                    "session/input" | "user_message" | "agent/user_message" => {
-                        server.handle_session_input(&params).await;
-                    }
-                    "agent/resume" => {
-                        server.handle_agent_resume(&params);
-                    }
-                    "harn.hitl.respond" => {
-                        server.handle_hitl_respond(&id, &params).await;
-                    }
-                    "workflow/signal" | "harn.workflow.signal" => {
-                        server.handle_workflow_signal(&id, &params).await;
-                    }
-                    "workflow/query" | "harn.workflow.query" => {
-                        server.handle_workflow_query(&id, &params);
-                    }
-                    "workflow/update" | "harn.workflow.update" => {
-                        server.handle_workflow_update(&id, &params).await;
-                    }
-                    "workflow/pause" | "harn.workflow.pause" => {
-                        server.handle_workflow_pause(&id, &params);
-                    }
-                    "workflow/resume" | "harn.workflow.resume" => {
-                        server.handle_workflow_resume(&id, &params);
-                    }
-                    "session/list" => {
-                        server.handle_session_list(&id);
-                    }
-                    _ => {
-                        if !id.is_null() {
-                            server.send_error(&id, -32601, &format!("Method not found: {method}"));
-                        }
-                    }
-                }
+                server.handle_incoming_message(msg).await;
             }
         })
         .await;
