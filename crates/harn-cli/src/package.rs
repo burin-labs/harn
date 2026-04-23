@@ -8401,6 +8401,7 @@ pub fn should_handle(event: TriggerEvent) -> bool {
             None,
             None,
             Some("./dep"),
+            None,
         )
         .unwrap_err();
         assert!(error.contains("invalid dependency alias"));
