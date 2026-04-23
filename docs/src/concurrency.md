@@ -436,3 +436,60 @@ saturating the server; RPM shapes sustained throughput. When batching
 hundreds of LLM calls against a local single-GPU server, both are
 worth setting — otherwise the RPM budget can be spent in a 2-second
 burst that overwhelms the queue and drops requests.
+
+## Connector task groups
+
+Connector code should treat `parallel ... with { max_concurrent: N }`,
+`deadline`, and `cancel_graceful` as one structured unit: cap fan-out, put a
+deadline around remote work, and let shutdown cancellation unwind outstanding
+children. A deadline or host cancellation interrupts async waits and cancels
+child tasks owned by the VM.
+
+Paginated fetch with bounded page fan-out:
+
+```harn
+fn fetch_page(cursor) {
+  connector_call("notion", "search", {cursor: cursor, page_size: 100})
+}
+
+fn collect_pages(cursors) {
+  let outcome = deadline 30s {
+    parallel settle cursors with { max_concurrent: 4 } { cursor ->
+      fetch_page(cursor)
+    }
+  }
+
+  var pages = []
+  for result in outcome.results {
+    if is_ok(result) {
+      pages = pages.push(unwrap(result).items)
+    } else {
+      log("page fetch failed: ${unwrap_err(result)}")
+    }
+  }
+  return pages
+}
+```
+
+Stream shutdown with cooperative cancellation:
+
+```harn
+fn consume_stream(url) {
+  let stream = sse_connect(url)
+  defer { sse_close(stream) }
+
+  while !is_cancelled() {
+    let event = sse_receive(stream, 5000)
+    if event == nil {
+      continue
+    }
+    event_log_emit("connector.events", event.kind, event.payload)
+  }
+}
+
+let reader = spawn { consume_stream(binding.stream_url) }
+let shutdown = waitpoint_wait("connector.shutdown", {timeout: 1h})
+if shutdown.status == "completed" {
+  cancel_graceful(reader, 2s)
+}
+```

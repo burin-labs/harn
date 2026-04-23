@@ -230,6 +230,7 @@ impl Vm {
     /// exits with `VmError::Cancelled` when set.
     pub fn install_cancel_token(&mut self, token: std::sync::Arc<std::sync::atomic::AtomicBool>) {
         self.cancel_token = Some(token);
+        self.cancel_grace_instructions_remaining = None;
     }
 
     /// Signal cooperative cancellation on this VM — the step loop

@@ -201,6 +201,11 @@ pub struct Vm {
     pub(crate) denied_builtins: HashSet<String>,
     /// Cancellation token for cooperative graceful shutdown (set by parent).
     pub(crate) cancel_token: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    /// Remaining instruction-boundary checks before a requested host
+    /// cancellation is forcefully raised. This gives `is_cancelled()` loops a
+    /// deterministic chance to return cleanly without letting non-cooperative
+    /// CPU-bound code run forever.
+    pub(crate) cancel_grace_instructions_remaining: Option<usize>,
     /// Captured stack trace from the most recent error (fn_name, line, col).
     pub(crate) error_stack_trace: Vec<(String, usize, usize, Option<String>)>,
     /// Yield channel sender for generator execution. When set, `Op::Yield`
@@ -406,6 +411,7 @@ impl Vm {
             bridge: None,
             denied_builtins: HashSet::new(),
             cancel_token: None,
+            cancel_grace_instructions_remaining: None,
             error_stack_trace: Vec::new(),
             yield_sender: None,
             project_root: None,
@@ -494,6 +500,7 @@ impl Vm {
             bridge: self.bridge.clone(),
             denied_builtins: self.denied_builtins.clone(),
             cancel_token: self.cancel_token.clone(),
+            cancel_grace_instructions_remaining: None,
             error_stack_trace: Vec::new(),
             yield_sender: None,
             project_root: self.project_root.clone(),
@@ -506,6 +513,17 @@ impl Vm {
     /// closures while sharing the parent's builtins, globals, and module state.
     pub(crate) fn child_vm_for_host(&self) -> Vm {
         self.child_vm()
+    }
+
+    /// Request cancellation for every outstanding child task owned by this VM
+    /// and then abort the join handles. This prevents un-awaited spawned tasks
+    /// from outliving their parent execution scope.
+    pub(crate) fn cancel_spawned_tasks(&mut self) {
+        for (_, task) in std::mem::take(&mut self.spawned_tasks) {
+            task.cancel_token
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+            task.handle.abort();
+        }
     }
 
     /// Set the source directory for import resolution and introspection.
@@ -583,6 +601,12 @@ impl Vm {
     pub(crate) fn release_sync_guards_for_frame(&mut self, frame_depth: usize) {
         self.held_sync_guards
             .retain(|guard| guard.frame_depth != frame_depth);
+    }
+}
+
+impl Drop for Vm {
+    fn drop(&mut self) {
+        self.cancel_spawned_tasks();
     }
 }
 

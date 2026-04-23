@@ -153,29 +153,35 @@ impl super::super::Vm {
                 if let Some(task) = self.spawned_tasks.remove(&id) {
                     task.cancel_token
                         .store(true, std::sync::atomic::Ordering::SeqCst);
-                    let deadline = tokio::time::Instant::now()
-                        + tokio::time::Duration::from_millis(timeout_ms);
-                    match tokio::time::timeout_at(deadline, task.handle).await {
-                        Ok(Ok(Ok((result, output)))) => {
-                            self.output.push_str(&output);
-                            self.stack
-                                .push(VmValue::enum_variant("Result", "Ok", vec![result]));
+                    let mut handle = task.handle;
+                    let timeout =
+                        tokio::time::sleep(tokio::time::Duration::from_millis(timeout_ms));
+                    tokio::pin!(timeout);
+                    tokio::select! {
+                        joined = &mut handle => {
+                            match joined {
+                                Ok(Ok((result, output))) => {
+                                    self.output.push_str(&output);
+                                    self.stack.push(VmValue::enum_variant("Result", "Ok", vec![result]));
+                                }
+                                Ok(Err(e)) => {
+                                    self.stack.push(VmValue::enum_variant(
+                                        "Result",
+                                        "Err",
+                                        vec![VmValue::String(Rc::from(e.to_string()))],
+                                    ));
+                                }
+                                Err(e) => {
+                                    self.stack.push(VmValue::enum_variant(
+                                        "Result",
+                                        "Err",
+                                        vec![VmValue::String(Rc::from(format!("Task join error: {e}")))],
+                                    ));
+                                }
+                            }
                         }
-                        Ok(Ok(Err(e))) => {
-                            self.stack.push(VmValue::enum_variant(
-                                "Result",
-                                "Err",
-                                vec![VmValue::String(Rc::from(e.to_string()))],
-                            ));
-                        }
-                        Ok(Err(e)) => {
-                            self.stack.push(VmValue::enum_variant(
-                                "Result",
-                                "Err",
-                                vec![VmValue::String(Rc::from(format!("Task join error: {e}")))],
-                            ));
-                        }
-                        Err(_) => {
+                        _ = &mut timeout => {
+                            handle.abort();
                             self.stack.push(VmValue::enum_variant(
                                 "Result",
                                 "Err",
