@@ -1,177 +1,183 @@
-Run the merge-queue-safe Harn release workflow from the repo source of truth.
+Run the merge-queue-safe Harn release workflow.
 
 ## TL;DR
 
-```bash
-# From updated main, after the release-content PR has landed:
-./scripts/release_ship.sh --bump patch
+The **only** part of a release that requires human/agent intuition is writing
+and landing the **"Prepare vX.Y.Z release"** PR. Everything from there is
+automated:
+
+```text
+land "Prepare vX.Y.Z release" PR
+        │
+        ▼  Bump Release workflow auto-fires
+   opens "Bump version to X.Y.Z" PR
+        │
+        ▼  PR lands through merge queue
+   Finalize Release workflow auto-fires
+        │
+        ▼  pushes vX.Y.Z tag (under release-bot App identity)
+   Release workflow auto-fires
+        │
+        ▼  builds binaries + multi-arch container, populates GH release
+   v0.7.X is shipped
 ```
 
-`release_ship.sh --bump patch` handles audit, dry-run publish, version bump,
-branch push, and automated bump PR creation. After that PR lands through the
-merge queue, **the `Finalize Release` GitHub Action (`.github/workflows/finalize-release.yml`) runs `release_ship.sh --finalize` automatically** — it
-audits, tags, publishes to crates.io, and creates/updates the GitHub release.
-The human release path ends at opening the bump PR; the tag + publish are
-automated. Only run `./scripts/release_ship.sh --finalize` locally to recover
-from a failed workflow run, or manually re-trigger the workflow via "Run
-workflow" on the `Finalize Release` GitHub Actions page.
+You write the prepare PR. Walk away. The bot opens the bump PR. The merge
+queue lands it. The bot tags, publishes to crates.io, builds binaries,
+publishes the container, and creates the GitHub release with rendered notes.
 
-## Default workflow
+## What the human/agent owns
+
+Step 1-8 below are the only steps that need judgment. After step 8 you are
+done — do **not** run `release_ship.sh` locally as a default step.
 
 1. Inspect the worktree with `git status --short` and `git diff --stat`.
    Treat tracked and untracked changes as candidate release content unless the
    user scopes the release more narrowly.
 2. Read enough diff context to summarize the pending work accurately.
-3. Audit all pending changes for code quality, correctness, and test coverage.
-   For each changed module or feature, check whether existing Rust tests
-   and conformance tests (`conformance/tests/`) adequately cover the new or
+3. Audit all pending changes for code quality, correctness, and test
+   coverage. For each changed module or feature, check whether existing Rust
+   tests and conformance tests (`conformance/tests/`) cover the new or
    changed behavior. Fill gaps:
    - Add or update `#[test]` functions for new/changed Rust logic.
    - Add or update `.harn` + `.expected` conformance test pairs for any
      user-visible behavior changes or new builtins/features.
-   - Fix implementation bugs, edge cases, or incomplete code paths discovered
-     during the audit.
+   - Fix implementation bugs, edge cases, or incomplete code paths
+     discovered during the audit.
    - **Targeted tests first**: run tests only for changed crates during the
-     audit loop (e.g. `cargo nextest run -p harn-vm` or
-     `cargo test -p harn-vm`). This keeps the edit-test cycle fast.
+     audit loop (e.g. `cargo nextest run -p harn-vm`). Keeps the
+     edit-test cycle fast.
    - **Full gate last**: once the audit is complete and all targeted tests
-     pass, run `make test` (nextest when available, `cargo test --workspace`
-     as fallback) and `cargo run --bin harn -- test conformance` as the final
-     gate before committing.
+     pass, run `make test` and `cargo run --bin harn -- test conformance` as
+     the final gate before committing.
    Do not skip this step — shipping untested or buggy code is worse than
    delaying a release.
-4. Do a repo-consistency sweep before shipping. Update release-facing docs and
-   operator guidance as needed, especially `README.md`, `CLAUDE.md`,
-   `docs/src/`, `spec/HARN_SPEC.md`, `CHANGELOG.md`, and any developer setup
-   surfaces such as `scripts/dev_setup.sh`, `Makefile`, `.githooks/`,
-   `CONTRIBUTING.md`, and `docs/src/portal.md`.
+4. Repo-consistency sweep. Update release-facing docs and operator guidance
+   as needed: `README.md`, `CLAUDE.md`, `docs/src/`, `spec/HARN_SPEC.md`,
+   `CHANGELOG.md`, and developer-setup surfaces (`scripts/dev_setup.sh`,
+   `Makefile`, `.githooks/`, `CONTRIBUTING.md`, `docs/src/portal.md`).
 5. If syntax, parser, lexer, or tree-sitter changed, update
-   `spec/HARN_SPEC.md` first. Treat it as the formal language-spec source of
+   `spec/HARN_SPEC.md` first — it is the formal language-spec source of
    truth.
-6. Update `CHANGELOG.md` before bumping the version. The new top entry must
-   describe the actual pending code changes that will ship.
-7. Run `cargo fmt --all` once so the upcoming release content PR is
-   formatting-clean. `release_gate.sh audit` runs `cargo fmt -- --check` and
-   will reject drift later; catching it here avoids re-doing commits.
-8. Stage, commit, push, and open a "Prepare vX.Y.Z release" PR. Include every
-   file that ships in this version, including `CHANGELOG.md` and doc updates.
-   Do **not** include `Cargo.toml` / `Cargo.lock` version bumps in this PR —
-   the ship script produces those in a separate "Bump version to X.Y.Z" PR.
-9. After the release-content PR lands through the merge queue, sync `main` and
-   run `./scripts/release_ship.sh --bump patch` (or `minor`/`major`). The
-   script audits, dry-run publishes, bumps `Cargo.toml`, commits the bump,
-   pushes `release/vX.Y.Z`, and opens the bump PR.
-10. After the bump PR lands through the merge queue, the `Finalize Release`
-    GitHub Action runs `./scripts/release_ship.sh --finalize` automatically
-    against updated `main`. It audits, dry-run publishes, creates/pushes the
-    tag, publishes to crates.io, and creates/updates the GitHub release. Do
-    not run `--finalize` locally as a default step; only do so if the
-    workflow fails and the tree needs to be recovered manually. The
-    workflow also exposes a `workflow_dispatch` trigger for manual
-    re-runs from the GitHub Actions UI.
-11. For an all-in-one dry run that stops before any destructive action,
-    use `./scripts/release_gate.sh full --bump patch --dry-run`.
-12. Only drop down to the piecewise `release_gate.sh prepare` / `publish` /
-    `notes` commands when `release_ship.sh` cannot do what you need
-    (e.g. recovering a partial release).
+6. Update `CHANGELOG.md` with a new top entry `## vX.Y.Z` describing the
+   actual pending code changes that will ship. The version chosen here
+   (patch / minor / major bump from the current Cargo.toml version) drives
+   what the bot opens later — pick deliberately.
+7. Run `cargo fmt --all` once so the prep PR is formatting-clean.
+   `release_gate.sh audit` runs `cargo fmt -- --check` and will reject drift
+   later.
+8. Stage, commit, push, and open the **"Prepare vX.Y.Z release"** PR.
+   Include every file that ships in this version: code, docs,
+   `CHANGELOG.md`. Do **not** include `Cargo.toml` / `Cargo.lock` version
+   bumps in this PR — the bot's bump PR carries those.
+
+## What happens automatically after the prepare PR lands
+
+9. **Bump Release** workflow (`.github/workflows/bump-release.yml`) fires on
+   push to `main` when the head commit starts with `Prepare v`. It:
+   - Reads `CHANGELOG.md`'s top `## vX.Y.Z` entry, compares to
+     `Cargo.toml`'s current version, derives the bump type (patch / minor /
+     major) via `scripts/detect_bump_type.py`.
+   - Runs `./scripts/release_ship.sh --bump <type>` under the
+     `harn-release-bot` App identity: audit, dry-run publish, bump
+     `Cargo.toml` + `Cargo.lock`, commit `Bump version to X.Y.Z`, push
+     `release/vX.Y.Z`, open the bump PR.
+10. The bump PR's CI runs (because the App-pushed branch isn't suppressed
+    the way `GITHUB_TOKEN`-pushed branches are). Once green, the merge
+    queue lands it.
+11. **Finalize Release** workflow (`.github/workflows/finalize-release.yml`)
+    fires on push to `main` when the head commit starts with `Bump version
+    to`. It runs `./scripts/release_ship.sh --finalize` under the App
+    identity: audit, dry-run publish, push the tag, `cargo publish`, render
+    notes from `CHANGELOG.md`, create/update the GitHub release.
+12. The tag push triggers **Release** workflow
+    (`.github/workflows/release.yml`), which builds darwin/linux × x86/arm
+    binary tarballs, publishes a multi-arch GHCR container image, and
+    attaches the binaries to the GitHub release.
+
+## Recovery paths (don't reach for these unless something failed)
+
+- A workflow failed mid-run: **re-trigger from the Actions UI** (each
+  workflow exposes `workflow_dispatch`). All scripts are idempotent —
+  per-crate publish skips already-published, `ensure_tag_at_head` skips
+  if the tag already points where it should, `gh release` is
+  view-then-edit-or-create.
+- The Release workflow needs to re-emit binaries for an already-tagged
+  version: `gh workflow run release.yml --ref main -f tag=vX.Y.Z`. The
+  workflow accepts the tag input and runs at that tagged code.
+- A truly stuck local recovery (rare): `./scripts/release_ship.sh
+  --bump patch` or `./scripts/release_ship.sh --finalize` from updated
+  `main`.
 
 ## Source of truth
 
-Always prefer the repo scripts:
+When in doubt, prefer the repo scripts over re-inventing the steps:
 
 ```bash
+./scripts/release_ship.sh --bump patch         # only for local recovery
+./scripts/release_ship.sh --finalize           # only for local recovery
 ./scripts/release_gate.sh <audit|prepare|publish|notes|full> ...
-./scripts/release_ship.sh --bump patch
-./scripts/release_ship.sh --finalize
+./scripts/release_gate.sh full --bump patch --dry-run   # all-in-one dry run
 ```
-
-Do not re-invent the release ritual from memory if the script can do it.
-Use normal git commands for the parts that the release gate intentionally does
-not automate, such as analyzing pending local work and opening the
-"Prepare vX.Y.Z release" PR. Once that PR lands and the tree is clean, prefer
-`./scripts/release_ship.sh --bump patch` for the bump PR and
-`./scripts/release_ship.sh --finalize` for tag/publish mechanics.
 
 ## Rules
 
-- Report failures clearly and stop on the first failed gate.
-- Summarize the resulting version, bump PR or publish status, release notes,
-  and required tag/release follow-up.
-- If `mdbook` is not installed, mention that the docs audit skipped mdBook build.
-- If the tree is dirty, do not work around it silently for `prepare`; either
-  stop or commit the intended release content first.
-- If untracked files exist, call them out explicitly and decide whether they
-  belong in the release before staging them.
-- Treat repo consistency as part of the release gate, not an optional cleanup
-  pass. If behavior changes, update human-facing docs in the same release when
-  they describe that behavior.
-- If local development setup changed, keep `README.md`, `CONTRIBUTING.md`,
-  `scripts/dev_setup.sh`, and `Makefile` aligned so the bootstrap path stays
-  obvious and low-friction.
-- If observability surfaces changed, update `docs/src/portal.md` and any CLI
-  references that describe `harn portal`.
-- If grammar-related files changed, mention whether `spec/HARN_SPEC.md` was
-  updated in the same batch.
-- The grammar/spec audit includes `scripts/verify_language_spec.py`, which
-  extracts `harn` fences from `spec/HARN_SPEC.md` and runs `harn check` on
-  them. Treat failures there as spec drift, not just docs drift.
-- The grammar/spec audit also includes `scripts/verify_tree_sitter_parse.py`,
-  which sweeps positive `.harn` programs through the executable tree-sitter
-  grammar. Treat failures there as parser/grammar divergence.
+- Stop on the first failed gate. Report the actual error.
 - A real release has exactly two release commits on `main`, both landed via
   PR/merge queue: `Prepare vX.Y.Z release` (code + docs + `CHANGELOG.md`)
-  followed by `Bump version to X.Y.Z` (Cargo.toml + Cargo.lock only).
-  `release_ship.sh --bump patch` creates and opens the second PR
-  automatically; the human/agent creates the first.
-- `scripts/release_ship.sh --bump patch` assumes the real release content,
-  including docs consistency updates, has already landed through the merge
-  queue and the local `main` tree is clean before it starts.
-- `verify_release_metadata.py` accepts the pre-bump state — it passes when
-  the top `CHANGELOG.md` entry is exactly one patch/minor/major step ahead
-  of `Cargo.toml`. That means running `release_ship.sh --bump patch` on a
-  "Prepare vX.Y.Z release" commit is fine even though Cargo.toml still points
-  at the previous version.
-- `release_ship.sh --finalize` pushes the tag **before** calling
-  `cargo publish`, so GitHub release binary workflows and downstream fetchers
-  (e.g. `burin-code`'s `fetch-harn`) start working in parallel with crates.io
-  publication. The GitHub release body is created last so it can reference the
-  final crates.io state.
-- Finalize runs inside GitHub Actions via
-  `.github/workflows/finalize-release.yml`. The workflow fires on push to
-  `main` when the head commit starts with the prefix `Bump version to` (the
-  convention `release_ship.sh --bump` writes), and also exposes
-  `workflow_dispatch` for manual re-runs. It uses the repo secret
-  `CARGO_REGISTRY_TOKEN` for crates.io and the default `GITHUB_TOKEN` for
-  tag push + release creation. Running `release_ship.sh --finalize`
-  locally is only needed when the workflow fails and a human has to
-  recover — it is idempotent once the tag exists at HEAD.
-- `CHANGELOG.md` is the release-language source of truth. Use
-  `scripts/render_release_notes.py` or `./scripts/release_gate.sh notes` to
-  produce the exact GitHub release body from it.
+  followed by `Bump version to X.Y.Z` (Cargo.toml + Cargo.lock only). The
+  human/agent creates the first; the bot creates the second.
+- Treat repo consistency as part of the prepare PR, not an optional
+  cleanup pass. If behavior changes, update human-facing docs in the same
+  prep PR.
+- If syntax / parser / lexer / tree-sitter changed, update
+  `spec/HARN_SPEC.md` (the source of truth) and run
+  `scripts/sync_language_spec.sh` to regenerate the docs mirror.
+- The grammar/spec audit includes `scripts/verify_language_spec.py`
+  (extracts ` ```harn ` fences and runs `harn check`) and
+  `scripts/verify_tree_sitter_parse.py` (sweeps positive `.harn`
+  programs through the executable tree-sitter grammar). Treat failures
+  as spec drift, not just docs drift.
+- `verify_release_metadata.py` accepts the pre-bump state — it passes
+  when the top `CHANGELOG.md` entry is exactly one patch / minor / major
+  step ahead of `Cargo.toml`. The Bump Release workflow relies on this.
+- `release_ship.sh --finalize` pushes the tag **before** `cargo publish`
+  so binary build / GHCR / downstream fetchers (e.g. `burin-code`'s
+  `fetch-harn`) run in parallel with crates.io. Both the local script
+  and the Finalize Release workflow honor this ordering.
+- The release-bot App needs `Contents: write`, `Pull requests: write`,
+  `Actions: write`, `Metadata: read` on the repo. Repo secrets:
+  `RELEASE_APP_ID`, `RELEASE_APP_PRIVATE_KEY`, `CARGO_REGISTRY_TOKEN`.
+- `CHANGELOG.md` is the release-language source of truth. Notes are
+  rendered from it via `scripts/render_release_notes.py`.
 
 ## Audit wall-clock expectations
 
-`release_gate.sh audit` runs a serial `cargo build --workspace --all-targets`
-warm prebuild before spawning the 5 parallel lanes (`rust-audit`,
-`harn-audit`, `docs-audit`, `grammar-audit`, `security-audit`). The prebuild
-removes cargo-lock contention that historically made `harn-audit`'s lint
-phase stretch to ~12 min while fighting `rust-audit`'s clippy+nextest for
-`target/`. Typical wall-clock:
+`release_gate.sh audit` runs a serial `cargo build --workspace
+--all-targets` warm prebuild before spawning 5 parallel lanes
+(`rust-audit`, `harn-audit`, `docs-audit`, `grammar-audit`,
+`security-audit`). Typical wall-clock:
 
 - Cold `target/`: ~6-10 min, dominated by prebuild.
 - Warm `target/` after a recent build: ~10-30 s for the whole audit.
-- If any lane exceeds ~5 min after the prebuild, that is a regression —
-  check for a new `cargo`-shelling hotspot inside that lane rather than
-  assuming cold-cache cost.
+- A lane exceeding ~5 min after the prebuild is a regression worth
+  investigating, not cold-cache cost.
+
+In CI, both Bump Release and Finalize Release pay cold-cache audit cost
+(~8-12 min total). The audit + publish wall-clock is typical for a
+full release run.
 
 ## Useful shortcuts
 
 ```bash
-./scripts/release_ship.sh --bump patch               # open the bump PR
-./scripts/release_ship.sh --finalize                 # recovery only
+# All-in-one dry run, stops before any destructive action:
 ./scripts/release_gate.sh full --bump patch --dry-run
+
+# Render the GitHub release body locally from CHANGELOG.md:
 ./scripts/release_gate.sh notes
 
-# Manual re-trigger of the finalize workflow:
+# Manually re-trigger any of the workflows:
+gh workflow run bump-release.yml --ref main
 gh workflow run finalize-release.yml --ref main
+gh workflow run release.yml --ref main -f tag=vX.Y.Z
 ```

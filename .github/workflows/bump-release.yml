@@ -1,0 +1,145 @@
+name: Bump Release
+
+# Fires when a "Prepare vX.Y.Z release" commit lands on main through the
+# merge queue. Runs ./scripts/release_ship.sh --bump <type> under the
+# release-bot App identity, which audits, dry-run publishes, bumps
+# Cargo.toml + Cargo.lock, commits, pushes release/vX.Y.Z, and opens
+# the "Bump version to X.Y.Z" PR. The bump PR's CI fires normally
+# (App-pushed branch IS subject to downstream workflows), and once it
+# lands the Finalize Release workflow takes over to tag, publish to
+# crates.io, cascade to the Release workflow for binaries, and create
+# the GitHub release.
+#
+# End-state human flow: write and land "Prepare vX.Y.Z release". Walk
+# away. Everything else is automated.
+#
+# workflow_dispatch is the manual recovery path — if this workflow
+# fails mid-run, re-run it; release_ship.sh's bump path is idempotent
+# in the sense that the existing release/vX.Y.Z branch will be
+# re-pushed cleanly.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: bump-release
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  SCCACHE_GHA_ENABLED: "true"
+
+jobs:
+  bump:
+    name: Open bump PR
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      startsWith(github.event.head_commit.message, 'Prepare v')
+    steps:
+      # Mint a short-lived App installation token so the bump branch
+      # push and the bump PR are authored by harn-release-bot. Using
+      # the App identity also means the bump PR's CI will fire
+      # normally (GHA suppresses downstream workflows on
+      # GITHUB_TOKEN-authenticated pushes; App tokens bypass that).
+      - name: Mint GitHub App installation token
+        id: app-token
+        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          ref: main
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Detect bump type from CHANGELOG vs Cargo.toml
+        id: bump
+        run: |
+          set +e
+          BUMP="$(python3 scripts/detect_bump_type.py)"
+          rc=$?
+          set -e
+          if [[ $rc -eq 2 ]]; then
+            echo "::notice::No bump needed (Cargo.toml and CHANGELOG already match)."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [[ $rc -ne 0 ]]; then
+            echo "::error::detect_bump_type.py failed with exit code $rc"
+            exit $rc
+          fi
+          echo "type=$BUMP" >> "$GITHUB_OUTPUT"
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "Detected bump type: $BUMP"
+
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        if: steps.bump.outputs.skip != 'true'
+        with:
+          components: clippy, rustfmt
+
+      - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+        if: steps.bump.outputs.skip != 'true'
+
+      - uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1 # v2.9.1
+        if: steps.bump.outputs.skip != 'true'
+        with:
+          shared-key: workspace
+
+      - name: Install cargo-nextest
+        if: steps.bump.outputs.skip != 'true'
+        uses: taiki-e/install-action@5f57d6cb7cd20b14a8a27f522884c4bc8a187458 # v2.75.19
+        continue-on-error: true
+        with:
+          tool: nextest@0.9.133
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        if: steps.bump.outputs.skip != 'true'
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: crates/harn-cli/portal/package-lock.json
+
+      - name: Install portal dependencies
+        if: steps.bump.outputs.skip != 'true'
+        working-directory: crates/harn-cli/portal
+        run: npm ci
+
+      - name: Install ripgrep
+        # security-audit lane greps the repo via `rg` — install
+        # explicitly to match the local dev expectation.
+        if: steps.bump.outputs.skip != 'true'
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
+
+      - name: Build tree-sitter grammar
+        # grammar-audit's verify_tree_sitter_parse.py loads the
+        # compiled grammar from tree-sitter-harn/harn.{so,dylib}.
+        if: steps.bump.outputs.skip != 'true'
+        working-directory: tree-sitter-harn
+        run: |
+          npm ci
+          npm run build
+
+      - name: Configure git identity
+        if: steps.bump.outputs.skip != 'true'
+        run: |
+          git config --global user.name "harn-release-bot[bot]"
+          git config --global user.email "harn-release-bot[bot]@users.noreply.github.com"
+
+      - name: Run release_ship.sh --bump
+        if: steps.bump.outputs.skip != 'true'
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          # gh CLI inside release_ship.sh uses GH_TOKEN for `gh pr
+          # create`. Using the App token makes the bump PR author the
+          # bot, consistent with the branch pusher.
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: ./scripts/release_ship.sh --bump ${{ steps.bump.outputs.type }}
