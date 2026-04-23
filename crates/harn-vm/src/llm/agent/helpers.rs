@@ -145,6 +145,7 @@ pub(crate) fn assistant_history_text(
 
 pub(crate) fn action_turn_nudge(
     tool_format: &str,
+    has_tools: bool,
     turn_policy: Option<&crate::orchestration::TurnPolicy>,
     prose_too_long: bool,
 ) -> Option<String> {
@@ -162,12 +163,16 @@ pub(crate) fn action_turn_nudge(
     } else {
         ""
     };
-    let completion_clause = if policy.allow_done_sentinel {
+    let completion_clause = if has_tools && policy.allow_done_sentinel {
         "either make concrete progress with a well-formed <tool_call> block, switch phase, or emit a <done> block if the task is genuinely complete."
-    } else {
+    } else if has_tools {
         "either make concrete progress with a well-formed <tool_call> block or switch phase if the workflow allows it."
+    } else if policy.allow_done_sentinel {
+        "either make concrete progress in your reply, switch phase, or emit a <done> block if the task is genuinely complete."
+    } else {
+        "either make concrete progress in your reply or switch phase if the workflow allows it."
     };
-    let mode_clause = if tool_format == "native" {
+    let mode_clause = if has_tools && tool_format == "native" {
         " Use the provider tool channel only; handwritten tool-call text is invalid in this transcript."
     } else {
         ""
@@ -186,7 +191,7 @@ pub(crate) fn sentinel_without_action_nudge(
     } else {
         "You emitted a <done> block without taking any tool action. The task is not complete yet. Make concrete progress with an available tool now, or switch phase if the workflow allows it. Do not emit <done> again until you have acted.".to_string()
     };
-    if let Some(nudge) = action_turn_nudge(tool_format, turn_policy, false) {
+    if let Some(nudge) = action_turn_nudge(tool_format, true, turn_policy, false) {
         message.push(' ');
         message.push_str(&nudge);
     }

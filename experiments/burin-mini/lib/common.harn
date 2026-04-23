@@ -16,6 +16,25 @@ pub fn evaluator_model() {
   return env_or("BURIN_MINI_EVALUATOR_MODEL", generator_model())
 }
 
+fn bool_env(value) {
+  let normalized = lowercase((value ?? "").trim())
+  if normalized == "1" || normalized == "true" || normalized == "yes" || normalized == "on" {
+    return true
+  }
+  if normalized == "0" || normalized == "false" || normalized == "no" || normalized == "off" {
+    return false
+  }
+  return nil
+}
+
+fn thinking_enabled_for_model(provider, model) {
+  let thinking_pref = bool_env(env_or("BURIN_MINI_THINKING", ""))
+  if thinking_pref != nil {
+    return thinking_pref
+  }
+  return false
+}
+
 /** Return true when a list contains the given value. */
 pub fn list_contains(items, needle) {
   for item in items {
@@ -718,7 +737,7 @@ pub fn research_schema() {
 
 /** Build common generator sub-agent options. */
 pub fn generator_options(system, tools, allowed_tools) {
-  return {
+  var opts = {
     provider: provider_name(),
     model: generator_model(),
     system: system,
@@ -729,11 +748,15 @@ pub fn generator_options(system, tools, allowed_tools) {
     temperature: 0,
     max_iterations: 6,
   }
+  if len(allowed_tools ?? []) > 0 && thinking_enabled_for_model(provider_name(), generator_model()) {
+    opts = opts + {thinking: true}
+  }
+  return opts
 }
 
 /** Build common evaluator sub-agent options. */
 pub fn evaluator_options(system, tools) {
-  return {
+  var opts = {
     provider: provider_name(),
     model: evaluator_model(),
     system: system,
@@ -744,6 +767,10 @@ pub fn evaluator_options(system, tools) {
     temperature: 0,
     max_iterations: 4,
   }
+  if thinking_enabled_for_model(provider_name(), evaluator_model()) {
+    opts = opts + {thinking: true}
+  }
+  return opts
 }
 
 /** Safely parse a JSON object from model output. */

@@ -414,7 +414,7 @@ pub(super) async fn run_llm_call(
 
     // Teach the model to fix grammar violations. Done before tool-call
     // dispatch so protocol errors surface even in mixed turns.
-    if !protocol_violations.is_empty() && ctx.tool_format != "native" {
+    if !protocol_violations.is_empty() && ctx.has_tools && ctx.tool_format != "native" {
         let feedback = format!(
             "Your response violated the tagged response protocol. Each issue:\n- {}\n\n\
              Re-emit using only these top-level tags, separated by whitespace:\n\n\
@@ -472,12 +472,14 @@ pub(super) async fn run_llm_call(
     let verified = !ctx.exit_when_verified || state.last_run_exit_code == Some(0);
     // Guard against premature exit where the model emits done without acting.
     let has_acted = !state.all_tools_used.is_empty() || !tool_calls.is_empty();
+    let completion_ready = has_acted || !ctx.has_tools;
     // Ledger gate: reject done while open/blocked deliverables remain.
     let ledger_blocks_done = state.task_ledger.gates_done();
     let completion_requested =
         sentinel_in_text || (allow_done_sentinel && user_response.as_deref().is_some());
     let sentinel_hit = ctx.persistent
-        && ((completion_requested && verified && has_acted && !ledger_blocks_done) || phase_change);
+        && ((completion_requested && verified && completion_ready && !ledger_blocks_done)
+            || phase_change);
 
     if completion_requested && ledger_blocks_done && ctx.persistent {
         let corrective = state.task_ledger.done_gate_feedback();

@@ -72,14 +72,12 @@ pub(crate) fn vm_build_llm_result(
         dict.insert("data".to_string(), json_val);
     }
 
-    // Always run the tagged-protocol parser so canonical_text / violations /
-    // done_marker are available even with no tool registry. It's cheap and a
-    // no-op when the text has no tags. Native provider tool calls are
-    // authoritative and take precedence over text-parsed calls.
-    let tagged = Some(crate::llm::tools::parse_text_tool_calls_with_tools(
-        &result.text,
-        tools_val,
-    ));
+    let has_text_tool_protocol = tools_val.is_some() || !result.tool_calls.is_empty();
+    // Keep parsing available for tool-calling responses so llm_call can
+    // expose canonical/prose/tool metadata, but do not surface tagged-protocol
+    // violations for ordinary plain-text completions with no tools.
+    let tagged = has_text_tool_protocol
+        .then(|| crate::llm::tools::parse_text_tool_calls_with_tools(&result.text, tools_val));
 
     let merged_tool_calls: Vec<serde_json::Value> = if !result.tool_calls.is_empty() {
         result.tool_calls.clone()
@@ -139,6 +137,11 @@ pub(crate) fn vm_build_llm_result(
         dict.insert(
             "prose".to_string(),
             VmValue::String(Rc::from(prose.as_str())),
+        );
+    } else {
+        dict.insert(
+            "prose".to_string(),
+            VmValue::String(Rc::from(result.text.as_str())),
         );
     }
 

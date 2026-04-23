@@ -104,3 +104,96 @@ fn build_llm_call_result_extracts_json_from_tagged_prose() {
         "tagged prose should still populate structured data"
     );
 }
+
+#[test]
+fn build_llm_call_result_leaves_plain_text_unflagged_without_tools() {
+    let opts = base_opts(vec![json!({"role": "user", "content": "What is 2 + 2?"})]);
+    let result = LlmResult {
+        text: "4".to_string(),
+        tool_calls: Vec::new(),
+        input_tokens: 8,
+        output_tokens: 1,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
+        model: "mock".to_string(),
+        provider: "mock".to_string(),
+        thinking: None,
+        stop_reason: None,
+        blocks: Vec::new(),
+    };
+
+    let vm_result = build_llm_call_result(&result, &opts);
+    let dict = vm_result.as_dict().expect("dict");
+    assert_eq!(
+        dict.get("prose").map(VmValue::display).as_deref(),
+        Some("4")
+    );
+    assert!(
+        dict.get("protocol_violations").is_none(),
+        "plain no-tool llm_call should not be judged against the tagged agent protocol"
+    );
+}
+
+#[test]
+fn build_llm_call_transcript_keeps_private_reasoning_out_of_visible_message_text() {
+    let opts = base_opts(vec![json!({"role": "user", "content": "Explain the repo"})]);
+    let result = LlmResult {
+        text: "Visible answer".to_string(),
+        tool_calls: Vec::new(),
+        input_tokens: 10,
+        output_tokens: 3,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
+        model: "mock".to_string(),
+        provider: "mock".to_string(),
+        thinking: Some("private chain of thought".to_string()),
+        stop_reason: None,
+        blocks: vec![
+            json!({
+                "type": "reasoning",
+                "text": "private chain of thought",
+                "visibility": "private",
+            }),
+            json!({
+                "type": "output_text",
+                "text": "Visible answer",
+                "visibility": "public",
+            }),
+        ],
+    };
+
+    let vm_result = build_llm_call_result(&result, &opts);
+    let dict = vm_result.as_dict().expect("dict");
+    let transcript = dict
+        .get("transcript")
+        .and_then(VmValue::as_dict)
+        .expect("transcript");
+    let events = match transcript.get("events") {
+        Some(VmValue::List(events)) => events,
+        _ => panic!("events"),
+    };
+    let assistant_message = events
+        .iter()
+        .find(|event| {
+            event
+                .as_dict()
+                .and_then(|dict| dict.get("kind"))
+                .map(VmValue::display)
+                .as_deref()
+                == Some("message")
+                && event
+                    .as_dict()
+                    .and_then(|dict| dict.get("role"))
+                    .map(VmValue::display)
+                    .as_deref()
+                    == Some("assistant")
+        })
+        .and_then(VmValue::as_dict)
+        .expect("assistant message event");
+    let text = assistant_message
+        .get("text")
+        .map(VmValue::display)
+        .unwrap_or_default();
+    assert_eq!(text, "Visible answer");
+    assert!(!text.contains("private chain of thought"));
+}

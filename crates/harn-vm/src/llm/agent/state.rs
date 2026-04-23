@@ -1116,33 +1116,34 @@ impl AgentLoopState {
             format!("emit `<done>{done_sentinel}</done>` as its own top-level block")
         };
         let persistent_system_prompt = if persistent {
+            let progress_instruction = if has_tools {
+                "Take action with tool calls — do not stop to explain."
+            } else {
+                "Solve the request directly in assistant text — do not stop early to explain or summarize."
+            };
             if exit_when_verified {
                 if allow_done_sentinel {
                     Some(format!(
-                        "\n\nKeep working until the current request is complete. Take action with tool \
-                         calls — do not stop to explain. {} only after the current request passes verification.",
-                        done_instruction
+                        "\n\nKeep working until the current request is complete. {progress_instruction} {} only after the current request passes verification.",
+                        done_instruction,
                     ))
                 } else {
-                    Some(
-                        "\n\nKeep working until the current request is complete. Take action with tool calls — \
-                         do not stop to explain."
-                            .to_string(),
-                    )
+                    Some(format!(
+                        "\n\nKeep working until the current request is complete. {progress_instruction}"
+                    ))
                 }
             } else if allow_done_sentinel {
                 Some(format!(
                     "\n\nIMPORTANT: You MUST keep working until the current request is complete. \
-                     Do NOT stop to explain or summarize — take action with tool calls. \
+                     {progress_instruction} \
                      When the requested work is complete, {}.",
                     done_instruction
                 ))
             } else {
-                Some(
+                Some(format!(
                     "\n\nIMPORTANT: You MUST keep working until the current request is complete. \
-                     Do NOT stop to explain or summarize — take action with tool calls."
-                        .to_string(),
-                )
+                     {progress_instruction}"
+                ))
             }
         } else {
             None
