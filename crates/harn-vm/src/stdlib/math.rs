@@ -4,7 +4,8 @@ use crate::vm::Vm;
 pub(crate) fn register_math_builtins(vm: &mut Vm) {
     vm.register_builtin("abs", |args, _out| {
         match args.first().unwrap_or(&VmValue::Nil) {
-            VmValue::Int(n) => Ok(VmValue::Int(n.wrapping_abs())),
+            VmValue::Int(i64::MIN) => Ok(VmValue::Float(9_223_372_036_854_775_808.0)),
+            VmValue::Int(n) => Ok(VmValue::Int(n.abs())),
             VmValue::Float(n) => Ok(VmValue::Float(n.abs())),
             _ => Ok(VmValue::Nil),
         }
@@ -40,7 +41,7 @@ pub(crate) fn register_math_builtins(vm: &mut Vm) {
 
     vm.register_builtin("floor", |args, _out| {
         match args.first().unwrap_or(&VmValue::Nil) {
-            VmValue::Float(n) => Ok(VmValue::Int(n.floor() as i64)),
+            VmValue::Float(n) => finite_float_to_i64(n.floor()).map(VmValue::Int),
             VmValue::Int(n) => Ok(VmValue::Int(*n)),
             _ => Ok(VmValue::Nil),
         }
@@ -48,7 +49,7 @@ pub(crate) fn register_math_builtins(vm: &mut Vm) {
 
     vm.register_builtin("ceil", |args, _out| {
         match args.first().unwrap_or(&VmValue::Nil) {
-            VmValue::Float(n) => Ok(VmValue::Int(n.ceil() as i64)),
+            VmValue::Float(n) => finite_float_to_i64(n.ceil()).map(VmValue::Int),
             VmValue::Int(n) => Ok(VmValue::Int(*n)),
             _ => Ok(VmValue::Nil),
         }
@@ -56,7 +57,7 @@ pub(crate) fn register_math_builtins(vm: &mut Vm) {
 
     vm.register_builtin("round", |args, _out| {
         match args.first().unwrap_or(&VmValue::Nil) {
-            VmValue::Float(n) => Ok(VmValue::Int(n.round() as i64)),
+            VmValue::Float(n) => finite_float_to_i64(n.round()).map(VmValue::Int),
             VmValue::Int(n) => Ok(VmValue::Int(*n)),
             _ => Ok(VmValue::Nil),
         }
@@ -75,7 +76,10 @@ pub(crate) fn register_math_builtins(vm: &mut Vm) {
             match (&args[0], &args[1]) {
                 (VmValue::Int(base), VmValue::Int(exp)) => {
                     if *exp >= 0 && *exp <= u32::MAX as i64 {
-                        Ok(VmValue::Int(base.wrapping_pow(*exp as u32)))
+                        match base.checked_pow(*exp as u32) {
+                            Some(value) => Ok(VmValue::Int(value)),
+                            None => Ok(VmValue::Float((*base as f64).powf(*exp as f64))),
+                        }
                     } else {
                         Ok(VmValue::Float((*base as f64).powf(*exp as f64)))
                     }
@@ -225,6 +229,20 @@ pub(crate) fn register_math_builtins(vm: &mut Vm) {
     });
 }
 
+fn finite_float_to_i64(n: f64) -> Result<i64, VmError> {
+    if !n.is_finite() {
+        return Err(VmError::Runtime(
+            "cannot convert non-finite float to int".to_string(),
+        ));
+    }
+    if n < i64::MIN as f64 || n >= 9_223_372_036_854_775_808.0 {
+        return Err(VmError::Runtime(
+            "float is outside the representable int range".to_string(),
+        ));
+    }
+    Ok(n as i64)
+}
+
 /// Helper to reduce boilerplate for unary float functions (sin, cos, etc.)
 fn register_unary_float(vm: &mut Vm, name: &'static str, f: fn(f64) -> f64) {
     vm.register_builtin(name, move |args, _out| {
@@ -235,4 +253,43 @@ fn register_unary_float(vm: &mut Vm, name: &'static str, f: fn(f64) -> f64) {
         };
         Ok(VmValue::Float(f(n)))
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn vm() -> Vm {
+        let mut vm = Vm::new();
+        register_math_builtins(&mut vm);
+        vm
+    }
+
+    fn call(vm: &mut Vm, name: &str, args: Vec<VmValue>) -> Result<VmValue, VmError> {
+        let f = vm.builtins.get(name).unwrap().clone();
+        let mut out = String::new();
+        f(&args, &mut out)
+    }
+
+    #[test]
+    fn abs_does_not_wrap_i64_min() {
+        let mut vm = vm();
+        let value = call(&mut vm, "abs", vec![VmValue::Int(i64::MIN)]).unwrap();
+        assert_eq!(value.display(), "9223372036854776000");
+    }
+
+    #[test]
+    fn integer_pow_does_not_wrap_on_overflow() {
+        let mut vm = vm();
+        let value = call(&mut vm, "pow", vec![VmValue::Int(2), VmValue::Int(63)]).unwrap();
+        assert_eq!(value.display(), "9223372036854776000");
+    }
+
+    #[test]
+    fn rounding_rejects_non_finite_float_to_int() {
+        let mut vm = vm();
+        let error = call(&mut vm, "floor", vec![VmValue::Float(f64::INFINITY)])
+            .expect_err("infinite float cannot become int");
+        assert!(error.to_string().contains("non-finite"));
+    }
 }

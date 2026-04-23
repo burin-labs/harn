@@ -17,31 +17,9 @@ pub(crate) fn span_to_range(span: &Span) -> Range {
 
 /// Convert a Span to an LSP Range using byte offsets for accurate end position.
 pub(crate) fn span_to_full_range(span: &Span, source: &str) -> Range {
-    let start_line = span.line.saturating_sub(1) as u32;
-    let start_col = span.column.saturating_sub(1) as u32;
-
-    let mut end_line = start_line;
-    let mut end_col = start_col;
-    if span.end > span.start && span.end <= source.len() {
-        let segment = &source[span.start..span.end];
-        for ch in segment.chars() {
-            if ch == '\n' {
-                end_line += 1;
-                end_col = 0;
-            } else {
-                end_col += 1;
-            }
-        }
-        if end_line == start_line {
-            end_col = start_col + segment.chars().count() as u32;
-        }
-    } else {
-        end_col = start_col + 1;
-    }
-
     Range {
-        start: Position::new(start_line, start_col),
-        end: Position::new(end_line, end_col),
+        start: offset_to_position(source, span.start),
+        end: offset_to_position(source, span.end.max(span.start + 1).min(source.len())),
     }
 }
 
@@ -62,99 +40,173 @@ pub(crate) fn position_in_span(pos: &Position, span: &Span, source: &str) -> boo
 
 /// Convert a 0-based LSP Position to a byte offset in the source string.
 pub(crate) fn lsp_position_to_offset(source: &str, pos: Position) -> usize {
-    let mut offset = 0;
-    for (i, line) in source.split('\n').enumerate() {
-        if i == pos.line as usize {
-            return offset + (pos.character as usize).min(line.len());
-        }
-        offset += line.len() + 1; // account for the stripped newline
-    }
-    source.len()
+    let Some((line_start, line_end)) = line_byte_range(source, pos.line as usize) else {
+        return source.len();
+    };
+    line_start + utf16_col_to_byte(&source[line_start..line_end], pos.character)
 }
 
 /// Convert a byte offset in `source` to a 0-based LSP Position.
 pub(crate) fn offset_to_position(source: &str, offset: usize) -> Position {
+    let offset = offset.min(source.len());
     let mut line = 0u32;
-    let mut col = 0u32;
+    let mut line_start = 0usize;
     for (i, ch) in source.char_indices() {
-        if i == offset {
+        if i >= offset {
+            let col = utf16_len(&source[line_start..offset]);
             return Position::new(line, col);
         }
         if ch == '\n' {
             line += 1;
-            col = 0;
-        } else {
-            col += 1;
+            line_start = i + ch.len_utf8();
         }
     }
-    Position::new(line, col)
+    Position::new(line, utf16_len(&source[line_start..offset]))
+}
+
+pub(crate) fn utf16_len(text: &str) -> u32 {
+    text.encode_utf16().count() as u32
+}
+
+fn line_byte_range(source: &str, line: usize) -> Option<(usize, usize)> {
+    let mut current_line = 0usize;
+    let mut line_start = 0usize;
+    for (idx, ch) in source.char_indices() {
+        if current_line == line && ch == '\n' {
+            return Some((line_start, idx));
+        }
+        if ch == '\n' {
+            if current_line == line {
+                return Some((line_start, idx));
+            }
+            current_line += 1;
+            line_start = idx + ch.len_utf8();
+        }
+    }
+    if current_line == line {
+        Some((line_start, source.len()))
+    } else {
+        None
+    }
+}
+
+fn utf16_col_to_byte(line: &str, character: u32) -> usize {
+    let mut units = 0u32;
+    for (idx, ch) in line.char_indices() {
+        let width = ch.len_utf16() as u32;
+        if units + width > character {
+            return idx;
+        }
+        units += width;
+        if units == character {
+            return idx + ch.len_utf8();
+        }
+    }
+    line.len()
 }
 
 /// Get the word at a given position.
 pub(crate) fn word_at_position(source: &str, position: Position) -> Option<String> {
-    let lines: Vec<&str> = source.lines().collect();
-    let line = lines.get(position.line as usize)?;
-    let col = position.character as usize;
-    if col > line.len() {
+    let offset = lsp_position_to_offset(source, position);
+    let (line_start, line_end) = line_byte_range(source, position.line as usize)?;
+    if offset < line_start || offset > line_end {
         return None;
     }
-
-    let chars: Vec<char> = line.chars().collect();
-    let mut start = col;
-    while start > 0 && (chars[start - 1].is_alphanumeric() || chars[start - 1] == '_') {
-        start -= 1;
+    let line = &source[line_start..line_end];
+    let mut rel = offset - line_start;
+    if !line.is_char_boundary(rel) {
+        rel = previous_char_boundary(line, rel);
     }
-    let mut end = col;
-    while end < chars.len() && (chars[end].is_alphanumeric() || chars[end] == '_') {
-        end += 1;
+
+    let mut start = rel;
+    while start > 0 {
+        let prev = previous_char_boundary(line, start);
+        let ch = line[prev..start].chars().next()?;
+        if !(ch.is_alphanumeric() || ch == '_') {
+            break;
+        }
+        start = prev;
+    }
+
+    let mut end = rel;
+    while end < line.len() {
+        let ch = line[end..].chars().next()?;
+        if !(ch.is_alphanumeric() || ch == '_') {
+            break;
+        }
+        end += ch.len_utf8();
     }
 
     if start == end {
         return None;
     }
-    Some(chars[start..end].iter().collect())
+    Some(line[start..end].to_string())
 }
 
 /// Check if cursor is right after a `.` (for method completion).
 pub(crate) fn char_before_position(source: &str, position: Position) -> Option<char> {
-    let lines: Vec<&str> = source.lines().collect();
-    let line = lines.get(position.line as usize)?;
-    let col = position.character as usize;
-    if col == 0 {
+    let offset = lsp_position_to_offset(source, position);
+    let (line_start, _) = line_byte_range(source, position.line as usize)?;
+    if offset <= line_start {
         return None;
     }
-    line.chars().nth(col - 1)
+    source[..offset].chars().next_back()
 }
 
 fn dot_receiver_identifier(source: &str, position: Position) -> Option<String> {
-    let lines: Vec<&str> = source.lines().collect();
-    let line = lines.get(position.line as usize)?;
-    let col = position.character as usize;
-    if col < 2 {
+    let offset = lsp_position_to_offset(source, position);
+    let (line_start, line_end) = line_byte_range(source, position.line as usize)?;
+    if offset <= line_start {
         return None;
     }
-
-    let chars: Vec<char> = line.chars().collect();
-    // `position` is after the `.`, so chars[col - 1] is `.`. Step back past it.
-    let mut end = col - 1;
-    if end == 0 {
+    let line = &source[line_start..line_end];
+    let mut rel = offset - line_start;
+    if !line.is_char_boundary(rel) {
+        rel = previous_char_boundary(line, rel);
+    }
+    let dot_start = previous_char_boundary(line, rel);
+    if &line[dot_start..rel] != "." || dot_start == 0 {
         return None;
     }
-    end -= 1;
+    let mut end = previous_char_boundary(line, dot_start);
 
-    while end > 0 && chars[end] == ' ' {
-        end -= 1;
+    while end > 0 {
+        let ch = line[end..].chars().next()?;
+        if ch != ' ' {
+            break;
+        }
+        end = previous_char_boundary(line, end);
     }
 
-    if !chars[end].is_alphanumeric() && chars[end] != '_' {
+    let ch = line[end..].chars().next()?;
+    if !ch.is_alphanumeric() && ch != '_' {
         return None;
     }
-    let id_end = end + 1;
+    let id_end = end + ch.len_utf8();
     let mut id_start = end;
-    while id_start > 0 && (chars[id_start - 1].is_alphanumeric() || chars[id_start - 1] == '_') {
-        id_start -= 1;
+    while id_start > 0 {
+        let prev = previous_char_boundary(line, id_start);
+        let ch = line[prev..id_start].chars().next()?;
+        if !(ch.is_alphanumeric() || ch == '_') {
+            break;
+        }
+        id_start = prev;
     }
-    Some(chars[id_start..id_end].iter().collect())
+    Some(line[id_start..id_end].to_string())
+}
+
+fn previous_char_boundary(text: &str, index: usize) -> usize {
+    let mut i = index.min(text.len());
+    while i > 0 && !text.is_char_boundary(i) {
+        i -= 1;
+    }
+    if i == 0 {
+        return 0;
+    }
+    text[..i]
+        .char_indices()
+        .next_back()
+        .map_or(0, |(idx, _)| idx)
 }
 
 pub(crate) fn infer_dot_receiver_name(source: &str, position: Position) -> Option<String> {
@@ -167,30 +219,37 @@ pub(crate) fn infer_dot_receiver_type(
     position: Position,
     symbols: &[SymbolInfo],
 ) -> Option<TypeExpr> {
-    let lines: Vec<&str> = source.lines().collect();
-    let line = lines.get(position.line as usize)?;
-    let col = position.character as usize;
-    if col < 2 {
+    let offset = lsp_position_to_offset(source, position);
+    let (line_start, line_end) = line_byte_range(source, position.line as usize)?;
+    if offset <= line_start {
         return None;
     }
-
-    let chars: Vec<char> = line.chars().collect();
-    let mut end = col - 1;
-    if end == 0 {
+    let line = &source[line_start..line_end];
+    let mut rel = offset - line_start;
+    if !line.is_char_boundary(rel) {
+        rel = previous_char_boundary(line, rel);
+    }
+    let dot_start = previous_char_boundary(line, rel);
+    if dot_start == 0 {
         return None;
     }
-    end -= 1;
-    while end > 0 && chars[end] == ' ' {
-        end -= 1;
+    let mut end = previous_char_boundary(line, dot_start);
+    while end > 0 {
+        let ch = line[end..].chars().next()?;
+        if ch != ' ' {
+            break;
+        }
+        end = previous_char_boundary(line, end);
     }
 
-    if chars[end] == '"' {
+    let ch = line[end..].chars().next()?;
+    if ch == '"' {
         return Some(TypeExpr::Named("string".to_string()));
     }
-    if chars[end] == ']' {
+    if ch == ']' {
         return Some(TypeExpr::Named("list".to_string()));
     }
-    if chars[end] == '}' {
+    if ch == '}' {
         return Some(TypeExpr::Named("dict".to_string()));
     }
 
@@ -295,4 +354,48 @@ pub(crate) fn find_word_in_region(region: &str, word: &str) -> Option<usize> {
         search_from = abs + 1;
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lsp_offsets_use_utf16_columns() {
+        let source = "let 😀name = \"é\"\nnext";
+        let name_offset = source.find("name").unwrap();
+        assert_eq!(
+            lsp_position_to_offset(source, Position::new(0, 6)),
+            name_offset
+        );
+        assert_eq!(offset_to_position(source, name_offset), Position::new(0, 6));
+    }
+
+    #[test]
+    fn word_at_position_handles_non_ascii_prefix() {
+        let source = "let café = 1";
+        assert_eq!(
+            word_at_position(source, Position::new(0, 6)).as_deref(),
+            Some("café")
+        );
+    }
+
+    #[test]
+    fn span_range_uses_utf16_length() {
+        let source = "let mood = \"😀\"";
+        let start = source.find("\"😀\"").unwrap();
+        let end = start + "\"😀\"".len();
+        let range = span_to_full_range(
+            &Span {
+                start,
+                end,
+                line: 1,
+                column: 12,
+                end_line: 1,
+            },
+            source,
+        );
+        assert_eq!(range.start, Position::new(0, 11));
+        assert_eq!(range.end, Position::new(0, 15));
+    }
 }

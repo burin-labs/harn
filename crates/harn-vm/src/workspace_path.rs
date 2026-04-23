@@ -183,7 +183,7 @@ fn is_absolute_str(path: &str) -> bool {
         return true;
     }
     let bytes = path.as_bytes();
-    bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':'
+    bytes.len() >= 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && bytes[2] == b'/'
 }
 
 fn split_segments(path: &str) -> (bool, Option<String>, Vec<String>) {
@@ -316,6 +316,14 @@ mod tests {
             info.reason.as_deref(),
             Some("workspace-relative path escapes the workspace root")
         );
+    }
+
+    #[test]
+    fn windows_drive_relative_path_is_not_host_absolute() {
+        let dir = tempfile::tempdir().unwrap();
+        let info = classify_workspace_path("C:src/main.harn", Some(dir.path()));
+        assert_eq!(info.kind, WorkspacePathKind::WorkspaceRelative);
+        assert_eq!(info.workspace_path.as_deref(), Some("C:src/main.harn"));
     }
 
     #[test]

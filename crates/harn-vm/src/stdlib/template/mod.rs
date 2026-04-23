@@ -309,8 +309,10 @@ pub(crate) fn render_template_with_provenance(
     })?;
     let mut out = String::with_capacity(template.len());
     let mut scope = Scope::new(bindings);
+    let include_root = base.map(|path| path.canonicalize().unwrap_or_else(|_| path.to_path_buf()));
     let mut rc = RenderCtx {
         base: base.map(Path::to_path_buf),
+        include_root,
         include_stack: Vec::new(),
         current_path: source_path.map(Path::to_path_buf),
         current_include_parent: None,

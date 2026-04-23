@@ -368,6 +368,27 @@ fn include_cycle_detected() {
     assert!(r.unwrap_err().kind.contains("circular include"));
 }
 
+#[test]
+fn include_cannot_escape_template_root() {
+    use std::fs;
+    let dir = tempdir();
+    let sibling_name = format!("{}-outside", dir.file_name().unwrap().to_string_lossy());
+    let outside_dir = dir.parent().unwrap().join(&sibling_name);
+    fs::create_dir_all(&outside_dir).unwrap();
+    fs::write(outside_dir.join("secret.prompt"), "secret").unwrap();
+    let parent = dir.join("main.prompt");
+    fs::write(
+        &parent,
+        format!(r#"{{{{ include "../{sibling_name}/secret.prompt" }}}}"#),
+    )
+    .unwrap();
+    let src = fs::read_to_string(&parent).unwrap();
+    let r = render_template_result(&src, None, Some(&dir), Some(&parent));
+    let _ = fs::remove_dir_all(outside_dir);
+    assert!(r.is_err());
+    assert!(r.unwrap_err().kind.contains("escapes template root"));
+}
+
 fn tempdir() -> PathBuf {
     let base = std::env::temp_dir().join(format!("harn-tpl-{}", nanoid()));
     std::fs::create_dir_all(&base).unwrap();

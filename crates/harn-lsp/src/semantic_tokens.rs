@@ -2,6 +2,7 @@ use harn_lexer::{Span, Token, TokenKind};
 use tower_lsp::lsp_types::*;
 
 use crate::constants::{BUILTINS, TYPE_NAMES};
+use crate::helpers::{offset_to_position, utf16_len};
 use crate::symbols::{HarnSymbolKind, SymbolInfo};
 
 /// Indices into the semantic token legend's token types array.
@@ -205,9 +206,10 @@ pub(crate) fn build_semantic_tokens(
             },
         };
 
-        // LSP semantic tokens use 0-based line/column
-        let line = token.span.line.saturating_sub(1) as u32;
-        let start_char = token.span.column.saturating_sub(1) as u32;
+        // LSP semantic tokens use 0-based UTF-16 line/column positions.
+        let start_position = offset_to_position(source, token.span.start);
+        let line = start_position.line;
+        let start_char = start_position.character;
 
         // Calculate token length from byte offsets
         if token.span.end > token.span.start && token.span.end <= source.len() {
@@ -216,7 +218,7 @@ pub(crate) fn build_semantic_tokens(
 
             if lines_in_token.len() <= 1 {
                 // Single-line token
-                let length = segment.chars().count() as u32;
+                let length = utf16_len(segment);
                 let delta_line = line - prev_line;
                 let delta_start = if delta_line == 0 {
                     start_char - prev_start
@@ -237,7 +239,7 @@ pub(crate) fn build_semantic_tokens(
                 for (line_idx, line_text) in lines_in_token.iter().enumerate() {
                     let cur_line = line + line_idx as u32;
                     let cur_start = if line_idx == 0 { start_char } else { 0 };
-                    let length = line_text.chars().count() as u32;
+                    let length = utf16_len(line_text);
                     if length == 0 && line_idx > 0 {
                         continue; // skip empty intermediate lines
                     }
@@ -389,5 +391,24 @@ fn classify_identifier(name: &str, span: &Span, symbols: &[SymbolInfo], source: 
                 sem::VARIABLE
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use harn_lexer::Lexer;
+
+    #[test]
+    fn semantic_token_lengths_are_utf16() {
+        let source = "let mood = \"😀\"\n";
+        let mut lexer = Lexer::new(source);
+        let tokens = lexer.tokenize_with_comments().unwrap();
+        let semantic = build_semantic_tokens(&tokens, &[], source);
+        let string_token = semantic
+            .iter()
+            .find(|token| token.token_type == sem::STRING)
+            .expect("string token");
+        assert_eq!(string_token.length, 4);
     }
 }

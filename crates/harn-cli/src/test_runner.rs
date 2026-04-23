@@ -97,18 +97,9 @@ pub async fn run_test_file(
         let local = tokio::task::LocalSet::new();
         let path_str = path.display().to_string();
         let timeout = std::time::Duration::from_millis(timeout_ms);
-        let previous_cwd = if let Some(cwd) = execution_cwd {
-            let previous = std::env::current_dir().ok();
-            std::env::set_current_dir(cwd).map_err(|error| {
-                format!(
-                    "Failed to set current directory to {}: {error}",
-                    cwd.display()
-                )
-            })?;
-            previous
-        } else {
-            None
-        };
+        let execution_cwd = execution_cwd
+            .map(Path::to_path_buf)
+            .unwrap_or_else(test_execution_cwd);
         let result = tokio::time::timeout(
             timeout,
             local.run_until(async {
@@ -117,7 +108,6 @@ pub async fn run_test_file(
                 let source_parent = path.parent().unwrap_or(std::path::Path::new("."));
                 let project_root = harn_vm::stdlib::process::find_project_root(source_parent);
                 let store_base = project_root.as_deref().unwrap_or(source_parent);
-                let execution_cwd = test_execution_cwd();
                 let source_dir = source_parent.to_string_lossy().into_owned();
                 harn_vm::register_store_builtins(&mut vm, store_base);
                 harn_vm::register_metadata_builtins(&mut vm, store_base);
@@ -170,9 +160,6 @@ pub async fn run_test_file(
             }),
         )
         .await;
-        if let Some(previous) = previous_cwd {
-            let _ = std::env::set_current_dir(previous);
-        }
 
         let duration = start.elapsed().as_millis() as u64;
 
@@ -239,7 +226,17 @@ pub async fn run_tests(
                 for file in files {
                     let filter = filter.map(|s| s.to_string());
                     handles.push(tokio::task::spawn_local(async move {
-                        run_test_file(&file, filter.as_deref(), timeout_ms, None).await
+                        let execution_cwd = file
+                            .parent()
+                            .filter(|parent| !parent.as_os_str().is_empty())
+                            .map(Path::to_path_buf);
+                        run_test_file(
+                            &file,
+                            filter.as_deref(),
+                            timeout_ms,
+                            execution_cwd.as_deref(),
+                        )
+                        .await
                     }));
                 }
                 let mut results = Vec::new();
@@ -308,7 +305,7 @@ fn discover_test_files(dir: &Path) -> Vec<PathBuf> {
                 files.extend(discover_test_files(&path));
             } else if path.extension().is_some_and(|e| e == "harn") {
                 if let Ok(content) = std::fs::read_to_string(&path) {
-                    if content.contains("test_") {
+                    if content.contains("test_") || content.contains("@test") {
                         files.push(canonicalize_existing_path(&path));
                     }
                 }
@@ -369,6 +366,7 @@ mod tests {
         let temp = TempTestDir::new();
         temp.write("suite/test_alpha.harn", "pipeline test_alpha(task) {}");
         temp.write("suite/nested/test_beta.harn", "pipeline test_beta(task) {}");
+        temp.write("suite/annotated.harn", "@test\npipeline annotated(task) {}");
         temp.write("suite/ignore.harn", "pipeline build(task) {}");
 
         // Pass an absolute path rather than mutating process-wide cwd — the
@@ -376,7 +374,7 @@ mod tests {
         // from two tests concurrently causes cross-test flakiness.
         let files = discover_test_files(&temp.path().join("suite"));
 
-        assert_eq!(files.len(), 2);
+        assert_eq!(files.len(), 3);
         assert!(files.iter().all(|path| path.is_absolute()));
         assert!(files
             .iter()
@@ -384,6 +382,9 @@ mod tests {
         assert!(files
             .iter()
             .any(|path| path.ends_with("suite/nested/test_beta.harn")));
+        assert!(files
+            .iter()
+            .any(|path| path.ends_with("suite/annotated.harn")));
     }
 
     #[tokio::test]
@@ -410,5 +411,32 @@ pipeline test_current_dir(task) {
             fs::canonicalize(restored_cwd).unwrap(),
             fs::canonicalize(original_cwd).unwrap()
         );
+    }
+
+    #[tokio::test]
+    async fn parallel_run_tests_uses_each_file_parent_as_execution_cwd() {
+        let _cwd_guard = crate::tests::common::cwd_lock::lock_cwd_async().await;
+        let _env_guard = crate::tests::common::env_lock::lock_env().lock().await;
+        let temp = TempTestDir::new();
+        temp.write(
+            "suite/a/test_one.harn",
+            r#"
+pipeline test_one(task) {
+  assert_eq(cwd(), source_dir())
+}
+"#,
+        );
+        temp.write(
+            "suite/b/test_two.harn",
+            r#"
+pipeline test_two(task) {
+  assert_eq(cwd(), source_dir())
+}
+"#,
+        );
+
+        let summary = run_tests(&temp.path().join("suite"), None, 1_000, true).await;
+        assert_eq!(summary.failed, 0);
+        assert_eq!(summary.passed, 2);
     }
 }

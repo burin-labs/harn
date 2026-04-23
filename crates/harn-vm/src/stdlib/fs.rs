@@ -1,13 +1,23 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::time::SystemTime;
 use std::{cell::RefCell, thread_local};
 
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
 thread_local! {
-    static FILE_TEXT_CACHE: RefCell<BTreeMap<PathBuf, Rc<str>>> = const { RefCell::new(BTreeMap::new()) };
+    static FILE_TEXT_CACHE: RefCell<BTreeMap<PathBuf, FileTextCacheEntry>> = const { RefCell::new(BTreeMap::new()) };
+}
+
+const FILE_TEXT_CACHE_MAX_ENTRIES: usize = 256;
+
+#[derive(Clone)]
+struct FileTextCacheEntry {
+    content: Rc<str>,
+    len: u64,
+    modified: Option<SystemTime>,
 }
 
 pub(crate) fn reset_fs_state() {
@@ -26,19 +36,58 @@ fn result_err(value: VmValue) -> VmValue {
     VmValue::enum_variant("Result", "Err", vec![value])
 }
 
+fn metadata_signature(path: &PathBuf) -> Option<(u64, Option<SystemTime>)> {
+    let metadata = std::fs::metadata(path).ok()?;
+    Some((metadata.len(), metadata.modified().ok()))
+}
+
+fn read_cached_text(path: &PathBuf) -> Option<Rc<str>> {
+    FILE_TEXT_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        let entry = cache.get(path).cloned()?;
+        match metadata_signature(path) {
+            Some((len, modified)) if len == entry.len && modified == entry.modified => {
+                Some(entry.content)
+            }
+            _ => {
+                cache.remove(path);
+                None
+            }
+        }
+    })
+}
+
+fn write_cached_text(path: PathBuf, content: Rc<str>) {
+    let Some((len, modified)) = metadata_signature(&path) else {
+        return;
+    };
+    FILE_TEXT_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if cache.len() >= FILE_TEXT_CACHE_MAX_ENTRIES && !cache.contains_key(&path) {
+            cache.pop_first();
+        }
+        cache.insert(
+            path,
+            FileTextCacheEntry {
+                content,
+                len,
+                modified,
+            },
+        );
+    });
+}
+
 pub(crate) fn register_fs_builtins(vm: &mut Vm) {
     vm.register_builtin("read_file", |args, _out| {
         let path = args.first().map(|a| a.display()).unwrap_or_default();
         let resolved = resolve_fs_path(&path);
-        if let Some(cached) = FILE_TEXT_CACHE.with(|cache| cache.borrow().get(&resolved).cloned()) {
+        if let Some(cached) = read_cached_text(&resolved) {
             return Ok(VmValue::String(cached));
         }
         match std::fs::read_to_string(&resolved) {
             Ok(content) => {
                 let shared: Rc<str> = Rc::from(content);
-                FILE_TEXT_CACHE.with(|cache| {
-                    cache.borrow_mut().insert(resolved.clone(), shared.clone());
-                });
+                write_cached_text(resolved.clone(), shared.clone());
                 Ok(VmValue::String(shared))
             }
             Err(e) => Err(VmError::Thrown(VmValue::String(Rc::from(format!(
@@ -51,15 +100,13 @@ pub(crate) fn register_fs_builtins(vm: &mut Vm) {
     vm.register_builtin("read_file_result", |args, _out| {
         let path = args.first().map(|a| a.display()).unwrap_or_default();
         let resolved = resolve_fs_path(&path);
-        if let Some(cached) = FILE_TEXT_CACHE.with(|cache| cache.borrow().get(&resolved).cloned()) {
+        if let Some(cached) = read_cached_text(&resolved) {
             return Ok(result_ok(VmValue::String(cached)));
         }
         match std::fs::read_to_string(&resolved) {
             Ok(content) => {
                 let shared: Rc<str> = Rc::from(content);
-                FILE_TEXT_CACHE.with(|cache| {
-                    cache.borrow_mut().insert(resolved.clone(), shared.clone());
-                });
+                write_cached_text(resolved.clone(), shared.clone());
                 Ok(result_ok(VmValue::String(shared)))
             }
             Err(e) => Ok(result_err(VmValue::String(Rc::from(format!(
@@ -92,9 +139,7 @@ pub(crate) fn register_fs_builtins(vm: &mut Vm) {
                     resolved.display()
                 ))))
             })?;
-            FILE_TEXT_CACHE.with(|cache| {
-                cache.borrow_mut().insert(resolved, Rc::from(content));
-            });
+            write_cached_text(resolved, Rc::from(content));
         }
         Ok(VmValue::Nil)
     });
@@ -279,4 +324,49 @@ pub(crate) fn register_fs_builtins(vm: &mut Vm) {
         }
         Ok(VmValue::Dict(Rc::new(info)))
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn vm() -> Vm {
+        let mut vm = Vm::new();
+        register_fs_builtins(&mut vm);
+        vm
+    }
+
+    fn call(vm: &mut Vm, name: &str, args: Vec<VmValue>) -> Result<VmValue, VmError> {
+        let f = vm.builtins.get(name).unwrap().clone();
+        let mut out = String::new();
+        f(&args, &mut out)
+    }
+
+    fn s(v: &str) -> VmValue {
+        VmValue::String(Rc::from(v))
+    }
+
+    #[test]
+    fn read_file_cache_invalidates_after_external_write() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("note.txt");
+        std::fs::write(&path, "one").unwrap();
+        let path_arg = path.to_string_lossy().into_owned();
+        let mut vm = vm();
+
+        assert_eq!(
+            call(&mut vm, "read_file", vec![s(&path_arg)])
+                .unwrap()
+                .display(),
+            "one"
+        );
+        std::fs::write(&path, "two updated").unwrap();
+
+        assert_eq!(
+            call(&mut vm, "read_file", vec![s(&path_arg)])
+                .unwrap()
+                .display(),
+            "two updated"
+        );
+    }
 }
