@@ -1,14 +1,22 @@
 name: Finalize Release
 
-# Fires when a "Bump version to X.Y.Z" commit lands on main through the merge
-# queue. Runs ./scripts/release_ship.sh --finalize, which audits, dry-run
-# publishes, tags, publishes to crates.io, and creates/updates the GitHub
-# release. The tag push cascades to .github/workflows/release.yml for binary
-# artifacts.
+# Fires whenever main has tag drift — i.e. Cargo.toml's workspace version
+# is ahead of the latest `vX.Y.Z` git tag. Runs ./scripts/release_ship.sh
+# --finalize, which audits, dry-run publishes, tags, publishes to
+# crates.io, and creates/updates the GitHub release. The tag push (under
+# the harn-release-bot App identity) cascades to release.yml for binary
+# tarballs + multi-arch container.
 #
-# workflow_dispatch is kept as a manual recovery path — if this workflow
-# fails mid-run (e.g. crates.io rate limit), re-run it; release_ship.sh is
-# idempotent once the tag exists at HEAD.
+# Tag-drift detection (vs. the older "head commit starts with 'Bump
+# version to '" trigger) means this workflow auto-recovers when an
+# earlier finalize run failed BEFORE pushing the tag. Any subsequent
+# push to main will see drift still present and re-run audit + publish.
+# Once the tag exists at HEAD, drift goes away and the job no-ops.
+#
+# workflow_dispatch is the recovery path for the one residual case:
+# failure AFTER tag push but BEFORE crates.io publish completed (drift
+# is gone but publish state is partial). release_ship.sh's per-crate
+# fallback skips already-published, so manual re-fire is idempotent.
 on:
   push:
     branches: [main]
@@ -27,12 +35,49 @@ env:
   SCCACHE_GHA_ENABLED: "true"
 
 jobs:
+  detect-drift:
+    name: Detect tag drift
+    runs-on: ubuntu-latest
+    outputs:
+      drift: ${{ steps.check.outputs.drift }}
+      cargo_version: ${{ steps.check.outputs.cargo_version }}
+      latest_tag: ${{ steps.check.outputs.latest_tag }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # Need full history so all `vX.Y.Z` tags are present locally;
+          # the default shallow clone omits tags.
+          fetch-depth: 0
+          ref: main
+
+      - name: Compare Cargo.toml workspace version to latest vX.Y.Z tag
+        id: check
+        run: |
+          set -euo pipefail
+          CARGO_VERSION="$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')"
+          LATEST_TAG="$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -1)"
+          LATEST_VERSION="${LATEST_TAG#v}"
+          if [[ -z "$LATEST_TAG" ]]; then
+            DRIFT=true
+            echo "::notice::No vX.Y.Z tags exist yet; treating Cargo.toml=$CARGO_VERSION as drift (first release)."
+          elif [[ "$CARGO_VERSION" != "$LATEST_VERSION" ]]; then
+            DRIFT=true
+            echo "::notice::Cargo.toml=$CARGO_VERSION ahead of latest tag $LATEST_TAG → finalize needed."
+          else
+            DRIFT=false
+            echo "::notice::Cargo.toml=$CARGO_VERSION matches latest tag $LATEST_TAG → no-op."
+          fi
+          {
+            echo "drift=$DRIFT"
+            echo "cargo_version=$CARGO_VERSION"
+            echo "latest_tag=$LATEST_TAG"
+          } >> "$GITHUB_OUTPUT"
+
   finalize:
     name: Finalize release
+    needs: detect-drift
     runs-on: ubuntu-latest
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      startsWith(github.event.head_commit.message, 'Bump version to ')
+    if: github.event_name == 'workflow_dispatch' || needs.detect-drift.outputs.drift == 'true'
     steps:
       # Mint a short-lived GitHub App installation token so the tag push
       # below comes from the harn-release-bot identity instead of
@@ -99,8 +144,8 @@ jobs:
 
       - name: Configure git identity
         run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "harn-release-bot[bot]"
+          git config --global user.email "harn-release-bot[bot]@users.noreply.github.com"
 
       - name: Finalize release
         env:
