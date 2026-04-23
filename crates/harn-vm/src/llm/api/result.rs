@@ -72,7 +72,16 @@ pub(crate) fn vm_build_llm_result(
         dict.insert("data".to_string(), json_val);
     }
 
-    let has_text_tool_protocol = tools_val.is_some() || !result.tool_calls.is_empty();
+    let has_tagged_blocks = [
+        "<assistant_prose>",
+        "<user_response>",
+        "<done>",
+        "<tool_call>",
+    ]
+    .iter()
+    .any(|tag| result.text.contains(tag));
+    let has_text_tool_protocol =
+        tools_val.is_some() || !result.tool_calls.is_empty() || has_tagged_blocks;
     // Keep parsing available for tool-calling responses so llm_call can
     // expose canonical/prose/tool metadata, but do not surface tagged-protocol
     // violations for ordinary plain-text completions with no tools.
@@ -174,7 +183,7 @@ pub(crate) fn vm_build_llm_result(
             crate::llm::tools::parse_text_tool_calls_with_tools(&result.text, tools_val);
         parse_result.prose
     } else {
-        result.text.clone()
+        crate::visible_text::sanitize_visible_assistant_text(&result.text, false)
     };
     dict.insert(
         "visible_text".to_string(),

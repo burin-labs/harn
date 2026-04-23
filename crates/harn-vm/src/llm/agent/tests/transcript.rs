@@ -588,6 +588,42 @@ async fn plain_done_sentinel_can_complete_persistent_loop_without_tools() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn tagged_done_block_does_not_complete_persistent_loop_without_tools() {
+    reset_llm_mock_state();
+    crate::llm::mock::push_llm_mock(crate::llm::mock::LlmMock {
+        text: "<assistant_prose>Still working.</assistant_prose>\n<done>##DONE##</done>"
+            .to_string(),
+        tool_calls: Vec::new(),
+        match_pattern: None,
+        consume_on_match: true,
+        input_tokens: None,
+        output_tokens: None,
+        cache_read_tokens: None,
+        cache_write_tokens: None,
+        thinking: None,
+        stop_reason: None,
+        model: "mock".to_string(),
+        provider: None,
+        blocks: None,
+        error: None,
+    });
+
+    let mut opts = base_opts(vec![serde_json::json!({
+        "role": "user",
+        "content": "Keep going until you are done",
+    })]);
+    let mut config = base_agent_config();
+    config.persistent = true;
+    config.max_iterations = 1;
+
+    let result = run_agent_loop_internal(&mut opts, config).await.unwrap();
+    assert_eq!(result["status"], "budget_exhausted");
+    assert_eq!(result["iterations"].as_u64(), Some(1));
+    assert_eq!(result["visible_text"].as_str(), Some("Still working."));
+    reset_llm_mock_state();
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn ledger_tool_is_rejected_when_no_task_ledger_is_active() {
     reset_llm_mock_state();
     crate::llm::mock::push_llm_mock(crate::llm::mock::LlmMock {

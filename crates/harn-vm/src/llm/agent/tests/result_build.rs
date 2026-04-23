@@ -135,6 +135,39 @@ fn build_llm_call_result_leaves_plain_text_unflagged_without_tools() {
 }
 
 #[test]
+fn build_llm_call_result_unwraps_tagged_no_tool_visible_text() {
+    let opts = base_opts(vec![json!({"role": "user", "content": "Say hello"})]);
+    let result = LlmResult {
+        text: "<assistant_prose>Hello there</assistant_prose>\n<done>##DONE##</done>".to_string(),
+        tool_calls: Vec::new(),
+        input_tokens: 8,
+        output_tokens: 4,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
+        model: "mock".to_string(),
+        provider: "mock".to_string(),
+        thinking: None,
+        stop_reason: None,
+        blocks: Vec::new(),
+    };
+
+    let vm_result = build_llm_call_result(&result, &opts);
+    let dict = vm_result.as_dict().expect("dict");
+    assert_eq!(
+        dict.get("prose").map(VmValue::display).as_deref(),
+        Some("Hello there")
+    );
+    assert_eq!(
+        dict.get("visible_text").map(VmValue::display).as_deref(),
+        Some("Hello there")
+    );
+    assert!(
+        dict.get("protocol_violations").is_none(),
+        "well-formed tagged no-tool responses should not report protocol violations"
+    );
+}
+
+#[test]
 fn build_llm_call_transcript_keeps_private_reasoning_out_of_visible_message_text() {
     let opts = base_opts(vec![json!({"role": "user", "content": "Explain the repo"})]);
     let result = LlmResult {

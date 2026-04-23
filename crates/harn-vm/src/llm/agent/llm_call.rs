@@ -437,13 +437,22 @@ pub(super) async fn run_llm_call(
 
     // Check sentinel on every response; when it coexists with tool calls
     // we still process the tools, then exit.
-    let sentinel_in_text = tagged_done_marker
+    let tagged_done_hit = tagged_done_marker
         .as_deref()
-        .is_some_and(|body| body == ctx.done_sentinel)
-        // Native-format and no-tools paths bypass the tagged parser —
-        // fall back to substring match.
-        || (ctx.tool_format == "native" && text.contains(ctx.done_sentinel))
-        || (!ctx.has_tools && text.contains(ctx.done_sentinel));
+        .is_some_and(|body| body == ctx.done_sentinel);
+    let plain_done_hit = if ctx.tool_format == "native" {
+        // Native-mode providers may surface the sentinel in visible prose
+        // while tool calls travel separately via the provider channel.
+        text.contains(ctx.done_sentinel)
+    } else if !ctx.has_tools {
+        // No-tool loops advertise the plain sentinel form, not a tagged
+        // `<done>` block. Honor only visible prose so tagged control
+        // blocks do not terminate a text-only loop early.
+        text_prose.contains(ctx.done_sentinel)
+    } else {
+        false
+    };
+    let sentinel_in_text = (ctx.has_tools && tagged_done_hit) || plain_done_hit;
     let phase_change = ctx
         .break_unless_phase
         .is_some_and(|phase| loop_state_requests_phase_change(&text, phase));
