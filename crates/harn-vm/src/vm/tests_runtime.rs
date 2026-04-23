@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::path::Path;
 use std::rc::Rc;
+use std::time::Duration;
 
 use crate::compiler::Compiler;
 use crate::stdlib::register_vm_stdlib;
@@ -112,6 +113,19 @@ fn run_harn_result(source: &str) -> Result<(String, VmValue), VmError> {
             })
             .await
     })
+}
+
+async fn run_harn_result_async(source: &str) -> Result<(String, VmValue), VmError> {
+    let mut lexer = Lexer::new(source);
+    let tokens = lexer.tokenize().unwrap();
+    let mut parser = Parser::new(tokens);
+    let program = parser.parse().unwrap();
+    let chunk = Compiler::new().compile(&program).unwrap();
+
+    let mut vm = Vm::new();
+    register_vm_stdlib(&mut vm);
+    let result = vm.execute(&chunk).await?;
+    Ok((vm.output().to_string(), result))
 }
 
 fn run_harn_with_setup<F>(source: &str, setup: F) -> Result<(String, VmValue), VmError>
@@ -1066,6 +1080,24 @@ log("cancelled")
 }
 
 #[test]
+fn test_cancel_graceful_propagates_to_cpu_bound_spawn() {
+    let out = run_output(
+        r#"pipeline t(task) {
+let handle = spawn {
+  var i = 0
+  while true {
+    i = i + 1
+  }
+}
+let result = cancel_graceful(handle, 100ms)
+log(is_err(result))
+log(contains(unwrap_err(result), "cancelled"))
+}"#,
+    );
+    assert_eq!(out, "[harn] true\n[harn] true");
+}
+
+#[test]
 fn test_spawn_returns_value() {
     let out = run_output("pipeline t(task) { let h = spawn { 42 }\nlet r = await(h)\nlog(r) }");
     assert_eq!(out, "[harn] 42");
@@ -1113,6 +1145,34 @@ try {
 }"#,
     );
     assert_eq!(out, "[harn] caught");
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn test_deadline_interrupts_async_sleep_without_wall_clock() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let handle = tokio::task::spawn_local(async {
+                run_harn_result_async(
+                    r#"pipeline t(task) {
+try {
+  deadline 50ms {
+    sleep(1s)
+    log("missed deadline")
+  }
+} catch(e) {
+  log("caught")
+}
+}"#,
+                )
+                .await
+            });
+            tokio::task::yield_now().await;
+            tokio::time::advance(Duration::from_millis(50)).await;
+            let (output, _) = handle.await.expect("join VM task").expect("run Harn");
+            assert_eq!(output.trim_end(), "[harn] caught");
+        })
+        .await;
 }
 
 /// Helper that runs Harn source with a set of denied builtins.

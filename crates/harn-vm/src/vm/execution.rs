@@ -1,10 +1,12 @@
 use std::rc::Rc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::chunk::{Chunk, ChunkRef};
 use crate::value::{ModuleFunctionRegistry, VmError, VmValue};
 
 use super::{CallFrame, LocalSlot, Vm};
+
+const CANCEL_GRACE_INSTRUCTIONS: usize = 1024;
 
 impl Vm {
     /// Execute a compiled chunk.
@@ -127,15 +129,11 @@ impl Vm {
         });
 
         loop {
-            if let Some(&(deadline, _)) = self.deadlines.last() {
-                if Instant::now() > deadline {
-                    self.deadlines.pop();
-                    let err = VmError::Thrown(VmValue::String(Rc::from("Deadline exceeded")));
-                    match self.handle_error(err) {
-                        Ok(None) => continue,
-                        Ok(Some(val)) => return Ok(val),
-                        Err(e) => return Err(e),
-                    }
+            if let Some(err) = self.pending_scope_interrupt() {
+                match self.handle_error(err) {
+                    Ok(None) => continue,
+                    Ok(Some(val)) => return Ok(val),
+                    Err(e) => return Err(e),
                 }
             }
 
@@ -166,7 +164,7 @@ impl Vm {
             let op = frame.chunk.code[frame.ip];
             frame.ip += 1;
 
-            match self.execute_op(op).await {
+            match self.execute_op_with_scope_interrupts(op).await {
                 Ok(Some(val)) => return Ok(val),
                 Ok(None) => continue,
                 Err(VmError::Return(val)) => {
@@ -209,15 +207,11 @@ impl Vm {
     }
 
     pub(crate) async fn execute_one_cycle(&mut self) -> Result<Option<(VmValue, bool)>, VmError> {
-        if let Some(&(deadline, _)) = self.deadlines.last() {
-            if Instant::now() > deadline {
-                self.deadlines.pop();
-                let err = VmError::Thrown(VmValue::String(Rc::from("Deadline exceeded")));
-                match self.handle_error(err) {
-                    Ok(None) => return Ok(None),
-                    Ok(Some(val)) => return Ok(Some((val, false))),
-                    Err(e) => return Err(e),
-                }
+        if let Some(err) = self.pending_scope_interrupt() {
+            match self.handle_error(err) {
+                Ok(None) => return Ok(None),
+                Ok(Some(val)) => return Ok(Some((val, false))),
+                Err(e) => return Err(e),
             }
         }
 
@@ -247,7 +241,7 @@ impl Vm {
         let op = frame.chunk.code[frame.ip];
         frame.ip += 1;
 
-        match self.execute_op(op).await {
+        match self.execute_op_with_scope_interrupts(op).await {
             Ok(Some(val)) => Ok(Some((val, false))),
             Ok(None) => Ok(None),
             Err(VmError::Return(val)) => {
@@ -285,6 +279,85 @@ impl Vm {
                 }
             }
         }
+    }
+
+    fn pending_scope_interrupt(&mut self) -> Option<VmError> {
+        if self.is_cancel_requested() {
+            match self.cancel_grace_instructions_remaining.as_mut() {
+                Some(0) => {
+                    self.cancel_spawned_tasks();
+                    return Some(Self::cancelled_error());
+                }
+                Some(remaining) => *remaining -= 1,
+                None => self.cancel_grace_instructions_remaining = Some(CANCEL_GRACE_INSTRUCTIONS),
+            }
+        } else {
+            self.cancel_grace_instructions_remaining = None;
+        }
+        if let Some(&(deadline, _)) = self.deadlines.last() {
+            if Instant::now() >= deadline {
+                self.deadlines.pop();
+                return Some(Self::deadline_exceeded_error());
+            }
+        }
+        None
+    }
+
+    async fn execute_op_with_scope_interrupts(
+        &mut self,
+        op: u8,
+    ) -> Result<Option<VmValue>, VmError> {
+        let deadline = self.deadlines.last().map(|(deadline, _)| *deadline);
+        let cancel_token = self.cancel_token.clone();
+
+        if deadline.is_none() && cancel_token.is_none() {
+            return self.execute_op(op).await;
+        }
+
+        let has_deadline = deadline.is_some();
+        let cancel_requested_at_start = cancel_token
+            .as_ref()
+            .is_some_and(|token| token.load(std::sync::atomic::Ordering::SeqCst));
+        let has_cancel = cancel_token.is_some() && !cancel_requested_at_start;
+        let deadline_sleep = async move {
+            if let Some(deadline) = deadline {
+                tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)).await;
+            } else {
+                std::future::pending::<()>().await;
+            }
+        };
+        let cancel_sleep = async move {
+            if let Some(token) = cancel_token {
+                while !token.load(std::sync::atomic::Ordering::SeqCst) {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            } else {
+                std::future::pending::<()>().await;
+            }
+        };
+
+        tokio::select! {
+            result = self.execute_op(op) => result,
+            _ = deadline_sleep, if has_deadline => {
+                self.deadlines.pop();
+                self.cancel_spawned_tasks();
+                Err(Self::deadline_exceeded_error())
+            }
+            _ = cancel_sleep, if has_cancel => {
+                self.cancel_spawned_tasks();
+                Err(Self::cancelled_error())
+            }
+        }
+    }
+
+    pub(crate) fn deadline_exceeded_error() -> VmError {
+        VmError::Thrown(VmValue::String(Rc::from("Deadline exceeded")))
+    }
+
+    pub(crate) fn cancelled_error() -> VmError {
+        VmError::Thrown(VmValue::String(Rc::from(
+            "kind:cancelled:VM cancelled by host",
+        )))
     }
 
     /// Capture the current call stack as (fn_name, line, col, source_file) tuples.

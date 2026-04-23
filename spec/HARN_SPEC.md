@@ -398,9 +398,10 @@ match_expr         ::= 'match' expression '{' match_arm* '}'
 match_arm          ::= expression ['if' expression] '->' '{' block '}'
 while_loop         ::= 'while' expression '{' block '}'
 retry_block        ::= 'retry' ['(' expression ')'] expression? '{' block '}'
-parallel_block     ::= 'parallel' '(' expression ')' '{' [IDENTIFIER '->'] block '}'
-parallel_each      ::= 'parallel' 'each' expression '{' IDENTIFIER '->' block '}'
-parallel_settle    ::= 'parallel' 'settle' expression '{' IDENTIFIER '->' block '}'
+parallel_block     ::= 'parallel' '(' expression ')' [parallel_options] '{' [IDENTIFIER '->'] block '}'
+parallel_each      ::= 'parallel' 'each' expression [parallel_options] '{' IDENTIFIER '->' block '}'
+parallel_settle    ::= 'parallel' 'settle' expression [parallel_options] '{' IDENTIFIER '->' block '}'
+parallel_options   ::= 'with' '{' 'max_concurrent' ':' expression '}'
 defer_block        ::= 'defer' '{' block '}'
 return_stmt        ::= 'return' [expression]
 throw_stmt         ::= 'throw' expression
@@ -1187,6 +1188,20 @@ successes and failures into a result object with fields:
 | `succeeded` | int | Number of `Ok` results |
 | `failed` | int | Number of `Err` results |
 
+All parallel forms accept `with { max_concurrent: N }` before the body:
+
+```harn
+fn fetch_page(cursor) { cursor }
+let cursors = ["a", "b", "c"]
+let pages = parallel settle cursors with { max_concurrent: 4 } { cursor ->
+  fetch_page(cursor)
+}
+```
+
+`max_concurrent` caps simultaneous in-flight child tasks. Missing,
+zero, and negative values mean unlimited. Results are still returned in
+source order.
+
 ### defer
 
 ```harn
@@ -1218,11 +1233,34 @@ let handle = spawn {
 }
 let result = await(handle)
 cancel(handle)
+let outcome = cancel_graceful(handle, 2s)
 ```
 
 `spawn` launches an async task and returns a `taskHandle`.
 `await` (a built-in interpreter function, not a keyword) blocks until the task completes
-and returns its result. `cancel` cancels the task.
+and returns its result. `cancel` force-aborts the task. `cancel_graceful`
+requests cooperative cancellation, waits up to the given duration, and then
+force-aborts the task if it is still running. `is_cancelled()` reports whether
+the current task has observed a cancellation request.
+
+Cancellation is structured at the VM task boundary. Spawned tasks inherit the
+parent's runtime context snapshot and cancellation token. The VM checks
+cancellation between bytecode instructions and while awaiting interruptible
+async operations, so CPU-bound Harn loops and blocked async calls both unwind.
+When a VM exits, any un-awaited spawned tasks it owns are cancelled and aborted.
+
+### deadline
+
+```harn
+deadline 30s {
+  // work must complete within 30 seconds
+}
+```
+
+`deadline` applies a timeout scope to the block. If the deadline expires, Harn
+throws `"Deadline exceeded"`, interrupts the active opcode or async wait, and
+cancels child tasks owned by that scope's VM. The error can be caught with
+`try`/`catch`.
 
 ### Synchronization
 

@@ -208,6 +208,7 @@ impl Vm {
         closure: &VmClosure,
         args: &[VmValue],
     ) -> Result<VmValue, VmError> {
+        self.cancel_grace_instructions_remaining = None;
         self.call_closure(closure, args).await
     }
 
