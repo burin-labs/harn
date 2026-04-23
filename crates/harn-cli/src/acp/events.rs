@@ -1,22 +1,21 @@
 //! ACP AgentEventSink — translates canonical `AgentEvent` variants into ACP
 //! `session/update` notifications. Registered per-session at prompt start.
 
-use std::io::Write;
-use std::sync::Arc;
-
 use harn_vm::agent_events::{AgentEvent, AgentEventSink};
 use harn_vm::visible_text::sanitize_visible_assistant_text;
+
+use super::AcpOutput;
 
 /// Writes canonical ACP `session/update` notifications for each
 /// `AgentEvent` the turn loop emits. Holds only the minimum state needed
 /// to serialize notifications without the full AcpBridge.
 pub(super) struct AcpAgentEventSink {
-    stdout_lock: Arc<std::sync::Mutex<()>>,
+    output: AcpOutput,
 }
 
 impl AcpAgentEventSink {
-    pub(super) fn new(stdout_lock: Arc<std::sync::Mutex<()>>) -> Self {
-        Self { stdout_lock }
+    pub(super) fn new(output: AcpOutput) -> Self {
+        Self { output }
     }
 
     fn write_notification(&self, params: serde_json::Value) {
@@ -26,11 +25,7 @@ impl AcpAgentEventSink {
             "params": params,
         });
         if let Ok(line) = serde_json::to_string(&notification) {
-            let _guard = self.stdout_lock.lock().unwrap_or_else(|e| e.into_inner());
-            let mut stdout = std::io::stdout().lock();
-            let _ = stdout.write_all(line.as_bytes());
-            let _ = stdout.write_all(b"\n");
-            let _ = stdout.flush();
+            self.output.write_line(&line);
         }
     }
 

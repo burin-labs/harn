@@ -5,12 +5,14 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
 use axum::body::{Body, Bytes};
+use axum::extract::ws::{Message as WsMessage, WebSocket, WebSocketUpgrade};
 use axum::extract::{DefaultBodyLimit, Extension, OriginalUri, Query};
 use axum::http::{HeaderMap, Method, StatusCode};
 use axum::middleware;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::Router;
+use futures::{SinkExt, StreamExt};
 use serde_json::{json, Value as JsonValue};
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
@@ -33,6 +35,10 @@ const REQUEST_RELEASE_FILE_ENV: &str = "HARN_ORCHESTRATOR_TEST_REQUEST_RELEASE_F
 const API_KEYS_ENV: &str = "HARN_ORCHESTRATOR_API_KEYS";
 const HMAC_SECRET_ENV: &str = "HARN_ORCHESTRATOR_HMAC_SECRET";
 const AUTH_TIMESTAMP_WINDOW_SECS: i64 = 5 * 60;
+const ACP_PATH: &str = "/acp";
+const ACP_TOPIC_PREFIX: &str = "acp.session";
+const ACP_PING_INTERVAL: Duration = Duration::from_secs(30);
+const ACP_PONG_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Clone)]
 pub(crate) struct ListenerConfig {
@@ -123,6 +129,11 @@ impl ListenerRuntime {
                 reload,
             })
         });
+        let acp_state = Arc::new(AcpWebSocketState {
+            event_log: config.event_log.clone(),
+            auth: auth.clone(),
+            pipeline: None,
+        });
         let routes = Arc::new(RouteRegistry::new(
             config.routes,
             config.event_log.clone(),
@@ -150,6 +161,10 @@ impl ListenerRuntime {
                 "/metrics",
                 get(metrics_endpoint).layer(Extension(config.metrics_registry.clone())),
             );
+        app = app.route(
+            ACP_PATH,
+            get(acp_websocket_endpoint).layer(Extension(acp_state)),
+        );
         if let Some(admin_state) = admin_state {
             app = app.route(
                 ADMIN_RELOAD_PATH,
@@ -367,6 +382,13 @@ struct AdminReloadState {
     event_log: Arc<AnyEventLog>,
     auth: Arc<ListenerAuth>,
     reload: AdminReloadHandle,
+}
+
+#[derive(Clone)]
+struct AcpWebSocketState {
+    event_log: Arc<AnyEventLog>,
+    auth: Arc<ListenerAuth>,
+    pipeline: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -803,6 +825,265 @@ async fn admin_reload_endpoint(
         )
             .into_response(),
     }
+}
+
+async fn acp_websocket_endpoint(
+    Extension(state): Extension<Arc<AcpWebSocketState>>,
+    ws: WebSocketUpgrade,
+    method: Method,
+    OriginalUri(uri): OriginalUri,
+    headers: HeaderMap,
+) -> Response {
+    let normalized_headers = normalize_headers(&headers);
+    if state.auth.has_credentials()
+        && state
+            .auth
+            .authorize(
+                state.event_log.as_ref(),
+                method.as_str(),
+                uri.path(),
+                &normalized_headers,
+                &[],
+            )
+            .await
+            .is_err()
+    {
+        return HttpError::unauthorized("auth failed").into_response();
+    }
+
+    ws.on_upgrade(move |socket| run_acp_websocket(socket, state))
+        .into_response()
+}
+
+async fn run_acp_websocket(socket: WebSocket, state: Arc<AcpWebSocketState>) {
+    let connection_id = uuid::Uuid::new_v4().to_string();
+    append_acp_event(
+        &state.event_log,
+        &connection_id,
+        "connection_opened",
+        json!({
+            "transport": "websocket",
+            "path": ACP_PATH,
+        }),
+    )
+    .await;
+
+    let (to_acp_tx, to_acp_rx) = mpsc::unbounded_channel::<JsonValue>();
+    let (from_acp_tx, mut from_acp_rx) = mpsc::unbounded_channel::<String>();
+    let pipeline = state.pipeline.clone();
+    let worker = std::thread::Builder::new()
+        .name(format!("harn-acp-ws-{connection_id}"))
+        .spawn(move || {
+            let runtime = match tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            {
+                Ok(runtime) => runtime,
+                Err(error) => {
+                    eprintln!("[harn] failed to start ACP WebSocket worker: {error}");
+                    return;
+                }
+            };
+            runtime.block_on(crate::acp::run_acp_channel_server(
+                pipeline,
+                to_acp_rx,
+                from_acp_tx,
+            ));
+        });
+
+    let Ok(worker) = worker else {
+        append_acp_event(
+            &state.event_log,
+            &connection_id,
+            "connection_failed",
+            json!({"reason": "worker_spawn_failed"}),
+        )
+        .await;
+        return;
+    };
+
+    let (mut sender, mut receiver) = socket.split();
+    let mut ping_interval = tokio::time::interval(ACP_PING_INTERVAL);
+    ping_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut liveness_interval = tokio::time::interval(Duration::from_secs(1));
+    liveness_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut ping_sent_at: Option<Instant> = None;
+    let mut session_id: Option<String> = None;
+
+    loop {
+        tokio::select! {
+            Some(line) = from_acp_rx.recv() => {
+                if let Some(id) = session_id_from_acp_response(&line) {
+                    session_id = Some(id.clone());
+                    append_acp_event(
+                        &state.event_log,
+                        &connection_id,
+                        "session_opened",
+                        json!({"session_id": id}),
+                    )
+                    .await;
+                }
+                append_acp_event(
+                    &state.event_log,
+                    &connection_id,
+                    "message_sent",
+                    acp_message_log_payload(&line, session_id.as_deref()),
+                )
+                .await;
+                if sender.send(WsMessage::Text(line.into())).await.is_err() {
+                    break;
+                }
+            }
+            frame = receiver.next() => {
+                let Some(frame) = frame else {
+                    break;
+                };
+                let Ok(frame) = frame else {
+                    break;
+                };
+                match frame {
+                    WsMessage::Text(text) => {
+                        let line = text.to_string();
+                        append_acp_event(
+                            &state.event_log,
+                            &connection_id,
+                            "message_received",
+                            acp_message_log_payload(&line, session_id.as_deref()),
+                        )
+                        .await;
+                        match serde_json::from_str::<JsonValue>(&line) {
+                            Ok(value) => {
+                                if to_acp_tx.send(value).is_err() {
+                                    break;
+                                }
+                            }
+                            Err(error) => {
+                                let response = harn_vm::jsonrpc::error_response(
+                                    JsonValue::Null,
+                                    -32700,
+                                    &format!("Parse error: {error}"),
+                                );
+                                if let Ok(line) = serde_json::to_string(&response) {
+                                    let _ = sender.send(WsMessage::Text(line.into())).await;
+                                }
+                            }
+                        }
+                    }
+                    WsMessage::Binary(_) => {
+                        let response = harn_vm::jsonrpc::error_response(
+                            JsonValue::Null,
+                            -32600,
+                            "ACP WebSocket transport only accepts JSON-RPC text frames",
+                        );
+                        if let Ok(line) = serde_json::to_string(&response) {
+                            let _ = sender.send(WsMessage::Text(line.into())).await;
+                        }
+                    }
+                    WsMessage::Ping(payload) => {
+                        if sender.send(WsMessage::Pong(payload)).await.is_err() {
+                            break;
+                        }
+                    }
+                    WsMessage::Pong(_) => {
+                        ping_sent_at = None;
+                    }
+                    WsMessage::Close(_) => {
+                        break;
+                    }
+                }
+            }
+            _ = ping_interval.tick() => {
+                if ping_sent_at.is_none() {
+                    ping_sent_at = Some(Instant::now());
+                    if sender.send(WsMessage::Ping(Vec::new().into())).await.is_err() {
+                        break;
+                    }
+                }
+            }
+            _ = liveness_interval.tick() => {
+                if ping_sent_at.is_some_and(|sent| sent.elapsed() > ACP_PONG_TIMEOUT) {
+                    let _ = sender.send(WsMessage::Close(None)).await;
+                    append_acp_event(
+                        &state.event_log,
+                        &connection_id,
+                        "connection_liveness_timeout",
+                        json!({"timeout_ms": ACP_PONG_TIMEOUT.as_millis()}),
+                    )
+                    .await;
+                    break;
+                }
+            }
+        }
+    }
+
+    drop(to_acp_tx);
+    let _ = tokio::task::spawn_blocking(move || worker.join()).await;
+    append_acp_event(
+        &state.event_log,
+        &connection_id,
+        "connection_closed",
+        json!({
+            "session_id": session_id,
+            "retention_ms": 5 * 60 * 1000u64,
+        }),
+    )
+    .await;
+}
+
+async fn append_acp_event(
+    event_log: &Arc<AnyEventLog>,
+    connection_id: &str,
+    kind: &str,
+    payload: JsonValue,
+) {
+    let Ok(topic) = Topic::new(format!("{ACP_TOPIC_PREFIX}.{connection_id}")) else {
+        return;
+    };
+    let _ = event_log.append(&topic, LogEvent::new(kind, payload)).await;
+}
+
+fn acp_message_log_payload(line: &str, session_id: Option<&str>) -> JsonValue {
+    match serde_json::from_str::<JsonValue>(line) {
+        Ok(value) => {
+            let mut payload = json!({
+                "method": value.get("method").and_then(JsonValue::as_str),
+                "id": value.get("id").cloned(),
+                "session_id": session_id,
+            });
+            if let Some(params_session_id) = value
+                .get("params")
+                .and_then(|params| params.get("sessionId").or_else(|| params.get("session_id")))
+                .and_then(JsonValue::as_str)
+            {
+                payload["session_id"] = json!(params_session_id);
+            }
+            if let Some(result_session_id) = value
+                .get("result")
+                .and_then(|result| result.get("sessionId").or_else(|| result.get("session_id")))
+                .and_then(JsonValue::as_str)
+            {
+                payload["session_id"] = json!(result_session_id);
+            }
+            payload
+        }
+        Err(_) => json!({
+            "malformed": true,
+            "session_id": session_id,
+        }),
+    }
+}
+
+fn session_id_from_acp_response(line: &str) -> Option<String> {
+    serde_json::from_str::<JsonValue>(line)
+        .ok()
+        .and_then(|value| value.get("result").cloned())
+        .and_then(|result| {
+            result
+                .get("sessionId")
+                .or_else(|| result.get("session_id"))
+                .and_then(JsonValue::as_str)
+                .map(ToString::to_string)
+        })
 }
 
 async fn authorize_request(
@@ -1335,6 +1616,10 @@ impl ListenerAuth {
 
     pub(crate) fn has_api_keys(&self) -> bool {
         !self.api_keys.is_empty()
+    }
+
+    pub(crate) fn has_credentials(&self) -> bool {
+        self.has_api_keys() || self.hmac_secret.is_some()
     }
 
     pub(crate) async fn authorize(
@@ -1871,6 +2156,93 @@ mod tests {
         format!("sha256={encoded}")
     }
 
+    fn authorized_acp_request(
+        addr: std::net::SocketAddr,
+    ) -> tokio_tungstenite::tungstenite::http::Request<()> {
+        use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+
+        let mut request = format!("ws://{addr}{ACP_PATH}")
+            .into_client_request()
+            .expect("client request");
+        request.headers_mut().insert(
+            tokio_tungstenite::tungstenite::http::header::AUTHORIZATION,
+            "Bearer ws-test-key".parse().expect("authorization header"),
+        );
+        request
+    }
+
+    async fn next_acp_text(
+        socket: &mut tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
+    ) -> JsonValue {
+        loop {
+            let message = socket
+                .next()
+                .await
+                .expect("websocket message")
+                .expect("websocket ok");
+            if let tokio_tungstenite::tungstenite::Message::Text(text) = message {
+                return serde_json::from_str(&text).expect("json-rpc text");
+            }
+        }
+    }
+
+    async fn acp_request(
+        socket: &mut tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
+        id: u64,
+        method: &str,
+        params: JsonValue,
+    ) -> JsonValue {
+        socket
+            .send(tokio_tungstenite::tungstenite::Message::Text(
+                json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "method": method,
+                    "params": params,
+                })
+                .to_string()
+                .into(),
+            ))
+            .await
+            .expect("send acp request");
+        loop {
+            let message = next_acp_text(socket).await;
+            if message.get("method").is_some() && message.get("id").is_some() {
+                socket
+                    .send(tokio_tungstenite::tungstenite::Message::Text(
+                        json!({
+                            "jsonrpc": "2.0",
+                            "id": message["id"].clone(),
+                            "result": {},
+                        })
+                        .to_string()
+                        .into(),
+                    ))
+                    .await
+                    .expect("send host response");
+                continue;
+            }
+            if message.get("id").and_then(JsonValue::as_u64) == Some(id) {
+                return message;
+            }
+        }
+    }
+
+    async fn new_acp_session(addr: std::net::SocketAddr) -> String {
+        let (mut socket, _) = tokio_tungstenite::connect_async(authorized_acp_request(addr))
+            .await
+            .expect("connect acp websocket");
+        let response = acp_request(&mut socket, 1, "session/new", json!({})).await;
+        response["result"]["sessionId"]
+            .as_str()
+            .expect("session id")
+            .to_string()
+    }
+
     async fn pending_events(log: &Arc<AnyEventLog>) -> Vec<(u64, harn_vm::event_log::LogEvent)> {
         log.read_range(&Topic::new(PENDING_TOPIC).expect("pending topic"), None, 16)
             .await
@@ -1885,6 +2257,127 @@ mod tests {
         )
         .await
         .expect("read claim events")
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn acp_websocket_requires_configured_bearer_auth() {
+        let _guard = lock_harn_state();
+        reset_active_event_log();
+        std::env::set_var(API_KEYS_ENV, "ws-test-key");
+        std::env::remove_var(HMAC_SECRET_ENV);
+
+        let dir = tempdir().expect("tempdir");
+        let log = install_default_for_base_dir(dir.path()).expect("install event log");
+        let listener = ListenerRuntime::start(ListenerConfig {
+            bind: "127.0.0.1:0".parse().expect("bind addr"),
+            tls: None,
+            event_log: log,
+            secrets: Arc::new(harn_vm::secrets::EnvSecretProvider::new(
+                "harn/listener-test",
+            )),
+            allowed_origins: OriginAllowList::wildcard(),
+            max_body_bytes: DEFAULT_MAX_BODY_BYTES,
+            metrics_registry: Arc::new(harn_vm::MetricsRegistry::default()),
+            admin_reload: None,
+            routes: Vec::new(),
+        })
+        .await
+        .expect("start listener");
+
+        let unauthorized =
+            tokio_tungstenite::connect_async(format!("ws://{}{}", listener.local_addr(), ACP_PATH))
+                .await;
+        assert!(unauthorized.is_err(), "missing bearer should fail upgrade");
+
+        let (mut socket, _) =
+            tokio_tungstenite::connect_async(authorized_acp_request(listener.local_addr()))
+                .await
+                .expect("authorized connect");
+        let response = acp_request(&mut socket, 1, "initialize", json!({})).await;
+        assert_eq!(response["result"]["agentInfo"]["name"], "harn");
+        assert!(
+            response["result"]["agentCapabilities"]["sessionCapabilities"]
+                .get("load")
+                .is_some()
+        );
+
+        listener
+            .shutdown(Duration::from_secs(5))
+            .await
+            .expect("shutdown listener");
+        std::env::remove_var(API_KEYS_ENV);
+        reset_active_event_log();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn acp_websocket_parallel_clients_get_distinct_sessions_and_can_load_active_session() {
+        let _guard = lock_harn_state();
+        reset_active_event_log();
+        std::env::set_var(API_KEYS_ENV, "ws-test-key");
+        std::env::remove_var(HMAC_SECRET_ENV);
+
+        let dir = tempdir().expect("tempdir");
+        let log = install_default_for_base_dir(dir.path()).expect("install event log");
+        let listener = ListenerRuntime::start(ListenerConfig {
+            bind: "127.0.0.1:0".parse().expect("bind addr"),
+            tls: None,
+            event_log: log,
+            secrets: Arc::new(harn_vm::secrets::EnvSecretProvider::new(
+                "harn/listener-test",
+            )),
+            allowed_origins: OriginAllowList::wildcard(),
+            max_body_bytes: DEFAULT_MAX_BODY_BYTES,
+            metrics_registry: Arc::new(harn_vm::MetricsRegistry::default()),
+            admin_reload: None,
+            routes: Vec::new(),
+        })
+        .await
+        .expect("start listener");
+
+        let (first, second) = tokio::join!(
+            new_acp_session(listener.local_addr()),
+            new_acp_session(listener.local_addr())
+        );
+        assert_ne!(first, second);
+
+        let (mut socket, _) =
+            tokio_tungstenite::connect_async(authorized_acp_request(listener.local_addr()))
+                .await
+                .expect("authorized connect");
+        let created = acp_request(&mut socket, 1, "session/new", json!({})).await;
+        let session_id = created["result"]["sessionId"]
+            .as_str()
+            .expect("session id")
+            .to_string();
+        let loaded = acp_request(
+            &mut socket,
+            2,
+            "session/load",
+            json!({"sessionId": session_id}),
+        )
+        .await;
+        assert_eq!(
+            loaded["result"]["session"]["sessionId"],
+            created["result"]["sessionId"]
+        );
+        let prompted = acp_request(
+            &mut socket,
+            3,
+            "session/prompt",
+            json!({
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "println(\"websocket prompt\")"}],
+            }),
+        )
+        .await;
+        assert_eq!(prompted["result"]["stopReason"], "completed");
+
+        listener
+            .shutdown(Duration::from_secs(5))
+            .await
+            .expect("shutdown listener");
+        std::env::remove_var(API_KEYS_ENV);
+        reset_active_event_log();
     }
 
     fn unix_now_ms() -> i64 {

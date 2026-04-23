@@ -190,7 +190,8 @@ Health probes stay public:
 
 Webhook routes keep using their provider-specific signature checks.
 `a2a-push` routes require either a bearer API key or a shared-secret
-HMAC authorization header.
+HMAC authorization header. The `/acp` WebSocket endpoint requires bearer
+auth when `HARN_ORCHESTRATOR_API_KEYS` is configured.
 
 Configure the auth material with environment variables:
 
@@ -204,6 +205,10 @@ Bearer requests use:
 ```text
 Authorization: Bearer <api-key>
 ```
+
+ACP browser or remote-IDE clients connect to `ws://<host>/acp` or
+`wss://<host>/acp` and send one JSON-RPC ACP message per text frame. See
+[ACP over WebSocket](./acp/websocket.md).
 
 HMAC requests use:
 

@@ -23,6 +23,25 @@ use crate::vm::Vm;
 /// Default timeout for bridge calls (5 minutes).
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(300);
 
+pub type HostBridgeWriter = Arc<dyn Fn(&str) -> Result<(), String> + Send + Sync>;
+
+fn stdout_writer(stdout_lock: Arc<std::sync::Mutex<()>>) -> HostBridgeWriter {
+    Arc::new(move |line: &str| {
+        let _guard = stdout_lock.lock().unwrap_or_else(|e| e.into_inner());
+        let mut stdout = std::io::stdout().lock();
+        stdout
+            .write_all(line.as_bytes())
+            .map_err(|e| format!("Bridge write error: {e}"))?;
+        stdout
+            .write_all(b"\n")
+            .map_err(|e| format!("Bridge write error: {e}"))?;
+        stdout
+            .flush()
+            .map_err(|e| format!("Bridge flush error: {e}"))?;
+        Ok(())
+    })
+}
+
 /// A JSON-RPC 2.0 bridge to a host process over stdin/stdout.
 ///
 /// The bridge sends requests to the host on stdout and receives responses
@@ -35,8 +54,8 @@ pub struct HostBridge {
     pending: Arc<Mutex<HashMap<u64, oneshot::Sender<serde_json::Value>>>>,
     /// Whether the host has sent a cancel notification.
     cancelled: Arc<AtomicBool>,
-    /// Mutex protecting stdout writes to prevent interleaving.
-    stdout_lock: Arc<std::sync::Mutex<()>>,
+    /// Transport writer used to send JSON-RPC to the host.
+    writer: HostBridgeWriter,
     /// ACP session ID (set in ACP mode for session-scoped notifications).
     session_id: std::sync::Mutex<String>,
     /// Name of the currently executing Harn script (without .harn suffix).
@@ -311,7 +330,7 @@ impl HostBridge {
             next_id: AtomicU64::new(1),
             pending,
             cancelled,
-            stdout_lock: Arc::new(std::sync::Mutex::new(())),
+            writer: stdout_writer(Arc::new(std::sync::Mutex::new(()))),
             session_id: std::sync::Mutex::new(String::new()),
             script_name: std::sync::Mutex::new(String::new()),
             queued_user_messages,
@@ -337,11 +356,20 @@ impl HostBridge {
         stdout_lock: Arc<std::sync::Mutex<()>>,
         start_id: u64,
     ) -> Self {
+        Self::from_parts_with_writer(pending, cancelled, stdout_writer(stdout_lock), start_id)
+    }
+
+    pub fn from_parts_with_writer(
+        pending: Arc<Mutex<HashMap<u64, oneshot::Sender<serde_json::Value>>>>,
+        cancelled: Arc<AtomicBool>,
+        writer: HostBridgeWriter,
+        start_id: u64,
+    ) -> Self {
         Self {
             next_id: AtomicU64::new(start_id),
             pending,
             cancelled,
-            stdout_lock,
+            writer,
             session_id: std::sync::Mutex::new(String::new()),
             script_name: std::sync::Mutex::new(String::new()),
             queued_user_messages: Arc::new(Mutex::new(VecDeque::new())),
@@ -364,7 +392,7 @@ impl HostBridge {
             next_id: AtomicU64::new(1),
             pending: Arc::new(Mutex::new(HashMap::new())),
             cancelled: Arc::new(AtomicBool::new(false)),
-            stdout_lock: Arc::new(std::sync::Mutex::new(())),
+            writer: stdout_writer(Arc::new(std::sync::Mutex::new(()))),
             session_id: std::sync::Mutex::new(String::new()),
             script_name: std::sync::Mutex::new(String::new()),
             queued_user_messages: Arc::new(Mutex::new(VecDeque::new())),
@@ -411,18 +439,7 @@ impl HostBridge {
 
     /// Write a complete JSON-RPC line to stdout, serialized through a mutex.
     fn write_line(&self, line: &str) -> Result<(), VmError> {
-        let _guard = self.stdout_lock.lock().unwrap_or_else(|e| e.into_inner());
-        let mut stdout = std::io::stdout().lock();
-        stdout
-            .write_all(line.as_bytes())
-            .map_err(|e| VmError::Runtime(format!("Bridge write error: {e}")))?;
-        stdout
-            .write_all(b"\n")
-            .map_err(|e| VmError::Runtime(format!("Bridge write error: {e}")))?;
-        stdout
-            .flush()
-            .map_err(|e| VmError::Runtime(format!("Bridge flush error: {e}")))?;
-        Ok(())
+        (self.writer)(line).map_err(VmError::Runtime)
     }
 
     /// Send a JSON-RPC request to the host and wait for the response.
