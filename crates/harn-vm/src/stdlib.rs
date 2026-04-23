@@ -26,6 +26,7 @@ mod project_catalog;
 mod project_enrich;
 mod regex;
 mod review;
+pub(crate) mod sandbox;
 pub mod secret_scan;
 mod sets;
 mod shapes;
@@ -146,6 +147,7 @@ pub fn stdlib_builtin_names() -> Vec<String> {
 pub fn reset_stdlib_state() {
     logging::reset_logging_state();
     process::reset_process_state();
+    sandbox::reset_sandbox_state();
     fs::reset_fs_state();
     json::reset_json_state();
     host::reset_host_state();

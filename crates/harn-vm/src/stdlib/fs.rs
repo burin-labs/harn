@@ -81,6 +81,11 @@ pub(crate) fn register_fs_builtins(vm: &mut Vm) {
     vm.register_builtin("read_file", |args, _out| {
         let path = args.first().map(|a| a.display()).unwrap_or_default();
         let resolved = resolve_fs_path(&path);
+        crate::stdlib::sandbox::enforce_fs_path(
+            "read_file",
+            &resolved,
+            crate::stdlib::sandbox::FsAccess::Read,
+        )?;
         if let Some(cached) = read_cached_text(&resolved) {
             return Ok(VmValue::String(cached));
         }
@@ -100,6 +105,13 @@ pub(crate) fn register_fs_builtins(vm: &mut Vm) {
     vm.register_builtin("read_file_result", |args, _out| {
         let path = args.first().map(|a| a.display()).unwrap_or_default();
         let resolved = resolve_fs_path(&path);
+        if let Err(error) = crate::stdlib::sandbox::enforce_fs_path(
+            "read_file_result",
+            &resolved,
+            crate::stdlib::sandbox::FsAccess::Read,
+        ) {
+            return Ok(result_err(VmValue::String(Rc::from(error.to_string()))));
+        }
         if let Some(cached) = read_cached_text(&resolved) {
             return Ok(result_ok(VmValue::String(cached)));
         }
@@ -119,6 +131,11 @@ pub(crate) fn register_fs_builtins(vm: &mut Vm) {
     vm.register_builtin("read_file_bytes", |args, _out| {
         let path = args.first().map(|a| a.display()).unwrap_or_default();
         let resolved = resolve_fs_path(&path);
+        crate::stdlib::sandbox::enforce_fs_path(
+            "read_file_bytes",
+            &resolved,
+            crate::stdlib::sandbox::FsAccess::Read,
+        )?;
         match std::fs::read(&resolved) {
             Ok(content) => Ok(VmValue::Bytes(Rc::new(content))),
             Err(e) => Err(VmError::Thrown(VmValue::String(Rc::from(format!(
@@ -133,6 +150,11 @@ pub(crate) fn register_fs_builtins(vm: &mut Vm) {
             let path = args[0].display();
             let content = args[1].display();
             let resolved = resolve_fs_path(&path);
+            crate::stdlib::sandbox::enforce_fs_path(
+                "write_file",
+                &resolved,
+                crate::stdlib::sandbox::FsAccess::Write,
+            )?;
             std::fs::write(&resolved, &content).map_err(|e| {
                 VmError::Thrown(VmValue::String(Rc::from(format!(
                     "Failed to write file {}: {e}",
@@ -157,6 +179,11 @@ pub(crate) fn register_fs_builtins(vm: &mut Vm) {
                     )))));
                 }
             };
+            crate::stdlib::sandbox::enforce_fs_path(
+                "write_file_bytes",
+                &resolved,
+                crate::stdlib::sandbox::FsAccess::Write,
+            )?;
             std::fs::write(&resolved, content).map_err(|e| {
                 VmError::Thrown(VmValue::String(Rc::from(format!(
                     "Failed to write file {}: {e}",
@@ -173,12 +200,22 @@ pub(crate) fn register_fs_builtins(vm: &mut Vm) {
     vm.register_builtin("file_exists", |args, _out| {
         let path = args.first().map(|a| a.display()).unwrap_or_default();
         let resolved = resolve_fs_path(&path);
+        crate::stdlib::sandbox::enforce_fs_path(
+            "file_exists",
+            &resolved,
+            crate::stdlib::sandbox::FsAccess::Read,
+        )?;
         Ok(VmValue::Bool(resolved.exists()))
     });
 
     vm.register_builtin("delete_file", |args, _out| {
         let path = args.first().map(|a| a.display()).unwrap_or_default();
         let resolved = resolve_fs_path(&path);
+        crate::stdlib::sandbox::enforce_fs_path(
+            "delete_file",
+            &resolved,
+            crate::stdlib::sandbox::FsAccess::Delete,
+        )?;
         if resolved.is_dir() {
             std::fs::remove_dir_all(&resolved).map_err(|e| {
                 VmError::Thrown(VmValue::String(Rc::from(format!(
@@ -206,6 +243,11 @@ pub(crate) fn register_fs_builtins(vm: &mut Vm) {
             let path = args[0].display();
             let content = args[1].display();
             let resolved = resolve_fs_path(&path);
+            crate::stdlib::sandbox::enforce_fs_path(
+                "append_file",
+                &resolved,
+                crate::stdlib::sandbox::FsAccess::Write,
+            )?;
             let mut file = std::fs::OpenOptions::new()
                 .append(true)
                 .create(true)
@@ -235,6 +277,11 @@ pub(crate) fn register_fs_builtins(vm: &mut Vm) {
             .map(|a| a.display())
             .unwrap_or_else(|| ".".to_string());
         let resolved = resolve_fs_path(&path);
+        crate::stdlib::sandbox::enforce_fs_path(
+            "list_dir",
+            &resolved,
+            crate::stdlib::sandbox::FsAccess::Read,
+        )?;
         let entries = std::fs::read_dir(&resolved).map_err(|e| {
             VmError::Thrown(VmValue::String(Rc::from(format!(
                 "Failed to list directory {}: {e}",
@@ -255,6 +302,11 @@ pub(crate) fn register_fs_builtins(vm: &mut Vm) {
     vm.register_builtin("mkdir", |args, _out| {
         let path = args.first().map(|a| a.display()).unwrap_or_default();
         let resolved = resolve_fs_path(&path);
+        crate::stdlib::sandbox::enforce_fs_path(
+            "mkdir",
+            &resolved,
+            crate::stdlib::sandbox::FsAccess::Write,
+        )?;
         std::fs::create_dir_all(&resolved).map_err(|e| {
             VmError::Thrown(VmValue::String(Rc::from(format!(
                 "Failed to create directory {}: {e}",
@@ -280,6 +332,16 @@ pub(crate) fn register_fs_builtins(vm: &mut Vm) {
             let dst = args[1].display();
             let resolved_src = resolve_fs_path(&src);
             let resolved_dst = resolve_fs_path(&dst);
+            crate::stdlib::sandbox::enforce_fs_path(
+                "copy_file",
+                &resolved_src,
+                crate::stdlib::sandbox::FsAccess::Read,
+            )?;
+            crate::stdlib::sandbox::enforce_fs_path(
+                "copy_file",
+                &resolved_dst,
+                crate::stdlib::sandbox::FsAccess::Write,
+            )?;
             std::fs::copy(&resolved_src, &resolved_dst).map_err(|e| {
                 VmError::Thrown(VmValue::String(Rc::from(format!(
                     "Failed to copy {} to {}: {e}",
@@ -303,6 +365,11 @@ pub(crate) fn register_fs_builtins(vm: &mut Vm) {
     vm.register_builtin("stat", |args, _out| {
         let path = args.first().map(|a| a.display()).unwrap_or_default();
         let resolved = resolve_fs_path(&path);
+        crate::stdlib::sandbox::enforce_fs_path(
+            "stat",
+            &resolved,
+            crate::stdlib::sandbox::FsAccess::Read,
+        )?;
         let metadata = std::fs::metadata(&resolved).map_err(|e| {
             VmError::Thrown(VmValue::String(Rc::from(format!(
                 "Failed to stat {}: {e}",

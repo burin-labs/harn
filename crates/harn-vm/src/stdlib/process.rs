@@ -137,8 +137,7 @@ pub(crate) fn register_process_builtins(vm: &mut Vm) {
         }
         let cmd = args[0].display();
         let cmd_args: Vec<String> = args[1..].iter().map(|a| a.display()).collect();
-        let output = exec_command(None, &cmd, &cmd_args)
-            .map_err(|e| VmError::Thrown(VmValue::String(Rc::from(e))))?;
+        let output = exec_command(None, &cmd, &cmd_args)?;
         Ok(vm_output_to_value(output))
     });
 
@@ -159,8 +158,7 @@ pub(crate) fn register_process_builtins(vm: &mut Vm) {
         } else {
             "-c"
         };
-        let output = exec_shell(None, shell, flag, &cmd)
-            .map_err(|e| VmError::Thrown(VmValue::String(Rc::from(e))))?;
+        let output = exec_shell(None, shell, flag, &cmd)?;
         Ok(vm_output_to_value(output))
     });
 
@@ -173,8 +171,7 @@ pub(crate) fn register_process_builtins(vm: &mut Vm) {
         let dir = args[0].display();
         let cmd = args[1].display();
         let cmd_args: Vec<String> = args[2..].iter().map(|a| a.display()).collect();
-        let output = exec_command(Some(dir.as_str()), &cmd, &cmd_args)
-            .map_err(|e| VmError::Thrown(VmValue::String(Rc::from(e))))?;
+        let output = exec_command(Some(dir.as_str()), &cmd, &cmd_args)?;
         Ok(vm_output_to_value(output))
     });
 
@@ -201,8 +198,7 @@ pub(crate) fn register_process_builtins(vm: &mut Vm) {
         } else {
             "-c"
         };
-        let output = exec_shell(Some(dir.as_str()), shell, flag, &cmd)
-            .map_err(|e| VmError::Thrown(VmValue::String(Rc::from(e))))?;
+        let output = exec_shell(Some(dir.as_str()), shell, flag, &cmd)?;
         Ok(vm_output_to_value(output))
     });
 
@@ -411,11 +407,16 @@ fn exec_command(
     dir: Option<&str>,
     cmd: &str,
     args: &[String],
-) -> Result<std::process::Output, String> {
-    let mut command = std::process::Command::new(cmd);
-    command.args(args);
-    apply_execution_context(&mut command, dir);
-    command.output().map_err(|e| format!("exec failed: {e}"))
+) -> Result<std::process::Output, VmError> {
+    let mut command = crate::stdlib::sandbox::std_command_for(cmd, args)?;
+    apply_execution_context(&mut command, dir)?;
+    let output = command
+        .output()
+        .map_err(|e| VmError::Thrown(VmValue::String(Rc::from(format!("exec failed: {e}")))))?;
+    if let Some(error) = crate::stdlib::sandbox::process_violation_error(&output) {
+        return Err(error);
+    }
+    Ok(output)
 }
 
 fn exec_shell(
@@ -423,18 +424,30 @@ fn exec_shell(
     shell: &str,
     flag: &str,
     script: &str,
-) -> Result<std::process::Output, String> {
-    let mut command = std::process::Command::new(shell);
-    command.arg(flag).arg(script);
-    apply_execution_context(&mut command, dir);
-    command.output().map_err(|e| format!("shell failed: {e}"))
+) -> Result<std::process::Output, VmError> {
+    let args = vec![flag.to_string(), script.to_string()];
+    let mut command = crate::stdlib::sandbox::std_command_for(shell, &args)?;
+    apply_execution_context(&mut command, dir)?;
+    let output = command
+        .output()
+        .map_err(|e| VmError::Thrown(VmValue::String(Rc::from(format!("shell failed: {e}")))))?;
+    if let Some(error) = crate::stdlib::sandbox::process_violation_error(&output) {
+        return Err(error);
+    }
+    Ok(output)
 }
 
-fn apply_execution_context(command: &mut std::process::Command, dir: Option<&str>) {
+fn apply_execution_context(
+    command: &mut std::process::Command,
+    dir: Option<&str>,
+) -> Result<(), VmError> {
     if let Some(dir) = dir {
-        command.current_dir(resolve_command_dir(dir));
+        let resolved = resolve_command_dir(dir);
+        crate::stdlib::sandbox::enforce_process_cwd(&resolved)?;
+        command.current_dir(resolved);
     } else if let Some(context) = current_execution_context() {
         if let Some(cwd) = context.cwd.filter(|cwd| !cwd.is_empty()) {
+            crate::stdlib::sandbox::enforce_process_cwd(std::path::Path::new(&cwd))?;
             command.current_dir(cwd);
         }
         if !context.env.is_empty() {
@@ -444,6 +457,7 @@ fn apply_execution_context(command: &mut std::process::Command, dir: Option<&str
     if let Some(value) = env_override(HARN_REPLAY_ENV) {
         command.env(HARN_REPLAY_ENV, value);
     }
+    Ok(())
 }
 
 fn resolve_command_dir(dir: &str) -> PathBuf {

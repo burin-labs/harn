@@ -3821,6 +3821,23 @@ Sandbox restrictions propagate to child VMs created by `spawn`,
 `parallel`, and `parallel each`. A child VM inherits the same set of
 denied builtins as its parent.
 
+### Handler capability sandbox
+
+When a workflow or handler runs under an active `CapabilityPolicy`,
+Harn also enforces `workspace_roots` at runtime for filesystem builtins.
+Attempts to read, write, create, copy, stat, list, or delete paths outside
+the declared roots fail as typed `tool_rejected` sandbox violations.
+Process cwd escapes through `exec_at` / `shell_at` are rejected the same way.
+
+Process execution is wrapped in an OS sandbox when Harn can do so for the
+current platform. On macOS, Harn generates a `sandbox-exec` profile from
+the active capability policy: writes are limited to declared
+`workspace_roots` plus process plumbing locations, and network access is
+allowed only when the policy side-effect ceiling permits `network`.
+Unsupported platforms warn once and run the process unsandboxed by default.
+Set `HARN_HANDLER_SANDBOX=enforce` to fail closed when no OS sandbox is
+available, or `HARN_HANDLER_SANDBOX=off` to disable the process wrapper.
+
 ## Test framework
 
 Harn includes a built-in test runner invoked via `harn test`.
