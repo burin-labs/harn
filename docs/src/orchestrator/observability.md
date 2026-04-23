@@ -17,6 +17,71 @@ metrics, EventLog append timings, budget gauges, A2A hop timings, worker queue
 depth and claim age, and LLM call/cache counters. Trigger labels use the
 manifest trigger id, provider, handler kind, and outcome where applicable.
 
+Webhook and trigger latency metrics use low-cardinality labels:
+`provider`, `trigger_id`, `binding_key`, `tenant_id`, and `status`. When an
+event has no tenant, `tenant_id` is `none`.
+
+Lifecycle histograms:
+
+- `harn_trigger_webhook_accepted_to_normalized_seconds`
+- `harn_trigger_webhook_accepted_to_queue_append_seconds`
+- `harn_trigger_queue_age_at_dispatch_admission_seconds`
+- `harn_trigger_queue_age_at_dispatch_start_seconds`
+- `harn_trigger_dispatch_runtime_seconds`
+- `harn_trigger_retry_delay_seconds`
+- `harn_trigger_accepted_to_dlq_seconds`
+
+Oldest pending age is exposed as `harn_trigger_oldest_pending_age_seconds` with
+the same trigger/provider/tenant labels, excluding `status`.
+
+Example webhook-to-dispatch latency SLO queries:
+
+```promql
+histogram_quantile(
+  0.50,
+  sum by (le, provider, trigger_id) (
+    rate(harn_trigger_queue_age_at_dispatch_start_seconds_bucket[5m])
+  )
+)
+```
+
+```promql
+histogram_quantile(
+  0.95,
+  sum by (le, provider, trigger_id) (
+    rate(harn_trigger_queue_age_at_dispatch_start_seconds_bucket[5m])
+  )
+)
+```
+
+```promql
+histogram_quantile(
+  0.99,
+  sum by (le, provider, trigger_id) (
+    rate(harn_trigger_queue_age_at_dispatch_start_seconds_bucket[5m])
+  )
+)
+```
+
+Example alert for queued work older than 30 seconds:
+
+```promql
+max by (provider, trigger_id, tenant_id) (
+  harn_trigger_oldest_pending_age_seconds
+) > 30
+```
+
+Example DLQ latency alert:
+
+```promql
+histogram_quantile(
+  0.95,
+  sum by (le, provider, trigger_id) (
+    rate(harn_trigger_accepted_to_dlq_seconds_bucket[10m])
+  )
+) > 300
+```
+
 `harn orchestrator inspect` also surfaces the persisted trigger metric snapshot
 for local diagnosis:
 
@@ -55,9 +120,11 @@ HARN_OTEL_SERVICE_NAME=harn-orchestrator \
 harn orchestrator serve
 ```
 
-The orchestrator exports spans for webhook ingestion and dispatch, attaches the
-Harn `trace_id` as a span attribute, and propagates W3C trace context through
-the EventLog into dispatch spans. A2A dispatches also carry `A2A-Trace-Id` and
+The orchestrator exports spans for webhook ingestion, queue append, and
+dispatch, attaches the Harn `trace_id` as a span attribute, and propagates W3C
+trace context through pending and inbox EventLog topics into dispatch spans.
+Dispatcher span events mark dispatch start, handler completion, retry
+scheduling, and DLQ movement. A2A dispatches also carry `A2A-Trace-Id` and
 `traceparent` headers downstream.
 
 Optional OTLP request headers can be supplied as comma-, semicolon-, or

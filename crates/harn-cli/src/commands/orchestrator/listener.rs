@@ -556,6 +556,7 @@ async fn ingest_trigger(
         context.metrics.in_flight.load(Ordering::Relaxed),
     );
     let request_started = Instant::now();
+    let accepted_at_ms = current_unix_ms();
     let body_size_bytes = body.len();
 
     let trace_id = harn_vm::TraceId::new();
@@ -634,9 +635,21 @@ async fn ingest_trigger(
             trace_id,
         )
         .await;
+        let ingress_timing = IngressLifecycleTiming {
+            accepted_at_ms,
+            normalized_at_ms: current_unix_ms(),
+            accepted_to_normalized: request_started.elapsed(),
+        };
         let response = match result {
             Ok(NormalizedRequest::Events(events)) => {
-                match enqueue_normalized_events(&context, events, &span_context_headers).await {
+                match enqueue_normalized_events(
+                    &context,
+                    events,
+                    &span_context_headers,
+                    ingress_timing,
+                )
+                .await
+                {
                     Ok(summary) => {
                         context
                             .metrics
@@ -661,7 +674,14 @@ async fn ingest_trigger(
                 }
             }
             Ok(NormalizedRequest::Immediate { response, events }) => {
-                match enqueue_normalized_events(&context, events, &span_context_headers).await {
+                match enqueue_normalized_events(
+                    &context,
+                    events,
+                    &span_context_headers,
+                    ingress_timing,
+                )
+                .await
+                {
                     Ok(summary) => {
                         context.metrics.dispatched.fetch_add(
                             std::cmp::max(summary.accepted, 1) as u64,
@@ -914,6 +934,13 @@ struct EnqueueSummary {
     first_event_id: Option<String>,
 }
 
+#[derive(Clone, Copy)]
+struct IngressLifecycleTiming {
+    accepted_at_ms: i64,
+    normalized_at_ms: i64,
+    accepted_to_normalized: Duration,
+}
+
 fn connector_normalize_result_to_request(
     result: harn_vm::ConnectorNormalizeResult,
     trace_id: harn_vm::TraceId,
@@ -1026,6 +1053,7 @@ async fn enqueue_normalized_events(
     context: &RouteContext,
     events: Vec<harn_vm::TriggerEvent>,
     span_context_headers: &BTreeMap<String, String>,
+    timing: IngressLifecycleTiming,
 ) -> Result<EnqueueSummary, HttpError> {
     let mut summary = EnqueueSummary {
         accepted: 0,
@@ -1034,6 +1062,18 @@ async fn enqueue_normalized_events(
     };
 
     for event in events {
+        let binding_key =
+            listener_binding_key(&context.route.trigger_id, context.route.binding_version);
+        context
+            .metrics_registry
+            .record_trigger_accepted_to_normalized(
+                &context.route.trigger_id,
+                &binding_key,
+                event.provider.as_str(),
+                event.tenant_id.as_ref().map(|tenant| tenant.0.as_str()),
+                "normalized",
+                timing.accepted_to_normalized,
+            );
         let postprocess = harn_vm::postprocess_normalized_event(
             context.inbox.as_ref(),
             &context.route.trigger_id,
@@ -1057,19 +1097,54 @@ async fn enqueue_normalized_events(
                     "binding_version": context.route.binding_version,
                     "event": event,
                 });
+                let queue_span = tracing::info_span!(
+                    "queue_append",
+                    trigger_id = %context.route.trigger_id,
+                    binding_version = context.route.binding_version,
+                    event_id = %event.id.0,
+                    trace_id = %event.trace_id.0
+                );
+                let _ = harn_vm::observability::otel::set_span_parent_from_headers(
+                    &queue_span,
+                    span_context_headers,
+                    &event.trace_id,
+                    None,
+                );
                 let mut pending_headers = BTreeMap::new();
                 pending_headers.insert("trace_id".to_string(), event.trace_id.0.clone());
-                pending_headers.extend(span_context_headers.clone());
+                pending_headers.insert(
+                    harn_vm::triggers::dispatcher::TRIGGER_ACCEPTED_AT_MS_HEADER.to_string(),
+                    timing.accepted_at_ms.to_string(),
+                );
+                pending_headers.insert(
+                    harn_vm::triggers::dispatcher::TRIGGER_NORMALIZED_AT_MS_HEADER.to_string(),
+                    timing.normalized_at_ms.to_string(),
+                );
+                pending_headers.insert("trigger_id".to_string(), context.route.trigger_id.clone());
+                pending_headers.insert("binding_key".to_string(), binding_key.clone());
+                pending_headers.insert("provider".to_string(), event.provider.as_str().to_string());
+                if let Some(tenant_id) = event.tenant_id.as_ref() {
+                    pending_headers.insert("tenant_id".to_string(), tenant_id.0.clone());
+                }
+                let _ = harn_vm::observability::otel::inject_current_context_headers(
+                    &queue_span,
+                    &mut pending_headers,
+                );
                 let append_started = Instant::now();
                 let payload_size_bytes = serde_json::to_vec(&payload)
                     .map(|bytes| bytes.len())
                     .unwrap_or(0);
+                let mut log_event = LogEvent::new("trigger_event", payload);
+                let queue_appended_at_ms = log_event.occurred_at_ms;
+                pending_headers.insert(
+                    harn_vm::triggers::dispatcher::TRIGGER_QUEUE_APPENDED_AT_MS_HEADER.to_string(),
+                    queue_appended_at_ms.to_string(),
+                );
+                log_event.headers = pending_headers;
                 let event_id = context
                     .event_log
-                    .append(
-                        &context.pending_topic,
-                        LogEvent::new("trigger_event", payload).with_headers(pending_headers),
-                    )
+                    .append(&context.pending_topic, log_event)
+                    .instrument(queue_span)
                     .await
                     .map_err(|error| {
                         HttpError::internal(format!(
@@ -1080,6 +1155,25 @@ async fn enqueue_normalized_events(
                     context.pending_topic.as_str(),
                     append_started.elapsed(),
                     payload_size_bytes,
+                );
+                context
+                    .metrics_registry
+                    .record_trigger_accepted_to_queue_append(
+                        &context.route.trigger_id,
+                        &binding_key,
+                        event.provider.as_str(),
+                        event.tenant_id.as_ref().map(|tenant| tenant.0.as_str()),
+                        "queued",
+                        duration_between_ms(queue_appended_at_ms, timing.accepted_at_ms),
+                    );
+                context.metrics_registry.note_trigger_pending_event(
+                    event.id.0.as_str(),
+                    &context.route.trigger_id,
+                    &binding_key,
+                    event.provider.as_str(),
+                    event.tenant_id.as_ref().map(|tenant| tenant.0.as_str()),
+                    timing.accepted_at_ms,
+                    queue_appended_at_ms,
                 );
                 tracing::info!(
                     component = "listener",
@@ -1599,6 +1693,22 @@ async fn mark_test_file(path: &Path) -> Result<(), String> {
     tokio::fs::write(path, b"1")
         .await
         .map_err(|error| format!("failed to write {}: {error}", path.display()))
+}
+
+fn listener_binding_key(trigger_id: &str, binding_version: u32) -> String {
+    format!("{trigger_id}@v{binding_version}")
+}
+
+fn current_unix_ms() -> i64 {
+    unix_ms(OffsetDateTime::now_utc())
+}
+
+fn unix_ms(timestamp: OffsetDateTime) -> i64 {
+    (timestamp.unix_timestamp_nanos() / 1_000_000) as i64
+}
+
+fn duration_between_ms(later_ms: i64, earlier_ms: i64) -> Duration {
+    Duration::from_millis(later_ms.saturating_sub(earlier_ms).max(0) as u64)
 }
 
 #[cfg(test)]
