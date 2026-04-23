@@ -155,6 +155,26 @@ execution:
 - `event_log_emit(topic, kind, payload, headers?)` appends to the active event log
 - `metrics_inc(name, amount?)` increments a Prometheus counter rendered as `connector_custom_<name>_total`
 
+Connector exports run under a default effect policy. `normalize_inbound(raw)` is
+the ingress hot path, so its default policy allows deterministic local work plus
+`secret_get`, `event_log_emit`, and `metrics_inc`, while rejecting outbound
+network calls, LLM calls, process execution, connector client calls, host calls,
+MCP calls, and ambient filesystem/project access. This keeps webhook ack paths
+fast and testable without external dependencies.
+
+`poll_tick(ctx)` and `call(method, args)` use the connector-outbound class:
+they may use `connector_call` and normal network builtins, but still reject
+ambient filesystem/project access, process execution, LLM calls, host calls, and
+MCP calls unless a trusted host overrides the policy. `activate(bindings)` uses
+the activation class, which permits connector/network setup work under the same
+filesystem/process/LLM restrictions.
+
+Hosts embedding `HarnConnector` can override defaults for trusted private
+connectors with `HarnConnector::load_with_effect_policies` and
+`HarnConnectorEffectPolicies`. For example, call `trust_export("poll_tick")` to
+run that export without the default connector policy, or `set_export_policy` to
+install a narrower host-specific `CapabilityPolicy`.
+
 ## Connector contract check
 
 Pure-Harn connector packages should run the package-level contract harness in
@@ -183,7 +203,10 @@ v1:
 The harness catches common drift such as returning a raw schema object with a
 `name` field instead of `harn_schema_name`, or returning an ack wrapper like
 `{ immediate_response, event }` without the required `type =
-"immediate_response"` discriminator.
+"immediate_response"` discriminator. It also runs connector-effect-policy
+diagnostics before fixtures, so direct hot-path calls such as `http_get`,
+`llm_call`, or `read_file` inside `normalize_inbound` fail with an author-facing
+message.
 
 Packages can declare deterministic normalize fixtures in `harn.toml`:
 
@@ -216,6 +239,7 @@ Fixture fields:
 | `expect_type` | Optional expected NormalizeResult type: `event`, `batch`, `immediate_response`, or `reject` |
 | `expect_kind` | Optional expected normalized event kind |
 | `expect_event_count` | Optional expected number of normalized events |
+| `expect_error_contains` | Optional substring expected in a deterministic `normalize_inbound` error, useful for proving denied effects fail without touching real services |
 
 Use `--provider <id>` to check one provider from a multi-provider package and
 `--json` for machine-readable CI output.

@@ -18,16 +18,17 @@ use tokio::sync::{oneshot, Notify};
 use crate::bridge::json_result_to_vm_value;
 use crate::event_log::{EventLog, LogEvent, Topic};
 use crate::llm::vm_value_to_json;
+use crate::orchestration::CapabilityPolicy;
 use crate::stdlib::register_vm_stdlib;
 use crate::triggers::dispatcher::InboxEnvelope;
-use crate::value::{VmClosure, VmError, VmValue};
+use crate::value::{ErrorCategory, VmClosure, VmError, VmValue};
 use crate::vm::Vm;
 use crate::{
     postprocess_normalized_event, redact_headers, ClientError, Connector, ConnectorClient,
     ConnectorCtx, ConnectorError, ConnectorHttpResponse, ConnectorNormalizeResult,
-    HeaderRedactionPolicy, PostNormalizeOutcome, ProviderId, ProviderPayload,
-    ProviderPayloadSchema, SignatureStatus, TenantId, TraceId, TriggerBinding, TriggerEvent,
-    TriggerEventId, TriggerKind,
+    HarnConnectorEffectPolicies, HeaderRedactionPolicy, PostNormalizeOutcome, ProviderId,
+    ProviderPayload, ProviderPayloadSchema, SignatureStatus, TenantId, TraceId, TriggerBinding,
+    TriggerEvent, TriggerEventId, TriggerKind,
 };
 
 thread_local! {
@@ -53,6 +54,7 @@ pub struct HarnConnector {
     payload_schema: ProviderPayloadSchema,
     module_path: PathBuf,
     has_poll_tick: bool,
+    effect_policies: HarnConnectorEffectPolicies,
     shared: Arc<HarnConnectorShared>,
 }
 
@@ -71,6 +73,7 @@ struct HarnConnectorShared {
 struct HarnConnectorWorker {
     tx: mpsc::Sender<WorkerCommand>,
     join: Mutex<Option<JoinHandle<()>>>,
+    effect_policies: HarnConnectorEffectPolicies,
 }
 
 enum WorkerCommand {
@@ -83,6 +86,7 @@ enum WorkerCommand {
         name: String,
         args: Vec<JsonValue>,
         required: bool,
+        policy: Option<CapabilityPolicy>,
         resp: oneshot::Sender<Result<Option<JsonValue>, String>>,
     },
     Shutdown {
@@ -210,6 +214,13 @@ struct ResolvedHarnPollBinding {
 
 impl HarnConnector {
     pub async fn load(module_path: &Path) -> Result<Self, ConnectorError> {
+        Self::load_with_effect_policies(module_path, HarnConnectorEffectPolicies::default()).await
+    }
+
+    pub async fn load_with_effect_policies(
+        module_path: &Path,
+        effect_policies: HarnConnectorEffectPolicies,
+    ) -> Result<Self, ConnectorError> {
         let contract = load_contract(module_path).await?;
         let shared = Arc::new(HarnConnectorShared {
             provider_id: contract.provider_id.clone(),
@@ -224,6 +235,7 @@ impl HarnConnector {
             payload_schema: contract.payload_schema,
             module_path: contract.module_path,
             has_poll_tick: contract.has_poll_tick,
+            effect_policies,
             shared,
         })
     }
@@ -303,7 +315,11 @@ impl HarnConnectorShared {
 }
 
 impl HarnConnectorWorker {
-    fn spawn(provider_id: ProviderId, module_path: PathBuf) -> Result<Arc<Self>, ConnectorError> {
+    fn spawn(
+        provider_id: ProviderId,
+        module_path: PathBuf,
+        effect_policies: HarnConnectorEffectPolicies,
+    ) -> Result<Arc<Self>, ConnectorError> {
         let (tx, rx) = mpsc::channel();
         let thread_name = format!("harn-connector-{}", provider_id.as_str());
         let join = std::thread::Builder::new()
@@ -313,6 +329,7 @@ impl HarnConnectorWorker {
         Ok(Arc::new(Self {
             tx,
             join: Mutex::new(Some(join)),
+            effect_policies,
         }))
     }
 
@@ -337,12 +354,15 @@ impl HarnConnectorWorker {
         args: Vec<JsonValue>,
         required: bool,
     ) -> Result<Option<JsonValue>, ConnectorError> {
+        let name = name.into();
+        let policy = self.effect_policies.policy_for_export(&name);
         let (resp_tx, resp_rx) = oneshot::channel();
         self.tx
             .send(WorkerCommand::CallExport {
-                name: name.into(),
+                name,
                 args,
                 required,
+                policy,
                 resp: resp_tx,
             })
             .map_err(worker_send_error)?;
@@ -410,7 +430,7 @@ async fn handle_worker_command(
                 let runtime = state
                     .as_ref()
                     .expect("runtime initialized before init export");
-                call_provider_export(runtime, "init", vec![init_payload], false)
+                call_provider_export(runtime, "init", vec![init_payload], false, None)
                     .await
                     .map(|_| ())
             }
@@ -422,13 +442,14 @@ async fn handle_worker_command(
             name,
             args,
             required,
+            policy,
             resp,
         } => {
             let result = async {
                 let runtime = state.as_ref().ok_or_else(|| {
                     ConnectorError::HarnRuntime("connector runtime is not initialized".to_string())
                 })?;
-                call_provider_export(runtime, &name, args, required).await
+                call_provider_export(runtime, &name, args, required, policy).await
             }
             .await
             .map_err(|error| error.to_string());
@@ -437,7 +458,7 @@ async fn handle_worker_command(
         WorkerCommand::Shutdown { resp } => {
             let result = async {
                 if let Some(runtime) = state.as_ref() {
-                    call_provider_export(runtime, "shutdown", Vec::new(), false)
+                    call_provider_export(runtime, "shutdown", Vec::new(), false, None)
                         .await
                         .map(|_| ())?;
                 }
@@ -479,8 +500,11 @@ impl Connector for HarnConnector {
     }
 
     async fn init(&mut self, ctx: ConnectorCtx) -> Result<(), ConnectorError> {
-        let worker =
-            HarnConnectorWorker::spawn(self.provider_id.clone(), self.module_path.clone())?;
+        let worker = HarnConnectorWorker::spawn(
+            self.provider_id.clone(),
+            self.module_path.clone(),
+            self.effect_policies.clone(),
+        )?;
         self.shared.set_ctx(ctx.clone());
         let init_payload = json!({
             "provider_id": self.provider_id.as_str(),
@@ -873,6 +897,7 @@ async fn call_provider_export(
     name: &str,
     args: Vec<JsonValue>,
     required: bool,
+    policy: Option<CapabilityPolicy>,
 ) -> Result<Option<JsonValue>, ConnectorError> {
     let Some(closure) = runtime.exports.get(name).cloned() else {
         if required {
@@ -883,26 +908,76 @@ async fn call_provider_export(
         return Ok(None);
     };
     let mut child_vm = runtime.base_vm.child_vm_for_host();
-    ACTIVE_HARN_CONNECTOR_CTX.with(|slot| slot.borrow_mut().push(runtime.ctx.clone()));
+    let _policy_guard = ConnectorExecutionPolicyGuard::push(policy);
+    let _ctx_guard = ActiveHarnConnectorCtxGuard::push(runtime.ctx.clone());
     let vm_args = args
         .into_iter()
         .map(|value| json_result_to_vm_value(&value))
         .collect::<Vec<_>>();
     let result = child_vm.call_closure_pub(&closure, &vm_args).await;
-    ACTIVE_HARN_CONNECTOR_CTX.with(|slot| {
-        slot.borrow_mut().pop();
-    });
     result
         .map(|value| Some(vm_value_to_json(&value)))
-        .map_err(vm_error_to_connector)
+        .map_err(|error| vm_error_to_connector_for_export(name, error))
 }
 
 pub(crate) fn active_harn_connector_ctx() -> Option<ConnectorCtx> {
     ACTIVE_HARN_CONNECTOR_CTX.with(|slot| slot.borrow().last().cloned())
 }
 
+struct ConnectorExecutionPolicyGuard {
+    active: bool,
+}
+
+impl ConnectorExecutionPolicyGuard {
+    fn push(policy: Option<CapabilityPolicy>) -> Self {
+        if let Some(policy) = policy {
+            crate::orchestration::push_execution_policy(policy);
+            Self { active: true }
+        } else {
+            Self { active: false }
+        }
+    }
+}
+
+impl Drop for ConnectorExecutionPolicyGuard {
+    fn drop(&mut self) {
+        if self.active {
+            crate::orchestration::pop_execution_policy();
+        }
+    }
+}
+
+struct ActiveHarnConnectorCtxGuard;
+
+impl ActiveHarnConnectorCtxGuard {
+    fn push(ctx: ConnectorCtx) -> Self {
+        ACTIVE_HARN_CONNECTOR_CTX.with(|slot| slot.borrow_mut().push(ctx));
+        Self
+    }
+}
+
+impl Drop for ActiveHarnConnectorCtxGuard {
+    fn drop(&mut self) {
+        ACTIVE_HARN_CONNECTOR_CTX.with(|slot| {
+            slot.borrow_mut().pop();
+        });
+    }
+}
+
 fn vm_error_to_connector(error: VmError) -> ConnectorError {
     ConnectorError::HarnRuntime(vm_error_message(error))
+}
+
+fn vm_error_to_connector_for_export(export: &str, error: VmError) -> ConnectorError {
+    match &error {
+        VmError::CategorizedError {
+            category: ErrorCategory::ToolRejected,
+            message,
+        } => ConnectorError::HarnRuntime(format!(
+            "connector export '{export}' violated effect policy: {message}"
+        )),
+        _ => vm_error_to_connector(error),
+    }
 }
 
 fn connector_error_to_client(error: ConnectorError) -> ClientError {
@@ -1640,6 +1715,46 @@ mod tests {
         }
     }
 
+    struct StaticSecretProvider;
+
+    #[async_trait]
+    impl SecretProvider for StaticSecretProvider {
+        async fn get(&self, id: &SecretId) -> Result<SecretBytes, SecretError> {
+            if id.to_string().starts_with("test/signing-secret") {
+                return Ok(SecretBytes::from("local-secret"));
+            }
+            Err(SecretError::NotFound {
+                provider: self.namespace().to_string(),
+                id: id.clone(),
+            })
+        }
+
+        async fn put(&self, _id: &SecretId, _value: SecretBytes) -> Result<(), SecretError> {
+            Ok(())
+        }
+
+        async fn rotate(&self, id: &SecretId) -> Result<RotationHandle, SecretError> {
+            Ok(RotationHandle {
+                provider: self.namespace().to_string(),
+                id: id.clone(),
+                from_version: None,
+                to_version: None,
+            })
+        }
+
+        async fn list(&self, _prefix: &SecretId) -> Result<Vec<SecretMeta>, SecretError> {
+            Ok(Vec::new())
+        }
+
+        fn namespace(&self) -> &str {
+            "test"
+        }
+
+        fn supports_versions(&self) -> bool {
+            false
+        }
+    }
+
     async fn ctx(log: Arc<AnyEventLog>) -> ConnectorCtx {
         let metrics = Arc::new(MetricsRegistry::default());
         ConnectorCtx {
@@ -1648,6 +1763,139 @@ mod tests {
             secrets: Arc::new(EmptySecretProvider),
             metrics,
             rate_limiter: Arc::new(RateLimiterFactory::default()),
+        }
+    }
+
+    async fn ctx_with_secrets(
+        log: Arc<AnyEventLog>,
+        secrets: Arc<dyn SecretProvider>,
+    ) -> ConnectorCtx {
+        let metrics = Arc::new(MetricsRegistry::default());
+        ConnectorCtx {
+            inbox: Arc::new(InboxIndex::new(log.clone(), metrics.clone()).await.unwrap()),
+            event_log: log,
+            secrets,
+            metrics,
+            rate_limiter: Arc::new(RateLimiterFactory::default()),
+        }
+    }
+
+    fn write_connector(source: &str) -> (TempDir, PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("connector.harn");
+        std::fs::write(&path, source).unwrap();
+        (dir, path)
+    }
+
+    #[tokio::test]
+    async fn normalize_inbound_default_policy_allows_local_hot_path_work() {
+        let (_dir, module_path) = write_connector(
+            r#"
+pub fn provider_id() { return "webhook" }
+pub fn kinds() { return ["webhook"] }
+pub fn payload_schema() { return "GenericWebhookPayload" }
+
+pub fn normalize_inbound(raw) {
+  let decoded = base64_decode(raw.body_base64)
+  let body = json_parse(decoded)
+  let secret = secret_get("test/signing-secret")
+  let signature = hmac_sha256(secret, decoded)
+  metrics_inc("normalize_ok")
+  return {
+    type: "event",
+    event: {
+      kind: "webhook.received",
+      dedupe_key: "webhook:" + body.id,
+      payload: {id: body.id, signature: signature},
+      signature_status: {state: "verified"},
+    },
+  }
+}
+"#,
+        );
+        let log = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(32)));
+        let mut connector = HarnConnector::load(&module_path).await.unwrap();
+        connector
+            .init(ctx_with_secrets(log, Arc::new(StaticSecretProvider)).await)
+            .await
+            .unwrap();
+        let result = connector
+            .normalize_inbound_result(raw_inbound(json!({"id": "evt-1"})))
+            .await
+            .unwrap();
+        connector.shutdown(StdDuration::ZERO).await.unwrap();
+
+        let ConnectorNormalizeResult::Event(event) = result else {
+            panic!("expected normalized event");
+        };
+        assert_eq!(event.kind, "webhook.received");
+        assert_eq!(event.signature_status, SignatureStatus::Verified);
+        match &event.provider_payload {
+            ProviderPayload::Known(crate::triggers::event::KnownProviderPayload::Webhook(
+                payload,
+            )) => assert_eq!(payload.raw["id"], "evt-1"),
+            other => panic!("unexpected provider payload: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn normalize_inbound_default_policy_denies_network_llm_and_file_effects() {
+        for (label, source, expected) in [
+            (
+                "network",
+                r#"
+pub fn provider_id() { return "webhook" }
+pub fn kinds() { return ["webhook"] }
+pub fn payload_schema() { return "GenericWebhookPayload" }
+pub fn normalize_inbound(_raw) {
+  http_get("https://example.invalid")
+  return {type: "reject", status: 400}
+}
+"#,
+                "network ceiling",
+            ),
+            (
+                "llm",
+                r#"
+pub fn provider_id() { return "webhook" }
+pub fn kinds() { return ["webhook"] }
+pub fn payload_schema() { return "GenericWebhookPayload" }
+pub fn normalize_inbound(_raw) {
+  llm_call("hello", nil, {provider: "mock"})
+  return {type: "reject", status: 400}
+}
+"#,
+                "LLM/network ceiling",
+            ),
+            (
+                "file",
+                r#"
+pub fn provider_id() { return "webhook" }
+pub fn kinds() { return ["webhook"] }
+pub fn payload_schema() { return "GenericWebhookPayload" }
+pub fn normalize_inbound(_raw) {
+  read_file("ambient.txt")
+  return {type: "reject", status: 400}
+}
+"#,
+                "workspace.read_text ceiling",
+            ),
+        ] {
+            let (_dir, module_path) = write_connector(source);
+            let log = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(32)));
+            let mut connector = HarnConnector::load(&module_path).await.unwrap();
+            connector.init(ctx(log).await).await.unwrap();
+            let error = connector
+                .normalize_inbound_result(raw_inbound(json!({"id": label})))
+                .await
+                .unwrap_err();
+            connector.shutdown(StdDuration::ZERO).await.unwrap();
+            let message = error.to_string();
+            assert!(
+                message.contains("connector export 'normalize_inbound' violated effect policy"),
+                "{label}: {message}"
+            );
+            assert!(message.contains(expected), "{label}: {message}");
         }
     }
 

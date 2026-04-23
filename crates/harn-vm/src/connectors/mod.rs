@@ -28,6 +28,7 @@ use crate::triggers::{
 
 pub mod a2a_push;
 pub mod cron;
+pub mod effect_policy;
 pub mod github;
 pub mod harn_module;
 pub mod hmac;
@@ -42,6 +43,10 @@ pub mod webhook;
 
 pub use a2a_push::A2aPushConnector;
 pub use cron::{CatchupMode, CronConnector};
+pub use effect_policy::{
+    connector_export_denied_builtin_reason, connector_export_effect_class,
+    default_connector_export_policy, ConnectorExportEffectClass, HarnConnectorEffectPolicies,
+};
 pub use github::GitHubConnector;
 pub use harn_module::{
     load_contract as load_harn_connector_contract, HarnConnector, HarnConnectorContract,
