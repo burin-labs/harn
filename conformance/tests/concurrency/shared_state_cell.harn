@@ -1,0 +1,18 @@
+pipeline default() {
+  let counter = shared_cell({scope: "task_group", key: "budget", initial: 0})
+  parallel 10 { i ->
+    var done = false
+    while !done {
+      let snap = shared_snapshot(counter)
+      done = shared_cas(counter, snap, snap.value + 1)
+    }
+  }
+  println(shared_get(counter))
+  let stale = shared_snapshot(counter)
+  shared_set(counter, 99)
+  println(shared_cas(counter, stale, 100))
+  let metrics = shared_metrics(counter)
+  println(metrics.cas_success_count >= 10)
+  println(metrics.cas_failure_count >= 1)
+  println(metrics.stale_read_count >= 1)
+}

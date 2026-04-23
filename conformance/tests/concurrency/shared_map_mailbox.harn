@@ -1,0 +1,18 @@
+pipeline default() {
+  let memo = shared_map({scope: "task_group", key: "memo", initial: {a: 1}})
+  println(shared_map_get(memo, "a"))
+  let snap = shared_map_snapshot(memo, "a")
+  println(shared_map_cas(memo, "a", snap, 3))
+  println(shared_map_get(memo, "a"))
+  shared_map_set(memo, "b", 4)
+  println(shared_map_entries(memo).b)
+  let inbox = mailbox_open({scope: "task_group", name: "worker", capacity: 4})
+  let task = spawn {
+    mailbox_send("worker", {kind: "hello", value: 42})
+  }
+  let msg = mailbox_receive(inbox)
+  await(task)
+  println(msg.kind)
+  println(msg.value)
+  println(mailbox_metrics(inbox).depth == 0)
+}

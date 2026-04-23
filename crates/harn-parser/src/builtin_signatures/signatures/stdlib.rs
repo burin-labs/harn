@@ -624,6 +624,34 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: None,
     },
     BuiltinSig {
+        name: "mailbox_close",
+        return_type: Some(BuiltinReturn::Named("bool")),
+    },
+    BuiltinSig {
+        name: "mailbox_lookup",
+        return_type: None,
+    },
+    BuiltinSig {
+        name: "mailbox_metrics",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
+        name: "mailbox_open",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
+        name: "mailbox_receive",
+        return_type: None,
+    },
+    BuiltinSig {
+        name: "mailbox_send",
+        return_type: Some(BuiltinReturn::Named("bool")),
+    },
+    BuiltinSig {
+        name: "mailbox_try_receive",
+        return_type: None,
+    },
+    BuiltinSig {
         name: "pair",
         return_type: Some(BuiltinReturn::Named("pair")),
     },
@@ -838,6 +866,62 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
     BuiltinSig {
         name: "send",
         return_type: None,
+    },
+    BuiltinSig {
+        name: "shared_cas",
+        return_type: Some(BuiltinReturn::Named("bool")),
+    },
+    BuiltinSig {
+        name: "shared_cell",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
+        name: "shared_get",
+        return_type: None,
+    },
+    BuiltinSig {
+        name: "shared_map",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
+        name: "shared_map_cas",
+        return_type: Some(BuiltinReturn::Named("bool")),
+    },
+    BuiltinSig {
+        name: "shared_map_delete",
+        return_type: None,
+    },
+    BuiltinSig {
+        name: "shared_map_entries",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
+        name: "shared_map_get",
+        return_type: None,
+    },
+    BuiltinSig {
+        name: "shared_map_set",
+        return_type: None,
+    },
+    BuiltinSig {
+        name: "shared_map_snapshot",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
+        name: "shared_metrics",
+        return_type: None,
+    },
+    BuiltinSig {
+        name: "shared_scope_id",
+        return_type: Some(BuiltinReturn::Named("string")),
+    },
+    BuiltinSig {
+        name: "shared_set",
+        return_type: None,
+    },
+    BuiltinSig {
+        name: "shared_snapshot",
+        return_type: Some(BuiltinReturn::Named("dict")),
     },
     BuiltinSig {
         name: "secret_get",

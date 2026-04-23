@@ -1266,6 +1266,112 @@ Acquisition is cancellable: a graceful task cancellation while waiting throws
 `kind:cancelled:VM cancelled by host`. Timeouts are deterministic and return
 `nil` instead of throwing so authors can choose the fallback policy.
 
+### Scoped shared state
+
+Child tasks created by `spawn`, `parallel`, `parallel each`, and
+`parallel settle` execute in isolated interpreter instances. Normal values are
+copied into the child at creation time. Later assignment in one task does not
+mutate another task's binding. Explicit handles are the shared-data boundary:
+channels, atomics, synchronization permits/runtimes, shared cells/maps, and
+mailboxes are shared by every task that receives or resolves the handle.
+
+`agent_loop` does not share mutable transcript internals with tasks. A named
+`session_id` shares durable transcript history through the agent session store.
+`spawn_agent` workers have independent worker/session lineage; use explicit
+mailboxes, shared state handles, `agent_state_*`, or host storage for data
+exchange outside the transcript.
+
+```harn
+let budget = shared_cell({scope: "task_group", key: "tokens", initial: 0})
+
+parallel 10 { i ->
+  var updated = false
+  while !updated {
+    let snap = shared_snapshot(budget)
+    updated = shared_cas(budget, snap, snap.value + 1)
+  }
+}
+```
+
+Process-local scopes are explicit:
+
+| Scope | Meaning |
+|---|---|
+| `task` | Current logical task |
+| `task_group` | Current parallel sibling group, or root task outside a group |
+| `workflow_run` | Current workflow run when available |
+| `agent_session` | Current agent session when available |
+| `tenant` | Current tenant id, or `tenant_id` from options |
+| `process` | Current VM process |
+
+Durable and external state are not implicit. Use `store_*` or
+`agent_state_*` for file/EventLog-backed state and host/connector APIs for
+external stores.
+
+Cells:
+
+- `shared_cell(key_or_options, initial?)` opens a scoped cell. Options support
+  `scope`, `key`, `initial`, and `tenant_id`.
+- `shared_get(cell)` reads the value.
+- `shared_snapshot(cell)` returns `{value, version}` for versioned CAS.
+- `shared_set(cell, value)` writes with last-write-wins behavior and returns
+  the previous value.
+- `shared_cas(cell, expected_or_snapshot, value)` writes only when the current
+  value matches the expected value, and when a snapshot is supplied, the
+  version still matches. It returns `true` on success and `false` on conflict.
+
+Maps:
+
+- `shared_map(key_or_options, initial?)` opens a scoped map.
+- `shared_map_get(map, key, default?)`, `shared_map_set(map, key, value)`,
+  `shared_map_delete(map, key)`, and `shared_map_entries(map)` are the
+  last-write-wins map operations.
+- `shared_map_snapshot(map, key)` and
+  `shared_map_cas(map, key, expected_or_snapshot, value)` provide
+  versioned conflict checks.
+
+`shared_metrics(handle)` reports `read_count`, `write_count`,
+`cas_success_count`, `cas_failure_count`, `stale_read_count`, and `version`
+for cells and maps.
+
+Use named synchronization around multi-step updates:
+
+```harn
+let memo = shared_map({scope: "workflow_run", key: "memo"})
+let lock = sync_mutex_acquire("memo:customer-42", 250ms)
+guard lock != nil else { throw "state lock timeout" }
+try {
+  shared_map_set(memo, "customer-42", compute_customer_summary())
+} finally {
+  sync_release(lock)
+}
+```
+
+### Actor mailboxes
+
+Mailboxes are scoped, named inboxes for actor-style communication between
+tasks and long-lived workers. They provide targeted messages without using
+transcript mutation as the transport.
+
+```harn
+let inbox = mailbox_open({scope: "task_group", name: "reviewer", capacity: 32})
+spawn {
+  mailbox_send("reviewer", {kind: "work", path: "src/main.rs"})
+}
+let msg = mailbox_receive(inbox)
+```
+
+- `mailbox_open(name_or_options, capacity?)` opens or creates an inbox.
+- `mailbox_lookup(name_or_handle)` returns a handle or `nil`.
+- `mailbox_send(target, value)` returns `false` when the mailbox is absent or
+  closed.
+- `mailbox_receive(target)` blocks until a message arrives, the mailbox closes,
+  or the task is cancelled.
+- `mailbox_try_receive(target)` is non-blocking.
+- `mailbox_close(target)` closes the inbox to new messages.
+- `mailbox_metrics(target)` reports `depth`, `capacity`, `sent_count`,
+  `received_count`, `failed_send_count`, and `closed`.
+
 ### Channels
 
 Channels provide typed message-passing between concurrent tasks.

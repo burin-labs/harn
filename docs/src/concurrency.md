@@ -149,6 +149,116 @@ Use `try_receive(ch)` for non-blocking reads -- it returns `nil`
 immediately if no message is available. Use `close_channel(ch)` to
 signal that no more messages will be sent.
 
+## Scoped shared state
+
+Normal values are copied into child VMs. Use shared cells or maps only when
+tasks need to coordinate on the same mutable state.
+
+```harn
+let budget = shared_cell({scope: "task_group", key: "tokens", initial: 0})
+
+parallel 10 { i ->
+  var updated = false
+  while !updated {
+    let snap = shared_snapshot(budget)
+    updated = shared_cas(budget, snap, snap.value + 1)
+  }
+}
+
+println(shared_get(budget)) // 10
+```
+
+Scopes are explicit:
+
+| Scope | Meaning |
+|---|---|
+| `task` | Current logical task only |
+| `task_group` | Siblings from one `parallel` operation, or the root task when no group is active |
+| `workflow_run` | Current workflow run when available |
+| `agent_session` | Current agent session when available |
+| `tenant` | Current tenant id, or `tenant_id` supplied in options |
+| `process` | This VM process |
+
+Durable and external state remain explicit: use `store_*` or `agent_state_*`
+for EventLog/file-backed state, and host or connector builtins for external
+stores.
+
+Cells support last-write-wins `shared_set(cell, value)`, versioned reads with
+`shared_snapshot(cell)`, and atomic compare-and-swap with
+`shared_cas(cell, expected_or_snapshot, value)`. Passing a snapshot to CAS
+detects stale reads when another writer has changed the cell since the read.
+
+Maps provide the same conflict model per map:
+`shared_map_get`, `shared_map_set`, `shared_map_delete`,
+`shared_map_snapshot`, `shared_map_cas`, and `shared_map_entries`.
+`shared_metrics(handle)` reports read, write, CAS success/failure, and stale
+read counters.
+
+Use the named synchronization primitives when an update needs a larger
+critical section:
+
+```harn
+let memo = shared_map({scope: "workflow_run", key: "memo"})
+let permit = sync_mutex_acquire("memo:customer-42", 250ms)
+guard permit != nil else { throw "memo lock timeout" }
+try {
+  shared_map_set(memo, "customer-42", compute_customer_summary())
+} finally {
+  sync_release(permit)
+}
+```
+
+## Actor mailboxes
+
+Mailboxes are named inboxes for actor-style communication between tasks and
+long-lived workers. They use explicit messages instead of transcript mutation.
+
+```harn
+let inbox = mailbox_open({scope: "task_group", name: "reviewer", capacity: 32})
+
+spawn {
+  mailbox_send("reviewer", {kind: "work", path: "src/main.rs"})
+}
+
+let msg = mailbox_receive(inbox)
+println(msg.kind)
+```
+
+`mailbox_send(target, value)` returns `false` when the target does not exist or
+has been closed. `mailbox_try_receive(target)` is non-blocking.
+`mailbox_receive(target)` blocks until a message arrives, the mailbox closes,
+or the task is cancelled. `mailbox_metrics(target)` reports depth, capacity,
+sent, received, failed send, and closed status.
+
+Examples:
+
+```harn
+// Connector token refresh: only one task refreshes the token.
+let tokens = shared_map({scope: "tenant", tenant_id: "acme", key: "connector_tokens"})
+let lock = sync_mutex_acquire("token:acme:slack", 2s)
+guard lock != nil else { throw "token refresh busy" }
+try { shared_map_set(tokens, "slack", refresh_slack_token()) } finally { sync_release(lock) }
+
+// Workflow memoization: cache pure stage output for this run.
+let memo = shared_map({scope: "workflow_run", key: "stage_memo"})
+let cached = shared_map_get(memo, "normalize", nil)
+if cached == nil {
+  shared_map_set(memo, "normalize", normalize(input))
+}
+
+// Multi-agent scratchpad: parent and workers exchange notes explicitly.
+let scratch = shared_map({scope: "agent_session", key: "scratchpad"})
+shared_map_set(scratch, "hypothesis", "retry with smaller batch")
+
+// Shared budget counter: CAS avoids lost updates.
+let spent = shared_cell({scope: "task_group", key: "budget_usd_micros", initial: 0})
+var ok = false
+while !ok {
+  let snap = shared_snapshot(spent)
+  ok = shared_cas(spent, snap, snap.value + 1250)
+}
+```
+
 ## Atomics
 
 Thread-safe counters:
