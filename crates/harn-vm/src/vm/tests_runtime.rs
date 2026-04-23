@@ -142,6 +142,16 @@ where
     })
 }
 
+fn run_harn_with_policy(
+    source: &str,
+    policy: crate::orchestration::CapabilityPolicy,
+) -> Result<(String, VmValue), VmError> {
+    crate::orchestration::push_execution_policy(policy);
+    let result = run_harn_result(source);
+    crate::orchestration::pop_execution_policy();
+    result
+}
+
 fn run_vm(source: &str) -> String {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -1214,6 +1224,287 @@ let results = parallel(2) { i ->
         msg.contains("not permitted"),
         "expected not permitted in parallel VM, got: {msg}"
     );
+}
+
+#[test]
+fn test_policy_workspace_roots_catch_filesystem_escapes() {
+    let allowed = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let outside_file = outside.path().join("secret.txt");
+    std::fs::write(&outside_file, "secret").unwrap();
+    let outside_copy = outside.path().join("copy.txt");
+    let outside_new = outside.path().join("new.txt");
+    let outside_dir = outside.path().join("new_dir");
+
+    let policy = crate::orchestration::CapabilityPolicy {
+        capabilities: std::collections::BTreeMap::from([(
+            "workspace".to_string(),
+            vec![
+                "read_text".to_string(),
+                "list".to_string(),
+                "exists".to_string(),
+                "write_text".to_string(),
+                "delete".to_string(),
+            ],
+        )]),
+        workspace_roots: vec![allowed.path().display().to_string()],
+        side_effect_level: Some("workspace_write".to_string()),
+        ..Default::default()
+    };
+
+    let escapes = [
+        format!(
+            r#"pipeline t(task) {{ read_file("{}") }}"#,
+            outside_file.display()
+        ),
+        format!(
+            r#"pipeline t(task) {{ read_file_bytes("{}") }}"#,
+            outside_file.display()
+        ),
+        format!(
+            r#"pipeline t(task) {{ write_file("{}", "x") }}"#,
+            outside_new.display()
+        ),
+        format!(
+            r#"pipeline t(task) {{ append_file("{}", "x") }}"#,
+            outside_file.display()
+        ),
+        format!(
+            r#"pipeline t(task) {{ copy_file("{}", "{}") }}"#,
+            outside_file.display(),
+            allowed.path().join("copy.txt").display()
+        ),
+        format!(
+            r#"pipeline t(task) {{ copy_file("{}", "{}") }}"#,
+            allowed.path().join("missing.txt").display(),
+            outside_copy.display()
+        ),
+        format!(
+            r#"pipeline t(task) {{ list_dir("{}") }}"#,
+            outside.path().display()
+        ),
+        format!(
+            r#"pipeline t(task) {{ mkdir("{}") }}"#,
+            outside_dir.display()
+        ),
+        format!(
+            r#"pipeline t(task) {{ stat("{}") }}"#,
+            outside_file.display()
+        ),
+        format!(
+            r#"pipeline t(task) {{ delete_file("{}") }}"#,
+            outside_file.display()
+        ),
+        format!(
+            r#"pipeline t(task) {{ file_exists("{}") }}"#,
+            outside_file.display()
+        ),
+    ];
+
+    for source in escapes {
+        let err = run_harn_with_policy(&source, policy.clone()).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                VmError::CategorizedError {
+                    category: crate::value::ErrorCategory::ToolRejected,
+                    ..
+                }
+            ),
+            "expected tool_rejected for source {source}, got {err:?}"
+        );
+        assert!(
+            err.to_string().contains("sandbox violation"),
+            "expected sandbox violation message, got {err}"
+        );
+    }
+}
+
+#[test]
+fn test_policy_workspace_roots_reject_process_cwd_escape() {
+    let allowed = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let policy = crate::orchestration::CapabilityPolicy {
+        capabilities: std::collections::BTreeMap::from([(
+            "process".to_string(),
+            vec!["exec".to_string()],
+        )]),
+        workspace_roots: vec![allowed.path().display().to_string()],
+        side_effect_level: Some("process_exec".to_string()),
+        ..Default::default()
+    };
+
+    let source = format!(
+        r#"pipeline t(task) {{ exec_at("{}", "sh", "-c", "true") }}"#,
+        outside.path().display()
+    );
+    let err = run_harn_with_policy(&source, policy).unwrap_err();
+    assert!(matches!(
+        err,
+        VmError::CategorizedError {
+            category: crate::value::ErrorCategory::ToolRejected,
+            ..
+        }
+    ));
+    assert!(err.to_string().contains("process cwd"));
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn test_macos_process_sandbox_surfaces_denial_as_typed_error() {
+    if !std::path::Path::new("/usr/bin/sandbox-exec").exists() {
+        return;
+    }
+    let cwd = std::env::current_dir().unwrap();
+    let allowed = tempfile::tempdir_in(&cwd).unwrap();
+    let outside_base = std::env::var_os("HOME")
+        .map(std::path::PathBuf::from)
+        .filter(|path| path.is_dir())
+        .unwrap_or_else(|| cwd.parent().unwrap_or(cwd.as_path()).to_path_buf());
+    if outside_base.starts_with("/tmp") || outside_base.starts_with("/private/tmp") {
+        return;
+    }
+    let outside = tempfile::tempdir_in(outside_base).unwrap();
+    let outside_file = outside.path().join("blocked.txt");
+    let previous = std::env::var("HARN_HANDLER_SANDBOX").ok();
+    std::env::set_var("HARN_HANDLER_SANDBOX", "enforce");
+
+    let policy = crate::orchestration::CapabilityPolicy {
+        capabilities: std::collections::BTreeMap::from([(
+            "process".to_string(),
+            vec!["exec".to_string()],
+        )]),
+        workspace_roots: vec![allowed.path().display().to_string()],
+        side_effect_level: Some("process_exec".to_string()),
+        ..Default::default()
+    };
+    let source = format!(
+        r#"pipeline t(task) {{ shell("printf denied > '{}'") }}"#,
+        outside_file.display()
+    );
+    let err = run_harn_with_policy(&source, policy).unwrap_err();
+    match previous {
+        Some(value) => std::env::set_var("HARN_HANDLER_SANDBOX", value),
+        None => std::env::remove_var("HARN_HANDLER_SANDBOX"),
+    }
+
+    assert!(matches!(
+        err,
+        VmError::CategorizedError {
+            category: crate::value::ErrorCategory::ToolRejected,
+            ..
+        }
+    ));
+    assert!(err.to_string().contains("sandbox violation"));
+    assert!(!outside_file.exists());
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn test_linux_process_sandbox_catches_ten_process_escapes() {
+    let allowed = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let outside_file = outside.path().join("secret.txt");
+    let outside_new = outside.path().join("new.txt");
+    let outside_copy = outside.path().join("copy.txt");
+    let outside_dir = outside.path().join("new_dir");
+    let allowed_file = allowed.path().join("allowed.txt");
+    std::fs::write(&outside_file, "secret").unwrap();
+    std::fs::write(&allowed_file, "allowed").unwrap();
+
+    let previous = std::env::var("HARN_HANDLER_SANDBOX").ok();
+    std::env::set_var("HARN_HANDLER_SANDBOX", "enforce");
+
+    let policy = crate::orchestration::CapabilityPolicy {
+        capabilities: std::collections::BTreeMap::from([
+            ("process".to_string(), vec!["exec".to_string()]),
+            (
+                "workspace".to_string(),
+                vec![
+                    "read_text".to_string(),
+                    "list".to_string(),
+                    "exists".to_string(),
+                    "write_text".to_string(),
+                    "delete".to_string(),
+                ],
+            ),
+        ]),
+        workspace_roots: vec![allowed.path().display().to_string()],
+        side_effect_level: Some("process_exec".to_string()),
+        ..Default::default()
+    };
+
+    let escapes = [
+        format!("cat {}", shell_quote(&outside_file)),
+        format!("printf x > {}", shell_quote(&outside_new)),
+        format!("printf x >> {}", shell_quote(&outside_file)),
+        format!("mkdir {}", shell_quote(&outside_dir)),
+        format!("rm {}", shell_quote(&outside_file)),
+        format!(
+            "cp {} {}",
+            shell_quote(&outside_file),
+            shell_quote(&allowed.path().join("copy.txt"))
+        ),
+        format!(
+            "cp {} {}",
+            shell_quote(&allowed_file),
+            shell_quote(&outside_copy)
+        ),
+        format!(
+            "mv {} {}",
+            shell_quote(&allowed_file),
+            shell_quote(&outside.path().join("moved.txt"))
+        ),
+        format!(
+            "ln -s {} {} && cat {}",
+            shell_quote(&outside_file),
+            shell_quote(&allowed.path().join("link.txt")),
+            shell_quote(&allowed.path().join("link.txt"))
+        ),
+        format!("touch {}", shell_quote(&outside.path().join("touched.txt"))),
+    ];
+    assert_eq!(escapes.len(), 10);
+
+    for command in escapes {
+        let source = format!(
+            r#"pipeline t(task) {{ shell("{}") }}"#,
+            harn_string_escape(&command)
+        );
+        let err = run_harn_with_policy(&source, policy.clone()).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                VmError::CategorizedError {
+                    category: crate::value::ErrorCategory::ToolRejected,
+                    ..
+                }
+            ),
+            "expected tool_rejected for command {command}, got {err:?}"
+        );
+        assert!(
+            err.to_string().contains("sandbox violation"),
+            "expected sandbox violation for command {command}, got {err}"
+        );
+    }
+
+    match previous {
+        Some(value) => std::env::set_var("HARN_HANDLER_SANDBOX", value),
+        None => std::env::remove_var("HARN_HANDLER_SANDBOX"),
+    }
+    assert!(outside_file.exists());
+    assert!(!outside_new.exists());
+    assert!(!outside_copy.exists());
+    assert!(!outside_dir.exists());
+}
+
+#[cfg(target_os = "linux")]
+fn shell_quote(path: &std::path::Path) -> String {
+    format!("'{}'", path.display().to_string().replace('\'', "'\\''"))
+}
+
+#[cfg(target_os = "linux")]
+fn harn_string_escape(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
 #[test]

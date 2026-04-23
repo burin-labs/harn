@@ -1,0 +1,9 @@
+package harn:pure-handler;
+
+world pure-handler {
+  /// Run a pure-compute Harn handler and return captured output.
+  ///
+  /// Implementations of this world must not import filesystem, process,
+  /// network, clock, random, or LLM host capabilities.
+  export run: func(source: string) -> result<string, string>;
+}

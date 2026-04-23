@@ -1,9 +1,9 @@
 [package]
 name = "harn-wasm"
-version.workspace = true
-edition.workspace = true
-license.workspace = true
-repository.workspace = true
+version = "0.7.31"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/burin-labs/harn"
 description = "WebAssembly target for the Harn programming language playground"
 
 [lib]

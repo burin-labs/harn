@@ -3819,6 +3819,34 @@ Sandbox restrictions propagate to child VMs created by `spawn`,
 `parallel`, and `parallel each`. A child VM inherits the same set of
 denied builtins as its parent.
 
+### Handler capability sandbox
+
+When a workflow or handler runs under an active `CapabilityPolicy`,
+Harn also enforces `workspace_roots` at runtime for filesystem builtins.
+Attempts to read, write, create, copy, stat, list, or delete paths outside
+the declared roots fail as typed `tool_rejected` sandbox violations.
+Process cwd escapes through `exec_at` / `shell_at` are rejected the same way.
+
+Pure-compute handlers can run through the WASM sandbox entrypoint exposed
+by `harn-wasm` as `executePureComponent` and described by
+`crates/harn-wasm/wit/harn-pure.wit`. That component surface has no host
+imports for filesystem, process, network, clock, random, LLM, or async
+effects, so attempted side effects fail inside the component boundary.
+
+Process execution is wrapped in an OS sandbox when Harn can do so for the
+current platform. On Linux, Harn installs a seccomp-BPF filter that returns
+`EPERM` for denied syscalls and a Landlock filesystem ruleset derived from
+the active `CapabilityPolicy`. On OpenBSD, Harn applies `pledge` promises
+and `unveil` path permissions derived from the same policy. On macOS, Harn
+generates a `sandbox-exec` profile from the active capability policy:
+writes are limited to process plumbing locations plus declared
+`workspace_roots` only when the policy allows workspace writes, and network
+access is allowed only when the policy side-effect ceiling permits
+`network`. Unsupported platforms warn once and run the process unsandboxed
+by default. Set `HARN_HANDLER_SANDBOX=enforce` to fail closed when no OS
+sandbox is available, or `HARN_HANDLER_SANDBOX=off` to disable the process
+wrapper.
+
 ## Test framework
 
 Harn includes a built-in test runner invoked via `harn test`.

@@ -1287,27 +1287,34 @@ pub async fn execute_stage_node(
             .filter(|value| !value.is_empty())
         {
             let mut process = if cfg!(target_os = "windows") {
-                let mut cmd = tokio::process::Command::new("cmd");
-                cmd.arg("/C").arg(command);
-                cmd
+                crate::stdlib::sandbox::tokio_command_for(
+                    "cmd",
+                    &["/C".to_string(), command.to_string()],
+                )?
             } else {
-                let mut cmd = tokio::process::Command::new("/bin/sh");
-                cmd.arg("-lc").arg(command);
-                cmd
+                crate::stdlib::sandbox::tokio_command_for(
+                    "/bin/sh",
+                    &["-lc".to_string(), command.to_string()],
+                )?
             };
             process.stdin(std::process::Stdio::null());
             if let Some(context) = crate::stdlib::process::current_execution_context() {
                 if let Some(cwd) = context.cwd.filter(|cwd| !cwd.is_empty()) {
+                    crate::stdlib::sandbox::enforce_process_cwd(std::path::Path::new(&cwd))?;
                     process.current_dir(cwd);
                 }
                 if !context.env.is_empty() {
                     process.envs(context.env);
                 }
             }
-            let output = process
-                .output()
-                .await
-                .map_err(|e| VmError::Runtime(format!("workflow verify exec failed: {e}")))?;
+            let output = process.output().await.map_err(|e| {
+                crate::stdlib::sandbox::process_spawn_error(&e).unwrap_or_else(|| {
+                    VmError::Runtime(format!("workflow verify exec failed: {e}"))
+                })
+            })?;
+            if let Some(error) = crate::stdlib::sandbox::process_violation_error(&output) {
+                return Err(error);
+            }
             let stdout = String::from_utf8_lossy(&output.stdout).to_string();
             let stderr = String::from_utf8_lossy(&output.stderr).to_string();
             let combined = if stderr.is_empty() {

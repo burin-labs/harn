@@ -278,7 +278,9 @@ pub fn enforce_current_policy_for_builtin(name: &str, args: &[VmValue]) -> Resul
         return Ok(());
     };
     match name {
-        "read_file" if !policy_allows_capability(&policy, "workspace", "read_text") => {
+        "read_file" | "read_file_result" | "read_file_bytes"
+            if !policy_allows_capability(&policy, "workspace", "read_text") =>
+        {
             return reject_policy(format!(
                 "builtin '{name}' exceeds workspace.read_text ceiling"
             ));
@@ -289,7 +291,7 @@ pub fn enforce_current_policy_for_builtin(name: &str, args: &[VmValue]) -> Resul
         "file_exists" | "stat" if !policy_allows_capability(&policy, "workspace", "exists") => {
             return reject_policy(format!("builtin '{name}' exceeds workspace.exists ceiling"));
         }
-        "write_file" | "append_file" | "mkdir" | "copy_file"
+        "write_file" | "write_file_bytes" | "append_file" | "mkdir" | "copy_file"
             if !policy_allows_capability(&policy, "workspace", "write_text")
                 || !policy_allows_side_effect(&policy, "workspace_write") =>
         {

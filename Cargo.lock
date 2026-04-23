@@ -1299,6 +1299,7 @@ dependencies = [
  "ignore",
  "jsonwebtoken",
  "keyring",
+ "libc",
  "md-5",
  "opentelemetry",
  "opentelemetry-otlp",

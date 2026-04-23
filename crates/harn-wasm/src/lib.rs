@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use harn_lexer::Lexer;
-use harn_parser::{Node, Parser};
+use harn_parser::{Node, Parser, SNode, TypedParam};
 use wasm_bindgen::prelude::*;
 
 /// Execute Harn source code and return the output as a plain string.
@@ -46,6 +46,17 @@ pub fn execute(source: &str) -> Result<String, JsError> {
     Ok(interp.output)
 }
 
+/// Execute a pure-compute handler through the WASM sandbox entrypoint.
+///
+/// The exported name mirrors the `harn:pure-handler/run` WIT function in
+/// `wit/harn-pure.wit`. The sync interpreter intentionally has no filesystem,
+/// process, network, LLM, or async host imports, so unsupported side effects
+/// fail as ordinary runtime errors inside the component boundary.
+#[wasm_bindgen(js_name = executePureComponent)]
+pub fn execute_pure_component(source: &str) -> Result<String, JsError> {
+    execute(source)
+}
+
 /// Lex source code and return tokens as JSON.
 #[wasm_bindgen]
 pub fn tokenize(source: &str) -> Result<String, JsError> {
@@ -83,11 +94,9 @@ pub fn format_code(source: &str) -> String {
 // This is a stripped-down version of the async Interpreter, without tokio dependencies.
 
 use harn_lexer::StringSegment;
-use harn_parser::{DictEntry, MatchArm};
-
 struct SyncInterpreter {
     env: Env,
-    pipelines: BTreeMap<String, Node>,
+    pipelines: BTreeMap<String, SNode>,
     output: String,
 }
 
@@ -100,7 +109,7 @@ enum Val {
     Nil,
     List(Vec<Val>),
     Dict(BTreeMap<String, Val>),
-    Closure(Vec<String>, Vec<Node>, Env),
+    Closure(Vec<String>, Vec<SNode>, Env),
 }
 
 impl Val {
@@ -135,16 +144,14 @@ impl Val {
                 format!("[{}]", inner.join(", "))
             }
             Val::Dict(map) => {
-                let inner: Vec<String> =
-                    map.iter().map(|(k, v)| format!("{k}: {}", v.as_string())).collect();
+                let inner: Vec<String> = map
+                    .iter()
+                    .map(|(k, v)| format!("{k}: {}", v.as_string()))
+                    .collect();
                 format!("{{{}}}", inner.join(", "))
             }
             Val::Closure(..) => "<fn>".to_string(),
         }
-    }
-
-    fn as_int(&self) -> Option<i64> {
-        if let Val::Int(n) = self { Some(*n) } else { None }
     }
 }
 
@@ -169,15 +176,23 @@ struct Env {
 
 impl Env {
     fn new() -> Self {
-        Self { values: BTreeMap::new(), parent: None }
+        Self {
+            values: BTreeMap::new(),
+            parent: None,
+        }
     }
 
     fn child(&self) -> Self {
-        Self { values: BTreeMap::new(), parent: Some(Box::new(self.clone())) }
+        Self {
+            values: BTreeMap::new(),
+            parent: Some(Box::new(self.clone())),
+        }
     }
 
     fn get(&self, name: &str) -> Option<Val> {
-        self.values.get(name).map(|(v, _)| v.clone())
+        self.values
+            .get(name)
+            .map(|(v, _)| v.clone())
             .or_else(|| self.parent.as_ref()?.get(name))
     }
 
@@ -210,18 +225,27 @@ impl SyncInterpreter {
         }
     }
 
-    fn run(&mut self, program: &[Node]) -> Result<(), String> {
+    fn run(&mut self, program: &[SNode]) -> Result<(), String> {
         for node in program {
-            if let Node::Pipeline { name, .. } = node {
+            if let Node::Pipeline { name, .. } = &node.node {
                 self.pipelines.insert(name.clone(), node.clone());
             }
         }
 
         let main = self.pipelines.get("default").cloned().or_else(|| {
-            program.iter().find(|n| matches!(n, Node::Pipeline { .. })).cloned()
+            program
+                .iter()
+                .find(|n| matches!(&n.node, Node::Pipeline { .. }))
+                .cloned()
         });
 
-        let Some(Node::Pipeline { params, body, .. }) = main else { return Ok(()) };
+        let Some(SNode {
+            node: Node::Pipeline { params, body, .. },
+            ..
+        }) = main
+        else {
+            return Ok(());
+        };
 
         if params.iter().any(|p| p == "task") {
             self.env.define("task", Val::String(String::new()), false);
@@ -233,7 +257,7 @@ impl SyncInterpreter {
         }
     }
 
-    fn exec(&mut self, stmts: &[Node]) -> Result<Val, EvalStop> {
+    fn exec(&mut self, stmts: &[SNode]) -> Result<Val, EvalStop> {
         let mut result = Val::Nil;
         for stmt in stmts {
             result = self.eval(stmt)?;
@@ -283,11 +307,12 @@ impl SyncInterpreter {
                     }
                 }
             }
+            harn_parser::BindingPattern::Pair(_, _) => {}
         }
     }
 
-    fn eval(&mut self, node: &Node) -> Result<Val, EvalStop> {
-        match node {
+    fn eval(&mut self, node: &SNode) -> Result<Val, EvalStop> {
+        match &node.node {
             Node::LetBinding { pattern, value, .. } => {
                 let val = self.eval(value)?;
                 self.define_pattern(pattern, val, false);
@@ -300,12 +325,16 @@ impl SyncInterpreter {
             }
             Node::Assignment { target, value, .. } => {
                 let val = self.eval(value)?;
-                if let Node::Identifier(name) = target.as_ref() {
+                if let Node::Identifier(name) = &target.as_ref().node {
                     self.env.assign(name, val).map_err(EvalStop::Error)?;
                 }
                 Ok(Val::Nil)
             }
-            Node::IfElse { condition, then_body, else_body } => {
+            Node::IfElse {
+                condition,
+                then_body,
+                else_body,
+            } => {
                 if self.eval(condition)?.is_truthy() {
                     self.exec(then_body)
                 } else if let Some(eb) = else_body {
@@ -314,16 +343,23 @@ impl SyncInterpreter {
                     Ok(Val::Nil)
                 }
             }
-            Node::ForIn { pattern, iterable, body } => {
+            Node::ForIn {
+                pattern,
+                iterable,
+                body,
+            } => {
                 let iter_val = self.eval(iterable)?;
                 let items = match iter_val {
                     Val::List(items) => items,
-                    Val::Dict(map) => map.into_iter().map(|(k, v)| {
-                        Val::Dict(BTreeMap::from([
-                            ("key".to_string(), Val::String(k)),
-                            ("value".to_string(), v),
-                        ]))
-                    }).collect(),
+                    Val::Dict(map) => map
+                        .into_iter()
+                        .map(|(k, v)| {
+                            Val::Dict(BTreeMap::from([
+                                ("key".to_string(), Val::String(k)),
+                                ("value".to_string(), v),
+                            ]))
+                        })
+                        .collect(),
                     _ => return Ok(Val::Nil),
                 };
                 let saved = self.env.clone();
@@ -339,7 +375,9 @@ impl SyncInterpreter {
             Node::WhileLoop { condition, body } => {
                 let mut result = Val::Nil;
                 for _ in 0..10_000 {
-                    if !self.eval(condition)?.is_truthy() { break; }
+                    if !self.eval(condition)?.is_truthy() {
+                        break;
+                    }
                     result = self.exec(body)?;
                 }
                 Ok(result)
@@ -352,7 +390,13 @@ impl SyncInterpreter {
                 let val = self.eval(value)?;
                 Err(EvalStop::Error(format!("Thrown: {}", val.as_string())))
             }
-            Node::TryCatch { body, error_var, catch_body, finally_body, .. } => {
+            Node::TryCatch {
+                body,
+                error_var,
+                catch_body,
+                finally_body,
+                ..
+            } => {
                 let result = match self.exec(body) {
                     Ok(v) => Ok(v),
                     Err(EvalStop::Return(v)) => Err(EvalStop::Return(v)),
@@ -368,23 +412,24 @@ impl SyncInterpreter {
                 }
                 result
             }
-            Node::TryExpr { body } => {
-                match self.exec(body) {
-                    Ok(v) => {
-                        let mut d = BTreeMap::new();
-                        d.insert("ok".into(), v);
-                        Ok(Val::Dict(d))
-                    }
-                    Err(EvalStop::Return(v)) => Err(EvalStop::Return(v)),
-                    Err(EvalStop::Error(e)) => {
-                        let mut d = BTreeMap::new();
-                        d.insert("err".into(), Val::String(e));
-                        Ok(Val::Dict(d))
-                    }
+            Node::TryExpr { body } => match self.exec(body) {
+                Ok(v) => {
+                    let mut d = BTreeMap::new();
+                    d.insert("ok".into(), v);
+                    Ok(Val::Dict(d))
                 }
-            }
-            Node::FnDecl { name, params, body, .. } => {
-                let closure = Val::Closure(params.clone(), body.clone(), self.env.clone());
+                Err(EvalStop::Return(v)) => Err(EvalStop::Return(v)),
+                Err(EvalStop::Error(e)) => {
+                    let mut d = BTreeMap::new();
+                    d.insert("err".into(), Val::String(e));
+                    Ok(Val::Dict(d))
+                }
+            },
+            Node::FnDecl {
+                name, params, body, ..
+            } => {
+                let closure =
+                    Val::Closure(TypedParam::names(params), body.clone(), self.env.clone());
                 self.env.define(name, closure, false);
                 Ok(Val::Nil)
             }
@@ -401,13 +446,21 @@ impl SyncInterpreter {
                 }
                 Err(EvalStop::Error(format!("Undefined builtin: {name}")))
             }
-            Node::MethodCall { object, method, args } => {
+            Node::MethodCall {
+                object,
+                method,
+                args,
+            } => {
                 let obj = self.eval(object)?;
                 let arg_vals: Result<Vec<_>, _> = args.iter().map(|a| self.eval(a)).collect();
                 let arg_vals = arg_vals?;
                 self.eval_method(obj, method, &arg_vals)
             }
-            Node::OptionalMethodCall { object, method, args } => {
+            Node::OptionalMethodCall {
+                object,
+                method,
+                args,
+            } => {
                 let obj = self.eval(object)?;
                 if matches!(obj, Val::Nil) {
                     return Ok(Val::Nil);
@@ -419,7 +472,10 @@ impl SyncInterpreter {
             Node::PropertyAccess { object, property }
             | Node::OptionalPropertyAccess { object, property } => {
                 let obj = self.eval(object)?;
-                if matches!((&obj, &node.node), (Val::Nil, Node::OptionalPropertyAccess { .. })) {
+                if matches!(
+                    (&obj, &node.node),
+                    (Val::Nil, Node::OptionalPropertyAccess { .. })
+                ) {
                     return Ok(Val::Nil);
                 }
                 match &obj {
@@ -467,12 +523,24 @@ impl SyncInterpreter {
                         let len = items.len() as i64;
                         let s = match &start_val {
                             Val::Nil => 0,
-                            Val::Int(i) => if *i < 0 { (len + *i).max(0) } else { (*i).min(len) },
+                            Val::Int(i) => {
+                                if *i < 0 {
+                                    (len + *i).max(0)
+                                } else {
+                                    (*i).min(len)
+                                }
+                            }
                             _ => 0,
                         };
                         let e = match &end_val {
                             Val::Nil => len,
-                            Val::Int(i) => if *i < 0 { (len + *i).max(0) } else { (*i).min(len) },
+                            Val::Int(i) => {
+                                if *i < 0 {
+                                    (len + *i).max(0)
+                                } else {
+                                    (*i).min(len)
+                                }
+                            }
                             _ => len,
                         };
                         if s >= e {
@@ -486,12 +554,24 @@ impl SyncInterpreter {
                         let len = chars.len() as i64;
                         let s = match &start_val {
                             Val::Nil => 0,
-                            Val::Int(i) => if *i < 0 { (len + *i).max(0) } else { (*i).min(len) },
+                            Val::Int(i) => {
+                                if *i < 0 {
+                                    (len + *i).max(0)
+                                } else {
+                                    (*i).min(len)
+                                }
+                            }
                             _ => 0,
                         };
                         let e = match &end_val {
                             Val::Nil => len,
-                            Val::Int(i) => if *i < 0 { (len + *i).max(0) } else { (*i).min(len) },
+                            Val::Int(i) => {
+                                if *i < 0 {
+                                    (len + *i).max(0)
+                                } else {
+                                    (*i).min(len)
+                                }
+                            }
                             _ => len,
                         };
                         if s >= e {
@@ -516,7 +596,11 @@ impl SyncInterpreter {
                     _ => Ok(Val::Nil),
                 }
             }
-            Node::Ternary { condition, true_expr, false_expr } => {
+            Node::Ternary {
+                condition,
+                true_expr,
+                false_expr,
+            } => {
                 if self.eval(condition)?.is_truthy() {
                     self.eval(true_expr)
                 } else {
@@ -530,9 +614,13 @@ impl SyncInterpreter {
                         StringSegment::Literal(s) => result.push_str(s),
                         StringSegment::Expression(expr, line, col) => {
                             let mut lexer = Lexer::with_position(expr, *line, *col);
-                            let tokens = lexer.tokenize().map_err(|e| EvalStop::Error(e.to_string()))?;
+                            let tokens = lexer
+                                .tokenize()
+                                .map_err(|e| EvalStop::Error(e.to_string()))?;
                             let mut parser = Parser::new(tokens);
-                            let node = parser.parse_single_expression().map_err(|e| EvalStop::Error(e.to_string()))?;
+                            let node = parser
+                                .parse_single_expression()
+                                .map_err(|e| EvalStop::Error(e.to_string()))?;
                             let val = self.eval(&node)?;
                             result.push_str(&val.as_string());
                         }
@@ -559,9 +647,11 @@ impl SyncInterpreter {
                 }
                 Ok(Val::Dict(map))
             }
-            Node::Closure { params, body } => {
-                Ok(Val::Closure(params.clone(), body.clone(), self.env.clone()))
-            }
+            Node::Closure { params, body, .. } => Ok(Val::Closure(
+                TypedParam::names(params),
+                body.clone(),
+                self.env.clone(),
+            )),
             Node::MatchExpr { value, arms } => {
                 let val = self.eval(value)?;
                 for arm in arms {
@@ -576,11 +666,18 @@ impl SyncInterpreter {
         }
     }
 
-    fn invoke_closure(&mut self, params: &[String], body: &[Node], cenv: &Env, args: &[Val]) -> Result<Val, EvalStop> {
+    fn invoke_closure(
+        &mut self,
+        params: &[String],
+        body: &[SNode],
+        cenv: &Env,
+        args: &[Val],
+    ) -> Result<Val, EvalStop> {
         let saved = self.env.clone();
         self.env = cenv.child();
         for (i, param) in params.iter().enumerate() {
-            self.env.define(param, args.get(i).cloned().unwrap_or(Val::Nil), false);
+            self.env
+                .define(param, args.get(i).cloned().unwrap_or(Val::Nil), false);
         }
         let result = self.exec(body);
         self.env = saved;
@@ -594,15 +691,25 @@ impl SyncInterpreter {
     fn eval_method(&mut self, obj: Val, method: &str, args: &[Val]) -> Result<Val, EvalStop> {
         match &obj {
             Val::String(s) => match method {
-                "contains" => Ok(Val::Bool(s.contains(&args.first().map(|a| a.as_string()).unwrap_or_default()))),
-                "replace" if args.len() >= 2 => Ok(Val::String(s.replace(&args[0].as_string(), &args[1].as_string()))),
+                "contains" => Ok(Val::Bool(
+                    s.contains(&args.first().map(|a| a.as_string()).unwrap_or_default()),
+                )),
+                "replace" if args.len() >= 2 => Ok(Val::String(
+                    s.replace(&args[0].as_string(), &args[1].as_string()),
+                )),
                 "split" => {
                     let sep = args.first().map(|a| a.as_string()).unwrap_or(",".into());
-                    Ok(Val::List(s.split(&sep).map(|p| Val::String(p.to_string())).collect()))
+                    Ok(Val::List(
+                        s.split(&sep).map(|p| Val::String(p.to_string())).collect(),
+                    ))
                 }
                 "trim" => Ok(Val::String(s.trim().to_string())),
-                "starts_with" => Ok(Val::Bool(s.starts_with(&args.first().map(|a| a.as_string()).unwrap_or_default()))),
-                "ends_with" => Ok(Val::Bool(s.ends_with(&args.first().map(|a| a.as_string()).unwrap_or_default()))),
+                "starts_with" => Ok(Val::Bool(
+                    s.starts_with(&args.first().map(|a| a.as_string()).unwrap_or_default()),
+                )),
+                "ends_with" => Ok(Val::Bool(
+                    s.ends_with(&args.first().map(|a| a.as_string()).unwrap_or_default()),
+                )),
                 "lowercase" => Ok(Val::String(s.to_lowercase())),
                 "uppercase" => Ok(Val::String(s.to_uppercase())),
                 "count" => Ok(Val::Int(s.chars().count() as i64)),
@@ -616,28 +723,44 @@ impl SyncInterpreter {
                     if let Some(Val::Closure(params, body, cenv)) = args.first() {
                         let mut results = Vec::new();
                         for item in items {
-                            results.push(self.invoke_closure(params, body, cenv, &[item.clone()])?);
+                            results.push(self.invoke_closure(
+                                params,
+                                body,
+                                cenv,
+                                &[item.clone()],
+                            )?);
                         }
                         Ok(Val::List(results))
-                    } else { Ok(Val::Nil) }
+                    } else {
+                        Ok(Val::Nil)
+                    }
                 }
                 "filter" => {
                     if let Some(Val::Closure(params, body, cenv)) = args.first() {
                         let mut results = Vec::new();
                         for item in items {
-                            if self.invoke_closure(params, body, cenv, &[item.clone()])?.is_truthy() {
+                            if self
+                                .invoke_closure(params, body, cenv, &[item.clone()])?
+                                .is_truthy()
+                            {
                                 results.push(item.clone());
                             }
                         }
                         Ok(Val::List(results))
-                    } else { Ok(Val::Nil) }
+                    } else {
+                        Ok(Val::Nil)
+                    }
                 }
                 _ => Ok(Val::Nil),
             },
             Val::Dict(map) => match method {
-                "keys" => Ok(Val::List(map.keys().map(|k| Val::String(k.clone())).collect())),
+                "keys" => Ok(Val::List(
+                    map.keys().map(|k| Val::String(k.clone())).collect(),
+                )),
                 "values" => Ok(Val::List(map.values().cloned().collect())),
-                "has" => Ok(Val::Bool(map.contains_key(&args.first().map(|a| a.as_string()).unwrap_or_default()))),
+                "has" => Ok(Val::Bool(map.contains_key(
+                    &args.first().map(|a| a.as_string()).unwrap_or_default(),
+                ))),
                 "count" => Ok(Val::Int(map.len() as i64)),
                 _ => Ok(Val::Nil),
             },
@@ -645,17 +768,27 @@ impl SyncInterpreter {
         }
     }
 
-    fn eval_binary(&mut self, op: &str, left: &Node, right: &Node) -> Result<Val, EvalStop> {
+    fn eval_binary(&mut self, op: &str, left: &SNode, right: &SNode) -> Result<Val, EvalStop> {
         if op == "??" {
             let lv = self.eval(left)?;
-            return if matches!(lv, Val::Nil) { self.eval(right) } else { Ok(lv) };
+            return if matches!(lv, Val::Nil) {
+                self.eval(right)
+            } else {
+                Ok(lv)
+            };
         }
         if op == "&&" {
-            return Ok(Val::Bool(self.eval(left)?.is_truthy() && self.eval(right)?.is_truthy()));
+            return Ok(Val::Bool(
+                self.eval(left)?.is_truthy() && self.eval(right)?.is_truthy(),
+            ));
         }
         if op == "||" {
             let lv = self.eval(left)?;
-            return if lv.is_truthy() { Ok(Val::Bool(true)) } else { Ok(Val::Bool(self.eval(right)?.is_truthy())) };
+            return if lv.is_truthy() {
+                Ok(Val::Bool(true))
+            } else {
+                Ok(Val::Bool(self.eval(right)?.is_truthy()))
+            };
         }
         if op == "|>" {
             let lv = self.eval(left)?;
@@ -663,7 +796,7 @@ impl SyncInterpreter {
             if let Val::Closure(params, body, cenv) = rv {
                 return self.invoke_closure(&params, &body, &cenv, &[lv]);
             }
-            if let Node::Identifier(name) = right {
+            if let Node::Identifier(name) = &right.node {
                 if let Some(Val::Closure(params, body, cenv)) = self.env.get(name) {
                     return self.invoke_closure(&params, &body, &cenv, &[lv]);
                 }
@@ -707,9 +840,35 @@ impl SyncInterpreter {
             "<" | ">" | "<=" | ">=" => {
                 let cmp = match (&lv, &rv) {
                     (Val::Int(a), Val::Int(b)) => a.cmp(b) as i32,
-                    (Val::Float(a), Val::Float(b)) => if a < b { -1 } else if a > b { 1 } else { 0 },
-                    (Val::Int(a), Val::Float(b)) => { let a = *a as f64; if a < *b { -1 } else if a > *b { 1 } else { 0 } },
-                    (Val::Float(a), Val::Int(b)) => { let b = *b as f64; if *a < b { -1 } else if *a > b { 1 } else { 0 } },
+                    (Val::Float(a), Val::Float(b)) => {
+                        if a < b {
+                            -1
+                        } else if a > b {
+                            1
+                        } else {
+                            0
+                        }
+                    }
+                    (Val::Int(a), Val::Float(b)) => {
+                        let a = *a as f64;
+                        if a < *b {
+                            -1
+                        } else if a > *b {
+                            1
+                        } else {
+                            0
+                        }
+                    }
+                    (Val::Float(a), Val::Int(b)) => {
+                        let b = *b as f64;
+                        if *a < b {
+                            -1
+                        } else if *a > b {
+                            1
+                        } else {
+                            0
+                        }
+                    }
                     _ => 0,
                 };
                 Ok(Val::Bool(match op {
@@ -719,7 +878,7 @@ impl SyncInterpreter {
                     ">=" => cmp >= 0,
                     _ => false,
                 }))
-            },
+            }
             "in" => {
                 let result = match &rv {
                     Val::List(items) => items.iter().any(|v| vals_equal(v, &lv)),
