@@ -207,7 +207,10 @@ Authorization: Bearer <api-key>
 ```
 
 ACP browser or remote-IDE clients connect to `ws://<host>/acp` or
-`wss://<host>/acp` and send one JSON-RPC ACP message per text frame. See
+`wss://<host>/acp` and send one JSON-RPC ACP message per text frame. The
+transport adds `_harn.eventId` to outbound frames; clients pass
+`lastAckedEventId` to `session/load` after reconnect so the orchestrator can
+replay missed frames from the retained worker or EventLog. See
 [ACP over WebSocket](./acp/websocket.md).
 
 HMAC requests use:
