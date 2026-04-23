@@ -44,7 +44,7 @@ LLM THROTTLING
     (RPM); `max_concurrent` on `parallel` caps simultaneous in-flight jobs.
 
 SCRIPTING
-    LLM-readable one-pager: https://harnlang.com/docs/llm/harn-quickref.md
+    LLM-readable one-pager: https://harnlang.com/docs/llm/harn-quickref.html
     Human cheatsheet:       https://harnlang.com/scripting-cheatsheet.html
     Full docs:              https://harnlang.com/
 ")]

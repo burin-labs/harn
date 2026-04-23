@@ -14,7 +14,7 @@ Use `render_string(...)` when the template should live inline in source. Use
 separate file relative to the calling module. The template syntax and error
 shape are identical across both entrypoints.
 
-This page is the reference. The one-page [quickref](./llm/harn-quickref.md)
+This page is the reference. The one-page [quickref](./docs/llm/harn-quickref.md)
 has a condensed version for agents writing Harn.
 
 ## At a glance

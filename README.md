@@ -474,14 +474,15 @@ notifications:
 
 ## Documentation
 
-- [Docs book](docs/src/introduction.md)
-- [Workflow runtime guide](docs/src/workflow-runtime.md)
-- [LLM calls and agent loops](docs/src/llm-and-agents.md)
-- [MCP and ACP integration](docs/src/mcp-and-acp.md)
-- [CLI reference](docs/src/cli-reference.md)
-- [Builtin reference](docs/src/builtins.md)
+- [Docs book](https://harnlang.com/)
+- [LLM quick reference](https://harnlang.com/docs/llm/harn-quickref.html)
+- [Workflow runtime guide](https://harnlang.com/workflow-runtime.html)
+- [LLM calls and agent loops](https://harnlang.com/llm-and-agents.html)
+- [MCP and ACP integration](https://harnlang.com/mcp-and-acp.html)
+- [CLI reference](https://harnlang.com/cli-reference.html)
+- [Builtin reference](https://harnlang.com/builtins.html)
 - [Language spec](spec/HARN_SPEC.md)
-- [Hosted language spec](docs/src/language-spec.md)
+- [Hosted language spec](https://harnlang.com/language-spec.html)
 
 ## Development
 

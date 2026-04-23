@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
 description = "Tokenizer with span tracking for the Harn programming language"
 
 [dev-dependencies]
