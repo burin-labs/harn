@@ -1198,8 +1198,28 @@ fn classify_call(name: &str, args: &[SNode]) -> CallSemantics {
                 .map(str::to_string);
             CallClassification::FsWrite { path }
         }
-        "exec" | "exec_at" | "shell" | "shell_at" | "http_post" | "http_put" | "http_patch"
-        | "http_delete" | "http_request" => CallClassification::SideEffect,
+        "exec"
+        | "exec_at"
+        | "shell"
+        | "shell_at"
+        | "http_post"
+        | "http_put"
+        | "http_patch"
+        | "http_delete"
+        | "http_request"
+        | "http_session"
+        | "http_session_request"
+        | "http_session_close"
+        | "sse_connect"
+        | "sse_receive"
+        | "sse_close"
+        | "sse_mock"
+        | "websocket_connect"
+        | "websocket_send"
+        | "websocket_receive"
+        | "websocket_close"
+        | "websocket_mock"
+        | "transport_mock_clear" => CallClassification::SideEffect,
         "mcp_call" => {
             let tool_name = literal_args
                 .get(1)

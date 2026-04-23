@@ -1,6 +1,6 @@
 //! Connector, host, tool, and shell-facing builtin signatures.
 
-use super::{BuiltinReturn, BuiltinSig, UNION_STRING_NIL};
+use super::{BuiltinReturn, BuiltinSig, UNION_DICT_NIL, UNION_STRING_NIL};
 
 pub(crate) const SIGNATURES: &[BuiltinSig] = &[
     BuiltinSig {
@@ -81,6 +81,18 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
     },
     BuiltinSig {
         name: "http_request",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
+        name: "http_session",
+        return_type: Some(BuiltinReturn::Named("string")),
+    },
+    BuiltinSig {
+        name: "http_session_close",
+        return_type: Some(BuiltinReturn::Named("bool")),
+    },
+    BuiltinSig {
+        name: "http_session_request",
         return_type: Some(BuiltinReturn::Named("dict")),
     },
     BuiltinSig {
@@ -200,6 +212,22 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("dict")),
     },
     BuiltinSig {
+        name: "sse_close",
+        return_type: Some(BuiltinReturn::Named("bool")),
+    },
+    BuiltinSig {
+        name: "sse_connect",
+        return_type: Some(BuiltinReturn::Named("string")),
+    },
+    BuiltinSig {
+        name: "sse_mock",
+        return_type: Some(BuiltinReturn::Named("nil")),
+    },
+    BuiltinSig {
+        name: "sse_receive",
+        return_type: Some(BuiltinReturn::Union(UNION_DICT_NIL)),
+    },
+    BuiltinSig {
         name: "skill_count",
         return_type: Some(BuiltinReturn::Named("int")),
     },
@@ -284,6 +312,14 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("string")),
     },
     BuiltinSig {
+        name: "transport_mock_calls",
+        return_type: Some(BuiltinReturn::Named("list")),
+    },
+    BuiltinSig {
+        name: "transport_mock_clear",
+        return_type: Some(BuiltinReturn::Named("nil")),
+    },
+    BuiltinSig {
         name: "tool_registry",
         return_type: Some(BuiltinReturn::Named("dict")),
     },
@@ -298,5 +334,25 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
     BuiltinSig {
         name: "tool_select",
         return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
+        name: "websocket_close",
+        return_type: Some(BuiltinReturn::Named("bool")),
+    },
+    BuiltinSig {
+        name: "websocket_connect",
+        return_type: Some(BuiltinReturn::Named("string")),
+    },
+    BuiltinSig {
+        name: "websocket_mock",
+        return_type: Some(BuiltinReturn::Named("nil")),
+    },
+    BuiltinSig {
+        name: "websocket_receive",
+        return_type: Some(BuiltinReturn::Union(UNION_DICT_NIL)),
+    },
+    BuiltinSig {
+        name: "websocket_send",
+        return_type: Some(BuiltinReturn::Named("bool")),
     },
 ];

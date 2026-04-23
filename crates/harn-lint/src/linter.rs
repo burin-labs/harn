@@ -363,6 +363,9 @@ impl<'a> Linter<'a> {
                 | "http_patch"
                 | "http_delete"
                 | "http_request"
+                | "http_session_request"
+                | "sse_receive"
+                | "websocket_receive"
                 | "host_call"
                 | "mcp_call"
         )

@@ -649,6 +649,16 @@ println(text.source.sha256)
 | `http_patch(url, body, options?)` | url: string, body: string, options: dict | dict | PATCH request |
 | `http_delete(url, options?)` | url: string, options: dict | dict | DELETE request |
 | `http_request(method, url, options?)` | method: string, url: string, options: dict | dict | Generic HTTP request |
+| `http_session(options?)` | options: dict | string | Create a reusable host-managed HTTP client/session handle |
+| `http_session_request(session, method, url, options?)` | session: string, method: string, url: string, options: dict | dict | Run an HTTP request through a reusable session |
+| `http_session_close(session)` | session: string | bool | Close a reusable HTTP session handle |
+| `sse_connect(method, url, options?)` | method: string, url: string, options: dict | string | Open an SSE/Streamable HTTP receive handle |
+| `sse_receive(stream, timeout_ms?)` | stream: string, timeout_ms: int | dict or nil | Receive one SSE event with timeout/backpressure |
+| `sse_close(stream)` | stream: string | bool | Close an SSE handle |
+| `websocket_connect(url, options?)` | url: string, options: dict | string | Open a WebSocket client handle |
+| `websocket_send(socket, message, options?)` | socket: string, message: string or bytes, options: dict | bool | Send a WebSocket text/binary/ping/pong/close message |
+| `websocket_receive(socket, timeout_ms?)` | socket: string, timeout_ms: int | dict or nil | Receive one WebSocket message with timeout/backpressure |
+| `websocket_close(socket)` | socket: string | bool | Close a WebSocket handle |
 
 All HTTP functions return `{status: int, headers: dict, body: string, ok: bool}`.
 Options: `timeout_ms` (alias `timeout`, both in ms), `retry: {max, backoff_ms}`,
@@ -659,7 +669,20 @@ optional `retry_methods` (defaults to `GET`, `HEAD`, `PUT`, `DELETE`,
 `max_redirects` (int), `body` (string). `timeout_ms` applies per attempt.
 Retryable responses default to `408`, `429`, `500`, `502`, `503`, and
 `504`; `Retry-After` is honored on `429` and `503` when retries are
-enabled. Throws on network errors.
+enabled. Throws on network errors. `http_request(..., {session: handle})`
+routes through an existing session when one is provided.
+
+Transport handles are strings owned by the VM host. Rust keeps responsibility
+for TCP/TLS/socket lifecycle, HTTP pooling, SSE/WebSocket protocol parsing,
+backpressure, receive timeouts, cancellation by dropping/closing handles, and
+resource limits. Connector packages should use `sse_receive` and
+`websocket_receive` as pull-based receive loops; each call reads at most one
+event/message and returns `{type: "timeout"}` on timeout or `nil` after close.
+SSE events return `{type: "open"}` or `{type: "event", event, data, id,
+retry_ms}`. WebSocket receives return `{type: "text", data}`, `{type:
+"binary", data_base64}`, `{type: "ping", data_base64}`, `{type: "pong",
+data_base64}`, `{type: "close"}`, or `{type: "timeout"}`. Options include
+`max_events`/`max_messages` and `max_message_bytes`.
 
 ### Mock HTTP
 
@@ -670,6 +693,10 @@ For testing pipelines that make HTTP calls without hitting real servers.
 | `http_mock(method, url_pattern, response)` | method: string, url_pattern: string, response: dict | nil | Register a mock. Use `*` in url_pattern for glob matching (supports multiple `*` wildcards, e.g., `https://api.example.com/*/items/*`). `response` may be a single `{status, body, headers}` dict or `{responses: [...]}` to script retries. |
 | `http_mock_clear()` | none | nil | Clear all mocks and recorded calls |
 | `http_mock_calls()` | none | list | Return list of `{method, url, headers, body}` for all intercepted calls |
+| `sse_mock(url_pattern, events_or_config)` | url_pattern: string, events_or_config: list or dict | nil | Register an in-process SSE stream mock. Events may be strings or `{event, data, id?, retry_ms?}` dicts. |
+| `websocket_mock(url_pattern, messages_or_config)` | url_pattern: string, messages_or_config: list or dict | nil | Register an in-process WebSocket mock. Messages may be strings/bytes or `{type, data}` dicts; `{messages: [...], echo: true}` enables echoing sends. |
+| `transport_mock_calls()` | none | list | Return recorded mocked SSE/WebSocket connect/send/close calls |
+| `transport_mock_clear()` | none | nil | Clear mocked SSE/WebSocket transports and recorded calls |
 
 ```harn
 http_mock("GET", "https://api.example.com/users", {

@@ -89,6 +89,34 @@ pub(crate) const BUILTINS: &[(&str, &str)] = &[
         "http_request",
         "http_request(method, url, options?) -> dict",
     ),
+    ("http_session", "http_session(options?) -> string"),
+    (
+        "http_session_request",
+        "http_session_request(session, method, url, options?) -> dict",
+    ),
+    ("http_session_close", "http_session_close(session) -> bool"),
+    (
+        "sse_connect",
+        "sse_connect(method, url, options?) -> string",
+    ),
+    (
+        "sse_receive",
+        "sse_receive(stream, timeout_ms?) -> dict | nil",
+    ),
+    ("sse_close", "sse_close(stream) -> bool"),
+    (
+        "websocket_connect",
+        "websocket_connect(url, options?) -> string",
+    ),
+    (
+        "websocket_send",
+        "websocket_send(socket, message, options?) -> bool",
+    ),
+    (
+        "websocket_receive",
+        "websocket_receive(socket, timeout_ms?) -> dict | nil",
+    ),
+    ("websocket_close", "websocket_close(socket) -> bool"),
     // Mock HTTP
     (
         "http_mock",
@@ -96,6 +124,13 @@ pub(crate) const BUILTINS: &[(&str, &str)] = &[
     ),
     ("http_mock_clear", "http_mock_clear() -> nil"),
     ("http_mock_calls", "http_mock_calls() -> list"),
+    ("sse_mock", "sse_mock(url_pattern, events_or_config) -> nil"),
+    (
+        "websocket_mock",
+        "websocket_mock(url_pattern, messages_or_config) -> nil",
+    ),
+    ("transport_mock_calls", "transport_mock_calls() -> list"),
+    ("transport_mock_clear", "transport_mock_clear() -> nil"),
     (
         "host_mock",
         "host_mock(capability, op, response_or_config, params?) -> nil",
