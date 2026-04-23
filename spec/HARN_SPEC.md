@@ -3335,6 +3335,18 @@ metadata such as `occurred_at`, `tenant_id`, `headers`, `batch`, and
 `signature_status`. During the transition to NormalizeResult v1, runtimes also
 accept the legacy direct event dict shape.
 
+Harn connector exports run under an effect policy chosen by export name.
+`normalize_inbound` uses the hot-path local class by default: deterministic
+stdlib work, JSON/base64/body handling, signature verification, `secret_get`,
+`event_log_emit`, and `metrics_inc` are allowed, while outbound network,
+`connector_call`, LLM calls, process execution, host/MCP calls, and ambient
+filesystem/project access are denied before the effect runs. `poll_tick` and
+`call` use the connector-outbound class, which allows network and
+`connector_call` but keeps filesystem, process, host/MCP, and LLM effects
+denied by default. `activate` uses the activation class with the same default
+restrictions as connector-outbound setup. Hosts may override these defaults for
+trusted private connectors by supplying an explicit export policy.
+
 Poll-capable providers export `poll_tick(ctx)`. The orchestrator invokes this
 hook for `kind = "poll"` bindings using the binding's `poll` configuration:
 `interval`/`interval_ms`/`interval_secs`, optional

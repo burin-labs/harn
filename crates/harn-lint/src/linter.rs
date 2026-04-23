@@ -78,6 +78,9 @@ pub(crate) struct Linter<'a> {
     /// Suppress the discarded-approval-result lint for the final expression
     /// in value-producing blocks such as `try { ... }`.
     pub(super) value_block_depth: usize,
+    /// Stack of connector exports whose default effect policy restricts
+    /// direct builtin calls.
+    pub(super) connector_effect_export_stack: Vec<String>,
 }
 
 impl<'a> Linter<'a> {
@@ -108,6 +111,7 @@ impl<'a> Linter<'a> {
             complexity_suppression_depth: 0,
             complexity_threshold: DEFAULT_COMPLEXITY_THRESHOLD,
             value_block_depth: 0,
+            connector_effect_export_stack: Vec::new(),
         }
     }
 

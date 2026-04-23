@@ -176,6 +176,19 @@ async fn check_one_connector(
             module_path.display()
         ));
     }
+    let effect_policy_diagnostics = connector_effect_policy_diagnostics(&module_path)?;
+    if !effect_policy_diagnostics.is_empty() {
+        return Err(format!(
+            "provider '{}' connector module '{}' violates connector effect policy:\n{}",
+            provider_id.as_str(),
+            module_path.display(),
+            effect_policy_diagnostics
+                .into_iter()
+                .map(|diagnostic| format!("- {diagnostic}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        ));
+    }
 
     let contract = harn_vm::load_harn_connector_contract(&module_path)
         .await
@@ -301,16 +314,43 @@ async fn check_one_connector(
         .filter(|fixture| fixture.provider == provider_id)
     {
         let raw = raw_from_fixture(fixture)?;
-        let result = connector
-            .normalize_inbound_result(raw)
-            .await
-            .map_err(|error| {
-                format!(
+        let result = match connector.normalize_inbound_result(raw).await {
+            Ok(result) => {
+                if let Some(expected) = fixture.expect_error_contains.as_deref() {
+                    return Err(format!(
+                        "provider '{}' normalize_inbound fixture '{}' expected error containing '{}' but succeeded",
+                        provider_id.as_str(),
+                        fixture_name(fixture),
+                        expected
+                    ));
+                }
+                result
+            }
+            Err(error) => {
+                if let Some(expected) = fixture.expect_error_contains.as_deref() {
+                    let message = error.to_string();
+                    if message.contains(expected) {
+                        checked_fixtures.push(CheckedFixture {
+                            name: fixture_name(fixture),
+                            result_type: "error".to_string(),
+                            event_count: 0,
+                        });
+                        continue;
+                    }
+                    return Err(format!(
+                        "provider '{}' normalize_inbound fixture '{}' expected error containing '{}' but got: {message}",
+                        provider_id.as_str(),
+                        fixture_name(fixture),
+                        expected
+                    ));
+                }
+                return Err(format!(
                     "provider '{}' normalize_inbound fixture '{}' failed: {error}",
                     provider_id.as_str(),
                     fixture_name(fixture)
-                )
-            })?;
+                ));
+            }
+        };
         let checked = validate_normalize_result(fixture, &result)?;
         checked_fixtures.push(checked);
     }
@@ -354,6 +394,23 @@ async fn connector_ctx() -> Result<harn_vm::ConnectorCtx, String> {
         metrics,
         rate_limiter: Arc::new(harn_vm::RateLimiterFactory::default()),
     })
+}
+
+fn connector_effect_policy_diagnostics(module_path: &Path) -> Result<Vec<String>, String> {
+    let source = std::fs::read_to_string(module_path)
+        .map_err(|error| format!("failed to read {}: {error}", module_path.display()))?;
+    let program = harn_parser::parse_source(&source)
+        .map_err(|error| format!("failed to parse {}: {error}", module_path.display()))?;
+    Ok(harn_lint::lint_with_source(&program, &source)
+        .into_iter()
+        .filter(|diagnostic| diagnostic.rule == "connector-effect-policy")
+        .map(|diagnostic| {
+            format!(
+                "{}:{} [{}]: {}",
+                diagnostic.span.line, diagnostic.span.column, diagnostic.rule, diagnostic.message
+            )
+        })
+        .collect())
 }
 
 #[derive(Default)]
@@ -566,6 +623,14 @@ mod tests {
     use super::*;
 
     use std::fs;
+    use std::sync::OnceLock;
+
+    async fn connector_check_test_guard() -> tokio::sync::MutexGuard<'static, ()> {
+        static LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+            .lock()
+            .await
+    }
 
     fn write_package(manifest_tail: &str, lib: &str) -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap();
@@ -600,6 +665,7 @@ connector = {{ harn = "./lib.harn" }}
 
     #[tokio::test]
     async fn connector_check_accepts_valid_fixture_package() {
+        let _guard = connector_check_test_guard().await;
         let dir = write_package(
             r#"
 [connector_contract]
@@ -684,6 +750,7 @@ pub fn call(method, _args) {
 
     #[tokio::test]
     async fn connector_check_rejects_payload_schema_name_mismatch() {
+        let _guard = connector_check_test_guard().await;
         let dir = write_package(
             "",
             r#"
@@ -708,6 +775,7 @@ pub fn normalize_inbound(_raw) {
 
     #[tokio::test]
     async fn connector_check_rejects_legacy_immediate_response_wrapper() {
+        let _guard = connector_check_test_guard().await;
         let dir = write_package(
             r#"
 [[connector_contract.fixtures]]
@@ -734,5 +802,67 @@ pub fn normalize_inbound(_raw) {
             .await
             .unwrap_err();
         assert!(error.contains("normalize_inbound fixture"));
+    }
+
+    #[tokio::test]
+    async fn connector_check_reports_static_effect_policy_violations() {
+        let _guard = connector_check_test_guard().await;
+        let dir = write_package(
+            "",
+            r#"
+pub fn provider_id() { return "echo" }
+pub fn kinds() { return ["webhook"] }
+pub fn payload_schema() { return "EchoEventPayload" }
+pub fn normalize_inbound(_raw) {
+  http_get("https://example.invalid")
+  return {type: "reject", status: 400}
+}
+"#,
+        );
+        let error = check_connector_package(&check_args(dir.path()))
+            .await
+            .unwrap_err();
+        assert!(error.contains("connector-effect-policy"), "{error}");
+        assert!(error.contains("http_get"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn connector_check_can_assert_runtime_policy_denial_fixture() {
+        let _guard = connector_check_test_guard().await;
+        let dir = write_package(
+            r#"
+[connector_contract]
+version = 1
+
+[[connector_contract.fixtures]]
+provider = "echo"
+name = "indirect file read denied"
+body_json = { id = "evt-1" }
+expect_error_contains = "violated effect policy"
+"#,
+            r#"
+pub fn provider_id() { return "echo" }
+pub fn kinds() { return ["webhook"] }
+pub fn payload_schema() { return "EchoEventPayload" }
+
+fn read_indirect() {
+  return read_file("ambient.txt")
+}
+
+pub fn normalize_inbound(raw) {
+  let _body = raw.body_json
+  read_indirect()
+  return {type: "reject", status: 400}
+}
+"#,
+        );
+        let report = check_connector_package(&check_args(dir.path()))
+            .await
+            .expect("expected-error fixture should pass");
+        assert_eq!(report.fixture_count, 1);
+        assert_eq!(
+            report.checked_connectors[0].fixtures[0].result_type,
+            "error"
+        );
     }
 }

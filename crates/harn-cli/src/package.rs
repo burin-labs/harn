@@ -894,6 +894,8 @@ pub struct ConnectorContractFixture {
     pub expect_kind: Option<String>,
     #[serde(default)]
     pub expect_event_count: Option<usize>,
+    #[serde(default)]
+    pub expect_error_contains: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -75,6 +75,7 @@ mod autofix;
 mod boolean_patterns;
 mod break_loop;
 mod complexity;
+mod connector_effect_policy;
 mod empty_blocks;
 mod file_header;
 mod formatting;

@@ -324,7 +324,79 @@ pub fn enforce_current_policy_for_builtin(name: &str, args: &[VmValue]) -> Resul
         {
             return reject_policy(format!("builtin '{name}' exceeds network ceiling"));
         }
+        "http_session_request"
+        | "sse_connect"
+        | "sse_receive"
+        | "websocket_connect"
+        | "websocket_send"
+        | "websocket_receive"
+            if !policy_allows_side_effect(&policy, "network") =>
+        {
+            return reject_policy(format!("builtin '{name}' exceeds network ceiling"));
+        }
+        "llm_call" | "llm_call_safe" | "llm_completion" | "llm_stream" | "llm_healthcheck"
+        | "agent_loop"
+            if !policy_allows_capability(&policy, "llm", "call")
+                || !policy_allows_side_effect(&policy, "network") =>
+        {
+            return reject_policy(format!("builtin '{name}' exceeds LLM/network ceiling"));
+        }
+        "connector_call"
+            if !policy_allows_capability(&policy, "connector", "call")
+                || !policy_allows_side_effect(&policy, "network") =>
+        {
+            return reject_policy(
+                "builtin 'connector_call' exceeds connector.call/network ceiling".to_string(),
+            );
+        }
+        "secret_get" if !policy_allows_capability(&policy, "connector", "secret_get") => {
+            return reject_policy(
+                "builtin 'secret_get' exceeds connector.secret_get ceiling".to_string(),
+            );
+        }
+        "event_log_emit" if !policy_allows_capability(&policy, "connector", "event_log_emit") => {
+            return reject_policy(
+                "builtin 'event_log_emit' exceeds connector.event_log_emit ceiling".to_string(),
+            );
+        }
+        "metrics_inc" if !policy_allows_capability(&policy, "connector", "metrics_inc") => {
+            return reject_policy(
+                "builtin 'metrics_inc' exceeds connector.metrics_inc ceiling".to_string(),
+            );
+        }
+        "project_fingerprint"
+        | "project_scan_native"
+        | "project_scan_tree_native"
+        | "project_walk_tree_native"
+        | "project_catalog_native"
+            if !policy_allows_capability(&policy, "workspace", "list")
+                || !policy_allows_side_effect(&policy, "read_only") =>
+        {
+            return reject_policy(format!("builtin '{name}' exceeds workspace.list ceiling"));
+        }
+        "__agent_state_init"
+        | "__agent_state_resume"
+        | "__agent_state_write"
+        | "__agent_state_read"
+        | "__agent_state_list"
+        | "__agent_state_delete"
+        | "__agent_state_handoff"
+            if !policy_allows_capability(&policy, "agent_state", "access") =>
+        {
+            return reject_policy(format!(
+                "builtin '{name}' exceeds agent_state.access ceiling"
+            ));
+        }
+        "vision_ocr"
+            if !policy_allows_capability(&policy, "vision", "ocr")
+                || !policy_allows_side_effect(&policy, "process_exec") =>
+        {
+            return reject_policy(format!(
+                "builtin '{name}' exceeds vision.ocr/process ceiling"
+            ));
+        }
         "mcp_connect"
+        | "mcp_ensure_active"
         | "mcp_call"
         | "mcp_list_tools"
         | "mcp_list_resources"
@@ -361,6 +433,11 @@ pub fn enforce_current_policy_for_builtin(name: &str, args: &[VmValue]) -> Resul
                     "host_call {capability}.{op} exceeds side-effect ceiling"
                 ));
             }
+        }
+        "host_tool_list" | "host_tool_call"
+            if !policy_allows_capability(&policy, "host", "tool_call") =>
+        {
+            return reject_policy(format!("builtin '{name}' exceeds host.tool_call ceiling"));
         }
         _ => {}
     }

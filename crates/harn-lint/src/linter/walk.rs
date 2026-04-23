@@ -113,8 +113,14 @@ impl<'a> Linter<'a> {
                     self.declare_parameter(&p.name, snode.span);
                 }
                 self.return_type_stack.push(return_type.clone());
+                if harn_vm::connector_export_effect_class(name).is_some() {
+                    self.connector_effect_export_stack.push(name.clone());
+                }
                 let _ = self.analyze_secret_scan_block(body, false);
                 self.lint_block(body);
+                if harn_vm::connector_export_effect_class(name).is_some() {
+                    self.connector_effect_export_stack.pop();
+                }
                 self.return_type_stack.pop();
                 self.loop_depth = saved_loop_depth;
                 self.pop_scope();
@@ -251,6 +257,24 @@ impl<'a> Linter<'a> {
                         ),
                         fix: None,
                     });
+                }
+                if let Some(export) = self.connector_effect_export_stack.last() {
+                    if let Some(reason) =
+                        harn_vm::connector_export_denied_builtin_reason(export, name)
+                    {
+                        self.diagnostics.push(LintDiagnostic {
+                            rule: "connector-effect-policy",
+                            message: format!(
+                                "connector export `{export}` calls disallowed builtin `{name}`: {reason}"
+                            ),
+                            span: snode.span,
+                            severity: LintSeverity::Warning,
+                            suggestion: Some(format!(
+                                "move `{name}` out of `{export}` or configure a trusted connector effect-policy override"
+                            )),
+                            fix: None,
+                        });
+                    }
                 }
                 for arg in args {
                     self.lint_node(arg);
