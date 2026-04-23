@@ -10,11 +10,9 @@ use crate::connectors::cron::state::{CronStateStore, PersistedCronState};
 use crate::connectors::cron::{
     looks_like_utc_offset, CatchupMode, CronConnector, CronEventSink, EventLogCronEventSink,
 };
+use crate::connectors::testkit::MemorySecretProvider;
 use crate::connectors::{Connector, ConnectorCtx, TriggerBinding};
 use crate::event_log::{AnyEventLog, EventLog, FileEventLog, MemoryEventLog, Topic};
-use crate::secrets::{
-    RotationHandle, SecretBytes, SecretError, SecretId, SecretMeta, SecretProvider,
-};
 use crate::triggers::TriggerEvent;
 use crate::{InboxIndex, MetricsRegistry, ProviderId, RateLimiterFactory, TriggerKind};
 
@@ -74,7 +72,7 @@ async fn ctx(event_log: Arc<AnyEventLog>) -> ConnectorCtx {
                 .unwrap(),
         ),
         event_log,
-        secrets: Arc::new(FakeSecretProvider),
+        secrets: Arc::new(MemorySecretProvider::new("cron")),
         metrics,
         rate_limiter: Arc::new(RateLimiterFactory::default()),
     }
@@ -82,43 +80,6 @@ async fn ctx(event_log: Arc<AnyEventLog>) -> ConnectorCtx {
 
 fn parse(ts: &str) -> OffsetDateTime {
     OffsetDateTime::parse(ts, &time::format_description::well_known::Rfc3339).unwrap()
-}
-
-struct FakeSecretProvider;
-
-#[async_trait]
-impl SecretProvider for FakeSecretProvider {
-    async fn get(&self, id: &SecretId) -> Result<SecretBytes, SecretError> {
-        Err(SecretError::NotFound {
-            provider: self.namespace().to_string(),
-            id: id.clone(),
-        })
-    }
-
-    async fn put(&self, _id: &SecretId, _value: SecretBytes) -> Result<(), SecretError> {
-        Ok(())
-    }
-
-    async fn rotate(&self, id: &SecretId) -> Result<RotationHandle, SecretError> {
-        Ok(RotationHandle {
-            provider: self.namespace().to_string(),
-            id: id.clone(),
-            from_version: None,
-            to_version: None,
-        })
-    }
-
-    async fn list(&self, _prefix: &SecretId) -> Result<Vec<SecretMeta>, SecretError> {
-        Ok(Vec::new())
-    }
-
-    fn namespace(&self) -> &str {
-        "cron"
-    }
-
-    fn supports_versions(&self) -> bool {
-        false
-    }
 }
 
 #[test]

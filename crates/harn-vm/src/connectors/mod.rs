@@ -37,6 +37,7 @@ pub mod slack;
 pub mod stream;
 #[cfg(test)]
 pub(crate) mod test_util;
+pub mod testkit;
 pub mod webhook;
 
 pub use a2a_push::A2aPushConnector;
