@@ -396,6 +396,20 @@ pub(super) fn dump_llm_request(
         "provider": opts.provider,
         "max_tokens": opts.max_tokens,
         "temperature": opts.temperature,
+        "thinking": match opts.thinking.as_ref() {
+            Some(super::api::ThinkingConfig::Enabled) => serde_json::json!({
+                "enabled": true,
+                "budget_tokens": serde_json::Value::Null,
+            }),
+            Some(super::api::ThinkingConfig::WithBudget(budget_tokens)) => serde_json::json!({
+                "enabled": true,
+                "budget_tokens": budget_tokens,
+            }),
+            None => serde_json::json!({
+                "enabled": false,
+                "budget_tokens": serde_json::Value::Null,
+            }),
+        },
         "tool_choice": opts.tool_choice,
         "tool_format": tool_format,
         "native_tool_count": opts.native_tools.as_ref().map(|tools| tools.len()).unwrap_or(0),

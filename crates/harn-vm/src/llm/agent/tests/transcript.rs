@@ -130,6 +130,62 @@ async fn observed_llm_call_transcript_uses_explicit_tool_format() {
     reset_llm_mock_state();
 }
 
+#[tokio::test(flavor = "current_thread")]
+#[allow(clippy::await_holding_lock)]
+async fn observed_llm_call_transcript_records_thinking_settings() {
+    let _guard = transcript_env_lock();
+    reset_llm_mock_state();
+    let dir = std::env::temp_dir().join(format!(
+        "harn-llm-transcript-thinking-{}",
+        uuid::Uuid::now_v7()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let old_dir = std::env::var("HARN_LLM_TRANSCRIPT_DIR").ok();
+    std::env::set_var(
+        "HARN_LLM_TRANSCRIPT_DIR",
+        dir.to_string_lossy().into_owned(),
+    );
+
+    let mut opts = base_opts(vec![serde_json::json!({
+        "role": "user",
+        "content": "reason about this task",
+    })]);
+    opts.thinking = Some(crate::llm::api::ThinkingConfig::WithBudget(2048));
+
+    let _ = observed_llm_call(
+        &opts,
+        Some("text"),
+        None,
+        &LlmRetryConfig::default(),
+        Some(0),
+        false,
+        false,
+    )
+    .await
+    .unwrap();
+
+    let transcript =
+        std::fs::read_to_string(dir.join("llm_transcript.jsonl")).expect("transcript file");
+    let request = transcript
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .find(|line| line["type"] == "provider_call_request")
+        .expect("provider_call_request event");
+    assert_eq!(request["thinking"]["enabled"], serde_json::json!(true));
+    assert_eq!(
+        request["thinking"]["budget_tokens"],
+        serde_json::json!(2048)
+    );
+
+    if let Some(previous) = old_dir {
+        std::env::set_var("HARN_LLM_TRANSCRIPT_DIR", previous);
+    } else {
+        std::env::remove_var("HARN_LLM_TRANSCRIPT_DIR");
+    }
+    let _ = std::fs::remove_dir_all(dir);
+    reset_llm_mock_state();
+}
+
 async fn assert_observed_llm_call_bridge_user_visible(user_visible: bool) {
     reset_llm_mock_state();
 
@@ -481,6 +537,89 @@ async fn user_response_block_can_complete_persistent_loop_without_done_sentinel(
     let result = run_agent_loop_internal(&mut opts, config).await.unwrap();
     assert_eq!(result["status"], "done");
     assert_eq!(result["visible_text"].as_str(), Some("Completed cleanly."));
+    reset_llm_mock_state();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn plain_done_sentinel_can_complete_persistent_loop_without_tools() {
+    reset_llm_mock_state();
+    crate::llm::mock::push_llm_mock(crate::llm::mock::LlmMock {
+        text: "1, 2, 3, 4, 5\n\n##DONE##".to_string(),
+        tool_calls: Vec::new(),
+        match_pattern: None,
+        consume_on_match: true,
+        input_tokens: None,
+        output_tokens: None,
+        cache_read_tokens: None,
+        cache_write_tokens: None,
+        thinking: Some("count the numbers".to_string()),
+        stop_reason: None,
+        model: "mock".to_string(),
+        provider: None,
+        blocks: Some(vec![
+            serde_json::json!({
+                "type": "reasoning",
+                "text": "count the numbers",
+                "visibility": "private",
+            }),
+            serde_json::json!({
+                "type": "output_text",
+                "text": "1, 2, 3, 4, 5\n\n##DONE##",
+                "visibility": "public",
+            }),
+        ]),
+        error: None,
+    });
+
+    let mut opts = base_opts(vec![serde_json::json!({
+        "role": "user",
+        "content": "Count to five, then finish",
+    })]);
+    opts.thinking = Some(crate::llm::api::ThinkingConfig::Enabled);
+    let mut config = base_agent_config();
+    config.persistent = true;
+    config.max_iterations = 2;
+
+    let result = run_agent_loop_internal(&mut opts, config).await.unwrap();
+    assert_eq!(result["status"], "done");
+    assert_eq!(result["iterations"].as_u64(), Some(1));
+    assert_eq!(result["visible_text"].as_str(), Some("1, 2, 3, 4, 5"));
+    reset_llm_mock_state();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn tagged_done_block_does_not_complete_persistent_loop_without_tools() {
+    reset_llm_mock_state();
+    crate::llm::mock::push_llm_mock(crate::llm::mock::LlmMock {
+        text: "<assistant_prose>Still working.</assistant_prose>\n<done>##DONE##</done>"
+            .to_string(),
+        tool_calls: Vec::new(),
+        match_pattern: None,
+        consume_on_match: true,
+        input_tokens: None,
+        output_tokens: None,
+        cache_read_tokens: None,
+        cache_write_tokens: None,
+        thinking: None,
+        stop_reason: None,
+        model: "mock".to_string(),
+        provider: None,
+        blocks: None,
+        error: None,
+    });
+
+    let mut opts = base_opts(vec![serde_json::json!({
+        "role": "user",
+        "content": "Keep going until you are done",
+    })]);
+    let mut config = base_agent_config();
+    config.persistent = true;
+    config.max_iterations = 1;
+
+    let result = run_agent_loop_internal(&mut opts, config).await.unwrap();
+    assert_eq!(result["status"], "budget_exhausted");
+    assert_eq!(result["iterations"].as_u64(), Some(1));
+    assert_eq!(result["visible_text"].as_str(), Some("Still working."));
     reset_llm_mock_state();
 }
 

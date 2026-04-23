@@ -65,6 +65,7 @@ pub(super) struct PostTurnContext<'a> {
     pub bridge: &'a Option<Rc<HostBridge>>,
     pub session_id: &'a str,
     pub tool_format: &'a str,
+    pub has_tools: bool,
     pub max_nudges: usize,
     pub persistent: bool,
     pub daemon: bool,
@@ -408,9 +409,19 @@ pub(super) async fn run_post_turn(
             .await?;
             return Ok(IterationOutcome::Break);
         }
-        let guidance =
-            action_turn_nudge(ctx.tool_format, ctx.turn_policy, call_result.prose_too_long)
-                .unwrap_or_else(|| "Use a tool call to make progress.".to_string());
+        let guidance = action_turn_nudge(
+            ctx.tool_format,
+            ctx.has_tools,
+            ctx.turn_policy,
+            call_result.prose_too_long,
+        )
+        .unwrap_or_else(|| {
+            if ctx.has_tools {
+                "Use a tool call to make progress.".to_string()
+            } else {
+                "Make concrete progress in your reply.".to_string()
+            }
+        });
         append_message_to_contexts(
             &mut state.visible_messages,
             &mut state.recorded_messages,
@@ -726,9 +737,20 @@ pub(super) async fn run_post_turn(
         return Ok(IterationOutcome::Break);
     }
 
-    let nudge = action_turn_nudge(ctx.tool_format, ctx.turn_policy, call_result.prose_too_long)
-        .or_else(|| ctx.custom_nudge.clone())
-        .unwrap_or_else(|| "Continue — use a tool call to make progress.".to_string());
+    let nudge = action_turn_nudge(
+        ctx.tool_format,
+        ctx.has_tools,
+        ctx.turn_policy,
+        call_result.prose_too_long,
+    )
+    .or_else(|| ctx.custom_nudge.clone())
+    .unwrap_or_else(|| {
+        if ctx.has_tools {
+            "Continue — use a tool call to make progress.".to_string()
+        } else {
+            "Continue — make progress in your reply.".to_string()
+        }
+    });
     append_message_to_contexts(
         &mut state.visible_messages,
         &mut state.recorded_messages,

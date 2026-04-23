@@ -340,6 +340,7 @@ pub async fn run_agent_loop_internal(
                 bridge: &bridge,
                 session_id: &session_id,
                 tool_format: &tool_format,
+                has_tools,
                 max_nudges,
                 persistent,
                 daemon,

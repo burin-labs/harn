@@ -414,7 +414,7 @@ pub(super) async fn run_llm_call(
 
     // Teach the model to fix grammar violations. Done before tool-call
     // dispatch so protocol errors surface even in mixed turns.
-    if !protocol_violations.is_empty() && ctx.tool_format != "native" {
+    if !protocol_violations.is_empty() && ctx.has_tools && ctx.tool_format != "native" {
         let feedback = format!(
             "Your response violated the tagged response protocol. Each issue:\n- {}\n\n\
              Re-emit using only these top-level tags, separated by whitespace:\n\n\
@@ -437,13 +437,22 @@ pub(super) async fn run_llm_call(
 
     // Check sentinel on every response; when it coexists with tool calls
     // we still process the tools, then exit.
-    let sentinel_in_text = tagged_done_marker
+    let tagged_done_hit = tagged_done_marker
         .as_deref()
-        .is_some_and(|body| body == ctx.done_sentinel)
-        // Native-format and no-tools paths bypass the tagged parser —
-        // fall back to substring match.
-        || (ctx.tool_format == "native" && text.contains(ctx.done_sentinel))
-        || (!ctx.has_tools && text.contains(ctx.done_sentinel));
+        .is_some_and(|body| body == ctx.done_sentinel);
+    let plain_done_hit = if ctx.tool_format == "native" {
+        // Native-mode providers may surface the sentinel in visible prose
+        // while tool calls travel separately via the provider channel.
+        text.contains(ctx.done_sentinel)
+    } else if !ctx.has_tools {
+        // No-tool loops advertise the plain sentinel form, not a tagged
+        // `<done>` block. Honor only visible prose so tagged control
+        // blocks do not terminate a text-only loop early.
+        text_prose.contains(ctx.done_sentinel)
+    } else {
+        false
+    };
+    let sentinel_in_text = (ctx.has_tools && tagged_done_hit) || plain_done_hit;
     let phase_change = ctx
         .break_unless_phase
         .is_some_and(|phase| loop_state_requests_phase_change(&text, phase));
@@ -472,12 +481,14 @@ pub(super) async fn run_llm_call(
     let verified = !ctx.exit_when_verified || state.last_run_exit_code == Some(0);
     // Guard against premature exit where the model emits done without acting.
     let has_acted = !state.all_tools_used.is_empty() || !tool_calls.is_empty();
+    let completion_ready = has_acted || !ctx.has_tools;
     // Ledger gate: reject done while open/blocked deliverables remain.
     let ledger_blocks_done = state.task_ledger.gates_done();
     let completion_requested =
         sentinel_in_text || (allow_done_sentinel && user_response.as_deref().is_some());
     let sentinel_hit = ctx.persistent
-        && ((completion_requested && verified && has_acted && !ledger_blocks_done) || phase_change);
+        && ((completion_requested && verified && completion_ready && !ledger_blocks_done)
+            || phase_change);
 
     if completion_requested && ledger_blocks_done && ctx.persistent {
         let corrective = state.task_ledger.done_gate_feedback();

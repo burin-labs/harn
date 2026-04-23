@@ -88,11 +88,12 @@ pub(super) fn render_blocks_text(blocks: &[VmValue]) -> String {
             .map(|value| value.display())
             .unwrap_or_else(|| "text".to_string());
         let text = match kind.as_str() {
-            "text" | "output_text" | "reasoning" => dict
+            "text" | "output_text" => dict
                 .get("text")
                 .or_else(|| dict.get("content"))
                 .map(|value| value.display())
                 .unwrap_or_default(),
+            "reasoning" => String::new(),
             "tool_call" => {
                 let name = dict
                     .get("name")

@@ -22,7 +22,7 @@ fn action_turn_nudge_mentions_action_or_yield() {
         allow_done_sentinel: true,
         max_prose_chars: Some(120),
     };
-    let msg = action_turn_nudge("text", Some(&policy), true).expect("nudge");
+    let msg = action_turn_nudge("text", true, Some(&policy), true).expect("nudge");
     assert!(
         msg.contains("either make concrete progress with a well-formed <tool_call> block, switch phase, or emit a <done> block")
     );
@@ -51,7 +51,7 @@ fn action_turn_nudge_omits_done_sentinel_when_stage_disallows_it() {
         allow_done_sentinel: false,
         max_prose_chars: Some(90),
     };
-    let msg = action_turn_nudge("text", Some(&policy), false).expect("nudge");
+    let msg = action_turn_nudge("text", true, Some(&policy), false).expect("nudge");
     assert!(!msg.contains("<done>"));
     assert!(msg.contains(
         "either make concrete progress with a well-formed <tool_call> block or switch phase"
@@ -77,7 +77,7 @@ fn native_action_turn_nudge_mentions_native_channel() {
         allow_done_sentinel: false,
         max_prose_chars: Some(90),
     };
-    let msg = action_turn_nudge("native", Some(&policy), false).expect("nudge");
+    let msg = action_turn_nudge("native", true, Some(&policy), false).expect("nudge");
     assert!(msg.contains("provider tool channel only"));
     assert!(msg.contains("handwritten tool-call text is invalid"));
 }
@@ -103,8 +103,41 @@ async fn persistent_prompt_omits_done_sentinel_when_stage_disallows_it() {
         .last()
         .and_then(|call| call.system.as_ref())
         .expect("mock call system prompt");
-    assert!(system.contains("take action with tool calls"));
+    assert!(system.contains("Solve the request directly in assistant text"));
     assert!(!system.contains("##DONE##"));
+    reset_llm_mock_state();
+}
+
+#[test]
+fn action_turn_nudge_uses_reply_language_when_no_tools_exist() {
+    let policy = TurnPolicy {
+        require_action_or_yield: true,
+        allow_done_sentinel: true,
+        max_prose_chars: Some(80),
+    };
+    let msg = action_turn_nudge("text", false, Some(&policy), false).expect("nudge");
+    assert!(msg.contains("make concrete progress in your reply"));
+    assert!(!msg.contains("<tool_call>"));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn persistent_prompt_without_tools_avoids_tool_call_language() {
+    reset_llm_mock_state();
+    let mut opts = base_opts(vec![serde_json::json!({
+        "role": "user",
+        "content": "answer the math question directly",
+    })]);
+    let mut config = base_agent_config();
+    config.persistent = true;
+
+    let _ = run_agent_loop_internal(&mut opts, config).await.unwrap();
+    let calls = get_llm_mock_calls();
+    let system = calls
+        .last()
+        .and_then(|call| call.system.as_ref())
+        .expect("mock call system prompt");
+    assert!(system.contains("Solve the request directly in assistant text"));
+    assert!(!system.contains("take action with tool calls"));
     reset_llm_mock_state();
 }
 

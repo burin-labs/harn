@@ -886,9 +886,6 @@ fn validate_options(opts: &crate::llm::api::LlmCallOptions) {
             if opts.top_k.is_some() {
                 warn("top_k");
             }
-            if opts.thinking.is_some() {
-                warn("thinking");
-            }
             if opts.cache {
                 warn("cache");
             }

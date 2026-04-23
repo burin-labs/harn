@@ -184,6 +184,7 @@ pub(crate) fn register_agent_builtins(vm: &mut Vm) {
         for key in [
             "provider",
             "model",
+            "thinking",
             "tools",
             "max_iterations",
             "tool_format",
