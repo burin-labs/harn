@@ -1293,6 +1293,7 @@ dependencies = [
  "data-encoding",
  "futures",
  "harn-lexer",
+ "harn-modules",
  "harn-parser",
  "hex",
  "httpdate",

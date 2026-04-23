@@ -58,6 +58,7 @@ pub(crate) struct CheckedFixture {
 pub(crate) async fn check_connector_package(
     args: &ConnectorCheckArgs,
 ) -> Result<ConnectorCheckReport, String> {
+    let _provider_schema_guard = package::lock_manifest_provider_schemas().await;
     let package = PathBuf::from(&args.package);
     let anchor = normalize_anchor(&package);
     let extensions = package::try_load_runtime_extensions(&anchor)?;

@@ -3,7 +3,7 @@ use std::ffi::OsStr;
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::{fs, process};
 
@@ -839,6 +839,47 @@ impl Dependency {
     }
 }
 
+fn validate_package_alias(alias: &str) -> Result<(), String> {
+    let valid = !alias.is_empty()
+        && alias != "."
+        && alias != ".."
+        && alias
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.'));
+    if valid {
+        Ok(())
+    } else {
+        Err(format!(
+            "invalid dependency alias {alias:?}; use ASCII letters, numbers, '.', '_' or '-'"
+        ))
+    }
+}
+
+fn toml_string_literal(value: &str) -> Result<String, String> {
+    use std::fmt::Write as _;
+
+    let mut encoded = String::with_capacity(value.len() + 2);
+    encoded.push('"');
+    for ch in value.chars() {
+        match ch {
+            '\u{08}' => encoded.push_str("\\b"),
+            '\t' => encoded.push_str("\\t"),
+            '\n' => encoded.push_str("\\n"),
+            '\u{0C}' => encoded.push_str("\\f"),
+            '\r' => encoded.push_str("\\r"),
+            '"' => encoded.push_str("\\\""),
+            '\\' => encoded.push_str("\\\\"),
+            ch if ch <= '\u{1F}' || ch == '\u{7F}' => {
+                write!(&mut encoded, "\\u{:04X}", ch as u32)
+                    .map_err(|error| format!("failed to encode TOML string: {error}"))?;
+            }
+            ch => encoded.push(ch),
+        }
+    }
+    encoded.push('"');
+    Ok(encoded)
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct RuntimeExtensions {
     pub root_manifest: Option<Manifest>,
@@ -990,6 +1031,15 @@ pub struct CollectedTriggerPredicate {
 
 type ManifestModuleCacheKey = (PathBuf, Option<String>, Option<String>);
 type ManifestModuleExports = BTreeMap<String, Rc<harn_vm::VmClosure>>;
+
+static MANIFEST_PROVIDER_SCHEMA_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+
+pub(crate) async fn lock_manifest_provider_schemas() -> tokio::sync::MutexGuard<'static, ()> {
+    MANIFEST_PROVIDER_SCHEMA_LOCK
+        .get_or_init(|| tokio::sync::Mutex::new(()))
+        .lock()
+        .await
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct LockFile {
@@ -2280,7 +2330,7 @@ fn leak_static_string(value: String) -> &'static str {
 pub(crate) async fn install_manifest_provider_schemas(
     extensions: &RuntimeExtensions,
 ) -> Result<(), String> {
-    harn_vm::reset_provider_catalog();
+    let mut schemas: Vec<Arc<dyn harn_vm::ProviderSchema>> = Vec::new();
     for provider in &extensions.provider_connectors {
         match &provider.connector {
             ResolvedProviderConnectorKind::RustBuiltin => continue,
@@ -2307,9 +2357,6 @@ pub(crate) async fn install_manifest_provider_schemas(
                         contract.provider_id.as_str()
                     ));
                 }
-                if harn_vm::provider_metadata(provider.id.as_str()).is_some() {
-                    continue;
-                }
                 let metadata = harn_vm::ProviderMetadata {
                     provider: contract.provider_id.as_str().to_string(),
                     kinds: contract
@@ -2326,11 +2373,11 @@ pub(crate) async fn install_manifest_provider_schemas(
                     schema_name: leak_static_string(metadata.schema_name.clone()),
                     metadata,
                 };
-                harn_vm::register_provider_schema(Arc::new(schema))
-                    .map_err(|error| error.to_string())?;
+                schemas.push(Arc::new(schema));
             }
         }
     }
+    harn_vm::reset_provider_catalog_with(schemas).map_err(|error| error.to_string())?;
     Ok(())
 }
 
@@ -2481,6 +2528,7 @@ pub async fn collect_manifest_triggers(
     vm: &mut harn_vm::Vm,
     extensions: &RuntimeExtensions,
 ) -> Result<Vec<CollectedManifestTrigger>, String> {
+    let _provider_schema_guard = lock_manifest_provider_schemas().await;
     install_manifest_provider_schemas(extensions).await?;
     validate_orchestrator_budget(extensions.root_manifest.as_ref())?;
     validate_static_trigger_configs(&extensions.triggers)?;
@@ -4628,11 +4676,17 @@ fn clone_git_commit_to(url: &str, commit: &str, dest: &Path) -> Result<(), Strin
 }
 
 fn unique_temp_dir(base: &Path, label: &str) -> Result<PathBuf, String> {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|error| format!("system clock error: {error}"))?
-        .as_nanos();
-    Ok(base.join(format!("{label}-{nanos}")))
+    for _ in 0..16 {
+        let suffix = uuid::Uuid::now_v7();
+        let candidate = base.join(format!("{label}-{suffix}"));
+        if !candidate.exists() {
+            return Ok(candidate);
+        }
+    }
+    Err(format!(
+        "failed to allocate a unique temporary directory under {}",
+        base.display()
+    ))
 }
 
 fn ensure_git_cache_populated(
@@ -4673,25 +4727,35 @@ fn ensure_git_cache_populated(
     fs::create_dir_all(parent)
         .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
     let temp_dir = unique_temp_dir(parent, "tmp")?;
-    clone_git_commit_to(url, commit, &temp_dir)?;
-    let hash = compute_content_hash(&temp_dir)?;
-    if let Some(expected) = expected_hash {
-        if hash != expected {
-            return Err(format!(
-                "content hash mismatch for {} at {}: expected {}, got {}",
-                source, commit, expected, hash
-            ));
+    let populated = (|| -> Result<String, String> {
+        clone_git_commit_to(url, commit, &temp_dir)?;
+        let hash = compute_content_hash(&temp_dir)?;
+        if let Some(expected) = expected_hash {
+            if hash != expected {
+                return Err(format!(
+                    "content hash mismatch for {} at {}: expected {}, got {}",
+                    source, commit, expected, hash
+                ));
+            }
         }
-    }
-    write_cached_content_hash(&temp_dir, &hash)?;
-    write_cache_metadata(&temp_dir, source, commit, &hash)?;
-    fs::rename(&temp_dir, &cache_dir).map_err(|error| {
-        format!(
-            "failed to move {} to {}: {error}",
-            temp_dir.display(),
-            cache_dir.display()
-        )
-    })?;
+        write_cached_content_hash(&temp_dir, &hash)?;
+        write_cache_metadata(&temp_dir, source, commit, &hash)?;
+        fs::rename(&temp_dir, &cache_dir).map_err(|error| {
+            format!(
+                "failed to move {} to {}: {error}",
+                temp_dir.display(),
+                cache_dir.display()
+            )
+        })?;
+        Ok(hash)
+    })();
+    let hash = match populated {
+        Ok(hash) => hash,
+        Err(error) => {
+            let _ = fs::remove_dir_all(&temp_dir);
+            return Err(error);
+        }
+    };
     Ok(hash)
 }
 
@@ -4766,6 +4830,7 @@ fn dependency_conflict_message(existing: &LockEntry, candidate: &LockEntry) -> S
 }
 
 fn replace_lock_entry(lock: &mut LockFile, candidate: LockEntry) -> Result<bool, String> {
+    validate_package_alias(&candidate.name)?;
     if let Some(existing) = lock.find(&candidate.name) {
         if existing == &candidate {
             return Ok(false);
@@ -4832,6 +4897,7 @@ fn build_lockfile(
 
     while let Some(next) = pending.pop() {
         let alias = next.alias;
+        validate_package_alias(&alias)?;
         let dependency = next.dependency;
         if dependency.local_path().is_some() && next.parent_is_git {
             let parent = next.parent.as_deref().unwrap_or("a git package");
@@ -4998,6 +5064,7 @@ fn materialize_dependencies_from_lock(
     let mut installed = 0usize;
     for entry in &lock.packages {
         let alias = &entry.name;
+        validate_package_alias(alias)?;
         if entry.source.starts_with("path+") {
             let source = path_from_source_uri(&entry.source)?;
             materialize_path_dependency(&source, &packages_dir, alias)?;
@@ -5038,6 +5105,7 @@ fn materialize_dependencies_from_lock(
 
 fn validate_lock_matches_manifest(ctx: &ManifestContext, lock: &LockFile) -> Result<(), String> {
     for (alias, dependency) in &ctx.manifest.dependencies {
+        validate_package_alias(alias)?;
         let entry = lock.find(alias).ok_or_else(|| {
             format!(
                 "{} is missing an entry for {alias}",
@@ -5123,6 +5191,7 @@ fn discover_git_cache_entries() -> Result<Vec<PackageCacheEntry>, String> {
 fn locked_git_cache_paths(lock: &LockFile) -> Result<HashSet<PathBuf>, String> {
     let mut keep = HashSet::new();
     for entry in &lock.packages {
+        validate_package_alias(&entry.name)?;
         if !entry.source.starts_with("git+") {
             continue;
         }
@@ -5136,6 +5205,7 @@ fn locked_git_cache_paths(lock: &LockFile) -> Result<HashSet<PathBuf>, String> {
 }
 
 fn verify_lock_entry_cache(entry: &LockEntry) -> Result<bool, String> {
+    validate_package_alias(&entry.name)?;
     if !entry.source.starts_with("git+") {
         if entry.source.starts_with("path+") {
             let path = path_from_source_uri(&entry.source)?;
@@ -5192,6 +5262,7 @@ fn verify_materialized_lock_entry(
     ctx: &ManifestContext,
     entry: &LockEntry,
 ) -> Result<bool, String> {
+    validate_package_alias(&entry.name)?;
     let packages_dir = ctx.packages_dir();
     if entry.source.starts_with("path+") {
         let dir = packages_dir.join(&entry.name);
@@ -5485,26 +5556,30 @@ fn dependency_section_bounds(lines: &[String]) -> Option<(usize, usize)> {
     Some((start, end))
 }
 
-fn render_dependency_line(alias: &str, dependency: &Dependency) -> String {
+fn render_dependency_line(alias: &str, dependency: &Dependency) -> Result<String, String> {
+    validate_package_alias(alias)?;
     match dependency {
-        Dependency::Path(path) => format!("{alias} = {{ path = \"{path}\" }}"),
+        Dependency::Path(path) => Ok(format!(
+            "{alias} = {{ path = {} }}",
+            toml_string_literal(path)?
+        )),
         Dependency::Table(table) => {
             let mut fields = Vec::new();
             if let Some(path) = table.path.as_deref() {
-                fields.push(format!("path = \"{path}\""));
+                fields.push(format!("path = {}", toml_string_literal(path)?));
             }
             if let Some(git) = table.git.as_deref() {
-                fields.push(format!("git = \"{git}\""));
+                fields.push(format!("git = {}", toml_string_literal(git)?));
             }
             if let Some(branch) = table.branch.as_deref() {
-                fields.push(format!("branch = \"{branch}\""));
+                fields.push(format!("branch = {}", toml_string_literal(branch)?));
             } else if let Some(rev) = table.rev.as_deref().or(table.tag.as_deref()) {
-                fields.push(format!("rev = \"{rev}\""));
+                fields.push(format!("rev = {}", toml_string_literal(rev)?));
             }
             if let Some(package) = table.package.as_deref() {
-                fields.push(format!("package = \"{package}\""));
+                fields.push(format!("package = {}", toml_string_literal(package)?));
             }
-            format!("{alias} = {{ {} }}", fields.join(", "))
+            Ok(format!("{alias} = {{ {} }}", fields.join(", ")))
         }
     }
 }
@@ -5536,7 +5611,7 @@ fn upsert_dependency_in_manifest(
             manifest_path.display()
         )
     })?;
-    let rendered = render_dependency_line(alias, dependency);
+    let rendered = render_dependency_line(alias, dependency)?;
     if let Some((index, _)) = lines
         .iter()
         .enumerate()
@@ -5665,6 +5740,7 @@ pub fn update_packages(alias: Option<&str>, all: bool) {
     let result = (|| -> Result<usize, String> {
         let ctx = load_current_manifest_context()?;
         if let Some(alias) = alias {
+            validate_package_alias(alias)?;
             if !ctx.manifest.dependencies.contains_key(alias) {
                 return Err(format!("{alias} is not present in [dependencies]"));
             }
@@ -5686,6 +5762,7 @@ pub fn update_packages(alias: Option<&str>, all: bool) {
 
 pub fn remove_package(alias: &str) {
     let result = (|| -> Result<bool, String> {
+        validate_package_alias(alias)?;
         let ctx = load_current_manifest_context()?;
         let removed = remove_dependency_from_manifest(&ctx.manifest_path(), alias)?;
         if !removed {
@@ -5735,6 +5812,7 @@ fn normalize_add_request(
                 .map(str::to_string)
                 .map(Ok)
                 .unwrap_or_else(|| derive_package_alias_from_path(&path))?;
+            validate_package_alias(&alias)?;
             return Ok((
                 alias,
                 Dependency::Table(DepTable {
@@ -5756,6 +5834,7 @@ fn normalize_add_request(
             let alias = alias
                 .map(str::to_string)
                 .unwrap_or_else(|| name_or_spec.to_string());
+            validate_package_alias(&alias)?;
             return Ok((
                 alias,
                 Dependency::Table(DepTable {
@@ -5769,6 +5848,7 @@ fn normalize_add_request(
             ));
         }
         let alias = alias.unwrap_or(name_or_spec).to_string();
+        validate_package_alias(&alias)?;
         if rev.is_none() && tag.is_none() && branch.is_none() {
             return Err(format!(
                 "git dependency {alias} must specify `rev` or `branch`; use `harn add <url>@<tag-or-sha>` or pass `--rev`/`--branch`"
@@ -5799,6 +5879,7 @@ fn normalize_add_request(
     let git = normalize_git_url(raw_source)?;
     let package_name = derive_repo_name_from_source(&git)?;
     let alias = alias.unwrap_or(package_name.as_str()).to_string();
+    validate_package_alias(&alias)?;
     if inline_ref.is_none() && rev.is_none() && tag.is_none() && branch.is_none() {
         return Err(format!(
             "git dependency {alias} must specify `rev` or `branch`; use `harn add {raw_source}@<tag-or-sha>` or pass `--rev`/`--branch`"
@@ -6828,7 +6909,7 @@ acme-lib = {{ git = "{git}", rev = "v1.0.0" }}
         .unwrap();
         assert_eq!(alias, "harn-openapi");
         assert_eq!(
-            render_dependency_line(&alias, &dependency),
+            render_dependency_line(&alias, &dependency).unwrap(),
             "harn-openapi = { git = \"https://github.com/burin-labs/harn-openapi\", rev = \"v1.2.3\" }"
         );
     }
@@ -8290,5 +8371,99 @@ pub fn should_handle(event: TriggerEvent) -> bool {
             .await
             .unwrap_err();
         assert!(error.contains("when_budget.timeout"));
+    }
+
+    #[test]
+    fn package_alias_validation_rejects_path_traversal_names() {
+        for alias in [
+            "../evil",
+            "nested/evil",
+            "nested\\evil",
+            ".",
+            "..",
+            "bad alias",
+        ] {
+            assert!(
+                validate_package_alias(alias).is_err(),
+                "{alias:?} should be rejected"
+            );
+        }
+        validate_package_alias("acme-lib_1.2").expect("ordinary alias should be accepted");
+    }
+
+    #[test]
+    fn add_package_rejects_aliases_that_escape_packages_dir() {
+        let error = normalize_add_request(
+            "ignored",
+            Some("../evil"),
+            None,
+            None,
+            None,
+            None,
+            Some("./dep"),
+            None,
+        )
+        .unwrap_err();
+        assert!(error.contains("invalid dependency alias"));
+    }
+
+    #[test]
+    fn rendered_dependency_values_are_toml_escaped() {
+        let path = "dep\" \nmalicious = true";
+        let line = render_dependency_line(
+            "safe",
+            &Dependency::Table(DepTable {
+                git: None,
+                tag: None,
+                rev: None,
+                branch: None,
+                path: Some(path.to_string()),
+                package: None,
+            }),
+        )
+        .expect("dependency line");
+        let parsed: Manifest = toml::from_str(&format!("[dependencies]\n{line}\n")).unwrap();
+        assert_eq!(parsed.dependencies.len(), 1);
+        assert_eq!(
+            parsed
+                .dependencies
+                .get("safe")
+                .and_then(Dependency::local_path),
+            Some(path)
+        );
+    }
+
+    #[test]
+    fn materialization_rejects_lock_alias_path_traversal_before_removing_paths() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dep = tmp.path().join("dep");
+        fs::create_dir_all(&dep).unwrap();
+        fs::write(dep.join("lib.harn"), "pub fn dep() { 1 }\n").unwrap();
+        let victim = tmp.path().join("victim");
+        fs::create_dir_all(&victim).unwrap();
+        fs::write(victim.join("keep.txt"), "keep").unwrap();
+
+        let manifest: Manifest = toml::from_str("[package]\nname = \"root\"\n").unwrap();
+        let ctx = ManifestContext {
+            manifest,
+            dir: tmp.path().to_path_buf(),
+        };
+        let lock = LockFile {
+            version: LOCK_FILE_VERSION,
+            packages: vec![LockEntry {
+                name: "../victim".to_string(),
+                source: path_source_uri(&dep).unwrap(),
+                rev_request: None,
+                commit: None,
+                content_hash: None,
+            }],
+        };
+
+        let error = materialize_dependencies_from_lock(&ctx, &lock, None, false).unwrap_err();
+        assert!(error.contains("invalid dependency alias"));
+        assert!(
+            victim.join("keep.txt").exists(),
+            "malicious alias should not remove paths outside .harn/packages"
+        );
     }
 }

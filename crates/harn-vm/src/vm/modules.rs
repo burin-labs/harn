@@ -5,8 +5,6 @@ use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::rc::Rc;
 
-use serde::Deserialize;
-
 use crate::value::{ModuleFunctionRegistry, VmClosure, VmEnv, VmError, VmValue};
 
 use super::{ScopeSpan, Vm};
@@ -17,81 +15,16 @@ pub(crate) struct LoadedModule {
     pub(crate) public_names: HashSet<String>,
 }
 
-#[derive(Debug, Default, Deserialize)]
-struct PackageManifest {
-    #[serde(default)]
-    exports: BTreeMap<String, String>,
-}
-
-fn resolve_package_import(base: &Path, import_path: &str) -> Option<PathBuf> {
-    for anchor in base.ancestors() {
-        let packages_root = anchor.join(".harn/packages");
-        if !packages_root.is_dir() {
-            if anchor.join(".git").exists() {
-                break;
-            }
-            continue;
-        }
-        if let Some(path) = resolve_from_packages_root(&packages_root, import_path) {
-            return Some(path);
-        }
-        if anchor.join(".git").exists() {
-            break;
-        }
-    }
-    None
-}
-
-fn resolve_from_packages_root(packages_root: &Path, import_path: &str) -> Option<PathBuf> {
-    let pkg_path = packages_root.join(import_path);
-    if let Some(path) = finalize_package_target(&pkg_path) {
-        return Some(path);
-    }
-
-    let (package_name, export_name) = import_path.split_once('/')?;
-    let manifest_path = packages_root.join(package_name).join("harn.toml");
-    let manifest = read_package_manifest(&manifest_path)?;
-    let rel_path = manifest.exports.get(export_name)?;
-    finalize_package_target(&packages_root.join(package_name).join(rel_path))
-}
-
-fn read_package_manifest(path: &Path) -> Option<PackageManifest> {
-    let content = std::fs::read_to_string(path).ok()?;
-    toml::from_str::<PackageManifest>(&content).ok()
-}
-
-fn finalize_package_target(path: &Path) -> Option<PathBuf> {
-    if path.is_dir() {
-        let lib = path.join("lib.harn");
-        if lib.exists() {
-            return Some(lib);
-        }
-        return Some(path.to_path_buf());
-    }
-    if path.exists() {
-        return Some(path.to_path_buf());
-    }
-    if path.extension().is_none() {
-        let mut with_ext = path.to_path_buf();
-        with_ext.set_extension("harn");
-        if with_ext.exists() {
-            return Some(with_ext);
-        }
-    }
-    None
-}
-
 pub fn resolve_module_import_path(base: &Path, path: &str) -> PathBuf {
+    let synthetic_current_file = base.join("__harn_import_base__.harn");
+    if let Some(resolved) = harn_modules::resolve_import_path(&synthetic_current_file, path) {
+        return resolved;
+    }
+
     let mut file_path = base.join(path);
 
     if !file_path.exists() && file_path.extension().is_none() {
         file_path.set_extension("harn");
-    }
-
-    if !file_path.exists() {
-        if let Some(resolved) = resolve_package_import(base, path) {
-            file_path = resolved;
-        }
     }
 
     file_path

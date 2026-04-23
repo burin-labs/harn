@@ -18,6 +18,7 @@ otel = [
 
 [dependencies]
 harn-lexer = { path = "../harn-lexer", version = "0.7" }
+harn-modules = { path = "../harn-modules", version = "0.7" }
 harn-parser = { path = "../harn-parser", version = "0.7" }
 async-trait = "0.1"
 chrono = "0.4"

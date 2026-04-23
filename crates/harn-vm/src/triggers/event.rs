@@ -998,6 +998,23 @@ pub fn reset_provider_catalog() {
         .expect("provider catalog poisoned") = ProviderCatalog::with_defaults();
 }
 
+pub fn reset_provider_catalog_with(
+    schemas: Vec<Arc<dyn ProviderSchema>>,
+) -> Result<(), ProviderCatalogError> {
+    let mut catalog = ProviderCatalog::with_defaults();
+    let builtin_providers: BTreeSet<String> = catalog.schema_names().into_keys().collect();
+    for schema in schemas {
+        if builtin_providers.contains(schema.provider_id()) {
+            continue;
+        }
+        catalog.register(schema)?;
+    }
+    *provider_catalog()
+        .write()
+        .expect("provider catalog poisoned") = catalog;
+    Ok(())
+}
+
 pub fn registered_provider_schema_names() -> BTreeMap<String, String> {
     provider_catalog()
         .read()
