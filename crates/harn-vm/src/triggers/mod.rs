@@ -14,13 +14,13 @@ pub use dispatcher::{
 };
 pub use event::{
     provider_metadata, redact_headers, register_provider_schema, registered_provider_metadata,
-    registered_provider_schema_names, reset_provider_catalog, A2aPushPayload, CronEventPayload,
-    ExtensionProviderPayload, GenericWebhookPayload, GitHubEventPayload, HeaderRedactionPolicy,
-    LinearEventPayload, NotionEventPayload, NotionPolledChangeEvent, ProviderCatalog,
-    ProviderCatalogError, ProviderId, ProviderMetadata, ProviderOutboundMethod, ProviderPayload,
-    ProviderRuntimeMetadata, ProviderSchema, ProviderSecretRequirement, SignatureStatus,
-    SignatureVerificationMetadata, SlackEventPayload, StreamEventPayload, TenantId, TraceId,
-    TriggerEvent, TriggerEventId,
+    registered_provider_schema_names, reset_provider_catalog, reset_provider_catalog_with,
+    A2aPushPayload, CronEventPayload, ExtensionProviderPayload, GenericWebhookPayload,
+    GitHubEventPayload, HeaderRedactionPolicy, LinearEventPayload, NotionEventPayload,
+    NotionPolledChangeEvent, ProviderCatalog, ProviderCatalogError, ProviderId, ProviderMetadata,
+    ProviderOutboundMethod, ProviderPayload, ProviderRuntimeMetadata, ProviderSchema,
+    ProviderSecretRequirement, SignatureStatus, SignatureVerificationMetadata, SlackEventPayload,
+    StreamEventPayload, TenantId, TraceId, TriggerEvent, TriggerEventId,
 };
 pub use flow_control::{
     parse_flow_control_duration, TriggerBatchConfig, TriggerConcurrencyConfig,

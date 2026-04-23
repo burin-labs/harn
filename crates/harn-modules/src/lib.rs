@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use harn_lexer::Span;
 use harn_parser::{BindingPattern, Node, Parser, SNode};
@@ -191,16 +191,21 @@ fn resolve_package_import(base: &Path, import_path: &str) -> Option<PathBuf> {
 }
 
 fn resolve_from_packages_root(packages_root: &Path, import_path: &str) -> Option<PathBuf> {
-    let pkg_path = packages_root.join(import_path);
-    if let Some(path) = finalize_package_target(&pkg_path) {
+    let safe_import_path = safe_package_relative_path(import_path)?;
+    let package_name = package_name_from_relative_path(&safe_import_path)?;
+    let package_root = packages_root.join(package_name);
+
+    let pkg_path = packages_root.join(&safe_import_path);
+    if let Some(path) = finalize_package_target(&package_root, &pkg_path) {
         return Some(path);
     }
 
-    let (package_name, export_name) = import_path.split_once('/')?;
+    let export_name = export_name_from_relative_path(&safe_import_path)?;
     let manifest_path = packages_root.join(package_name).join("harn.toml");
     let manifest = read_package_manifest(&manifest_path)?;
     let rel_path = manifest.exports.get(export_name)?;
-    finalize_package_target(&packages_root.join(package_name).join(rel_path))
+    let safe_export_path = safe_package_relative_path(rel_path)?;
+    finalize_package_target(&package_root, &package_root.join(safe_export_path))
 }
 
 fn read_package_manifest(path: &Path) -> Option<PackageManifest> {
@@ -208,22 +213,73 @@ fn read_package_manifest(path: &Path) -> Option<PackageManifest> {
     toml::from_str::<PackageManifest>(&content).ok()
 }
 
-fn finalize_package_target(path: &Path) -> Option<PathBuf> {
+fn safe_package_relative_path(raw: &str) -> Option<PathBuf> {
+    if raw.is_empty() || raw.contains('\\') {
+        return None;
+    }
+    let mut out = PathBuf::new();
+    let mut saw_component = false;
+    for component in Path::new(raw).components() {
+        match component {
+            Component::Normal(part) => {
+                saw_component = true;
+                out.push(part);
+            }
+            Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => return None,
+        }
+    }
+    saw_component.then_some(out)
+}
+
+fn package_name_from_relative_path(path: &Path) -> Option<&str> {
+    match path.components().next()? {
+        Component::Normal(name) => name.to_str(),
+        _ => None,
+    }
+}
+
+fn export_name_from_relative_path(path: &Path) -> Option<&str> {
+    let mut components = path.components();
+    components.next()?;
+    let rest = components.as_path();
+    if rest.as_os_str().is_empty() {
+        None
+    } else {
+        rest.to_str()
+    }
+}
+
+fn path_is_within(root: &Path, path: &Path) -> bool {
+    let Ok(root) = root.canonicalize() else {
+        return false;
+    };
+    let Ok(path) = path.canonicalize() else {
+        return false;
+    };
+    path == root || path.starts_with(root)
+}
+
+fn target_within_package_root(package_root: &Path, path: PathBuf) -> Option<PathBuf> {
+    path_is_within(package_root, &path).then_some(path)
+}
+
+fn finalize_package_target(package_root: &Path, path: &Path) -> Option<PathBuf> {
     if path.is_dir() {
         let lib = path.join("lib.harn");
         if lib.exists() {
-            return Some(lib);
+            return target_within_package_root(package_root, lib);
         }
-        return Some(path.to_path_buf());
+        return target_within_package_root(package_root, path.to_path_buf());
     }
     if path.exists() {
-        return Some(path.to_path_buf());
+        return target_within_package_root(package_root, path.to_path_buf());
     }
     if path.extension().is_none() {
         let mut with_ext = path.to_path_buf();
         with_ext.set_extension("harn");
         if with_ext.exists() {
-            return Some(with_ext);
+            return target_within_package_root(package_root, with_ext);
         }
     }
     None
@@ -770,6 +826,63 @@ mod tests {
             .imported_names_for_file(&entry)
             .expect("package export should resolve");
         assert!(imported.contains("exported_capability"));
+    }
+
+    #[test]
+    fn package_direct_import_cannot_escape_packages_root() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join(".harn/packages/acme")).unwrap();
+        fs::write(root.join("secret.harn"), "pub fn leaked() { 1 }\n").unwrap();
+        let entry = write_file(root, "entry.harn", "");
+
+        let resolved = resolve_import_path(&entry, "acme/../../secret");
+        assert!(resolved.is_none(), "package import escaped package root");
+    }
+
+    #[test]
+    fn package_export_map_cannot_escape_package_root() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join(".harn/packages/acme")).unwrap();
+        fs::write(root.join("secret.harn"), "pub fn leaked() { 1 }\n").unwrap();
+        fs::write(
+            root.join(".harn/packages/acme/harn.toml"),
+            "[exports]\nleak = \"../../secret.harn\"\n",
+        )
+        .unwrap();
+        let entry = write_file(root, "entry.harn", "");
+
+        let resolved = resolve_import_path(&entry, "acme/leak");
+        assert!(resolved.is_none(), "package export escaped package root");
+    }
+
+    #[test]
+    fn package_export_map_allows_symlinked_path_dependencies() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let source = root.join("source-package");
+        fs::create_dir_all(source.join("runtime")).unwrap();
+        fs::write(
+            source.join("harn.toml"),
+            "[exports]\ncapabilities = \"runtime/capabilities.harn\"\n",
+        )
+        .unwrap();
+        fs::write(
+            source.join("runtime/capabilities.harn"),
+            "pub fn exported_capability() { 1 }\n",
+        )
+        .unwrap();
+        fs::create_dir_all(root.join(".harn/packages")).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&source, root.join(".harn/packages/acme")).unwrap();
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_dir(&source, root.join(".harn/packages/acme")).unwrap();
+        let entry = write_file(root, "entry.harn", "");
+
+        let resolved = resolve_import_path(&entry, "acme/capabilities")
+            .expect("symlinked package export should resolve");
+        assert!(resolved.ends_with("runtime/capabilities.harn"));
     }
 
     #[test]

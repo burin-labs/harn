@@ -325,10 +325,25 @@ fn macos_sandbox_profile(policy: &CapabilityPolicy) -> String {
          (allow process*)\n\
          (allow sysctl-read)\n\
          (allow mach-lookup)\n\
-         (allow file-read*)\n\
-         (allow file-write* (subpath \"/dev\") (subpath \"/tmp\") (subpath \"/private/tmp\"))\n",
+         (allow file-read-data (literal \"/\"))\n\
+         (allow file-write* (subpath \"/dev\"))\n",
     );
+    for root in macos_system_read_roots() {
+        profile.push_str(&format!(
+            "(allow file-read* (subpath \"{}\"))\n",
+            sandbox_profile_escape(root)
+        ));
+    }
+    for root in &roots {
+        profile.push_str(&format!(
+            "(allow file-read* (subpath \"{}\"))\n",
+            sandbox_profile_escape(&root.display().to_string())
+        ));
+    }
     if policy_allows_workspace_write(policy) {
+        profile.push_str(
+            "(allow file-write* (subpath \"/tmp\") (subpath \"/private/tmp\") (subpath \"/var/tmp\"))\n",
+        );
         for root in roots {
             profile.push_str(&format!(
                 "(allow file-write* (subpath \"{}\"))\n",
@@ -340,6 +355,19 @@ fn macos_sandbox_profile(policy: &CapabilityPolicy) -> String {
         profile.push_str("(allow network*)\n");
     }
     profile
+}
+
+#[cfg(target_os = "macos")]
+fn macos_system_read_roots() -> &'static [&'static str] {
+    &[
+        "/bin",
+        "/etc",
+        "/Library",
+        "/opt/homebrew",
+        "/private/etc",
+        "/System",
+        "/usr",
+    ]
 }
 
 #[cfg(target_os = "macos")]
@@ -1024,5 +1052,52 @@ mod tests {
             Path::new("/tmp/harn-root-other/file"),
             root
         ));
+    }
+
+    #[cfg(target_os = "macos")]
+    fn macos_policy_with_workspace_ops(ops: &[&str]) -> CapabilityPolicy {
+        CapabilityPolicy {
+            tools: Vec::new(),
+            capabilities: std::collections::BTreeMap::from([(
+                "workspace".to_string(),
+                ops.iter().map(|op| op.to_string()).collect(),
+            )]),
+            workspace_roots: vec!["/tmp/harn-workspace".to_string()],
+            side_effect_level: Some("read_only".to_string()),
+            recursion_limit: None,
+            tool_arg_constraints: Vec::new(),
+            tool_annotations: std::collections::BTreeMap::new(),
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_sandbox_profile_does_not_grant_global_file_read() {
+        let profile = macos_sandbox_profile(&macos_policy_with_workspace_ops(&["read_text"]));
+        assert!(
+            !profile.contains("(allow file-read*)\n"),
+            "profile must not grant global file reads"
+        );
+        assert!(
+            profile.contains("(allow file-read-data (literal \"/\"))"),
+            "profile should permit root-directory reads needed to exec common macOS binaries"
+        );
+        assert!(
+            profile.contains("harn-workspace"),
+            "workspace root should be included in scoped read grants: {profile}"
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_sandbox_profile_allows_tmp_write_only_with_workspace_write() {
+        let read_only = macos_sandbox_profile(&macos_policy_with_workspace_ops(&["read_text"]));
+        assert!(
+            !read_only.contains("(subpath \"/tmp\") (subpath \"/private/tmp\")"),
+            "read-only profile must not grant temp writes"
+        );
+
+        let writable = macos_sandbox_profile(&macos_policy_with_workspace_ops(&["write_text"]));
+        assert!(writable.contains("(subpath \"/tmp\") (subpath \"/private/tmp\")"));
     }
 }
