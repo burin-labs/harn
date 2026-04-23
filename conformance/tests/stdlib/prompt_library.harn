@@ -1,0 +1,88 @@
+import "std/prompt_library"
+
+pipeline test(task) {
+  write_file(
+    "prompt_library_catalog.toml",
+    "[[prompt_fragments]]\n"
+    + "id = \"rust-repo-conventions-v1\"\n"
+    + "title = \"Rust repo conventions\"\n"
+    + "tags = [\"rust\", \"testing\"]\n"
+    + "token_budget = 16\n"
+    + "cache_ttl = \"5m\"\n"
+    + "body = \"Use nextest for {{crate}} and keep sccache warm.\"\n",
+  )
+  write_file(
+    "prompt_library_front.harn.prompt",
+    "---\n"
+    + "id = \"ops-prefix\"\n"
+    + "title = \"Ops prefix\"\n"
+    + "tags = [\"ops\"]\n"
+    + "---\n"
+    + "Operate in {{env}} with low-noise status updates.",
+  )
+  let library = prompt_library_load(["prompt_library_catalog.toml", "prompt_library_front.harn.prompt"])
+  assert_eq(
+    prompt_library_inject(library, "rust-repo-conventions-v1", {crate: "harn-vm"}),
+    "Use nextest for harn-vm and keep sccache warm.",
+  )
+  assert_eq(prompt_library_list(library, {tag: "ops"})[0].id, "ops-prefix")
+  assert_eq(
+    prompt_library_payload(library, "ops-prefix", {env: "prod"}).cache_control.type,
+    "ephemeral",
+  )
+  let api = prompt_library_api(library)
+  assert_eq(
+    api.inject("ops-prefix", {env: "staging"}),
+    "Operate in staging with low-noise status updates.",
+  )
+  assert_eq(len(api.suggest({tags: ["rust"], limit: 1})), 1)
+  assert_eq(
+    prompt_library_suggest(library, {query: "sccache", limit: 1})[0].id,
+    "rust-repo-conventions-v1",
+  )
+  assert(
+    contains(
+    prompt_library_inject_cluster(library, {tag: "rust", max_tokens: 20}, {crate: "parser"}),
+    "parser",
+  ),
+  )
+  let conversations = [
+    {
+    id: "a1",
+    tenant_id: "tenant-a",
+    text: "System repo rust testing conventions use nextest sccache cargo workspace shared alpha",
+    embedding: [0.0, 0.0],
+  },
+    {
+    id: "a2",
+    tenant_id: "tenant-a",
+    text: "System repo rust testing conventions use nextest sccache cargo workspace shared beta",
+    embedding: [0.0, 0.1],
+  },
+    {
+    id: "b1",
+    tenant_id: "tenant-b",
+    text: "System docs api reference conventions publish mdbook snippets separately",
+    embedding: [10.0, 10.0],
+  },
+  ]
+  let proposals = prompt_library_hotspots(
+    conversations,
+    {
+    tenant_id: "tenant-a",
+    k: 1,
+    min_shared_tokens: 8,
+    dollars_per_token: 0.01,
+    daily_invocation_count: 1,
+  },
+  )
+  assert_eq(len(proposals), 1)
+  assert_eq(proposals[0].provenance, "kmeans")
+  assert_eq(proposals[0].tenant_id, "tenant-a")
+  assert(contains(proposals[0].body, "system repo rust testing conventions"))
+  let review_library = prompt_library_define(prompt_library(), proposals[0])
+  let queue = prompt_library_review_queue(review_library)
+  assert_eq(len(queue), 1)
+  assert_eq(queue[0].members, ["a1", "a2"])
+  log("prompt_library ok")
+}
