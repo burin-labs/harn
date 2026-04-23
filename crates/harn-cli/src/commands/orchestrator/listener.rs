@@ -1,7 +1,7 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex, RwLock, Weak};
 use std::time::{Duration, Instant};
 
 use axum::body::{Body, Bytes};
@@ -45,6 +45,9 @@ const INGEST_REFILL_PER_SEC_ENV: &str = "HARN_ORCHESTRATOR_INGEST_REFILL_PER_SEC
 const DEFAULT_INGEST_GLOBAL_CAPACITY: u32 = 4096;
 const DEFAULT_INGEST_PER_SOURCE_CAPACITY: u32 = 1024;
 const DEFAULT_INGEST_REFILL_PER_SEC: u32 = 1024;
+const ACP_RETAINED_SESSION_SECS_ENV: &str = "HARN_ACP_WS_RETAIN_SECS";
+const ACP_DEFAULT_RETAINED_SESSION_SECS: u64 = 5 * 60;
+const ACP_REPLAY_BUFFER_LIMIT: usize = 4096;
 
 #[derive(Clone)]
 pub(crate) struct ListenerConfig {
@@ -135,10 +138,19 @@ impl ListenerRuntime {
                 reload,
             })
         });
+        let acp_hub = AcpWebSocketHub::new(
+            config.event_log.clone(),
+            acp_retained_session_duration_from_env(),
+        );
+        let acp_hub_sweeper = acp_hub.clone();
+        tokio::spawn(async move {
+            acp_hub_sweeper.run_expiry_sweeper().await;
+        });
         let acp_state = Arc::new(AcpWebSocketState {
             event_log: config.event_log.clone(),
             auth: auth.clone(),
             pipeline: None,
+            hub: acp_hub,
         });
         let routes = Arc::new(RouteRegistry::new(
             config.routes,
@@ -396,6 +408,45 @@ struct AcpWebSocketState {
     event_log: Arc<AnyEventLog>,
     auth: Arc<ListenerAuth>,
     pipeline: Option<String>,
+    hub: Arc<AcpWebSocketHub>,
+}
+
+struct AcpWebSocketHub {
+    state: Mutex<AcpWebSocketHubState>,
+    event_log: Arc<AnyEventLog>,
+    retention: Duration,
+}
+
+#[derive(Default)]
+struct AcpWebSocketHubState {
+    workers_by_id: BTreeMap<String, Arc<AcpWorker>>,
+    workers_by_session: BTreeMap<String, Arc<AcpWorker>>,
+}
+
+struct AcpWorker {
+    id: String,
+    request_tx: Mutex<Option<mpsc::UnboundedSender<JsonValue>>>,
+    socket_tx: Mutex<Option<mpsc::UnboundedSender<String>>>,
+    active_connection_id: Mutex<Option<String>>,
+    sessions: Mutex<BTreeSet<String>>,
+    replay_buffer: Mutex<VecDeque<AcpReplayEvent>>,
+    next_event_id: AtomicU64,
+    detached_at: Mutex<Option<Instant>>,
+    event_log: Arc<AnyEventLog>,
+    hub: Weak<AcpWebSocketHub>,
+}
+
+#[derive(Clone)]
+struct AcpReplayEvent {
+    id: u64,
+    line: String,
+    session_id: Option<String>,
+}
+
+#[derive(Debug)]
+enum AcpAttachError {
+    NotFound,
+    AlreadyAttached,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -992,6 +1043,300 @@ async fn admin_reload_endpoint(
     }
 }
 
+impl AcpWebSocketHub {
+    fn new(event_log: Arc<AnyEventLog>, retention: Duration) -> Arc<Self> {
+        Arc::new(Self {
+            state: Mutex::new(AcpWebSocketHubState::default()),
+            event_log,
+            retention,
+        })
+    }
+
+    fn spawn_worker(self: &Arc<Self>, pipeline: Option<String>) -> Result<Arc<AcpWorker>, String> {
+        let worker_id = uuid::Uuid::new_v4().to_string();
+        let (to_acp_tx, to_acp_rx) = mpsc::unbounded_channel::<JsonValue>();
+        let (from_acp_tx, mut from_acp_rx) = mpsc::unbounded_channel::<String>();
+        let worker = Arc::new(AcpWorker {
+            id: worker_id.clone(),
+            request_tx: Mutex::new(Some(to_acp_tx)),
+            socket_tx: Mutex::new(None),
+            active_connection_id: Mutex::new(None),
+            sessions: Mutex::new(BTreeSet::new()),
+            replay_buffer: Mutex::new(VecDeque::new()),
+            next_event_id: AtomicU64::new(1),
+            detached_at: Mutex::new(None),
+            event_log: self.event_log.clone(),
+            hub: Arc::downgrade(self),
+        });
+        self.state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .workers_by_id
+            .insert(worker_id.clone(), worker.clone());
+
+        let worker_for_output = worker.clone();
+        tokio::spawn(async move {
+            while let Some(line) = from_acp_rx.recv().await {
+                worker_for_output.handle_output(line).await;
+            }
+        });
+
+        let worker_name = worker_id.clone();
+        std::thread::Builder::new()
+            .name(format!("harn-acp-ws-{worker_name}"))
+            .spawn(move || {
+                let runtime = match tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                {
+                    Ok(runtime) => runtime,
+                    Err(error) => {
+                        eprintln!("[harn] failed to start ACP WebSocket worker: {error}");
+                        return;
+                    }
+                };
+                runtime.block_on(crate::acp::run_acp_channel_server(
+                    pipeline,
+                    to_acp_rx,
+                    from_acp_tx,
+                ));
+            })
+            .map_err(|error| format!("worker spawn failed: {error}"))?;
+
+        Ok(worker)
+    }
+
+    fn register_session(&self, session_id: String, worker: &Arc<AcpWorker>) {
+        worker
+            .sessions
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(session_id.clone());
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        state
+            .workers_by_session
+            .entry(session_id)
+            .or_insert_with(|| worker.clone());
+    }
+
+    fn attach(
+        &self,
+        session_id: &str,
+        connection_id: &str,
+        socket_tx: mpsc::UnboundedSender<String>,
+        last_acked_event_id: u64,
+    ) -> Result<Arc<AcpWorker>, AcpAttachError> {
+        let worker = self
+            .state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .workers_by_session
+            .get(session_id)
+            .cloned()
+            .ok_or(AcpAttachError::NotFound)?;
+        worker.attach(connection_id, socket_tx, last_acked_event_id)?;
+        Ok(worker)
+    }
+
+    fn remove_worker(&self, worker: &Arc<AcpWorker>) {
+        let sessions = worker.session_ids();
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        state.workers_by_id.remove(&worker.id);
+        for session_id in sessions {
+            if state
+                .workers_by_session
+                .get(&session_id)
+                .is_some_and(|mapped| Arc::ptr_eq(mapped, worker))
+            {
+                state.workers_by_session.remove(&session_id);
+            }
+        }
+        worker.shutdown();
+    }
+
+    async fn run_expiry_sweeper(self: Arc<Self>) {
+        let sweep_interval = self
+            .retention
+            .min(Duration::from_secs(15))
+            .max(Duration::from_secs(1));
+        let mut interval = tokio::time::interval(sweep_interval);
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            interval.tick().await;
+            let expired: Vec<Arc<AcpWorker>> = {
+                let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+                state
+                    .workers_by_id
+                    .values()
+                    .filter(|worker| worker.is_expired(self.retention))
+                    .cloned()
+                    .collect()
+            };
+            for worker in expired {
+                let sessions = worker.session_ids();
+                self.remove_worker(&worker);
+                append_acp_event(
+                    &self.event_log,
+                    &worker.id,
+                    "session_worker_expired",
+                    json!({
+                        "worker_id": worker.id,
+                        "session_ids": sessions,
+                        "retention_ms": self.retention.as_millis(),
+                    }),
+                )
+                .await;
+            }
+        }
+    }
+}
+
+impl AcpWorker {
+    fn attach(
+        &self,
+        connection_id: &str,
+        socket_tx: mpsc::UnboundedSender<String>,
+        last_acked_event_id: u64,
+    ) -> Result<(), AcpAttachError> {
+        {
+            let mut active = self
+                .active_connection_id
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            if active
+                .as_deref()
+                .is_some_and(|active_connection_id| active_connection_id != connection_id)
+            {
+                return Err(AcpAttachError::AlreadyAttached);
+            }
+            *active = Some(connection_id.to_string());
+        }
+        *self.socket_tx.lock().unwrap_or_else(|e| e.into_inner()) = Some(socket_tx.clone());
+        *self.detached_at.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        self.replay_since(last_acked_event_id, socket_tx);
+        Ok(())
+    }
+
+    fn detach(&self, connection_id: &str) {
+        let mut active = self
+            .active_connection_id
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if active.as_deref() != Some(connection_id) {
+            return;
+        }
+        *active = None;
+        *self.socket_tx.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        *self.detached_at.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now());
+    }
+
+    fn send_request(&self, value: JsonValue) -> Result<(), ()> {
+        self.request_tx
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .ok_or(())?
+            .send(value)
+            .map_err(|_| ())
+    }
+
+    fn shutdown(&self) {
+        self.request_tx
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take();
+        self.socket_tx
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take();
+    }
+
+    fn is_expired(&self, retention: Duration) -> bool {
+        self.detached_at
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .is_some_and(|detached_at| detached_at.elapsed() >= retention)
+    }
+
+    fn session_ids(&self) -> Vec<String> {
+        self.sessions
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .cloned()
+            .collect()
+    }
+
+    async fn handle_output(self: &Arc<Self>, line: String) {
+        let session_id = session_id_from_acp_message(&line).or_else(|| {
+            let sessions = self.session_ids();
+            (sessions.len() == 1).then(|| sessions[0].clone())
+        });
+        if let Some(session_id) = session_id.clone() {
+            if let Some(hub) = self.hub.upgrade() {
+                hub.register_session(session_id, self);
+            }
+        }
+
+        let event_id = self.next_event_id.fetch_add(1, Ordering::SeqCst);
+        let annotated = annotate_acp_line(&line, event_id, session_id.as_deref(), false);
+        {
+            let mut replay_buffer = self.replay_buffer.lock().unwrap_or_else(|e| e.into_inner());
+            replay_buffer.push_back(AcpReplayEvent {
+                id: event_id,
+                line: annotated.clone(),
+                session_id: session_id.clone(),
+            });
+            while replay_buffer.len() > ACP_REPLAY_BUFFER_LIMIT {
+                replay_buffer.pop_front();
+            }
+        }
+
+        let topic_id = session_id.as_deref().unwrap_or(&self.id);
+        append_acp_event(
+            &self.event_log,
+            topic_id,
+            "message_sent",
+            acp_replay_log_payload(&annotated, event_id, session_id.as_deref()),
+        )
+        .await;
+
+        let socket_tx = self
+            .socket_tx
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        if let Some(socket_tx) = socket_tx {
+            let _ = socket_tx.send(annotated);
+        }
+    }
+
+    fn replay_since(&self, last_acked_event_id: u64, socket_tx: mpsc::UnboundedSender<String>) {
+        let events: Vec<AcpReplayEvent> = self
+            .replay_buffer
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .filter(|event| event.id > last_acked_event_id)
+            .cloned()
+            .collect();
+        for event in events {
+            let replayed =
+                annotate_acp_line(&event.line, event.id, event.session_id.as_deref(), true);
+            let _ = socket_tx.send(replayed);
+        }
+    }
+}
+
+fn acp_retained_session_duration_from_env() -> Duration {
+    let seconds = std::env::var(ACP_RETAINED_SESSION_SECS_ENV)
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|seconds| *seconds > 0)
+        .unwrap_or(ACP_DEFAULT_RETAINED_SESSION_SECS);
+    Duration::from_secs(seconds)
+}
+
 async fn acp_websocket_endpoint(
     Extension(state): Extension<Arc<AcpWebSocketState>>,
     ws: WebSocketUpgrade,
@@ -1033,51 +1378,22 @@ async fn run_acp_websocket(socket: WebSocket, state: Arc<AcpWebSocketState>) {
     )
     .await;
 
-    let (to_acp_tx, to_acp_rx) = mpsc::unbounded_channel::<JsonValue>();
-    let (from_acp_tx, mut from_acp_rx) = mpsc::unbounded_channel::<String>();
-    let pipeline = state.pipeline.clone();
-    let worker = std::thread::Builder::new()
-        .name(format!("harn-acp-ws-{connection_id}"))
-        .spawn(move || {
-            let runtime = match tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-            {
-                Ok(runtime) => runtime,
-                Err(error) => {
-                    eprintln!("[harn] failed to start ACP WebSocket worker: {error}");
-                    return;
-                }
-            };
-            runtime.block_on(crate::acp::run_acp_channel_server(
-                pipeline,
-                to_acp_rx,
-                from_acp_tx,
-            ));
-        });
-
-    let Ok(worker) = worker else {
-        append_acp_event(
-            &state.event_log,
-            &connection_id,
-            "connection_failed",
-            json!({"reason": "worker_spawn_failed"}),
-        )
-        .await;
-        return;
-    };
-
     let (mut sender, mut receiver) = socket.split();
-    let mut ping_interval = tokio::time::interval(ACP_PING_INTERVAL);
+    let (socket_tx, mut socket_rx) = mpsc::unbounded_channel::<String>();
+    let mut ping_interval = tokio::time::interval_at(
+        tokio::time::Instant::now() + ACP_PING_INTERVAL,
+        ACP_PING_INTERVAL,
+    );
     ping_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut liveness_interval = tokio::time::interval(Duration::from_secs(1));
     liveness_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut ping_sent_at: Option<Instant> = None;
     let mut session_id: Option<String> = None;
+    let mut worker: Option<Arc<AcpWorker>> = None;
 
     loop {
         tokio::select! {
-            Some(line) = from_acp_rx.recv() => {
+            Some(line) = socket_rx.recv() => {
                 if let Some(id) = session_id_from_acp_response(&line) {
                     session_id = Some(id.clone());
                     append_acp_event(
@@ -1118,7 +1434,73 @@ async fn run_acp_websocket(socket: WebSocket, state: Arc<AcpWebSocketState>) {
                         .await;
                         match serde_json::from_str::<JsonValue>(&line) {
                             Ok(value) => {
-                                if to_acp_tx.send(value).is_err() {
+                                if let Some(load_session_id) = session_load_session_id(&value) {
+                                    match state.hub.attach(
+                                        &load_session_id,
+                                        &connection_id,
+                                        socket_tx.clone(),
+                                        last_acked_event_id(&value),
+                                    ) {
+                                        Ok(attached) => {
+                                            session_id = Some(load_session_id);
+                                            worker = Some(attached);
+                                        }
+                                        Err(AcpAttachError::AlreadyAttached) => {
+                                            send_socket_jsonrpc_error(
+                                                &socket_tx,
+                                                value.get("id").unwrap_or(&JsonValue::Null),
+                                                -32010,
+                                                "ACP session is already attached to another WebSocket",
+                                            );
+                                            continue;
+                                        }
+                                        Err(AcpAttachError::NotFound) => {
+                                            replay_persisted_acp_events(
+                                                &state.event_log,
+                                                &load_session_id,
+                                                last_acked_event_id(&value),
+                                                &socket_tx,
+                                            )
+                                            .await;
+                                            if worker.is_none() {
+                                                send_socket_jsonrpc_error(
+                                                    &socket_tx,
+                                                    value.get("id").unwrap_or(&JsonValue::Null),
+                                                    -32004,
+                                                    &format!("Session not found: {load_session_id}"),
+                                                );
+                                                continue;
+                                            }
+                                        }
+                                    }
+                                }
+                                if worker.is_none() {
+                                    match state.hub.spawn_worker(state.pipeline.clone()) {
+                                        Ok(new_worker) => {
+                                            new_worker.attach(
+                                                &connection_id,
+                                                socket_tx.clone(),
+                                                0,
+                                            )
+                                            .expect("fresh ACP worker is unattached");
+                                            worker = Some(new_worker);
+                                        }
+                                        Err(error) => {
+                                            append_acp_event(
+                                                &state.event_log,
+                                                &connection_id,
+                                                "connection_failed",
+                                                json!({"reason": error}),
+                                            )
+                                            .await;
+                                            break;
+                                        }
+                                    }
+                                }
+                                if worker
+                                    .as_ref()
+                                    .is_none_or(|worker| worker.send_request(value).is_err())
+                                {
                                     break;
                                 }
                             }
@@ -1181,15 +1563,16 @@ async fn run_acp_websocket(socket: WebSocket, state: Arc<AcpWebSocketState>) {
         }
     }
 
-    drop(to_acp_tx);
-    let _ = tokio::task::spawn_blocking(move || worker.join()).await;
+    if let Some(worker) = worker.as_ref() {
+        worker.detach(&connection_id);
+    }
     append_acp_event(
         &state.event_log,
         &connection_id,
         "connection_closed",
         json!({
             "session_id": session_id,
-            "retention_ms": 5 * 60 * 1000u64,
+            "retention_ms": state.hub.retention.as_millis(),
         }),
     )
     .await;
@@ -1205,6 +1588,50 @@ async fn append_acp_event(
         return;
     };
     let _ = event_log.append(&topic, LogEvent::new(kind, payload)).await;
+}
+
+async fn replay_persisted_acp_events(
+    event_log: &Arc<AnyEventLog>,
+    session_id: &str,
+    last_acked_event_id: u64,
+    socket_tx: &mpsc::UnboundedSender<String>,
+) {
+    let Ok(topic) = Topic::new(format!("{ACP_TOPIC_PREFIX}.{session_id}")) else {
+        return;
+    };
+    let Ok(events) = event_log
+        .read_range(&topic, None, ACP_REPLAY_BUFFER_LIMIT)
+        .await
+    else {
+        return;
+    };
+    for (_, event) in events {
+        if event.kind != "message_sent" {
+            continue;
+        }
+        let Some(acp_event_id) = event
+            .payload
+            .get("acp_event_id")
+            .and_then(JsonValue::as_u64)
+        else {
+            continue;
+        };
+        if acp_event_id <= last_acked_event_id {
+            continue;
+        }
+        let Some(line) = event.payload.get("line").and_then(JsonValue::as_str) else {
+            continue;
+        };
+        let replayed = annotate_acp_line(line, acp_event_id, Some(session_id), true);
+        let _ = socket_tx.send(replayed);
+    }
+}
+
+fn acp_replay_log_payload(line: &str, acp_event_id: u64, session_id: Option<&str>) -> JsonValue {
+    let mut payload = acp_message_log_payload(line, session_id);
+    payload["acp_event_id"] = json!(acp_event_id);
+    payload["line"] = json!(line);
+    payload
 }
 
 fn acp_message_log_payload(line: &str, session_id: Option<&str>) -> JsonValue {
@@ -1238,6 +1665,68 @@ fn acp_message_log_payload(line: &str, session_id: Option<&str>) -> JsonValue {
     }
 }
 
+fn annotate_acp_line(
+    line: &str,
+    event_id: u64,
+    session_id: Option<&str>,
+    replayed: bool,
+) -> String {
+    let Ok(mut value) = serde_json::from_str::<JsonValue>(line) else {
+        return line.to_string();
+    };
+    let Some(object) = value.as_object_mut() else {
+        return line.to_string();
+    };
+    let harn_meta = object
+        .entry("_harn")
+        .or_insert_with(|| json!({}))
+        .as_object_mut();
+    if let Some(harn_meta) = harn_meta {
+        harn_meta.insert("eventId".to_string(), json!(event_id));
+        harn_meta.insert("replayed".to_string(), json!(replayed));
+        if let Some(session_id) = session_id {
+            harn_meta.insert("sessionId".to_string(), json!(session_id));
+        }
+    }
+    serde_json::to_string(&value).unwrap_or_else(|_| line.to_string())
+}
+
+fn session_load_session_id(value: &JsonValue) -> Option<String> {
+    if value.get("method").and_then(JsonValue::as_str) != Some("session/load") {
+        return None;
+    }
+    value
+        .get("params")
+        .and_then(|params| params.get("sessionId").or_else(|| params.get("session_id")))
+        .and_then(JsonValue::as_str)
+        .map(ToString::to_string)
+}
+
+fn last_acked_event_id(value: &JsonValue) -> u64 {
+    value
+        .get("params")
+        .and_then(|params| {
+            params
+                .get("lastAckedEventId")
+                .or_else(|| params.get("last_acked_event_id"))
+                .or_else(|| params.get("lastEventId"))
+        })
+        .and_then(JsonValue::as_u64)
+        .unwrap_or(0)
+}
+
+fn send_socket_jsonrpc_error(
+    socket_tx: &mpsc::UnboundedSender<String>,
+    id: &JsonValue,
+    code: i64,
+    message: &str,
+) {
+    let response = harn_vm::jsonrpc::error_response(id.clone(), code, message);
+    if let Ok(line) = serde_json::to_string(&response) {
+        let _ = socket_tx.send(line);
+    }
+}
+
 fn session_id_from_acp_response(line: &str) -> Option<String> {
     serde_json::from_str::<JsonValue>(line)
         .ok()
@@ -1247,6 +1736,37 @@ fn session_id_from_acp_response(line: &str) -> Option<String> {
                 .get("sessionId")
                 .or_else(|| result.get("session_id"))
                 .and_then(JsonValue::as_str)
+                .map(ToString::to_string)
+        })
+}
+
+fn session_id_from_acp_message(line: &str) -> Option<String> {
+    serde_json::from_str::<JsonValue>(line)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("params")
+                .and_then(|params| params.get("sessionId").or_else(|| params.get("session_id")))
+                .and_then(JsonValue::as_str)
+                .or_else(|| {
+                    value
+                        .get("result")
+                        .and_then(|result| {
+                            result.get("sessionId").or_else(|| result.get("session_id"))
+                        })
+                        .and_then(JsonValue::as_str)
+                })
+                .or_else(|| {
+                    value
+                        .get("result")
+                        .and_then(|result| result.get("session"))
+                        .and_then(|session| {
+                            session
+                                .get("sessionId")
+                                .or_else(|| session.get("session_id"))
+                        })
+                        .and_then(JsonValue::as_str)
+                })
                 .map(ToString::to_string)
         })
 }
@@ -2188,7 +2708,7 @@ mod tests {
         TriggerRetryConfig,
     };
     use sha2::{Digest, Sha256};
-    use tempfile::tempdir;
+    use tempfile::{tempdir, TempDir};
 
     use crate::tests::common::harn_state_lock::lock_harn_state;
 
@@ -2416,6 +2936,71 @@ mod tests {
             .to_string()
     }
 
+    async fn send_acp_request(
+        socket: &mut tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
+        id: u64,
+        method: &str,
+        params: JsonValue,
+    ) {
+        socket
+            .send(tokio_tungstenite::tungstenite::Message::Text(
+                json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "method": method,
+                    "params": params,
+                })
+                .to_string()
+                .into(),
+            ))
+            .await
+            .expect("send acp request");
+    }
+
+    async fn send_acp_response(
+        socket: &mut tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
+        id: u64,
+        result: JsonValue,
+    ) {
+        socket
+            .send(tokio_tungstenite::tungstenite::Message::Text(
+                json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "result": result,
+                })
+                .to_string()
+                .into(),
+            ))
+            .await
+            .expect("send acp response");
+    }
+
+    async fn start_acp_test_listener() -> (ListenerRuntime, Arc<AnyEventLog>, TempDir) {
+        let dir = tempdir().expect("tempdir");
+        let log = install_default_for_base_dir(dir.path()).expect("install event log");
+        let listener = ListenerRuntime::start(ListenerConfig {
+            bind: "127.0.0.1:0".parse().expect("bind addr"),
+            tls: None,
+            event_log: log.clone(),
+            secrets: Arc::new(harn_vm::secrets::EnvSecretProvider::new(
+                "harn/listener-test",
+            )),
+            allowed_origins: OriginAllowList::wildcard(),
+            max_body_bytes: DEFAULT_MAX_BODY_BYTES,
+            metrics_registry: Arc::new(harn_vm::MetricsRegistry::default()),
+            admin_reload: None,
+            routes: Vec::new(),
+        })
+        .await
+        .expect("start listener");
+        (listener, log, dir)
+    }
+
     async fn pending_events(log: &Arc<AnyEventLog>) -> Vec<(u64, harn_vm::event_log::LogEvent)> {
         log.read_range(&Topic::new(PENDING_TOPIC).expect("pending topic"), None, 16)
             .await
@@ -2439,23 +3024,7 @@ mod tests {
         std::env::set_var(API_KEYS_ENV, "ws-test-key");
         std::env::remove_var(HMAC_SECRET_ENV);
 
-        let dir = tempdir().expect("tempdir");
-        let log = install_default_for_base_dir(dir.path()).expect("install event log");
-        let listener = ListenerRuntime::start(ListenerConfig {
-            bind: "127.0.0.1:0".parse().expect("bind addr"),
-            tls: None,
-            event_log: log,
-            secrets: Arc::new(harn_vm::secrets::EnvSecretProvider::new(
-                "harn/listener-test",
-            )),
-            allowed_origins: OriginAllowList::wildcard(),
-            max_body_bytes: DEFAULT_MAX_BODY_BYTES,
-            metrics_registry: Arc::new(harn_vm::MetricsRegistry::default()),
-            admin_reload: None,
-            routes: Vec::new(),
-        })
-        .await
-        .expect("start listener");
+        let (listener, _log, _dir) = start_acp_test_listener().await;
 
         let unauthorized =
             tokio_tungstenite::connect_async(format!("ws://{}{}", listener.local_addr(), ACP_PATH))
@@ -2489,23 +3058,7 @@ mod tests {
         std::env::set_var(API_KEYS_ENV, "ws-test-key");
         std::env::remove_var(HMAC_SECRET_ENV);
 
-        let dir = tempdir().expect("tempdir");
-        let log = install_default_for_base_dir(dir.path()).expect("install event log");
-        let listener = ListenerRuntime::start(ListenerConfig {
-            bind: "127.0.0.1:0".parse().expect("bind addr"),
-            tls: None,
-            event_log: log,
-            secrets: Arc::new(harn_vm::secrets::EnvSecretProvider::new(
-                "harn/listener-test",
-            )),
-            allowed_origins: OriginAllowList::wildcard(),
-            max_body_bytes: DEFAULT_MAX_BODY_BYTES,
-            metrics_registry: Arc::new(harn_vm::MetricsRegistry::default()),
-            admin_reload: None,
-            routes: Vec::new(),
-        })
-        .await
-        .expect("start listener");
+        let (listener, _log, _dir) = start_acp_test_listener().await;
 
         let (first, second) = tokio::join!(
             new_acp_session(listener.local_addr()),
@@ -2550,6 +3103,204 @@ mod tests {
             .await
             .expect("shutdown listener");
         std::env::remove_var(API_KEYS_ENV);
+        reset_active_event_log();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn acp_websocket_rejects_duplicate_attach_to_live_session() {
+        let _guard = lock_harn_state();
+        reset_active_event_log();
+        std::env::set_var(API_KEYS_ENV, "ws-test-key");
+        std::env::remove_var(HMAC_SECRET_ENV);
+
+        let (listener, _log, _dir) = start_acp_test_listener().await;
+        let (mut first_socket, _) =
+            tokio_tungstenite::connect_async(authorized_acp_request(listener.local_addr()))
+                .await
+                .expect("first connect");
+        let created = acp_request(&mut first_socket, 1, "session/new", json!({})).await;
+        let session_id = created["result"]["sessionId"]
+            .as_str()
+            .expect("session id")
+            .to_string();
+
+        let (mut second_socket, _) =
+            tokio_tungstenite::connect_async(authorized_acp_request(listener.local_addr()))
+                .await
+                .expect("second connect");
+        let loaded = acp_request(
+            &mut second_socket,
+            2,
+            "session/load",
+            json!({"sessionId": session_id}),
+        )
+        .await;
+        assert_eq!(loaded["error"]["code"], json!(-32010));
+
+        listener
+            .shutdown(Duration::from_secs(5))
+            .await
+            .expect("shutdown listener");
+        std::env::remove_var(API_KEYS_ENV);
+        reset_active_event_log();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn acp_websocket_reconnect_replays_pending_host_request_and_completes_prompt() {
+        let _guard = lock_harn_state();
+        reset_active_event_log();
+        std::env::set_var(API_KEYS_ENV, "ws-test-key");
+        std::env::remove_var(HMAC_SECRET_ENV);
+
+        let (listener, _log, _dir) = start_acp_test_listener().await;
+        let (mut socket, _) =
+            tokio_tungstenite::connect_async(authorized_acp_request(listener.local_addr()))
+                .await
+                .expect("connect");
+        let created = acp_request(&mut socket, 1, "session/new", json!({})).await;
+        let session_id = created["result"]["sessionId"]
+            .as_str()
+            .expect("session id")
+            .to_string();
+
+        send_acp_request(
+            &mut socket,
+            2,
+            "session/prompt",
+            json!({
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "println(\"reconnect\")"}],
+            }),
+        )
+        .await;
+        let host_request = loop {
+            let message = next_acp_text(&mut socket).await;
+            if message.get("method").is_some() && message.get("id").is_some() {
+                break message;
+            }
+        };
+        let host_request_id = host_request["id"].as_u64().expect("host request id");
+        let replay_from = host_request["_harn"]["eventId"]
+            .as_u64()
+            .expect("host request event id")
+            .saturating_sub(1);
+        socket.close(None).await.expect("close first socket");
+        drop(socket);
+        tokio::time::sleep(Duration::from_millis(250)).await;
+
+        let (mut reconnected, _) =
+            tokio_tungstenite::connect_async(authorized_acp_request(listener.local_addr()))
+                .await
+                .expect("reconnect");
+        send_acp_request(
+            &mut reconnected,
+            3,
+            "session/load",
+            json!({
+                "sessionId": session_id,
+                "lastAckedEventId": replay_from,
+            }),
+        )
+        .await;
+
+        let mut saw_replayed_host_request = false;
+        let mut saw_load_response = false;
+        let mut saw_prompt_response = false;
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while !(saw_replayed_host_request && saw_load_response && saw_prompt_response) {
+                let message = next_acp_text(&mut reconnected).await;
+                if message.get("method").is_some() && message.get("id").is_some() {
+                    if message.get("id").and_then(JsonValue::as_u64) == Some(host_request_id) {
+                        assert_eq!(message["_harn"]["replayed"], json!(true));
+                        saw_replayed_host_request = true;
+                    }
+                    let id = message["id"].as_u64().expect("host request id");
+                    send_acp_response(&mut reconnected, id, json!({})).await;
+                } else if message.get("id").and_then(JsonValue::as_u64) == Some(3) {
+                    assert_eq!(message["result"]["session"]["sessionId"], json!(session_id));
+                    saw_load_response = true;
+                } else if message.get("id").and_then(JsonValue::as_u64) == Some(2) {
+                    assert_eq!(message["result"]["stopReason"], json!("completed"));
+                    saw_prompt_response = true;
+                }
+            }
+        })
+        .await
+        .expect("reconnect flow completed");
+
+        listener
+            .shutdown(Duration::from_secs(5))
+            .await
+            .expect("shutdown listener");
+        std::env::remove_var(API_KEYS_ENV);
+        reset_active_event_log();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn acp_websocket_replays_serialized_events_after_worker_expiry() {
+        let _guard = lock_harn_state();
+        reset_active_event_log();
+        std::env::set_var(API_KEYS_ENV, "ws-test-key");
+        std::env::remove_var(HMAC_SECRET_ENV);
+        std::env::set_var(ACP_RETAINED_SESSION_SECS_ENV, "1");
+
+        let (listener, _log, _dir) = start_acp_test_listener().await;
+        let (mut socket, _) =
+            tokio_tungstenite::connect_async(authorized_acp_request(listener.local_addr()))
+                .await
+                .expect("connect");
+        let created = acp_request(&mut socket, 1, "session/new", json!({})).await;
+        let session_id = created["result"]["sessionId"]
+            .as_str()
+            .expect("session id")
+            .to_string();
+        let replay_from = created["_harn"]["eventId"]
+            .as_u64()
+            .expect("created event id")
+            .saturating_sub(1);
+        socket.close(None).await.expect("close socket");
+        drop(socket);
+        tokio::time::sleep(Duration::from_millis(2_500)).await;
+
+        let (mut reconnected, _) =
+            tokio_tungstenite::connect_async(authorized_acp_request(listener.local_addr()))
+                .await
+                .expect("reconnect");
+        send_acp_request(
+            &mut reconnected,
+            4,
+            "session/load",
+            json!({
+                "sessionId": session_id,
+                "lastAckedEventId": replay_from,
+            }),
+        )
+        .await;
+
+        let mut saw_persisted_replay = false;
+        let mut saw_expired_session_error = false;
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while !(saw_persisted_replay && saw_expired_session_error) {
+                let message = next_acp_text(&mut reconnected).await;
+                if message["_harn"]["replayed"] == json!(true) {
+                    assert_eq!(message["result"]["sessionId"], json!(session_id));
+                    saw_persisted_replay = true;
+                }
+                if message.get("id").and_then(JsonValue::as_u64) == Some(4) {
+                    assert_eq!(message["error"]["code"], json!(-32004));
+                    saw_expired_session_error = true;
+                }
+            }
+        })
+        .await
+        .expect("expired replay flow completed");
+
+        listener
+            .shutdown(Duration::from_secs(5))
+            .await
+            .expect("shutdown listener");
+        std::env::remove_var(API_KEYS_ENV);
+        std::env::remove_var(ACP_RETAINED_SESSION_SECS_ENV);
         reset_active_event_log();
     }
 

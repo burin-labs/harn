@@ -60,10 +60,50 @@ surface as stdio ACP:
 - `workflow/*`
 - `harn.hitl.respond`
 
-`session/load` can reload an active session in the current dispatcher. The
-WebSocket transport also records connection and session lifecycle events on
-`acp.session.<connection-id>` EventLog topics so durable replay can build on
-the same audit trail.
+The transport assigns every outbound JSON-RPC frame a stable Harn extension
+event id:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "session/update",
+  "params": {},
+  "_harn": {
+    "eventId": 42,
+    "sessionId": "session-id",
+    "replayed": false
+  }
+}
+```
+
+Clients should persist the highest `_harn.eventId` they have durably processed.
+On reconnect, call `session/load` with that cursor:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "method": "session/load",
+  "params": {
+    "sessionId": "session-id",
+    "lastAckedEventId": 42
+  }
+}
+```
+
+`session/load` attaches the new socket to the retained session worker when one
+is still live. The server replays missed outbound frames with
+`_harn.replayed = true`, then continues the same worker. This includes pending
+JSON-RPC requests from Harn to the host, so a prompt that is waiting on
+`host/capabilities`, `host/call`, or another host response can continue after
+the host reconnects and responds to the replayed request.
+
+Retained workers expire after 5 minutes by default. `HARN_ACP_WS_RETAIN_SECS`
+can tune that window for controlled deployments and tests. After expiry, or
+after an orchestrator process restart, Harn can still replay serialized outbound
+frames from the EventLog topic `acp.session.<session-id>`, but it cannot resume
+an in-flight VM stack that was waiting inside the expired process. In that case
+the host should treat replay as recovery/audit state and start a new prompt.
 
 ## Example
 
