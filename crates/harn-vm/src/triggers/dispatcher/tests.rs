@@ -2027,12 +2027,15 @@ pub fn wait_for_signal(event: TriggerEvent) -> string {
                 "{outcome:?}"
             );
 
-            let wait_events =
-                read_topic(log.clone(), crate::waitpoints::WAITPOINT_WAITS_TOPIC).await;
-            assert!(wait_events.iter().any(|(_, event)| {
-                event.kind == "waitpoint_wait_interrupted"
-                    && event.headers.get("wait_id").map(String::as_str) == Some("wait-cancel")
-            }));
+            wait_for_topic_event(
+                log.clone(),
+                crate::waitpoints::WAITPOINT_WAITS_TOPIC,
+                |event| {
+                    event.kind == "waitpoint_wait_interrupted"
+                        && event.headers.get("wait_id").map(String::as_str) == Some("wait-cancel")
+                },
+            )
+            .await;
         })
         .await;
 }
