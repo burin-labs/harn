@@ -1,0 +1,19 @@
+{
+  "_type": "eval_suite_manifest",
+  "id": "persona_template_pack_smoke",
+  "name": "persona template pack smoke",
+  "cases": [
+    {
+      "label": "merge_captain_dry_run_plan",
+      "run_path": "../runs/merge_captain_smoke.run.json"
+    },
+    {
+      "label": "review_captain_structured_receipt",
+      "run_path": "../runs/review_captain_smoke.run.json"
+    },
+    {
+      "label": "oncall_captain_verification_plan",
+      "run_path": "../runs/oncall_captain_smoke.run.json"
+    }
+  ]
+}

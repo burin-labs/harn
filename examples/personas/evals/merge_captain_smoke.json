@@ -1,0 +1,11 @@
+{
+  "_type": "eval_suite_manifest",
+  "id": "merge_captain_smoke",
+  "name": "merge_captain smoke",
+  "cases": [
+    {
+      "label": "merge_captain_dry_run_plan",
+      "run_path": "../runs/merge_captain_smoke.run.json"
+    }
+  ]
+}

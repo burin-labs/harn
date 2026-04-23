@@ -1,0 +1,36 @@
+fn sample_incident() {
+  return {
+    service: "orchestrator-api",
+    hypothesis: "a deploy introduced a replay-loop regression",
+    symptoms: ["pagerduty page", "error-rate spike", "slack escalation"],
+    observability_backends: ["mcp:honeycomb", "mcp:splunk"],
+    human_owner: "primary-oncall",
+  }
+}
+
+pipeline run(task) {
+  let incident = sample_incident()
+  let result = {
+    persona: "oncall_captain",
+    execution_mode: "dry_run",
+    approval_required: true,
+    service: incident.service,
+    summary: "verification plan for ${incident.service}",
+    plan: [
+    "Check the current deploy and the most recent rollback candidate.",
+    "Query Honeycomb and Splunk through MCP before proposing side effects.",
+    "Record whether the hypothesis is confirmed, disproven, or unresolved.",
+  ],
+    status: "unresolved",
+    receipt: {
+    kind: "incident_receipt",
+    outcome: "unresolved",
+    hypothesis: incident.hypothesis,
+    backends: incident.observability_backends,
+    owner: incident.human_owner,
+  },
+    handoff: "review_captain",
+  }
+  println(json_stringify(result))
+  return result
+}

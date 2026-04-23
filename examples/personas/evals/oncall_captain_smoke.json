@@ -1,0 +1,11 @@
+{
+  "_type": "eval_suite_manifest",
+  "id": "oncall_captain_smoke",
+  "name": "oncall_captain smoke",
+  "cases": [
+    {
+      "label": "oncall_captain_verification_plan",
+      "run_path": "../runs/oncall_captain_smoke.run.json"
+    }
+  ]
+}

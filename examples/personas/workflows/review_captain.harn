@@ -1,0 +1,45 @@
+fn sample_review() {
+  return {
+    repo: "burin-labs/harn",
+    pr_number: 463,
+    changed_files: ["examples/personas/harn.toml", "examples/personas/workflows/merge_captain.harn"],
+    missing_tests: ["template smoke for oncall_captain"],
+    risky_paths: ["examples/personas/harn.toml"],
+  }
+}
+
+fn review_verdict(review) {
+  if len(review.missing_tests) > 0 || len(review.risky_paths) > 0 {
+    return "needs_follow_up"
+  }
+  return "low_risk"
+}
+
+pipeline run(task) {
+  let review = sample_review()
+  let verdict = review_verdict(review)
+  let handoff = if verdict == "needs_follow_up" {
+    "merge_captain"
+  } else {
+    nil
+  }
+  let result = {
+    persona: "review_captain",
+    execution_mode: "dry_run",
+    approval_required: false,
+    repo: review.repo,
+    pr_number: review.pr_number,
+    summary: "structured review receipt for PR #${review.pr_number}",
+    focus: ["regressions", "missing tests", "risky diffs"],
+    receipt: {
+    kind: "review_receipt",
+    verdict: verdict,
+    missing_tests: review.missing_tests,
+    risky_paths: review.risky_paths,
+    changed_files: review.changed_files,
+  },
+    handoff: handoff,
+  }
+  println(json_stringify(result))
+  return result
+}

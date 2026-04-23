@@ -1,0 +1,16 @@
+{
+  "event": "github.pr_opened",
+  "repo": "burin-labs/harn",
+  "number": 463,
+  "title": "Persona template pack v0",
+  "failing_checks": [
+    "ci / rust"
+  ],
+  "stale_threads": [
+    "acceptance coverage"
+  ],
+  "release_blockers": [
+    "needs-human-release-note"
+  ],
+  "merge_conflicts": false
+}
