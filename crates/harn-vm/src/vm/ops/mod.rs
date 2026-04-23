@@ -81,6 +81,7 @@ impl super::Vm {
             Op::ParallelMap => self.execute_parallel_map().await?,
             Op::ParallelSettle => self.execute_parallel_settle().await?,
             Op::Spawn => self.execute_spawn()?,
+            Op::SyncMutexEnter => self.execute_sync_mutex_enter().await?,
             Op::Import => self.execute_import_op().await?,
             Op::SelectiveImport => self.execute_selective_import().await?,
             Op::DeadlineSetup => self.execute_deadline_setup()?,

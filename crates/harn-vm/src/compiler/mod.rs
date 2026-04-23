@@ -358,8 +358,11 @@ impl Compiler {
                 self.chunk.emit(Op::DeadlineEnd, self.line);
             }
             Node::MutexBlock { body } => {
-                // v1: single-threaded, but still uses a lexical block scope.
                 self.begin_scope();
+                let key_idx = self
+                    .chunk
+                    .add_constant(Constant::String("__default__".to_string()));
+                self.chunk.emit_u16(Op::SyncMutexEnter, key_idx, self.line);
                 for sn in body {
                     self.compile_node(sn)?;
                     if Self::produces_value(&sn.node) {

@@ -1,0 +1,11 @@
+pipeline test(task) {
+  let result = try {
+    mutex {
+    throw "boom"
+  }
+  }
+  println(is_err(result))
+  let permit = sync_mutex_acquire("__default__", 0)
+  println(permit != nil)
+  sync_release(permit)
+}

@@ -31,6 +31,7 @@ pub mod skills;
 pub mod stdlib;
 pub mod stdlib_modules;
 pub mod store;
+pub(crate) mod synchronization;
 pub mod tool_annotations;
 pub mod tracing;
 pub mod triggers;

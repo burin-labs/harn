@@ -968,6 +968,26 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("string")),
     },
     BuiltinSig {
+        name: "sync_gate_acquire",
+        return_type: None,
+    },
+    BuiltinSig {
+        name: "sync_metrics",
+        return_type: None,
+    },
+    BuiltinSig {
+        name: "sync_mutex_acquire",
+        return_type: None,
+    },
+    BuiltinSig {
+        name: "sync_release",
+        return_type: Some(BuiltinReturn::Named("bool")),
+    },
+    BuiltinSig {
+        name: "sync_semaphore_acquire",
+        return_type: None,
+    },
+    BuiltinSig {
         name: "tan",
         return_type: Some(BuiltinReturn::Named("float")),
     },

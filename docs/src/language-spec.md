@@ -1224,6 +1224,46 @@ cancel(handle)
 `await` (a built-in interpreter function, not a keyword) blocks until the task completes
 and returns its result. `cancel` cancels the task.
 
+### Synchronization
+
+Harn synchronization primitives are workflow-level parking primitives, not
+low-level OS locks or spinlocks. The initial scope is process-local: spawned and
+parallel child VMs inherit the same synchronization runtime, while durable
+EventLog-backed variants are reserved for explicit future primitives.
+
+`mutex { ... }` acquires the fair process-local default mutex key
+`"__default__"` for the lexical block. The permit is released when the block's
+scope exits, including `throw`, `return`, `break`, `continue`, and caught
+runtime errors.
+
+Named primitives return a permit value or `nil` on timeout:
+
+```harn
+let lock = sync_mutex_acquire("state:customer-42", 250ms)
+let slot = sync_semaphore_acquire("connector:notion", 4, 1, 2s)
+let gate = sync_gate_acquire("workflow-runner", 8, 5s)
+```
+
+- `sync_mutex_acquire(key?, timeout?)` acquires one permit from a named FIFO
+  mutex. Omitting `key` uses `"__default__"`.
+- `sync_semaphore_acquire(key, capacity, permits?, timeout?)` acquires a
+  weighted permit from a named FIFO semaphore.
+- `sync_gate_acquire(key, limit, timeout?)` acquires one fair-admission slot
+  from a named FIFO gate.
+- `sync_release(permit)` releases a named permit and returns `true` only for
+  the first release.
+- `sync_metrics(kind?, key?)` returns observability counters for matching
+  primitives. A concrete `(kind, key)` returns a dict; partial or empty
+  filters return a list.
+
+Metrics include `acquisition_count`, `timeout_count`, `cancellation_count`,
+`release_count`, `current_held`, `current_queue_depth`, `max_queue_depth`,
+`total_wait_ms`, and `total_held_ms`.
+
+Acquisition is cancellable: a graceful task cancellation while waiting throws
+`kind:cancelled:VM cancelled by host`. Timeouts are deterministic and return
+`nil` instead of throwing so authors can choose the fallback policy.
+
 ### Channels
 
 Channels provide typed message-passing between concurrent tasks.

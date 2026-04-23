@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, HashSet};
 use std::rc::Rc;
+use std::sync::Arc;
 use std::time::Instant;
 
 use crate::chunk::{Chunk, ChunkRef, Constant};
@@ -146,6 +147,10 @@ pub struct Vm {
     pub(crate) exception_handlers: Vec<ExceptionHandler>,
     /// Spawned async task handles.
     pub(crate) spawned_tasks: BTreeMap<String, VmTaskHandle>,
+    /// Shared process-local synchronization primitives inherited by child VMs.
+    pub(crate) sync_runtime: Arc<crate::synchronization::VmSyncRuntime>,
+    /// Permits acquired by lexical synchronization blocks in this VM.
+    pub(crate) held_sync_guards: Vec<crate::synchronization::VmSyncHeldGuard>,
     /// Counter for generating unique task IDs.
     pub(crate) task_counter: u64,
     /// Counter for logical runtime-context task groups.
@@ -377,6 +382,8 @@ impl Vm {
             frames: Vec::new(),
             exception_handlers: Vec::new(),
             spawned_tasks: BTreeMap::new(),
+            sync_runtime: Arc::new(crate::synchronization::VmSyncRuntime::new()),
+            held_sync_guards: Vec::new(),
             task_counter: 0,
             runtime_context_counter: 0,
             runtime_context: crate::runtime_context::RuntimeContext::root(),
@@ -462,6 +469,8 @@ impl Vm {
             frames: Vec::new(),
             exception_handlers: Vec::new(),
             spawned_tasks: BTreeMap::new(),
+            sync_runtime: self.sync_runtime.clone(),
+            held_sync_guards: Vec::new(),
             task_counter: 0,
             runtime_context_counter: self.runtime_context_counter,
             runtime_context: self.runtime_context.clone(),
@@ -549,6 +558,27 @@ impl Vm {
             Constant::String(s) => Ok(s.clone()),
             _ => Err(VmError::TypeError("expected string constant".into())),
         }
+    }
+
+    pub(crate) fn release_sync_guards_for_current_scope(&mut self) {
+        let depth = self.env.scope_depth();
+        self.held_sync_guards
+            .retain(|guard| guard.env_scope_depth < depth);
+    }
+
+    pub(crate) fn release_sync_guards_after_unwind(
+        &mut self,
+        frame_depth: usize,
+        env_scope_depth: usize,
+    ) {
+        self.held_sync_guards.retain(|guard| {
+            guard.frame_depth <= frame_depth && guard.env_scope_depth <= env_scope_depth
+        });
+    }
+
+    pub(crate) fn release_sync_guards_for_frame(&mut self, frame_depth: usize) {
+        self.held_sync_guards
+            .retain(|guard| guard.frame_depth != frame_depth);
     }
 }
 

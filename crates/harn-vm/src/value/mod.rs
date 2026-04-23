@@ -10,7 +10,8 @@ pub use error::{
     categorized_error, classify_error_message, error_to_category, ErrorCategory, VmError,
 };
 pub use handles::{
-    VmAtomicHandle, VmChannelHandle, VmGenerator, VmJoinHandle, VmRange, VmTaskHandle,
+    VmAtomicHandle, VmChannelHandle, VmGenerator, VmJoinHandle, VmRange, VmSyncPermitHandle,
+    VmTaskHandle,
 };
 pub use structural::{
     compare_values, value_identity_key, value_structural_hash_key, values_equal, values_identical,
