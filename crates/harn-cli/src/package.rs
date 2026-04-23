@@ -82,6 +82,10 @@ pub struct Manifest {
     /// connectors or `.harn` modules as connector implementations.
     #[serde(default)]
     pub providers: Vec<ProviderManifestEntry>,
+    /// `[connector_contract]` table — deterministic package-local fixtures
+    /// consumed by `harn connector check` for pure-Harn connector packages.
+    #[serde(default, alias = "connector-contract")]
+    pub connector_contract: ConnectorContractConfig,
     /// `[orchestrator]` table — listener-level controls shared by
     /// manifest-driven ingress surfaces.
     #[serde(default)]
@@ -692,6 +696,39 @@ pub struct ProviderConnectorManifest {
     pub harn: Option<String>,
     #[serde(default)]
     pub rust: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct ConnectorContractConfig {
+    #[serde(default)]
+    pub version: Option<u32>,
+    #[serde(default)]
+    pub fixtures: Vec<ConnectorContractFixture>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ConnectorContractFixture {
+    pub provider: harn_vm::ProviderId,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub kind: Option<String>,
+    #[serde(default)]
+    pub headers: BTreeMap<String, String>,
+    #[serde(default)]
+    pub query: BTreeMap<String, String>,
+    #[serde(default)]
+    pub metadata: Option<toml::Value>,
+    #[serde(default)]
+    pub body: Option<String>,
+    #[serde(default)]
+    pub body_json: Option<toml::Value>,
+    #[serde(default)]
+    pub expect_type: Option<String>,
+    #[serde(default)]
+    pub expect_kind: Option<String>,
+    #[serde(default)]
+    pub expect_event_count: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2018,7 +2055,9 @@ fn leak_static_string(value: String) -> &'static str {
     Box::leak(value.into_boxed_str())
 }
 
-async fn install_manifest_provider_schemas(extensions: &RuntimeExtensions) -> Result<(), String> {
+pub(crate) async fn install_manifest_provider_schemas(
+    extensions: &RuntimeExtensions,
+) -> Result<(), String> {
     harn_vm::reset_provider_catalog();
     for provider in &extensions.provider_connectors {
         match &provider.connector {
@@ -2106,14 +2145,10 @@ fn is_empty_capabilities(file: &harn_vm::llm::capabilities::CapabilitiesFile) ->
 
 /// Load the nearest project manifest plus any installed package manifests and
 /// merge the root project's runtime extensions.
-pub fn load_runtime_extensions(anchor: &Path) -> RuntimeExtensions {
-    if let Err(error) = ensure_dependencies_materialized(anchor) {
-        eprintln!("error: {error}");
-        process::exit(1);
-    }
-
+pub fn try_load_runtime_extensions(anchor: &Path) -> Result<RuntimeExtensions, String> {
+    ensure_dependencies_materialized(anchor)?;
     let Some((root_manifest, manifest_dir)) = find_nearest_manifest(anchor) else {
-        return RuntimeExtensions::default();
+        return Ok(RuntimeExtensions::default());
     };
 
     let mut llm = harn_vm::llm_config::ProvidersConfig::default();
@@ -2133,13 +2168,23 @@ pub fn load_runtime_extensions(anchor: &Path) -> RuntimeExtensions {
     let provider_connectors =
         resolved_provider_connectors_from_manifest(&root_manifest, &manifest_dir);
 
-    RuntimeExtensions {
+    Ok(RuntimeExtensions {
         root_manifest: Some(root_manifest),
         llm: (!llm.is_empty()).then_some(llm),
         capabilities: (!is_empty_capabilities(&capabilities)).then_some(capabilities),
         hooks,
         triggers,
         provider_connectors,
+    })
+}
+
+pub fn load_runtime_extensions(anchor: &Path) -> RuntimeExtensions {
+    match try_load_runtime_extensions(anchor) {
+        Ok(extensions) => extensions,
+        Err(error) => {
+            eprintln!("error: {error}");
+            process::exit(1);
+        }
     }
 }
 

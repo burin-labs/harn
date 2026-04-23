@@ -69,6 +69,8 @@ SCRIPTING
     Doctor(DoctorArgs),
     /// Register outbound connector resources with a provider.
     Connect(ConnectArgs),
+    /// Validate pure-Harn connector packages against the connector contract.
+    Connector(ConnectorArgs),
     /// Serve a Harn workflow over a transport adapter.
     Serve(ServeArgs),
     /// Start the ACP server on stdio.
@@ -385,6 +387,33 @@ pub(crate) struct ConnectArgs {
     pub json: bool,
     #[command(subcommand)]
     pub command: Option<ConnectCommand>,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ConnectorArgs {
+    #[command(subcommand)]
+    pub command: ConnectorCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum ConnectorCommand {
+    /// Check a pure-Harn connector package against connector contract v1.
+    Check(ConnectorCheckArgs),
+}
+
+#[derive(Debug, Args, Clone)]
+pub(crate) struct ConnectorCheckArgs {
+    /// Package directory, harn.toml, or file under the package to check.
+    pub package: String,
+    /// Restrict the check to one provider id. Repeatable.
+    #[arg(long = "provider", value_name = "ID")]
+    pub providers: Vec<String>,
+    /// Run poll bindings long enough to execute the first poll_tick.
+    #[arg(long = "run-poll-tick")]
+    pub run_poll_tick: bool,
+    /// Emit the check report as JSON.
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Debug, Subcommand)]

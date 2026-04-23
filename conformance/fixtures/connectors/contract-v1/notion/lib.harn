@@ -1,0 +1,51 @@
+pub fn provider_id() {
+  return "notion"
+}
+
+pub fn kinds() {
+  return ["webhook", "poll"]
+}
+
+pub fn payload_schema() {
+  return {harn_schema_name: "NotionEventPayload", json_schema: {type: "object", additionalProperties: true}}
+}
+
+pub fn init(ctx) {
+  if !ctx.capabilities.secret_get {
+    throw "secret_get capability missing"
+  }
+}
+
+pub fn activate(bindings) {
+  metrics_inc("notion_contract_activations", len(bindings))
+}
+
+pub fn normalize_inbound(raw) {
+  let body = raw.body_json ?? json_parse(raw.body_text)
+  return {
+    type: "event",
+    event: {
+    kind: "notion." + body.type,
+    dedupe_key: "notion:" + body.id,
+    payload: {id: body.id, page_id: body.page_id},
+  },
+  }
+}
+
+pub fn poll_tick(ctx) {
+  return {
+    cursor: {last_seen: ctx.tick_at},
+    state: {state_key: ctx.state_key},
+    events: [
+    {
+    kind: "notion.page.polled",
+    dedupe_key: "notion:poll:" + ctx.binding_id,
+    payload: {binding_id: ctx.binding_id, lease_id: ctx.lease.id},
+  },
+  ],
+  }
+}
+
+pub fn call(method, _args) {
+  throw "method_not_found:" + method
+}

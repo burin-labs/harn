@@ -1,0 +1,29 @@
+[package]
+name = "slack-connector-contract-fixture"
+version = "0.1.0"
+
+[[providers]]
+id = "slack"
+connector = { harn = "./lib.harn" }
+
+[connector_contract]
+version = 1
+
+[[connector_contract.fixtures]]
+provider = "slack"
+name = "url verification ack"
+kind = "webhook"
+headers = { "content-type" = "application/json" }
+body_json = { type = "url_verification", challenge = "challenge-token" }
+expect_type = "immediate_response"
+expect_event_count = 0
+
+[[connector_contract.fixtures]]
+provider = "slack"
+name = "message event"
+kind = "webhook"
+headers = { "content-type" = "application/json" }
+body_json = { type = "event_callback", event_id = "Ev1", event = { type = "message", text = "hello", channel = "C1" } }
+expect_type = "event"
+expect_kind = "slack.message"
+expect_event_count = 1

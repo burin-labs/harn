@@ -372,6 +372,12 @@ async fn main() {
             }
         },
         Command::Acp(args) => acp::run_acp_server(args.pipeline.as_deref()).await,
+        Command::Connector(args) => {
+            if let Err(error) = commands::connector::handle_connector_command(args).await {
+                eprintln!("error: {error}");
+                process::exit(1);
+            }
+        }
         Command::McpServe(args) => {
             commands::run::run_file_mcp_serve(&args.file, args.card.as_deref()).await
         }

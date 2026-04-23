@@ -1,0 +1,20 @@
+[package]
+name = "github-connector-contract-fixture"
+version = "0.1.0"
+
+[[providers]]
+id = "github"
+connector = { harn = "./lib.harn" }
+
+[connector_contract]
+version = 1
+
+[[connector_contract.fixtures]]
+provider = "github"
+name = "issues opened webhook"
+kind = "webhook"
+headers = { "x-github-event" = "issues", "content-type" = "application/json" }
+body_json = { id = "evt-gh-1", action = "opened", issue = { number = 42, title = "Contract drift" } }
+expect_type = "event"
+expect_kind = "github.issues.opened"
+expect_event_count = 1
