@@ -1643,6 +1643,66 @@ pub fn local_fn(event: TriggerEvent) -> string {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn destination_circuit_opens_and_dlqs_subsequent_dispatches() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (_dir, log, dispatcher) = dispatcher_fixture(
+                r#"
+import "std/triggers"
+
+pub fn local_fn(event: TriggerEvent) -> string {
+  throw "provider 503"
+}
+"#,
+                "local_fn",
+                None,
+                TriggerRetryConfig::new(7, RetryPolicy::Linear { delay_ms: 0 }),
+            )
+            .await;
+
+            let first = dispatcher
+                .dispatch_event(trigger_event("issues.opened", "delivery-circuit-open"))
+                .await
+                .expect("first dispatch returns terminal outcome");
+            assert_eq!(first[0].status, DispatchStatus::Dlq);
+            assert_eq!(first[0].attempt_count, 5);
+            assert!(first[0]
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("destination circuit opened")));
+
+            let second = dispatcher
+                .dispatch_event(trigger_event("issues.opened", "delivery-circuit-fast-fail"))
+                .await
+                .expect("second dispatch returns terminal outcome");
+            assert_eq!(second[0].status, DispatchStatus::Dlq);
+            assert_eq!(second[0].attempt_count, 0);
+            assert!(second[0]
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("destination circuit open")));
+
+            let dlq = dispatcher.dlq_entries();
+            assert_eq!(dlq.len(), 2);
+            assert_eq!(dlq[0].attempt_count, 5);
+            assert_eq!(dlq[1].attempt_count, 0);
+
+            let attempts = read_topic(log.clone(), "trigger.attempts").await;
+            assert_eq!(
+                attempts
+                    .iter()
+                    .filter(|(_, event)| event.kind == "attempt_recorded")
+                    .count(),
+                5
+            );
+            let dlq_topic = read_topic(log.clone(), "trigger.dlq").await;
+            assert_eq!(dlq_topic.len(), 2);
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn replay_dispatch_emits_replay_chain_edge_and_headers() {
     let local = tokio::task::LocalSet::new();
     local

@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 use axum::body::{Body, Bytes};
 use axum::extract::ws::{Message as WsMessage, WebSocket, WebSocketUpgrade};
 use axum::extract::{DefaultBodyLimit, Extension, OriginalUri, Query};
-use axum::http::{HeaderMap, Method, StatusCode};
+use axum::http::{header, HeaderMap, HeaderValue, Method, StatusCode};
 use axum::middleware;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -39,6 +39,12 @@ const ACP_PATH: &str = "/acp";
 const ACP_TOPIC_PREFIX: &str = "acp.session";
 const ACP_PING_INTERVAL: Duration = Duration::from_secs(30);
 const ACP_PONG_TIMEOUT: Duration = Duration::from_secs(10);
+const INGEST_GLOBAL_CAPACITY_ENV: &str = "HARN_ORCHESTRATOR_INGEST_GLOBAL_CAPACITY";
+const INGEST_PER_SOURCE_CAPACITY_ENV: &str = "HARN_ORCHESTRATOR_INGEST_PER_SOURCE_CAPACITY";
+const INGEST_REFILL_PER_SEC_ENV: &str = "HARN_ORCHESTRATOR_INGEST_REFILL_PER_SEC";
+const DEFAULT_INGEST_GLOBAL_CAPACITY: u32 = 4096;
+const DEFAULT_INGEST_PER_SOURCE_CAPACITY: u32 = 1024;
+const DEFAULT_INGEST_REFILL_PER_SEC: u32 = 1024;
 
 #[derive(Clone)]
 pub(crate) struct ListenerConfig {
@@ -365,6 +371,7 @@ struct RouteContext {
     inbox: Arc<harn_vm::InboxIndex>,
     secrets: Arc<dyn SecretProvider>,
     metrics_registry: Arc<harn_vm::MetricsRegistry>,
+    ingest_backpressure: IngestBackpressure,
     auth: Arc<ListenerAuth>,
     pending_topic: Topic,
     request_gate: TestRequestGate,
@@ -406,6 +413,7 @@ impl AuthMode {
 struct RouteRegistry {
     routes_by_path: RwLock<BTreeMap<String, Arc<RouteContext>>>,
     metrics_by_trigger_id: Mutex<BTreeMap<String, Arc<RouteRuntimeMetrics>>>,
+    ingest_backpressure: IngestBackpressure,
     event_log: Arc<AnyEventLog>,
     inbox: Arc<harn_vm::InboxIndex>,
     secrets: Arc<dyn SecretProvider>,
@@ -429,6 +437,7 @@ impl RouteRegistry {
         let registry = Self {
             routes_by_path: RwLock::new(BTreeMap::new()),
             metrics_by_trigger_id: Mutex::new(BTreeMap::new()),
+            ingest_backpressure: IngestBackpressure::from_env(),
             event_log,
             inbox,
             secrets,
@@ -461,6 +470,7 @@ impl RouteRegistry {
                     inbox: self.inbox.clone(),
                     secrets: self.secrets.clone(),
                     metrics_registry: self.metrics_registry.clone(),
+                    ingest_backpressure: self.ingest_backpressure.clone(),
                     auth: self.auth.clone(),
                     pending_topic: self.pending_topic.clone(),
                     request_gate: self.request_gate.clone(),
@@ -511,6 +521,127 @@ struct RouteRuntimeMetrics {
     dispatched: AtomicU64,
     failed: AtomicU64,
     in_flight: AtomicU64,
+}
+
+#[derive(Clone, Debug)]
+struct IngestBackpressure {
+    config: IngestBackpressureConfig,
+    state: Arc<Mutex<IngestBackpressureState>>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct IngestBackpressureConfig {
+    global_capacity: u32,
+    per_source_capacity: u32,
+    refill_per_sec: u32,
+}
+
+#[derive(Debug)]
+struct IngestBackpressureState {
+    global: IngestBucket,
+    sources: BTreeMap<String, IngestBucket>,
+}
+
+#[derive(Clone, Debug)]
+struct IngestBucket {
+    tokens: f64,
+    last_refill: Instant,
+}
+
+impl IngestBackpressure {
+    fn from_env() -> Self {
+        let config = IngestBackpressureConfig {
+            global_capacity: read_u32_env(
+                INGEST_GLOBAL_CAPACITY_ENV,
+                DEFAULT_INGEST_GLOBAL_CAPACITY,
+            ),
+            per_source_capacity: read_u32_env(
+                INGEST_PER_SOURCE_CAPACITY_ENV,
+                DEFAULT_INGEST_PER_SOURCE_CAPACITY,
+            ),
+            refill_per_sec: read_u32_env(INGEST_REFILL_PER_SEC_ENV, DEFAULT_INGEST_REFILL_PER_SEC),
+        };
+        Self::new(config)
+    }
+
+    fn new(config: IngestBackpressureConfig) -> Self {
+        let config = IngestBackpressureConfig {
+            global_capacity: config.global_capacity.max(1),
+            per_source_capacity: config.per_source_capacity.max(1),
+            refill_per_sec: config.refill_per_sec.max(1),
+        };
+        let now = Instant::now();
+        Self {
+            config,
+            state: Arc::new(Mutex::new(IngestBackpressureState {
+                global: IngestBucket::full(config.global_capacity, now),
+                sources: BTreeMap::new(),
+            })),
+        }
+    }
+
+    fn try_acquire(&self, source: &str) -> Result<(), Duration> {
+        let now = Instant::now();
+        let mut state = self
+            .state
+            .lock()
+            .expect("ingest backpressure mutex poisoned");
+
+        state
+            .global
+            .refill(self.config.global_capacity, self.config.refill_per_sec, now);
+        let (source_tokens, source_retry_after) = {
+            let source_bucket = state
+                .sources
+                .entry(source.to_string())
+                .or_insert_with(|| IngestBucket::full(self.config.per_source_capacity, now));
+            source_bucket.refill(
+                self.config.per_source_capacity,
+                self.config.refill_per_sec,
+                now,
+            );
+            (
+                source_bucket.tokens,
+                source_bucket.retry_after(self.config.refill_per_sec),
+            )
+        };
+
+        if state.global.tokens >= 1.0 && source_tokens >= 1.0 {
+            state.global.tokens -= 1.0;
+            if let Some(source_bucket) = state.sources.get_mut(source) {
+                source_bucket.tokens -= 1.0;
+            }
+            Ok(())
+        } else {
+            Err(std::cmp::max(
+                state.global.retry_after(self.config.refill_per_sec),
+                source_retry_after,
+            ))
+        }
+    }
+}
+
+impl IngestBucket {
+    fn full(capacity: u32, now: Instant) -> Self {
+        Self {
+            tokens: capacity.max(1) as f64,
+            last_refill: now,
+        }
+    }
+
+    fn refill(&mut self, capacity: u32, refill_per_sec: u32, now: Instant) {
+        let elapsed = now.duration_since(self.last_refill).as_secs_f64();
+        self.tokens =
+            (self.tokens + elapsed * refill_per_sec.max(1) as f64).min(capacity.max(1) as f64);
+        self.last_refill = now;
+    }
+
+    fn retry_after(&self, refill_per_sec: u32) -> Duration {
+        if self.tokens >= 1.0 {
+            return Duration::ZERO;
+        }
+        Duration::from_secs_f64(((1.0 - self.tokens) / refill_per_sec.max(1) as f64).max(0.001))
+    }
 }
 
 impl RouteRuntimeMetrics {
@@ -580,6 +711,40 @@ async fn ingest_trigger(
     let request_started = Instant::now();
     let accepted_at_ms = current_unix_ms();
     let body_size_bytes = body.len();
+
+    if let Err(retry_after) = context
+        .ingest_backpressure
+        .try_acquire(context.route.provider.as_str())
+    {
+        context.metrics.failed.fetch_add(1, Ordering::Relaxed);
+        context.metrics.in_flight.fetch_sub(1, Ordering::Relaxed);
+        context.metrics_registry.set_trigger_inflight(
+            &context.route.trigger_id,
+            context.metrics.in_flight.load(Ordering::Relaxed),
+        );
+        context
+            .metrics_registry
+            .record_backpressure_event("ingest", "reject");
+        let mut response = (StatusCode::SERVICE_UNAVAILABLE, "ingest saturated").into_response();
+        let retry_after_secs = retry_after.as_secs().max(1).to_string();
+        response.headers_mut().insert(
+            header::RETRY_AFTER,
+            HeaderValue::from_str(&retry_after_secs)
+                .unwrap_or_else(|_| HeaderValue::from_static("1")),
+        );
+        let response = finalize_response(&context, response);
+        context.metrics_registry.record_http_request(
+            &context.route.path,
+            method.as_str(),
+            response.status().as_u16(),
+            request_started.elapsed(),
+            body_size_bytes,
+        );
+        return response;
+    }
+    context
+        .metrics_registry
+        .record_backpressure_event("ingest", "admit");
 
     let trace_id = harn_vm::TraceId::new();
     let span = tracing::info_span!(
@@ -1996,6 +2161,14 @@ fn duration_between_ms(later_ms: i64, earlier_ms: i64) -> Duration {
     Duration::from_millis(later_ms.saturating_sub(earlier_ms).max(0) as u64)
 }
 
+fn read_u32_env(name: &str, default: u32) -> u32 {
+    std::env::var(name)
+        .ok()
+        .and_then(|value| value.parse::<u32>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(default)
+}
+
 #[cfg(test)]
 // Tests below hold the shared `lock_harn_state` guard across `.await`
 // points; the guard is dropped when each `#[tokio::test]` future resolves
@@ -2576,6 +2749,86 @@ mod tests {
             .shutdown(Duration::from_secs(5))
             .await
             .expect("shutdown listener");
+        reset_active_event_log();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn webhook_ingest_saturation_returns_retry_after() {
+        let _guard = lock_harn_state();
+        reset_active_event_log();
+        std::env::set_var(INGEST_PER_SOURCE_CAPACITY_ENV, "1");
+        std::env::set_var(INGEST_GLOBAL_CAPACITY_ENV, "100");
+        std::env::set_var(INGEST_REFILL_PER_SEC_ENV, "1");
+
+        let dir = tempdir().expect("tempdir");
+        let log = install_default_for_base_dir(dir.path()).expect("install event log");
+        let metrics = Arc::new(harn_vm::MetricsRegistry::default());
+        let listener = ListenerRuntime::start(ListenerConfig {
+            bind: "127.0.0.1:0".parse().expect("bind addr"),
+            tls: None,
+            event_log: log.clone(),
+            secrets: Arc::new(StaticSecretProvider {
+                secret_id: SecretId::new("github", "test-signing-secret"),
+                secret: "topsecret".to_string(),
+            }),
+            allowed_origins: OriginAllowList::wildcard(),
+            max_body_bytes: DEFAULT_MAX_BODY_BYTES,
+            metrics_registry: metrics.clone(),
+            admin_reload: None,
+            routes: vec![webhook_route("/hooks/github")],
+        })
+        .await
+        .expect("start listener");
+
+        let body = br#"{"action":"opened","issue":{"number":1}}"#;
+        let signature = github_signature("topsecret", body);
+        let client = reqwest::Client::new();
+        let url = format!("http://{}/hooks/github", listener.local_addr());
+
+        let first = client
+            .post(&url)
+            .header("X-GitHub-Event", "issues")
+            .header("X-GitHub-Delivery", "delivery-1")
+            .header("X-Hub-Signature-256", &signature)
+            .header("Content-Type", "application/json")
+            .body(body.to_vec())
+            .send()
+            .await
+            .expect("send first webhook");
+        assert_eq!(first.status(), StatusCode::OK);
+
+        let saturated = client
+            .post(&url)
+            .header("X-GitHub-Event", "issues")
+            .header("X-GitHub-Delivery", "delivery-2")
+            .header("X-Hub-Signature-256", &signature)
+            .header("Content-Type", "application/json")
+            .body(body.to_vec())
+            .send()
+            .await
+            .expect("send saturated webhook");
+        assert_eq!(saturated.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            saturated
+                .headers()
+                .get(header::RETRY_AFTER)
+                .and_then(|value| value.to_str().ok()),
+            Some("1")
+        );
+
+        let events = pending_events(&log).await;
+        assert_eq!(events.len(), 1);
+        assert!(metrics
+            .render_prometheus()
+            .contains("harn_backpressure_events_total{action=\"reject\",dimension=\"ingest\"} 1"));
+
+        listener
+            .shutdown(Duration::from_secs(5))
+            .await
+            .expect("shutdown listener");
+        std::env::remove_var(INGEST_PER_SOURCE_CAPACITY_ENV);
+        std::env::remove_var(INGEST_GLOBAL_CAPACITY_ENV);
+        std::env::remove_var(INGEST_REFILL_PER_SEC_ENV);
         reset_active_event_log();
     }
 

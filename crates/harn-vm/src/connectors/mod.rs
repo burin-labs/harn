@@ -774,6 +774,14 @@ impl MetricsRegistry {
         );
     }
 
+    pub fn record_backpressure_event(&self, dimension: &str, action: &str) {
+        self.increment_counter(
+            "harn_backpressure_events_total",
+            labels([("dimension", dimension), ("action", action)]),
+            1,
+        );
+    }
+
     pub fn record_event_log_append(
         &self,
         topic: &str,
@@ -1104,6 +1112,7 @@ fn metric_family_names(kind: MetricKind) -> &'static [&'static str] {
             "harn_trigger_retries_total",
             "harn_trigger_dlq_total",
             "harn_trigger_budget_exhausted_total",
+            "harn_backpressure_events_total",
             "harn_a2a_hops_total",
             "harn_llm_calls_total",
             "harn_llm_cost_usd_total",
@@ -2012,6 +2021,7 @@ mod tests {
             "retry_exhausted",
             StdDuration::from_secs(45),
         );
+        metrics.record_backpressure_event("ingest", "reject");
         metrics.note_trigger_pending_event(
             "evt-1",
             "github-new-issue",
@@ -2042,6 +2052,7 @@ mod tests {
             "harn_event_log_consumer_lag{consumer=\"orchestrator-pump\",topic=\"orchestrator.triggers.pending\"} 0",
             "harn_trigger_budget_cost_today_usd{trigger_id=\"github-new-issue\"} 0.002",
             "harn_trigger_budget_exhausted_total{strategy=\"daily_budget_exceeded\",trigger_id=\"github-new-issue\"} 1",
+            "harn_backpressure_events_total{action=\"reject\",dimension=\"ingest\"} 1",
             "harn_a2a_hops_total{outcome=\"succeeded\",target=\"agent.example\"} 1",
             "harn_a2a_hop_duration_seconds_bucket{le=\"0.01\",target=\"agent.example\"} 1",
             "harn_worker_queue_depth{queue=\"triage\"} 1",

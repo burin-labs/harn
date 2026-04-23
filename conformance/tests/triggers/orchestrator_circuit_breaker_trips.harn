@@ -1,0 +1,9 @@
+pipeline test(task) {
+  let result = trigger_test_harness("orchestrator_circuit_breaker_trips")
+  println(result.ok)
+  println(len(result.attempts) == 5)
+  println(result.dlq[0].attempts == 5)
+  println(
+    result.details.opened && result.details.fast_failed && result.details.probe_closes_after_success,
+  )
+}

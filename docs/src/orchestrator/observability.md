@@ -14,7 +14,7 @@ curl http://127.0.0.1:8080/metrics
 
 The endpoint includes HTTP request counters and histograms, trigger pipeline
 metrics, EventLog append timings, budget gauges, A2A hop timings, worker queue
-depth and claim age, and LLM call/cache counters. Trigger labels use the
+depth and claim age, backpressure counters, and LLM call/cache counters. Trigger labels use the
 manifest trigger id, provider, handler kind, and outcome where applicable.
 
 Webhook and trigger latency metrics use low-cardinality labels:
@@ -33,6 +33,11 @@ Lifecycle histograms:
 
 Oldest pending age is exposed as `harn_trigger_oldest_pending_age_seconds` with
 the same trigger/provider/tenant labels, excluding `status`.
+
+Backpressure decisions are exposed as
+`harn_backpressure_events_total{dimension, action}`. The `ingest` dimension
+tracks HTTP token-bucket admission/rejection; the `circuit` dimension tracks
+destination circuit transitions and fail-fast DLQ moves.
 
 Example webhook-to-dispatch latency SLO queries:
 
