@@ -11,6 +11,10 @@ granular archaeology.
 
 ### Added
 
+- **Prompt Librarian stdlib (#313).** Adds `std/prompt_library` for reusable
+  prompt fragments, TOML/front-matter `.harn.prompt` catalog loading, cached
+  fragment payload metadata, tenant-scoped k-means hotspot proposals, and a
+  review-queue shape for host/portal handoff.
 - **`jwt_sign` crypto builtin (#454).** New
   `jwt_sign(alg, claims, private_key)` stdlib builtin produces compact
   JWT/JWS tokens signed with ES256 (P-256 PEM) or RS256 (RSA PEM) keys,

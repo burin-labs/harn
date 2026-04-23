@@ -17,6 +17,7 @@ pub fn get_stdlib_source(module: &str) -> Option<&'static str> {
         "review" => Some(include_str!("stdlib_review.harn")),
         "experiments" => Some(include_str!("stdlib_experiments.harn")),
         "project" => Some(include_str!("stdlib_project.harn")),
+        "prompt_library" => Some(include_str!("stdlib_prompt_library.harn")),
         "async" => Some(include_str!("stdlib_async.harn")),
         "agents" => Some(include_str!("stdlib_agents.harn")),
         "agent_state" => Some(include_str!("stdlib_agent_state.harn")),

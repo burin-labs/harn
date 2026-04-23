@@ -155,6 +155,9 @@ enforcement.
   `schema_parse(...)`, `schema_is(...)`, JSON Schema/OpenAPI conversion, and
   schema composition helpers, plus a lazy `std/schema` builder module for
   ergonomic schema authoring when imported.
+- Prompt fragment reuse via `import "std/prompt_library"`: load TOML catalogs
+  or front-matter `.harn.prompt` files, render cache-aware fragment payloads,
+  and propose tenant-scoped k-means hotspots for repeated context prefixes.
 - Deterministic vision OCR via `vision_ocr(...)` and `import "std/vision"`:
   image path / payload normalization, structured text output
   (`blocks`, `lines`, `tokens`), and event-log-backed OCR audit records for

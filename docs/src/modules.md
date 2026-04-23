@@ -81,7 +81,7 @@ code or inside any pipeline.
 described below (`std/text`, `std/json`, `std/math`, `std/collections`,
 `std/path`, `std/vision`, `std/context`, `std/agent_state`, `std/agents`,
 `std/runtime`, `std/review`, `std/experiments`, `std/project`,
-`std/monitors`, `std/worktree`,
+`std/prompt_library`, `std/monitors`, `std/worktree`,
 `std/checkpoint`). These add layered
 utilities on top of the core builtins; the core builtins themselves are
 always available.
@@ -101,6 +101,7 @@ import "std/json"
 import "std/context"
 import "std/agent_state"
 import "std/agents"
+import "std/prompt_library"
 import "std/review"
 import "std/experiments"
 import "std/monitors"
@@ -149,6 +150,24 @@ Helpers for structural prompt experiments:
 | `latest_string_user_message(messages)` | Return `{index, message}` for the latest plain-string user message |
 | `replace_message(messages, index, message)` | Return a copy of `messages` with one entry replaced |
 | `prepend_message(messages, msg)` / `append_message(messages, msg)` | Convenience helpers for custom transforms |
+
+### std/prompt_library
+
+Reusable prompt fragments and deterministic prompt-hotspot proposals:
+
+| Function | Description |
+|---|---|
+| `prompt_library(fragments?)` | Create an in-memory prompt fragment library |
+| `prompt_library_load(path_or_paths)` | Load TOML `[[prompt_fragments]]` catalogs or front-matter `.harn.prompt` files |
+| `prompt_library_inject(library, id, bindings?)` | Render one fragment to text |
+| `prompt_library_payload(library, id, bindings?)` | Render one fragment plus cache metadata |
+| `prompt_library_inject_cluster(library, filters?, bindings?)` | Render matching fragments until `max_tokens` is reached |
+| `prompt_library_suggest(library, ctx?)` | Rank fragments by tags and query terms |
+| `prompt_library_hotspots(conversations, options?)` | Produce tenant-scoped k-means fragment proposals |
+| `prompt_library_review_queue(library, filters?)` | Return pending k-means proposals for review UIs |
+
+See [Prompt library stdlib](./stdlib/prompt-library.md) for the fragment file
+format and hotspot proposal shape.
 
 ### std/collections
 

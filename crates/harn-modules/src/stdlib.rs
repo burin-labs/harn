@@ -28,6 +28,10 @@ pub(crate) const STDLIB_SOURCES: &[(&str, &str)] = &[
         include_str!("stdlib/stdlib_experiments.harn"),
     ),
     ("project", include_str!("stdlib/stdlib_project.harn")),
+    (
+        "prompt_library",
+        include_str!("stdlib/stdlib_prompt_library.harn"),
+    ),
     ("async", include_str!("stdlib/stdlib_async.harn")),
     ("agents", include_str!("stdlib/stdlib_agents.harn")),
     (

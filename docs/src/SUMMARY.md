@@ -26,6 +26,7 @@
 - [Triggers](./triggers.md)
 - [Trigger stdlib](./stdlib/triggers.md)
 - [Monitor stdlib](./stdlib/monitors.md)
+- [Prompt library stdlib](./stdlib/prompt-library.md)
 - [Human in the loop](./hitl.md)
 - [Trust graph](./trust-graph.md)
 - [Skills](./skills.md)

@@ -348,6 +348,8 @@ Imports starting with `std/` load embedded stdlib modules:
 - `import "std/collections"` — collection utilities (filter_nil, store_stale,
   store_refresh)
 - `import "std/vision"` — deterministic OCR helpers (`ocr(image, options?)`)
+- `import "std/prompt_library"` — reusable prompt fragments, cache metadata,
+  tenant-scoped k-means hotspot proposals, and review-queue records
 - `import "std/agent_state"` — durable session-scoped state helpers
   (agent_state_init, agent_state_resume, agent_state_write,
   agent_state_read, agent_state_list, agent_state_delete,
