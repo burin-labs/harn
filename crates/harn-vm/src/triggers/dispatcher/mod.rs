@@ -55,6 +55,8 @@ pub use retry::{RetryPolicy, TriggerRetryConfig, DEFAULT_MAX_ATTEMPTS};
 pub const TRIGGER_ACCEPTED_AT_MS_HEADER: &str = "harn_trigger_accepted_at_ms";
 pub const TRIGGER_NORMALIZED_AT_MS_HEADER: &str = "harn_trigger_normalized_at_ms";
 pub const TRIGGER_QUEUE_APPENDED_AT_MS_HEADER: &str = "harn_trigger_queue_appended_at_ms";
+const DESTINATION_CIRCUIT_FAILURE_THRESHOLD: u32 = 5;
+const DESTINATION_CIRCUIT_BACKOFF: Duration = Duration::from_secs(60);
 
 thread_local! {
     static ACTIVE_DISPATCHER_STATE: RefCell<Option<Arc<DispatcherRuntimeState>>> = const { RefCell::new(None) };
@@ -139,6 +141,7 @@ struct DispatcherRuntimeState {
     shutting_down: std::sync::atomic::AtomicBool,
     idle_notify: Notify,
     flow_control: FlowControlManager,
+    destination_circuits: DestinationCircuitRegistry,
 }
 
 impl DispatcherRuntimeState {
@@ -151,6 +154,92 @@ impl DispatcherRuntimeState {
             shutting_down: std::sync::atomic::AtomicBool::new(false),
             idle_notify: Notify::new(),
             flow_control: FlowControlManager::new(event_log),
+            destination_circuits: DestinationCircuitRegistry::default(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DestinationCircuitProbe {
+    Allow { half_open: bool },
+    Block { retry_after: Duration },
+}
+
+#[derive(Debug)]
+struct DestinationCircuitRegistry {
+    threshold: u32,
+    backoff: Duration,
+    states: Mutex<BTreeMap<String, DestinationCircuitState>>,
+}
+
+#[derive(Clone, Debug)]
+struct DestinationCircuitState {
+    failures: u32,
+    opened_at: Option<Instant>,
+}
+
+impl Default for DestinationCircuitRegistry {
+    fn default() -> Self {
+        Self {
+            threshold: DESTINATION_CIRCUIT_FAILURE_THRESHOLD,
+            backoff: DESTINATION_CIRCUIT_BACKOFF,
+            states: Mutex::new(BTreeMap::new()),
+        }
+    }
+}
+
+impl DestinationCircuitRegistry {
+    fn check(&self, destination: &str) -> DestinationCircuitProbe {
+        let mut states = self
+            .states
+            .lock()
+            .expect("destination circuit registry poisoned");
+        let Some(state) = states.get_mut(destination) else {
+            return DestinationCircuitProbe::Allow { half_open: false };
+        };
+        let Some(opened_at) = state.opened_at else {
+            return DestinationCircuitProbe::Allow { half_open: false };
+        };
+        let elapsed = opened_at.elapsed();
+        if elapsed >= self.backoff {
+            DestinationCircuitProbe::Allow { half_open: true }
+        } else {
+            DestinationCircuitProbe::Block {
+                retry_after: self.backoff.saturating_sub(elapsed),
+            }
+        }
+    }
+
+    fn record_success(&self, destination: &str) {
+        let mut states = self
+            .states
+            .lock()
+            .expect("destination circuit registry poisoned");
+        states.remove(destination);
+    }
+
+    fn record_failure(&self, destination: &str) -> bool {
+        let mut states = self
+            .states
+            .lock()
+            .expect("destination circuit registry poisoned");
+        let state = states
+            .entry(destination.to_string())
+            .or_insert(DestinationCircuitState {
+                failures: 0,
+                opened_at: None,
+            });
+        if state.opened_at.is_some() {
+            state.failures = self.threshold;
+            state.opened_at = Some(Instant::now());
+            return true;
+        }
+        state.failures = state.failures.saturating_add(1);
+        if state.failures >= self.threshold {
+            state.opened_at = Some(Instant::now());
+            true
+        } else {
+            false
         }
     }
 }
@@ -1364,6 +1453,70 @@ impl Dispatcher {
             }
         };
 
+        let destination_key = destination_circuit_key(&route);
+        let half_open_probe = match self.state.destination_circuits.check(&destination_key) {
+            DestinationCircuitProbe::Allow { half_open } => {
+                if half_open {
+                    if let Some(metrics) = self.metrics.as_ref() {
+                        metrics.record_backpressure_event("circuit", "half_open_probe");
+                    }
+                }
+                half_open
+            }
+            DestinationCircuitProbe::Block { retry_after } => {
+                if let Some(metrics) = self.metrics.as_ref() {
+                    metrics.record_backpressure_event("circuit", "fail_fast");
+                }
+                let final_error = format!(
+                    "destination circuit open for {}; retry after {}s",
+                    destination_key,
+                    retry_after.as_secs().max(1)
+                );
+                self.move_circuit_open_to_dlq(
+                    binding,
+                    &route,
+                    &event,
+                    replay_of_event_id.as_ref(),
+                    &final_error,
+                    &destination_key,
+                )
+                .await?;
+                finish_in_flight(
+                    binding.id.as_str(),
+                    binding.version,
+                    TriggerDispatchOutcome::Dlq,
+                )
+                .await
+                .map_err(|error| DispatchError::Registry(error.to_string()))?;
+                self.release_flow_control(&acquired_flow).await?;
+                decrement_in_flight(&self.state);
+                self.append_dispatch_trust_record(
+                    binding,
+                    &route,
+                    &event,
+                    replay_of_event_id.as_ref(),
+                    autonomy_tier,
+                    TrustOutcome::Failure,
+                    "dlq",
+                    0,
+                    Some(final_error.clone()),
+                )
+                .await?;
+                return Ok(DispatchOutcome {
+                    trigger_id: binding.id.as_str().to_string(),
+                    binding_key: binding.binding_key(),
+                    event_id: event.id.0,
+                    attempt_count: 0,
+                    status: DispatchStatus::Dlq,
+                    handler_kind: route.kind().to_string(),
+                    target_uri: route.target_uri(),
+                    replay_of_event_id,
+                    result: None,
+                    error: Some(final_error),
+                });
+            }
+        };
+
         let mut previous_retry_node = None;
         let max_attempts = binding.retry.max_attempts();
         for attempt in 1..=max_attempts {
@@ -1629,6 +1782,14 @@ impl Dispatcher {
                         }),
                     )
                     .await?;
+                    self.state
+                        .destination_circuits
+                        .record_success(&destination_key);
+                    if half_open_probe {
+                        if let Some(metrics) = self.metrics.as_ref() {
+                            metrics.record_backpressure_event("circuit", "closed");
+                        }
+                    }
                     finish_in_flight(
                         binding.id.as_str(),
                         binding.version,
@@ -1816,6 +1977,110 @@ impl Dispatcher {
                         }),
                     )
                     .await?;
+
+                    let circuit_opened = if error.retryable() {
+                        self.state
+                            .destination_circuits
+                            .record_failure(&destination_key)
+                    } else {
+                        false
+                    };
+                    if circuit_opened {
+                        if let Some(metrics) = self.metrics.as_ref() {
+                            metrics.record_backpressure_event("circuit", "opened");
+                            metrics.record_trigger_dlq(binding.id.as_str(), "circuit_open");
+                            metrics.record_trigger_accepted_to_dlq(
+                                binding.id.as_str(),
+                                &binding_key,
+                                event.provider.as_str(),
+                                tenant_id(&event),
+                                "circuit_open",
+                                duration_between_ms(
+                                    current_unix_ms(),
+                                    accepted_at_ms(parent_headers.as_ref(), &event),
+                                ),
+                            );
+                        }
+                        let final_error = format!(
+                            "destination circuit opened for {} after {} consecutive failures: {}",
+                            destination_key, DESTINATION_CIRCUIT_FAILURE_THRESHOLD, error
+                        );
+                        let dlq_entry = DlqEntry {
+                            trigger_id: binding.id.as_str().to_string(),
+                            binding_key: binding.binding_key(),
+                            event: event.clone(),
+                            attempt_count: attempt,
+                            final_error: final_error.clone(),
+                            attempts: attempts.clone(),
+                        };
+                        self.state
+                            .dlq
+                            .lock()
+                            .expect("dispatcher dlq poisoned")
+                            .push(dlq_entry.clone());
+                        self.append_lifecycle_event(
+                            "DlqMoved",
+                            &event,
+                            binding,
+                            serde_json::json!({
+                                "event_id": event.id.0,
+                                "attempt_count": attempt,
+                                "final_error": dlq_entry.final_error,
+                                "reason": "circuit_open",
+                                "destination": destination_key,
+                                "replay_of_event_id": replay_of_event_id,
+                            }),
+                            replay_of_event_id.as_ref(),
+                        )
+                        .await?;
+                        self.append_topic_event(
+                            TRIGGER_DLQ_TOPIC,
+                            "dlq_moved",
+                            &event,
+                            Some(binding),
+                            Some(attempt),
+                            serde_json::to_value(&dlq_entry).map_err(|serde_error| {
+                                DispatchError::Serde(serde_error.to_string())
+                            })?,
+                            replay_of_event_id.as_ref(),
+                        )
+                        .await?;
+                        finish_in_flight(
+                            binding.id.as_str(),
+                            binding.version,
+                            TriggerDispatchOutcome::Dlq,
+                        )
+                        .await
+                        .map_err(|registry_error| {
+                            DispatchError::Registry(registry_error.to_string())
+                        })?;
+                        self.release_flow_control(&acquired_flow).await?;
+                        decrement_in_flight(&self.state);
+                        self.append_dispatch_trust_record(
+                            binding,
+                            &route,
+                            &event,
+                            replay_of_event_id.as_ref(),
+                            autonomy_tier,
+                            TrustOutcome::Failure,
+                            "dlq",
+                            attempt,
+                            Some(final_error.clone()),
+                        )
+                        .await?;
+                        return Ok(DispatchOutcome {
+                            trigger_id: binding.id.as_str().to_string(),
+                            binding_key: binding.binding_key(),
+                            event_id: event.id.0,
+                            attempt_count: attempt,
+                            status: DispatchStatus::Dlq,
+                            handler_kind: route.kind().to_string(),
+                            target_uri: route.target_uri(),
+                            replay_of_event_id,
+                            result: None,
+                            error: Some(final_error),
+                        });
+                    }
 
                     if !error.retryable() {
                         finish_in_flight(
@@ -3501,6 +3766,112 @@ impl Dispatcher {
         .await
     }
 
+    async fn move_circuit_open_to_dlq(
+        &self,
+        binding: &TriggerBinding,
+        route: &DispatchUri,
+        event: &TriggerEvent,
+        replay_of_event_id: Option<&String>,
+        final_error: &str,
+        destination: &str,
+    ) -> Result<(), DispatchError> {
+        let dlq_entry = DlqEntry {
+            trigger_id: binding.id.as_str().to_string(),
+            binding_key: binding.binding_key(),
+            event: event.clone(),
+            attempt_count: 0,
+            final_error: final_error.to_string(),
+            attempts: Vec::new(),
+        };
+        self.state
+            .dlq
+            .lock()
+            .expect("dispatcher dlq poisoned")
+            .push(dlq_entry.clone());
+        if let Some(metrics) = self.metrics.as_ref() {
+            metrics.record_trigger_dlq(binding.id.as_str(), "circuit_open");
+            metrics.record_trigger_accepted_to_dlq(
+                binding.id.as_str(),
+                &binding.binding_key(),
+                event.provider.as_str(),
+                tenant_id(event),
+                "circuit_open",
+                Duration::ZERO,
+            );
+        }
+        tracing::info!(
+            component = "dispatcher",
+            lifecycle = "dlq_moved",
+            trigger_id = %binding.id.as_str(),
+            binding_key = %binding.binding_key(),
+            event_id = %event.id.0,
+            reason = "circuit_open",
+            destination,
+            trace_id = %event.trace_id.0
+        );
+        self.emit_action_graph(
+            event,
+            vec![RunActionGraphNodeRecord {
+                id: format!("dlq:{}:{}", binding.binding_key(), event.id.0),
+                label: binding.id.as_str().to_string(),
+                kind: ACTION_GRAPH_NODE_KIND_DLQ.to_string(),
+                status: "queued".to_string(),
+                outcome: "circuit_open".to_string(),
+                trace_id: Some(event.trace_id.0.clone()),
+                stage_id: None,
+                node_id: None,
+                worker_id: None,
+                run_id: None,
+                run_path: None,
+                metadata: dlq_node_metadata(binding, event, 0, final_error),
+            }],
+            vec![RunActionGraphEdgeRecord {
+                from_id: format!("trigger:{}", event.id.0),
+                to_id: format!("dlq:{}:{}", binding.binding_key(), event.id.0),
+                kind: ACTION_GRAPH_EDGE_KIND_DLQ_MOVE.to_string(),
+                label: Some("circuit open".to_string()),
+            }],
+            serde_json::json!({
+                "source": "dispatcher",
+                "trigger_id": binding.id.as_str(),
+                "binding_key": binding.binding_key(),
+                "event_id": event.id.0,
+                "handler_kind": route.kind(),
+                "target_uri": route.target_uri(),
+                "destination": destination,
+                "final_error": final_error,
+                "replay_of_event_id": replay_of_event_id,
+            }),
+        )
+        .await?;
+        self.append_lifecycle_event(
+            "DlqMoved",
+            event,
+            binding,
+            serde_json::json!({
+                "event_id": event.id.0,
+                "attempt_count": 0,
+                "final_error": final_error,
+                "reason": "circuit_open",
+                "destination": destination,
+                "replay_of_event_id": replay_of_event_id,
+            }),
+            replay_of_event_id,
+        )
+        .await?;
+        self.append_topic_event(
+            TRIGGER_DLQ_TOPIC,
+            "dlq_moved",
+            event,
+            Some(binding),
+            None,
+            serde_json::to_value(&dlq_entry)
+                .map_err(|serde_error| DispatchError::Serde(serde_error.to_string()))?,
+            replay_of_event_id,
+        )
+        .await
+    }
+
     async fn append_skipped_outbox_event(
         &self,
         binding: &TriggerBinding,
@@ -3785,6 +4156,10 @@ fn dispatch_error_label(error: &DispatchError) -> &'static str {
         DispatchError::Cancelled(_) => "cancelled",
         _ => "failed",
     }
+}
+
+fn destination_circuit_key(route: &DispatchUri) -> String {
+    format!("{}:{}", route.kind(), route.target_uri())
 }
 
 fn dispatch_success_outcome(route: &DispatchUri, result: &serde_json::Value) -> &'static str {

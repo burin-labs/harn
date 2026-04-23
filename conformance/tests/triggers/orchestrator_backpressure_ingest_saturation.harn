@@ -1,0 +1,7 @@
+pipeline test(task) {
+  let result = trigger_test_harness("orchestrator_backpressure_ingest_saturation")
+  println(result.ok)
+  println(result.attempts[1].status == "ingest_saturated")
+  println(result.attempts[1].backoff_ms == 60000)
+  println(result.details.status == 503)
+}

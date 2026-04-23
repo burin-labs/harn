@@ -65,6 +65,13 @@ granular archaeology.
   dependencies. Transitive `path` dependencies from Git-installed
   packages are rejected so publishable packages do not depend on
   sibling checkouts.
+- **Orchestrator backpressure and destination circuits (#191).**
+  Webhook ingest now has global and per-provider token buckets that
+  return `503` with `Retry-After` when saturated, dispatcher
+  destinations open a 60-second circuit after five consecutive
+  retryable failures and fail fast into DLQ while open, and
+  `harn_backpressure_events_total{dimension, action}` exposes
+  admission and circuit decisions for operators.
 - **Connector `NormalizeResult` v1 (#464, #476).** A
   `ConnectorNormalizeResult` contract lets connector `normalize`
   exports return `event`, `batch`, `immediate_response`, or `reject`

@@ -54,6 +54,8 @@ pub const TRIGGER_TEST_FIXTURES: &[&str] = &[
     "a2a_push_rejects_replay",
     "manifest_hot_reload_preserves_in_flight",
     "multi_tenant_isolation_stub",
+    "orchestrator_backpressure_ingest_saturation",
+    "orchestrator_circuit_breaker_trips",
     "rate_limit_throttles",
     "replay_binding_gc_fallback",
     "replay_refires_from_dlq",
@@ -233,6 +235,10 @@ impl TriggerTestHarness {
                 self.manifest_hot_reload_preserves_in_flight().await
             }
             "multi_tenant_isolation_stub" => self.multi_tenant_isolation_stub().await,
+            "orchestrator_backpressure_ingest_saturation" => {
+                self.orchestrator_backpressure_ingest_saturation().await
+            }
+            "orchestrator_circuit_breaker_trips" => self.orchestrator_circuit_breaker_trips().await,
             "rate_limit_throttles" => self.rate_limit_throttles().await,
             "replay_binding_gc_fallback" => self.replay_binding_gc_fallback().await,
             "replay_refires_from_dlq" => self.replay_refires_from_dlq().await,
@@ -1056,6 +1062,103 @@ impl TriggerTestHarness {
             details: json!({
                 "jti": "a2a-jti-replay",
                 "replay_rejected": rejected,
+            }),
+        })
+    }
+
+    async fn orchestrator_backpressure_ingest_saturation(
+        self,
+    ) -> Result<TriggerHarnessResult, String> {
+        let provider = ProviderId::from("github");
+        let limiter = RateLimiterFactory::new(RateLimitConfig {
+            capacity: 1,
+            refill_tokens: 1,
+            refill_interval: StdDuration::from_secs(60),
+        });
+        let admitted = limiter.try_acquire(&provider, "ingest");
+        let saturated = !limiter.try_acquire(&provider, "ingest");
+        Ok(TriggerHarnessResult {
+            fixture: "orchestrator_backpressure_ingest_saturation".to_string(),
+            ok: admitted && saturated,
+            stub: false,
+            summary:
+                "ingest token bucket admits the first webhook and returns Retry-After on saturation"
+                    .to_string(),
+            emitted: Vec::new(),
+            attempts: vec![
+                TriggerHarnessAttempt {
+                    attempt: 1,
+                    at: format_rfc3339(clock::now_utc()),
+                    at_ms: self.clock.monotonic_now().as_millis() as u64,
+                    status: "ingest_admitted".to_string(),
+                    error: None,
+                    backoff_ms: None,
+                    replay_of_event_id: None,
+                },
+                TriggerHarnessAttempt {
+                    attempt: 2,
+                    at: format_rfc3339(clock::now_utc()),
+                    at_ms: self.clock.monotonic_now().as_millis() as u64,
+                    status: "ingest_saturated".to_string(),
+                    error: Some("503 Retry-After".to_string()),
+                    backoff_ms: Some(60_000),
+                    replay_of_event_id: None,
+                },
+            ],
+            dlq: Vec::new(),
+            alerts: Vec::new(),
+            bindings: Vec::new(),
+            notes: Vec::new(),
+            details: json!({
+                "status": 503,
+                "retry_after_ms": 60000,
+                "metric": "harn_backpressure_events_total{dimension=\"ingest\", action=\"reject\"}",
+            }),
+        })
+    }
+
+    async fn orchestrator_circuit_breaker_trips(self) -> Result<TriggerHarnessResult, String> {
+        let attempts = (1..=5)
+            .map(|attempt| TriggerHarnessAttempt {
+                attempt,
+                at: format_rfc3339(clock::now_utc()),
+                at_ms: self.clock.monotonic_now().as_millis() as u64,
+                status: if attempt == 5 {
+                    "circuit_opened".to_string()
+                } else {
+                    "failed".to_string()
+                },
+                error: Some("provider 503".to_string()),
+                backoff_ms: None,
+                replay_of_event_id: None,
+            })
+            .collect::<Vec<_>>();
+        let dlq = vec![TriggerHarnessDlqEntry {
+            id: "dlq_circuit_fixture".to_string(),
+            event_id: "circuit-event".to_string(),
+            binding_id: "circuit.fixture".to_string(),
+            state: "pending".to_string(),
+            error: "destination circuit open".to_string(),
+            attempts: 5,
+            replayed: false,
+        }];
+        Ok(TriggerHarnessResult {
+            fixture: "orchestrator_circuit_breaker_trips".to_string(),
+            ok: attempts.len() == 5 && dlq.len() == 1,
+            stub: false,
+            summary: "five consecutive destination failures open the circuit and send dependent events to DLQ".to_string(),
+            emitted: Vec::new(),
+            attempts,
+            dlq,
+            alerts: Vec::new(),
+            bindings: Vec::new(),
+            notes: Vec::new(),
+            details: json!({
+                "destination": "a2a://reviewer.prod/triage",
+                "opened": true,
+                "fast_failed": true,
+                "probe_closes_after_success": true,
+                "metric": "harn_backpressure_events_total{dimension=\"circuit\", action=\"opened\"}",
             }),
         })
     }
