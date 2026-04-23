@@ -18,15 +18,15 @@ fn to_posix(s: &str) -> String {
     s.replace('\\', "/")
 }
 
-/// Returns true if the path is absolute (leading `/` on posix or `X:` drive
-/// letter on windows).
+/// Returns true if the path is absolute (leading `/` on posix or `X:/` drive
+/// root on windows). `X:foo` is drive-relative, not absolute.
 fn is_absolute_str(p: &str) -> bool {
     let p = to_posix(p);
     if p.starts_with('/') {
         return true;
     }
     let bytes = p.as_bytes();
-    bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':'
+    bytes.len() >= 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && bytes[2] == b'/'
 }
 
 /// Split a path into segments, preserving whether it was absolute.
@@ -179,9 +179,9 @@ fn with_stem(p: &str, new_stem: &str) -> String {
 /// Compute the relative path from `base` to `p`. Returns `None` if `p` is
 /// not reachable as a descendant of `base` via relative traversal.
 fn relative_to(p: &str, base: &str) -> Option<String> {
-    let (p_abs, _, p_segs) = split_segments(&normalize(p));
-    let (b_abs, _, b_segs) = split_segments(&normalize(base));
-    if p_abs != b_abs {
+    let (p_abs, p_drive, p_segs) = split_segments(&normalize(p));
+    let (b_abs, b_drive, b_segs) = split_segments(&normalize(base));
+    if p_abs != b_abs || p_drive != b_drive {
         return None;
     }
     let common = p_segs
@@ -418,6 +418,7 @@ mod tests {
     fn is_absolute_detection() {
         assert!(is_absolute_str("/a/b"));
         assert!(is_absolute_str("C:/a/b"));
+        assert!(!is_absolute_str("C:a/b"));
         assert!(!is_absolute_str("a/b"));
         assert!(!is_absolute_str("./a"));
         assert!(!is_absolute_str(""));
@@ -429,5 +430,6 @@ mod tests {
         assert_eq!(relative_to("/a/c", "/a/b").as_deref(), Some("../c"));
         assert_eq!(relative_to("a/b/c", "a/b").as_deref(), Some("c"));
         assert_eq!(relative_to("/a", "b"), None);
+        assert_eq!(relative_to("C:/a/b", "D:/a/b"), None);
     }
 }

@@ -62,6 +62,7 @@ impl<'a> Scope<'a> {
 
 pub(super) struct RenderCtx {
     pub(super) base: Option<PathBuf>,
+    pub(super) include_root: Option<PathBuf>,
     pub(super) include_stack: Vec<PathBuf>,
     pub(super) current_path: Option<PathBuf>,
     /// When inside an `{% include %}`, this holds the include-call's
@@ -267,6 +268,19 @@ fn render_node(
                 crate::stdlib::process::resolve_source_asset_path(&path_str)
             };
             let canonical = resolved.canonicalize().unwrap_or(resolved.clone());
+            if let Some(root) = &rc.include_root {
+                if !canonical.starts_with(root) {
+                    return Err(TemplateError::new(
+                        *line,
+                        *col,
+                        format!(
+                            "include path {} escapes template root {}",
+                            canonical.display(),
+                            root.display()
+                        ),
+                    ));
+                }
+            }
             if rc.include_stack.iter().any(|p| p == &canonical) {
                 let chain = rc
                     .include_stack
@@ -283,7 +297,7 @@ fn render_node(
                     ),
                 ));
             }
-            if rc.include_stack.len() > 32 {
+            if rc.include_stack.len() >= 32 {
                 return Err(TemplateError::new(
                     *line,
                     *col,
