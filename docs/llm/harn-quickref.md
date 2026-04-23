@@ -1,11 +1,11 @@
 # Harn Quick Reference (LLM-friendly)
 
-**Canonical URL:** <https://harnlang.com/docs/llm/harn-quickref.md>
+**Canonical URL:** <https://harnlang.com/docs/llm/harn-quickref.html>
 
 This file is a one-pass reference optimized for LLM consumption and
 grep. It covers the syntax, stdlib highlights, concurrency, and the
 LLM / agent_loop surface an agent typically needs to write scripts.
-You can fetch this file directly in any agent context that supports
+You can fetch the hosted quick reference in any agent context that supports
 HTTP fetches (Claude with `WebFetch`, Cursor's `@web`, Aider, etc.)
 using the canonical URL above.
 

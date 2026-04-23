@@ -510,8 +510,8 @@ in Harn.
   `harn.burincode.com` continues to 301 → `harnlang.com` for 12+
   months to preserve external links (crates.io metadata, blog posts,
   cached search results). References in CLI help text, README, docs,
-  skill registry examples, CLAUDE.md, and conformance fixtures all
-  point at the new domain.
+  Cargo crate metadata, mdBook site metadata, skill registry examples,
+  CLAUDE.md, and conformance fixtures all point at the new domain.
 
 ### Fixed
 

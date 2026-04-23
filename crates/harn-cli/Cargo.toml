@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
 description = "CLI for the Harn programming language — run, test, REPL, format, and lint"
 build = "build.rs"
 # Two bins ship in this crate: `harn` (the main CLI) and
