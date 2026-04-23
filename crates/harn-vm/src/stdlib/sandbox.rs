@@ -972,7 +972,7 @@ fn policy_allows_network(policy: &CapabilityPolicy) -> bool {
         .unwrap_or(true)
 }
 
-#[cfg(any(target_os = "linux", target_os = "macos", target_os = "openbsd"))]
+#[cfg(any(target_os = "macos", target_os = "openbsd"))]
 fn policy_allows_workspace_write(policy: &CapabilityPolicy) -> bool {
     policy.capabilities.is_empty()
         || policy_allows_capability(policy, "workspace", &["write_text", "delete"])

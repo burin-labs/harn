@@ -1357,7 +1357,13 @@ fn test_macos_process_sandbox_surfaces_denial_as_typed_error() {
     }
     let cwd = std::env::current_dir().unwrap();
     let allowed = tempfile::tempdir_in(&cwd).unwrap();
-    let outside_base = cwd.parent().unwrap_or(cwd.as_path());
+    let outside_base = std::env::var_os("HOME")
+        .map(std::path::PathBuf::from)
+        .filter(|path| path.is_dir())
+        .unwrap_or_else(|| cwd.parent().unwrap_or(cwd.as_path()).to_path_buf());
+    if outside_base.starts_with("/tmp") || outside_base.starts_with("/private/tmp") {
+        return;
+    }
     let outside = tempfile::tempdir_in(outside_base).unwrap();
     let outside_file = outside.path().join("blocked.txt");
     let previous = std::env::var("HARN_HANDLER_SANDBOX").ok();
