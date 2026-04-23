@@ -3551,6 +3551,14 @@ entry per dependency. Each git entry records:
 that hash whenever it reuses a cached package or re-materializes
 `.harn/packages/<alias>/`.
 
+For CI and production hosts, `harn install --locked --offline` uses only
+the committed `harn.lock` plus the local shared cache; it fails when the
+manifest and lockfile disagree or when a locked git package is not
+already cached. `harn package cache list`, `clean`, and `verify`
+inspect, garbage-collect, and recompute content hashes for cached git
+packages. `harn package cache verify --materialized` also verifies
+installed `.harn/packages/` contents against the lockfile hashes.
+
 ### `[exports]` — stable package module entry points
 
 ```toml

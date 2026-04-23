@@ -16,8 +16,8 @@ use std::sync::Arc;
 use std::{env, fs, process};
 
 use cli::{
-    Cli, Command, RunsCommand, ServeCommand, SkillCommand, SkillKeyCommand, SkillTrustCommand,
-    SkillsCommand,
+    Cli, Command, PackageCacheCommand, PackageCommand, RunsCommand, ServeCommand, SkillCommand,
+    SkillKeyCommand, SkillTrustCommand, SkillsCommand,
 };
 use harn_lexer::Lexer;
 use harn_parser::{DiagnosticSeverity, Parser, TypeChecker};
@@ -448,7 +448,11 @@ async fn main() {
         Command::Repl => commands::repl::run_repl().await,
         Command::Bench(args) => commands::bench::run_bench(&args.file, args.iterations).await,
         Command::Viz(args) => commands::viz::run_viz(&args.file, args.output.as_deref()),
-        Command::Install(args) => package::install_packages(args.frozen, args.refetch.as_deref()),
+        Command::Install(args) => package::install_packages(
+            args.frozen || args.locked || args.offline,
+            args.refetch.as_deref(),
+            args.offline,
+        ),
         Command::Add(args) => package::add_package(
             &args.name_or_spec,
             args.alias.as_deref(),
@@ -461,6 +465,15 @@ async fn main() {
         Command::Update(args) => package::update_packages(args.alias.as_deref(), args.all),
         Command::Remove(args) => package::remove_package(&args.alias),
         Command::Lock => package::lock_packages(),
+        Command::Package(args) => match args.command {
+            PackageCommand::Cache(cache) => match cache.command {
+                PackageCacheCommand::List => package::list_package_cache(),
+                PackageCacheCommand::Clean(clean) => package::clean_package_cache(clean.all),
+                PackageCacheCommand::Verify(verify) => {
+                    package::verify_package_cache(verify.materialized)
+                }
+            },
+        },
         Command::ModelInfo(args) => print_model_info(&args.model).await,
         Command::Skills(args) => match args.command {
             SkillsCommand::List(list) => commands::skills::run_list(&list),

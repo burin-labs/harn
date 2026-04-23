@@ -864,8 +864,14 @@ dependencies into `.harn/packages/`.
 ```bash
 harn install
 harn install --frozen
+harn install --locked --offline
 harn install --refetch my-lib
 ```
+
+`--locked` is a CI-oriented alias for `--frozen`: Harn fails if
+`harn.toml` and `harn.lock` disagree. `--offline` also implies locked
+behavior and fails instead of fetching when a locked git package is
+missing from the shared cache.
 
 ## harn lock
 
@@ -893,6 +899,23 @@ Remove one dependency from `harn.toml`, `harn.lock`, and
 ```bash
 harn remove my-lib
 ```
+
+## harn package cache
+
+Inspect and maintain the shared git package cache.
+
+```bash
+harn package cache list
+harn package cache verify
+harn package cache verify --materialized
+harn package cache clean
+harn package cache clean --all
+```
+
+`verify` recomputes cached package content hashes and compares them with
+`harn.lock`; `--materialized` also checks `.harn/packages/`. `clean`
+removes cache entries not referenced by the current lockfile, while
+`--all` clears all cached git package entries.
 
 ## harn version
 
