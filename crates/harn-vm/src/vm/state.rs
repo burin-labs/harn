@@ -149,6 +149,8 @@ pub struct Vm {
     pub(crate) spawned_tasks: BTreeMap<String, VmTaskHandle>,
     /// Shared process-local synchronization primitives inherited by child VMs.
     pub(crate) sync_runtime: Arc<crate::synchronization::VmSyncRuntime>,
+    /// Shared process-local cells, maps, and mailboxes inherited by child VMs.
+    pub(crate) shared_state_runtime: Rc<crate::shared_state::VmSharedStateRuntime>,
     /// Permits acquired by lexical synchronization blocks in this VM.
     pub(crate) held_sync_guards: Vec<crate::synchronization::VmSyncHeldGuard>,
     /// Counter for generating unique task IDs.
@@ -383,6 +385,7 @@ impl Vm {
             exception_handlers: Vec::new(),
             spawned_tasks: BTreeMap::new(),
             sync_runtime: Arc::new(crate::synchronization::VmSyncRuntime::new()),
+            shared_state_runtime: Rc::new(crate::shared_state::VmSharedStateRuntime::new()),
             held_sync_guards: Vec::new(),
             task_counter: 0,
             runtime_context_counter: 0,
@@ -470,6 +473,7 @@ impl Vm {
             exception_handlers: Vec::new(),
             spawned_tasks: BTreeMap::new(),
             sync_runtime: self.sync_runtime.clone(),
+            shared_state_runtime: self.shared_state_runtime.clone(),
             held_sync_guards: Vec::new(),
             task_counter: 0,
             runtime_context_counter: self.runtime_context_counter,

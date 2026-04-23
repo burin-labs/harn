@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::shared_state::ScopedKey;
 use crate::value::{VmAtomicHandle, VmChannelHandle, VmError, VmValue};
 use crate::vm::Vm;
 
@@ -99,6 +100,140 @@ fn positive_u32_arg(
     Ok(value as u32)
 }
 
+fn dict_string(dict: &BTreeMap<String, VmValue>, key: &str) -> Option<String> {
+    dict.get(key).and_then(|value| match value {
+        VmValue::String(text) if !text.is_empty() => Some(text.to_string()),
+        VmValue::Nil => None,
+        other => Some(other.display()),
+    })
+}
+
+fn context_string(context: &VmValue, key: &str) -> Option<String> {
+    context.as_dict().and_then(|dict| match dict.get(key) {
+        Some(VmValue::String(text)) if !text.is_empty() => Some(text.to_string()),
+        _ => None,
+    })
+}
+
+fn resolve_shared_scope(
+    vm: &Vm,
+    raw_scope: Option<&str>,
+    options: Option<&BTreeMap<String, VmValue>>,
+    builtin: &str,
+) -> Result<String, VmError> {
+    let context = crate::runtime_context::runtime_context_value(vm);
+    let scope = raw_scope.unwrap_or("task_group");
+    let pick = |field: &str| context_string(&context, field);
+    let resolved = match scope {
+        "task" | "task_local" | "task-local" => {
+            pick("task_id").unwrap_or_else(|| "task_root".to_string())
+        }
+        "root_task" | "root-task" => {
+            pick("root_task_id").unwrap_or_else(|| "task_root".to_string())
+        }
+        "task_group" | "task-group" | "workflow" | "workflow_local" | "workflow-local" => {
+            pick("task_group_id")
+                .or_else(|| pick("run_id"))
+                .or_else(|| pick("root_task_id"))
+                .unwrap_or_else(|| "task_root".to_string())
+        }
+        "workflow_run" | "workflow-run" | "run" => pick("run_id")
+            .or_else(|| pick("task_group_id"))
+            .or_else(|| pick("root_task_id"))
+            .unwrap_or_else(|| "task_root".to_string()),
+        "agent_session" | "agent-session" | "session" => pick("agent_session_id")
+            .or_else(|| pick("root_agent_session_id"))
+            .or_else(|| pick("root_task_id"))
+            .unwrap_or_else(|| "task_root".to_string()),
+        "tenant" | "tenant_scoped" | "tenant-scoped" => options
+            .and_then(|opts| dict_string(opts, "tenant_id"))
+            .or_else(|| pick("tenant_id"))
+            .ok_or_else(|| {
+                VmError::Runtime(format!(
+                    "{builtin}: tenant scope requires tenant_id in options or runtime context"
+                ))
+            })?,
+        "process" | "global" => "process".to_string(),
+        "durable" | "event_log" | "event-log" => {
+            return Err(VmError::Runtime(format!(
+                "{builtin}: durable shared state is explicit; use store_* or agent_state_* APIs"
+            )));
+        }
+        "external" | "host" => {
+            return Err(VmError::Runtime(format!(
+                "{builtin}: external shared state must be provided by a host/connector builtin"
+            )));
+        }
+        custom => custom.to_string(),
+    };
+    Ok(format!("{scope}:{resolved}"))
+}
+
+fn shared_options(args: &[VmValue]) -> Option<&BTreeMap<String, VmValue>> {
+    args.first().and_then(VmValue::as_dict)
+}
+
+fn scoped_from_open_args(
+    vm: &Vm,
+    args: &[VmValue],
+    builtin: &str,
+    key_field: &str,
+) -> Result<(ScopedKey, Option<BTreeMap<String, VmValue>>), VmError> {
+    let options = shared_options(args);
+    let key = if let Some(options) = options {
+        dict_string(options, key_field)
+            .or_else(|| dict_string(options, "key"))
+            .or_else(|| dict_string(options, "name"))
+    } else {
+        args.first()
+            .map(VmValue::display)
+            .filter(|key| !key.is_empty())
+    }
+    .ok_or_else(|| VmError::Runtime(format!("{builtin}: key/name is required")))?;
+    let raw_scope = options.and_then(|opts| dict_string(opts, "scope"));
+    let scope = resolve_shared_scope(vm, raw_scope.as_deref(), options, builtin)?;
+    Ok((ScopedKey { scope, key }, options.cloned()))
+}
+
+fn scoped_from_handle_or_name(
+    vm: &Vm,
+    value: &VmValue,
+    expected_kind: &str,
+    builtin: &str,
+) -> Result<ScopedKey, VmError> {
+    if let Some(dict) = value.as_dict() {
+        let kind = dict_string(dict, "_type").unwrap_or_default();
+        if kind != expected_kind {
+            return Err(VmError::Runtime(format!(
+                "{builtin}: expected {expected_kind} handle"
+            )));
+        }
+        let scope = dict_string(dict, "scope").ok_or_else(|| {
+            VmError::Runtime(format!("{builtin}: {expected_kind} handle missing scope"))
+        })?;
+        let key = dict_string(dict, "key").ok_or_else(|| {
+            VmError::Runtime(format!("{builtin}: {expected_kind} handle missing key"))
+        })?;
+        return Ok(ScopedKey { scope, key });
+    }
+    let key = value.display();
+    if key.is_empty() {
+        return Err(VmError::Runtime(format!(
+            "{builtin}: name must not be empty"
+        )));
+    }
+    let scope = resolve_shared_scope(vm, None, None, builtin)?;
+    Ok(ScopedKey { scope, key })
+}
+
+fn current_async_vm(builtin: &str) -> Result<Vm, VmError> {
+    crate::vm::clone_async_builtin_child_vm().ok_or_else(|| {
+        VmError::Runtime(format!(
+            "{builtin}: shared state builtin requires VM execution context"
+        ))
+    })
+}
+
 pub(crate) fn register_concurrency_builtins(vm: &mut Vm) {
     let sync_runtime = vm.sync_runtime.clone();
     vm.register_async_builtin("sync_mutex_acquire", move |args| {
@@ -181,6 +316,377 @@ pub(crate) fn register_concurrency_builtins(vm: &mut Vm) {
         let kind = args.first().map(|v| v.display());
         let key = args.get(1).map(|v| v.display());
         Ok(sync_runtime.metrics(kind.as_deref(), key.as_deref()))
+    });
+
+    vm.register_async_builtin("shared_scope_id", |args| async move {
+        let vm = current_async_vm("shared_scope_id")?;
+        let options = args.get(1).and_then(VmValue::as_dict);
+        let raw_scope = args.first().map(VmValue::display);
+        Ok(VmValue::String(Rc::from(resolve_shared_scope(
+            &vm,
+            raw_scope.as_deref(),
+            options,
+            "shared_scope_id",
+        )?)))
+    });
+
+    let shared_runtime = vm.shared_state_runtime.clone();
+    vm.register_async_builtin("shared_cell", move |args| {
+        let shared_runtime = shared_runtime.clone();
+        async move {
+            let vm = current_async_vm("shared_cell")?;
+            let (scoped, options) = scoped_from_open_args(&vm, &args, "shared_cell", "key")?;
+            let initial = options
+                .as_ref()
+                .and_then(|opts| opts.get("initial").cloned())
+                .or_else(|| args.get(1).cloned())
+                .unwrap_or(VmValue::Nil);
+            Ok(shared_runtime.open_cell(scoped, initial))
+        }
+    });
+
+    let shared_runtime = vm.shared_state_runtime.clone();
+    vm.register_async_builtin("shared_get", move |args| {
+        let shared_runtime = shared_runtime.clone();
+        async move {
+            let vm = current_async_vm("shared_get")?;
+            let handle = args
+                .first()
+                .ok_or_else(|| VmError::Runtime("shared_get: handle is required".to_string()))?;
+            let scoped = scoped_from_handle_or_name(&vm, handle, "shared_cell", "shared_get")?;
+            Ok(shared_runtime.cell_get(&scoped))
+        }
+    });
+
+    let shared_runtime = vm.shared_state_runtime.clone();
+    vm.register_async_builtin("shared_snapshot", move |args| {
+        let shared_runtime = shared_runtime.clone();
+        async move {
+            let vm = current_async_vm("shared_snapshot")?;
+            let handle = args.first().ok_or_else(|| {
+                VmError::Runtime("shared_snapshot: handle is required".to_string())
+            })?;
+            let scoped = scoped_from_handle_or_name(&vm, handle, "shared_cell", "shared_snapshot")?;
+            Ok(shared_runtime.cell_snapshot(&scoped))
+        }
+    });
+
+    let shared_runtime = vm.shared_state_runtime.clone();
+    vm.register_async_builtin("shared_set", move |args| {
+        let shared_runtime = shared_runtime.clone();
+        async move {
+            let vm = current_async_vm("shared_set")?;
+            let handle = args
+                .first()
+                .ok_or_else(|| VmError::Runtime("shared_set: handle is required".to_string()))?;
+            let scoped = scoped_from_handle_or_name(&vm, handle, "shared_cell", "shared_set")?;
+            let value = args.get(1).cloned().unwrap_or(VmValue::Nil);
+            Ok(shared_runtime.cell_set(&scoped, value))
+        }
+    });
+
+    let shared_runtime = vm.shared_state_runtime.clone();
+    vm.register_async_builtin("shared_cas", move |args| {
+        let shared_runtime = shared_runtime.clone();
+        async move {
+            if args.len() < 3 {
+                return Err(VmError::Runtime(
+                    "shared_cas: requires handle, expected, and new value".to_string(),
+                ));
+            }
+            let vm = current_async_vm("shared_cas")?;
+            let scoped = scoped_from_handle_or_name(&vm, &args[0], "shared_cell", "shared_cas")?;
+            Ok(VmValue::Bool(shared_runtime.cell_cas(
+                &scoped,
+                &args[1],
+                args[2].clone(),
+            )))
+        }
+    });
+
+    let shared_runtime = vm.shared_state_runtime.clone();
+    vm.register_async_builtin("shared_map", move |args| {
+        let shared_runtime = shared_runtime.clone();
+        async move {
+            let vm = current_async_vm("shared_map")?;
+            let (scoped, options) = scoped_from_open_args(&vm, &args, "shared_map", "key")?;
+            let initial = options
+                .as_ref()
+                .and_then(|opts| opts.get("initial"))
+                .or_else(|| args.get(1))
+                .and_then(VmValue::as_dict)
+                .cloned();
+            Ok(shared_runtime.open_map(scoped, initial))
+        }
+    });
+
+    let shared_runtime = vm.shared_state_runtime.clone();
+    vm.register_async_builtin("shared_map_get", move |args| {
+        let shared_runtime = shared_runtime.clone();
+        async move {
+            if args.len() < 2 {
+                return Err(VmError::Runtime(
+                    "shared_map_get: requires handle and key".to_string(),
+                ));
+            }
+            let vm = current_async_vm("shared_map_get")?;
+            let scoped = scoped_from_handle_or_name(&vm, &args[0], "shared_map", "shared_map_get")?;
+            let default = args.get(2).cloned().unwrap_or(VmValue::Nil);
+            Ok(shared_runtime.map_get(&scoped, &args[1].display(), default))
+        }
+    });
+
+    let shared_runtime = vm.shared_state_runtime.clone();
+    vm.register_async_builtin("shared_map_snapshot", move |args| {
+        let shared_runtime = shared_runtime.clone();
+        async move {
+            if args.len() < 2 {
+                return Err(VmError::Runtime(
+                    "shared_map_snapshot: requires handle and key".to_string(),
+                ));
+            }
+            let vm = current_async_vm("shared_map_snapshot")?;
+            let scoped =
+                scoped_from_handle_or_name(&vm, &args[0], "shared_map", "shared_map_snapshot")?;
+            Ok(shared_runtime.map_snapshot(&scoped, &args[1].display()))
+        }
+    });
+
+    let shared_runtime = vm.shared_state_runtime.clone();
+    vm.register_async_builtin("shared_map_entries", move |args| {
+        let shared_runtime = shared_runtime.clone();
+        async move {
+            let vm = current_async_vm("shared_map_entries")?;
+            let handle = args.first().ok_or_else(|| {
+                VmError::Runtime("shared_map_entries: handle is required".to_string())
+            })?;
+            let scoped =
+                scoped_from_handle_or_name(&vm, handle, "shared_map", "shared_map_entries")?;
+            Ok(shared_runtime.map_entries(&scoped))
+        }
+    });
+
+    let shared_runtime = vm.shared_state_runtime.clone();
+    vm.register_async_builtin("shared_map_set", move |args| {
+        let shared_runtime = shared_runtime.clone();
+        async move {
+            if args.len() < 3 {
+                return Err(VmError::Runtime(
+                    "shared_map_set: requires handle, key, and value".to_string(),
+                ));
+            }
+            let vm = current_async_vm("shared_map_set")?;
+            let scoped = scoped_from_handle_or_name(&vm, &args[0], "shared_map", "shared_map_set")?;
+            Ok(shared_runtime.map_set(&scoped, args[1].display(), args[2].clone()))
+        }
+    });
+
+    let shared_runtime = vm.shared_state_runtime.clone();
+    vm.register_async_builtin("shared_map_delete", move |args| {
+        let shared_runtime = shared_runtime.clone();
+        async move {
+            if args.len() < 2 {
+                return Err(VmError::Runtime(
+                    "shared_map_delete: requires handle and key".to_string(),
+                ));
+            }
+            let vm = current_async_vm("shared_map_delete")?;
+            let scoped =
+                scoped_from_handle_or_name(&vm, &args[0], "shared_map", "shared_map_delete")?;
+            Ok(shared_runtime.map_delete(&scoped, &args[1].display()))
+        }
+    });
+
+    let shared_runtime = vm.shared_state_runtime.clone();
+    vm.register_async_builtin("shared_map_cas", move |args| {
+        let shared_runtime = shared_runtime.clone();
+        async move {
+            if args.len() < 4 {
+                return Err(VmError::Runtime(
+                    "shared_map_cas: requires handle, key, expected, and new value".to_string(),
+                ));
+            }
+            let vm = current_async_vm("shared_map_cas")?;
+            let scoped = scoped_from_handle_or_name(&vm, &args[0], "shared_map", "shared_map_cas")?;
+            Ok(VmValue::Bool(shared_runtime.map_cas(
+                &scoped,
+                args[1].display(),
+                &args[2],
+                args[3].clone(),
+            )))
+        }
+    });
+
+    let shared_runtime = vm.shared_state_runtime.clone();
+    vm.register_async_builtin("shared_metrics", move |args| {
+        let shared_runtime = shared_runtime.clone();
+        async move {
+            let vm = current_async_vm("shared_metrics")?;
+            let Some(handle) = args.first() else {
+                return Ok(shared_runtime.metrics(None, None));
+            };
+            let Some(dict) = handle.as_dict() else {
+                return Ok(shared_runtime.metrics(None, None));
+            };
+            let kind = dict_string(dict, "_type").ok_or_else(|| {
+                VmError::Runtime("shared_metrics: handle missing _type".to_string())
+            })?;
+            let scoped = scoped_from_handle_or_name(&vm, handle, &kind, "shared_metrics")?;
+            Ok(shared_runtime.metrics(Some(&kind), Some(&scoped)))
+        }
+    });
+
+    let shared_runtime = vm.shared_state_runtime.clone();
+    vm.register_async_builtin("mailbox_open", move |args| {
+        let shared_runtime = shared_runtime.clone();
+        async move {
+            let vm = current_async_vm("mailbox_open")?;
+            let (scoped, options) = scoped_from_open_args(&vm, &args, "mailbox_open", "name")?;
+            let capacity = options
+                .as_ref()
+                .and_then(|opts| opts.get("capacity").and_then(VmValue::as_int))
+                .or_else(|| args.get(1).and_then(VmValue::as_int))
+                .unwrap_or(256)
+                .max(1) as usize;
+            Ok(shared_runtime.open_mailbox(scoped, capacity))
+        }
+    });
+
+    let shared_runtime = vm.shared_state_runtime.clone();
+    vm.register_async_builtin("mailbox_lookup", move |args| {
+        let shared_runtime = shared_runtime.clone();
+        async move {
+            let vm = current_async_vm("mailbox_lookup")?;
+            let target = args.first().ok_or_else(|| {
+                VmError::Runtime("mailbox_lookup: name or handle is required".to_string())
+            })?;
+            let scoped = scoped_from_handle_or_name(&vm, target, "mailbox", "mailbox_lookup")?;
+            Ok(shared_runtime.mailbox(&scoped).unwrap_or(VmValue::Nil))
+        }
+    });
+
+    let shared_runtime = vm.shared_state_runtime.clone();
+    vm.register_async_builtin("mailbox_send", move |args| {
+        let shared_runtime = shared_runtime.clone();
+        async move {
+            if args.len() < 2 {
+                return Err(VmError::Runtime(
+                    "mailbox_send: requires target and value".to_string(),
+                ));
+            }
+            let vm = current_async_vm("mailbox_send")?;
+            let scoped = scoped_from_handle_or_name(&vm, &args[0], "mailbox", "mailbox_send")?;
+            let Some(channel) = shared_runtime.mailbox_channel(&scoped) else {
+                return Ok(VmValue::Bool(false));
+            };
+            if channel.closed.load(Ordering::SeqCst) {
+                shared_runtime.note_mailbox_send(&scoped, false);
+                return Ok(VmValue::Bool(false));
+            }
+            let ok = channel.sender.send(args[1].clone()).await.is_ok();
+            shared_runtime.note_mailbox_send(&scoped, ok);
+            Ok(VmValue::Bool(ok))
+        }
+    });
+
+    let shared_runtime = vm.shared_state_runtime.clone();
+    vm.register_async_builtin("mailbox_try_receive", move |args| {
+        let shared_runtime = shared_runtime.clone();
+        async move {
+            let vm = current_async_vm("mailbox_try_receive")?;
+            let target = args.first().ok_or_else(|| {
+                VmError::Runtime("mailbox_try_receive: target is required".to_string())
+            })?;
+            let scoped = scoped_from_handle_or_name(&vm, target, "mailbox", "mailbox_try_receive")?;
+            let Some(channel) = shared_runtime.mailbox_channel(&scoped) else {
+                return Ok(VmValue::Nil);
+            };
+            let Ok(mut rx) = channel.receiver.try_lock() else {
+                return Ok(VmValue::Nil);
+            };
+            match rx.try_recv() {
+                Ok(value) => {
+                    shared_runtime.note_mailbox_receive(&scoped);
+                    Ok(value)
+                }
+                Err(_) => Ok(VmValue::Nil),
+            }
+        }
+    });
+
+    let shared_runtime = vm.shared_state_runtime.clone();
+    vm.register_async_builtin("mailbox_receive", move |args| {
+        let shared_runtime = shared_runtime.clone();
+        async move {
+            let vm = current_async_vm("mailbox_receive")?;
+            let cancel_token = vm.cancel_token.clone();
+            let target = args.first().ok_or_else(|| {
+                VmError::Runtime("mailbox_receive: target is required".to_string())
+            })?;
+            let scoped = scoped_from_handle_or_name(&vm, target, "mailbox", "mailbox_receive")?;
+            let Some(channel) = shared_runtime.mailbox_channel(&scoped) else {
+                return Ok(VmValue::Nil);
+            };
+            loop {
+                if cancel_token
+                    .as_ref()
+                    .is_some_and(|token| token.load(Ordering::SeqCst))
+                {
+                    return Err(cancelled_vm_error());
+                }
+                if channel.closed.load(Ordering::SeqCst) {
+                    let mut rx = channel.receiver.lock().await;
+                    return match rx.try_recv() {
+                        Ok(value) => {
+                            shared_runtime.note_mailbox_receive(&scoped);
+                            Ok(value)
+                        }
+                        Err(_) => Ok(VmValue::Nil),
+                    };
+                }
+                let mut rx = channel.receiver.lock().await;
+                let poll = tokio::time::sleep(tokio::time::Duration::from_millis(10));
+                tokio::pin!(poll);
+                tokio::select! {
+                    value = rx.recv() => {
+                        return match value {
+                            Some(value) => {
+                                shared_runtime.note_mailbox_receive(&scoped);
+                                Ok(value)
+                            }
+                            None => Ok(VmValue::Nil),
+                        };
+                    }
+                    _ = &mut poll => {}
+                }
+            }
+        }
+    });
+
+    let shared_runtime = vm.shared_state_runtime.clone();
+    vm.register_async_builtin("mailbox_close", move |args| {
+        let shared_runtime = shared_runtime.clone();
+        async move {
+            let vm = current_async_vm("mailbox_close")?;
+            let target = args
+                .first()
+                .ok_or_else(|| VmError::Runtime("mailbox_close: target is required".to_string()))?;
+            let scoped = scoped_from_handle_or_name(&vm, target, "mailbox", "mailbox_close")?;
+            Ok(VmValue::Bool(shared_runtime.close_mailbox(&scoped)))
+        }
+    });
+
+    let shared_runtime = vm.shared_state_runtime.clone();
+    vm.register_async_builtin("mailbox_metrics", move |args| {
+        let shared_runtime = shared_runtime.clone();
+        async move {
+            let vm = current_async_vm("mailbox_metrics")?;
+            let target = args.first().ok_or_else(|| {
+                VmError::Runtime("mailbox_metrics: target is required".to_string())
+            })?;
+            let scoped = scoped_from_handle_or_name(&vm, target, "mailbox", "mailbox_metrics")?;
+            Ok(shared_runtime.metrics(Some("mailbox"), Some(&scoped)))
+        }
     });
 
     vm.register_builtin("channel", |args, _out| {

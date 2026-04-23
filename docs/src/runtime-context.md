@@ -57,6 +57,29 @@ assert_eq(result, ["acme", "acme"])
 | `runtime_context_set(key, value)` | Set a task-local value and return the previous value or `nil` |
 | `runtime_context_clear(key)` | Clear a task-local value and return the previous value or `nil` |
 
+## Copying vs Sharing
+
+`spawn`, `parallel`, `parallel each`, and `parallel settle` create isolated
+interpreter instances. Normal bindings, lists, dicts, structs, and task-local
+context values are copied into the child at creation time. Later assignment in
+one task does not mutate another task's binding.
+
+Explicit handle values are shared by design:
+
+| Handle | Shared behavior |
+|---|---|
+| `channel(...)` | Message transport shared by every task that receives the handle |
+| `atomic(...)` | Shared integer cell |
+| `sync_*_acquire(...)` | Shared named synchronization runtime |
+| `shared_cell(...)` / `shared_map(...)` | Scoped process-local shared state |
+| `mailbox_open(...)` | Targeted actor-style inbox |
+
+`agent_loop` calls do not share transcript internals with tasks. A named
+`session_id` shares durable transcript history through the agent session store.
+`spawn_agent` workers get their own worker/session lineage; use explicit
+mailboxes, shared state handles, `agent_state_*`, or host storage when a parent
+and worker need data exchange outside the transcript.
+
 ## Debug Fields
 
 `runtime_context().debug` contains best-effort introspection for tools:
