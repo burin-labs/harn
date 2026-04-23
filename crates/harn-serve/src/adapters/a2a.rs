@@ -120,6 +120,7 @@ struct TaskState {
     context_id: Option<String>,
     status: TaskStatus,
     history: Vec<TaskMessage>,
+    metadata: BTreeMap<String, JsonValue>,
     push_configs: Vec<JsonValue>,
     events: Vec<JsonValue>,
     subscribers: Vec<UnboundedSender<JsonValue>>,
@@ -396,6 +397,7 @@ impl A2aServer {
                 role: "user".to_string(),
                 parts: vec![json!({"type": "text", "text": text})],
             }],
+            metadata: BTreeMap::new(),
             push_configs: push_config.into_iter().collect(),
             events: Vec::new(),
             subscribers: Vec::new(),
@@ -463,6 +465,7 @@ impl A2aServer {
 
     fn complete_task(&self, task_id: &str, response: CallResponse) {
         let text = response_text(&response.value);
+        let handoff_metadata = handoff_task_metadata(&response);
         let message = json!({
             "type": "message",
             "taskId": task_id,
@@ -482,6 +485,9 @@ impl A2aServer {
                 role: "agent".to_string(),
                 parts: vec![json!({"type": "text", "text": text})],
             });
+            if let Some(metadata) = handoff_metadata {
+                task.metadata.extend(metadata);
+            }
             publish_locked(task, message);
             task.status = TaskStatus::Completed;
             publish_locked(task, status_event(task_id, TaskStatus::Completed));
@@ -849,7 +855,33 @@ fn task_to_json(task: &TaskState) -> JsonValue {
     if let Some(context_id) = task.context_id.as_ref() {
         value["contextId"] = JsonValue::String(context_id.clone());
     }
+    if !task.metadata.is_empty() {
+        value["metadata"] = serde_json::to_value(&task.metadata)
+            .unwrap_or_else(|_| JsonValue::Object(Default::default()));
+    }
     value
+}
+
+fn handoff_task_metadata(response: &CallResponse) -> Option<BTreeMap<String, JsonValue>> {
+    let handoffs = harn_vm::orchestration::extract_handoffs_from_json_value(&response.value);
+    if handoffs.is_empty() {
+        return None;
+    }
+    Some(BTreeMap::from([
+        (
+            "handoff_ids".to_string(),
+            JsonValue::Array(
+                handoffs
+                    .iter()
+                    .map(|handoff| JsonValue::String(handoff.id.clone()))
+                    .collect(),
+            ),
+        ),
+        (
+            "handoffs".to_string(),
+            serde_json::to_value(&handoffs).unwrap_or_else(|_| JsonValue::Array(Vec::new())),
+        ),
+    ]))
 }
 
 fn status_event(task_id: &str, status: TaskStatus) -> JsonValue {
@@ -1163,6 +1195,78 @@ pub fn triage(task: string) -> string {
         assert_eq!(
             response["result"]["history"][1]["parts"][0]["text"],
             "hello"
+        );
+    }
+
+    #[tokio::test]
+    async fn send_message_surfaces_handoff_metadata() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let script = dir.path().join("server.harn");
+        std::fs::write(
+            &script,
+            r#"
+import "std/agents"
+
+pub fn triage(task: string) -> dict {
+  let review = handoff({
+    source_persona: "merge_captain",
+    target_persona_or_human: {
+      kind: "persona",
+      id: "review_captain",
+      label: "review_captain"
+    },
+    task: task,
+    reason: "Need explicit code review before merge",
+    evidence_refs: [{artifact_id: "artifact_diff", label: "Patch summary"}],
+    files_or_entities_touched: ["crates/harn-vm/src/orchestration/handoffs.rs"],
+    open_questions: ["Is the side-effect budget acceptable?"],
+    blocked_on: ["review_captain approval"],
+    requested_capabilities: ["review", "comment"],
+    allowed_side_effects: ["comment_on_pr"],
+    budget_remaining: {tokens: 900, tool_calls: 2},
+    deadline_checkback: {checkback_at: "2026-04-24T10:00:00Z"},
+    confidence: 0.74
+  })
+  return workflow_result_run(
+    task,
+    "triage",
+    {visible_text: "handoff ready"},
+    [handoff_artifact(review)],
+    {}
+  )
+}
+"#,
+        )
+        .expect("write script");
+        let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
+        let server = Arc::new(A2aServer::new(A2aServerConfig::new(core)));
+        let request = harn_vm::jsonrpc::request(
+            "handoff-1",
+            "a2a.SendMessage",
+            json!({
+                "message": {
+                    "metadata": {"target_agent": "triage"},
+                    "parts": [{"type": "text", "text": "Review PR #461"}]
+                }
+            }),
+        );
+
+        let RpcOutcome::Json(response) = server.process_rpc(request, AuthRequest::default()).await
+        else {
+            panic!("expected json response");
+        };
+
+        assert_eq!(response["result"]["status"]["state"], "completed");
+        assert!(response["result"]["metadata"]["handoff_ids"][0]
+            .as_str()
+            .is_some_and(|value| !value.is_empty()));
+        assert_eq!(
+            response["result"]["metadata"]["handoffs"][0]["source_persona"],
+            "merge_captain"
+        );
+        assert_eq!(
+            response["result"]["metadata"]["handoffs"][0]["target_persona_or_human"]["label"],
+            "review_captain"
         );
     }
 

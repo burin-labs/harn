@@ -130,14 +130,27 @@ durability property the primitive is designed to expose.
   "version": 1,
   "session_id": "session-123",
   "key": "__handoff.json",
+  "handoff": {
+    "_type": "handoff_artifact",
+    "source_persona": "merge_captain",
+    "target_persona_or_human": {
+      "kind": "human",
+      "label": "maintainer"
+    },
+    "task": "Approve the rollout window",
+    "reason": "A human must authorize production side effects"
+  },
   "summary": {
     "status": "ready"
   }
 }
 ```
 
-Callers own the shape of `summary`. Harn owns the outer envelope and the
-well-known key.
+Callers still own the shape of `summary`, but durable personas should prefer a
+typed handoff payload over transcript dumps or vague prose. When the payload
+matches the typed handoff shape, Harn preserves it under the `handoff` field so
+receivers can load structured task, evidence, open-question, and side-effect
+context without importing the source transcript.
 
 ## Two-writer discipline
 

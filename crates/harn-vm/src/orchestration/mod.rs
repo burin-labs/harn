@@ -33,6 +33,9 @@ pub use compaction::*;
 mod artifacts;
 pub use artifacts::*;
 
+mod handoffs;
+pub use handoffs::*;
+
 mod policy;
 pub use policy::*;
 

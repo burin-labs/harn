@@ -409,6 +409,7 @@ Workflow helpers built on transcripts and `agent_loop`:
 | `workflow_result_text(result)` | Extract a visible text result from an LLM call, workflow wrapper, or ad hoc payload |
 | `workflow_result_run(task, workflow_name, result, artifacts?, options?)` | Normalize an ad hoc result into a reusable run record |
 | `workflow_result_persist(task, workflow_name, result, artifacts?, options?)` | Persist an ad hoc result as a run record without going through `workflow_execute` |
+| `handoff_artifact(value)` | Wrap a typed handoff payload as a normal workflow artifact without transferring raw transcript history |
 | `workflow_session(prev)` | Normalize a task result or transcript into a reusable session object |
 | `workflow_session_new(metadata?)` | Create a new empty workflow session |
 | `workflow_session_restore(run_or_path)` | Restore a session from a run record or persisted run path |

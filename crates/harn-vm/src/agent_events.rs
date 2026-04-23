@@ -24,6 +24,7 @@ use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use serde::{Deserialize, Serialize};
 
 use crate::event_log::{AnyEventLog, EventLog, LogEvent as EventLogRecord, Topic};
+use crate::orchestration::HandoffArtifact;
 use crate::tool_annotations::ToolKind;
 
 /// Typed worker lifecycle events emitted by delegated/background agent
@@ -201,6 +202,11 @@ pub enum AgentEvent {
         estimated_tokens_after: usize,
         snapshot_asset_id: Option<String>,
     },
+    Handoff {
+        session_id: String,
+        artifact_id: String,
+        handoff: Box<HandoffArtifact>,
+    },
 }
 
 impl AgentEvent {
@@ -222,7 +228,8 @@ impl AgentEvent {
             | Self::SkillScopeTools { session_id, .. }
             | Self::ToolSearchQuery { session_id, .. }
             | Self::ToolSearchResult { session_id, .. }
-            | Self::TranscriptCompacted { session_id, .. } => session_id,
+            | Self::TranscriptCompacted { session_id, .. }
+            | Self::Handoff { session_id, .. } => session_id,
         }
     }
 }

@@ -534,9 +534,13 @@ consumed by a protocol bridge.
 
 Canonical ACP envelope types are provided as Harn type aliases in
 `std/acp` — `SessionUpdate`, `AgentMessageChunk`, `ToolCall`,
-`ToolCallUpdate`, and `Plan` — and can be used directly as pipeline
+`ToolCallUpdate`, `Plan`, and `Handoff` — and can be used directly as pipeline
 return types so a pipeline's contract matches the ACP schema
 byte-for-byte.
+
+When a workflow emits a typed handoff artifact, ACP also mirrors it as a
+structured `session/update` with `sessionUpdate: "handoff"`, so hosts can show
+handoff lifecycle entries without scraping transcript prose.
 
 ## Security notes
 
@@ -630,6 +634,11 @@ Content-Type: application/json
 
 Task states follow the A2A protocol lifecycle: `submitted`, `working`,
 `completed`, `failed`, `cancelled`.
+
+Completed task payloads also include `metadata.handoff_ids` and
+`metadata.handoffs` when the served function returned typed handoff artifacts,
+so remote personas can consume the handoff artifact directly instead of
+replaying the source transcript.
 
 ### Vendor workflow control methods
 

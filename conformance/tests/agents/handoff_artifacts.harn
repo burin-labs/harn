@@ -1,0 +1,41 @@
+import "std/agents"
+
+pipeline main() {
+  let patch = artifact_workspace_file("crates/harn-vm/src/lib.rs", "pub fn handoff() {}")
+  let verification = artifact_verification_result("cargo test -p harn-vm", "passed")
+  let review = handoff(
+    {
+    source_persona: "merge_captain",
+    target_persona_or_human: {kind: "persona", id: "review_captain", label: "review_captain"},
+    task: "Review issue #461 handoff wiring before merge",
+    reason: "The merge queue requires an explicit review artifact before landing",
+    evidence_refs: [
+    {artifact_id: patch.id, label: "Updated runtime"},
+    {artifact_id: verification.id, label: "Focused verification"},
+  ],
+    files_or_entities_touched: ["crates/harn-vm/src/orchestration/handoffs.rs", "crates/harn-cli/src/acp/events.rs"],
+    open_questions: ["Should A2A expose full handoff payloads or only ids?"],
+    blocked_on: ["review_captain approval"],
+    requested_capabilities: ["review", "comment_on_pr"],
+    allowed_side_effects: ["comment_on_pr"],
+    budget_remaining: {tokens: 1200, tool_calls: 3},
+    deadline_checkback: {checkback_at: "2026-04-24T10:00:00Z"},
+    confidence: 0.82,
+  },
+  )
+  let emitted = handoff_artifact(review)
+  let run = workflow_result_run(
+    "Prepare review handoff",
+    "merge_captain",
+    {visible_text: "handoff ready"},
+    [patch, verification, emitted],
+    {},
+  )
+  let consumed = handoff(run?.artifacts[2])
+  let context = handoff_context(run?.artifacts[2])
+  println(run?.handoffs[0]?.source_persona == "merge_captain")
+  println(run?.handoffs[0]?.target_persona_or_human?.label == "review_captain")
+  println(run?.handoffs[0]?.receipt_links[0]?.kind == "run_receipt")
+  println(consumed?.evidence_refs[0]?.artifact_id == patch?.id)
+  println(contains(context, "comment_on_pr"))
+}

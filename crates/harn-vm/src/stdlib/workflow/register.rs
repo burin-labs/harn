@@ -161,6 +161,7 @@ pub(in crate::stdlib) async fn execute_workflow(
         completed_nodes: Vec::new(),
         child_runs: Vec::new(),
         artifacts: artifacts.clone(),
+        handoffs: Vec::new(),
         policy: builtin_ceiling(),
         execution: execution.clone(),
         transcript: None,

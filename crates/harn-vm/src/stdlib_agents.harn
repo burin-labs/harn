@@ -84,7 +84,7 @@ pub fn run_stage(task, config) {
   if config?.mode == "completion" {
     return llm_completion(prompt?.prompt, config?.suffix, prompt?.system, opts)
   }
-  if config?.mode == "llm" || config?.persistent == false {
+  if config?.mode == "llm" || !config?.persistent {
     return llm_call(prompt?.prompt, prompt?.system, opts)
   }
   return agent_loop(prompt?.prompt, prompt?.system, opts + {persistent: config?.persistent ?? true})
@@ -96,7 +96,7 @@ pub fn verify_command(config) {
     return nil
   }
   let output = host_call("process.exec", {command: config?.command})
-  var ok = output?.success == true
+  var ok = output?.success
   if config?.expect_status != nil {
     ok = output?.status == config?.expect_status
   }
@@ -689,7 +689,7 @@ fn __action_graph_terminal_node(plan, phase, template) {
   let node_kind = __action_graph_terminal_kind(template, phase)
   var verify_payload = nil
   if node_kind == "verify" {
-    verify_payload = template?.verify \
+    verify_payload = template?.verify
       ?? filter_nil(
       {
       command: template?.command,
@@ -735,7 +735,7 @@ pub fn action_graph(raw, options = nil) {
     let tools = __action_graph_tool_list(dict)
     let title = __action_graph_first_string(
       [dict?.title, dict?.name, dict?.label, dict?.action, dict?.task, dict?.instruction, dict?.summary],
-    ) \
+    )
       ?? format("Action {}", index + 1)
     let instruction = __action_graph_first_string(
       [
@@ -748,7 +748,7 @@ pub fn action_graph(raw, options = nil) {
       dict?.text,
       title,
     ],
-    ) \
+    )
       ?? title
     let source_id = __action_graph_first_string([dict?.id, dict?.action_id, dict?.name, dict?.label])
     let phase = __action_graph_phase(dict, dict?.phase ?? options?.phase, tools, instruction)
@@ -1256,6 +1256,25 @@ pub fn workflow_result_persist(task, workflow_name, result, artifacts, options) 
   }
 }
 
+/** handoff_artifact. */
+pub fn handoff_artifact(value) {
+  let item = handoff(value)
+  let target = item?.target_persona_or_human ?? {}
+  let label = target?.label ?? target?.id ?? "unknown"
+  return artifact(
+    {
+    kind: "handoff",
+    title: "Handoff to " + label,
+    text: handoff_context(item),
+    data: item,
+    source: item?.source_persona,
+    freshness: "fresh",
+    relevance: item?.confidence ?? 1.0,
+    metadata: {handoff_id: item?.id, target_kind: target?.kind, target_label: label},
+  },
+  )
+}
+
 /** workflow_session. */
 pub fn workflow_session(prev) {
   let transcript = prev?.transcript ?? prev?.result?.transcript ?? prev
@@ -1284,9 +1303,7 @@ pub fn workflow_session(prev) {
 pub fn workflow_session_new(metadata) {
   let raw = metadata ?? {}
   let workflow_id = raw?.workflow_id ?? raw?.workflow
-  return workflow_session(
-    {status: "active", workflow_id: workflow_id, transcript: transcript(raw)},
-  )
+  return workflow_session({status: "active", workflow_id: workflow_id, transcript: transcript(raw)})
 }
 
 /** workflow_session_restore. */

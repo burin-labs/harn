@@ -254,6 +254,7 @@ fn replay_fixture_round_trip_passes() {
         completed_nodes: vec!["act".to_string()],
         child_runs: vec![],
         artifacts: vec![],
+        handoffs: vec![],
         policy: CapabilityPolicy::default(),
         execution: None,
         transcript: None,
@@ -313,6 +314,86 @@ fn replay_eval_suite_reports_failed_case() {
     assert_eq!(suite.total, 2);
     assert_eq!(suite.failed, 1);
     assert!(suite.cases.iter().any(|case| !case.pass));
+}
+
+#[test]
+fn normalize_run_record_materializes_typed_handoffs_from_artifacts() {
+    let value = crate::stdlib::json_to_vm_value(&serde_json::json!({
+        "_type": "run_record",
+        "id": "run_handoff",
+        "workflow_id": "wf",
+        "status": "completed",
+        "artifacts": [{
+            "_type": "artifact",
+            "id": "artifact_handoff",
+            "kind": "handoff",
+            "data": {
+                "_type": "handoff_artifact",
+                "id": "handoff_1",
+                "source_persona": "merge_captain",
+                "target_persona_or_human": {
+                    "kind": "persona",
+                    "label": "review_captain"
+                },
+                "task": "Review PR #461",
+                "reason": "Explicit review is required before merge",
+                "requested_capabilities": ["review"],
+                "allowed_side_effects": ["comment_on_pr"]
+            }
+        }]
+    }));
+
+    let run = normalize_run_record(&value).expect("normalize run");
+
+    assert_eq!(run.handoffs.len(), 1);
+    assert_eq!(run.handoffs[0].source_persona, "merge_captain");
+    assert_eq!(
+        run.handoffs[0].target_persona_or_human.display_name(),
+        "review_captain"
+    );
+    assert_eq!(
+        run.artifacts[0]
+            .metadata
+            .get("handoff_id")
+            .and_then(|value| value.as_str()),
+        Some("handoff_1")
+    );
+}
+
+#[test]
+fn save_run_record_adds_run_receipt_link_to_handoff() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("run.json");
+    let run = RunRecord {
+        id: "run_handoff_receipt".to_string(),
+        workflow_id: "wf".to_string(),
+        status: "completed".to_string(),
+        handoffs: vec![HandoffArtifact {
+            id: "handoff_receipt".to_string(),
+            source_persona: "merge_captain".to_string(),
+            target_persona_or_human: HandoffTargetRecord {
+                kind: "human".to_string(),
+                id: None,
+                label: Some("maintainer".to_string()),
+            },
+            task: "Approve the rollout".to_string(),
+            reason: "Human sign-off gates production changes".to_string(),
+            requested_capabilities: vec!["release_signoff".to_string()],
+            allowed_side_effects: vec!["publish_release_notes".to_string()],
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+
+    save_run_record(&run, Some(path.to_str().expect("path"))).expect("save run");
+    let loaded = load_run_record(&path).expect("load run");
+
+    assert_eq!(loaded.handoffs.len(), 1);
+    assert!(loaded.handoffs[0].receipt_links.iter().any(|link| {
+        link.kind == "run_receipt"
+            && link.run_id.as_deref() == Some("run_handoff_receipt")
+            && link.path.as_deref() == Some(path.to_str().expect("path"))
+    }));
 }
 
 #[test]

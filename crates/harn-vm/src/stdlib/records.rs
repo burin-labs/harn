@@ -6,9 +6,11 @@ use std::rc::Rc;
 
 use crate::orchestration::{
     diff_run_records, evaluate_run_against_fixture, evaluate_run_suite,
-    evaluate_run_suite_manifest, normalize_artifact, normalize_eval_suite_manifest,
-    normalize_run_record, render_artifacts_context, render_unified_diff, replay_fixture_from_run,
-    save_run_record, select_artifacts, ArtifactRecord, ContextPolicy, ReplayFixture,
+    evaluate_run_suite_manifest, extract_handoff_from_artifact, handoff_context_text,
+    handoff_from_json_value, normalize_artifact, normalize_eval_suite_manifest,
+    normalize_handoff_artifact_json, normalize_run_record, render_artifacts_context,
+    render_unified_diff, replay_fixture_from_run, save_run_record, select_artifacts,
+    ArtifactRecord, ContextPolicy, ReplayFixture,
 };
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
@@ -43,6 +45,20 @@ fn to_vm<T: serde::Serialize>(value: &T) -> Result<VmValue, VmError> {
     let json = serde_json::to_value(value)
         .map_err(|e| VmError::Runtime(format!("records encode error: {e}")))?;
     Ok(crate::stdlib::json_to_vm_value(&json))
+}
+
+fn emit_handoff_event(artifact: &ArtifactRecord) {
+    let Some(session_id) = crate::llm::current_agent_session_id() else {
+        return;
+    };
+    let Some(handoff) = extract_handoff_from_artifact(artifact) else {
+        return;
+    };
+    crate::agent_events::emit_event(&crate::agent_events::AgentEvent::Handoff {
+        session_id,
+        artifact_id: artifact.id.clone(),
+        handoff: Box::new(handoff),
+    });
 }
 
 pub(crate) fn parse_artifact_list(value: Option<&VmValue>) -> Result<Vec<ArtifactRecord>, VmError> {
@@ -247,7 +263,32 @@ pub(crate) fn register_record_builtins(vm: &mut Vm) {
             normalize_artifact(args.first().ok_or_else(|| {
                 VmError::Runtime("artifact: missing artifact payload".to_string())
             })?)?;
+        emit_handoff_event(&artifact);
         to_vm(&artifact)
+    });
+
+    vm.register_builtin("handoff", |args, _out| {
+        let value = args
+            .first()
+            .ok_or_else(|| VmError::Runtime("handoff: missing payload".to_string()))?;
+        let json = crate::llm::vm_value_to_json(value);
+        let handoff = handoff_from_json_value(&json)
+            .or_else(|| normalize_handoff_artifact_json(json.clone()).ok())
+            .ok_or_else(|| VmError::Runtime("handoff: invalid handoff payload".to_string()))?;
+        to_vm(&handoff)
+    });
+
+    vm.register_builtin("handoff_context", |args, _out| {
+        let value = args
+            .first()
+            .ok_or_else(|| VmError::Runtime("handoff_context: missing payload".to_string()))?;
+        let json = crate::llm::vm_value_to_json(value);
+        let handoff = handoff_from_json_value(&json)
+            .or_else(|| normalize_handoff_artifact_json(json.clone()).ok())
+            .ok_or_else(|| {
+                VmError::Runtime("handoff_context: invalid handoff payload".to_string())
+            })?;
+        Ok(VmValue::String(Rc::from(handoff_context_text(&handoff))))
     });
 
     vm.register_builtin("artifact_derive", |args, _out| {
