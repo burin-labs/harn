@@ -27,7 +27,7 @@ fn bool_env(value) {
   return nil
 }
 
-fn thinking_enabled_for_model(provider, model) {
+fn thinking_enabled_for_model(_provider, _model) {
   let thinking_pref = bool_env(env_or("BURIN_MINI_THINKING", ""))
   if thinking_pref != nil {
     return thinking_pref
