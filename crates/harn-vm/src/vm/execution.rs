@@ -7,6 +7,7 @@ use crate::value::{ModuleFunctionRegistry, VmError, VmValue};
 use super::{CallFrame, LocalSlot, Vm};
 
 const CANCEL_GRACE_INSTRUCTIONS: usize = 1024;
+const CANCEL_GRACE_ASYNC_OP: Duration = Duration::from_millis(250);
 
 impl Vm {
     /// Execute a compiled chunk.
@@ -307,6 +308,12 @@ impl Vm {
         &mut self,
         op: u8,
     ) -> Result<Option<VmValue>, VmError> {
+        enum ScopeInterruptResult {
+            Op(Result<Option<VmValue>, VmError>),
+            Deadline,
+            CancelTimedOut,
+        }
+
         let deadline = self.deadlines.last().map(|(deadline, _)| *deadline);
         let cancel_token = self.cancel_token.clone();
 
@@ -336,14 +343,31 @@ impl Vm {
             }
         };
 
-        tokio::select! {
-            result = self.execute_op(op) => result,
-            _ = deadline_sleep, if has_deadline => {
+        let result = {
+            let op_future = self.execute_op(op);
+            tokio::pin!(op_future);
+            tokio::select! {
+                result = &mut op_future => ScopeInterruptResult::Op(result),
+                _ = deadline_sleep, if has_deadline => ScopeInterruptResult::Deadline,
+                _ = cancel_sleep, if has_cancel => {
+                    let grace = tokio::time::sleep(CANCEL_GRACE_ASYNC_OP);
+                    tokio::pin!(grace);
+                    tokio::select! {
+                        result = &mut op_future => ScopeInterruptResult::Op(result),
+                        _ = &mut grace => ScopeInterruptResult::CancelTimedOut,
+                    }
+                }
+            }
+        };
+
+        match result {
+            ScopeInterruptResult::Op(result) => result,
+            ScopeInterruptResult::Deadline => {
                 self.deadlines.pop();
                 self.cancel_spawned_tasks();
                 Err(Self::deadline_exceeded_error())
             }
-            _ = cancel_sleep, if has_cancel => {
+            ScopeInterruptResult::CancelTimedOut => {
                 self.cancel_spawned_tasks();
                 Err(Self::cancelled_error())
             }

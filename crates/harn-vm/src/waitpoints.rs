@@ -1,3 +1,5 @@
+#[cfg(test)]
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
@@ -8,9 +10,30 @@ use time::OffsetDateTime;
 use crate::event_log::{
     sanitize_topic_component, AnyEventLog, EventLog, LogError, LogEvent, Topic,
 };
+#[cfg(test)]
+use tokio::sync::oneshot;
 
 pub const WAITPOINT_STATE_TOPIC_PREFIX: &str = "waitpoint.state.";
 pub const WAITPOINT_WAITS_TOPIC: &str = "waitpoint.waits";
+
+#[cfg(test)]
+thread_local! {
+    static TEST_WAIT_SIGNALS: RefCell<Vec<WaitpointTestSignal>> = const { RefCell::new(Vec::new()) };
+}
+
+#[cfg(test)]
+struct WaitpointTestSignal {
+    wait_id: String,
+    kind: WaitpointTestSignalKind,
+    tx: oneshot::Sender<()>,
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum WaitpointTestSignalKind {
+    Started,
+    Interrupted,
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -331,7 +354,9 @@ pub async fn append_wait_started(
         .with_headers(wait_headers(&record.wait_id, &record.waitpoint_ids)),
     )
     .await
-    .map(|_| ())
+    .map(|_| ())?;
+    notify_test_wait_started(&record.wait_id);
+    Ok(())
 }
 
 pub async fn append_wait_terminal(
@@ -349,7 +374,63 @@ pub async fn append_wait_terminal(
         .with_headers(wait_headers(&record.wait_id, &record.waitpoint_ids)),
     )
     .await
-    .map(|_| ())
+    .map(|_| ())?;
+    if record.status == WaitpointWaitStatus::Interrupted {
+        notify_test_wait_interrupted(&record.wait_id);
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+pub(crate) fn install_test_wait_signal(
+    wait_id: impl Into<String>,
+    kind: WaitpointTestSignalKind,
+    tx: oneshot::Sender<()>,
+) {
+    TEST_WAIT_SIGNALS.with(|slot| {
+        slot.borrow_mut().push(WaitpointTestSignal {
+            wait_id: wait_id.into(),
+            kind,
+            tx,
+        });
+    });
+}
+
+#[cfg(test)]
+pub(crate) fn clear_test_wait_signals() {
+    TEST_WAIT_SIGNALS.with(|slot| slot.borrow_mut().clear());
+}
+
+#[cfg(not(test))]
+fn notify_test_wait_started(_wait_id: &str) {}
+
+#[cfg(test)]
+fn notify_test_wait_started(wait_id: &str) {
+    notify_test_wait_signal(wait_id, WaitpointTestSignalKind::Started);
+}
+
+#[cfg(not(test))]
+fn notify_test_wait_interrupted(_wait_id: &str) {}
+
+#[cfg(test)]
+fn notify_test_wait_interrupted(wait_id: &str) {
+    notify_test_wait_signal(wait_id, WaitpointTestSignalKind::Interrupted);
+}
+
+#[cfg(test)]
+fn notify_test_wait_signal(wait_id: &str, kind: WaitpointTestSignalKind) {
+    TEST_WAIT_SIGNALS.with(|slot| {
+        let mut signals = slot.borrow_mut();
+        let mut index = 0;
+        while index < signals.len() {
+            if signals[index].wait_id == wait_id && signals[index].kind == kind {
+                let signal = signals.remove(index);
+                let _ = signal.tx.send(());
+            } else {
+                index += 1;
+            }
+        }
+    });
 }
 
 pub async fn find_wait_terminal(
