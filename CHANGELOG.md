@@ -7,6 +7,29 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
+## Unreleased
+
+### Changed
+
+- **`llm_call` throws a categorized error dict (#534).** The value
+  caught in `catch (e)` from a failed `llm_call` is now
+  `{category, message, retry_after_ms?, provider, model}` — the same
+  shape `llm_call_safe` exposes under `r.error`. Scripts can dispatch
+  on `e.category` against the 13 canonical `ErrorCategory` strings
+  (`"rate_limit"`, `"timeout"`, `"overloaded"`, `"server_error"`,
+  `"transient_network"`, `"schema_validation"`, `"auth"`,
+  `"not_found"`, `"circuit_open"`, `"tool_error"`, `"tool_rejected"`,
+  `"cancelled"`, `"generic"`) and honor `e.retry_after_ms` instead of
+  parsing the error message. **Breaking:** callers that
+  string-matched the previous thrown message (`e.contains("429")`)
+  must switch to `e.category == "rate_limit"` or use `e.message` to
+  keep the substring check. The `error_category(e)` and
+  `is_rate_limited(e)` helpers accept either the new dict shape or a
+  legacy string — no change for callers that already use them.
+  `llm_mock({error: {...}})` gained an optional
+  `retry_after_ms: <int>` field for tests that exercise the
+  rate-limit path end-to-end.
+
 ## v0.7.35
 
 ### Added

@@ -174,6 +174,7 @@ async fn empty_completion_retry_is_counted_in_trace_summary() {
         error: Some(crate::llm::mock::MockError {
             category: crate::value::ErrorCategory::ServerError,
             message: "openai-compatible model mock reported completion_tokens=1 but delivered no content, reasoning, or tool calls".to_string(),
+            retry_after_ms: None,
         }),
     });
     crate::llm::mock::push_llm_mock(crate::llm::mock::LlmMock {

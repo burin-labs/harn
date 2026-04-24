@@ -35,6 +35,12 @@ enum CliLlmMockMode {
 pub struct MockError {
     pub category: ErrorCategory,
     pub message: String,
+    /// Optional hint echoed into the error message as a synthetic
+    /// `retry-after:` header so the existing `extract_retry_after_ms`
+    /// parser recovers it — matches how real provider errors embed
+    /// the value. Lets tests assert that `e.retry_after_ms` flows
+    /// end-to-end on the thrown dict.
+    pub retry_after_ms: Option<u64>,
 }
 
 #[derive(Clone)]
@@ -269,8 +275,25 @@ fn mock_last_prompt_text(messages: &[serde_json::Value]) -> String {
 /// provider path would have raised, so classification, retry, and
 /// `error_category` all behave identically to a real failure.
 fn mock_error_to_vm_error(err: &MockError) -> VmError {
+    // Embed `retry_after_ms` as a synthetic `retry-after:` header on
+    // the message so `agent_observe::extract_retry_after_ms` — the
+    // same parser that handles real HTTP 429s — surfaces the value
+    // on the caller's thrown dict. Keeps the mock path byte-for-byte
+    // compatible with a real rate-limit response.
+    let message = match err.retry_after_ms {
+        Some(ms) => {
+            let secs = (ms as f64 / 1000.0).max(0.0);
+            let sep = if err.message.is_empty() || err.message.ends_with('\n') {
+                ""
+            } else {
+                "\n"
+            };
+            format!("{}{sep}retry-after: {secs}\n", err.message)
+        }
+        None => err.message.clone(),
+    };
     VmError::CategorizedError {
-        message: err.message.clone(),
+        message,
         category: err.category.clone(),
     }
 }

@@ -227,9 +227,9 @@ fn parse_cli_llm_mock_error(
     if value.is_null() {
         return Ok(None);
     }
-    let object = value
-        .as_object()
-        .ok_or_else(|| "error must be an object {category, message}".to_string())?;
+    let object = value.as_object().ok_or_else(|| {
+        "error must be an object {category, message, retry_after_ms?}".to_string()
+    })?;
     let category_str = object
         .get("category")
         .and_then(|value| value.as_str())
@@ -243,7 +243,19 @@ fn parse_cli_llm_mock_error(
         .and_then(|value| value.as_str())
         .unwrap_or_default()
         .to_string();
-    Ok(Some(harn_vm::llm::MockError { category, message }))
+    let retry_after_ms = match object.get("retry_after_ms") {
+        None | Some(serde_json::Value::Null) => None,
+        Some(serde_json::Value::Number(n)) => match n.as_u64() {
+            Some(v) => Some(v),
+            None => return Err("error.retry_after_ms must be a non-negative integer".to_string()),
+        },
+        Some(_) => return Err("error.retry_after_ms must be a non-negative integer".to_string()),
+    };
+    Ok(Some(harn_vm::llm::MockError {
+        category,
+        message,
+        retry_after_ms,
+    }))
 }
 
 fn optional_string_field(

@@ -1,0 +1,41 @@
+/**
+ * Walk every canonical ErrorCategory string and verify the thrown
+ * dict round-trips `category`, `message`, `provider`, and `model` on
+ * `llm_call`. The safe-envelope path mirrors the same shape under
+ * `r.error`.
+ */
+pipeline default(task) {
+  let categories = [
+    "rate_limit",
+    "timeout",
+    "overloaded",
+    "server_error",
+    "transient_network",
+    "schema_validation",
+    "auth",
+    "not_found",
+    "circuit_open",
+    "tool_error",
+    "tool_rejected",
+    "cancelled",
+    "generic",
+  ]
+  for category in categories {
+    llm_mock({error: {category: category, message: "synthetic-" + category}})
+    try {
+      llm_call("probe", nil, {provider: "mock", model: "mock-model", llm_retries: 0})
+    } catch (e) {
+      println(
+        category + " thrown=" + e.category + " msg=" + e.message + " provider=" + e.provider
+        + " model="
+        + e.model,
+      )
+    }
+    // Parity: llm_call_safe wraps the exact same fields.
+    llm_mock({error: {category: category, message: "safe-" + category}})
+    let r = llm_call_safe("probe", nil, {provider: "mock", model: "mock-model", llm_retries: 0})
+    println(
+      category + " safe=" + r.error.category + " msg=" + r.error.message + " ok=" + to_string(r.ok),
+    )
+  }
+}

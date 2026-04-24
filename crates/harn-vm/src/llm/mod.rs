@@ -392,11 +392,58 @@ pub fn reset_llm_state() {
 /// Shared implementation of `llm_call` / `llm_call_safe`. Runs the
 /// full schema-retry loop; on success returns the LLM result dict, on
 /// failure returns the underlying `VmError`. `llm_call` propagates the
-/// error; `llm_call_safe` wraps it in a `{ok: false, error: …}` envelope.
+/// error (re-wrapped as a thrown `{category, message, retry_after_ms?,
+/// provider, model}` dict so catch blocks can dispatch on category);
+/// `llm_call_safe` wraps it in a `{ok: false, error: …}` envelope with
+/// the same fields.
 async fn llm_call_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let options = args.get(2).and_then(|a| a.as_dict()).cloned();
     let opts = extract_llm_options(&args)?;
-    execute_llm_call(opts, options, None).await
+    let provider = opts.provider.clone();
+    let model = opts.model.clone();
+    match execute_llm_call(opts, options, None).await {
+        Ok(v) => Ok(v),
+        Err(err) => Err(VmError::Thrown(build_llm_error_dict(
+            &err, &provider, &model,
+        ))),
+    }
+}
+
+/// Build the `{category, message, retry_after_ms?, provider, model}`
+/// dict that `llm_call` throws on failure. `retry_after_ms` is only
+/// set when the underlying error carries a parseable `retry-after:`
+/// hint, so callers can pattern-match on its presence:
+///
+/// ```harn
+/// try { llm_call(prompt, nil, opts) } catch (e) {
+///   if e.category == "rate_limit" {
+///     sleep(e.retry_after_ms ?? 1000)
+///   }
+/// }
+/// ```
+pub(crate) fn build_llm_error_dict(err: &VmError, provider: &str, model: &str) -> VmValue {
+    let category = crate::value::error_to_category(err);
+    let message = match err {
+        VmError::CategorizedError { message, .. } => message.clone(),
+        VmError::Thrown(VmValue::String(s)) => s.to_string(),
+        VmError::Thrown(VmValue::Dict(d)) => d
+            .get("message")
+            .map(|v| v.display())
+            .unwrap_or_else(|| err.to_string()),
+        _ => err.to_string(),
+    };
+    let mut dict = std::collections::BTreeMap::new();
+    dict.insert(
+        "category".to_string(),
+        VmValue::String(Rc::from(category.as_str())),
+    );
+    dict.insert("message".to_string(), VmValue::String(Rc::from(message)));
+    if let Some(ms) = agent_observe::extract_retry_after_ms(err) {
+        dict.insert("retry_after_ms".to_string(), VmValue::Int(ms as i64));
+    }
+    dict.insert("provider".to_string(), VmValue::String(Rc::from(provider)));
+    dict.insert("model".to_string(), VmValue::String(Rc::from(model)));
+    VmValue::Dict(Rc::new(dict))
 }
 
 pub(crate) async fn execute_llm_call(
@@ -517,14 +564,22 @@ fn llm_safe_envelope_ok(response: VmValue) -> VmValue {
 }
 
 fn llm_safe_envelope_err(err: &VmError) -> VmValue {
+    // `llm_call_impl` pre-wraps its errors into a
+    // `VmError::Thrown(VmValue::Dict{category, message, retry_after_ms?,
+    // provider, model})`. Pass that dict through verbatim so
+    // `llm_call_safe` callers see the same fields as `try/catch`
+    // users — with `category` / `message` always populated.
+    if let VmError::Thrown(VmValue::Dict(d)) = err {
+        let mut dict = std::collections::BTreeMap::new();
+        dict.insert("ok".to_string(), VmValue::Bool(false));
+        dict.insert("response".to_string(), VmValue::Nil);
+        dict.insert("error".to_string(), VmValue::Dict(d.clone()));
+        return VmValue::Dict(Rc::new(dict));
+    }
     let category = crate::value::error_to_category(err);
     let message = match err {
         VmError::CategorizedError { message, .. } => message.clone(),
         VmError::Thrown(VmValue::String(s)) => s.to_string(),
-        VmError::Thrown(VmValue::Dict(d)) => d
-            .get("message")
-            .map(|v| v.display())
-            .unwrap_or_else(|| err.to_string()),
         _ => err.to_string(),
     };
     let mut err_dict = std::collections::BTreeMap::new();
@@ -1015,11 +1070,11 @@ fn register_llm_mock_builtins(vm: &mut Vm) {
             .map(|v| v.display())
             .unwrap_or_else(|| "mock".to_string());
 
-        // Optional error injection: {error: {category, message}}. When
-        // present the mock short-circuits the provider call and surfaces
-        // as `VmError::CategorizedError`, making it observable via
-        // `error_category`, `try { ... }`, and the `llm_call_safe`
-        // envelope.
+        // Optional error injection: {error: {category, message,
+        // retry_after_ms?}}. When present the mock short-circuits the
+        // provider call and surfaces as `VmError::CategorizedError`,
+        // making it observable via `error_category`, the `llm_call`
+        // thrown dict, and the `llm_call_safe` envelope.
         let error = match config.get("error") {
             None | Some(VmValue::Nil) => None,
             Some(VmValue::Dict(err_dict)) => {
@@ -1045,11 +1100,28 @@ fn register_llm_mock_builtins(vm: &mut Vm) {
                     .get("message")
                     .map(|v| v.display())
                     .unwrap_or_default();
-                Some(MockError { category, message })
+                let retry_after_ms = match err_dict.get("retry_after_ms") {
+                    None | Some(VmValue::Nil) => None,
+                    Some(v) => match v.as_int() {
+                        Some(n) if n >= 0 => Some(n as u64),
+                        _ => {
+                            return Err(crate::value::VmError::Runtime(
+                                "llm_mock: error.retry_after_ms must be a non-negative int"
+                                    .to_string(),
+                            ));
+                        }
+                    },
+                };
+                Some(MockError {
+                    category,
+                    message,
+                    retry_after_ms,
+                })
             }
             _ => {
                 return Err(crate::value::VmError::Runtime(
-                    "llm_mock: error must be a dict {category, message}".to_string(),
+                    "llm_mock: error must be a dict {category, message, retry_after_ms?}"
+                        .to_string(),
                 ));
             }
         };

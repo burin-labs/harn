@@ -983,8 +983,24 @@ removed — call the lifecycle verbs explicitly.
 
 ## Resilient LLM patterns
 
-`llm_call` throws on transport / schema / budget failures. Three
-helpers flatten the common recovery boilerplate:
+`llm_call` throws on transport / schema / budget failures. The thrown
+value is a dict with the same fields `llm_call_safe` exposes under
+`r.error`, so scripts can dispatch on category without string-sniffing:
+
+```harn
+try {
+  let r = llm_call(user_prompt, nil, opts)
+} catch (e) {
+  // e is {category, message, retry_after_ms?, provider, model}
+  if e.category == "rate_limit" {
+    sleep(e.retry_after_ms ?? 1000)
+    continue
+  }
+  throw e
+}
+```
+
+Three helpers flatten the common recovery boilerplate:
 
 ```harn
 // Non-throwing envelope: the ok/response/error shape eliminates the
@@ -1016,17 +1032,26 @@ let r = with_rate_limit("openai", fn() {
 }, {max_retries: 5, backoff_ms: 500})
 ```
 
-`llm_call_safe`'s `error.category` is one of the canonical
-`ErrorCategory` strings: `"rate_limit"`, `"timeout"`, `"overloaded"`,
-`"server_error"`, `"transient_network"`, `"schema_validation"`,
-`"auth"`, `"not_found"`, `"circuit_open"`, `"tool_error"`,
-`"tool_rejected"`, `"cancelled"`, `"generic"`. Match on these instead
-of string-sniffing the message.
+`error.category` (both on the thrown dict and on
+`r.error.category`) is one of the canonical `ErrorCategory` strings:
+`"rate_limit"`, `"timeout"`, `"overloaded"`, `"server_error"`,
+`"transient_network"`, `"schema_validation"`, `"auth"`, `"not_found"`,
+`"circuit_open"`, `"tool_error"`, `"tool_rejected"`, `"cancelled"`,
+`"generic"`. `retry_after_ms` is set when the provider surfaced a
+`Retry-After` hint (or `llm_mock` was told to); otherwise omitted.
 
-Pair with `llm_mock({error: {category, message}})` to write
-deterministic tests for either helper's error path:
+Pair with `llm_mock({error: {category, message, retry_after_ms?}})` to
+write deterministic tests for either helper's error path:
 
 ```harn
+llm_mock({error: {category: "rate_limit", message: "429", retry_after_ms: 2500}})
+try {
+  llm_call("hi", nil, {provider: "mock", llm_retries: 0})
+} catch (e) {
+  assert(e.category == "rate_limit")
+  assert(e.retry_after_ms == 2500)
+}
+
 llm_mock({error: {category: "rate_limit", message: "429"}})
 let r = llm_call_safe("hi", nil, {provider: "mock", llm_retries: 0})
 assert(!r.ok)
