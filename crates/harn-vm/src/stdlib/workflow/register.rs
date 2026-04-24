@@ -544,7 +544,11 @@ pub(in crate::stdlib) async fn execute_workflow(
                 selected_artifact_titles.clone(),
             );
         }
-        if let Some(tool_calling_mode) = executed.result.get("tool_calling_mode") {
+        if let Some(tool_calling_mode) = executed
+            .result
+            .get("tools")
+            .and_then(|tools| tools.get("mode"))
+        {
             stage_metadata.insert("tool_calling_mode".to_string(), tool_calling_mode.clone());
         }
 

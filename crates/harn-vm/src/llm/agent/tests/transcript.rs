@@ -313,7 +313,7 @@ async fn daemon_timer_wake_persists_snapshot_and_compacts_on_idle() {
     // budget_exhausted rather than the ambiguous "idle" it used to.
     assert_eq!(result["status"], "budget_exhausted");
     assert_eq!(result["daemon_state"], "budget_exhausted");
-    assert_eq!(result["iterations"].as_u64(), Some(2));
+    assert_eq!(result["llm"]["iterations"].as_u64(), Some(2));
     assert_eq!(
         result["daemon_snapshot_path"].as_str(),
         Some(snapshot_path.to_str().unwrap())
@@ -363,7 +363,7 @@ async fn daemon_resume_path_restores_prior_session_state() {
         result["daemon_snapshot_path"].as_str(),
         Some(snapshot_path.to_str().unwrap())
     );
-    assert_eq!(result["iterations"].as_u64(), Some(6));
+    assert_eq!(result["llm"]["iterations"].as_u64(), Some(6));
     assert!(result["text"]
         .as_str()
         .unwrap_or("")
@@ -582,7 +582,7 @@ async fn plain_done_sentinel_can_complete_persistent_loop_without_tools() {
 
     let result = run_agent_loop_internal(&mut opts, config).await.unwrap();
     assert_eq!(result["status"], "done");
-    assert_eq!(result["iterations"].as_u64(), Some(1));
+    assert_eq!(result["llm"]["iterations"].as_u64(), Some(1));
     assert_eq!(result["visible_text"].as_str(), Some("1, 2, 3, 4, 5"));
     reset_llm_mock_state();
 }
@@ -618,7 +618,7 @@ async fn tagged_done_block_does_not_complete_persistent_loop_without_tools() {
 
     let result = run_agent_loop_internal(&mut opts, config).await.unwrap();
     assert_eq!(result["status"], "budget_exhausted");
-    assert_eq!(result["iterations"].as_u64(), Some(1));
+    assert_eq!(result["llm"]["iterations"].as_u64(), Some(1));
     assert_eq!(result["visible_text"].as_str(), Some("Still working."));
     reset_llm_mock_state();
 }
@@ -636,7 +636,7 @@ async fn default_mock_response_without_tools_still_exhausts_budget() {
 
     let result = run_agent_loop_internal(&mut opts, config).await.unwrap();
     assert_eq!(result["status"], "budget_exhausted");
-    assert_eq!(result["iterations"].as_u64(), Some(1));
+    assert_eq!(result["llm"]["iterations"].as_u64(), Some(1));
     reset_llm_mock_state();
 }
 
@@ -695,8 +695,8 @@ async fn ledger_tool_is_rejected_when_no_task_ledger_is_active() {
     config.max_iterations = 1;
 
     let result = run_agent_loop_internal(&mut opts, config).await.unwrap();
-    assert_eq!(result["successful_tools"], json!([]));
-    assert_eq!(result["rejected_tools"], json!(["ledger"]));
+    assert_eq!(result["tools"]["successful"], json!([]));
+    assert_eq!(result["tools"]["rejected"], json!(["ledger"]));
     let transcript = serde_json::to_string(&result["transcript"]).expect("transcript json");
     assert!(transcript.contains("ledger unavailable"));
     reset_llm_mock_state();

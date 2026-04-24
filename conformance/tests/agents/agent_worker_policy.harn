@@ -25,7 +25,7 @@ pipeline main() {
     policy: {tools: ["read_only"]},
   },
   )
-  println(denied?.rejected_tools[0] == "write_note")
+  println(denied?.tools?.rejected[0] == "write_note")
   let transcript = json_stringify(transcript_messages(denied?.transcript))
   println(transcript.contains("permission_denied"))
   println(transcript.contains("write_note"))

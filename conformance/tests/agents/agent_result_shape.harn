@@ -1,0 +1,29 @@
+// Asserts the namespaced `agent_loop` result shape introduced in
+// burin-labs/harn#532. The flat keys (`iterations`, `duration_ms`,
+// `tools_used`, `successful_tools`, `rejected_tools`, `tool_calling_mode`)
+// were removed; callers read them via `result.llm.*` and `result.tools.*`.
+pipeline test(task) {
+  let result = agent_loop(
+    "Just keep replying",
+    "You are helpful",
+    {provider: "mock", persistent: true, max_iterations: 1, max_nudges: 1},
+  )
+  println(result.status == "budget_exhausted")
+  println(type_of(result.llm) == "dict")
+  println(type_of(result.tools) == "dict")
+  println(result.llm.iterations >= 1)
+  println(result.llm.duration_ms >= 0)
+  println(result.llm.input_tokens >= 0)
+  println(result.llm.output_tokens >= 0)
+  println(type_of(result.tools.calls) == "list")
+  println(type_of(result.tools.successful) == "list")
+  println(type_of(result.tools.rejected) == "list")
+  println(type_of(result.tools.mode) == "string")
+  // The retired flat keys must not resurface as siblings.
+  println(result.iterations == nil)
+  println(result.duration_ms == nil)
+  println(result.tools_used == nil)
+  println(result.successful_tools == nil)
+  println(result.rejected_tools == nil)
+  println(result.tool_calling_mode == nil)
+}

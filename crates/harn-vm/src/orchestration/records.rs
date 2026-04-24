@@ -1193,12 +1193,14 @@ pub fn derive_run_observability(
                 .map(|ledger| ledger.observations.clone())
                 .unwrap_or_default();
             research_fact_count += research_facts.len();
+            let tools_payload = payload.get("tools");
             let tools_used = json_string_array(
-                payload
-                    .get("tools_used")
+                tools_payload
+                    .and_then(|tools| tools.get("calls"))
                     .or_else(|| trace.and_then(|trace| trace.get("tools_used"))),
             );
-            let successful_tools = json_string_array(payload.get("successful_tools"));
+            let successful_tools =
+                json_string_array(tools_payload.and_then(|tools| tools.get("successful")));
             let planner_round = RunPlannerRoundRecord {
                 stage_id: stage.id.clone(),
                 node_id: stage.node_id.clone(),

@@ -101,6 +101,14 @@ pub(super) async fn run_finalize(
         successful_tools: state.successful_tools_used.clone(),
     });
     let trace_summary = crate::llm::trace::agent_trace_summary();
+    let input_tokens = trace_summary
+        .get("total_input_tokens")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0);
+    let output_tokens = trace_summary
+        .get("total_output_tokens")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0);
 
     // Expose final ledger state so post-processors (QC officer, audit
     // pipelines) can reason over what the agent considered "done".
@@ -141,12 +149,18 @@ pub(super) async fn run_finalize(
         "daemon_snapshot_path": state.daemon_snapshot_path,
         "text": state.total_text,
         "visible_text": final_visible_text,
-        "iterations": state.total_iterations,
-        "duration_ms": loop_start.elapsed().as_millis() as i64,
-        "tools_used": state.all_tools_used,
-        "successful_tools": state.successful_tools_used,
-        "rejected_tools": state.rejected_tools,
-        "tool_calling_mode": tool_format,
+        "llm": {
+            "iterations": state.total_iterations,
+            "duration_ms": loop_start.elapsed().as_millis() as i64,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+        },
+        "tools": {
+            "calls": state.all_tools_used,
+            "successful": state.successful_tools_used,
+            "rejected": state.rejected_tools,
+            "mode": tool_format,
+        },
         "deferred_user_messages": state.deferred_user_messages,
         "task_ledger": ledger_json,
         "ledger_done_rejections": ledger_done_nudge_count,

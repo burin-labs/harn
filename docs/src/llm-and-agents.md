@@ -450,9 +450,9 @@ let result = agent_loop(
   "You are a senior engineer.",
   {persistent: true}
 )
-println(result.text)       // the accumulated output
-println(result.status)     // "done", "stuck", "budget_exhausted", "idle", "watchdog", or "failed"
-println(result.iterations) // number of LLM round-trips
+println(result.text)           // the accumulated output
+println(result.status)         // "done", "stuck", "budget_exhausted", "idle", "watchdog", or "failed"
+println(result.llm.iterations) // number of LLM round-trips
 ```
 
 ### How it works
@@ -470,21 +470,43 @@ println(result.iterations) // number of LLM round-trips
 
 ### agent_loop return value
 
-`agent_loop` returns a dict with the following fields:
+`agent_loop` returns a namespaced dict. Execution metrics live under
+`llm`, tool invocation data under `tools`. This shape replaces the
+earlier flat layout (`iterations`, `duration_ms`, `tools_used`,
+`successful_tools`, `rejected_tools`, `tool_calling_mode` were all
+top-level keys before `v0.8`).
 
 | Field | Type | Description |
 |---|---|---|
 | `status` | string | Terminal state: `"done"` (natural completion), `"stuck"` (exceeded `max_nudges` consecutive text-only turns), `"budget_exhausted"` (hit `max_iterations` without any explicit break), `"idle"` (daemon yielded with no remaining wake source), `"watchdog"` (daemon idle-wait tripped the `idle_watchdog_attempts` limit), or `"failed"` (`require_successful_tools` not satisfied). |
 | `text` | string | Accumulated text output from all iterations |
 | `visible_text` | string | Human-visible accumulated output |
-| `iterations` | int | Number of LLM round-trips |
-| `duration_ms` | int | Total wall-clock time in milliseconds |
-| `tools_used` | list | Names of tools that were called |
-| `rejected_tools` | list | Tools rejected by policy/host ceiling |
+| `llm` | dict | LLM execution metrics — see below |
+| `tools` | dict | Tool invocation summary — see below |
 | `deferred_user_messages` | list | Queued human messages deferred until agent yield/completion |
 | `daemon_state` | string | Final daemon lifecycle state; mirrors `status` for daemon loops. |
 | `daemon_snapshot_path` | string or nil | Persisted snapshot path when daemon persistence is enabled |
+| `task_ledger` | dict | Final task-ledger state (deliverables, nudges, etc.) |
+| `trace` | dict | Structured span/event summary for observability |
 | `transcript` | dict | Transcript of the full conversation state |
+
+Nested `llm` fields:
+
+| Field | Type | Description |
+|---|---|---|
+| `iterations` | int | Number of LLM round-trips |
+| `duration_ms` | int | Total wall-clock time in milliseconds |
+| `input_tokens` | int | Sum of input tokens across LLM calls |
+| `output_tokens` | int | Sum of output tokens across LLM calls |
+
+Nested `tools` fields:
+
+| Field | Type | Description |
+|---|---|---|
+| `calls` | list | Names of tools that were attempted |
+| `successful` | list | Tools that returned `status: "ok"` at least once |
+| `rejected` | list | Tools rejected by approval policy or capability ceiling |
+| `mode` | string | Tool-calling contract used for the loop (`"native"`, `"text"`, …) |
 
 ### agent_loop options
 

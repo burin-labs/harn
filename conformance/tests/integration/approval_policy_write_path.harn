@@ -26,5 +26,5 @@ pipeline main() {
     approval_policy: {write_path_allowlist: ["/tmp/*"]},
   },
   )
-  println(len(denied?.rejected_tools) == 0 || denied?.rejected_tools[0] == "write_file")
+  println(len(denied?.tools?.rejected) == 0 || denied?.tools?.rejected[0] == "write_file")
 }

@@ -116,7 +116,7 @@ async fn require_successful_tools_marks_loop_failed_when_no_write_succeeds() {
 
     let result = run_agent_loop_internal(&mut opts, config).await.unwrap();
     assert_eq!(result["status"], "failed");
-    assert_eq!(result["successful_tools"], json!([]));
+    assert_eq!(result["tools"]["successful"], json!([]));
 }
 
 #[test]
