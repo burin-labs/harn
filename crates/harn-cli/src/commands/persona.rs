@@ -1,7 +1,14 @@
-use std::path::Path;
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 use std::process;
+use std::sync::Arc;
 
-use crate::cli::{PersonaInspectArgs, PersonaListArgs};
+use harn_vm::event_log::{AnyEventLog, EventLog};
+
+use crate::cli::{
+    PersonaControlArgs, PersonaInspectArgs, PersonaListArgs, PersonaSpendArgs, PersonaStatusArgs,
+    PersonaTickArgs, PersonaTriggerArgs,
+};
 use crate::package::{self, PersonaManifestEntry, ResolvedPersonaManifest};
 
 pub(crate) fn run_list(manifest: Option<&Path>, args: &PersonaListArgs) {
@@ -120,22 +127,300 @@ pub(crate) fn run_inspect(manifest: Option<&Path>, args: &PersonaInspectArgs) {
     println!("manifest:       {}", catalog.manifest_path.display());
 }
 
+pub(crate) async fn run_status(
+    manifest: Option<&Path>,
+    state_dir: &Path,
+    args: &PersonaStatusArgs,
+) -> Result<(), String> {
+    let catalog = load_catalog_result(manifest)?;
+    let binding = runtime_binding_or_err(&catalog, &args.name)?;
+    let log = open_persona_log(state_dir)?;
+    let status = harn_vm::persona_status(&log, &binding, harn_vm::persona_now_ms()).await?;
+    print_status(&status, args.json);
+    Ok(())
+}
+
+pub(crate) async fn run_pause(
+    manifest: Option<&Path>,
+    state_dir: &Path,
+    args: &PersonaControlArgs,
+) -> Result<(), String> {
+    let catalog = load_catalog_result(manifest)?;
+    let binding = runtime_binding_or_err(&catalog, &args.name)?;
+    let log = open_persona_log(state_dir)?;
+    let status = harn_vm::pause_persona(&log, &binding, harn_vm::persona_now_ms()).await?;
+    print_status(&status, args.json);
+    Ok(())
+}
+
+pub(crate) async fn run_resume(
+    manifest: Option<&Path>,
+    state_dir: &Path,
+    args: &PersonaControlArgs,
+) -> Result<(), String> {
+    let catalog = load_catalog_result(manifest)?;
+    let binding = runtime_binding_or_err(&catalog, &args.name)?;
+    let log = open_persona_log(state_dir)?;
+    let status = harn_vm::resume_persona(&log, &binding, harn_vm::persona_now_ms()).await?;
+    print_status(&status, args.json);
+    Ok(())
+}
+
+pub(crate) async fn run_disable(
+    manifest: Option<&Path>,
+    state_dir: &Path,
+    args: &PersonaControlArgs,
+) -> Result<(), String> {
+    let catalog = load_catalog_result(manifest)?;
+    let binding = runtime_binding_or_err(&catalog, &args.name)?;
+    let log = open_persona_log(state_dir)?;
+    let status = harn_vm::disable_persona(&log, &binding, harn_vm::persona_now_ms()).await?;
+    print_status(&status, args.json);
+    Ok(())
+}
+
+pub(crate) async fn run_tick(
+    manifest: Option<&Path>,
+    state_dir: &Path,
+    args: &PersonaTickArgs,
+) -> Result<(), String> {
+    let catalog = load_catalog_result(manifest)?;
+    let binding = runtime_binding_or_err(&catalog, &args.name)?;
+    let log = open_persona_log(state_dir)?;
+    let now_ms = timestamp_arg(args.at.as_deref())?;
+    let receipt = harn_vm::fire_persona_schedule(
+        &log,
+        &binding,
+        harn_vm::PersonaRunCost {
+            cost_usd: args.cost_usd,
+            tokens: args.tokens,
+        },
+        now_ms,
+    )
+    .await?;
+    log.flush().await.map_err(|error| error.to_string())?;
+    print_receipt(&receipt, args.json);
+    Ok(())
+}
+
+pub(crate) async fn run_trigger(
+    manifest: Option<&Path>,
+    state_dir: &Path,
+    args: &PersonaTriggerArgs,
+) -> Result<(), String> {
+    let catalog = load_catalog_result(manifest)?;
+    let binding = runtime_binding_or_err(&catalog, &args.name)?;
+    let log = open_persona_log(state_dir)?;
+    let now_ms = timestamp_arg(args.at.as_deref())?;
+    let metadata = parse_metadata(&args.metadata)?;
+    let receipt = harn_vm::fire_persona_trigger(
+        &log,
+        &binding,
+        &args.provider,
+        &args.kind,
+        metadata,
+        harn_vm::PersonaRunCost {
+            cost_usd: args.cost_usd,
+            tokens: args.tokens,
+        },
+        now_ms,
+    )
+    .await?;
+    log.flush().await.map_err(|error| error.to_string())?;
+    print_receipt(&receipt, args.json);
+    Ok(())
+}
+
+pub(crate) async fn run_spend(
+    manifest: Option<&Path>,
+    state_dir: &Path,
+    args: &PersonaSpendArgs,
+) -> Result<(), String> {
+    let catalog = load_catalog_result(manifest)?;
+    let binding = runtime_binding_or_err(&catalog, &args.name)?;
+    let log = open_persona_log(state_dir)?;
+    let now_ms = timestamp_arg(args.at.as_deref())?;
+    let budget = harn_vm::record_persona_spend(
+        &log,
+        &binding,
+        harn_vm::PersonaRunCost {
+            cost_usd: args.cost_usd,
+            tokens: args.tokens,
+        },
+        now_ms,
+    )
+    .await?;
+    log.flush().await.map_err(|error| error.to_string())?;
+    if args.json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&budget)
+                .unwrap_or_else(|error| fatal(&format!("failed to serialize budget: {error}")))
+        );
+    } else {
+        println!(
+            "budget: spent_today=${:.4} tokens_today={} exhausted={}",
+            budget.spent_today_usd, budget.tokens_today, budget.exhausted
+        );
+    }
+    Ok(())
+}
+
 fn load_catalog_or_exit(manifest: Option<&Path>) -> ResolvedPersonaManifest {
+    match load_catalog_result(manifest) {
+        Ok(catalog) => catalog,
+        Err(message) => fatal(&message),
+    }
+}
+
+fn load_catalog_result(manifest: Option<&Path>) -> Result<ResolvedPersonaManifest, String> {
     let result = if let Some(path) = manifest {
         package::load_personas_from_manifest_path(path).map(Some)
     } else {
         package::load_personas_config(None)
     };
     match result {
-        Ok(Some(catalog)) => catalog,
-        Ok(None) => {
-            fatal("no harn.toml found; pass --manifest <path> or run inside a Harn project")
+        Ok(Some(catalog)) => Ok(catalog),
+        Ok(None) => Err(
+            "no harn.toml found; pass --manifest <path> or run inside a Harn project".to_string(),
+        ),
+        Err(errors) => Err(errors
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n")),
+    }
+}
+
+fn runtime_binding_or_err(
+    catalog: &ResolvedPersonaManifest,
+    name: &str,
+) -> Result<harn_vm::PersonaRuntimeBinding, String> {
+    let persona = catalog
+        .personas
+        .iter()
+        .find(|persona| persona.name.as_deref() == Some(name))
+        .ok_or_else(|| {
+            format!(
+                "persona '{}' not found in {}",
+                name,
+                catalog.manifest_path.display()
+            )
+        })?;
+    Ok(harn_vm::PersonaRuntimeBinding {
+        name: persona.name.clone().unwrap_or_default(),
+        entry_workflow: persona.entry_workflow.clone().unwrap_or_default(),
+        schedules: persona.schedules.clone(),
+        triggers: persona.triggers.clone(),
+        budget: harn_vm::PersonaBudgetPolicy {
+            daily_usd: persona.budget.daily_usd,
+            hourly_usd: persona.budget.hourly_usd,
+            run_usd: persona.budget.run_usd,
+            max_tokens: persona.budget.max_tokens,
+        },
+    })
+}
+
+fn open_persona_log(state_dir: &Path) -> Result<Arc<AnyEventLog>, String> {
+    let state_dir = absolutize_from_cwd(state_dir)?;
+    std::fs::create_dir_all(&state_dir).map_err(|error| {
+        format!(
+            "failed to create persona state dir {}: {error}",
+            state_dir.display()
+        )
+    })?;
+    harn_vm::event_log::install_default_for_base_dir(&state_dir)
+        .map_err(|error| format!("failed to open persona event log: {error}"))
+}
+
+fn absolutize_from_cwd(path: &Path) -> Result<PathBuf, String> {
+    if path.is_absolute() {
+        return Ok(path.to_path_buf());
+    }
+    std::env::current_dir()
+        .map(|cwd| cwd.join(path))
+        .map_err(|error| format!("failed to read current directory: {error}"))
+}
+
+fn timestamp_arg(value: Option<&str>) -> Result<i64, String> {
+    match value {
+        Some(value) => harn_vm::parse_persona_ms(value),
+        None => Ok(harn_vm::persona_now_ms()),
+    }
+}
+
+fn parse_metadata(values: &[String]) -> Result<BTreeMap<String, String>, String> {
+    let mut metadata = BTreeMap::new();
+    for value in values {
+        let Some((key, raw)) = value.split_once('=') else {
+            return Err(format!("metadata '{value}' must use KEY=VALUE syntax"));
+        };
+        let key = key.trim();
+        if key.is_empty() {
+            return Err(format!("metadata '{value}' has an empty key"));
         }
-        Err(errors) => {
-            for error in &errors {
-                eprintln!("error: {error}");
-            }
-            process::exit(1);
+        metadata.insert(key.to_string(), raw.to_string());
+    }
+    Ok(metadata)
+}
+
+fn print_status(status: &harn_vm::PersonaStatus, json: bool) {
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(status)
+                .unwrap_or_else(|error| fatal(&format!("failed to serialize status: {error}")))
+        );
+        return;
+    }
+    println!("persona:        {}", status.name);
+    println!("state:          {}", status.state.as_str());
+    println!("entry_workflow: {}", status.entry_workflow);
+    println!(
+        "last_run:       {}",
+        status.last_run.as_deref().unwrap_or("-")
+    );
+    println!(
+        "next_run:       {}",
+        status.next_scheduled_run.as_deref().unwrap_or("-")
+    );
+    println!("queued_events:  {}", status.queued_events);
+    println!(
+        "active_lease:   {}",
+        status
+            .active_lease
+            .as_ref()
+            .map(|lease| lease.id.as_str())
+            .unwrap_or("-")
+    );
+    println!(
+        "budget:         spent_today=${:.4} remaining_today={}",
+        status.budget.spent_today_usd,
+        status
+            .budget
+            .remaining_today_usd
+            .map(|value| format!("${value:.4}"))
+            .unwrap_or_else(|| "-".to_string())
+    );
+    if let Some(error) = &status.last_error {
+        println!("last_error:     {error}");
+    }
+}
+
+fn print_receipt(receipt: &harn_vm::PersonaRunReceipt, json: bool) {
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(receipt)
+                .unwrap_or_else(|error| fatal(&format!("failed to serialize receipt: {error}")))
+        );
+    } else {
+        println!(
+            "persona={} status={} work_key={} queued={}",
+            receipt.persona, receipt.status, receipt.work_key, receipt.queued
+        );
+        if let Some(error) = &receipt.error {
+            println!("error={error}");
         }
     }
 }

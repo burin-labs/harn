@@ -9,6 +9,14 @@ granular archaeology.
 
 ## Unreleased
 
+### Added
+
+- **Continuous persona runtime primitives (#462).** Adds an
+  event-sourced `persona.runtime.events` runtime with lifecycle state,
+  single-writer leases, schedule and external trigger wake receipts,
+  pause/resume/disable controls, per-persona budget enforcement, and
+  stable `harn persona status <name> --json` output for hosts.
+
 ### Changed
 
 - **Unified `agent_loop` `llm_retries` default at 4 (#554).** Previously
