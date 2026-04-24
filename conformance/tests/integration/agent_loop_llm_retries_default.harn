@@ -1,0 +1,14 @@
+pipeline default() {
+  llm_mock_clear()
+  // The default agent_loop retry budget is four retries after the
+  // first attempt. This succeeds only if the fifth mock response is reached.
+  llm_mock({error: {category: "rate_limit", message: "429 transient 1"}})
+  llm_mock({error: {category: "rate_limit", message: "429 transient 2"}})
+  llm_mock({error: {category: "rate_limit", message: "429 transient 3"}})
+  llm_mock({error: {category: "rate_limit", message: "429 transient 4"}})
+  llm_mock({text: "Recovered after default retries. ##DONE##"})
+  let result = agent_loop("finish", nil, {provider: "mock", llm_backoff_ms: 0})
+  println(result.status)
+  println(result.visible_text)
+  println(len(llm_mock_calls()))
+}

@@ -357,7 +357,9 @@ pub(crate) use self::agent::{
     current_agent_session_id, current_host_bridge, emit_agent_event as emit_live_agent_event,
     parse_skill_config, run_agent_loop_internal,
 };
-pub(crate) use self::agent_config::{agent_loop_result_from_llm, AgentLoopConfig};
+pub(crate) use self::agent_config::{
+    agent_loop_result_from_llm, AgentLoopConfig, DEFAULT_AGENT_LOOP_LLM_RETRIES,
+};
 pub use self::agent_config::{
     register_agent_loop_with_bridge, register_llm_call_structured_with_bridge,
     register_llm_call_with_bridge,
@@ -965,7 +967,8 @@ pub fn register_llm_builtins(vm: &mut Vm) {
                 approval_policy,
                 daemon,
                 daemon_config,
-                llm_retries: opt_int(&options, "llm_retries").unwrap_or(3) as usize,
+                llm_retries: opt_int(&options, "llm_retries")
+                    .unwrap_or(DEFAULT_AGENT_LOOP_LLM_RETRIES as i64) as usize,
                 llm_backoff_ms: opt_int(&options, "llm_backoff_ms").unwrap_or(2000) as u64,
                 token_budget: opt_int(&options, "token_budget"),
                 exit_when_verified,
