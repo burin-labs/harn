@@ -1,0 +1,26 @@
+rate_limit thrown=rate_limit msg=synthetic-rate_limit provider=mock model=mock-model
+rate_limit safe=rate_limit msg=safe-rate_limit ok=false
+timeout thrown=timeout msg=synthetic-timeout provider=mock model=mock-model
+timeout safe=timeout msg=safe-timeout ok=false
+overloaded thrown=overloaded msg=synthetic-overloaded provider=mock model=mock-model
+overloaded safe=overloaded msg=safe-overloaded ok=false
+server_error thrown=server_error msg=synthetic-server_error provider=mock model=mock-model
+server_error safe=server_error msg=safe-server_error ok=false
+transient_network thrown=transient_network msg=synthetic-transient_network provider=mock model=mock-model
+transient_network safe=transient_network msg=safe-transient_network ok=false
+schema_validation thrown=schema_validation msg=synthetic-schema_validation provider=mock model=mock-model
+schema_validation safe=schema_validation msg=safe-schema_validation ok=false
+auth thrown=auth msg=synthetic-auth provider=mock model=mock-model
+auth safe=auth msg=safe-auth ok=false
+not_found thrown=not_found msg=synthetic-not_found provider=mock model=mock-model
+not_found safe=not_found msg=safe-not_found ok=false
+circuit_open thrown=circuit_open msg=synthetic-circuit_open provider=mock model=mock-model
+circuit_open safe=circuit_open msg=safe-circuit_open ok=false
+tool_error thrown=tool_error msg=synthetic-tool_error provider=mock model=mock-model
+tool_error safe=tool_error msg=safe-tool_error ok=false
+tool_rejected thrown=tool_rejected msg=synthetic-tool_rejected provider=mock model=mock-model
+tool_rejected safe=tool_rejected msg=safe-tool_rejected ok=false
+cancelled thrown=cancelled msg=synthetic-cancelled provider=mock model=mock-model
+cancelled safe=cancelled msg=safe-cancelled ok=false
+generic thrown=generic msg=synthetic-generic provider=mock model=mock-model
+generic safe=generic msg=safe-generic ok=false

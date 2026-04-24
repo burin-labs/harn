@@ -71,7 +71,7 @@ pipeline default() {
   },
   )
   }
-  println(contains(unwrap_err(err), "schema"))
+  println(contains(unwrap_err(err).message, "schema"))
   println(len(llm_mock_calls()))
   // `schema_retry_nudge: false` still retries; it just omits the
   // corrective user message.
@@ -116,5 +116,5 @@ pipeline default() {
   },
   )
   }
-  println(contains(unwrap_err(prose_err), "parseable JSON"))
+  println(contains(unwrap_err(prose_err).message, "parseable JSON"))
 }

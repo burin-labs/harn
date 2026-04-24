@@ -1,19 +1,30 @@
-// Inject a categorized error via llm_mock({error: ...}) and verify
-// the category round-trips through the `try { llm_call } catch` path.
+/**
+ * `llm_call`'s catch value is a dict `{category, message,
+ * retry_after_ms?, provider, model}` — the same shape `llm_call_safe`
+ * returns inside its `error` envelope. `error_category(e)` and
+ * `is_rate_limited(e)` still work (they accept dict or string); scripts
+ * can also dispatch directly on `e.category`.
+ */
 pipeline default(task) {
   // `llm_retries: 0` disables the llm_call-internal transient retry so
   // a single injected error surfaces as a throw on the first attempt.
-  llm_mock({error: {category: "rate_limit", message: "429 Too Many Requests"}})
+  llm_mock({error: {category: "rate_limit", message: "429 Too Many Requests", retry_after_ms: 2500}})
   try {
-    llm_call("hello", nil, {provider: "mock", llm_retries: 0})
+    llm_call("hello", nil, {provider: "mock", model: "mock-model", llm_retries: 0})
   } catch (e) {
     println(error_category(e))
     println(is_rate_limited(e))
+    println(e.category)
+    println(e.retry_after_ms)
+    println(e.provider)
+    println(e.model)
   }
   llm_mock({error: {category: "overloaded", message: "529 overloaded"}})
   try {
     llm_call("hello again", nil, {provider: "mock", llm_retries: 0})
   } catch (e2) {
     println(error_category(e2))
+    // retry_after_ms is omitted when the provider didn't surface one.
+    println(e2.retry_after_ms == nil)
   }
 }
