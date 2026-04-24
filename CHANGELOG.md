@@ -7,7 +7,16 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
-## Unreleased
+## v0.7.36
+
+### Added
+
+- **`assemble_context` builtin (#530).** Adaptive context-assembly
+  primitive that returns a packed prompt of relevance-ranked snippets
+  bounded by a token budget. Pipelines can pass typed source records
+  and per-source metadata; the builtin handles ranking, dedup, and
+  truncation so workflows don't reimplement the same context-packing
+  logic.
 
 ### Changed
 
