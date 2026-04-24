@@ -793,6 +793,16 @@ assert(is_err(result))
 | `try_receive(ch)` | ch: channel | any or nil | Non-blocking receive. Returns nil if no data available |
 | `select(ch1, ch2, ...)` | channels: channel | dict or nil | Wait for data on any channel. Returns `{index, value, channel}` for the first ready channel, or nil if all closed |
 
+### Supervisors
+
+| Function | Parameters | Returns | Description |
+|---|---|---|---|
+| `supervisor_start(spec)` | spec: dict | supervisor handle | Start a named supervisor with child `task` closures, child kinds, restart policy, and propagation strategy |
+| `supervisor_state(handle_or_id)` | handle or string | dict | Return supervisor children, status, restart counts, last errors, wait reasons, active leases, next restart times, and metrics |
+| `supervisor_events(handle_or_id)` | handle or string | list | Return lifecycle events for started, stopped, failed, restarted, suppressed, escalated, and shutdown activity |
+| `supervisor_metrics(handle_or_id)` | handle or string | dict | Return aggregate lifecycle counters |
+| `supervisor_stop(handle_or_id, timeout?)` | handle or string, duration | dict | Request cooperative child cancellation, wait for drain, then force-abort remaining children |
+
 ### Atomics
 
 | Function | Parameters | Returns | Description |

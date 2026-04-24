@@ -33,6 +33,7 @@ mod sets;
 mod shapes;
 mod skills;
 mod strings;
+pub(crate) mod supervisor;
 pub mod template;
 mod testing;
 pub(crate) mod tools;
@@ -102,6 +103,7 @@ pub fn register_agent_stdlib(vm: &mut Vm) {
     hitl::register_hitl_builtins(vm);
     hitl_read::register_hitl_read_builtins(vm);
     waitpoint::register_waitpoint_builtins(vm);
+    supervisor::register_supervisor_builtins(vm);
     agents::register_agent_builtins(vm);
     agent_sessions::register_agent_session_builtins(vm);
     workflow_messages::register_workflow_message_builtins(vm);
@@ -160,6 +162,7 @@ pub fn reset_stdlib_state() {
     monitors::reset_monitor_state();
     waitpoints::reset_waitpoint_state();
     waitpoint::reset_waitpoint_state();
+    supervisor::reset_supervisor_state();
     agents::records::reset_eval_metrics();
     agents::records::reset_friction_events();
     tools::clear_current_tool_registry();

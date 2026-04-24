@@ -1422,6 +1422,66 @@ let msg = mailbox_receive(inbox)
 - `mailbox_metrics(target)` reports `depth`, `capacity`, `sent_count`,
   `received_count`, `failed_send_count`, and `closed`.
 
+### Supervisor trees
+
+Supervisors manage named long-lived child loops and restart them according to a
+small workflow-oriented policy surface. Children are closures, so the same
+primitive can wrap connector streams, continuous personas, actor/mailbox loops,
+workflow runners, and generic Harn task groups without new syntax.
+
+```harn
+fn poll_connector(name) {
+  name
+}
+
+let sup = supervisor_start({
+  name: "ops",
+  strategy: "one_for_one",
+  children: [
+    {
+      name: "github-stream",
+      kind: "connector_stream",
+      restart: {
+        mode: "on_failure",
+        max_restarts: 5,
+        window_ms: 60000,
+        backoff_ms: 250,
+        max_backoff_ms: 30000,
+        factor: 2,
+        jitter_ms: 100,
+        circuit_open_ms: 300000,
+      },
+      task: { ctx -> poll_connector(ctx.child_name) },
+    },
+  ],
+})
+
+let _state = supervisor_state(sup)
+
+let _events = supervisor_events(sup)
+supervisor_stop(sup, 2s)
+```
+
+`strategy` supports `one_for_one`, `one_for_all`, `rest_for_one`, and
+`escalate_to_parent`. Restart modes are `never`, `on_failure`, and `always`.
+Restart policies support deterministic restart caps, rolling windows,
+exponential backoff, deterministic jitter, and circuit-open delay before a
+suppressed child is eligible to restart again. Child status includes `running`,
+`waiting`, `circuit_open`, `stopped`, `failed`, and `suppressed`.
+
+- `supervisor_start(spec)` starts a supervisor and returns a supervisor handle.
+- `supervisor_state(handle_or_id)` returns children, status, restart count,
+  last error, current wait reason, active lease, next restart time, and metrics.
+- `supervisor_events(handle_or_id)` returns lifecycle events for child started,
+  stopped, failed, restarted, suppressed, escalated, and supervisor shutdown.
+- `supervisor_metrics(handle_or_id)` returns lifecycle counters.
+- `supervisor_stop(handle_or_id, timeout?)` requests cooperative child
+  cancellation, waits for drain, then force-aborts any remaining children.
+
+`runtime_context().debug.supervisors` exposes the same state for runtime
+introspection tooling. Supervisor lifecycle events are also appended to the
+active EventLog topic `supervisor.lifecycle` when an EventLog is installed.
+
 ### Channels
 
 Channels provide typed message-passing between concurrent tasks.
