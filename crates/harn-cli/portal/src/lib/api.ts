@@ -1,6 +1,9 @@
 import type {
   PortalHighlightKeywords,
   PortalCostReport,
+  PortalDlqBulkResponse,
+  PortalDlqEntry,
+  PortalDlqListResponse,
   PortalLaunchJob,
   PortalLaunchJobList,
   PortalLlmOptions,
@@ -79,6 +82,33 @@ export function fetchLlmOptions(): Promise<PortalLlmOptions> {
 
 export function fetchCostReport(): Promise<PortalCostReport> {
   return fetchJson<PortalCostReport>("/api/costs")
+}
+
+export function fetchDlq(params?: {
+  trigger_id?: string
+  provider?: string
+  error_class?: string
+  since?: string
+  until?: string
+  state?: string
+  q?: string
+}): Promise<PortalDlqListResponse> {
+  const search = new URLSearchParams()
+  for (const [key, value] of Object.entries(params ?? {})) {
+    if (value) {
+      search.set(key, value)
+    }
+  }
+  const suffix = search.toString()
+  return fetchJson<PortalDlqListResponse>(`/api/dlq${suffix ? `?${suffix}` : ""}`)
+}
+
+export function fetchDlqEntry(entryId: string): Promise<PortalDlqEntry> {
+  return fetchJson<PortalDlqEntry>(`/api/dlq/${encodeURIComponent(entryId)}`)
+}
+
+export function exportDlqEntry(entryId: string): Promise<unknown> {
+  return fetchJson<unknown>(`/api/dlq/${encodeURIComponent(entryId)}/export`)
 }
 
 export function fetchRunDetail(path: string): Promise<PortalRunDetail> {
@@ -175,4 +205,60 @@ export async function replayTriggerEvent(event_id: string): Promise<PortalLaunch
     // Keep status-based fallback.
   }
   throw new Error(message)
+}
+
+async function postJson<T>(url: string, payload: unknown = {}): Promise<T> {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  })
+  if (response.ok) {
+    return response.json() as Promise<T>
+  }
+
+  let message = `Request failed: ${response.status}`
+  try {
+    const payload = (await response.json()) as { error?: string }
+    if (payload.error) {
+      message = `${message} ${payload.error}`
+    }
+  } catch {
+    // Keep status-based fallback.
+  }
+  throw new Error(message)
+}
+
+export function replayDlqEntry(entryId: string, driftAccept = false): Promise<PortalLaunchJob> {
+  const suffix = driftAccept ? "replay-drift-accept" : "replay"
+  return postJson<PortalLaunchJob>(`/api/dlq/${encodeURIComponent(entryId)}/${suffix}`)
+}
+
+export function purgeDlqEntry(entryId: string): Promise<PortalDlqEntry> {
+  return postJson<PortalDlqEntry>(`/api/dlq/${encodeURIComponent(entryId)}/purge`)
+}
+
+export function replayDlqBulk(payload: {
+  trigger_id?: string
+  provider?: string
+  error_class?: string
+  since?: string
+  until?: string
+  dry_run?: boolean
+  rate_limit_per_second?: number
+}): Promise<PortalDlqBulkResponse> {
+  return postJson<PortalDlqBulkResponse>("/api/dlq/bulk/replay", payload)
+}
+
+export function purgeDlqBulk(payload: {
+  trigger_id?: string
+  provider?: string
+  error_class?: string
+  older_than_seconds?: number
+  dry_run?: boolean
+  rate_limit_per_second?: number
+}): Promise<PortalDlqBulkResponse> {
+  return postJson<PortalDlqBulkResponse>("/api/dlq/bulk/purge", payload)
 }

@@ -1,4 +1,5 @@
 mod assets;
+mod dlq;
 mod dto;
 mod errors;
 mod handlers;

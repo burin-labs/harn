@@ -157,6 +157,9 @@ Each `DlqEntry` includes:
 - Trigger identity (`binding_id`, `binding_version`)
 - Current `state`
 - Latest `error`
+- Derived `error_class` (`provider_5xx`, `predicate_panic`,
+  `handler_panic`, `handler_timeout`, `auth_failed`, `budget_exhausted`, or
+  `unknown`)
 - `retry_history`
 
 `retry_history` records every DLQ attempt, including replay attempts.

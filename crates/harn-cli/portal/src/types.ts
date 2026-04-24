@@ -554,3 +554,73 @@ export type PortalLaunchJob = {
 export type PortalLaunchJobList = {
   jobs: PortalLaunchJob[]
 }
+
+export type PortalDlqAttempt = {
+  attempt: number
+  at: string
+  status: string
+  error: string | null
+}
+
+export type PortalDlqEntry = {
+  id: string
+  event_id: string
+  trigger_id: string
+  binding_id: string
+  binding_key: string
+  binding_version: number | null
+  provider: string
+  event_kind: string
+  failed_at: string
+  failed_at_ms: number
+  last_error: string
+  error_class: string
+  retry_count: number
+  state: string
+  headers: Record<string, string>
+  payload: unknown
+  event: unknown
+  attempt_history: PortalDlqAttempt[]
+  predicate_trace: unknown[]
+}
+
+export type PortalDlqGroup = {
+  error_class: string
+  count: number
+  newest_failed_at: string | null
+}
+
+export type PortalDlqAlert = {
+  trigger_id: string
+  error_class: string
+  count: number
+  window_seconds: number
+  threshold_entries: number
+  destinations: string[]
+}
+
+export type PortalDlqAlertConfig = {
+  trigger_id: string
+  destinations: string[]
+  threshold_entries: number | null
+  threshold_percent: number | null
+}
+
+export type PortalDlqListResponse = {
+  total: number
+  entries: PortalDlqEntry[]
+  groups: PortalDlqGroup[]
+  alerts: PortalDlqAlert[]
+  alert_configs: PortalDlqAlertConfig[]
+}
+
+export type PortalDlqBulkResponse = {
+  operation: string
+  dry_run: boolean
+  matched_count: number
+  accepted_count: number
+  skipped_count: number
+  rate_limit_per_second: number
+  jobs: PortalLaunchJob[]
+  entries: PortalDlqEntry[]
+}

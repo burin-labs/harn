@@ -54,6 +54,16 @@ granular archaeology.
   over tool args. Child agents inherit parent scopes by intersection,
   so delegation cannot widen trust. Permission denials surface as
   structured tool results rather than opaque failures.
+- **Portal DLQ management surface (#192).** Adds `/dlq` to the React
+  portal with filterable DLQ list, error-class groups, active alert
+  summary, detail inspector, replay, drift-accept replay, purge,
+  export-fixture, and bulk controls. Admin endpoints expose DLQ
+  list/detail/replay/purge/export plus bulk replay and purge, reading
+  from `trigger.dlq` and normalizing both dispatcher `dlq_moved` and
+  stdlib `dlq_entry` shapes. DLQ records are tagged with a derived
+  `error_class` at move/upsert time, and per-trigger DLQ alert
+  destinations/thresholds configured in `harn.toml` surface through
+  the portal API.
 
 ### Changed
 

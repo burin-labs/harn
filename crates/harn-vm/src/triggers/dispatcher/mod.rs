@@ -357,7 +357,13 @@ pub struct DlqEntry {
     pub event: TriggerEvent,
     pub attempt_count: u32,
     pub final_error: String,
+    #[serde(default = "default_dlq_error_class")]
+    pub error_class: String,
     pub attempts: Vec<DispatchAttemptRecord>,
+}
+
+fn default_dlq_error_class() -> String {
+    "unknown".to_string()
 }
 
 #[derive(Clone, Debug)]
@@ -2010,6 +2016,8 @@ impl Dispatcher {
                             event: event.clone(),
                             attempt_count: attempt,
                             final_error: final_error.clone(),
+                            error_class: crate::triggers::classify_trigger_dlq_error(&final_error)
+                                .to_string(),
                             attempts: attempts.clone(),
                         };
                         self.state
@@ -2287,6 +2295,8 @@ impl Dispatcher {
                         event: event.clone(),
                         attempt_count: attempt,
                         final_error: final_error.clone(),
+                        error_class: crate::triggers::classify_trigger_dlq_error(&final_error)
+                            .to_string(),
                         attempts: attempts.clone(),
                     };
                     self.state
@@ -3677,6 +3687,7 @@ impl Dispatcher {
             event: event.clone(),
             attempt_count: 0,
             final_error: final_error.to_string(),
+            error_class: crate::triggers::classify_trigger_dlq_error(final_error).to_string(),
             attempts: Vec::new(),
         };
         self.state
@@ -3780,6 +3791,7 @@ impl Dispatcher {
             event: event.clone(),
             attempt_count: 0,
             final_error: final_error.to_string(),
+            error_class: crate::triggers::classify_trigger_dlq_error(final_error).to_string(),
             attempts: Vec::new(),
         };
         self.state
@@ -4387,6 +4399,10 @@ fn dlq_node_metadata(
         serde_json::json!(attempt_count),
     );
     metadata.insert("final_error".to_string(), serde_json::json!(final_error));
+    metadata.insert(
+        "error_class".to_string(),
+        serde_json::json!(crate::triggers::classify_trigger_dlq_error(final_error)),
+    );
     metadata
 }
 

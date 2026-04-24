@@ -271,4 +271,82 @@ describe("App", () => {
     await userEvent.click(replayButtons[replayButtons.length - 1])
     expect(await screen.findByText("Queued trigger replay trigger_evt_current")).toBeInTheDocument()
   })
+
+  it("shows DLQ entries and queues replay actions", async () => {
+    vi.stubGlobal("confirm", vi.fn(() => true))
+    const fetchMock = vi.fn(async (input: string) => {
+      if (input.startsWith("/api/runs")) {
+        return { ok: true, json: async () => ({ ...runsPayload, runs: [] }) }
+      }
+      if (input.startsWith("/api/dlq")) {
+        if (input === "/api/dlq/dlq_cake/replay") {
+          return {
+            ok: true,
+            json: async () => ({
+              id: "job-dlq",
+              mode: "trigger_replay",
+              target_label: "trigger replay trigger_evt_cake",
+              status: "running",
+              started_at: "2026-04-24T10:10:00Z",
+              finished_at: null,
+              exit_code: null,
+              logs: "",
+              discovered_run_paths: [],
+              workspace_dir: null,
+              transcript_path: null,
+            }),
+          }
+        }
+        return {
+          ok: true,
+          json: async () => ({
+            total: 1,
+            groups: [{ error_class: "provider_5xx", count: 1, newest_failed_at: "2026-04-24T10:00:00Z" }],
+            alerts: [],
+            alert_configs: [],
+            entries: [
+              {
+                id: "dlq_cake",
+                event_id: "trigger_evt_cake",
+                trigger_id: "cake-classifier",
+                binding_id: "cake-classifier",
+                binding_key: "cake-classifier@v1",
+                binding_version: 1,
+                provider: "github",
+                event_kind: "issues.opened",
+                failed_at: "2026-04-24T10:00:00Z",
+                failed_at_ms: 1777044000000,
+                last_error: "provider returned 503",
+                error_class: "provider_5xx",
+                retry_count: 3,
+                state: "pending",
+                headers: { "x-delivery": "abc" },
+                payload: { issue: { number: 7 } },
+                event: {},
+                attempt_history: [{ attempt: 1, at: "2026-04-24T10:00:00Z", status: "failed", error: "503" }],
+                predicate_trace: [{ kind: "predicate.evaluated" }],
+              },
+            ],
+          }),
+        }
+      }
+      throw new Error(`unexpected fetch ${input}`)
+    })
+    vi.stubGlobal("fetch", fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={["/dlq"]}>
+        <IntlProvider locale="en">
+          <App />
+        </IntlProvider>
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText("Dead-letter queue")).toBeInTheDocument()
+    expect(await screen.findByText("cake-classifier")).toBeInTheDocument()
+    expect(screen.getByText("provider_5xx: 1")).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole("button", { name: "Replay" }))
+    expect(await screen.findByText("Queued trigger replay trigger_evt_cake")).toBeInTheDocument()
+  })
 })

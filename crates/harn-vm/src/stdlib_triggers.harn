@@ -1,11 +1,13 @@
-// std/triggers — typed trigger envelopes shared across inbound providers.
-//
-// Import with: `import "std/triggers"`.
-//
-// The runtime persists RFC3339 timestamps, typed signature status, and a
-// provider-tagged payload union. Connector-specific payloads intentionally
-// start with a small normalized surface plus `raw: dict`; provider tickets can
-// refine these aliases later without changing the top-level TriggerEvent shape.
+/**
+ * std/triggers — typed trigger envelopes shared across inbound providers.
+ *
+ * Import with: `import "std/triggers"`.
+ *
+ * The runtime persists RFC3339 timestamps, typed signature status, and a
+ * provider-tagged payload union. Connector-specific payloads intentionally
+ * start with a small normalized surface plus `raw: dict`; provider tickets can
+ * refine these aliases later without changing the top-level TriggerEvent shape.
+ */
 type ProviderId = "github" | "slack" | "linear" | "notion" | "cron" | "webhook" | "a2a-push" | "kafka" | "nats" | "pulsar" | "postgres-cdc" | "email" | "websocket" | string
 
 type SignatureVerified = {state: "verified"}
@@ -190,7 +192,7 @@ type DispatchHandle = {event_id: string, binding_id: string, binding_version: in
 
 type DlqAttempt = {attempt: int, at: string, status: string, error: string | nil}
 
-type DlqEntry = {id: string, event_id: string, binding_id: string, binding_version: int, provider: string, kind: string, state: string, error: string, event: TriggerEvent, retry_history: list<DlqAttempt>}
+type DlqEntry = {id: string, event_id: string, binding_id: string, binding_version: int, provider: string, kind: string, state: string, error: string, error_class: string, event: TriggerEvent, retry_history: list<DlqAttempt>}
 
 type TriggerActionGraphEvent = {kind: string, headers: dict, payload: dict}
 

@@ -68,8 +68,14 @@ struct DlqEntryRecord {
     kind: String,
     state: String,
     error: String,
+    #[serde(default = "default_dlq_error_class")]
+    error_class: String,
     event: TriggerEvent,
     retry_history: Vec<DlqAttemptRecord>,
+}
+
+fn default_dlq_error_class() -> String {
+    "unknown".to_string()
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -633,10 +639,12 @@ async fn upsert_dlq_entry(
         kind: event.kind.clone(),
         state: "pending".to_string(),
         error: error.to_string(),
+        error_class: crate::triggers::classify_trigger_dlq_error(error).to_string(),
         event: event.clone(),
         retry_history: Vec::new(),
     };
     entry.error = error.to_string();
+    entry.error_class = crate::triggers::classify_trigger_dlq_error(error).to_string();
     retry_history.push(DlqAttemptRecord {
         attempt: (retry_history.len() + 1) as u32,
         at: clock::now_utc()
