@@ -200,10 +200,7 @@ impl LinearConnector {
         let client = Arc::new(LinearClient {
             provider_id: ProviderId::from(LINEAR_PROVIDER_ID),
             state: state.clone(),
-            http: reqwest::Client::builder()
-                .user_agent("harn-linear-connector")
-                .build()
-                .unwrap_or_else(|_| reqwest::Client::new()),
+            http: crate::connectors::outbound_http_client("harn-linear-connector"),
         });
         Self {
             provider_id: ProviderId::from(LINEAR_PROVIDER_ID),

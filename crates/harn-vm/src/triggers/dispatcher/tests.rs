@@ -2107,7 +2107,7 @@ pub fn local_fn(event: TriggerEvent) -> string {
         .await;
 }
 
-#[tokio::test(flavor = "current_thread")]
+#[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn drain_waits_for_in_flight_local_handlers_without_cancelling() {
     let local = tokio::task::LocalSet::new();
     local
@@ -2136,10 +2136,11 @@ pub fn slow_handler(event: TriggerEvent) -> string {
             });
 
             wait_for_dispatcher_in_flight(&dispatcher, 1).await;
-            let report = dispatcher
-                .drain(Duration::from_secs(1))
-                .await
-                .expect("drain completes");
+            let drain = dispatcher.drain(Duration::from_secs(1));
+            tokio::pin!(drain);
+            tokio::task::yield_now().await;
+            tokio::time::advance(Duration::from_millis(50)).await;
+            let report = drain.await.expect("drain completes");
             assert!(report.drained, "{report:?}");
             assert_eq!(report.in_flight, 0);
             assert_eq!(report.retry_queue_depth, 0);
@@ -2377,7 +2378,7 @@ pub fn local_fn(event: TriggerEvent) -> string {
         .await;
 }
 
-#[tokio::test(flavor = "current_thread")]
+#[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn flow_control_singleton_skips_while_inflight() {
     let local = tokio::task::LocalSet::new();
     local
@@ -2415,6 +2416,7 @@ pub fn slow_handler(event: TriggerEvent) -> string {
                 .dispatch_event(trigger_event("issues.opened", "delivery-singleton-2"))
                 .await
                 .expect("second dispatch returns skip");
+            tokio::time::advance(Duration::from_millis(50)).await;
             let first = first.await.expect("join singleton leader");
 
             assert_eq!(first[0].status, DispatchStatus::Succeeded);
@@ -2812,7 +2814,7 @@ pub fn local_fn(event: TriggerEvent) -> dict {
         .await;
 }
 
-#[tokio::test(flavor = "current_thread")]
+#[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn flow_control_priority_prefers_higher_ranked_waiters() {
     let local = tokio::task::LocalSet::new();
     local
@@ -2932,6 +2934,10 @@ pub fn slow_handler(event: TriggerEvent) -> string {
                     .await
                     .expect("gold waiter succeeds")
             });
+
+            tokio::time::advance(Duration::from_millis(30)).await;
+            tokio::time::advance(Duration::from_millis(30)).await;
+            tokio::time::advance(Duration::from_millis(30)).await;
 
             let leader = leader.await.expect("join leader");
             let gold = gold_waiter.await.expect("join gold waiter");

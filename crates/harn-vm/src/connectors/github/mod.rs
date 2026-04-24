@@ -305,10 +305,7 @@ impl GitHubConnector {
         let client = Arc::new(GitHubClient {
             provider_id: ProviderId::from(GITHUB_PROVIDER_ID),
             state: state.clone(),
-            http: reqwest::Client::builder()
-                .user_agent("harn-github-connector")
-                .build()
-                .unwrap_or_else(|_| reqwest::Client::new()),
+            http: crate::connectors::outbound_http_client("harn-github-connector"),
             tokens: GitHubInstallationTokenStore::new(32),
         });
         Self {

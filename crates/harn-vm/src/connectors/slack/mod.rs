@@ -252,10 +252,7 @@ impl SlackConnector {
         let client = Arc::new(SlackClient {
             provider_id: ProviderId::from(SLACK_PROVIDER_ID),
             state: state.clone(),
-            http: reqwest::Client::builder()
-                .user_agent("harn-slack-connector")
-                .build()
-                .unwrap_or_else(|_| reqwest::Client::new()),
+            http: crate::connectors::outbound_http_client("harn-slack-connector"),
         });
         Self {
             provider_id: ProviderId::from(SLACK_PROVIDER_ID),

@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
@@ -11,6 +10,10 @@ use time::OffsetDateTime;
 
 use super::*;
 use crate::connectors::{
+    test_util::{
+        accept_http_connection, read_http_request, write_http_response,
+        CapturedHttpRequest as CapturedRequest,
+    },
     Connector, ConnectorClient, ConnectorCtx, InboxIndex, MetricsRegistry, RateLimiterFactory,
     RawInbound, TriggerBinding,
 };
@@ -408,119 +411,9 @@ async fn slack_connector_rejects_tampered_signature() {
     ));
 }
 
-#[derive(Clone, Debug)]
-struct CapturedRequest {
-    method: String,
-    path: String,
-    headers: BTreeMap<String, String>,
-    body: String,
-}
-
 #[derive(Default)]
 struct MockScenario {
     requests: Vec<CapturedRequest>,
-}
-
-fn accept_with_deadline(listener: &TcpListener, label: &str) -> std::net::TcpStream {
-    listener.set_nonblocking(true).expect("set nonblocking");
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
-    loop {
-        match listener.accept() {
-            Ok((stream, _)) => {
-                stream
-                    .set_nonblocking(false)
-                    .expect("restore blocking mode");
-                stream
-                    .set_read_timeout(Some(std::time::Duration::from_secs(3)))
-                    .ok();
-                stream
-                    .set_write_timeout(Some(std::time::Duration::from_secs(3)))
-                    .ok();
-                return stream;
-            }
-            Err(ref error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                if std::time::Instant::now() >= deadline {
-                    panic!("{label}: no client within 3s");
-                }
-                std::thread::sleep(std::time::Duration::from_millis(10));
-            }
-            Err(error) => panic!("{label}: accept failed: {error}"),
-        }
-    }
-}
-
-fn read_request(stream: &mut std::net::TcpStream) -> CapturedRequest {
-    let mut buffer = Vec::new();
-    let mut temp = [0u8; 4096];
-    let header_end;
-    loop {
-        let n = stream.read(&mut temp).expect("read request");
-        assert!(n > 0, "request ended before headers");
-        buffer.extend_from_slice(&temp[..n]);
-        if let Some(idx) = buffer.windows(4).position(|window| window == b"\r\n\r\n") {
-            header_end = idx + 4;
-            break;
-        }
-    }
-    let header_text = String::from_utf8_lossy(&buffer[..header_end]).to_string();
-    let mut lines = header_text.split("\r\n").filter(|line| !line.is_empty());
-    let request_line = lines.next().expect("request line");
-    let mut request_parts = request_line.split_whitespace();
-    let method = request_parts.next().unwrap_or_default().to_string();
-    let path = request_parts.next().unwrap_or_default().to_string();
-    let mut headers = BTreeMap::new();
-    for line in lines {
-        if let Some((name, value)) = line.split_once(':') {
-            headers.insert(name.to_ascii_lowercase(), value.trim().to_string());
-        }
-    }
-    let content_length = headers
-        .get("content-length")
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(0);
-    while buffer.len() < header_end + content_length {
-        let n = stream.read(&mut temp).expect("read body");
-        assert!(n > 0, "request ended before body");
-        buffer.extend_from_slice(&temp[..n]);
-    }
-    let body =
-        String::from_utf8_lossy(&buffer[header_end..header_end + content_length]).to_string();
-    CapturedRequest {
-        method,
-        path,
-        headers,
-        body,
-    }
-}
-
-fn write_response(
-    stream: &mut std::net::TcpStream,
-    status: u16,
-    headers: &[(&str, String)],
-    body: &str,
-) {
-    let status_text = match status {
-        200 => "OK",
-        201 => "Created",
-        _ => "OK",
-    };
-    let mut response = format!(
-        "HTTP/1.1 {} {}\r\ncontent-length: {}\r\nconnection: close\r\n",
-        status,
-        status_text,
-        body.len()
-    );
-    for (name, value) in headers {
-        response.push_str(name);
-        response.push_str(": ");
-        response.push_str(value);
-        response.push_str("\r\n");
-    }
-    response.push_str("\r\n");
-    response.push_str(body);
-    stream
-        .write_all(response.as_bytes())
-        .expect("write response");
 }
 
 fn spawn_mock_server(
@@ -531,51 +424,51 @@ fn spawn_mock_server(
     let addr = listener.local_addr().expect("mock addr");
     let handle = std::thread::spawn(move || {
         for _ in 0..expected_requests {
-            let mut stream = accept_with_deadline(&listener, "slack mock server");
-            let request = read_request(&mut stream);
+            let mut stream = accept_http_connection(&listener, "slack mock server");
+            let request = read_http_request(&mut stream);
             scenario
                 .lock()
                 .expect("scenario lock")
                 .requests
                 .push(request.clone());
             match request.path.as_str() {
-                "/chat.postMessage" => write_response(
+                "/chat.postMessage" => write_http_response(
                     &mut stream,
                     200,
                     &[("content-type", "application/json".to_string())],
                     r#"{"ok":true,"channel":"C123ABC456","ts":"1715.000100","message":{"text":"hello from harn"}}"#,
                 ),
-                "/chat.update" => write_response(
+                "/chat.update" => write_http_response(
                     &mut stream,
                     200,
                     &[("content-type", "application/json".to_string())],
                     r#"{"ok":true,"channel":"C123ABC456","ts":"1715.000100","text":"updated"}"#,
                 ),
-                "/reactions.add" => write_response(
+                "/reactions.add" => write_http_response(
                     &mut stream,
                     200,
                     &[("content-type", "application/json".to_string())],
                     r#"{"ok":true}"#,
                 ),
-                "/views.open" => write_response(
+                "/views.open" => write_http_response(
                     &mut stream,
                     200,
                     &[("content-type", "application/json".to_string())],
                     r#"{"ok":true,"view":{"id":"V123ABC456","type":"modal"}}"#,
                 ),
-                path if path.starts_with("/users.info") => write_response(
+                path if path.starts_with("/users.info") => write_http_response(
                     &mut stream,
                     200,
                     &[("content-type", "application/json".to_string())],
                     r#"{"ok":true,"user":{"id":"U123ABC456","name":"roadrunner"}}"#,
                 ),
-                "/auth.test" => write_response(
+                "/auth.test" => write_http_response(
                     &mut stream,
                     200,
                     &[("content-type", "application/json".to_string())],
                     r#"{"ok":true,"url":"https://example.slack.com/","team":"Example","user":"bot"}"#,
                 ),
-                "/files.getUploadURLExternal" => write_response(
+                "/files.getUploadURLExternal" => write_http_response(
                     &mut stream,
                     200,
                     &[("content-type", "application/json".to_string())],
@@ -584,8 +477,8 @@ fn spawn_mock_server(
                         addr
                     ),
                 ),
-                "/upload/F123" => write_response(&mut stream, 200, &[], ""),
-                "/files.completeUploadExternal" => write_response(
+                "/upload/F123" => write_http_response(&mut stream, 200, &[], ""),
+                "/files.completeUploadExternal" => write_http_response(
                     &mut stream,
                     200,
                     &[("content-type", "application/json".to_string())],
