@@ -64,6 +64,15 @@ granular archaeology.
   `error_class` at move/upsert time, and per-trigger DLQ alert
   destinations/thresholds configured in `harn.toml` surface through
   the portal API.
+- **Supervisor trees and restart policies (#484).** Adds supervisor
+  lifecycle builtins for named child-task supervision with
+  state/events/metrics introspection, runtime debug exposure, and
+  cooperative stop/drain. Restart policies support
+  `never`/`on_failure`/`always` modes, max restart windows,
+  exponential backoff, deterministic jitter, circuit-open probing,
+  and `one-for-one`/`one-for-all`/`rest-for-one`/`escalate`
+  strategies. Documented in the spec, concurrency guide, and
+  builtins reference.
 
 ### Changed
 
