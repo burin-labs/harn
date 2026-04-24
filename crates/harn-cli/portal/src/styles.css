@@ -1074,3 +1074,107 @@ pre {
   gap: 6px;
   margin: 2px 0;
 }
+
+.dlq-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.dlq-summary-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.subpanel {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(8, 16, 28, 0.45);
+  padding: 14px;
+  min-width: 0;
+}
+
+.subpanel h3,
+.subpanel h4 {
+  margin: 0 0 10px;
+}
+
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.pill.danger {
+  border-color: rgba(248, 115, 115, 0.35);
+  background: rgba(248, 115, 115, 0.12);
+  color: #ffc6c6;
+}
+
+.dlq-bulk-bar {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.dlq-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(360px, 0.48fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.selected-row {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+  background: rgba(85, 182, 255, 0.08);
+}
+
+.dlq-error-cell {
+  max-width: 320px;
+  white-space: normal;
+}
+
+.dlq-detail-panel {
+  position: sticky;
+  top: 16px;
+  display: grid;
+  gap: 12px;
+}
+
+.dlq-action-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.danger-button {
+  border-color: rgba(248, 115, 115, 0.35);
+  color: #ffc6c6;
+}
+
+.dlq-detail-panel pre {
+  max-height: 220px;
+  overflow: auto;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-3);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+@media (max-width: 1100px) {
+  .dlq-layout,
+  .dlq-summary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .dlq-detail-panel {
+    position: static;
+  }
+}

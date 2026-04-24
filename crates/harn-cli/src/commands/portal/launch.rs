@@ -120,6 +120,7 @@ pub(super) async fn create_trigger_replay_job(
 
     let job_id = portal_timestamp_id("job");
     let started_at = portal_timestamp_id("started");
+    let before_paths = known_run_paths(&state.run_dir).map_err(internal_error)?;
     let job = PortalLaunchJob {
         id: job_id.clone(),
         mode: "trigger_replay".to_string(),
@@ -141,6 +142,7 @@ pub(super) async fn create_trigger_replay_job(
 
     let jobs = state.launch_jobs.clone();
     let launch_program = state.launch_program.clone();
+    let run_dir = state.run_dir.clone();
     let workspace_root = state.workspace_root.clone();
     let event_id = event_id.to_string();
     tokio::spawn(async move {
@@ -172,6 +174,8 @@ pub(super) async fn create_trigger_replay_job(
                         "failed".to_string()
                     };
                     job.finished_at = Some(portal_timestamp_id("finished"));
+                    job.discovered_run_paths =
+                        discovered_run_paths(&run_dir, &before_paths).unwrap_or_default();
                 }
                 Err(error) => {
                     job.status = "failed".to_string();

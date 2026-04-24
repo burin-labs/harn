@@ -94,8 +94,14 @@ pub(crate) struct DlqEntryRecord {
     pub kind: String,
     pub state: String,
     pub error: String,
+    #[serde(default = "default_dlq_error_class")]
+    pub error_class: String,
     pub event: harn_vm::TriggerEvent,
     pub retry_history: Vec<DlqAttemptRecord>,
+}
+
+fn default_dlq_error_class() -> String {
+    "unknown".to_string()
 }
 
 #[derive(Clone, Debug, Serialize)]

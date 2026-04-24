@@ -21,6 +21,10 @@ const messages = defineMessages({
     id: "portal.sidebar.runs",
     defaultMessage: "Runs",
   },
+  dlq: {
+    id: "portal.sidebar.dlq",
+    defaultMessage: "DLQ",
+  },
   costs: {
     id: "portal.sidebar.costs",
     defaultMessage: "Costs",
@@ -98,6 +102,9 @@ export function Sidebar({ stats, loading, lastRefreshAt, lastError, onRefresh }:
         </NavLink>
         <NavLink className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`} to="/runs">
           {intl.formatMessage(messages.runs)}
+        </NavLink>
+        <NavLink className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`} to="/dlq">
+          {intl.formatMessage(messages.dlq)}
         </NavLink>
         <NavLink className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`} to="/costs">
           {intl.formatMessage(messages.costs)}

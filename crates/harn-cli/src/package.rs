@@ -229,6 +229,8 @@ pub struct TriggerManifestEntry {
     pub batch: Option<TriggerBatchManifestSpec>,
     #[serde(default)]
     pub window: Option<TriggerStreamWindowManifestSpec>,
+    #[serde(default, alias = "dlq-alerts")]
+    pub dlq_alerts: Vec<TriggerDlqAlertManifestSpec>,
     #[serde(default)]
     pub secrets: BTreeMap<String, String>,
     #[serde(default)]
@@ -443,6 +445,50 @@ pub struct TriggerStreamWindowManifestSpec {
     pub gap: Option<String>,
     #[serde(default)]
     pub max_items: Option<u32>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct TriggerDlqAlertManifestSpec {
+    #[serde(default)]
+    pub destinations: Vec<TriggerDlqAlertDestination>,
+    #[serde(default)]
+    pub threshold: TriggerDlqAlertThreshold,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct TriggerDlqAlertThreshold {
+    #[serde(default, alias = "entries-in-1h")]
+    pub entries_in_1h: Option<u32>,
+    #[serde(default, alias = "percent-of-dispatches")]
+    pub percent_of_dispatches: Option<f64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum TriggerDlqAlertDestination {
+    Slack {
+        channel: String,
+        #[serde(default)]
+        webhook_url_env: Option<String>,
+    },
+    Email {
+        address: String,
+    },
+    Webhook {
+        url: String,
+        #[serde(default)]
+        headers: BTreeMap<String, String>,
+    },
+}
+
+impl TriggerDlqAlertDestination {
+    pub fn label(&self) -> String {
+        match self {
+            Self::Slack { channel, .. } => format!("slack:{channel}"),
+            Self::Email { address } => format!("email:{address}"),
+            Self::Webhook { url, .. } => format!("webhook:{url}"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -8213,6 +8259,36 @@ timezone = "America/Los_Angeles"
         let encoded = toml::to_string(&parsed).expect("trigger tables encode");
         let reparsed: TriggerTables = toml::from_str(&encoded).expect("trigger tables reparse");
         assert_eq!(reparsed, parsed);
+    }
+
+    #[test]
+    fn trigger_manifest_entries_parse_dlq_alerts() {
+        let source = r##"
+[[triggers]]
+id = "cake-classifier"
+kind = "webhook"
+provider = "github"
+handler = "handlers::classify"
+
+[[triggers.dlq_alerts]]
+destinations = [
+  { kind = "slack", channel = "#ops", webhook_url_env = "OPS_SLACK_WEBHOOK" },
+  { kind = "email", address = "ops@example.com" },
+  { kind = "webhook", url = "https://alerts.example.com/harn" },
+]
+threshold = { entries_in_1h = 5, percent_of_dispatches = 20.0 }
+"##;
+        let parsed: TriggerTables = toml::from_str(source).expect("trigger tables parse");
+        assert_eq!(parsed.triggers[0].dlq_alerts.len(), 1);
+        let alert = &parsed.triggers[0].dlq_alerts[0];
+        assert_eq!(alert.threshold.entries_in_1h, Some(5));
+        assert_eq!(alert.threshold.percent_of_dispatches, Some(20.0));
+        assert_eq!(alert.destinations[0].label(), "slack:#ops");
+        assert_eq!(alert.destinations[1].label(), "email:ops@example.com");
+        assert_eq!(
+            alert.destinations[2].label(),
+            "webhook:https://alerts.example.com/harn"
+        );
     }
 
     #[test]

@@ -74,6 +74,7 @@
 - [Harn portal](./portal.md)
 - [Orchestrator](./orchestrator.md)
 - [Hot reload](./orchestrator/hot-reload.md)
+- [Orchestrator DLQ management](./orchestrator/dlq.md)
 - [Orchestrator backpressure](./orchestrator/backpressure.md)
 - [Worker dispatch](./orchestrator/worker-dispatch.md)
 - [Orchestrator observability](./orchestrator/observability.md)

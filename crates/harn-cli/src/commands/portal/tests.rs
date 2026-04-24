@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
+use harn_vm::event_log::{EventLog, LogEvent, Topic};
 use tokio::sync::Mutex;
 use tower::util::ServiceExt;
 
@@ -346,6 +347,160 @@ async fn api_trust_graph_returns_records_and_chain() {
     assert_eq!(payload["records"].as_array().unwrap().len(), 1);
     assert_eq!(payload["chain"]["verified"], true);
     assert_eq!(payload["topics"][0], harn_vm::TRUST_GRAPH_GLOBAL_TOPIC);
+}
+
+#[tokio::test]
+async fn api_dlq_lists_filters_and_details_entries() {
+    let temp = tempfile::tempdir().unwrap();
+    let log = Arc::new(harn_vm::event_log::AnyEventLog::Memory(
+        harn_vm::event_log::MemoryEventLog::new(16),
+    ));
+    let topic = Topic::new(harn_vm::TRIGGER_DLQ_TOPIC).unwrap();
+    log.append(
+        &topic,
+        LogEvent::new(
+            "dlq_moved",
+            serde_json::json!({
+                "trigger_id": "cake-classifier",
+                "binding_key": "cake-classifier@v1",
+                "attempt_count": 2,
+                "final_error": "provider returned 503 service unavailable",
+                "event": {
+                    "id": "trigger_evt_dlq",
+                    "provider": "github",
+                    "kind": "issues.opened",
+                    "headers": {"x-delivery": "delivery-1"},
+                    "provider_payload": {"issue": {"number": 7}}
+                },
+                "attempts": [
+                    {
+                        "attempt": 1,
+                        "completed_at": "2026-04-24T10:00:00Z",
+                        "outcome": "failed",
+                        "error_msg": "provider returned 500"
+                    }
+                ]
+            }),
+        ),
+    )
+    .await
+    .unwrap();
+    let lifecycle_topic = Topic::new(harn_vm::TRIGGERS_LIFECYCLE_TOPIC).unwrap();
+    log.append(
+        &lifecycle_topic,
+        LogEvent::new(
+            "predicate.evaluated",
+            serde_json::json!({
+                "event_id": "trigger_evt_dlq",
+                "result": false,
+                "reason": "fixture"
+            }),
+        ),
+    )
+    .await
+    .unwrap();
+
+    let app = build_router(test_portal_state_with_event_log(temp.path(), log));
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/dlq?error_class=provider_5xx")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(payload["total"], 1);
+    assert_eq!(
+        payload["entries"][0]["id"],
+        "dlq_cake_classifier_v1_trigger_evt_dlq"
+    );
+    assert_eq!(payload["entries"][0]["error_class"], "provider_5xx");
+    assert_eq!(
+        payload["entries"][0]["predicate_trace"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/dlq/dlq_cake_classifier_v1_trigger_evt_dlq")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn api_dlq_purge_writes_tombstone() {
+    let temp = tempfile::tempdir().unwrap();
+    let log = Arc::new(harn_vm::event_log::AnyEventLog::Memory(
+        harn_vm::event_log::MemoryEventLog::new(16),
+    ));
+    let topic = Topic::new(harn_vm::TRIGGER_DLQ_TOPIC).unwrap();
+    log.append(
+        &topic,
+        LogEvent::new(
+            "dlq_moved",
+            serde_json::json!({
+                "trigger_id": "manual",
+                "binding_key": "manual@v1",
+                "attempt_count": 1,
+                "final_error": "handler VmError::Thrown",
+                "event": {
+                    "id": "trigger_evt_purge",
+                    "provider": "manual",
+                    "kind": "manual.fire",
+                    "headers": {},
+                    "provider_payload": {}
+                },
+                "attempts": []
+            }),
+        ),
+    )
+    .await
+    .unwrap();
+
+    let app = build_router(test_portal_state_with_event_log(temp.path(), log));
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/dlq/dlq_manual_v1_trigger_evt_purge/purge")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/dlq")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(payload["total"], 0);
 }
 
 #[test]

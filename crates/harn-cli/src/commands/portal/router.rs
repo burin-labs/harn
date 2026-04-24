@@ -6,6 +6,10 @@ use axum::Router;
 use super::assets::{asset, index};
 use super::handlers::compare::compare_runs_handler;
 use super::handlers::costs::cost_report_handler;
+use super::handlers::dlq::{
+    bulk_purge_dlq_handler, bulk_replay_dlq_handler, dlq_detail_handler, export_dlq_handler,
+    list_dlq_handler, purge_dlq_handler, replay_dlq_handler, replay_drift_accept_dlq_handler,
+};
 use super::handlers::launch::{
     launch_run_handler, list_launch_jobs_handler, list_launch_targets_handler,
     trigger_replay_handler,
@@ -35,6 +39,17 @@ pub(super) fn build_router(state: Arc<PortalState>) -> Router {
         .route("/api/launch/jobs", get(list_launch_jobs_handler))
         .route("/api/launch", post(launch_run_handler))
         .route("/api/trigger/replay", post(trigger_replay_handler))
+        .route("/api/dlq", get(list_dlq_handler))
+        .route("/api/dlq/bulk/replay", post(bulk_replay_dlq_handler))
+        .route("/api/dlq/bulk/purge", post(bulk_purge_dlq_handler))
+        .route("/api/dlq/{entry_id}", get(dlq_detail_handler))
+        .route("/api/dlq/{entry_id}/replay", post(replay_dlq_handler))
+        .route(
+            "/api/dlq/{entry_id}/replay-drift-accept",
+            post(replay_drift_accept_dlq_handler),
+        )
+        .route("/api/dlq/{entry_id}/purge", post(purge_dlq_handler))
+        .route("/api/dlq/{entry_id}/export", get(export_dlq_handler))
         .route("/{*path}", get(index))
         .with_state(state)
 }
