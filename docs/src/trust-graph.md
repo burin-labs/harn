@@ -27,7 +27,11 @@ Each record carries:
 - `metadata`
 
 See [`spec/opentrustgraph.md`](../../spec/opentrustgraph.md) for the normative
-schema, JSON Schema, and sample event stream.
+record model, chain export model, and sample event stream. The small public
+artifact that Harn Cloud receipts, Burin supervision UI planning, and external
+verifiers should link to is
+[`opentrustgraph-spec/`](../../opentrustgraph-spec/). It contains the JSON
+Schema files and conformance fixtures used by Harn's runtime tests.
 
 ## Autonomy tiers
 
@@ -135,4 +139,7 @@ The portal exposes `GET /api/trust-graph` for external UIs. Query parameters
 mirror the CLI filters: `agent`, `action`, `limit`, and `grouped_by_trace`.
 The response includes flat records, optional trace groups, per-agent summary
 rows, the current chain verification report, and the topic names the portal is
-reading.
+reading. A supervision UI can project that response into the
+`opentrustgraph-chain/v0` envelope by using the verification report's topic,
+total, root hash, and verified flag as `chain` metadata and the returned records
+as `records`.

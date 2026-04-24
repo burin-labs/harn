@@ -1,0 +1,95 @@
+{
+  "schema": "opentrustgraph-chain/v0",
+  "chain": {
+    "topic": "trust_graph",
+    "total": 3,
+    "root_hash": "sha256:e1ca0fc25124ed404fb05d31a468d4ddb33fab3325f86a58ad4068671188b57a",
+    "verified": true,
+    "generated_at": "2026-04-19T19:03:00Z",
+    "producer": {
+      "name": "harn",
+      "version": "0.7.x"
+    }
+  },
+  "records": [
+    {
+      "schema": "opentrustgraph/v0",
+      "record_id": "01966f4c-1000-78a1-91d6-407b18572001",
+      "agent": "deploy-agent",
+      "action": "deploy.preview",
+      "approver": null,
+      "outcome": "denied",
+      "trace_id": "trace_tier_01",
+      "autonomy_tier": "shadow",
+      "timestamp": "2026-04-19T19:00:00Z",
+      "cost_usd": null,
+      "chain_index": 1,
+      "previous_hash": null,
+      "entry_hash": "sha256:12fd52408e6feb50e7bbaa2d308ee4896464264a7e59893e40142cdc649cf654",
+      "metadata": {
+        "terminal_status": "blocked",
+        "reason": "shadow tier blocks direct mutation"
+      }
+    },
+    {
+      "schema": "opentrustgraph/v0",
+      "record_id": "01966f4c-1001-71da-9e75-e5b339a30002",
+      "agent": "deploy-agent",
+      "action": "trust.promote",
+      "approver": "ops-lead",
+      "outcome": "success",
+      "trace_id": "trace_tier_02",
+      "autonomy_tier": "act_with_approval",
+      "timestamp": "2026-04-19T19:01:00Z",
+      "cost_usd": null,
+      "chain_index": 2,
+      "previous_hash": "sha256:12fd52408e6feb50e7bbaa2d308ee4896464264a7e59893e40142cdc649cf654",
+      "entry_hash": "sha256:51af6fa6f2cc790749d6c892939a27e43d10ac191fa8d42ae611a5ade0d01813",
+      "metadata": {
+        "control": true,
+        "from_tier": "shadow",
+        "to_tier": "act_with_approval",
+        "approval": {
+          "required": true,
+          "quorum": 1,
+          "signatures": [
+            {
+              "reviewer": "ops-lead",
+              "signed_at": "2026-04-19T19:00:59Z",
+              "signature": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "schema": "opentrustgraph/v0",
+      "record_id": "01966f4c-1002-765e-a26e-17403bc70003",
+      "agent": "deploy-agent",
+      "action": "deploy.preview",
+      "approver": "ops-lead",
+      "outcome": "success",
+      "trace_id": "trace_tier_03",
+      "autonomy_tier": "act_with_approval",
+      "timestamp": "2026-04-19T19:02:00Z",
+      "cost_usd": 0.034,
+      "chain_index": 3,
+      "previous_hash": "sha256:51af6fa6f2cc790749d6c892939a27e43d10ac191fa8d42ae611a5ade0d01813",
+      "entry_hash": "sha256:e1ca0fc25124ed404fb05d31a468d4ddb33fab3325f86a58ad4068671188b57a",
+      "metadata": {
+        "provider": "github",
+        "approval": {
+          "required": true,
+          "quorum": 1,
+          "signatures": [
+            {
+              "reviewer": "ops-lead",
+              "signed_at": "2026-04-19T19:01:58Z",
+              "signature": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

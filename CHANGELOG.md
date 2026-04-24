@@ -33,6 +33,14 @@ granular archaeology.
   (version range), and `docs_url`, adds `harn package new <name>`,
   `harn package validate`, and `harn package publish --dry-run`, and
   documents the authoring flow in `docs/src/package-authoring.md`.
+- **OpenTrustGraph v0 spec artifact (#449).** Publishes
+  `opentrustgraph-spec/` as the canonical v0 artifact inside the Harn
+  repo with a chain-export JSON Schema, approval-evidence rules,
+  valid tier-transition fixture, and an invalid missing-approval
+  fixture. Fixtures are deterministic chain envelopes and are
+  validated from Harn runtime tests; the artifact is cross-linked
+  from docs, portal docs, and the README for Harn Cloud and
+  supervision references.
 
 ### Changed
 

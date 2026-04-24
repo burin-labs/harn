@@ -1,38 +1,54 @@
-[
-  {
-    "schema": "opentrustgraph/v0",
-    "record_id": "01966f4c-0f31-7b5d-b44b-f7f8e7e1d384",
-    "agent": "github-triage-bot",
-    "action": "github.issue.opened",
-    "approver": null,
-    "outcome": "success",
-    "trace_id": "trace_invalid_01",
-    "autonomy_tier": "suggest",
-    "timestamp": "2026-04-19T18:42:11Z",
-    "cost_usd": null,
-    "chain_index": 1,
-    "previous_hash": null,
-    "entry_hash": "sha256:bd9f5d07cd3185d88cc15b255a491e09b46b7bbdd095b795f45a709e4bb74f8f",
-    "metadata": {
-      "provider": "github"
+{
+  "schema": "opentrustgraph-chain/v0",
+  "chain": {
+    "topic": "trust_graph",
+    "total": 2,
+    "root_hash": "sha256:13f9bf66cea6d09b868318afd40dad1fa6acb35994f64ab3fffcc57d30658c41",
+    "verified": false,
+    "generated_at": "2026-04-19T18:45:00Z",
+    "producer": {
+      "name": "harn",
+      "version": "0.7.x"
     }
   },
-  {
-    "schema": "opentrustgraph/v0",
-    "record_id": "01966f4c-0f32-7d37-b443-d72dd96f0f4f",
-    "agent": "github-triage-bot",
-    "action": "trust.promote",
-    "approver": "maintainer-1",
-    "outcome": "success",
-    "trace_id": "trace_invalid_02",
-    "autonomy_tier": "act_auto",
-    "timestamp": "2026-04-19T18:43:02Z",
-    "cost_usd": null,
-    "chain_index": 2,
-    "previous_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
-    "entry_hash": "sha256:75955793c1806c9e56248b5b756f5d909ed4f1680c780f83075738c7552b93af",
-    "metadata": {
-      "control": true
+  "records": [
+    {
+      "schema": "opentrustgraph/v0",
+      "record_id": "01966f4c-0f31-7b5d-b44b-f7f8e7e1d384",
+      "agent": "github-triage-bot",
+      "action": "github.issue.opened",
+      "approver": null,
+      "outcome": "success",
+      "trace_id": "trace_valid_01",
+      "autonomy_tier": "suggest",
+      "timestamp": "2026-04-19T18:42:11Z",
+      "cost_usd": null,
+      "chain_index": 1,
+      "previous_hash": null,
+      "entry_hash": "sha256:84facae7d56fd304e040ea18d80bd019e274ad86ddd5a4d732f3ac3d984c48ec",
+      "metadata": {
+        "provider": "github"
+      }
+    },
+    {
+      "schema": "opentrustgraph/v0",
+      "record_id": "01966f4c-0f32-7d37-b443-d72dd96f0f4f",
+      "agent": "github-triage-bot",
+      "action": "trust.promote",
+      "approver": "maintainer-1",
+      "outcome": "success",
+      "trace_id": "trace_valid_02",
+      "autonomy_tier": "act_auto",
+      "timestamp": "2026-04-19T18:43:02Z",
+      "cost_usd": null,
+      "chain_index": 2,
+      "previous_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "entry_hash": "sha256:13f9bf66cea6d09b868318afd40dad1fa6acb35994f64ab3fffcc57d30658c41",
+      "metadata": {
+        "control": true,
+        "from_tier": "suggest",
+        "to_tier": "act_auto"
+      }
     }
-  }
-]
+  ]
+}

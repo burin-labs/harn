@@ -7,10 +7,14 @@ for compatibility), but the format is designed to
 be runtime-neutral so other schedulers and workflow engines can adopt the same
 stream shape.
 
-Version marker:
+Version markers:
 
 ```json
 {"schema":"opentrustgraph/v0"}
+```
+
+```json
+{"schema":"opentrustgraph-chain/v0"}
 ```
 
 ## TrustRecord
@@ -72,148 +76,120 @@ Autonomy tier enum:
 - `act_with_approval`
 - `act_auto`
 
-## JSON Schema
+Approval evidence:
+
+- When `metadata.approval.required` is `true`, `outcome` is `success`, and
+  `autonomy_tier` is `act_with_approval`, the record must include a non-empty
+  `approver`.
+- The same record must include at least one signature receipt in
+  `metadata.approval.signatures`.
+- Signature receipt objects are intentionally extensible. Harn uses
+  `reviewer`, `signed_at`, and `signature` fields today.
+
+## Chain export
+
+A `TrustChainExport` wraps ordered records with metadata for receipts,
+supervision UIs, and third-party verification:
 
 ```json
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://harnlang.com/schemas/opentrustgraph/v0/trust-record.schema.json",
-  "title": "OpenTrustGraph TrustRecord",
-  "type": "object",
-  "additionalProperties": false,
-  "required": [
-    "schema",
-    "record_id",
-    "agent",
-    "action",
-    "outcome",
-    "trace_id",
-    "autonomy_tier",
-    "timestamp",
-    "chain_index",
-    "previous_hash",
-    "entry_hash",
-    "metadata"
-  ],
-  "properties": {
-    "schema": {
-      "const": "opentrustgraph/v0"
+  "schema": "opentrustgraph-chain/v0",
+  "chain": {
+    "topic": "trust_graph",
+    "total": 2,
+    "root_hash": "sha256:6bb2b155ba07c67443c881f2d9dd954083bb44542df81520db1490fcbfdd5bf9",
+    "verified": true,
+    "generated_at": "2026-04-19T18:45:00Z",
+    "producer": {
+      "name": "harn",
+      "version": "0.7.x"
     },
-    "record_id": {
-      "type": "string",
-      "description": "UUIDv7 recommended."
-    },
-    "agent": {
-      "type": "string",
-      "minLength": 1
-    },
-    "action": {
-      "type": "string",
-      "minLength": 1
-    },
-    "approver": {
-      "type": ["string", "null"]
-    },
-    "outcome": {
-      "type": "string",
-      "enum": ["success", "failure", "denied", "timeout"]
-    },
-    "trace_id": {
-      "type": "string",
-      "minLength": 1
-    },
-    "autonomy_tier": {
-      "type": "string",
-      "enum": ["shadow", "suggest", "act_with_approval", "act_auto"]
-    },
-    "timestamp": {
-      "type": "string",
-      "format": "date-time"
-    },
-    "cost_usd": {
-      "type": ["number", "null"]
-    },
-    "chain_index": {
-      "type": "integer",
-      "minimum": 1
-    },
-    "previous_hash": {
-      "type": ["string", "null"],
-      "pattern": "^(sha256:[0-9a-f]{64})$"
-    },
-    "entry_hash": {
-      "type": "string",
-      "pattern": "^sha256:[0-9a-f]{64}$"
-    },
-    "metadata": {
-      "type": "object"
-    }
-  }
+  },
+  "records": []
 }
 ```
 
-## Sample stream
+Fields:
+
+- `schema`: chain-export schema/version discriminator. Current value:
+  `opentrustgraph-chain/v0`.
+- `chain.topic`: canonical event-log topic or exported stream name.
+- `chain.total`: number of records in the ordered export.
+- `chain.root_hash`: final record's `entry_hash`, or `null` for an empty
+  export.
+- `chain.verified`: whether the producer verified record hashes, previous-hash
+  linkage, and required approval evidence before export.
+- `chain.generated_at`: RFC3339 UTC timestamp for the export.
+- `chain.producer`: producer name and version.
+- `records`: ordered `TrustRecord` list.
+
+## JSON Schema
+
+The normative JSON Schema files live in the public artifact directory:
+
+- [`opentrustgraph-spec/schemas/trust-record.v0.schema.json`](../opentrustgraph-spec/schemas/trust-record.v0.schema.json)
+- [`opentrustgraph-spec/schemas/trust-chain.v0.schema.json`](../opentrustgraph-spec/schemas/trust-chain.v0.schema.json)
+
+Harn tests parse those schema files and all fixtures directly, so the spec
+artifact and runtime hash contract stay in sync.
+
+## Sample export
 
 ```json
-[
-  {
-    "schema": "opentrustgraph/v0",
-    "record_id": "01966f4c-0f31-7b5d-b44b-f7f8e7e1d384",
-    "agent": "github-triage-bot",
-    "action": "github.issue.opened",
-    "approver": null,
-    "outcome": "denied",
-    "trace_id": "trace_shadow_01",
-    "autonomy_tier": "shadow",
-    "timestamp": "2026-04-19T18:42:11Z",
-    "cost_usd": null,
-    "chain_index": 1,
-    "previous_hash": null,
-    "entry_hash": "sha256:bd9f5d07cd3185d88cc15b255a491e09b46b7bbdd095b795f45a709e4bb74f8f",
-    "metadata": {
-      "terminal_status": "failed",
-      "reason": "shadow tier blocks direct mutation"
+{
+  "schema": "opentrustgraph-chain/v0",
+  "chain": {
+    "topic": "trust_graph",
+    "total": 2,
+    "root_hash": "sha256:6bb2b155ba07c67443c881f2d9dd954083bb44542df81520db1490fcbfdd5bf9",
+    "verified": true,
+    "generated_at": "2026-04-19T18:45:00Z",
+    "producer": {
+      "name": "harn",
+      "version": "0.7.x"
     }
   },
-  {
-    "schema": "opentrustgraph/v0",
-    "record_id": "01966f4c-0f32-7d37-b443-d72dd96f0f4f",
-    "agent": "github-triage-bot",
-    "action": "trust.promote",
-    "approver": "maintainer-1",
-    "outcome": "success",
-    "trace_id": "trustctl-01966f4c-0f32-7d37-b443-d72dd96f0f4f",
-    "autonomy_tier": "act_auto",
-    "timestamp": "2026-04-19T18:43:02Z",
-    "cost_usd": null,
-    "chain_index": 2,
-    "previous_hash": "sha256:bd9f5d07cd3185d88cc15b255a491e09b46b7bbdd095b795f45a709e4bb74f8f",
-    "entry_hash": "sha256:75955793c1806c9e56248b5b756f5d909ed4f1680c780f83075738c7552b93af",
-    "metadata": {
-      "control": true
+  "records": [
+    {
+      "schema": "opentrustgraph/v0",
+      "record_id": "01966f4c-0f31-7b5d-b44b-f7f8e7e1d384",
+      "agent": "github-triage-bot",
+      "action": "github.issue.opened",
+      "approver": null,
+      "outcome": "success",
+      "trace_id": "trace_valid_01",
+      "autonomy_tier": "suggest",
+      "timestamp": "2026-04-19T18:42:11Z",
+      "cost_usd": null,
+      "chain_index": 1,
+      "previous_hash": null,
+      "entry_hash": "sha256:84facae7d56fd304e040ea18d80bd019e274ad86ddd5a4d732f3ac3d984c48ec",
+      "metadata": {
+        "provider": "github"
+      }
+    },
+    {
+      "schema": "opentrustgraph/v0",
+      "record_id": "01966f4c-0f32-7d37-b443-d72dd96f0f4f",
+      "agent": "github-triage-bot",
+      "action": "trust.promote",
+      "approver": "maintainer-1",
+      "outcome": "success",
+      "trace_id": "trace_valid_02",
+      "autonomy_tier": "act_auto",
+      "timestamp": "2026-04-19T18:43:02Z",
+      "cost_usd": null,
+      "chain_index": 2,
+      "previous_hash": "sha256:84facae7d56fd304e040ea18d80bd019e274ad86ddd5a4d732f3ac3d984c48ec",
+      "entry_hash": "sha256:6bb2b155ba07c67443c881f2d9dd954083bb44542df81520db1490fcbfdd5bf9",
+      "metadata": {
+        "control": true,
+        "from_tier": "suggest",
+        "to_tier": "act_auto"
+      }
     }
-  },
-  {
-    "schema": "opentrustgraph/v0",
-    "record_id": "01966f4c-0f33-79f7-a4a8-82c6900e31f8",
-    "agent": "github-triage-bot",
-    "action": "github.issue.opened",
-    "approver": null,
-    "outcome": "success",
-    "trace_id": "trace_live_01",
-    "autonomy_tier": "act_auto",
-    "timestamp": "2026-04-19T18:43:10Z",
-    "cost_usd": 0.0041,
-    "chain_index": 3,
-    "previous_hash": "sha256:75955793c1806c9e56248b5b756f5d909ed4f1680c780f83075738c7552b93af",
-    "entry_hash": "sha256:bea6b8da017bc3639ff8c1e8cf704fbbb57a2a662a45639d6fed4b30a538ec41",
-    "metadata": {
-      "provider": "github",
-      "binding_version": 4,
-      "terminal_status": "succeeded"
-    }
-  }
-]
+  ]
+}
 ```
 
 ## Portability notes

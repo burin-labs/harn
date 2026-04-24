@@ -8,6 +8,10 @@ provider/runtime code: products declare workflows, policies, capabilities,
 and UI hooks, while Harn owns transcripts, context assembly, retries,
 tool routing, persistence, replay, and provider normalization.
 
+Harn also emits portable `opentrustgraph/v0` trust records for autonomy
+decisions, approval gates, and tier transitions. The public schema and fixtures
+live in [`opentrustgraph-spec/`](./opentrustgraph-spec/).
+
 ## Install
 
 From a GitHub release:
