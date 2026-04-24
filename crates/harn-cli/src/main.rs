@@ -411,9 +411,14 @@ async fn main() {
                 }
             }
         }
-        Command::Init(args) | Command::New(args) => {
-            commands::init::init_project(args.name.as_deref(), args.template)
-        }
+        Command::Init(args) => commands::init::init_project(args.name.as_deref(), args.template),
+        Command::New(args) => match commands::init::resolve_new_args(&args) {
+            Ok((name, template)) => commands::init::init_project(name.as_deref(), template),
+            Err(error) => {
+                eprintln!("error: {error}");
+                process::exit(1);
+            }
+        },
         Command::Doctor(args) => commands::doctor::run_doctor(!args.no_network).await,
         Command::Serve(args) => match args.command {
             ServeCommand::Acp(args) => {
@@ -547,6 +552,20 @@ async fn main() {
             PackageCommand::Info(info) => {
                 package::show_package_registry_info(&info.name, info.registry.as_deref(), info.json)
             }
+            PackageCommand::Check(check) => {
+                package::check_package(check.package.as_deref(), check.json)
+            }
+            PackageCommand::Pack(pack) => package::pack_package(
+                pack.package.as_deref(),
+                pack.output.as_deref(),
+                pack.dry_run,
+                pack.json,
+            ),
+            PackageCommand::Docs(docs) => package::generate_package_docs(
+                docs.package.as_deref(),
+                docs.output.as_deref(),
+                docs.check,
+            ),
             PackageCommand::Cache(cache) => match cache.command {
                 PackageCacheCommand::List => package::list_package_cache(),
                 PackageCacheCommand::Clean(clean) => package::clean_package_cache(clean.all),
@@ -555,6 +574,12 @@ async fn main() {
                 }
             },
         },
+        Command::Publish(args) => package::publish_package(
+            args.package.as_deref(),
+            args.dry_run,
+            args.registry.as_deref(),
+            args.json,
+        ),
         Command::Persona(args) => match args.command {
             PersonaCommand::List(list) => {
                 commands::persona::run_list(args.manifest.as_deref(), &list)
