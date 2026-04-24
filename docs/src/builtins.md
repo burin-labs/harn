@@ -1566,10 +1566,65 @@ directory. `workflow.update(...)` polls for a response until
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
+| `assemble_context(options)` | options: dict | dict | Pack artifacts into a token-budgeted slice of chunks with pluggable ranking, cross-artifact dedup, microcompact chunking, and per-chunk observability. See [Adaptive context assembly](#adaptive-context-assembly) below |
 | `estimate_tokens(messages)` | messages: list | int | Estimate token count for a message list (chars / 4 heuristic) |
 | `microcompact(text, max_chars?)` | text, max_chars (default 20000) | string | Snip oversized text, keeping head and tail with a marker |
 | `select_artifacts_adaptive(artifacts, policy)` | artifacts: list, policy: dict | list | Deduplicate, microcompact oversized artifacts, then select with token budget |
 | `transcript_auto_compact(messages, options?)` | messages: list, options: dict | list | Run the same transcript auto-compaction pipeline used by `agent_loop` |
+
+#### Adaptive context assembly
+
+`assemble_context` is the within-selection complement to
+`transcript_auto_compact`. Where transcript compaction shrinks an
+ongoing conversation, `assemble_context` re-packs the next turn's
+artifacts into a fixed token budget:
+
+1. Chunk oversized artifacts at paragraph / line boundaries.
+2. Dedup chunks across artifacts (exact text match or trigram Jaccard).
+3. Rank by recency, keyword overlap against `query`, or a host ranker
+   closure.
+4. Pack greedy into `budget_tokens`, reporting why each chunk was
+   included or dropped.
+
+Options dict:
+
+| Key | Type | Default | Meaning |
+|---|---|---|---|
+| `artifacts` | `list[artifact]` | required | Source set. Each entry is normalized via `artifact(...)`. |
+| `budget_tokens` | int | `8000` | Hard cap on packed tokens. |
+| `dedup` | `"none"` / `"chunked"` / `"semantic"` | `"chunked"` | Exact-text hash (`"chunked"`) or trigram Jaccard overlap (`"semantic"`). |
+| `semantic_overlap` | float | `0.85` | Jaccard threshold when `dedup: "semantic"`. |
+| `strategy` | `"recency"` / `"relevance"` / `"round_robin"` | `"relevance"` | Packing order. |
+| `query` | string | nil | Used by the default relevance ranker (keyword overlap + density). |
+| `microcompact_threshold` | int | `2000` | Artifacts above this many tokens are chunked. |
+| `ranker_callback` | `closure(query, chunks) → list[float]` | nil | Host-supplied ranker. Returns a score per chunk in the same order as the `chunks` input. Only invoked when `strategy: "relevance"`. |
+
+Returned record:
+
+- `chunks: list[chunk]` — selected chunks in pack order. Each carries
+  `id`, `artifact_id`, `artifact_kind`, `title`, `source`, `text`,
+  `estimated_tokens`, `chunk_index`, `chunk_count`, and `score`.
+  `chunk.id = "{artifact_id}#{sha256(text)[..16]}"` — stable and
+  content-addressed, so the same input always produces the same id
+  across runs for replay diffing.
+- `included: list[summary]` — per-artifact `{artifact_id,
+  artifact_kind, chunks_included, chunks_total, tokens_included}`.
+- `dropped: list[exclusion]` — per-exclusion `{artifact_id, chunk_id,
+  reason, detail}`. Reasons include `"no_text"`, `"empty_text"`,
+  `"duplicate"`, `"budget_exceeded"`.
+- `reasons: list[rationale]` — per-chunk `{chunk_id, artifact_id,
+  strategy, score, included, reason}`. Use this to surface "why was
+  this in the prompt?" in observability dashboards.
+- `total_tokens`, `budget_tokens`, `strategy`, `dedup` echo the
+  packing configuration for downstream tooling.
+
+Integration hook: a workflow node may carry `context_assembler: {...}`
+in its declaration. When set, `execute_stage_node` routes the
+pre-selected artifacts through `assemble_context` and renders the
+packed chunks as the stage's prompt context, replacing the default
+`render_artifacts_context` output. Scripts that call `agent_loop`
+directly can do the same manually: call `assemble_context` on their
+artifact list and bake the packed chunks into the system prompt.
 
 ### Delegated workers
 

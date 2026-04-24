@@ -8,6 +8,10 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("dict")),
     },
     BuiltinSig {
+        name: "assemble_context",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
         name: "artifact_apply_intent",
         return_type: Some(BuiltinReturn::Named("dict")),
     },

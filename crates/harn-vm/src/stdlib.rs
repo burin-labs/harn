@@ -4,6 +4,7 @@ mod agent_sessions;
 pub mod agent_state;
 mod agents;
 mod agents_daemon;
+pub(crate) mod assemble;
 mod bytes;
 mod concurrency;
 mod connectors;
@@ -105,6 +106,7 @@ pub fn register_agent_stdlib(vm: &mut Vm) {
     agent_sessions::register_agent_session_builtins(vm);
     workflow_messages::register_workflow_message_builtins(vm);
     transcript_compact::register_transcript_compaction_builtins(vm);
+    assemble::register_assemble_context_builtin(vm);
     register_http_builtins(vm);
     register_llm_builtins(vm);
     register_mcp_builtins(vm);
