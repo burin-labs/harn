@@ -31,6 +31,18 @@ fn action_turn_nudge_mentions_action_or_yield() {
 }
 
 #[test]
+fn native_action_turn_nudge_mentions_bare_done_sentinel() {
+    let policy = TurnPolicy {
+        require_action_or_yield: true,
+        allow_done_sentinel: true,
+        max_prose_chars: Some(120),
+    };
+    let msg = action_turn_nudge("native", true, Some(&policy), false).expect("nudge");
+    assert!(msg.contains("include `##DONE##` exactly once"));
+    assert!(!msg.contains("<done>"));
+}
+
+#[test]
 fn sentinel_without_action_nudge_stays_stage_agnostic() {
     let policy = TurnPolicy {
         require_action_or_yield: true,
@@ -42,6 +54,18 @@ fn sentinel_without_action_nudge_stays_stage_agnostic() {
     assert!(msg.contains("Make concrete progress with an available tool now, or switch phase"));
     assert!(!msg.contains("lookup() or read()"));
     assert!(msg.contains("Keep prose to at most 180 visible characters"));
+}
+
+#[test]
+fn native_sentinel_without_action_nudge_mentions_bare_done_sentinel() {
+    let policy = TurnPolicy {
+        require_action_or_yield: true,
+        allow_done_sentinel: true,
+        max_prose_chars: Some(180),
+    };
+    let msg = sentinel_without_action_nudge("native", Some(&policy));
+    assert!(msg.contains("`##DONE##` without taking any tool action"));
+    assert!(!msg.contains("<done>"));
 }
 
 #[test]
@@ -138,6 +162,8 @@ async fn persistent_prompt_without_tools_avoids_tool_call_language() {
         .expect("mock call system prompt");
     assert!(system.contains("Solve the request directly in assistant text"));
     assert!(!system.contains("take action with tool calls"));
+    assert!(system.contains("include `##DONE##` exactly once in assistant text"));
+    assert!(!system.contains("<done>##DONE##</done>"));
     reset_llm_mock_state();
 }
 

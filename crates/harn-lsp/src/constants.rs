@@ -602,7 +602,7 @@ pub(crate) fn builtin_doc(name: &str) -> Option<String> {
         "http_post" => "**http_post(url, body, headers?)** → string — HTTP POST request",
         "llm_call" => "**llm_call(prompt, system?, options?)** → dict — Call an LLM API\n\nReturns: `{text, model, input_tokens, output_tokens, transcript?}`",
         "llm_completion" => "**llm_completion(prefix, suffix?, system?, options?)** → dict — Text completion / fill-in-the-middle generation",
-        "agent_loop" => "**agent_loop(prompt, system?, options?)** → dict — Agent loop with tool dispatch\n\nReturns: `{status, text, iterations, duration_ms, tools_used, transcript}`\n\nOptions: `{provider, model, persistent, max_iterations, max_nudges, nudge}`\n\nIn persistent mode, loop continues until `##DONE##` sentinel is output.",
+        "agent_loop" => "**agent_loop(prompt, system?, options?)** → dict — Agent loop with tool dispatch\n\nReturns: `{status, text, iterations, duration_ms, tools_used, transcript}`\n\nOptions: `{provider, model, persistent, max_iterations, max_nudges, nudge}`\n\nIn persistent mode, loop continues until the completion sentinel is output: bare `##DONE##` in no-tool/native-tool stages, or `<done>##DONE##</done>` in tagged text-tool stages.",
         "await" => "**await(handle)** → value — Wait for spawned task to complete",
         "cancel" => "**cancel(handle)** → nil — Cancel a spawned task",
         "abs" => "**abs(value)** → int | float — Absolute value",
