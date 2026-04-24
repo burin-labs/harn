@@ -202,9 +202,8 @@ impl OpenAiCompatibleProvider {
         // Qwen3.6 introduced `preserve_thinking`. When the capability
         // matrix says the current (provider, model) pair honours it,
         // emit the flag so the chat template carries `<think>` blocks
-        // across turns. Alibaba recommends it for agentic workloads
-        // (coding agents, long-horizon tool loops — our primary use
-        // case). Providers that don't understand the kwarg ignore it.
+        // across turns. Alibaba recommends it for long-horizon tool
+        // loops. Providers that don't understand the kwarg ignore it.
         let caps = crate::llm::capabilities::lookup(&opts.provider, &opts.model);
         if caps.preserve_thinking {
             chat_template_kwargs["preserve_thinking"] = serde_json::json!(true);

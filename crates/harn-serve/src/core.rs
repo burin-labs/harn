@@ -1,5 +1,4 @@
 use std::collections::{BTreeMap, VecDeque};
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::atomic::AtomicBool;
@@ -266,12 +265,14 @@ impl DispatchCore {
         request: &CallRequest,
         function: &crate::ExportedFunction,
     ) -> Result<(serde_json::Value, String), DispatchError> {
-        let source = fs::read_to_string(&self.config.script_path).map_err(|error| {
-            DispatchError::Io(format!(
-                "failed to read {}: {error}",
-                self.config.script_path.display()
-            ))
-        })?;
+        let source = tokio::fs::read_to_string(&self.config.script_path)
+            .await
+            .map_err(|error| {
+                DispatchError::Io(format!(
+                    "failed to read {}: {error}",
+                    self.config.script_path.display()
+                ))
+            })?;
         let script_path = self.config.script_path.clone();
         let cancel_token = request
             .cancel_token
@@ -327,12 +328,14 @@ impl DispatchCore {
         request: &CallRequest,
         function: &crate::ExportedFunction,
     ) -> Result<(serde_json::Value, String), DispatchError> {
-        let source = fs::read_to_string(&self.config.script_path).map_err(|error| {
-            DispatchError::Io(format!(
-                "failed to read {}: {error}",
-                self.config.script_path.display()
-            ))
-        })?;
+        let source = tokio::fs::read_to_string(&self.config.script_path)
+            .await
+            .map_err(|error| {
+                DispatchError::Io(format!(
+                    "failed to read {}: {error}",
+                    self.config.script_path.display()
+                ))
+            })?;
         let program = harn_parser::parse_source(&source).map_err(|error| {
             DispatchError::Validation(format!(
                 "failed to parse {}: {error}",

@@ -62,8 +62,8 @@ pub(crate) fn trace_llm_call(entry: LlmTraceEntry) {
 
 /// Fine-grained event emitted during agent loop execution. Captures tool
 /// calls, LLM calls, interventions, compaction, and phase changes so
-/// downstream consumers (portal, burin-code) can display execution traces
-/// without reconstructing them from raw JSON.
+/// downstream consumers (portal, IDE hosts, cloud runners) can display
+/// execution traces without reconstructing them from raw JSON.
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AgentTraceEvent {

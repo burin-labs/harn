@@ -66,8 +66,8 @@ pub struct AutoCompactConfig {
     /// observation mask compaction. Called with a list of archived messages,
     /// returns a list of `Option<String>` — `Some(masked)` to override the
     /// default mask for that message, `None` to use the default.
-    /// This lets the host (e.g. burin-code) inject AST outlines, file
-    /// summaries, etc. without putting language-specific logic in Harn.
+    /// This lets the host (e.g. an IDE or cloud runner) inject AST outlines,
+    /// file summaries, etc. without putting language-specific logic in Harn.
     pub mask_callback: Option<VmValue>,
     /// Optional callback for per-tool-result compression. Called with
     /// `{tool_name, output, max_chars}` and returns compressed output string.
@@ -393,7 +393,7 @@ fn render_llm_compaction_prompt(
 ) -> Result<String, VmError> {
     let Some(path) = summarize_prompt.filter(|path| !path.trim().is_empty()) else {
         return Ok(format!(
-            "Summarize these archived conversation messages for a follow-on coding agent. Preserve goals, constraints, decisions, completed tool work, unresolved issues, and next actions. Output only the summary text.\n\nArchived message count: {archived_count}\n\nConversation:\n{formatted}"
+            "Summarize these archived conversation messages for a follow-on agent. Preserve goals, constraints, decisions, completed tool work, unresolved issues, and next actions. Output only the summary text.\n\nArchived message count: {archived_count}\n\nConversation:\n{formatted}"
         ));
     };
 

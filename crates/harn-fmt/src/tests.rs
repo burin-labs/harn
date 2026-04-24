@@ -1264,6 +1264,60 @@ fn test_multiline_interpolated_string_preserves_verbatim_body() {
 }
 
 #[test]
+fn test_multi_nil_coalescing_chain_wraps_each_operand() {
+    // A chain of ≥3 `??` operators must wrap with each operator at
+    // line start and a +2-space continuation indent relative to the
+    // owning statement (body indent 2 → continuation indent 4).
+    let source = r#"pipeline default(task) {
+  let x = first_long_name ?? second_long_name ?? third_long_name ?? fourth_long_name
+}"#;
+    let result = fmt_opts(source, 30);
+    for expected in [
+        "\n    ?? second_long_name",
+        "\n    ?? third_long_name",
+        "\n    ?? fourth_long_name",
+    ] {
+        assert!(
+            result.contains(expected),
+            "Expected line-leading `??` operator `{expected}`, got:\n{result}"
+        );
+    }
+    assert!(
+        !result.contains("\\\n"),
+        "`??` is newline-safe; no backslash continuation expected, got:\n{result}"
+    );
+    assert_eq!(
+        result,
+        fmt_opts(&result, 30),
+        "formatter is not idempotent on multi-?? chain"
+    );
+}
+
+#[test]
+fn test_nil_coalescing_chained_with_method_call_wraps() {
+    // A method chain + trailing `??` must place the `??` on its own
+    // line (continuation-indented) while the method chain stays intact
+    // when it fits.
+    let source = r#"pipeline default(task) {
+  let x = source.filter(keep).map(transform).collect() ?? fallback_sentinel
+}"#;
+    let result = fmt_opts(source, 40);
+    assert!(
+        result.contains("\n    ?? fallback_sentinel"),
+        "Expected line-leading `??` after method chain, got:\n{result}"
+    );
+    assert!(
+        !result.contains("\\\n"),
+        "no backslash continuation expected, got:\n{result}"
+    );
+    assert_eq!(
+        result,
+        fmt_opts(&result, 40),
+        "formatter is not idempotent on method-chain + ??"
+    );
+}
+
+#[test]
 fn test_imports_stay_tight_then_blank_before_first_item() {
     let source = "import \"std/http\"\nimport \"alpha\"\nimport \"zeta\"\npipeline default(task) { log(1) }\n";
     let result = format_source(source).unwrap();

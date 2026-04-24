@@ -3722,7 +3722,7 @@ Validation rejects missing required fields, malformed or unknown
 `capability.operation` entries, invalid cron schedules, unknown handoff targets,
 unknown budget/model/source/rollout fields, negative budget amounts, and invalid
 rollout percentages. `harn persona list` and `harn persona inspect <name>
---json` expose the resolved schema for hosts such as Harn Cloud and Burin Code.
+--json` expose the resolved schema for hosts such as IDEs and cloud runners.
 
 ### `[dependencies]` and `harn.lock` — git-backed package installs
 

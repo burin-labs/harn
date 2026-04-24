@@ -172,7 +172,7 @@ pub enum AgentEvent {
     /// the raw query args, the configured strategy, and a `mode` tag
     /// distinguishing the client-executed fallback (`"client"`) from
     /// provider-native paths (`"anthropic"` / `"openai"`). Mirrors the
-    /// transcript event shape so IDEs can render a search-in-progress
+    /// transcript event shape so hosts can render a search-in-progress
     /// chip in real time — the replay path walks the transcript after
     /// the turn, which is too late for live UX.
     ToolSearchQuery {

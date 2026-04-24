@@ -331,7 +331,7 @@ pub(crate) fn register_conversation_builtins(vm: &mut Vm) {
             .and_then(|d| d.get("prompt"))
             .map(|v| v.display())
             .unwrap_or_else(|| {
-                "Summarize this conversation for a follow-on coding agent. Preserve goals, constraints, decisions, unresolved questions, and concrete next actions. Be concise but complete.".to_string()
+                "Summarize this conversation for a follow-on agent. Preserve goals, constraints, decisions, unresolved questions, and concrete next actions. Be concise but complete.".to_string()
             });
 
         let messages = transcript_message_list(transcript)?;

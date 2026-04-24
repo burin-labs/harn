@@ -2,7 +2,7 @@
 //!
 //! A Server Card is a small JSON document that describes an MCP server
 //! without requiring a full handshake. It lets skill matchers, tool
-//! indexers, and IDEs decide whether to even connect to a server.
+//! indexers, and hosts decide whether to even connect to a server.
 //!
 //! This module implements both sides:
 //! - **Consumer**: `fetch_server_card(source, ttl)` loads the card from a

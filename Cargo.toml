@@ -23,7 +23,7 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/burin-labs/harn"
 homepage = "https://harnlang.com/"
-description = "A pipeline-oriented programming language for orchestrating AI coding agents"
+description = "A pipeline-oriented programming language for orchestrating AI agents and workflows"
 keywords = ["ai", "agents", "pipeline", "llm", "language"]
 categories = ["compilers", "command-line-utilities"]
 

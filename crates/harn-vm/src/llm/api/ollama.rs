@@ -3,7 +3,7 @@
 
 pub(crate) fn ollama_num_ctx_override() -> Option<u64> {
     for key in [
-        "BURIN_OLLAMA_NUM_CTX",
+        "HARN_OLLAMA_NUM_CTX",
         "OLLAMA_CONTEXT_LENGTH",
         "OLLAMA_NUM_CTX",
     ] {
@@ -19,7 +19,7 @@ pub(crate) fn ollama_num_ctx_override() -> Option<u64> {
 }
 
 pub(crate) fn ollama_keep_alive_override() -> Option<serde_json::Value> {
-    for key in ["BURIN_OLLAMA_KEEP_ALIVE", "OLLAMA_KEEP_ALIVE"] {
+    for key in ["HARN_OLLAMA_KEEP_ALIVE", "OLLAMA_KEEP_ALIVE"] {
         if let Ok(raw) = std::env::var(key) {
             let trimmed = raw.trim();
             if !trimmed.is_empty() {
@@ -46,16 +46,16 @@ mod tests {
     use crate::llm::env_lock;
 
     #[test]
-    fn ollama_num_ctx_override_prefers_burin_env() {
+    fn ollama_num_ctx_override_prefers_harn_env() {
         let _guard = env_lock().lock().expect("env lock");
         unsafe {
-            std::env::set_var("BURIN_OLLAMA_NUM_CTX", "131072");
+            std::env::set_var("HARN_OLLAMA_NUM_CTX", "131072");
             std::env::remove_var("OLLAMA_CONTEXT_LENGTH");
             std::env::remove_var("OLLAMA_NUM_CTX");
         }
         assert_eq!(ollama_num_ctx_override(), Some(131072));
         unsafe {
-            std::env::remove_var("BURIN_OLLAMA_NUM_CTX");
+            std::env::remove_var("HARN_OLLAMA_NUM_CTX");
         }
     }
 
@@ -63,12 +63,12 @@ mod tests {
     fn ollama_keep_alive_override_normalizes_forever() {
         let _guard = env_lock().lock().expect("env lock");
         unsafe {
-            std::env::set_var("BURIN_OLLAMA_KEEP_ALIVE", "forever");
+            std::env::set_var("HARN_OLLAMA_KEEP_ALIVE", "forever");
             std::env::remove_var("OLLAMA_KEEP_ALIVE");
         }
         assert_eq!(ollama_keep_alive_override(), Some(serde_json::json!(-1)));
         unsafe {
-            std::env::remove_var("BURIN_OLLAMA_KEEP_ALIVE");
+            std::env::remove_var("HARN_OLLAMA_KEEP_ALIVE");
         }
     }
 }

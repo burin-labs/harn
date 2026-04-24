@@ -649,8 +649,8 @@ fn default_config() -> ProvidersConfig {
         },
     );
 
-    // Ollama default. Note: Burin overrides this to `/v1/chat/completions`
-    // via its bundled `providers.toml` (loaded by setting
+    // Ollama default. Hosts can override this to `/v1/chat/completions`
+    // via a bundled `providers.toml` (loaded by setting
     // `HARN_PROVIDERS_CONFIG` in the host process). The OpenAI-compat
     // path bypasses Ollama's per-model tool-call post-processors
     // (qwen3coder.go, qwen35.go) which raise HTTP 500s on text-mode

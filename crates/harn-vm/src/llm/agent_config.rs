@@ -563,8 +563,13 @@ pub fn register_llm_call_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Host
             let mut opts = extract_llm_options(&args)?;
             let options = args.get(2).and_then(|a| a.as_dict()).cloned();
             let user_visible = opt_bool(&options, "user_visible");
+            // Match the non-bridge `llm_call` default (see
+            // `crate::llm::execute_llm_call`): transient HTTP/provider
+            // failures retry twice by default; pass `llm_retries: 0` to
+            // opt out. Schema validation errors are orthogonal and
+            // handled by `schema_retries`.
             let retry_config = LlmRetryConfig {
-                retries: opt_int(&options, "llm_retries").unwrap_or(0) as usize,
+                retries: opt_int(&options, "llm_retries").unwrap_or(2) as usize,
                 backoff_ms: opt_int(&options, "llm_backoff_ms").unwrap_or(2000) as u64,
             };
             let _ =

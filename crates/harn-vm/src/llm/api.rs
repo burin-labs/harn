@@ -703,12 +703,12 @@ mod tests {
             let captured = std::sync::Arc::new(std::sync::Mutex::new(None));
             let (addr, server) = spawn_ollama_stub_with_body_capture(captured.clone());
             let prev_ollama_host = std::env::var("OLLAMA_HOST").ok();
-            let prev_num_ctx = std::env::var("BURIN_OLLAMA_NUM_CTX").ok();
-            let prev_keep_alive = std::env::var("BURIN_OLLAMA_KEEP_ALIVE").ok();
+            let prev_num_ctx = std::env::var("HARN_OLLAMA_NUM_CTX").ok();
+            let prev_keep_alive = std::env::var("HARN_OLLAMA_KEEP_ALIVE").ok();
             unsafe {
                 std::env::set_var("OLLAMA_HOST", format!("http://{addr}"));
-                std::env::set_var("BURIN_OLLAMA_NUM_CTX", "131072");
-                std::env::set_var("BURIN_OLLAMA_KEEP_ALIVE", "forever");
+                std::env::set_var("HARN_OLLAMA_NUM_CTX", "131072");
+                std::env::set_var("HARN_OLLAMA_KEEP_ALIVE", "forever");
             }
 
             let local = tokio::task::LocalSet::new();
@@ -727,12 +727,12 @@ mod tests {
                 None => unsafe { std::env::remove_var("OLLAMA_HOST") },
             }
             match prev_num_ctx {
-                Some(value) => unsafe { std::env::set_var("BURIN_OLLAMA_NUM_CTX", value) },
-                None => unsafe { std::env::remove_var("BURIN_OLLAMA_NUM_CTX") },
+                Some(value) => unsafe { std::env::set_var("HARN_OLLAMA_NUM_CTX", value) },
+                None => unsafe { std::env::remove_var("HARN_OLLAMA_NUM_CTX") },
             }
             match prev_keep_alive {
-                Some(value) => unsafe { std::env::set_var("BURIN_OLLAMA_KEEP_ALIVE", value) },
-                None => unsafe { std::env::remove_var("BURIN_OLLAMA_KEEP_ALIVE") },
+                Some(value) => unsafe { std::env::set_var("HARN_OLLAMA_KEEP_ALIVE", value) },
+                None => unsafe { std::env::remove_var("HARN_OLLAMA_KEEP_ALIVE") },
             }
 
             server.join().expect("stub server");

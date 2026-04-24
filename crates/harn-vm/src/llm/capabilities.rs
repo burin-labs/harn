@@ -70,7 +70,7 @@ pub struct ProviderRule {
     pub thinking: Option<bool>,
     /// Carry `<think>...</think>` blocks in assistant history across turns.
     /// Qwen3.6 exposes this as `chat_template_kwargs.preserve_thinking`;
-    /// Alibaba recommends enabling it for long-horizon coding agents so the
+    /// Alibaba recommends enabling it for long-horizon agent loops so the
     /// model doesn't re-derive context it already worked out in prior turns.
     /// Anthropic's adaptive-thinking signature contract is stricter but plays
     /// the same role there.
@@ -408,7 +408,7 @@ mod tests {
         assert!(caps.thinking);
         assert!(
             caps.preserve_thinking,
-            "Qwen3.6 should enable preserve_thinking by default for coding agents"
+            "Qwen3.6 should enable preserve_thinking by default for long-horizon loops"
         );
     }
 

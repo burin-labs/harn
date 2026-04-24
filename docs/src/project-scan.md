@@ -51,8 +51,8 @@ Normalization rules:
 - Singular fields choose the dominant value in a stable precedence order, while
   the plural fields preserve every detected tag.
 - The catalog is local to Harn so `project_fingerprint(...)` remains fast and
-  self-contained; downstream repos such as burin-code consume the stable output
-  tags rather than acting as a runtime dependency for detection.
+  self-contained; downstream consumers consume the stable output tags rather
+  than acting as a runtime dependency for detection.
 
 ## What it returns
 
