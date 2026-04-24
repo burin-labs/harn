@@ -170,6 +170,7 @@ pub(in crate::stdlib) async fn execute_workflow(
         observability: None,
         trace_spans: Vec::new(),
         tool_recordings: Vec::new(),
+        hitl_questions: Vec::new(),
         metadata: BTreeMap::new(),
         persisted_path: None,
     });

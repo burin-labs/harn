@@ -280,78 +280,126 @@ async fn main() {
             commands::check::fmt_targets(&targets, args.check, &opts);
         }
         Command::Test(args) => {
-            if args.record {
-                harn_vm::llm::set_replay_mode(
-                    harn_vm::llm::LlmReplayMode::Record,
-                    ".harn-fixtures",
-                );
-            } else if args.replay {
-                harn_vm::llm::set_replay_mode(
-                    harn_vm::llm::LlmReplayMode::Replay,
-                    ".harn-fixtures",
-                );
-            }
-
-            if let Some(t) = args.target.as_deref() {
-                if t == "conformance" {
-                    commands::test::run_conformance_tests(
-                        t,
-                        args.selection.as_deref(),
-                        args.filter.as_deref(),
-                        args.junit.as_deref(),
-                        args.timeout,
-                        args.verbose,
-                        args.timing,
-                    )
-                    .await;
-                } else if args.selection.is_some() {
-                    command_error(
-                        "only `harn test conformance` accepts a second positional target",
-                    );
-                } else if args.watch {
-                    commands::test::run_watch_tests(
-                        t,
-                        args.filter.as_deref(),
-                        args.timeout,
-                        args.parallel,
-                    )
-                    .await;
+            if args.determinism {
+                if args.watch {
+                    command_error("--determinism cannot be combined with --watch");
+                }
+                if args.record || args.replay {
+                    command_error("--determinism manages its own record/replay cycle");
+                }
+                if let Some(t) = args.target.as_deref() {
+                    if t == "conformance" {
+                        commands::test::run_conformance_determinism_tests(
+                            t,
+                            args.selection.as_deref(),
+                            args.filter.as_deref(),
+                            args.timeout,
+                        )
+                        .await;
+                    } else if args.selection.is_some() {
+                        command_error(
+                            "only `harn test conformance` accepts a second positional target",
+                        );
+                    } else {
+                        commands::test::run_determinism_tests(
+                            t,
+                            args.filter.as_deref(),
+                            args.timeout,
+                        )
+                        .await;
+                    }
                 } else {
-                    commands::test::run_user_tests(
-                        t,
+                    let test_dir = if PathBuf::from("tests").is_dir() {
+                        "tests".to_string()
+                    } else {
+                        command_error("no path specified and no tests/ directory found");
+                    };
+                    if args.selection.is_some() {
+                        command_error(
+                            "only `harn test conformance` accepts a second positional target",
+                        );
+                    }
+                    commands::test::run_determinism_tests(
+                        &test_dir,
                         args.filter.as_deref(),
                         args.timeout,
-                        args.parallel,
                     )
                     .await;
                 }
             } else {
-                let test_dir = if PathBuf::from("tests").is_dir() {
-                    "tests".to_string()
-                } else {
-                    command_error("no path specified and no tests/ directory found");
-                };
-                if args.selection.is_some() {
-                    command_error(
-                        "only `harn test conformance` accepts a second positional target",
+                if args.record {
+                    harn_vm::llm::set_replay_mode(
+                        harn_vm::llm::LlmReplayMode::Record,
+                        ".harn-fixtures",
+                    );
+                } else if args.replay {
+                    harn_vm::llm::set_replay_mode(
+                        harn_vm::llm::LlmReplayMode::Replay,
+                        ".harn-fixtures",
                     );
                 }
-                if args.watch {
-                    commands::test::run_watch_tests(
-                        &test_dir,
-                        args.filter.as_deref(),
-                        args.timeout,
-                        args.parallel,
-                    )
-                    .await;
+
+                if let Some(t) = args.target.as_deref() {
+                    if t == "conformance" {
+                        commands::test::run_conformance_tests(
+                            t,
+                            args.selection.as_deref(),
+                            args.filter.as_deref(),
+                            args.junit.as_deref(),
+                            args.timeout,
+                            args.verbose,
+                            args.timing,
+                        )
+                        .await;
+                    } else if args.selection.is_some() {
+                        command_error(
+                            "only `harn test conformance` accepts a second positional target",
+                        );
+                    } else if args.watch {
+                        commands::test::run_watch_tests(
+                            t,
+                            args.filter.as_deref(),
+                            args.timeout,
+                            args.parallel,
+                        )
+                        .await;
+                    } else {
+                        commands::test::run_user_tests(
+                            t,
+                            args.filter.as_deref(),
+                            args.timeout,
+                            args.parallel,
+                        )
+                        .await;
+                    }
                 } else {
-                    commands::test::run_user_tests(
-                        &test_dir,
-                        args.filter.as_deref(),
-                        args.timeout,
-                        args.parallel,
-                    )
-                    .await;
+                    let test_dir = if PathBuf::from("tests").is_dir() {
+                        "tests".to_string()
+                    } else {
+                        command_error("no path specified and no tests/ directory found");
+                    };
+                    if args.selection.is_some() {
+                        command_error(
+                            "only `harn test conformance` accepts a second positional target",
+                        );
+                    }
+                    if args.watch {
+                        commands::test::run_watch_tests(
+                            &test_dir,
+                            args.filter.as_deref(),
+                            args.timeout,
+                            args.parallel,
+                        )
+                        .await;
+                    } else {
+                        commands::test::run_user_tests(
+                            &test_dir,
+                            args.filter.as_deref(),
+                            args.timeout,
+                            args.parallel,
+                        )
+                        .await;
+                    }
                 }
             }
         }
@@ -392,6 +440,12 @@ async fn main() {
         }
         Command::Trigger(args) => {
             if let Err(error) = commands::trigger::handle(args).await {
+                eprintln!("error: {error}");
+                process::exit(1);
+            }
+        }
+        Command::Trace(args) => {
+            if let Err(error) = commands::trace::handle(args).await {
                 eprintln!("error: {error}");
                 process::exit(1);
             }
@@ -674,6 +728,7 @@ fn inspect_run_record(path: &str, compare: Option<&str>) {
     println!("Artifacts: {}", run.artifacts.len());
     println!("Transitions: {}", run.transitions.len());
     println!("Checkpoints: {}", run.checkpoints.len());
+    println!("HITL questions: {}", run.hitl_questions.len());
     if let Some(observability) = &run.observability {
         println!("Planner rounds: {}", observability.planner_rounds.len());
         println!("Research facts: {}", observability.research_fact_count);

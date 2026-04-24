@@ -126,6 +126,8 @@ struct HitlRequestEnvelope {
     #[serde(default)]
     agent: String,
     trace_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    run_id: Option<String>,
     requested_at: String,
     payload: JsonValue,
 }
@@ -273,6 +275,7 @@ pub async fn append_approval_request_on(
         kind: HitlRequestKind::Approval,
         agent: agent.into(),
         trace_id: trace_id.clone(),
+        run_id: None,
         requested_at: now_rfc3339(),
         payload: json!({
             "action": action.into(),
@@ -306,6 +309,7 @@ async fn ask_user_impl(args: &[VmValue]) -> Result<VmValue, VmError> {
             .map(|keys| keys.agent.clone())
             .unwrap_or_default(),
         trace_id: trace_id.clone(),
+        run_id: crate::orchestration::current_mutation_session().and_then(|session| session.run_id),
         requested_at: now_rfc3339(),
         payload: json!({
             "prompt": prompt,
@@ -373,6 +377,7 @@ async fn request_approval_impl(args: &[VmValue]) -> Result<VmValue, VmError> {
             .map(|keys| keys.agent.clone())
             .unwrap_or_default(),
         trace_id: trace_id.clone(),
+        run_id: crate::orchestration::current_mutation_session().and_then(|session| session.run_id),
         requested_at: now_rfc3339(),
         payload: json!({
             "action": action,
@@ -444,6 +449,7 @@ async fn dual_control_impl(args: &[VmValue]) -> Result<VmValue, VmError> {
             .map(|keys| keys.agent.clone())
             .unwrap_or_default(),
         trace_id: trace_id.clone(),
+        run_id: crate::orchestration::current_mutation_session().and_then(|session| session.run_id),
         requested_at: now_rfc3339(),
         payload: json!({
             "n": n,
@@ -514,6 +520,7 @@ async fn escalate_to_impl(args: &[VmValue]) -> Result<VmValue, VmError> {
             .map(|keys| keys.agent.clone())
             .unwrap_or_default(),
         trace_id: trace_id.clone(),
+        run_id: crate::orchestration::current_mutation_session().and_then(|session| session.run_id),
         requested_at: now_rfc3339(),
         payload: json!({
             "role": role,
@@ -1318,7 +1325,11 @@ fn next_request_id(kind: HitlRequestKind, dispatch_keys: Option<&DispatchKeys>) 
 }
 
 fn request_headers(request: &HitlRequestEnvelope) -> BTreeMap<String, String> {
-    headers_with_trace(&request.request_id, &request.trace_id)
+    let mut headers = headers_with_trace(&request.request_id, &request.trace_id);
+    if let Some(run_id) = request.run_id.as_ref() {
+        headers.insert("run_id".to_string(), run_id.clone());
+    }
+    headers
 }
 
 fn response_headers(request_id: &str) -> BTreeMap<String, String> {
