@@ -11,9 +11,11 @@ table (including `schema_retries` + `provider: "auto"`), and the
 gotchas that repeatedly trip up first-time scripters.
 
 - In-repo: `docs/llm/harn-quickref.md`
+- Trigger/orchestrator add-on: `docs/llm/harn-triggers-quickref.md`
 - Canonical URL: <https://harnlang.com/docs/llm/harn-quickref.html>
+- Trigger/orchestrator URL: <https://harnlang.com/docs/llm/harn-triggers-quickref.html>
 
-Claude Code users get this autoloaded via the `harn-scripting` skill
+Claude Code users get these autoloaded via the `harn-scripting` skill
 at `.claude/skills/harn-scripting/SKILL.md`.
 
 ## Dev Environment Tips

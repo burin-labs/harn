@@ -1,0 +1,14 @@
+[package]
+name = "linear-cycle-planning"
+
+[exports]
+handlers = "lib.harn"
+
+[[triggers]]
+id = "linear-cycle-planning"
+kind = "webhook"
+provider = "linear"
+match = { path = "/hooks/linear", events = ["issue.create", "issue.update"] }
+handler = "handlers::on_issue_change"
+dedupe_key = "event.dedupe_key"
+secrets = { signing_secret = "linear/signing-secret" }

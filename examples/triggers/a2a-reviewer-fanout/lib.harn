@@ -1,5 +1,6 @@
 import "std/triggers"
 
+/** Return true for A2A push events that should be forwarded. */
 pub fn should_forward(event: TriggerEvent) -> bool {
   return event.provider == "a2a-push"
 }

@@ -1,0 +1,11 @@
+import "std/triggers"
+
+/** Build a release-note generation plan from GitHub webhook payloads. */
+pub fn generate_release_notes(event: TriggerEvent) -> dict {
+  return {
+    provider: event.provider,
+    kind: event.kind,
+    action: "generate_release_notes",
+    source: event.provider_payload.raw,
+  }
+}

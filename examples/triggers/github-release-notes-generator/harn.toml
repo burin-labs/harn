@@ -1,0 +1,15 @@
+[package]
+name = "github-release-notes-generator"
+
+[exports]
+handlers = "lib.harn"
+
+[[triggers]]
+id = "github-release-notes-generator"
+kind = "webhook"
+provider = "github"
+match = { path = "/hooks/github", events = ["push", "workflow_run.completed"] }
+handler = "handlers::generate_release_notes"
+dedupe_key = "event.dedupe_key"
+retry = { max = 5, backoff = "svix" }
+secrets = { signing_secret = "github/webhook-secret" }

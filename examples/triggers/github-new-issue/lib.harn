@@ -1,9 +1,11 @@
 import "std/triggers"
 
+/** Return true when a trigger event came from the GitHub provider. */
 pub fn should_handle(event: TriggerEvent) -> bool {
   return event.provider == "github"
 }
 
+/** Log the issue triage handoff for a new GitHub issue. */
 pub fn on_new_issue(event: TriggerEvent) {
   log("triaging ${event.kind}")
 }

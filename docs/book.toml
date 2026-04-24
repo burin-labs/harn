@@ -23,3 +23,4 @@ additional-js = ["theme/harn-keywords.js", "theme/harn-hljs.js"]
 "/docs/prompt-templating/index.html" = "https://harnlang.com/prompt-templating.html"
 "/docs/prompt-templating.html" = "https://harnlang.com/prompt-templating.html"
 "/docs/llm/harn-quickref.md" = "https://harnlang.com/docs/llm/harn-quickref.html"
+"/docs/llm/harn-triggers-quickref.md" = "https://harnlang.com/docs/llm/harn-triggers-quickref.html"

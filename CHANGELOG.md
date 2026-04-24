@@ -16,6 +16,11 @@ granular archaeology.
   single-writer leases, schedule and external trigger wake receipts,
   pause/resume/disable controls, per-persona budget enforcement, and
   stable `harn persona status <name> --json` output for hosts.
+- **Connector catalog and trigger example library (#177).** Added a
+  connector catalog, generated `docs/llm/harn-triggers-quickref.md`
+  from the live trigger provider catalog, and expanded
+  `examples/triggers/` into a ready-to-customize library with
+  `README.md` and `SKILL.md` metadata per recipe.
 
 ### Changed
 
