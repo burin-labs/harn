@@ -7,10 +7,23 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
-## Unreleased
+## v0.7.37
 
 ### Added
 
+- **Eval pack manifest v1 (#450).** Adds eval-pack v1 manifest structs
+  and TOML/JSON loading to `harn-vm`, evaluates portable packs through
+  existing replay fixtures, baseline diffs, deterministic/HITL
+  assertions, and cost/latency/token/stage thresholds, and surfaces
+  them via `harn eval harn.eval.toml` and
+  `harn test package --evals` with `[package].evals` discovery.
+  Documented fixture/rubric kinds, judge metadata, and threshold
+  severities.
+- **GitLab connector listed in the connector catalog (#588).**
+  `docs/src/connectors/catalog.md` now registers the pure-Harn
+  [`burin-labs/harn-gitlab-connector`](https://github.com/burin-labs/harn-gitlab-connector)
+  package with its auth quirks, supported trigger event types, and
+  outbound surfaces.
 - **Continuous persona runtime primitives (#462).** Adds an
   event-sourced `persona.runtime.events` runtime with lifecycle state,
   single-writer leases, schedule and external trigger wake receipts,
@@ -76,6 +89,15 @@ granular archaeology.
 
 ### Changed
 
+- **Enforced stdlib mirror parity in CI (#552).** The Format check job
+  now asserts every `crates/harn-vm/src/stdlib*.harn` file matches the
+  corresponding `crates/harn-modules/src/stdlib/` mirror byte-for-byte,
+  preventing drift between the VM's embedded stdlib and the packaged
+  module surface.
+- **Fixed stranded-envelope conformance flake (#553).** The orchestrator
+  recovery test now gates on a `/readyz` poll after the listener URL
+  is known, eliminating a race where envelopes could be flushed before
+  the server was ready under CI load.
 - **Stabilized connector tests and dispatcher timing (#560).** Connector
   test suites (GitHub, Slack, Linear, Notion) now share a single HTTP
   stub helper in `connectors::test_util`, eliminating ad-hoc local
