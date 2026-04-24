@@ -1,0 +1,37 @@
+import "std/agents"
+
+fn write_tools() {
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "write_note",
+    "Write a note",
+    {
+    handler: { args -> "wrote " + args.path },
+    parameters: {path: {type: "string"}},
+    returns: {type: "string"},
+  },
+  )
+  return tools
+}
+
+pipeline main() {
+  llm_mock({tool_calls: [{id: "write_1", name: "write_note", arguments: {path: "/workspace/a.txt"}}]})
+  let worker = spawn_agent(
+    {
+    name: "permission-worker",
+    task: "Try to write.",
+    wait: true,
+    permissions: {deny: ["write_note"]},
+    node: {
+    kind: "stage",
+    mode: "agent",
+    model_policy: {provider: "mock", tool_format: "native", max_iterations: 1},
+    tools: write_tools(),
+  },
+  },
+  )
+  println(worker?.status == "completed")
+  println(worker?.result?.result?.tools?.rejected[0] == "write_note")
+  println(len(transcript_events_by_kind(worker?.result?.transcript, "PermissionDeny")) == 1)
+}

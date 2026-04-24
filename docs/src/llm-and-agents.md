@@ -1022,9 +1022,19 @@ lineage metadata.
 - `tokens_used`
 - `budget_exceeded`
 - `session_id`
+- `transcript`
 - `data` when the child requests JSON mode or `returns.schema` succeeds
 - `error: {category, message, tool?}` when the child fails or a narrowed tool
   policy rejects a call
+
+`agent_loop(...)`, `sub_agent_run(...)`, and `spawn_agent(...)` also accept a
+`permissions` dict for per-agent dynamic policy. `allow` and `deny` entries can
+be tool-name glob lists, argument pattern lists, or Harn predicates over the tool
+args. `on_escalation` receives a `PermissionRequest` and may return
+`{grant: "once"}`, `{grant: "session"}`, `true`, or `false`. Permission
+decisions are recorded as `PermissionGrant`, `PermissionDeny`, and
+`PermissionEscalation` transcript events, while parent `policy` ceilings still
+intersect with child declarations.
 
 Set `background: true` to get a normal worker handle back instead of waiting
 inline. The resulting worker uses `mode: "sub_agent"` and can be resumed with

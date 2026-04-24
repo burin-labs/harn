@@ -34,6 +34,8 @@ pub struct AgentLoopConfig {
     pub auto_compact: Option<crate::orchestration::AutoCompactConfig>,
     /// Capability policy scoped to this agent loop.
     pub policy: Option<crate::orchestration::CapabilityPolicy>,
+    /// Dynamic per-agent permission rules, including VM predicates and escalation.
+    pub permissions: Option<crate::llm::permissions::DynamicPermissionPolicy>,
     /// Declarative approval policy (auto-approve / auto-deny / require host confirmation).
     pub approval_policy: Option<crate::orchestration::ToolApprovalPolicy>,
     /// Daemon mode.
@@ -387,6 +389,10 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                         serde_json::from_value::<crate::orchestration::ToolApprovalPolicy>(json)
                             .unwrap_or_default()
                     });
+            let permissions = crate::llm::permissions::parse_dynamic_permission_policy(
+                options.as_ref().and_then(|o| o.get("permissions")),
+                "agent_loop",
+            )?;
             let daemon_config = parse_daemon_loop_config(options.as_ref());
             let turn_policy = options
                 .as_ref()
@@ -414,6 +420,7 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                     native_tool_fallback,
                     auto_compact,
                     policy,
+                    permissions,
                     approval_policy,
                     daemon,
                     daemon_config,

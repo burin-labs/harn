@@ -1,0 +1,48 @@
+fn write_tools() {
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "write_note",
+    "Write a note",
+    {
+    handler: { args -> "wrote " + args.path },
+    parameters: {path: {type: "string"}},
+    returns: {type: "string"},
+  },
+  )
+  return tools
+}
+
+pipeline main() {
+  llm_mock(
+    {
+    tool_calls: [
+    {id: "write_1", name: "write_note", arguments: {path: "/workspace/a.txt"}},
+    {id: "write_2", name: "write_note", arguments: {path: "/workspace/a.txt"}},
+  ],
+  },
+  )
+  let result = agent_loop(
+    "Write twice.",
+    "Use tools.",
+    {
+    provider: "mock",
+    tools: write_tools(),
+    tool_format: "native",
+    max_iterations: 1,
+    permissions: {
+    deny: ["write_note"],
+    on_escalation: { request ->
+    if request.tool == "write_note" && request.args.path.starts_with("/workspace/") {
+      return {grant: "session", approver: "tester", reason: "workspace write approved"}
+    }
+    return false
+  },
+  },
+  },
+  )
+  println(len(transcript_events_by_kind(result?.transcript, "PermissionEscalation")) == 1)
+  println(len(transcript_events_by_kind(result?.transcript, "PermissionGrant")) == 2)
+  println(len(result?.tools?.rejected ?? []) == 0)
+  println(transcript_render_full(result?.transcript).contains("workspace write approved"))
+}

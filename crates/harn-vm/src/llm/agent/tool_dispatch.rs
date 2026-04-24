@@ -553,6 +553,15 @@ pub(super) async fn run_tool_dispatch(
             if !state.rejected_tools.contains(&tool_name.to_string()) {
                 state.rejected_tools.push(tool_name.to_string());
             }
+            state
+                .transcript_events
+                .push(crate::llm::permissions::permission_transcript_event(
+                    "PermissionDeny",
+                    tool_name,
+                    &tool_args,
+                    &error.to_string(),
+                    false,
+                ));
             state.transcript_events.push(transcript_event(
                 "tool_execution",
                 "tool",
@@ -577,6 +586,97 @@ pub(super) async fn run_tool_dispatch(
                 ));
             }
             continue;
+        }
+
+        if let Some(permission) = crate::llm::permissions::check_dynamic_permission(
+            &mut state.permission_session_grants,
+            tool_name,
+            &tool_args,
+            ctx.session_id,
+        )
+        .await?
+        {
+            match permission {
+                crate::llm::permissions::PermissionCheck::Granted { reason, escalated } => {
+                    if escalated {
+                        state.transcript_events.push(
+                            crate::llm::permissions::permission_transcript_event(
+                                "PermissionEscalation",
+                                tool_name,
+                                &tool_args,
+                                &reason,
+                                true,
+                            ),
+                        );
+                    }
+                    state.transcript_events.push(
+                        crate::llm::permissions::permission_transcript_event(
+                            "PermissionGrant",
+                            tool_name,
+                            &tool_args,
+                            &reason,
+                            escalated,
+                        ),
+                    );
+                }
+                crate::llm::permissions::PermissionCheck::Denied { reason, escalated } => {
+                    if escalated {
+                        state.transcript_events.push(
+                            crate::llm::permissions::permission_transcript_event(
+                                "PermissionEscalation",
+                                tool_name,
+                                &tool_args,
+                                &reason,
+                                true,
+                            ),
+                        );
+                    }
+                    state.transcript_events.push(
+                        crate::llm::permissions::permission_transcript_event(
+                            "PermissionDeny",
+                            tool_name,
+                            &tool_args,
+                            &reason,
+                            escalated,
+                        ),
+                    );
+                    let result_text = render_tool_result(&denied_tool_result(tool_name, reason));
+                    if !state.rejected_tools.contains(&tool_name.to_string()) {
+                        state.rejected_tools.push(tool_name.to_string());
+                    }
+                    state.transcript_events.push(transcript_event(
+                        "tool_execution",
+                        "tool",
+                        "internal",
+                        &result_text,
+                        Some(serde_json::json!({
+                            "tool_name": tool_name,
+                            "tool_use_id": tool_id,
+                            "rejected": true,
+                            "arguments": tool_args.clone(),
+                            "permission": "denied",
+                            "escalated": escalated,
+                        })),
+                    ));
+                    if ctx.tool_format == "native" {
+                        append_message_to_contexts(
+                            &mut state.visible_messages,
+                            &mut state.recorded_messages,
+                            build_tool_result_message(
+                                tool_id,
+                                tool_name,
+                                &result_text,
+                                &opts.provider,
+                            ),
+                        );
+                    } else {
+                        observations.push_str(&format!(
+                            "[result of {tool_name}]\n{result_text}\n[end of {tool_name} result]\n\n"
+                        ));
+                    }
+                    continue;
+                }
+            }
         }
 
         let approval_decision = crate::orchestration::current_approval_policy()
@@ -645,10 +745,19 @@ pub(super) async fn run_tool_dispatch(
             }
         };
         if let Err((approval_status, reason)) = approval_outcome {
-            let result_text = render_tool_result(&denied_tool_result(tool_name, reason));
+            let result_text = render_tool_result(&denied_tool_result(tool_name, reason.clone()));
             if !state.rejected_tools.contains(&tool_name.to_string()) {
                 state.rejected_tools.push(tool_name.to_string());
             }
+            state
+                .transcript_events
+                .push(crate::llm::permissions::permission_transcript_event(
+                    "PermissionDeny",
+                    tool_name,
+                    &tool_args,
+                    &reason,
+                    false,
+                ));
             state.transcript_events.push(transcript_event(
                 "tool_execution",
                 "tool",

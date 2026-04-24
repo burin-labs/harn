@@ -266,6 +266,7 @@ fn wrap_sub_agent_error(
     budget_exceeded: bool,
     session_id: &str,
     error: VmValue,
+    transcript: Option<VmValue>,
 ) -> VmValue {
     let mut envelope = sub_agent_base_envelope(
         summary,
@@ -277,6 +278,9 @@ fn wrap_sub_agent_error(
     );
     envelope.insert("ok".to_string(), VmValue::Bool(false));
     envelope.insert("error".to_string(), error);
+    if let Some(transcript) = transcript {
+        envelope.insert("transcript".to_string(), transcript);
+    }
     VmValue::Dict(Rc::new(envelope))
 }
 
@@ -625,6 +629,10 @@ fn sub_agent_loop_options(spec: &SubAgentRunSpec) -> Result<crate::llm::AgentLoo
             )
             .unwrap_or_default()
         });
+    let permissions = crate::llm::permissions::parse_dynamic_permission_policy(
+        options.as_ref().and_then(|o| o.get("permissions")),
+        "sub_agent_run",
+    )?;
     let turn_policy = options
         .as_ref()
         .and_then(|o| o.get("turn_policy"))
@@ -658,6 +666,7 @@ fn sub_agent_loop_options(spec: &SubAgentRunSpec) -> Result<crate::llm::AgentLoo
         native_tool_fallback,
         auto_compact: None,
         policy,
+        permissions,
         approval_policy,
         daemon: false,
         daemon_config: Default::default(),
@@ -753,6 +762,7 @@ pub(super) async fn execute_sub_agent(
                 false,
                 &spec.session_id,
                 error_value.clone(),
+                Some(transcript.clone()),
             );
             append_parent_sub_agent_event(
                 spec.parent_session_id.as_deref(),
@@ -801,6 +811,7 @@ pub(super) async fn execute_sub_agent(
         budget_exceeded,
         &spec.session_id,
     );
+    envelope.insert("transcript".to_string(), transcript.clone());
 
     if spec.returns_schema.is_none() && option_requests_structured_output(&spec.options) {
         if let Some(candidate) = synthesized.structured_json.as_ref() {
@@ -846,6 +857,7 @@ pub(super) async fn execute_sub_agent(
                             message,
                             None,
                         ),
+                        Some(transcript.clone()),
                     )),
                     transcript,
                 });
@@ -878,6 +890,7 @@ pub(super) async fn execute_sub_agent(
                 budget_exceeded,
                 &spec.session_id,
                 sub_agent_error_dict("permission_denied", reason, Some(tool)),
+                Some(transcript.clone()),
             )),
             transcript,
         });

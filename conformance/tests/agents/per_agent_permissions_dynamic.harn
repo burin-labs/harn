@@ -1,0 +1,54 @@
+fn note_tools() {
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "read_note",
+    "Read a note",
+    {
+    handler: { args -> "read " + args.path },
+    parameters: {path: {type: "string"}},
+    returns: {type: "string"},
+  },
+  )
+  tools = tool_define(
+    tools,
+    "write_note",
+    "Write a note",
+    {
+    handler: { args -> "wrote " + args.path },
+    parameters: {path: {type: "string"}},
+    returns: {type: "string"},
+  },
+  )
+  return tools
+}
+
+pipeline main() {
+  llm_mock(
+    {
+    tool_calls: [
+    {id: "read_1", name: "read_note", arguments: {path: "/workspace/a.txt"}},
+    {id: "write_1", name: "write_note", arguments: {path: "/workspace/a.txt"}},
+  ],
+  },
+  )
+  let result = agent_loop(
+    "Read then write.",
+    "Use tools.",
+    {
+    provider: "mock",
+    tools: note_tools(),
+    tool_format: "native",
+    max_iterations: 1,
+    permissions: {
+    allow: {read_note: { args -> args.path.starts_with("/workspace/") }},
+    deny: {write_note: { args -> true }},
+  },
+  },
+  )
+  let events = transcript_events(result?.transcript)
+  println(len(transcript_events_by_kind(result?.transcript, "PermissionGrant")) == 1)
+  println(len(transcript_events_by_kind(result?.transcript, "PermissionDeny")) == 1)
+  println(result?.tools?.rejected[0] == "write_note")
+  println(json_stringify(events).contains("/workspace/a.txt"))
+}

@@ -55,6 +55,20 @@ impl Drop for ApprovalPolicyGuard {
     }
 }
 
+/// Pops the loop-local dynamic permission policy off the stack when
+/// the loop exits. Only pops if the loop actually pushed a policy.
+pub(super) struct DynamicPermissionPolicyGuard {
+    pub(super) active: bool,
+}
+
+impl Drop for DynamicPermissionPolicyGuard {
+    fn drop(&mut self) {
+        if self.active {
+            crate::llm::permissions::pop_dynamic_permission_policy();
+        }
+    }
+}
+
 /// Owned handle for a temporarily-reshaped `VmValue` tools registry.
 /// The state struct doesn't own this — it holds a borrow into it via
 /// `tools_val_borrow` only during construction. Dropped before `Self::new`
@@ -437,14 +451,15 @@ fn rehydrate_active_skills(
 /// let _sink_guard      = …;  // 2nd
 /// let _policy_guard    = …;  // 3rd
 /// let _approval_guard  = …;  // 4th
+/// let _permission_guard = …; // 5th
 /// ```
 ///
 /// `let` bindings drop in REVERSE declaration order, so the observable
-/// drop order was: approval → policy → sink → iteration. To preserve
+/// drop order is: permission → approval → policy → sink → iteration. To preserve
 /// that order with struct fields (forward drop order), the guard fields
 /// appear in this struct in the SAME sequence as the observable drop
-/// order: `_approval_guard`, `_policy_guard`, `_sink_guard`,
-/// `_iteration_guard`. **Do not reorder** without re-auditing the push/
+/// order: `_permission_guard`, `_approval_guard`, `_policy_guard`,
+/// `_sink_guard`, `_iteration_guard`. **Do not reorder** without re-auditing the push/
 /// pop lifetimes in `crate::orchestration`.
 pub(super) struct AgentLoopState {
     pub(super) config: AgentLoopConfig,
@@ -481,6 +496,7 @@ pub(super) struct AgentLoopState {
     pub(super) all_tools_used: Vec<String>,
     pub(super) successful_tools_used: Vec<String>,
     pub(super) rejected_tools: Vec<String>,
+    pub(super) permission_session_grants: std::collections::BTreeSet<String>,
     pub(super) deferred_user_messages: Vec<String>,
 
     pub(super) daemon_state: String,
@@ -545,6 +561,7 @@ pub(super) struct AgentLoopState {
     pub(crate) rehydrated_from_session: bool,
 
     // Drop guards: see "Drop ordering" on the struct docs.
+    pub(super) _permission_guard: DynamicPermissionPolicyGuard,
     pub(super) _approval_guard: ApprovalPolicyGuard,
     pub(super) _policy_guard: ExecutionPolicyGuard,
     pub(super) _sink_guard: SessionSinkGuard,
@@ -946,6 +963,14 @@ impl AgentLoopState {
             active: effective_approval_policy.is_some(),
         };
 
+        let effective_permissions = config.permissions.clone();
+        if let Some(ref permissions) = effective_permissions {
+            crate::llm::permissions::push_dynamic_permission_policy(permissions.clone());
+        }
+        let _permission_guard = DynamicPermissionPolicyGuard {
+            active: effective_permissions.is_some(),
+        };
+
         let has_skill_registry = config_skill_registry
             .as_ref()
             .and_then(|value| value.as_dict())
@@ -1248,6 +1273,7 @@ impl AgentLoopState {
             all_tools_used,
             successful_tools_used,
             rejected_tools,
+            permission_session_grants: std::collections::BTreeSet::new(),
             deferred_user_messages,
             daemon_state,
             daemon_snapshot_path,
@@ -1278,6 +1304,7 @@ impl AgentLoopState {
             skill_match: config_skill_match,
             working_files: config_working_files,
             native_tools_snapshot,
+            _permission_guard,
             _approval_guard,
             _policy_guard,
             _sink_guard,
