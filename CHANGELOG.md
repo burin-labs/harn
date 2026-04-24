@@ -7,6 +7,27 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
+## v0.7.34
+
+### Added
+
+- **Eval v2 replay tooling (#525).** Adds `harn trace import` to ingest
+  generic `{prompt, response, tool_calls}` JSONL traces into standard
+  `--llm-mock` fixtures, a `harn test --determinism` harness that
+  records then replays each pipeline and diffs stdout, provider
+  responses, and persisted run records, and a clarifying-question eval
+  kind backed by a new `hitl_questions` run-record field populated from
+  the HITL event log.
+
+### Changed
+
+- **Protocol-aware done sentinel guidance (#524).** Persistent no-tool
+  and native-tool loops now surface bare `##DONE##` in prompts, nudges,
+  mock-LLM behavior, editor hover docs, and docs snippets, while tagged
+  text-tool flows continue to use `<done>##DONE##</done>`. Adds prompt
+  coverage so the no-tool variant can't silently regress to the tagged
+  sentinel.
+
 ## v0.7.33
 
 ### Added
