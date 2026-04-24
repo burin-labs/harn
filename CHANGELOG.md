@@ -19,6 +19,12 @@ granular archaeology.
 
 ### Changed
 
+- **Stabilized connector tests and dispatcher timing (#560).** Connector
+  test suites (GitHub, Slack, Linear, Notion) now share a single HTTP
+  stub helper in `connectors::test_util`, eliminating ad-hoc local
+  mocks. Dispatcher timing tests moved to Tokio paused time so timing
+  assertions no longer depend on wall-clock scheduling — reduces flake
+  risk under CI load.
 - **Unified `agent_loop` `llm_retries` default at 4 (#554).** Previously
   the bridge-aware registration defaulted to 4 while the non-bridge
   registration and `sub_agent_run` defaulted to 3. All three paths now

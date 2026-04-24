@@ -19,14 +19,12 @@ use serde_json::{json, Value as JsonValue};
 use tempfile::TempDir;
 use tokio::sync::oneshot;
 
-// Two-tier timeout convention shared with the orchestrator integration
-// tests: cold-start of the debug `harn` binary is process-bound and can
-// take a few hundred milliseconds (link, parse, set up the stdio loop),
-// while in-flight JSON-RPC roundtrips against an already-ready server
-// are event-bound and finish in milliseconds. Use a 5s budget when
-// waiting for the readiness log on stderr, and the tighter 2s budget
-// for every subsequent message-level recv.
-const PROCESS_READY_TIMEOUT: Duration = Duration::from_secs(5);
+// Two-tier timeout convention shared with the orchestrator integration tests:
+// cold-start of the debug `harn` binary is process-bound and can stretch under
+// full nextest load, while JSON-RPC roundtrips against an already-ready server
+// finish in milliseconds. Use the wider budget for the first protocol response
+// or HTTP readiness URL, and the tighter budget for subsequent message recvs.
+const PROCESS_READY_TIMEOUT: Duration = Duration::from_secs(15);
 const TEST_TIMEOUT: Duration = Duration::from_secs(2);
 
 fn lock_harn_serve_mcp_tests() -> mcp_support::HarnProcessTestLock {
@@ -49,7 +47,9 @@ pub fn fail(kind: string) -> string {
 }
 
 pub fn spin(label: string) -> string {
-  while !is_cancelled() {}
+  while !is_cancelled() {
+    sleep(1ms)
+  }
   return "cancelled:" + label
 }
 "#,
@@ -95,16 +95,6 @@ where
         "timed out waiting for matching JSON-RPC message; observed {} non-matching message(s): {:?}",
         observed.len(),
         observed
-    );
-}
-
-fn wait_for_stdio_ready(child: &mut std::process::Child, rx: &Receiver<String>) {
-    mcp_support::wait_for_child_log_suffix(
-        child,
-        rx,
-        "MCP workflow server ready on ",
-        PROCESS_READY_TIMEOUT,
-        "stdio MCP server",
     );
 }
 
@@ -164,9 +154,8 @@ fn serve_mcp_stdio_lists_calls_and_cancels_exported_functions() {
 
     let mut stdin = child.stdin.take().unwrap();
     let (rx, stdout_handle) = spawn_stdout_reader(child.stdout.take().unwrap());
-    let (stderr_rx, _stderr_handle) =
+    let (_stderr_rx, _stderr_handle) =
         mcp_support::spawn_stderr_reader(child.stderr.take().unwrap());
-    wait_for_stdio_ready(&mut child, &stderr_rx);
 
     writeln!(
         stdin,
@@ -183,7 +172,7 @@ fn serve_mcp_stdio_lists_calls_and_cancels_exported_functions() {
         })
     )
     .unwrap();
-    let init = recv_until(&rx, TEST_TIMEOUT, |message| message["id"] == 1);
+    let init = recv_until(&rx, PROCESS_READY_TIMEOUT, |message| message["id"] == 1);
     assert_eq!(init["result"]["serverInfo"]["name"], "server");
 
     writeln!(

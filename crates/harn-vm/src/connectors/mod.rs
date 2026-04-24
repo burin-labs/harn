@@ -69,6 +69,16 @@ pub use stream::StreamConnector;
 use webhook::WebhookProviderProfile;
 pub use webhook::{GenericWebhookConnector, WebhookSignatureVariant};
 
+const OUTBOUND_CONNECTOR_HTTP_TIMEOUT: StdDuration = StdDuration::from_secs(30);
+
+pub(crate) fn outbound_http_client(user_agent: &'static str) -> reqwest::Client {
+    reqwest::Client::builder()
+        .user_agent(user_agent)
+        .timeout(OUTBOUND_CONNECTOR_HTTP_TIMEOUT)
+        .build()
+        .expect("connector HTTP client configuration should be valid")
+}
+
 /// Shared owned handle to a connector instance registered with the runtime.
 pub type ConnectorHandle = Arc<AsyncMutex<Box<dyn Connector>>>;
 

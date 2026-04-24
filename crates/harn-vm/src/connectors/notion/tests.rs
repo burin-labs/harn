@@ -1,5 +1,4 @@
 use std::collections::{BTreeMap, HashMap};
-use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
@@ -12,6 +11,10 @@ use time::OffsetDateTime;
 
 use super::*;
 use crate::connectors::{
+    test_util::{
+        accept_http_connection, read_http_request, write_http_response,
+        CapturedHttpRequest as CapturedRequest,
+    },
     Connector, ConnectorCtx, InboxIndex, MetricsRegistry, RateLimiterFactory, RawInbound,
     TriggerBinding,
 };
@@ -282,99 +285,16 @@ async fn notion_webhook_signed_event_normalizes_to_typed_payload() {
     assert_eq!(payload.subscription_id.as_deref(), Some("sub_1"));
 }
 
-#[derive(Clone, Debug)]
-struct CapturedRequest {
-    method: String,
-    path: String,
-    headers: BTreeMap<String, String>,
-    body: String,
-}
-
-fn accept_with_deadline(listener: &TcpListener, label: &str) -> std::net::TcpStream {
-    listener.set_nonblocking(true).expect("set nonblocking");
-    let deadline = std::time::Instant::now() + StdDuration::from_secs(3);
-    loop {
-        match listener.accept() {
-            Ok((stream, _)) => {
-                stream.set_nonblocking(false).unwrap();
-                return stream;
-            }
-            Err(ref error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                if std::time::Instant::now() >= deadline {
-                    panic!("{label}: no client within 3s");
-                }
-                std::thread::sleep(StdDuration::from_millis(10));
-            }
-            Err(error) => panic!("{label}: accept failed: {error}"),
-        }
-    }
-}
-
-fn read_request(stream: &mut std::net::TcpStream) -> CapturedRequest {
-    let mut buffer = Vec::new();
-    let mut temp = [0u8; 4096];
-    let header_end;
-    loop {
-        let n = stream.read(&mut temp).expect("read request");
-        assert!(n > 0, "request ended before headers");
-        buffer.extend_from_slice(&temp[..n]);
-        if let Some(idx) = buffer.windows(4).position(|window| window == b"\r\n\r\n") {
-            header_end = idx + 4;
-            break;
-        }
-    }
-    let header_text = String::from_utf8_lossy(&buffer[..header_end]).to_string();
-    let mut lines = header_text.split("\r\n").filter(|line| !line.is_empty());
-    let request_line = lines.next().unwrap();
-    let mut request_parts = request_line.split_whitespace();
-    let method = request_parts.next().unwrap_or_default().to_string();
-    let path = request_parts.next().unwrap_or_default().to_string();
-    let mut headers = BTreeMap::new();
-    for line in lines {
-        if let Some((name, value)) = line.split_once(':') {
-            headers.insert(name.to_ascii_lowercase(), value.trim().to_string());
-        }
-    }
-    let content_length = headers
-        .get("content-length")
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(0);
-    while buffer.len() < header_end + content_length {
-        let n = stream.read(&mut temp).expect("read body");
-        assert!(n > 0, "request ended before body");
-        buffer.extend_from_slice(&temp[..n]);
-    }
-    let body =
-        String::from_utf8_lossy(&buffer[header_end..header_end + content_length]).to_string();
-    CapturedRequest {
-        method,
-        path,
-        headers,
-        body,
-    }
-}
-
 fn write_response(stream: &mut std::net::TcpStream, status: u16, body: &str) {
-    let status_text = match status {
-        200 => "OK",
-        201 => "Created",
-        429 => "Too Many Requests",
-        _ => "OK",
-    };
-    let retry_after = if status == 429 {
-        "retry-after: 0\r\n"
+    let headers = if status == 429 {
+        vec![
+            ("content-type", "application/json".to_string()),
+            ("retry-after", "0".to_string()),
+        ]
     } else {
-        ""
+        vec![("content-type", "application/json".to_string())]
     };
-    let response = format!(
-        "HTTP/1.1 {} {}\r\n{}content-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
-        status,
-        status_text,
-        retry_after,
-        body.len(),
-        body,
-    );
-    stream.write_all(response.as_bytes()).unwrap();
+    write_http_response(stream, status, &headers, body);
 }
 
 fn spawn_mock_server(
@@ -386,8 +306,8 @@ fn spawn_mock_server(
     let addr = listener.local_addr().unwrap();
     let handle = std::thread::spawn(move || {
         for index in 0..expected_requests {
-            let mut stream = accept_with_deadline(&listener, "notion mock server");
-            let request = read_request(&mut stream);
+            let mut stream = accept_http_connection(&listener, "notion mock server");
+            let request = read_http_request(&mut stream);
             captured.lock().unwrap().push(request.clone());
             let (status, body) = responder(index, &request);
             write_response(&mut stream, status, &body);

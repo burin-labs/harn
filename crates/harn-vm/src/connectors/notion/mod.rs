@@ -314,10 +314,7 @@ impl NotionConnector {
         let client = Arc::new(NotionClient {
             provider_id: ProviderId::from(NOTION_PROVIDER_ID),
             state: state.clone(),
-            http: reqwest::Client::builder()
-                .user_agent("harn-notion-connector")
-                .build()
-                .unwrap_or_else(|_| reqwest::Client::new()),
+            http: crate::connectors::outbound_http_client("harn-notion-connector"),
         });
         Self {
             provider_id: ProviderId::from(NOTION_PROVIDER_ID),
