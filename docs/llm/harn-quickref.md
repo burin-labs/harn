@@ -755,9 +755,10 @@ let outcome = parallel settle paths with { max_concurrent: 4 } { path ->
 ### `agent_loop`
 
 `agent_loop(prompt, system?, options?)` runs a multi-turn loop with
-tool dispatch. Terminates when the model emits `<done>##DONE##</done>`
-(or `##DONE##` in legacy text) — the sentinel is configurable via
-`done_sentinel`.
+tool dispatch. Completion uses the `##DONE##` sentinel: tagged
+text-tool stages emit `<done>##DONE##</done>`, while no-tool and
+native-tool stages emit bare `##DONE##`. The sentinel is configurable
+via `done_sentinel`.
 
 Returns a dict with `status`, `text`, `visible_text` (last iteration's
 prose with tool calls stripped), `iterations`, `duration_ms`,

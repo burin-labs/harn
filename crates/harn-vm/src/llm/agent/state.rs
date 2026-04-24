@@ -1110,7 +1110,7 @@ impl AgentLoopState {
             .as_ref()
             .map(|policy| policy.allow_done_sentinel)
             .unwrap_or(true);
-        let done_instruction = if tool_format == "native" {
+        let done_instruction = if tool_format == "native" || !has_tools {
             format!("include `{done_sentinel}` exactly once in assistant text")
         } else {
             format!("emit `<done>{done_sentinel}</done>` as its own top-level block")

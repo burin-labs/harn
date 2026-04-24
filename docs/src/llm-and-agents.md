@@ -438,8 +438,10 @@ println(result.text)
 ## agent_loop
 
 Run an agent that keeps working until it's done. The agent maintains
-conversation history across turns and loops until it outputs the
-`##DONE##` sentinel. Returns a dict with canonical visible text,
+conversation history across turns and loops until it emits the
+completion sentinel `##DONE##`. In tagged text-tool stages the runtime
+wraps it as `<done>##DONE##</done>`; in no-tool and native-tool stages
+the model emits bare `##DONE##`. Returns a dict with canonical visible text,
 tool usage, transcript state, and any deferred queued human messages.
 
 ```harn
@@ -458,7 +460,9 @@ println(result.iterations) // number of LLM round-trips
 1. Sends the prompt to the model
 2. Reads the response
 3. If `persistent: true`:
-   - Checks if the response contains `##DONE##`
+   - Checks if the response contains the completion sentinel
+     (`##DONE##`, optionally wrapped as `<done>...</done>`
+     in tagged text-tool stages)
    - If yes, stops and returns the accumulated output
    - If no, sends a nudge message asking the agent to continue
    - Repeats until done or limits are hit
@@ -488,7 +492,7 @@ Same as `llm_call`, plus additional options:
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `persistent` | bool | `false` | Keep looping until `##DONE##` |
+| `persistent` | bool | `false` | Keep looping until the completion sentinel is emitted (`##DONE##`, or `<done>##DONE##</done>` in tagged text-tool stages) |
 | `max_iterations` | int | `50` | Maximum number of LLM round-trips |
 | `max_nudges` | int | `3` | Max consecutive text-only responses before stopping |
 | `nudge` | string | see below | Custom message to send when nudging the agent |
@@ -528,15 +532,15 @@ debugging provider contract drift or OpenAI-compatible empty completions.
 
 Default nudge message:
 
-> You have not output ##DONE## yet — the task is not complete.
-> Use your tools to continue working. Only output ##DONE## when
-> the task is fully complete and verified.
+> The nudge is mode-aware:
+> In tagged text-tool stages it asks for concrete tool progress and reserves `<done>##DONE##</done>` for real completion.
+> In no-tool or native-tool stages it asks for concrete progress and reserves bare `##DONE##` for completion.
 
 When `persistent: true`, the system prompt is automatically extended with:
 
 > IMPORTANT: You MUST keep working until the task is complete.
-> Do NOT stop to explain or summarize — take action. Output ##DONE##
-> only when the task is fully complete and verified.
+> The completion instruction is mode-aware:
+> tagged text-tool stages use `<done>##DONE##</done>`, while no-tool and native-tool stages use bare `##DONE##`.
 
 ## Daemon stdlib wrappers
 

@@ -543,13 +543,11 @@ pub(crate) fn mock_llm_response(
         }
     }
 
-    // Tagged response: <assistant_prose> + <done> when the system
-    // prompt advertises the sentinel (agent_loop compatibility).
-    let done_block = if system.is_some_and(|s| s.contains("##DONE##")) {
-        "\n<done>##DONE##</done>"
-    } else {
-        ""
-    };
+    // Mirror the prompt family's completion contract:
+    // - tagged text-tool stages use <assistant_prose> + <done>
+    // - no-tool/native stages use plain assistant text + bare ##DONE##
+    let tagged_done = system.is_some_and(|s| s.contains("<done>"));
+    let bare_done = system.is_some_and(|s| s.contains("##DONE##"));
 
     let prose_body = if prompt_text.is_empty() {
         "Mock LLM response".to_string()
@@ -560,7 +558,13 @@ pub(crate) fn mock_llm_response(
             prompt_text.chars().take(100).collect::<String>()
         )
     };
-    let response = format!("<assistant_prose>{prose_body}</assistant_prose>{done_block}");
+    let response = if tagged_done {
+        format!("<assistant_prose>{prose_body}</assistant_prose>\n<done>##DONE##</done>")
+    } else if bare_done {
+        format!("{prose_body}\n##DONE##")
+    } else {
+        prose_body
+    };
 
     Ok(LlmResult {
         text: response.clone(),
