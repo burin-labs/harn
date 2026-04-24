@@ -198,6 +198,20 @@ model_match = "*qwen3*"
 native_tools = true
 thinking = true
 
+# Apple Silicon MLX server (mlx-vlm). OpenAI-compat with vision; honors
+# the same `chat_template_kwargs.preserve_thinking` knob as vLLM, since
+# mlx-vlm reuses HF tokenizers / chat templates.
+[[provider.mlx]]
+model_match = "*qwen3.6*"
+native_tools = true
+thinking = true
+preserve_thinking = true
+
+[[provider.mlx]]
+model_match = "*qwen3*"
+native_tools = true
+thinking = true
+
 # ---------- Qwen3.6 family (routed providers) --------------------------------
 #
 # DashScope is the authoritative Qwen host; Fireworks and OpenRouter
@@ -346,3 +360,4 @@ local = "openai"
 # New April 2026 routes for Qwen3.6:
 dashscope = "openai"
 llamacpp = "openai"
+mlx = "openai"
