@@ -7,6 +7,19 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
+## Unreleased
+
+### Changed
+
+- **Unified `agent_loop` `llm_retries` default at 4 (#554).** Previously
+  the bridge-aware registration defaulted to 4 while the non-bridge
+  registration and `sub_agent_run` defaulted to 3. All three paths now
+  share a single `DEFAULT_AGENT_LOOP_LLM_RETRIES` constant, so an
+  unqualified `agent_loop` or `sub_agent_run` call retries transient
+  provider errors up to four times (five attempts total) regardless of
+  entry point. Callers that explicitly pass `llm_retries` are
+  unaffected.
+
 ## v0.7.36
 
 ### Added
