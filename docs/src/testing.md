@@ -161,6 +161,68 @@ harn playground --script pipeline.harn --llm-mock-record fixtures.jsonl
 harn playground --script pipeline.harn --llm-mock fixtures.jsonl
 ```
 
+To import an external eval trace into the same fixture format:
+
+```bash
+harn trace import \
+  --trace-file traces/generic.jsonl \
+  --trace-id trace_123 \
+  --output fixtures/imported.jsonl
+```
+
+The importer expects JSONL records shaped like
+`{prompt, response, tool_calls}` and passes through common metadata
+such as `model`, `provider`, and token counts when present.
+
+## Eval kinds
+
+`harn eval` supports the default replay fixture flow plus an explicit
+clarifying-question kind for ambiguous tasks.
+
+### Replay evals
+
+Replay evals are the default. They compare a run's persisted status and
+stage outcomes against an embedded or explicit replay fixture.
+
+### Clarifying-question evals
+
+Clarifying-question evals assert that the agent called `ask_user(...)`
+and asked the minimal question required to proceed. The run record
+persists `ask_user` prompts, and the fixture can require a single
+question plus term-level constraints:
+
+```json
+{
+  "_type": "replay_fixture",
+  "eval_kind": "clarifying_question",
+  "expected_status": "completed",
+  "clarifying_question": {
+    "required_terms": ["repository"],
+    "forbidden_terms": ["branch"],
+    "min_questions": 1,
+    "max_questions": 1
+  }
+}
+```
+
+Use this when defaults would be unsafe and the right behavior is to ask
+the user before continuing.
+
+## Determinism harness
+
+Use `harn test --determinism` to assert that a pipeline replays the same
+way on a second pass:
+
+```bash
+harn test --determinism tests/agent_loop.harn
+```
+
+The harness records once and replays once when no sibling
+`<name>.llm-mock.jsonl` exists. If a sibling fixture is already
+present, it replays both passes from that fixture. It compares stdout,
+provider response payloads from `llm_transcript.jsonl`, and persisted
+run-record structure to catch branching drift.
+
 ## Built-in assertions
 
 Harn provides `assert`, `assert_eq`, and `assert_ne` builtins for test pipelines:

@@ -263,6 +263,7 @@ fn replay_fixture_round_trip_passes() {
         observability: None,
         trace_spans: vec![],
         tool_recordings: vec![],
+        hitl_questions: vec![],
         metadata: BTreeMap::new(),
         persisted_path: None,
     };
@@ -314,6 +315,96 @@ fn replay_eval_suite_reports_failed_case() {
     assert_eq!(suite.total, 2);
     assert_eq!(suite.failed, 1);
     assert!(suite.cases.iter().any(|case| !case.pass));
+}
+
+#[test]
+fn clarifying_question_eval_requires_matching_hitl_prompt() {
+    let run = RunRecord {
+        id: "run_clarify".to_string(),
+        workflow_id: "wf".to_string(),
+        status: "completed".to_string(),
+        hitl_questions: vec![RunHitlQuestionRecord {
+            request_id: "hitl_question_1".to_string(),
+            prompt: "Which repository should I patch?".to_string(),
+            agent: "planner".to_string(),
+            trace_id: Some("trace-1".to_string()),
+            asked_at: "2026-04-23T12:00:00Z".to_string(),
+        }],
+        ..Default::default()
+    };
+    let fixture = ReplayFixture {
+        type_name: "replay_fixture".to_string(),
+        id: "fixture_clarify".to_string(),
+        source_run_id: run.id.clone(),
+        workflow_id: run.workflow_id.clone(),
+        created_at: "2026-04-23T12:00:01Z".to_string(),
+        eval_kind: Some("clarifying_question".to_string()),
+        clarifying_question: Some(ClarifyingQuestionEvalSpec {
+            required_terms: vec!["repository".to_string()],
+            forbidden_terms: vec!["branch".to_string()],
+            ..Default::default()
+        }),
+        expected_status: "completed".to_string(),
+        stage_assertions: vec![],
+        ..Default::default()
+    };
+
+    let report = evaluate_run_against_fixture(&run, &fixture);
+
+    assert!(report.pass, "failures: {:?}", report.failures);
+}
+
+#[test]
+fn save_run_record_materializes_hitl_questions_from_active_event_log() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    crate::event_log::reset_active_event_log();
+    let log =
+        crate::event_log::install_default_for_base_dir(temp_dir.path()).expect("install event log");
+    let topic = crate::event_log::Topic::new(crate::HITL_QUESTIONS_TOPIC).unwrap();
+    futures::executor::block_on(
+        log.append(
+            &topic,
+            crate::event_log::LogEvent::new(
+                "hitl.question_asked",
+                serde_json::json!({
+                    "request_id": "hitl_question_1",
+                    "kind": "question",
+                    "agent": "planner",
+                    "trace_id": "trace_1",
+                    "run_id": "run_hitl",
+                    "requested_at": "2026-04-23T12:00:00Z",
+                    "payload": {
+                        "prompt": "Which environment should I deploy to?"
+                    }
+                }),
+            )
+            .with_headers(std::collections::BTreeMap::from([
+                ("request_id".to_string(), "hitl_question_1".to_string()),
+                ("trace_id".to_string(), "trace_1".to_string()),
+                ("run_id".to_string(), "run_hitl".to_string()),
+            ])),
+        ),
+    )
+    .unwrap();
+
+    let path = temp_dir.path().join("run.json");
+    let run = RunRecord {
+        id: "run_hitl".to_string(),
+        workflow_id: "wf".to_string(),
+        status: "completed".to_string(),
+        ..Default::default()
+    };
+
+    save_run_record(&run, Some(path.to_str().unwrap())).unwrap();
+    let loaded = load_run_record(&path).unwrap();
+
+    assert_eq!(loaded.hitl_questions.len(), 1);
+    assert_eq!(
+        loaded.hitl_questions[0].prompt,
+        "Which environment should I deploy to?"
+    );
+
+    crate::event_log::reset_active_event_log();
 }
 
 #[test]

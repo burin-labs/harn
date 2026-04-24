@@ -545,6 +545,7 @@ harn eval .harn-runs/<run>.json
 harn eval .harn-runs/<run>.json --compare baseline.json
 harn eval .harn-runs/
 harn eval evals/regression.json
+harn eval evals/clarifying-question.json
 harn eval --llm-mock fixtures.jsonl --structural-experiment doubled_prompt pipeline.harn
 ```
 
@@ -553,6 +554,12 @@ harn eval --llm-mock fixtures.jsonl --structural-experiment doubled_prompt pipel
 - a single run record JSON file
 - a directory of run record JSON files
 - an eval suite manifest JSON file with grouped cases and optional baseline comparisons
+
+Clarifying-question evals use an explicit fixture with
+`"eval_kind": "clarifying_question"`. The fixture checks persisted
+`ask_user(...)` prompts captured in the run record and can enforce a
+single minimal question via `required_terms`, `forbidden_terms`, and
+question-count bounds.
 
 When `path` is a `.harn` pipeline file, `--structural-experiment <spec>` runs
 the pipeline twice in isolated temp run directories: once as the baseline and
@@ -661,6 +668,23 @@ caps bulk execution throughput in operations per second.
 Every bulk replay appends an audit envelope to
 `trigger.operations.audit` describing who ran it, when, the normalized
 filter, and the affected records.
+
+## harn trace import
+
+Convert a third-party eval trace into a standard `--llm-mock` fixture.
+
+```bash
+harn trace import \
+  --trace-file traces/generic.jsonl \
+  --trace-id trace_123 \
+  --output fixtures/imported.jsonl
+```
+
+The source file is JSONL. Each line should contain at least
+`{prompt, response}` and may also include `tool_calls`, `model`,
+`provider`, token counts, and `trace_id`. The generated fixture can be
+used directly with `harn run --llm-mock ...`, `harn eval
+--llm-mock ...`, or `harn test --determinism`.
 
 ## harn trigger cancel
 

@@ -3,8 +3,11 @@ use std::path::{Path, PathBuf};
 use std::process;
 
 use regex::Regex;
+use serde_json::Value;
 
-use crate::commands::run::{install_cli_llm_mock_mode, CliLlmMockMode};
+use crate::commands::run::{
+    install_cli_llm_mock_mode, persist_cli_llm_mock_recording, CliLlmMockMode,
+};
 use crate::env_guard::ScopedEnvVar;
 use crate::execute;
 use crate::test_runner;
@@ -570,6 +573,337 @@ pub(crate) async fn run_user_tests(
     if summary.failed > 0 {
         process::exit(1);
     }
+}
+
+fn collect_user_test_files(path_str: &str) -> Result<Vec<PathBuf>, String> {
+    let path = PathBuf::from(path_str);
+    if !path.exists() {
+        return Err(format!("Path not found: {path_str}"));
+    }
+    if path.is_file() {
+        return Ok(vec![path]);
+    }
+    let files = collect_harn_files_sorted(&path);
+    if files.is_empty() {
+        return Err(format!("No .harn files found under {}", path.display()));
+    }
+    Ok(files)
+}
+
+fn sibling_llm_fixture(path: &Path) -> Option<PathBuf> {
+    let fixture = path.with_extension("llm-mock.jsonl");
+    fixture.is_file().then_some(fixture)
+}
+
+fn load_run_records(dir: &Path) -> Result<Vec<harn_vm::orchestration::RunRecord>, String> {
+    let mut paths: Vec<_> = fs::read_dir(dir)
+        .map_err(|error| format!("failed to read {}: {error}", dir.display()))?
+        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
+        .collect();
+    paths.sort();
+    paths
+        .iter()
+        .map(|path| {
+            harn_vm::orchestration::load_run_record(path)
+                .map_err(|error| format!("failed to load {}: {error}", path.display()))
+        })
+        .collect()
+}
+
+fn load_transcript_responses(dir: &Path) -> Result<Vec<Value>, String> {
+    let path = dir.join("llm_transcript.jsonl");
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let content = fs::read_to_string(&path)
+        .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+    content
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .filter(|event| event.get("type").and_then(Value::as_str) == Some("provider_call_response"))
+        .map(|event| {
+            Ok(serde_json::json!({
+                "provider": event.get("provider").cloned().unwrap_or(Value::Null),
+                "model": event.get("model").cloned().unwrap_or(Value::Null),
+                "text": event.get("text").cloned().unwrap_or(Value::Null),
+                "tool_calls": event.get("tool_calls").cloned().unwrap_or(Value::Null),
+                "input_tokens": event.get("input_tokens").cloned().unwrap_or(Value::Null),
+                "output_tokens": event.get("output_tokens").cloned().unwrap_or(Value::Null),
+                "thinking": event.get("thinking").cloned().unwrap_or(Value::Null),
+            }))
+        })
+        .collect()
+}
+
+async fn execute_determinism_run(
+    source: &str,
+    path: &Path,
+    timeout_ms: u64,
+    llm_mock_mode: &CliLlmMockMode,
+    run_dir: &tempfile::TempDir,
+    transcript_dir: &tempfile::TempDir,
+) -> Result<String, String> {
+    harn_vm::reset_thread_local_state();
+    install_cli_llm_mock_mode(llm_mock_mode)?;
+    let run_dir_guard = ScopedEnvVar::set(
+        harn_vm::runtime_paths::HARN_RUN_DIR_ENV,
+        &run_dir.path().to_string_lossy(),
+    );
+    let transcript_dir_guard = ScopedEnvVar::set(
+        "HARN_LLM_TRANSCRIPT_DIR",
+        &transcript_dir.path().to_string_lossy(),
+    );
+    let result = tokio::time::timeout(
+        std::time::Duration::from_millis(timeout_ms),
+        execute(source, Some(path)),
+    )
+    .await;
+    let persist_result = persist_cli_llm_mock_recording(llm_mock_mode);
+    harn_vm::llm::clear_cli_llm_mock_mode();
+    drop(transcript_dir_guard);
+    drop(run_dir_guard);
+    persist_result?;
+    match result {
+        Ok(Ok(output)) => Ok(output),
+        Ok(Err(error)) => Err(error),
+        Err(_) => Err(format!("timed out after {timeout_ms}ms")),
+    }
+}
+
+fn compare_determinism_artifacts(
+    path: &Path,
+    left_runs: &[harn_vm::orchestration::RunRecord],
+    right_runs: &[harn_vm::orchestration::RunRecord],
+    left_responses: &[Value],
+    right_responses: &[Value],
+) -> Result<(), String> {
+    if left_runs.len() != right_runs.len() {
+        return Err(format!(
+            "{} produced {} run record(s) on the first pass and {} on replay",
+            path.display(),
+            left_runs.len(),
+            right_runs.len()
+        ));
+    }
+    for (idx, (left, right)) in left_runs.iter().zip(right_runs.iter()).enumerate() {
+        let diff = harn_vm::orchestration::diff_run_records(left, right);
+        if !diff.identical
+            || left.tool_recordings != right.tool_recordings
+            || left.hitl_questions != right.hitl_questions
+        {
+            return Err(format!(
+                "{} replay diverged for run #{idx}: identical={} tool_recordings_equal={} hitl_questions_equal={}",
+                path.display(),
+                diff.identical,
+                left.tool_recordings == right.tool_recordings,
+                left.hitl_questions == right.hitl_questions
+            ));
+        }
+    }
+    if left_responses != right_responses {
+        return Err(format!(
+            "{} replay changed provider_call_response output",
+            path.display()
+        ));
+    }
+    Ok(())
+}
+
+async fn run_determinism_case(path: &Path, timeout_ms: u64) -> Result<(), String> {
+    let source = fs::read_to_string(path)
+        .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+    let recording_dir = tempfile::Builder::new()
+        .prefix("harn-determinism-record-")
+        .tempdir()
+        .map_err(|error| format!("failed to create determinism tempdir: {error}"))?;
+    let replay_dir = tempfile::Builder::new()
+        .prefix("harn-determinism-replay-")
+        .tempdir()
+        .map_err(|error| format!("failed to create determinism tempdir: {error}"))?;
+    let record_transcript = tempfile::Builder::new()
+        .prefix("harn-determinism-record-llm-")
+        .tempdir()
+        .map_err(|error| format!("failed to create transcript tempdir: {error}"))?;
+    let replay_transcript = tempfile::Builder::new()
+        .prefix("harn-determinism-replay-llm-")
+        .tempdir()
+        .map_err(|error| format!("failed to create transcript tempdir: {error}"))?;
+    let fixture_mode = sibling_llm_fixture(path);
+    let fixture_path = fixture_mode
+        .clone()
+        .unwrap_or_else(|| recording_dir.path().join("fixture.jsonl"));
+    let first_mode = fixture_mode
+        .clone()
+        .map(|fixture_path| CliLlmMockMode::Replay { fixture_path })
+        .unwrap_or_else(|| CliLlmMockMode::Record {
+            fixture_path: fixture_path.clone(),
+        });
+    let second_mode = CliLlmMockMode::Replay {
+        fixture_path: fixture_path.clone(),
+    };
+
+    let first_output = execute_determinism_run(
+        &source,
+        path,
+        timeout_ms,
+        &first_mode,
+        &recording_dir,
+        &record_transcript,
+    )
+    .await?;
+    let second_output = execute_determinism_run(
+        &source,
+        path,
+        timeout_ms,
+        &second_mode,
+        &replay_dir,
+        &replay_transcript,
+    )
+    .await?;
+
+    if first_output != second_output {
+        return Err(format!(
+            "{} replay changed stdout\nfirst:\n{}\nsecond:\n{}",
+            path.display(),
+            first_output,
+            second_output
+        ));
+    }
+
+    let first_runs = load_run_records(recording_dir.path())?;
+    let second_runs = load_run_records(replay_dir.path())?;
+    let first_responses = load_transcript_responses(record_transcript.path())?;
+    let second_responses = load_transcript_responses(replay_transcript.path())?;
+    compare_determinism_artifacts(
+        path,
+        &first_runs,
+        &second_runs,
+        &first_responses,
+        &second_responses,
+    )
+}
+
+pub(crate) async fn run_determinism_tests(path_str: &str, filter: Option<&str>, timeout_ms: u64) {
+    let files = collect_user_test_files(path_str).unwrap_or_else(|error| {
+        eprintln!("{error}");
+        process::exit(1);
+    });
+    let mut passed = 0usize;
+    let mut failed = 0usize;
+    let mut errors = Vec::new();
+
+    for path in files {
+        let rel_path = path.display().to_string();
+        if let Some(pattern) = filter {
+            let matched = if let Some(re_pat) = pattern.strip_prefix("re:") {
+                Regex::new(re_pat).is_ok_and(|re| re.is_match(&rel_path))
+            } else {
+                rel_path.contains(pattern)
+            };
+            if !matched {
+                continue;
+            }
+        }
+
+        match run_determinism_case(&path, timeout_ms).await {
+            Ok(()) => {
+                println!("  \x1b[32mPASS\x1b[0m  {rel_path}");
+                passed += 1;
+            }
+            Err(error) => {
+                println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
+                failed += 1;
+                errors.push(error);
+            }
+        }
+    }
+
+    println!();
+    if failed > 0 {
+        println!(
+            "\x1b[31m{passed} passed, {failed} failed, {} total\x1b[0m",
+            passed + failed
+        );
+        println!();
+        println!("Failures:");
+        for error in errors {
+            println!("  {error}");
+        }
+        process::exit(1);
+    }
+    println!(
+        "\x1b[32m{passed} passed, {failed} failed, {} total\x1b[0m",
+        passed + failed
+    );
+}
+
+pub(crate) async fn run_conformance_determinism_tests(
+    dir: &str,
+    selection: Option<&str>,
+    filter: Option<&str>,
+    timeout_ms: u64,
+) {
+    let dir_path = PathBuf::from(dir);
+    let suite_root = canonicalize_or_err(&dir_path).unwrap_or_else(|error| {
+        eprintln!("{error}");
+        process::exit(1);
+    });
+    let files = resolve_conformance_selection(&suite_root, selection).unwrap_or_else(|error| {
+        eprintln!("{error}");
+        process::exit(1);
+    });
+    let mut passed = 0usize;
+    let mut failed = 0usize;
+    let mut errors = Vec::new();
+
+    for path in files {
+        let rel_path = path
+            .strip_prefix(&suite_root)
+            .unwrap_or(&path)
+            .display()
+            .to_string();
+        if let Some(pattern) = filter {
+            let matched = if let Some(re_pat) = pattern.strip_prefix("re:") {
+                Regex::new(re_pat).is_ok_and(|re| re.is_match(&rel_path))
+            } else {
+                rel_path.contains(pattern)
+            };
+            if !matched {
+                continue;
+            }
+        }
+        match run_determinism_case(&path, timeout_ms).await {
+            Ok(()) => {
+                println!("  \x1b[32mPASS\x1b[0m  {rel_path}");
+                passed += 1;
+            }
+            Err(error) => {
+                println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
+                failed += 1;
+                errors.push(error);
+            }
+        }
+    }
+
+    println!();
+    if failed > 0 {
+        println!(
+            "\x1b[31m{passed} passed, {failed} failed, {} total\x1b[0m",
+            passed + failed
+        );
+        println!();
+        println!("Failures:");
+        for error in errors {
+            println!("  {error}");
+        }
+        process::exit(1);
+    }
+    println!(
+        "\x1b[32m{passed} passed, {failed} failed, {} total\x1b[0m",
+        passed + failed
+    );
 }
 
 pub(crate) async fn run_watch_tests(

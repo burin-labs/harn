@@ -9,7 +9,9 @@ use super::{
     default_run_dir, new_id, now_rfc3339, parse_json_payload, parse_json_value, sync_run_handoffs,
     ArtifactRecord, CapabilityPolicy, HandoffArtifact,
 };
-use crate::event_log::{active_event_log, EventLog, LogEvent as EventLogRecord, Topic};
+use crate::event_log::{
+    active_event_log, AnyEventLog, EventLog, LogEvent as EventLogRecord, Topic,
+};
 use crate::llm::vm_value_to_json;
 use crate::triggers::{SignatureStatus, TriggerEvent};
 use crate::value::{VmError, VmValue};
@@ -117,8 +119,21 @@ pub struct ReplayFixture {
     pub workflow_id: String,
     pub workflow_name: Option<String>,
     pub created_at: String,
+    pub eval_kind: Option<String>,
+    pub clarifying_question: Option<ClarifyingQuestionEvalSpec>,
     pub expected_status: String,
     pub stage_assertions: Vec<ReplayStageAssertion>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct ClarifyingQuestionEvalSpec {
+    pub expected_question: Option<String>,
+    pub accepted_questions: Vec<String>,
+    pub required_terms: Vec<String>,
+    pub forbidden_terms: Vec<String>,
+    pub min_questions: usize,
+    pub max_questions: Option<usize>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -386,6 +401,16 @@ pub struct EvalSuiteCase {
     pub compare_to: Option<String>,
 }
 
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RunHitlQuestionRecord {
+    pub request_id: String,
+    pub prompt: String,
+    pub agent: String,
+    pub trace_id: Option<String>,
+    pub asked_at: String,
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct RunRecord {
@@ -416,6 +441,7 @@ pub struct RunRecord {
     pub observability: Option<RunObservabilityRecord>,
     pub trace_spans: Vec<RunTraceSpanRecord>,
     pub tool_recordings: Vec<ToolCallRecord>,
+    pub hitl_questions: Vec<RunHitlQuestionRecord>,
     pub metadata: BTreeMap<String, serde_json::Value>,
     pub persisted_path: Option<String>,
 }
@@ -493,6 +519,119 @@ pub struct RunExecutionRecord {
 
 fn compact_json_value(value: &serde_json::Value) -> String {
     serde_json::to_string(value).unwrap_or_else(|_| value.to_string())
+}
+
+fn normalize_question_text(text: &str) -> String {
+    text.chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch.is_whitespace() {
+                ch.to_ascii_lowercase()
+            } else {
+                ' '
+            }
+        })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn clarifying_min_questions(spec: &ClarifyingQuestionEvalSpec) -> usize {
+    spec.min_questions.max(1)
+}
+
+fn clarifying_max_questions(spec: &ClarifyingQuestionEvalSpec) -> usize {
+    spec.max_questions.unwrap_or(1).max(1)
+}
+
+fn read_topic_records(
+    log: &AnyEventLog,
+    topic: &Topic,
+) -> Vec<(crate::event_log::EventId, EventLogRecord)> {
+    let mut from = None;
+    let mut records = Vec::new();
+    loop {
+        let batch =
+            futures::executor::block_on(log.read_range(topic, from, 256)).unwrap_or_default();
+        if batch.is_empty() {
+            break;
+        }
+        from = batch.last().map(|(event_id, _)| *event_id);
+        records.extend(batch);
+    }
+    records
+}
+
+fn merge_hitl_questions_from_active_log(run: &mut RunRecord) {
+    let Some(log) = active_event_log() else {
+        return;
+    };
+    let topic = Topic::new(crate::HITL_QUESTIONS_TOPIC)
+        .expect("static hitl.questions topic should always be valid");
+    let mut merged = run
+        .hitl_questions
+        .iter()
+        .cloned()
+        .map(|question| (question.request_id.clone(), question))
+        .collect::<BTreeMap<_, _>>();
+
+    for (_, event) in read_topic_records(log.as_ref(), &topic) {
+        if event.kind != "hitl.question_asked" {
+            continue;
+        }
+        let payload = &event.payload;
+        let matches_run = event
+            .headers
+            .get("run_id")
+            .is_some_and(|value| value == &run.id)
+            || payload
+                .get("run_id")
+                .and_then(|value| value.as_str())
+                .is_some_and(|value| value == run.id);
+        if !matches_run {
+            continue;
+        }
+        let request_id = payload
+            .get("request_id")
+            .and_then(|value| value.as_str())
+            .or_else(|| event.headers.get("request_id").map(String::as_str))
+            .unwrap_or_default();
+        let prompt = payload
+            .get("payload")
+            .and_then(|value| value.get("prompt"))
+            .and_then(|value| value.as_str())
+            .unwrap_or_default();
+        if request_id.is_empty() || prompt.is_empty() {
+            continue;
+        }
+        merged.insert(
+            request_id.to_string(),
+            RunHitlQuestionRecord {
+                request_id: request_id.to_string(),
+                prompt: prompt.to_string(),
+                agent: payload
+                    .get("agent")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or_default()
+                    .to_string(),
+                trace_id: payload
+                    .get("trace_id")
+                    .and_then(|value| value.as_str())
+                    .map(str::to_string),
+                asked_at: payload
+                    .get("requested_at")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or_default()
+                    .to_string(),
+            },
+        );
+    }
+
+    run.hitl_questions = merged.into_values().collect();
+    run.hitl_questions.sort_by(|left, right| {
+        (left.asked_at.as_str(), left.request_id.as_str())
+            .cmp(&(right.asked_at.as_str(), right.request_id.as_str()))
+    });
 }
 
 fn signature_status_label(status: &SignatureStatus) -> &'static str {
@@ -1265,6 +1404,7 @@ pub fn normalize_run_record(value: &VmValue) -> Result<RunRecord, VmError> {
     if run.replay_fixture.is_none() {
         run.replay_fixture = Some(replay_fixture_from_run(&run));
     }
+    merge_hitl_questions_from_active_log(&mut run);
     sync_run_handoffs(&mut run);
     if run.observability.is_none() {
         let persisted_path = run.persisted_path.clone();
@@ -1477,6 +1617,7 @@ pub fn save_run_record(run: &RunRecord, path: Option<&str>) -> Result<String, Vm
         .map(PathBuf::from)
         .unwrap_or_else(|| default_run_dir().join(format!("{}.json", run.id)));
     let mut materialized = run.clone();
+    merge_hitl_questions_from_active_log(&mut materialized);
     if materialized.replay_fixture.is_none() {
         materialized.replay_fixture = Some(replay_fixture_from_run(&materialized));
     }
@@ -1527,6 +1668,8 @@ pub fn replay_fixture_from_run(run: &RunRecord) -> ReplayFixture {
         workflow_id: run.workflow_id.clone(),
         workflow_name: run.workflow_name.clone(),
         created_at: now_rfc3339(),
+        eval_kind: Some("replay".to_string()),
+        clarifying_question: None,
         expected_status: run.status.clone(),
         stage_assertions: run
             .stages
@@ -1552,6 +1695,9 @@ pub fn replay_fixture_from_run(run: &RunRecord) -> ReplayFixture {
 }
 
 pub fn evaluate_run_against_fixture(run: &RunRecord, fixture: &ReplayFixture) -> ReplayEvalReport {
+    if fixture.eval_kind.as_deref() == Some("clarifying_question") {
+        return evaluate_clarifying_question(run, fixture);
+    }
     let mut failures = Vec::new();
     if run.status != fixture.expected_status {
         failures.push(format!(
@@ -1605,6 +1751,94 @@ pub fn evaluate_run_against_fixture(run: &RunRecord, fixture: &ReplayFixture) ->
                 ));
             }
         }
+    }
+
+    ReplayEvalReport {
+        pass: failures.is_empty(),
+        failures,
+        stage_count: run.stages.len(),
+    }
+}
+
+fn evaluate_clarifying_question(run: &RunRecord, fixture: &ReplayFixture) -> ReplayEvalReport {
+    let mut failures = Vec::new();
+    let spec = fixture.clarifying_question.clone().unwrap_or_default();
+    let min_questions = clarifying_min_questions(&spec);
+    let max_questions = clarifying_max_questions(&spec);
+    let questions = &run.hitl_questions;
+
+    if run.status != fixture.expected_status {
+        failures.push(format!(
+            "run status mismatch: expected {}, got {}",
+            fixture.expected_status, run.status
+        ));
+    }
+    if questions.len() < min_questions {
+        failures.push(format!(
+            "expected at least {min_questions} clarifying question(s), got {}",
+            questions.len()
+        ));
+    }
+    if questions.len() > max_questions {
+        failures.push(format!(
+            "expected at most {max_questions} clarifying question(s), got {}",
+            questions.len()
+        ));
+    }
+
+    let normalized_expected = spec
+        .expected_question
+        .as_deref()
+        .map(normalize_question_text);
+    let normalized_accepted = spec
+        .accepted_questions
+        .iter()
+        .map(|question| normalize_question_text(question))
+        .collect::<Vec<_>>();
+    let required_terms = spec
+        .required_terms
+        .iter()
+        .map(|term| normalize_question_text(term))
+        .collect::<Vec<_>>();
+    let forbidden_terms = spec
+        .forbidden_terms
+        .iter()
+        .map(|term| normalize_question_text(term))
+        .collect::<Vec<_>>();
+
+    let matched = questions.iter().any(|question| {
+        let normalized = normalize_question_text(&question.prompt);
+        let matches_expected = normalized_expected
+            .as_ref()
+            .is_none_or(|expected| &normalized == expected)
+            && (normalized_accepted.is_empty()
+                || normalized_accepted
+                    .iter()
+                    .any(|candidate| candidate == &normalized));
+        let has_required_terms = required_terms
+            .iter()
+            .all(|term| normalized.contains(term.as_str()));
+        let avoids_forbidden_terms = forbidden_terms
+            .iter()
+            .all(|term| !normalized.contains(term.as_str()));
+        matches_expected && has_required_terms && avoids_forbidden_terms
+    });
+
+    if !questions.is_empty()
+        && (!normalized_accepted.is_empty()
+            || normalized_expected.is_some()
+            || !required_terms.is_empty()
+            || !forbidden_terms.is_empty())
+        && !matched
+    {
+        failures.push(format!(
+            "no clarifying question matched fixture; actual questions: {}",
+            questions
+                .iter()
+                .map(|question| format!("{:?}", question.prompt))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
     }
 
     ReplayEvalReport {

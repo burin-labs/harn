@@ -86,6 +86,8 @@ SCRIPTING
     Portal(PortalArgs),
     /// Replay and inspect historical trigger dispatches from the event log.
     Trigger(TriggerArgs),
+    /// Import third-party eval traces into replayable Harn fixtures.
+    Trace(TraceArgs),
     /// Query and manage trust-graph autonomy state.
     Trust(TrustArgs),
     /// Query and verify trust-graph autonomy state.
@@ -332,6 +334,9 @@ pub(crate) struct TestArgs {
     /// Replay LLM fixtures from .harn-fixtures/.
     #[arg(long)]
     pub replay: bool,
+    /// Record then replay each selected pipeline and assert deterministic output.
+    #[arg(long)]
+    pub determinism: bool,
     /// Extra skill-discovery roots (repeatable). See `harn run
     /// --skill-dir` — applied the same way to user tests and
     /// conformance fixtures so bundled `skills/` dirs are picked up.
@@ -860,6 +865,31 @@ pub(crate) struct TriggerCancelArgs {
     /// Max operations per second for bulk runs. Omit to run without throttling.
     #[arg(long = "rate-limit", value_name = "OPS_PER_SEC")]
     pub rate_limit: Option<f64>,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct TraceArgs {
+    #[command(subcommand)]
+    pub command: TraceCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum TraceCommand {
+    /// Convert a generic JSONL trace into a replayable `--llm-mock` fixture.
+    Import(TraceImportArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct TraceImportArgs {
+    /// Source JSONL trace file with `{prompt,response,tool_calls}` records.
+    #[arg(long = "trace-file", value_name = "PATH")]
+    pub trace_file: String,
+    /// Optional trace id to filter when the source file contains multiple traces.
+    #[arg(long = "trace-id", value_name = "ID")]
+    pub trace_id: Option<String>,
+    /// Output path for the generated replay fixture JSONL.
+    #[arg(long = "output", value_name = "PATH")]
+    pub output: String,
 }
 
 #[derive(Debug, Args)]
@@ -1852,7 +1882,7 @@ mod tests {
         Cli, Command, ConnectCommand, McpCommand, OrchestratorCommand, OrchestratorDeployProvider,
         OrchestratorLogFormat, OrchestratorQueueCommand, PackageCacheCommand, PackageCommand,
         ProjectTemplate, RunsCommand, SkillCommand, SkillKeyCommand, SkillTrustCommand,
-        SkillsCommand, TriggerCommand, TrustCommand, TrustOutcomeArg, TrustTierArg,
+        SkillsCommand, TraceCommand, TriggerCommand, TrustCommand, TrustOutcomeArg, TrustTierArg,
     };
     use clap::Parser;
 
@@ -2101,6 +2131,29 @@ mod tests {
     }
 
     #[test]
+    fn test_parses_trace_import_args() {
+        let cli = Cli::parse_from([
+            "harn",
+            "trace",
+            "import",
+            "--trace-file",
+            "langfuse.jsonl",
+            "--trace-id",
+            "trace_123",
+            "--output",
+            "fixtures/imported.jsonl",
+        ]);
+
+        let Command::Trace(args) = cli.command.unwrap() else {
+            panic!("expected trace command");
+        };
+        let TraceCommand::Import(import) = args.command;
+        assert_eq!(import.trace_file, "langfuse.jsonl");
+        assert_eq!(import.trace_id.as_deref(), Some("trace_123"));
+        assert_eq!(import.output, "fixtures/imported.jsonl");
+    }
+
+    #[test]
     fn test_parses_trigger_replay_flags() {
         let cli = Cli::parse_from([
             "harn",
@@ -2122,6 +2175,25 @@ mod tests {
         assert!(replay.diff);
         assert_eq!(replay.as_of.as_deref(), Some("2026-04-19T18:00:00Z"));
         assert!(replay.where_expr.is_none());
+    }
+
+    #[test]
+    fn test_parses_test_determinism_flag() {
+        let cli = Cli::parse_from([
+            "harn",
+            "test",
+            "--determinism",
+            "--filter",
+            "agent",
+            "tests/agent_loop.harn",
+        ]);
+
+        let Command::Test(args) = cli.command.unwrap() else {
+            panic!("expected test command");
+        };
+        assert!(args.determinism);
+        assert_eq!(args.filter.as_deref(), Some("agent"));
+        assert_eq!(args.target.as_deref(), Some("tests/agent_loop.harn"));
     }
 
     #[test]
