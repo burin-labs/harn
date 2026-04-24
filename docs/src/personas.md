@@ -96,7 +96,7 @@ harn persona --manifest examples/personas/harn.toml inspect merge_captain --json
 it, Harn walks up from the current directory to the nearest `harn.toml`, stopping
 at a `.git` boundary.
 
-The JSON output is stable enough for hosts such as Harn Cloud and Burin Code to
+The JSON output is stable enough for hosts such as IDEs and cloud runners to
 consume. It includes name, version, tools, capabilities, autonomy tier, model
 policy, budget, triggers, handoffs, context packs, evals, receipt policy, and
 manifest source.

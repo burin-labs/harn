@@ -777,9 +777,8 @@ fn session_sink_registry_round_trip_and_cleanup() {
 fn workflow_stage_extracts_session_id_from_raw_model_policy() {
     // orchestration/workflow.rs reads session_id from the caller's
     // model_policy dict. A workflow-stage builder minting its own id
-    // (via `burin_new_session_id`) must thread through unchanged —
-    // otherwise the pipeline-side agent_subscribe handlers attach to
-    // an id the VM never uses.
+    // must thread through unchanged — otherwise the pipeline-side
+    // `agent_subscribe` handlers attach to an id the VM never uses.
     let mut dict: std::collections::BTreeMap<String, VmValue> = Default::default();
     dict.insert(
         "session_id".to_string(),

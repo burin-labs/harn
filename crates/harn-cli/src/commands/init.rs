@@ -143,7 +143,7 @@ pipeline test_add(task) {
     }
   })
 
-  let result = agent_loop(task, "You are a careful coding agent. Read the repository before proposing changes.", {
+  let result = agent_loop(task, "You are a helpful agent. Read the repository before proposing changes.", {
     persistent: true,
     max_nudges: 3,
     tools: tools

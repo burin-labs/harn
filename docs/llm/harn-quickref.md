@@ -1033,6 +1033,32 @@ assert(!r.ok)
 assert(r.error.category == "rate_limit")
 ```
 
+## Cancellation
+
+`llm_call` and `agent_loop` cooperate with the VM's cancellation token,
+which the host raises on Ctrl-C, `cancel(task)` inside a Harn program,
+or an ACP `session/cancel` request:
+
+- **Mid-`llm_call`**: the in-flight HTTP request is dropped
+  (best-effort) and the call returns a thrown
+  `VmError::Thrown(cancelled)` that bubbles out of the enclosing
+  pipeline. Non-throwing callers can use `llm_call_safe` to catch it
+  as `{ok: false, error.category: "cancelled"}`.
+- **Mid-tool-call inside `agent_loop`**: the tool's async handler sees
+  the same cancellation token; async builtins that opted in
+  (`llm_call`, `http_*`, `sleep`, …) short-circuit immediately. The
+  loop finalizes the transcript with the partial turn and exits with
+  `status: "cancelled"`.
+- **Between turns in `agent_loop`**: the next iteration never starts;
+  the loop returns with its current iteration count, the accumulated
+  transcript, and `status: "cancelled"`. Persistent sessions remain
+  usable — re-invoke `agent_loop` with the same `session_id` to
+  resume.
+
+`done_sentinel`, `max_iterations`, and `token_budget` each produce
+their own non-cancellation statuses; the cancellation path is
+specifically for external interruption.
+
 ## Rate limiting
 
 Per-provider RPM limiting is built in:

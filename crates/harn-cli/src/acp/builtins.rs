@@ -217,15 +217,11 @@ pub(super) async fn acp_terminal_exec(
 
     if terminal_id.is_empty() {
         // Client doesn't support terminal — fall back to local exec.
-        let output = std::process::Command::new("sh")
-            .arg("-c")
-            .arg(&cmd)
-            .output()
-            .map_err(|e| {
-                harn_vm::VmError::Thrown(harn_vm::VmValue::String(Rc::from(format!(
-                    "exec failed: {e}"
-                ))))
-            })?;
+        let output = local_shell_exec(&cmd).map_err(|e| {
+            harn_vm::VmError::Thrown(harn_vm::VmValue::String(Rc::from(format!(
+                "exec failed: {e}"
+            ))))
+        })?;
         let stdout = String::from_utf8_lossy(&output.stdout).to_string();
         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
         let exit_code = output.status.code().unwrap_or(-1);
@@ -350,4 +346,29 @@ pub(super) fn normalize_host_capability_manifest(value: harn_vm::VmValue) -> har
     }
 
     harn_vm::VmValue::Dict(Rc::new(normalized))
+}
+
+/// Cross-platform fallback shell exec used when the ACP client doesn't
+/// expose a terminal capability. Picks `sh -c` on Unix and `cmd /C` on
+/// Windows; returns an explanatory error on other platforms.
+#[cfg(unix)]
+fn local_shell_exec(cmd: &str) -> std::io::Result<std::process::Output> {
+    std::process::Command::new("sh").arg("-c").arg(cmd).output()
+}
+
+#[cfg(windows)]
+fn local_shell_exec(cmd: &str) -> std::io::Result<std::process::Output> {
+    std::process::Command::new("cmd")
+        .arg("/C")
+        .arg(cmd)
+        .output()
+}
+
+#[cfg(not(any(unix, windows)))]
+fn local_shell_exec(_cmd: &str) -> std::io::Result<std::process::Output> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "local shell exec fallback is not supported on this platform; \
+         the ACP client must advertise the terminal capability",
+    ))
 }

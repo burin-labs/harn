@@ -170,9 +170,9 @@ model_match = "qwen3*"
 native_tools = true
 thinking = true
 
-# llama.cpp / llama-server speaks OpenAI-compat but is a separate surface
-# in Burin's providers.toml. Give it the same Qwen3.6 wiring so the local
-# GGUF path gets `preserve_thinking` by default too.
+# llama.cpp / llama-server speaks OpenAI-compat but is a separate
+# provider entry from Ollama. Give it the same Qwen3.6 wiring so the
+# local GGUF path gets `preserve_thinking` by default too.
 [[provider.llamacpp]]
 model_match = "*qwen3.6*"
 native_tools = true

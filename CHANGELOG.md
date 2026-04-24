@@ -22,6 +22,18 @@ granular archaeology.
   `Schema<T>` in the second argument position narrows the return type
   to `T`. The `*_safe` variant returns the `{ok, data, error}`
   envelope mirroring `llm_call_safe`.
+- **Formatter regression tests + conformance fixture for multi-`??`
+  chains.** `harn fmt` already wraps null-coalescing chains with each
+  operator at line start and a +2-space continuation indent, but the
+  invariant was only tested for two operands; added unit tests for
+  `n ≥ 3`-operand chains and method-chain-plus-`??` shapes, plus a
+  conformance fixture under `conformance/tests/fmt/` that locks in
+  both formatter stability and runtime right-to-left fallback
+  semantics.
+- **Cancellation contract documented.** `docs/llm/harn-quickref.md`
+  now has a dedicated "Cancellation" section covering Ctrl-C /
+  `cancel(task)` / ACP `session/cancel` semantics across `llm_call`,
+  mid-tool-call, and between-turn `agent_loop` states.
 
 ### Changed
 
@@ -37,6 +49,33 @@ granular archaeology.
   the nested paths — there is no `result_shape` flag or legacy
   fallback. Internal planner-round summarization in run records reads
   the new paths; docs, quickref, and conformance fixtures are updated.
+- **Host-agnostic defaults and comments.** Scoped `harn new`'s default
+  system prompt, the default conversation / archived-message
+  compaction prompts, the Cargo package description, and scattered
+  doc-comment + docs references away from "coding agent" / "Burin" /
+  "IDE" wording. Legitimate integration points (DAP custom
+  `burin/promptProvenance`, bridge module, docs about IDE-hosts)
+  remain as-is.
+- **Ollama env-var rename.** `HARN_OLLAMA_NUM_CTX` and
+  `HARN_OLLAMA_KEEP_ALIVE` are now the canonical host-agnostic
+  overrides; the previous `BURIN_OLLAMA_*` names are dropped
+  (breaking for anyone still setting them — switch to the `HARN_`
+  prefix). `HARN_ACP_TRACE_CALLS` similarly replaces
+  `BURIN_TRACE_HARN_CALLS`.
+- **Unified `llm_call` retry default.** The bridge-aware `llm_call`
+  path now defaults `llm_retries` to 2, matching the non-bridge path
+  and the documented "transient errors retry, schema errors don't"
+  posture. Pass `llm_retries: 0` to opt out.
+
+### Fixed
+
+- **Cross-platform fixes.** `stdlib_builtin_names` now uses
+  `std::env::temp_dir()` instead of the hardcoded `/tmp` path; the
+  ACP terminal fallback routes through `sh -c` on Unix and `cmd /C`
+  on Windows instead of unconditionally shelling out to `sh`;
+  `harn-serve` invokes `tokio::fs::read_to_string` for script reads
+  inside async handlers so the runtime isn't blocked on large
+  scripts.
 
 ## v0.7.34
 

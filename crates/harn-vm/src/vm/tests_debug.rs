@@ -119,9 +119,9 @@ fn test_evaluate_in_frame_does_not_leak_state() {
     assert_eq!(vm.stack.len(), pre_stack);
     assert_eq!(vm.frames.len(), pre_frames);
     assert_eq!(vm.env.scope_depth(), pre_scope);
-    // The synthetic `__burin_eval_result__` binding must not linger
+    // The synthetic `__harn_eval_result__` binding must not linger
     // in the paused scope.
-    assert!(vm.env.get("__burin_eval_result__").is_none());
+    assert!(vm.env.get("__harn_eval_result__").is_none());
 }
 
 #[test]

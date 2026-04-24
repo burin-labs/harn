@@ -217,8 +217,8 @@ Invocation:
 Hosts expose their own managed skill store to the VM through three RPCs.
 Filesystem skill discovery works without the bridge (`harn run` walks
 the seven non-host layers described in [Skills](./skills.md)); these
-RPCs add a layer 8 so cloud hosts, enterprise deployments, and the
-Burin Code IDE can serve skills the filesystem can't see.
+RPCs add a layer 8 so cloud hosts, enterprise deployments, and IDE
+hosts can serve skills the filesystem can't see.
 
 ### `skills/list`
 

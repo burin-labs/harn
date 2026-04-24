@@ -31,7 +31,7 @@ fn verbose_bridge_logs_enabled() -> bool {
         std::env::var("HARN_ACP_VERBOSE").ok().as_deref(),
         Some("1" | "true" | "TRUE" | "yes" | "YES")
     ) || matches!(
-        std::env::var("BURIN_TRACE_HARN_CALLS").ok().as_deref(),
+        std::env::var("HARN_ACP_TRACE_CALLS").ok().as_deref(),
         Some("1")
     )
 }

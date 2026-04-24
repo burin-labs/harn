@@ -332,7 +332,7 @@ pub fn fork(src_id: &str, dst_id: Option<String>) -> Option<String> {
 
 /// Fork `src_id` and truncate the destination transcript to the
 /// first `keep_first` messages (#105 — branch-replay). Pairs with the
-/// scrubber: the IDE picks an event index, rebuilds a message count,
+/// scrubber: the host picks an event index, rebuilds a message count,
 /// and calls this to spawn a live sibling session that resumes from
 /// the rebuilt state. Subscribers are not carried over (same as
 /// `fork`), so sibling events don't double-fan into the parent's

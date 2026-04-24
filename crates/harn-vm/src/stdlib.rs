@@ -123,7 +123,10 @@ pub fn register_vm_stdlib(vm: &mut Vm) {
 pub fn stdlib_builtin_names() -> Vec<String> {
     let mut vm = Vm::new();
     register_vm_stdlib(&mut vm);
-    let tmp = std::path::PathBuf::from("/tmp");
+    // Name-only introspection — the path is never accessed, but passing
+    // a real per-platform temp dir keeps the registration logic honest
+    // when the callee someday decides it needs a valid parent.
+    let tmp = std::env::temp_dir();
     crate::store::register_store_builtins(&mut vm, &tmp);
     crate::checkpoint::register_checkpoint_builtins(&mut vm, &tmp, "default");
     crate::metadata::register_metadata_builtins(&mut vm, &tmp);
