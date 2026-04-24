@@ -24,6 +24,11 @@ granular archaeology.
 
 ### Added
 
+- **Continuous persona runtime primitives (#462).** Adds an
+  event-sourced `persona.runtime.events` runtime with lifecycle state,
+  single-writer leases, schedule and external trigger wake receipts,
+  pause/resume/disable controls, per-persona budget enforcement, and
+  stable `harn persona status <name> --json` output for hosts.
 - **`assemble_context` builtin (#530).** Adaptive context-assembly
   primitive that returns a packed prompt of relevance-ranked snippets
   bounded by a token budget. Pipelines can pass typed source records

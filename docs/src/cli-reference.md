@@ -135,7 +135,7 @@ control-flow nodes.
 
 ## harn persona
 
-List and inspect durable agent persona manifests from `harn.toml`.
+List, inspect, and control durable agent persona manifests from `harn.toml`.
 
 ```bash
 harn persona list
@@ -143,16 +143,31 @@ harn persona list --json
 harn persona inspect merge_captain
 harn persona inspect merge_captain --json
 harn persona --manifest examples/personas/harn.toml inspect merge_captain --json
+harn persona --manifest examples/personas/harn.toml status merge_captain --json
+harn persona --manifest examples/personas/harn.toml tick merge_captain --json
+harn persona --manifest examples/personas/harn.toml trigger merge_captain \
+  --provider github --kind pull_request \
+  --metadata repository=burin-labs/harn --metadata number=462 --json
+harn persona --manifest examples/personas/harn.toml pause merge_captain
+harn persona --manifest examples/personas/harn.toml resume merge_captain
+harn persona --manifest examples/personas/harn.toml disable merge_captain
 ```
 
 | Flag | Description |
 |---|---|
 | `--manifest <path>` | Use an explicit `harn.toml` path or directory containing one |
-| `--json` | Emit stable JSON for `list` or `inspect` |
+| `--state-dir <dir>` | Store persona runtime events under a durable EventLog base directory, default `.harn/personas` |
+| `--json` | Emit stable JSON for list, inspect, status, controls, trigger, tick, and budget receipts |
 
 `harn persona` validates the manifest before printing. It rejects missing entry
 workflows, unknown capabilities, invalid budget fields, invalid schedules, and
 handoffs that point at undeclared personas.
+
+Runtime commands append event-sourced lifecycle records to
+`persona.runtime.events`. `pause` queues matching trigger events,
+`resume` drains queued events once under a lease, and `disable` records later
+events as dead-lettered. `tick`, `trigger`, and `spend` enforce per-persona
+daily, hourly, run, and token budgets before recording expensive-work receipts.
 
 ## harn fmt
 

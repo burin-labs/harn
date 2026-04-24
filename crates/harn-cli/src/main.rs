@@ -558,6 +558,84 @@ async fn main() {
             PersonaCommand::Inspect(inspect) => {
                 commands::persona::run_inspect(args.manifest.as_deref(), &inspect)
             }
+            PersonaCommand::Status(status) => {
+                if let Err(error) = commands::persona::run_status(
+                    args.manifest.as_deref(),
+                    &args.state_dir,
+                    &status,
+                )
+                .await
+                {
+                    eprintln!("error: {error}");
+                    process::exit(1);
+                }
+            }
+            PersonaCommand::Pause(control) => {
+                if let Err(error) = commands::persona::run_pause(
+                    args.manifest.as_deref(),
+                    &args.state_dir,
+                    &control,
+                )
+                .await
+                {
+                    eprintln!("error: {error}");
+                    process::exit(1);
+                }
+            }
+            PersonaCommand::Resume(control) => {
+                if let Err(error) = commands::persona::run_resume(
+                    args.manifest.as_deref(),
+                    &args.state_dir,
+                    &control,
+                )
+                .await
+                {
+                    eprintln!("error: {error}");
+                    process::exit(1);
+                }
+            }
+            PersonaCommand::Disable(control) => {
+                if let Err(error) = commands::persona::run_disable(
+                    args.manifest.as_deref(),
+                    &args.state_dir,
+                    &control,
+                )
+                .await
+                {
+                    eprintln!("error: {error}");
+                    process::exit(1);
+                }
+            }
+            PersonaCommand::Tick(tick) => {
+                if let Err(error) =
+                    commands::persona::run_tick(args.manifest.as_deref(), &args.state_dir, &tick)
+                        .await
+                {
+                    eprintln!("error: {error}");
+                    process::exit(1);
+                }
+            }
+            PersonaCommand::Trigger(trigger) => {
+                if let Err(error) = commands::persona::run_trigger(
+                    args.manifest.as_deref(),
+                    &args.state_dir,
+                    &trigger,
+                )
+                .await
+                {
+                    eprintln!("error: {error}");
+                    process::exit(1);
+                }
+            }
+            PersonaCommand::Spend(spend) => {
+                if let Err(error) =
+                    commands::persona::run_spend(args.manifest.as_deref(), &args.state_dir, &spend)
+                        .await
+                {
+                    eprintln!("error: {error}");
+                    process::exit(1);
+                }
+            }
         },
         Command::ModelInfo(args) => print_model_info(&args.model).await,
         Command::Skills(args) => match args.command {

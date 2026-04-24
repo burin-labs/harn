@@ -193,3 +193,253 @@ fn persona_manifest_flag_loads_example_personas() {
     assert_eq!(persona["name"], "merge_captain");
     assert_eq!(persona["receipt_policy"], "required");
 }
+
+#[test]
+fn persona_runtime_status_tick_and_budget_are_persisted() {
+    let temp = write_manifest(valid_manifest());
+    let state_dir = temp.path().join(".harn-personas-test");
+
+    let status = Command::new(env!("CARGO_BIN_EXE_harn"))
+        .current_dir(temp.path())
+        .args([
+            "persona",
+            "--state-dir",
+            state_dir.to_str().unwrap(),
+            "status",
+            "merge_captain",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        status.status.success(),
+        "stdout={}, stderr={}",
+        String::from_utf8_lossy(&status.stdout),
+        String::from_utf8_lossy(&status.stderr)
+    );
+    let status_json: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
+    assert_eq!(status_json["state"], "idle");
+    assert_eq!(status_json["queued_events"], 0);
+    assert_eq!(status_json["budget"]["daily_usd"], 20.0);
+
+    let tick = Command::new(env!("CARGO_BIN_EXE_harn"))
+        .current_dir(temp.path())
+        .args([
+            "persona",
+            "--state-dir",
+            state_dir.to_str().unwrap(),
+            "tick",
+            "merge_captain",
+            "--at",
+            "2026-04-24T12:30:00Z",
+            "--cost-usd",
+            "0.25",
+            "--tokens",
+            "12",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        tick.status.success(),
+        "stdout={}, stderr={}",
+        String::from_utf8_lossy(&tick.stdout),
+        String::from_utf8_lossy(&tick.stderr)
+    );
+    let receipt: serde_json::Value = serde_json::from_slice(&tick.stdout).unwrap();
+    assert_eq!(receipt["status"], "completed");
+    assert!(receipt["lease"]["id"]
+        .as_str()
+        .unwrap()
+        .starts_with("persona_lease_"));
+
+    let status = Command::new(env!("CARGO_BIN_EXE_harn"))
+        .current_dir(temp.path())
+        .args([
+            "persona",
+            "--state-dir",
+            state_dir.to_str().unwrap(),
+            "status",
+            "merge_captain",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(status.status.success());
+    let status_json: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
+    assert_eq!(status_json["state"], "idle");
+    assert_eq!(status_json["last_run"], "2026-04-24T12:30:00Z");
+    assert_eq!(status_json["budget"]["spent_today_usd"], 0.25);
+    assert_eq!(status_json["budget"]["tokens_today"], 12);
+}
+
+#[test]
+fn persona_pause_resume_disable_trigger_controls_are_durable() {
+    let temp = write_manifest(valid_manifest());
+    let state_dir = temp.path().join(".harn-personas-test");
+
+    let pause = Command::new(env!("CARGO_BIN_EXE_harn"))
+        .current_dir(temp.path())
+        .args([
+            "persona",
+            "--state-dir",
+            state_dir.to_str().unwrap(),
+            "pause",
+            "merge_captain",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(pause.status.success());
+
+    let trigger = Command::new(env!("CARGO_BIN_EXE_harn"))
+        .current_dir(temp.path())
+        .args([
+            "persona",
+            "--state-dir",
+            state_dir.to_str().unwrap(),
+            "trigger",
+            "merge_captain",
+            "--provider",
+            "github",
+            "--kind",
+            "pull_request",
+            "--metadata",
+            "repository=burin-labs/harn",
+            "--metadata",
+            "number=462",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        trigger.status.success(),
+        "stdout={}, stderr={}",
+        String::from_utf8_lossy(&trigger.stdout),
+        String::from_utf8_lossy(&trigger.stderr)
+    );
+    let receipt: serde_json::Value = serde_json::from_slice(&trigger.stdout).unwrap();
+    assert_eq!(receipt["status"], "queued");
+    assert_eq!(receipt["work_key"], "github:burin-labs/harn:pr:462");
+
+    let resume = Command::new(env!("CARGO_BIN_EXE_harn"))
+        .current_dir(temp.path())
+        .args([
+            "persona",
+            "--state-dir",
+            state_dir.to_str().unwrap(),
+            "resume",
+            "merge_captain",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(resume.status.success());
+    let status_json: serde_json::Value = serde_json::from_slice(&resume.stdout).unwrap();
+    assert_eq!(status_json["state"], "idle");
+    assert_eq!(status_json["queued_events"], 0);
+
+    let disable = Command::new(env!("CARGO_BIN_EXE_harn"))
+        .current_dir(temp.path())
+        .args([
+            "persona",
+            "--state-dir",
+            state_dir.to_str().unwrap(),
+            "disable",
+            "merge_captain",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(disable.status.success());
+
+    let trigger = Command::new(env!("CARGO_BIN_EXE_harn"))
+        .current_dir(temp.path())
+        .args([
+            "persona",
+            "--state-dir",
+            state_dir.to_str().unwrap(),
+            "trigger",
+            "merge_captain",
+            "--provider",
+            "slack",
+            "--kind",
+            "message",
+            "--metadata",
+            "channel=C123",
+            "--metadata",
+            "ts=1713988800.000100",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(trigger.status.success());
+    let receipt: serde_json::Value = serde_json::from_slice(&trigger.stdout).unwrap();
+    assert_eq!(receipt["status"], "dead_lettered");
+}
+
+#[test]
+fn persona_runtime_blocks_budget_exhaustion() {
+    let temp = write_manifest(
+        r#"
+[[personas]]
+name = "merge_captain"
+description = "Owns merge readiness."
+entry_workflow = "workflows/merge.harn#run"
+tools = ["github"]
+capabilities = ["git.get_diff"]
+autonomy_tier = "act_with_approval"
+receipt_policy = "required"
+triggers = ["github.pr_opened"]
+budget = { daily_usd = 0.01, run_usd = 0.01, max_tokens = 10 }
+"#,
+    );
+    let state_dir = temp.path().join(".harn-personas-test");
+    let trigger = Command::new(env!("CARGO_BIN_EXE_harn"))
+        .current_dir(temp.path())
+        .args([
+            "persona",
+            "--state-dir",
+            state_dir.to_str().unwrap(),
+            "trigger",
+            "merge_captain",
+            "--provider",
+            "github",
+            "--kind",
+            "check_run",
+            "--metadata",
+            "repository=burin-labs/harn",
+            "--metadata",
+            "check_name=ci",
+            "--cost-usd",
+            "0.02",
+            "--tokens",
+            "1",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(trigger.status.success());
+    let receipt: serde_json::Value = serde_json::from_slice(&trigger.stdout).unwrap();
+    assert_eq!(receipt["status"], "budget_exhausted");
+    assert!(receipt["error"].as_str().unwrap().contains("run_usd"));
+
+    let status = Command::new(env!("CARGO_BIN_EXE_harn"))
+        .current_dir(temp.path())
+        .args([
+            "persona",
+            "--state-dir",
+            state_dir.to_str().unwrap(),
+            "status",
+            "merge_captain",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(status.status.success());
+    let status_json: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
+    assert!(status_json["last_error"]
+        .as_str()
+        .unwrap()
+        .contains("run_usd"));
+}

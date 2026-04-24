@@ -19,10 +19,11 @@ These templates are safe by default:
 
 ## What works today
 
-Persona manifest v1 is inspection and validation only. The runtime does not yet
-schedule personas from `[[personas]]` entries or execute typed persona handoffs
-directly. The checked-in workflows, fixtures, and evals are therefore starter
-artifacts for teams to fork, not a hidden SaaS control plane.
+Persona manifest v1 is now inspection, validation, and durable runtime control.
+The CLI can record schedule wakes, trigger wakes, leases, pause/resume/disable
+controls, budget receipts, and status JSON for these entries. The checked-in
+workflows, fixtures, and evals remain starter artifacts for teams to fork, not
+a hidden SaaS control plane.
 
 The current templates make gaps explicit instead of inventing more platform
 scope:
@@ -31,8 +32,9 @@ scope:
   and Splunk are expected to arrive through MCP wiring today.
 - `handoffs` are declared in the manifest and modeled in workflow output, but
   persona-runtime handoff dispatch is not wired in v1.
-- schedules are validated now and can be consumed by future runtime work, but
-  they do not wake these personas up by themselves yet.
+- schedules can be fired and recorded with `harn persona tick`, but
+  deployment-specific always-on wake loops still belong to the orchestrator or
+  host.
 
 ## Layout
 
@@ -51,11 +53,16 @@ harn persona --manifest examples/personas/harn.toml list
 harn persona --manifest examples/personas/harn.toml inspect merge_captain --json
 harn persona --manifest examples/personas/harn.toml inspect review_captain --json
 harn persona --manifest examples/personas/harn.toml inspect oncall_captain --json
+harn persona --manifest examples/personas/harn.toml status merge_captain --json
 ```
 
 ## Smoke checks
 
 ```bash
+harn persona --manifest examples/personas/harn.toml tick merge_captain --json
+harn persona --manifest examples/personas/harn.toml trigger merge_captain \
+  --provider github --kind pull_request \
+  --metadata repository=burin-labs/harn --metadata number=462 --json
 harn run examples/personas/workflows/merge_captain.harn
 harn run examples/personas/workflows/review_captain.harn
 harn run examples/personas/workflows/oncall_captain.harn

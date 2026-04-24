@@ -13,8 +13,9 @@ not just natural-language behavior.
 
 Persona v1 lives in `harn.toml` as `[[personas]]` entries. This keeps personas
 compatible with package manifests and the existing manifest discovery model.
-Runtime scheduling and typed handoff execution are intentionally outside this
-first pass; the CLI only parses, validates, lists, and inspects manifests.
+The continuous runtime is intentionally small and event-sourced: it records
+schedule and trigger wakes, leases, lifecycle controls, budget receipts, and
+status snapshots without inventing a hidden hosted scheduler.
 
 ```toml
 [[personas]]
@@ -90,6 +91,15 @@ harn persona list --json
 harn persona inspect merge_captain
 harn persona inspect merge_captain --json
 harn persona --manifest examples/personas/harn.toml inspect merge_captain --json
+harn persona --manifest examples/personas/harn.toml status merge_captain --json
+harn persona --manifest examples/personas/harn.toml tick merge_captain \
+  --at 2026-04-24T12:30:00Z --cost-usd 0.02 --tokens 120 --json
+harn persona --manifest examples/personas/harn.toml trigger merge_captain \
+  --provider github --kind pull_request \
+  --metadata repository=burin-labs/harn --metadata number=462 --json
+harn persona --manifest examples/personas/harn.toml pause merge_captain
+harn persona --manifest examples/personas/harn.toml resume merge_captain
+harn persona --manifest examples/personas/harn.toml disable merge_captain
 ```
 
 `--manifest` accepts a `harn.toml` path or a directory containing one. Without
@@ -100,6 +110,38 @@ The JSON output is stable enough for hosts such as IDEs and cloud runners to
 consume. It includes name, version, tools, capabilities, autonomy tier, model
 policy, budget, triggers, handoffs, context packs, evals, receipt policy, and
 manifest source.
+
+## Continuous runtime
+
+Persona runtime commands write durable records to the active EventLog topic
+`persona.runtime.events` under `--state-dir` (default `.harn/personas`). The
+status query replays those records and returns stable JSON with:
+
+- lifecycle state: `inactive`, `starting`, `idle`, `running`, `paused`,
+  `draining`, `failed`, or `disabled`
+- `last_run` and `next_scheduled_run`
+- active lease id, holder, work key, acquisition time, and expiry
+- budget limits, spend, token usage, exhaustion reason, and last receipt id
+- queued event count, disabled/dead-lettered event count, and last error
+
+Leases are single-writer. A persona run acquires one active lease for the
+normalized work key and records a conflict instead of processing duplicate work
+while the lease is live. Expired leases are recovered by appending a
+`persona.lease.expired` event before the next acquisition.
+
+Pause/resume/disable are explicit controls. Paused personas do not drop events:
+incoming events are queued with a `queue_then_drain_on_resume` policy. `resume`
+sets the state back to idle and drains queued events once under normal lease and
+budget checks. Disabled personas record later events as dead-lettered.
+
+Budget checks run before schedule and trigger work records. Per-persona
+`daily_usd`, `hourly_usd`, `run_usd`, and `max_tokens` caps block expensive
+work and append a structured budget-exhaustion event with a receipt id.
+
+External trigger metadata is normalized for common continuous-persona sources:
+GitHub PRs and check runs, Linear issues, Slack messages, and generic webhooks.
+For example, GitHub PR metadata with `repository=burin-labs/harn` and
+`number=462` normalizes to the work key `github:burin-labs/harn:pr:462`.
 
 ## Template pack
 
@@ -122,13 +164,15 @@ opaque hosted behavior.
 
 ## Current v1 gaps
 
-Persona manifest v1 is a contract surface, not a scheduler. Harn currently
-parses, validates, lists, and inspects personas; it does not yet execute them
-from `[[personas]]` entries.
+Persona manifest v1 is a contract and runtime-control surface, not a managed
+cloud scheduler. Harn records durable wakes and receipts from CLI/runtime
+commands, but it does not yet run a long-lived hosted persona supervisor from
+`[[personas]]` entries by itself.
 
 That means template packs should stay honest about missing platform scope:
 
-- schedules validate now but are not runtime wakeups yet
+- schedule bindings can be fired and recorded, but deployment-specific
+  long-running wake loops still belong to the orchestrator/host
 - handoffs validate now but are not typed persona-runtime dispatch yet
 - backend-specific systems such as Honeycomb and Splunk should be expressed
   through current tool wiring such as MCP rather than invented manifest fields
@@ -139,7 +183,7 @@ That means template packs should stay honest about missing platform scope:
 |---|---|---|---|
 | Skill | Reusable instructions, activation metadata, and optional bundled files. | `SKILL.md` bundle or `skill NAME { ... }`. | No, but it can be loaded into an agent turn. |
 | Workflow | Deterministic Harn code that performs work. | `.harn` pipeline/workflow entrypoint. | Yes, when run by the VM or orchestrator. |
-| Persona | Durable operational role that points at workflows and adds policy. | `[[personas]]` manifest entry. | Not in v1; it is parsed and validated for later runtime execution. |
+| Persona | Durable operational role that points at workflows and adds policy. | `[[personas]]` manifest entry. | Yes for runtime wake/control receipts; workflow execution is still host/orchestrator-owned. |
 
 A skill can teach a model how to do a task. A workflow is the executable path.
 A persona says which role owns the work, when it should wake up, what it may
