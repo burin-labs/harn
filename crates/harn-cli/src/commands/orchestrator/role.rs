@@ -31,7 +31,7 @@ impl OrchestratorRole {
         state_dir: &Path,
     ) -> Result<harn_vm::Vm, String> {
         match self {
-            Self::SingleTenant => {
+            Self::SingleTenant | Self::MultiTenant => {
                 std::env::set_var(
                     harn_vm::runtime_paths::HARN_STATE_DIR_ENV,
                     state_dir.display().to_string(),
@@ -45,9 +45,6 @@ impl OrchestratorRole {
                 vm.set_source_dir(source_dir);
                 Ok(vm)
             }
-            Self::MultiTenant => Err(
-                "multi-tenant orchestrator role is not yet implemented (see O-12 #190)".to_string(),
-            ),
         }
     }
 }

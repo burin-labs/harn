@@ -673,8 +673,7 @@ impl Dispatcher {
         event: TriggerEvent,
         parent_headers: Option<&BTreeMap<String, String>>,
     ) -> Result<u64, DispatchError> {
-        let topic = Topic::new(TRIGGER_INBOX_ENVELOPES_TOPIC)
-            .expect("static trigger inbox envelopes topic is valid");
+        let topic = topic_for_event(&event, TRIGGER_INBOX_ENVELOPES_TOPIC)?;
         let trigger_id_for_metrics = trigger_id.clone();
         let mut headers = parent_headers.cloned().unwrap_or_default();
         headers.extend(event_headers(&event, None, None, None));
@@ -3912,8 +3911,7 @@ impl Dispatcher {
         payload: serde_json::Value,
         replay_of_event_id: Option<&String>,
     ) -> Result<(), DispatchError> {
-        let topic = Topic::new(topic_name)
-            .expect("static trigger dispatcher topic names should always be valid");
+        let topic = topic_for_event(event, topic_name)?;
         let headers = event_headers(event, binding, attempt, replay_of_event_id);
         self.event_log
             .append(&topic, LogEvent::new(kind, payload).with_headers(headers))
@@ -4092,8 +4090,7 @@ pub async fn enqueue_trigger_event<L: EventLog + ?Sized>(
     event_log: &L,
     event: &TriggerEvent,
 ) -> Result<u64, DispatchError> {
-    let topic = Topic::new(TRIGGER_INBOX_ENVELOPES_TOPIC)
-        .expect("static trigger.inbox.envelopes topic is valid");
+    let topic = topic_for_event(event, TRIGGER_INBOX_ENVELOPES_TOPIC)?;
     let headers = event_headers(event, None, None, None);
     let payload =
         serde_json::to_value(event).map_err(|error| DispatchError::Serde(error.to_string()))?;
@@ -4516,6 +4513,9 @@ fn event_headers(
     if let Some(replay_of_event_id) = replay_of_event_id {
         headers.insert("replay_of_event_id".to_string(), replay_of_event_id.clone());
     }
+    if let Some(tenant_id) = event.tenant_id.as_ref() {
+        headers.insert("tenant_id".to_string(), tenant_id.0.clone());
+    }
     if let Some(binding) = binding {
         headers.insert("trigger_id".to_string(), binding.id.as_str().to_string());
         headers.insert("binding_key".to_string(), binding.binding_key());
@@ -4528,6 +4528,15 @@ fn event_headers(
         headers.insert("attempt".to_string(), attempt.to_string());
     }
     headers
+}
+
+fn topic_for_event(event: &TriggerEvent, topic_name: &str) -> Result<Topic, DispatchError> {
+    let topic = Topic::new(topic_name)
+        .expect("static trigger dispatcher topic names should always be valid");
+    match event.tenant_id.as_ref() {
+        Some(tenant_id) => crate::tenant_topic(tenant_id, &topic).map_err(DispatchError::from),
+        None => Ok(topic),
+    }
 }
 
 fn worker_queue_priority(

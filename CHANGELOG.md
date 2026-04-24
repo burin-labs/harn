@@ -21,6 +21,13 @@ granular archaeology.
   from the live trigger provider catalog, and expanded
   `examples/triggers/` into a ready-to-customize library with
   `README.md` and `SKILL.md` metadata per recipe.
+- **Multi-tenant orchestrator isolation (#190).** Adds a persisted
+  tenant registry under `harn orchestrator tenant` with per-tenant
+  namespaced event log, `TenantScope` / `TenantEventLog` /
+  `TenantSecretProvider` primitives, API-key hashing and resolution,
+  per-tenant budgets, and topic/namespace helpers. Dispatcher routing
+  now scopes all dispatch traffic to tenant topics so one tenant's
+  load cannot leak into another's queues.
 
 ### Changed
 

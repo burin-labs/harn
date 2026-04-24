@@ -17,8 +17,9 @@ Today, the command:
 
 Current limitations:
 
-- `multi-tenant` returns a clear not-implemented error that points at
-  `O-12 #190`
+- Multi-tenant mode isolates listener ingress, tenant-scoped secrets, and
+  trigger EventLog topics. Shared scheduler/provider objects remain
+  orchestrator-global.
 
 ## Command
 
@@ -90,6 +91,11 @@ rotating file at `<state-dir>/logs/orchestrator.log`. Set
 `HARN_OTEL_ENDPOINT` to export OTLP traces. See
 [Orchestrator observability](./orchestrator/observability.md) for metric names,
 log configuration, and the dashboard example.
+
+Use `--role multi-tenant` with `harn orchestrator tenant` to provision API-key
+backed tenants, tenant-prefixed EventLog topics, and tenant-scoped secrets. See
+[Multi-tenant orchestrator](./orchestrator/multi-tenant.md) for the tenant
+lifecycle and isolation model.
 
 Hot reload now supports four equivalent entrypoints:
 

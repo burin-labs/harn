@@ -1262,6 +1262,47 @@ impl TriggerTestHarness {
     async fn multi_tenant_isolation_stub(self) -> Result<TriggerHarnessResult, String> {
         let tenant_a = synthetic_event("tenant.event", "tenant-a", Some("tenant-a"));
         let tenant_b = synthetic_event("tenant.event", "tenant-b", Some("tenant-b"));
+        let event_log = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(16)));
+        let scope_a = crate::TenantScope::new(TenantId::new("tenant-a"), std::env::temp_dir())?;
+        let scope_b = crate::TenantScope::new(TenantId::new("tenant-b"), std::env::temp_dir())?;
+        let tenant_a_log = Arc::new(crate::TenantEventLog::new(
+            event_log.clone(),
+            scope_a.clone(),
+        ));
+        let tenant_b_log = Arc::new(crate::TenantEventLog::new(
+            event_log.clone(),
+            scope_b.clone(),
+        ));
+        let topic = Topic::new(crate::TRIGGER_OUTBOX_TOPIC).map_err(|error| error.to_string())?;
+        tenant_a_log
+            .append(
+                &topic,
+                LogEvent::new("tenant.event", serde_json::to_value(&tenant_a).unwrap()),
+            )
+            .await
+            .map_err(|error| error.to_string())?;
+        tenant_b_log
+            .append(
+                &topic,
+                LogEvent::new("tenant.event", serde_json::to_value(&tenant_b).unwrap()),
+            )
+            .await
+            .map_err(|error| error.to_string())?;
+        let cross_tenant_denied = tenant_a_log
+            .append(
+                &scope_b.topic(&topic).map_err(|error| error.to_string())?,
+                LogEvent::new("tenant.event", serde_json::to_value(&tenant_b).unwrap()),
+            )
+            .await
+            .is_err();
+        let tenant_a_events = tenant_a_log
+            .read_range(&topic, None, 16)
+            .await
+            .map_err(|error| error.to_string())?;
+        let tenant_b_events = tenant_b_log
+            .read_range(&topic, None, 16)
+            .await
+            .map_err(|error| error.to_string())?;
         self.connector_registry.record_event(
             "tenant.fixture",
             1,
@@ -1279,17 +1320,25 @@ impl TriggerTestHarness {
         let emitted = self.connector_registry.emitted();
         Ok(TriggerHarnessResult {
             fixture: "multi_tenant_isolation_stub".to_string(),
-            ok: emitted.len() == 2,
-            stub: true,
-            summary: "single-tenant orchestrator remains the product reality; the harness only asserts tenant ids stay partitioned in envelopes".to_string(),
+            ok: emitted.len() == 2
+                && tenant_a_events.len() == 1
+                && tenant_b_events.len() == 1
+                && cross_tenant_denied,
+            stub: false,
+            summary:
+                "tenant-scoped EventLog wrappers keep tenant trigger envelopes on isolated topics"
+                    .to_string(),
             emitted,
             attempts: Vec::new(),
             dlq: Vec::new(),
             alerts: Vec::new(),
             bindings: Vec::new(),
-            notes: vec!["stub fixture: orchestrator multi-tenant routing is still pending".to_string()],
+            notes: Vec::new(),
             details: json!({
                 "cross_tenant_leak": false,
+                "cross_tenant_denied": cross_tenant_denied,
+                "tenant_a_events": tenant_a_events.len(),
+                "tenant_b_events": tenant_b_events.len(),
             }),
         })
     }
