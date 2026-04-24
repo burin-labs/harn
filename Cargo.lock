@@ -1138,7 +1138,7 @@ dependencies = [
 
 [[package]]
 name = "harn-cli"
-version = "0.7.34"
+version = "0.7.35"
 dependencies = [
  "async-trait",
  "axum",
@@ -1187,7 +1187,7 @@ dependencies = [
 
 [[package]]
 name = "harn-dap"
-version = "0.7.34"
+version = "0.7.35"
 dependencies = [
  "harn-vm",
  "serde",
@@ -1197,7 +1197,7 @@ dependencies = [
 
 [[package]]
 name = "harn-fmt"
-version = "0.7.34"
+version = "0.7.35"
 dependencies = [
  "harn-lexer",
  "harn-parser",
@@ -1205,7 +1205,7 @@ dependencies = [
 
 [[package]]
 name = "harn-ir"
-version = "0.7.34"
+version = "0.7.35"
 dependencies = [
  "harn-lexer",
  "harn-parser",
@@ -1213,11 +1213,11 @@ dependencies = [
 
 [[package]]
 name = "harn-lexer"
-version = "0.7.34"
+version = "0.7.35"
 
 [[package]]
 name = "harn-lint"
-version = "0.7.34"
+version = "0.7.35"
 dependencies = [
  "harn-lexer",
  "harn-modules",
@@ -1227,7 +1227,7 @@ dependencies = [
 
 [[package]]
 name = "harn-lsp"
-version = "0.7.34"
+version = "0.7.35"
 dependencies = [
  "harn-fmt",
  "harn-ir",
@@ -1241,7 +1241,7 @@ dependencies = [
 
 [[package]]
 name = "harn-modules"
-version = "0.7.34"
+version = "0.7.35"
 dependencies = [
  "harn-lexer",
  "harn-parser",
@@ -1252,7 +1252,7 @@ dependencies = [
 
 [[package]]
 name = "harn-parser"
-version = "0.7.34"
+version = "0.7.35"
 dependencies = [
  "harn-lexer",
  "yansi",
@@ -1260,7 +1260,7 @@ dependencies = [
 
 [[package]]
 name = "harn-serve"
-version = "0.7.34"
+version = "0.7.35"
 dependencies = [
  "async-trait",
  "axum",
@@ -1283,7 +1283,7 @@ dependencies = [
 
 [[package]]
 name = "harn-vm"
-version = "0.7.34"
+version = "0.7.35"
 dependencies = [
  "async-trait",
  "base64",
