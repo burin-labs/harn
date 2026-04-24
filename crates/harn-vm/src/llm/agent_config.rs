@@ -152,9 +152,18 @@ pub(crate) fn agent_loop_result_from_llm(
         "text": result.text,
         "visible_text": result.text,
         "private_reasoning": result.thinking,
-        "iterations": 1,
-        "duration_ms": 0,
-        "tools_used": [],
+        "llm": {
+            "iterations": 1,
+            "duration_ms": 0,
+            "input_tokens": result.input_tokens,
+            "output_tokens": result.output_tokens,
+        },
+        "tools": {
+            "calls": [],
+            "successful": [],
+            "rejected": [],
+            "mode": "",
+        },
         "transcript": super::helpers::vm_value_to_json(&transcript_to_vm_with_events(
             None,
             opts.transcript_summary,

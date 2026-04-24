@@ -1505,10 +1505,17 @@ pub async fn execute_stage_node(
                 .map(|artifact| artifact.title.clone())
                 .collect::<Vec<_>>()),
         );
-        payload.insert(
-            "tool_calling_mode".to_string(),
-            serde_json::json!(tool_format.clone()),
-        );
+        match payload
+            .entry("tools".to_string())
+            .or_insert_with(|| serde_json::json!({}))
+        {
+            serde_json::Value::Object(tools) => {
+                tools.insert("mode".to_string(), serde_json::json!(tool_format.clone()));
+            }
+            slot => {
+                *slot = serde_json::json!({ "mode": tool_format.clone() });
+            }
+        }
     }
 
     let visible_text = llm_result["text"].as_str().unwrap_or_default().to_string();

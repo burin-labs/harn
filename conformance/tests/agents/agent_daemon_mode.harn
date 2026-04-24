@@ -24,7 +24,7 @@ pipeline test(task) {
   println(result.status)
   println(result.daemon_state)
   println(result.daemon_snapshot_path == snapshot)
-  println(result.iterations)
+  println(result.llm.iterations)
   println(saved.daemon_state)
   println(saved.total_iterations)
   println(saved.transcript_summary.contains("daemon compact"))

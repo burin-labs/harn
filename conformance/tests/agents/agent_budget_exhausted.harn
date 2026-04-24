@@ -12,5 +12,5 @@ pipeline test(task) {
   )
   println(result.status)
   assert(result.status == "budget_exhausted", "status should be budget_exhausted")
-  assert(result.iterations >= 1, "should have run at least one iteration")
+  assert(result.llm.iterations >= 1, "should have run at least one iteration")
 }

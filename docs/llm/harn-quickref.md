@@ -760,13 +760,17 @@ text-tool stages emit `<done>##DONE##</done>`, while no-tool and
 native-tool stages emit bare `##DONE##`. The sentinel is configurable
 via `done_sentinel`.
 
-Returns a dict with `status`, `text`, `visible_text` (last iteration's
-prose with tool calls stripped), `iterations`, `duration_ms`,
-`tools_used`, `task_ledger`, `transcript`, and more. Respects the same
-`llm_retries` / `llm_backoff_ms` options plus its own `tool_retries`,
-`max_iterations`, `max_nudges`, and `native_tool_fallback`
-(`"allow"`, `"allow_once"`, or `"reject"` for native-tool stages that
-receive text-mode `<tool_call>` fallback output).
+Returns a namespaced dict: top-level `status`, `text`, `visible_text`
+(last iteration's prose with tool calls stripped), `task_ledger`,
+`transcript`, `daemon_state`, `daemon_snapshot_path`, `trace`, and
+`deferred_user_messages`; LLM execution metrics nested under `llm`
+(`iterations`, `duration_ms`, `input_tokens`, `output_tokens`); tool
+invocation data nested under `tools` (`calls`, `successful`, `rejected`,
+`mode`). Respects the same `llm_retries` / `llm_backoff_ms` options
+plus its own `tool_retries`, `max_iterations`, `max_nudges`, and
+`native_tool_fallback` (`"allow"`, `"allow_once"`, or `"reject"` for
+native-tool stages that receive text-mode `<tool_call>` fallback
+output).
 
 ### Sessions (persistent conversations)
 

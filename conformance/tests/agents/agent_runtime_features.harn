@@ -20,7 +20,7 @@ pipeline test(task) {
     "You are helpful",
     {provider: "mock", tools: list_tools(), tool_format: "native", max_iterations: 1},
   )
-  println(denied?.rejected_tools[0])
+  println(denied?.tools?.rejected[0])
   println(
     json_stringify(transcript_messages(denied?.transcript))
     .contains("permission_denied"),
@@ -92,7 +92,7 @@ pipeline test(task) {
   },
   },
   )
-  println(stopped_after_tool_turn?.iterations == 1)
+  println(stopped_after_tool_turn?.llm?.iterations == 1)
   println(
     json_stringify(transcript_messages(stopped_after_tool_turn?.transcript))
     .contains("handoff now"),

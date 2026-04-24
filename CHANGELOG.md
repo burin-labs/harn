@@ -7,6 +7,23 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
+## Unreleased
+
+### Changed
+
+- **BREAKING: Namespaced `agent_loop` result shape (#532).** The flat
+  `iterations`, `duration_ms`, `tools_used`, `successful_tools`,
+  `rejected_tools`, and `tool_calling_mode` keys are gone. Metrics now
+  live under `result.llm.{iterations, duration_ms, input_tokens,
+  output_tokens}` and tool invocation data under `result.tools.{calls,
+  successful, rejected, mode}`. Top-level keys (`status`, `text`,
+  `visible_text`, `transcript`, `task_ledger`, `trace`, `daemon_state`,
+  `daemon_snapshot_path`, `deferred_user_messages`,
+  `ledger_done_rejections`) are unchanged. Callers should migrate to
+  the nested paths — there is no `result_shape` flag or legacy
+  fallback. Internal planner-round summarization in run records reads
+  the new paths; docs, quickref, and conformance fixtures are updated.
+
 ## v0.7.34
 
 ### Added

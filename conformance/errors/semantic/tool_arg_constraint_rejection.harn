@@ -29,7 +29,7 @@ pipeline test(task) {
     },
   },
   )
-  println(result?.rejected_tools[0])
+  println(result?.tools?.rejected[0])
   println(
     json_stringify(transcript_messages(result?.transcript)).contains("does not match allowed patterns"),
   )
