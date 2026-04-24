@@ -1504,6 +1504,14 @@ These builtins expose Harn's typed orchestration runtime.
 | `run_record_diff(left, right)` | left, right | dict | Compare two run records and summarize stage/status deltas |
 | `eval_suite_manifest(payload)` | payload: dict | dict | Normalize a grouped eval suite manifest |
 | `eval_suite_run(manifest)` | manifest: dict | dict | Evaluate a manifest of saved runs, fixtures, and optional baselines |
+| `friction_event(payload)` | payload: dict | dict | Normalize a redacted friction event for repeated queries, clarifications, approval stalls, missing context, handoffs, tool gaps, failed assumptions, expensive deterministic steps, or human hypotheses |
+| `friction_record(payload, options?)` | payload: dict, options: dict | dict | Record a friction event to the process-local buffer, append JSONL with `log_path`/`HARN_FRICTION_LOG`, or no-op when `enabled: false` |
+| `friction_events()` | — | list | Return process-local friction events recorded in the current VM |
+| `friction_clear()` | — | nil | Clear process-local friction events |
+| `context_pack_manifest(payload)` | payload: dict | dict | Validate and normalize a context-pack manifest |
+| `context_pack_manifest_parse(src)` | src: TOML or JSON string | dict | Parse and validate a context-pack manifest |
+| `context_pack_suggestions(events?, options?)` | events: list or `{events}`, options: dict | list | Generate candidate context-pack/workflow suggestions from repeated friction evidence |
+| `friction_eval_fixture(fixture)` | fixture: `{events, options?, expected_suggestions?}` | dict | Evaluate a repeated-friction fixture and assert expected context-pack suggestions |
 | `eval_metric(name, value, metadata?)` | name: string, value: any, metadata: dict | nil | Record a named metric into the eval metric store |
 | `eval_metrics()` | — | list | Return all recorded eval metrics as `{name, value, metadata?}` dicts |
 

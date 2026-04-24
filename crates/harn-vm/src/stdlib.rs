@@ -161,6 +161,7 @@ pub fn reset_stdlib_state() {
     waitpoints::reset_waitpoint_state();
     waitpoint::reset_waitpoint_state();
     agents::records::reset_eval_metrics();
+    agents::records::reset_friction_events();
     tools::clear_current_tool_registry();
     vision::reset_vision_state();
     crate::skills::clear_current_skill_registry();

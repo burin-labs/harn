@@ -39,6 +39,9 @@ pub use assemble::*;
 mod handoffs;
 pub use handoffs::*;
 
+mod friction;
+pub use friction::*;
+
 mod policy;
 pub use policy::*;
 

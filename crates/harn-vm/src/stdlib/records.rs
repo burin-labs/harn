@@ -5,12 +5,15 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use crate::orchestration::{
-    diff_run_records, evaluate_run_against_fixture, evaluate_run_suite,
-    evaluate_run_suite_manifest, extract_handoff_from_artifact, handoff_context_text,
-    handoff_from_json_value, normalize_artifact, normalize_eval_suite_manifest,
-    normalize_handoff_artifact_json, normalize_run_record, render_artifacts_context,
+    diff_run_records, evaluate_context_pack_suggestion_expectations, evaluate_run_against_fixture,
+    evaluate_run_suite, evaluate_run_suite_manifest, extract_handoff_from_artifact,
+    generate_context_pack_suggestions, handoff_context_text, handoff_from_json_value,
+    normalize_artifact, normalize_context_pack_manifest, normalize_eval_suite_manifest,
+    normalize_friction_event, normalize_handoff_artifact_json, normalize_run_record,
+    parse_context_pack_manifest_src, parse_friction_events_value, render_artifacts_context,
     render_unified_diff, replay_fixture_from_run, save_run_record, select_artifacts,
-    ArtifactRecord, ContextPolicy, ReplayFixture,
+    ArtifactRecord, ContextPackSuggestionExpectation, ContextPackSuggestionOptions, ContextPolicy,
+    ReplayFixture,
 };
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
@@ -28,11 +31,16 @@ pub struct EvalMetric {
 
 thread_local! {
     static EVAL_METRICS: RefCell<Vec<EvalMetric>> = const { RefCell::new(Vec::new()) };
+    static FRICTION_EVENTS: RefCell<Vec<crate::orchestration::FrictionEvent>> = const { RefCell::new(Vec::new()) };
 }
 
 /// Reset thread-local eval metrics. Call between test runs to avoid leaking.
 pub fn reset_eval_metrics() {
     EVAL_METRICS.with(|m| m.borrow_mut().clear());
+}
+
+pub fn reset_friction_events() {
+    FRICTION_EVENTS.with(|events| events.borrow_mut().clear());
 }
 
 /// Peek at recorded eval metrics without consuming them.
@@ -725,6 +733,157 @@ pub(crate) fn register_record_builtins(vm: &mut Vm) {
             VmError::Runtime("eval_suite_run: missing manifest payload".to_string())
         })?)?;
         to_vm(&evaluate_run_suite_manifest(&manifest)?)
+    });
+
+    vm.register_builtin("friction_event", |args, _out| {
+        let event = normalize_friction_event(
+            args.first()
+                .ok_or_else(|| VmError::Runtime("friction_event: missing payload".to_string()))?,
+        )?;
+        to_vm(&event)
+    });
+
+    vm.register_builtin("friction_record", |args, _out| {
+        let event =
+            normalize_friction_event(args.first().ok_or_else(|| {
+                VmError::Runtime("friction_record: missing payload".to_string())
+            })?)?;
+        let options = args.get(1).map(crate::llm::vm_value_to_json);
+        let enabled = options
+            .as_ref()
+            .and_then(|value| value.get("enabled"))
+            .and_then(|value| value.as_bool())
+            .unwrap_or(true);
+        if !enabled {
+            return to_vm(&serde_json::json!({
+                "recorded": false,
+                "sink": "disabled",
+                "event": event
+            }));
+        }
+
+        FRICTION_EVENTS.with(|events| events.borrow_mut().push(event.clone()));
+
+        let path = options
+            .as_ref()
+            .and_then(|value| value.get("log_path").or_else(|| value.get("path")))
+            .and_then(|value| value.as_str())
+            .map(str::to_string)
+            .or_else(|| std::env::var("HARN_FRICTION_LOG").ok());
+        if let Some(path) = path {
+            let encoded = serde_json::to_string(&event)
+                .map_err(|e| VmError::Runtime(format!("friction_record: encode error: {e}")))?;
+            if let Some(parent) = std::path::Path::new(&path).parent() {
+                if parent.as_os_str().is_empty() {
+                    // Relative filename in cwd: no directory to create.
+                } else {
+                    std::fs::create_dir_all(parent).map_err(|e| {
+                        VmError::Runtime(format!("friction_record: failed to create log dir: {e}"))
+                    })?;
+                }
+            }
+            use std::io::Write;
+            let mut file = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&path)
+                .map_err(|e| {
+                    VmError::Runtime(format!("friction_record: failed to open log: {e}"))
+                })?;
+            writeln!(file, "{encoded}").map_err(|e| {
+                VmError::Runtime(format!("friction_record: failed to append log: {e}"))
+            })?;
+            return to_vm(&serde_json::json!({
+                "recorded": true,
+                "sink": "jsonl",
+                "path": path,
+                "event": event
+            }));
+        }
+
+        to_vm(&serde_json::json!({
+            "recorded": true,
+            "sink": "memory",
+            "event": event
+        }))
+    });
+
+    vm.register_builtin("friction_events", |_args, _out| {
+        let events = FRICTION_EVENTS.with(|events| events.borrow().clone());
+        to_vm(&events)
+    });
+
+    vm.register_builtin("friction_clear", |_args, _out| {
+        FRICTION_EVENTS.with(|events| events.borrow_mut().clear());
+        Ok(VmValue::Nil)
+    });
+
+    vm.register_builtin("context_pack_manifest", |args, _out| {
+        let manifest = normalize_context_pack_manifest(args.first().ok_or_else(|| {
+            VmError::Runtime("context_pack_manifest: missing payload".to_string())
+        })?)?;
+        to_vm(&manifest)
+    });
+
+    vm.register_builtin("context_pack_manifest_parse", |args, _out| {
+        let src = require_text_arg(args, 0, "context_pack_manifest_parse", "source")?;
+        let manifest = parse_context_pack_manifest_src(&src)?;
+        to_vm(&manifest)
+    });
+
+    vm.register_builtin("context_pack_suggestions", |args, _out| {
+        let events = match args.first() {
+            Some(value) => parse_friction_events_value(value)?,
+            None => FRICTION_EVENTS.with(|events| Ok::<_, VmError>(events.borrow().clone()))?,
+        };
+        let options: ContextPackSuggestionOptions = match args.get(1) {
+            Some(value) if !matches!(value, VmValue::Nil) => {
+                serde_json::from_value(crate::llm::vm_value_to_json(value)).map_err(|e| {
+                    VmError::Runtime(format!(
+                        "context_pack_suggestions: options parse error: {e}"
+                    ))
+                })?
+            }
+            _ => ContextPackSuggestionOptions::default(),
+        };
+        to_vm(&generate_context_pack_suggestions(&events, &options))
+    });
+
+    vm.register_builtin("friction_eval_fixture", |args, _out| {
+        let fixture = args.first().ok_or_else(|| {
+            VmError::Runtime("friction_eval_fixture: missing fixture payload".to_string())
+        })?;
+        let json = crate::llm::vm_value_to_json(fixture);
+        let events = parse_friction_events_value(fixture)?;
+        let options: ContextPackSuggestionOptions = json
+            .get("options")
+            .cloned()
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|e| {
+                VmError::Runtime(format!("friction_eval_fixture: options parse error: {e}"))
+            })?
+            .unwrap_or_default();
+        let expectations: Vec<ContextPackSuggestionExpectation> = json
+            .get("expected_suggestions")
+            .cloned()
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|e| {
+                VmError::Runtime(format!(
+                    "friction_eval_fixture: expected_suggestions parse error: {e}"
+                ))
+            })?
+            .unwrap_or_default();
+        let suggestions = generate_context_pack_suggestions(&events, &options);
+        let failures = evaluate_context_pack_suggestion_expectations(&suggestions, &expectations);
+        to_vm(&serde_json::json!({
+            "pass": failures.is_empty(),
+            "failures": failures,
+            "event_count": events.len(),
+            "suggestion_count": suggestions.len(),
+            "suggestions": suggestions
+        }))
     });
 
     vm.register_builtin("eval_metric", |args, _out| {

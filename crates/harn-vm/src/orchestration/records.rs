@@ -6,8 +6,10 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use super::{
-    default_run_dir, new_id, now_rfc3339, parse_json_payload, parse_json_value, sync_run_handoffs,
-    ArtifactRecord, CapabilityPolicy, HandoffArtifact,
+    default_run_dir, evaluate_context_pack_suggestion_expectations,
+    generate_context_pack_suggestions, new_id, normalize_friction_events_json, now_rfc3339,
+    parse_json_payload, parse_json_value, sync_run_handoffs, ArtifactRecord, CapabilityPolicy,
+    ContextPackSuggestionExpectation, ContextPackSuggestionOptions, FrictionEvent, HandoffArtifact,
 };
 use crate::event_log::{
     active_event_log, AnyEventLog, EventLog, LogEvent as EventLogRecord, Topic,
@@ -528,6 +530,8 @@ pub struct EvalPackCase {
     pub run: Option<String>,
     #[serde(default, alias = "run-path")]
     pub run_path: Option<String>,
+    #[serde(default, alias = "friction-events", alias = "friction_events")]
+    pub friction_events: Option<String>,
     pub fixture: Option<String>,
     #[serde(default, alias = "fixture-path")]
     pub fixture_path: Option<String>,
@@ -1789,6 +1793,23 @@ pub fn evaluate_eval_pack_manifest(manifest: &EvalPackManifest) -> Result<EvalPa
         let mut warnings = Vec::new();
         let mut informational = Vec::new();
 
+        if case.friction_events.is_some() {
+            let report = evaluate_eval_pack_friction_case(
+                manifest,
+                case,
+                &case_id,
+                &label,
+                &severity,
+                blocking,
+                base_dir,
+                fixture_base_dir,
+                &fixtures_by_id,
+                &rubrics_by_id,
+            )?;
+            reports.push(report);
+            continue;
+        }
+
         let run = load_eval_pack_case_run(case, base_dir, fixture_base_dir, &fixtures_by_id)?;
         let fixture =
             load_eval_pack_case_fixture(case, base_dir, fixture_base_dir, &fixtures_by_id, &run)?;
@@ -1879,6 +1900,70 @@ pub fn evaluate_eval_pack_manifest(manifest: &EvalPackManifest) -> Result<EvalPa
     })
 }
 
+#[allow(clippy::too_many_arguments)]
+fn evaluate_eval_pack_friction_case(
+    manifest: &EvalPackManifest,
+    case: &EvalPackCase,
+    case_id: &str,
+    label: &str,
+    severity: &str,
+    blocking: bool,
+    base_dir: Option<&Path>,
+    fixture_base_dir: Option<&Path>,
+    fixtures_by_id: &BTreeMap<&str, &EvalPackFixtureRef>,
+    rubrics_by_id: &BTreeMap<&str, &EvalPackRubric>,
+) -> Result<EvalPackCaseReport, VmError> {
+    let mut failures = Vec::new();
+    let mut warnings = Vec::new();
+    let mut informational = Vec::new();
+    let events =
+        load_eval_pack_case_friction_events(case, base_dir, fixture_base_dir, fixtures_by_id)?;
+    let options = friction_suggestion_options(case, manifest);
+    let suggestions = generate_context_pack_suggestions(&events, &options);
+
+    for rubric_id in &case.rubrics {
+        let Some(rubric) = rubrics_by_id.get(rubric_id.as_str()) else {
+            failures.push(format!("case references unknown rubric '{rubric_id}'"));
+            continue;
+        };
+        apply_eval_pack_friction_rubric(rubric, &suggestions, &mut failures, &mut warnings);
+    }
+
+    if case.rubrics.is_empty() && suggestions.is_empty() {
+        failures.push("friction fixture produced no context-pack suggestions".to_string());
+    }
+
+    let pass = failures.is_empty() || !blocking;
+    if !failures.is_empty() && !blocking {
+        if severity == "warning" {
+            warnings.append(&mut failures);
+        } else {
+            informational.append(&mut failures);
+        }
+    }
+
+    Ok(EvalPackCaseReport {
+        id: case_id.to_string(),
+        label: label.to_string(),
+        severity: severity.to_string(),
+        pass,
+        blocking,
+        run_id: "friction_events".to_string(),
+        workflow_id: String::new(),
+        source_path: eval_pack_case_friction_source_path(
+            case,
+            base_dir,
+            fixture_base_dir,
+            fixtures_by_id,
+        ),
+        stage_count: events.len(),
+        failures,
+        warnings,
+        informational,
+        comparison: None,
+    })
+}
+
 fn eval_pack_case_severity(manifest: &EvalPackManifest, case: &EvalPackCase) -> String {
     normalize_eval_pack_severity(
         case.severity
@@ -1953,6 +2038,94 @@ fn eval_pack_case_source_path(
             .display()
             .to_string(),
     )
+}
+
+fn load_eval_pack_case_friction_events(
+    case: &EvalPackCase,
+    base_dir: Option<&Path>,
+    fixture_base_dir: Option<&Path>,
+    fixtures_by_id: &BTreeMap<&str, &EvalPackFixtureRef>,
+) -> Result<Vec<FrictionEvent>, VmError> {
+    let event_ref = case.friction_events.as_deref().ok_or_else(|| {
+        VmError::Runtime("eval pack friction case is missing friction_events".to_string())
+    })?;
+    if let Some(fixture) = fixtures_by_id.get(event_ref) {
+        return load_friction_events_from_fixture_ref(fixture, fixture_base_dir);
+    }
+    load_friction_events_from_path(&resolve_manifest_path(base_dir, event_ref))
+}
+
+fn load_friction_events_from_fixture_ref(
+    fixture: &EvalPackFixtureRef,
+    base_dir: Option<&Path>,
+) -> Result<Vec<FrictionEvent>, VmError> {
+    if let Some(inline) = &fixture.inline {
+        return normalize_friction_events_json(inline.clone());
+    }
+    let path = fixture.path.as_deref().ok_or_else(|| {
+        VmError::Runtime(format!(
+            "fixture '{}' is missing path or inline friction events",
+            fixture.id
+        ))
+    })?;
+    load_friction_events_from_path(&resolve_manifest_path(base_dir, path))
+}
+
+fn load_friction_events_from_path(path: &Path) -> Result<Vec<FrictionEvent>, VmError> {
+    let content = std::fs::read_to_string(path)
+        .map_err(|e| VmError::Runtime(format!("failed to read friction events fixture: {e}")))?;
+    let value: serde_json::Value = serde_json::from_str(&content)
+        .map_err(|e| VmError::Runtime(format!("failed to parse friction events fixture: {e}")))?;
+    normalize_friction_events_json(value)
+}
+
+fn eval_pack_case_friction_source_path(
+    case: &EvalPackCase,
+    base_dir: Option<&Path>,
+    fixture_base_dir: Option<&Path>,
+    fixtures_by_id: &BTreeMap<&str, &EvalPackFixtureRef>,
+) -> Option<String> {
+    let event_ref = case.friction_events.as_deref()?;
+    if let Some(fixture) = fixtures_by_id.get(event_ref) {
+        return fixture.path.as_ref().map(|path| {
+            resolve_manifest_path(fixture_base_dir, path)
+                .display()
+                .to_string()
+        });
+    }
+    Some(
+        resolve_manifest_path(base_dir, event_ref)
+            .display()
+            .to_string(),
+    )
+}
+
+fn friction_suggestion_options(
+    case: &EvalPackCase,
+    manifest: &EvalPackManifest,
+) -> ContextPackSuggestionOptions {
+    let min_occurrences = case
+        .metadata
+        .get("min_occurrences")
+        .or_else(|| manifest.metadata.get("min_occurrences"))
+        .and_then(|value| value.as_u64())
+        .unwrap_or(2) as usize;
+    let owner = case
+        .metadata
+        .get("owner")
+        .or_else(|| manifest.metadata.get("owner"))
+        .and_then(|value| value.as_str())
+        .map(str::to_string)
+        .or_else(|| {
+            manifest
+                .package
+                .as_ref()
+                .and_then(|package| package.name.clone())
+        });
+    ContextPackSuggestionOptions {
+        min_occurrences,
+        owner,
+    }
 }
 
 fn apply_eval_pack_thresholds(
@@ -2038,6 +2211,78 @@ fn apply_eval_pack_rubric(
             "rubric '{}' has unknown kind '{}' and was not run locally",
             rubric.id, other
         )),
+    }
+}
+
+fn apply_eval_pack_friction_rubric(
+    rubric: &EvalPackRubric,
+    suggestions: &[super::ContextPackSuggestion],
+    failures: &mut Vec<String>,
+    warnings: &mut Vec<String>,
+) {
+    match rubric.kind.as_str() {
+        "" | "deterministic" | "friction" | "context-pack-suggestion" => {
+            let mut expectations = Vec::new();
+            for assertion in &rubric.assertions {
+                match assertion.kind.as_str() {
+                    "context-pack-suggestion" | "context_pack_suggestion" | "suggestion" => {
+                        let expectation = context_pack_expectation_from_assertion(assertion);
+                        expectations.push(expectation);
+                    }
+                    other => failures.push(format!(
+                        "rubric '{}' has unsupported friction assertion kind '{}'",
+                        rubric.id, other
+                    )),
+                }
+            }
+            failures.extend(evaluate_context_pack_suggestion_expectations(
+                suggestions,
+                &expectations,
+            ));
+        }
+        other => warnings.push(format!(
+            "rubric '{}' has unknown friction kind '{}' and was not run locally",
+            rubric.id, other
+        )),
+    }
+}
+
+fn context_pack_expectation_from_assertion(
+    assertion: &EvalPackAssertion,
+) -> ContextPackSuggestionExpectation {
+    let expected = assertion
+        .expected
+        .as_ref()
+        .and_then(|value| value.as_object());
+    let expected_string = assertion.expected.as_ref().and_then(|value| value.as_str());
+    ContextPackSuggestionExpectation {
+        min_suggestions: expected
+            .and_then(|map| map.get("min_suggestions"))
+            .and_then(|value| value.as_u64())
+            .map(|value| value as usize),
+        recommended_artifact: expected
+            .and_then(|map| map.get("recommended_artifact"))
+            .and_then(|value| value.as_str())
+            .map(str::to_string)
+            .or_else(|| expected_string.map(str::to_string)),
+        title_contains: assertion.contains.clone().or_else(|| {
+            expected
+                .and_then(|map| map.get("title_contains"))
+                .and_then(|value| value.as_str())
+                .map(str::to_string)
+        }),
+        manifest_name_contains: expected
+            .and_then(|map| map.get("manifest_name_contains"))
+            .and_then(|value| value.as_str())
+            .map(str::to_string),
+        required_capability: expected
+            .and_then(|map| map.get("required_capability"))
+            .and_then(|value| value.as_str())
+            .map(str::to_string),
+        required_output_slot: expected
+            .and_then(|map| map.get("required_output_slot"))
+            .and_then(|value| value.as_str())
+            .map(str::to_string),
     }
 }
 
@@ -3213,5 +3458,91 @@ max-latency-ms = 1
         assert!(report.pass);
         assert_eq!(report.warning_failed, 1);
         assert!(report.cases[0].warnings[0].contains("latency"));
+    }
+
+    #[test]
+    fn eval_pack_manifest_runs_friction_context_pack_case() {
+        let temp = tempfile::tempdir().unwrap();
+        let events_path = temp.path().join("incident-friction.json");
+        fs::write(
+            &events_path,
+            r#"
+{
+  "events": [
+    {
+      "kind": "repeated_query",
+      "source": "incident-triage",
+      "actor": "sre",
+      "tool": "splunk",
+      "provider": "splunk",
+      "redacted_summary": "Checkout incidents need the same Splunk search",
+      "recurrence_hints": ["checkout incident queries"],
+      "estimated_time_ms": 300000,
+      "metadata": {
+        "query": "index=checkout service=api error",
+        "capability": "splunk.search",
+        "secret_ref": "SPLUNK_READ_TOKEN",
+        "output_slot": "splunk_errors"
+      }
+    },
+    {
+      "kind": "repeated_query",
+      "source": "incident-triage",
+      "actor": "sre",
+      "tool": "splunk",
+      "provider": "splunk",
+      "redacted_summary": "Checkout incident triage repeated the Splunk search",
+      "recurrence_hints": ["checkout incident queries"],
+      "estimated_time_ms": 240000,
+      "metadata": {
+        "query": "index=checkout service=api error",
+        "capability": "splunk.search",
+        "secret_ref": "SPLUNK_READ_TOKEN",
+        "output_slot": "splunk_errors"
+      }
+    }
+  ]
+}
+"#,
+        )
+        .unwrap();
+        let pack_path = temp.path().join("harn.eval.toml");
+        fs::write(
+            &pack_path,
+            r#"
+version = 1
+id = "team-learning"
+name = "Team learning evals"
+
+[[fixtures]]
+id = "incident-friction"
+kind = "friction-events"
+path = "incident-friction.json"
+
+[[cases]]
+id = "incident-context-pack"
+name = "Incident context pack suggestion"
+friction_events = "incident-friction"
+rubrics = ["context-pack"]
+
+[[rubrics]]
+id = "context-pack"
+kind = "friction"
+
+[[rubrics.assertions]]
+kind = "context-pack-suggestion"
+contains = "incident"
+expected = { min_suggestions = 1, recommended_artifact = "context_pack", required_capability = "splunk.search", required_output_slot = "splunk_errors" }
+"#,
+        )
+        .unwrap();
+
+        let manifest = load_eval_pack_manifest(&pack_path).unwrap();
+        let report = evaluate_eval_pack_manifest(&manifest).unwrap();
+
+        assert!(report.pass);
+        assert_eq!(report.total, 1);
+        assert_eq!(report.cases[0].run_id, "friction_events");
+        assert_eq!(report.cases[0].stage_count, 2);
     }
 }
