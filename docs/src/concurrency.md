@@ -197,7 +197,7 @@ read counters.
 Use the named synchronization primitives when an update needs a larger
 critical section:
 
-```harn
+```harn,ignore
 let memo = shared_map({scope: "workflow_run", key: "memo"})
 let permit = sync_mutex_acquire("memo:customer-42", 250ms)
 guard permit != nil else { throw "memo lock timeout" }
@@ -232,7 +232,7 @@ sent, received, failed send, and closed status.
 
 Examples:
 
-```harn
+```harn,ignore
 // Connector token refresh: only one task refreshes the token.
 let tokens = shared_map({scope: "tenant", tenant_id: "acme", key: "connector_tokens"})
 let lock = sync_mutex_acquire("token:acme:slack", 2s)

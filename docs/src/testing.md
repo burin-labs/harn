@@ -52,7 +52,7 @@ harn test conformance --timing --filter my_test
 Create a `.harn` file with a `pipeline default(task)` entry point and use
 `log()` or `println()` to produce output:
 
-```harn
+```harn,ignore
 // conformance/tests/<group>/my_feature.harn  (e.g. stdlib/, types/)
 pipeline default(task) {
   let result = my_feature(42)

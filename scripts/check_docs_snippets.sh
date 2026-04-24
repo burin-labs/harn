@@ -18,14 +18,26 @@ cd "$ROOT_DIR"
 
 HARN_BIN="${HARN_BIN:-}"
 if [[ -z "$HARN_BIN" ]]; then
+  # Resolve the Cargo target directory so this works under
+  # CARGO_TARGET_DIR overrides and sccache/worktree-redirected targets
+  # where `target/` in the CWD does not exist.
+  target_dir=""
+  if command -v cargo >/dev/null 2>&1; then
+    target_dir="$(cargo metadata --no-deps --format-version 1 2>/dev/null \
+      | python3 -c 'import json,sys; print(json.load(sys.stdin).get("target_directory", ""))' 2>/dev/null)"
+  fi
+  if [[ -z "$target_dir" ]]; then
+    target_dir="${CARGO_TARGET_DIR:-target}"
+  fi
+
   # Prefer a pre-built debug binary so the script is fast in a loop; fall
-  # back to `cargo run` for fresh clones.
-  if [[ -x "target/debug/harn" ]]; then
-    HARN_BIN="target/debug/harn"
+  # back to `cargo build` for fresh clones.
+  if [[ -x "$target_dir/debug/harn" ]]; then
+    HARN_BIN="$target_dir/debug/harn"
   else
     echo "building harn-cli (set HARN_BIN to skip)..." >&2
     cargo build -q -p harn-cli
-    HARN_BIN="target/debug/harn"
+    HARN_BIN="$target_dir/debug/harn"
   fi
 fi
 

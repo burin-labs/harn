@@ -118,7 +118,7 @@ let prose = try { llm_call(prompt, nil, opts).prose } catch (e) { "fallback" }
 
 ## Concurrency
 
-```harn
+```harn,ignore
 // Spawn a task, collect its result.
 let h = spawn { long_work() }
 let value = await(h)

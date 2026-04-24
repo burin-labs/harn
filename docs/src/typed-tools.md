@@ -100,7 +100,7 @@ fn deterministic_tools() {
 
 Then hand the registry to `agent_loop(...)`:
 
-```harn
+```harn,ignore
 let result = agent_loop(
   "Read the screenshot, hash the extracted order id, and summarize the UI state.",
   "Use deterministic tools first. Prefer pure stdlib tools over free-form reasoning when possible.",

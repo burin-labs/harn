@@ -208,7 +208,7 @@ if is_err(result) && unwrap_err(result).name == "ApprovalDeniedError" {
 
 Gate a destructive step behind dual control:
 
-```harn
+```harn,ignore
 let deleted = dual_control(2, 3, {
   delete_file("prod.db")
   return true

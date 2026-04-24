@@ -5,9 +5,9 @@ pub fn host_tools() {
 
 /** host_tool_lookup. */
 pub fn host_tool_lookup(name: string) {
-  for tool in host_tool_list() {
-    if tool?.name == name {
-      return tool
+  for entry in host_tool_list() {
+    if entry?.name == name {
+      return entry
     }
   }
   return nil

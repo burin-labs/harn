@@ -60,6 +60,8 @@ Normalization rules:
 dictionary describing exactly that directory:
 
 ```harn
+import "std/project"
+
 let ev = project_scan(".", {tiers: ["ambient", "config"]})
 ```
 
@@ -98,6 +100,8 @@ monorepos, use `project_scan_tree(...)` and let callers decide how to combine
 sub-project evidence:
 
 ```harn
+import "std/project"
+
 let tree = project_scan_tree(".", {tiers: ["ambient"], depth: 3})
 // {".": {...}, "frontend": {...}, "backend": {...}}
 ```
@@ -126,6 +130,8 @@ selection, schema-retry plumbing, and content-hash caching.
 Typical use:
 
 ```harn
+import "std/project"
+
 let base = project_scan(".", {tiers: ["ambient", "config"]})
 let enriched = project_enrich(".", {
   base_evidence: base,
@@ -231,6 +237,8 @@ every turn.
 Typical shape:
 
 ```harn
+import "std/project"
+
 let tree = project_deep_scan(".", {
   namespace: "coding-enrichment-v1",
   tiers: ["ambient", "config", "enriched"],

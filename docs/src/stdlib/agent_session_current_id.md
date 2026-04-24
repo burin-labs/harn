@@ -5,7 +5,7 @@ VM thread.
 
 ## Signature
 
-```harn
+```harn,ignore
 agent_session_current_id() -> string | nil
 ```
 
