@@ -38,6 +38,7 @@
 - [Agent state](./agent-state.md)
 - [Transcript architecture](./transcript-architecture.md)
 - [Workflow runtime](./workflow-runtime.md)
+- [Team learning and context packs](./team-learning.md)
 - [Trigger manifests](./triggers/manifest.md)
 - [Trigger budgets](./triggers/budgets.md)
 - [Trigger event schema](./triggers/event-schema.md)

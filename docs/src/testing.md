@@ -255,15 +255,27 @@ Fixture refs support these portable `kind` values:
 |---|---|
 | `run-record` or `recorded-run` | Loads a persisted Harn run record JSON file |
 | `replay-fixture` | Loads a replay fixture JSON file |
+| `friction-events` | Loads repeated-friction event fixtures and evaluates generated context-pack suggestions |
 | `jsonl-trace` | Reserved for imported trace fixture metadata |
 | `provider-events` | Reserved for synthetic provider event streams |
 | `connector-payload` | Reserved for connector payload samples |
 
 Local `harn eval` executes replay fixtures, baseline comparisons,
-deterministic assertions, HITL question assertions, and cost/latency/token/stage
-thresholds. `llm-judge` rubrics carry judge model, calibration, tie-break, and
+deterministic assertions, HITL question assertions, repeated-friction
+context-pack suggestion assertions, and cost/latency/token/stage thresholds.
+`llm-judge` rubrics carry judge model, calibration, tie-break, and
 prompt-version metadata for hosted or explicit judge runners; a blocking
 `llm-judge` rubric fails locally rather than being silently skipped.
+
+Repeated-friction cases use `friction_events = "<fixture-id-or-path>"` and a
+rubric assertion such as:
+
+```toml
+[[rubrics.assertions]]
+kind = "context-pack-suggestion"
+contains = "incident"
+expected = { min_suggestions = 1, recommended_artifact = "context_pack", required_capability = "splunk.search" }
+```
 
 Threshold `severity` controls gate behavior:
 
