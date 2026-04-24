@@ -136,8 +136,6 @@ Mapping:
 - `harn serve acp <file.harn>` starts the packaged stdio ACP adapter
 - the adapter owns session state, prompt execution, permission prompts, cancel
   tokens, and bidirectional `session/update` traffic
-- the legacy `harn acp <file.harn>` path remains as a compatibility alias for
-  one release
 
 ## Design rule
 

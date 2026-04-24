@@ -458,7 +458,6 @@ Run Harn as an ACP backend:
 
 ```bash
 harn serve acp agent.harn
-harn acp agent.harn        # legacy alias for one release
 ```
 
 Inspect persisted run records:

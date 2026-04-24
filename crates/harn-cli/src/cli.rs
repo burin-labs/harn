@@ -73,8 +73,6 @@ SCRIPTING
     Connector(ConnectorArgs),
     /// Serve a Harn workflow over a transport adapter.
     Serve(ServeArgs),
-    /// Start the ACP server on stdio.
-    Acp(AcpArgs),
     /// Legacy alias: expose a .harn tool bundle as an MCP server on stdio.
     #[command(hide = true, name = "mcp-serve")]
     McpServe(LegacyMcpServeArgs),
@@ -683,12 +681,6 @@ pub(crate) struct ServeMcpArgs {
     pub hmac_secret: Option<String>,
     /// Path to the `.harn` file whose exported `pub fn` entrypoints are served.
     pub file: String,
-}
-
-#[derive(Debug, Args)]
-pub(crate) struct AcpArgs {
-    /// Optional pipeline to expose through ACP. Deprecated: use `harn serve acp <path.harn>`.
-    pub pipeline: Option<String>,
 }
 
 #[derive(Debug, Args)]

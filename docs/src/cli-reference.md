@@ -495,20 +495,6 @@ harn watch main.harn
 harn watch --deny shell main.harn
 ```
 
-## harn acp
-
-Start an ACP (Agent Client Protocol) server on stdio.
-
-```bash
-harn acp                    # bridge mode, no pipeline
-harn acp pipeline.harn      # execute a pipeline per prompt
-```
-
-This is a legacy compatibility entrypoint. Prefer `harn serve acp <file.harn>`
-for new ACP host configuration.
-
-See [MCP and ACP Integration](./mcp-and-acp.md) for protocol details.
-
 ## harn portal
 
 Launch the local Harn observability portal for persisted runs.

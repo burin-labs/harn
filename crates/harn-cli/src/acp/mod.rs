@@ -34,12 +34,6 @@ pub(crate) fn server_config(pipeline: Option<String>) -> AcpServerConfig {
     AcpServerConfig::new(pipeline).with_runtime_configurator(Arc::new(CliAcpRuntimeConfigurator))
 }
 
-/// Backwards-compatible `harn acp` entrypoint kept for one release.
-pub(crate) async fn run_legacy_acp_server(pipeline: Option<&str>) {
-    eprintln!("warning: `harn acp` is deprecated; use `harn serve acp <path.harn>` instead");
-    run_acp_server(pipeline).await;
-}
-
 pub(crate) async fn run_acp_server(pipeline: Option<&str>) {
     harn_serve::run_acp_server(server_config(pipeline.map(str::to_string))).await;
 }

@@ -19,6 +19,11 @@ granular archaeology.
   provider errors up to four times (five attempts total) regardless of
   entry point. Callers that explicitly pass `llm_retries` are
   unaffected.
+- **ACP server moved into `harn-serve::adapters::acp` (#557).** The stdio
+  ACP adapter is now packaged in the `harn-serve` crate and fronted by
+  `harn serve acp <file.harn>`. **Breaking:** the top-level `harn acp`
+  command is removed with no compatibility alias. Editor and IDE hosts
+  must invoke `harn serve acp <file.harn>` directly.
 
 ## v0.7.36
 

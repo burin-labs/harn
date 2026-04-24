@@ -432,7 +432,6 @@ async fn main() {
                 }
             }
         },
-        Command::Acp(args) => acp::run_legacy_acp_server(args.pipeline.as_deref()).await,
         Command::Connector(args) => {
             if let Err(error) = commands::connector::handle_connector_command(args).await {
                 eprintln!("error: {error}");
