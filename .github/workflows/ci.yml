@@ -24,6 +24,22 @@ jobs:
         with:
           components: rustfmt
       - run: make fmt-check
+      - name: Check stdlib mirror parity
+        run: |
+          for vm_file in crates/harn-vm/src/stdlib*.harn; do
+            module_file="crates/harn-modules/src/stdlib/$(basename "$vm_file")"
+
+            if [ ! -f "$module_file" ]; then
+              echo "::error file=$vm_file::Missing stdlib mirror $module_file"
+              exit 1
+            fi
+
+            if ! cmp -s "$vm_file" "$module_file"; then
+              echo "::error file=$vm_file::Stdlib mirror drift: $vm_file must match $module_file byte-for-byte"
+              echo "Run: cp \"$vm_file\" \"$module_file\""
+              exit 1
+            fi
+          done
 
   lint-md:
     name: Markdown lint
