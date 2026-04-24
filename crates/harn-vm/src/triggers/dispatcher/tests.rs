@@ -350,22 +350,15 @@ async fn wait_for_dispatcher_in_flight(dispatcher: &Dispatcher, expected: u64) {
     );
 }
 
-async fn wait_for_topic_event(
-    log: Arc<crate::event_log::AnyEventLog>,
-    topic: &str,
-    predicate: impl Fn(&crate::event_log::LogEvent) -> bool,
-) {
-    for _ in 0..1_000 {
-        if read_topic(log.clone(), topic)
-            .await
-            .iter()
-            .any(|(_, event)| predicate(event))
-        {
-            return;
-        }
-        tokio::task::yield_now().await;
-    }
-    panic!("timed out waiting for matching {topic} event");
+fn test_cancel_requested_at() -> time::OffsetDateTime {
+    time::OffsetDateTime::UNIX_EPOCH
+}
+
+async fn await_test_signal(label: &str, rx: oneshot::Receiver<()>) {
+    tokio::time::timeout(Duration::from_secs(5), rx)
+        .await
+        .unwrap_or_else(|_| panic!("timed out waiting for {label}"))
+        .unwrap_or_else(|_| panic!("{label} sender dropped before firing"));
 }
 
 fn flatten_action_graph(
@@ -1928,7 +1921,7 @@ pub fn wait_for_cancel(event: TriggerEvent) -> string {
                 &DispatchCancelRequest {
                     binding_key: binding_key.clone(),
                     event_id: event_id.clone(),
-                    requested_at: time::OffsetDateTime::now_utc(),
+                    requested_at: test_cancel_requested_at(),
                     requested_by: Some("test".to_string()),
                     audit_id: Some("audit-test".to_string()),
                 },
@@ -1986,6 +1979,19 @@ pub fn wait_for_signal(event: TriggerEvent) -> string {
             let event = trigger_event("issues.opened", "delivery-waitpoint-cancel");
             let event_id = event.id.0.clone();
             let binding_key = binding.binding_key();
+            crate::waitpoints::clear_test_wait_signals();
+            let (started_tx, started_rx) = oneshot::channel();
+            crate::waitpoints::install_test_wait_signal(
+                "wait-cancel",
+                crate::waitpoints::WaitpointTestSignalKind::Started,
+                started_tx,
+            );
+            let (interrupted_tx, interrupted_rx) = oneshot::channel();
+            crate::waitpoints::install_test_wait_signal(
+                "wait-cancel",
+                crate::waitpoints::WaitpointTestSignalKind::Interrupted,
+                interrupted_tx,
+            );
 
             let run_dispatcher = dispatcher.clone();
             let handle = tokio::task::spawn_local(async move {
@@ -1995,21 +2001,13 @@ pub fn wait_for_signal(event: TriggerEvent) -> string {
                     .expect("dispatch completes")
             });
 
-            wait_for_topic_event(
-                log.clone(),
-                crate::waitpoints::WAITPOINT_WAITS_TOPIC,
-                |event| {
-                    event.kind == "waitpoint_wait_started"
-                        && event.headers.get("wait_id").map(String::as_str) == Some("wait-cancel")
-                },
-            )
-            .await;
+            await_test_signal("waitpoint_wait_started", started_rx).await;
             append_dispatch_cancel_request(
                 &log,
                 &DispatchCancelRequest {
                     binding_key: binding_key.clone(),
                     event_id: event_id.clone(),
-                    requested_at: time::OffsetDateTime::now_utc(),
+                    requested_at: test_cancel_requested_at(),
                     requested_by: Some("test".to_string()),
                     audit_id: Some("audit-test".to_string()),
                 },
@@ -2027,15 +2025,7 @@ pub fn wait_for_signal(event: TriggerEvent) -> string {
                 "{outcome:?}"
             );
 
-            wait_for_topic_event(
-                log.clone(),
-                crate::waitpoints::WAITPOINT_WAITS_TOPIC,
-                |event| {
-                    event.kind == "waitpoint_wait_interrupted"
-                        && event.headers.get("wait_id").map(String::as_str) == Some("wait-cancel")
-                },
-            )
-            .await;
+            await_test_signal("waitpoint_wait_interrupted", interrupted_rx).await;
         })
         .await;
 }
