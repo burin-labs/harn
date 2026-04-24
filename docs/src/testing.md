@@ -179,6 +179,100 @@ such as `model`, `provider`, and token counts when present.
 `harn eval` supports the default replay fixture flow plus an explicit
 clarifying-question kind for ambiguous tasks.
 
+## Eval packs
+
+Portable eval packs live in `harn.eval.toml` or another TOML file listed in
+`[package].evals` in `harn.toml`. The same pack can be run locally and imported
+by hosted tooling because it contains only portable fixture references, rubrics,
+judge metadata, thresholds, and package metadata.
+
+```toml
+version = 1
+id = "slack-connector"
+name = "Slack connector evals"
+
+[package]
+name = "slack-connector"
+version = "0.1.0"
+
+[[fixtures]]
+id = "url-verification-run"
+kind = "run-record"
+path = "fixtures/url-verification.run.json"
+
+[[fixtures]]
+id = "url-verification-replay"
+kind = "replay-fixture"
+path = "fixtures/url-verification.replay.json"
+
+[[rubrics]]
+id = "webhook-normalization"
+kind = "deterministic"
+description = "Webhook normalization keeps status and response shape stable."
+
+[[rubrics.assertions]]
+kind = "run-status"
+expected = "completed"
+
+[[cases]]
+id = "url-verification"
+name = "URL verification handshake"
+run = "url-verification-run"
+fixture = "url-verification-replay"
+rubrics = ["webhook-normalization"]
+severity = "blocking"
+
+[cases.thresholds]
+max-latency-ms = 500
+max-cost-usd = 0.001
+```
+
+Run a single pack directly:
+
+```bash
+harn eval harn.eval.toml
+```
+
+Run the eval packs shipped by a package:
+
+```bash
+harn test package --evals
+```
+
+`[package].evals` is optional when the package root contains
+`harn.eval.toml`; otherwise declare one or more package-relative pack paths:
+
+```toml
+[package]
+name = "slack-connector"
+version = "0.1.0"
+evals = ["evals/webhooks.toml", "evals/replay.toml"]
+```
+
+Fixture refs support these portable `kind` values:
+
+| Kind | Local behavior |
+|---|---|
+| `run-record` or `recorded-run` | Loads a persisted Harn run record JSON file |
+| `replay-fixture` | Loads a replay fixture JSON file |
+| `jsonl-trace` | Reserved for imported trace fixture metadata |
+| `provider-events` | Reserved for synthetic provider event streams |
+| `connector-payload` | Reserved for connector payload samples |
+
+Local `harn eval` executes replay fixtures, baseline comparisons,
+deterministic assertions, HITL question assertions, and cost/latency/token/stage
+thresholds. `llm-judge` rubrics carry judge model, calibration, tie-break, and
+prompt-version metadata for hosted or explicit judge runners; a blocking
+`llm-judge` rubric fails locally rather than being silently skipped.
+
+Threshold `severity` controls gate behavior:
+
+| Severity | Local gate behavior |
+|---|---|
+| `blocking` | Failing case exits non-zero |
+| `warning` | Failure is reported but does not fail the command |
+| `informational` | Failure is reported as info only |
+
 ### Replay evals
 
 Replay evals are the default. They compare a run's persisted status and

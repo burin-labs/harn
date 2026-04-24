@@ -280,7 +280,15 @@ async fn main() {
             commands::check::fmt_targets(&targets, args.check, &opts);
         }
         Command::Test(args) => {
-            if args.determinism {
+            if args.evals {
+                if args.determinism || args.record || args.replay || args.watch {
+                    command_error("--evals cannot be combined with --determinism, --record, --replay, or --watch");
+                }
+                if args.target.as_deref() != Some("package") || args.selection.is_some() {
+                    command_error("package evals are run with `harn test package --evals`");
+                }
+                run_package_evals();
+            } else if args.determinism {
                 if args.watch {
                     command_error("--determinism cannot be combined with --watch");
                 }
@@ -635,22 +643,30 @@ fn load_run_record_or_exit(path: &Path) -> harn_vm::orchestration::RunRecord {
 }
 
 fn load_eval_suite_manifest_or_exit(path: &Path) -> harn_vm::orchestration::EvalSuiteManifest {
-    let content = fs::read_to_string(path).unwrap_or_else(|error| {
-        eprintln!("Failed to read eval manifest {}: {error}", path.display());
+    harn_vm::orchestration::load_eval_suite_manifest(path).unwrap_or_else(|error| {
+        eprintln!("Failed to load eval manifest {}: {error}", path.display());
         process::exit(1);
-    });
-    let mut manifest: harn_vm::orchestration::EvalSuiteManifest = serde_json::from_str(&content)
-        .unwrap_or_else(|error| {
-            eprintln!("Failed to parse eval manifest {}: {error}", path.display());
-            process::exit(1);
-        });
-    if manifest.base_dir.is_none() {
-        manifest.base_dir = path.parent().map(|parent| parent.display().to_string());
-    }
-    manifest
+    })
+}
+
+fn load_eval_pack_manifest_or_exit(path: &Path) -> harn_vm::orchestration::EvalPackManifest {
+    harn_vm::orchestration::load_eval_pack_manifest(path).unwrap_or_else(|error| {
+        eprintln!("Failed to load eval pack {}: {error}", path.display());
+        process::exit(1);
+    })
 }
 
 fn file_looks_like_eval_manifest(path: &Path) -> bool {
+    if path.file_name().and_then(|name| name.to_str()) == Some("harn.eval.toml") {
+        return true;
+    }
+    if path.extension().and_then(|ext| ext.to_str()) == Some("toml") {
+        let Ok(content) = fs::read_to_string(path) else {
+            return false;
+        };
+        return toml::from_str::<harn_vm::orchestration::EvalPackManifest>(&content)
+            .is_ok_and(|manifest| !manifest.cases.is_empty());
+    }
     let Ok(content) = fs::read_to_string(path) else {
         return false;
     };
@@ -659,6 +675,24 @@ fn file_looks_like_eval_manifest(path: &Path) -> bool {
     };
     json.get("_type").and_then(|value| value.as_str()) == Some("eval_suite_manifest")
         || json.get("cases").is_some()
+}
+
+fn file_looks_like_eval_pack_manifest(path: &Path) -> bool {
+    if path.file_name().and_then(|name| name.to_str()) == Some("harn.eval.toml") {
+        return true;
+    }
+    if path.extension().and_then(|ext| ext.to_str()) == Some("toml") {
+        return file_looks_like_eval_manifest(path);
+    }
+    let Ok(content) = fs::read_to_string(path) else {
+        return false;
+    };
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) else {
+        return false;
+    };
+    json.get("version").is_some()
+        && json.get("cases").is_some()
+        && json.get("_type").and_then(|value| value.as_str()) != Some("eval_suite_manifest")
 }
 
 fn collect_run_record_paths(path: &str) -> Vec<PathBuf> {
@@ -943,6 +977,28 @@ fn eval_run_record(
     }
 
     let path_buf = PathBuf::from(path);
+    if path_buf.is_file() && file_looks_like_eval_pack_manifest(&path_buf) {
+        if compare.is_some() {
+            eprintln!("--compare is not supported with eval pack manifests");
+            process::exit(1);
+        }
+        let manifest = load_eval_pack_manifest_or_exit(&path_buf);
+        let report = harn_vm::orchestration::evaluate_eval_pack_manifest(&manifest).unwrap_or_else(
+            |error| {
+                eprintln!(
+                    "Failed to evaluate eval pack {}: {error}",
+                    path_buf.display()
+                );
+                process::exit(1);
+            },
+        );
+        print_eval_pack_report(&report);
+        if !report.pass {
+            process::exit(1);
+        }
+        return;
+    }
+
     if path_buf.is_file() && file_looks_like_eval_manifest(&path_buf) {
         if compare.is_some() {
             eprintln!("--compare is not supported with eval suite manifests");
@@ -1054,6 +1110,71 @@ fn eval_run_record(
         }
     }
     if !report.pass {
+        process::exit(1);
+    }
+}
+
+fn print_eval_pack_report(report: &harn_vm::orchestration::EvalPackReport) {
+    println!(
+        "{} {} passed, {} blocking failed, {} warning, {} informational, {} total",
+        if report.pass { "PASS" } else { "FAIL" },
+        report.passed,
+        report.blocking_failed,
+        report.warning_failed,
+        report.informational_failed,
+        report.total
+    );
+    for case in &report.cases {
+        println!(
+            "- {} [{}] {} ({})",
+            case.label,
+            case.workflow_id,
+            if case.pass { "PASS" } else { "FAIL" },
+            case.severity
+        );
+        if let Some(path) = &case.source_path {
+            println!("  path: {}", path);
+        }
+        if let Some(comparison) = &case.comparison {
+            println!("  baseline identical: {}", comparison.identical);
+            if !comparison.identical {
+                println!(
+                    "  baseline status: {} -> {}",
+                    comparison.left_status, comparison.right_status
+                );
+            }
+        }
+        for failure in &case.failures {
+            println!("  {}", failure);
+        }
+        for warning in &case.warnings {
+            println!("  warning: {}", warning);
+        }
+        for item in &case.informational {
+            println!("  info: {}", item);
+        }
+    }
+}
+
+fn run_package_evals() {
+    let paths = package::load_package_eval_pack_paths(None).unwrap_or_else(|error| {
+        eprintln!("{error}");
+        process::exit(1);
+    });
+    let mut all_pass = true;
+    for path in &paths {
+        println!("Eval pack: {}", path.display());
+        let manifest = load_eval_pack_manifest_or_exit(path);
+        let report = harn_vm::orchestration::evaluate_eval_pack_manifest(&manifest).unwrap_or_else(
+            |error| {
+                eprintln!("Failed to evaluate eval pack {}: {error}", path.display());
+                process::exit(1);
+            },
+        );
+        print_eval_pack_report(&report);
+        all_pass &= report.pass;
+    }
+    if !all_pass {
         process::exit(1);
     }
 }

@@ -204,9 +204,11 @@ enforcement.
   and `llm_mock_clear()` — queue specific text, tool calls, or mixed
   responses for the mock provider. Supports FIFO queuing and glob-pattern
   matching against prompts.
-- Eval suite manifests and baseline comparisons via `eval_suite_manifest(...)`,
-  `eval_suite_run(...)`, and `harn eval <manifest.json>`, so grouped replay
-  regression suites are first-class runtime data instead of external scripts.
+- Eval suite manifests and portable eval packs via `eval_suite_manifest(...)`,
+  `eval_suite_run(...)`, `harn eval <manifest.json|harn.eval.toml>`, and
+  `harn test package --evals`, so grouped replay, rubric, threshold, and
+  package-shipped connector evals are first-class runtime data instead of
+  external scripts.
 - Typed artifacts and resources as the real context boundary. Context
   selection is artifact-aware, budget-aware, and policy-driven rather than
   raw prompt concatenation.
