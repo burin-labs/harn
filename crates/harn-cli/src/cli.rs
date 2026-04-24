@@ -337,6 +337,9 @@ pub(crate) struct TestArgs {
     /// Record then replay each selected pipeline and assert deterministic output.
     #[arg(long)]
     pub determinism: bool,
+    /// Run eval packs declared by the nearest package manifest.
+    #[arg(long)]
+    pub evals: bool,
     /// Extra skill-discovery roots (repeatable). See `harn run
     /// --skill-dir` — applied the same way to user tests and
     /// conformance fixtures so bundled `skills/` dirs are picked up.
@@ -2151,6 +2154,17 @@ mod tests {
         assert_eq!(import.trace_file, "langfuse.jsonl");
         assert_eq!(import.trace_id.as_deref(), Some("trace_123"));
         assert_eq!(import.output, "fixtures/imported.jsonl");
+    }
+
+    #[test]
+    fn test_parses_package_evals_flag() {
+        let cli = Cli::parse_from(["harn", "test", "package", "--evals"]);
+
+        let Command::Test(args) = cli.command.unwrap() else {
+            panic!("expected test command");
+        };
+        assert_eq!(args.target.as_deref(), Some("package"));
+        assert!(args.evals);
     }
 
     #[test]

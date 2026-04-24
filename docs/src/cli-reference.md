@@ -545,15 +545,26 @@ harn eval .harn-runs/<run>.json
 harn eval .harn-runs/<run>.json --compare baseline.json
 harn eval .harn-runs/
 harn eval evals/regression.json
+harn eval harn.eval.toml
 harn eval evals/clarifying-question.json
 harn eval --llm-mock fixtures.jsonl --structural-experiment doubled_prompt pipeline.harn
 ```
 
-`harn eval` accepts three inputs:
+`harn eval` accepts four inputs:
 
 - a single run record JSON file
 - a directory of run record JSON files
 - an eval suite manifest JSON file with grouped cases and optional baseline comparisons
+- an eval-pack v1 TOML/JSON manifest such as `harn.eval.toml`
+
+Run eval packs declared by a package manifest with:
+
+```bash
+harn test package --evals
+```
+
+Package eval discovery uses `[package].evals = ["evals/webhooks.toml"]` when
+present, otherwise it falls back to `harn.eval.toml` in the package root.
 
 Clarifying-question evals use an explicit fixture with
 `"eval_kind": "clarifying_question"`. The fixture checks persisted

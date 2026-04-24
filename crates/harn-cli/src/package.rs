@@ -790,6 +790,8 @@ pub struct McpServerConfig {
 pub struct PackageInfo {
     pub name: Option<String>,
     pub version: Option<String>,
+    #[serde(default)]
+    pub evals: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -3120,6 +3122,53 @@ pub fn load_workspace_config(anchor: Option<&Path>) -> Option<(WorkspaceConfig, 
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
     let (manifest, dir) = find_nearest_manifest(&anchor)?;
     Some((manifest.workspace, dir))
+}
+
+pub fn load_package_eval_pack_paths(anchor: Option<&Path>) -> Result<Vec<PathBuf>, String> {
+    let anchor = anchor
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    let Some((manifest, dir)) = find_nearest_manifest(&anchor) else {
+        return Err("no harn.toml found for package eval discovery".to_string());
+    };
+
+    let declared = manifest
+        .package
+        .as_ref()
+        .map(|package| package.evals.clone())
+        .unwrap_or_default();
+    let mut paths = if declared.is_empty() {
+        let default_pack = dir.join("harn.eval.toml");
+        if default_pack.is_file() {
+            vec![default_pack]
+        } else {
+            Vec::new()
+        }
+    } else {
+        declared
+            .iter()
+            .map(|entry| {
+                let path = PathBuf::from(entry);
+                if path.is_absolute() {
+                    path
+                } else {
+                    dir.join(path)
+                }
+            })
+            .collect()
+    };
+    paths.sort();
+    if paths.is_empty() {
+        return Err(
+            "package declares no eval packs; add [package].evals or harn.eval.toml".to_string(),
+        );
+    }
+    for path in &paths {
+        if !path.is_file() {
+            return Err(format!("eval pack does not exist: {}", path.display()));
+        }
+    }
+    Ok(paths)
 }
 
 pub fn load_personas_from_manifest_path(
@@ -6104,6 +6153,33 @@ mod tests {
         let harn_file = root.join("main.harn");
         fs::write(&harn_file, "pipeline main() {}\n").unwrap();
         harn_file
+    }
+
+    #[test]
+    fn package_eval_pack_paths_use_package_manifest_entries() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join(".git")).unwrap();
+        fs::create_dir_all(root.join("evals")).unwrap();
+        fs::write(
+            root.join(MANIFEST),
+            r#"
+[package]
+name = "demo"
+version = "0.1.0"
+evals = ["evals/webhook.toml"]
+"#,
+        )
+        .unwrap();
+        fs::write(
+            root.join("evals/webhook.toml"),
+            "version = 1\n[[cases]]\nrun = \"run.json\"\n",
+        )
+        .unwrap();
+
+        let paths = load_package_eval_pack_paths(Some(&root.join("src/main.harn"))).unwrap();
+
+        assert_eq!(paths, vec![root.join("evals/webhook.toml")]);
     }
 
     struct TestEnvGuard {

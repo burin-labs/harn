@@ -3773,6 +3773,78 @@ stem. Use `harn add <alias> --path ../repo` for the legacy explicit
 alias form, or `harn add <alias> --git ../repo` when a local git checkout
 should be pinned by commit instead of live-linked.
 
+### Eval packs
+
+Packages can ship portable eval packs in `harn.eval.toml` or in paths listed
+under `[package].evals`:
+
+```toml
+[package]
+name = "slack-connector"
+version = "0.1.0"
+evals = ["evals/webhooks.toml"]
+```
+
+An eval pack is a TOML document with `version = 1`, package metadata, fixture
+references, rubrics, optional judge calibration, thresholds, and cases:
+
+```toml
+version = 1
+id = "slack-connector"
+name = "Slack connector evals"
+
+[[fixtures]]
+id = "url-verification-run"
+kind = "run-record"
+path = "fixtures/url-verification.run.json"
+
+[[fixtures]]
+id = "url-verification-replay"
+kind = "replay-fixture"
+path = "fixtures/url-verification.replay.json"
+
+[[rubrics]]
+id = "normalization"
+kind = "deterministic"
+
+[[rubrics.assertions]]
+kind = "run-status"
+expected = "completed"
+
+[[cases]]
+id = "url-verification"
+run = "url-verification-run"
+fixture = "url-verification-replay"
+rubrics = ["normalization"]
+severity = "blocking"
+
+[cases.thresholds]
+max-latency-ms = 500
+max-cost-usd = 0.001
+```
+
+Fixture `kind` values are portable labels: `run-record`, `replay-fixture`,
+`jsonl-trace`, `provider-events`, and `connector-payload`. Local CLI evaluation
+executes run-record/replay-fixture cases and deterministic assertions; other
+fixture kinds remain importable metadata for hosted runners.
+
+Rubric `kind` values include `deterministic`, `replay`, `budget`, `hitl`,
+`side-effect`, and `llm-judge`. LLM judge rubrics declare model selection,
+prompt version, tie handling, confidence minimums, and golden examples, but a
+blocking `llm-judge` rubric fails local evaluation unless an explicit judge
+runner handles it.
+
+Threshold severity controls deployment-gate behavior:
+
+| Severity | Meaning |
+|---|---|
+| `blocking` | Failure exits non-zero locally and blocks deployment gates |
+| `warning` | Failure is reported but does not block |
+| `informational` | Failure is reported for comparison and dashboards only |
+
+Run a pack directly with `harn eval harn.eval.toml`, or run package-declared
+packs with `harn test package --evals`.
+
 ### Package registry index
 
 `harn package search`, `harn package info`, and registry-name
