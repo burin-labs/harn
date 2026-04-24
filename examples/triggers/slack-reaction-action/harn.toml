@@ -1,0 +1,14 @@
+[package]
+name = "slack-reaction-action"
+
+[exports]
+handlers = "lib.harn"
+
+[[triggers]]
+id = "slack-reaction-action"
+kind = "webhook"
+provider = "slack"
+match = { path = "/hooks/slack", events = ["reaction_added"] }
+handler = "handlers::on_reaction"
+dedupe_key = "event.dedupe_key"
+secrets = { signing_secret = "slack/signing-secret" }

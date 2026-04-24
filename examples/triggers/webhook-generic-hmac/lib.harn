@@ -1,0 +1,7 @@
+import "std/triggers"
+
+/** Route a generic HMAC-verified webhook event. */
+pub fn on_webhook(event: TriggerEvent) -> dict {
+  let raw = event.provider_payload.raw
+  return {action: "generic_webhook", kind: event.kind, source: raw.source ?? "generic", payload: raw}
+}

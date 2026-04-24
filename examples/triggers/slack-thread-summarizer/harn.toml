@@ -1,0 +1,15 @@
+[package]
+name = "slack-thread-summarizer"
+
+[exports]
+handlers = "lib.harn"
+
+[[triggers]]
+id = "slack-thread-summarizer"
+kind = "webhook"
+provider = "slack"
+match = { path = "/hooks/slack", events = ["message"] }
+when = "handlers::should_summarize"
+handler = "handlers::summarize_thread"
+dedupe_key = "event.dedupe_key"
+secrets = { signing_secret = "slack/signing-secret" }

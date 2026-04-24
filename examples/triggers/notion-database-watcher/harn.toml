@@ -1,0 +1,14 @@
+[package]
+name = "notion-database-watcher"
+
+[exports]
+handlers = "lib.harn"
+
+[[triggers]]
+id = "notion-database-watcher"
+kind = "poll"
+provider = "notion"
+match = { events = ["notion.page.polled", "notion.page.content_updated"] }
+handler = "handlers::on_database_change"
+poll = { interval = "5m", state_key = "notion:database:watcher", max_batch_size = 50 }
+secrets = { verification_token = "notion/verification-token" }

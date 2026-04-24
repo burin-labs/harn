@@ -1,0 +1,15 @@
+[package]
+name = "webhook-generic-hmac"
+
+[exports]
+handlers = "lib.harn"
+
+[[triggers]]
+id = "webhook-generic-hmac"
+kind = "webhook"
+provider = "webhook"
+match = { path = "/hooks/generic", events = ["invoice.payment_succeeded", "event.created"] }
+handler = "handlers::on_webhook"
+dedupe_key = "event.dedupe_key"
+retry = { max = 5, backoff = "svix" }
+secrets = { signing_secret = "webhook/generic-signing-secret" }

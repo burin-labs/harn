@@ -1,0 +1,12 @@
+import "std/triggers"
+
+/** Plan a weekly Notion content-review pass. */
+pub fn schedule_content_reviews(event: TriggerEvent) -> dict {
+  return {
+    provider: "notion",
+    action: "schedule_content_reviews",
+    tick: event.kind,
+    database: "content-calendar",
+    due_within_days: 7,
+  }
+}

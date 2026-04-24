@@ -1,0 +1,17 @@
+import "std/triggers"
+
+/** Route a Slack message based on simple keyword classes. */
+pub fn route_message(event: TriggerEvent) -> dict {
+  let raw = event.provider_payload.raw
+  let text = lowercase(raw.text ?? raw.event?.text ?? "")
+  let route = if contains(text, "urgent") {
+    "priority"
+  } else {
+    if contains(text, "help") {
+      "support"
+    } else {
+      "ambient"
+    }
+  }
+  return {route: route, channel: raw.channel ?? raw.event?.channel, text: text}
+}

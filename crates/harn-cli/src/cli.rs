@@ -136,6 +136,13 @@ SCRIPTING
     /// `make gen-highlight` target.
     #[command(hide = true, name = "dump-highlight-keywords")]
     DumpHighlightKeywords(DumpHighlightKeywordsArgs),
+    /// Regenerate docs/llm/harn-triggers-quickref.md from the live trigger provider catalog.
+    ///
+    /// Dev-only. Hidden from `--help` — invoke via
+    /// `cargo run -p harn-cli -- dump-trigger-quickref` or the
+    /// `make gen-trigger-quickref` target.
+    #[command(hide = true, name = "dump-trigger-quickref")]
+    DumpTriggerQuickref(DumpTriggerQuickrefArgs),
 }
 
 #[derive(Debug, Args)]
@@ -1526,6 +1533,18 @@ pub(crate) struct DumpHighlightKeywordsArgs {
     /// Verify the on-disk file matches what would be generated; exit non-zero
     /// if stale. Used by CI to prevent drift between the highlighter and the
     /// lexer/stdlib.
+    #[arg(long)]
+    pub check: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct DumpTriggerQuickrefArgs {
+    /// Path to the generated trigger quickref file (relative to the repo root).
+    #[arg(long, default_value = "docs/llm/harn-triggers-quickref.md")]
+    pub output: String,
+    /// Verify the on-disk file matches what would be generated; exit non-zero
+    /// if stale. Used by CI to prevent drift between the quickref and the
+    /// runtime trigger provider catalog.
     #[arg(long)]
     pub check: bool,
 }

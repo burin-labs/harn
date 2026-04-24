@@ -12,6 +12,9 @@ using the canonical URL above.
 The human-facing companion lives at `docs/src/scripting-cheatsheet.md`.
 Keep the two in lockstep when syntax changes.
 
+For trigger manifests, connector contract v1, and the provider catalog, also
+load `docs/llm/harn-triggers-quickref.md`.
+
 ## Files and execution
 
 - File extension: `.harn`.

@@ -1,5 +1,6 @@
 import "std/triggers"
 
+/** Emit a weekday digest placeholder for a cron tick. */
 pub fn send_daily_digest(event: TriggerEvent) {
   log("running digest for ${event.kind}")
 }

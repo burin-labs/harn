@@ -1,10 +1,10 @@
-.PHONY: setup install-hooks check fmt fmt-harn fmt-harn-fix lint lint-md lint-actions lint-harn test test-cargo test-fast conformance bench-vm all release-gate portal portal-check portal-demo gen-highlight check-highlight check-docs-snippets
+.PHONY: setup install-hooks check fmt fmt-harn fmt-harn-fix lint lint-md lint-actions lint-harn test test-cargo test-fast conformance bench-vm all release-gate portal portal-check portal-demo gen-highlight check-highlight gen-trigger-quickref check-trigger-quickref check-trigger-examples check-docs-snippets
 
 # Full quality check: format first, then lint/test in parallel.
 # Usage: make all -j       (parallel checks after formatting)
 #        make all           (sequential, also works)
 all: fmt
-	$(MAKE) lint lint-md lint-actions lint-harn fmt-harn test conformance check-highlight check-docs-snippets portal-check
+	$(MAKE) lint lint-md lint-actions lint-harn fmt-harn test conformance check-highlight check-trigger-quickref check-trigger-examples check-docs-snippets portal-check
 
 check: all
 
@@ -142,6 +142,28 @@ check-highlight:
 	@echo "=== Checking docs/theme/harn-keywords.js is up to date ==="
 	@cargo run --quiet -p harn-cli -- dump-highlight-keywords --check
 	@echo "    Harn keyword file OK."
+
+# Regenerate the LLM trigger quickref from the live ProviderCatalog metadata.
+gen-trigger-quickref:
+	cargo run --quiet -p harn-cli -- dump-trigger-quickref
+
+# CI guard: fail if the trigger quickref is stale relative to ProviderCatalog.
+check-trigger-quickref:
+	@echo "=== Checking docs/llm/harn-triggers-quickref.md is up to date ==="
+	@cargo run --quiet -p harn-cli -- dump-trigger-quickref --check
+	@echo "    Harn trigger quickref OK."
+
+# Validate the ready-to-customize trigger example library.
+check-trigger-examples:
+	@echo "=== Checking trigger examples ==="
+	@find examples/triggers -mindepth 1 -maxdepth 1 -type d | sort | while IFS= read -r dir; do \
+		test -f "$$dir/harn.toml"; \
+		test -f "$$dir/lib.harn"; \
+		test -f "$$dir/README.md"; \
+		test -f "$$dir/SKILL.md"; \
+		cargo run --quiet --bin harn -- check "$$dir/lib.harn"; \
+	done
+	@echo "    Trigger examples OK."
 
 # CI guard: every ```harn block in docs/src/*.md must parse under
 # `harn check`. Blocks tagged ```harn,ignore are skipped.

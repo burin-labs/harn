@@ -652,6 +652,9 @@ async fn main() {
         Command::DumpHighlightKeywords(args) => {
             commands::dump_highlight_keywords::run(&args.output, args.check);
         }
+        Command::DumpTriggerQuickref(args) => {
+            commands::dump_trigger_quickref::run(&args.output, args.check);
+        }
     }
 }
 

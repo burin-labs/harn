@@ -1,0 +1,12 @@
+import "std/triggers"
+
+/** Plan a sweep for Linear issues stuck in review. */
+pub fn bump_stuck_issues(event: TriggerEvent) -> dict {
+  return {
+    provider: "linear",
+    action: "bump_stuck_issues",
+    tick: event.kind,
+    states: ["In Review", "Needs Review"],
+    stale_after_hours: 48,
+  }
+}

@@ -1,0 +1,12 @@
+import "std/triggers"
+
+/** Handle a Notion poll or webhook change notification. */
+pub fn on_database_change(event: TriggerEvent) -> dict {
+  let raw = event.provider_payload.raw
+  return {
+    action: "notion_database_change",
+    kind: event.kind,
+    entity_id: raw.entity_id ?? raw.page_id,
+    high_water_mark: raw.polled?.high_water_mark,
+  }
+}

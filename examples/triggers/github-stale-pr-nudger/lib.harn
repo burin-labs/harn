@@ -1,0 +1,12 @@
+import "std/triggers"
+
+/** Plan a stale-PR sweep from a cron tick. */
+pub fn nudge_stale_prs(event: TriggerEvent) -> dict {
+  return {
+    provider: "github",
+    action: "nudge_stale_prs",
+    tick_kind: event.kind,
+    repos: ["burin-labs/harn"],
+    stale_after_days: 14,
+  }
+}

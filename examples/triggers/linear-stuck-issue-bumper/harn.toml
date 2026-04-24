@@ -1,0 +1,15 @@
+[package]
+name = "linear-stuck-issue-bumper"
+
+[exports]
+handlers = "lib.harn"
+
+[[triggers]]
+id = "linear-stuck-issue-bumper"
+kind = "cron"
+provider = "cron"
+match = { events = ["cron.tick"] }
+handler = "handlers::bump_stuck_issues"
+schedule = "0 */4 * * 1-5"
+timezone = "UTC"
+budget = { daily_cost_usd = 1.50, max_concurrent = 1 }

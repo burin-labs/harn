@@ -1,0 +1,12 @@
+import "std/triggers"
+
+/** Turn a Linear issue change into a cycle-planning candidate. */
+pub fn on_issue_change(event: TriggerEvent) -> dict {
+  let raw = event.provider_payload.raw
+  return {
+    action: "cycle_planning_candidate",
+    issue_id: raw.data?.id ?? raw.issue?.id,
+    team_id: raw.data?.team?.id ?? raw.issue?.team?.id,
+    priority: raw.data?.priority ?? raw.issue?.priority,
+  }
+}
