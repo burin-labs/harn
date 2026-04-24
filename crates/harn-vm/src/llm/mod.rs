@@ -24,6 +24,7 @@ pub(crate) mod daemon;
 pub(crate) mod helpers;
 pub(crate) mod ledger;
 pub(crate) mod mock;
+pub(crate) mod permissions;
 pub(crate) mod structural_experiments;
 pub(crate) mod tool_search;
 mod transcript_stats;
@@ -942,6 +943,10 @@ pub fn register_llm_builtins(vm: &mut Vm) {
                 serde_json::from_value::<crate::orchestration::ToolApprovalPolicy>(json)
                     .unwrap_or_default()
             });
+        let permissions = crate::llm::permissions::parse_dynamic_permission_policy(
+            options.as_ref().and_then(|o| o.get("permissions")),
+            "agent_loop",
+        )?;
         let done_sentinel = opt_str(&options, "done_sentinel");
         let break_unless_phase = opt_str(&options, "break_unless_phase");
         let exit_when_verified = opt_bool(&options, "exit_when_verified");
@@ -964,6 +969,7 @@ pub fn register_llm_builtins(vm: &mut Vm) {
                 native_tool_fallback,
                 auto_compact,
                 policy,
+                permissions,
                 approval_policy,
                 daemon,
                 daemon_config,

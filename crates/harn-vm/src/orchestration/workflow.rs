@@ -1412,6 +1412,13 @@ pub async fn execute_stage_node(
             let effective_policy = tool_policy
                 .intersect(&node.capability_policy)
                 .map_err(VmError::Runtime)?;
+            let permissions = crate::llm::permissions::parse_dynamic_permission_policy(
+                node.raw_model_policy
+                    .as_ref()
+                    .and_then(|value| value.as_dict())
+                    .and_then(|dict| dict.get("permissions")),
+                "workflow model_policy",
+            )?;
             crate::llm::run_agent_loop_internal(
                 &mut opts,
                 crate::llm::AgentLoopConfig {
@@ -1427,6 +1434,7 @@ pub async fn execute_stage_node(
                     native_tool_fallback: node.model_policy.native_tool_fallback,
                     auto_compact,
                     policy: Some(effective_policy),
+                    permissions,
                     approval_policy: Some(node.approval_policy.clone()),
                     daemon: false,
                     daemon_config: Default::default(),

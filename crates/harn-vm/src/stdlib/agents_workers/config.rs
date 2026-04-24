@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
@@ -432,10 +433,17 @@ pub(in super::super) fn parse_worker_config(value: &VmValue) -> Result<WorkerIni
     let node_value = dict.get("node").ok_or_else(|| {
         VmError::Runtime("spawn_agent: config requires either graph or node".to_string())
     })?;
-    let node = crate::orchestration::parse_workflow_node_json(
-        crate::llm::vm_value_to_json(node_value),
-        "spawn_agent node",
-    )?;
+    let mut node = crate::orchestration::parse_workflow_node_value(node_value, "spawn_agent node")?;
+    if let Some(permissions) = dict.get("permissions").cloned() {
+        let mut raw_model_policy = node
+            .raw_model_policy
+            .as_ref()
+            .and_then(|value| value.as_dict())
+            .cloned()
+            .unwrap_or_default();
+        raw_model_policy.insert("permissions".to_string(), permissions);
+        node.raw_model_policy = Some(VmValue::Dict(Rc::new(raw_model_policy)));
+    }
     let artifacts = parse_artifact_list(dict.get("artifacts"))?;
     let transcript = dict.get("transcript").cloned();
     Ok(WorkerInit {

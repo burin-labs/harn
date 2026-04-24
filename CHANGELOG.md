@@ -47,6 +47,13 @@ granular archaeology.
   manifest validation and deterministic suggestion generation from
   repeated friction evidence; extends eval packs with
   `friction-events` fixtures and `context-pack-suggestion` assertions.
+- **Per-agent dynamic permissions (#529).** `agent_loop`,
+  `sub_agent_run`, workflow stages, and `spawn_agent` now accept a
+  `permissions.allow` / `permissions.deny` dict with tool-name globs,
+  argument pattern lists, keyed argument patterns, and VM predicates
+  over tool args. Child agents inherit parent scopes by intersection,
+  so delegation cannot widen trust. Permission denials surface as
+  structured tool results rather than opaque failures.
 
 ### Changed
 

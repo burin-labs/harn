@@ -830,6 +830,24 @@ its own `tool_retries`, `max_iterations`, `max_nudges`, and
 native-tool stages that receive text-mode `<tool_call>` fallback
 output).
 
+Pass `permissions` to scope one agent below the ambient `policy` ceiling:
+
+```harn
+agent_loop(task, system, {
+  permissions: {
+    allow: {read_note: { args -> args.path.starts_with("/workspace/") }},
+    deny: ["write_note"],
+    on_escalation: { request -> {grant: "once", approver: "operator"} },
+  },
+})
+```
+
+`allow` and `deny` accept tool-name globs, argument pattern lists, or VM
+predicates. Deny rules win. Escalation callbacks receive a `PermissionRequest`
+dict and return `false`, `true`, `{grant: "once"}`, or `{grant: "session"}`.
+Child agents still intersect with the parent capability policy; escalation
+cannot widen a parent ceiling.
+
 ### Sessions (persistent conversations)
 
 Pass `session_id` to `agent_loop` to resume a multi-turn conversation:

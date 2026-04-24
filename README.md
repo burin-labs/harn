@@ -259,6 +259,12 @@ enforcement.
 - Per-agent capability policies with argument-level constraints: `agent_loop`
   accepts a `policy` dict to scope tool permissions, including `tool_arg_constraints`
   for pattern-matching on tool arguments.
+- Dynamic per-agent permissions: `agent_loop`, `sub_agent_run`, and
+  `spawn_agent` accept `permissions` with `allow` / `deny` tool rules, VM
+  predicates over the tool args, and `on_escalation` callbacks that can grant a
+  denied call once or for the session. Permission decisions emit
+  `PermissionGrant`, `PermissionDeny`, and `PermissionEscalation` transcript
+  events.
 - Generic call-site type checking is stricter: `where`-clause interface
   violations are errors, repeated generic parameters must bind to one concrete
   type, and container bindings like `list<T>` propagate their element type.

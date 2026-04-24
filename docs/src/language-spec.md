@@ -1319,6 +1319,20 @@ mailboxes are shared by every task that receives or resolves the handle.
 mailboxes, shared state handles, `agent_state_*`, or host storage for data
 exchange outside the transcript.
 
+`agent_loop`, `sub_agent_run`, and `spawn_agent` accept a `permissions` option
+that scopes one agent below the ambient capability policy. `permissions.allow`
+and `permissions.deny` are tool-name glob lists or dicts keyed by tool-name
+glob; dict values may be argument pattern lists or pure Harn predicates of the
+tool args. Deny rules win. If a call is denied and `on_escalation` is present,
+the runtime calls it with a `PermissionRequest` dict. The callback may return
+`false`, `true`, `{grant: "once"}`, or `{grant: "session"}`. Session grants are
+memoized for the same tool and argument payload. Child permissions are still
+intersected with parent `policy` ceilings and cannot widen them. Permission
+decisions append `PermissionGrant`, `PermissionDeny`, and
+`PermissionEscalation` transcript events; escalation grants from `shadow` or
+`suggest` trigger contexts append a `trust.promote` OpenTrustGraph record at
+`act_with_approval`.
+
 ```harn
 let budget = shared_cell({scope: "task_group", key: "tokens", initial: 0})
 
