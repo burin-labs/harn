@@ -7,7 +7,7 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
-## Unreleased
+## v0.7.35
 
 ### Added
 
@@ -66,6 +66,13 @@ granular archaeology.
   path now defaults `llm_retries` to 2, matching the non-bridge path
   and the documented "transient errors retry, schema errors don't"
   posture. Pass `llm_retries: 0` to opt out.
+- **`llm_call` schema-retry is now a single-turn correction (#533).**
+  The invalid assistant response is no longer replayed across retries.
+  Each retry replays the caller's original messages plus one appended
+  corrective user turn — avoiding the `user → assistant(bad) →
+  user(nudge) → assistant` shape that confuses smaller / local models.
+  The `SchemaRetry` trace event gains a `correction_prompt` field; set
+  `schema_retry_nudge: false` for a bare retry with no appended turn.
 
 ### Fixed
 
@@ -76,6 +83,9 @@ granular archaeology.
   `harn-serve` invokes `tokio::fs::read_to_string` for script reads
   inside async handlers so the runtime isn't blocked on large
   scripts.
+- **Docs snippets (#535).** Fixed 26 failing `harn check` docs
+  snippets across 13 files so `make check-docs-snippets` is clean
+  again.
 
 ## v0.7.34
 
