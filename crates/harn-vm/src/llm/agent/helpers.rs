@@ -163,12 +163,14 @@ pub(crate) fn action_turn_nudge(
     } else {
         ""
     };
-    let completion_clause = if has_tools && policy.allow_done_sentinel {
+    let completion_clause = if has_tools && policy.allow_done_sentinel && tool_format == "native" {
+        "either make concrete progress with the provider tool channel, switch phase, or include `##DONE##` exactly once if the task is genuinely complete."
+    } else if has_tools && policy.allow_done_sentinel {
         "either make concrete progress with a well-formed <tool_call> block, switch phase, or emit a <done> block if the task is genuinely complete."
     } else if has_tools {
         "either make concrete progress with a well-formed <tool_call> block or switch phase if the workflow allows it."
     } else if policy.allow_done_sentinel {
-        "either make concrete progress in your reply, switch phase, or emit a <done> block if the task is genuinely complete."
+        "either make concrete progress in your reply, switch phase, or include `##DONE##` exactly once if the task is genuinely complete."
     } else {
         "either make concrete progress in your reply or switch phase if the workflow allows it."
     };
@@ -186,10 +188,19 @@ pub(crate) fn sentinel_without_action_nudge(
     tool_format: &str,
     turn_policy: Option<&crate::orchestration::TurnPolicy>,
 ) -> String {
-    let mut message = if turn_policy.is_some_and(|policy| !policy.allow_done_sentinel) {
-        "You emitted a <done> block in a workflow-owned action stage. The task is not complete yet. Make concrete progress with an available tool now, or switch phase if the workflow allows it. Do not output a <done> block in this stage.".to_string()
+    let completion_signal = if tool_format == "native" {
+        "`##DONE##`"
     } else {
-        "You emitted a <done> block without taking any tool action. The task is not complete yet. Make concrete progress with an available tool now, or switch phase if the workflow allows it. Do not emit <done> again until you have acted.".to_string()
+        "a <done> block"
+    };
+    let mut message = if turn_policy.is_some_and(|policy| !policy.allow_done_sentinel) {
+        format!(
+            "You emitted {completion_signal} in a workflow-owned action stage. The task is not complete yet. Make concrete progress with an available tool now, or switch phase if the workflow allows it. Do not output {completion_signal} in this stage."
+        )
+    } else {
+        format!(
+            "You emitted {completion_signal} without taking any tool action. The task is not complete yet. Make concrete progress with an available tool now, or switch phase if the workflow allows it. Do not emit {completion_signal} again until you have acted."
+        )
     };
     if let Some(nudge) = action_turn_nudge(tool_format, true, turn_policy, false) {
         message.push(' ');
