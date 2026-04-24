@@ -14,6 +14,7 @@ mod resume;
 pub(crate) mod role;
 mod serve;
 mod stats;
+mod tenant;
 mod tls;
 
 use crate::cli::{OrchestratorArgs, OrchestratorCommand};
@@ -31,5 +32,6 @@ pub(crate) async fn handle(args: OrchestratorArgs) -> Result<(), String> {
         OrchestratorCommand::Dlq(dlq_args) => dlq::run(dlq_args).await,
         OrchestratorCommand::Queue(queue_args) => queue::run(queue_args).await,
         OrchestratorCommand::Recover(recover_args) => recover::run(recover_args).await,
+        OrchestratorCommand::Tenant(tenant_args) => tenant::run(tenant_args).await,
     }
 }

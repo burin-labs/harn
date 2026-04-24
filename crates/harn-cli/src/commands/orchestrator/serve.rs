@@ -128,6 +128,26 @@ async fn run_local(args: OrchestratorServeArgs) -> Result<(), String> {
     let event_log = harn_vm::event_log::active_event_log()
         .ok_or_else(|| "event log was not installed during VM initialization".to_string())?;
     let event_log_description = event_log.describe();
+    let tenant_store = if args.role == OrchestratorRole::MultiTenant {
+        let store = harn_vm::TenantStore::load(&state_dir)?;
+        let active_tenants = store
+            .list()
+            .into_iter()
+            .filter(|tenant| tenant.status == harn_vm::TenantStatus::Active)
+            .collect::<Vec<_>>();
+        eprintln!(
+            "[harn] tenants loaded: {} active ({})",
+            active_tenants.len(),
+            active_tenants
+                .iter()
+                .map(|tenant| tenant.scope.id.0.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        Some(Arc::new(store))
+    } else {
+        None
+    };
     eprintln!(
         "[harn] event log: {} {}",
         event_log_description.backend,
@@ -196,19 +216,67 @@ async fn run_local(args: OrchestratorServeArgs) -> Result<(), String> {
         event_log.clone(),
         Some(metrics_registry.clone()),
     );
-    let pending_pump = spawn_pending_pump(
-        event_log.clone(),
-        dispatcher.clone(),
-        pump_config,
-        metrics_registry.clone(),
-    )?;
+    let mut pending_pumps = vec![(
+        PENDING_TOPIC.to_string(),
+        spawn_pending_pump(
+            event_log.clone(),
+            dispatcher.clone(),
+            pump_config,
+            metrics_registry.clone(),
+            PENDING_TOPIC,
+        )?,
+    )];
+    let mut inbox_pumps = vec![(
+        harn_vm::TRIGGER_INBOX_ENVELOPES_TOPIC.to_string(),
+        spawn_inbox_pump(
+            event_log.clone(),
+            dispatcher.clone(),
+            pump_config,
+            metrics_registry.clone(),
+            harn_vm::TRIGGER_INBOX_ENVELOPES_TOPIC,
+        )?,
+    )];
+    if let Some(store) = tenant_store.as_ref() {
+        for tenant in store
+            .list()
+            .into_iter()
+            .filter(|tenant| tenant.status == harn_vm::TenantStatus::Active)
+        {
+            let pending_topic = harn_vm::tenant_topic(
+                &tenant.scope.id,
+                &harn_vm::event_log::Topic::new(PENDING_TOPIC)
+                    .map_err(|error| error.to_string())?,
+            )
+            .map_err(|error| error.to_string())?;
+            pending_pumps.push((
+                pending_topic.as_str().to_string(),
+                spawn_pending_pump(
+                    event_log.clone(),
+                    dispatcher.clone(),
+                    pump_config,
+                    metrics_registry.clone(),
+                    pending_topic.as_str(),
+                )?,
+            ));
+            let inbox_topic = harn_vm::tenant_topic(
+                &tenant.scope.id,
+                &harn_vm::event_log::Topic::new(harn_vm::TRIGGER_INBOX_ENVELOPES_TOPIC)
+                    .map_err(|error| error.to_string())?,
+            )
+            .map_err(|error| error.to_string())?;
+            inbox_pumps.push((
+                inbox_topic.as_str().to_string(),
+                spawn_inbox_pump(
+                    event_log.clone(),
+                    dispatcher.clone(),
+                    pump_config,
+                    metrics_registry.clone(),
+                    inbox_topic.as_str(),
+                )?,
+            ));
+        }
+    }
     let cron_pump = spawn_cron_pump(
-        event_log.clone(),
-        dispatcher.clone(),
-        pump_config,
-        metrics_registry.clone(),
-    )?;
-    let inbox_pump = spawn_inbox_pump(
         event_log.clone(),
         dispatcher.clone(),
         pump_config,
@@ -240,6 +308,7 @@ async fn run_local(args: OrchestratorServeArgs) -> Result<(), String> {
         metrics_registry: metrics_registry.clone(),
         admin_reload: Some(admin_reload.clone()),
         routes: route_configs,
+        tenant_store: tenant_store.clone(),
     })
     .await?;
     let local_bind = listener.local_addr();
@@ -378,9 +447,9 @@ async fn run_local(args: OrchestratorServeArgs) -> Result<(), String> {
         },
         listener,
         dispatcher,
-        pending_pump,
+        pending_pumps,
         cron_pump,
-        inbox_pump,
+        inbox_pumps,
         waitpoint_pump,
         waitpoint_cancel_pump,
         waitpoint_sweeper,
@@ -897,8 +966,9 @@ fn spawn_pending_pump(
     dispatcher: harn_vm::Dispatcher,
     pump_config: PumpConfig,
     metrics_registry: Arc<harn_vm::MetricsRegistry>,
+    topic_name: &str,
 ) -> Result<PumpHandle, String> {
-    let topic = harn_vm::event_log::Topic::new(PENDING_TOPIC).map_err(|error| error.to_string())?;
+    let topic = harn_vm::event_log::Topic::new(topic_name).map_err(|error| error.to_string())?;
     spawn_topic_pump(
         event_log,
         topic,
@@ -972,9 +1042,9 @@ fn spawn_inbox_pump(
     dispatcher: harn_vm::Dispatcher,
     pump_config: PumpConfig,
     metrics_registry: Arc<harn_vm::MetricsRegistry>,
+    topic_name: &str,
 ) -> Result<PumpHandle, String> {
-    let topic = harn_vm::event_log::Topic::new(harn_vm::TRIGGER_INBOX_ENVELOPES_TOPIC)
-        .map_err(|error| error.to_string())?;
+    let topic = harn_vm::event_log::Topic::new(topic_name).map_err(|error| error.to_string())?;
     let consumer = pump_consumer_id(&topic)?;
     let inbox_task_release_file = inbox_task_test_release_file();
     let (mode_tx, mut mode_rx) = watch::channel(PumpMode::Running);
@@ -1427,9 +1497,9 @@ async fn graceful_shutdown(
     ctx: GracefulShutdownCtx<'_>,
     listener: ListenerRuntime,
     dispatcher: harn_vm::Dispatcher,
-    pending_pump: PumpHandle,
+    pending_pumps: Vec<(String, PumpHandle)>,
     cron_pump: PumpHandle,
-    inbox_pump: PumpHandle,
+    inbox_pumps: Vec<(String, PumpHandle)>,
     waitpoint_pump: PumpHandle,
     waitpoint_cancel_pump: PumpHandle,
     waitpoint_sweeper: WaitpointSweepHandle,
@@ -1477,21 +1547,14 @@ async fn graceful_shutdown(
         }
     }
 
-    let pending_stats = drain_pump_best_effort(
-        ctx.event_log,
-        PENDING_TOPIC,
-        pending_pump,
-        ctx.drain_config,
-        deadline,
-    )
-    .await?;
-    emit_drain_truncated(
-        ctx.event_log,
-        PENDING_TOPIC,
-        pending_stats,
-        ctx.drain_config,
-    )
-    .await?;
+    let mut pending_processed = 0;
+    for (topic_name, pump) in pending_pumps {
+        let stats =
+            drain_pump_best_effort(ctx.event_log, &topic_name, pump, ctx.drain_config, deadline)
+                .await?;
+        pending_processed += stats.stats.processed;
+        emit_drain_truncated(ctx.event_log, &topic_name, stats, ctx.drain_config).await?;
+    }
     let cron_stats = drain_pump_best_effort(
         ctx.event_log,
         CRON_TICK_TOPIC,
@@ -1501,21 +1564,14 @@ async fn graceful_shutdown(
     )
     .await?;
     emit_drain_truncated(ctx.event_log, CRON_TICK_TOPIC, cron_stats, ctx.drain_config).await?;
-    let inbox_stats = drain_pump_best_effort(
-        ctx.event_log,
-        harn_vm::TRIGGER_INBOX_ENVELOPES_TOPIC,
-        inbox_pump,
-        ctx.drain_config,
-        deadline,
-    )
-    .await?;
-    emit_drain_truncated(
-        ctx.event_log,
-        harn_vm::TRIGGER_INBOX_ENVELOPES_TOPIC,
-        inbox_stats,
-        ctx.drain_config,
-    )
-    .await?;
+    let mut inbox_processed = 0;
+    for (topic_name, pump) in inbox_pumps {
+        let stats =
+            drain_pump_best_effort(ctx.event_log, &topic_name, pump, ctx.drain_config, deadline)
+                .await?;
+        inbox_processed += stats.stats.processed;
+        emit_drain_truncated(ctx.event_log, &topic_name, stats, ctx.drain_config).await?;
+    }
     let waitpoint_stats = waitpoint_pump
         .drain(
             topic_latest_id(ctx.event_log, harn_vm::WAITPOINT_RESUME_TOPIC).await?,
@@ -1566,9 +1622,9 @@ async fn graceful_shutdown(
             "dispatcher_in_flight": drain_report.in_flight,
             "dispatcher_retry_queue_depth": drain_report.retry_queue_depth,
             "dispatcher_dlq_depth": drain_report.dlq_depth,
-            "pending_events_drained": pending_stats.stats.processed,
+            "pending_events_drained": pending_processed,
             "cron_events_drained": cron_stats.stats.processed,
-            "inbox_events_drained": inbox_stats.stats.processed,
+            "inbox_events_drained": inbox_processed,
             "waitpoint_events_drained": waitpoint_stats.stats.processed,
             "waitpoint_cancel_events_drained": waitpoint_cancel_stats.stats.processed,
             "timed_out": timed_out,

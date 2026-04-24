@@ -76,6 +76,7 @@
 - [Worker dispatch](./orchestrator/worker-dispatch.md)
 - [Orchestrator observability](./orchestrator/observability.md)
 - [Orchestrator secrets](./orchestrator/secrets.md)
+- [Multi-tenant orchestrator](./orchestrator/multi-tenant.md)
 - [Connector OAuth](./orchestrator/oauth.md)
 - [Deploy to Render](./deploy/render.md)
 - [Deploy to Fly.io](./deploy/fly.md)

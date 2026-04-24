@@ -369,7 +369,7 @@ fn load_manifest(config_path: &Path) -> Result<(Manifest, PathBuf), String> {
     Ok((manifest, manifest_dir))
 }
 
-fn absolutize_from_cwd(path: &Path) -> Result<PathBuf, String> {
+pub(crate) fn absolutize_from_cwd(path: &Path) -> Result<PathBuf, String> {
     let candidate = if path.is_absolute() {
         path.to_path_buf()
     } else {

@@ -34,6 +34,7 @@ pub mod stdlib;
 pub mod stdlib_modules;
 pub mod store;
 pub(crate) mod synchronization;
+pub mod tenant;
 pub mod tool_annotations;
 pub mod tracing;
 pub mod triggers;
@@ -121,6 +122,13 @@ pub use stdlib::{
     register_agent_stdlib, register_core_stdlib, register_io_stdlib, register_vm_stdlib,
 };
 pub use store::register_store_builtins;
+pub use tenant::{
+    tenant_event_topic_prefix, tenant_secret_namespace, tenant_topic, validate_tenant_id, ApiKeyId,
+    TenantApiKeyRecord, TenantBudget, TenantEventLog, TenantRecord, TenantRegistrySnapshot,
+    TenantResolutionError, TenantScope, TenantSecretProvider, TenantStatus, TenantStore,
+    TENANT_EVENT_TOPIC_PREFIX, TENANT_REGISTRY_DIR, TENANT_REGISTRY_FILE,
+    TENANT_SECRET_NAMESPACE_PREFIX,
+};
 pub use triggers::{
     append_dispatch_cancel_request, begin_in_flight, binding_autonomy_budget_would_exceed,
     binding_budget_would_exceed, binding_version_as_of, clear_dispatcher_state,

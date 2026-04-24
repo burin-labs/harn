@@ -60,6 +60,7 @@ pub(crate) struct ListenerConfig {
     pub(crate) metrics_registry: Arc<harn_vm::MetricsRegistry>,
     pub(crate) admin_reload: Option<AdminReloadHandle>,
     pub(crate) routes: Vec<RouteConfig>,
+    pub(crate) tenant_store: Option<Arc<harn_vm::TenantStore>>,
 }
 
 impl ListenerConfig {
@@ -161,6 +162,7 @@ impl ListenerRuntime {
             auth.clone(),
             pending_topic.clone(),
             request_gate,
+            config.tenant_store.clone(),
         )?);
         let mut app = Router::new()
             .route(
@@ -387,7 +389,20 @@ struct RouteContext {
     auth: Arc<ListenerAuth>,
     pending_topic: Topic,
     request_gate: TestRequestGate,
+    tenant_store: Option<Arc<harn_vm::TenantStore>>,
     metrics: Arc<RouteRuntimeMetrics>,
+}
+
+#[derive(Clone)]
+struct ResolvedRoute {
+    context: Arc<RouteContext>,
+    path_tenant_id: Option<String>,
+}
+
+#[derive(Clone)]
+struct TenantRequestScope {
+    scope: harn_vm::TenantScope,
+    credential_authenticated: bool,
 }
 
 #[derive(Clone, Default)]
@@ -472,9 +487,11 @@ struct RouteRegistry {
     auth: Arc<ListenerAuth>,
     pending_topic: Topic,
     request_gate: TestRequestGate,
+    tenant_store: Option<Arc<harn_vm::TenantStore>>,
 }
 
 impl RouteRegistry {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         routes: Vec<RouteConfig>,
         event_log: Arc<AnyEventLog>,
@@ -484,6 +501,7 @@ impl RouteRegistry {
         auth: Arc<ListenerAuth>,
         pending_topic: Topic,
         request_gate: TestRequestGate,
+        tenant_store: Option<Arc<harn_vm::TenantStore>>,
     ) -> Result<Self, String> {
         let registry = Self {
             routes_by_path: RwLock::new(BTreeMap::new()),
@@ -496,6 +514,7 @@ impl RouteRegistry {
             auth,
             pending_topic,
             request_gate,
+            tenant_store,
         };
         registry.reload(routes)?;
         Ok(registry)
@@ -525,6 +544,7 @@ impl RouteRegistry {
                     auth: self.auth.clone(),
                     pending_topic: self.pending_topic.clone(),
                     request_gate: self.request_gate.clone(),
+                    tenant_store: self.tenant_store.clone(),
                     metrics,
                 }),
             );
@@ -533,12 +553,22 @@ impl RouteRegistry {
         Ok(())
     }
 
-    fn resolve(&self, path: &str) -> Option<Arc<RouteContext>> {
-        self.routes_by_path
-            .read()
-            .expect("route table poisoned")
-            .get(path)
+    fn resolve(&self, path: &str) -> Option<ResolvedRoute> {
+        let routes = self.routes_by_path.read().expect("route table poisoned");
+        if let Some(context) = routes.get(path).cloned() {
+            return Some(ResolvedRoute {
+                context,
+                path_tenant_id: None,
+            });
+        }
+        let (tenant_id, route_path) = tenant_path_prefix(path)?;
+        routes
+            .get(&route_path)
             .cloned()
+            .map(|context| ResolvedRoute {
+                context,
+                path_tenant_id: Some(tenant_id),
+            })
     }
 
     fn snapshot_metrics(&self) -> BTreeMap<String, TriggerMetricSnapshot> {
@@ -631,12 +661,22 @@ impl IngestBackpressure {
         }
     }
 
-    fn try_acquire(&self, source: &str) -> Result<(), Duration> {
+    fn try_acquire_with_limit(
+        &self,
+        source: &str,
+        per_minute_limit: Option<u32>,
+    ) -> Result<(), Duration> {
         let now = Instant::now();
         let mut state = self
             .state
             .lock()
             .expect("ingest backpressure mutex poisoned");
+        let source_capacity = per_minute_limit
+            .unwrap_or(self.config.per_source_capacity)
+            .max(1);
+        let source_refill_per_sec = per_minute_limit
+            .map(|limit| (limit / 60).max(1))
+            .unwrap_or(self.config.refill_per_sec);
 
         state
             .global
@@ -645,15 +685,11 @@ impl IngestBackpressure {
             let source_bucket = state
                 .sources
                 .entry(source.to_string())
-                .or_insert_with(|| IngestBucket::full(self.config.per_source_capacity, now));
-            source_bucket.refill(
-                self.config.per_source_capacity,
-                self.config.refill_per_sec,
-                now,
-            );
+                .or_insert_with(|| IngestBucket::full(source_capacity, now));
+            source_bucket.refill(source_capacity, source_refill_per_sec, now);
             (
                 source_bucket.tokens,
-                source_bucket.retry_after(self.config.refill_per_sec),
+                source_bucket.retry_after(source_refill_per_sec),
             )
         };
 
@@ -738,6 +774,166 @@ fn validate_unique_route_paths(routes: &[RouteConfig]) -> Result<(), String> {
     Ok(())
 }
 
+fn tenant_path_prefix(path: &str) -> Option<(String, String)> {
+    for prefix in ["/hooks/tenant/", "/tenant/"] {
+        let Some(rest) = path.strip_prefix(prefix) else {
+            continue;
+        };
+        let (tenant_id, route_tail) = rest.split_once('/')?;
+        if tenant_id.is_empty() {
+            return None;
+        }
+        return Some((tenant_id.to_string(), format!("/{route_tail}")));
+    }
+    None
+}
+
+async fn resolve_tenant_request(
+    context: &RouteContext,
+    path_tenant_id: Option<&str>,
+    headers: &BTreeMap<String, String>,
+) -> Result<Option<TenantRequestScope>, Response> {
+    let Some(store) = context.tenant_store.as_ref() else {
+        return Ok(None);
+    };
+    let credential_key = tenant_api_key_from_headers(headers);
+    let credential_scope = match credential_key {
+        Some(key) => match store.resolve_api_key(key) {
+            Ok(scope) => Some(scope),
+            Err(harn_vm::TenantResolutionError::Suspended(id)) => {
+                return Err(tenant_denial_response(
+                    context,
+                    Some(id.0),
+                    path_tenant_id.map(ToString::to_string),
+                    "tenant_suspended",
+                    HttpError::payment_required("tenant is suspended"),
+                )
+                .await);
+            }
+            Err(harn_vm::TenantResolutionError::Unknown) => {
+                return Err(tenant_denial_response(
+                    context,
+                    None,
+                    path_tenant_id.map(ToString::to_string),
+                    "unknown_api_key",
+                    HttpError::forbidden("unknown tenant API key"),
+                )
+                .await);
+            }
+        },
+        None => None,
+    };
+
+    let path_scope = match path_tenant_id {
+        Some(id) => match store.get(id) {
+            Some(record) if record.status == harn_vm::TenantStatus::Active => {
+                Some(record.scope.clone())
+            }
+            Some(record) => {
+                return Err(tenant_denial_response(
+                    context,
+                    Some(record.scope.id.0.clone()),
+                    Some(id.to_string()),
+                    "tenant_suspended",
+                    HttpError::payment_required("tenant is suspended"),
+                )
+                .await);
+            }
+            None => {
+                return Err(tenant_denial_response(
+                    context,
+                    credential_scope.as_ref().map(|scope| scope.id.0.clone()),
+                    Some(id.to_string()),
+                    "unknown_path_tenant",
+                    HttpError::forbidden("unknown tenant"),
+                )
+                .await);
+            }
+        },
+        None => None,
+    };
+
+    if let (Some(credential_scope), Some(path_scope)) = (&credential_scope, &path_scope) {
+        if credential_scope.id != path_scope.id {
+            return Err(tenant_denial_response(
+                context,
+                Some(credential_scope.id.0.clone()),
+                Some(path_scope.id.0.clone()),
+                "cross_tenant_attempt",
+                HttpError::forbidden("API key is not valid for requested tenant"),
+            )
+            .await);
+        }
+    }
+
+    let scope = credential_scope.or(path_scope);
+    let Some(scope) = scope else {
+        return Err(tenant_denial_response(
+            context,
+            None,
+            None,
+            "tenant_required",
+            HttpError::forbidden("tenant is required"),
+        )
+        .await);
+    };
+
+    Ok(Some(TenantRequestScope {
+        credential_authenticated: credential_key.is_some(),
+        scope,
+    }))
+}
+
+fn tenant_api_key_from_headers(headers: &BTreeMap<String, String>) -> Option<&str> {
+    if let Some(api_key) = header_value(headers, "x-api-key") {
+        return Some(api_key.trim()).filter(|value| !value.is_empty());
+    }
+    let authorization = header_value(headers, "authorization")?;
+    let (scheme, value) = authorization.split_once(' ')?;
+    if scheme.eq_ignore_ascii_case("Bearer") {
+        Some(value.trim()).filter(|value| !value.is_empty())
+    } else {
+        None
+    }
+}
+
+async fn tenant_denial_response(
+    context: &RouteContext,
+    tenant_id: Option<String>,
+    attempted_tenant_id: Option<String>,
+    reason: &str,
+    error: HttpError,
+) -> Response {
+    let mut headers = BTreeMap::new();
+    headers.insert("reason".to_string(), reason.to_string());
+    if let Some(tenant_id) = tenant_id.as_ref() {
+        headers.insert("tenant_id".to_string(), tenant_id.clone());
+    }
+    if let Some(attempted_tenant_id) = attempted_tenant_id.as_ref() {
+        headers.insert(
+            "attempted_tenant_id".to_string(),
+            attempted_tenant_id.clone(),
+        );
+    }
+    headers.insert("trigger_id".to_string(), context.route.trigger_id.clone());
+    let payload = json!({
+        "reason": reason,
+        "tenant_id": tenant_id,
+        "attempted_tenant_id": attempted_tenant_id,
+        "trigger_id": context.route.trigger_id,
+    });
+    if let Ok(topic) = Topic::new("orchestrator.tenant.audit") {
+        let _ = context
+            .event_log
+            .append(
+                &topic,
+                LogEvent::new("tenant_access_denied", payload).with_headers(headers),
+            )
+            .await;
+    }
+    error.into_response()
+}
+
 async fn ingest_trigger(
     Extension(routes): Extension<Arc<RouteRegistry>>,
     method: Method,
@@ -746,9 +942,10 @@ async fn ingest_trigger(
     Query(query): Query<BTreeMap<String, String>>,
     body: Bytes,
 ) -> impl IntoResponse {
-    let Some(context) = routes.resolve(uri.path()) else {
+    let Some(resolved) = routes.resolve(uri.path()) else {
         return (StatusCode::NOT_FOUND, "trigger route not configured").into_response();
     };
+    let context = resolved.context;
 
     context.metrics.received.fetch_add(1, Ordering::Relaxed);
     context.metrics.in_flight.fetch_add(1, Ordering::Relaxed);
@@ -762,10 +959,43 @@ async fn ingest_trigger(
     let request_started = Instant::now();
     let accepted_at_ms = current_unix_ms();
     let body_size_bytes = body.len();
+    let normalized_headers = normalize_headers(&headers);
+    let tenant_scope = match resolve_tenant_request(
+        &context,
+        resolved.path_tenant_id.as_deref(),
+        &normalized_headers,
+    )
+    .await
+    {
+        Ok(scope) => scope,
+        Err(response) => {
+            context.metrics.failed.fetch_add(1, Ordering::Relaxed);
+            context.metrics.in_flight.fetch_sub(1, Ordering::Relaxed);
+            context.metrics_registry.set_trigger_inflight(
+                &context.route.trigger_id,
+                context.metrics.in_flight.load(Ordering::Relaxed),
+            );
+            context.metrics_registry.record_http_request(
+                &context.route.path,
+                method.as_str(),
+                response.status().as_u16(),
+                request_started.elapsed(),
+                body_size_bytes,
+            );
+            return finalize_response(&context, response);
+        }
+    };
+    let ingest_source = tenant_scope
+        .as_ref()
+        .map(|tenant| format!("tenant:{}", tenant.scope.id.0))
+        .unwrap_or_else(|| context.route.provider.as_str().to_string());
+    let tenant_ingest_per_minute = tenant_scope
+        .as_ref()
+        .and_then(|tenant| tenant.scope.budget.ingest_per_minute);
 
     if let Err(retry_after) = context
         .ingest_backpressure
-        .try_acquire(context.route.provider.as_str())
+        .try_acquire_with_limit(&ingest_source, tenant_ingest_per_minute)
     {
         context.metrics.failed.fetch_add(1, Ordering::Relaxed);
         context.metrics.in_flight.fetch_sub(1, Ordering::Relaxed);
@@ -812,9 +1042,9 @@ async fn ingest_trigger(
     );
 
     async move {
-        let normalized_headers = normalize_headers(&headers);
         if let Err(error) = authorize_request(
             &context,
+            tenant_scope.as_ref(),
             method.as_str(),
             uri.path(),
             &normalized_headers,
@@ -871,6 +1101,7 @@ async fn ingest_trigger(
             &query,
             body.as_ref(),
             trace_id,
+            tenant_scope.as_ref().map(|tenant| &tenant.scope),
         )
         .await;
         let ingress_timing = IngressLifecycleTiming {
@@ -1773,6 +2004,7 @@ fn session_id_from_acp_message(line: &str) -> Option<String> {
 
 async fn authorize_request(
     context: &RouteContext,
+    tenant_scope: Option<&TenantRequestScope>,
     method: &str,
     path: &str,
     headers: &BTreeMap<String, String>,
@@ -1780,6 +2012,11 @@ async fn authorize_request(
 ) -> Result<(), HttpError> {
     match context.route.auth_mode {
         AuthMode::Public => Ok(()),
+        AuthMode::BearerOrHmac
+            if tenant_scope.is_some_and(|tenant| tenant.credential_authenticated) =>
+        {
+            Ok(())
+        }
         AuthMode::BearerOrHmac => context
             .auth
             .authorize(context.event_log.as_ref(), method, path, headers, body)
@@ -1794,6 +2031,7 @@ async fn normalize_request(
     query: &BTreeMap<String, String>,
     body: &[u8],
     trace_id: harn_vm::TraceId,
+    tenant_scope: Option<&harn_vm::TenantScope>,
 ) -> Result<NormalizedRequest, HttpError> {
     let received_at = OffsetDateTime::now_utc();
     if let Some(connector) = context.route.connector.as_ref() {
@@ -1804,6 +2042,7 @@ async fn normalize_request(
             "binding_id": context.route.trigger_id,
             "binding_version": context.route.binding_version,
             "path": context.route.path,
+            "tenant_id": tenant_scope.map(|tenant| tenant.id.0.as_str()),
         });
         let result = connector
             .lock()
@@ -1811,7 +2050,7 @@ async fn normalize_request(
             .normalize_inbound_result(raw)
             .await
             .map_err(HttpError::from_connector)?;
-        return connector_normalize_result_to_request(result, trace_id);
+        return connector_normalize_result_to_request(result, trace_id, tenant_scope);
     }
 
     let normalized_body = normalize_body(body, normalized_headers);
@@ -1820,7 +2059,8 @@ async fn normalize_request(
     let signature_status = match context.route.signature_mode {
         SignatureMode::Unsigned => harn_vm::SignatureStatus::Unsigned,
         SignatureMode::GitHub => {
-            let secret = load_secret(context, context.route.signing_secret.as_ref()).await?;
+            let secret =
+                load_secret(context, tenant_scope, context.route.signing_secret.as_ref()).await?;
             harn_vm::connectors::hmac::verify_hmac_signed(
                 context.event_log.as_ref(),
                 &provider,
@@ -1836,7 +2076,8 @@ async fn normalize_request(
             harn_vm::SignatureStatus::Verified
         }
         SignatureMode::Standard => {
-            let secret = load_secret(context, context.route.signing_secret.as_ref()).await?;
+            let secret =
+                load_secret(context, tenant_scope, context.route.signing_secret.as_ref()).await?;
             harn_vm::connectors::hmac::verify_hmac_signed(
                 context.event_log.as_ref(),
                 &provider,
@@ -1872,7 +2113,7 @@ async fn normalize_request(
         occurred_at: infer_occurred_at(&provider_payload),
         dedupe_key,
         trace_id,
-        tenant_id: None,
+        tenant_id: tenant_scope.map(|tenant| tenant.id.clone()),
         headers: harn_vm::redact_headers(
             normalized_headers,
             &harn_vm::HeaderRedactionPolicy::default(),
@@ -1910,6 +2151,7 @@ struct IngressLifecycleTiming {
 fn connector_normalize_result_to_request(
     result: harn_vm::ConnectorNormalizeResult,
     trace_id: harn_vm::TraceId,
+    tenant_scope: Option<&harn_vm::TenantScope>,
 ) -> Result<NormalizedRequest, HttpError> {
     match result {
         harn_vm::ConnectorNormalizeResult::Event(event) => {
@@ -1932,11 +2174,11 @@ fn connector_normalize_result_to_request(
                 });
             }
             event.trace_id = trace_id;
-            Ok(NormalizedRequest::Events(vec![event]))
+            apply_tenant_scope(vec![event], tenant_scope).map(NormalizedRequest::Events)
         }
         harn_vm::ConnectorNormalizeResult::Batch(mut events) => {
             set_trace_id(&mut events, trace_id);
-            Ok(NormalizedRequest::Events(events))
+            apply_tenant_scope(events, tenant_scope).map(NormalizedRequest::Events)
         }
         harn_vm::ConnectorNormalizeResult::ImmediateResponse {
             response,
@@ -1945,13 +2187,35 @@ fn connector_normalize_result_to_request(
             set_trace_id(&mut events, trace_id);
             Ok(NormalizedRequest::Immediate {
                 response: connector_http_response_to_response(response)?,
-                events,
+                events: apply_tenant_scope(events, tenant_scope)?,
             })
         }
         harn_vm::ConnectorNormalizeResult::Reject(response) => Ok(NormalizedRequest::Rejected(
             connector_http_response_to_response(response)?,
         )),
     }
+}
+
+fn apply_tenant_scope(
+    mut events: Vec<harn_vm::TriggerEvent>,
+    tenant_scope: Option<&harn_vm::TenantScope>,
+) -> Result<Vec<harn_vm::TriggerEvent>, HttpError> {
+    let Some(tenant_scope) = tenant_scope else {
+        return Ok(events);
+    };
+    for event in &mut events {
+        match event.tenant_id.as_ref() {
+            Some(existing) if existing != &tenant_scope.id => {
+                return Err(HttpError::forbidden(format!(
+                    "event tenant '{}' does not match request tenant '{}'",
+                    existing.0, tenant_scope.id.0
+                )));
+            }
+            Some(_) => {}
+            None => event.tenant_id = Some(tenant_scope.id.clone()),
+        }
+    }
+    Ok(events)
 }
 
 fn set_trace_id(events: &mut [harn_vm::TriggerEvent], trace_id: harn_vm::TraceId) {
@@ -2058,6 +2322,8 @@ async fn enqueue_normalized_events(
             }
             harn_vm::PostNormalizeOutcome::Ready(event) => {
                 let event = *event;
+                let pending_topic = topic_for_event(&event, &context.pending_topic)
+                    .map_err(|error| HttpError::internal(error.to_string()))?;
                 let payload = json!({
                     "trigger_id": context.route.trigger_id,
                     "binding_version": context.route.binding_version,
@@ -2109,7 +2375,7 @@ async fn enqueue_normalized_events(
                 log_event.headers = pending_headers;
                 let event_id = context
                     .event_log
-                    .append(&context.pending_topic, log_event)
+                    .append(&pending_topic, log_event)
                     .instrument(queue_span)
                     .await
                     .map_err(|error| {
@@ -2118,7 +2384,7 @@ async fn enqueue_normalized_events(
                         ))
                     })?;
                 context.metrics_registry.record_event_log_append(
-                    context.pending_topic.as_str(),
+                    pending_topic.as_str(),
                     append_started.elapsed(),
                     payload_size_bytes,
                 );
@@ -2214,6 +2480,7 @@ fn trigger_path(trigger: &CollectedManifestTrigger) -> Result<String, String> {
 
 async fn load_secret(
     context: &RouteContext,
+    tenant_scope: Option<&harn_vm::TenantScope>,
     secret_id: Option<&SecretId>,
 ) -> Result<String, HttpError> {
     let secret_id = secret_id.ok_or_else(|| {
@@ -2222,8 +2489,15 @@ async fn load_secret(
             context.route.trigger_id
         ))
     })?;
-    let secret = context
-        .secrets
+    let tenant_provider;
+    let provider: &dyn SecretProvider = if let Some(scope) = tenant_scope {
+        tenant_provider =
+            harn_vm::TenantSecretProvider::new(context.secrets.clone(), scope.clone());
+        &tenant_provider
+    } else {
+        context.secrets.as_ref()
+    };
+    let secret = provider
         .get(secret_id)
         .await
         .map_err(|error| HttpError::internal(error.to_string()))?;
@@ -2604,6 +2878,20 @@ impl HttpError {
         }
     }
 
+    fn forbidden(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::FORBIDDEN,
+            message: message.into(),
+        }
+    }
+
+    fn payment_required(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::PAYMENT_REQUIRED,
+            message: message.into(),
+        }
+    }
+
     fn internal(message: impl Into<String>) -> Self {
         Self {
             status: StatusCode::INTERNAL_SERVER_ERROR,
@@ -2667,6 +2955,16 @@ async fn mark_test_file(path: &Path) -> Result<(), String> {
 
 fn listener_binding_key(trigger_id: &str, binding_version: u32) -> String {
     format!("{trigger_id}@v{binding_version}")
+}
+
+fn topic_for_event(
+    event: &harn_vm::TriggerEvent,
+    topic: &Topic,
+) -> Result<Topic, harn_vm::event_log::LogError> {
+    match event.tenant_id.as_ref() {
+        Some(tenant_id) => harn_vm::tenant_topic(tenant_id, topic),
+        None => Ok(topic.clone()),
+    }
 }
 
 fn current_unix_ms() -> i64 {
@@ -2995,6 +3293,7 @@ mod tests {
             metrics_registry: Arc::new(harn_vm::MetricsRegistry::default()),
             admin_reload: None,
             routes: Vec::new(),
+            tenant_store: None,
         })
         .await
         .expect("start listener");
@@ -3343,6 +3642,7 @@ mod tests {
             metrics_registry: Arc::new(harn_vm::MetricsRegistry::default()),
             admin_reload: None,
             routes: vec![route("/a2a/v1", 1)],
+            tenant_store: None,
         })
         .await
         .expect("start listener");
@@ -3461,6 +3761,7 @@ mod tests {
             metrics_registry: Arc::new(harn_vm::MetricsRegistry::default()),
             admin_reload: None,
             routes: vec![webhook_route("/hooks/github")],
+            tenant_store: None,
         })
         .await
         .expect("start listener");
@@ -3527,6 +3828,7 @@ mod tests {
             metrics_registry: metrics.clone(),
             admin_reload: None,
             routes: vec![webhook_route("/hooks/github")],
+            tenant_store: None,
         })
         .await
         .expect("start listener");
@@ -3602,6 +3904,7 @@ mod tests {
             metrics_registry: Arc::new(harn_vm::MetricsRegistry::default()),
             admin_reload: None,
             routes: vec![webhook_route("/hooks/github")],
+            tenant_store: None,
         })
         .await
         .expect("start listener");
@@ -3672,6 +3975,7 @@ mod tests {
             metrics_registry: Arc::new(harn_vm::MetricsRegistry::default()),
             admin_reload: None,
             routes: vec![route],
+            tenant_store: None,
         })
         .await
         .expect("start listener");

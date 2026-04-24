@@ -1072,6 +1072,74 @@ pub(crate) enum OrchestratorCommand {
     Queue(OrchestratorQueueArgs),
     /// Replay stranded inbox envelopes explicitly.
     Recover(OrchestratorRecoverArgs),
+    /// Manage multi-tenant orchestrator tenants.
+    Tenant(OrchestratorTenantArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct OrchestratorTenantArgs {
+    #[command(flatten)]
+    pub local: OrchestratorLocalArgs,
+    #[command(subcommand)]
+    pub command: OrchestratorTenantCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum OrchestratorTenantCommand {
+    /// Create a tenant and print its initial API key.
+    Create(OrchestratorTenantCreateArgs),
+    /// List registered tenants.
+    Ls(OrchestratorTenantLsArgs),
+    /// Suspend a tenant while preserving state.
+    Suspend(OrchestratorTenantSuspendArgs),
+    /// Delete a tenant and remove its state.
+    Delete(OrchestratorTenantDeleteArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct OrchestratorTenantCreateArgs {
+    /// Tenant id to provision.
+    pub id: String,
+    /// Daily tenant budget in USD.
+    #[arg(long = "daily-cost-usd", value_name = "USD")]
+    pub daily_cost_usd: Option<f64>,
+    /// Hourly tenant budget in USD.
+    #[arg(long = "hourly-cost-usd", value_name = "USD")]
+    pub hourly_cost_usd: Option<f64>,
+    /// Tenant ingest rate limit.
+    #[arg(long = "ingest-per-minute", value_name = "N")]
+    pub ingest_per_minute: Option<u32>,
+    /// Emit JSON instead of human-readable output.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args, Default)]
+pub(crate) struct OrchestratorTenantLsArgs {
+    /// Emit JSON instead of human-readable output.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct OrchestratorTenantSuspendArgs {
+    /// Tenant id to suspend.
+    pub id: String,
+    /// Emit JSON instead of human-readable output.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct OrchestratorTenantDeleteArgs {
+    /// Tenant id to delete.
+    pub id: String,
+    /// Confirm destructive tenant state removal.
+    #[arg(long, default_value_t = false, action = ArgAction::SetTrue)]
+    pub confirm: bool,
+    /// Emit JSON instead of human-readable output.
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Debug, Args)]
@@ -2005,9 +2073,10 @@ mod tests {
 
     use super::{
         Cli, Command, ConnectCommand, McpCommand, OrchestratorCommand, OrchestratorDeployProvider,
-        OrchestratorLogFormat, OrchestratorQueueCommand, PackageCacheCommand, PackageCommand,
-        ProjectTemplate, RunsCommand, SkillCommand, SkillKeyCommand, SkillTrustCommand,
-        SkillsCommand, TraceCommand, TriggerCommand, TrustCommand, TrustOutcomeArg, TrustTierArg,
+        OrchestratorLogFormat, OrchestratorQueueCommand, OrchestratorTenantCommand,
+        PackageCacheCommand, PackageCommand, ProjectTemplate, RunsCommand, SkillCommand,
+        SkillKeyCommand, SkillTrustCommand, SkillsCommand, TraceCommand, TriggerCommand,
+        TrustCommand, TrustOutcomeArg, TrustTierArg,
     };
     use clap::Parser;
 
@@ -2864,6 +2933,39 @@ mod tests {
         assert_eq!(recover.envelope_age, StdDuration::from_secs(15 * 60));
         assert!(recover.dry_run);
         assert!(!recover.yes);
+    }
+
+    #[test]
+    fn test_parses_orchestrator_tenant_create_args() {
+        let cli = Cli::parse_from([
+            "harn",
+            "orchestrator",
+            "tenant",
+            "--state-dir",
+            "state/orchestrator",
+            "create",
+            "acme",
+            "--daily-cost-usd",
+            "25.5",
+            "--ingest-per-minute",
+            "120",
+            "--json",
+        ]);
+
+        let Command::Orchestrator(args) = cli.command.unwrap() else {
+            panic!("expected orchestrator command");
+        };
+        let OrchestratorCommand::Tenant(tenant) = args.command else {
+            panic!("expected orchestrator tenant");
+        };
+        let OrchestratorTenantCommand::Create(create) = tenant.command else {
+            panic!("expected orchestrator tenant create");
+        };
+        assert_eq!(tenant.local.state_dir, PathBuf::from("state/orchestrator"));
+        assert_eq!(create.id, "acme");
+        assert_eq!(create.daily_cost_usd, Some(25.5));
+        assert_eq!(create.ingest_per_minute, Some(120));
+        assert!(create.json);
     }
 
     #[test]
