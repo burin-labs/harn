@@ -1,0 +1,39 @@
+{
+  "schema": "opentrustgraph-chain/v0",
+  "chain": {
+    "topic": "trust_graph",
+    "total": 1,
+    "root_hash": "sha256:bc337327340a47fa65876090ed7e73218259cb91ca04b9a027670a6bcb9ea5ad",
+    "verified": false,
+    "generated_at": "2026-04-19T20:01:00Z",
+    "producer": {
+      "name": "harn",
+      "version": "0.7.x"
+    }
+  },
+  "records": [
+    {
+      "schema": "opentrustgraph/v0",
+      "record_id": "01966f4c-2000-7763-9b4b-d2bfe8050001",
+      "agent": "deploy-agent",
+      "action": "deploy.prod",
+      "approver": null,
+      "outcome": "success",
+      "trace_id": "trace_missing_approval_01",
+      "autonomy_tier": "act_with_approval",
+      "timestamp": "2026-04-19T20:00:00Z",
+      "cost_usd": 0.21,
+      "chain_index": 1,
+      "previous_hash": null,
+      "entry_hash": "sha256:bc337327340a47fa65876090ed7e73218259cb91ca04b9a027670a6bcb9ea5ad",
+      "metadata": {
+        "approval": {
+          "required": true,
+          "quorum": 1,
+          "signatures": []
+        },
+        "provider": "github"
+      }
+    }
+  ]
+}

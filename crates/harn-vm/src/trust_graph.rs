@@ -645,6 +645,36 @@ mod tests {
     use crate::event_log::MemoryEventLog;
     use time::Duration;
 
+    const RECORD_SCHEMA_JSON: &str =
+        include_str!("../../../opentrustgraph-spec/schemas/trust-record.v0.schema.json");
+    const CHAIN_SCHEMA_JSON: &str =
+        include_str!("../../../opentrustgraph-spec/schemas/trust-chain.v0.schema.json");
+    const VALID_DECISION_CHAIN_JSON: &str =
+        include_str!("../../../opentrustgraph-spec/fixtures/valid/decision-chain.json");
+    const VALID_TIER_TRANSITION_JSON: &str =
+        include_str!("../../../opentrustgraph-spec/fixtures/valid/tier-transition.json");
+    const INVALID_TAMPERED_CHAIN_JSON: &str =
+        include_str!("../../../opentrustgraph-spec/fixtures/invalid/tampered-chain.json");
+    const INVALID_MISSING_APPROVAL_JSON: &str =
+        include_str!("../../../opentrustgraph-spec/fixtures/invalid/missing-approval.json");
+
+    #[derive(Debug, serde::Deserialize)]
+    struct TrustChainFixture {
+        schema: String,
+        chain: TrustChainFixtureMetadata,
+        records: Vec<TrustRecord>,
+    }
+
+    #[derive(Debug, serde::Deserialize)]
+    struct TrustChainFixtureMetadata {
+        topic: String,
+        total: u64,
+        root_hash: Option<String>,
+        verified: bool,
+        generated_at: String,
+        producer: BTreeMap<String, serde_json::Value>,
+    }
+
     #[tokio::test]
     async fn append_and_query_round_trip() {
         let log: Arc<AnyEventLog> = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(16)));
@@ -779,7 +809,7 @@ mod tests {
     #[tokio::test]
     async fn query_limit_keeps_newest_matching_records() {
         let log: Arc<AnyEventLog> = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(16)));
-        let base = OffsetDateTime::now_utc();
+        let base = OffsetDateTime::from_unix_timestamp(1_775_000_000).unwrap();
         for (offset, action) in ["first", "second", "third"].into_iter().enumerate() {
             let mut record = TrustRecord::new(
                 "bot",
@@ -834,5 +864,243 @@ mod tests {
         assert_eq!(grouped[0].records.len(), 2);
         assert_eq!(grouped[0].records[1].action, "third");
         assert_eq!(grouped[1].trace_id, "trace-2");
+    }
+
+    #[test]
+    fn opentrustgraph_schema_files_are_parseable_and_match_runtime_enums() {
+        let record_schema: serde_json::Value = serde_json::from_str(RECORD_SCHEMA_JSON).unwrap();
+        let chain_schema: serde_json::Value = serde_json::from_str(CHAIN_SCHEMA_JSON).unwrap();
+
+        assert_eq!(
+            record_schema["properties"]["schema"]["const"],
+            serde_json::json!(OPENTRUSTGRAPH_SCHEMA_V0)
+        );
+        assert_eq!(
+            chain_schema["properties"]["schema"]["const"],
+            serde_json::json!("opentrustgraph-chain/v0")
+        );
+
+        let outcomes = record_schema["properties"]["outcome"]["enum"]
+            .as_array()
+            .unwrap();
+        for outcome in [
+            TrustOutcome::Success,
+            TrustOutcome::Failure,
+            TrustOutcome::Denied,
+            TrustOutcome::Timeout,
+        ] {
+            assert!(outcomes.contains(&serde_json::json!(outcome.as_str())));
+        }
+
+        let tiers = record_schema["properties"]["autonomy_tier"]["enum"]
+            .as_array()
+            .unwrap();
+        for tier in [
+            AutonomyTier::Shadow,
+            AutonomyTier::Suggest,
+            AutonomyTier::ActWithApproval,
+            AutonomyTier::ActAuto,
+        ] {
+            assert!(tiers.contains(&serde_json::json!(tier.as_str())));
+        }
+    }
+
+    #[test]
+    fn opentrustgraph_valid_fixtures_match_runtime_contract() {
+        for (name, fixture) in [
+            ("decision-chain", VALID_DECISION_CHAIN_JSON),
+            ("tier-transition", VALID_TIER_TRANSITION_JSON),
+        ] {
+            let fixture = parse_chain_fixture(fixture);
+            let errors = validate_chain_fixture(&fixture);
+            assert!(errors.is_empty(), "{name} errors: {errors:?}");
+        }
+    }
+
+    #[test]
+    fn opentrustgraph_invalid_fixtures_exercise_expected_failures() {
+        let tampered = parse_chain_fixture(INVALID_TAMPERED_CHAIN_JSON);
+        let tampered_errors = validate_chain_fixture(&tampered);
+        assert!(
+            tampered_errors
+                .iter()
+                .any(|error| error.contains("previous_hash mismatch")),
+            "tampered-chain errors: {tampered_errors:?}"
+        );
+        assert!(
+            !tampered_errors
+                .iter()
+                .any(|error| error.contains("entry_hash mismatch")),
+            "tampered-chain should isolate hash-link tampering: {tampered_errors:?}"
+        );
+
+        let missing_approval = parse_chain_fixture(INVALID_MISSING_APPROVAL_JSON);
+        let missing_errors = validate_chain_fixture(&missing_approval);
+        assert!(
+            missing_errors
+                .iter()
+                .any(|error| error.contains("approval required")),
+            "missing-approval errors: {missing_errors:?}"
+        );
+    }
+
+    fn parse_chain_fixture(input: &str) -> TrustChainFixture {
+        serde_json::from_str(input).unwrap()
+    }
+
+    fn validate_chain_fixture(fixture: &TrustChainFixture) -> Vec<String> {
+        let mut errors = Vec::new();
+        if fixture.schema != "opentrustgraph-chain/v0" {
+            errors.push(format!("unsupported chain schema {}", fixture.schema));
+        }
+        if fixture.chain.topic.trim().is_empty() {
+            errors.push("chain topic is empty".to_string());
+        }
+        if fixture.chain.total != fixture.records.len() as u64 {
+            errors.push(format!(
+                "chain total mismatch; expected {}, found {}",
+                fixture.records.len(),
+                fixture.chain.total
+            ));
+        }
+        if fixture
+            .chain
+            .producer
+            .get("name")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default()
+            .trim()
+            .is_empty()
+        {
+            errors.push("chain producer.name is empty".to_string());
+        }
+        if OffsetDateTime::parse(
+            &fixture.chain.generated_at,
+            &time::format_description::well_known::Rfc3339,
+        )
+        .is_err()
+        {
+            errors.push("chain generated_at is not RFC3339".to_string());
+        }
+
+        for (index, record) in fixture.records.iter().enumerate() {
+            errors.extend(validate_fixture_record_contract(index, record));
+        }
+        errors.extend(validate_fixture_hash_chain(fixture));
+
+        let expected_verified = errors.is_empty();
+        if fixture.chain.verified != expected_verified {
+            errors.push(format!(
+                "chain verified flag mismatch; expected {expected_verified}, found {}",
+                fixture.chain.verified
+            ));
+        }
+        errors
+    }
+
+    fn validate_fixture_record_contract(index: usize, record: &TrustRecord) -> Vec<String> {
+        let mut errors = Vec::new();
+        let label = format!("record {index}");
+        if record.schema != OPENTRUSTGRAPH_SCHEMA_V0 {
+            errors.push(format!("{label}: unsupported schema {}", record.schema));
+        }
+        if record.record_id.trim().is_empty() {
+            errors.push(format!("{label}: record_id is empty"));
+        }
+        if record.agent.trim().is_empty() {
+            errors.push(format!("{label}: agent is empty"));
+        }
+        if record.action.trim().is_empty() {
+            errors.push(format!("{label}: action is empty"));
+        }
+        if record.trace_id.trim().is_empty() {
+            errors.push(format!("{label}: trace_id is empty"));
+        }
+        if !record.entry_hash.starts_with("sha256:") {
+            errors.push(format!("{label}: entry_hash is not sha256-prefixed"));
+        }
+        if let Some(cost_usd) = record.cost_usd {
+            if cost_usd < 0.0 {
+                errors.push(format!("{label}: cost_usd is negative"));
+            }
+        }
+
+        if record.outcome == TrustOutcome::Success
+            && record.autonomy_tier == AutonomyTier::ActWithApproval
+            && approval_required(record)
+        {
+            if record
+                .approver
+                .as_deref()
+                .unwrap_or_default()
+                .trim()
+                .is_empty()
+            {
+                errors.push(format!("{label}: approval required but approver is empty"));
+            }
+            if approval_signature_count(record) == 0 {
+                errors.push(format!(
+                    "{label}: approval required but signatures are empty"
+                ));
+            }
+        }
+
+        errors
+    }
+
+    fn validate_fixture_hash_chain(fixture: &TrustChainFixture) -> Vec<String> {
+        let mut errors = Vec::new();
+        let mut previous_hash: Option<String> = None;
+
+        for (position, record) in fixture.records.iter().enumerate() {
+            let expected_index = position as u64 + 1;
+            if record.chain_index != expected_index {
+                errors.push(format!(
+                    "record {position}: expected chain_index {expected_index}, found {}",
+                    record.chain_index
+                ));
+            }
+            if record.previous_hash != previous_hash {
+                errors.push(format!(
+                    "record {position}: previous_hash mismatch; expected {:?}, found {:?}",
+                    previous_hash, record.previous_hash
+                ));
+            }
+            let expected_hash = compute_trust_record_hash(record).unwrap();
+            if expected_hash != record.entry_hash {
+                errors.push(format!(
+                    "record {position}: entry_hash mismatch; expected {expected_hash}, found {}",
+                    record.entry_hash
+                ));
+            }
+            previous_hash = Some(record.entry_hash.clone());
+        }
+
+        if fixture.chain.root_hash != previous_hash {
+            errors.push(format!(
+                "chain root_hash mismatch; expected {:?}, found {:?}",
+                previous_hash, fixture.chain.root_hash
+            ));
+        }
+        errors
+    }
+
+    fn approval_required(record: &TrustRecord) -> bool {
+        record
+            .metadata
+            .get("approval")
+            .and_then(|approval| approval.get("required"))
+            .and_then(|required| required.as_bool())
+            .unwrap_or(false)
+    }
+
+    fn approval_signature_count(record: &TrustRecord) -> usize {
+        record
+            .metadata
+            .get("approval")
+            .and_then(|approval| approval.get("signatures"))
+            .and_then(|signatures| signatures.as_array())
+            .map(Vec::len)
+            .unwrap_or(0)
     }
 }
