@@ -122,6 +122,7 @@ fn acp_session_fork_branches_runtime_state_and_dispatches_independently() {
 
     let mut child = Command::new(env!("CARGO_BIN_EXE_harn"))
         .current_dir(temp.path())
+        .arg("serve")
         .arg("acp")
         .arg("acp_fixture.harn")
         .stdin(Stdio::piped())
