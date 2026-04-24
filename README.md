@@ -457,8 +457,8 @@ let focused = artifact_select([note], {
 Run Harn as an ACP backend:
 
 ```bash
-harn acp
-harn acp agent.harn
+harn serve acp agent.harn
+harn acp agent.harn        # legacy alias for one release
 ```
 
 Inspect persisted run records:

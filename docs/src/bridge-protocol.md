@@ -21,8 +21,8 @@ ACP surface:
   if the host does not implement it (or returns an error).
 
 Internally, the agent loop emits `AgentEvent::ToolCall` +
-`AgentEvent::ToolCallUpdate` events; `harn-cli`'s ACP server translates
-them into `session/update` notifications via an `AgentEventSink` it
+`AgentEvent::ToolCallUpdate` events; the packaged `harn-serve` ACP adapter
+translates them into `session/update` notifications via an `AgentEventSink` it
 registers per session.
 
 ### `session/request_permission`
@@ -328,7 +328,7 @@ Alternative shapes accepted for host convenience:
 
 Agents emit ACP `session/update` notifications for skill lifecycle
 transitions so hosts can surface active-skill state in real time.
-`harn-cli`'s ACP server translates the canonical `AgentEvent`
+The packaged `harn-serve` ACP adapter translates the canonical `AgentEvent`
 variants into:
 
 - `sessionUpdate: "skill_activated"` — `{skillName, iteration, reason}`

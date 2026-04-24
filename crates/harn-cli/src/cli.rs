@@ -614,10 +614,18 @@ pub(crate) struct ServeArgs {
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum ServeCommand {
+    /// Serve a .harn agent over stdio using ACP.
+    Acp(ServeAcpArgs),
     /// Serve a .harn agent over HTTP using A2A.
     A2a(A2aServeArgs),
     /// Serve exported `pub fn` entrypoints as MCP tools.
     Mcp(ServeMcpArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ServeAcpArgs {
+    /// Path to the .harn file to serve.
+    pub file: String,
 }
 
 #[derive(Debug, Args)]
@@ -679,7 +687,7 @@ pub(crate) struct ServeMcpArgs {
 
 #[derive(Debug, Args)]
 pub(crate) struct AcpArgs {
-    /// Optional pipeline to expose through ACP.
+    /// Optional pipeline to expose through ACP. Deprecated: use `harn serve acp <path.harn>`.
     pub pipeline: Option<String>,
 }
 
@@ -2112,6 +2120,19 @@ mod tests {
         assert_eq!(serve.api_key, vec!["alpha".to_string(), "beta".to_string()]);
         assert_eq!(serve.hmac_secret.as_deref(), Some("shared"));
         assert_eq!(serve.file, "server.harn");
+    }
+
+    #[test]
+    fn test_parses_serve_acp() {
+        let cli = Cli::parse_from(["harn", "serve", "acp", "agent.harn"]);
+
+        let Command::Serve(args) = cli.command.unwrap() else {
+            panic!("expected serve command");
+        };
+        let crate::cli::ServeCommand::Acp(serve) = args.command else {
+            panic!("expected serve acp");
+        };
+        assert_eq!(serve.file, "agent.harn");
     }
 
     #[test]

@@ -8,6 +8,10 @@ mod replay;
 
 pub use adapter::{AdapterDescriptor, TransportAdapter};
 pub use adapters::a2a::{A2aHttpServeOptions, A2aServer, A2aServerConfig, A2A_PROTOCOL_VERSION};
+pub use adapters::acp::{
+    run_acp_channel_server, run_acp_server, AcpRuntimeConfigurator, AcpServer, AcpServerConfig,
+    NoopAcpRuntimeConfigurator,
+};
 pub use adapters::mcp::{
     McpHttpServeOptions, McpServer, McpServerConfig, McpStdioServer, MCP_PROTOCOL_VERSION,
 };

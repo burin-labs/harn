@@ -22,7 +22,7 @@ tokio = { version = "1", features = ["io-util", "macros", "net", "rt", "sync", "
 time = "0.3"
 tracing = "0.1"
 url = "2"
-uuid = { version = "1", features = ["v7"] }
+uuid = { version = "1", features = ["v4", "v7"] }
 
 [dev-dependencies]
 hex = "0.4"

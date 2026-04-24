@@ -266,8 +266,9 @@ impl AgentEventSink for AcpAgentEventSink {
 
 #[cfg(test)]
 mod tests {
-    use harn_vm::agent_events::AgentEventSink;
+    use harn_vm::agent_events::{AgentEvent, AgentEventSink, ToolCallStatus};
     use harn_vm::orchestration::{HandoffArtifact, HandoffTargetRecord};
+    use harn_vm::tool_annotations::ToolKind;
     use tokio::sync::mpsc;
 
     use super::{AcpAgentEventSink, AcpOutput};
@@ -304,5 +305,164 @@ mod tests {
             payload["params"]["update"]["handoff"]["target_persona_or_human"]["label"],
             "review_captain"
         );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn forwarded_agent_events_serialize_as_session_updates() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let sink = AcpAgentEventSink::new(AcpOutput::Channel(tx));
+        let handoff = HandoffArtifact {
+            id: "handoff-1".to_string(),
+            source_persona: "merge_captain".to_string(),
+            target_persona_or_human: HandoffTargetRecord {
+                kind: "persona".to_string(),
+                id: Some("review_captain".to_string()),
+                label: Some("review_captain".to_string()),
+            },
+            task: "Review the patch".to_string(),
+            reason: "Merge queue requires review".to_string(),
+            ..Default::default()
+        }
+        .normalize();
+
+        let events = vec![
+            AgentEvent::AgentMessageChunk {
+                session_id: "session-1".to_string(),
+                content: "hello".to_string(),
+            },
+            AgentEvent::AgentThoughtChunk {
+                session_id: "session-1".to_string(),
+                content: "thinking".to_string(),
+            },
+            AgentEvent::ToolCall {
+                session_id: "session-1".to_string(),
+                tool_call_id: "tool-1".to_string(),
+                tool_name: "read".to_string(),
+                kind: Some(ToolKind::Read),
+                status: ToolCallStatus::Pending,
+                raw_input: serde_json::json!({"path": "README.md"}),
+            },
+            AgentEvent::ToolCallUpdate {
+                session_id: "session-1".to_string(),
+                tool_call_id: "tool-1".to_string(),
+                tool_name: "read".to_string(),
+                status: ToolCallStatus::Completed,
+                raw_output: Some(serde_json::json!({"ok": true})),
+                error: None,
+            },
+            AgentEvent::Plan {
+                session_id: "session-1".to_string(),
+                plan: serde_json::json!([{"step": "edit", "status": "pending"}]),
+            },
+            AgentEvent::SkillActivated {
+                session_id: "session-1".to_string(),
+                skill_name: "rust".to_string(),
+                iteration: 1,
+                reason: "matched".to_string(),
+            },
+            AgentEvent::SkillDeactivated {
+                session_id: "session-1".to_string(),
+                skill_name: "rust".to_string(),
+                iteration: 2,
+            },
+            AgentEvent::SkillScopeTools {
+                session_id: "session-1".to_string(),
+                skill_name: "rust".to_string(),
+                allowed_tools: vec!["read".to_string()],
+            },
+            AgentEvent::ToolSearchQuery {
+                session_id: "session-1".to_string(),
+                tool_use_id: "search-1".to_string(),
+                name: "tool_search".to_string(),
+                query: serde_json::json!({"q": "read"}),
+                strategy: "semantic".to_string(),
+                mode: "client".to_string(),
+            },
+            AgentEvent::ToolSearchResult {
+                session_id: "session-1".to_string(),
+                tool_use_id: "search-1".to_string(),
+                promoted: vec!["read".to_string()],
+                strategy: "semantic".to_string(),
+                mode: "client".to_string(),
+            },
+            AgentEvent::TranscriptCompacted {
+                session_id: "session-1".to_string(),
+                mode: "auto".to_string(),
+                strategy: "summary".to_string(),
+                archived_messages: 3,
+                estimated_tokens_before: 100,
+                estimated_tokens_after: 40,
+                snapshot_asset_id: Some("asset-1".to_string()),
+            },
+            AgentEvent::Handoff {
+                session_id: "session-1".to_string(),
+                artifact_id: "artifact-1".to_string(),
+                handoff: Box::new(handoff),
+            },
+        ];
+        let expected_updates = [
+            "agent_message_chunk",
+            "agent_thought_chunk",
+            "tool_call",
+            "tool_call_update",
+            "plan",
+            "skill_activated",
+            "skill_deactivated",
+            "skill_scope_tools",
+            "tool_search_query",
+            "tool_search_result",
+            "transcript_compacted",
+            "handoff",
+        ];
+
+        for event in &events {
+            sink.handle_event(event);
+        }
+
+        for expected in expected_updates {
+            let line = rx.recv().await.expect("ACP event notification");
+            let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
+            assert_eq!(payload["method"], "session/update");
+            assert_eq!(payload["params"]["sessionId"], "session-1");
+            assert_eq!(payload["params"]["update"]["sessionUpdate"], expected);
+        }
+    }
+
+    #[test]
+    fn internal_agent_events_do_not_emit_session_updates() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let sink = AcpAgentEventSink::new(AcpOutput::Channel(tx));
+
+        sink.handle_event(&AgentEvent::TurnStart {
+            session_id: "session-1".to_string(),
+            iteration: 1,
+        });
+        sink.handle_event(&AgentEvent::BudgetExhausted {
+            session_id: "session-1".to_string(),
+            max_iterations: 3,
+        });
+        sink.handle_event(&AgentEvent::TurnEnd {
+            session_id: "session-1".to_string(),
+            iteration: 1,
+            turn_info: serde_json::json!({}),
+        });
+        sink.handle_event(&AgentEvent::FeedbackInjected {
+            session_id: "session-1".to_string(),
+            kind: "user".to_string(),
+            content: "continue".to_string(),
+        });
+        sink.handle_event(&AgentEvent::LoopStuck {
+            session_id: "session-1".to_string(),
+            max_nudges: 2,
+            last_iteration: 4,
+            tail_excerpt: "tail".to_string(),
+        });
+        sink.handle_event(&AgentEvent::DaemonWatchdogTripped {
+            session_id: "session-1".to_string(),
+            attempts: 3,
+            elapsed_ms: 10,
+        });
+
+        assert!(rx.try_recv().is_err());
     }
 }

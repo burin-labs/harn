@@ -381,9 +381,13 @@ Bridge-level tool gates and daemon idle/resume notifications are documented in
 ### Running the ACP server
 
 ```bash
-harn acp                    # no pipeline, uses bridge mode
-harn acp pipeline.harn      # execute a specific pipeline per prompt
+harn serve acp pipeline.harn      # execute a specific pipeline per prompt
+harn acp pipeline.harn            # legacy alias for one release
 ```
+
+The packaged ACP adapter is exposed through `harn serve acp`. The legacy
+top-level `harn acp` command remains available for existing editor
+integrations, but new host configuration should use `harn serve acp`.
 
 ### Protocol overview
 

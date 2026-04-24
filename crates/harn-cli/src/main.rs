@@ -416,6 +416,11 @@ async fn main() {
         }
         Command::Doctor(args) => commands::doctor::run_doctor(!args.no_network).await,
         Command::Serve(args) => match args.command {
+            ServeCommand::Acp(args) => {
+                if let Err(error) = commands::serve::run_acp_server(&args).await {
+                    command_error(&error);
+                }
+            }
             ServeCommand::A2a(args) => {
                 if let Err(error) = commands::serve::run_a2a_server(&args).await {
                     command_error(&error);
@@ -427,7 +432,7 @@ async fn main() {
                 }
             }
         },
-        Command::Acp(args) => acp::run_acp_server(args.pipeline.as_deref()).await,
+        Command::Acp(args) => acp::run_legacy_acp_server(args.pipeline.as_deref()).await,
         Command::Connector(args) => {
             if let Err(error) = commands::connector::handle_connector_command(args).await {
                 eprintln!("error: {error}");
@@ -578,7 +583,7 @@ fn normalize_serve_args(mut raw_args: Vec<String>) -> Vec<String> {
         && raw_args.get(1).is_some_and(|arg| arg == "serve")
         && !matches!(
             raw_args.get(2).map(String::as_str),
-            Some("a2a" | "mcp" | "-h" | "--help")
+            Some("acp" | "a2a" | "mcp" | "-h" | "--help")
         )
     {
         raw_args.insert(2, "a2a".to_string());
@@ -1692,7 +1697,7 @@ mod main_tests {
         let args = normalize_serve_args(vec![
             "harn".to_string(),
             "serve".to_string(),
-            "mcp".to_string(),
+            "acp".to_string(),
             "server.harn".to_string(),
         ]);
         assert_eq!(
@@ -1700,7 +1705,7 @@ mod main_tests {
             vec![
                 "harn".to_string(),
                 "serve".to_string(),
-                "mcp".to_string(),
+                "acp".to_string(),
                 "server.harn".to_string(),
             ]
         );

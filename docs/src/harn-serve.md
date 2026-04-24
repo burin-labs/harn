@@ -1,8 +1,8 @@
 # Outbound Workflow Server
 
-`harn-serve` is the shared outbound-server core for exposing Harn workflow
-entrypoints to external callers. It is the common layer under the planned MCP,
-A2A, and ACP adapters from issue `#301`.
+`harn-serve` is the shared outbound-server crate for exposing Harn workflows to
+external callers. It contains the MCP, A2A, and ACP adapters plus the shared
+dispatch, auth, replay, and export-catalog pieces those adapters use.
 
 The goal is to keep protocol adapters thin:
 
@@ -27,8 +27,8 @@ The `harn-serve` crate owns these pieces:
 - unified observability:
   one inbound span per call
   one trust-graph record per terminal outcome
-- a transport-adapter trait so MCP, A2A, and ACP can layer their own wire
-  protocol on top without redefining dispatch semantics
+- common adapter descriptors and transport-specific modules so MCP, A2A, and
+  ACP can layer their own wire protocol without duplicating shared concerns
 
 This keeps adapter tickets focused on protocol mechanics such as discovery
 documents, streaming, progress notifications, or session semantics.
@@ -133,10 +133,11 @@ Typical fit:
 
 Mapping:
 
-- the shared dispatch core still owns function loading, auth metadata,
-  cancellation, and trust/trace emission
-- the ACP adapter owns session state, permission prompts, and bidirectional
-  updates
+- `harn serve acp <file.harn>` starts the packaged stdio ACP adapter
+- the adapter owns session state, prompt execution, permission prompts, cancel
+  tokens, and bidirectional `session/update` traffic
+- the legacy `harn acp <file.harn>` path remains as a compatibility alias for
+  one release
 
 ## Design rule
 

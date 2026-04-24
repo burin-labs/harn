@@ -9,7 +9,12 @@ use harn_serve::{
 };
 use time::Duration;
 
-use crate::cli::{A2aServeArgs, McpServeTransport, ServeMcpArgs};
+use crate::cli::{A2aServeArgs, McpServeTransport, ServeAcpArgs, ServeMcpArgs};
+
+pub(crate) async fn run_acp_server(args: &ServeAcpArgs) -> Result<(), String> {
+    crate::acp::run_acp_server(Some(&args.file)).await;
+    Ok(())
+}
 
 pub(crate) async fn run_a2a_server(args: &A2aServeArgs) -> Result<(), String> {
     let mut config = DispatchCoreConfig::for_script(&args.file);
