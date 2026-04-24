@@ -1,5 +1,4 @@
 // std/text — Text processing utilities for LLM output and code analysis.
-
 // Convert an integer-compatible value into a decimal string with explicit
 // stdlib import ergonomics for Harn-authored libraries.
 /** int_to_string. */
@@ -35,30 +34,46 @@ pub fn parse_float_or(value, fallback) {
 /** extract_paths. */
 pub fn extract_paths(text) {
   let lines = split(text, "\n")
-    .filter({ line ->
-      let t = trim(line)
-      return contains(t, "/")
-        && !starts_with(t, "//")
-        && !starts_with(t, "#")
-    })
+    .filter(
+    { line ->
+    let t = trim(line)
+    return contains(t, "/")
+    && !starts_with(t, "//")
+    && !starts_with(t, "#")
+  },
+  )
   var seen = []
-  return lines.flat_map({ line ->
-    return split(trim(line), " ").map({ word ->
-      var clean = regex_replace("^[\"'`,;:()\\[\\]{}><]+|[\"'`,;:()\\[\\]{}><]+$", "", trim(word))
-      while ends_with(clean, ".") || ends_with(clean, ",") || ends_with(clean, ":") || ends_with(clean, ";") {
-        clean = substring(clean, 0, len(clean) - 1)
-      }
-      return clean
-    }).filter({ clean ->
-      if !contains(clean, "/") && !contains(clean, ".") { return false }
-      let ext = extname(clean)
-      return ext != "" && len(ext) <= 11
-    })
-  }).filter({ p ->
-    if seen.contains(p) { return false }
+  return lines
+    .flat_map(
+    { line -> return split(trim(line), " ")
+    .map(
+    { word ->
+    var clean = regex_replace("^[\"'`,;:()\\[\\]{}><]+|[\"'`,;:()\\[\\]{}><]+$", "", trim(word))
+    while ends_with(clean, ".") || ends_with(clean, ",") || ends_with(clean, ":") || ends_with(clean, ";") {
+      clean = substring(clean, 0, len(clean) - 1)
+    }
+    return clean
+  },
+  )
+    .filter(
+    { clean ->
+    if !contains(clean, "/") && !contains(clean, ".") {
+      return false
+    }
+    let ext = extname(clean)
+    return ext != "" && len(ext) <= 11
+  },
+  ) },
+  )
+    .filter(
+    { p ->
+    if seen.contains(p) {
+      return false
+    }
     seen = seen + [p]
     return true
-  }).sort()
+  },
+  ).sort()
 }
 
 // Parse fenced code blocks from LLM response text.
@@ -72,7 +87,6 @@ pub fn parse_cells(response) {
   var block_type = "code"
   var block_lang = nil
   var current_lines = []
-
   var trimmed = ""
   var lang_part = ""
   for line in lines {
@@ -112,7 +126,9 @@ pub fn parse_cells(response) {
 // If target_file is provided, only write_file calls mentioning that file are kept.
 /** filter_test_cells. */
 pub fn filter_test_cells(cells, target_file) {
-  return cells.filter({ cell ->
+  return cells
+    .filter(
+    { cell ->
     if cell.type == "call" && contains(cell.code, "write_file") {
       if target_file != nil {
         return contains(cell.code, target_file)
@@ -120,7 +136,8 @@ pub fn filter_test_cells(cells, target_file) {
       return true
     }
     return cell.type == "code"
-  })
+  },
+  )
 }
 
 // Keep first n and last n lines of text, with an omission marker in between.
@@ -132,12 +149,14 @@ pub fn truncate_head_tail(text, n) {
   }
   let skipped = len(lines) - n * 2
   return join(lines[:n], "\n")
-    + "\n... (" + to_string(skipped) + " lines omitted) ...\n"
+    + "\n... ("
+    + to_string(skipped)
+    + " lines omitted) ...\n"
     + join(lines[-n:], "\n")
 }
 
 // Check if compiler/build output contains compile error indicators.
-// Matches Python errors and generic patterns (case-sensitive, matching burin-code behavior).
+// Case-sensitive match; recognises Python, Rust, Go, and generic patterns.
 /** detect_compile_error. */
 pub fn detect_compile_error(output) {
   return contains(output, "SyntaxError")
@@ -167,13 +186,14 @@ pub fn has_got_want(output) {
 // Filters for lines containing error keywords, returns first 20 joined with newlines.
 /** format_test_errors. */
 pub fn format_test_errors(output) {
-  let error_lines = split(output, "\n").filter({ line ->
-    return contains(line, "FAIL")
-      || contains(line, "Error")
-      || contains(line, "error")
-      || contains(line, "AssertionError")
-      || contains(line, "assert")
-  })
+  let error_lines = split(output, "\n")
+    .filter(
+    { line -> return contains(line, "FAIL")
+    || contains(line, "Error")
+    || contains(line, "error")
+    || contains(line, "AssertionError")
+    || contains(line, "assert") },
+  )
   if len(error_lines) > 20 {
     return join(error_lines[:20], "\n")
   }
