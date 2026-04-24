@@ -329,6 +329,10 @@ fn debug_context_value(vm: &crate::vm::Vm, cancelled: bool) -> VmValue {
         "held_synchronization".to_string(),
         VmValue::List(Rc::new(Vec::new())),
     );
+    debug.insert(
+        "supervisors".to_string(),
+        crate::stdlib::supervisor::supervisor_debug_values(),
+    );
     VmValue::Dict(Rc::new(debug))
 }
 

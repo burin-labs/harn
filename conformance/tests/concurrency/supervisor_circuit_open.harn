@@ -1,0 +1,29 @@
+pipeline default() {
+  let starts = atomic(0)
+  let sup = supervisor_start(
+    {
+    name: "circuit",
+    strategy: "one_for_one",
+    children: [
+    {
+    name: "probe",
+    kind: "workflow_runner",
+    restart: {mode: "on_failure", max_restarts: 0, backoff_ms: 1, circuit_open_ms: 1},
+    task: { _ctx ->
+    let attempt = atomic_add(starts, 1) + 1
+    if attempt == 1 {
+      throw "open-circuit"
+    }
+    "half-open-success"
+  },
+  },
+  ],
+  },
+  )
+  sleep(25ms)
+  let state = supervisor_state(sup)
+  println(atomic_get(starts))
+  println(state.children[0].status)
+  println(state.metrics.failed)
+  println(state.metrics.suppressed)
+}

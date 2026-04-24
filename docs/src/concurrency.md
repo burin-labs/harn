@@ -493,3 +493,84 @@ if shutdown.status == "completed" {
   cancel_graceful(reader, 2s)
 }
 ```
+
+## Supervisor Trees
+
+Use `supervisor_start` when a workflow owns long-lived child loops that need
+named lifecycle, restart policies, backoff, graceful drain, and introspection.
+The child `task` is a closure called with `{supervisor_id, child_name,
+child_kind, attempt, restart_count}`.
+
+Connector stream:
+
+```harn
+let _streams = supervisor_start({
+  name: "connector-streams",
+  strategy: "one_for_one",
+  children: [{
+    name: "github-events",
+    kind: "connector_stream",
+    restart: {mode: "on_failure", max_restarts: 8, window_ms: 60000, backoff_ms: 250, factor: 2, jitter_ms: 100, circuit_open_ms: 300000},
+    task: { _ctx ->
+      let stream = sse_connect("https://example.invalid/events")
+      while !is_cancelled() {
+        let event = sse_receive(stream, 5000)
+        if event != nil {
+          event_log_emit("connector.github", event.kind, event.payload)
+        }
+      }
+    },
+  }],
+})
+```
+
+Continuous persona:
+
+```harn
+let _persona = supervisor_start({
+  name: "review-captain",
+  strategy: "one_for_one",
+  children: [{
+    name: "inbox-loop",
+    kind: "persona_loop",
+    active_lease: "persona:review-captain",
+    restart: {mode: "always", max_restarts: 10, window_ms: 300000, backoff_ms: 1000},
+    task: { _ctx -> agent_loop("watch the review inbox", nil, {mode: "daemon"}) },
+  }],
+})
+```
+
+Actor/mailbox worker:
+
+```harn
+fn handle_patch_message(msg) {
+  msg
+}
+
+let inbox = mailbox_open({scope: "task_group", name: "patcher", capacity: 32})
+
+let _actor = supervisor_start({
+  name: "patch-actors",
+  strategy: "rest_for_one",
+  children: [{
+    name: "patcher",
+    kind: "actor_mailbox",
+    restart: {mode: "on_failure", max_restarts: 3, window_ms: 60000, backoff_ms: 100},
+    task: { _ctx ->
+      while !is_cancelled() {
+        let msg = mailbox_receive(inbox)
+        if msg != nil {
+          handle_patch_message(msg)
+        }
+      }
+    },
+  }],
+})
+```
+
+`supervisor_state(handle)` returns child status, restart counts, last errors,
+wait reasons, active leases, next restart times, and aggregate metrics.
+`supervisor_events(handle)` returns lifecycle events, and
+`runtime_context().debug.supervisors` exposes supervisor state to tools.
+`supervisor_stop(handle, timeout?)` requests cooperative cancellation and then
+force-aborts children that do not drain before the timeout.

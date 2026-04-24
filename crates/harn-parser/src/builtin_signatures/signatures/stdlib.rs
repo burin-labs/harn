@@ -1052,6 +1052,26 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("string")),
     },
     BuiltinSig {
+        name: "supervisor_events",
+        return_type: Some(BuiltinReturn::Named("list")),
+    },
+    BuiltinSig {
+        name: "supervisor_metrics",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
+        name: "supervisor_start",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
+        name: "supervisor_state",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
+        name: "supervisor_stop",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
         name: "sync_gate_acquire",
         return_type: None,
     },

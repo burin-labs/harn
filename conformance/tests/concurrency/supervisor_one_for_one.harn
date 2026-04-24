@@ -1,0 +1,47 @@
+pipeline default() {
+  let flaky_starts = atomic(0)
+  let stable_starts = atomic(0)
+  let sup = supervisor_start(
+    {
+    name: "fixture",
+    strategy: "one_for_one",
+    children: [
+    {
+    name: "flaky",
+    kind: "generic_task",
+    restart: {mode: "on_failure", max_restarts: 1, window_ms: 1000, backoff_ms: 1},
+    task: { _ctx ->
+    let attempt = atomic_add(flaky_starts, 1) + 1
+    if attempt == 1 {
+      throw "flaky-boom"
+    }
+    "recovered"
+  },
+  },
+    {
+    name: "stable",
+    kind: "actor_mailbox",
+    restart: "never",
+    task: { _ctx ->
+    atomic_add(stable_starts, 1)
+    "stable"
+  },
+  },
+  ],
+  },
+  )
+  sleep(25ms)
+  let state = supervisor_state(sup)
+  let events = supervisor_events(sup)
+  let debug = runtime_context().debug
+  println(atomic_get(flaky_starts))
+  println(atomic_get(stable_starts))
+  println(state.status)
+  println(state.metrics.failed)
+  println(state.metrics.restarted)
+  println(state.children[0].status)
+  println(state.children[0].restart_count)
+  println(state.children[1].status)
+  println(events[0].kind)
+  println(debug.supervisors[0].name)
+}
