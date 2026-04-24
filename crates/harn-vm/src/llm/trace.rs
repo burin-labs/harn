@@ -116,10 +116,17 @@ pub enum AgentTraceEvent {
     /// response failed `output_schema` validation. One event per retry;
     /// `attempt` counts retries (the initial call is attempt 0 and
     /// produces no event; the first retry emits `attempt: 1`).
+    ///
+    /// The retry does **not** persist the invalid response — the
+    /// original messages are replayed with a single appended user-role
+    /// correction that cites the validation errors and schema. That
+    /// correction text is surfaced here as `correction_prompt` so
+    /// transcripts show both why the retry happened and what was sent.
     SchemaRetry {
         attempt: usize,
         errors: Vec<String>,
         nudge_used: bool,
+        correction_prompt: String,
     },
     NativeToolFallback {
         iteration: usize,

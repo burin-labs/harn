@@ -485,8 +485,8 @@ println(response.output_tokens)
 | `response_format` | string | nil | `"json"` asks the provider for JSON mode. |
 | `output_schema` | `Schema<T>` (dict \| type-alias) | nil | JSON-schema-shaped dict, or a top-level `type T = ...` alias (compiler lowers to the schema dict). The generic parameter `T` flows into the narrowed `r.data: T`. Validated after parse. |
 | `output_validation` | string | `"off"` | `"error"` throws on mismatch; `"warn"` logs. |
-| `schema_retries` | int | 1 | When validation fails, re-prompt up to N times with a corrective nudge. Works alongside `output_validation: "error"`. |
-| `schema_retry_nudge` | string \| bool | auto | String = verbatim corrective message (+ validation errors appended). `true` = auto nudge from schema required/properties keys. `false` = retry without a nudge. |
+| `schema_retries` | int | 1 | When validation fails, re-prompt up to N times with a corrective user turn. Each retry is a single-turn correction — the invalid response is NOT persisted; the original messages are replayed with one appended user-role correction citing the validation errors + schema. Works alongside `output_validation: "error"`. |
+| `schema_retry_nudge` | string \| bool | auto | String = verbatim corrective message (+ validation errors appended). `true` = auto nudge from schema required/properties keys. `false` = bare retry — replays the original messages unchanged, no correction appended. |
 | `llm_retries` | int | 2 | Retries on transient HTTP / provider errors. Set to 0 for fail-fast. |
 | `llm_backoff_ms` | int | 2000 | Base exponential backoff. |
 | `stream` | bool | true | SSE streaming transport. |
@@ -1027,6 +1027,14 @@ in-flight work. Use both when batching LLM calls at scale.
   corrective nudge. `llm_retries` retries transient provider errors.
   They compose orthogonally — each schema retry starts a fresh
   transient budget.
+- A schema retry is a **single-turn correction**, not a multi-turn
+  conversation. The invalid response is not persisted; the retry
+  replays the original messages with one appended user-role correction
+  that cites the validation errors and the schema. For cost / cache
+  purposes, treat the retry as one extra prompt+response on the same
+  prefix as the original call (not a growing conversation). The
+  correction text is surfaced on the `SchemaRetry` trace event as
+  `correction_prompt`.
 - Module-level `var` cross-fn mutation is not shared yet. Prefer
   atomics (`atomic(0)` / `atomic_add`) for shared counters.
 - Small / local models benefit heavily from:

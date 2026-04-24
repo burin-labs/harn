@@ -416,6 +416,12 @@ pub(crate) async fn execute_llm_call(
     let nudge_mode = parse_schema_nudge(&options);
 
     let tool_format = helpers::opt_str(&options, "tool_format");
+    // Snapshot the caller's original messages once. Each schema retry
+    // replays this snapshot plus a single corrective user message, so
+    // the invalid response never pollutes subsequent attempts — the
+    // retry is a single-turn correction rather than a multi-turn
+    // conversation. See issue #533.
+    let original_messages = opts.messages.clone();
     for attempt in 0..=schema_retries {
         let result = agent_observe::observed_llm_call(
             &opts,
@@ -447,13 +453,15 @@ pub(crate) async fn execute_llm_call(
                 attempt: attempt + 1,
                 errors: errors.clone(),
                 nudge_used: !nudge.is_empty(),
+                correction_prompt: nudge.clone(),
             });
-            // Append broken response + corrective nudge so the next
-            // call has progressively richer context.
-            opts.messages.push(serde_json::json!({
-                "role": "assistant",
-                "content": result.text,
-            }));
+            // Replay the original messages with a single corrective
+            // user turn appended. The invalid assistant response is
+            // deliberately dropped — smaller / local models get
+            // confused by a user→assistant(bad)→user(nudge)→assistant
+            // shape, and the verbatim bad response otherwise sits in
+            // context for every subsequent retry.
+            opts.messages = original_messages.clone();
             if !nudge.is_empty() {
                 opts.messages.push(serde_json::json!({
                     "role": "user",
