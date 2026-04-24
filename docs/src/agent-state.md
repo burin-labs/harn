@@ -157,6 +157,8 @@ context without importing the source transcript.
 Each handle can carry a writer identity and conflict policy:
 
 ```harn
+import "std/agent_state"
+
 let state = agent_state_init(".harn/state", {
   session_id: "demo",
   writer_id: "planner",

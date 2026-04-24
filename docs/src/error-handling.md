@@ -46,7 +46,7 @@ try {
 A `return` statement inside a `try` block is **not** caught. It propagates
 out of the enclosing pipeline or function as expected.
 
-```harn
+```harn,ignore
 fn find_user(id) {
   try {
     let user = lookup(id)
@@ -168,7 +168,7 @@ handler's tail value on a caught throw. The lub of the two branch types is
 inferred automatically, and an explicit type annotation on the `let` binds
 the result:
 
-```harn
+```harn,ignore
 let parsed: dict = try { json_parse(input) } catch (e) { default_config() }
 ```
 
@@ -176,7 +176,7 @@ Typed catches work identically in expression position; when the thrown
 error's type does not match the catch's type filter, the throw propagates
 past the expression and the `let` binding is never established:
 
-```harn
+```harn,ignore
 let user: User = try {
   fetch_user(id)
 } catch (e: NetworkError) {

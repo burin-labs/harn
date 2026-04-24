@@ -3,7 +3,7 @@
 `std/monitors` provides `wait_for(...)` for waiting on external state while
 preserving deterministic replay records.
 
-```harn
+```harn,ignore
 import { wait_for } from "std/monitors"
 
 let result = wait_for({

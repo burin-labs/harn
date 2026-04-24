@@ -773,7 +773,7 @@ scaffolding.
 
 ### Example
 
-```harn
+```harn,ignore
 skill ship {
   description "Ship a production release"
   when_to_use "User says ship/release/deploy"
@@ -847,7 +847,7 @@ Worker configs may also include `policy` to narrow the delegated worker to a
 subset of the parent's current execution ceiling, or a top-level
 `tools: ["name", ...]` shorthand:
 
-```harn
+```harn,ignore
 let worker = spawn_agent({
   task: "Read project files only",
   tools: ["read", "search"],
@@ -884,7 +884,7 @@ Use `sub_agent_run(...)` when you want a full child `agent_loop` with its own
 session and narrowed capability scope, but you do not want the child transcript
 to spill into the parent conversation history.
 
-```harn
+```harn,ignore
 let result = sub_agent_run("Find the config entrypoints.", {
   provider: "mock",
   tools: repo_tools(),

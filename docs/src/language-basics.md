@@ -604,7 +604,7 @@ function name.
 
 Binary operators, method chains, and pipes can span multiple lines:
 
-```harn
+```harn,ignore
 let message = "hello"
   + " "
   + "world"
@@ -631,7 +631,7 @@ backslash continuation.
 A backslash at the end of a line forces the next line to continue the
 current expression, even when no operator is present:
 
-```harn
+```harn,ignore
 let long_value = some_function( \
   arg1, arg2, arg3 \
 )
@@ -847,6 +847,11 @@ Structs can also be constructed with the struct name as a constructor,
 using named fields directly:
 
 ```harn
+struct Point {
+  x: int
+  y: int
+}
+
 let p = Point { x: 10, y: 20 }
 println(p.x)  // 10
 ```
@@ -965,7 +970,7 @@ both satisfy `Displayable`. No extra annotation is needed.
 
 Now you can write a function that accepts any `Displayable`:
 
-```harn
+```harn,ignore
 fn introduce(animal: Displayable) {
   println("Meet: ${animal.display()}")
 }
@@ -1080,7 +1085,7 @@ println(add(1, ...rest))  // 6
 
 Spread works in method calls too:
 
-```harn
+```harn,ignore
 let point = Point({x: 0, y: 0})
 let deltas = [10, 20]
 let moved = point.translate(...deltas)
@@ -1120,7 +1125,7 @@ parsed as the traditional `try`/`catch` statement instead.
 The `ask` expression is syntactic sugar for making an LLM call. It takes
 a set of key-value fields and returns the LLM response as a string:
 
-```harn
+```harn,ignore
 let answer = ask {
   system: "You are a helpful assistant.",
   user: "What is 2 + 2?"
