@@ -73,8 +73,6 @@ SCRIPTING
     Connector(ConnectorArgs),
     /// Serve a Harn workflow over a transport adapter.
     Serve(ServeArgs),
-    /// Start the ACP server on stdio.
-    Acp(AcpArgs),
     /// Legacy alias: expose a .harn tool bundle as an MCP server on stdio.
     #[command(hide = true, name = "mcp-serve")]
     McpServe(LegacyMcpServeArgs),
@@ -614,10 +612,18 @@ pub(crate) struct ServeArgs {
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum ServeCommand {
+    /// Serve a .harn agent over stdio using ACP.
+    Acp(ServeAcpArgs),
     /// Serve a .harn agent over HTTP using A2A.
     A2a(A2aServeArgs),
     /// Serve exported `pub fn` entrypoints as MCP tools.
     Mcp(ServeMcpArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ServeAcpArgs {
+    /// Path to the .harn file to serve.
+    pub file: String,
 }
 
 #[derive(Debug, Args)]
@@ -675,12 +681,6 @@ pub(crate) struct ServeMcpArgs {
     pub hmac_secret: Option<String>,
     /// Path to the `.harn` file whose exported `pub fn` entrypoints are served.
     pub file: String,
-}
-
-#[derive(Debug, Args)]
-pub(crate) struct AcpArgs {
-    /// Optional pipeline to expose through ACP.
-    pub pipeline: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -2215,6 +2215,19 @@ mod tests {
         assert_eq!(serve.api_key, vec!["alpha".to_string(), "beta".to_string()]);
         assert_eq!(serve.hmac_secret.as_deref(), Some("shared"));
         assert_eq!(serve.file, "server.harn");
+    }
+
+    #[test]
+    fn test_parses_serve_acp() {
+        let cli = Cli::parse_from(["harn", "serve", "acp", "agent.harn"]);
+
+        let Command::Serve(args) = cli.command.unwrap() else {
+            panic!("expected serve command");
+        };
+        let crate::cli::ServeCommand::Acp(serve) = args.command else {
+            panic!("expected serve acp");
+        };
+        assert_eq!(serve.file, "agent.harn");
     }
 
     #[test]

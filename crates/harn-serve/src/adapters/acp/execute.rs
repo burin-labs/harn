@@ -3,10 +3,10 @@
 
 use std::collections::BTreeMap;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::time::Instant;
 
-use super::{builtins, AcpBridge};
-use crate::package;
+use super::{builtins, AcpBridge, AcpRuntimeConfigurator};
 
 /// Execute a compiled chunk with ACP bridge builtins.
 pub(super) async fn execute_chunk(
@@ -16,6 +16,7 @@ pub(super) async fn execute_chunk(
     prompt_text: &str,
     source_path: Option<&std::path::Path>,
     cwd: &std::path::Path,
+    runtime_configurator: Arc<dyn AcpRuntimeConfigurator>,
 ) -> Result<String, String> {
     let vm_setup_started = Instant::now();
     let mut vm = harn_vm::Vm::new();
@@ -50,16 +51,7 @@ pub(super) async fn execute_chunk(
         vm.set_source_dir(cwd);
     }
 
-    if let Some(path) = source_path {
-        let extensions = package::load_runtime_extensions(path);
-        package::install_runtime_extensions(&extensions);
-        package::install_manifest_triggers(&mut vm, &extensions)
-            .await
-            .map_err(|error| format!("failed to install manifest triggers: {error}"))?;
-        package::install_manifest_hooks(&mut vm, &extensions)
-            .await
-            .map_err(|error| format!("failed to install manifest hooks: {error}"))?;
-    }
+    runtime_configurator.configure(&mut vm, source_path).await?;
 
     vm.set_global("prompt", harn_vm::VmValue::String(Rc::from(prompt_text)));
     vm.set_global(

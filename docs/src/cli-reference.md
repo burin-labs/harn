@@ -510,17 +510,6 @@ harn watch main.harn
 harn watch --deny shell main.harn
 ```
 
-## harn acp
-
-Start an ACP (Agent Client Protocol) server on stdio.
-
-```bash
-harn acp                    # bridge mode, no pipeline
-harn acp pipeline.harn      # execute a pipeline per prompt
-```
-
-See [MCP and ACP Integration](./mcp-and-acp.md) for protocol details.
-
 ## harn portal
 
 Launch the local Harn observability portal for persisted runs.
@@ -807,6 +796,7 @@ Start a workflow server through one of the outbound transport adapters.
 harn serve a2a agent.harn                  # explicit A2A
 harn serve agent.harn                      # legacy A2A shorthand
 harn serve --port 3000 agent.harn          # legacy A2A shorthand with custom port
+harn serve acp agent.harn                  # ACP session server over stdio
 harn serve mcp server.harn                 # exported pub fn -> MCP tools over stdio
 harn serve mcp --transport http server.harn
 ```
@@ -823,6 +813,12 @@ agent card at `/.well-known/a2a-agent` and supports task send, send-and-wait,
 streaming/resubscribe, push callback registration, and cancel propagation. The
 legacy shorthand `harn serve <file>` is preserved and rewrites internally to
 `harn serve a2a <file>`.
+
+`harn serve acp` starts the packaged ACP adapter on stdio for editor and IDE
+hosts. It creates ACP sessions, executes the target pipeline for each
+`session/prompt`, streams `AgentEvent` values as `session/update`
+notifications, and forwards permission prompts through
+`session/request_permission`.
 
 See [MCP and ACP Integration](./mcp-and-acp.md) and
 [Outbound workflow server](./harn-serve.md) for protocol details.

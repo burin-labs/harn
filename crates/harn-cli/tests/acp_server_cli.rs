@@ -122,6 +122,7 @@ fn acp_session_fork_branches_runtime_state_and_dispatches_independently() {
 
     let mut child = Command::new(env!("CARGO_BIN_EXE_harn"))
         .current_dir(temp.path())
+        .arg("serve")
         .arg("acp")
         .arg("acp_fixture.harn")
         .stdin(Stdio::piped())
@@ -306,6 +307,74 @@ fn acp_session_fork_branches_runtime_state_and_dispatches_independently() {
     assert_eq!(parent_summary["len"], 2);
     assert_eq!(parent_summary["messages"][0]["content"], "alpha");
     assert_eq!(parent_summary["messages"][1]["content"], "beta");
+
+    drop(stdin);
+    let status = child.wait().unwrap();
+    assert!(status.success(), "status={status}");
+}
+
+#[test]
+fn serve_acp_stdio_runs_packaged_adapter() {
+    let _guard = lock_acp_cli_tests();
+    let temp = TempDir::new().unwrap();
+    write_fixture(&temp);
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_harn"))
+        .current_dir(temp.path())
+        .arg("serve")
+        .arg("acp")
+        .arg("acp_fixture.harn")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+
+    let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+
+    let (_, init) = send_request(
+        &mut stdin,
+        &mut stdout,
+        json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {}
+        }),
+    );
+    assert_eq!(init["result"]["agentInfo"]["name"], "harn");
+
+    let (_, created) = send_request(
+        &mut stdin,
+        &mut stdout,
+        json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "session/new",
+            "params": {
+                "cwd": temp.path(),
+            }
+        }),
+    );
+    let session_id = created["result"]["sessionId"].as_str().unwrap().to_string();
+
+    let (notifications, response) = send_request(
+        &mut stdin,
+        &mut stdout,
+        json!({
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "session/prompt",
+            "params": {
+                "sessionId": session_id,
+                "prompt": [{ "type": "text", "text": "packaged" }]
+            }
+        }),
+    );
+    assert_eq!(response["result"]["stopReason"], "completed");
+    let summary = latest_prompt_summary(&notifications, &session_id);
+    assert_eq!(summary["messages"][0]["content"], "packaged");
 
     drop(stdin);
     let status = child.wait().unwrap();
