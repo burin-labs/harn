@@ -17,11 +17,33 @@ fn wait_for_listener_url(log_path) {
   return url
 }
 
+fn process_alive(pid) {
+  let probe = shell("kill -0 " + pid + " >/dev/null 2>&1")
+  return probe.success
+}
+
+fn wait_for_readyz(url, pid) {
+  var attempts = 0
+  while attempts < 200 {
+    if !process_alive(pid) {
+      return false
+    }
+    try {
+      let response = http_request("GET", url + "/readyz", {timeout_ms: 250})
+      if response.status == 200 {
+        return true
+      }
+    }
+    sleep(25ms)
+    attempts = attempts + 1
+  }
+  return false
+}
+
 fn wait_for_exit(pid) {
   var attempts = 0
   while attempts < 200 {
-    let probe = shell("kill -0 " + pid + " >/dev/null 2>&1")
-    if !probe.success {
+    if !process_alive(pid) {
       return true
     }
     sleep(50ms)
@@ -75,6 +97,7 @@ pipeline test(task) {
   assert(crash_start.success && crash_pid != "", "failed to start crashing orchestrator")
   let crash_url = wait_for_listener_url(path_join(root, "orchestrator-crash.log"))
   assert(crash_url != nil, "crashing listener URL did not appear in log")
+  assert(wait_for_readyz(crash_url, crash_pid), "crashing listener did not become ready")
   let response = http_request(
     "POST",
     crash_url + "/a2a/review",
@@ -94,7 +117,7 @@ pipeline test(task) {
   assert(restart.success && restart_pid != "", "failed to restart orchestrator")
   let restart_url = wait_for_listener_url(path_join(root, "orchestrator-restart.log"))
   assert(restart_url != nil, "restart listener URL did not appear in log")
-  sleep(50ms)
+  assert(wait_for_readyz(restart_url, restart_pid), "restart listener did not become ready")
   let state_dir = path_join(root, "state")
   let config_path = path_join(root, "harn.toml")
   let queue = shell_at(
