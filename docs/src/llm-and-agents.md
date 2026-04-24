@@ -595,6 +595,8 @@ Same as `llm_call`, plus additional options:
 | `max_iterations` | int | `50` | Maximum number of LLM round-trips |
 | `max_nudges` | int | `3` | Max consecutive text-only responses before stopping |
 | `nudge` | string | see below | Custom message to send when nudging the agent |
+| `llm_retries` | int | `4` | Retries on transient HTTP / provider errors. Set to `0` for fail-fast |
+| `llm_backoff_ms` | int | `2000` | Base exponential backoff in ms between LLM retries |
 | `tool_retries` | int | `0` | Number of retry attempts for failed tool calls |
 | `tool_backoff_ms` | int | `1000` | Base backoff delay in ms for tool retries (doubles each attempt) |
 | `policy` | dict | nil | Capability ceiling applied to this agent loop |

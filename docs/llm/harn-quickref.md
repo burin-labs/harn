@@ -821,7 +821,8 @@ Returns a namespaced dict: top-level `status`, `text`, `visible_text`
 (`iterations`, `duration_ms`, `input_tokens`, `output_tokens`); tool
 invocation data nested under `tools` (`calls`, `successful`, `rejected`,
 `mode`). Respects the same `llm_retries` / `llm_backoff_ms` options
-plus its own `tool_retries`, `max_iterations`, `max_nudges`, and
+as `llm_call`, with `agent_loop` defaulting `llm_retries` to 4, plus
+its own `tool_retries`, `max_iterations`, `max_nudges`, and
 `native_tool_fallback` (`"allow"`, `"allow_once"`, or `"reject"` for
 native-tool stages that receive text-mode `<tool_call>` fallback
 output).

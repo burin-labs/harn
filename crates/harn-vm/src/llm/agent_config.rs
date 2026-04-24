@@ -16,6 +16,8 @@ use super::helpers::{
 };
 use super::tools::build_assistant_response_message;
 
+pub(crate) const DEFAULT_AGENT_LOOP_LLM_RETRIES: usize = 4;
+
 #[derive(Clone)]
 pub struct AgentLoopConfig {
     pub persistent: bool,
@@ -415,7 +417,9 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                     approval_policy,
                     daemon,
                     daemon_config,
-                    llm_retries: opt_int(&options, "llm_retries").unwrap_or(4) as usize,
+                    llm_retries: opt_int(&options, "llm_retries")
+                        .unwrap_or(DEFAULT_AGENT_LOOP_LLM_RETRIES as i64)
+                        as usize,
                     llm_backoff_ms: opt_int(&options, "llm_backoff_ms").unwrap_or(2000) as u64,
                     token_budget: opt_int(&options, "token_budget"),
                     exit_when_verified: opt_bool(&options, "exit_when_verified"),

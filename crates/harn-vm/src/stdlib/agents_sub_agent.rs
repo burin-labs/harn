@@ -661,7 +661,9 @@ fn sub_agent_loop_options(spec: &SubAgentRunSpec) -> Result<crate::llm::AgentLoo
         approval_policy,
         daemon: false,
         daemon_config: Default::default(),
-        llm_retries: crate::llm::helpers::opt_int(&options, "llm_retries").unwrap_or(3) as usize,
+        llm_retries: crate::llm::helpers::opt_int(&options, "llm_retries")
+            .unwrap_or(crate::llm::DEFAULT_AGENT_LOOP_LLM_RETRIES as i64)
+            as usize,
         llm_backoff_ms: crate::llm::helpers::opt_int(&options, "llm_backoff_ms").unwrap_or(2000)
             as u64,
         token_budget: crate::llm::helpers::opt_int(&options, "token_budget"),
