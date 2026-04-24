@@ -41,6 +41,12 @@ granular archaeology.
   validated from Harn runtime tests; the artifact is cross-linked
   from docs, portal docs, and the README for Harn Cloud and
   supervision references.
+- **Friction context-pack primitives (#452).** Introduces structured
+  friction event primitives with privacy-focused normalization, a
+  JSONL sink, and in-memory event inspection; adds context-pack
+  manifest validation and deterministic suggestion generation from
+  repeated friction evidence; extends eval packs with
+  `friction-events` fixtures and `context-pack-suggestion` assertions.
 
 ### Changed
 
