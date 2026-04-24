@@ -1,0 +1,25 @@
+// `llm_call_structured(prompt, schema, options?)` returns the
+// validated data directly — no `.data` unwrap. The helper forces
+// `response_format: "json"`, `output_validation: "error"`, and
+// `schema_retries: 3` unless the caller overrides them.
+pipeline default() {
+  let schema = {
+    type: "object",
+    required: ["name", "age"],
+    properties: {name: {type: "string"}, age: {type: "integer"}},
+  }
+  llm_mock({text: "{\"name\": \"Ada\", \"age\": 36}"})
+  let summary = llm_call_structured("Summarize", schema, {provider: "mock"})
+  println(summary.name)
+  println(summary.age)
+  // A single call was made — no schema retry needed.
+  println(len(llm_mock_calls()))
+  // The forced options are applied by the helper, so a user-provided
+  // `system` lands in the standard slot.
+  llm_mock_clear()
+  llm_mock({text: "{\"name\": \"Grace\", \"age\": 42}"})
+  let grace = llm_call_structured("Summarize", schema, {provider: "mock", system: "You are precise."})
+  println(grace.name)
+  let calls = llm_mock_calls()
+  println(calls[0].system)
+}

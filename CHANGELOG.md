@@ -9,6 +9,20 @@ granular archaeology.
 
 ## Unreleased
 
+### Added
+
+- **Ergonomic `llm_call_structured` helper (#531).** Adds
+  `llm_call_structured(prompt, schema, options?)` and
+  `llm_call_structured_safe(prompt, schema, options?)` to the stdlib
+  (non-bridge and ACP bridge paths). Schema is the second positional
+  argument, the schema-validated-JSON defaults
+  (`response_format: "json"`, `output_validation: "error"`,
+  `schema_retries: 3`) are forced unless the caller overrides them,
+  and the helper returns the validated `.data` payload directly.
+  `Schema<T>` in the second argument position narrows the return type
+  to `T`. The `*_safe` variant returns the `{ok, data, error}`
+  envelope mirroring `llm_call_safe`.
+
 ### Changed
 
 - **BREAKING: Namespaced `agent_loop` result shape (#532).** The flat

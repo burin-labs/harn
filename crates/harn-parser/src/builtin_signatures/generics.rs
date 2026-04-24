@@ -11,6 +11,7 @@ pub(crate) fn lookup_generic_builtin_sig(name: &str) -> Option<BuiltinGenericSig
         "escalate_to" => Some(escalate_to_builtin_sig()),
         "hitl_pending" => Some(hitl_pending_builtin_sig()),
         "llm_call" | "llm_completion" => Some(llm_call_generic_sig()),
+        "llm_call_structured" => Some(llm_call_structured_generic_sig()),
         "project_fingerprint" => Some(project_fingerprint_builtin_sig()),
         "request_approval" => Some(request_approval_builtin_sig()),
         "schema_parse" | "schema_check" => Some(schema_parse_generic_sig()),
@@ -139,6 +140,27 @@ fn llm_call_generic_sig() -> BuiltinGenericSig {
             options_shape,
         ],
         return_type: return_shape,
+    }
+}
+
+fn llm_call_structured_generic_sig() -> BuiltinGenericSig {
+    // `llm_call_structured(prompt, schema, options?)` returns the
+    // validated data directly. When the schema argument is a `Schema<T>`
+    // (inline dict literal or type alias), T flows into the return type
+    // so callers can dot-walk the response with full narrowing. No
+    // `.data` unwrap needed — the helper is sugar for the .data
+    // projection of `llm_call`.
+    BuiltinGenericSig {
+        type_params: vec!["T".into()],
+        params: vec![
+            TypeExpr::Named("string".into()),
+            schema_of_t(),
+            TypeExpr::Union(vec![
+                TypeExpr::Named("dict".into()),
+                TypeExpr::Named("nil".into()),
+            ]),
+        ],
+        return_type: TypeExpr::Named("T".into()),
     }
 }
 

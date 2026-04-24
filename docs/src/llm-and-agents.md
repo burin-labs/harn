@@ -141,6 +141,83 @@ For custom transforms, pass a closure (or a `std/experiments.custom(...)`
 spec) that rewrites `{messages, system}` and returns either `nil`, a new
 message list, or `{messages?, system?, metadata?}`.
 
+## llm_call_structured
+
+`llm_call_structured(prompt, schema, options?)` is the ergonomic
+helper for the "ask for JSON against this schema, retry on
+validation failure, return just the parsed data" pattern. It wraps
+`llm_call` and pre-applies the schema-validated-JSON defaults so
+callsites stop repeating the same four options.
+
+```harn
+let schema = {
+  type: "object",
+  required: ["name", "age"],
+  properties: {
+    name: {type: "string"},
+    age: {type: "integer"},
+  },
+}
+let person = llm_call_structured(
+  "Extract the speaker's name and age from the transcript.",
+  schema,
+  {provider: "anthropic", system: "You are precise."},
+)
+println(person.name)
+println(person.age)
+```
+
+### Parameters
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| prompt | string | yes | The user message |
+| schema | dict or `Schema<T>` | yes | JSON Schema dict or a type alias in value position. When passed a `Schema<T>` the return narrows to `T`. |
+| options | dict | no | Any option `llm_call` accepts, plus `system` (lifted into the system-message slot) and `retries` (alias for `schema_retries`) |
+
+### Return value
+
+The validated `data` payload, typed as `T` when the schema is a
+`Schema<T>`. Throws on exhausted schema retries or transport
+failure — callers can assume the return matches the schema.
+
+The `{response_format: "json", output_validation: "error",
+schema_retries: 3}` defaults are applied unless the caller
+overrides them in `options`.
+
+### Non-throwing variant
+
+`llm_call_structured_safe(prompt, schema, options?)` returns the
+`{ok, data, error}` envelope (mirroring `llm_call_safe` but with
+the validated `.data` pre-unwrapped) instead of throwing:
+
+```harn
+let r = llm_call_structured_safe(prompt, schema, {provider: "openai"})
+if !r.ok {
+  log("structured call failed:", r.error.category, r.error.message)
+  return nil
+}
+let person = r.data
+```
+
+`r.error.category` is one of the canonical `ErrorCategory` strings
+(`"rate_limit"`, `"timeout"`, `"schema_validation"`, `"auth"`,
+`"transient_network"`, `"generic"`, …) — match on the category
+instead of string-sniffing the message.
+
+### When to use which helper
+
+- Product code that needs just the parsed payload: prefer
+  `llm_call_structured`. It removes the `output_validation`,
+  `schema_retries`, `response_format`, and `.data` noise from every
+  callsite.
+- Code that also needs token counts, transcript, thinking traces, or
+  to pass a pre-built transcript: call `llm_call` directly and read
+  `.text` / `.data` / `.input_tokens` / etc. off the full result
+  dict.
+- Call sites that prefer explicit branching over `try` blocks:
+  `llm_call_structured_safe` (the non-throwing envelope).
+
 ## Tool Vault
 
 Harn's Tool Vault is the progressive-tool-disclosure primitive: tool
