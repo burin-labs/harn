@@ -70,6 +70,12 @@ pub struct WorkflowNode {
     /// fields (post_turn_callback) that can't go through serde.
     #[serde(skip)]
     pub raw_model_policy: Option<VmValue>,
+    /// Raw context_assembler VmValue dict — when set, the stage's
+    /// artifact context is packed through `assemble_context` before
+    /// rendering the system prompt. Closure fields (`ranker_callback`)
+    /// are preserved here because they can't round-trip through serde.
+    #[serde(skip)]
+    pub raw_context_assembler: Option<VmValue>,
 }
 
 impl PartialEq for WorkflowNode {
@@ -709,6 +715,7 @@ pub fn parse_workflow_node_value(value: &VmValue, label: &str) -> Result<Workflo
     node.raw_tools = dict.and_then(|d| d.get("tools")).cloned();
     node.raw_auto_compact = dict.and_then(|d| d.get("auto_compact")).cloned();
     node.raw_model_policy = dict.and_then(|d| d.get("model_policy")).cloned();
+    node.raw_context_assembler = dict.and_then(|d| d.get("context_assembler")).cloned();
     Ok(node)
 }
 
@@ -1222,7 +1229,13 @@ pub async fn execute_stage_node(
         selection_policy.include_kinds = node.input_contract.input_kinds.clone();
     }
     let selected = super::select_artifacts_adaptive(artifacts.to_vec(), &selection_policy);
-    let rendered_context = super::render_artifacts_context(&selected, &node.context_policy);
+    let rendered_context = if let Some(assembler) = node.raw_context_assembler.as_ref() {
+        let assembled =
+            crate::stdlib::assemble::assemble_from_options(&selected, assembler).await?;
+        super::render_assembled_chunks(&assembled)
+    } else {
+        super::render_artifacts_context(&selected, &node.context_policy)
+    };
     let verification_contracts = super::stage_verification_contracts(node_id, node)?;
     let rendered_verification = super::render_verification_context(&verification_contracts);
     let stage_session_id = resolve_node_session_id(node);

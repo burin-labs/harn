@@ -778,6 +778,34 @@ let outcome = parallel settle paths with { max_concurrent: 4 } { path ->
 }
 ```
 
+### `assemble_context`
+
+`assemble_context(options)` packs a list of artifacts into a
+token-budgeted slice of chunks for the next prompt. Complements
+`transcript_auto_compact` (which shrinks the ongoing conversation).
+
+```harn
+let packed = assemble_context({
+  artifacts: [skill_a, skill_b, fetched_docs],
+  budget_tokens: 8000,
+  dedup: "chunked",                 // none | chunked | semantic
+  strategy: "relevance",            // recency | relevance | round_robin
+  query: user_prompt,               // scored by default keyword-overlap ranker
+  microcompact_threshold: 2000,     // artifacts over this get chunked
+})
+// packed = {chunks, included, dropped, reasons, total_tokens, budget_tokens, …}
+```
+
+Chunk ids are content-addressed (`{artifact_id}#{sha256(text)[..16]}`)
+so the same input produces the same ids across runs — safe to diff in
+replay. `reasons` names the strategy and inclusion verdict per chunk;
+`dropped` surfaces exclusions (`"duplicate"`, `"budget_exceeded"`,
+`"no_text"`). For a custom relevance ranker, pass
+`ranker_callback: { query, chunks -> chunks.map({ c -> score }) }`;
+the default ranker uses keyword overlap against `query`. Workflow
+nodes may set `context_assembler: {...}` to route the stage's selected
+artifacts through this builtin before the prompt is rendered.
+
 ### `agent_loop`
 
 `agent_loop(prompt, system?, options?)` runs a multi-turn loop with

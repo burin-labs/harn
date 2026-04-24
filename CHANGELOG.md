@@ -91,6 +91,17 @@ granular archaeology.
 
 ### Added
 
+- **Adaptive context assembly (#530).** Adds `assemble_context`, the
+  within-selection complement to `transcript_auto_compact`. Chunks
+  oversized artifacts at paragraph boundaries, deduplicates across
+  artifacts (exact-text or trigram-Jaccard), packs by
+  recency/relevance/round-robin under a token budget, and returns a
+  `{chunks, included, dropped, reasons, total_tokens, budget_tokens}`
+  record. Chunk ids are content-addressed for replay determinism. A
+  host `ranker_callback` plugs in custom scoring, and workflow nodes
+  can declare `context_assembler: {...}` so `execute_stage_node` routes
+  the stage's artifact context through the builtin without rewiring
+  prompts.
 - **Eval v2 replay tooling (#525).** Adds `harn trace import` to ingest
   generic `{prompt, response, tool_calls}` JSONL traces into standard
   `--llm-mock` fixtures, a `harn test --determinism` harness that

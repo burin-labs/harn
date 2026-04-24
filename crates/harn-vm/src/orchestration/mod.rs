@@ -33,6 +33,9 @@ pub use compaction::*;
 mod artifacts;
 pub use artifacts::*;
 
+mod assemble;
+pub use assemble::*;
+
 mod handoffs;
 pub use handoffs::*;
 
