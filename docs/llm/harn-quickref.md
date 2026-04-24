@@ -675,7 +675,12 @@ Known-key validation in `skill_define`: `description`, `when_to_use`,
 
 ### Common patterns
 
-Structured output with automatic retry:
+Structured output with automatic retry — prefer
+`llm_call_structured(prompt, schema, options?)`, which returns the
+validated data directly (no `.data` unwrap) and forces the schema
+defaults (`response_format: "json"`, `output_validation: "error"`,
+`schema_retries: 3`). Throws on exhausted retries or transport
+failure:
 
 ```harn
 let schema = {
@@ -686,6 +691,36 @@ let schema = {
     improvement: {type: "string"},
   },
 }
+let verdict = llm_call_structured(prompt, schema, {
+  provider: "auto",
+  model: "local:gemma-4-e4b-it",
+  system: "You are a strict grader.",
+})
+println(verdict.verdict)
+```
+
+Non-throwing variant `llm_call_structured_safe(prompt, schema,
+options?)` returns `{ok, data, error}` (same envelope as
+`llm_call_safe`, but with the validated `.data` pre-unwrapped):
+
+```harn
+let r = llm_call_structured_safe(prompt, schema, {provider: "auto"})
+if !r.ok {
+  log("structured call failed:", r.error.category, r.error.message)
+  return nil
+}
+println(r.data.verdict)
+```
+
+Options: everything `llm_call` accepts flows through, plus
+`retries` as an alias for `schema_retries`. Provider options,
+`system`, `provider`, `model`, `max_tokens`, etc. are all passed
+through unchanged.
+
+If you need the raw response (token counts, transcript, thinking
+trace) alongside the parsed data, call `llm_call` directly:
+
+```harn
 let r = llm_call(prompt, sys, {
   provider: "auto",
   model: "local:gemma-4-e4b-it",
@@ -695,11 +730,13 @@ let r = llm_call(prompt, sys, {
   response_format: "json",
 })
 println(r.data.verdict)
+println(r.input_tokens)
 ```
 
 Schema-as-type (a `type` alias drives both the schema and the
 narrowing guard — lowered to the canonical JSON-Schema dict at compile
-time; literal-string/int unions emit as `{type, enum}`):
+time; literal-string/int unions emit as `{type, enum}`). With
+`llm_call_structured` the return narrows to `T` directly:
 
 ```harn
 type GraderOut = {
@@ -707,30 +744,19 @@ type GraderOut = {
   summary: string,
 }
 
-let r = llm_call(prompt, sys, {
+let out: GraderOut = llm_call_structured(prompt, GraderOut, {
   provider: "auto",
-  output_schema: GraderOut,      // alias in value position
-  output_validation: "error",
-  schema_retries: 2,
-  response_format: "json",
+  system: sys,
 })
-if schema_is(r.data, GraderOut) {
-  println(r.data.verdict)        // narrowed to GraderOut here
-}
+println(out.verdict)     // narrowed to GraderOut
 ```
 
-Reusable generic wrapper (narrows without a `schema_is` guard via
-the `Schema<T>` generic param):
+Reusable generic wrapper (narrows via the `Schema<T>` generic
+param):
 
 ```harn
 fn grade<T>(prompt: string, schema: Schema<T>) -> T {
-  let r = llm_call(prompt, nil, {
-    provider: "auto",
-    output_schema: schema,
-    output_validation: "error",
-    response_format: "json",
-  })
-  return r.data
+  return llm_call_structured(prompt, schema, {provider: "auto"})
 }
 
 let out: GraderOut = grade("Grade this", schema_of(GraderOut))
@@ -957,8 +983,8 @@ removed — call the lifecycle verbs explicitly.
 
 ## Resilient LLM patterns
 
-`llm_call` throws on transport / schema / budget failures. Two helpers
-flatten the common recovery boilerplate:
+`llm_call` throws on transport / schema / budget failures. Three
+helpers flatten the common recovery boilerplate:
 
 ```harn
 // Non-throwing envelope: the ok/response/error shape eliminates the
@@ -969,6 +995,17 @@ if !r.ok {
   return nil
 }
 let data = r.response.data
+
+// When the call is a JSON-against-schema extraction, prefer
+// `llm_call_structured` / `*_safe` instead: `.data` is
+// pre-unwrapped and the schema-validated-JSON options are forced
+// by default (no boilerplate `output_validation` / `schema_retries`
+// / `response_format` keys at each callsite).
+let verdict = llm_call_structured(user_prompt, schema, {provider: "auto"})
+// ...or non-throwing:
+let r = llm_call_structured_safe(user_prompt, schema, {provider: "auto"})
+if !r.ok { log("structured call failed:", r.error.category); return nil }
+let data = r.data
 
 // Scoped permit acquisition + backoff for flaky providers. Retries on
 // rate_limit / overloaded / transient_network / timeout categories with

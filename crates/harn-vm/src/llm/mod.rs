@@ -358,7 +358,10 @@ pub(crate) use self::agent::{
     parse_skill_config, run_agent_loop_internal,
 };
 pub(crate) use self::agent_config::{agent_loop_result_from_llm, AgentLoopConfig};
-pub use self::agent_config::{register_agent_loop_with_bridge, register_llm_call_with_bridge};
+pub use self::agent_config::{
+    register_agent_loop_with_bridge, register_llm_call_structured_with_bridge,
+    register_llm_call_with_bridge,
+};
 pub use self::api::fetch_provider_max_context;
 pub(crate) use self::api::vm_call_llm_full;
 pub use self::cost::{calculate_cost_for_provider, peek_total_cost};
@@ -393,18 +396,23 @@ pub fn reset_llm_state() {
 async fn llm_call_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let options = args.get(2).and_then(|a| a.as_dict()).cloned();
     let opts = extract_llm_options(&args)?;
-    execute_llm_call(opts, options).await
+    execute_llm_call(opts, options, None).await
 }
 
 pub(crate) async fn execute_llm_call(
     mut opts: api::LlmCallOptions,
     options: Option<std::collections::BTreeMap<String, VmValue>>,
+    bridge: Option<&Rc<crate::bridge::HostBridge>>,
 ) -> Result<VmValue, VmError> {
     let _ = structural_experiments::apply_structural_experiment(&mut opts, None).await?;
     // Default `llm_retries` to 2 for resilience against transient
-    // HTTP / provider failures. Pass `llm_retries: 0` to opt out.
+    // HTTP / provider failures on the non-bridge path; bridge callers
+    // default to 0 to match the historical bridge-aware `llm_call`
+    // behavior (the host drives retries). Pass `llm_retries: 0` to opt
+    // out explicitly.
+    let transient_default = if bridge.is_some() { 0 } else { 2 };
     let retry_config = agent_observe::LlmRetryConfig {
-        retries: helpers::opt_int(&options, "llm_retries").unwrap_or(2) as usize,
+        retries: helpers::opt_int(&options, "llm_retries").unwrap_or(transient_default) as usize,
         backoff_ms: helpers::opt_int(&options, "llm_backoff_ms").unwrap_or(2000) as u64,
     };
     // Schema retry loop is orthogonal to transient retries. Each
@@ -416,6 +424,8 @@ pub(crate) async fn execute_llm_call(
     let nudge_mode = parse_schema_nudge(&options);
 
     let tool_format = helpers::opt_str(&options, "tool_format");
+    let bridged = bridge.is_some();
+    let user_visible = bridged && helpers::opt_bool(&options, "user_visible");
     // Snapshot the caller's original messages once. Each schema retry
     // replays this snapshot plus a single corrective user message, so
     // the invalid response never pollutes subsequent attempts — the
@@ -426,11 +436,11 @@ pub(crate) async fn execute_llm_call(
         let result = agent_observe::observed_llm_call(
             &opts,
             tool_format.as_deref(),
-            None, // no bridge
+            bridge,
             &retry_config,
             None,
-            false,
-            false, // non-bridge path runs on the local set
+            user_visible,
+            bridged, // offthread=true on the bridge path, local set otherwise
         )
         .await?;
 
@@ -530,6 +540,125 @@ fn llm_safe_envelope_err(err: &VmError) -> VmValue {
     VmValue::Dict(Rc::new(dict))
 }
 
+/// Rewrite `(prompt, schema, options?)` — the ergonomic
+/// `llm_call_structured` argument shape — into the canonical
+/// `(prompt, system, options)` arg list that `extract_llm_options` and
+/// `llm_call_impl` expect. Schema is installed as `output_schema`; the
+/// JSON-schema-validated-output defaults (`response_format: "json"`,
+/// `output_validation: "error"`, `schema_retries: 3`) are applied
+/// unless the caller already set them. The caller's `system` key
+/// (when present) is lifted out of the options dict into the second
+/// positional slot. Built as a standalone helper so the non-bridge
+/// and bridge-aware paths share one definition.
+pub(crate) fn rewrite_structured_args(args: Vec<VmValue>) -> Result<Vec<VmValue>, VmError> {
+    if args.len() < 2 {
+        return Err(VmError::Runtime(
+            "llm_call_structured: missing required `schema` argument (expected \
+             (prompt, schema, options?))"
+                .to_string(),
+        ));
+    }
+    let prompt = args.first().cloned().unwrap_or(VmValue::Nil);
+    let schema = match args.get(1) {
+        Some(VmValue::Dict(_)) => args.get(1).cloned().unwrap(),
+        Some(other) => {
+            return Err(VmError::Runtime(format!(
+                "llm_call_structured: `schema` must be a dict (JSON Schema), got {}",
+                other.type_name()
+            )));
+        }
+        None => unreachable!("len check above guarantees arg index 1"),
+    };
+    let mut options = args
+        .get(2)
+        .and_then(|a| a.as_dict())
+        .cloned()
+        .unwrap_or_default();
+
+    // Pull `system` out of the options dict (ergonomic alias — the
+    // canonical llm_call path takes system as the second positional
+    // arg). Nil values are treated as absence so `{system: nil, ...}`
+    // still lets the default apply.
+    let system = options
+        .remove("system")
+        .filter(|v| !matches!(v, VmValue::Nil));
+
+    // Public ergonomic alias: `retries` in the issue's proposed shape
+    // maps to `schema_retries`. Honor the long form if the caller
+    // passes it explicitly; otherwise default to 3 (enough to recover
+    // from small-model JSON drift while staying cheap on frontier
+    // models that rarely miss).
+    let retries_alias = options.remove("retries").and_then(|v| v.as_int());
+    if let Some(n) = retries_alias {
+        options
+            .entry("schema_retries".to_string())
+            .or_insert(VmValue::Int(n));
+    } else {
+        options
+            .entry("schema_retries".to_string())
+            .or_insert(VmValue::Int(3));
+    }
+
+    options.entry("output_schema".to_string()).or_insert(schema);
+    options
+        .entry("response_format".to_string())
+        .or_insert(VmValue::String(Rc::from("json")));
+    options
+        .entry("output_validation".to_string())
+        .or_insert(VmValue::String(Rc::from("error")));
+
+    Ok(vec![
+        prompt,
+        system.unwrap_or(VmValue::Nil),
+        VmValue::Dict(Rc::new(options)),
+    ])
+}
+
+/// Extract the `.data` field from a canonical `llm_call` result dict.
+/// Used by `llm_call_structured` to surface just the validated payload.
+pub(crate) fn extract_structured_data(response: VmValue) -> VmValue {
+    match response {
+        VmValue::Dict(d) => d.get("data").cloned().unwrap_or(VmValue::Nil),
+        other => other,
+    }
+}
+
+/// Build the `{ok: true, data, error: nil}` envelope for
+/// `llm_call_structured_safe`. Mirrors `llm_safe_envelope_ok` but keys
+/// the payload on `data` (the validated schema-parsed value) instead
+/// of `response` (the full result dict), matching the issue shape.
+pub(crate) fn structured_safe_envelope_ok(data: VmValue) -> VmValue {
+    let mut dict = std::collections::BTreeMap::new();
+    dict.insert("ok".to_string(), VmValue::Bool(true));
+    dict.insert("data".to_string(), data);
+    dict.insert("error".to_string(), VmValue::Nil);
+    VmValue::Dict(Rc::new(dict))
+}
+
+pub(crate) fn structured_safe_envelope_err(err: &VmError) -> VmValue {
+    let category = crate::value::error_to_category(err);
+    let message = match err {
+        VmError::CategorizedError { message, .. } => message.clone(),
+        VmError::Thrown(VmValue::String(s)) => s.to_string(),
+        VmError::Thrown(VmValue::Dict(d)) => d
+            .get("message")
+            .map(|v| v.display())
+            .unwrap_or_else(|| err.to_string()),
+        _ => err.to_string(),
+    };
+    let mut err_dict = std::collections::BTreeMap::new();
+    err_dict.insert(
+        "category".to_string(),
+        VmValue::String(Rc::from(category.as_str())),
+    );
+    err_dict.insert("message".to_string(), VmValue::String(Rc::from(message)));
+    let mut dict = std::collections::BTreeMap::new();
+    dict.insert("ok".to_string(), VmValue::Bool(false));
+    dict.insert("data".to_string(), VmValue::Nil);
+    dict.insert("error".to_string(), VmValue::Dict(Rc::new(err_dict)));
+    VmValue::Dict(Rc::new(dict))
+}
+
 /// Register LLM builtins on a VM.
 pub fn register_llm_builtins(vm: &mut Vm) {
     rate_limit::init_from_config();
@@ -544,6 +673,31 @@ pub fn register_llm_builtins(vm: &mut Vm) {
         match llm_call_impl(args).await {
             Ok(response) => Ok(llm_safe_envelope_ok(response)),
             Err(err) => Ok(llm_safe_envelope_err(&err)),
+        }
+    });
+
+    // `llm_call_structured(prompt, schema, options?)` is ergonomic
+    // sugar for the "ask for JSON against this schema, retry on
+    // validation failure, return the parsed data" pattern. Throws on
+    // exhausted schema retries or transport failure so callers can
+    // assume the returned value matches the schema. The paired
+    // `*_safe` variant returns `{ok, data, error}` for call sites
+    // that prefer explicit branching over `try`.
+    vm.register_async_builtin("llm_call_structured", |args| async move {
+        let rewritten = rewrite_structured_args(args)?;
+        let response = llm_call_impl(rewritten).await?;
+        Ok(extract_structured_data(response))
+    });
+    vm.register_async_builtin("llm_call_structured_safe", |args| async move {
+        let rewritten = match rewrite_structured_args(args) {
+            Ok(v) => v,
+            Err(err) => return Ok(structured_safe_envelope_err(&err)),
+        };
+        match llm_call_impl(rewritten).await {
+            Ok(response) => Ok(structured_safe_envelope_ok(extract_structured_data(
+                response,
+            ))),
+            Err(err) => Ok(structured_safe_envelope_err(&err)),
         }
     });
 
@@ -1141,7 +1295,7 @@ mod tests {
             error: None,
         });
 
-        let response = execute_llm_call(base_opts(), None)
+        let response = execute_llm_call(base_opts(), None, None)
             .await
             .expect("structured retry should recover");
         let dict = response.as_dict().expect("dict response");

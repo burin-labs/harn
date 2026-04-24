@@ -151,7 +151,7 @@ async fn self_review_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
             VmValue::String(Rc::from(system.as_str())),
             options.clone(),
         ])?;
-        let response = execute_llm_call(extracted, Some(options_dict)).await?;
+        let response = execute_llm_call(extracted, Some(options_dict), None).await?;
         let response_dict = response.as_dict().ok_or_else(|| {
             VmError::Runtime("self_review: expected llm response dict".to_string())
         })?;

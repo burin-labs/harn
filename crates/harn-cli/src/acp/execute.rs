@@ -85,7 +85,11 @@ pub(super) async fn execute_chunk(
     harn_vm::llm::register_agent_loop_with_bridge(&mut vm, host_bridge.clone());
 
     // Bridge-aware llm_call adds call_start/call_end observability.
-    harn_vm::llm::register_llm_call_with_bridge(&mut vm, host_bridge);
+    harn_vm::llm::register_llm_call_with_bridge(&mut vm, host_bridge.clone());
+    // Bridge-aware llm_call_structured / llm_call_structured_safe run
+    // the same schema-retry loop as the non-bridge path but emit
+    // call_start/call_end notifications through the bridge.
+    harn_vm::llm::register_llm_call_structured_with_bridge(&mut vm, host_bridge);
 
     let vm_setup_ms = vm_setup_started.elapsed().as_millis() as u64;
     bridge.send_log(

@@ -586,3 +586,47 @@ pub fn register_llm_call_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Host
         }
     });
 }
+
+/// Register bridge-aware `llm_call_structured` / `llm_call_structured_safe`.
+/// The bridge path still runs the schema-retry loop locally so the
+/// throws-on-exhausted-retries contract matches the non-bridge path;
+/// the bridge receives per-attempt call_start/call_end notifications
+/// identically to the plain `llm_call` bridge variant. Paired with
+/// `register_llm_call_with_bridge` in the ACP setup.
+pub fn register_llm_call_structured_with_bridge(
+    vm: &mut Vm,
+    bridge: Rc<crate::bridge::HostBridge>,
+) {
+    let b1 = bridge.clone();
+    vm.register_async_builtin("llm_call_structured", move |args| {
+        let bridge = b1.clone();
+        async move {
+            let rewritten = crate::llm::rewrite_structured_args(args)?;
+            let opts = extract_llm_options(&rewritten)?;
+            let options = rewritten.get(2).and_then(|a| a.as_dict()).cloned();
+            let response = crate::llm::execute_llm_call(opts, options, Some(&bridge)).await?;
+            Ok(crate::llm::extract_structured_data(response))
+        }
+    });
+    let b2 = bridge;
+    vm.register_async_builtin("llm_call_structured_safe", move |args| {
+        let bridge = b2.clone();
+        async move {
+            let rewritten = match crate::llm::rewrite_structured_args(args) {
+                Ok(v) => v,
+                Err(err) => return Ok(crate::llm::structured_safe_envelope_err(&err)),
+            };
+            let opts = match extract_llm_options(&rewritten) {
+                Ok(opts) => opts,
+                Err(err) => return Ok(crate::llm::structured_safe_envelope_err(&err)),
+            };
+            let options = rewritten.get(2).and_then(|a| a.as_dict()).cloned();
+            match crate::llm::execute_llm_call(opts, options, Some(&bridge)).await {
+                Ok(response) => Ok(crate::llm::structured_safe_envelope_ok(
+                    crate::llm::extract_structured_data(response),
+                )),
+                Err(err) => Ok(crate::llm::structured_safe_envelope_err(&err)),
+            }
+        }
+    });
+}

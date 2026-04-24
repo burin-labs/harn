@@ -136,6 +136,18 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("dict")),
     },
     BuiltinSig {
+        name: "llm_call_structured",
+        // Return type is schema-dependent (Schema<T> → T) and resolved
+        // by `lookup_generic_builtin_sig`. Fall-through `None` keeps the
+        // parser from assuming a concrete return type when the schema
+        // argument isn't a typed alias.
+        return_type: None,
+    },
+    BuiltinSig {
+        name: "llm_call_structured_safe",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
         name: "llm_completion",
         return_type: Some(BuiltinReturn::Named("dict")),
     },

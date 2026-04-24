@@ -131,7 +131,7 @@ async fn project_enrich_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
         VmValue::Nil,
         llm_options_value.clone(),
     ])?;
-    match execute_llm_call(extracted, llm_options_value.as_dict().cloned()).await {
+    match execute_llm_call(extracted, llm_options_value.as_dict().cloned(), None).await {
         Ok(response) => {
             let response_dict = response.as_dict().ok_or_else(|| {
                 VmError::Thrown(VmValue::String(Rc::from(

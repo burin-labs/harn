@@ -1,0 +1,28 @@
+// `llm_call_structured_safe(prompt, schema, options?)` returns the
+// `{ok, data, error}` envelope on both success and failure. Mirrors
+// `llm_call_safe` but with `.data` pre-unwrapped.
+pipeline default() {
+  let schema = {type: "object", required: ["verdict"], properties: {verdict: {type: "string"}}}
+  // Success path: parsed data surfaces in `.data`, error is nil.
+  llm_mock({text: "{\"verdict\": \"PASS\"}"})
+  let ok = llm_call_structured_safe("Grade", schema, {provider: "mock"})
+  println(ok.ok)
+  println(ok.data.verdict)
+  println(ok.error == nil)
+  // Schema-validation failure: after `retries: 0` the categorized
+  // schema error is captured in the envelope instead of thrown.
+  llm_mock_clear()
+  llm_mock({text: "{\"other\": \"nope\"}"})
+  let bad = llm_call_structured_safe("Grade", schema, {provider: "mock", retries: 0})
+  println(bad.ok)
+  println(bad.data == nil)
+  println(bad.error.category)
+  // Transport-level failure: injected error bubbles up into
+  // `.error.category` / `.error.message`.
+  llm_mock_clear()
+  llm_mock({error: {category: "rate_limit", message: "429 slow down"}})
+  let rate = llm_call_structured_safe("Grade", schema, {provider: "mock", llm_retries: 0})
+  println(rate.ok)
+  println(rate.error.category)
+  println(contains(rate.error.message, "429"))
+}
