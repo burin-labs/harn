@@ -28,6 +28,11 @@ granular archaeology.
   per-tenant budgets, and topic/namespace helpers. Dispatcher routing
   now scopes all dispatch traffic to tenant topics so one tenant's
   load cannot leak into another's queues.
+- **Package authoring workflow (#471).** Extends `harn.toml`
+  `[package]` with `description`, `license`, `repository`, `harn`
+  (version range), and `docs_url`, adds `harn package new <name>`,
+  `harn package validate`, and `harn package publish --dry-run`, and
+  documents the authoring flow in `docs/src/package-authoring.md`.
 
 ### Changed
 
