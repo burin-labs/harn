@@ -63,8 +63,8 @@ SCRIPTING
     Test(TestArgs),
     /// Scaffold a new project with harn.toml.
     Init(InitArgs),
-    /// Scaffold a new project from a starter template.
-    New(InitArgs),
+    /// Scaffold a new project, package, or connector from a starter template.
+    New(NewArgs),
     /// Diagnose the local Harn environment and provider setup.
     Doctor(DoctorArgs),
     /// Register outbound connector resources with a provider.
@@ -119,6 +119,8 @@ SCRIPTING
     Lock,
     /// Manage Harn package caches and integrity verification.
     Package(PackageArgs),
+    /// Prepare a package for publication. Real registry submission is not yet enabled.
+    Publish(PublishArgs),
     /// List and inspect durable agent persona manifests.
     Persona(PersonaArgs),
     /// Print resolved metadata for a model alias or model id as JSON.
@@ -374,6 +376,19 @@ pub(crate) enum ProjectTemplate {
     Eval,
     #[value(name = "pipeline-lab")]
     PipelineLab,
+    Package,
+    Connector,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct NewArgs {
+    /// Project name, or `package` / `connector` when using `harn new package NAME`.
+    pub first: Option<String>,
+    /// Package or connector name when the first positional argument is a kind.
+    pub second: Option<String>,
+    /// Starter template to scaffold.
+    #[arg(long, value_enum)]
+    pub template: Option<ProjectTemplate>,
 }
 
 #[derive(Debug, Args)]
@@ -1687,8 +1702,50 @@ pub(crate) enum PackageCommand {
     Search(PackageSearchArgs),
     /// Show package registry metadata for one package.
     Info(PackageInfoArgs),
+    /// Validate a package manifest and publish readiness.
+    Check(PackageCheckArgs),
+    /// Build an inspectable package artifact directory.
+    Pack(PackagePackArgs),
+    /// Generate package API docs from exported Harn symbols.
+    Docs(PackageDocsArgs),
     /// Inspect, clean, and verify the shared package cache.
     Cache(PackageCacheArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct PackageCheckArgs {
+    /// Package directory, harn.toml, or file under the package. Defaults to cwd.
+    pub package: Option<PathBuf>,
+    /// Emit JSON instead of a human-readable report.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct PackagePackArgs {
+    /// Package directory, harn.toml, or file under the package. Defaults to cwd.
+    pub package: Option<PathBuf>,
+    /// Output artifact directory. Defaults to .harn/dist/<name>-<version>.
+    #[arg(long, value_name = "DIR")]
+    pub output: Option<PathBuf>,
+    /// Validate and print the file list without writing the artifact.
+    #[arg(long)]
+    pub dry_run: bool,
+    /// Emit JSON instead of a human-readable report.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct PackageDocsArgs {
+    /// Package directory, harn.toml, or file under the package. Defaults to cwd.
+    pub package: Option<PathBuf>,
+    /// Output Markdown file. Defaults to docs/api.md.
+    #[arg(long, value_name = "PATH")]
+    pub output: Option<PathBuf>,
+    /// Verify the output file already matches generated docs.
+    #[arg(long)]
+    pub check: bool,
 }
 
 #[derive(Debug, Args)]
@@ -1711,6 +1768,21 @@ pub(crate) struct PackageInfoArgs {
     #[arg(long, value_name = "URL|PATH")]
     pub registry: Option<String>,
     /// Emit JSON instead of human-readable metadata.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct PublishArgs {
+    /// Package directory, harn.toml, or file under the package. Defaults to cwd.
+    pub package: Option<PathBuf>,
+    /// Required until registry submission support lands.
+    #[arg(long)]
+    pub dry_run: bool,
+    /// Package registry index URL or path to report as the submission target.
+    #[arg(long, value_name = "URL|PATH")]
+    pub registry: Option<String>,
+    /// Emit JSON instead of a human-readable report.
     #[arg(long)]
     pub json: bool,
 }
@@ -2975,8 +3047,21 @@ mod tests {
         let Command::New(args) = cli.command.unwrap() else {
             panic!("expected new command");
         };
-        assert_eq!(args.name.as_deref(), Some("review-bot"));
-        assert_eq!(args.template, ProjectTemplate::Agent);
+        assert_eq!(args.first.as_deref(), Some("review-bot"));
+        assert_eq!(args.second.as_deref(), None);
+        assert_eq!(args.template, Some(ProjectTemplate::Agent));
+    }
+
+    #[test]
+    fn test_parses_new_package_kind() {
+        let cli = Cli::parse_from(["harn", "new", "package", "acme-lib"]);
+
+        let Command::New(args) = cli.command.unwrap() else {
+            panic!("expected new command");
+        };
+        assert_eq!(args.first.as_deref(), Some("package"));
+        assert_eq!(args.second.as_deref(), Some("acme-lib"));
+        assert_eq!(args.template, None);
     }
 
     #[test]
@@ -2992,7 +3077,7 @@ mod tests {
         let Command::New(args) = cli.command.unwrap() else {
             panic!("expected new command");
         };
-        assert_eq!(args.template, ProjectTemplate::PipelineLab);
+        assert_eq!(args.template, Some(ProjectTemplate::PipelineLab));
     }
 
     #[test]
@@ -3125,6 +3210,36 @@ mod tests {
         };
         assert_eq!(info.name, "@burin/notion-sdk@1.2.3");
         assert_eq!(info.registry.as_deref(), Some("index.toml"));
+
+        let cli = Cli::parse_from(["harn", "package", "check", "pkg", "--json"]);
+        let Command::Package(args) = cli.command.unwrap() else {
+            panic!("expected package command");
+        };
+        let PackageCommand::Check(check) = args.command else {
+            panic!("expected package check");
+        };
+        assert_eq!(check.package, Some(PathBuf::from("pkg")));
+        assert!(check.json);
+
+        let cli = Cli::parse_from(["harn", "package", "pack", "pkg", "--dry-run"]);
+        let Command::Package(args) = cli.command.unwrap() else {
+            panic!("expected package command");
+        };
+        let PackageCommand::Pack(pack) = args.command else {
+            panic!("expected package pack");
+        };
+        assert_eq!(pack.package, Some(PathBuf::from("pkg")));
+        assert!(pack.dry_run);
+
+        let cli = Cli::parse_from(["harn", "package", "docs", "pkg", "--check"]);
+        let Command::Package(args) = cli.command.unwrap() else {
+            panic!("expected package command");
+        };
+        let PackageCommand::Docs(docs) = args.command else {
+            panic!("expected package docs");
+        };
+        assert_eq!(docs.package, Some(PathBuf::from("pkg")));
+        assert!(docs.check);
 
         let cli = Cli::parse_from(["harn", "package", "cache", "list"]);
         let Command::Package(args) = cli.command.unwrap() else {

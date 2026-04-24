@@ -33,6 +33,7 @@
 - [Skills](./skills.md)
 - [Personas](./personas.md)
 - [Skill provenance](./skill-provenance.md)
+- [Package authoring](./package-authoring.md)
 - [Sessions](./sessions.md)
 - [Agent state](./agent-state.md)
 - [Transcript architecture](./transcript-architecture.md)

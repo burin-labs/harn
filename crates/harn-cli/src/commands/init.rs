@@ -2,7 +2,27 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process;
 
-use crate::cli::ProjectTemplate;
+use crate::cli::{NewArgs, ProjectTemplate};
+
+pub(crate) fn resolve_new_args(
+    args: &NewArgs,
+) -> Result<(Option<String>, ProjectTemplate), String> {
+    let template = args.template.unwrap_or(ProjectTemplate::Basic);
+    match (args.first.as_deref(), args.second.as_deref()) {
+        (Some("package"), Some(name)) => Ok((Some(name.to_string()), ProjectTemplate::Package)),
+        (Some("connector"), Some(name)) => Ok((Some(name.to_string()), ProjectTemplate::Connector)),
+        (Some(kind @ ("package" | "connector")), None) => Err(format!(
+            "`harn new {kind}` requires a package name, for example `harn new {kind} my-{kind}`"
+        )),
+        (Some(name), None) => Ok((Some(name.to_string()), template)),
+        (None, None) => Ok((None, template)),
+        (Some(_), Some(_)) => Err(
+            "unexpected second positional argument; use `harn new package NAME` or `harn new NAME --template package`"
+                .to_string(),
+        ),
+        (None, Some(_)) => unreachable!("clap cannot fill second positional without first"),
+    }
+}
 
 pub(crate) fn init_project(name: Option<&str>, template: ProjectTemplate) {
     let dir = match name {
@@ -25,7 +45,9 @@ pub(crate) fn init_project(name: Option<&str>, template: ProjectTemplate) {
         }
     };
 
-    let project_name = name.unwrap_or("my-project");
+    let project_name = name
+        .and_then(|value| Path::new(value).file_name().and_then(|name| name.to_str()))
+        .unwrap_or("my-project");
     for (relative_path, content) in template_files(project_name, template) {
         write_if_new(&dir.join(relative_path), &content);
     }
@@ -35,7 +57,11 @@ pub(crate) fn init_project(name: Option<&str>, template: ProjectTemplate) {
         println!("  cd {}", n);
     }
     match template {
-        ProjectTemplate::Basic | ProjectTemplate::Agent | ProjectTemplate::Eval => {
+        ProjectTemplate::Basic
+        | ProjectTemplate::Agent
+        | ProjectTemplate::Eval
+        | ProjectTemplate::Package
+        | ProjectTemplate::Connector => {
             println!("  harn run main.harn       # run the program");
             println!("  harn test tests/         # run the tests");
         }
@@ -49,6 +75,14 @@ pub(crate) fn init_project(name: Option<&str>, template: ProjectTemplate) {
     }
     println!("  harn fmt main.harn       # format code");
     println!("  harn lint main.harn      # lint code");
+    if matches!(
+        template,
+        ProjectTemplate::Package | ProjectTemplate::Connector
+    ) {
+        println!("  harn package check       # validate publish readiness");
+        println!("  harn package docs        # generate API docs");
+        println!("  harn package pack        # build an inspectable artifact");
+    }
     println!("  harn doctor              # verify the local environment");
 }
 
@@ -312,13 +346,325 @@ Edit `host.harn` or `pipeline.harn` and the playground will re-run automatically
                 .to_string(),
             ),
         ],
+        ProjectTemplate::Package => vec![
+            (
+                "harn.toml",
+                format!(
+                    r#"[package]
+name = "{project_name}"
+version = "0.1.0"
+description = "Reusable Harn package."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/OWNER/{project_name}"
+harn = ">=0.7,<0.8"
+docs_url = "docs/api.md"
+
+[exports]
+lib = "lib/main.harn"
+
+[dependencies]
+"#
+                ),
+            ),
+            (
+                "lib/main.harn",
+                r#"/// Return a greeting for `name`.
+pub fn greet(name: string) -> string {
+  return "Hello, " + name + "!"
+}
+"#
+                .to_string(),
+            ),
+            (
+                "main.harn",
+                r#"import "lib/main"
+
+pipeline default(task) {
+  println(greet("world"))
+}
+"#
+                .to_string(),
+            ),
+            (
+                "tests/test_main.harn",
+                r#"import "../lib/main"
+
+pipeline test_greet(task) {
+  assert_eq(greet("Harn"), "Hello, Harn!")
+}
+"#
+                .to_string(),
+            ),
+            (
+                ".github/workflows/harn-package.yml",
+                r#"name: Harn package
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: taiki-e/install-action@cargo-binstall
+      - run: cargo binstall harn-cli --no-confirm
+      - run: harn install --locked --offline || harn install
+      - run: harn test tests/
+      - run: harn package check
+      - run: harn package docs --check
+      - run: harn package pack --dry-run
+"#
+                .to_string(),
+            ),
+            (
+                "README.md",
+                format!(
+                    r#"# {project_name}
+
+Reusable Harn package.
+
+## Quickstart
+
+```bash
+harn add ../{project_name}
+harn test tests/
+harn package check
+harn package docs
+harn package pack
+```
+
+Consumers import stable modules through the `[exports]` entries in `harn.toml`.
+"#
+                ),
+            ),
+            (
+                "LICENSE",
+                "MIT OR Apache-2.0\n".to_string(),
+            ),
+            (
+                "docs/api.md",
+                format!(
+                    r#"# API Reference: {project_name}
+
+Generated by `harn package docs`.
+
+Version: `0.1.0`
+
+## Export `lib`
+
+`lib/main.harn`
+
+### fn `greet`
+
+Return a greeting for `name`.
+
+```harn
+pub fn greet(name: string) -> string
+```
+"#
+                ),
+            ),
+        ],
+        ProjectTemplate::Connector => vec![
+            (
+                "harn.toml",
+                format!(
+                    r#"[package]
+name = "{project_name}"
+version = "0.1.0"
+description = "Pure-Harn connector package."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/OWNER/{project_name}"
+harn = ">=0.7,<0.8"
+docs_url = "docs/api.md"
+
+[exports]
+connector = "connectors/echo.harn"
+
+[[providers]]
+id = "echo"
+connector = {{ harn = "connectors/echo" }}
+
+[connector_contract]
+version = 1
+
+[[connector_contract.fixtures]]
+provider = "echo"
+name = "message"
+kind = "webhook"
+body_json = {{ message = "hello" }}
+expect_type = "event"
+expect_kind = "webhook"
+expect_event_count = 1
+
+[dependencies]
+"#
+                ),
+            ),
+            (
+                "connectors/echo.harn",
+                r#"/// Connector provider id.
+pub fn provider_id() {
+  return "echo"
+}
+
+/// Trigger kinds emitted by this connector.
+pub fn kinds() {
+  return ["webhook"]
+}
+
+/// JSON payload schema for normalized inbound events.
+pub fn payload_schema() {
+  return {
+    harn_schema_name: "EchoEventPayload",
+    json_schema: {
+      type: "object",
+      additionalProperties: true,
+    },
+  }
+}
+
+/// Convert one inbound request into Harn trigger events.
+pub fn normalize_inbound(raw) {
+  let body = raw.body_json ?? json_parse(raw.body_text)
+  return {
+    type: "event",
+    event: {
+      kind: "webhook",
+      dedupe_key: "echo:" + (body.message ?? "message"),
+      payload: body,
+    },
+  }
+}
+"#
+                .to_string(),
+            ),
+            (
+                "main.harn",
+                r#"import "connectors/echo"
+
+pipeline default(task) {
+  println(provider_id())
+}
+"#
+                .to_string(),
+            ),
+            (
+                "tests/test_connector.harn",
+                r#"import "../connectors/echo"
+
+pipeline test_provider_id(task) {
+  assert_eq(provider_id(), "echo")
+  assert_eq(kinds(), ["webhook"])
+}
+"#
+                .to_string(),
+            ),
+            (
+                ".github/workflows/harn-package.yml",
+                r#"name: Harn connector package
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: taiki-e/install-action@cargo-binstall
+      - run: cargo binstall harn-cli --no-confirm
+      - run: harn install --locked --offline || harn install
+      - run: harn test tests/
+      - run: harn connector check .
+      - run: harn package check
+      - run: harn package docs --check
+      - run: harn package pack --dry-run
+"#
+                .to_string(),
+            ),
+            (
+                "README.md",
+                format!(
+                    r#"# {project_name}
+
+Pure-Harn connector package.
+
+## Quickstart
+
+```bash
+harn connector check .
+harn test tests/
+harn package check
+harn package docs
+harn package pack
+```
+
+Consumers import the connector through the stable `[exports]` entry in `harn.toml`.
+"#
+                ),
+            ),
+            ("LICENSE", "MIT OR Apache-2.0\n".to_string()),
+            (
+                "docs/api.md",
+                format!(
+                    r#"# API Reference: {project_name}
+
+Generated by `harn package docs`.
+
+Version: `0.1.0`
+
+## Export `connector`
+
+`connectors/echo.harn`
+
+### fn `provider_id`
+
+Connector provider id.
+
+```harn
+pub fn provider_id()
+```
+
+### fn `kinds`
+
+Trigger kinds emitted by this connector.
+
+```harn
+pub fn kinds()
+```
+
+### fn `payload_schema`
+
+JSON payload schema for normalized inbound events.
+
+```harn
+pub fn payload_schema()
+```
+
+### fn `normalize_inbound`
+
+Convert one inbound request into Harn trigger events.
+
+```harn
+pub fn normalize_inbound(raw)
+```
+"#
+                ),
+            ),
+        ],
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::template_files;
-    use crate::cli::ProjectTemplate;
+    use super::{resolve_new_args, template_files};
+    use crate::cli::{NewArgs, ProjectTemplate};
 
     #[test]
     fn basic_template_keeps_library_layout() {
@@ -347,5 +693,28 @@ mod tests {
         assert!(pipeline_lab
             .iter()
             .any(|(path, _)| *path == "pipeline.harn"));
+
+        let package = template_files("sample", ProjectTemplate::Package);
+        assert!(package.iter().any(|(path, _)| *path == "lib/main.harn"));
+        assert!(package
+            .iter()
+            .any(|(path, _)| *path == ".github/workflows/harn-package.yml"));
+
+        let connector = template_files("sample", ProjectTemplate::Connector);
+        assert!(connector
+            .iter()
+            .any(|(path, _)| *path == "connectors/echo.harn"));
+    }
+
+    #[test]
+    fn new_package_kind_resolves_to_package_template() {
+        let args = NewArgs {
+            first: Some("package".to_string()),
+            second: Some("sample".to_string()),
+            template: None,
+        };
+        let (name, template) = resolve_new_args(&args).unwrap();
+        assert_eq!(name.as_deref(), Some("sample"));
+        assert_eq!(template, ProjectTemplate::Package);
     }
 }
