@@ -435,6 +435,8 @@ mod tests {
             ("dashscope", "qwen3.6-plus"),
             ("llamacpp", "unsloth/Qwen3.6-35B-A3B-GGUF"),
             ("local", "Qwen3.6-35B-A3B"),
+            ("mlx", "unsloth/Qwen3.6-27B-UD-MLX-4bit"),
+            ("mlx", "Qwen/Qwen3.6-27B"),
         ] {
             let caps = lookup(provider, model);
             assert!(caps.thinking, "{provider}/{model}: thinking");
