@@ -100,6 +100,11 @@ println(unwrap_err(bad))         // something went wrong
 | `schema_pick(schema, keys)` | schema: dict, keys: list | dict | Keep only selected top-level properties |
 | `schema_omit(schema, keys)` | schema: dict, keys: list | dict | Remove selected top-level properties |
 | `json_extract(text, key?)` | text: string, key: string (optional) | value | Extract JSON from text (strips markdown code fences). If key given, returns that key's value |
+| `json_pointer(value, ptr)` | value: any, ptr: string | value | Read an RFC 6901 JSON Pointer path. Returns `nil` when missing |
+| `json_pointer_set(value, ptr, new)` | value: any, ptr: string, new: any | value | Return a copy with a JSON Pointer path replaced or inserted at an existing parent |
+| `json_pointer_delete(value, ptr)` | value: any, ptr: string | value | Return a copy with a JSON Pointer path removed. Missing paths are unchanged |
+| `jq(value, expr)` | value: any, expr: string | list | Evaluate a jq-like expression and return the emitted stream as a list |
+| `jq_first(value, expr)` | value: any, expr: string | value | Return the first `jq` result, or `nil` when the expression emits nothing |
 
 Type mapping:
 
@@ -215,6 +220,28 @@ correctly extract nested objects and arrays from mixed prose.
 let result = llm_call("Return JSON with name and age")
 let data = json_extract(result.text)         // parse, stripping fences
 let name = json_extract(result.text, "name") // extract just one key
+```
+
+### JSON Pointer and jq-like queries
+
+`json_pointer` implements RFC 6901 addressing, including `~0` for `~`
+and `~1` for `/`. `json_pointer_set` and `json_pointer_delete` return
+mutated copies instead of changing the input value in place. Setting a
+dict key inserts or replaces it when the parent exists; setting a list
+index replaces that element, and `-` appends.
+
+`jq` supports the v1 scripting subset: identity, field access,
+quoted-key access, array iteration/index/slice, pipes, commas,
+`length`, `keys`, `values`, `type`, `map(...)`, `select(...)`,
+`==`, `!=`, `<`, `>`, `and`, `or`, `not`, object construction, and
+recursive descent. It always returns the emitted stream as a list;
+`jq_first` is the convenience form for single-result queries.
+
+```harn
+let api = json_parse(response.body)
+let email = json_pointer(api, "/users/0/email")
+let active_emails = jq(api, ".users[] | select(.active == true) | .email")
+let summary = jq_first(api, "{ count: .users | length, next: .meta.next }")
 ```
 
 ## Math

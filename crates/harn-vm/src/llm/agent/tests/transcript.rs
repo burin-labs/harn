@@ -150,6 +150,8 @@ async fn observed_llm_call_transcript_records_thinking_settings() {
         "role": "user",
         "content": "reason about this task",
     })]);
+    let model_marker = format!("mock-thinking-marker-{}", uuid::Uuid::now_v7());
+    opts.model = model_marker.clone();
     opts.thinking = Some(crate::llm::api::ThinkingConfig::WithBudget(2048));
 
     let _ = observed_llm_call(
@@ -169,7 +171,9 @@ async fn observed_llm_call_transcript_records_thinking_settings() {
     let request = transcript
         .lines()
         .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
-        .find(|line| line["type"] == "provider_call_request")
+        .find(|line| {
+            line["type"] == "provider_call_request" && line["model"] == model_marker.as_str()
+        })
         .expect("provider_call_request event");
     assert_eq!(request["thinking"]["enabled"], serde_json::json!(true));
     assert_eq!(

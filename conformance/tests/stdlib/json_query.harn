@@ -1,0 +1,20 @@
+pipeline test(task) {
+  let api = json_parse(
+    "{\"users\":[{\"name\":\"Ada\",\"email\":\"ada@example.com\",\"age\":36,\"score\":9,\"active\":true},{\"name\":\"Bob\",\"email\":\"bob@example.com\",\"age\":41,\"score\":5,\"active\":false},{\"name\":\"Cy\",\"email\":\"cy@example.com\",\"age\":29,\"score\":8,\"active\":true}],\"meta\":{\"count\":3,\"next\":null},\"quoted key\":{\"value\":9}}",
+  )
+  println(jq_first(api, ".users[0].name"))
+  println(jq_first(api, ".[\"quoted key\"].value"))
+  println(json_stringify(jq(api, ".users[] | .email")))
+  println(json_stringify(jq(api, ".users[1:3] | .[] | .name")))
+  println(jq_first(api, ".users | length"))
+  println(json_stringify(jq_first(api, ".meta | keys")))
+  println(json_stringify(jq_first(api, ".users[0] | values")))
+  println(jq_first(api, ".users | type"))
+  println(json_stringify(jq_first(api, ".users | map(.name)")))
+  println(json_stringify(jq(api, ".users[] | select(.active == true) | .email")))
+  println(json_stringify(jq(api, ".users[] | select(.score > 7 and .active == true) | .name")))
+  println(json_stringify(jq(api, ".users[] | select(not .active) | .name")))
+  println(json_stringify(jq_first(api, "{ name: .users[0].name, age: .users[0].age }")))
+  println(json_stringify(jq(api, ".meta.count, .meta.next")))
+  println(json_stringify(jq(api, ".. | select(type == \"object\" and .email != null) | .email")))
+}

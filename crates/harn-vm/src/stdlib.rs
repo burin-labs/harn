@@ -17,6 +17,7 @@ pub mod host;
 mod io;
 mod iter;
 pub(crate) mod json;
+mod json_query;
 mod logging;
 mod math;
 mod monitors;

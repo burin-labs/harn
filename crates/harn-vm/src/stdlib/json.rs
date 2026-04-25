@@ -2,6 +2,7 @@ use std::rc::Rc;
 use std::{cell::RefCell, collections::BTreeMap, thread_local};
 
 use crate::schema;
+use crate::stdlib::json_query;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -246,6 +247,211 @@ pub(crate) fn register_json_builtins(vm: &mut Vm) {
             None => Ok(parsed),
         }
     });
+
+    vm.register_builtin("json_pointer", |args, _out| {
+        require_args(args, 2, "json_pointer")?;
+        let ptr = args[1].display();
+        json_pointer_get(&args[0], &ptr)
+    });
+
+    vm.register_builtin("json_pointer_set", |args, _out| {
+        require_args(args, 3, "json_pointer_set")?;
+        let ptr = args[1].display();
+        json_pointer_set(&args[0], &ptr, args[2].clone())
+    });
+
+    vm.register_builtin("json_pointer_delete", |args, _out| {
+        require_args(args, 2, "json_pointer_delete")?;
+        let ptr = args[1].display();
+        json_pointer_delete(&args[0], &ptr)
+    });
+
+    vm.register_builtin("jq", |args, _out| {
+        require_args(args, 2, "jq")?;
+        let expr = args[1].display();
+        json_query::eval_jq(&args[0], &expr)
+            .map(|values| VmValue::List(Rc::new(values)))
+            .map_err(|error| VmError::Thrown(VmValue::String(Rc::from(error))))
+    });
+
+    vm.register_builtin("jq_first", |args, _out| {
+        require_args(args, 2, "jq_first")?;
+        let expr = args[1].display();
+        json_query::eval_jq(&args[0], &expr)
+            .map(|values| values.into_iter().next().unwrap_or(VmValue::Nil))
+            .map_err(|error| VmError::Thrown(VmValue::String(Rc::from(error))))
+    });
+}
+
+fn json_pointer_tokens(ptr: &str, builtin: &str) -> Result<Vec<String>, VmError> {
+    if ptr.is_empty() {
+        return Ok(Vec::new());
+    }
+    if !ptr.starts_with('/') {
+        return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+            "{builtin}: pointer must be empty or start with '/'"
+        )))));
+    }
+    ptr[1..]
+        .split('/')
+        .map(|segment| {
+            let mut decoded = String::with_capacity(segment.len());
+            let mut chars = segment.chars();
+            while let Some(ch) = chars.next() {
+                if ch == '~' {
+                    match chars.next() {
+                        Some('0') => decoded.push('~'),
+                        Some('1') => decoded.push('/'),
+                        Some(other) => {
+                            return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                                "{builtin}: invalid escape '~{other}' in pointer"
+                            )))));
+                        }
+                        None => {
+                            return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                                "{builtin}: dangling '~' in pointer"
+                            )))));
+                        }
+                    }
+                } else {
+                    decoded.push(ch);
+                }
+            }
+            Ok(decoded)
+        })
+        .collect()
+}
+
+fn json_pointer_get(value: &VmValue, ptr: &str) -> Result<VmValue, VmError> {
+    let tokens = json_pointer_tokens(ptr, "json_pointer")?;
+    let mut current = value;
+    for token in tokens {
+        match current {
+            VmValue::Dict(map) => {
+                let Some(next) = map.get(&token) else {
+                    return Ok(VmValue::Nil);
+                };
+                current = next;
+            }
+            VmValue::List(items) => {
+                let Some(index) = parse_pointer_index(&token) else {
+                    return Ok(VmValue::Nil);
+                };
+                let Some(next) = items.get(index) else {
+                    return Ok(VmValue::Nil);
+                };
+                current = next;
+            }
+            _ => return Ok(VmValue::Nil),
+        }
+    }
+    Ok(current.clone())
+}
+
+fn json_pointer_set(value: &VmValue, ptr: &str, replacement: VmValue) -> Result<VmValue, VmError> {
+    let tokens = json_pointer_tokens(ptr, "json_pointer_set")?;
+    if tokens.is_empty() {
+        return Ok(replacement);
+    }
+    Ok(pointer_set_at(value, &tokens, replacement))
+}
+
+fn pointer_set_at(value: &VmValue, tokens: &[String], replacement: VmValue) -> VmValue {
+    let Some((head, tail)) = tokens.split_first() else {
+        return replacement;
+    };
+    match value {
+        VmValue::Dict(map) => {
+            let mut next = map.as_ref().clone();
+            if tail.is_empty() {
+                next.insert(head.clone(), replacement);
+                VmValue::Dict(Rc::new(next))
+            } else if let Some(child) = map.get(head) {
+                next.insert(head.clone(), pointer_set_at(child, tail, replacement));
+                VmValue::Dict(Rc::new(next))
+            } else {
+                value.clone()
+            }
+        }
+        VmValue::List(items) => {
+            let mut next = items.as_ref().clone();
+            if tail.is_empty() {
+                if head == "-" || parse_pointer_index(head) == Some(next.len()) {
+                    next.push(replacement);
+                    return VmValue::List(Rc::new(next));
+                }
+                if let Some(index) = parse_pointer_index(head) {
+                    if let Some(slot) = next.get_mut(index) {
+                        *slot = replacement;
+                        return VmValue::List(Rc::new(next));
+                    }
+                }
+                value.clone()
+            } else if let Some(index) = parse_pointer_index(head) {
+                if let Some(child) = items.get(index) {
+                    next[index] = pointer_set_at(child, tail, replacement);
+                    VmValue::List(Rc::new(next))
+                } else {
+                    value.clone()
+                }
+            } else {
+                value.clone()
+            }
+        }
+        _ => value.clone(),
+    }
+}
+
+fn json_pointer_delete(value: &VmValue, ptr: &str) -> Result<VmValue, VmError> {
+    let tokens = json_pointer_tokens(ptr, "json_pointer_delete")?;
+    if tokens.is_empty() {
+        return Ok(VmValue::Nil);
+    }
+    Ok(pointer_delete_at(value, &tokens))
+}
+
+fn pointer_delete_at(value: &VmValue, tokens: &[String]) -> VmValue {
+    let Some((head, tail)) = tokens.split_first() else {
+        return value.clone();
+    };
+    match value {
+        VmValue::Dict(map) => {
+            let mut next = map.as_ref().clone();
+            if tail.is_empty() {
+                next.remove(head);
+                VmValue::Dict(Rc::new(next))
+            } else if let Some(child) = map.get(head) {
+                next.insert(head.clone(), pointer_delete_at(child, tail));
+                VmValue::Dict(Rc::new(next))
+            } else {
+                value.clone()
+            }
+        }
+        VmValue::List(items) => {
+            let mut next = items.as_ref().clone();
+            if let Some(index) = parse_pointer_index(head) {
+                if index >= next.len() {
+                    return value.clone();
+                }
+                if tail.is_empty() {
+                    next.remove(index);
+                } else {
+                    next[index] = pointer_delete_at(&next[index], tail);
+                }
+                VmValue::List(Rc::new(next))
+            } else {
+                value.clone()
+            }
+        }
+        _ => value.clone(),
+    }
+}
+
+fn parse_pointer_index(token: &str) -> Option<usize> {
+    if token.is_empty() || (token.len() > 1 && token.starts_with('0')) {
+        return None;
+    }
+    token.parse::<usize>().ok()
 }
 
 pub(crate) fn escape_json_string_vm(s: &str) -> String {
