@@ -18,16 +18,12 @@
 //!
 //! ## Status
 //!
-//! The deterministic-tool surface (`tools/{search, read_file, write_file,
-//! delete_file, list_directory, get_file_outline, git}`), process-lifecycle
-//! tools, and the code-index surface (`code_index/{query, rebuild, stats,
-//! imports_for, importers_of}`) are implemented. The remaining modules
-//! (`ast/`, `scanner/`, `fs_watch/`) still return
-//! [`HostlibError::Unimplemented`] until their implementations are filled in.
-//! The public surface —
-//! module names, method names, and JSON schemas under `schemas/` — is the
-//! source of truth for `burin-code`'s schema-drift tests, so it must stay
-//! stable while module bodies evolve.
+//! The AST, scanner, code-index, and deterministic-tool surfaces are
+//! implemented. `fs_watch/` still registers its public contract with
+//! [`HostlibError::Unimplemented`] handlers. Module names, method names,
+//! and JSON schemas under `schemas/` are the source of truth for
+//! `burin-code`'s schema-drift tests, so they must stay stable while module
+//! bodies evolve.
 
 #![deny(rust_2018_idioms)]
 #![warn(missing_docs)]

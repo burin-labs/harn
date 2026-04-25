@@ -35,8 +35,12 @@ use tokio::sync::oneshot;
 const STARTUP_PREFIX: &str = "[harn] HTTP listener ready on ";
 const STARTUP_NEEDLE: &str = "HTTP listener ready";
 const SHUTDOWN_NEEDLE: &str = "graceful shutdown complete";
-const PROCESS_FAIL_FAST_TIMEOUT: Duration = Duration::from_secs(5);
-const EVENT_FAIL_FAST_TIMEOUT: Duration = Duration::from_secs(2);
+// Was 5s; bumped to 15s to absorb the cold-start latency the harn-cli
+// binary takes when nextest runs all 2k+ workspace tests in parallel
+// under load. Local fail-fast loops still trip well before any real
+// startup hang surfaces.
+const PROCESS_FAIL_FAST_TIMEOUT: Duration = Duration::from_secs(15);
+const EVENT_FAIL_FAST_TIMEOUT: Duration = Duration::from_secs(5);
 
 type HmacSha256 = Hmac<Sha256>;
 

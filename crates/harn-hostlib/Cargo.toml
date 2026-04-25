@@ -43,6 +43,7 @@ ignore = "0.4"
 notify = "8"
 walkdir = "2"
 base64 = "0.22"
+regex = "1"
 
 # Tree-sitter grammars driving `ast::*` (issue #564). Versions match the
 # Swift `ASTEngine` set verbatim — see the `ast` module for the language
@@ -72,5 +73,6 @@ tree-sitter-r = "1.2"
 [dev-dependencies]
 tempfile = "3"
 serde_json = "1"
+filetime = "0.2"
 harn-lexer = { path = "../harn-lexer", version = "0.7" }
 harn-parser = { path = "../harn-parser", version = "0.7" }

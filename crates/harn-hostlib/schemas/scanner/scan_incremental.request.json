@@ -2,10 +2,31 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://harnlang.com/schemas/hostlib/scanner/scan_incremental.request.json",
   "title": "scanner.scan_incremental request",
-  "description": "Compute a delta against a prior `scan_project` snapshot.",
+  "description": "Refresh a previous `scan_project` against the current filesystem. Returns the same `ScanResult` shape as `scan_project` plus a `delta` block describing which paths changed since the snapshot.",
   "type": "object",
   "properties": {
-    "snapshot_token": { "type": "string" }
+    "snapshot_token": {
+      "type": "string",
+      "description": "Token returned by a prior `scan_project` (or another `scan_incremental`) call. Identifies the persisted snapshot to diff against."
+    },
+    "changed_paths": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Optional explicit set of repo-relative paths that changed since the snapshot. Falls back to filesystem mtime + presence checks when omitted."
+    },
+    "include_git_history": { "type": "boolean", "default": false },
+    "repo_map_token_budget": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 1200
+    },
+    "max_files": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 0
+    },
+    "include_hidden": { "type": "boolean", "default": false },
+    "respect_gitignore": { "type": "boolean", "default": true }
   },
   "required": ["snapshot_token"],
   "additionalProperties": false

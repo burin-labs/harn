@@ -103,7 +103,21 @@ fn scanner_capability_registers_documented_methods() {
             "hostlib_scanner_scan_incremental"
         ]
     );
-    assert_all_unimplemented(&registry);
+    // Implemented scanner methods should refuse an empty payload with
+    // `MissingParameter` rather than routing through `Unimplemented`.
+    // The full scanner contract is exercised end-to-end in
+    // `tests/scanner_e2e.rs`.
+    for name in &[
+        "hostlib_scanner_scan_project",
+        "hostlib_scanner_scan_incremental",
+    ] {
+        let entry = registry.find(name).expect("registered");
+        let err = (entry.handler)(&[]).expect_err("must reject empty args");
+        assert!(
+            !matches!(err, HostlibError::Unimplemented { .. }),
+            "scanner method {name} should be implemented, got {err:?}"
+        );
+    }
 }
 
 #[test]

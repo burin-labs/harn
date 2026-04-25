@@ -2,13 +2,40 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://harnlang.com/schemas/hostlib/scanner/scan_project.request.json",
   "title": "scanner.scan_project request",
-  "description": "Walk the project root and return a deterministic file list. Honors `.gitignore` and friends through `ignore`.",
+  "description": "Walk a project root deterministically and emit a `ScanResult` matching the burin-code Swift CoreRepoScanner schema: project metadata, file/folder/symbol records, dependency edges, and a token-budgeted repo map. Honors `.gitignore` and language-specific excluded directories.",
   "type": "object",
   "properties": {
-    "root": { "type": "string" },
-    "include_hidden": { "type": "boolean", "default": false },
-    "respect_gitignore": { "type": "boolean", "default": true },
-    "max_files": { "type": "integer", "minimum": 0, "default": 0 }
+    "root": {
+      "type": "string",
+      "description": "Absolute or working-directory-relative path to scan."
+    },
+    "include_hidden": {
+      "type": "boolean",
+      "default": false,
+      "description": "Include dotfiles (`.envrc`, `.github/`, etc.). The standard excluded-directory set still applies."
+    },
+    "respect_gitignore": {
+      "type": "boolean",
+      "default": true,
+      "description": "Honor `.gitignore`/`.git/info/exclude`. Set false to scan ignored content (e.g. when indexing a vendored snapshot)."
+    },
+    "max_files": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 0,
+      "description": "Hard cap on file count (0 = unlimited). When the cap is reached the response sets `truncated=true`."
+    },
+    "include_git_history": {
+      "type": "boolean",
+      "default": true,
+      "description": "Run `git log --since=90.days` to compute per-file churn scores. Skip in environments without git or for one-shot scans where churn is not needed."
+    },
+    "repo_map_token_budget": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 1200,
+      "description": "Approximate token budget for the text repo map. The builder caps emission at `4 * budget` characters."
+    }
   },
   "required": ["root"],
   "additionalProperties": false
