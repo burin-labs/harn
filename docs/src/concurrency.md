@@ -149,6 +149,10 @@ Use `try_receive(ch)` for non-blocking reads -- it returns `nil`
 immediately if no message is available. Use `close_channel(ch)` to
 signal that no more messages will be sent.
 
+For dynamic fan-in, `channel_select([ch1, ch2, ...], timeout?)` mirrors the
+`select { ... }` statement but takes a runtime list of channels and returns the
+same `{index, value, channel}` dict.
+
 ## Scoped shared state
 
 Normal values are copied into child VMs. Use shared cells or maps only when
@@ -313,12 +317,16 @@ Harn synchronization is intentionally higher-level than OS locks:
 |---|---|---|---|---|
 | `mutex { ... }` | process-local default key | FIFO | cancellable | Small critical-section updates |
 | `sync_mutex_acquire(key, timeout?)` | process-local named key | FIFO | returns `nil` on timeout, throws on cancellation | Named critical sections |
+| `sync_rwlock_acquire(key, mode, timeout?)` | process-local named key | FIFO | returns `nil` on timeout, throws on cancellation | Shared readers / exclusive writers |
 | `sync_semaphore_acquire(key, capacity, permits?, timeout?)` | process-local named key | FIFO | returns `nil` on timeout, throws on cancellation | Bounded connector or model work |
 | `sync_gate_acquire(key, limit, timeout?)` | process-local named key | FIFO | returns `nil` on timeout, throws on cancellation | Fair runner admission |
 
 All permits are parking primitives, not spinlocks. A permit returned by
 `sync_*_acquire` must be passed to `sync_release(permit)`. Releasing twice
 returns `false`; the first release returns `true`.
+
+`sync_rwlock_acquire(key, "read", timeout?)` takes one shared permit, while
+`sync_rwlock_acquire(key, "write", timeout?)` waits for exclusive access.
 
 `sync_metrics(kind?, key?)` reports wait/held counters for matching
 primitives:

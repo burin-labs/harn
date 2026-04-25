@@ -154,6 +154,7 @@ pub fn values_equal(a: &VmValue, b: &VmValue) -> bool {
         (VmValue::Float(x), VmValue::Int(y)) => *x == (*y as f64),
         (VmValue::TaskHandle(a), VmValue::TaskHandle(b)) => a == b,
         (VmValue::Channel(_), VmValue::Channel(_)) => false, // channels are never equal
+        (VmValue::Rng(_), VmValue::Rng(_)) => false,
         (VmValue::SyncPermit(_), VmValue::SyncPermit(_)) => false,
         (VmValue::Atomic(a), VmValue::Atomic(b)) => {
             a.value.load(Ordering::SeqCst) == b.value.load(Ordering::SeqCst)

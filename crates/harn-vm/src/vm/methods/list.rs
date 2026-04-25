@@ -429,13 +429,16 @@ impl crate::vm::Vm {
             }
             "window" | "each_cons" | "sliding_window" => {
                 let size = args.first().and_then(|a| a.as_int()).unwrap_or(2).max(1) as usize;
+                let step = args.get(1).and_then(|a| a.as_int()).unwrap_or(1).max(1) as usize;
                 if size > items.len() {
                     return Ok(VmValue::List(Rc::new(Vec::new())));
                 }
-                let windows: Vec<VmValue> = items
-                    .windows(size)
-                    .map(|w| VmValue::List(Rc::new(w.to_vec())))
-                    .collect();
+                let mut windows = Vec::new();
+                let mut start = 0;
+                while start + size <= items.len() {
+                    windows.push(VmValue::List(Rc::new(items[start..start + size].to_vec())));
+                    start += step;
+                }
                 Ok(VmValue::List(Rc::new(windows)))
             }
             "tally" => {

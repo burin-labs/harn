@@ -318,6 +318,40 @@ pub(crate) fn register_io_builtins(vm: &mut Vm) {
         Ok(VmValue::String(Rc::from(uuid::Uuid::new_v4().to_string())))
     });
 
+    vm.register_builtin("uuid_parse", |args, _out| {
+        let raw = args.first().map(|a| a.display()).unwrap_or_default();
+        match uuid::Uuid::parse_str(&raw) {
+            Ok(uuid) => Ok(VmValue::String(Rc::from(uuid.to_string()))),
+            Err(_) => Ok(VmValue::Nil),
+        }
+    });
+
+    vm.register_builtin("uuid_v7", |_args, _out| {
+        Ok(VmValue::String(Rc::from(uuid::Uuid::now_v7().to_string())))
+    });
+
+    vm.register_builtin("uuid_v5", |args, _out| {
+        if args.len() < 2 {
+            return Err(VmError::Runtime(
+                "uuid_v5(namespace, name): requires namespace and name".to_string(),
+            ));
+        }
+        let namespace_raw = args[0].display();
+        let namespace = uuid_v5_namespace(&namespace_raw).ok_or_else(|| {
+            VmError::Runtime(
+                "uuid_v5: namespace must be a UUID or one of dns/url/oid/x500".to_string(),
+            )
+        })?;
+        let name = args[1].display();
+        Ok(VmValue::String(Rc::from(
+            uuid::Uuid::new_v5(&namespace, name.as_bytes()).to_string(),
+        )))
+    });
+
+    vm.register_builtin("uuid_nil", |_args, _out| {
+        Ok(VmValue::String(Rc::from(uuid::Uuid::nil().to_string())))
+    });
+
     vm.register_builtin("prompt_user", |args, out| {
         let msg = args.first().map(|a| a.display()).unwrap_or_default();
         out.push_str(&msg);
@@ -383,6 +417,16 @@ pub(crate) fn register_io_builtins(vm: &mut Vm) {
         ));
         Ok(VmValue::Nil)
     });
+}
+
+fn uuid_v5_namespace(raw: &str) -> Option<uuid::Uuid> {
+    match raw.to_ascii_lowercase().as_str() {
+        "dns" | "namespace_dns" => Some(uuid::Uuid::NAMESPACE_DNS),
+        "url" | "namespace_url" => Some(uuid::Uuid::NAMESPACE_URL),
+        "oid" | "namespace_oid" => Some(uuid::Uuid::NAMESPACE_OID),
+        "x500" | "namespace_x500" => Some(uuid::Uuid::NAMESPACE_X500),
+        _ => uuid::Uuid::parse_str(raw).ok(),
+    }
 }
 
 fn render_progress_line(args: &[VmValue]) -> String {

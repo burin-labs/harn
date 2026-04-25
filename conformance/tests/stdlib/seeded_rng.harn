@@ -1,0 +1,13 @@
+pipeline test(task) {
+  let rng_a = rng_seed(42)
+  let rng_b = rng_seed(42)
+  assert_eq(random(rng_a), random(rng_b))
+  assert_eq(random_int(rng_a, 10, 99), random_int(rng_b, 10, 99))
+  assert_eq(
+    random_choice(rng_a, ["alpha", "beta", "gamma"]),
+    random_choice(rng_b, ["alpha", "beta", "gamma"]),
+  )
+  assert_eq(random_shuffle(rng_a, [1, 2, 3, 4, 5]), random_shuffle(rng_b, [1, 2, 3, 4, 5]))
+  assert_eq(random_choice(["only"]), "only")
+  log("seeded rng ok")
+}

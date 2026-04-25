@@ -517,6 +517,8 @@ let swapped  = regex_replace("(\\w+)\\s(\\w+)", "$2 $1", "hello world")
 let same     = regex_replace_all("(\\w+)\\s(\\w+)", "$2 $1", "hello world")
 //           -> alias of regex_replace; every match replaced.
 let captures = regex_captures("(?P<day>[A-Z][a-z]+)", "Mon Tue")
+let words    = regex_split("a, b, c", ",\\s*")
+let ci       = regex_match("hello", "HeLLo", "i")
 ```
 
 `regex_replace` and `regex_replace_all` both replace every match and
@@ -550,6 +552,19 @@ let tar_entries = tar_extract(tar)     // [{path, content: bytes, mode}]
 
 let zip = zip_create([{path: "a.txt", content: "alpha"}])
 let zip_entries = zip_extract(zip)     // [{path, content: bytes}]
+```
+
+## Scripting helpers
+
+```harn
+let rng = rng_seed(42)
+let roll = random_int(rng, 1, 6)
+let shuffled = random_shuffle(rng, [1, 2, 3, 4])
+let grouped = group_by(["a", "bb", "c"], { s -> len(s) })
+let parts = partition([1, 2, 3, 4], { x -> x % 2 == 0 })
+let padded = str_pad("é", 3, ".", "both")
+let graphemes = unicode_graphemes("éx")
+let parsed = uuid_parse(uuid_v7())
 ```
 
 ## LLM surface

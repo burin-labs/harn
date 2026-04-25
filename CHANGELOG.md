@@ -26,6 +26,17 @@ granular archaeology.
   parsing, process-local test result handles, package-manager command
   assembly, and the public `harn_vm::process_sandbox` helpers so active
   Linux seccomp/landlock and macOS sandbox-exec policies still apply.
+- **Stdlib scripting helpers (#618).** Added reproducible RNG handles
+  via `rng_seed(...)` and seeded overloads for `random`,
+  `random_int`, `random_choice`, and `random_shuffle`; promoted
+  `mean` / `median` / `variance` / `stddev` / `percentile` and
+  collection helpers (`chunk`, `window`, `group_by`, `partition`,
+  `dedup_by`, `flat_map`) to global builtins; added `uuid_parse`,
+  `uuid_v5`, `uuid_v7`, and `uuid_nil`; shipped
+  `unicode_normalize`, `unicode_graphemes`, and `str_pad`; added
+  `sync_rwlock_acquire` and `channel_select`; and extended regex
+  support with optional match flags plus `regex_split`. Each area
+  now has dedicated conformance coverage.
 
 - **Scanner host builtins (#566).** `harn-hostlib`'s `scanner/` module
   gains live implementations of `scan_project` and `scan_incremental`.

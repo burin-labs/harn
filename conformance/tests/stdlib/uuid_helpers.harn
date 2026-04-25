@@ -1,0 +1,14 @@
+pipeline test(task) {
+  let v7 = uuid_v7()
+  assert_eq(len(v7), 36)
+  assert_eq(substring(v7, 14, 1), "7")
+  assert_eq(uuid_parse(v7), v7)
+  assert_eq(uuid_parse("not-a-uuid"), nil)
+  let v5_a = uuid_v5("dns", "harnlang.com")
+  let v5_b = uuid_v5("dns", "harnlang.com")
+  assert_eq(v5_a, v5_b)
+  assert_eq(substring(v5_a, 14, 1), "5")
+  assert_eq(uuid_parse(v5_a), v5_a)
+  assert_eq(uuid_nil(), "00000000-0000-0000-0000-000000000000")
+  log("uuid helpers ok")
+}

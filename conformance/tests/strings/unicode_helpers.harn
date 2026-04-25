@@ -1,0 +1,8 @@
+pipeline test(task) {
+  assert_eq(unicode_normalize("é", "NFC"), "é")
+  assert_eq(len(unicode_graphemes("éx")), 2)
+  assert_eq(str_pad("ha", 5, ".", "left"), "...ha")
+  assert_eq(str_pad("ha", 5, ".", "right"), "ha...")
+  assert_eq(str_pad("é", 3, ".", "both"), ".é.")
+  log("unicode helpers ok")
+}
