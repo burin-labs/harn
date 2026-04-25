@@ -3342,6 +3342,10 @@ Sets are iterable with `for ... in` and support `len()`.
 | `tar_extract(bytes)` | Extracts an in-memory tar archive into `[{path, content: bytes, mode}]` |
 | `zip_create(entries)` | Creates an in-memory deflated zip archive from `[{path, content}]` and returns `bytes`; `content` may be bytes or string |
 | `zip_extract(bytes)` | Extracts an in-memory zip archive into `[{path, content: bytes}]` |
+| `multipart_parse(body, content_type, opts?)` | Parses a buffered `multipart/form-data` body from bytes/string plus `Content-Type`; `opts` supports `max_total_bytes`, `max_field_bytes`, and `max_fields` |
+| `multipart_field_bytes(field)` | Returns a parsed multipart field's raw bytes |
+| `multipart_field_text(field)` | Decodes a parsed multipart field's bytes as UTF-8, throwing on invalid text |
+| `multipart_form_data(fields, opts?)` | Deterministically builds `{content_type, boundary, body}` multipart fixtures for tests; field content may be bytes or string |
 
 ```harn
 let encoded = base64_encode("hello world")  // "aGVsbG8gd29ybGQ="
@@ -3352,6 +3356,33 @@ let hash = sha256("hello")                  // hex string
 let md5hash = md5("hello")                  // hex string
 let gz = gzip_encode("hello")               // bytes
 let hello = bytes_to_string(gzip_decode(gz)) // "hello"
+```
+
+`multipart_parse` returns `{boundary, fields, field_count, total_bytes}`.
+Each field is `{name, filename, content_type, headers, bytes, text}`. `text`
+is `nil` for non-UTF-8 uploads so binary data remains lossless in `bytes`.
+
+```harn
+let fixture = multipart_form_data([
+  {name: "title", content: "Quarterly report"},
+  {
+    name: "upload",
+    filename: "report.bin",
+    content_type: "application/octet-stream",
+    content: bytes_from_hex("000102ff"),
+  },
+])
+
+let form = multipart_parse(fixture.body, fixture.content_type, {
+  max_total_bytes: 1048576,
+  max_field_bytes: 262144,
+  max_fields: 8,
+})
+
+let title = multipart_field_text(form.fields[0])
+let uploaded = multipart_field_bytes(form.fields[1])
+println(title)
+println(bytes_to_hex(uploaded))
 ```
 
 `jwt_sign` requires `claims` to be a dict so it can be serialized as a JSON

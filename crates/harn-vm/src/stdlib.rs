@@ -25,6 +25,7 @@ mod json_query;
 mod logging;
 mod math;
 mod monitors;
+mod multipart;
 mod path;
 pub mod process;
 mod project;
@@ -76,6 +77,7 @@ pub fn register_core_stdlib(vm: &mut Vm) {
     compression::register_compression_builtins(vm);
     crypto::register_crypto_builtins(vm);
     csv::register_csv_builtins(vm);
+    multipart::register_multipart_builtins(vm);
     url_parse::register_url_builtins(vm);
     path::register_path_helper_builtins(vm);
     sets::register_set_builtins(vm);

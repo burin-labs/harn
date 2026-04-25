@@ -244,6 +244,43 @@ let active_emails = jq(api, ".users[] | select(.active == true) | .email")
 let summary = jq_first(api, "{ count: .users | length, next: .meta.next }")
 ```
 
+## Multipart forms
+
+| Function | Parameters | Returns | Description |
+|---|---|---|---|
+| `multipart_parse(body, content_type, options?)` | body: bytes or string, content_type: string, options: dict | dict | Parse a buffered `multipart/form-data` request body. Options support `max_total_bytes`, `max_field_bytes`, and `max_fields` |
+| `multipart_field_bytes(field)` | field: dict | bytes | Return a parsed field's raw bytes |
+| `multipart_field_text(field)` | field: dict | string | Decode a parsed field's bytes as UTF-8, throwing on invalid text |
+| `multipart_form_data(fields, options?)` | fields: list, options: dict | dict | Deterministically build `{content_type, boundary, body}` test fixtures from field dicts |
+
+`multipart_parse` returns `{boundary, fields, field_count, total_bytes}`.
+Each field is `{name, filename, content_type, headers, bytes, text}`. `text`
+is `nil` when the uploaded bytes are not valid UTF-8; use
+`multipart_field_text(field)` when invalid UTF-8 should be an error.
+
+```harn
+let fixture = multipart_form_data([
+  {name: "title", content: "Quarterly report"},
+  {
+    name: "upload",
+    filename: "report.bin",
+    content_type: "application/octet-stream",
+    content: bytes_from_hex("000102ff"),
+  },
+])
+
+let form = multipart_parse(fixture.body, fixture.content_type, {
+  max_total_bytes: 1048576,
+  max_field_bytes: 262144,
+  max_fields: 8,
+})
+
+let title = multipart_field_text(form.fields[0])
+let uploaded = multipart_field_bytes(form.fields[1])
+println(title)
+println(bytes_to_hex(uploaded))
+```
+
 ## Math
 
 | Function | Parameters | Returns | Description |
