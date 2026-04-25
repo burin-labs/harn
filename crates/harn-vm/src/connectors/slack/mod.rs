@@ -617,6 +617,9 @@ impl SlackClient {
             config.api_base_url.trim_end_matches('/'),
             method.trim_start_matches('/')
         );
+        if let Some(error) = crate::egress::client_error_for_url("connector_call:slack", &url) {
+            return Err(error);
+        }
         let mut request = self
             .http
             .request(http_method, url)
@@ -647,6 +650,9 @@ impl SlackClient {
             config.api_base_url.trim_end_matches('/'),
             method.trim_start_matches('/')
         );
+        if let Some(error) = crate::egress::client_error_for_url("connector_call:slack", &url) {
+            return Err(error);
+        }
         self.http
             .request(Method::GET, url)
             .header("Authorization", format!("Bearer {token}"))
@@ -687,6 +693,10 @@ impl SlackClient {
             "{}/files.getUploadURLExternal",
             config.api_base_url.trim_end_matches('/')
         );
+        if let Some(error) = crate::egress::client_error_for_url("connector_call:slack", &start_url)
+        {
+            return Err(error);
+        }
         let mut form = vec![
             ("filename".to_string(), args.filename.clone()),
             ("length".to_string(), args.content.len().to_string()),
@@ -721,6 +731,11 @@ impl SlackClient {
                 "Slack API response missing upload_url for files.getUploadURLExternal".to_string(),
             )
         })?;
+        if let Some(error) =
+            crate::egress::client_error_for_url("connector_call:slack", &upload_url)
+        {
+            return Err(error);
+        }
         let file_id = start_payload.file_id.ok_or_else(|| {
             ClientError::Transport(
                 "Slack API response missing file_id for files.getUploadURLExternal".to_string(),

@@ -768,6 +768,10 @@ impl GitHubClient {
                 )
                 .acquire()
                 .await;
+            if let Some(error) = crate::egress::client_error_for_url("connector_call:github", &url)
+            {
+                return Err(error);
+            }
 
             let mut request = self
                 .http
@@ -836,6 +840,9 @@ impl GitHubClient {
             )
             .acquire()
             .await;
+        if let Some(error) = crate::egress::client_error_for_url("connector_call:github", &url) {
+            return Err(error);
+        }
         let response = self
             .http
             .post(url)

@@ -9,6 +9,7 @@ pub mod checkpoint;
 mod chunk;
 mod compiler;
 pub mod connectors;
+pub mod egress;
 pub mod event_log;
 pub mod events;
 pub mod flow;

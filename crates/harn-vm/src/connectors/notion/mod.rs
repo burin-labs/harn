@@ -837,6 +837,10 @@ impl NotionClient {
                 .await;
             let token = self.api_token(config).await?;
             let url = absolute_api_url(&config.api_base_url, path)?;
+            if let Some(error) = crate::egress::client_error_for_url("connector_call:notion", &url)
+            {
+                return Err(error);
+            }
             let mut request = self
                 .http
                 .request(method.clone(), url)

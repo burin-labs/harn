@@ -128,6 +128,7 @@ pub fn register_agent_stdlib(vm: &mut Vm) {
     workflow_messages::register_workflow_message_builtins(vm);
     transcript_compact::register_transcript_compaction_builtins(vm);
     assemble::register_assemble_context_builtin(vm);
+    crate::egress::register_egress_builtins(vm);
     register_http_builtins(vm);
     register_llm_builtins(vm);
     register_mcp_builtins(vm);
@@ -179,6 +180,7 @@ pub fn reset_stdlib_state() {
     fs::reset_fs_state();
     json::reset_json_state();
     host::reset_host_state();
+    crate::egress::reset_egress_policy_for_host();
     hitl::reset_hitl_state();
     crate::http::reset_http_state();
     monitors::reset_monitor_state();

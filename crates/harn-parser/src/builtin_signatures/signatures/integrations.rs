@@ -8,6 +8,10 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: None,
     },
     BuiltinSig {
+        name: "egress_policy",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
         name: "exec",
         return_type: Some(BuiltinReturn::Named("dict")),
     },

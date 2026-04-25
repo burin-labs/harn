@@ -574,6 +574,11 @@ impl LinearClient {
             .await;
 
         let auth = self.auth_header(config).await?;
+        if let Some(error) =
+            crate::egress::client_error_for_url("connector_call:linear", &config.api_base_url)
+        {
+            return Err(error);
+        }
         let mut request_body = JsonMap::new();
         request_body.insert("query".to_string(), JsonValue::String(query.to_string()));
         if !variables.is_null() {
@@ -693,6 +698,11 @@ impl LinearClient {
     }
 
     async fn probe_health(&self, health_url: &str) -> Result<bool, ClientError> {
+        if let Some(error) =
+            crate::egress::client_error_for_url("connector_call:linear", health_url)
+        {
+            return Err(error);
+        }
         let response = self
             .http
             .get(health_url)

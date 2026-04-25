@@ -150,13 +150,15 @@ pub async fn run_test_file(
                 crate::package::install_manifest_hooks(&mut vm, &extensions)
                     .await
                     .map_err(|error| format!("failed to install manifest hooks: {error}"))?;
-                match vm.execute(&chunk).await {
+                let result = match vm.execute(&chunk).await {
                     Ok(val) => Ok(val),
                     Err(e) => {
                         let formatted = vm.format_runtime_error(&e);
                         Err(formatted)
                     }
-                }
+                };
+                harn_vm::egress::reset_egress_policy_for_host();
+                result
             }),
         )
         .await;

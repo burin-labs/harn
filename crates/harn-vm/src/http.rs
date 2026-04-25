@@ -2544,7 +2544,16 @@ fn http_client_key(config: &HttpRequestConfig) -> String {
 
 fn build_http_client(config: &HttpRequestConfig) -> Result<reqwest::Client, VmError> {
     let redirect_policy = if config.follow_redirects {
-        reqwest::redirect::Policy::limited(config.max_redirects)
+        let max_redirects = config.max_redirects;
+        reqwest::redirect::Policy::custom(move |attempt| {
+            if attempt.previous().len() >= max_redirects {
+                attempt.error("too many redirects")
+            } else if crate::egress::redirect_url_allowed("http_redirect", attempt.url().as_str()) {
+                attempt.follow()
+            } else {
+                attempt.error("egress policy blocked redirect target")
+            }
+        })
     } else {
         reqwest::redirect::Policy::none()
     };
@@ -3791,6 +3800,13 @@ async fn vm_execute_http_request_with_client(
 ) -> Result<VmValue, VmError> {
     let parts = parse_http_request_parts(method, options)?;
 
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        return Err(vm_error(format!(
+            "http: URL must start with http:// or https://, got '{url}'"
+        )));
+    }
+    crate::egress::enforce_url_allowed("http_request", url).await?;
+
     for attempt in 0..=config.retry.max {
         if let Some(mock_response) = consume_http_mock(
             method,
@@ -3819,12 +3835,6 @@ async fn vm_execute_http_request_with_client(
                 mock_response.headers,
                 mock_response.body,
             ));
-        }
-
-        if !url.starts_with("http://") && !url.starts_with("https://") {
-            return Err(vm_error(format!(
-                "http: URL must start with http:// or https://, got '{url}'"
-            )));
         }
 
         let mut req = client.request(parts.method.clone(), url);
@@ -3919,6 +3929,7 @@ async fn vm_http_download(
             "http_download: URL must start with http:// or https://, got '{url}'"
         )));
     }
+    crate::egress::enforce_url_allowed("http_download", url).await?;
     let config = parse_http_options(options);
     let client = if let Some(session_id) = session_from_options(options) {
         HTTP_SESSIONS
@@ -4019,6 +4030,7 @@ async fn vm_http_stream_open(
             "http_stream_open: URL must start with http:// or https://, got '{url}'"
         )));
     }
+    crate::egress::enforce_url_allowed("http_stream_open", url).await?;
     let config = parse_http_options(options);
     let client = if let Some(session_id) = session_from_options(options) {
         HTTP_SESSIONS
@@ -4185,6 +4197,7 @@ async fn vm_sse_connect(
             "sse_connect: URL must start with http:// or https://, got '{url}'"
         )));
     }
+    crate::egress::enforce_url_allowed("sse_connect", url).await?;
 
     let config = parse_http_options(options);
     let client = if let Some(session_id) = session_from_options(options) {
@@ -4736,6 +4749,7 @@ async fn vm_websocket_connect(
             "websocket_connect: URL must start with ws:// or wss://, got '{url}'"
         )));
     }
+    crate::egress::enforce_url_allowed("websocket_connect", url).await?;
     let timeout_ms = vm_get_int_option_prefer(
         options,
         "timeout_ms",

@@ -75,6 +75,18 @@ pub(crate) fn outbound_http_client(user_agent: &'static str) -> reqwest::Client 
     reqwest::Client::builder()
         .user_agent(user_agent)
         .timeout(OUTBOUND_CONNECTOR_HTTP_TIMEOUT)
+        .redirect(reqwest::redirect::Policy::custom(|attempt| {
+            if attempt.previous().len() >= 10 {
+                attempt.error("too many redirects")
+            } else if crate::egress::redirect_url_allowed(
+                "connector_redirect",
+                attempt.url().as_str(),
+            ) {
+                attempt.follow()
+            } else {
+                attempt.error("egress policy blocked redirect target")
+            }
+        }))
         .build()
         .expect("connector HTTP client configuration should be valid")
 }
@@ -214,6 +226,7 @@ pub enum ClientError {
     InvalidArgs(String),
     RateLimited(String),
     Transport(String),
+    EgressBlocked(crate::egress::EgressBlocked),
     Other(String),
 }
 
@@ -225,6 +238,7 @@ impl fmt::Display for ClientError {
             | Self::RateLimited(message)
             | Self::Transport(message)
             | Self::Other(message) => message.fmt(f),
+            Self::EgressBlocked(blocked) => blocked.fmt(f),
         }
     }
 }
