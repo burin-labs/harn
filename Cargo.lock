@@ -270,6 +270,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "63044e1ae8e69f3b5a92c736ca6269b8d12fa7efe39bf34ddb06d102cf0e2cab"
 dependencies = [
  "memchr",
+ "regex-automata",
  "serde",
 ]
 
@@ -1146,6 +1147,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "grep-regex"
+version = "0.1.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0ce0c256c3ad82bcc07b812c15a45ec1d398122e8e15124f96695234db7112ef"
+dependencies = [
+ "bstr",
+ "grep-matcher",
+ "log",
+ "regex-automata",
+ "regex-syntax",
+]
+
+[[package]]
 name = "grep-searcher"
 version = "0.1.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1252,7 +1266,12 @@ name = "harn-hostlib"
 version = "0.7.38"
 dependencies = [
  "anyhow",
+ "base64",
+ "grep-matcher",
+ "grep-regex",
  "grep-searcher",
+ "harn-lexer",
+ "harn-parser",
  "harn-vm",
  "ignore",
  "notify",

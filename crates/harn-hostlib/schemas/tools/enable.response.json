@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/tools/enable.response.json",
+  "title": "tools.enable response",
+  "type": "object",
+  "properties": {
+    "feature": { "type": "string" },
+    "enabled": { "type": "boolean" },
+    "newly_enabled": {
+      "type": "boolean",
+      "description": "True when this call flipped the feature from off to on; false when the feature was already enabled."
+    }
+  },
+  "required": ["feature", "enabled", "newly_enabled"],
+  "additionalProperties": false
+}

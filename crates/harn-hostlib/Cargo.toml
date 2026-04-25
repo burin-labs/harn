@@ -35,10 +35,15 @@ thiserror = "2"
 # `git` if anything urgent comes up.
 tree-sitter = "0.26"
 grep-searcher = "0.1"
+grep-matcher = "0.1"
+grep-regex = "0.1"
 ignore = "0.4"
 notify = "8"
 walkdir = "2"
+base64 = "0.22"
 
 [dev-dependencies]
 tempfile = "3"
 serde_json = "1"
+harn-lexer = { path = "../harn-lexer", version = "0.7" }
+harn-parser = { path = "../harn-parser", version = "0.7" }
