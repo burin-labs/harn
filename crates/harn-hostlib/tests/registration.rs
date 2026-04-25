@@ -109,8 +109,8 @@ fn tools_capability_registers_documented_methods() {
             "hostlib_tools_list_directory",
             "hostlib_tools_get_file_outline",
             "hostlib_tools_git",
-            // Process tools — slated for issue C2; still routed through
-            // `HostlibError::Unimplemented` until then.
+            // Process tools from issue #568. Also gated by
+            // `hostlib_enable("tools:deterministic")`.
             "hostlib_tools_run_command",
             "hostlib_tools_run_test",
             "hostlib_tools_run_build_command",
@@ -121,39 +121,37 @@ fn tools_capability_registers_documented_methods() {
         ]
     );
 
-    // Process tools must still route through `Unimplemented` — they are
-    // slated for issue C2.
-    let process_methods = [
+    // All implemented tools must refuse to run before
+    // `hostlib_enable("tools:deterministic")`. We check each entry so newly
+    // wired tools cannot accidentally bypass the opt-in gate.
+    harn_hostlib::tools::permissions::reset();
+    let gated_methods = [
+        "hostlib_tools_search",
+        "hostlib_tools_read_file",
+        "hostlib_tools_write_file",
+        "hostlib_tools_delete_file",
+        "hostlib_tools_list_directory",
+        "hostlib_tools_get_file_outline",
+        "hostlib_tools_git",
         "hostlib_tools_run_command",
         "hostlib_tools_run_test",
         "hostlib_tools_run_build_command",
         "hostlib_tools_inspect_test_results",
         "hostlib_tools_manage_packages",
     ];
-    for name in process_methods {
+    for name in gated_methods {
         let entry = registry.find(name).expect("registered");
-        let err = (entry.handler)(&[]).expect_err("must be unimplemented");
-        assert!(
-            matches!(err, HostlibError::Unimplemented { builtin } if builtin == name),
-            "expected Unimplemented for {name}, got {err:?}"
-        );
-    }
-
-    // Deterministic tools must refuse to run before
-    // `hostlib_enable("tools:deterministic")`. We check one representative
-    // builtin to confirm the gating handler is wired.
-    harn_hostlib::tools::permissions::reset();
-    let search = registry.find("hostlib_tools_search").expect("registered");
-    let err = (search.handler)(&[]).expect_err("disabled by default");
-    match err {
-        HostlibError::Backend { builtin, message } => {
-            assert_eq!(builtin, "hostlib_tools_search");
-            assert!(
-                message.contains("hostlib_enable"),
-                "gating error must point users at hostlib_enable: {message}"
-            );
+        let err = (entry.handler)(&[]).expect_err("disabled by default");
+        match err {
+            HostlibError::Backend { builtin, message } => {
+                assert_eq!(builtin, name);
+                assert!(
+                    message.contains("hostlib_enable"),
+                    "gating error must point users at hostlib_enable: {message}"
+                );
+            }
+            other => panic!("expected Backend gate error for {name}, got {other:?}"),
         }
-        other => panic!("expected Backend gate error, got {other:?}"),
     }
 }
 
