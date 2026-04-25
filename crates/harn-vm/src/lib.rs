@@ -11,6 +11,7 @@ mod compiler;
 pub mod connectors;
 pub mod event_log;
 pub mod events;
+pub mod flow;
 mod http;
 pub mod jsonrpc;
 pub mod llm;
