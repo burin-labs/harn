@@ -52,3 +52,5 @@ meta_scratch/
 /project_deep_scan_repo/
 # qmode experiment per-task state (qa.jsonl, plan.json, llm-mock.jsonl, transcripts).
 experiments/burin-mini/.qmode/
+# qmode test runs may write synthetic preferences to project-scoped profiles.
+experiments/burin-mini/workspace/.harn/
