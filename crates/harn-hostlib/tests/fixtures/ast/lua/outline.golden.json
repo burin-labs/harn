@@ -1,0 +1,5 @@
+[
+  {"name":"M.greet", "kind":"function", "signature":"function M.greet(name)", "start_row":2, "end_row":4, "children":[]},
+  {"name":"M:shout", "kind":"method", "signature":"function M:shout(message)", "start_row":6, "end_row":8, "children":[]},
+  {"name":"helper", "kind":"function", "signature":"function helper(x)", "start_row":10, "end_row":12, "children":[]}
+]

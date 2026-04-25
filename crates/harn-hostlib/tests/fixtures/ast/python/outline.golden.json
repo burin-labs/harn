@@ -1,0 +1,10 @@
+[
+  {"name":"Greeter", "kind":"class", "signature":"class Greeter", "start_row":0, "end_row":5, "children":
+    [
+      {"name":"__init__", "kind":"method", "signature":"def __init__(name)", "start_row":1, "end_row":2, "children":[]},
+      {"name":"greet", "kind":"method", "signature":"def greet()", "start_row":4, "end_row":5, "children":[]}
+    ]
+  },
+  {"name":"shout", "kind":"function", "signature":"def shout(message)", "start_row":8, "end_row":9, "children":[]},
+  {"name":"fetch", "kind":"function", "signature":"def fetch(url)", "start_row":12, "end_row":13, "children":[]}
+]

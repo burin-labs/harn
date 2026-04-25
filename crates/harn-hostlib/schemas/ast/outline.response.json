@@ -2,6 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://harnlang.com/schemas/hostlib/ast/outline.response.json",
   "title": "ast.outline response",
+  "description": "Hierarchical outline of a source file. Built by folding the flat symbol list (see ast.symbols) into a tree using each container's row range to decide ownership. All row coordinates are 0-based.",
   "type": "object",
   "properties": {
     "path": { "type": "string" },
@@ -18,7 +19,11 @@
       "type": "object",
       "properties": {
         "name": { "type": "string" },
-        "kind": { "type": "string" },
+        "kind": {
+          "type": "string",
+          "description": "Lowercase symbol kind. See schemas/ast/symbols.response.json."
+        },
+        "signature": { "type": "string" },
         "start_row": { "type": "integer", "minimum": 0 },
         "end_row": { "type": "integer", "minimum": 0 },
         "children": {
@@ -26,7 +31,7 @@
           "items": { "$ref": "#/$defs/OutlineItem" }
         }
       },
-      "required": ["name", "kind", "start_row", "end_row", "children"],
+      "required": ["name", "kind", "signature", "start_row", "end_row", "children"],
       "additionalProperties": false
     }
   }

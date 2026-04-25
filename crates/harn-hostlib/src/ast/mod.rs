@@ -2,13 +2,109 @@
 //!
 //! Wraps tree-sitter parsing, symbol extraction, and outline generation —
 //! the Swift `Sources/ASTEngine/` surface ported into Rust. Implementation
-//! lands in follow-up issue B2; this scaffold registers the contract so
-//! `burin-code`'s schema-drift tests can lock the public surface today.
+//! lands per issue #564.
+//!
+//! ## Wire format
+//!
+//! - Row/column coordinates are **0-based** across all three builtins,
+//!   matching tree-sitter's native `Point` representation. Swift's
+//!   `ASTEngine` historically returned 1-based coordinates for symbols;
+//!   we normalize on 0-based here so `parse_file`, `symbols`, and
+//!   `outline` share one convention. Burin-code's bridge consumer is
+//!   updated in #(B5).
+//! - `parse_file` emits a flat node list with `parent_id` rather than
+//!   nested children — keeps the wire JSON-serializable without inflating
+//!   it with object copies.
+//! - `symbols` and `outline` carry a `signature` string (e.g.
+//!   `"fn foo(bar: i32)"`) on every entry to match Swift's
+//!   `TreeSitterSymbol.signature`. Burin-code's outline UI surfaces this
+//!   directly.
+//!
+//! ## Languages
+//!
+//! [`language::Language`] mirrors Swift's `TreeSitterLanguage` enum
+//! verbatim: TypeScript/TSX, JavaScript/JSX, Python, Go, Rust, Java,
+//! C, C++, C#, Ruby, Kotlin, PHP, Scala, Bash, Swift, Zig, Elixir, Lua,
+//! Haskell, R. Adding/dropping languages requires a coordinated change
+//! in both repos.
 
-use crate::registry::{BuiltinRegistry, HostlibCapability};
+use std::sync::Arc;
 
-/// AST capability handle. Stateless today; will own a tree-sitter language
-/// registry and parser pool once the implementation lands.
+use harn_vm::VmValue;
+
+use crate::error::HostlibError;
+use crate::registry::{BuiltinRegistry, HostlibCapability, RegisteredBuiltin, SyncHandler};
+
+mod language;
+mod outline;
+mod parse;
+mod symbols;
+mod symbols_call;
+mod types;
+
+pub use language::Language;
+pub use types::{OutlineItem, ParsedNode, Symbol, SymbolKind};
+
+/// Programmatic entry point to the AST builtins. Embedders typically go
+/// through the registered builtins, but tests and tools that want
+/// strongly-typed access can use these helpers directly.
+pub mod api {
+    use std::path::Path;
+
+    use crate::error::HostlibError;
+
+    use super::language::Language;
+    use super::outline::build_outline;
+    use super::parse::{parse_source, read_source};
+    use super::symbols::extract;
+    use super::types::{OutlineItem, Symbol};
+
+    /// Parse `path` (with optional language hint) and return its symbols.
+    pub fn symbols(
+        path: &Path,
+        language_hint: Option<&str>,
+    ) -> Result<(Language, Vec<Symbol>), HostlibError> {
+        let language = detect(path, language_hint)?;
+        let source = read_source(&path.to_string_lossy(), 0)?;
+        let tree = parse_source(&source, language)?;
+        Ok((language, extract(&tree, &source, language)))
+    }
+
+    /// Parse `path` and return a hierarchical outline.
+    pub fn outline(
+        path: &Path,
+        language_hint: Option<&str>,
+    ) -> Result<(Language, Vec<OutlineItem>), HostlibError> {
+        let (language, symbols) = symbols(path, language_hint)?;
+        Ok((language, build_outline(symbols)))
+    }
+
+    /// Parse a source `str` for `language` and return its symbols. Useful
+    /// for unit tests where the input lives in-memory rather than on disk.
+    pub fn symbols_from_source(
+        source: &str,
+        language: Language,
+    ) -> Result<Vec<Symbol>, HostlibError> {
+        let tree = parse_source(source, language)?;
+        Ok(extract(&tree, source, language))
+    }
+
+    fn detect(path: &Path, language_hint: Option<&str>) -> Result<Language, HostlibError> {
+        Language::detect(path, language_hint).ok_or_else(|| HostlibError::InvalidParameter {
+            builtin: "ast::api",
+            param: "language",
+            message: format!(
+                "could not infer a tree-sitter grammar for `{}` \
+                 (extension or `language` field unrecognized)",
+                path.display()
+            ),
+        })
+    }
+}
+
+/// AST capability handle. Stateless; tree-sitter parsers are constructed
+/// per-call (cheap relative to grammar lookup) so the capability itself
+/// has nothing to own.
 #[derive(Default)]
 pub struct AstCapability;
 
@@ -18,8 +114,28 @@ impl HostlibCapability for AstCapability {
     }
 
     fn register_builtins(&self, registry: &mut BuiltinRegistry) {
-        registry.register_unimplemented("hostlib_ast_parse_file", "ast", "parse_file");
-        registry.register_unimplemented("hostlib_ast_symbols", "ast", "symbols");
-        registry.register_unimplemented("hostlib_ast_outline", "ast", "outline");
+        register(registry, "hostlib_ast_parse_file", "parse_file", parse::run);
+        register(
+            registry,
+            "hostlib_ast_symbols",
+            "symbols",
+            symbols_call::run,
+        );
+        register(registry, "hostlib_ast_outline", "outline", outline::run);
     }
+}
+
+fn register(
+    registry: &mut BuiltinRegistry,
+    name: &'static str,
+    method: &'static str,
+    runner: fn(&[VmValue]) -> Result<VmValue, HostlibError>,
+) {
+    let handler: SyncHandler = Arc::new(runner);
+    registry.register(RegisteredBuiltin {
+        name,
+        module: "ast",
+        method,
+        handler,
+    });
 }

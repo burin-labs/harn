@@ -1,0 +1,13 @@
+[
+  {"name":"Fixture.Greeter", "kind":"module", "signature":"defmodule Fixture.Greeter", "start_row":0, "end_row":8, "children":
+    [
+      {"name":"greet", "kind":"method", "signature":"def greet(name)", "start_row":1, "end_row":3, "children":[]},
+      {"name":"internal_helper", "kind":"method", "signature":"defp internal_helper(s)", "start_row":5, "end_row":7, "children":[]}
+    ]
+  },
+  {"name":"Fixture.Shout", "kind":"module", "signature":"defmodule Fixture.Shout", "start_row":10, "end_row":12, "children":
+    [
+      {"name":"shout", "kind":"method", "signature":"def shout(s), do: String.upcase(s)", "start_row":11, "end_row":11, "children":[]}
+    ]
+  }
+]

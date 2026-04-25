@@ -1,0 +1,229 @@
+//! End-to-end coverage for the wired-up `ast::*` builtins.
+//!
+//! Complements `ast_fixtures.rs` (golden-symbol/outline checks): this
+//! file drives the full builtin path through the registration table —
+//! parameter parsing, `VmValue::Dict` shape, schema field set — and
+//! includes a perf smoke check against a known input.
+
+use std::collections::BTreeMap;
+use std::fs;
+use std::path::PathBuf;
+use std::rc::Rc;
+use std::time::Instant;
+
+use harn_hostlib::{ast::AstCapability, BuiltinRegistry, HostlibCapability};
+use harn_vm::VmValue;
+
+fn ast_registry() -> BuiltinRegistry {
+    let mut registry = BuiltinRegistry::new();
+    AstCapability.register_builtins(&mut registry);
+    registry
+}
+
+fn dict(pairs: &[(&str, VmValue)]) -> VmValue {
+    let mut map: BTreeMap<String, VmValue> = BTreeMap::new();
+    for (k, v) in pairs {
+        map.insert((*k).into(), v.clone());
+    }
+    VmValue::Dict(Rc::new(map))
+}
+
+fn fixture_path(rel: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/ast")
+        .join(rel)
+}
+
+fn invoke(registry: &BuiltinRegistry, name: &str, payload: VmValue) -> VmValue {
+    let entry = registry
+        .find(name)
+        .unwrap_or_else(|| panic!("builtin {name} not registered"));
+    (entry.handler)(&[payload]).unwrap_or_else(|err| panic!("{name} failed: {err}"))
+}
+
+fn dict_field(value: &VmValue, key: &str) -> VmValue {
+    match value {
+        VmValue::Dict(d) => d
+            .get(key)
+            .cloned()
+            .unwrap_or_else(|| panic!("missing field `{key}` on {value:?}")),
+        other => panic!("expected dict, got {other:?}"),
+    }
+}
+
+fn string_value(value: &VmValue) -> &str {
+    match value {
+        VmValue::String(s) => s.as_ref(),
+        other => panic!("expected string, got {other:?}"),
+    }
+}
+
+fn list_value(value: &VmValue) -> Rc<Vec<VmValue>> {
+    match value {
+        VmValue::List(l) => l.clone(),
+        other => panic!("expected list, got {other:?}"),
+    }
+}
+
+fn int_value(value: &VmValue) -> i64 {
+    match value {
+        VmValue::Int(n) => *n,
+        other => panic!("expected int, got {other:?}"),
+    }
+}
+
+#[test]
+fn parse_file_produces_flat_node_list_with_root_id_zero() {
+    let registry = ast_registry();
+    let path = fixture_path("rust/source.rs");
+    let payload = dict(&[(
+        "path",
+        VmValue::String(Rc::from(path.to_string_lossy().as_ref())),
+    )]);
+
+    let result = invoke(&registry, "hostlib_ast_parse_file", payload);
+
+    assert_eq!(string_value(&dict_field(&result, "language")), "rust");
+    assert_eq!(int_value(&dict_field(&result, "root_id")), 0);
+    let nodes = list_value(&dict_field(&result, "nodes"));
+    assert!(
+        nodes.len() > 5,
+        "expected non-trivial tree, got {} nodes",
+        nodes.len()
+    );
+
+    // Root has parent_id = nil; every other node has an integer parent
+    // pointing at a smaller id (BFS guarantees this).
+    let first = &nodes[0];
+    assert!(matches!(dict_field(first, "parent_id"), VmValue::Nil));
+    for node in nodes.iter().skip(1) {
+        match dict_field(node, "parent_id") {
+            VmValue::Int(n) => assert!(
+                n >= 0 && (n as usize) < nodes.len(),
+                "parent_id out of range: {n}"
+            ),
+            other => panic!("expected int parent_id, got {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn parse_file_rejects_unknown_language() {
+    let registry = ast_registry();
+    let entry = registry.find("hostlib_ast_parse_file").expect("registered");
+    let payload = dict(&[
+        ("path", VmValue::String(Rc::from("foo.unknown"))),
+        ("language", VmValue::String(Rc::from("klingon"))),
+    ]);
+    let err = (entry.handler)(&[payload]).expect_err("must reject unknown language");
+    assert!(
+        err.to_string().contains("klingon") || err.to_string().contains("could not infer"),
+        "unexpected error message: {err}",
+    );
+}
+
+#[test]
+fn symbols_filters_by_kind() {
+    let registry = ast_registry();
+    let path = fixture_path("rust/source.rs");
+    let kinds = VmValue::List(Rc::new(vec![VmValue::String(Rc::from("function"))]));
+    let payload = dict(&[
+        (
+            "path",
+            VmValue::String(Rc::from(path.to_string_lossy().as_ref())),
+        ),
+        ("kinds", kinds),
+    ]);
+    let result = invoke(&registry, "hostlib_ast_symbols", payload);
+    let symbols = list_value(&dict_field(&result, "symbols"));
+    assert!(!symbols.is_empty());
+    for sym in symbols.iter() {
+        assert_eq!(string_value(&dict_field(sym, "kind")), "function");
+    }
+}
+
+#[test]
+fn outline_caps_depth_when_max_depth_supplied() {
+    let registry = ast_registry();
+    let path = fixture_path("python/source.py");
+    let payload = dict(&[
+        (
+            "path",
+            VmValue::String(Rc::from(path.to_string_lossy().as_ref())),
+        ),
+        ("max_depth", VmValue::Int(1)),
+    ]);
+    let result = invoke(&registry, "hostlib_ast_outline", payload);
+    let items = list_value(&dict_field(&result, "items"));
+    assert!(!items.is_empty());
+    for item in items.iter() {
+        let children = list_value(&dict_field(item, "children"));
+        assert!(
+            children.is_empty(),
+            "max_depth=1 must cap to root level, got children {children:?}"
+        );
+    }
+}
+
+/// Perf smoke test from issue #564: parse a known file within a budget.
+/// We don't pin the exact cutoff because tree-sitter performance varies
+/// across CI machines, but a 20ms budget is comfortable on local dev
+/// hardware and gives ample headroom on CI.
+#[test]
+fn parse_file_meets_perf_budget_on_a_known_input() {
+    let registry = ast_registry();
+    // Use the largest fixture we ship (Rust). The issue suggests
+    // burin-code's `Package.swift` as a reference; running against an
+    // in-tree fixture keeps the test hermetic and CI-friendly.
+    let path = fixture_path("rust/source.rs");
+    let payload = dict(&[(
+        "path",
+        VmValue::String(Rc::from(path.to_string_lossy().as_ref())),
+    )]);
+
+    // Warm up: first call sometimes pays a one-time grammar load.
+    let _ = invoke(&registry, "hostlib_ast_parse_file", payload.clone());
+
+    let start = Instant::now();
+    let _ = invoke(&registry, "hostlib_ast_parse_file", payload);
+    let elapsed = start.elapsed();
+
+    // 20ms target from the issue. Doubled to 40ms here so the test is
+    // immune to noisy CI; the realistic warm-call latency is sub-1ms.
+    assert!(
+        elapsed.as_millis() < 40,
+        "parse_file took {elapsed:?} (>40ms ceiling)",
+    );
+}
+
+#[test]
+fn perf_smoke_against_burin_code_when_available() {
+    // The issue calls out `~/projects/burin-code/Package.swift`. That
+    // path only exists on the maintainer's box; skip silently otherwise
+    // so CI stays green.
+    let target = std::env::var("HOME")
+        .ok()
+        .map(|home| PathBuf::from(home).join("projects/burin-code/Package.swift"));
+    let Some(path) = target.filter(|p| p.exists()) else {
+        return;
+    };
+
+    let registry = ast_registry();
+    let payload = dict(&[(
+        "path",
+        VmValue::String(Rc::from(path.to_string_lossy().as_ref())),
+    )]);
+    let _warmup = invoke(&registry, "hostlib_ast_parse_file", payload.clone());
+    let start = Instant::now();
+    let _ = invoke(&registry, "hostlib_ast_parse_file", payload);
+    let elapsed = start.elapsed();
+    let bytes = fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+    eprintln!(
+        "burin-code Package.swift parse_file: {elapsed:?} ({} bytes)",
+        bytes
+    );
+    assert!(
+        elapsed.as_millis() < 50,
+        "Package.swift parse took {elapsed:?} (>50ms)"
+    );
+}

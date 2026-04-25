@@ -1,0 +1,5 @@
+[
+  {"name":"add", "kind":"function", "signature":"fn add()", "start_row":2, "end_row":4, "children":[]},
+  {"name":"shout", "kind":"function", "signature":"fn shout()", "start_row":6, "end_row":8, "children":[]},
+  {"name":"add returns sum", "kind":"function", "signature":"test \"add returns sum\"", "start_row":10, "end_row":12, "children":[]}
+]

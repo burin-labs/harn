@@ -47,7 +47,22 @@ fn ast_capability_registers_documented_methods() {
             "hostlib_ast_outline",
         ]
     );
-    assert_all_unimplemented(&registry);
+    // Issue #564 implemented every AST builtin. With no `path` parameter
+    // each one routes through `MissingParameter` rather than the scaffold
+    // `Unimplemented` — the contract surface is real now.
+    for entry in registry.iter() {
+        let err = (entry.handler)(&[]).expect_err("handler must error on empty args");
+        match err {
+            HostlibError::MissingParameter { builtin, param } => {
+                assert_eq!(builtin, entry.name);
+                assert_eq!(param, "path");
+            }
+            other => panic!(
+                "expected MissingParameter for {}, got {other:?}",
+                entry.name
+            ),
+        }
+    }
 }
 
 #[test]

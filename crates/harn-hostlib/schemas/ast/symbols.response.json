@@ -2,6 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://harnlang.com/schemas/hostlib/ast/symbols.response.json",
   "title": "ast.symbols response",
+  "description": "Flat list of symbols extracted from a single source file. All row/column coordinates are 0-based, matching tree-sitter's native Point representation.",
   "type": "object",
   "properties": {
     "path": { "type": "string" },
@@ -18,14 +19,30 @@
       "type": "object",
       "properties": {
         "name": { "type": "string" },
-        "kind": { "type": "string" },
+        "kind": {
+          "type": "string",
+          "description": "Lowercase symbol kind. One of: function, method, class, struct, enum, interface, protocol, type, variable, module, other."
+        },
         "container": { "type": ["string", "null"] },
+        "signature": {
+          "type": "string",
+          "description": "Single-line, language-flavored signature (e.g. 'fn parse(input: &str)'). Truncated to 80 chars with an ellipsis."
+        },
         "start_row": { "type": "integer", "minimum": 0 },
         "start_col": { "type": "integer", "minimum": 0 },
         "end_row": { "type": "integer", "minimum": 0 },
         "end_col": { "type": "integer", "minimum": 0 }
       },
-      "required": ["name", "kind", "start_row", "start_col", "end_row", "end_col"],
+      "required": [
+        "name",
+        "kind",
+        "container",
+        "signature",
+        "start_row",
+        "start_col",
+        "end_row",
+        "end_col"
+      ],
       "additionalProperties": false
     }
   }

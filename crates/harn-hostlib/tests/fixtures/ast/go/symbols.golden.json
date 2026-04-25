@@ -1,0 +1,8 @@
+[
+  {"name":"fixture", "kind":"module", "container":null, "signature":"package fixture", "start_row":0, "start_col":0, "end_row":0, "end_col":15},
+  {"name":"Greeter", "kind":"struct", "container":null, "signature":"type Greeter struct", "start_row":2, "start_col":0, "end_row":4, "end_col":1},
+  {"name":"Speaker", "kind":"interface", "container":null, "signature":"type Speaker interface", "start_row":6, "start_col":0, "end_row":8, "end_col":1},
+  {"name":"Greet", "kind":"method", "container":null, "signature":"func (g Greeter) Greet()", "start_row":10, "start_col":0, "end_row":12, "end_col":1},
+  {"name":"Shout", "kind":"function", "container":null, "signature":"func Shout(s string)", "start_row":14, "start_col":0, "end_row":16, "end_col":1},
+  {"name":"TestSomething", "kind":"function", "container":null, "signature":"[test] func TestSomething()", "start_row":18, "start_col":0, "end_row":18, "end_col":23}
+]

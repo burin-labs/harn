@@ -1,0 +1,18 @@
+[
+  {"name":"Speaker", "kind":"protocol", "signature":"trait Speaker", "start_row":0, "end_row":2, "children":
+    [
+      {"name":"speak", "kind":"method", "signature":"def speak()", "start_row":1, "end_row":1, "children":[]}
+    ]
+  },
+  {"name":"Greeter", "kind":"class", "signature":"case class Greeter", "start_row":4, "end_row":6, "children":
+    [
+      {"name":"speak", "kind":"method", "signature":"def speak()", "start_row":5, "end_row":5, "children":[]}
+    ]
+  },
+  {"name":"Defaults", "kind":"class", "signature":"object Defaults", "start_row":8, "end_row":10, "children":
+    [
+      {"name":"World", "kind":"variable", "signature":"val World", "start_row":9, "end_row":9, "children":[]}
+    ]
+  },
+  {"name":"shout", "kind":"function", "signature":"def shout(s: String)", "start_row":12, "end_row":12, "children":[]}
+]

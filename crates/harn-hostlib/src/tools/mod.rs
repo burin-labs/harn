@@ -42,7 +42,7 @@ use harn_vm::VmValue;
 use crate::error::HostlibError;
 use crate::registry::{BuiltinRegistry, HostlibCapability, RegisteredBuiltin, SyncHandler};
 
-mod args;
+pub(crate) mod args;
 mod diagnostics;
 mod file_io;
 mod git;

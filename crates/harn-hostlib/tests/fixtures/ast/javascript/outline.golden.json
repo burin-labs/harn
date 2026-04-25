@@ -1,0 +1,11 @@
+[
+  {"name":"Counter", "kind":"class", "signature":"class Counter", "start_row":0, "end_row":7, "children":
+    [
+      {"name":"constructor", "kind":"method", "signature":"constructor()", "start_row":1, "end_row":3, "children":[]},
+      {"name":"increment", "kind":"method", "signature":"increment()", "start_row":4, "end_row":6, "children":[]}
+    ]
+  },
+  {"name":"addOne", "kind":"function", "signature":"function addOne(n)", "start_row":9, "end_row":11, "children":[]},
+  {"name":"square", "kind":"function", "signature":"const square = (...) =>", "start_row":13, "end_row":13, "children":[]},
+  {"name":"VERSION", "kind":"variable", "signature":"const VERSION = \"1.0\";", "start_row":15, "end_row":15, "children":[]}
+]
