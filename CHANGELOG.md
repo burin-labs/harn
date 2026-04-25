@@ -193,6 +193,13 @@ granular archaeology.
   `set_color_mode` and `NO_COLOR`/`FORCE_COLOR` env vars and the
   computed TTY state of stdout.
 
+- **`harn connector check` registers `store_*` builtins** on the connector's
+  base VM, matching the runtime that backs `harn run` /
+  `harn orchestrator serve`. Previously connectors that used
+  `store_get`/`store_set`/`store_delete` for persistent state (e.g. for
+  installation-token caches) failed during contract verification with
+  `Undefined builtin: store_*`.
+
 ### CI
 
 - **Windows CI smoke job** (`.github/workflows/ci.yml`). Builds the
