@@ -1,6 +1,5 @@
-//! Smoke test for #567: drive every deterministic tool from a real
-//! `.harn` script through the full lexer + parser + compiler + VM
-//! pipeline.
+//! Smoke test for driving every deterministic tool from a real `.harn`
+//! script through the full lexer + parser + compiler + VM pipeline.
 //!
 //! The standalone integration tests under `tests/tools_*.rs` exercise
 //! handlers directly. This file proves the contract end-to-end: that a
@@ -220,5 +219,67 @@ return {{
     assert!(matches!(
         dict.get("branch").unwrap(),
         VmValue::String(s) if s.as_ref() == "main"
+    ));
+}
+
+#[test]
+fn end_to_end_code_index_via_harn_script() {
+    let dir = TempDir::new().unwrap();
+    let root = dir.path();
+    fs::create_dir_all(root.join("src")).unwrap();
+    fs::write(
+        root.join("src/index.ts"),
+        "import { helper } from \"./util\";\nexport const ZetaToken = helper();\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("src/util.ts"),
+        "export function helper() { return 'ZetaToken from util'; }\n",
+    )
+    .unwrap();
+
+    let root_str = root.to_string_lossy().replace('\\', "/");
+
+    let source = format!(
+        r#"
+let rebuild = hostlib_code_index_rebuild({{ root: "{root}" }})
+let stats = hostlib_code_index_stats({{}})
+let q = hostlib_code_index_query({{ needle: "ZetaToken", max_results: 10 }})
+let imps = hostlib_code_index_imports_for({{ path: "src/index.ts" }})
+let users = hostlib_code_index_importers_of({{ module: "src/util.ts" }})
+return {{
+    indexed: rebuild.files_indexed,
+    files: stats.indexed_files,
+    hits: len(q.results),
+    first_path: q.results[0].path,
+    imports_kind: imps.imports[0].kind,
+    importer: users.importers[0],
+}}
+"#,
+        root = root_str,
+    );
+
+    let (result, _) = run_harn(&source);
+    let dict = match &result {
+        VmValue::Dict(d) => d,
+        other => panic!("expected dict, got {other:?}"),
+    };
+    let get = |k: &str| dict.get(k).unwrap_or_else(|| panic!("missing {k}"));
+
+    let VmValue::Int(indexed) = get("indexed") else {
+        panic!("indexed");
+    };
+    assert!(*indexed >= 2);
+    let VmValue::Int(hits) = get("hits") else {
+        panic!("hits");
+    };
+    assert!(*hits >= 2, "expected at least 2 hits, got {hits}");
+    assert!(matches!(
+        get("imports_kind"),
+        VmValue::String(s) if s.as_ref() == "import"
+    ));
+    assert!(matches!(
+        get("importer"),
+        VmValue::String(s) if s.as_ref() == "src/index.ts"
     ));
 }

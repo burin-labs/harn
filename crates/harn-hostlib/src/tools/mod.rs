@@ -1,8 +1,8 @@
 //! Deterministic tools capability.
 //!
 //! Ports the Swift `CoreToolExecutor` surface: search (ripgrep via
-//! `grep-searcher` + `ignore`), file I/O, listing, file outline, git via
-//! `gix` (currently shelled-out — see [`git`] for the rationale), and
+//! `grep-searcher` + `ignore`), file I/O, listing, file outline, git
+//! inspection, and
 //! process lifecycle (`run_command`, `run_test`, `run_build_command`,
 //! `inspect_test_results`, `manage_packages`).
 //!
@@ -29,9 +29,8 @@
 //! Pipelines must call `hostlib_enable("tools:deterministic")` (registered
 //! by [`ToolsCapability::register_builtins`]) before any of the tool
 //! methods will execute. Until then, calls return
-//! [`HostlibError::Backend`] with an explanatory message. This matches the
-//! "per-session opt-in" model called out in issue #567 and keeps the
-//! deterministic-tool surface sandbox-friendly.
+//! [`HostlibError::Backend`] with an explanatory message. The per-session
+//! opt-in model keeps the deterministic-tool surface sandbox-friendly.
 
 use std::collections::BTreeMap;
 use std::rc::Rc;

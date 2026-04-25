@@ -95,6 +95,30 @@ granular archaeology.
   `hostlib_enable("tools:deterministic")` before any of these seven
   deterministic tools will execute, otherwise calls fail with a
   structured error pointing at the enable builtin.
+- **Code-index host builtins (#565).** `harn-hostlib`'s `code_index/`
+  module now ships a working trigram + word index, dep graph, file
+  table, and import resolver — ports the Swift `BurinCodeIndex` actor
+  into pure Rust. Five builtins go live behind the schemas locked in
+  by #563: `hostlib_code_index_query` (trigram-accelerated literal
+  substring search with case-insensitive default, `scope` path filter,
+  and `max_results` truncation), `hostlib_code_index_rebuild` (depth-
+  first walk honouring the same skip-dirs / sensitive-file filter
+  that `BurinCodeIndex/FilteredWalker.swift` enforced — node_modules,
+  `.git`, build artefacts, anything matching the credentials shape are
+  pruned before descent), `hostlib_code_index_stats` (file count,
+  distinct trigrams, distinct words, byte estimate, last rebuild
+  timestamp), `hostlib_code_index_imports_for` (per-file imports list
+  with `module` / `resolved_path` / `kind` triples), and
+  `hostlib_code_index_importers_of` (reverse import lookup). Import
+  resolution is data-driven via
+  `data/code_index_import_rules.json` (Python, TS/JS, Java/Kotlin,
+  Scala, C#, PHP, Elixir, Haskell, Lua, Ruby, C/C++, Zig, R, Swift,
+  Rust, Go) — adding a language is a JSON edit. The trigram packing,
+  word-index tokenisation, and FNV-1a content hashing match Swift
+  byte-for-byte so snapshots could in principle round-trip. Five
+  builtins are now exposed via `install_default`; embedders that want
+  isolated workspaces construct independent `CodeIndexCapability`
+  instances.
 
 - **Fair-share scheduler for worker-queue claims (#477).** New
   deficit-round-robin policy in front of `WorkerQueue::claim_next` so a

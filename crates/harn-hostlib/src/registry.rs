@@ -59,7 +59,7 @@ impl BuiltinRegistry {
     }
 
     /// Convenience: register a builtin whose body is the `unimplemented`
-    /// scaffold error. Every module currently uses this.
+    /// scaffold error.
     pub fn register_unimplemented(
         &mut self,
         name: &'static str,

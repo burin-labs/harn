@@ -2,7 +2,8 @@
 //!
 //! Ports `Sources/BurinCore/Scanner/` — deterministic project-wide file
 //! enumeration honoring `.gitignore` and friends, plus an incremental mode
-//! driven by a watch token. Implementation lands in issue B4.
+//! driven by a watch token. The contract is registered ahead of the scanner
+//! implementation.
 
 use crate::registry::{BuiltinRegistry, HostlibCapability};
 

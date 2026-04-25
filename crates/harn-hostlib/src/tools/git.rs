@@ -1,14 +1,9 @@
 //! `tools/git` — read-only git inspection.
 //!
-//! Per the issue plan we'd prefer `gix`, but the scaffold's `Cargo.toml`
-//! intentionally omits it because gix 0.82 fails to compile on the repo's
-//! current rustc. To avoid blocking the rest of the deterministic-tool
-//! work on a toolchain bump, this module shells out to the system `git`
-//! binary using `Command` with an **arg-list invocation only** (never
-//! `sh -c <string>`). That keeps the surface free of shell injection and
-//! preserves the contract documented in `schemas/tools/git.{request,response}.json`.
-//! When B2's toolchain bump unblocks `gix`, individual operations can be
-//! migrated one at a time without touching the public surface.
+//! This module shells out to the system `git` binary using `Command` with an
+//! **arg-list invocation only** (never `sh -c <string>`). That keeps the
+//! surface free of shell injection and preserves the contract documented in
+//! `schemas/tools/git.{request,response}.json`.
 
 use std::path::PathBuf;
 use std::process::Command;

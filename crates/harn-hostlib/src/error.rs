@@ -13,15 +13,15 @@ use harn_vm::{VmError, VmValue};
 /// Variants intentionally describe the *kind* of failure rather than the
 /// specific module — every module routes its missing-implementation errors
 /// through [`HostlibError::Unimplemented`] so embedders and tests can
-/// distinguish "this is a stub waiting for B2/B3/etc." from real failures
-/// once implementations land.
+/// distinguish intentionally scaffolded contracts from real failures once
+/// implementations land.
 #[derive(Debug, thiserror::Error)]
 pub enum HostlibError {
     /// The method exists in the registration table but has no implementation
     /// yet. This is the canonical scaffold-stage error: it tells callers
-    /// "the contract is stable, the body is coming in a follow-up issue."
+    /// "the contract is stable, but this module has not been implemented."
     #[error(
-        "hostlib: {builtin} is not implemented yet (scaffold; tracked by issue #563 follow-ups)"
+        "hostlib: {builtin} is not implemented yet (scaffolded contract without an implementation)"
     )]
     Unimplemented {
         /// Fully-qualified builtin name, e.g. `"hostlib_ast_parse_file"`.
@@ -49,8 +49,6 @@ pub enum HostlibError {
     },
 
     /// Catch-all wrapper for I/O, parsing, or other backend failures.
-    /// Implementations land in follow-up issues; today nothing surfaces
-    /// this variant.
     #[error("hostlib: {builtin}: {message}")]
     Backend {
         /// Fully-qualified builtin name.

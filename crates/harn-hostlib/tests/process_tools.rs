@@ -1,5 +1,5 @@
-//! Integration tests for issue #568 — the five process-lifecycle tool
-//! builtins (`run_command`, `run_test`, `run_build_command`,
+//! Integration tests for the five process-lifecycle tool builtins
+//! (`run_command`, `run_test`, `run_build_command`,
 //! `inspect_test_results`, `manage_packages`).
 //!
 //! These spawn real subprocesses, so they're gated to Unix and rely only
@@ -363,7 +363,7 @@ fn manage_packages_no_ecosystem_no_manifest_errors() {
 
 #[test]
 fn manage_packages_unsupported_pair_for_ecosystem_errors() {
-    // gradle has no defined `add` mapping today.
+    // Gradle does not have a portable CLI mapping for adding dependencies.
     let mut req = dict();
     req.insert("operation".into(), vstr("add"));
     req.insert("ecosystem".into(), vstr("gradle"));

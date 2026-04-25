@@ -331,7 +331,7 @@ mod tests {
 
     #[test]
     fn unsupported_pair_returns_none() {
-        // gradle has no defined `add` mapping today
+        // Gradle does not have a portable CLI mapping for adding dependencies.
         assert!(build_argv(
             Ecosystem::Gradle,
             Operation::Add,

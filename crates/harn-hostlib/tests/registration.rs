@@ -2,10 +2,10 @@
 //! compiles, that unimplemented methods route through `HostlibError` rather
 //! than panicking, and that every registered builtin has a matching schema.
 //!
-//! These tests are the contract that follow-up implementation issues
-//! (B2/B3/B4/C1/C2/C3) must keep green: when an issue lands, the only
-//! change here should be that a routed `Unimplemented` becomes a real
-//! return value — never a removed builtin.
+//! These tests are the contract implementation work must keep green:
+//! when a module moves beyond scaffolding, the only change here should be
+//! that a routed `Unimplemented` becomes a real return value — never a
+//! removed builtin.
 
 use harn_hostlib::{
     ast::AstCapability, code_index::CodeIndexCapability, fs_watch::FsWatchCapability,
@@ -67,7 +67,7 @@ fn ast_capability_registers_documented_methods() {
 
 #[test]
 fn code_index_capability_registers_documented_methods() {
-    let registry = collect_into_registry(CodeIndexCapability);
+    let registry = collect_into_registry(CodeIndexCapability::new());
     let names: Vec<_> = registry.iter().map(|b| b.name).collect();
     assert_eq!(
         names,
@@ -79,7 +79,17 @@ fn code_index_capability_registers_documented_methods() {
             "hostlib_code_index_importers_of",
         ]
     );
-    assert_all_unimplemented(&registry);
+    // Without a populated workspace, code-index read methods return empty
+    // payloads rather than panicking. Assert that contract here so any
+    // regression to `unimplemented!()` fails loudly.
+    let stats = registry
+        .find("hostlib_code_index_stats")
+        .expect("registered");
+    let value = (stats.handler)(&[]).expect("stats works on an empty index");
+    match value {
+        harn_vm::VmValue::Dict(_) => {}
+        other => panic!("expected dict response from stats, got {other:?}"),
+    }
 }
 
 #[test]
@@ -124,14 +134,14 @@ fn tools_capability_registers_documented_methods() {
             "hostlib_tools_list_directory",
             "hostlib_tools_get_file_outline",
             "hostlib_tools_git",
-            // Process tools from issue #568. Also gated by
+            // Process tools. Also gated by
             // `hostlib_enable("tools:deterministic")`.
             "hostlib_tools_run_command",
             "hostlib_tools_run_test",
             "hostlib_tools_run_build_command",
             "hostlib_tools_inspect_test_results",
             "hostlib_tools_manage_packages",
-            // Per-session opt-in builtin from issue #567.
+            // Per-session opt-in builtin.
             "hostlib_enable",
         ]
     );
@@ -188,7 +198,7 @@ fn install_default_wires_every_module_into_a_vm() {
 fn every_registered_builtin_has_request_and_response_schemas() {
     let registry = HostlibRegistry::new()
         .with(AstCapability)
-        .with(CodeIndexCapability)
+        .with(CodeIndexCapability::new())
         .with(ScannerCapability)
         .with(FsWatchCapability)
         .with(ToolsCapability);

@@ -1,0 +1,158 @@
+{
+  "_comment": "Ported from burin-code Sources/BurinCodeIndex/Resources/import-rules.json. Strategies and field semantics documented in src/code_index/imports.rs.",
+  "languages": {
+    "python": {
+      "strategy": "dotted",
+      "stripPrefixes": ["from ", "import "],
+      "takeFirstAfterStrip": true,
+      "separator": ".",
+      "replaceSeparator": "/",
+      "candidateSuffixes": [".py", "/__init__.py"],
+      "allowSuffixMatch": false,
+      "kind": "import"
+    },
+    "typescript": {
+      "strategy": "relative",
+      "requirePrefixes": ["./", "../", "/"],
+      "candidateExtensions": ["ts", "tsx", "js", "jsx", "mjs", "cjs"],
+      "indexFallbacks": ["index.ts", "index.tsx", "index.js", "index.jsx", "index.mjs", "index.cjs"],
+      "kind": "import"
+    },
+    "javascript": {
+      "strategy": "relative",
+      "requirePrefixes": ["./", "../", "/"],
+      "candidateExtensions": ["js", "jsx", "mjs", "cjs", "ts", "tsx"],
+      "indexFallbacks": ["index.js", "index.jsx", "index.mjs", "index.cjs"],
+      "kind": "import"
+    },
+    "java": {
+      "strategy": "dotted",
+      "stripPrefixes": ["import ", "static "],
+      "stripSuffixes": [";", ".*"],
+      "separator": ".",
+      "replaceSeparator": "/",
+      "candidateSuffixes": [".java"],
+      "allowSuffixMatch": true,
+      "kind": "import"
+    },
+    "kotlin": {
+      "strategy": "dotted",
+      "stripPrefixes": ["import "],
+      "stripSuffixes": [";", ".*"],
+      "separator": ".",
+      "replaceSeparator": "/",
+      "candidateSuffixes": [".kt", ".kts"],
+      "allowSuffixMatch": true,
+      "kind": "import"
+    },
+    "scala": {
+      "strategy": "dotted",
+      "stripPrefixes": ["import "],
+      "stripSuffixes": [";"],
+      "separator": ".",
+      "replaceSeparator": "/",
+      "candidateSuffixes": [".scala"],
+      "allowSuffixMatch": true,
+      "kind": "import"
+    },
+    "csharp": {
+      "strategy": "dotted",
+      "stripPrefixes": ["using "],
+      "stripSuffixes": [";"],
+      "separator": ".",
+      "replaceSeparator": "/",
+      "candidateSuffixes": [".cs"],
+      "allowSuffixMatch": true,
+      "lastSegmentOnly": true,
+      "kind": "using"
+    },
+    "php": {
+      "strategy": "dotted",
+      "stripPrefixes": ["use "],
+      "stripSuffixes": [";"],
+      "aliasSeparator": " as ",
+      "separator": "\\",
+      "replaceSeparator": "/",
+      "candidateSuffixes": [".php"],
+      "allowSuffixMatch": true,
+      "kind": "use"
+    },
+    "elixir": {
+      "strategy": "dotted",
+      "stripPrefixes": ["alias ", "import ", "require ", "use "],
+      "separator": ".",
+      "replaceSeparator": "/",
+      "candidateSuffixes": [".ex", ".exs"],
+      "allowSuffixMatch": true,
+      "lastSegmentOnly": true,
+      "camelToSnake": true,
+      "kind": "alias"
+    },
+    "haskell": {
+      "strategy": "dotted",
+      "stripPrefixes": ["import ", "qualified "],
+      "takeFirstAfterStrip": true,
+      "separator": ".",
+      "replaceSeparator": "/",
+      "candidateSuffixes": [".hs", ".lhs"],
+      "allowSuffixMatch": true,
+      "kind": "import"
+    },
+    "lua": {
+      "strategy": "dotted-literal",
+      "separator": ".",
+      "replaceSeparator": "/",
+      "candidateSuffixes": [".lua", "/init.lua"],
+      "allowSuffixMatch": true,
+      "kind": "require"
+    },
+    "ruby": {
+      "strategy": "relative",
+      "relativeOnlyIfContains": ["require_relative"],
+      "candidateExtensions": ["rb"],
+      "allowSuffixMatch": true,
+      "appendExtensionIfMissing": "rb",
+      "kind": "require"
+    },
+    "c": {
+      "strategy": "relative",
+      "skipIfContainsAngleBracket": true,
+      "candidateExtensions": [],
+      "allowSuffixMatch": true,
+      "kind": "include"
+    },
+    "cpp": {
+      "strategy": "relative",
+      "skipIfContainsAngleBracket": true,
+      "candidateExtensions": [],
+      "allowSuffixMatch": true,
+      "kind": "include"
+    },
+    "zig": {
+      "strategy": "relative",
+      "requireLiteralContains": [".", "/"],
+      "candidateExtensions": [],
+      "allowSuffixMatch": false,
+      "kind": "import"
+    },
+    "r": {
+      "strategy": "relative",
+      "relativeOnlyIfContains": ["source"],
+      "candidateExtensions": [],
+      "allowSuffixMatch": false,
+      "kind": "source"
+    },
+    "rust": {
+      "strategy": "noop",
+      "kind": "use"
+    },
+    "go": {
+      "strategy": "noop",
+      "kind": "import"
+    },
+    "swift": {
+      "strategy": "noop",
+      "kind": "import"
+    }
+  }
+}
