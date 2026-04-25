@@ -82,6 +82,16 @@ After that PR lands through the merge queue, run:
 
   ./scripts/release_ship.sh --finalize
 
+Environment variables:
+  HARN_BOOTSTRAP_NEW_CRATES=1
+    First-release bootstrap mode for a brand-new workspace crate that
+    an already-published crate now depends on. Skips the publish
+    dry-run and tells verify_crate_packages.sh to skip the harn-cli
+    package check (which fails when a path-dep crate isn't on
+    crates.io yet). The real publish later uses
+    `cargo publish --workspace`, which orders intra-workspace deps
+    correctly. See harn#609.
+
 Finalize mode:
   1. Runs ./scripts/release_gate.sh audit
   2. Optionally runs ./scripts/release_gate.sh publish --dry-run
@@ -165,6 +175,20 @@ run_common_gates() {
   # would otherwise get the build.rs placeholder.
   log_step "Build portal frontend"
   make portal-check
+
+  # New-crate bootstrap mode: if the prepare PR introduced a workspace
+  # crate that's also depended on by an already-published crate (e.g.
+  # harn-cli pulling in the brand-new harn-hostlib), cargo's
+  # dependency-resolution step inside `cargo package -p harn-cli` will
+  # fail looking that crate up on crates.io even with --no-verify. Skip
+  # the dry-run and let `cargo publish --workspace` order the crates at
+  # real-publish time. The audit's package-audit lane reads the same
+  # env var via verify_crate_packages.sh and skips the harn-cli check.
+  # See harn#609 for the full failure mode.
+  if [[ "${HARN_BOOTSTRAP_NEW_CRATES:-0}" == "1" ]]; then
+    echo "=== HARN_BOOTSTRAP_NEW_CRATES=1: skipping publish dry-run ==="
+    SKIP_DRY_RUN=1
+  fi
 
   log_step "Release audit"
   ./scripts/release_gate.sh audit
