@@ -399,7 +399,7 @@ fn bind_params<'q>(
             VmValue::Float(value) => query.bind(*value),
             VmValue::String(value) => query.bind(value.to_string()),
             VmValue::Bytes(value) => query.bind((**value).clone()),
-            VmValue::Duration(ms) => query.bind(*ms as i64),
+            VmValue::Duration(ms) => query.bind(*ms),
             value => query.bind(sqlx_core::types::Json(vm_value_to_json(value))),
         };
     }
