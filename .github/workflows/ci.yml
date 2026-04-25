@@ -90,11 +90,19 @@ jobs:
       - run: npm run build
         working-directory: crates/harn-cli/portal
 
+  actions:
+    name: GitHub Actions lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+      - run: make lint-actions
+
   check-status:
     name: Check status
     runs-on: ubuntu-latest
     if: always()
-    needs: [fmt, lint-md, rust, portal]
+    needs: [fmt, lint-md, rust, portal, actions]
     steps:
       - name: Verify required CI jobs
         run: |
@@ -103,6 +111,7 @@ jobs:
             ["Markdown lint"]="${{ needs['lint-md'].result }}"
             ["Rust (lint + test + conformance)"]="${{ needs.rust.result }}"
             ["Portal frontend"]="${{ needs.portal.result }}"
+            ["GitHub Actions lint"]="${{ needs.actions.result }}"
           )
 
           failed=0
