@@ -21,6 +21,9 @@ scaffold (every method routed through `HostlibError::Unimplemented`).
 [#567](https://github.com/burin-labs/harn/issues/567) lights up the
 deterministic-tool surface: `search`, `read_file`, `write_file`,
 `delete_file`, `list_directory`, `get_file_outline`, and `git`.
+[#568](https://github.com/burin-labs/harn/issues/568) lights up the
+process-lifecycle surface: `run_command`, `run_test`,
+`run_build_command`, `inspect_test_results`, and `manage_packages`.
 
 | Issue | Module | What lands | Status |
 |-------|--------|-----------|--------|
@@ -31,7 +34,31 @@ deterministic-tool surface: `search`, `read_file`, `write_file`,
 | C1    | `fs_watch/`        | `subscribe`, `unsubscribe`                                                                | unimplemented |
 | #567  | `tools/` (read & search) | `search`, `read_file`, `list_directory`, `get_file_outline`, `git`                 | ✅ shipped (this issue) |
 | #567  | `tools/` (mutating)      | `write_file`, `delete_file`                                                        | ✅ shipped (this issue) |
-| C2    | `tools/` (process)       | `run_command`, `run_test`, `run_build_command`, `inspect_test_results`, `manage_packages` | unimplemented |
+| #568  | `tools/` (process)       | `run_command`, `run_test`, `run_build_command`, `inspect_test_results`, `manage_packages` | ✅ shipped |
+
+### Process tools
+
+The five process-lifecycle tools spawn real subprocesses and route through
+`harn_vm::process_sandbox`. That keeps every spawn under the active
+orchestration capability policy: Linux seccomp/landlock filters via
+`pre_exec`, macOS `sandbox-exec` wrapping, and cwd enforcement against the
+workspace roots the embedder configured.
+
+- `tools/run_command` accepts `argv: [string]` (no shell parsing), captures
+  stdout/stderr, enforces `timeout_ms` by killing the child and reporting
+  `timed_out: true`, and forwards optional `cwd`, `env`, and `stdin`.
+- `tools/run_test` runs explicit `argv` verbatim or detects a default test
+  runner from manifests in `cwd`. Pytest and vitest get a JUnit XML output
+  path so `inspect_test_results` can drill into per-test records.
+- `tools/run_build_command` runs explicit `argv` or a detected build
+  command. Cargo uses `--message-format=json-diagnostic-rendered-ansi`;
+  other runners fall back to go/generic diagnostic parsing.
+- `tools/inspect_test_results` reads the opaque `result_handle` from
+  `run_test` and parses JUnit XML, cargo libtest text, or go test text.
+- `tools/manage_packages` assembles install/add/remove/update/refresh
+  commands for cargo, npm, pnpm, yarn, pip, uv, poetry, go, swift, gradle,
+  maven, bundler, composer, and dotnet, with lockfile mtime change
+  detection.
 
 ## Why a separate crate?
 
@@ -51,7 +78,9 @@ boundary.
 ## Per-session opt-in for deterministic tools
 
 The deterministic-tool surface (`tools/{search, read_file, write_file,
-delete_file, list_directory, get_file_outline, git}`) is **gated**.
+delete_file, list_directory, get_file_outline, git, run_command,
+run_test, run_build_command, inspect_test_results, manage_packages}`) is
+**gated**.
 `install_default` registers the contract for every method, but the
 handlers refuse to run until the pipeline opts in by calling
 
@@ -63,8 +92,9 @@ hostlib_enable("tools:deterministic")
 matches the safety story called out in
 [#567](https://github.com/burin-labs/harn/issues/567): a Harn script that
 hasn't asked for filesystem / git / search access cannot get it even
-though the contract is wired in. The opt-in is per-thread, so each VM
-gets an independent enable set.
+though the contract is wired in. The same gate applies to process and
+package-manager tools. The opt-in is per-thread, so each VM gets an
+independent enable set.
 
 Embedders that want to enable the surface from Rust without going through
 the builtin can use [`tools::permissions::enable_for_test`] (test-only)

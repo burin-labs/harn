@@ -17,15 +17,15 @@
 //! | `list_directory`        | implemented                     |
 //! | `get_file_outline`      | implemented (regex extractor)   |
 //! | `git`                   | implemented (system git CLI)    |
-//! | `run_command`           | unimplemented (issue C2)        |
-//! | `run_test`              | unimplemented (issue C2)        |
-//! | `run_build_command`     | unimplemented (issue C2)        |
-//! | `inspect_test_results`  | unimplemented (issue C2)        |
-//! | `manage_packages`       | unimplemented (issue C2)        |
+//! | `run_command`           | implemented                     |
+//! | `run_test`              | implemented                     |
+//! | `run_build_command`     | implemented                     |
+//! | `inspect_test_results`  | implemented                     |
+//! | `manage_packages`       | implemented                     |
 //!
 //! ### Per-session opt-in
 //!
-//! All seven deterministic tools are gated by a per-thread feature flag.
+//! All deterministic tools are gated by a per-thread feature flag.
 //! Pipelines must call `hostlib_enable("tools:deterministic")` (registered
 //! by [`ToolsCapability::register_builtins`]) before any of the tool
 //! methods will execute. Until then, calls return
@@ -43,11 +43,22 @@ use crate::error::HostlibError;
 use crate::registry::{BuiltinRegistry, HostlibCapability, RegisteredBuiltin, SyncHandler};
 
 mod args;
+mod diagnostics;
 mod file_io;
 mod git;
+mod inspect_test_results;
+mod lang;
+mod manage_packages;
 mod outline;
+mod payload;
 pub mod permissions;
+mod proc;
+mod response;
+mod run_build_command;
+mod run_command;
+mod run_test;
 mod search;
+mod test_parsers;
 
 pub use permissions::FEATURE_TOOLS_DETERMINISTIC;
 
@@ -94,23 +105,35 @@ impl HostlibCapability for ToolsCapability {
         );
         register_gated(registry, "hostlib_tools_git", "git", git::run);
 
-        // Process tools land in C2; keep the contract surface visible.
-        registry.register_unimplemented("hostlib_tools_run_command", "tools", "run_command");
-        registry.register_unimplemented("hostlib_tools_run_test", "tools", "run_test");
-        registry.register_unimplemented(
+        register_gated(
+            registry,
+            "hostlib_tools_run_command",
+            "run_command",
+            run_command::handle,
+        );
+        register_gated(
+            registry,
+            "hostlib_tools_run_test",
+            "run_test",
+            run_test::handle,
+        );
+        register_gated(
+            registry,
             "hostlib_tools_run_build_command",
-            "tools",
             "run_build_command",
+            run_build_command::handle,
         );
-        registry.register_unimplemented(
+        register_gated(
+            registry,
             "hostlib_tools_inspect_test_results",
-            "tools",
             "inspect_test_results",
+            inspect_test_results::handle,
         );
-        registry.register_unimplemented(
+        register_gated(
+            registry,
             "hostlib_tools_manage_packages",
-            "tools",
             "manage_packages",
+            manage_packages::handle,
         );
 
         // The opt-in builtin lives in the `tools` module so embedders that

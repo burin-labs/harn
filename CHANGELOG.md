@@ -9,6 +9,17 @@ granular archaeology.
 
 ## Unreleased
 
+### Added
+
+- **`harn-hostlib` process-lifecycle tools (#568, #606).** Implemented
+  `run_command`, `run_test`, `run_build_command`,
+  `inspect_test_results`, and `manage_packages` under the gated
+  `tools:deterministic` hostlib surface. Process spawns use argv-only
+  execution, cwd/env/stdin/timeout handling, structured build diagnostic
+  parsing, process-local test result handles, package-manager command
+  assembly, and the public `harn_vm::process_sandbox` helpers so active
+  Linux seccomp/landlock and macOS sandbox-exec policies still apply.
+
 ### Changed
 
 - **Release scripts: harden new-workspace-crate first-release path
@@ -81,12 +92,9 @@ granular archaeology.
   arg-list invocations only, never `sh -c`, plus rev-string validation
   that rejects flag lookalikes and control bytes). The surface is
   gated by a per-session opt-in: pipelines call
-  `hostlib_enable("tools:deterministic")` before any of the seven
+  `hostlib_enable("tools:deterministic")` before any of these seven
   deterministic tools will execute, otherwise calls fail with a
-  structured error pointing at the enable builtin. Process tools
-  (`run_command`, `run_test`, `run_build_command`,
-  `inspect_test_results`, `manage_packages`) remain
-  `Unimplemented`-routed for issue C2.
+  structured error pointing at the enable builtin.
 
 - **Fair-share scheduler for worker-queue claims (#477).** New
   deficit-round-robin policy in front of `WorkerQueue::claim_next` so a
