@@ -3329,6 +3329,11 @@ Sets are iterable with `for ... in` and support `len()`.
 | `bytes_eq(a, b)` | Constant-time byte equality check |
 | `sha256(str)` | Returns the hex-encoded SHA-256 hash of `str` |
 | `md5(str)` | Returns the hex-encoded MD5 hash of `str` |
+| `hmac_sha256(key, message)` | Returns HMAC-SHA256 as lowercase hex |
+| `hmac_sha256_base64(key, message)` | Returns HMAC-SHA256 as standard base64 |
+| `constant_time_eq(a, b)` | Constant-time string equality for signatures |
+| `signed_url(base, claims, secret, expires_at, options?)` | Returns a short-lived HMAC-SHA256 signed absolute URL or absolute path |
+| `verify_signed_url(url, secret_or_keys, now, options?)` | Verifies a signed URL/path and returns `{valid, reason, signature_valid, expired, expires_at, kid, claims}` |
 | `jwt_sign(alg, claims, private_key)` | Signs a compact JWT/JWS with a PEM private key. Supports `ES256` and `RS256` |
 | `gzip_encode(bytes_or_string, level?)` | Gzip-compresses bytes/string into `bytes`; `level` defaults to `6` and must be `0..9` |
 | `gzip_decode(bytes)` | Gzip-decompresses `bytes` and returns `bytes` |
@@ -3382,6 +3387,20 @@ let uploaded = multipart_field_bytes(form.fields[1])
 println(title)
 println(bytes_to_hex(uploaded))
 ```
+
+`signed_url` is the canonical helper for short-lived Harn-hosted receipt and
+artifact links. `base` may be an absolute URL with a host or an absolute path
+beginning with `/`. The helper merges existing query parameters with `claims`,
+adds `exp`, an optional `kid`, and a `sig`, then signs a versioned canonical
+payload with HMAC-SHA256. Query canonicalization percent-encodes each key/value
+with the RFC 3986 unreserved set left plain and sorts encoded pairs
+lexicographically. Path canonicalization preserves `/`, preserves existing
+`%XX` escapes with uppercase hex, and percent-encodes other non-unreserved
+bytes. Signatures use URL-safe base64 without padding. `verify_signed_url`
+removes `sig`, rebuilds the same canonical payload, compares signatures in
+constant time, applies `skew_seconds` if provided, and supports key rotation by
+accepting either one secret string or a `{kid: secret}` dict. Parameter names
+can be overridden with `signature_param`, `expires_param`, and `kid_param`.
 
 `jwt_sign` requires `claims` to be a dict so it can be serialized as a JSON
 claims object. `ES256` expects a P-256 EC private key in PEM form; `RS256`

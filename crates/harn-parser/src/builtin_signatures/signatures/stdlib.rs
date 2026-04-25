@@ -1216,6 +1216,10 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("int")),
     },
     BuiltinSig {
+        name: "signed_url",
+        return_type: Some(BuiltinReturn::Named("string")),
+    },
+    BuiltinSig {
         name: "sin",
         return_type: Some(BuiltinReturn::Named("float")),
     },
@@ -1482,6 +1486,10 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
     BuiltinSig {
         name: "values",
         return_type: Some(BuiltinReturn::Named("list")),
+    },
+    BuiltinSig {
+        name: "verify_signed_url",
+        return_type: Some(BuiltinReturn::Named("dict")),
     },
     BuiltinSig {
         name: "vision_ocr",

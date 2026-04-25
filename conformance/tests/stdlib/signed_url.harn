@@ -1,0 +1,38 @@
+pipeline test(task) {
+  let link = signed_url(
+    "https://example.test/receipts/r_123?b=two+words",
+    {artifact: "transcript/json", receipt: "r_123"},
+    "secret",
+    1700000600,
+    {kid: "v2"},
+  )
+  assert(contains(link, "artifact=transcript%2Fjson"), "claim values are URL encoded")
+  assert(contains(link, "b=two%20words"), "spaces use percent encoding")
+  assert(contains(link, "kid=v2"), "key id is included")
+  assert(contains(link, "sig="), "signature is included")
+  let verified = verify_signed_url(link, {v1: "old-secret", v2: "secret"}, 1700000590)
+  assert(verified.valid, "valid signed URL verifies")
+  assert(verified.signature_valid, "signature flag is set")
+  assert(!verified.expired, "fresh link is not expired")
+  assert_eq(verified.reason, "ok")
+  assert_eq(verified.kid, "v2")
+  assert_eq(verified.claims.artifact, "transcript/json")
+  assert_eq(verified.claims.receipt, "r_123")
+  let tampered = replace(link, "receipt=r_123", "receipt=r_999")
+  let bad = verify_signed_url(tampered, {v1: "old-secret", v2: "secret"}, 1700000590)
+  assert(!bad.valid, "tampering fails")
+  assert(!bad.signature_valid, "tampering fails signature comparison")
+  assert_eq(bad.reason, "bad_signature")
+  let expired = verify_signed_url(link, {v2: "secret"}, 1700000631, {skew_seconds: 30})
+  assert(!expired.valid, "past skew is expired")
+  assert(expired.signature_valid, "expired link can still have a valid signature")
+  assert(expired.expired, "expired flag is set")
+  assert_eq(expired.reason, "expired")
+  let within_skew = verify_signed_url(link, {v2: "secret"}, 1700000630, {skew_seconds: 30})
+  assert(within_skew.valid, "expiry allows configured skew")
+  let path_link = signed_url("/artifacts/run 1", {download: "true"}, "secret", 1700000600)
+  assert(contains(path_link, "/artifacts/run%201?"), "signed paths are encoded")
+  assert(contains(path_link, "download=true"), "signed paths are supported")
+  assert(contains(path_link, "sig="), "signed path includes signature")
+  println("signed_url_ok")
+}

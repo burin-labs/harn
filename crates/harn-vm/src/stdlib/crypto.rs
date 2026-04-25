@@ -1,6 +1,8 @@
+use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use jsonwebtoken::{Algorithm, EncodingKey, Header};
+use url::Url;
 use zeroize::Zeroizing;
 
 use crate::value::{VmError, VmValue};
@@ -70,6 +72,531 @@ fn jwt_sign_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
         .map_err(|error| jwt_error(format!("signing failed: {error}")))?;
 
     Ok(VmValue::String(Rc::from(token)))
+}
+
+#[derive(Clone, Debug)]
+struct SignedUrlOptions {
+    signature_param: String,
+    expires_param: String,
+    kid_param: String,
+    kid: Option<String>,
+    skew_seconds: i64,
+}
+
+impl Default for SignedUrlOptions {
+    fn default() -> Self {
+        Self {
+            signature_param: "sig".to_string(),
+            expires_param: "exp".to_string(),
+            kid_param: "kid".to_string(),
+            kid: None,
+            skew_seconds: 0,
+        }
+    }
+}
+
+#[derive(Debug)]
+struct UrlParts {
+    resource: String,
+    output_prefix: String,
+    query_pairs: Vec<(String, String)>,
+}
+
+fn signed_url_error(message: impl Into<String>) -> VmError {
+    VmError::Runtime(format!("signed_url: {}", message.into()))
+}
+
+fn verify_signed_url_error(message: impl Into<String>) -> VmError {
+    VmError::Runtime(format!("verify_signed_url: {}", message.into()))
+}
+
+fn string_arg<'a>(args: &'a [VmValue], index: usize, name: &str) -> Result<&'a str, VmError> {
+    match args.get(index) {
+        Some(VmValue::String(value)) => Ok(value.as_ref()),
+        Some(other) => Err(signed_url_error(format!(
+            "{name} must be a string, got {}",
+            other.type_name()
+        ))),
+        None => Err(signed_url_error(format!("{name} is required"))),
+    }
+}
+
+fn int_arg(args: &[VmValue], index: usize, name: &str) -> Result<i64, VmError> {
+    match args.get(index) {
+        Some(VmValue::Int(value)) => Ok(*value),
+        Some(other) => Err(signed_url_error(format!(
+            "{name} must be an int, got {}",
+            other.type_name()
+        ))),
+        None => Err(signed_url_error(format!("{name} is required"))),
+    }
+}
+
+fn option_string(
+    options: &BTreeMap<String, VmValue>,
+    key: &str,
+    builtin: &str,
+) -> Result<Option<String>, VmError> {
+    match options.get(key) {
+        Some(VmValue::String(value)) => Ok(Some(value.to_string())),
+        Some(VmValue::Nil) | None => Ok(None),
+        Some(other) => Err(VmError::Runtime(format!(
+            "{builtin}: option `{key}` must be a string, got {}",
+            other.type_name()
+        ))),
+    }
+}
+
+fn option_int(
+    options: &BTreeMap<String, VmValue>,
+    key: &str,
+    builtin: &str,
+) -> Result<Option<i64>, VmError> {
+    match options.get(key) {
+        Some(VmValue::Int(value)) => Ok(Some(*value)),
+        Some(VmValue::Nil) | None => Ok(None),
+        Some(other) => Err(VmError::Runtime(format!(
+            "{builtin}: option `{key}` must be an int, got {}",
+            other.type_name()
+        ))),
+    }
+}
+
+fn signed_url_options(value: Option<&VmValue>, builtin: &str) -> Result<SignedUrlOptions, VmError> {
+    let mut options = SignedUrlOptions::default();
+    let Some(value) = value else {
+        return Ok(options);
+    };
+    let dict = value.as_dict().ok_or_else(|| {
+        VmError::Runtime(format!(
+            "{builtin}: options must be a dict, got {}",
+            value.type_name()
+        ))
+    })?;
+    if let Some(signature_param) = option_string(dict, "signature_param", builtin)? {
+        options.signature_param = signature_param;
+    }
+    if let Some(expires_param) = option_string(dict, "expires_param", builtin)? {
+        options.expires_param = expires_param;
+    }
+    if let Some(kid_param) = option_string(dict, "kid_param", builtin)? {
+        options.kid_param = kid_param;
+    }
+    options.kid = option_string(dict, "kid", builtin)?;
+    options.skew_seconds = option_int(dict, "skew_seconds", builtin)?.unwrap_or(0);
+    validate_param_name(&options.signature_param, builtin, "signature_param")?;
+    validate_param_name(&options.expires_param, builtin, "expires_param")?;
+    validate_param_name(&options.kid_param, builtin, "kid_param")?;
+    if options.signature_param == options.expires_param
+        || options.signature_param == options.kid_param
+        || options.expires_param == options.kid_param
+    {
+        return Err(VmError::Runtime(format!(
+            "{builtin}: signature_param, expires_param, and kid_param must be distinct"
+        )));
+    }
+    if options.skew_seconds < 0 {
+        return Err(VmError::Runtime(format!(
+            "{builtin}: skew_seconds must be greater than or equal to 0"
+        )));
+    }
+    Ok(options)
+}
+
+fn validate_param_name(param: &str, builtin: &str, option_name: &str) -> Result<(), VmError> {
+    if param.is_empty() {
+        return Err(VmError::Runtime(format!(
+            "{builtin}: option `{option_name}` cannot be empty"
+        )));
+    }
+    Ok(())
+}
+
+fn parse_url_parts(raw: &str, builtin: &str) -> Result<UrlParts, VmError> {
+    if let Ok(mut parsed) = Url::parse(raw) {
+        if parsed.cannot_be_a_base() || parsed.host_str().is_none() {
+            return Err(VmError::Runtime(format!(
+                "{builtin}: expected an absolute URL with a host or an absolute path starting with `/`"
+            )));
+        }
+        parsed.set_fragment(None);
+        let query_pairs = parsed.query().map(parse_query_pairs).unwrap_or_default();
+        parsed.set_query(None);
+        let origin = parsed.origin().ascii_serialization();
+        let path = parsed.path();
+        let resource = format!("{origin}{path}");
+        return Ok(UrlParts {
+            resource,
+            output_prefix: parsed.as_str().to_string(),
+            query_pairs,
+        });
+    }
+
+    let without_fragment = raw.split_once('#').map(|(head, _)| head).unwrap_or(raw);
+    let (path, query) = without_fragment
+        .split_once('?')
+        .map(|(path, query)| (path, Some(query)))
+        .unwrap_or((without_fragment, None));
+    let path = if path.is_empty() { "/" } else { path };
+    if !path.starts_with('/') {
+        return Err(VmError::Runtime(format!(
+            "{builtin}: expected an absolute URL or an absolute path starting with `/`"
+        )));
+    }
+    let path = percent_encode_path(path);
+    Ok(UrlParts {
+        resource: path.clone(),
+        output_prefix: path,
+        query_pairs: query.map(parse_query_pairs).unwrap_or_default(),
+    })
+}
+
+fn parse_query_pairs(raw: &str) -> Vec<(String, String)> {
+    url::form_urlencoded::parse(raw.as_bytes())
+        .map(|(key, value)| (key.into_owned(), value.into_owned()))
+        .collect()
+}
+
+fn percent_encode_component(input: &str) -> String {
+    let mut out = String::new();
+    for byte in input.as_bytes() {
+        match *byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(*byte as char);
+            }
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
+}
+
+fn percent_encode_path(input: &str) -> String {
+    let bytes = input.as_bytes();
+    let mut out = String::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        let byte = bytes[i];
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' | b'/' => {
+                out.push(byte as char);
+                i += 1;
+            }
+            b'%' if i + 2 < bytes.len()
+                && (bytes[i + 1] as char).is_ascii_hexdigit()
+                && (bytes[i + 2] as char).is_ascii_hexdigit() =>
+            {
+                out.push('%');
+                out.push((bytes[i + 1] as char).to_ascii_uppercase());
+                out.push((bytes[i + 2] as char).to_ascii_uppercase());
+                i += 3;
+            }
+            _ => {
+                out.push_str(&format!("%{byte:02X}"));
+                i += 1;
+            }
+        }
+    }
+    out
+}
+
+fn canonical_query(pairs: &[(String, String)]) -> String {
+    let mut encoded: Vec<(String, String)> = pairs
+        .iter()
+        .map(|(key, value)| {
+            (
+                percent_encode_component(key),
+                percent_encode_component(value),
+            )
+        })
+        .collect();
+    encoded.sort();
+    encoded
+        .into_iter()
+        .map(|(key, value)| format!("{key}={value}"))
+        .collect::<Vec<_>>()
+        .join("&")
+}
+
+fn signed_url_payload(resource: &str, query: &str) -> String {
+    format!("harn-signed-url-v1\n{resource}\n{query}")
+}
+
+fn hmac_sha256_base64url(secret: &str, message: &str) -> String {
+    use base64::Engine;
+    let mac = crate::connectors::hmac::hmac_sha256(secret.as_bytes(), message.as_bytes());
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(mac)
+}
+
+fn append_query(prefix: &str, query: &str) -> String {
+    if query.is_empty() {
+        prefix.to_string()
+    } else {
+        format!("{prefix}?{query}")
+    }
+}
+
+fn claims_arg<'a>(
+    args: &'a [VmValue],
+    options: &SignedUrlOptions,
+) -> Result<&'a BTreeMap<String, VmValue>, VmError> {
+    let Some(value) = args.get(1) else {
+        return Err(signed_url_error("claims is required"));
+    };
+    let dict = value.as_dict().ok_or_else(|| {
+        signed_url_error(format!("claims must be a dict, got {}", value.type_name()))
+    })?;
+    for reserved in [
+        &options.signature_param,
+        &options.expires_param,
+        &options.kid_param,
+    ] {
+        if dict.contains_key(reserved) {
+            return Err(signed_url_error(format!(
+                "claims cannot contain reserved parameter `{reserved}`"
+            )));
+        }
+    }
+    Ok(dict)
+}
+
+fn signed_url_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
+    if args.len() < 4 || args.len() > 5 {
+        return Err(signed_url_error(
+            "requires 4 or 5 arguments: base, claims, secret, expires_at, options?",
+        ));
+    }
+    let options = signed_url_options(args.get(4), "signed_url")?;
+    let base = string_arg(args, 0, "base")?;
+    let claims = claims_arg(args, &options)?;
+    let secret = string_arg(args, 2, "secret")?;
+    let expires_at = int_arg(args, 3, "expires_at")?;
+    let mut parts = parse_url_parts(base, "signed_url")?;
+
+    parts.query_pairs.retain(|(key, _)| {
+        key != &options.signature_param
+            && key != &options.expires_param
+            && key != &options.kid_param
+    });
+    for (key, value) in claims.iter() {
+        parts.query_pairs.push((key.clone(), value.display()));
+    }
+    parts
+        .query_pairs
+        .push((options.expires_param.clone(), expires_at.to_string()));
+    if let Some(kid) = &options.kid {
+        parts
+            .query_pairs
+            .push((options.kid_param.clone(), kid.clone()));
+    }
+
+    let query_without_signature = canonical_query(&parts.query_pairs);
+    let payload = signed_url_payload(&parts.resource, &query_without_signature);
+    let signature = hmac_sha256_base64url(secret, &payload);
+    let mut signed_pairs = parts.query_pairs;
+    signed_pairs.push((options.signature_param, signature));
+    let signed_query = canonical_query(&signed_pairs);
+    Ok(VmValue::String(Rc::from(append_query(
+        &parts.output_prefix,
+        &signed_query,
+    ))))
+}
+
+fn verification_result(
+    valid: bool,
+    reason: &str,
+    signature_valid: bool,
+    expired: bool,
+    expires_at: Option<i64>,
+    kid: Option<String>,
+    claims: BTreeMap<String, VmValue>,
+) -> VmValue {
+    let mut result = BTreeMap::new();
+    result.insert("valid".to_string(), VmValue::Bool(valid));
+    result.insert("reason".to_string(), VmValue::String(Rc::from(reason)));
+    result.insert(
+        "signature_valid".to_string(),
+        VmValue::Bool(signature_valid),
+    );
+    result.insert("expired".to_string(), VmValue::Bool(expired));
+    result.insert(
+        "expires_at".to_string(),
+        expires_at.map(VmValue::Int).unwrap_or(VmValue::Nil),
+    );
+    result.insert(
+        "kid".to_string(),
+        kid.map(|kid| VmValue::String(Rc::from(kid)))
+            .unwrap_or(VmValue::Nil),
+    );
+    result.insert("claims".to_string(), VmValue::Dict(Rc::new(claims)));
+    VmValue::Dict(Rc::new(result))
+}
+
+fn choose_secret(secret_or_keys: &VmValue, kid: Option<&str>) -> Result<Option<String>, VmError> {
+    match secret_or_keys {
+        VmValue::String(secret) => Ok(Some(secret.to_string())),
+        VmValue::Dict(keys) => {
+            let Some(kid) = kid else {
+                return Ok(None);
+            };
+            Ok(keys.get(kid).map(|secret| secret.display()))
+        }
+        other => Err(verify_signed_url_error(format!(
+            "secret_or_keys must be a string or dict, got {}",
+            other.type_name()
+        ))),
+    }
+}
+
+fn verify_signed_url_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
+    if args.len() < 3 || args.len() > 4 {
+        return Err(verify_signed_url_error(
+            "requires 3 or 4 arguments: url, secret_or_keys, now, options?",
+        ));
+    }
+    let options = signed_url_options(args.get(3), "verify_signed_url")?;
+    let raw_url = match args.first() {
+        Some(VmValue::String(value)) => value.as_ref(),
+        Some(other) => {
+            return Err(verify_signed_url_error(format!(
+                "url must be a string, got {}",
+                other.type_name()
+            )));
+        }
+        None => return Err(verify_signed_url_error("url is required")),
+    };
+    let now = match args.get(2) {
+        Some(VmValue::Int(value)) => *value,
+        Some(other) => {
+            return Err(verify_signed_url_error(format!(
+                "now must be an int, got {}",
+                other.type_name()
+            )));
+        }
+        None => return Err(verify_signed_url_error("now is required")),
+    };
+    let mut parts = parse_url_parts(raw_url, "verify_signed_url")?;
+
+    let signatures: Vec<String> = parts
+        .query_pairs
+        .iter()
+        .filter(|(key, _)| key == &options.signature_param)
+        .map(|(_, value)| value.clone())
+        .collect();
+    if signatures.len() != 1 {
+        return Ok(verification_result(
+            false,
+            "missing_signature",
+            false,
+            false,
+            None,
+            None,
+            BTreeMap::new(),
+        ));
+    }
+    let signature = signatures[0].clone();
+
+    let expires_values: Vec<String> = parts
+        .query_pairs
+        .iter()
+        .filter(|(key, _)| key == &options.expires_param)
+        .map(|(_, value)| value.clone())
+        .collect();
+    if expires_values.len() != 1 {
+        return Ok(verification_result(
+            false,
+            "missing_expiry",
+            false,
+            false,
+            None,
+            None,
+            BTreeMap::new(),
+        ));
+    }
+    let expires_at = match expires_values[0].parse::<i64>() {
+        Ok(value) => value,
+        Err(_) => {
+            return Ok(verification_result(
+                false,
+                "invalid_expiry",
+                false,
+                false,
+                None,
+                None,
+                BTreeMap::new(),
+            ));
+        }
+    };
+
+    let kid_values: Vec<String> = parts
+        .query_pairs
+        .iter()
+        .filter(|(key, _)| key == &options.kid_param)
+        .map(|(_, value)| value.clone())
+        .collect();
+    if kid_values.len() > 1 {
+        return Ok(verification_result(
+            false,
+            "duplicate_kid",
+            false,
+            false,
+            Some(expires_at),
+            None,
+            BTreeMap::new(),
+        ));
+    }
+    let kid = kid_values.first().cloned();
+
+    let mut claims = BTreeMap::new();
+    for (key, value) in &parts.query_pairs {
+        if key != &options.signature_param
+            && key != &options.expires_param
+            && key != &options.kid_param
+        {
+            claims.insert(key.clone(), VmValue::String(Rc::from(value.as_str())));
+        }
+    }
+
+    let Some(secret_or_keys) = args.get(1) else {
+        return Err(verify_signed_url_error("secret_or_keys is required"));
+    };
+    let Some(secret) = choose_secret(secret_or_keys, kid.as_deref())? else {
+        return Ok(verification_result(
+            false,
+            "unknown_key",
+            false,
+            false,
+            Some(expires_at),
+            kid,
+            claims,
+        ));
+    };
+
+    parts
+        .query_pairs
+        .retain(|(key, _)| key != &options.signature_param);
+    let query_without_signature = canonical_query(&parts.query_pairs);
+    let payload = signed_url_payload(&parts.resource, &query_without_signature);
+    let expected = hmac_sha256_base64url(&secret, &payload);
+    let signature_valid =
+        crate::connectors::hmac::secure_eq(signature.as_bytes(), expected.as_bytes());
+    let expired = now > expires_at.saturating_add(options.skew_seconds);
+    let valid = signature_valid && !expired;
+    let reason = if !signature_valid {
+        "bad_signature"
+    } else if expired {
+        "expired"
+    } else {
+        "ok"
+    };
+    Ok(verification_result(
+        valid,
+        reason,
+        signature_valid,
+        expired,
+        Some(expires_at),
+        kid,
+        claims,
+    ))
 }
 
 pub(crate) fn register_crypto_builtins(vm: &mut Vm) {
@@ -199,6 +726,11 @@ pub(crate) fn register_crypto_builtins(vm: &mut Vm) {
     });
 
     vm.register_builtin("jwt_sign", |args, _out| jwt_sign_builtin(args));
+
+    vm.register_builtin("signed_url", |args, _out| signed_url_builtin(args));
+    vm.register_builtin("verify_signed_url", |args, _out| {
+        verify_signed_url_builtin(args)
+    });
 
     // Constant-time string equality. The variable-time `==` operator can leak
     // the position of the first differing byte through timing, which lets an
@@ -513,6 +1045,15 @@ C/edCMRM78P8eQTBCDUTK1ywSYaszvQZvneiW6gNtWEJndSreEcyyUdVvg==\n\
         ])))
     }
 
+    fn dict(items: &[(&str, VmValue)]) -> VmValue {
+        VmValue::Dict(Rc::new(
+            items
+                .iter()
+                .map(|(key, value)| (key.to_string(), value.clone()))
+                .collect(),
+        ))
+    }
+
     #[test]
     fn base64_round_trip_ascii() {
         let mut vm = vm();
@@ -816,6 +1357,179 @@ C/edCMRM78P8eQTBCDUTK1ywSYaszvQZvneiW6gNtWEJndSreEcyyUdVvg==\n\
             result.display(),
             "b613679a0814d9ec772f95d778c35fc5ff1697c493715653c6c712144292c5ad"
         );
+    }
+
+    #[test]
+    fn signed_url_canonicalizes_query_and_uses_url_safe_signature() {
+        let mut vm = vm();
+        let signed = call(
+            &mut vm,
+            "signed_url",
+            vec![
+                s("https://example.test/receipt/abc?b=two+words&a=1"),
+                dict(&[("z", s("slash/value")), ("a2", s("!"))]),
+                s("secret"),
+                VmValue::Int(1_700_000_600),
+            ],
+        )
+        .unwrap()
+        .display();
+
+        assert!(signed.starts_with("https://example.test/receipt/abc?"));
+        assert!(signed.contains("a=1"));
+        assert!(signed.contains("a2=%21"));
+        assert!(signed.contains("b=two%20words"));
+        assert!(signed.contains("z=slash%2Fvalue"));
+        let sig = signed
+            .split('&')
+            .find_map(|part| part.strip_prefix("sig="))
+            .expect("signature param");
+        assert!(!sig.contains('+'));
+        assert!(!sig.contains('/'));
+        assert!(!sig.contains('='));
+    }
+
+    #[test]
+    fn verify_signed_url_accepts_valid_path_and_returns_claims() {
+        let mut vm = vm();
+        let signed = call(
+            &mut vm,
+            "signed_url",
+            vec![
+                s("/artifacts/run 1?kind=trace"),
+                dict(&[("receipt", s("r_123"))]),
+                s("secret"),
+                VmValue::Int(200),
+            ],
+        )
+        .unwrap();
+        assert!(signed.display().starts_with("/artifacts/run%201?"));
+        let verified = call(
+            &mut vm,
+            "verify_signed_url",
+            vec![signed, s("secret"), VmValue::Int(199)],
+        )
+        .unwrap();
+        let VmValue::Dict(result) = verified else {
+            panic!("expected verification dict");
+        };
+        assert!(matches!(result.get("valid"), Some(VmValue::Bool(true))));
+        assert!(matches!(
+            result.get("signature_valid"),
+            Some(VmValue::Bool(true))
+        ));
+        assert!(matches!(result.get("expired"), Some(VmValue::Bool(false))));
+        assert_eq!(result.get("reason").unwrap().display(), "ok");
+        let claims = result.get("claims").unwrap().as_dict().unwrap();
+        assert_eq!(claims.get("kind").unwrap().display(), "trace");
+        assert_eq!(claims.get("receipt").unwrap().display(), "r_123");
+    }
+
+    #[test]
+    fn verify_signed_url_rejects_tampering() {
+        let mut vm = vm();
+        let signed = call(
+            &mut vm,
+            "signed_url",
+            vec![
+                s("/receipts/r_123"),
+                dict(&[("download", s("true"))]),
+                s("secret"),
+                VmValue::Int(200),
+            ],
+        )
+        .unwrap()
+        .display();
+        let tampered = signed.replace("download=true", "download=false");
+        let verified = call(
+            &mut vm,
+            "verify_signed_url",
+            vec![s(&tampered), s("secret"), VmValue::Int(100)],
+        )
+        .unwrap();
+        let result = verified.as_dict().unwrap();
+        assert!(matches!(result.get("valid"), Some(VmValue::Bool(false))));
+        assert!(matches!(
+            result.get("signature_valid"),
+            Some(VmValue::Bool(false))
+        ));
+        assert_eq!(result.get("reason").unwrap().display(), "bad_signature");
+    }
+
+    #[test]
+    fn verify_signed_url_handles_expiry_and_skew() {
+        let mut vm = vm();
+        let signed = call(
+            &mut vm,
+            "signed_url",
+            vec![
+                s("/receipts/r_123"),
+                dict(&[]),
+                s("secret"),
+                VmValue::Int(200),
+            ],
+        )
+        .unwrap();
+        let expired = call(
+            &mut vm,
+            "verify_signed_url",
+            vec![signed.clone(), s("secret"), VmValue::Int(201)],
+        )
+        .unwrap();
+        let expired_result = expired.as_dict().unwrap();
+        assert!(matches!(
+            expired_result.get("valid"),
+            Some(VmValue::Bool(false))
+        ));
+        assert!(matches!(
+            expired_result.get("signature_valid"),
+            Some(VmValue::Bool(true))
+        ));
+        assert_eq!(expired_result.get("reason").unwrap().display(), "expired");
+
+        let within_skew = call(
+            &mut vm,
+            "verify_signed_url",
+            vec![
+                signed,
+                s("secret"),
+                VmValue::Int(205),
+                dict(&[("skew_seconds", VmValue::Int(5))]),
+            ],
+        )
+        .unwrap();
+        assert!(matches!(
+            within_skew.as_dict().unwrap().get("valid"),
+            Some(VmValue::Bool(true))
+        ));
+    }
+
+    #[test]
+    fn signed_url_supports_key_rotation_id() {
+        let mut vm = vm();
+        let options = dict(&[("kid", s("v2"))]);
+        let signed = call(
+            &mut vm,
+            "signed_url",
+            vec![
+                s("https://example.test/receipts/r_123"),
+                dict(&[("format", s("json"))]),
+                s("new-secret"),
+                VmValue::Int(200),
+                options,
+            ],
+        )
+        .unwrap();
+        let keys = dict(&[("v1", s("old-secret")), ("v2", s("new-secret"))]);
+        let verified = call(
+            &mut vm,
+            "verify_signed_url",
+            vec![signed, keys, VmValue::Int(100)],
+        )
+        .unwrap();
+        let result = verified.as_dict().unwrap();
+        assert!(matches!(result.get("valid"), Some(VmValue::Bool(true))));
+        assert_eq!(result.get("kid").unwrap().display(), "v2");
     }
 
     #[test]
