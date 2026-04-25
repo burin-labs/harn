@@ -21,6 +21,10 @@
     ".burin",
     ".claude",
     "docs/src/SUMMARY.md",
-    "conformance/tests/**/.harn/**/*.md"
+    "conformance/tests/**/.harn/**/*.md",
+    // qmode experiment writes synthetic profile bullets here during eval runs;
+    // these are not docs and shouldn't be linted as such.
+    "experiments/**/.harn/**/*.md",
+    "experiments/**/USER_PROFILE.md"
   ]
 }

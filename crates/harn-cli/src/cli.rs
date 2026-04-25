@@ -1873,6 +1873,9 @@ pub(crate) struct PersonaStatusArgs {
 pub(crate) struct PersonaControlArgs {
     /// Persona name to control.
     pub name: String,
+    /// RFC3339 timestamp to use as "now" for deterministic tests.
+    #[arg(long, value_name = "RFC3339")]
+    pub at: Option<String>,
     /// Emit stable JSON after applying the control.
     #[arg(long)]
     pub json: bool,

@@ -58,6 +58,99 @@ pub fn search_workspace(query) {
   return result?.stdout ?? result?.stderr ?? ""
 }
 
+/** List every workspace file in deterministic (path-sorted) order. */
+pub fn list_workspace_files() {
+  let result = exec_at(
+    workspace_root(),
+    "rg",
+    "--files",
+    "--hidden",
+    "--sort",
+    "path",
+    "--glob",
+    "!node_modules",
+    "--glob",
+    "!.git",
+    "--glob",
+    "!dist",
+    "--glob",
+    "!coverage",
+  )
+  let out = (result?.stdout ?? "").trim()
+  if out == "" {
+    return []
+  }
+  return split(out, "\n")
+}
+
+/**
+ * Unified discovery: filename matches AND content matches in one call.
+ *
+ * Returns a string with two sections (omitted when empty), or an explicit
+ * "(no matches for 'query')" line if both sections are empty. The caller
+ * should pass a token or symbol — natural-language phrases like
+ * "auth middleware" rarely match content literally; the filename pass
+ * is what saves them.
+ */
+pub fn find_workspace(query) {
+  let q = (query ?? "").trim()
+  if q == "" {
+    return "(empty query)"
+  }
+  // Filename pass: path-sorted file list, filter by case-insensitive substring.
+  var name_hits = []
+  for path in list_workspace_files() {
+    if contains(lowercase(path), lowercase(q)) {
+      name_hits = name_hits + [path]
+    }
+  }
+  // Content pass: ripgrep -n -i, capped at 80 lines.
+  let rg = exec_at(
+    workspace_root(),
+    "rg",
+    "-n",
+    "-i",
+    "--hidden",
+    "--sort",
+    "path",
+    "--max-count",
+    "20",
+    "--glob",
+    "!node_modules",
+    "--glob",
+    "!.git",
+    "--glob",
+    "!dist",
+    "--glob",
+    "!coverage",
+    q,
+    ".",
+  )
+  let content_lines = split((rg?.stdout ?? "").trim(), "\n")
+  let trimmed_content = if len(content_lines) > 80 {
+    content_lines[0:80]
+  } else {
+    content_lines
+  }
+  let truncated = len(content_lines) > 80
+  var sections = []
+  if len(name_hits) > 0 {
+    let hdr = "## Filename matches (${len(name_hits)})"
+    sections = sections + [hdr + "\n" + join(name_hits, "\n")]
+  }
+  if (rg?.stdout ?? "").trim() != "" {
+    var body = join(trimmed_content, "\n")
+    if truncated {
+      body = body + "\n... (truncated; refine query or use read on a specific file)"
+    }
+    sections = sections + ["## Content matches\n" + body]
+  }
+  if len(sections) == 0 {
+    return "(no matches for '${q}')"
+  }
+  return join(sections, "\n\n")
+}
+
 /** Run one shell command from the sample workspace root. */
 pub fn run_workspace(command) {
   return shell_at(workspace_root(), command)

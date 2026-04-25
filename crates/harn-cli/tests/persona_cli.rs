@@ -266,7 +266,7 @@ fn persona_runtime_status_tick_and_budget_are_persisted() {
             "status",
             "merge_captain",
             "--at",
-            "2026-04-24T12:30:00Z",
+            "2026-04-24T13:00:00Z",
             "--json",
         ])
         .output()
