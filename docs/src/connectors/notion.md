@@ -1,5 +1,15 @@
 # Notion connector
 
+> **Deprecated.** The Rust-side `NotionConnector` is on the sunset path tracked
+> by [#446](https://github.com/burin-labs/harn/issues/446). The recommended
+> implementation is the pure-Harn
+> [`harn-notion-connector`](https://github.com/burin-labs/harn-notion-connector)
+> package. This page documents the existing Rust connector for users who have
+> not yet migrated; new deployments should configure the Harn package via
+> `connector = { harn = "..." }` on the `[[providers]]` table. See the
+> [Rust-to-Harn-package migration guide](../migrations/rust-connectors-to-harn-packages.md)
+> for a no-downtime cutover path.
+
 `NotionConnector` is Harn's built-in hybrid Notion integration. It combines:
 
 - webhook ingest for the event families Notion can push directly

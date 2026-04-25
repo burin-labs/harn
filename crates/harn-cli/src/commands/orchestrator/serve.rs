@@ -532,11 +532,20 @@ async fn initialize_connectors(
     let mut handles = Vec::new();
     for (provider, kinds) in grouped_kinds {
         let provider_name = provider.as_str().to_string();
-        if let Some(connector) = connector_override_for(&provider, provider_overrides).await? {
-            registry.remove(&provider);
-            registry
-                .register(connector)
-                .map_err(|error| error.to_string())?;
+        let used_harn_override =
+            if let Some(connector) = connector_override_for(&provider, provider_overrides).await? {
+                registry.remove(&provider);
+                registry
+                    .register(connector)
+                    .map_err(|error| error.to_string())?;
+                true
+            } else {
+                false
+            };
+        if !used_harn_override {
+            if let Some(message) = rust_deprecated_provider_warning(provider.as_str()) {
+                eprintln!("{message}");
+            }
         }
         if registry.get(&provider).is_none() {
             let connector = connector_for(&provider, kinds);
@@ -639,6 +648,29 @@ fn connector_for(
         "cron" => Box::new(harn_vm::CronConnector::new()),
         _ => Box::new(PlaceholderConnector::new(provider.clone(), kinds)),
     }
+}
+
+/// Providers whose Rust-side business logic is on the deprecation path tracked
+/// by https://github.com/burin-labs/harn/issues/446. New deployments should
+/// configure the corresponding pure-Harn connector package on the
+/// `[[providers]]` table to silence the orchestrator-startup deprecation
+/// warning.
+const RUST_DEPRECATED_PROVIDERS: &[&str] = &["github", "linear", "notion", "slack"];
+
+/// Returns a one-line deprecation warning when a manifest leaves a Rust-side
+/// provider connector (github/slack/linear/notion) auto-selected. Pointing the
+/// `[[providers]]` table at the corresponding pure-Harn package suppresses the
+/// warning for that provider.
+fn rust_deprecated_provider_warning(provider: &str) -> Option<String> {
+    if !RUST_DEPRECATED_PROVIDERS.contains(&provider) {
+        return None;
+    }
+    Some(format!(
+        "warning: provider '{provider}' is using the deprecated Rust-side connector. \
+         Set `connector = {{ harn = \"...\" }}` on the [[providers]] table to use the \
+         pure-Harn `harn-{provider}-connector` package; see \
+         docs/migrations/rust-connectors-to-harn-packages.md (issue #446)."
+    ))
 }
 
 async fn connector_override_for(
@@ -2576,5 +2608,40 @@ impl harn_vm::Connector for PlaceholderConnector {
 
     fn client(&self) -> Arc<dyn harn_vm::ConnectorClient> {
         Arc::new(PlaceholderClient)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rust_deprecated_provider_warning_fires_for_sunset_providers() {
+        for provider in ["github", "slack", "linear", "notion"] {
+            let message = rust_deprecated_provider_warning(provider)
+                .unwrap_or_else(|| panic!("expected deprecation warning for '{provider}'"));
+            assert!(
+                message.contains(provider),
+                "warning for '{provider}' should mention the provider id: {message}",
+            );
+            assert!(
+                message.contains("connector = { harn"),
+                "warning for '{provider}' should suggest the manifest override: {message}",
+            );
+            assert!(
+                message.contains("issue #446"),
+                "warning for '{provider}' should reference issue #446: {message}",
+            );
+        }
+    }
+
+    #[test]
+    fn rust_deprecated_provider_warning_silent_for_core_providers() {
+        for provider in ["cron", "webhook", "a2a-push", "stream", "kafka", "acme"] {
+            assert!(
+                rust_deprecated_provider_warning(provider).is_none(),
+                "core provider '{provider}' must not trigger the sunset warning"
+            );
+        }
     }
 }

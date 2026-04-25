@@ -22,6 +22,26 @@ granular archaeology.
   into `harn-cli`'s ACP server behind the default-on `hostlib` cargo
   feature.
 
+### Deprecated
+
+- **Rust-side GitHub, Slack, Linear, and Notion provider connectors
+  (#602, #446).** New deployments should configure the corresponding
+  pure-Harn connector packages
+  ([harn-github-connector](https://github.com/burin-labs/harn-github-connector),
+  [harn-slack-connector](https://github.com/burin-labs/harn-slack-connector),
+  [harn-linear-connector](https://github.com/burin-labs/harn-linear-connector),
+  [harn-notion-connector](https://github.com/burin-labs/harn-notion-connector))
+  by pointing `[[providers]]` at `connector = { harn = "..." }`.
+  `harn orchestrator serve` now emits a single `warning:` line per
+  affected provider at startup when the Rust default is auto-selected; the
+  warning is silenced once a Harn package override is in place. Cron, the
+  generic webhook connector with HMAC verification, A2A push, stream
+  ingress, raw-body access, and signing primitives stay in core. Adds a
+  `Rust connectors → Harn packages` migration guide under `docs/migrations/`
+  and deprecation banners on each affected connector reference page. No
+  Rust connector business logic has been removed; the timeline for that
+  removal is gated on the prerequisites called out on issue #446.
+
 ### Removed
 
 - **`harn mcp-serve` (#594).** The hidden legacy alias for serving a

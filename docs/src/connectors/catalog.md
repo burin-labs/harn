@@ -11,6 +11,19 @@ transition plan:
 - Community connectors are Harn packages that export connector contract v1 and
   pass `harn connector check`.
 
+> **Deprecated: Rust-side GitHub, Slack, Linear, and Notion connectors.**
+> Per [#446](https://github.com/burin-labs/harn/issues/446), the Rust-side
+> business logic for these four providers is on a sunset path. New deployments
+> should point manifests at the corresponding pure-Harn packages
+> (`harn-github-connector`, `harn-slack-connector`, `harn-linear-connector`,
+> `harn-notion-connector`) by setting `connector = { harn = "..." }` on the
+> `[[providers]]` table. The Rust shims will keep working until the
+> prerequisite tickets enumerated on issue #446 are complete and the
+> deprecation soak elapses; until then, leaving the manifest unchanged still
+> resolves to the existing Rust connector. See the
+> [Rust-to-Harn-package migration guide](../migrations/rust-connectors-to-harn-packages.md)
+> for a no-downtime cutover.
+
 For an LLM-sized version of this page, use
 [`docs/llm/harn-triggers-quickref.md`](../../llm/harn-triggers-quickref.md).
 That file is generated from the live provider catalog and checked by CI.
