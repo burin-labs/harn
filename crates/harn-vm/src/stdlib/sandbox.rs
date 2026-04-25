@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::path::{Component, Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Output, Stdio};
 
 use crate::orchestration::CapabilityPolicy;
 use crate::value::{ErrorCategory, VmError};
@@ -12,6 +12,10 @@ use std::io;
 use std::os::fd::AsRawFd;
 #[cfg(any(target_os = "linux", target_os = "openbsd"))]
 use std::os::unix::process::CommandExt;
+
+#[cfg(target_os = "windows")]
+#[path = "sandbox/windows.rs"]
+mod windows;
 
 const HANDLER_SANDBOX_ENV: &str = "HARN_HANDLER_SANDBOX";
 
@@ -24,6 +28,13 @@ pub(crate) enum FsAccess {
     Read,
     Write,
     Delete,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct ProcessCommandConfig {
+    pub cwd: Option<PathBuf>,
+    pub env: Vec<(String, String)>,
+    pub stdin_null: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -104,6 +115,34 @@ pub fn std_command_for(program: &str, args: &[String]) -> Result<Command, VmErro
     }
 }
 
+pub fn command_output(
+    program: &str,
+    args: &[String],
+    config: &ProcessCommandConfig,
+) -> Result<Output, VmError> {
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(policy) = active_sandbox_policy() {
+            let output = windows::sandboxed_output(program, args, config, &policy)
+                .map_err(|error| windows_process_error("process sandbox failed", error))?;
+            if let Some(error) = process_violation_error(&output) {
+                return Err(error);
+            }
+            return Ok(output);
+        }
+    }
+
+    let mut command = std_command_for(program, args)?;
+    apply_process_config(&mut command, config);
+    let output = command
+        .output()
+        .map_err(|error| process_spawn_error(&error).unwrap_or_else(|| spawn_error(error)))?;
+    if let Some(error) = process_violation_error(&output) {
+        return Err(error);
+    }
+    Ok(output)
+}
+
 pub fn tokio_command_for(
     program: &str,
     args: &[String],
@@ -137,6 +176,7 @@ pub fn process_violation_error(output: &std::process::Output) -> Option<VmError>
     if !output.status.success()
         && (stderr.contains("operation not permitted")
             || stderr.contains("permission denied")
+            || stderr.contains("access is denied")
             || stdout.contains("operation not permitted"))
     {
         return Some(sandbox_rejection(format!(
@@ -162,6 +202,7 @@ pub fn process_spawn_error(error: &std::io::Error) -> Option<VmError> {
     if error.kind() == std::io::ErrorKind::PermissionDenied
         || message.contains("operation not permitted")
         || message.contains("permission denied")
+        || message.contains("access is denied")
     {
         return Some(sandbox_rejection(format!(
             "sandbox violation: process was denied by the OS sandbox before exec: {error}"
@@ -200,7 +241,17 @@ fn platform_sandbox_available() -> bool {
     true
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "openbsd")))]
+#[cfg(target_os = "windows")]
+fn platform_sandbox_available() -> bool {
+    true
+}
+
+#[cfg(not(any(
+    target_os = "linux",
+    target_os = "macos",
+    target_os = "openbsd",
+    target_os = "windows"
+)))]
 fn platform_sandbox_available() -> bool {
     false
 }
@@ -304,7 +355,34 @@ fn platform_command_wrapper(
     Ok(CommandWrapper::Direct)
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "openbsd")))]
+#[cfg(target_os = "windows")]
+fn platform_command_wrapper(
+    _program: &str,
+    _args: &[String],
+    _policy: &CapabilityPolicy,
+) -> Result<CommandWrapper, VmError> {
+    match fallback_mode() {
+        SandboxFallback::Off => Ok(CommandWrapper::Direct),
+        SandboxFallback::Warn => {
+            warn_once(
+                "handler_sandbox_windows_command_for",
+                "Windows process sandboxing requires command_output(); std_command_for() cannot attach an AppContainer to std::process::Command",
+            );
+            Ok(CommandWrapper::Direct)
+        }
+        SandboxFallback::Enforce => Err(sandbox_rejection(
+            "Windows process sandboxing requires command_output(); std_command_for() cannot attach an AppContainer to std::process::Command"
+                .to_string(),
+        )),
+    }
+}
+
+#[cfg(not(any(
+    target_os = "linux",
+    target_os = "macos",
+    target_os = "openbsd",
+    target_os = "windows"
+)))]
 fn platform_command_wrapper(
     _program: &str,
     _args: &[String],
@@ -863,7 +941,7 @@ extern "C" {
     fn unveil(path: *const libc::c_char, permissions: *const libc::c_char) -> libc::c_int;
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "openbsd")))]
+#[cfg(not(any(target_os = "linux", target_os = "openbsd", target_os = "windows")))]
 fn unavailable(message: &str) -> Result<CommandWrapper, VmError> {
     match fallback_mode() {
         SandboxFallback::Off | SandboxFallback::Warn => {
@@ -874,6 +952,27 @@ fn unavailable(message: &str) -> Result<CommandWrapper, VmError> {
             "{message}; set {HANDLER_SANDBOX_ENV}=warn or off to run unsandboxed"
         ))),
     }
+}
+
+fn apply_process_config(command: &mut Command, config: &ProcessCommandConfig) {
+    if let Some(cwd) = config.cwd.as_ref() {
+        command.current_dir(cwd);
+    }
+    command.envs(config.env.iter().map(|(key, value)| (key, value)));
+    if config.stdin_null {
+        command.stdin(Stdio::null());
+    }
+}
+
+fn spawn_error(error: std::io::Error) -> VmError {
+    VmError::Thrown(crate::value::VmValue::String(std::rc::Rc::from(format!(
+        "process spawn failed: {error}"
+    ))))
+}
+
+#[cfg(target_os = "windows")]
+fn windows_process_error(context: &str, error: std::io::Error) -> VmError {
+    process_spawn_error(&error).unwrap_or_else(|| sandbox_rejection(format!("{context}: {error}")))
 }
 
 fn fallback_mode() -> SandboxFallback {
@@ -1000,13 +1099,18 @@ fn policy_allows_network(policy: &CapabilityPolicy) -> bool {
         .unwrap_or(true)
 }
 
-#[cfg(any(target_os = "macos", target_os = "openbsd"))]
+#[cfg(any(target_os = "macos", target_os = "openbsd", target_os = "windows"))]
 fn policy_allows_workspace_write(policy: &CapabilityPolicy) -> bool {
     policy.capabilities.is_empty()
         || policy_allows_capability(policy, "workspace", &["write_text", "delete"])
 }
 
-#[cfg(any(target_os = "linux", target_os = "macos", target_os = "openbsd"))]
+#[cfg(any(
+    target_os = "linux",
+    target_os = "macos",
+    target_os = "openbsd",
+    target_os = "windows"
+))]
 fn policy_allows_capability(policy: &CapabilityPolicy, capability: &str, ops: &[&str]) -> bool {
     policy
         .capabilities
