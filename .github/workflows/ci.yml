@@ -90,11 +90,37 @@ jobs:
       - run: npm run build
         working-directory: crates/harn-cli/portal
 
+  check-status:
+    name: Check status
+    runs-on: ubuntu-latest
+    if: always()
+    needs: [fmt, lint-md, rust, portal]
+    steps:
+      - name: Verify required CI jobs
+        run: |
+          declare -A results=(
+            ["Format check"]="${{ needs.fmt.result }}"
+            ["Markdown lint"]="${{ needs['lint-md'].result }}"
+            ["Rust (lint + test + conformance)"]="${{ needs.rust.result }}"
+            ["Portal frontend"]="${{ needs.portal.result }}"
+          )
+
+          failed=0
+          for name in "${!results[@]}"; do
+            result="${results[$name]}"
+            echo "$name: $result"
+            if [ "$result" != "success" ]; then
+              failed=1
+            fi
+          done
+
+          exit "$failed"
+
   deploy-docs:
     name: Deploy docs
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
-    needs: [fmt, lint-md, rust, portal]
+    needs: [check-status]
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
