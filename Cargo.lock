@@ -1255,6 +1255,7 @@ dependencies = [
  "harn-vm",
  "ignore",
  "notify",
+ "once_cell",
  "serde",
  "serde_json",
  "tempfile",

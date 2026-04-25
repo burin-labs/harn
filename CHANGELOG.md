@@ -21,6 +21,19 @@ granular archaeology.
   schema-drift tests can lock the public surface immediately. Wired
   into `harn-cli`'s ACP server behind the default-on `hostlib` cargo
   feature.
+- **`harn-hostlib` process tools (#568).** Implemented the five
+  process-lifecycle builtins under `tools/`: `run_command` (sandbox-aware
+  argv spawn with cwd/env/stdin/timeout), `run_test` and
+  `run_build_command` (manifest-based ecosystem detection across cargo,
+  npm/pnpm/yarn, pip/uv/poetry, go, swift, gradle, maven, bundler,
+  composer, dotnet, plus structured cargo-JSON / go / generic
+  diagnostic parsing on the build path), `inspect_test_results`
+  (process-local handle store with JUnit XML, cargo libtest, and go
+  test parsers), and `manage_packages` (install / add / remove / update
+  / refresh across every supported ecosystem with lockfile-mtime change
+  detection). Every spawn routes through the new public
+  `harn_vm::process_sandbox` re-export so Linux seccomp/landlock and
+  macOS sandbox-exec policies still apply.
 
 ### Removed
 

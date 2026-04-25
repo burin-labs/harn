@@ -61,7 +61,7 @@ pub(crate) fn enforce_fs_path(builtin: &str, path: &Path, access: FsAccess) -> R
     )))
 }
 
-pub(crate) fn enforce_process_cwd(path: &Path) -> Result<(), VmError> {
+pub fn enforce_process_cwd(path: &Path) -> Result<(), VmError> {
     let Some(policy) = crate::orchestration::current_execution_policy() else {
         return Ok(());
     };
@@ -84,7 +84,7 @@ pub(crate) fn enforce_process_cwd(path: &Path) -> Result<(), VmError> {
     )))
 }
 
-pub(crate) fn std_command_for(program: &str, args: &[String]) -> Result<Command, VmError> {
+pub fn std_command_for(program: &str, args: &[String]) -> Result<Command, VmError> {
     let policy = active_sandbox_policy();
     match command_wrapper(program, args, policy.as_ref())? {
         CommandWrapper::Direct => {
@@ -104,7 +104,7 @@ pub(crate) fn std_command_for(program: &str, args: &[String]) -> Result<Command,
     }
 }
 
-pub(crate) fn tokio_command_for(
+pub fn tokio_command_for(
     program: &str,
     args: &[String],
 ) -> Result<tokio::process::Command, VmError> {
@@ -127,7 +127,7 @@ pub(crate) fn tokio_command_for(
     }
 }
 
-pub(crate) fn process_violation_error(output: &std::process::Output) -> Option<VmError> {
+pub fn process_violation_error(output: &std::process::Output) -> Option<VmError> {
     crate::orchestration::current_execution_policy()?;
     if fallback_mode() == SandboxFallback::Off || !platform_sandbox_available() {
         return None;
@@ -153,7 +153,7 @@ pub(crate) fn process_violation_error(output: &std::process::Output) -> Option<V
     None
 }
 
-pub(crate) fn process_spawn_error(error: &std::io::Error) -> Option<VmError> {
+pub fn process_spawn_error(error: &std::io::Error) -> Option<VmError> {
     crate::orchestration::current_execution_policy()?;
     if fallback_mode() == SandboxFallback::Off || !platform_sandbox_available() {
         return None;
