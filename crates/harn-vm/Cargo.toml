@@ -28,7 +28,7 @@ regex = "1"
 serde_json = "1"
 rand = "0.10"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "time", "test-util", "process", "io-util", "io-std", "macros"] }
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["brotli", "deflate", "gzip", "json", "multipart", "rustls-tls", "zstd"] }
 reqwest-eventsource = "0.6"
 tokio-tungstenite = { version = "0.26", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
 jsonwebtoken = { version = "9", default-features = false, features = ["use_pem"] }
@@ -74,6 +74,7 @@ zstd = "0.13.3"
 brotli = "8.0.2"
 tar = { version = "0.4.45", default-features = false }
 zip = { version = "2", default-features = false, features = ["deflate-flate2", "flate2"] }
+x509-parser = "0.18.1"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61.2", features = [

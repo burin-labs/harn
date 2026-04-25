@@ -1106,9 +1106,20 @@ query_stringify([{key: "name", value: "ali ce"}])
 
 - `http_get/post/put/patch/delete/request` return
   `{status, headers, body, ok}` for outbound HTTP calls.
-- Common options: `timeout_ms` (alias `timeout`), `retry: {max, backoff_ms}`,
+- `http_download(url, dst_path, options?)` streams a response body to disk and
+  returns `{bytes_written, status, headers, ok}`.
+- `http_stream_open/read/info/close` expose pull-based response streaming;
+  `http_stream_read` returns `bytes` chunks and then `nil` at EOF.
+- Common options: `timeout_ms` (alias `timeout`), `total_timeout_ms`,
+  `connect_timeout_ms`, `read_timeout_ms`, `retry: {max, backoff_ms}`,
   legacy `retries` / `backoff`, `retry_on`, `retry_methods`, `headers`,
-  `auth`, `follow_redirects`, and `max_redirects`.
+  `auth`, `follow_redirects`, `max_redirects`, `proxy`,
+  `proxy_auth: {user, pass}`, `decompress`, and
+  `tls: {ca_bundle_path?, client_cert_path?, client_key_path?, client_identity_path?, pinned_sha256?}`.
+- `http_post/put/patch` accept either `(url, body, options?)` or `(url, options)`
+  when the request is driven entirely by options such as `multipart`.
+- `multipart` accepts a list of part dicts with `name` plus one of `value`,
+  `value_base64`, or `path`, along with optional `filename` and `content_type`.
 - Default retries cover `408`, `429`, `500`, `502`, `503`, and `504` for
   idempotent methods only. `Retry-After` is honored on `429` / `503`.
 - `http_mock(method, url_pattern, response)` can script multiple responses

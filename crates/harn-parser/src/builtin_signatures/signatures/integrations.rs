@@ -1,6 +1,6 @@
 //! Connector, host, tool, and shell-facing builtin signatures.
 
-use super::{BuiltinReturn, BuiltinSig, UNION_DICT_NIL, UNION_STRING_NIL};
+use super::{BuiltinReturn, BuiltinSig, UNION_BYTES_NIL, UNION_DICT_NIL, UNION_STRING_NIL};
 
 pub(crate) const SIGNATURES: &[BuiltinSig] = &[
     BuiltinSig {
@@ -52,6 +52,10 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("dict")),
     },
     BuiltinSig {
+        name: "http_download",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
         name: "http_get",
         return_type: Some(BuiltinReturn::Named("dict")),
     },
@@ -94,6 +98,22 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
     BuiltinSig {
         name: "http_session_request",
         return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
+        name: "http_stream_close",
+        return_type: Some(BuiltinReturn::Named("bool")),
+    },
+    BuiltinSig {
+        name: "http_stream_info",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
+        name: "http_stream_open",
+        return_type: Some(BuiltinReturn::Named("string")),
+    },
+    BuiltinSig {
+        name: "http_stream_read",
+        return_type: Some(BuiltinReturn::Union(UNION_BYTES_NIL)),
     },
     BuiltinSig {
         name: "list_providers_native",

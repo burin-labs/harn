@@ -319,12 +319,17 @@ pub fn enforce_current_policy_for_builtin(name: &str, args: &[VmValue]) -> Resul
         {
             return reject_policy(format!("builtin '{name}' exceeds process.exec ceiling"));
         }
-        "http_get" | "http_post" | "http_put" | "http_patch" | "http_delete" | "http_request"
+        "http_get" | "http_post" | "http_put" | "http_patch" | "http_delete" | "http_download"
+        | "http_request"
             if !policy_allows_side_effect(&policy, "network") =>
         {
             return reject_policy(format!("builtin '{name}' exceeds network ceiling"));
         }
         "http_session_request"
+        | "http_stream_open"
+        | "http_stream_read"
+        | "http_stream_close"
+        | "http_stream_info"
         | "sse_connect"
         | "sse_receive"
         | "websocket_connect"

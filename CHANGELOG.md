@@ -140,6 +140,17 @@ granular archaeology.
     Diffie-Hellman key agreement.
   - `jwt_verify(alg, token, key)` for HS256/RS256/ES256 — completes
     the existing `jwt_sign` round-trip.
+- **HTTP client power features for stdlib builtins (#616).** Added
+  `http_download` for file-backed transfers plus
+  `http_stream_open` / `http_stream_read` / `http_stream_info` /
+  `http_stream_close` for pull-based response streaming. HTTP requests
+  now also support multipart form uploads, proxy routing with optional
+  basic auth and bypass lists, per-phase timeout controls
+  (`total_timeout_ms`, `connect_timeout_ms`, `read_timeout_ms`),
+  custom trust material / client identities via `tls`, certificate pin
+  verification with `pinned_sha256`, and explicit decompression control.
+  Conformance and VM coverage now exercise multipart bodies, streamed
+  reads, file downloads, proxy forwarding, and pinned/custom-TLS flows.
 
 ### Changed
 

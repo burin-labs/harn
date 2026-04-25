@@ -1,0 +1,4 @@
+proxied
+GET
+http://example.invalid/proxy-check
+Basic dXNlcjpwYXNz
