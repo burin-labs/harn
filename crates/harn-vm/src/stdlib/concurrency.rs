@@ -41,6 +41,24 @@ fn select_none() -> VmValue {
     VmValue::Dict(Rc::new(result))
 }
 
+fn require_channel_list(args: &[VmValue], builtin: &str) -> Result<Vec<VmValue>, VmError> {
+    match args.first() {
+        Some(VmValue::List(items)) => {
+            for item in items.iter() {
+                if !matches!(item, VmValue::Channel(_)) {
+                    return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                        "{builtin}: channel list must contain only channels"
+                    )))));
+                }
+            }
+            Ok(items.as_ref().clone())
+        }
+        _ => Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+            "{builtin}: first argument must be a list of channels"
+        ))))),
+    }
+}
+
 /// Try to receive from a list of channels (non-blocking).
 fn try_poll_channels(channels: &[VmValue]) -> (Option<(usize, VmValue, String)>, bool) {
     let mut all_closed = true;
@@ -296,6 +314,46 @@ pub(crate) fn register_concurrency_builtins(vm: &mut Vm) {
                 crate::vm::clone_async_builtin_child_vm().and_then(|vm| vm.cancel_token.clone());
             Ok(sync_runtime
                 .acquire("gate", &key, limit, 1, timeout_ms, cancel_token)
+                .await?
+                .map(VmValue::SyncPermit)
+                .unwrap_or(VmValue::Nil))
+        }
+    });
+
+    let sync_runtime = vm.sync_runtime.clone();
+    vm.register_async_builtin("sync_rwlock_acquire", move |args| {
+        let sync_runtime = sync_runtime.clone();
+        async move {
+            const RWLOCK_CAPACITY: u32 = 1024;
+            let key = args
+                .first()
+                .map(|a| a.display())
+                .unwrap_or_else(|| "default".to_string());
+            let mode = args
+                .get(1)
+                .map(|a| a.display())
+                .unwrap_or_else(|| "read".to_string());
+            let permits = match mode.as_str() {
+                "read" => 1,
+                "write" => RWLOCK_CAPACITY,
+                _ => {
+                    return Err(VmError::Runtime(
+                        "sync_rwlock_acquire: mode must be read or write".to_string(),
+                    ));
+                }
+            };
+            let timeout_ms = optional_timeout_ms(args.get(2));
+            let cancel_token =
+                crate::vm::clone_async_builtin_child_vm().and_then(|vm| vm.cancel_token.clone());
+            Ok(sync_runtime
+                .acquire(
+                    "rwlock",
+                    &key,
+                    RWLOCK_CAPACITY,
+                    permits,
+                    timeout_ms,
+                    cancel_token,
+                )
                 .await?
                 .map(VmValue::SyncPermit)
                 .unwrap_or(VmValue::Nil))
@@ -976,6 +1034,26 @@ pub(crate) fn register_concurrency_builtins(vm: &mut Vm) {
             }
             if all_closed {
                 return Ok(select_none());
+            }
+            tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
+        }
+    });
+
+    vm.register_async_builtin("channel_select", |args| async move {
+        let channels = require_channel_list(&args, "channel_select")?;
+        let timeout_ms = optional_timeout_ms(args.get(1));
+        let deadline = timeout_ms
+            .map(|ms| tokio::time::Instant::now() + tokio::time::Duration::from_millis(ms));
+        loop {
+            let (found, all_closed) = try_poll_channels(&channels);
+            if let Some((i, val, name)) = found {
+                return Ok(select_result(i, val, &name));
+            }
+            if all_closed {
+                return Ok(VmValue::Nil);
+            }
+            if deadline.is_some_and(|deadline| tokio::time::Instant::now() >= deadline) {
+                return Ok(VmValue::Nil);
             }
             tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
         }

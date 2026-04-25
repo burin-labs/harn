@@ -1,6 +1,6 @@
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicI64};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use super::{VmError, VmValue};
 
@@ -27,6 +27,18 @@ pub struct VmChannelHandle {
 #[derive(Debug, Clone)]
 pub struct VmAtomicHandle {
     pub value: Arc<AtomicI64>,
+}
+
+/// A reproducible random number generator handle.
+#[derive(Clone)]
+pub struct VmRngHandle {
+    pub rng: Arc<Mutex<rand::rngs::StdRng>>,
+}
+
+impl std::fmt::Debug for VmRngHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("VmRngHandle { .. }")
+    }
 }
 
 /// A held synchronization permit for mutex/semaphore/gate primitives.

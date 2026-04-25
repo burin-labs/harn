@@ -256,8 +256,20 @@ let summary = jq_first(api, "{ count: .users | length, next: .meta.next }")
 | `pow(base, exp)` | base: number, exp: number | int or float | Exponentiation. Returns int when both args are int and exp is non-negative |
 | `min(a, b)` | a: number, b: number | int or float | Minimum of two values. Returns float if either argument is float |
 | `max(a, b)` | a: number, b: number | int or float | Maximum of two values. Returns float if either argument is float |
+| `rng_seed(seed)` | seed: int | rng | Create a reproducible RNG handle |
 | `random()` | none | float | Random float in [0, 1) |
+| `random(rng)` | rng: rng | float | Random float from a seeded RNG handle |
 | `random_int(min, max)` | min: int, max: int | int | Random integer in [min, max] inclusive |
+| `random_int(rng, min, max)` | rng: rng, min: int, max: int | int | Random integer from a seeded RNG handle |
+| `random_choice(list)` | list: list | any or nil | Random element from a list, or nil for an empty list |
+| `random_choice(rng, list)` | rng: rng, list: list | any or nil | Random element using a seeded RNG handle |
+| `random_shuffle(list)` | list: list | list | Shuffled copy of a list |
+| `random_shuffle(rng, list)` | rng: rng, list: list | list | Shuffled copy using a seeded RNG handle |
+| `mean(items)` | items: list[number] | float | Arithmetic mean of a numeric list |
+| `median(items)` | items: list[number] | float | Median of a numeric list |
+| `variance(items, sample?)` | items: list[number], sample: bool | float | Population variance, or sample variance when `sample = true` |
+| `stddev(items, sample?)` | items: list[number], sample: bool | float | Population standard deviation, or sample mode when `sample = true` |
+| `percentile(items, p)` | items: list[number], p: 0..100 | float | R-7 percentile interpolation |
 
 ### Trigonometry
 
@@ -346,6 +358,9 @@ Sets also support method syntax: `my_set.union(other)`.
 | `replace(str, old, new)` | str: string, old: string, new: string | string | Replace all occurrences |
 | `join(list, sep)` | list: list, sep: string | string | Join list elements with separator |
 | `substring(str, start, len?)` | str: string, start: int, len: int | string | Extract substring from start position |
+| `unicode_normalize(str, form)` | str: string, form: `"NFC"\|"NFD"\|"NFKC"\|"NFKD"` | string | Normalize Unicode into the requested form |
+| `unicode_graphemes(str)` | str: string | list | Split a string into extended grapheme clusters |
+| `str_pad(str, width, char?, side?)` | str: string, width: int, char: string, side: `"left"\|"right"\|"both"` | string | Pad to a grapheme width using the given fill character |
 | `format(template, ...)` | template: string, args: any | string | Format string with `{}` placeholders. With a dict as the second arg, supports named `{key}` placeholders |
 
 ### String methods (dot syntax)
@@ -407,6 +422,17 @@ These are called on string values with dot notation: `"hello".uppercase()`.
 | `.contains(item)` | item: any | bool | Check if list contains item |
 | `.index_of(item)` | item: any | int | Index of item (-1 if not found) |
 | `.slice(start, end?)` | start: int, end: int | list | Slice with negative index support |
+
+### Collection helper builtins
+
+| Function | Parameters | Returns | Description |
+|---|---|---|---|
+| `chunk(list, size)` | list: list, size: int | list | Split into chunks of size |
+| `window(list, size, step?)` | list: list, size: int, step: int | list | Sliding windows with optional stride |
+| `group_by(list, fn)` | list: list, fn: closure | dict | Group into a dict keyed by callback result |
+| `partition(list, fn)` | list: list, fn: closure | dict | Split into `{match, no_match}` lists |
+| `dedup_by(list, fn)` | list: list, fn: closure | list | Keep the first item for each callback-derived key |
+| `flat_map(list, fn)` | list: list, fn: closure | list | Map then flatten one level |
 
 ### Iterator methods
 
@@ -507,6 +533,10 @@ does **not** drain the iterator.
 | `platform()` | none | string | OS name: `"darwin"`, `"linux"`, or `"windows"` |
 | `arch()` | none | string | CPU architecture (e.g., `"aarch64"`, `"x86_64"`) |
 | `uuid()` | none | string | Generate a random v4 UUID |
+| `uuid_parse(str)` | str: string | string or nil | Parse and canonicalize a UUID string, or return nil if invalid |
+| `uuid_v5(namespace, name)` | namespace: UUID or `"dns"\|"url"\|"oid"\|"x500"`, name: string | string | Generate a deterministic namespaced v5 UUID |
+| `uuid_v7()` | none | string | Generate a time-ordered v7 UUID |
+| `uuid_nil()` | none | string | Return the all-zero nil UUID |
 | `home_dir()` | none | string | User's home directory path |
 | `pid()` | none | int | Current process ID |
 | `cwd()` | none | string | Current working directory |
@@ -521,7 +551,8 @@ does **not** drain the iterator.
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `regex_match(pattern, text)` | pattern: string, text: string | list or nil | Find all non-overlapping matches. Returns nil if no matches |
+| `regex_match(pattern, text, flags?)` | pattern: string, text: string, flags: string | list or nil | Find all non-overlapping matches. Optional flags: `i`, `m`, `s`, `x` |
+| `regex_split(text, pattern, flags?)` | text: string, pattern: string, flags: string | list | Split text by regex matches |
 | `regex_replace(pattern, replacement, text)` | pattern: string, replacement: string, text: string | string | Replace all matches. Throws on invalid regex |
 | `regex_captures(pattern, text)` | pattern: string, text: string | list | Find all matches with capture group details |
 
@@ -819,6 +850,7 @@ assert(is_err(result))
 | `close_channel(ch)` | ch: channel | nil | Close a channel, preventing further sends |
 | `try_receive(ch)` | ch: channel | any or nil | Non-blocking receive. Returns nil if no data available |
 | `select(ch1, ch2, ...)` | channels: channel | dict or nil | Wait for data on any channel. Returns `{index, value, channel}` for the first ready channel, or nil if all closed |
+| `channel_select(channels, timeout?)` | channels: list[channel], timeout: int or duration | dict or nil | Select over a channel list with an optional timeout |
 
 ### Supervisors
 

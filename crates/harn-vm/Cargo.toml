@@ -53,11 +53,13 @@ serde = { version = "1", features = ["derive"] }
 serde_path_to_error = "0.1"
 subtle = "2.6"
 time = { version = "0.3", features = ["formatting", "parsing", "serde"] }
-uuid = { version = "1", features = ["v4", "v7"] }
+uuid = { version = "1", features = ["v4", "v5", "v7"] }
 tokio-util = { version = "0.7", features = ["io"] }
 futures = "0.3"
 httpdate = "1"
 ignore = "0.4"
+unicode-normalization = "0.1"
+unicode-segmentation = "1"
 keyring = { version = "3", features = ["apple-native", "windows-native", "linux-native"] }
 rusqlite = { version = "0.39", features = ["bundled"] }
 tracing = "0.1"

@@ -7,7 +7,8 @@ use crate::mcp::VmMcpClientHandle;
 use crate::BuiltinId;
 
 use super::{
-    VmAtomicHandle, VmChannelHandle, VmClosure, VmError, VmGenerator, VmRange, VmSyncPermitHandle,
+    VmAtomicHandle, VmChannelHandle, VmClosure, VmError, VmGenerator, VmRange, VmRngHandle,
+    VmSyncPermitHandle,
 };
 
 /// An async builtin function for the VM.
@@ -114,6 +115,7 @@ pub enum VmValue {
     TaskHandle(String),
     Channel(VmChannelHandle),
     Atomic(VmAtomicHandle),
+    Rng(VmRngHandle),
     SyncPermit(VmSyncPermitHandle),
     McpClient(VmMcpClientHandle),
     Set(Rc<Vec<VmValue>>),
@@ -167,6 +169,7 @@ impl VmValue {
             VmValue::TaskHandle(_) => true,
             VmValue::Channel(_) => true,
             VmValue::Atomic(_) => true,
+            VmValue::Rng(_) => true,
             VmValue::SyncPermit(_) => true,
             VmValue::McpClient(_) => true,
             VmValue::Set(s) => !s.is_empty(),
@@ -198,6 +201,7 @@ impl VmValue {
             VmValue::TaskHandle(_) => "task_handle",
             VmValue::Channel(_) => "channel",
             VmValue::Atomic(_) => "atomic",
+            VmValue::Rng(_) => "rng",
             VmValue::SyncPermit(_) => "sync_permit",
             VmValue::McpClient(_) => "mcp_client",
             VmValue::Set(_) => "set",
@@ -415,6 +419,9 @@ impl VmValue {
             }
             VmValue::Atomic(a) => {
                 let _ = write!(out, "<atomic:{}>", a.value.load(Ordering::SeqCst));
+            }
+            VmValue::Rng(_) => {
+                out.push_str("<rng>");
             }
             VmValue::SyncPermit(p) => {
                 let _ = write!(out, "<sync_permit:{}:{}>", p.kind(), p.key());

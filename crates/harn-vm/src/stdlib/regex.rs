@@ -9,21 +9,40 @@ thread_local! {
     static REGEX_CACHE: RefCell<HashMap<String, regex::Regex>> = RefCell::new(HashMap::new());
 }
 
-fn get_cached_regex(pattern: &str) -> Result<regex::Regex, VmError> {
+fn get_cached_regex(pattern: &str, flags: &str) -> Result<regex::Regex, VmError> {
+    let cache_key = format!("{flags}\0{pattern}");
     REGEX_CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
-        if let Some(re) = cache.get(pattern) {
+        if let Some(re) = cache.get(&cache_key) {
             return Ok(re.clone());
         }
-        let re = regex::Regex::new(pattern).map_err(|e| {
+        let re = build_regex(pattern, flags).map_err(|e| {
             VmError::Thrown(VmValue::String(Rc::from(format!("Invalid regex: {e}"))))
         })?;
         if cache.len() >= 128 {
             cache.clear();
         }
-        cache.insert(pattern.to_string(), re.clone());
+        cache.insert(cache_key, re.clone());
         Ok(re)
     })
+}
+
+fn build_regex(pattern: &str, flags: &str) -> Result<regex::Regex, String> {
+    let mut builder = regex::RegexBuilder::new(pattern);
+    for flag in flags.chars() {
+        match flag {
+            'i' => builder.case_insensitive(true),
+            'm' => builder.multi_line(true),
+            's' => builder.dot_matches_new_line(true),
+            'x' => builder.ignore_whitespace(true),
+            _ => {
+                return Err(format!(
+                    "unsupported regex flag '{flag}', expected one of i/m/s/x"
+                ));
+            }
+        };
+    }
+    builder.build().map_err(|e| e.to_string())
 }
 
 pub(crate) fn register_regex_builtins(vm: &mut Vm) {
@@ -31,7 +50,8 @@ pub(crate) fn register_regex_builtins(vm: &mut Vm) {
         if args.len() >= 2 {
             let pattern = args[0].display();
             let text = args[1].display();
-            let re = get_cached_regex(&pattern)?;
+            let flags = args.get(2).map(VmValue::display).unwrap_or_default();
+            let re = get_cached_regex(&pattern, &flags)?;
             let matches: Vec<VmValue> = re
                 .find_iter(&text)
                 .map(|m| VmValue::String(Rc::from(m.as_str())))
@@ -52,7 +72,7 @@ pub(crate) fn register_regex_builtins(vm: &mut Vm) {
             let pattern = args[0].display();
             let replacement = args[1].display();
             let text = args[2].display();
-            let re = get_cached_regex(&pattern)?;
+            let re = get_cached_regex(&pattern, "")?;
             return Ok(VmValue::String(Rc::from(
                 re.replace_all(&text, replacement.as_str()).into_owned(),
             )));
@@ -68,7 +88,7 @@ pub(crate) fn register_regex_builtins(vm: &mut Vm) {
         }
         let pattern = args[0].display();
         let text = args[1].display();
-        let re = get_cached_regex(&pattern)?;
+        let re = get_cached_regex(&pattern, "")?;
 
         let mut results: Vec<VmValue> = Vec::new();
         for caps in re.captures_iter(&text) {
@@ -96,6 +116,21 @@ pub(crate) fn register_regex_builtins(vm: &mut Vm) {
             results.push(VmValue::Dict(Rc::new(dict)));
         }
         Ok(VmValue::List(Rc::new(results)))
+    });
+
+    vm.register_builtin("regex_split", |args, _out| {
+        if args.len() < 2 {
+            return Ok(VmValue::Nil);
+        }
+        let text = args[0].display();
+        let pattern = args[1].display();
+        let flags = args.get(2).map(VmValue::display).unwrap_or_default();
+        let re = get_cached_regex(&pattern, &flags)?;
+        Ok(VmValue::List(Rc::new(
+            re.split(&text)
+                .map(|part| VmValue::String(Rc::from(part)))
+                .collect(),
+        )))
     });
 }
 
@@ -296,9 +331,9 @@ mod tests {
     fn cache_eviction_still_works() {
         for i in 0..70 {
             let pattern = format!("pat{i}");
-            let _ = get_cached_regex(&pattern);
+            let _ = get_cached_regex(&pattern, "");
         }
-        let re = get_cached_regex("pat0").unwrap();
+        let re = get_cached_regex("pat0", "").unwrap();
         assert!(re.is_match("pat0"));
     }
 }

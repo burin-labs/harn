@@ -220,6 +220,14 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: None,
     },
     BuiltinSig {
+        name: "channel_select",
+        return_type: None,
+    },
+    BuiltinSig {
+        name: "chunk",
+        return_type: Some(BuiltinReturn::Named("list")),
+    },
+    BuiltinSig {
         name: "circuit_breaker",
         return_type: Some(BuiltinReturn::Named("string")),
     },
@@ -372,6 +380,10 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("nil")),
     },
     BuiltinSig {
+        name: "dedup_by",
+        return_type: Some(BuiltinReturn::Named("list")),
+    },
+    BuiltinSig {
         name: "dim",
         return_type: Some(BuiltinReturn::Named("string")),
     },
@@ -452,6 +464,10 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: None,
     },
     BuiltinSig {
+        name: "flat_map",
+        return_type: Some(BuiltinReturn::Named("list")),
+    },
+    BuiltinSig {
         name: "format",
         return_type: Some(BuiltinReturn::Named("string")),
     },
@@ -462,6 +478,10 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
     BuiltinSig {
         name: "gzip_encode",
         return_type: Some(BuiltinReturn::Named("bytes")),
+    },
+    BuiltinSig {
+        name: "group_by",
+        return_type: Some(BuiltinReturn::Named("dict")),
     },
     BuiltinSig {
         name: "hash_value",
@@ -648,8 +668,16 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: None,
     },
     BuiltinSig {
+        name: "mean",
+        return_type: Some(BuiltinReturn::Named("float")),
+    },
+    BuiltinSig {
         name: "md5",
         return_type: Some(BuiltinReturn::Named("string")),
+    },
+    BuiltinSig {
+        name: "median",
+        return_type: Some(BuiltinReturn::Named("float")),
     },
     BuiltinSig {
         name: "metrics_inc",
@@ -780,6 +808,14 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Union(UNION_STRING_NIL)),
     },
     BuiltinSig {
+        name: "partition",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
+        name: "percentile",
+        return_type: Some(BuiltinReturn::Named("float")),
+    },
+    BuiltinSig {
         name: "pi",
         return_type: Some(BuiltinReturn::Named("float")),
     },
@@ -816,8 +852,16 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("float")),
     },
     BuiltinSig {
+        name: "random_choice",
+        return_type: None,
+    },
+    BuiltinSig {
         name: "random_int",
         return_type: None,
+    },
+    BuiltinSig {
+        name: "random_shuffle",
+        return_type: Some(BuiltinReturn::Named("list")),
     },
     BuiltinSig {
         name: "range",
@@ -860,6 +904,10 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("string")),
     },
     BuiltinSig {
+        name: "regex_split",
+        return_type: Some(BuiltinReturn::Named("list")),
+    },
+    BuiltinSig {
         name: "register_tool_hook",
         return_type: Some(BuiltinReturn::Named("nil")),
     },
@@ -885,6 +933,10 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
     },
     BuiltinSig {
         name: "round",
+        return_type: None,
+    },
+    BuiltinSig {
+        name: "rng_seed",
         return_type: None,
     },
     BuiltinSig {
@@ -1096,6 +1148,14 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("dict")),
     },
     BuiltinSig {
+        name: "stddev",
+        return_type: Some(BuiltinReturn::Named("float")),
+    },
+    BuiltinSig {
+        name: "str_pad",
+        return_type: Some(BuiltinReturn::Named("string")),
+    },
+    BuiltinSig {
         name: "substring",
         return_type: Some(BuiltinReturn::Named("string")),
     },
@@ -1134,6 +1194,10 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
     BuiltinSig {
         name: "sync_release",
         return_type: Some(BuiltinReturn::Named("bool")),
+    },
+    BuiltinSig {
+        name: "sync_rwlock_acquire",
+        return_type: None,
     },
     BuiltinSig {
         name: "sync_semaphore_acquire",
@@ -1236,6 +1300,14 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("string")),
     },
     BuiltinSig {
+        name: "unicode_graphemes",
+        return_type: Some(BuiltinReturn::Named("list")),
+    },
+    BuiltinSig {
+        name: "unicode_normalize",
+        return_type: Some(BuiltinReturn::Named("string")),
+    },
+    BuiltinSig {
         name: "unreachable",
         return_type: Some(BuiltinReturn::Never),
     },
@@ -1276,6 +1348,26 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("string")),
     },
     BuiltinSig {
+        name: "uuid_nil",
+        return_type: Some(BuiltinReturn::Named("string")),
+    },
+    BuiltinSig {
+        name: "uuid_parse",
+        return_type: Some(BuiltinReturn::Union(UNION_STRING_NIL)),
+    },
+    BuiltinSig {
+        name: "uuid_v5",
+        return_type: Some(BuiltinReturn::Named("string")),
+    },
+    BuiltinSig {
+        name: "uuid_v7",
+        return_type: Some(BuiltinReturn::Named("string")),
+    },
+    BuiltinSig {
+        name: "variance",
+        return_type: Some(BuiltinReturn::Named("float")),
+    },
+    BuiltinSig {
         name: "values",
         return_type: Some(BuiltinReturn::Named("list")),
     },
@@ -1298,6 +1390,10 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
     BuiltinSig {
         name: "waitpoint_wait",
         return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
+        name: "window",
+        return_type: Some(BuiltinReturn::Named("list")),
     },
     BuiltinSig {
         name: "with_rate_limit",

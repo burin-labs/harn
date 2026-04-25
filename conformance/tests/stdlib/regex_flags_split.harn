@@ -1,0 +1,9 @@
+pipeline test(task) {
+  assert_eq(regex_match("hello", "HeLLo", "i"), ["HeLLo"])
+  assert_eq(regex_match("^b", "a\nB", "im"), ["B"])
+  assert_eq(regex_match("a.+c", "a\nb\nc", "s"), ["a\nb\nc"])
+  assert_eq(regex_match("a b c", "abc", "x"), ["abc"])
+  assert_eq(regex_split("a, b, c", ",\\s*"), ["a", "b", "c"])
+  assert_eq(regex_match("hello", "world", "i"), nil)
+  log("regex flags ok")
+}

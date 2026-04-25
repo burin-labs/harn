@@ -1,4 +1,7 @@
-use crate::value::{VmError, VmRange, VmValue};
+use std::rc::Rc;
+use std::sync::{Arc, Mutex};
+
+use crate::value::{VmError, VmRange, VmRngHandle, VmValue};
 use crate::vm::Vm;
 
 pub(crate) fn register_math_builtins(vm: &mut Vm) {
@@ -102,23 +105,192 @@ pub(crate) fn register_math_builtins(vm: &mut Vm) {
         }
     });
 
-    vm.register_builtin("random", |_args, _out| {
+    vm.register_builtin("rng_seed", |args, _out| {
+        use rand::SeedableRng;
+        let seed = args.first().and_then(|arg| arg.as_int()).ok_or_else(|| {
+            VmError::TypeError("rng_seed(seed): seed must be an integer".to_string())
+        })?;
+        Ok(VmValue::Rng(VmRngHandle {
+            rng: Arc::new(Mutex::new(rand::rngs::StdRng::seed_from_u64(seed as u64))),
+        }))
+    });
+
+    vm.register_builtin("random", |args, _out| {
         use rand::RngExt;
-        let val: f64 = rand::rng().random();
+        let val: f64 = if let Some(VmValue::Rng(handle)) = args.first() {
+            handle.rng.lock().expect("rng mutex poisoned").random()
+        } else {
+            rand::rng().random()
+        };
         Ok(VmValue::Float(val))
     });
 
     vm.register_builtin("random_int", |args, _out| {
         use rand::RngExt;
-        if args.len() >= 2 {
-            let min = args[0].as_int().unwrap_or(0);
-            let max = args[1].as_int().unwrap_or(0);
-            if min <= max {
-                let val = rand::rng().random_range(min..=max);
-                return Ok(VmValue::Int(val));
+        let (rng, min_idx) = match args.first() {
+            Some(VmValue::Rng(handle)) => (Some(handle), 1),
+            _ => (None, 0),
+        };
+        if args.len() >= min_idx + 2 {
+            let min = args[min_idx].as_int().ok_or_else(|| {
+                VmError::TypeError("random_int: min must be an integer".to_string())
+            })?;
+            let max = args[min_idx + 1].as_int().ok_or_else(|| {
+                VmError::TypeError("random_int: max must be an integer".to_string())
+            })?;
+            if min > max {
+                return Ok(VmValue::Nil);
             }
+            let val = if let Some(handle) = rng {
+                handle
+                    .rng
+                    .lock()
+                    .expect("rng mutex poisoned")
+                    .random_range(min..=max)
+            } else {
+                rand::rng().random_range(min..=max)
+            };
+            return Ok(VmValue::Int(val));
         }
         Ok(VmValue::Nil)
+    });
+
+    vm.register_builtin("random_choice", |args, _out| {
+        use rand::RngExt;
+        let (rng, list_idx) = match args.first() {
+            Some(VmValue::Rng(handle)) => (Some(handle), 1),
+            _ => (None, 0),
+        };
+        let Some(VmValue::List(items)) = args.get(list_idx) else {
+            return Ok(VmValue::Nil);
+        };
+        if items.is_empty() {
+            return Ok(VmValue::Nil);
+        }
+        let idx = if let Some(handle) = rng {
+            handle
+                .rng
+                .lock()
+                .expect("rng mutex poisoned")
+                .random_range(0..items.len())
+        } else {
+            rand::rng().random_range(0..items.len())
+        };
+        Ok(items[idx].clone())
+    });
+
+    vm.register_builtin("random_shuffle", |args, _out| {
+        use rand::seq::SliceRandom;
+        let (rng, list_idx) = match args.first() {
+            Some(VmValue::Rng(handle)) => (Some(handle), 1),
+            _ => (None, 0),
+        };
+        let Some(VmValue::List(items)) = args.get(list_idx) else {
+            return Ok(VmValue::Nil);
+        };
+        let mut shuffled = items.as_ref().clone();
+        if let Some(handle) = rng {
+            shuffled.shuffle(&mut *handle.rng.lock().expect("rng mutex poisoned"));
+        } else {
+            shuffled.shuffle(&mut rand::rng());
+        }
+        Ok(VmValue::List(Rc::new(shuffled)))
+    });
+
+    vm.register_builtin("mean", |args, _out| {
+        let values = numeric_list_arg(args, "mean")?;
+        if values.is_empty() {
+            return Ok(VmValue::Float(0.0));
+        }
+        Ok(VmValue::Float(
+            values.iter().sum::<f64>() / values.len() as f64,
+        ))
+    });
+
+    vm.register_builtin("median", |args, _out| {
+        let mut values = non_empty_numeric_list_arg(args, "median")?;
+        values.sort_by(|a, b| a.total_cmp(b));
+        let mid = values.len() / 2;
+        if values.len() % 2 == 1 {
+            Ok(VmValue::Float(values[mid]))
+        } else {
+            Ok(VmValue::Float((values[mid - 1] + values[mid]) / 2.0))
+        }
+    });
+
+    vm.register_builtin("percentile", |args, _out| {
+        let mut values = non_empty_numeric_list_arg(args, "percentile")?;
+        let p = number_arg(args.get(1), "percentile")?;
+        if !(0.0..=100.0).contains(&p) {
+            return Err(VmError::Runtime(
+                "percentile must be between 0 and 100".to_string(),
+            ));
+        }
+        values.sort_by(|a, b| a.total_cmp(b));
+        if values.len() == 1 {
+            return Ok(VmValue::Float(values[0]));
+        }
+        let h = 1.0 + (values.len() as f64 - 1.0) * (p / 100.0);
+        let lower = h.floor();
+        let upper = h.ceil();
+        if lower == upper {
+            return Ok(VmValue::Float(values[lower as usize - 1]));
+        }
+        let weight = h - lower;
+        let lo = values[lower as usize - 1];
+        let hi = values[upper as usize - 1];
+        Ok(VmValue::Float(lo + weight * (hi - lo)))
+    });
+
+    vm.register_builtin("variance", |args, _out| {
+        let values = non_empty_numeric_list_arg(args, "variance")?;
+        let sample = args.get(1).is_some_and(VmValue::is_truthy);
+        if sample && values.len() < 2 {
+            return Err(VmError::Runtime(
+                "sample variance requires at least 2 values".to_string(),
+            ));
+        }
+        let mean = values.iter().sum::<f64>() / values.len() as f64;
+        let total = values
+            .iter()
+            .map(|value| {
+                let delta = value - mean;
+                delta * delta
+            })
+            .sum::<f64>();
+        let denom = if sample {
+            values.len() - 1
+        } else {
+            values.len()
+        };
+        Ok(VmValue::Float(total / denom as f64))
+    });
+
+    vm.register_builtin("stddev", |args, _out| {
+        let variance = {
+            let values = non_empty_numeric_list_arg(args, "stddev")?;
+            let sample = args.get(1).is_some_and(VmValue::is_truthy);
+            if sample && values.len() < 2 {
+                return Err(VmError::Runtime(
+                    "sample variance requires at least 2 values".to_string(),
+                ));
+            }
+            let mean = values.iter().sum::<f64>() / values.len() as f64;
+            let total = values
+                .iter()
+                .map(|value| {
+                    let delta = value - mean;
+                    delta * delta
+                })
+                .sum::<f64>();
+            let denom = if sample {
+                values.len() - 1
+            } else {
+                values.len()
+            };
+            total / denom as f64
+        };
+        Ok(VmValue::Float(variance.sqrt()))
     });
 
     register_unary_float(vm, "sin", f64::sin);
@@ -227,6 +399,34 @@ pub(crate) fn register_math_builtins(vm: &mut Vm) {
             inclusive: false,
         }))
     });
+}
+
+fn number_arg(value: Option<&VmValue>, label: &str) -> Result<f64, VmError> {
+    match value {
+        Some(VmValue::Int(n)) => Ok(*n as f64),
+        Some(VmValue::Float(n)) => Ok(*n),
+        _ => Err(VmError::TypeError(format!("{label} must be numeric"))),
+    }
+}
+
+fn numeric_list_arg(args: &[VmValue], label: &str) -> Result<Vec<f64>, VmError> {
+    let Some(VmValue::List(items)) = args.first() else {
+        return Err(VmError::TypeError(format!("{label}: items must be a list")));
+    };
+    items
+        .iter()
+        .map(|item| number_arg(Some(item), label))
+        .collect()
+}
+
+fn non_empty_numeric_list_arg(args: &[VmValue], label: &str) -> Result<Vec<f64>, VmError> {
+    let values = numeric_list_arg(args, label)?;
+    if values.is_empty() {
+        return Err(VmError::Runtime(format!(
+            "{label}: items must not be empty"
+        )));
+    }
+    Ok(values)
 }
 
 fn finite_float_to_i64(n: f64) -> Result<i64, VmError> {

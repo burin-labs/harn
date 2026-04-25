@@ -2,6 +2,8 @@ use std::rc::Rc;
 
 use crate::value::{values_equal, VmError, VmValue};
 use crate::vm::Vm;
+use unicode_normalization::UnicodeNormalization;
+use unicode_segmentation::UnicodeSegmentation;
 
 fn split_snake(s: &str) -> Vec<&str> {
     s.split('_').filter(|p| !p.is_empty()).collect()
@@ -294,6 +296,73 @@ pub(crate) fn register_string_builtins(vm: &mut Vm) {
             .map(|p| VmValue::String(Rc::from(p)))
             .collect();
         Ok(VmValue::List(Rc::new(parts)))
+    });
+
+    vm.register_builtin("unicode_normalize", |args, _out| {
+        let s = args.first().map(|a| a.display()).unwrap_or_default();
+        let form = args
+            .get(1)
+            .map(|a| a.display().to_uppercase())
+            .unwrap_or_else(|| "NFC".to_string());
+        let normalized: String = match form.as_str() {
+            "NFC" => s.nfc().collect(),
+            "NFD" => s.nfd().collect(),
+            "NFKC" => s.nfkc().collect(),
+            "NFKD" => s.nfkd().collect(),
+            _ => {
+                return Err(VmError::Runtime(
+                    "unicode_normalize: form must be NFC, NFD, NFKC, or NFKD".to_string(),
+                ));
+            }
+        };
+        Ok(VmValue::String(Rc::from(normalized)))
+    });
+
+    vm.register_builtin("unicode_graphemes", |args, _out| {
+        let s = args.first().map(|a| a.display()).unwrap_or_default();
+        Ok(VmValue::List(Rc::new(
+            UnicodeSegmentation::graphemes(s.as_str(), true)
+                .map(|grapheme| VmValue::String(Rc::from(grapheme)))
+                .collect(),
+        )))
+    });
+
+    vm.register_builtin("str_pad", |args, _out| {
+        let s = args.first().map(|a| a.display()).unwrap_or_default();
+        let width = args.get(1).and_then(VmValue::as_int).unwrap_or(0).max(0) as usize;
+        let fill = args
+            .get(2)
+            .map(|a| a.display())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| " ".to_string());
+        let fill = UnicodeSegmentation::graphemes(fill.as_str(), true)
+            .next()
+            .unwrap_or(" ");
+        let side = args
+            .get(3)
+            .map(|a| a.display().to_lowercase())
+            .unwrap_or_else(|| "right".to_string());
+        let grapheme_count = UnicodeSegmentation::graphemes(s.as_str(), true).count();
+        if grapheme_count >= width {
+            return Ok(VmValue::String(Rc::from(s)));
+        }
+        let needed = width - grapheme_count;
+        let (left, right) = match side.as_str() {
+            "left" => (needed, 0),
+            "right" => (0, needed),
+            "both" => (needed / 2, needed - needed / 2),
+            _ => {
+                return Err(VmError::Runtime(
+                    "str_pad: side must be left, right, or both".to_string(),
+                ));
+            }
+        };
+        Ok(VmValue::String(Rc::from(format!(
+            "{}{}{}",
+            fill.repeat(left),
+            s,
+            fill.repeat(right)
+        ))))
     });
 
     vm.register_builtin("starts_with", |args, _out| {

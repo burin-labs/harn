@@ -7,6 +7,7 @@ mod agents_daemon;
 pub(crate) mod assemble;
 mod bytes;
 mod clock;
+mod collections;
 mod compression;
 mod concurrency;
 mod connectors;
@@ -78,6 +79,7 @@ pub fn register_core_stdlib(vm: &mut Vm) {
     url_parse::register_url_builtins(vm);
     path::register_path_helper_builtins(vm);
     sets::register_set_builtins(vm);
+    collections::register_collection_builtins(vm);
     iter::register_iter_builtins(vm);
     shapes::register_shape_builtins(vm);
     testing::register_testing_builtins(vm);
