@@ -886,6 +886,9 @@ println(text.source.sha256)
 | `sse_server_mock_receive(stream)` | stream: string or dict | dict | Deterministically read the next buffered server SSE frame in tests |
 | `sse_server_mock_disconnect(stream)` | stream: string or dict | bool | Simulate a client disconnecting from a server SSE response |
 | `websocket_connect(url, options?)` | url: string, options: dict | string | Open a WebSocket client handle |
+| `websocket_server(bind?, options?)` | bind: string, options: dict | dict | Start a host-managed WebSocket server and return `{id, addr, url}` |
+| `websocket_route(server, path, options?)` | server: string or dict, path: string, options: dict | bool | Register an HTTP upgrade route on a WebSocket server |
+| `websocket_accept(server, timeout_ms?)` | server: string or dict, timeout_ms: int | dict or nil | Accept one upgraded connection and return its socket handle plus peer metadata |
 | `websocket_send(socket, message, options?)` | socket: string, message: string or bytes, options: dict | bool | Send a WebSocket text/binary/ping/pong/close message |
 | `websocket_receive(socket, timeout_ms?)` | socket: string, timeout_ms: int | dict or nil | Receive one WebSocket message with timeout/backpressure |
 | `websocket_close(socket)` | socket: string | bool | Close a WebSocket handle |
@@ -905,6 +908,7 @@ println(text.source.sha256)
 | `http_response_json(value, options?)` | value: any, options: dict | dict | Build a JSON response with a JSON content type |
 | `http_response_bytes(bytes, options?)` | bytes: bytes/string, options: dict | dict | Build a bytes response |
 | `http_header(headers_or_message, name)` | headers/request/response: dict, name: string | string or nil | Read a header case-insensitively from a header dict, request, or response |
+| `websocket_server_close(server)` | server: string or dict | bool | Stop a WebSocket server handle |
 
 `http_get/post/put/patch/delete/request/session_request` return
 `{status: int, headers: dict, body: string, ok: bool}`.
@@ -944,16 +948,47 @@ headers from the Harn layer; it deliberately omits HSTS for plain and
 self-signed dev configs.
 
 Transport handles are strings owned by the VM host. Rust keeps responsibility
-for TCP/TLS/socket lifecycle, HTTP pooling, SSE/WebSocket protocol parsing,
-backpressure, receive timeouts, cancellation by dropping/closing handles, and
-resource limits. Connector packages should use `sse_receive` and
-`websocket_receive` as pull-based receive loops; each call reads at most one
-event/message and returns `{type: "timeout"}` on timeout or `nil` after close.
+for TCP/TLS/socket lifecycle, HTTP pooling, HTTP-to-WebSocket upgrade handling,
+SSE/WebSocket protocol parsing, backpressure, receive timeouts, cancellation by
+dropping/closing handles, and resource limits. Connector packages should use
+`sse_receive`, `websocket_accept`, and `websocket_receive` as pull-based loops;
+each call reads at most one event/message and returns `{type: "timeout"}` on
+timeout or `nil` after close.
+
 SSE events return `{type: "open"}` or `{type: "event", event, data, id,
 retry_ms}`. WebSocket receives return `{type: "text", data}`, `{type:
 "binary", data_base64}`, `{type: "ping", data_base64}`, `{type: "pong",
-data_base64}`, `{type: "close"}`, or `{type: "timeout"}`. Options include
-`max_events`/`max_messages` and `max_message_bytes`.
+data_base64}`, `{type: "close", code?, reason?}`, or `{type: "timeout"}`.
+Options include `max_events`/`max_messages` and `max_message_bytes`. WebSocket
+server route options also include `auth: {bearer: "token"}` and
+`idle_timeout_ms`; unauthorized or unregistered upgrade paths are rejected
+during the HTTP upgrade. Server outbound backpressure is explicit:
+`send_buffer_messages` bounds queued server-to-client frames, and
+`websocket_send` throws when that queue is full. `websocket_connect` accepts
+`headers` and `auth: {bearer: "token"}` options for clients that need upgrade
+metadata.
+
+Minimal inbound echo:
+
+```harn
+pipeline websocket_echo() {
+  let server = websocket_server("127.0.0.1:8787", {})
+  websocket_route(server, "/acp", {auth: {bearer: env("ACP_TOKEN")}})
+
+  while true {
+    let conn = websocket_accept(server, 30000)
+    if conn?.type == "timeout" {
+      continue
+    }
+
+    let frame = websocket_receive(conn, 30000)
+    if frame?.type == "text" {
+      websocket_send(conn, frame.data, {})
+    }
+    websocket_close(conn)
+  }
+}
+```
 
 ### Inbound HTTP server primitives
 

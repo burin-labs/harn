@@ -1,7 +1,13 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::io::Write;
+use std::net::{Shutdown, TcpListener, TcpStream};
 use std::rc::Rc;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    mpsc, Arc, RwLock,
+};
+use std::thread;
 use std::time::{Duration, SystemTime};
 
 use crate::value::{VmClosure, VmError, VmValue};
@@ -11,6 +17,11 @@ use base64::Engine;
 use futures::{SinkExt, StreamExt};
 use reqwest_eventsource::{Event as SseEvent, EventSource};
 use sha2::{Digest, Sha256};
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use tokio_tungstenite::tungstenite::handshake::server::{ErrorResponse, Request, Response};
+use tokio_tungstenite::tungstenite::http::{HeaderValue, StatusCode};
+use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
+use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 use x509_parser::prelude::{FromDer, X509Certificate};
 
@@ -217,6 +228,8 @@ struct WebSocketMock {
 struct MockWsMessage {
     message_type: String,
     data: Vec<u8>,
+    close_code: Option<u16>,
+    close_reason: Option<String>,
 }
 
 type RealWebSocket =
@@ -233,12 +246,51 @@ struct WebSocketHandle {
 enum WebSocketHandleKind {
     Real(Rc<tokio::sync::Mutex<RealWebSocket>>),
     Fake(Rc<tokio::sync::Mutex<FakeWebSocket>>),
+    Server(Rc<tokio::sync::Mutex<ServerWebSocket>>),
 }
 
 struct FakeWebSocket {
     messages: VecDeque<MockWsMessage>,
     echo: bool,
     closed: bool,
+}
+
+struct WebSocketServer {
+    addr: String,
+    routes: Arc<RwLock<HashMap<String, WebSocketRoute>>>,
+    events: Rc<tokio::sync::Mutex<mpsc::Receiver<WebSocketServerEvent>>>,
+    running: Arc<AtomicBool>,
+}
+
+#[derive(Clone)]
+struct WebSocketRoute {
+    path: String,
+    bearer_token: Option<String>,
+    max_messages: usize,
+    max_message_bytes: usize,
+    send_buffer_messages: usize,
+    idle_timeout_ms: u64,
+}
+
+struct WebSocketServerEvent {
+    handle: ServerWebSocket,
+    path: String,
+    peer: String,
+    headers: BTreeMap<String, String>,
+    max_messages: usize,
+    max_message_bytes: usize,
+}
+
+struct ServerWebSocket {
+    incoming: VecDeque<MockWsMessage>,
+    incoming_rx: mpsc::Receiver<MockWsMessage>,
+    outgoing_tx: mpsc::SyncSender<ServerWebSocketCommand>,
+    closed: bool,
+}
+
+enum ServerWebSocketCommand {
+    Send(MockWsMessage),
+    Close(Option<u16>, Option<String>),
 }
 
 #[derive(Clone)]
@@ -281,6 +333,7 @@ const DEFAULT_TRANSPORT_RECEIVE_TIMEOUT_MS: u64 = 30_000;
 const DEFAULT_MAX_STREAM_EVENTS: usize = 10_000;
 const DEFAULT_MAX_MESSAGE_BYTES: usize = 1024 * 1024;
 const DEFAULT_SERVER_MAX_BODY_BYTES: usize = 1024 * 1024;
+const DEFAULT_WEBSOCKET_SERVER_IDLE_TIMEOUT_MS: u64 = 30_000;
 const MAX_HTTP_SESSIONS: usize = 64;
 const MAX_HTTP_STREAMS: usize = 64;
 const MAX_SSE_STREAMS: usize = 64;
@@ -288,6 +341,7 @@ const MAX_SSE_SERVER_STREAMS: usize = 64;
 const MAX_WEBSOCKETS: usize = 64;
 const MULTIPART_MOCK_BOUNDARY: &str = "harn-boundary";
 const MAX_HTTP_SERVERS: usize = 128;
+const MAX_WEBSOCKET_SERVERS: usize = 16;
 
 thread_local! {
     static HTTP_MOCKS: RefCell<Vec<HttpMock>> = const { RefCell::new(Vec::new()) };
@@ -300,6 +354,7 @@ thread_local! {
     static SSE_SERVER_HANDLES: RefCell<HashMap<String, SseServerHandle>> = RefCell::new(HashMap::new());
     static WEBSOCKET_MOCKS: RefCell<Vec<WebSocketMock>> = const { RefCell::new(Vec::new()) };
     static WEBSOCKET_HANDLES: RefCell<HashMap<String, WebSocketHandle>> = RefCell::new(HashMap::new());
+    static WEBSOCKET_SERVERS: RefCell<HashMap<String, WebSocketServer>> = RefCell::new(HashMap::new());
     static TRANSPORT_MOCK_CALLS: RefCell<Vec<TransportMockCall>> = const { RefCell::new(Vec::new()) };
     static TRANSPORT_HANDLE_COUNTER: RefCell<u64> = const { RefCell::new(0) };
     static HTTP_SERVERS: RefCell<HashMap<String, HttpServer>> = RefCell::new(HashMap::new());
@@ -326,6 +381,14 @@ pub fn reset_http_state() {
     SSE_SERVER_HANDLES.with(|handles| handles.borrow_mut().clear());
     WEBSOCKET_MOCKS.with(|mocks| mocks.borrow_mut().clear());
     WEBSOCKET_HANDLES.with(|handles| handles.borrow_mut().clear());
+    WEBSOCKET_SERVERS.with(|servers| {
+        let mut servers = servers.borrow_mut();
+        for server in servers.values() {
+            server.running.store(false, Ordering::SeqCst);
+            let _ = TcpStream::connect(&server.addr);
+        }
+        servers.clear();
+    });
     TRANSPORT_MOCK_CALLS.with(|calls| calls.borrow_mut().clear());
     TRANSPORT_HANDLE_COUNTER.with(|counter| *counter.borrow_mut() = 0);
     HTTP_SERVERS.with(|servers| servers.borrow_mut().clear());
@@ -2061,6 +2124,40 @@ pub fn register_http_builtins(vm: &mut Vm) {
         vm_websocket_connect(&url, &options).await
     });
 
+    vm.register_builtin("websocket_server", |args, _out| {
+        let bind = args
+            .first()
+            .map(|arg| arg.display())
+            .filter(|bind| !bind.is_empty())
+            .unwrap_or_else(|| "127.0.0.1:0".to_string());
+        let options = get_options_arg(args, 1);
+        vm_websocket_server(&bind, &options)
+    });
+
+    vm.register_builtin("websocket_route", |args, _out| {
+        if args.len() < 2 {
+            return Err(vm_error(
+                "websocket_route: requires server handle and route path",
+            ));
+        }
+        let server_id = handle_from_value(&args[0], "websocket_route")?;
+        let path = args[1].display();
+        if path.is_empty() || !path.starts_with('/') {
+            return Err(vm_error("websocket_route: path must start with '/'"));
+        }
+        let options = get_options_arg(args, 2);
+        vm_websocket_route(&server_id, &path, &options)
+    });
+
+    vm.register_async_builtin("websocket_accept", |args| async move {
+        let Some(handle) = args.first() else {
+            return Err(vm_error("websocket_accept: requires a server handle"));
+        };
+        let server_id = handle_from_value(handle, "websocket_accept")?;
+        let timeout_ms = receive_timeout_arg(&args, 1);
+        vm_websocket_accept(&server_id, timeout_ms).await
+    });
+
     vm.register_async_builtin("websocket_send", |args| async move {
         if args.len() < 2 {
             return Err(vm_error(
@@ -2090,12 +2187,28 @@ pub fn register_http_builtins(vm: &mut Vm) {
         vm_websocket_close(&socket_id).await
     });
 
+    vm.register_builtin("websocket_server_close", |args, _out| {
+        let Some(handle) = args.first() else {
+            return Err(vm_error("websocket_server_close: requires a server handle"));
+        };
+        let server_id = handle_from_value(handle, "websocket_server_close")?;
+        vm_websocket_server_close(&server_id)
+    });
+
     vm.register_builtin("transport_mock_clear", |_args, _out| {
         HTTP_STREAMS.with(|streams| streams.borrow_mut().clear());
         SSE_MOCKS.with(|mocks| mocks.borrow_mut().clear());
         SSE_HANDLES.with(|handles| handles.borrow_mut().clear());
         WEBSOCKET_MOCKS.with(|mocks| mocks.borrow_mut().clear());
         WEBSOCKET_HANDLES.with(|handles| handles.borrow_mut().clear());
+        WEBSOCKET_SERVERS.with(|servers| {
+            let mut servers = servers.borrow_mut();
+            for server in servers.values() {
+                server.running.store(false, Ordering::SeqCst);
+                let _ = TcpStream::connect(&server.addr);
+            }
+            servers.clear();
+        });
         TRANSPORT_MOCK_CALLS.with(|calls| calls.borrow_mut().clear());
         Ok(VmValue::Nil)
     });
@@ -3358,15 +3471,27 @@ fn parse_ws_message(value: &VmValue) -> MockWsMessage {
                     .map(|value| value.display().into_bytes())
                     .unwrap_or_default()
             };
-            MockWsMessage { message_type, data }
+            MockWsMessage {
+                message_type,
+                data,
+                close_code: dict
+                    .get("code")
+                    .and_then(|value| value.as_int())
+                    .map(|value| value as u16),
+                close_reason: dict.get("reason").map(|value| value.display()),
+            }
         }
         VmValue::Bytes(bytes) => MockWsMessage {
             message_type: "binary".to_string(),
             data: bytes.as_ref().clone(),
+            close_code: None,
+            close_reason: None,
         },
         other => MockWsMessage {
             message_type: "text".to_string(),
             data: other.display().into_bytes(),
+            close_code: None,
+            close_reason: None,
         },
     }
 }
@@ -3418,7 +3543,22 @@ fn ws_message_data(message: &MockWsMessage) -> String {
     }
 }
 
+fn closed_event_with(code: Option<u16>, reason: Option<String>) -> VmValue {
+    let mut dict = BTreeMap::new();
+    dict.insert("type".to_string(), VmValue::String(Rc::from("close")));
+    if let Some(code) = code {
+        dict.insert("code".to_string(), VmValue::Int(i64::from(code)));
+    }
+    if let Some(reason) = reason {
+        dict.insert("reason".to_string(), VmValue::String(Rc::from(reason)));
+    }
+    VmValue::Dict(Rc::new(dict))
+}
+
 fn ws_event_value(message: MockWsMessage) -> VmValue {
+    if message.message_type == "close" {
+        return closed_event_with(message.close_code, message.close_reason);
+    }
     let mut dict = BTreeMap::new();
     dict.insert(
         "type".to_string(),
@@ -3451,20 +3591,33 @@ fn real_ws_event_value(message: WsMessage) -> VmValue {
         WsMessage::Text(text) => ws_event_value(MockWsMessage {
             message_type: "text".to_string(),
             data: text.as_bytes().to_vec(),
+            close_code: None,
+            close_reason: None,
         }),
         WsMessage::Binary(bytes) => ws_event_value(MockWsMessage {
             message_type: "binary".to_string(),
             data: bytes.to_vec(),
+            close_code: None,
+            close_reason: None,
         }),
         WsMessage::Ping(bytes) => ws_event_value(MockWsMessage {
             message_type: "ping".to_string(),
             data: bytes.to_vec(),
+            close_code: None,
+            close_reason: None,
         }),
         WsMessage::Pong(bytes) => ws_event_value(MockWsMessage {
             message_type: "pong".to_string(),
             data: bytes.to_vec(),
+            close_code: None,
+            close_reason: None,
         }),
-        WsMessage::Close(_) => closed_event(),
+        WsMessage::Close(frame) => match frame {
+            Some(frame) => {
+                closed_event_with(Some(u16::from(frame.code)), Some(frame.reason.to_string()))
+            }
+            None => closed_event(),
+        },
         WsMessage::Frame(_) => VmValue::Nil,
     }
 }
@@ -4144,6 +4297,398 @@ async fn vm_sse_receive(stream_id: &str, timeout_ms: u64) -> Result<VmValue, VmE
     }
 }
 
+fn websocket_route_from_options(path: &str, options: &BTreeMap<String, VmValue>) -> WebSocketRoute {
+    let bearer_token = options.get("auth").and_then(|auth| match auth {
+        VmValue::Dict(dict) => dict.get("bearer").map(|value| value.display()),
+        other => {
+            let value = other.display();
+            (!value.is_empty()).then_some(value)
+        }
+    });
+    WebSocketRoute {
+        path: path.to_string(),
+        bearer_token,
+        max_messages: transport_limit_option(options, "max_messages", DEFAULT_MAX_STREAM_EVENTS)
+            .max(1),
+        max_message_bytes: transport_limit_option(
+            options,
+            "max_message_bytes",
+            DEFAULT_MAX_MESSAGE_BYTES,
+        )
+        .max(1),
+        send_buffer_messages: transport_limit_option(options, "send_buffer_messages", 64),
+        idle_timeout_ms: vm_get_int_option(
+            options,
+            "idle_timeout_ms",
+            DEFAULT_WEBSOCKET_SERVER_IDLE_TIMEOUT_MS as i64,
+        )
+        .max(0) as u64,
+    }
+}
+
+fn vm_websocket_server(
+    bind: &str,
+    options: &BTreeMap<String, VmValue>,
+) -> Result<VmValue, VmError> {
+    let listener = TcpListener::bind(bind)
+        .map_err(|error| vm_error(format!("websocket_server: bind failed: {error}")))?;
+    listener
+        .set_nonblocking(true)
+        .map_err(|error| vm_error(format!("websocket_server: nonblocking failed: {error}")))?;
+    let local_addr = listener
+        .local_addr()
+        .map_err(|error| vm_error(format!("websocket_server: local addr failed: {error}")))?;
+    let id = next_transport_handle("websocket-server");
+    let addr = local_addr.to_string();
+    let url = format!("ws://{addr}");
+    let routes = Arc::new(RwLock::new(HashMap::<String, WebSocketRoute>::new()));
+    if let Some(path) = options
+        .get("path")
+        .map(|value| value.display())
+        .filter(|path| !path.is_empty())
+    {
+        if !path.starts_with('/') {
+            return Err(vm_error("websocket_server: path must start with '/'"));
+        }
+        routes
+            .write()
+            .expect("websocket routes poisoned")
+            .insert(path.clone(), websocket_route_from_options(&path, options));
+    }
+    let (event_tx, event_rx) = mpsc::channel();
+    let running = Arc::new(AtomicBool::new(true));
+    let server_routes = routes.clone();
+    let server_running = running.clone();
+    thread::Builder::new()
+        .name(format!("harn-ws-{id}"))
+        .spawn(move || websocket_server_loop(listener, server_routes, event_tx, server_running))
+        .map_err(|error| vm_error(format!("websocket_server: spawn failed: {error}")))?;
+    WEBSOCKET_SERVERS.with(|servers| {
+        let mut servers = servers.borrow_mut();
+        if servers.len() >= MAX_WEBSOCKET_SERVERS {
+            running.store(false, Ordering::SeqCst);
+            let _ = TcpStream::connect(&addr);
+            return Err(vm_error(format!(
+                "websocket_server: maximum open servers ({MAX_WEBSOCKET_SERVERS}) reached"
+            )));
+        }
+        servers.insert(
+            id.clone(),
+            WebSocketServer {
+                addr: addr.clone(),
+                routes,
+                events: Rc::new(tokio::sync::Mutex::new(event_rx)),
+                running,
+            },
+        );
+        Ok(())
+    })?;
+    let mut dict = BTreeMap::new();
+    dict.insert("id".to_string(), VmValue::String(Rc::from(id)));
+    dict.insert("addr".to_string(), VmValue::String(Rc::from(addr)));
+    dict.insert("url".to_string(), VmValue::String(Rc::from(url)));
+    Ok(VmValue::Dict(Rc::new(dict)))
+}
+
+fn vm_websocket_route(
+    server_id: &str,
+    path: &str,
+    options: &BTreeMap<String, VmValue>,
+) -> Result<VmValue, VmError> {
+    let routes = WEBSOCKET_SERVERS.with(|servers| {
+        servers
+            .borrow()
+            .get(server_id)
+            .map(|server| server.routes.clone())
+    });
+    let Some(routes) = routes else {
+        return Err(vm_error(format!(
+            "websocket_route: unknown server '{server_id}'"
+        )));
+    };
+    routes.write().expect("websocket routes poisoned").insert(
+        path.to_string(),
+        websocket_route_from_options(path, options),
+    );
+    Ok(VmValue::Bool(true))
+}
+
+async fn vm_websocket_accept(server_id: &str, timeout_ms: u64) -> Result<VmValue, VmError> {
+    let receiver = WEBSOCKET_SERVERS.with(|servers| {
+        servers
+            .borrow()
+            .get(server_id)
+            .map(|server| server.events.clone())
+    });
+    let Some(receiver) = receiver else {
+        return Err(vm_error(format!(
+            "websocket_accept: unknown server '{server_id}'"
+        )));
+    };
+    let started = std::time::Instant::now();
+    loop {
+        let event = {
+            let receiver = receiver.lock().await;
+            receiver.try_recv()
+        };
+        match event {
+            Ok(event) => return register_accepted_websocket(event),
+            Err(mpsc::TryRecvError::Disconnected) => return Ok(VmValue::Nil),
+            Err(mpsc::TryRecvError::Empty) => {
+                if timeout_ms == 0 || started.elapsed() >= Duration::from_millis(timeout_ms) {
+                    return Ok(timeout_event());
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        }
+    }
+}
+
+fn register_accepted_websocket(event: WebSocketServerEvent) -> Result<VmValue, VmError> {
+    let WebSocketServerEvent {
+        handle,
+        path,
+        peer,
+        headers,
+        max_messages,
+        max_message_bytes,
+    } = event;
+    let id = next_transport_handle("websocket");
+    WEBSOCKET_HANDLES.with(|handles| {
+        let mut handles = handles.borrow_mut();
+        if handles.len() >= MAX_WEBSOCKETS {
+            return Err(vm_error(format!(
+                "websocket_accept: maximum open sockets ({MAX_WEBSOCKETS}) reached"
+            )));
+        }
+        handles.insert(
+            id.clone(),
+            WebSocketHandle {
+                kind: WebSocketHandleKind::Server(Rc::new(tokio::sync::Mutex::new(handle))),
+                url: path.clone(),
+                max_messages,
+                max_message_bytes,
+                received: 0,
+            },
+        );
+        Ok(())
+    })?;
+    let mut metadata = BTreeMap::new();
+    metadata.insert("id".to_string(), VmValue::String(Rc::from(id)));
+    metadata.insert("path".to_string(), VmValue::String(Rc::from(path)));
+    metadata.insert("peer".to_string(), VmValue::String(Rc::from(peer)));
+    metadata.insert(
+        "headers".to_string(),
+        VmValue::Dict(Rc::new(
+            headers
+                .into_iter()
+                .map(|(name, value)| (name, VmValue::String(Rc::from(value))))
+                .collect(),
+        )),
+    );
+    Ok(VmValue::Dict(Rc::new(metadata)))
+}
+
+fn vm_websocket_server_close(server_id: &str) -> Result<VmValue, VmError> {
+    let server = WEBSOCKET_SERVERS.with(|servers| servers.borrow_mut().remove(server_id));
+    let Some(server) = server else {
+        return Ok(VmValue::Bool(false));
+    };
+    server.running.store(false, Ordering::SeqCst);
+    let _ = TcpStream::connect(&server.addr);
+    Ok(VmValue::Bool(true))
+}
+
+fn websocket_server_loop(
+    listener: TcpListener,
+    routes: Arc<RwLock<HashMap<String, WebSocketRoute>>>,
+    event_tx: mpsc::Sender<WebSocketServerEvent>,
+    running: Arc<AtomicBool>,
+) {
+    while running.load(Ordering::SeqCst) {
+        match listener.accept() {
+            Ok((stream, peer)) => {
+                let routes = routes.clone();
+                let event_tx = event_tx.clone();
+                let running = running.clone();
+                let peer = peer.to_string();
+                let _ = thread::Builder::new()
+                    .name("harn-ws-conn".to_string())
+                    .spawn(move || {
+                        websocket_connection_thread(stream, peer, routes, event_tx, running);
+                    });
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                thread::sleep(Duration::from_millis(10));
+            }
+            Err(_) => break,
+        }
+    }
+}
+
+fn error_response(status: StatusCode, body: &str) -> ErrorResponse {
+    let mut response = ErrorResponse::new(Some(body.to_string()));
+    *response.status_mut() = status;
+    response
+}
+
+fn route_for_request(
+    request: &Request,
+    routes: &Arc<RwLock<HashMap<String, WebSocketRoute>>>,
+) -> Result<WebSocketRoute, ErrorResponse> {
+    let path = request.uri().path().to_string();
+    let Some(route) = routes
+        .read()
+        .expect("websocket routes poisoned")
+        .get(&path)
+        .cloned()
+    else {
+        return Err(error_response(
+            StatusCode::NOT_FOUND,
+            "websocket route not found",
+        ));
+    };
+    if let Some(token) = route.bearer_token.as_ref() {
+        let expected = format!("Bearer {token}");
+        let authorized = request
+            .headers()
+            .get("authorization")
+            .and_then(|value| value.to_str().ok())
+            .map(|value| value == expected)
+            .unwrap_or(false);
+        if !authorized {
+            return Err(error_response(
+                StatusCode::UNAUTHORIZED,
+                "websocket route unauthorized",
+            ));
+        }
+    }
+    Ok(route)
+}
+
+fn websocket_connection_thread(
+    stream: TcpStream,
+    peer: String,
+    routes: Arc<RwLock<HashMap<String, WebSocketRoute>>>,
+    event_tx: mpsc::Sender<WebSocketServerEvent>,
+    running: Arc<AtomicBool>,
+) {
+    let accepted_route = Arc::new(std::sync::Mutex::new(
+        None::<(WebSocketRoute, BTreeMap<String, String>)>,
+    ));
+    let callback_route = accepted_route.clone();
+    let callback =
+        move |request: &Request, response: Response| -> Result<Response, ErrorResponse> {
+            let route = route_for_request(request, &routes)?;
+            let headers = request
+                .headers()
+                .iter()
+                .filter_map(|(name, value)| {
+                    value
+                        .to_str()
+                        .ok()
+                        .map(|value| (name.as_str().to_ascii_lowercase(), value.to_string()))
+                })
+                .collect::<BTreeMap<_, _>>();
+            *callback_route
+                .lock()
+                .expect("websocket route metadata poisoned") = Some((route, headers));
+            Ok(response)
+        };
+    let Ok(mut socket) = tokio_tungstenite::tungstenite::accept_hdr(stream, callback) else {
+        return;
+    };
+    let Some((route, headers)) = accepted_route
+        .lock()
+        .expect("websocket route metadata poisoned")
+        .clone()
+    else {
+        let _ = socket.close(None);
+        return;
+    };
+    let _ = socket
+        .get_mut()
+        .set_read_timeout(Some(Duration::from_millis(50)));
+    let (incoming_tx, incoming_rx) = mpsc::channel();
+    let (outgoing_tx, outgoing_rx) = mpsc::sync_channel(route.send_buffer_messages);
+    let event = WebSocketServerEvent {
+        handle: ServerWebSocket {
+            incoming: VecDeque::new(),
+            incoming_rx,
+            outgoing_tx,
+            closed: false,
+        },
+        path: route.path.clone(),
+        peer,
+        headers,
+        max_messages: route.max_messages,
+        max_message_bytes: route.max_message_bytes,
+    };
+    if event_tx.send(event).is_err() {
+        let _ = socket.close(None);
+        return;
+    }
+    let mut last_activity = std::time::Instant::now();
+    while running.load(Ordering::SeqCst) {
+        while let Ok(command) = outgoing_rx.try_recv() {
+            match command {
+                ServerWebSocketCommand::Send(message) => {
+                    let Ok(message) = real_ws_message(&message) else {
+                        continue;
+                    };
+                    if socket.send(message).is_err() {
+                        return;
+                    }
+                    last_activity = std::time::Instant::now();
+                }
+                ServerWebSocketCommand::Close(code, reason) => {
+                    let _ = socket.close(close_frame(code, reason));
+                    return;
+                }
+            }
+        }
+        if route.idle_timeout_ms > 0
+            && last_activity.elapsed() >= Duration::from_millis(route.idle_timeout_ms)
+        {
+            let _ = socket.close(close_frame(Some(1001), Some("idle timeout".to_string())));
+            let _ = incoming_tx.send(MockWsMessage {
+                message_type: "close".to_string(),
+                data: Vec::new(),
+                close_code: Some(1001),
+                close_reason: Some("idle timeout".to_string()),
+            });
+            return;
+        }
+        match socket.read() {
+            Ok(message) => {
+                last_activity = std::time::Instant::now();
+                if incoming_tx
+                    .send(mock_ws_message_from_real(message))
+                    .is_err()
+                {
+                    return;
+                }
+            }
+            Err(tokio_tungstenite::tungstenite::Error::Io(error))
+                if error.kind() == std::io::ErrorKind::WouldBlock
+                    || error.kind() == std::io::ErrorKind::TimedOut =>
+            {
+                continue;
+            }
+            Err(_) => {
+                let _ = incoming_tx.send(MockWsMessage {
+                    message_type: "close".to_string(),
+                    data: Vec::new(),
+                    close_code: None,
+                    close_reason: None,
+                });
+                return;
+            }
+        }
+    }
+    let _ = socket.get_mut().shutdown(Shutdown::Both);
+}
+
 async fn vm_websocket_connect(
     url: &str,
     options: &BTreeMap<String, VmValue>,
@@ -4198,7 +4743,8 @@ async fn vm_websocket_connect(
         DEFAULT_TIMEOUT_MS as i64,
     )
     .max(0) as u64;
-    let connect = tokio_tungstenite::connect_async(url);
+    let request = websocket_client_request(url, options)?;
+    let connect = tokio_tungstenite::connect_async(request);
     let (socket, _) = tokio::time::timeout(Duration::from_millis(timeout_ms), connect)
         .await
         .map_err(|_| vm_error(format!("websocket_connect: timed out after {timeout_ms}ms")))?
@@ -4253,7 +4799,69 @@ fn websocket_message_from_vm(
         }
         other => other.display().into_bytes(),
     };
-    Ok(MockWsMessage { message_type, data })
+    Ok(MockWsMessage {
+        message_type,
+        data,
+        close_code: options
+            .get("code")
+            .or_else(|| options.get("close_code"))
+            .and_then(|value| value.as_int())
+            .map(|value| value as u16),
+        close_reason: options
+            .get("reason")
+            .or_else(|| options.get("close_reason"))
+            .map(|value| value.display()),
+    })
+}
+
+fn websocket_client_request(
+    url: &str,
+    options: &BTreeMap<String, VmValue>,
+) -> Result<tokio_tungstenite::tungstenite::http::Request<()>, VmError> {
+    let mut request = url
+        .into_client_request()
+        .map_err(|error| vm_error(format!("websocket_connect: invalid request: {error}")))?;
+    if let Some(headers) = options.get("headers").and_then(|value| value.as_dict()) {
+        for (name, value) in headers {
+            let header_name = tokio_tungstenite::tungstenite::http::header::HeaderName::from_bytes(
+                name.as_bytes(),
+            )
+            .map_err(|error| {
+                vm_error(format!(
+                    "websocket_connect: invalid header name '{name}': {error}"
+                ))
+            })?;
+            let header_value = HeaderValue::from_str(&value.display()).map_err(|error| {
+                vm_error(format!(
+                    "websocket_connect: invalid header value for '{name}': {error}"
+                ))
+            })?;
+            request.headers_mut().insert(header_name, header_value);
+        }
+    }
+    if let Some(auth) = options.get("auth") {
+        let bearer = match auth {
+            VmValue::Dict(dict) => dict.get("bearer").map(|value| value.display()),
+            other => Some(other.display()),
+        };
+        if let Some(token) = bearer.filter(|token| !token.is_empty()) {
+            let value = HeaderValue::from_str(&format!("Bearer {token}")).map_err(|error| {
+                vm_error(format!(
+                    "websocket_connect: invalid authorization header: {error}"
+                ))
+            })?;
+            request.headers_mut().insert("authorization", value);
+        }
+    }
+    Ok(request)
+}
+
+fn close_frame(code: Option<u16>, reason: Option<String>) -> Option<CloseFrame> {
+    code.or(reason.as_ref().map(|_| 1000))
+        .map(|code| CloseFrame {
+            code: CloseCode::from(code),
+            reason: reason.unwrap_or_default().into(),
+        })
 }
 
 fn real_ws_message(message: &MockWsMessage) -> Result<WsMessage, VmError> {
@@ -4266,10 +4874,59 @@ fn real_ws_message(message: &MockWsMessage) -> Result<WsMessage, VmError> {
         "binary" => Ok(WsMessage::Binary(message.data.clone().into())),
         "ping" => Ok(WsMessage::Ping(message.data.clone().into())),
         "pong" => Ok(WsMessage::Pong(message.data.clone().into())),
-        "close" => Ok(WsMessage::Close(None)),
+        "close" => Ok(WsMessage::Close(close_frame(
+            message.close_code,
+            message.close_reason.clone(),
+        ))),
         other => Err(vm_error(format!(
             "websocket_send: unsupported message type '{other}'"
         ))),
+    }
+}
+
+fn mock_ws_message_from_real(message: WsMessage) -> MockWsMessage {
+    match message {
+        WsMessage::Text(text) => MockWsMessage {
+            message_type: "text".to_string(),
+            data: text.as_bytes().to_vec(),
+            close_code: None,
+            close_reason: None,
+        },
+        WsMessage::Binary(bytes) => MockWsMessage {
+            message_type: "binary".to_string(),
+            data: bytes.to_vec(),
+            close_code: None,
+            close_reason: None,
+        },
+        WsMessage::Ping(bytes) => MockWsMessage {
+            message_type: "ping".to_string(),
+            data: bytes.to_vec(),
+            close_code: None,
+            close_reason: None,
+        },
+        WsMessage::Pong(bytes) => MockWsMessage {
+            message_type: "pong".to_string(),
+            data: bytes.to_vec(),
+            close_code: None,
+            close_reason: None,
+        },
+        WsMessage::Close(frame) => {
+            let (close_code, close_reason) = frame
+                .map(|frame| (Some(u16::from(frame.code)), Some(frame.reason.to_string())))
+                .unwrap_or((None, None));
+            MockWsMessage {
+                message_type: "close".to_string(),
+                data: Vec::new(),
+                close_code,
+                close_reason,
+            }
+        }
+        WsMessage::Frame(_) => MockWsMessage {
+            message_type: "close".to_string(),
+            data: Vec::new(),
+            close_code: None,
+            close_reason: None,
+        },
     }
 }
 
@@ -4287,6 +4944,7 @@ async fn vm_websocket_send(
         let kind = match &handle.kind {
             WebSocketHandleKind::Real(socket) => WebSocketHandleKind::Real(socket.clone()),
             WebSocketHandleKind::Fake(socket) => WebSocketHandleKind::Fake(socket.clone()),
+            WebSocketHandleKind::Server(socket) => WebSocketHandleKind::Server(socket.clone()),
         };
         Some((kind, url, max_message_bytes))
     });
@@ -4328,6 +4986,28 @@ async fn vm_websocket_send(
                 .map_err(|error| vm_error(format!("websocket_send: failed: {error}")))?;
             Ok(VmValue::Bool(true))
         }
+        WebSocketHandleKind::Server(socket) => {
+            let mut socket = socket.lock().await;
+            if socket.closed {
+                return Ok(VmValue::Bool(false));
+            }
+            let command = if message.message_type == "close" {
+                socket.closed = true;
+                ServerWebSocketCommand::Close(message.close_code, message.close_reason.clone())
+            } else {
+                ServerWebSocketCommand::Send(message.clone())
+            };
+            socket
+                .outgoing_tx
+                .try_send(command)
+                .map_err(|error| match error {
+                    mpsc::TrySendError::Full(_) => vm_error("websocket_send: send buffer full"),
+                    mpsc::TrySendError::Disconnected(_) => {
+                        vm_error("websocket_send: connection closed")
+                    }
+                })?;
+            Ok(VmValue::Bool(true))
+        }
     }
 }
 
@@ -4345,6 +5025,7 @@ async fn vm_websocket_receive(socket_id: &str, timeout_ms: u64) -> Result<VmValu
         let kind = match &handle.kind {
             WebSocketHandleKind::Real(socket) => WebSocketHandleKind::Real(socket.clone()),
             WebSocketHandleKind::Fake(socket) => WebSocketHandleKind::Fake(socket.clone()),
+            WebSocketHandleKind::Server(socket) => WebSocketHandleKind::Server(socket.clone()),
         };
         Some(Ok((kind, max_message_bytes)))
     });
@@ -4403,6 +5084,43 @@ async fn vm_websocket_receive(socket_id: &str, timeout_ms: u64) -> Result<VmValu
             }
             Ok(real_ws_event_value(message))
         }
+        WebSocketHandleKind::Server(socket) => {
+            let started = std::time::Instant::now();
+            loop {
+                let message = {
+                    let mut socket = socket.lock().await;
+                    if socket.closed {
+                        return Ok(VmValue::Nil);
+                    }
+                    while let Ok(message) = socket.incoming_rx.try_recv() {
+                        socket.incoming.push_back(message);
+                    }
+                    socket.incoming.pop_front()
+                };
+                if let Some(message) = message {
+                    if message.data.len() > max_message_bytes {
+                        let mut socket = socket.lock().await;
+                        socket.closed = true;
+                        let _ = socket.outgoing_tx.try_send(ServerWebSocketCommand::Close(
+                            Some(1009),
+                            Some("message too large".to_string()),
+                        ));
+                        return Err(vm_error(format!(
+                            "websocket_receive: message exceeded max_message_bytes ({max_message_bytes})"
+                        )));
+                    }
+                    if message.message_type == "close" {
+                        let mut socket = socket.lock().await;
+                        socket.closed = true;
+                    }
+                    return Ok(ws_event_value(message));
+                }
+                if timeout_ms == 0 || started.elapsed() >= Duration::from_millis(timeout_ms) {
+                    return Ok(timeout_event());
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        }
     }
 }
 
@@ -4429,6 +5147,14 @@ async fn vm_websocket_close(socket_id: &str) -> Result<VmValue, VmError> {
                 .close(None)
                 .await
                 .map_err(|error| vm_error(format!("websocket_close: failed: {error}")))?;
+            Ok(VmValue::Bool(true))
+        }
+        WebSocketHandleKind::Server(socket) => {
+            let mut socket = socket.lock().await;
+            socket.closed = true;
+            let _ = socket
+                .outgoing_tx
+                .try_send(ServerWebSocketCommand::Close(None, None));
             Ok(VmValue::Bool(true))
         }
     }

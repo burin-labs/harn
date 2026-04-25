@@ -340,9 +340,12 @@ pub fn enforce_current_policy_for_builtin(name: &str, args: &[VmValue]) -> Resul
         | "http_stream_info"
         | "sse_connect"
         | "sse_receive"
+        | "websocket_accept"
         | "websocket_connect"
+        | "websocket_route"
         | "websocket_send"
         | "websocket_receive"
+        | "websocket_server"
             if !policy_allows_side_effect(&policy, "network") =>
         {
             return reject_policy(format!("builtin '{name}' exceeds network ceiling"));

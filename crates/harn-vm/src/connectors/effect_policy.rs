@@ -162,9 +162,12 @@ fn builtin_effect_group(builtin: &str) -> Option<BuiltinEffectGroup> {
         | "http_stream_info"
         | "sse_connect"
         | "sse_receive"
+        | "websocket_accept"
         | "websocket_connect"
+        | "websocket_route"
         | "websocket_send"
-        | "websocket_receive" => Some(BuiltinEffectGroup::Network),
+        | "websocket_receive"
+        | "websocket_server" => Some(BuiltinEffectGroup::Network),
         "llm_call" | "llm_call_safe" | "llm_completion" | "llm_stream" | "llm_healthcheck"
         | "agent_loop" => Some(BuiltinEffectGroup::Llm),
         "vision_ocr" => Some(BuiltinEffectGroup::Process),

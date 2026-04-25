@@ -90,6 +90,7 @@ pub fn is_untyped_boundary_source(name: &str) -> bool {
             | "sse_server_mock_receive"
             | "sse_server_response"
             | "sse_server_status"
+            | "websocket_accept"
             | "websocket_receive"
             | "host_call"
             | "connector_call"

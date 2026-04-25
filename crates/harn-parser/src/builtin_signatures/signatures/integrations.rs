@@ -488,6 +488,10 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("dict")),
     },
     BuiltinSig {
+        name: "websocket_accept",
+        return_type: Some(BuiltinReturn::Union(UNION_DICT_NIL)),
+    },
+    BuiltinSig {
         name: "websocket_close",
         return_type: Some(BuiltinReturn::Named("bool")),
     },
@@ -504,7 +508,19 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Union(UNION_DICT_NIL)),
     },
     BuiltinSig {
+        name: "websocket_route",
+        return_type: Some(BuiltinReturn::Named("bool")),
+    },
+    BuiltinSig {
         name: "websocket_send",
+        return_type: Some(BuiltinReturn::Named("bool")),
+    },
+    BuiltinSig {
+        name: "websocket_server",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
+        name: "websocket_server_close",
         return_type: Some(BuiltinReturn::Named("bool")),
     },
 ];
