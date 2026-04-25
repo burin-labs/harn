@@ -324,12 +324,60 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("string")),
     },
     BuiltinSig {
+        name: "sse_event",
+        return_type: Some(BuiltinReturn::Named("string")),
+    },
+    BuiltinSig {
         name: "sse_mock",
         return_type: Some(BuiltinReturn::Named("nil")),
     },
     BuiltinSig {
         name: "sse_receive",
         return_type: Some(BuiltinReturn::Union(UNION_DICT_NIL)),
+    },
+    BuiltinSig {
+        name: "sse_server_cancel",
+        return_type: Some(BuiltinReturn::Named("bool")),
+    },
+    BuiltinSig {
+        name: "sse_server_cancelled",
+        return_type: Some(BuiltinReturn::Named("bool")),
+    },
+    BuiltinSig {
+        name: "sse_server_close",
+        return_type: Some(BuiltinReturn::Named("bool")),
+    },
+    BuiltinSig {
+        name: "sse_server_disconnected",
+        return_type: Some(BuiltinReturn::Named("bool")),
+    },
+    BuiltinSig {
+        name: "sse_server_flush",
+        return_type: Some(BuiltinReturn::Named("bool")),
+    },
+    BuiltinSig {
+        name: "sse_server_heartbeat",
+        return_type: Some(BuiltinReturn::Named("bool")),
+    },
+    BuiltinSig {
+        name: "sse_server_mock_disconnect",
+        return_type: Some(BuiltinReturn::Named("bool")),
+    },
+    BuiltinSig {
+        name: "sse_server_mock_receive",
+        return_type: Some(BuiltinReturn::Union(UNION_DICT_NIL)),
+    },
+    BuiltinSig {
+        name: "sse_server_response",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
+        name: "sse_server_send",
+        return_type: Some(BuiltinReturn::Named("bool")),
+    },
+    BuiltinSig {
+        name: "sse_server_status",
+        return_type: Some(BuiltinReturn::Named("dict")),
     },
     BuiltinSig {
         name: "skill_count",

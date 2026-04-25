@@ -104,6 +104,42 @@ pub(crate) const BUILTINS: &[(&str, &str)] = &[
         "sse_receive(stream, timeout_ms?) -> dict | nil",
     ),
     ("sse_close", "sse_close(stream) -> bool"),
+    ("sse_event", "sse_event(event, options?) -> string"),
+    (
+        "sse_server_response",
+        "sse_server_response(options?) -> dict",
+    ),
+    (
+        "sse_server_send",
+        "sse_server_send(stream, event, options?) -> bool",
+    ),
+    (
+        "sse_server_heartbeat",
+        "sse_server_heartbeat(stream, comment?) -> bool",
+    ),
+    ("sse_server_flush", "sse_server_flush(stream) -> bool"),
+    ("sse_server_status", "sse_server_status(stream) -> dict"),
+    (
+        "sse_server_disconnected",
+        "sse_server_disconnected(stream) -> bool",
+    ),
+    (
+        "sse_server_cancelled",
+        "sse_server_cancelled(stream) -> bool",
+    ),
+    (
+        "sse_server_cancel",
+        "sse_server_cancel(stream, reason?) -> bool",
+    ),
+    ("sse_server_close", "sse_server_close(stream) -> bool"),
+    (
+        "sse_server_mock_receive",
+        "sse_server_mock_receive(stream) -> dict",
+    ),
+    (
+        "sse_server_mock_disconnect",
+        "sse_server_mock_disconnect(stream) -> bool",
+    ),
     (
         "websocket_connect",
         "websocket_connect(url, options?) -> string",

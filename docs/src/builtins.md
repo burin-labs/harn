@@ -873,6 +873,18 @@ println(text.source.sha256)
 | `sse_connect(method, url, options?)` | method: string, url: string, options: dict | string | Open an SSE/Streamable HTTP receive handle |
 | `sse_receive(stream, timeout_ms?)` | stream: string, timeout_ms: int | dict or nil | Receive one SSE event with timeout/backpressure |
 | `sse_close(stream)` | stream: string | bool | Close an SSE handle |
+| `sse_event(event, options?)` | event: any, options: dict | string | Format a server-sent event frame |
+| `sse_server_response(options?)` | options: dict | dict | Create a `text/event-stream` response handle |
+| `sse_server_send(stream, event, options?)` | stream: string or dict, event: any, options: dict | bool | Write one event frame to a server SSE response |
+| `sse_server_heartbeat(stream, comment?)` | stream: string or dict, comment: string | bool | Write an SSE comment/heartbeat frame |
+| `sse_server_flush(stream)` | stream: string or dict | bool | Flush pending server SSE frames when the client is still connected |
+| `sse_server_status(stream)` | stream: string or dict | dict | Inspect buffered event count, close, cancel, and disconnect state |
+| `sse_server_disconnected(stream)` | stream: string or dict | bool | Return whether the mock/client side disconnected |
+| `sse_server_cancelled(stream)` | stream: string or dict | bool | Return whether the response was cancelled |
+| `sse_server_cancel(stream, reason?)` | stream: string or dict, reason: string | bool | Mark the response cancelled and closed |
+| `sse_server_close(stream)` | stream: string or dict | bool | Close a server SSE response |
+| `sse_server_mock_receive(stream)` | stream: string or dict | dict | Deterministically read the next buffered server SSE frame in tests |
+| `sse_server_mock_disconnect(stream)` | stream: string or dict | bool | Simulate a client disconnecting from a server SSE response |
 | `websocket_connect(url, options?)` | url: string, options: dict | string | Open a WebSocket client handle |
 | `websocket_send(socket, message, options?)` | socket: string, message: string or bytes, options: dict | bool | Send a WebSocket text/binary/ping/pong/close message |
 | `websocket_receive(socket, timeout_ms?)` | socket: string, timeout_ms: int | dict or nil | Receive one WebSocket message with timeout/backpressure |
@@ -1008,6 +1020,32 @@ pipeline default() {
     client_ip: "203.0.113.10",
   })
   println(probe.status)
+}
+```
+
+### Server-side SSE primitives
+
+Server-side SSE responses are VM-owned handles. `sse_server_response()` returns
+`{id, type: "sse_response", status, headers, body: nil, streaming: true}` with
+`content-type: text/event-stream; charset=utf-8`, `cache-control: no-cache`,
+`connection: keep-alive`, and `x-accel-buffering: no` unless overridden.
+`sse_server_send()` formats fields as UTF-8 SSE lines: `event`, `id`, `retry`
+or `retry_ms`, and multi-line `data`. `sse_server_heartbeat()` writes comment
+frames. `max_event_bytes` rejects oversized frames before buffering, and
+`max_buffered_events` rejects writes when the client is not draining quickly
+enough. `sse_server_flush()` reports whether the stream is still writable after
+marking currently buffered events flushed. Writes return `false` after close,
+cancel, or disconnect. Use `sse_server_status()`, `sse_server_disconnected()`,
+and `sse_server_cancelled()` to observe shutdown state.
+
+```harn
+pipeline progress_stream(task) {
+  let stream = sse_server_response({max_event_bytes: 4096})
+  sse_server_send(stream, {event: "progress", id: "1", data: "queued"})
+  sse_server_heartbeat(stream, "still working")
+  sse_server_send(stream, {event: "progress", id: "2", data: "done"})
+  sse_server_flush(stream)
+  return stream
 }
 ```
 
