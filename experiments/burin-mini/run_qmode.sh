@@ -68,6 +68,21 @@ run_pipeline() {
   return "$rc"
 }
 
+record_answer_and_continue() {
+  local task_id="$1"
+  local answer_text="$2"
+  local td; td="$(task_dir "$task_id")"
+  local q asked
+  q="$(jq -r '.question' "$td/pending.json")"
+  asked="$(jq -r '.asked_at' "$td/pending.json")"
+  jq -nc --arg q "$q" --arg a "$answer_text" --arg ask "$asked" --arg ans "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '{question:$q, answer:$a, asked_at:$ask, answered_at:$ans}' >> "$td/qa.jsonl"
+  rm "$td/pending.json"
+  local task_text
+  task_text="$(jq -r '.task' "$td/task.json")"
+  run_pipeline "$task_id" "$task_text" "$@" || true
+}
+
 post_run_dispatch() {
   local task_id="$1"
   local td; td="$(task_dir "$task_id")"
@@ -128,13 +143,7 @@ case "$cmd" in
       jq . "$td/plan.json"
       exit 0
     fi
-    q="$(jq -r '.question' "$td/pending.json")"
-    asked="$(jq -r '.asked_at' "$td/pending.json")"
-    jq -nc --arg q "$q" --arg a "$answer_text" --arg ask "$asked" --arg ans "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-      '{question:$q, answer:$a, asked_at:$ask, answered_at:$ans}' >> "$td/qa.jsonl"
-    rm "$td/pending.json"
-    task_text="$(jq -r '.task' "$td/task.json")"
-    run_pipeline "$task_id" "$task_text" || true
+    record_answer_and_continue "$task_id" "$answer_text"
     post_run_dispatch "$task_id"
     ;;
   show)
@@ -220,13 +229,8 @@ case "$cmd" in
         echo "[qmode chat] empty answer — re-prompting."
         continue
       fi
-      asked="$(jq -r '.asked_at' "$td/pending.json")"
-      jq -nc --arg q "$q" --arg a "$answer_text" --arg ask "$asked" --arg ans "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-        '{question:$q, answer:$a, asked_at:$ask, answered_at:$ans}' >> "$td/qa.jsonl"
-      rm "$td/pending.json"
-      task_text="$(jq -r '.task' "$td/task.json")"
       echo "[qmode chat] thinking..."
-      run_pipeline "$task_id" "$task_text" >/dev/null
+      record_answer_and_continue "$task_id" "$answer_text" >/dev/null
     done
     ;;
   *)

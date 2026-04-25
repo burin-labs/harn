@@ -187,47 +187,14 @@ fn append_profile_writes(profile_writes) {
 }
 
 // -----------------------------------------------------------------------------
-// Plan schema (compatible with burin-code's plan-json-schema partial).
-// -----------------------------------------------------------------------------
-
-fn _plan_schema() {
-  return {
-    type: "object",
-    required: ["mode", "direction", "tasks", "ready"],
-    properties: {
-    mode: {type: "string", enum: ["fast_execute", "plan_then_execute"]},
-    direction: {type: "string"},
-    targets: {type: "array", items: {type: "string"}},
-    grounding: {
-    type: "array",
-    items: {
-    type: "object",
-    properties: {path: {type: "string"}, role: {type: "string"}, why: {type: "string"}},
-  },
-  },
-    tasks: {type: "array", items: {type: "string"}},
-    verification: {type: "array", items: {type: "string"}},
-    ready: {type: "boolean"},
-    profile_writes: {
-    type: "array",
-    items: {
-    type: "object",
-    properties: {scope: {type: "string", enum: ["user", "project", "cwd"]}, bullet: {type: "string"}},
-  },
-  },
-  },
-  }
-}
-
-// -----------------------------------------------------------------------------
 
 // Repo map (Aider-style orientation, but token-cheap).
 //
 // We front-load the workspace tree + a one-line summary per file so the model
-// doesn't burn iterations on `glob` just to learn the layout. The first
-// non-empty line of each file is a surprisingly strong proxy for "what is
-// this file" across markdown, JS/TS, Python, shell, JSON, Rust, etc. — and
-// avoids the need for tree-sitter symbol extraction we don't have here.
+// doesn't burn iterations to learn the layout. The first non-empty line of
+// each file is a surprisingly strong proxy for "what is this file" across
+// markdown, JS/TS, Python, shell, JSON, Rust, etc. — and avoids tree-sitter
+// symbol extraction we don't have here.
 
 // -----------------------------------------------------------------------------
 
@@ -284,7 +251,7 @@ fn repo_map_text() {
 // Tools available to the model.
 // -----------------------------------------------------------------------------
 
-fn build_tools(task_id, dir) {
+fn build_tools(dir) {
   let pending_p = path_join(dir, "pending.json")
   let plan_p = path_join(dir, "plan.json")
   var registry = tool_registry()
@@ -324,7 +291,6 @@ fn build_tools(task_id, dir) {
     description: "One-line preference, written as the user would describe it. Example: \"All services should default to JSON responses with a status field, e.g. {status: 'ok'}.\"",
   },
     scope: {type: "string", description: "Where to save it: 'user', 'project', or 'cwd'. Default: 'project'."},
-    reason: {type: "string", description: "Optional audit note: which user message you learned this from."},
   },
     returns: {type: "string"},
     handler: { args ->
@@ -387,7 +353,7 @@ fn build_tools(task_id, dir) {
   registry = tool_define(
     registry,
     "exit_plan_mode",
-    "Emit the final structured plan and end the conversation. Pass the plan as a JSON object (or JSON-stringified). To save durable user preferences, call save_user_pref BEFORE this — exit_plan_mode does not handle preferences anymore.",
+    "Emit the final structured plan and end the conversation. Pass the plan as a JSON object (or JSON-stringified). To save durable user preferences, call save_user_pref BEFORE this.",
     {
     parameters: {
     plan: {
@@ -405,16 +371,11 @@ fn build_tools(task_id, dir) {
     raw
   }
       write_file(plan_p, json_stringify(plan))
-      append_profile_writes(plan?.profile_writes ?? [])
     }
     "Plan recorded. The harness will end the step now."
   },
   },
   )
-  // profile_writes inside the plan body remains a defensive fallback
-  // for transcripts produced before save_user_pref existed; the tool
-  // is the new source of truth.
-  // Idempotent — first plan in this iteration sticks.
   return registry
 }
 
@@ -551,15 +512,17 @@ pipeline default() {
     path_join(dir, "last-prompt.txt"),
     "===SYSTEM===\n${sys_prompt}\n===USER===\n${user_prompt}\n",
   )
-  // 10 iterations is plenty once `glob` returns useful results (rg-backed,
-  // not the broken `ls` version that wasted 5+ iterations on errors).
+  // turn_policy forces a tool call (or explicit yield) on every iteration —
+  // without it qwen3.6 happily emits prose + ##DONE##. stop_after_successful_tools
+  // ends the loop the moment a terminal tool succeeds (Vercel AI SDK's
+  // `stopWhen: hasToolCall(...)` / OpenAI Agents SDK's `StopAtTools(...)`).
   let result = agent_loop(
     user_prompt,
     sys_prompt,
     {
     provider: provider_name(),
     model: generator_model(),
-    tools: build_tools(task_id, dir),
+    tools: build_tools(dir),
     tool_format: "native",
     temperature: 0.2,
     max_tokens: 2048,
@@ -569,13 +532,6 @@ pipeline default() {
     stop_after_successful_tools: ["ask_question", "exit_plan_mode"],
   },
   )
-  // Force a tool call (or explicit yield) on every iteration; without
-  // this, qwen3.6 happily emits a prose answer + ##DONE##. With it,
-  // the model has to keep using tools until one of them is terminal.
-  // Stop the loop the moment a terminal tool succeeds — same shape as
-  // Vercel AI SDK's `stopWhen: hasToolCall(...)` and OpenAI Agents
-  // SDK's `StopAtTools(...)`.
-  // Step outcome for the driver to consume.
   let outcome = if file_exists(path_join(dir, "plan.json")) {
     "exit_plan_mode"
   } else {
