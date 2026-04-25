@@ -7,18 +7,18 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
-## Unreleased
+## v0.7.38
 
 ### Added
 
-- **`harn persona status --at <RFC3339>` (#TBD).** Mirrors the
+- **`harn persona status --at <RFC3339>` (#592).** Mirrors the
   existing `tick --at` flag: pins the budget-window query to a
   deterministic UTC moment instead of using the wall clock. Lets
   tests pair a `tick --at <T>` with a `status --at <T>` and assert
   on `spent_today_usd` / `tokens_today` without flaking when the
   test happens to run after `<T>`'s UTC midnight.
 
-- **Optional subscript `obj?[index]` (#TBD).** Symmetric counterpart to
+- **Optional subscript `obj?[index]` (#596).** Symmetric counterpart to
   `obj?.member`. Returns `nil` when the receiver is `nil`; otherwise
   indexes normally. Lets connector authors safely chain into lists or
   dicts that may be missing — `payload?.commits?[0]?.timestamp` now
@@ -30,7 +30,7 @@ granular archaeology.
 
 ### Changed
 
-- **`http_mock` re-registration now replaces (#TBD).** Calling
+- **`http_mock` re-registration now replaces (#593).** Calling
   `http_mock(method, url_pattern, ...)` a second time with the same
   `(method, url_pattern)` tuple now replaces the prior mock instead of
   appending behind it. Previously the first registration matched
@@ -43,14 +43,14 @@ granular archaeology.
 ### Fixed
 
 - **`persona_runtime_status_tick_and_budget_are_persisted` UTC-day
-  flake (#TBD).** The test pinned `tick --at 2026-04-24T12:30:00Z`
+  flake (#592).** The test pinned `tick --at 2026-04-24T12:30:00Z`
   but read `status` against the wall clock, so the
   `spent_today_usd == 0.25` assertion silently dropped to `0.0`
   every time the test ran after the tick's UTC midnight (i.e.
   basically any time of day in PT/CT/ET). The status command now
   accepts the same `--at` flag and the test threads it through.
 
-- **Trailing binary operator + newline now parses (#TBD).** A binary
+- **Trailing binary operator + newline now parses (#595).** A binary
   operator at the *end* of a line followed by the right operand on the
   next line (e.g. `let x = a ??\n  b`) previously errored with
   `expected expression, found \n`. Only the *leading*-operator
