@@ -67,7 +67,9 @@ Unsupported URI schemes fail fast at load time.
   for that binding
 
 Leave it unset for normal remote targets. It exists for bounded local-dev cases
-such as dispatching into `harn serve`, which currently listens on HTTP only.
+such as dispatching into `harn serve --tls plain`. For production `harn serve`
+targets, prefer `--tls edge` behind an HTTPS ingress or `--cert`/`--key` for
+in-process HTTPS.
 
 `worker://...` handlers reuse the top-level scalar dispatch priority:
 

@@ -1241,6 +1241,95 @@ async fn run_http_server_request(server_id: &str, request: VmValue) -> Result<Vm
 
 /// Register HTTP builtins on a VM.
 pub fn register_http_builtins(vm: &mut Vm) {
+    vm.register_builtin("http_server_tls_plain", |_args, _out| {
+        Ok(http_server_tls_config_value(
+            "plain",
+            false,
+            "http",
+            false,
+            BTreeMap::new(),
+        ))
+    });
+    vm.register_builtin("http_server_tls_edge", |args, _out| {
+        let options = get_options_arg(args, 0);
+        Ok(http_server_tls_config_value(
+            "edge",
+            false,
+            "https",
+            vm_get_bool_option(&options, "hsts", true),
+            hsts_options(&options),
+        ))
+    });
+    vm.register_builtin("http_server_tls_pem", |args, _out| {
+        if args.len() < 2 {
+            return Err(vm_error(
+                "http_server_tls_pem: requires cert path and key path",
+            ));
+        }
+        let cert_path = args[0].display();
+        let key_path = args[1].display();
+        if !std::path::Path::new(&cert_path).is_file() {
+            return Err(vm_error(format!(
+                "http_server_tls_pem: certificate not found: {cert_path}"
+            )));
+        }
+        if !std::path::Path::new(&key_path).is_file() {
+            return Err(vm_error(format!(
+                "http_server_tls_pem: private key not found: {key_path}"
+            )));
+        }
+        let mut extra = BTreeMap::new();
+        extra.insert(
+            "cert_path".to_string(),
+            VmValue::String(Rc::from(cert_path)),
+        );
+        extra.insert("key_path".to_string(), VmValue::String(Rc::from(key_path)));
+        Ok(http_server_tls_config_value(
+            "pem", true, "https", true, extra,
+        ))
+    });
+    vm.register_builtin("http_server_tls_self_signed_dev", |args, _out| {
+        let hosts = tls_hosts_arg(args.first())?;
+        let cert = rcgen::generate_simple_self_signed(hosts.clone()).map_err(|error| {
+            vm_error(format!(
+                "http_server_tls_self_signed_dev: failed to generate certificate: {error}"
+            ))
+        })?;
+        let mut extra = BTreeMap::new();
+        extra.insert(
+            "hosts".to_string(),
+            VmValue::List(Rc::new(
+                hosts
+                    .into_iter()
+                    .map(|host| VmValue::String(Rc::from(host)))
+                    .collect(),
+            )),
+        );
+        extra.insert(
+            "cert_pem".to_string(),
+            VmValue::String(Rc::from(cert.cert.pem())),
+        );
+        extra.insert(
+            "key_pem".to_string(),
+            VmValue::String(Rc::from(cert.key_pair.serialize_pem())),
+        );
+        Ok(http_server_tls_config_value(
+            "self_signed_dev",
+            true,
+            "https",
+            false,
+            extra,
+        ))
+    });
+    vm.register_builtin("http_server_security_headers", |args, _out| {
+        let Some(VmValue::Dict(config)) = args.first() else {
+            return Err(vm_error(
+                "http_server_security_headers: requires a TLS config dict",
+            ));
+        };
+        Ok(VmValue::Dict(Rc::new(http_server_security_headers(config))))
+    });
+
     vm.register_async_builtin("http_get", |args| async move {
         http_verb_handler("GET", false, args).await
     });
@@ -1889,6 +1978,103 @@ pub fn register_http_builtins(vm: &mut Vm) {
             .collect::<Vec<_>>();
         Ok(VmValue::List(Rc::new(values)))
     });
+}
+
+fn http_server_tls_config_value(
+    mode: &str,
+    terminate_tls: bool,
+    scheme: &str,
+    hsts: bool,
+    extra: BTreeMap<String, VmValue>,
+) -> VmValue {
+    let mut dict = BTreeMap::new();
+    dict.insert("mode".to_string(), VmValue::String(Rc::from(mode)));
+    dict.insert("terminate_tls".to_string(), VmValue::Bool(terminate_tls));
+    dict.insert("scheme".to_string(), VmValue::String(Rc::from(scheme)));
+    dict.insert("hsts".to_string(), VmValue::Bool(hsts));
+    for (key, value) in extra {
+        dict.insert(key, value);
+    }
+    VmValue::Dict(Rc::new(dict))
+}
+
+fn hsts_options(options: &BTreeMap<String, VmValue>) -> BTreeMap<String, VmValue> {
+    let mut hsts = BTreeMap::new();
+    hsts.insert(
+        "hsts_max_age_seconds".to_string(),
+        VmValue::Int(vm_get_int_option(
+            options,
+            "hsts_max_age_seconds",
+            31_536_000,
+        )),
+    );
+    hsts.insert(
+        "hsts_include_subdomains".to_string(),
+        VmValue::Bool(vm_get_bool_option(
+            options,
+            "hsts_include_subdomains",
+            false,
+        )),
+    );
+    hsts.insert(
+        "hsts_preload".to_string(),
+        VmValue::Bool(vm_get_bool_option(options, "hsts_preload", false)),
+    );
+    hsts
+}
+
+fn http_server_security_headers(config: &BTreeMap<String, VmValue>) -> BTreeMap<String, VmValue> {
+    let hsts_enabled = vm_get_bool_option(config, "hsts", false);
+    if !hsts_enabled {
+        return BTreeMap::new();
+    }
+    let mut value = format!(
+        "max-age={}",
+        vm_get_int_option(config, "hsts_max_age_seconds", 31_536_000).max(0)
+    );
+    if vm_get_bool_option(config, "hsts_include_subdomains", false) {
+        value.push_str("; includeSubDomains");
+    }
+    if vm_get_bool_option(config, "hsts_preload", false) {
+        value.push_str("; preload");
+    }
+    BTreeMap::from([(
+        "strict-transport-security".to_string(),
+        VmValue::String(Rc::from(value)),
+    )])
+}
+
+fn tls_hosts_arg(value: Option<&VmValue>) -> Result<Vec<String>, VmError> {
+    match value {
+        None | Some(VmValue::Nil) => Ok(vec!["localhost".to_string(), "127.0.0.1".to_string()]),
+        Some(VmValue::List(hosts)) => {
+            let mut parsed = Vec::new();
+            for host in hosts.iter() {
+                let host = host.display();
+                if host.is_empty() {
+                    return Err(vm_error(
+                        "http_server_tls_self_signed_dev: host names must be non-empty",
+                    ));
+                }
+                parsed.push(host);
+            }
+            if parsed.is_empty() {
+                return Err(vm_error(
+                    "http_server_tls_self_signed_dev: host list must not be empty",
+                ));
+            }
+            Ok(parsed)
+        }
+        Some(other) => {
+            let host = other.display();
+            if host.is_empty() {
+                return Err(vm_error(
+                    "http_server_tls_self_signed_dev: host name must be non-empty",
+                ));
+            }
+            Ok(vec![host])
+        }
+    }
 }
 
 fn vm_get_int_option(options: &BTreeMap<String, VmValue>, key: &str, default: i64) -> i64 {

@@ -37,6 +37,10 @@ harn orchestrator serve \
 
 Omit `--cert` and `--key` to serve plain HTTP. When both are present,
 the listener serves HTTPS and terminates TLS with `rustls`.
+For managed platforms, it is also valid to keep the orchestrator listener on
+plain HTTP behind an HTTPS edge proxy or load balancer that owns certificate
+issuance and renewal; in that topology, configure browser-facing HSTS and
+other TLS headers at the edge.
 
 On startup, the command logs the active secret-provider chain, loaded
 triggers, registered connectors, and the actual bound listener URL. On

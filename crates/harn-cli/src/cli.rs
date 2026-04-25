@@ -665,6 +665,15 @@ pub(crate) struct A2aServeArgs {
     /// Shared secret used to attach an HS256 signature to the agent card.
     #[arg(long = "card-signing-secret", env = "HARN_SERVE_A2A_CARD_SECRET")]
     pub card_signing_secret: Option<String>,
+    /// TLS listener mode. Supplying both `--cert` and `--key` implies `pem`.
+    #[arg(long = "tls", value_enum, default_value_t = ServeTlsMode::Plain)]
+    pub tls: ServeTlsMode,
+    /// PEM-encoded certificate chain for in-process HTTPS termination.
+    #[arg(long, env = "HARN_SERVE_CERT", value_name = "PATH")]
+    pub cert: Option<PathBuf>,
+    /// PEM-encoded private key for in-process HTTPS termination.
+    #[arg(long, env = "HARN_SERVE_KEY", value_name = "PATH")]
+    pub key: Option<PathBuf>,
     /// Path to the .harn file to serve.
     pub file: String,
 }
@@ -701,6 +710,15 @@ pub(crate) struct ServeMcpArgs {
     /// Shared secret for HMAC request signing on HTTP transports.
     #[arg(long = "hmac-secret", env = "HARN_SERVE_HMAC_SECRET")]
     pub hmac_secret: Option<String>,
+    /// TLS listener mode. Supplying both `--cert` and `--key` implies `pem`.
+    #[arg(long = "tls", value_enum, default_value_t = ServeTlsMode::Plain)]
+    pub tls: ServeTlsMode,
+    /// PEM-encoded certificate chain for in-process HTTPS termination.
+    #[arg(long, env = "HARN_SERVE_CERT", value_name = "PATH")]
+    pub cert: Option<PathBuf>,
+    /// PEM-encoded private key for in-process HTTPS termination.
+    #[arg(long, env = "HARN_SERVE_KEY", value_name = "PATH")]
+    pub key: Option<PathBuf>,
     /// Optional Server Card JSON to advertise (MCP v2.1). Path to a
     /// `.json` file OR an inline JSON string. The card is embedded in
     /// the `initialize` response's `serverInfo.card` field AND exposed
@@ -719,6 +737,14 @@ pub(crate) struct ServeMcpArgs {
 pub(crate) enum McpServeTransport {
     Stdio,
     Http,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum ServeTlsMode {
+    Plain,
+    Edge,
+    SelfSignedDev,
+    Pem,
 }
 
 #[derive(Debug, Args)]
@@ -2363,6 +2389,12 @@ mod tests {
             "alpha,beta",
             "--hmac-secret",
             "shared",
+            "--tls",
+            "pem",
+            "--cert",
+            "tls/cert.pem",
+            "--key",
+            "tls/key.pem",
             "server.harn",
         ]);
 
@@ -2379,6 +2411,9 @@ mod tests {
         assert_eq!(serve.messages_path, "/legacy/messages");
         assert_eq!(serve.api_key, vec!["alpha".to_string(), "beta".to_string()]);
         assert_eq!(serve.hmac_secret.as_deref(), Some("shared"));
+        assert_eq!(serve.tls, crate::cli::ServeTlsMode::Pem);
+        assert_eq!(serve.cert, Some(PathBuf::from("tls/cert.pem")));
+        assert_eq!(serve.key, Some(PathBuf::from("tls/key.pem")));
         assert_eq!(serve.file, "server.harn");
     }
 

@@ -23,7 +23,7 @@ use uuid::Uuid;
 
 use crate::{
     AdapterDescriptor, AuthRequest, CallArguments, CallRequest, CallResponse, DispatchCore,
-    DispatchError, ExportCatalog, TransportAdapter,
+    DispatchError, ExportCatalog, HttpTlsConfig, TransportAdapter,
 };
 
 pub const A2A_PROTOCOL_VERSION: &str = "1.0.0";
@@ -40,6 +40,7 @@ const A2A_VERSION_NOT_SUPPORTED: i64 = -32009;
 pub struct A2aHttpServeOptions {
     pub bind: SocketAddr,
     pub public_url: Option<String>,
+    pub tls: HttpTlsConfig,
 }
 
 impl Default for A2aHttpServeOptions {
@@ -47,6 +48,7 @@ impl Default for A2aHttpServeOptions {
         Self {
             bind: "0.0.0.0:8080".parse().expect("valid bind addr"),
             public_url: None,
+            tls: HttpTlsConfig::plain(),
         }
     }
 }
@@ -176,15 +178,17 @@ impl A2aServer {
     }
 
     pub async fn run_http(self: Arc<Self>, options: A2aHttpServeOptions) -> Result<(), String> {
-        let listener = tokio::net::TcpListener::bind(options.bind)
-            .await
-            .map_err(|error| format!("failed to bind {}: {error}", options.bind))?;
+        let listener = crate::tls::bind_listener(options.bind)?;
         let local_addr = listener
             .local_addr()
             .map_err(|error| format!("failed to read local addr: {error}"))?;
-        let public_url = options
-            .public_url
-            .unwrap_or_else(|| format!("http://localhost:{}", local_addr.port()));
+        let public_url = options.public_url.unwrap_or_else(|| {
+            format!(
+                "{}://localhost:{}",
+                options.tls.advertised_scheme(),
+                local_addr.port()
+            )
+        });
         let state = HttpState {
             server: self,
             public_url: public_url.clone(),
@@ -199,11 +203,12 @@ impl A2aServer {
             .route("/tasks/cancel", post(rest_cancel_task))
             .route("/tasks/resubscribe", post(rest_resubscribe_task))
             .with_state(state);
+        let router = crate::tls::apply_security_headers(router, &options.tls);
 
         eprintln!("Harn A2A server listening on {public_url}");
         eprintln!("[harn] A2A workflow server ready on {public_url}");
         eprintln!("[harn] Agent card: {public_url}/.well-known/a2a-agent");
-        axum::serve(listener, router)
+        crate::tls::serve_router_from_tcp(listener, router, &options.tls)
             .await
             .map_err(|error| format!("A2A HTTP server failed: {error}"))
     }

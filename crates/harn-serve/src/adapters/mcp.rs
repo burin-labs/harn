@@ -22,7 +22,7 @@ use uuid::Uuid;
 
 use crate::{
     AdapterDescriptor, AuthRequest, CallArguments, CallRequest, CallResponse, DispatchCore,
-    DispatchError, ExportCatalog, TransportAdapter,
+    DispatchError, ExportCatalog, HttpTlsConfig, TransportAdapter,
 };
 
 pub const MCP_PROTOCOL_VERSION: &str = "2025-11-25";
@@ -36,6 +36,7 @@ pub struct McpHttpServeOptions {
     pub path: String,
     pub sse_path: String,
     pub messages_path: String,
+    pub tls: HttpTlsConfig,
 }
 
 impl Default for McpHttpServeOptions {
@@ -45,6 +46,7 @@ impl Default for McpHttpServeOptions {
             path: "/mcp".to_string(),
             sse_path: "/sse".to_string(),
             messages_path: "/messages".to_string(),
+            tls: HttpTlsConfig::plain(),
         }
     }
 }
@@ -294,17 +296,17 @@ impl McpServer {
             )
             .route(&options.messages_path, post(legacy_sse_message))
             .with_state(state.clone());
-        let listener = tokio::net::TcpListener::bind(options.bind)
-            .await
-            .map_err(|error| format!("failed to bind {}: {error}", options.bind))?;
+        let router = crate::tls::apply_security_headers(router, &options.tls);
+        let listener = crate::tls::bind_listener(options.bind)?;
         let local_addr = listener
             .local_addr()
             .map_err(|error| format!("failed to read local addr: {error}"))?;
         eprintln!(
-            "[harn] MCP workflow server ready on http://{local_addr}{}",
+            "[harn] MCP workflow server ready on {}://{local_addr}{}",
+            options.tls.listener_scheme(),
             options.path
         );
-        axum::serve(listener, router)
+        crate::tls::serve_router_from_tcp(listener, router, &options.tls)
             .await
             .map_err(|error| format!("MCP HTTP server failed: {error}"))
     }

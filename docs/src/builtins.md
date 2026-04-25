@@ -858,6 +858,11 @@ println(text.source.sha256)
 | `http_delete(url, options?)` | url: string, options: dict | dict | DELETE request |
 | `http_request(method, url, options?)` | method: string, url: string, options: dict | dict | Generic HTTP request |
 | `http_download(url, dst_path, options?)` | url: string, dst_path: string, options: dict | dict | Stream a response body to a file |
+| `http_server_tls_plain()` | none | dict | Build HTTP-server TLS config for intentional cleartext/local listener mode |
+| `http_server_tls_edge(options?)` | options: dict | dict | Build HTTP-server TLS config for edge-terminated HTTPS; local listener stays plain and HSTS is enabled by default |
+| `http_server_tls_pem(cert_path, key_path)` | cert_path: string, key_path: string | dict | Build in-process HTTPS config from PEM files; missing files throw before startup |
+| `http_server_tls_self_signed_dev(hosts?)` | hosts: string or list | dict | Generate a self-signed development cert/key config for local HTTPS testing. HSTS is disabled |
+| `http_server_security_headers(tls_config)` | tls_config: dict | dict | Return TLS-aware response headers such as `strict-transport-security`; edge and PEM modes enable HSTS by default, plain and self-signed dev do not |
 | `http_session(options?)` | options: dict | string | Create a reusable host-managed HTTP client/session handle |
 | `http_session_request(session, method, url, options?)` | session: string, method: string, url: string, options: dict | dict | Run an HTTP request through a reusable session |
 | `http_session_close(session)` | session: string | bool | Close a reusable HTTP session handle |
@@ -916,6 +921,15 @@ returned handle can be inspected with `http_stream_info`, drained with
 repeated `http_stream_read(stream, max_bytes)`, and closed explicitly with
 `http_stream_close`. Reads return `bytes`; once the stream is exhausted they
 return `nil`.
+
+HTTP server TLS helper builtins only describe listener/security policy. Runtime
+hosts such as `harn serve` consume the same modes: `plain` for deliberate
+cleartext, `edge` when a proxy/load balancer terminates public TLS, `pem` for
+in-process HTTPS with certificate/key files, and `self_signed_dev` for local
+HTTPS testing. `http_server_security_headers(...)` emits HSTS for edge and PEM
+configs so edge-terminated deployments can still set browser-facing security
+headers from the Harn layer; it deliberately omits HSTS for plain and
+self-signed dev configs.
 
 Transport handles are strings owned by the VM host. Rust keeps responsibility
 for TCP/TLS/socket lifecycle, HTTP pooling, SSE/WebSocket protocol parsing,
