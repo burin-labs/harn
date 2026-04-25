@@ -211,7 +211,7 @@ fn decode_status(status: std::process::ExitStatus) -> (i32, Option<String>) {
 
 #[cfg(unix)]
 fn format_signal(sig: i32) -> String {
-    // Stay minimal: mirror the names burin-code's UI surfaces today.
+    // Stay minimal: mirror the names exposed by burin-code's UI surfaces.
     match sig {
         1 => "SIGHUP".into(),
         2 => "SIGINT".into(),

@@ -9,6 +9,7 @@ description = "Opt-in code-intelligence and deterministic-tool host builtins for
 include = [
     "src/**/*",
     "schemas/**/*",
+    "data/**/*",
     "tests/**/*",
     "Cargo.toml",
     "README.md",

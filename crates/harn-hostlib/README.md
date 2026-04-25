@@ -28,6 +28,10 @@ deterministic-tool surface: `search`, `read_file`, `write_file`,
 [#568](https://github.com/burin-labs/harn/issues/568) lights up the
 process-lifecycle surface: `run_command`, `run_test`,
 `run_build_command`, `inspect_test_results`, and `manage_packages`.
+[#565](https://github.com/burin-labs/harn/issues/565) lights up the
+`code_index` surface: trigram + word index, dep graph, and the five
+host builtins (`query`, `rebuild`, `stats`, `imports_for`,
+`importers_of`).
 
 ### `ast/` languages
 
@@ -81,6 +85,7 @@ and commit the updated goldens.
 | B1 (#563) | scaffold       | crate + schemas + registration plumbing                                                   | ✅ shipped |
 | B2 (#564) | `ast/`         | `parse_file`, `symbols`, `outline` (tree-sitter for 22 host languages)                    | ✅ shipped |
 | B3    | `code_index/`      | `query`, `rebuild`, `stats`, `imports_for`, `importers_of`                                | unimplemented |
+| B3 (#565) | `code_index/`  | `query`, `rebuild`, `stats`, `imports_for`, `importers_of`                                | ✅ shipped |
 | B4    | `scanner/`         | `scan_project`, `scan_incremental`                                                        | unimplemented |
 | C1    | `fs_watch/`        | `subscribe`, `unsubscribe`                                                                | unimplemented |
 | #567  | `tools/` (read & search) | `search`, `read_file`, `list_directory`, `get_file_outline`, `git`                 | ✅ shipped (this issue) |
@@ -203,6 +208,8 @@ programmatically without locating the on-disk schema directory.
 crates/harn-hostlib/
 ├── Cargo.toml
 ├── README.md                  # this file
+├── data/                      # data tables consumed via include_str!
+│   └── code_index_import_rules.json
 ├── schemas/                   # JSON Schema 2020-12 contracts
 │   ├── ast/
 │   ├── code_index/
@@ -215,12 +222,14 @@ crates/harn-hostlib/
 │   ├── registry.rs            # HostlibCapability + HostlibRegistry
 │   ├── schemas.rs             # const SCHEMAS catalog (include_str!)
 │   ├── ast/
-│   ├── code_index/
+│   ├── code_index/            # trigram + word index, dep graph (#565)
 │   ├── scanner/
 │   ├── fs_watch/
 │   └── tools/
 └── tests/
-    └── registration.rs        # registration + schema parity tests
+    ├── registration.rs        # registration + schema parity tests
+    ├── code_index.rs          # builtin-level integration tests
+    └── code_index_scenario.rs # scenario test over a Swift-shaped fixture
 ```
 
 ## Adding a new method

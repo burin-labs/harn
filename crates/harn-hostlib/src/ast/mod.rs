@@ -1,8 +1,8 @@
 //! AST host capability.
 //!
 //! Wraps tree-sitter parsing, symbol extraction, and outline generation —
-//! the Swift `Sources/ASTEngine/` surface ported into Rust. Implementation
-//! lands per issue #564.
+//! the Swift `Sources/ASTEngine/` surface ported into Rust. The implementation
+//! is fully wired so AST builtins share one canonical wire format.
 //!
 //! ## Wire format
 //!
@@ -10,15 +10,13 @@
 //!   matching tree-sitter's native `Point` representation. Swift's
 //!   `ASTEngine` historically returned 1-based coordinates for symbols;
 //!   we normalize on 0-based here so `parse_file`, `symbols`, and
-//!   `outline` share one convention. Burin-code's bridge consumer is
-//!   updated in #(B5).
+//!   `outline` share one convention.
 //! - `parse_file` emits a flat node list with `parent_id` rather than
 //!   nested children — keeps the wire JSON-serializable without inflating
 //!   it with object copies.
 //! - `symbols` and `outline` carry a `signature` string (e.g.
 //!   `"fn foo(bar: i32)"`) on every entry to match Swift's
-//!   `TreeSitterSymbol.signature`. Burin-code's outline UI surfaces this
-//!   directly.
+//!   `TreeSitterSymbol.signature`.
 //!
 //! ## Languages
 //!
@@ -27,6 +25,7 @@
 //! C, C++, C#, Ruby, Kotlin, PHP, Scala, Bash, Swift, Zig, Elixir, Lua,
 //! Haskell, R. Adding/dropping languages requires a coordinated change
 //! in both repos.
+//!
 
 use std::sync::Arc;
 

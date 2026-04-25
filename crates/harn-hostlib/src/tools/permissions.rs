@@ -10,10 +10,9 @@
 //!
 //! State is held in a thread-local so that:
 //!
-//! * Each VM instance — which today runs single-threaded — gets an
-//!   independent enable set.
-//! * Cargo test isolation works without extra ceremony (each test runs on
-//!   its own thread).
+//! * Independent VM runs stay isolated when the embedder executes them on
+//!   separate threads.
+//! * Cargo test isolation works without extra ceremony.
 //!
 //! Embedders can also call [`enable_for_test`] / [`reset`] from Rust if
 //! they need to bypass the builtin (for example, tests that don't drive
@@ -51,7 +50,7 @@ pub fn reset() {
     ENABLED.with(|cell| cell.borrow_mut().clear());
 }
 
-/// Report whether `feature` is currently enabled on the current thread.
+/// Report whether `feature` is enabled on the current thread.
 pub fn is_enabled(feature: &str) -> bool {
     ENABLED.with(|cell| cell.borrow().contains(feature))
 }
