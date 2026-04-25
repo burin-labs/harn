@@ -7653,12 +7653,14 @@ version = "0.1.0"
                 "pub fn version() -> string { return \"v2\" }\n",
             )
             .unwrap();
-            let live_source = fs::read_to_string(materialized.join("lib.harn")).unwrap();
             #[cfg(unix)]
-            assert!(
-                live_source.contains("v2"),
-                "materialized path dependency should reflect sibling repo edits"
-            );
+            {
+                let live_source = fs::read_to_string(materialized.join("lib.harn")).unwrap();
+                assert!(
+                    live_source.contains("v2"),
+                    "materialized path dependency should reflect sibling repo edits"
+                );
+            }
 
             remove_package("openapi");
             assert!(!materialized.exists());
