@@ -13,8 +13,7 @@ use harn_vm::{VmError, VmValue};
 /// Variants intentionally describe the *kind* of failure rather than the
 /// specific module — every module routes its missing-implementation errors
 /// through [`HostlibError::Unimplemented`] so embedders and tests can
-/// distinguish intentionally scaffolded contracts from real failures once
-/// implementations land.
+/// distinguish intentionally scaffolded contracts from runtime failures.
 #[derive(Debug, thiserror::Error)]
 pub enum HostlibError {
     /// The method exists in the registration table but has no implementation

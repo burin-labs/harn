@@ -1,7 +1,8 @@
 //! File-system watch host capability.
 //!
 //! Wraps `notify` to deliver change events to subscribers identified by
-//! handle. Implementation lands in issue C1.
+//! handle. The public contract is registered while the implementation is
+//! still pending.
 
 use crate::registry::{BuiltinRegistry, HostlibCapability};
 

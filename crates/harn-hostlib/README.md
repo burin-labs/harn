@@ -84,12 +84,11 @@ and commit the updated goldens.
 |-------|--------|-----------|--------|
 | B1 (#563) | scaffold       | crate + schemas + registration plumbing                                                   | ✅ shipped |
 | B2 (#564) | `ast/`         | `parse_file`, `symbols`, `outline` (tree-sitter for 22 host languages)                    | ✅ shipped |
-| B3    | `code_index/`      | `query`, `rebuild`, `stats`, `imports_for`, `importers_of`                                | unimplemented |
 | B3 (#565) | `code_index/`  | `query`, `rebuild`, `stats`, `imports_for`, `importers_of`                                | ✅ shipped |
-| B4    | `scanner/`         | `scan_project`, `scan_incremental`                                                        | unimplemented |
+| B4 (#566) | `scanner/`     | `scan_project`, `scan_incremental`                                                        | ✅ shipped |
 | C1    | `fs_watch/`        | `subscribe`, `unsubscribe`                                                                | unimplemented |
-| #567  | `tools/` (read & search) | `search`, `read_file`, `list_directory`, `get_file_outline`, `git`                 | ✅ shipped (this issue) |
-| #567  | `tools/` (mutating)      | `write_file`, `delete_file`                                                        | ✅ shipped (this issue) |
+| #567  | `tools/` (read & search) | `search`, `read_file`, `list_directory`, `get_file_outline`, `git`                 | ✅ shipped |
+| #567  | `tools/` (mutating)      | `write_file`, `delete_file`                                                        | ✅ shipped |
 | #568  | `tools/` (process)       | `run_command`, `run_test`, `run_build_command`, `inspect_test_results`, `manage_packages` | ✅ shipped |
 
 ### Process tools
@@ -130,6 +129,27 @@ transcript lifecycle, replay/eval, mutation session audit metadata —
 stays there. See
 [`AGENTS.md`](../../CLAUDE.md#trust-boundary) for the canonical trust
 boundary.
+
+## Scanner host capability
+
+`scanner/` ports `Sources/BurinCore/Scanner/CoreRepoScanner.swift` and emits
+the `ScanResult` shape that burin-code's intake pipeline consumes today
+(project metadata + file/folder/symbol records + dependency edges +
+sub-project boundaries + token-budgeted text repo map). Two builtins:
+
+- `hostlib_scanner_scan_project({ root, include_hidden?, respect_gitignore?,
+  max_files?, include_git_history?, repo_map_token_budget? })` — full scan.
+  Persists a snapshot to `<root>/.harn/hostlib/scanner-snapshot.json` so
+  follow-up incremental scans can diff against it.
+- `hostlib_scanner_scan_incremental({ snapshot_token, changed_paths?, … })`
+  — refresh the snapshot. Falls back to a full rescan when the snapshot is
+  missing or the diff exceeds ~30% of the workspace.
+
+Unlike the `tools/` surface, the scanner is **not** gated by
+`hostlib_enable("tools:deterministic")`: producing a `ScanResult` is a
+read-only operation that doesn't mutate user state and the snapshot file
+already lives under `.harn/`, which the hostlib treats as a managed
+directory.
 
 ## Per-session opt-in for deterministic tools
 

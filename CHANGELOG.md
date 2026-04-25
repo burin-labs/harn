@@ -20,6 +20,30 @@ granular archaeology.
   assembly, and the public `harn_vm::process_sandbox` helpers so active
   Linux seccomp/landlock and macOS sandbox-exec policies still apply.
 
+- **Scanner host builtins (#566).** `harn-hostlib`'s `scanner/` module
+  gains live implementations of `scan_project` and `scan_incremental`.
+  Ports the deterministic intake pipeline from
+  `Sources/BurinCore/Scanner/CoreRepoScanner.swift` —
+  `.gitignore`-aware file discovery (git ls-files when available, falling
+  back to `ignore`/`walkdir`), regex-based symbol extraction (Swift,
+  Shell, Dart, and the generic fallback faithfully ported from
+  `SymbolExtractor.swift`), import parsing for 13 languages
+  (`ImportParser.swift`), reference-count + churn + importance scoring,
+  source ↔ test pairing using burin-code's per-language test patterns,
+  folder aggregates + project metadata (language stats, detected test
+  command, code-pattern hints), sub-project boundary detection
+  (`SubProjectDetector.swift`), and a token-budgeted text repo map
+  (`RepoMapBuilder.swift`). Output shape mirrors burin-code's `ScanResult`
+  exactly so consumers can swap the Rust pipeline in via the bridge once
+  the `.harn-version` bump lands. `scan_project` persists a snapshot to
+  `<root>/.harn/hostlib/scanner-snapshot.json`; `scan_incremental` diffs
+  the workspace against that snapshot (mtime-based by default,
+  optionally driven by an explicit `changed_paths` list) and falls back
+  to a full rescan when the diff exceeds ~30% of the workspace or the
+  snapshot is missing. Unlike the deterministic-tools surface the
+  scanner is ungated — emitting a `ScanResult` is read-only and the
+  snapshot lives in the managed `.harn/` directory.
+
 ### Changed
 
 - **Release scripts: harden new-workspace-crate first-release path

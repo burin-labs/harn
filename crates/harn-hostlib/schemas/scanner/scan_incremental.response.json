@@ -2,13 +2,47 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://harnlang.com/schemas/hostlib/scanner/scan_incremental.response.json",
   "title": "scanner.scan_incremental response",
+  "description": "Refreshed `ScanResult` plus the path delta computed against the snapshot. The shape under everything except `delta` is identical to `scan_project`'s response.",
   "type": "object",
+  "allOf": [
+    { "$ref": "https://harnlang.com/schemas/hostlib/scanner/scan_project.response.json" }
+  ],
   "properties": {
     "snapshot_token": { "type": "string" },
-    "added": { "type": "array", "items": { "type": "string" } },
-    "modified": { "type": "array", "items": { "type": "string" } },
-    "removed": { "type": "array", "items": { "type": "string" } }
+    "truncated": { "type": "boolean" },
+    "project": {},
+    "folders": {},
+    "files": {},
+    "symbols": {},
+    "dependencies": {},
+    "sub_projects": {},
+    "repo_map": {},
+    "delta": {
+      "type": "object",
+      "properties": {
+        "added": { "type": "array", "items": { "type": "string" } },
+        "modified": { "type": "array", "items": { "type": "string" } },
+        "removed": { "type": "array", "items": { "type": "string" } },
+        "full_rescan": {
+          "type": "boolean",
+          "description": "True when the diff exceeded ~30% of the snapshot or the snapshot was missing/stale, forcing a full rescan."
+        }
+      },
+      "required": ["added", "modified", "removed", "full_rescan"],
+      "additionalProperties": false
+    }
   },
-  "required": ["snapshot_token", "added", "modified", "removed"],
-  "additionalProperties": false
+  "required": [
+    "snapshot_token",
+    "truncated",
+    "project",
+    "folders",
+    "files",
+    "symbols",
+    "dependencies",
+    "sub_projects",
+    "repo_map",
+    "delta"
+  ],
+  "type": "object"
 }

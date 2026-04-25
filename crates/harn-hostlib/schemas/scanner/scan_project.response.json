@@ -2,31 +2,189 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://harnlang.com/schemas/hostlib/scanner/scan_project.response.json",
   "title": "scanner.scan_project response",
+  "description": "Mirror of the Swift `ScanResult` shape consumed by burin-code today: project metadata, folder/file/symbol records, dependency edges, and a text repo map. Times are ISO-8601 UTC strings. Paths are repo-relative POSIX paths.",
   "type": "object",
   "properties": {
-    "root": { "type": "string" },
-    "files": {
-      "type": "array",
-      "items": { "$ref": "#/$defs/Entry" }
-    },
     "snapshot_token": {
       "type": "string",
-      "description": "Opaque cookie passed back to `scan_incremental` to compute deltas."
+      "description": "Opaque cookie that names this scan's persisted snapshot. Pass back to `scan_incremental` to refresh it."
     },
-    "truncated": { "type": "boolean" }
+    "truncated": { "type": "boolean" },
+    "project": { "$ref": "#/$defs/ProjectMetadata" },
+    "folders": { "type": "array", "items": { "$ref": "#/$defs/FolderRecord" } },
+    "files": { "type": "array", "items": { "$ref": "#/$defs/FileRecord" } },
+    "symbols": { "type": "array", "items": { "$ref": "#/$defs/SymbolRecord" } },
+    "dependencies": { "type": "array", "items": { "$ref": "#/$defs/DependencyEdge" } },
+    "sub_projects": { "type": "array", "items": { "$ref": "#/$defs/SubProject" } },
+    "repo_map": { "type": "string" }
   },
-  "required": ["root", "files", "snapshot_token", "truncated"],
+  "required": [
+    "snapshot_token",
+    "truncated",
+    "project",
+    "folders",
+    "files",
+    "symbols",
+    "dependencies",
+    "sub_projects",
+    "repo_map"
+  ],
   "additionalProperties": false,
   "$defs": {
-    "Entry": {
+    "ProjectMetadata": {
       "type": "object",
       "properties": {
-        "path": { "type": "string" },
-        "size": { "type": "integer", "minimum": 0 },
-        "modified_unix_ms": { "type": "integer", "minimum": 0 },
-        "is_dir": { "type": "boolean" }
+        "name": { "type": "string" },
+        "root_path": { "type": "string" },
+        "languages": { "type": "array", "items": { "$ref": "#/$defs/LanguageStat" } },
+        "test_commands": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "Map keyed by command (e.g. `pnpm test`) to a human label."
+        },
+        "detected_test_command": { "type": ["string", "null"] },
+        "code_patterns": { "type": "array", "items": { "type": "string" } },
+        "total_files": { "type": "integer", "minimum": 0 },
+        "total_lines": { "type": "integer", "minimum": 0 },
+        "last_scanned_at": {
+          "type": "string",
+          "description": "ISO-8601 UTC timestamp when the scan completed."
+        }
       },
-      "required": ["path", "size", "modified_unix_ms", "is_dir"],
+      "required": [
+        "name",
+        "root_path",
+        "languages",
+        "test_commands",
+        "code_patterns",
+        "total_files",
+        "total_lines",
+        "last_scanned_at"
+      ],
+      "additionalProperties": false
+    },
+    "LanguageStat": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "file_count": { "type": "integer", "minimum": 0 },
+        "line_count": { "type": "integer", "minimum": 0 },
+        "percentage": { "type": "number" }
+      },
+      "required": ["name", "file_count", "line_count", "percentage"],
+      "additionalProperties": false
+    },
+    "FolderRecord": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "relative_path": { "type": "string" },
+        "file_count": { "type": "integer", "minimum": 0 },
+        "line_count": { "type": "integer", "minimum": 0 },
+        "dominant_language": { "type": "string" },
+        "key_symbol_names": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": [
+        "id",
+        "relative_path",
+        "file_count",
+        "line_count",
+        "dominant_language",
+        "key_symbol_names"
+      ],
+      "additionalProperties": false
+    },
+    "FileRecord": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "relative_path": { "type": "string" },
+        "file_name": { "type": "string" },
+        "language": { "type": "string" },
+        "line_count": { "type": "integer", "minimum": 0 },
+        "size_bytes": { "type": "integer", "minimum": 0 },
+        "last_modified_unix_ms": { "type": "integer", "minimum": 0 },
+        "imports": { "type": "array", "items": { "type": "string" } },
+        "churn_score": { "type": "number" },
+        "corresponding_test_file": { "type": ["string", "null"] }
+      },
+      "required": [
+        "id",
+        "relative_path",
+        "file_name",
+        "language",
+        "line_count",
+        "size_bytes",
+        "last_modified_unix_ms",
+        "imports",
+        "churn_score"
+      ],
+      "additionalProperties": false
+    },
+    "SymbolRecord": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "kind": { "$ref": "#/$defs/SymbolKind" },
+        "file_path": { "type": "string" },
+        "line": { "type": "integer", "minimum": 1 },
+        "signature": { "type": "string" },
+        "container": { "type": ["string", "null"] },
+        "reference_count": { "type": "integer", "minimum": 0 },
+        "importance_score": { "type": "number" }
+      },
+      "required": [
+        "id",
+        "name",
+        "kind",
+        "file_path",
+        "line",
+        "signature",
+        "reference_count",
+        "importance_score"
+      ],
+      "additionalProperties": false
+    },
+    "SymbolKind": {
+      "type": "string",
+      "enum": [
+        "function",
+        "method",
+        "class",
+        "struct",
+        "enum",
+        "protocol",
+        "interface",
+        "typealias",
+        "property",
+        "variable",
+        "constant",
+        "module",
+        "mark",
+        "todo",
+        "fixme",
+        "other"
+      ]
+    },
+    "DependencyEdge": {
+      "type": "object",
+      "properties": {
+        "from_file": { "type": "string" },
+        "to_module": { "type": "string" }
+      },
+      "required": ["from_file", "to_module"],
+      "additionalProperties": false
+    },
+    "SubProject": {
+      "type": "object",
+      "properties": {
+        "path": { "type": "string", "description": "Absolute path." },
+        "name": { "type": "string" },
+        "language": { "type": "string" },
+        "project_marker": { "type": "string" }
+      },
+      "required": ["path", "name", "language", "project_marker"],
       "additionalProperties": false
     }
   }
