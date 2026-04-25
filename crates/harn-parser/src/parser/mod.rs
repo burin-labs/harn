@@ -56,6 +56,54 @@ pipeline p() {
     }
 
     #[test]
+    fn parses_line_trailing_infix_continuation_operators() {
+        // Sister case to the leading-operator test above. The trailing form
+        // (operator at the end of the previous line, right operand on the
+        // continuation line) used to error with "expected expression, found
+        // \\n" because each binary-op parser advanced past the operator and
+        // immediately tried to parse the right operand without skipping the
+        // newline that followed.
+        //
+        // We assert against a raw source string here rather than a
+        // conformance fixture because `harn fmt` canonicalizes the trailing
+        // form back to the leading form on save, so a fixture round-trips
+        // before the test ever validates the trailing form.
+        let source = r#"
+pipeline p() {
+  let nc = nil ??
+    "fallback"
+  let conj = true &&
+    true
+  let disj = false ||
+    true
+  let same = 1 ==
+    1
+  let diff = 1 !=
+    2
+  let lt = 1 <
+    2
+  let gte = 2 >=
+    2
+  let sum = 1 +
+    2
+  let mul = 4 *
+    2
+  let div = 8 /
+    2
+  let pow = 2 **
+    3
+  let chain = nil ??
+    nil ??
+    "chain"
+  let piped = 1 |>
+    to_string
+}
+"#;
+
+        assert!(parse_source(source).is_ok());
+    }
+
+    #[test]
     fn parses_public_declarations_and_generic_interfaces() {
         let source = r#"
 pub pipeline build(task) extends base {

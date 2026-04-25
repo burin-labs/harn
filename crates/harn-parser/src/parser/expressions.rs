@@ -21,6 +21,7 @@ impl Parser {
         while self.check_skip_newlines(&TokenKind::Pipe) {
             let start = left.span;
             self.advance();
+            self.skip_newlines();
             let right = self.parse_range()?;
             left = spanned(
                 Node::BinaryOp {
@@ -85,6 +86,7 @@ impl Parser {
         while self.check_skip_newlines(&TokenKind::NilCoal) {
             let start = left.span;
             self.advance();
+            self.skip_newlines();
             let right = self.parse_multiplicative()?;
             left = spanned(
                 Node::BinaryOp {
@@ -103,6 +105,7 @@ impl Parser {
         while self.check_skip_newlines(&TokenKind::Or) {
             let start = left.span;
             self.advance();
+            self.skip_newlines();
             let right = self.parse_logical_and()?;
             left = spanned(
                 Node::BinaryOp {
@@ -121,6 +124,7 @@ impl Parser {
         while self.check_skip_newlines(&TokenKind::And) {
             let start = left.span;
             self.advance();
+            self.skip_newlines();
             let right = self.parse_equality()?;
             left = spanned(
                 Node::BinaryOp {
@@ -145,6 +149,7 @@ impl Parser {
                 "!="
             };
             self.advance();
+            self.skip_newlines();
             let right = self.parse_comparison()?;
             left = spanned(
                 Node::BinaryOp {
@@ -175,6 +180,7 @@ impl Parser {
                     _ => "<",
                 };
                 self.advance();
+                self.skip_newlines();
                 let right = self.parse_additive()?;
                 left = spanned(
                     Node::BinaryOp {
@@ -187,6 +193,7 @@ impl Parser {
             } else if self.check(&TokenKind::In) {
                 let start = left.span;
                 self.advance();
+                self.skip_newlines();
                 let right = self.parse_additive()?;
                 left = spanned(
                     Node::BinaryOp {
@@ -202,6 +209,7 @@ impl Parser {
                 if self.check(&TokenKind::In) {
                     let start = left.span;
                     self.advance();
+                    self.skip_newlines();
                     let right = self.parse_additive()?;
                     left = spanned(
                         Node::BinaryOp {
@@ -232,6 +240,7 @@ impl Parser {
                 "-"
             };
             self.advance();
+            self.skip_newlines();
             let right = self.parse_nil_coalescing()?;
             left = spanned(
                 Node::BinaryOp {
@@ -260,6 +269,7 @@ impl Parser {
                 "%"
             };
             self.advance();
+            self.skip_newlines();
             let right = self.parse_exponent()?;
             left = spanned(
                 Node::BinaryOp {
@@ -281,6 +291,7 @@ impl Parser {
 
         let start = left.span;
         self.advance();
+        self.skip_newlines();
         let right = self.parse_exponent()?;
         Ok(spanned(
             Node::BinaryOp {
