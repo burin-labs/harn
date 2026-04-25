@@ -21,6 +21,24 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      bootstrap_new_crates:
+        description: >-
+          First-release bootstrap for a new workspace crate that an
+          already-published crate now depends on. Sets
+          HARN_BOOTSTRAP_NEW_CRATES=1, which skips the publish dry-run
+          and the audit's harn-cli package check. The real publish
+          uses `cargo publish --workspace`, which orders intra-workspace
+          deps correctly. See harn#609.
+        type: boolean
+        default: false
+      skip_dry_run:
+        description: >-
+          Skip only the publish dry-run gate. Useful if the dry-run is
+          flaky for an unrelated reason and you've already validated
+          the release content elsewhere.
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -154,4 +172,15 @@ jobs:
           # Use the App token so the GitHub release author is the bot,
           # consistent with the tag pusher.
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
-        run: ./scripts/release_ship.sh --finalize
+          # First-release bootstrap recovery path. See harn#609.
+          # release_ship.sh + verify_crate_packages.sh both honor the
+          # env var: skip the publish dry-run and the harn-cli package
+          # check that fails when a path-dep crate isn't on crates.io
+          # yet. Defaults to "0" on push events.
+          HARN_BOOTSTRAP_NEW_CRATES: ${{ inputs.bootstrap_new_crates && '1' || '0' }}
+        run: |
+          args=(--finalize)
+          if [[ "${{ inputs.skip_dry_run }}" == "true" ]]; then
+            args+=(--skip-dry-run)
+          fi
+          ./scripts/release_ship.sh "${args[@]}"

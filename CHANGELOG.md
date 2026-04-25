@@ -7,6 +7,35 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
+## Unreleased
+
+### Changed
+
+- **Release scripts: harden new-workspace-crate first-release path
+  (#609).** When a "Prepare vX.Y.Z release" PR adds a new workspace
+  crate that an already-published crate (e.g. `harn-cli`) depends on,
+  cargo's dependency-resolution step inside `cargo package -p harn-cli`
+  fails with `no matching package named <new-crate> found` — even with
+  `--no-verify`, which only skips the staged build. The Bump Release
+  workflow's audit lane therefore fails for the first release that
+  ships such a crate. Bootstrap pattern, in priority order:
+  - **Recommended:** before landing the prepare PR, manually
+    `cargo publish -p <new-crate> --no-verify --allow-dirty` from
+    main HEAD to seed the crate at the current workspace version.
+    Subsequent releases proceed through the normal automated flow.
+  - **Recovery:** if the prepare PR already landed and the bump
+    workflow is failing, manually re-trigger Bump Release (or
+    Finalize Release) with `bootstrap_new_crates: true`. The flag
+    sets `HARN_BOOTSTRAP_NEW_CRATES=1` for `release_ship.sh`, which
+    skips the publish dry-run and tells `verify_crate_packages.sh`
+    to skip the `harn-cli` package check. The real publish later
+    uses `cargo publish --workspace`, which orders intra-workspace
+    deps correctly. `scripts/publish.sh`'s `WORKSPACE_CRATES`
+    fallback list now includes `harn-hostlib` between `harn-lsp`
+    and `harn-cli` so the per-crate fallback covers it. The
+    merge-captain runbook (`.claude/commands/release-harn.md`) and
+    the burin-code merge-captain skill carry the same pre-flight.
+
 ## v0.7.39
 
 ### Added

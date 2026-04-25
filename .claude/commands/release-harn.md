@@ -71,6 +71,71 @@ done — do **not** run `release_ship.sh` locally as a default step.
    `CHANGELOG.md`. Do **not** include `Cargo.toml` / `Cargo.lock` version
    bumps in this PR — the bot's bump PR carries those.
 
+## New-crate first-release pre-flight (harn#609)
+
+**When this applies.** The pending release adds a new workspace crate
+(e.g. `crates/harn-foo`) AND wires an already-published crate (most
+commonly `harn-cli`, but any of the published members) to depend on it
+via the standard `harn-foo = { path = "../harn-foo", version = "0.7" }`
+pattern.
+
+**Why it matters.** During the audit's `package-audit` lane,
+`scripts/verify_crate_packages.sh` runs `cargo package -p harn-cli
+--no-verify`. Cargo strips the path dep, replaces it with the version
+requirement, and queries crates.io to validate it. If `harn-foo` has
+never been published, the lookup fails with `no matching package named
+harn-foo found`. `--no-verify` only skips the staged build, not the
+dependency-resolution step that fails here. The Bump Release workflow
+audit therefore aborts before the publish dry-run ever runs.
+
+**Recommended pre-flight (do this BEFORE landing the prepare PR):**
+
+```bash
+# From a clean worktree at main HEAD (or the prepare branch), seed
+# the new crate at the current workspace version.
+cargo publish -p harn-foo --no-verify --allow-dirty
+```
+
+After this, every subsequent release goes through the normal automated
+flow without intervention. Confirm crates.io picked it up
+(`https://crates.io/crates/harn-foo`) before merging the prepare PR.
+
+**Recovery path (use when the prepare PR already landed and the bump
+workflow is failing in audit):**
+
+1. Manually re-trigger Bump Release with the bootstrap input:
+
+   ```bash
+   gh workflow run bump-release.yml \
+     -f bootstrap_new_crates=true
+   ```
+
+2. The flag sets `HARN_BOOTSTRAP_NEW_CRATES=1`, which tells
+   `release_ship.sh` to skip the publish dry-run AND tells
+   `verify_crate_packages.sh` to skip the harn-cli package check. The
+   bump PR opens normally.
+3. Land the bump PR through the merge queue. If Finalize Release also
+   fails the same way, re-trigger it the same way:
+
+   ```bash
+   gh workflow run finalize-release.yml \
+     -f bootstrap_new_crates=true
+   ```
+
+   The real `cargo publish --workspace` inside finalize orders
+   intra-workspace deps correctly and will publish `harn-foo` before
+   `harn-cli`.
+
+**For maintenance.** Add the new crate to:
+
+- `scripts/publish.sh`'s `WORKSPACE_CRATES` array in dependency order
+  (the per-crate fallback walks this list when the workspace publish
+  bails mid-stream).
+- Optionally, an explicit `cargo package -p harn-foo --allow-dirty
+  --no-verify` step in `scripts/verify_crate_packages.sh` to catch
+  packaging issues for the new crate as a separate audit signal
+  (see the existing `harn-hostlib` step for the pattern).
+
 ## What happens automatically after the prepare PR lands
 
 9. **Bump Release** workflow (`.github/workflows/bump-release.yml`) fires on

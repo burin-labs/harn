@@ -5,19 +5,29 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
 VERIFY_CLI=0
+SKIP_CLI=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --verify-cli)
       VERIFY_CLI=1
       shift
       ;;
+    --skip-cli)
+      SKIP_CLI=1
+      shift
+      ;;
     *)
       echo "error: unknown arg: $1" >&2
-      echo "usage: ./scripts/verify_crate_packages.sh [--verify-cli]" >&2
+      echo "usage: ./scripts/verify_crate_packages.sh [--verify-cli|--skip-cli]" >&2
       exit 1
       ;;
   esac
 done
+
+if [[ "$VERIFY_CLI" -eq 1 && "$SKIP_CLI" -eq 1 ]]; then
+  echo "error: --verify-cli and --skip-cli are mutually exclusive" >&2
+  exit 1
+fi
 
 metadata="$(cargo metadata --format-version 1 --no-deps)"
 target_dir="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])' <<<"$metadata")"
@@ -62,6 +72,30 @@ fi
 
 echo "=== Check extracted harn-modules package ==="
 CARGO_TARGET_DIR="$tmp/target" cargo check --manifest-path "$modules_pkg/Cargo.toml"
+
+# `harn-hostlib` is a workspace path dep of `harn-cli`. Verifying it
+# packages cleanly here (a) catches scaffold issues for the crate on its
+# own and (b) mirrors the per-crate audit pattern used for harn-modules
+# above. The check is independent of the harn-cli step below — packaging
+# harn-hostlib does not preempt cargo's "must exist on crates.io" lookup
+# for harn-cli's version requirement on harn-hostlib.
+echo "=== Package harn-hostlib ==="
+cargo package -p harn-hostlib --allow-dirty --no-verify
+
+# `cargo package -p harn-cli` resolves harn-cli's path deps against
+# crates.io to validate the version requirement that cargo will publish.
+# When a workspace crate (e.g. harn-hostlib) was just added and has never
+# been published, that lookup fails with "no matching package named X
+# found" — even with --no-verify, which only skips the staged build, not
+# dependency resolution. Set HARN_BOOTSTRAP_NEW_CRATES=1 (or pass
+# --skip-cli) on the first release that ships such a crate; the real
+# `cargo publish --workspace` later will still order intra-workspace
+# deps correctly. See harn#609 for the full story.
+if [[ "${HARN_BOOTSTRAP_NEW_CRATES:-0}" == "1" || "$SKIP_CLI" -eq 1 ]]; then
+  echo "=== Skip harn-cli package check (bootstrap mode) ==="
+  echo "Package verification complete (skipped harn-cli for new-crate bootstrap)"
+  exit 0
+fi
 
 echo "=== Package harn-cli ==="
 if [[ "$VERIFY_CLI" -eq 1 ]]; then
