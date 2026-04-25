@@ -102,7 +102,7 @@ impl A2aPushConnector {
             kinds: vec![TriggerKind::from(PROVIDER_ID)],
             client: Arc::new(A2aPushClient),
             state: RwLock::new(A2aPushState::default()),
-            http: reqwest::Client::new(),
+            http: crate::connectors::outbound_http_client("harn-a2a-push-connector"),
         }
     }
 
@@ -268,6 +268,10 @@ impl A2aPushConnector {
         };
         if let Some(cached) = cached_jwks(jwks_url) {
             return Ok(cached);
+        }
+        if let Some(error) = crate::egress::connector_error_for_url("connector:a2a-push", jwks_url)
+        {
+            return Err(error);
         }
         let jwks = self
             .http

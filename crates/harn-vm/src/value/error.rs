@@ -48,6 +48,8 @@ pub enum ErrorCategory {
     ToolError,
     /// Tool was rejected by the host (not permitted / not in allowlist)
     ToolRejected,
+    /// Outbound network egress was blocked by policy.
+    EgressBlocked,
     /// Operation was cancelled
     Cancelled,
     /// Resource not found
@@ -70,6 +72,7 @@ impl ErrorCategory {
             ErrorCategory::SchemaValidation => "schema_validation",
             ErrorCategory::ToolError => "tool_error",
             ErrorCategory::ToolRejected => "tool_rejected",
+            ErrorCategory::EgressBlocked => "egress_blocked",
             ErrorCategory::Cancelled => "cancelled",
             ErrorCategory::NotFound => "not_found",
             ErrorCategory::CircuitOpen => "circuit_open",
@@ -88,6 +91,7 @@ impl ErrorCategory {
             "schema_validation" => ErrorCategory::SchemaValidation,
             "tool_error" => ErrorCategory::ToolError,
             "tool_rejected" => ErrorCategory::ToolRejected,
+            "egress_blocked" => ErrorCategory::EgressBlocked,
             "cancelled" => ErrorCategory::Cancelled,
             "not_found" => ErrorCategory::NotFound,
             "circuit_open" => ErrorCategory::CircuitOpen,

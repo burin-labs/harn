@@ -135,7 +135,10 @@ fn required_string_arg(
 }
 
 fn client_error_to_vm(error: ClientError) -> VmError {
-    VmError::Thrown(VmValue::String(Rc::from(error.to_string())))
+    match error {
+        ClientError::EgressBlocked(blocked) => blocked.to_vm_error(),
+        other => VmError::Thrown(VmValue::String(Rc::from(other.to_string()))),
+    }
 }
 
 fn optional_headers_arg(

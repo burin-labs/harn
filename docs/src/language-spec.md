@@ -3331,6 +3331,11 @@ Sets are iterable with `for ... in` and support `len()`.
 | `bytes_eq(a, b)` | Constant-time byte equality check |
 | `sha256(str)` | Returns the hex-encoded SHA-256 hash of `str` |
 | `md5(str)` | Returns the hex-encoded MD5 hash of `str` |
+| `hmac_sha256(key, message)` | Returns HMAC-SHA256 as lowercase hex |
+| `hmac_sha256_base64(key, message)` | Returns HMAC-SHA256 as standard base64 |
+| `constant_time_eq(a, b)` | Constant-time string equality for signatures |
+| `signed_url(base, claims, secret, expires_at, options?)` | Returns a short-lived HMAC-SHA256 signed absolute URL or absolute path |
+| `verify_signed_url(url, secret_or_keys, now, options?)` | Verifies a signed URL/path and returns `{valid, reason, signature_valid, expired, expires_at, kid, claims}` |
 | `jwt_sign(alg, claims, private_key)` | Signs a compact JWT/JWS with a PEM private key. Supports `ES256` and `RS256` |
 | `gzip_encode(bytes_or_string, level?)` | Gzip-compresses bytes/string into `bytes`; `level` defaults to `6` and must be `0..9` |
 | `gzip_decode(bytes)` | Gzip-decompresses `bytes` and returns `bytes` |
@@ -3385,10 +3390,50 @@ println(title)
 println(bytes_to_hex(uploaded))
 ```
 
+`signed_url` is the canonical helper for short-lived Harn-hosted receipt and
+artifact links. `base` may be an absolute URL with a host or an absolute path
+beginning with `/`. The helper merges existing query parameters with `claims`,
+adds `exp`, an optional `kid`, and a `sig`, then signs a versioned canonical
+payload with HMAC-SHA256. Query canonicalization percent-encodes each key/value
+with the RFC 3986 unreserved set left plain and sorts encoded pairs
+lexicographically. Path canonicalization preserves `/`, preserves existing
+`%XX` escapes with uppercase hex, and percent-encodes other non-unreserved
+bytes. Signatures use URL-safe base64 without padding. `verify_signed_url`
+removes `sig`, rebuilds the same canonical payload, compares signatures in
+constant time, applies `skew_seconds` if provided, and supports key rotation by
+accepting either one secret string or a `{kid: secret}` dict. Parameter names
+can be overridden with `signature_param`, `expires_param`, and `kid_param`.
+
 `jwt_sign` requires `claims` to be a dict so it can be serialized as a JSON
 claims object. `ES256` expects a P-256 EC private key in PEM form; `RS256`
 expects an RSA private key in PEM form. Unsupported algorithms, non-dict
 claims, and invalid PEM keys throw runtime errors.
+
+### Cookie and session builtins
+
+| Function | Description |
+|---|---|
+| `cookie_parse(headers)` | Parses request `Cookie` header strings, lists, or header dicts into `{cookies, pairs, duplicates, invalid}` |
+| `cookie_serialize(name, value, options?)` | Serializes one `Set-Cookie` header value. Options support `HttpOnly`, `Secure`, `SameSite`, `Path`, `Domain`, `Max-Age`, and `Expires` through snake_case or header-style keys |
+| `cookie_delete(name, options?)` | Serializes a deletion cookie with `Max-Age=0` and an epoch `Expires` timestamp |
+| `cookie_sign(value, secret)` / `cookie_verify(value, secret)` | Signs and verifies a string cookie value using HMAC-SHA256 with URL-safe base64 signatures |
+| `session_sign(payload, secret)` / `session_verify(token, secret)` | Signs and verifies a stateless JSON session payload. Verification returns `{ok, payload, error}` and does not throw on bad signatures |
+| `session_cookie(name, payload, secret, options?)` | Serializes a signed session cookie with secure defaults: `Path=/`, `HttpOnly`, `Secure`, and `SameSite=Lax` |
+| `session_from_cookies(headers, name, secret)` | Parses request cookies and verifies the named cookie as a stateless session token |
+| `cookie_round_trip(request_cookie?, set_cookie)` | Test helper that applies response `Set-Cookie` headers to a request cookie header and returns the next `{cookie_header, cookies}` |
+
+Duplicate request cookies are deterministic: `cookies[name]` keeps the first
+valid value in wire order and `duplicates[name]` records every observed value
+for that name. Invalid cookie segments are skipped and returned in `invalid`.
+
+`cookie_serialize` validates names and values and rejects `SameSite=None`
+without `Secure`. `session_cookie` uses secure dashboard/operator defaults by
+default; callers may override them explicitly for local testing.
+
+Stateless signed sessions put the trusted payload in the cookie token. A
+store-backed session should instead place only an opaque session ID in the
+cookie and keep mutable state in `store_*`, `shared_map_*`, or an application
+database.
 
 ### Regex builtins
 
@@ -3433,6 +3478,7 @@ provider integrations.
 | Function | Description |
 |---|---|
 | `connector_call(provider, method, params?)` | Invoke the active outbound connector client for `provider` and return JSON-like result data |
+| `egress_policy(config)` | Install a process egress policy for HTTP, SSE, WebSocket, and Rust-backed connector outbound calls. Rules support exact hosts, `*.suffix` hosts, IP literals/CIDR, optional `:port`, and `default: "deny"` allowlist mode. Blocked calls throw `{type: "EgressBlocked", category: "egress_blocked", host, port, reason, url}` |
 | `secret_get(secret_id)` | Read a secret from the active connector context. Only available while executing a Harn-backed connector export such as `normalize_inbound` or `call` |
 | `event_log_emit(topic, kind, payload, headers?)` | Append an event to the active event log from a Harn-backed connector export |
 | `metrics_inc(name, amount?)` | Increment a connector-owned Prometheus counter from a Harn-backed connector export |

@@ -858,6 +858,7 @@ println(text.source.sha256)
 | `http_delete(url, options?)` | url: string, options: dict | dict | DELETE request |
 | `http_request(method, url, options?)` | method: string, url: string, options: dict | dict | Generic HTTP request |
 | `http_download(url, dst_path, options?)` | url: string, dst_path: string, options: dict | dict | Stream a response body to a file |
+| `egress_policy(config)` | config: dict | dict | Install the process egress policy used by HTTP, SSE, WebSocket, and connector outbound calls |
 | `http_server_tls_plain()` | none | dict | Build HTTP-server TLS config for intentional cleartext/local listener mode |
 | `http_server_tls_edge(options?)` | options: dict | dict | Build HTTP-server TLS config for edge-terminated HTTPS; local listener stays plain and HSTS is enabled by default |
 | `http_server_tls_pem(cert_path, key_path)` | cert_path: string, key_path: string | dict | Build in-process HTTPS config from PEM files; missing files throw before startup |
@@ -931,6 +932,35 @@ enabled. Throws on network errors. `http_request(..., {session: handle})`
 routes through an existing session when one is provided. `http_post`,
 `http_put`, and `http_patch` accept an options dict as the second argument
 when you want to send multipart without a separate string body.
+
+`egress_policy({allow, deny, default})` installs a process-scoped outbound
+network policy before user code opens real connections. Rules accept exact
+hosts (`api.example.com`), suffix wildcards (`*.example.com`), IP literals or
+CIDR ranges (`127.0.0.0/8`), and optional port restrictions
+(`api.example.com:443`). Deny rules override allow rules; `default: "deny"`
+turns the policy into an allowlist. Operators can seed the same policy without
+editing scripts via comma-separated `HARN_EGRESS_ALLOW`, `HARN_EGRESS_DENY`,
+and `HARN_EGRESS_DEFAULT=deny`.
+
+```harn
+pipeline main(task) {
+  egress_policy({
+    allow: ["api.example.com:443", "*.trusted.example", "10.0.0.0/8"],
+    deny: ["blocked.trusted.example"],
+    default: "deny",
+  })
+
+  let response = http_get("https://api.example.com/v1/status")
+  println(response.status)
+}
+```
+
+Blocked attempts throw `{type: "EgressBlocked", category:
+"egress_blocked", host, port, reason, url}` and append an
+`egress.blocked` event to `connectors.egress.audit` when an event log is
+active. The same policy is checked by `http_request` and friends,
+`http_session_request`, `http_stream_open`, `http_download`, `sse_connect`,
+`websocket_connect`, and Rust-backed `connector_call` clients.
 
 `http_stream_open` uses the same request options as `http_request`. The
 returned handle can be inspected with `http_stream_info`, drained with
@@ -1294,7 +1324,7 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
 | `llm_call(prompt, system?, options?)` | prompt: string, system: string, options: dict | dict | Single LLM request. Returns `{text, model, input_tokens, output_tokens}`. Throws on transport / rate-limit / schema-validation failures |
-| `llm_call_safe(prompt, system?, options?)` | prompt: string, system: string, options: dict | dict | Non-throwing envelope around `llm_call`. Returns `{ok: bool, response: dict or nil, error: {category, message} or nil}`. `error.category` is one of `ErrorCategory`'s canonical strings (`"rate_limit"`, `"timeout"`, `"overloaded"`, `"server_error"`, `"transient_network"`, `"schema_validation"`, `"auth"`, `"not_found"`, `"circuit_open"`, `"tool_error"`, `"tool_rejected"`, `"cancelled"`, `"generic"`) |
+| `llm_call_safe(prompt, system?, options?)` | prompt: string, system: string, options: dict | dict | Non-throwing envelope around `llm_call`. Returns `{ok: bool, response: dict or nil, error: {category, message} or nil}`. `error.category` is one of `ErrorCategory`'s canonical strings (`"rate_limit"`, `"timeout"`, `"overloaded"`, `"server_error"`, `"transient_network"`, `"schema_validation"`, `"auth"`, `"not_found"`, `"circuit_open"`, `"tool_error"`, `"tool_rejected"`, `"egress_blocked"`, `"cancelled"`, `"generic"`) |
 | `with_rate_limit(provider, fn, options?)` | provider: string, fn: closure, options: dict | whatever `fn` returns | Acquire a permit from the provider's sliding-window rate limiter, invoke `fn`, and retry with exponential backoff on retryable errors (`rate_limit`, `overloaded`, `transient_network`, `timeout`). Options: `max_retries` (default 5), `backoff_ms` (default 1000, capped at 30s after doubling) |
 | `llm_completion(prefix, suffix?, system?, options?)` | prefix: string, suffix: string, system: string, options: dict | dict | Text completion / fill-in-the-middle request. Returns `{text, model, input_tokens, output_tokens}` |
 | `agent_loop(prompt, system?, options?)` | prompt: string, system: string, options: dict | dict | Multi-turn agent loop with `##DONE##` completion sentinel (`<done>##DONE##</done>` in tagged text-tool stages), daemon/idling support, and optional per-turn context filtering. Returns `{status, text, visible_text, llm: {iterations, duration_ms, input_tokens, output_tokens}, tools: {calls, successful, rejected, mode}, transcript, task_ledger, trace, …}` |
@@ -1551,7 +1581,7 @@ Structured error throwing and classification for retry logic and error handling.
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
 | `throw_error(message, category?)` | message: string, category: string | never | Throw a categorized error. The error is a dict with `message` and `category` fields |
-| `error_category(err)` | err: any | string | Extract category from a caught error. Returns `"timeout"`, `"auth"`, `"rate_limit"`, `"tool_error"`, `"cancelled"`, `"not_found"`, `"circuit_open"`, or `"generic"` |
+| `error_category(err)` | err: any | string | Extract category from a caught error. Returns `"timeout"`, `"auth"`, `"rate_limit"`, `"tool_error"`, `"tool_rejected"`, `"egress_blocked"`, `"cancelled"`, `"not_found"`, `"circuit_open"`, or `"generic"` |
 | `is_timeout(err)` | err: any | bool | Check if error is a timeout |
 | `is_rate_limited(err)` | err: any | bool | Check if error is a rate limit |
 

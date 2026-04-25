@@ -3479,6 +3479,7 @@ provider integrations.
 | Function | Description |
 |---|---|
 | `connector_call(provider, method, params?)` | Invoke the active outbound connector client for `provider` and return JSON-like result data |
+| `egress_policy(config)` | Install a process egress policy for HTTP, SSE, WebSocket, and Rust-backed connector outbound calls. Rules support exact hosts, `*.suffix` hosts, IP literals/CIDR, optional `:port`, and `default: "deny"` allowlist mode. Blocked calls throw `{type: "EgressBlocked", category: "egress_blocked", host, port, reason, url}` |
 | `secret_get(secret_id)` | Read a secret from the active connector context. Only available while executing a Harn-backed connector export such as `normalize_inbound` or `call` |
 | `event_log_emit(topic, kind, payload, headers?)` | Append an event to the active event log from a Harn-backed connector export |
 | `metrics_inc(name, amount?)` | Increment a connector-owned Prometheus counter from a Harn-backed connector export |

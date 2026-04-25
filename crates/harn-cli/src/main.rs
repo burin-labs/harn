@@ -1717,6 +1717,7 @@ pub(crate) async fn execute(source: &str, source_path: Option<&Path>) -> Result<
                     .map_err(|error| format!("failed to initialize connector clients: {error}"))?;
             }
             let execution_result = vm.execute(&chunk).await.map_err(|e| e.to_string());
+            harn_vm::egress::reset_egress_policy_for_host();
             if connector_clients_installed {
                 harn_vm::clear_active_connector_clients();
             }

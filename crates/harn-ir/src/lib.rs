@@ -1201,6 +1201,7 @@ fn classify_call(name: &str, args: &[SNode]) -> CallSemantics {
         }
         "exec"
         | "exec_at"
+        | "egress_policy"
         | "shell"
         | "shell_at"
         | "http_post"

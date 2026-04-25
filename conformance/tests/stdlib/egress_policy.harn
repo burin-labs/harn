@@ -1,0 +1,55 @@
+pipeline test(task) {
+  http_mock_clear()
+  transport_mock_clear()
+  egress_policy(
+    {
+    allow: ["allowed.example.test", "*.wild.example.test", "127.0.0.0/8", "port.example.test:8443"],
+    deny: ["blocked.wild.example.test", "127.0.0.66"],
+    default: "deny",
+  },
+  )
+  http_mock("GET", "https://allowed.example.test/ok", {status: 200, body: "allowed"})
+  let allowed = http_get("https://allowed.example.test/ok")
+  assert_eq(allowed.status, 200)
+  http_mock("GET", "https://api.wild.example.test/ok", {status: 200, body: "wild"})
+  let wildcard = http_get("https://api.wild.example.test/ok")
+  assert_eq(wildcard.body, "wild")
+  http_mock("GET", "http://127.0.0.1:9/ok", {status: 200, body: "cidr"})
+  let cidr = http_get("http://127.0.0.1:9/ok")
+  assert_eq(cidr.body, "cidr")
+  http_mock("GET", "https://port.example.test:8443/ok", {status: 200, body: "port"})
+  let port_ok = http_get("https://port.example.test:8443/ok")
+  assert_eq(port_ok.body, "port")
+  let port_blocked = try {
+    http_get("https://port.example.test/blocked")
+  }
+  assert(is_err(port_blocked))
+  let port_error = unwrap_err(port_blocked)
+  assert_eq(port_error.type, "EgressBlocked")
+  assert_eq(port_error.host, "port.example.test")
+  assert_eq(port_error.port, 443)
+  assert_eq(error_category(port_error), "egress_blocked")
+  let deny_blocked = try {
+    http_get("https://blocked.wild.example.test/blocked")
+  }
+  assert(is_err(deny_blocked))
+  assert_eq(unwrap_err(deny_blocked).type, "EgressBlocked")
+  let session = http_session({timeout_ms: 100})
+  let session_blocked = try {
+    http_session_request(session, "GET", "https://blocked.example.test/session", {})
+  }
+  assert(is_err(session_blocked))
+  assert_eq(unwrap_err(session_blocked).type, "EgressBlocked")
+  assert(http_session_close(session))
+  let sse_blocked = try {
+    sse_connect("GET", "https://blocked.example.test/events", {})
+  }
+  assert(is_err(sse_blocked))
+  assert_eq(unwrap_err(sse_blocked).type, "EgressBlocked")
+  let ws_blocked = try {
+    websocket_connect("wss://blocked.example.test/socket", {})
+  }
+  assert(is_err(ws_blocked))
+  assert_eq(unwrap_err(ws_blocked).type, "EgressBlocked")
+  println("egress_policy_ok")
+}
