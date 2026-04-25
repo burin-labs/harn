@@ -141,6 +141,10 @@ pub(crate) const BUILTINS: &[(&str, &str)] = &[
         "sse_server_mock_disconnect(stream) -> bool",
     ),
     (
+        "websocket_accept",
+        "websocket_accept(server, timeout_ms?) -> dict | nil",
+    ),
+    (
         "websocket_connect",
         "websocket_connect(url, options?) -> string",
     ),
@@ -153,6 +157,18 @@ pub(crate) const BUILTINS: &[(&str, &str)] = &[
         "websocket_receive(socket, timeout_ms?) -> dict | nil",
     ),
     ("websocket_close", "websocket_close(socket) -> bool"),
+    (
+        "websocket_route",
+        "websocket_route(server, path, options?) -> bool",
+    ),
+    (
+        "websocket_server",
+        "websocket_server(bind?, options?) -> dict",
+    ),
+    (
+        "websocket_server_close",
+        "websocket_server_close(server) -> bool",
+    ),
     // Mock HTTP
     (
         "http_mock",

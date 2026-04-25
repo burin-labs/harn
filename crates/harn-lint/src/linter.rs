@@ -372,6 +372,7 @@ impl<'a> Linter<'a> {
                 | "sse_server_mock_receive"
                 | "sse_server_response"
                 | "sse_server_status"
+                | "websocket_accept"
                 | "websocket_receive"
                 | "host_call"
                 | "mcp_call"

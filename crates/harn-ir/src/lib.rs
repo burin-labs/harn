@@ -1223,11 +1223,15 @@ fn classify_call(name: &str, args: &[SNode]) -> CallSemantics {
         | "sse_server_cancel"
         | "sse_server_mock_receive"
         | "sse_server_mock_disconnect"
+        | "websocket_accept"
         | "websocket_connect"
         | "websocket_send"
         | "websocket_receive"
         | "websocket_close"
         | "websocket_mock"
+        | "websocket_route"
+        | "websocket_server"
+        | "websocket_server_close"
         | "transport_mock_clear" => CallClassification::SideEffect,
         "mcp_call" => {
             let tool_name = literal_args

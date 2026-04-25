@@ -37,6 +37,42 @@ There is no NDJSON, SSE, or extra wrapper envelope.
 The server responds with one JSON-RPC object in one text frame. Binary frames
 are rejected with JSON-RPC `Invalid Request`.
 
+## Harn-Native Ingress
+
+Harnesses that need to host ACP-style browser or agent streams can expose an
+upgrade route directly from Harn:
+
+```harn
+pipeline acp_websocket_echo() {
+  let server = websocket_server("127.0.0.1:8787", {})
+  websocket_route(server, "/acp", {
+    auth: {bearer: env("ACP_TOKEN")},
+    max_message_bytes: 1048576,
+    send_buffer_messages: 64,
+    idle_timeout_ms: 30000,
+  })
+
+  while true {
+    let conn = websocket_accept(server, 30000)
+    if conn?.type == "timeout" {
+      continue
+    }
+
+    let frame = websocket_receive(conn, 30000)
+    if frame?.type == "text" {
+      let request = json_parse(frame.data)
+      websocket_send(conn, json_stringify({
+        jsonrpc: "2.0",
+        id: request.id,
+        result: {echo: request.method},
+      }), {})
+    } else if frame?.type == "close" {
+      websocket_close(conn)
+    }
+  }
+}
+```
+
 ## Liveness
 
 The server sends WebSocket ping frames every 30 seconds. If a pong is not
