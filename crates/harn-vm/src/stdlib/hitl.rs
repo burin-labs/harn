@@ -1263,7 +1263,7 @@ fn optional_string_list(value: Option<&VmValue>, builtin: &str) -> Result<Vec<St
 
 fn parse_duration_value(value: &VmValue) -> Result<StdDuration, VmError> {
     match value {
-        VmValue::Duration(ms) => Ok(StdDuration::from_millis(*ms)),
+        VmValue::Duration(ms) if *ms >= 0 => Ok(StdDuration::from_millis(*ms as u64)),
         VmValue::Int(ms) if *ms >= 0 => Ok(StdDuration::from_millis(*ms as u64)),
         VmValue::Float(ms) if *ms >= 0.0 => Ok(StdDuration::from_millis(*ms as u64)),
         _ => Err(VmError::Runtime(
@@ -1434,7 +1434,7 @@ fn coerce_like_default(value: &VmValue, default: &VmValue) -> VmValue {
         VmValue::String(_) => VmValue::String(Rc::from(value.display())),
         VmValue::Duration(_) => match value {
             VmValue::Duration(_) => value.clone(),
-            VmValue::Int(ms) if *ms >= 0 => VmValue::Duration(*ms as u64),
+            VmValue::Int(ms) => VmValue::Duration(*ms),
             _ => default.clone(),
         },
         VmValue::Nil => value.clone(),

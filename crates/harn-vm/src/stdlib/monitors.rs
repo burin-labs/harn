@@ -434,7 +434,7 @@ fn parse_required_duration(value: Option<&VmValue>, field: &str) -> Result<StdDu
 
 fn parse_duration_value(value: &VmValue) -> Result<StdDuration, VmError> {
     match value {
-        VmValue::Duration(ms) => Ok(StdDuration::from_millis(*ms)),
+        VmValue::Duration(ms) if *ms >= 0 => Ok(StdDuration::from_millis(*ms as u64)),
         VmValue::Int(ms) if *ms >= 0 => Ok(StdDuration::from_millis(*ms as u64)),
         VmValue::Float(ms) if *ms >= 0.0 => Ok(StdDuration::from_millis(*ms as u64)),
         other => Err(VmError::Runtime(format!(

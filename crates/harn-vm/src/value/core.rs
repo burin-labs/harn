@@ -102,7 +102,7 @@ pub enum VmValue {
         id: BuiltinId,
         name: Rc<str>,
     },
-    Duration(u64),
+    Duration(i64),
     EnumVariant {
         enum_name: Rc<str>,
         variant: Rc<str>,
@@ -163,7 +163,7 @@ impl VmValue {
             VmValue::Closure(_) => true,
             VmValue::BuiltinRef(_) => true,
             VmValue::BuiltinRefId { .. } => true,
-            VmValue::Duration(ms) => *ms > 0,
+            VmValue::Duration(ms) => *ms != 0,
             VmValue::EnumVariant { .. } => true,
             VmValue::StructInstance { .. } => true,
             VmValue::TaskHandle(_) => true,
@@ -371,14 +371,16 @@ impl VmValue {
                 let _ = write!(out, "<builtin {name}>");
             }
             VmValue::Duration(ms) => {
-                if *ms >= 3_600_000 && ms % 3_600_000 == 0 {
-                    let _ = write!(out, "{}h", ms / 3_600_000);
-                } else if *ms >= 60_000 && ms % 60_000 == 0 {
-                    let _ = write!(out, "{}m", ms / 60_000);
-                } else if *ms >= 1000 && ms % 1000 == 0 {
-                    let _ = write!(out, "{}s", ms / 1000);
+                let sign = if *ms < 0 { "-" } else { "" };
+                let abs_ms = ms.unsigned_abs();
+                if abs_ms >= 3_600_000 && abs_ms % 3_600_000 == 0 {
+                    let _ = write!(out, "{}{}h", sign, abs_ms / 3_600_000);
+                } else if abs_ms >= 60_000 && abs_ms % 60_000 == 0 {
+                    let _ = write!(out, "{}{}m", sign, abs_ms / 60_000);
+                } else if abs_ms >= 1000 && abs_ms % 1000 == 0 {
+                    let _ = write!(out, "{}{}s", sign, abs_ms / 1000);
                 } else {
-                    let _ = write!(out, "{}ms", ms);
+                    let _ = write!(out, "{}{}ms", sign, abs_ms);
                 }
             }
             VmValue::EnumVariant {

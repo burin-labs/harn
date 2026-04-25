@@ -1,0 +1,7 @@
+pipeline default() {
+  let ts = date_parse("2026-04-25T17:32:09.481Z")
+  println(date_format(ts, "%Y-%m-%dT%H:%M:%S.%3fZ"))
+  println(date_to_zone(ts, "UTC"))
+  println(date_format(ts, "%s.%3f"))
+  println(date_format(date_parse("2026-04-25T17:32:09.123456Z"), "%6f"))
+}

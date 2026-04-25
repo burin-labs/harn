@@ -360,8 +360,24 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("dict")),
     },
     BuiltinSig {
+        name: "date_add",
+        return_type: None,
+    },
+    BuiltinSig {
         name: "date_format",
         return_type: Some(BuiltinReturn::Named("string")),
+    },
+    BuiltinSig {
+        name: "date_from_components",
+        return_type: None,
+    },
+    BuiltinSig {
+        name: "date_diff",
+        return_type: Some(BuiltinReturn::Named("duration")),
+    },
+    BuiltinSig {
+        name: "date_in_zone",
+        return_type: Some(BuiltinReturn::Named("dict")),
     },
     BuiltinSig {
         name: "date_iso",
@@ -372,8 +388,16 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("dict")),
     },
     BuiltinSig {
+        name: "date_now_iso",
+        return_type: Some(BuiltinReturn::Named("string")),
+    },
+    BuiltinSig {
         name: "date_parse",
-        return_type: Some(BuiltinReturn::Named("float")),
+        return_type: None,
+    },
+    BuiltinSig {
+        name: "date_to_zone",
+        return_type: Some(BuiltinReturn::Named("string")),
     },
     BuiltinSig {
         name: "delete_file",
@@ -394,6 +418,34 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
     BuiltinSig {
         name: "dual_control",
         return_type: None,
+    },
+    BuiltinSig {
+        name: "duration_days",
+        return_type: Some(BuiltinReturn::Named("duration")),
+    },
+    BuiltinSig {
+        name: "duration_hours",
+        return_type: Some(BuiltinReturn::Named("duration")),
+    },
+    BuiltinSig {
+        name: "duration_minutes",
+        return_type: Some(BuiltinReturn::Named("duration")),
+    },
+    BuiltinSig {
+        name: "duration_ms",
+        return_type: Some(BuiltinReturn::Named("duration")),
+    },
+    BuiltinSig {
+        name: "duration_seconds",
+        return_type: Some(BuiltinReturn::Named("duration")),
+    },
+    BuiltinSig {
+        name: "duration_to_human",
+        return_type: Some(BuiltinReturn::Named("string")),
+    },
+    BuiltinSig {
+        name: "duration_to_seconds",
+        return_type: Some(BuiltinReturn::Named("int")),
     },
     BuiltinSig {
         name: "e",
@@ -694,6 +746,10 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
     BuiltinSig {
         name: "mkdir",
         return_type: Some(BuiltinReturn::Named("nil")),
+    },
+    BuiltinSig {
+        name: "month_name",
+        return_type: Some(BuiltinReturn::Named("string")),
     },
     BuiltinSig {
         name: "monitor_wait_for_native",
@@ -1390,6 +1446,10 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
     BuiltinSig {
         name: "waitpoint_wait",
         return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
+        name: "weekday_name",
+        return_type: Some(BuiltinReturn::Named("string")),
     },
     BuiltinSig {
         name: "window",

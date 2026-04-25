@@ -668,9 +668,29 @@ let token = jwt_sign(
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `date_now()` | none | dict | Current UTC datetime as dict with `year`, `month`, `day`, `hour`, `minute`, `second`, `weekday`, and `timestamp` fields |
-| `date_parse(str)` | str: string | float | Parse a datetime string (e.g., `"2024-01-15 10:30:00"`) into a Unix timestamp. Extracts numeric components from the string. Throws if fewer than 3 parts (year, month, day). Validates month (1-12), day (1-31), hour (0-23), minute (0-59), second (0-59) |
-| `date_format(dt, format?)` | dt: float, int, or dict; format: string (default `"%Y-%m-%d %H:%M:%S"`) | string | Format a timestamp or date dict as a string. Supports `%Y`, `%m`, `%d`, `%H`, `%M`, `%S` placeholders. Throws for negative timestamps |
+| `date_now()` | none | dict | Current UTC datetime as dict with `year`, `month`, `day`, `hour`, `minute`, `second`, `weekday`, `timestamp`, and `iso8601` fields |
+| `date_now_iso()` | none | string | Current UTC datetime as RFC 3339 / ISO 8601 string |
+| `date_parse(str)` | str: string | int or float | Parse RFC 3339 / ISO 8601 strings (including offsets and fractional seconds) into a Unix timestamp. Falls back to legacy numeric-component extraction for malformed legacy inputs, but validates the resulting calendar date |
+| `date_format(dt, format?, tz?)` | dt: float, int, or dict; format: string (default `"%Y-%m-%d %H:%M:%S"`); tz: IANA timezone string | string | Format a timestamp or date dict using chrono/strftime format codes such as `%Y`, `%m`, `%d`, `%H`, `%M`, `%S`, `%A`, `%B`, `%Z`, `%z`, `%:z`, `%f`, `%3f`, and `%s`. Negative pre-epoch timestamps are supported |
+| `date_in_zone(dt, tz)` | dt: float, int, or dict; tz: IANA timezone string | dict | Convert a timestamp into timezone-local fields: `year`, `month`, `day`, `hour`, `minute`, `second`, `weekday`, `zone`, `offset_seconds`, `timestamp`, and `iso8601` |
+| `date_to_zone(dt, tz)` | dt: float, int, or dict; tz: IANA timezone string | string | Convert a timestamp to an RFC 3339 string with the timezone's offset |
+| `date_from_components(parts, tz?)` | parts: dict; tz: IANA timezone string (default UTC) | int or float | Build a Unix timestamp from `{year, month, day, hour?, minute?, second?}` interpreted in the given timezone |
+| `date_add(dt, duration)` | dt: float, int, or dict; duration: duration | int or float | Add a duration to a timestamp |
+| `date_diff(a, b)` | a, b: float, int, or dict | duration | Return the signed duration `a - b` |
+| `duration_ms(n)` | n: number | duration | Create a duration from milliseconds |
+| `duration_seconds(n)` | n: number | duration | Create a duration from seconds |
+| `duration_minutes(n)` | n: number | duration | Create a duration from minutes |
+| `duration_hours(n)` | n: number | duration | Create a duration from hours |
+| `duration_days(n)` | n: number | duration | Create a duration from days |
+| `duration_to_seconds(duration)` | duration: duration | int | Convert a duration to whole seconds |
+| `duration_to_human(duration)` | duration: duration | string | Format a compact duration such as `"3h 14m"` |
+| `weekday_name(dt, tz?)` | dt: float, int, or dict; tz: IANA timezone string | string | Weekday name for a timestamp, optionally in a timezone |
+| `month_name(dt, tz?)` | dt: float, int, or dict; tz: IANA timezone string | string | Month name for a timestamp, optionally in a timezone |
+
+Migration note: `date_parse` now tries standards-compliant RFC 3339 / ISO 8601 parsing first.
+Malformed strings that previously happened to work through digit extraction still fall back to
+that behavior, but impossible calendar dates such as `"2024-02-31"` now throw instead of rolling
+through timestamp arithmetic.
 
 ## Vision
 

@@ -32,15 +32,7 @@ pub(crate) fn vm_level_to_u8(level: &str) -> Option<u8> {
 }
 
 pub(crate) fn vm_format_timestamp_utc() -> String {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default();
-    let total_secs = now.as_secs();
-    let millis = now.subsec_millis();
-
-    let (y, m, d, hour, minute, second, _) = super::datetime::vm_civil_from_timestamp(total_secs);
-
-    format!("{y:04}-{m:02}-{d:02}T{hour:02}:{minute:02}:{second:02}.{millis:03}Z")
+    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
 }
 
 pub(crate) fn vm_escape_json_str(s: &str) -> String {

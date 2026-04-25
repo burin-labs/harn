@@ -89,13 +89,13 @@ fn cancelled_vm_error() -> VmError {
 fn optional_timeout_ms(value: Option<&VmValue>) -> Option<u64> {
     match value {
         Some(VmValue::Int(n)) => Some((*n).max(0) as u64),
-        Some(VmValue::Duration(ms)) => Some(*ms),
+        Some(VmValue::Duration(ms)) => Some((*ms).max(0) as u64),
         Some(VmValue::Dict(dict)) => dict
             .get("timeout_ms")
             .or_else(|| dict.get("max_wait_ms"))
             .and_then(|v| match v {
                 VmValue::Int(n) => Some((*n).max(0) as u64),
-                VmValue::Duration(ms) => Some(*ms),
+                VmValue::Duration(ms) => Some((*ms).max(0) as u64),
                 _ => None,
             }),
         _ => None,
@@ -860,7 +860,7 @@ pub(crate) fn register_concurrency_builtins(vm: &mut Vm) {
 
     vm.register_async_builtin("sleep", |args| async move {
         let ms = match args.first() {
-            Some(VmValue::Duration(ms)) => *ms,
+            Some(VmValue::Duration(ms)) => (*ms).max(0) as u64,
             Some(VmValue::Int(n)) => *n as u64,
             _ => 0,
         };
@@ -975,7 +975,7 @@ pub(crate) fn register_concurrency_builtins(vm: &mut Vm) {
         };
         let timeout_ms = match &args[1] {
             VmValue::Int(n) => (*n).max(0) as u64,
-            VmValue::Duration(ms) => *ms,
+            VmValue::Duration(ms) => (*ms).max(0) as u64,
             _ => 5000,
         };
         let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_millis(timeout_ms);

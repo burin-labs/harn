@@ -145,7 +145,7 @@ impl super::super::Vm {
                 .get(1)
                 .and_then(|a| match a {
                     VmValue::Int(n) => Some(*n as u64),
-                    VmValue::Duration(ms) => Some(*ms),
+                    VmValue::Duration(ms) => Some((*ms).max(0) as u64),
                     _ => None,
                 })
                 .unwrap_or(5000);

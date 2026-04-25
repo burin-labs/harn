@@ -17,6 +17,20 @@ granular archaeology.
   `zip_create`/`zip_extract` builtins. Encoders accept strings or
   bytes, decoders return bytes, tar extraction preserves entry modes,
   and conformance now covers all supported formats.
+- **Timezone-aware datetime stdlib (#614).** `date_parse` now uses
+  chrono-backed RFC 3339 / ISO 8601 parsing before the legacy
+  digit-extraction fallback, `date_format` supports full strftime
+  formatting and pre-epoch timestamps, and `date_now()` includes an
+  additive `iso8601` field. Added `date_now_iso`,
+  `date_in_zone`, `date_to_zone`, `date_from_components`,
+  `date_add`, `date_diff`, `weekday_name`, `month_name`, and
+  duration helpers (`duration_ms`, `duration_seconds`,
+  `duration_minutes`, `duration_hours`, `duration_days`,
+  `duration_to_seconds`, `duration_to_human`) with IANA timezone
+  support via `chrono-tz`. Migration note: malformed inputs that
+  relied on `date_parse` digit extraction still fall back, but
+  impossible calendar dates now throw instead of rolling through
+  timestamp arithmetic.
 
 - **`harn-hostlib` process-lifecycle tools (#568, #606).** Implemented
   `run_command`, `run_test`, `run_build_command`,

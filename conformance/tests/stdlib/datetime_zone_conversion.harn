@@ -1,0 +1,12 @@
+pipeline default() {
+  let ts = date_parse("2026-04-25T17:32:09Z")
+  let la = date_in_zone(ts, "America/Los_Angeles")
+  println(la.year)
+  println(la.month)
+  println(la.day)
+  println(la.hour)
+  println(la.offset_seconds)
+  println(la.zone)
+  println(date_to_zone(ts, "America/Los_Angeles"))
+  println(date_format(ts, "%Y-%m-%d %H:%M %Z %:z", "America/Los_Angeles"))
+}

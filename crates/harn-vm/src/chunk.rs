@@ -367,7 +367,7 @@ pub enum Constant {
     String(String),
     Bool(bool),
     Nil,
-    Duration(u64),
+    Duration(i64),
 }
 
 /// Monomorphic inline-cache state for bytecode instructions that repeatedly

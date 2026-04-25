@@ -380,7 +380,7 @@ fn transport_limit_option(options: &BTreeMap<String, VmValue>, key: &str, defaul
 
 fn receive_timeout_arg(args: &[VmValue], index: usize) -> u64 {
     match args.get(index) {
-        Some(VmValue::Duration(ms)) => *ms,
+        Some(VmValue::Duration(ms)) => (*ms).max(0) as u64,
         Some(value) => value
             .as_int()
             .map(|ms| ms.max(0) as u64)

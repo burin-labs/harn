@@ -135,7 +135,11 @@ impl Compiler {
             Node::BoolLiteral(false) => self.chunk.emit(Op::False, self.line),
             Node::NilLiteral => self.chunk.emit(Op::Nil, self.line),
             Node::DurationLiteral(ms) => {
-                let idx = self.chunk.add_constant(Constant::Duration(*ms));
+                let ms = i64::try_from(*ms).map_err(|_| CompileError {
+                    message: "duration literal is too large".to_string(),
+                    line: self.line,
+                })?;
+                let idx = self.chunk.add_constant(Constant::Duration(ms));
                 self.chunk.emit_u16(Op::Constant, idx, self.line);
             }
             Node::Identifier(name) => {

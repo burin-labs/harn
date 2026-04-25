@@ -286,7 +286,7 @@ impl super::super::Vm {
     pub(super) fn execute_deadline_setup(&mut self) -> Result<(), VmError> {
         let dur_val = self.pop()?;
         let ms = match &dur_val {
-            VmValue::Duration(ms) => *ms,
+            VmValue::Duration(ms) => (*ms).max(0) as u64,
             VmValue::Int(n) => (*n).max(0) as u64,
             _ => 30_000,
         };

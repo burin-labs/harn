@@ -1,8 +1,4 @@
-// Test that date_format rejects negative timestamps
+/** Test that date_format supports negative pre-epoch timestamps */
 pipeline default(task) {
-  let r = try {
-    date_format(-1000, "%Y-%m-%d")
-  }
-  println(is_err(r))
-  println(unwrap_err(r))
+  println(date_format(-1000, "%Y-%m-%d %H:%M:%S"))
 }
