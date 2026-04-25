@@ -2129,9 +2129,14 @@ async fn wait_for_runtime_signal_loop(
 
     #[cfg(not(unix))]
     {
-        tokio::signal::ctrl_c()
-            .await
-            .map_err(|error| format!("failed to wait for Ctrl-C: {error}"))
+        loop {
+            tokio::select! {
+                result = tokio::signal::ctrl_c() => {
+                    return result.map_err(|error| format!("failed to wait for Ctrl-C: {error}"));
+                }
+                Some(request) = ctx.reload_rx.recv() => handle_reload_request(&mut ctx, request).await?,
+            }
+        }
     }
 }
 

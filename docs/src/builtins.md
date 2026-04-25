@@ -1114,8 +1114,8 @@ assert_eq(resp.status, 200)
 ```harn
 let stream = http_stream_open("https://example.com/archive.tar.gz", {
   decompress: false,
-  connect_timeout_ms: 5_000,
-  read_timeout_ms: 30_000,
+  connect_timeout_ms: 5000,
+  read_timeout_ms: 30000,
 })
 let meta = http_stream_info(stream)
 let chunk = http_stream_read(stream, 65536)
