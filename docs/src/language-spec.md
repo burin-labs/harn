@@ -354,6 +354,9 @@ Imports starting with `std/` load embedded stdlib modules:
   (agent_state_init, agent_state_resume, agent_state_write,
   agent_state_read, agent_state_list, agent_state_delete,
   agent_state_handoff)
+- `import "std/postgres"` — Postgres persistence helpers (pg_pool,
+  pg_connect, pg_query, pg_query_one, pg_execute, pg_transaction, pg_close,
+  pg_mock_pool, pg_mock_calls)
 
 These modules are compiled into the interpreter binary and require no
 filesystem access.
@@ -3331,6 +3334,11 @@ Sets are iterable with `for ... in` and support `len()`.
 | `bytes_eq(a, b)` | Constant-time byte equality check |
 | `sha256(str)` | Returns the hex-encoded SHA-256 hash of `str` |
 | `md5(str)` | Returns the hex-encoded MD5 hash of `str` |
+| `hmac_sha256(key, message)` | Returns HMAC-SHA256 as lowercase hex |
+| `hmac_sha256_base64(key, message)` | Returns HMAC-SHA256 as standard base64 |
+| `constant_time_eq(a, b)` | Constant-time string equality for signatures |
+| `signed_url(base, claims, secret, expires_at, options?)` | Returns a short-lived HMAC-SHA256 signed absolute URL or absolute path |
+| `verify_signed_url(url, secret_or_keys, now, options?)` | Verifies a signed URL/path and returns `{valid, reason, signature_valid, expired, expires_at, kid, claims}` |
 | `jwt_sign(alg, claims, private_key)` | Signs a compact JWT/JWS with a PEM private key. Supports `ES256` and `RS256` |
 | `gzip_encode(bytes_or_string, level?)` | Gzip-compresses bytes/string into `bytes`; `level` defaults to `6` and must be `0..9` |
 | `gzip_decode(bytes)` | Gzip-decompresses `bytes` and returns `bytes` |
@@ -3385,10 +3393,50 @@ println(title)
 println(bytes_to_hex(uploaded))
 ```
 
+`signed_url` is the canonical helper for short-lived Harn-hosted receipt and
+artifact links. `base` may be an absolute URL with a host or an absolute path
+beginning with `/`. The helper merges existing query parameters with `claims`,
+adds `exp`, an optional `kid`, and a `sig`, then signs a versioned canonical
+payload with HMAC-SHA256. Query canonicalization percent-encodes each key/value
+with the RFC 3986 unreserved set left plain and sorts encoded pairs
+lexicographically. Path canonicalization preserves `/`, preserves existing
+`%XX` escapes with uppercase hex, and percent-encodes other non-unreserved
+bytes. Signatures use URL-safe base64 without padding. `verify_signed_url`
+removes `sig`, rebuilds the same canonical payload, compares signatures in
+constant time, applies `skew_seconds` if provided, and supports key rotation by
+accepting either one secret string or a `{kid: secret}` dict. Parameter names
+can be overridden with `signature_param`, `expires_param`, and `kid_param`.
+
 `jwt_sign` requires `claims` to be a dict so it can be serialized as a JSON
 claims object. `ES256` expects a P-256 EC private key in PEM form; `RS256`
 expects an RSA private key in PEM form. Unsupported algorithms, non-dict
 claims, and invalid PEM keys throw runtime errors.
+
+### Cookie and session builtins
+
+| Function | Description |
+|---|---|
+| `cookie_parse(headers)` | Parses request `Cookie` header strings, lists, or header dicts into `{cookies, pairs, duplicates, invalid}` |
+| `cookie_serialize(name, value, options?)` | Serializes one `Set-Cookie` header value. Options support `HttpOnly`, `Secure`, `SameSite`, `Path`, `Domain`, `Max-Age`, and `Expires` through snake_case or header-style keys |
+| `cookie_delete(name, options?)` | Serializes a deletion cookie with `Max-Age=0` and an epoch `Expires` timestamp |
+| `cookie_sign(value, secret)` / `cookie_verify(value, secret)` | Signs and verifies a string cookie value using HMAC-SHA256 with URL-safe base64 signatures |
+| `session_sign(payload, secret)` / `session_verify(token, secret)` | Signs and verifies a stateless JSON session payload. Verification returns `{ok, payload, error}` and does not throw on bad signatures |
+| `session_cookie(name, payload, secret, options?)` | Serializes a signed session cookie with secure defaults: `Path=/`, `HttpOnly`, `Secure`, and `SameSite=Lax` |
+| `session_from_cookies(headers, name, secret)` | Parses request cookies and verifies the named cookie as a stateless session token |
+| `cookie_round_trip(request_cookie?, set_cookie)` | Test helper that applies response `Set-Cookie` headers to a request cookie header and returns the next `{cookie_header, cookies}` |
+
+Duplicate request cookies are deterministic: `cookies[name]` keeps the first
+valid value in wire order and `duplicates[name]` records every observed value
+for that name. Invalid cookie segments are skipped and returned in `invalid`.
+
+`cookie_serialize` validates names and values and rejects `SameSite=None`
+without `Secure`. `session_cookie` uses secure dashboard/operator defaults by
+default; callers may override them explicitly for local testing.
+
+Stateless signed sessions put the trusted payload in the cookie token. A
+store-backed session should instead place only an opaque session ID in the
+cookie and keep mutable state in `store_*`, `shared_map_*`, or an application
+database.
 
 ### Regex builtins
 
@@ -3753,6 +3801,35 @@ caller-supplied directory.
 
 Keys must be relative paths inside the session root. Absolute paths and
 parent-directory escapes are rejected.
+
+### std/postgres module
+
+```harn
+import "std/postgres"
+```
+
+Provides VM-native Postgres helpers for durable tenant state, event logs,
+receipts, claims, and audit records.
+
+| Function | Notes |
+|---|---|
+| `pg_pool(source, options?)` | Open a pooled Postgres connection from a URL, `env:NAME`, `secret:namespace/name`, or source dict |
+| `pg_connect(source, options?)` | Open a single-connection Postgres pool |
+| `pg_query(handle, sql, params?)` | Run a parameterized query and return rows as dictionaries |
+| `pg_query_one(handle, sql, params?)` | Return the first row, or `nil` when no rows match |
+| `pg_execute(handle, sql, params?)` | Execute a statement and return `{rows_affected}` |
+| `pg_transaction(pool, callback, options?)` | Pass a scoped transaction handle to a closure, commit on success, rollback on thrown error |
+| `pg_close(pool)` | Close a pool handle |
+| `pg_mock_pool(fixtures)` | Create an in-process fixture-backed Postgres handle for tests |
+| `pg_mock_calls(mock)` | Inspect recorded mock SQL calls |
+
+Dynamic values must be passed through the `params` list rather than string
+interpolation. Compound Harn values bind as JSON. Row decoding covers null,
+boolean, integer and float types, text, `uuid`, `json`/`jsonb`, `bytea`, date,
+time, timestamp, and timestamptz. Transaction options may include `settings`,
+applied with transaction-local `set_config(name, value, true)` for RLS
+policies. Schema migrations are host-owned; Harn does not maintain a migration
+ledger.
 
 ## Workspace manifest (`harn.toml`)
 
