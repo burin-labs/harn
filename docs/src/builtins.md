@@ -676,6 +676,8 @@ println(md5("hello"))     // 5d41402abc4b2a76b9719d911017c592
 | `hmac_sha256(key, message)` | key: string, message: string | string | HMAC-SHA256 as a lowercase hex-encoded string. Most webhook providers (GitHub, Stripe) send signatures in this form |
 | `hmac_sha256_base64(key, message)` | key: string, message: string | string | HMAC-SHA256 as standard base64 (used by Slack-style signatures) |
 | `constant_time_eq(a, b)` | a: string, b: string | bool | Timing-safe string equality. Always use this to compare HMAC signatures — plain `==` can leak the signature byte-by-byte through timing differences |
+| `signed_url(base, claims, secret, expires_at, options?)` | base: string, claims: dict, secret: string, expires_at: int, options: dict | string | Create a short-lived HMAC-SHA256 signed absolute URL or absolute path. The signature is URL-safe base64 without padding |
+| `verify_signed_url(url, secret_or_keys, now, options?)` | url: string, secret_or_keys: string or dict, now: int, options: dict | dict | Verify a signed URL/path with constant-time signature comparison and optional clock skew. Returns `{valid, reason, signature_valid, expired, expires_at, kid, claims}` |
 | `jwt_sign(alg, claims, private_key)` | alg: string, claims: dict, private_key: string | string | Sign a compact JWT/JWS using a PEM private key. Supports `ES256` with P-256 EC private keys and `RS256` with RSA private keys |
 
 Example (GitHub-style webhook signature verification):
@@ -686,6 +688,42 @@ if !constant_time_eq(signature, request_signature) {
   throw "invalid signature"
 }
 ```
+
+Example (short-lived receipt or artifact link):
+
+```harn
+let expires_at = timestamp() + 300
+let link = signed_url(
+  "https://portal.example.test/receipts/r_123",
+  {artifact: "transcript.json"},
+  receipt_secret,
+  expires_at,
+  {kid: "v2"},
+)
+
+let verified = verify_signed_url(
+  link,
+  {v1: old_receipt_secret, v2: receipt_secret},
+  timestamp(),
+  {skew_seconds: 30},
+)
+if !verified.valid {
+  throw "invalid receipt link: " + verified.reason
+}
+```
+
+`signed_url` accepts either an absolute URL with a host or an absolute path
+beginning with `/`. Existing query parameters and `claims` are merged, reserved
+parameters are then added, and the query is canonicalized by percent-encoding
+each key/value with RFC 3986 unreserved characters left plain and sorting
+encoded pairs lexicographically. Paths preserve `/`, preserve existing `%XX`
+escapes with uppercase hex, and percent-encode other non-unreserved bytes. The
+signed payload is the version marker, canonical resource (origin + path for
+URLs, path for paths), and canonical query without the signature. Default
+parameter names are `exp`, `kid`, and `sig`; override them with `expires_param`,
+`kid_param`, and `signature_param` in `options`. `kid` is optional when signing;
+verification can use either one secret string or a dict mapping key ids to
+secrets.
 
 JWT signing expects `claims` to be a JSON object. The private key must be PEM encoded:
 `ES256` accepts PKCS#8 EC private keys such as `-----BEGIN PRIVATE KEY-----`;
