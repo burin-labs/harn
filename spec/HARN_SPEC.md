@@ -352,6 +352,9 @@ Imports starting with `std/` load embedded stdlib modules:
   (agent_state_init, agent_state_resume, agent_state_write,
   agent_state_read, agent_state_list, agent_state_delete,
   agent_state_handoff)
+- `import "std/postgres"` — Postgres persistence helpers (pg_pool,
+  pg_connect, pg_query, pg_query_one, pg_execute, pg_transaction, pg_close,
+  pg_mock_pool, pg_mock_calls)
 
 These modules are compiled into the interpreter binary and require no
 filesystem access.
@@ -3796,6 +3799,35 @@ caller-supplied directory.
 
 Keys must be relative paths inside the session root. Absolute paths and
 parent-directory escapes are rejected.
+
+### std/postgres module
+
+```harn
+import "std/postgres"
+```
+
+Provides VM-native Postgres helpers for durable tenant state, event logs,
+receipts, claims, and audit records.
+
+| Function | Notes |
+|---|---|
+| `pg_pool(source, options?)` | Open a pooled Postgres connection from a URL, `env:NAME`, `secret:namespace/name`, or source dict |
+| `pg_connect(source, options?)` | Open a single-connection Postgres pool |
+| `pg_query(handle, sql, params?)` | Run a parameterized query and return rows as dictionaries |
+| `pg_query_one(handle, sql, params?)` | Return the first row, or `nil` when no rows match |
+| `pg_execute(handle, sql, params?)` | Execute a statement and return `{rows_affected}` |
+| `pg_transaction(pool, callback, options?)` | Pass a scoped transaction handle to a closure, commit on success, rollback on thrown error |
+| `pg_close(pool)` | Close a pool handle |
+| `pg_mock_pool(fixtures)` | Create an in-process fixture-backed Postgres handle for tests |
+| `pg_mock_calls(mock)` | Inspect recorded mock SQL calls |
+
+Dynamic values must be passed through the `params` list rather than string
+interpolation. Compound Harn values bind as JSON. Row decoding covers null,
+boolean, integer and float types, text, `uuid`, `json`/`jsonb`, `bytea`, date,
+time, timestamp, and timestamptz. Transaction options may include `settings`,
+applied with transaction-local `set_config(name, value, true)` for RLS
+policies. Schema migrations are host-owned; Harn does not maintain a migration
+ledger.
 
 ## Workspace manifest (`harn.toml`)
 

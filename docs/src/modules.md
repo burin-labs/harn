@@ -335,6 +335,26 @@ backend:
 See [Agent state](./agent-state.md) for the handle format, conflict
 policies, and backend details.
 
+### std/postgres
+
+Postgres persistence helpers for durable tenant state, event logs, receipts,
+claims, and audit records:
+
+| Function | Description |
+|---|---|
+| `pg_pool(source, options?)` | Open a pooled Postgres connection from a URL, `env:NAME`, `secret:namespace/name`, or source dict |
+| `pg_connect(source, options?)` | Open a single-connection pool |
+| `pg_query(handle, sql, params?)` | Run a parameterized query and return rows as dictionaries |
+| `pg_query_one(handle, sql, params?)` | Return the first row, or `nil` when no rows match |
+| `pg_execute(handle, sql, params?)` | Run a statement and return `{rows_affected}` |
+| `pg_transaction(pool, callback, options?)` | Run a closure with a scoped transaction handle, committing on success and rolling back on error |
+| `pg_close(pool)` | Close a pool handle |
+| `pg_mock_pool(fixtures)` | Create fixture-backed Postgres test handle |
+| `pg_mock_calls(mock)` | Inspect mock SQL calls |
+
+See [Postgres](./postgres.md) for parameter binding, transaction settings,
+RLS examples, pool options, and migration boundaries.
+
 ### std/runtime
 
 Generic host/runtime helpers that are useful across many hosts:

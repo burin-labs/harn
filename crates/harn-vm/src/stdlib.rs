@@ -28,6 +28,7 @@ mod math;
 mod monitors;
 mod multipart;
 mod path;
+mod postgres;
 pub mod process;
 mod project;
 mod project_catalog;
@@ -115,6 +116,7 @@ pub fn register_agent_stdlib(vm: &mut Vm) {
     skills::register_skill_builtins(vm);
     agents_daemon::register_daemon_builtins(vm);
     triggers_stdlib::register_trigger_builtins(vm);
+    postgres::register_postgres_builtins(vm);
     waitpoints::register_waitpoint_builtins(vm);
     monitors::register_monitor_builtins(vm);
     hitl::register_hitl_builtins(vm);
@@ -182,6 +184,7 @@ pub fn reset_stdlib_state() {
     monitors::reset_monitor_state();
     waitpoints::reset_waitpoint_state();
     waitpoint::reset_waitpoint_state();
+    postgres::reset_postgres_state();
     supervisor::reset_supervisor_state();
     agents::records::reset_eval_metrics();
     agents::records::reset_friction_events();
