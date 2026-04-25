@@ -311,7 +311,8 @@ impl<'a> Linter<'a> {
                 self.lint_node(object);
             }
 
-            Node::SubscriptAccess { object, index } => {
+            Node::SubscriptAccess { object, index }
+            | Node::OptionalSubscriptAccess { object, index } => {
                 if let Node::FunctionCall { name, .. } = &object.node {
                     if Self::is_boundary_api(name) {
                         self.diagnostics.push(LintDiagnostic {

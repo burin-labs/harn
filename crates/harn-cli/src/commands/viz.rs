@@ -393,6 +393,9 @@ fn summarize_node(node: &SNode) -> String {
         Node::SubscriptAccess { object, index } => {
             format!("{}[{}]", inline_label(object), inline_label(index))
         }
+        Node::OptionalSubscriptAccess { object, index } => {
+            format!("{}?[{}]", inline_label(object), inline_label(index))
+        }
         Node::SliceAccess { object, .. } => format!("{}[..]", inline_label(object)),
         Node::BinaryOp { op, left, right } => {
             format!("{} {} {}", inline_label(left), op, inline_label(right))
@@ -535,6 +538,9 @@ fn inline_label(node: &SNode) -> String {
         }
         Node::SubscriptAccess { object, index } => {
             format!("{}[{}]", inline_label(object), inline_label(index))
+        }
+        Node::OptionalSubscriptAccess { object, index } => {
+            format!("{}?[{}]", inline_label(object), inline_label(index))
         }
         Node::BinaryOp { op, left, right } => {
             format!("{} {} {}", inline_label(left), op, inline_label(right))

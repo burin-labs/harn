@@ -458,12 +458,36 @@ impl Parser {
                     );
                 }
             } else if self.check(&TokenKind::Question) {
-                // Postfix try `expr?` vs ternary `expr ? a : b`: if the next token
-                // could start a ternary branch, let parse_ternary handle the `?`.
+                // Disambiguate `?[index]` (optional subscript), `expr?`
+                // (postfix try), and `expr ? a : b` (ternary).
+                //
+                // Optional subscript wins eagerly when the next token is `[`
+                // because `cond ? [a, b, c] : ...` is rare and writing it as
+                // `cond ? ([a, b, c]) : ...` is a fine workaround, while
+                // `obj?[k]` is the natural way to chain into a list/dict.
                 let next_pos = self.pos + 1;
-                let is_ternary = self.tokens.get(next_pos).is_some_and(|t| {
+                let next_kind = self.tokens.get(next_pos).map(|t| &t.kind);
+                if matches!(next_kind, Some(TokenKind::LBracket)) {
+                    let start = expr.span;
+                    self.advance(); // consume ?
+                    self.advance(); // consume [
+                    let index = self.parse_expression()?;
+                    self.consume(&TokenKind::RBracket, "]")?;
+                    expr = spanned(
+                        Node::OptionalSubscriptAccess {
+                            object: Box::new(expr),
+                            index: Box::new(index),
+                        },
+                        Span::merge(start, self.prev_span()),
+                    );
+                    continue;
+                }
+                // Postfix try `expr?` vs ternary `expr ? a : b`: if the next
+                // token could start a ternary branch, let parse_ternary
+                // handle the `?`.
+                let is_ternary = next_kind.is_some_and(|kind| {
                     matches!(
-                        t.kind,
+                        kind,
                         TokenKind::Identifier(_)
                             | TokenKind::IntLiteral(_)
                             | TokenKind::FloatLiteral(_)
@@ -473,7 +497,6 @@ impl Parser {
                             | TokenKind::False
                             | TokenKind::Nil
                             | TokenKind::LParen
-                            | TokenKind::LBracket
                             | TokenKind::LBrace
                             | TokenKind::Not
                             | TokenKind::Minus

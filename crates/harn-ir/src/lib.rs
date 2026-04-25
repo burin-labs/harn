@@ -1051,7 +1051,8 @@ impl<'a> HandlerIrBuilder<'a> {
             | Node::UnaryOp {
                 operand: object, ..
             } => self.build_expr(object, incoming),
-            Node::SubscriptAccess { object, index } => {
+            Node::SubscriptAccess { object, index }
+            | Node::OptionalSubscriptAccess { object, index } => {
                 let exits = self.build_expr(object, incoming);
                 self.build_expr(index, exits)
             }

@@ -656,7 +656,8 @@ fn collect_symbols(
         Node::PropertyAccess { object, .. } | Node::OptionalPropertyAccess { object, .. } => {
             recurse!(object, scope_span);
         }
-        Node::SubscriptAccess { object, index } => {
+        Node::SubscriptAccess { object, index }
+        | Node::OptionalSubscriptAccess { object, index } => {
             recurse!(object, scope_span);
             recurse!(index, scope_span);
         }

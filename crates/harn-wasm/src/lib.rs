@@ -495,8 +495,15 @@ impl SyncInterpreter {
                     _ => Ok(Val::Nil),
                 }
             }
-            Node::SubscriptAccess { object, index } => {
+            Node::SubscriptAccess { object, index }
+            | Node::OptionalSubscriptAccess { object, index } => {
                 let obj = self.eval(object)?;
+                if matches!(
+                    (&obj, &node.node),
+                    (Val::Nil, Node::OptionalSubscriptAccess { .. })
+                ) {
+                    return Ok(Val::Nil);
+                }
                 let idx = self.eval(index)?;
                 match (&obj, &idx) {
                     (Val::List(items), Val::Int(i)) if *i >= 0 => {

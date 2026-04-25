@@ -377,6 +377,7 @@ pub(crate) fn is_simple_expr(node: &SNode) -> bool {
             | Node::PropertyAccess { .. }
             | Node::OptionalPropertyAccess { .. }
             | Node::SubscriptAccess { .. }
+            | Node::OptionalSubscriptAccess { .. }
             | Node::SliceAccess { .. }
             | Node::Ternary { .. }
             | Node::Assignment { .. }

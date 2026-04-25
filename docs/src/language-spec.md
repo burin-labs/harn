@@ -501,6 +501,7 @@ unary              ::= ('!' | '-') unary | postfix
 postfix            ::= primary (member_access
                                | optional_member_access
                                | subscript_access
+                               | optional_subscript_access
                                | slice_access
                                | call
                                | try_unwrap)*
@@ -508,6 +509,8 @@ member_access      ::= '.' IDENTIFIER ['(' arg_list ')']
 optional_member_access
                     ::= '?.' IDENTIFIER ['(' arg_list ')']
 subscript_access   ::= '[' expression ']'
+optional_subscript_access
+                    ::= '?[' expression ']'
 slice_access       ::= '[' [expression] ':' [expression] ']'
 call               ::= '(' arg_list ')'    (* only when postfix base is an identifier *)
 try_unwrap         ::= '?'                 (* expr? on Result *)
@@ -575,7 +578,7 @@ From lowest to highest binding:
 | 9 | `*` `/` `%` | Left | Multiplicative |
 | 10 | `**` | Right | Exponentiation |
 | 11 | `!` `-` (unary) | Right (prefix) | Unary |
-| 12 | `.` `?.` `[]` `[:]` `()` `?` | Left | Postfix |
+| 12 | `.` `?.` `[]` `?[]` `[:]` `()` `?` | Left | Postfix |
 
 ### Multiline expressions
 

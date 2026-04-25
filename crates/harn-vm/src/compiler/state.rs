@@ -803,7 +803,9 @@ impl Compiler {
             Node::PropertyAccess { object, .. } | Node::OptionalPropertyAccess { object, .. } => {
                 self.root_var_name(object)
             }
-            Node::SubscriptAccess { object, .. } => self.root_var_name(object),
+            Node::SubscriptAccess { object, .. } | Node::OptionalSubscriptAccess { object, .. } => {
+                self.root_var_name(object)
+            }
             _ => None,
         }
     }

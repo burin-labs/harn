@@ -638,7 +638,15 @@ module.exports = grammar({
       ),
 
     subscript_expression: ($) =>
-      prec.left(11, seq(field("object", $._expression), "[", $._expression, "]")),
+      prec.left(
+        11,
+        seq(
+          field("object", $._expression),
+          choice("[", "?["),
+          $._expression,
+          "]"
+        )
+      ),
 
     slice_expression: ($) =>
       prec.left(

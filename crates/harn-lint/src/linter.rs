@@ -383,6 +383,7 @@ impl<'a> Linter<'a> {
             Node::PropertyAccess { object, .. }
             | Node::OptionalPropertyAccess { object, .. }
             | Node::SubscriptAccess { object, .. }
+            | Node::OptionalSubscriptAccess { object, .. }
             | Node::SliceAccess { object, .. } => Self::root_var_name(object),
             _ => None,
         }
@@ -472,7 +473,8 @@ impl<'a> Linter<'a> {
             | Node::UnaryOp {
                 operand: object, ..
             } => self.analyze_secret_scan_expr(object, scanned),
-            Node::SubscriptAccess { object, index } => {
+            Node::SubscriptAccess { object, index }
+            | Node::OptionalSubscriptAccess { object, index } => {
                 let state = self.analyze_secret_scan_expr(object, scanned);
                 self.analyze_secret_scan_expr(index, state)
             }

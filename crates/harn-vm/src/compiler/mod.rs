@@ -232,6 +232,11 @@ impl Compiler {
                 self.compile_node(index)?;
                 self.chunk.emit(Op::Subscript, self.line);
             }
+            Node::OptionalSubscriptAccess { object, index } => {
+                self.compile_node(object)?;
+                self.compile_node(index)?;
+                self.chunk.emit(Op::SubscriptOpt, self.line);
+            }
             Node::SliceAccess { object, start, end } => {
                 self.compile_node(object)?;
                 if let Some(s) = start {

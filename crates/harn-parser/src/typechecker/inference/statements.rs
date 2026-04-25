@@ -948,7 +948,8 @@ impl TypeChecker {
                 }
                 self.check_node(object, scope);
             }
-            Node::SubscriptAccess { object, index } => {
+            Node::SubscriptAccess { object, index }
+            | Node::OptionalSubscriptAccess { object, index } => {
                 if self.strict_types {
                     if let Node::FunctionCall { name, args } = &object.node {
                         if builtin_signatures::is_untyped_boundary_source(name) {

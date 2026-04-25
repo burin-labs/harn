@@ -79,6 +79,9 @@ pub enum Op {
     BuildDict,
     /// Subscript access: stack has [object, index]. Pushes result.
     Subscript,
+    /// Optional subscript (`obj?[index]`). Like `Subscript` but pushes nil
+    /// instead of indexing when the object is nil.
+    SubscriptOpt,
     /// Slice access: stack has [object, start_or_nil, end_or_nil]. Pushes sublist/substring.
     Slice,
 
@@ -282,6 +285,7 @@ impl Op {
         Op::BuildList,
         Op::BuildDict,
         Op::Subscript,
+        Op::SubscriptOpt,
         Op::Slice,
         Op::GetProperty,
         Op::GetPropertyOpt,
@@ -862,6 +866,7 @@ impl Chunk {
                     out.push_str(&format!("BUILD_DICT {:>4}\n", count));
                 }
                 x if x == Op::Subscript as u8 => out.push_str("SUBSCRIPT\n"),
+                x if x == Op::SubscriptOpt as u8 => out.push_str("SUBSCRIPT_OPT\n"),
                 x if x == Op::Slice as u8 => out.push_str("SLICE\n"),
                 x if x == Op::GetProperty as u8 => {
                     let idx = self.read_u16(ip);

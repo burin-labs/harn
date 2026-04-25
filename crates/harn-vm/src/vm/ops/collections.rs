@@ -159,9 +159,13 @@ impl super::super::Vm {
         self.stack.push(VmValue::Dict(Rc::new(map)));
     }
 
-    pub(super) fn execute_subscript(&mut self) -> Result<(), VmError> {
+    pub(super) fn execute_subscript(&mut self, optional: bool) -> Result<(), VmError> {
         let idx = self.pop()?;
         let obj = self.pop()?;
+        if optional && matches!(obj, VmValue::Nil) {
+            self.stack.push(VmValue::Nil);
+            return Ok(());
+        }
         let result = match (&obj, &idx) {
             (VmValue::List(items), VmValue::Int(i)) => {
                 if *i < 0 {
