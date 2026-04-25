@@ -1,0 +1,9 @@
+pipeline default() {
+  let base = date_parse("2026-04-25T00:00:00Z")
+  let later = date_add(base, duration_hours(2))
+  println(date_to_zone(later, "UTC"))
+  println(duration_to_seconds(date_diff(later, base)))
+  println(duration_to_human(duration_minutes(194)))
+  println(duration_to_human(date_diff(base, later)))
+  println(date_format(date_add(base, duration_ms(1500)), "%H:%M:%S.%3f"))
+}

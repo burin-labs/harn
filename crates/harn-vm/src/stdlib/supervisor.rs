@@ -1137,7 +1137,7 @@ fn string_value(value: &str) -> VmValue {
 
 fn duration_ms(value: &VmValue) -> Option<u64> {
     match value {
-        VmValue::Duration(ms) => Some(*ms),
+        VmValue::Duration(ms) => Some((*ms).max(0) as u64),
         VmValue::Int(ms) => Some((*ms).max(0) as u64),
         VmValue::Float(ms) => Some(ms.max(0.0) as u64),
         VmValue::String(text) => parse_duration_string(text),

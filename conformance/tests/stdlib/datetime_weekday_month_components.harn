@@ -1,0 +1,11 @@
+pipeline default() {
+  let ts = date_parse("2026-04-25T00:00:00Z")
+  println(weekday_name(ts))
+  println(month_name(ts))
+  println(date_format(ts, "%A %B %j %s"))
+  let built = date_from_components(
+    {year: 2026, month: 4, day: 25, hour: 10, minute: 32, second: 9},
+    "America/Los_Angeles",
+  )
+  println(date_to_zone(built, "UTC"))
+}

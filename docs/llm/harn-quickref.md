@@ -1086,6 +1086,22 @@ query_stringify([{key: "name", value: "ali ce"}])
 - JWT verification: `jwt_verify(alg, token, key)` (HS256 / RS256 /
   ES256). Pairs with the existing `jwt_sign`.
 
+### Date/time builtins
+
+- `date_now() -> {year, month, day, hour, minute, second, weekday, timestamp, iso8601}`.
+- `date_now_iso() -> string` returns current UTC as RFC 3339.
+- `date_parse(str) -> int | float` parses RFC 3339 / ISO 8601 first, then falls back to
+  legacy digit extraction for malformed date-ish strings.
+- `date_format(ts, fmt?, tz?) -> string` supports chrono/strftime codes including `%A`,
+  `%B`, `%Z`, `%z`, `%:z`, `%f`, `%3f`, and `%s`; negative pre-epoch timestamps work.
+- `date_in_zone(ts, "America/Los_Angeles") -> dict` and `date_to_zone(ts, tz) -> string`
+  convert through IANA timezone names.
+- `date_from_components({year, month, day, hour?, minute?, second?}, tz?) -> int | float`.
+- Durations: `duration_ms/seconds/minutes/hours/days(n) -> duration`,
+  `date_add(ts, d)`, `date_diff(a, b) -> duration`,
+  `duration_to_seconds(d)`, `duration_to_human(d)`.
+- `weekday_name(ts, tz?)` and `month_name(ts, tz?)` return localized English names.
+
 ### HTTP builtins
 
 - `http_get/post/put/patch/delete/request` return

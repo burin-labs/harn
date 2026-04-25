@@ -1,0 +1,6 @@
+pipeline default() {
+  let ts = date_parse("1969-12-31T23:00:00Z")
+  println(ts)
+  println(date_format(ts, "%Y-%m-%d %H:%M:%S"))
+  println(date_to_zone(ts, "America/Los_Angeles"))
+}

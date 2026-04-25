@@ -248,16 +248,9 @@ pub(crate) fn register_process_builtins(vm: &mut Vm) {
     });
 
     vm.register_builtin("date_iso", |_args, _out| {
-        use crate::stdlib::datetime::vm_civil_from_timestamp;
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default();
-        let total_secs = now.as_secs();
-        let millis = now.subsec_millis();
-        let (y, m, d, hour, minute, second, _) = vm_civil_from_timestamp(total_secs);
-        Ok(VmValue::String(Rc::from(format!(
-            "{y:04}-{m:02}-{d:02}T{hour:02}:{minute:02}:{second:02}.{millis:03}Z"
-        ))))
+        Ok(VmValue::String(Rc::from(
+            chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+        )))
     });
 
     vm.register_builtin("cwd", |_args, _out| {

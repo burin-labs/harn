@@ -18,4 +18,7 @@ pipeline test(task) {
   let parsed = json_parse(json)
   log(parsed.x)
   log(parsed.y)
+  let full_range = json_parse(json_stringify({pre_epoch: -2208988800, max_i64: 9223372036854775807}))
+  log(full_range.pre_epoch)
+  log(full_range.max_i64)
 }

@@ -5,6 +5,7 @@ pipeline default() {
   println(now.month >= 1)
   println(now.month <= 12)
   println(now.timestamp > 0.0)
+  println(contains(now.iso8601, "T"))
   // date_format with a known timestamp
   // 2024-01-15 00:00:00 UTC = 1705276800
   let formatted = date_format(1705276800.0, "%Y-%m-%d")
