@@ -1,13 +1,2664 @@
 openapi: 3.1.0
 info:
-  title: Harn Agents Protocol v1
+  title: Harn Agents Protocol API
   version: agents-protocol-2026-04-25
+  summary: OpenAPI description for the Harn Agents Protocol v1 REST surface.
   description: |
-    OpenAPI component anchor for the Harn Agents Protocol v1 REST surface.
-    REST paths are defined by the narrative spec as they land; shared resource
-    schemas live under components so endpoint specs can reuse one contract.
-paths: {}
+    Machine-readable REST and SSE contract for managed Harn agents. The
+    narrative protocol requirements live in `spec/AGENTS_PROTOCOL.md`; this
+    document fixes the v1 paths, request bodies, response envelopes, and
+    resource schemas used by SDKs and conformance fixtures.
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+  contact:
+    name: Burin Labs
+    url: https://github.com/burin-labs/harn
+externalDocs:
+  description: Harn Agents Protocol v1 narrative specification.
+  url: https://harnlang.com/spec/agents-protocol/v1
+servers:
+  - url: https://api.harnlang.com
+    description: Harn Cloud production API.
+  - url: http://localhost:8080
+    description: Local Harness development server.
+security:
+  - bearerAuth: []
+tags:
+  - name: Discovery
+  - name: Personas
+  - name: Workspaces
+  - name: Sessions
+  - name: Tasks
+  - name: Branches
+  - name: Messages
+  - name: Artifacts
+  - name: Events
+  - name: Receipts
+  - name: Memories
+  - name: Vaults
+  - name: Connectors
+  - name: Skills
+  - name: Outcomes
+  - name: Quotas
+
+paths:
+  /v1:
+    get:
+      tags: [Discovery]
+      operationId: getProtocolDiscovery
+      summary: Discover supported protocol versions and capabilities.
+      security: []
+      responses:
+        "200":
+          description: Discovery metadata.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Discovery"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /v1/agent-card:
+    get:
+      tags: [Discovery]
+      operationId: getAgentCard
+      summary: Retrieve the public AgentCard for this Harness.
+      security: []
+      responses:
+        "200":
+          description: AgentCard.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentCard"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /v1/personas:
+    get:
+      tags: [Personas]
+      operationId: listPersonas
+      summary: List Personas visible to the caller.
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Persona list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PersonaList"
+        default:
+          $ref: "#/components/responses/Error"
+    post:
+      tags: [Personas]
+      operationId: createPersona
+      summary: Create or import a Persona definition.
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePersonaRequest"
+      responses:
+        "201":
+          description: Created Persona.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Persona"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /v1/personas/{persona_id}:
+    get:
+      tags: [Personas]
+      operationId: getPersona
+      summary: Retrieve a Persona.
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/PersonaId"
+      responses:
+        "200":
+          description: Persona.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Persona"
+        default:
+          $ref: "#/components/responses/Error"
+    patch:
+      tags: [Personas]
+      operationId: updatePersona
+      summary: Update mutable Persona metadata and policy links.
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/PersonaId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdatePersonaRequest"
+      responses:
+        "200":
+          description: Updated Persona.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Persona"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /v1/workspaces:
+    get:
+      tags: [Workspaces]
+      operationId: listWorkspaces
+      summary: List Workspaces visible to the caller.
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Workspace list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceList"
+        default:
+          $ref: "#/components/responses/Error"
+    post:
+      tags: [Workspaces]
+      operationId: createWorkspace
+      summary: Create a Workspace isolation boundary.
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateWorkspaceRequest"
+      responses:
+        "201":
+          description: Created Workspace.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Workspace"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /v1/workspaces/{workspace_id}:
+    get:
+      tags: [Workspaces]
+      operationId: getWorkspace
+      summary: Retrieve a Workspace.
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: Workspace.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Workspace"
+        default:
+          $ref: "#/components/responses/Error"
+    patch:
+      tags: [Workspaces]
+      operationId: updateWorkspace
+      summary: Update mutable Workspace metadata and policy links.
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateWorkspaceRequest"
+      responses:
+        "200":
+          description: Updated Workspace.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Workspace"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /v1/sessions:
+    get:
+      tags: [Sessions]
+      operationId: listSessions
+      summary: List Sessions.
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/WorkspaceIdQuery"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Session list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionList"
+        default:
+          $ref: "#/components/responses/Error"
+    post:
+      tags: [Sessions]
+      operationId: createSession
+      summary: Create a Session bound to a Persona and Workspace.
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSessionRequest"
+      responses:
+        "201":
+          description: Created Session.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /v1/sessions/{session_id}:
+    get:
+      tags: [Sessions]
+      operationId: getSession
+      summary: Retrieve a Session.
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/SessionId"
+      responses:
+        "200":
+          description: Session.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+        default:
+          $ref: "#/components/responses/Error"
+    patch:
+      tags: [Sessions]
+      operationId: updateSession
+      summary: Update mutable Session metadata.
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/SessionId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateSessionRequest"
+      responses:
+        "200":
+          description: Updated Session.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /v1/sessions/{session_id}/close:
+    post:
+      tags: [Sessions]
+      operationId: closeSession
+      summary: Close an active Session.
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/SessionId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Closed Session.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /v1/sessions/{session_id}/fork:
+    post:
+      tags: [Sessions]
+      operationId: forkSession
+      summary: Fork a Session transcript into a new Session.
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/SessionId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ForkSessionRequest"
+      responses:
+        "201":
+          description: Forked Session.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /v1/sessions/{session_id}/messages:
+    get:
+      tags: [Messages]
+      operationId: listSessionMessages
+      summary: List Messages in a Session.
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/SessionId"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Message list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageList"
+        default:
+          $ref: "#/components/responses/Error"
+    post:
+      tags: [Messages]
+      operationId: appendSessionMessage
+      summary: Append a user, tool, or host Message to a Session.
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/SessionId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AppendMessageRequest"
+      responses:
+        "201":
+          description: Created Message.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Message"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /v1/sessions/{session_id}/tasks:
+    get:
+      tags: [Tasks]
+      operationId: listSessionTasks
+      summary: List Tasks in a Session.
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/SessionId"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Task list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskList"
+        default:
+          $ref: "#/components/responses/Error"
+    post:
+      tags: [Tasks]
+      operationId: submitSessionTask
+      summary: Submit a Task in a Session.
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/SessionId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SubmitTaskRequest"
+      responses:
+        "202":
+          description: Accepted Task.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /v1/sessions/{session_id}/branches:
+    get:
+      tags: [Branches]
+      operationId: listSessionBranches
+      summary: List Branches in a Session.
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/SessionId"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Branch list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BranchList"
+        default:
+          $ref: "#/components/responses/Error"
+    post:
+      tags: [Branches]
+      operationId: createSessionBranch
+      summary: Create a sub-agent or alternate transcript Branch.
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/SessionId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateBranchRequest"
+      responses:
+        "201":
+          description: Created Branch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Branch"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /v1/sessions/{session_id}/events:
+    get:
+      tags: [Events]
+      operationId: listSessionEvents
+      summary: Read a Session event range.
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/SessionId"
+        - $ref: "#/components/parameters/AfterEventId"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Event range.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EventList"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /v1/sessions/{session_id}/events/stream:
+    get:
+      tags: [Events]
+      operationId: streamSessionEvents
+      summary: Stream Session Events over Server-Sent Events.
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/SessionId"
+        - $ref: "#/components/parameters/LastEventId"
+      responses:
+        "200":
+          description: SSE stream of Event objects.
+          content:
+            text/event-stream:
+              schema:
+                $ref: "#/components/schemas/EventStream"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /v1/tasks:
+    get:
+      tags: [Tasks]
+      operationId: listTasks
+      summary: List Tasks visible to the caller.
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/WorkspaceIdQuery"
+        - $ref: "#/components/parameters/SessionIdQuery"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Task list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskList"
+        default:
+          $ref: "#/components/responses/Error"
+    post:
+      tags: [Tasks]
+      operationId: submitTask
+      summary: Submit a Task when the Session is supplied in the body.
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SubmitTaskRequest"
+      responses:
+        "202":
+          description: Accepted Task.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /v1/tasks/{task_id}:
+    get:
+      tags: [Tasks]
+      operationId: getTask
+      summary: Retrieve a Task.
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/TaskId"
+      responses:
+        "200":
+          description: Task.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /v1/tasks/{task_id}/cancel:
+    post:
+      tags: [Tasks]
+      operationId: cancelTask
+      summary: Request cooperative Task cancellation.
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/TaskId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CancelTaskRequest"
+      responses:
+        "200":
+          description: Updated Task.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /v1/tasks/{task_id}/messages:
+    post:
+      tags: [Messages]
+      operationId: appendTaskMessage
+      summary: Send input, interrupt, or tool-confirmation content to a Task.
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/TaskId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AppendTaskMessageRequest"
+      responses:
+        "201":
+          description: Created Message.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Message"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /v1/tasks/{task_id}/events:
+    get:
+      tags: [Events]
+      operationId: listTaskEvents
+      summary: Read a Task event range.
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/TaskId"
+        - $ref: "#/components/parameters/AfterEventId"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Event range.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EventList"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /v1/tasks/{task_id}/stream:
+    get:
+      tags: [Events]
+      operationId: streamTaskEvents
+      summary: Stream Task Events over Server-Sent Events.
+      description: WebSocket upgrades may use the same path for host-mediated interactive flows.
+      x-websocket-path: true
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/TaskId"
+        - $ref: "#/components/parameters/LastEventId"
+      responses:
+        "200":
+          description: SSE stream of Event objects.
+          content:
+            text/event-stream:
+              schema:
+                $ref: "#/components/schemas/EventStream"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /v1/tasks/{task_id}/receipts:
+    get:
+      tags: [Receipts]
+      operationId: listTaskReceipts
+      summary: List Receipts associated with a Task.
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/TaskId"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Receipt list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReceiptList"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /v1/branches/{branch_id}:
+    get:
+      tags: [Branches]
+      operationId: getBranch
+      summary: Retrieve a Branch.
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/BranchId"
+      responses:
+        "200":
+          description: Branch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Branch"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /v1/messages/{message_id}:
+    get:
+      tags: [Messages]
+      operationId: getMessage
+      summary: Retrieve a Message.
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/MessageId"
+      responses:
+        "200":
+          description: Message.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Message"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /v1/artifacts:
+    get:
+      tags: [Artifacts]
+      operationId: listArtifacts
+      summary: List Artifacts.
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/WorkspaceIdQuery"
+        - $ref: "#/components/parameters/SessionIdQuery"
+        - $ref: "#/components/parameters/TaskIdQuery"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Artifact list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ArtifactList"
+        default:
+          $ref: "#/components/responses/Error"
+    post:
+      tags: [Artifacts]
+      operationId: registerArtifact
+      summary: Register an Artifact or mediated upload URI.
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterArtifactRequest"
+      responses:
+        "201":
+          description: Created Artifact.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Artifact"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /v1/artifacts/{artifact_id}:
+    get:
+      tags: [Artifacts]
+      operationId: getArtifact
+      summary: Retrieve Artifact metadata.
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/ArtifactId"
+      responses:
+        "200":
+          description: Artifact.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Artifact"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /v1/artifacts/{artifact_id}/content:
+    get:
+      tags: [Artifacts]
+      operationId: downloadArtifactContent
+      summary: Download Artifact content when access is mediated by the API.
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/ArtifactId"
+      responses:
+        "200":
+          description: Artifact bytes.
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        default:
+          $ref: "#/components/responses/Error"
+
+  /v1/events:
+    get:
+      tags: [Events]
+      operationId: listEvents
+      summary: Read a global or filtered Event range.
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/WorkspaceIdQuery"
+        - $ref: "#/components/parameters/SessionIdQuery"
+        - $ref: "#/components/parameters/TaskIdQuery"
+        - $ref: "#/components/parameters/AfterEventId"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Event range.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EventList"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /v1/events/{event_id}:
+    get:
+      tags: [Events]
+      operationId: getEvent
+      summary: Retrieve an Event.
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/EventId"
+      responses:
+        "200":
+          description: Event.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Event"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /v1/events/stream:
+    get:
+      tags: [Events]
+      operationId: streamEvents
+      summary: Stream global or filtered Events over Server-Sent Events.
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/WorkspaceIdQuery"
+        - $ref: "#/components/parameters/SessionIdQuery"
+        - $ref: "#/components/parameters/TaskIdQuery"
+        - $ref: "#/components/parameters/LastEventId"
+      responses:
+        "200":
+          description: SSE stream of Event objects.
+          content:
+            text/event-stream:
+              schema:
+                $ref: "#/components/schemas/EventStream"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /v1/receipts/{receipt_id}:
+    get:
+      tags: [Receipts]
+      operationId: getReceipt
+      summary: Retrieve a Receipt resource.
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/ReceiptId"
+      responses:
+        "200":
+          description: Receipt.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Receipt"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /v1/receipts/{receipt_id}/verify:
+    post:
+      tags: [Receipts]
+      operationId: verifyReceipt
+      summary: Verify a Receipt.
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/ReceiptId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VerifyReceiptRequest"
+      responses:
+        "200":
+          description: Receipt verification result.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReceiptVerification"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /v1/memories:
+    get:
+      tags: [Memories]
+      operationId: listMemories
+      summary: List Memory records.
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/WorkspaceIdQuery"
+        - $ref: "#/components/parameters/SessionIdQuery"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Memory list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemoryList"
+        default:
+          $ref: "#/components/responses/Error"
+    post:
+      tags: [Memories]
+      operationId: createMemory
+      summary: Create a durable Memory record.
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateMemoryRequest"
+      responses:
+        "201":
+          description: Created Memory.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Memory"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /v1/memories/{memory_id}:
+    get:
+      tags: [Memories]
+      operationId: getMemory
+      summary: Retrieve a Memory record.
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/MemoryId"
+      responses:
+        "200":
+          description: Memory.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Memory"
+        default:
+          $ref: "#/components/responses/Error"
+    delete:
+      tags: [Memories]
+      operationId: deleteMemory
+      summary: Delete or tombstone a Memory record.
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/MemoryId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "204":
+          description: Memory deleted or tombstoned.
+        default:
+          $ref: "#/components/responses/Error"
+
+  /v1/vaults:
+    get:
+      tags: [Vaults]
+      operationId: listVaults
+      summary: List Vault metadata without secret values.
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/WorkspaceIdQuery"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Vault list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VaultList"
+        default:
+          $ref: "#/components/responses/Error"
+    post:
+      tags: [Vaults]
+      operationId: createVault
+      summary: Create or register a Vault.
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateVaultRequest"
+      responses:
+        "201":
+          description: Created Vault.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Vault"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /v1/vaults/{vault_id}:
+    get:
+      tags: [Vaults]
+      operationId: getVault
+      summary: Retrieve Vault metadata without secret values.
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/VaultId"
+      responses:
+        "200":
+          description: Vault.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Vault"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /v1/connectors:
+    get:
+      tags: [Connectors]
+      operationId: listConnectors
+      summary: List Connectors.
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/WorkspaceIdQuery"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Connector list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConnectorList"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /v1/connectors/{connector_id}:
+    get:
+      tags: [Connectors]
+      operationId: getConnector
+      summary: Retrieve a Connector.
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/ConnectorId"
+      responses:
+        "200":
+          description: Connector.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Connector"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /v1/skills:
+    get:
+      tags: [Skills]
+      operationId: listSkills
+      summary: List Skills.
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Skill list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SkillList"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /v1/skills/{skill_id}:
+    get:
+      tags: [Skills]
+      operationId: getSkill
+      summary: Retrieve a Skill.
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/SkillId"
+      responses:
+        "200":
+          description: Skill.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Skill"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /v1/outcomes:
+    get:
+      tags: [Outcomes]
+      operationId: listOutcomes
+      summary: List Outcomes.
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/TaskIdQuery"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Outcome list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OutcomeList"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /v1/outcomes/{outcome_id}:
+    get:
+      tags: [Outcomes]
+      operationId: getOutcome
+      summary: Retrieve an Outcome.
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/OutcomeId"
+      responses:
+        "200":
+          description: Outcome.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Outcome"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /v1/quotas:
+    get:
+      tags: [Quotas]
+      operationId: listQuotas
+      summary: List Quotas.
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Quota list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuotaList"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /v1/quotas/{quota_id}:
+    get:
+      tags: [Quotas]
+      operationId: getQuota
+      summary: Retrieve a Quota.
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/QuotaId"
+      responses:
+        "200":
+          description: Quota.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Quota"
+        default:
+          $ref: "#/components/responses/Error"
+
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: API key or OAuth2 access token
+    oauth2ClientCredentials:
+      type: oauth2
+      flows:
+        clientCredentials:
+          tokenUrl: https://api.harnlang.com/oauth/token
+          scopes:
+            sessions:read: Read Sessions.
+            sessions:write: Create or mutate Sessions.
+            tasks:read: Read Tasks.
+            tasks:write: Submit or cancel Tasks.
+            events:read: Read or stream Events.
+            artifacts:read: Read Artifacts.
+            artifacts:write: Register Artifacts.
+            receipts:read: Read Receipts.
+
+  parameters:
+    ProtocolVersion:
+      name: Harn-Agents-Protocol-Version
+      in: header
+      required: true
+      description: Date-stamped Harn Agents Protocol version.
+      schema:
+        type: string
+        enum: [agents-protocol-2026-04-25]
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: Client-generated key used to safely retry non-idempotent writes.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 255
+    Limit:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 50
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      schema:
+        type: string
+    AfterEventId:
+      name: after_event_id
+      in: query
+      required: false
+      schema:
+        type: string
+    LastEventId:
+      name: Last-Event-ID
+      in: header
+      required: false
+      description: SSE resume cursor.
+      schema:
+        type: string
+    WorkspaceIdQuery:
+      name: workspace_id
+      in: query
+      required: false
+      schema:
+        type: string
+    SessionIdQuery:
+      name: session_id
+      in: query
+      required: false
+      schema:
+        type: string
+    TaskIdQuery:
+      name: task_id
+      in: query
+      required: false
+      schema:
+        type: string
+    PersonaId:
+      name: persona_id
+      in: path
+      required: true
+      schema:
+        type: string
+    WorkspaceId:
+      name: workspace_id
+      in: path
+      required: true
+      schema:
+        type: string
+    SessionId:
+      name: session_id
+      in: path
+      required: true
+      schema:
+        type: string
+    TaskId:
+      name: task_id
+      in: path
+      required: true
+      schema:
+        type: string
+    BranchId:
+      name: branch_id
+      in: path
+      required: true
+      schema:
+        type: string
+    MessageId:
+      name: message_id
+      in: path
+      required: true
+      schema:
+        type: string
+    ArtifactId:
+      name: artifact_id
+      in: path
+      required: true
+      schema:
+        type: string
+    EventId:
+      name: event_id
+      in: path
+      required: true
+      schema:
+        type: string
+    ReceiptId:
+      name: receipt_id
+      in: path
+      required: true
+      schema:
+        type: string
+    MemoryId:
+      name: memory_id
+      in: path
+      required: true
+      schema:
+        type: string
+    VaultId:
+      name: vault_id
+      in: path
+      required: true
+      schema:
+        type: string
+    ConnectorId:
+      name: connector_id
+      in: path
+      required: true
+      schema:
+        type: string
+    SkillId:
+      name: skill_id
+      in: path
+      required: true
+      schema:
+        type: string
+    OutcomeId:
+      name: outcome_id
+      in: path
+      required: true
+      schema:
+        type: string
+    QuotaId:
+      name: quota_id
+      in: path
+      required: true
+      schema:
+        type: string
+
+  responses:
+    Error:
+      description: Protocol error response.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
   schemas:
+    JsonObject:
+      type: object
+      additionalProperties: true
+    JsonValue:
+      description: Any JSON value.
+    Metadata:
+      type: object
+      additionalProperties: true
+      default: {}
+    Timestamp:
+      type: string
+      format: date-time
+    ResourcePointer:
+      type: object
+      required: [object, id]
+      properties:
+        object:
+          type: string
+        id:
+          type: string
+    PageInfo:
+      type: object
+      required: [has_more]
+      properties:
+        next_cursor:
+          type: [string, "null"]
+        has_more:
+          type: boolean
+    ResourceEnvelope:
+      type: object
+      required: [id, object, created_at, updated_at, metadata]
+      properties:
+        id:
+          type: string
+        object:
+          type: string
+        created_at:
+          $ref: "#/components/schemas/Timestamp"
+        updated_at:
+          $ref: "#/components/schemas/Timestamp"
+        metadata:
+          $ref: "#/components/schemas/Metadata"
+
+    Discovery:
+      type: object
+      required: [object, protocol_family, current_version, supported_versions, capabilities]
+      properties:
+        object:
+          type: string
+          enum: [protocol_discovery]
+        protocol_family:
+          type: string
+          enum: [harn_agents_protocol]
+        current_version:
+          type: string
+          enum: [agents-protocol-2026-04-25]
+        supported_versions:
+          type: array
+          items:
+            type: string
+        capabilities:
+          type: object
+          properties:
+            rest:
+              type: boolean
+            sse:
+              type: boolean
+            websocket:
+              type: boolean
+            receipts:
+              type: boolean
+            replay:
+              type: boolean
+
+    Persona:
+      allOf:
+        - $ref: "#/components/schemas/ResourceEnvelope"
+        - type: object
+          required: [object, name, version, entry_workflow, description, autonomy_tier, receipt_policy]
+          properties:
+            object:
+              type: string
+              enum: [persona]
+            name:
+              type: string
+            version:
+              type: string
+            entry_workflow:
+              type: string
+            description:
+              type: string
+            autonomy_tier:
+              $ref: "#/components/schemas/AutonomyTier"
+            receipt_policy:
+              type: string
+              enum: [required, optional, disabled]
+            tools:
+              type: array
+              items:
+                type: string
+            capabilities:
+              type: array
+              items:
+                type: string
+            triggers:
+              type: array
+              items:
+                $ref: "#/components/schemas/JsonObject"
+            schedules:
+              type: array
+              items:
+                $ref: "#/components/schemas/JsonObject"
+            handoffs:
+              type: array
+              items:
+                type: string
+            context_packs:
+              type: array
+              items:
+                type: string
+            evals:
+              type: array
+              items:
+                type: string
+            owner:
+              type: [string, "null"]
+            model_policy:
+              $ref: "#/components/schemas/JsonObject"
+            rollout_policy:
+              $ref: "#/components/schemas/JsonObject"
+            quota_id:
+              type: [string, "null"]
+    PersonaList:
+      allOf:
+        - $ref: "#/components/schemas/PaginatedList"
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: "#/components/schemas/Persona"
+    CreatePersonaRequest:
+      type: object
+      required: [name, version, entry_workflow, description, autonomy_tier, receipt_policy]
+      properties:
+        module_ref:
+          type: string
+          description: Optional harn://owner/name@version module reference.
+        name:
+          type: string
+        version:
+          type: string
+        entry_workflow:
+          type: string
+        description:
+          type: string
+        autonomy_tier:
+          $ref: "#/components/schemas/AutonomyTier"
+        receipt_policy:
+          type: string
+          enum: [required, optional, disabled]
+        metadata:
+          $ref: "#/components/schemas/Metadata"
+    UpdatePersonaRequest:
+      type: object
+      properties:
+        description:
+          type: string
+        receipt_policy:
+          type: string
+          enum: [required, optional, disabled]
+        quota_id:
+          type: [string, "null"]
+        metadata:
+          $ref: "#/components/schemas/Metadata"
+
+    Workspace:
+      allOf:
+        - $ref: "#/components/schemas/ResourceEnvelope"
+        - type: object
+          required: [object, name, root, default_branch_id]
+          properties:
+            object:
+              type: string
+              enum: [workspace]
+            name:
+              type: string
+            root:
+              type: string
+            default_branch_id:
+              type: [string, "null"]
+            host:
+              type: [string, "null"]
+            repository:
+              type: [string, "null"]
+            tenant_id:
+              type: [string, "null"]
+            capabilities:
+              type: array
+              items:
+                type: string
+            connectors:
+              type: array
+              items:
+                type: string
+            quota_id:
+              type: [string, "null"]
+    WorkspaceList:
+      allOf:
+        - $ref: "#/components/schemas/PaginatedList"
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: "#/components/schemas/Workspace"
+    CreateWorkspaceRequest:
+      type: object
+      required: [name, root]
+      properties:
+        name:
+          type: string
+        root:
+          type: string
+        image:
+          type: [string, "null"]
+        packages:
+          type: array
+          items:
+            type: string
+        network_policy:
+          $ref: "#/components/schemas/JsonObject"
+        sandbox_backend:
+          type: [string, "null"]
+        metadata:
+          $ref: "#/components/schemas/Metadata"
+    UpdateWorkspaceRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        capabilities:
+          type: array
+          items:
+            type: string
+        quota_id:
+          type: [string, "null"]
+        metadata:
+          $ref: "#/components/schemas/Metadata"
+
+    Session:
+      allOf:
+        - $ref: "#/components/schemas/ResourceEnvelope"
+        - type: object
+          required: [object, workspace_id, state, transcript]
+          properties:
+            object:
+              type: string
+              enum: [session]
+            workspace_id:
+              type: string
+            state:
+              type: string
+              enum: [ACTIVE, IDLE, PAUSED, CLOSED, FAILED]
+            transcript:
+              oneOf:
+                - $ref: "#/components/schemas/JsonObject"
+                - type: string
+                  format: uri-reference
+            persona_id:
+              type: [string, "null"]
+            root_session_id:
+              type: [string, "null"]
+            parent_session_id:
+              type: [string, "null"]
+            branch_id:
+              type: [string, "null"]
+            last_event_id:
+              type: [string, "null"]
+            summary:
+              type: [string, "null"]
+            expires_at:
+              oneOf:
+                - $ref: "#/components/schemas/Timestamp"
+                - type: "null"
+    SessionList:
+      allOf:
+        - $ref: "#/components/schemas/PaginatedList"
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: "#/components/schemas/Session"
+    CreateSessionRequest:
+      type: object
+      required: [workspace_id]
+      properties:
+        workspace_id:
+          type: string
+        persona_id:
+          type: [string, "null"]
+        vault_ids:
+          type: array
+          items:
+            type: string
+        memory_ids:
+          type: array
+          items:
+            type: string
+        skill_ids:
+          type: array
+          items:
+            type: string
+        initial_messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/MessageInput"
+        metadata:
+          $ref: "#/components/schemas/Metadata"
+    UpdateSessionRequest:
+      type: object
+      properties:
+        summary:
+          type: [string, "null"]
+        metadata:
+          $ref: "#/components/schemas/Metadata"
+    ForkSessionRequest:
+      type: object
+      properties:
+        at_event_id:
+          type: [string, "null"]
+        branch_id:
+          type: [string, "null"]
+        metadata:
+          $ref: "#/components/schemas/Metadata"
+
+    Task:
+      allOf:
+        - $ref: "#/components/schemas/ResourceEnvelope"
+        - type: object
+          required: [object, session_id, workspace_id, status, input, created_by]
+          properties:
+            object:
+              type: string
+              enum: [task]
+            session_id:
+              type: string
+            workspace_id:
+              type: string
+            status:
+              $ref: "#/components/schemas/TaskStatus"
+            input:
+              oneOf:
+                - $ref: "#/components/schemas/Message"
+                - $ref: "#/components/schemas/JsonObject"
+            created_by:
+              type: string
+            persona_id:
+              type: [string, "null"]
+            branch_id:
+              type: [string, "null"]
+            parent_task_id:
+              type: [string, "null"]
+            assigned_agent_id:
+              type: [string, "null"]
+            receipt_id:
+              type: [string, "null"]
+            outcome_id:
+              type: [string, "null"]
+            quota_id:
+              type: [string, "null"]
+            started_at:
+              oneOf:
+                - $ref: "#/components/schemas/Timestamp"
+                - type: "null"
+            completed_at:
+              oneOf:
+                - $ref: "#/components/schemas/Timestamp"
+                - type: "null"
+            canceled_at:
+              oneOf:
+                - $ref: "#/components/schemas/Timestamp"
+                - type: "null"
+            failure:
+              oneOf:
+                - $ref: "#/components/schemas/Failure"
+                - type: "null"
+    TaskStatus:
+      type: string
+      enum: [SUBMITTED, WORKING, INPUT_REQUIRED, AUTH_REQUIRED, COMPLETED, FAILED, CANCELED]
+    TaskList:
+      allOf:
+        - $ref: "#/components/schemas/PaginatedList"
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: "#/components/schemas/Task"
+    SubmitTaskRequest:
+      type: object
+      required: [input]
+      properties:
+        session_id:
+          type: string
+          description: Required on the top-level `/v1/tasks` submit path; inferred on nested Session paths.
+        workspace_id:
+          type: string
+        persona_id:
+          type: [string, "null"]
+        branch_id:
+          type: [string, "null"]
+        parent_task_id:
+          type: [string, "null"]
+        input:
+          oneOf:
+            - $ref: "#/components/schemas/MessageInput"
+            - $ref: "#/components/schemas/JsonObject"
+        metadata:
+          $ref: "#/components/schemas/Metadata"
+    CancelTaskRequest:
+      type: object
+      properties:
+        reason:
+          type: [string, "null"]
+
+    Branch:
+      allOf:
+        - $ref: "#/components/schemas/ResourceEnvelope"
+        - type: object
+          required: [object, workspace_id, kind, base_ref]
+          properties:
+            object:
+              type: string
+              enum: [branch]
+            workspace_id:
+              type: string
+            kind:
+              type: string
+              enum: [workspace, session, task, sandbox]
+            base_ref:
+              type: string
+            parent_branch_id:
+              type: [string, "null"]
+            session_id:
+              type: [string, "null"]
+            task_id:
+              type: [string, "null"]
+            worktree_uri:
+              type: [string, "null"]
+            created_by:
+              type: [string, "null"]
+            merged_into:
+              type: [string, "null"]
+    BranchList:
+      allOf:
+        - $ref: "#/components/schemas/PaginatedList"
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: "#/components/schemas/Branch"
+    CreateBranchRequest:
+      type: object
+      required: [kind, base_ref]
+      properties:
+        kind:
+          type: string
+          enum: [workspace, session, task, sandbox]
+        base_ref:
+          type: string
+        parent_branch_id:
+          type: [string, "null"]
+        task_id:
+          type: [string, "null"]
+        metadata:
+          $ref: "#/components/schemas/Metadata"
+
+    Message:
+      allOf:
+        - $ref: "#/components/schemas/ResourceEnvelope"
+        - type: object
+          required: [object, role, parts]
+          properties:
+            object:
+              type: string
+              enum: [message]
+            session_id:
+              type: [string, "null"]
+            task_id:
+              type: [string, "null"]
+            role:
+              type: string
+              enum: [user, assistant, system, tool, agent]
+            parts:
+              type: array
+              items:
+                $ref: "#/components/schemas/Part"
+    MessageInput:
+      type: object
+      required: [role, parts]
+      properties:
+        role:
+          type: string
+          enum: [user, assistant, system, tool, agent]
+        parts:
+          type: array
+          items:
+            $ref: "#/components/schemas/PartInput"
+        metadata:
+          $ref: "#/components/schemas/Metadata"
+    MessageList:
+      allOf:
+        - $ref: "#/components/schemas/PaginatedList"
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: "#/components/schemas/Message"
+    AppendMessageRequest:
+      type: object
+      required: [message]
+      properties:
+        message:
+          $ref: "#/components/schemas/MessageInput"
+    AppendTaskMessageRequest:
+      type: object
+      required: [kind, message]
+      properties:
+        kind:
+          type: string
+          enum: [input, interrupt, tool_confirmation]
+        message:
+          $ref: "#/components/schemas/MessageInput"
+    Part:
+      oneOf:
+        - $ref: "#/components/schemas/TextPart"
+        - $ref: "#/components/schemas/JsonPart"
+        - $ref: "#/components/schemas/ToolCallPart"
+        - $ref: "#/components/schemas/ToolResultPart"
+        - $ref: "#/components/schemas/ArtifactRefPart"
+        - $ref: "#/components/schemas/FileRefPart"
+        - $ref: "#/components/schemas/ImageRefPart"
+    PartInput:
+      $ref: "#/components/schemas/Part"
+    PartVisibility:
+      type: string
+      enum: [public, internal, receipt_only]
+    TextPart:
+      type: object
+      required: [type, text, visibility]
+      properties:
+        type:
+          type: string
+          enum: [text]
+        text:
+          type: string
+        visibility:
+          $ref: "#/components/schemas/PartVisibility"
+    JsonPart:
+      type: object
+      required: [type, value, visibility]
+      properties:
+        type:
+          type: string
+          enum: [json]
+        value:
+          $ref: "#/components/schemas/JsonValue"
+        visibility:
+          $ref: "#/components/schemas/PartVisibility"
+    ToolCallPart:
+      type: object
+      required: [type, tool_call_id, name, input, visibility]
+      properties:
+        type:
+          type: string
+          enum: [tool_call]
+        tool_call_id:
+          type: string
+        name:
+          type: string
+        input:
+          $ref: "#/components/schemas/JsonObject"
+        visibility:
+          $ref: "#/components/schemas/PartVisibility"
+    ToolResultPart:
+      type: object
+      required: [type, tool_call_id, output, status, visibility]
+      properties:
+        type:
+          type: string
+          enum: [tool_result]
+        tool_call_id:
+          type: string
+        output:
+          $ref: "#/components/schemas/JsonValue"
+        status:
+          type: string
+          enum: [ok, error]
+        visibility:
+          $ref: "#/components/schemas/PartVisibility"
+    ArtifactRefPart:
+      type: object
+      required: [type, artifact_id, visibility]
+      properties:
+        type:
+          type: string
+          enum: [artifact_ref]
+        artifact_id:
+          type: string
+        visibility:
+          $ref: "#/components/schemas/PartVisibility"
+    FileRefPart:
+      type: object
+      required: [type, uri, mime_type, visibility]
+      properties:
+        type:
+          type: string
+          enum: [file_ref]
+        uri:
+          type: string
+        mime_type:
+          type: string
+        visibility:
+          $ref: "#/components/schemas/PartVisibility"
+    ImageRefPart:
+      type: object
+      required: [type, artifact_id, mime_type, visibility]
+      properties:
+        type:
+          type: string
+          enum: [image_ref]
+        artifact_id:
+          type: string
+        mime_type:
+          type: string
+        visibility:
+          $ref: "#/components/schemas/PartVisibility"
+
+    Artifact:
+      allOf:
+        - $ref: "#/components/schemas/ResourceEnvelope"
+        - type: object
+          required: [object, kind, mime_type, uri, visibility, sha256]
+          properties:
+            object:
+              type: string
+              enum: [artifact]
+            kind:
+              type: string
+              enum: [file, patch, image, log, diff, receipt, snapshot, dataset, other]
+            mime_type:
+              type: string
+            uri:
+              type: [string, "null"]
+              format: uri-reference
+            visibility:
+              $ref: "#/components/schemas/PartVisibility"
+            sha256:
+              type: [string, "null"]
+              pattern: "^[a-fA-F0-9]{64}$"
+            workspace_id:
+              type: [string, "null"]
+            session_id:
+              type: [string, "null"]
+            task_id:
+              type: [string, "null"]
+            receipt_id:
+              type: [string, "null"]
+    ArtifactList:
+      allOf:
+        - $ref: "#/components/schemas/PaginatedList"
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: "#/components/schemas/Artifact"
+    RegisterArtifactRequest:
+      type: object
+      required: [kind, mime_type, visibility]
+      properties:
+        kind:
+          type: string
+          enum: [file, patch, image, log, diff, receipt, snapshot, dataset, other]
+        mime_type:
+          type: string
+        uri:
+          type: [string, "null"]
+        visibility:
+          $ref: "#/components/schemas/PartVisibility"
+        sha256:
+          type: [string, "null"]
+          pattern: "^[a-fA-F0-9]{64}$"
+        workspace_id:
+          type: [string, "null"]
+        session_id:
+          type: [string, "null"]
+        task_id:
+          type: [string, "null"]
+        metadata:
+          $ref: "#/components/schemas/Metadata"
+
+    AgentCard:
+      allOf:
+        - $ref: "#/components/schemas/ResourceEnvelope"
+        - type: object
+          required: [object, name, description, protocol_version, interfaces, skills]
+          properties:
+            object:
+              type: string
+              enum: [agent_card]
+            name:
+              type: string
+            description:
+              type: string
+            protocol_version:
+              type: string
+            interfaces:
+              type: array
+              items:
+                $ref: "#/components/schemas/AgentInterface"
+            skills:
+              type: array
+              items:
+                $ref: "#/components/schemas/Skill"
+            persona_ids:
+              type: array
+              items:
+                type: string
+            capabilities:
+              type: array
+              items:
+                type: string
+            auth_schemes:
+              type: array
+              items:
+                type: string
+            receipt_policy:
+              type: [string, "null"]
+            quotas:
+              type: array
+              items:
+                $ref: "#/components/schemas/Quota"
+            provider:
+              $ref: "#/components/schemas/JsonObject"
+            public_url:
+              type: [string, "null"]
+              format: uri
+            signature:
+              oneOf:
+                - $ref: "#/components/schemas/CardSignature"
+                - type: "null"
+    AgentInterface:
+      type: object
+      required: [transport, url]
+      properties:
+        transport:
+          type: string
+          enum: [rest, sse, websocket, a2a, mcp, acp]
+        url:
+          type: string
+          format: uri-reference
+    CardSignature:
+      type: object
+      required: [algorithm, key_id, value]
+      properties:
+        algorithm:
+          type: string
+        key_id:
+          type: string
+        value:
+          type: string
+
+    Event:
+      allOf:
+        - $ref: "#/components/schemas/ResourceEnvelope"
+        - type: object
+          required: [object, event, resource, sequence, payload]
+          properties:
+            object:
+              type: string
+              enum: [event]
+            event:
+              type: string
+            resource:
+              $ref: "#/components/schemas/ResourcePointer"
+            sequence:
+              type: integer
+              minimum: 0
+            payload:
+              $ref: "#/components/schemas/JsonObject"
+            trace_id:
+              type: [string, "null"]
+            span_id:
+              type: [string, "null"]
+            session_id:
+              type: [string, "null"]
+            task_id:
+              type: [string, "null"]
+            workspace_id:
+              type: [string, "null"]
+            actor:
+              type: [string, "null"]
+            idempotency_key:
+              type: [string, "null"]
+            previous_event_id:
+              type: [string, "null"]
+            receipt_id:
+              type: [string, "null"]
+            replayed:
+              type: boolean
+              default: false
+    EventList:
+      allOf:
+        - $ref: "#/components/schemas/PaginatedList"
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: "#/components/schemas/Event"
+    EventStream:
+      type: string
+      description: UTF-8 Server-Sent Events. Each frame `data` field is an Event JSON object.
+
     Receipt:
-      $ref: ../agents-protocol-receipts/schemas/receipt-2026-04-25.schema.json
+      allOf:
+        - $ref: "#/components/schemas/ResourceEnvelope"
+        - type: object
+          required: [object, subject, format, summary, issued_at, issuer]
+          properties:
+            object:
+              type: string
+              enum: [receipt]
+            subject:
+              $ref: "#/components/schemas/ResourcePointer"
+            format:
+              type: string
+            summary:
+              type: string
+            issued_at:
+              $ref: "#/components/schemas/Timestamp"
+            issuer:
+              type: string
+            wire:
+              $ref: "#/components/schemas/ReceiptWireEnvelope"
+            verification:
+              oneOf:
+                - $ref: "#/components/schemas/ReceiptVerification"
+                - type: "null"
+      externalDocs:
+        description: Receipt wire format sibling specification.
+        url: https://github.com/burin-labs/harn/issues/635
+    ReceiptWireEnvelope:
+      type: object
+      description: |
+        Placeholder OpenAPI projection of the v1 receipt-format envelope. The
+        sibling receipt-format spec owns canonicalization, signatures, hash
+        chains, and redaction. Receipt resources reference that envelope here
+        through `$ref` so generated clients can carry the wire receipt without
+        treating it as an untyped trace.
+      required: [schema_version, subject, issued_at]
+      properties:
+        schema_version:
+          type: string
+        subject:
+          $ref: "#/components/schemas/ResourcePointer"
+        issued_at:
+          $ref: "#/components/schemas/Timestamp"
+        payload:
+          $ref: "#/components/schemas/JsonObject"
+        signature:
+          oneOf:
+            - $ref: "#/components/schemas/CardSignature"
+            - type: "null"
+    ReceiptList:
+      allOf:
+        - $ref: "#/components/schemas/PaginatedList"
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: "#/components/schemas/Receipt"
+    VerifyReceiptRequest:
+      type: object
+      properties:
+        trust_anchor:
+          type: [string, "null"]
+        at_time:
+          oneOf:
+            - $ref: "#/components/schemas/Timestamp"
+            - type: "null"
+    ReceiptVerification:
+      type: object
+      required: [valid, checked_at]
+      properties:
+        valid:
+          type: boolean
+        checked_at:
+          $ref: "#/components/schemas/Timestamp"
+        reason:
+          type: [string, "null"]
+        details:
+          $ref: "#/components/schemas/JsonObject"
+
+    Memory:
+      allOf:
+        - $ref: "#/components/schemas/ResourceEnvelope"
+        - type: object
+          required: [object, scope, owner_id, content, provenance]
+          properties:
+            object:
+              type: string
+              enum: [memory]
+            scope:
+              type: string
+              enum: [persona, session, workspace, tenant]
+            owner_id:
+              type: string
+            content:
+              oneOf:
+                - type: string
+                - $ref: "#/components/schemas/JsonObject"
+                - $ref: "#/components/schemas/ArtifactRefPart"
+            provenance:
+              $ref: "#/components/schemas/JsonObject"
+            expires_at:
+              oneOf:
+                - $ref: "#/components/schemas/Timestamp"
+                - type: "null"
+            embedding_ref:
+              type: [string, "null"]
+            visibility:
+              $ref: "#/components/schemas/PartVisibility"
+            redaction_policy:
+              $ref: "#/components/schemas/JsonObject"
+            confidence:
+              type: [number, "null"]
+              minimum: 0
+              maximum: 1
+    MemoryList:
+      allOf:
+        - $ref: "#/components/schemas/PaginatedList"
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: "#/components/schemas/Memory"
+    CreateMemoryRequest:
+      type: object
+      required: [scope, owner_id, content, provenance]
+      properties:
+        scope:
+          type: string
+          enum: [persona, session, workspace, tenant]
+        owner_id:
+          type: string
+        content:
+          $ref: "#/components/schemas/JsonValue"
+        provenance:
+          $ref: "#/components/schemas/JsonObject"
+        metadata:
+          $ref: "#/components/schemas/Metadata"
+
+    Vault:
+      allOf:
+        - $ref: "#/components/schemas/ResourceEnvelope"
+        - type: object
+          required: [object, workspace_id, provider, capabilities]
+          properties:
+            object:
+              type: string
+              enum: [vault]
+            workspace_id:
+              type: [string, "null"]
+            provider:
+              type: string
+            capabilities:
+              type: array
+              items:
+                type: string
+    VaultList:
+      allOf:
+        - $ref: "#/components/schemas/PaginatedList"
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: "#/components/schemas/Vault"
+    CreateVaultRequest:
+      type: object
+      required: [provider, capabilities]
+      properties:
+        workspace_id:
+          type: [string, "null"]
+        provider:
+          type: string
+        capabilities:
+          type: array
+          items:
+            type: string
+        metadata:
+          $ref: "#/components/schemas/Metadata"
+
+    Connector:
+      allOf:
+        - $ref: "#/components/schemas/ResourceEnvelope"
+        - type: object
+          required: [object, provider, workspace_id, status, event_kinds]
+          properties:
+            object:
+              type: string
+              enum: [connector]
+            provider:
+              type: string
+            workspace_id:
+              type: string
+            status:
+              type: string
+              enum: [ACTIVE, PAUSED, FAILED, DISABLED]
+            event_kinds:
+              type: array
+              items:
+                type: string
+            dedupe_policy:
+              $ref: "#/components/schemas/JsonObject"
+            auth:
+              $ref: "#/components/schemas/JsonObject"
+            webhook:
+              $ref: "#/components/schemas/JsonObject"
+            polling:
+              $ref: "#/components/schemas/JsonObject"
+            target_persona_id:
+              type: [string, "null"]
+            target_session_id:
+              type: [string, "null"]
+    ConnectorList:
+      allOf:
+        - $ref: "#/components/schemas/PaginatedList"
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: "#/components/schemas/Connector"
+
+    Skill:
+      allOf:
+        - $ref: "#/components/schemas/ResourceEnvelope"
+        - type: object
+          required: [object, name, description, input_schema, output_schema]
+          properties:
+            object:
+              type: string
+              enum: [skill]
+            name:
+              type: string
+            description:
+              type: string
+            input_schema:
+              oneOf:
+                - $ref: "#/components/schemas/JsonObject"
+                - type: "null"
+            output_schema:
+              oneOf:
+                - $ref: "#/components/schemas/JsonObject"
+                - type: "null"
+            source:
+              type: [string, "null"]
+            version:
+              type: [string, "null"]
+            capabilities:
+              type: array
+              items:
+                type: string
+            requires_approval:
+              type: boolean
+              default: false
+            deprecated:
+              type: boolean
+              default: false
+    SkillList:
+      allOf:
+        - $ref: "#/components/schemas/PaginatedList"
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: "#/components/schemas/Skill"
+
+    Outcome:
+      allOf:
+        - $ref: "#/components/schemas/ResourceEnvelope"
+        - type: object
+          required: [object, task_id, status, summary]
+          properties:
+            object:
+              type: string
+              enum: [outcome]
+            task_id:
+              type: string
+            status:
+              type: string
+              enum: [SUCCEEDED, FAILED, CANCELED]
+            summary:
+              type: string
+            messages:
+              type: array
+              items:
+                $ref: "#/components/schemas/Message"
+            artifacts:
+              type: array
+              items:
+                $ref: "#/components/schemas/Artifact"
+            handoffs:
+              type: array
+              items:
+                $ref: "#/components/schemas/JsonObject"
+            receipt_id:
+              type: [string, "null"]
+            failure:
+              oneOf:
+                - $ref: "#/components/schemas/Failure"
+                - type: "null"
+            cost:
+              $ref: "#/components/schemas/JsonObject"
+            metrics:
+              $ref: "#/components/schemas/JsonObject"
+    OutcomeList:
+      allOf:
+        - $ref: "#/components/schemas/PaginatedList"
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: "#/components/schemas/Outcome"
+
+    Quota:
+      allOf:
+        - $ref: "#/components/schemas/ResourceEnvelope"
+        - type: object
+          required: [object, scope, limits, usage]
+          properties:
+            object:
+              type: string
+              enum: [quota]
+            scope:
+              type: string
+              enum: [persona, workspace, tenant, organization]
+            limits:
+              type: object
+              additionalProperties:
+                type: number
+            usage:
+              type: object
+              additionalProperties:
+                type: number
+            reset_at:
+              oneOf:
+                - $ref: "#/components/schemas/Timestamp"
+                - type: "null"
+            hard_limit:
+              type: boolean
+              default: true
+            soft_limit:
+              type: boolean
+              default: false
+            exhaustion_reason:
+              type: [string, "null"]
+            last_receipt_id:
+              type: [string, "null"]
+    QuotaList:
+      allOf:
+        - $ref: "#/components/schemas/PaginatedList"
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: "#/components/schemas/Quota"
+
+    AutonomyTier:
+      type: string
+      enum: [shadow, suggest, act_with_approval, act_auto]
+    Failure:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        details:
+          $ref: "#/components/schemas/JsonObject"
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          $ref: "#/components/schemas/Error"
+    Error:
+      type: object
+      required: [code, message, type]
+      properties:
+        code:
+          type: string
+          enum:
+            - invalid_request
+            - invalid_state_transition
+            - unauthenticated
+            - permission_denied
+            - resource_not_found
+            - conflict
+            - idempotency_key_reused
+            - cursor_expired
+            - payload_too_large
+            - policy_violation
+            - resource_locked
+            - unsupported_protocol_version
+            - rate_limited
+            - client_closed_request
+            - internal_error
+            - upstream_unavailable
+            - service_unavailable
+            - deadline_exceeded
+        message:
+          type: string
+        type:
+          type: string
+          enum:
+            - request_error
+            - auth_error
+            - permission_error
+            - not_found_error
+            - conflict_error
+            - rate_limit_error
+            - runtime_error
+            - upstream_error
+            - server_error
+        param:
+          type: [string, "null"]
+        request_id:
+          type: [string, "null"]
+        details:
+          $ref: "#/components/schemas/JsonObject"
+    PaginatedList:
+      type: object
+      required: [object, data, page]
+      properties:
+        object:
+          type: string
+          enum: [list]
+        data:
+          type: array
+          items: {}
+        page:
+          $ref: "#/components/schemas/PageInfo"

@@ -1,10 +1,10 @@
-.PHONY: setup install-hooks configure-merge-drivers check fmt fmt-harn fmt-harn-fix lint lint-md lint-actions lint-harn test test-cargo test-fast conformance bench-vm all release-gate portal portal-check portal-demo gen-highlight check-highlight gen-trigger-quickref check-trigger-quickref check-trigger-examples check-docs-snippets
+.PHONY: setup install-hooks configure-merge-drivers check fmt fmt-harn fmt-harn-fix lint lint-md lint-actions lint-harn spec-lint test test-cargo test-fast conformance bench-vm all release-gate portal portal-check portal-demo gen-highlight check-highlight gen-trigger-quickref check-trigger-quickref check-trigger-examples check-docs-snippets
 
 # Full quality check: format first, then lint/test in parallel.
 # Usage: make all -j       (parallel checks after formatting)
 #        make all           (sequential, also works)
 all: fmt
-	$(MAKE) lint lint-md lint-actions lint-harn fmt-harn test conformance check-highlight check-trigger-quickref check-trigger-examples check-docs-snippets portal-check
+	$(MAKE) lint lint-md lint-actions lint-harn spec-lint fmt-harn test conformance check-highlight check-trigger-quickref check-trigger-examples check-docs-snippets portal-check
 
 check: all
 
@@ -56,6 +56,11 @@ bench-vm:
 # Lint markdown files
 lint-md:
 	npx markdownlint-cli2 "**/*.md"
+
+# Validate the Harn Agents Protocol OpenAPI artifact and its public path/schema snapshot.
+spec-lint:
+	npx redocly lint spec/openapi.yaml
+	./scripts/check_openapi_snapshot.py
 
 # Lint GitHub Actions workflows.
 lint-actions:
