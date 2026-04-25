@@ -766,8 +766,14 @@ fn print_trace_summary() {
     );
 }
 
-/// Run a .harn file as an MCP server over stdio. The pipeline must call
-/// `mcp_serve(registry)` so the CLI can expose its tools.
+/// Run a .harn file as an MCP server over stdio using the script-driven
+/// surface. The pipeline must call `mcp_tools(registry)` (or the alias
+/// `mcp_serve(registry)`) so the CLI can expose its tools, and may
+/// register additional resources/prompts via `mcp_resource(...)` /
+/// `mcp_resource_template(...)` / `mcp_prompt(...)`.
+///
+/// Dispatched into by `harn serve mcp <file>` when the script does not
+/// define any `pub fn` exports — see `commands::serve::run_mcp_server`.
 ///
 /// `card_source` — optional `--card` argument. Accepts either a path to
 /// a JSON file or an inline JSON string. When present, the card is
@@ -916,7 +922,7 @@ pub(crate) async fn run_file_mcp_serve(path: &str, card_source: Option<&str>) {
                 ));
             }
             eprintln!(
-                "[harn] mcp-serve: serving {} as '{server_name}'",
+                "[harn] serve mcp: serving {} as '{server_name}'",
                 caps.join(", ")
             );
 

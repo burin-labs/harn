@@ -66,7 +66,7 @@ pub(crate) fn init_project(name: Option<&str>, template: ProjectTemplate) {
             println!("  harn test tests/         # run the tests");
         }
         ProjectTemplate::McpServer => {
-            println!("  harn mcp-serve main.harn # expose the starter MCP server");
+            println!("  harn serve mcp main.harn # expose the starter MCP server");
         }
         ProjectTemplate::PipelineLab => {
             println!("  harn playground --task \"Explain this repo\"    # run the lab");

@@ -1317,7 +1317,7 @@ harn mcp login notion
 ### MCP server mode
 
 Harn pipelines can expose tools, resources, resource templates, and prompts
-as an MCP server using `harn mcp-serve`. The CLI serves them over stdio
+as an MCP server using `harn serve mcp`. The CLI serves them over stdio
 using the MCP protocol, making them callable by Claude Desktop, Cursor,
 or any MCP client.
 
@@ -1448,7 +1448,7 @@ pipeline main(task) {
 Run as an MCP server:
 
 ```bash
-harn mcp-serve agent.harn
+harn serve mcp agent.harn
 ```
 
 Configure in Claude Desktop (`claude_desktop_config.json`):
@@ -1458,7 +1458,7 @@ Configure in Claude Desktop (`claude_desktop_config.json`):
   "mcpServers": {
     "my-agent": {
       "command": "harn",
-      "args": ["mcp-serve", "agent.harn"]
+      "args": ["serve", "mcp", "agent.harn"]
     }
   }
 }

@@ -24,7 +24,7 @@ pub struct McpServer {
     /// Optional Server Card payload — advertised in the `initialize`
     /// response's `serverInfo.card` field and exposed as a static
     /// resource at the well-known URI `well-known://mcp-card`.
-    /// Populated by `harn mcp-serve --card path/to/card.json`.
+    /// Populated by `harn serve mcp --card path/to/card.json`.
     server_card: Option<serde_json::Value>,
 }
 

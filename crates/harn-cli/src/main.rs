@@ -443,9 +443,6 @@ async fn main() {
                 process::exit(1);
             }
         }
-        Command::McpServe(args) => {
-            commands::run::run_file_mcp_serve(&args.file, args.card.as_deref()).await
-        }
         Command::Mcp(args) => commands::mcp::handle_mcp_command(&args.command).await,
         Command::Watch(args) => {
             let denied =

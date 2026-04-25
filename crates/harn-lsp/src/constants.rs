@@ -713,7 +713,7 @@ pub(crate) fn builtin_doc(name: &str) -> Option<String> {
         "mcp_server_info" => "**mcp_server_info(client)** → dict — Server info: `{name, connected}`",
         "mcp_disconnect" => "**mcp_disconnect(client)** → nil — Disconnect and kill MCP server process",
         // MCP server
-        "mcp_tools" => "**mcp_tools(registry)** → nil — Register a tool registry for the MCP server (used with `harn mcp-serve`)",
+        "mcp_tools" => "**mcp_tools(registry)** → nil — Register a tool registry for the MCP server (used with `harn serve mcp`)",
         "mcp_serve" => "**mcp_serve(registry)** → nil — Alias for `mcp_tools` (deprecated)",
         "mcp_resource" => "**mcp_resource({uri, name, text, description?, mime_type?})** → nil — Register a static resource for the MCP server",
         "mcp_resource_template" => "**mcp_resource_template({uri_template, name, handler, description?, mime_type?})** → nil — Register a parameterized resource template (RFC 6570 URI template)",

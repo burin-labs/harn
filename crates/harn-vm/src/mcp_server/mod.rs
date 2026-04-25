@@ -3,8 +3,9 @@
 //!
 //! This is the mirror of `mcp.rs` (the client). A Harn pipeline registers
 //! capabilities with `mcp_tools()`, `mcp_resource()`, `mcp_resource_template()`,
-//! and `mcp_prompt()`, then the CLI's `mcp-serve` command starts this server,
-//! making them callable by Claude Desktop, Cursor, or any MCP client.
+//! and `mcp_prompt()`, then `harn serve mcp` detects the script-driven
+//! surface and starts this server, making them callable by Claude
+//! Desktop, Cursor, or any MCP client.
 
 mod convert;
 mod defs;
