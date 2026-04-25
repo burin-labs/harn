@@ -756,6 +756,22 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: None,
     },
     BuiltinSig {
+        name: "multipart_field_bytes",
+        return_type: Some(BuiltinReturn::Named("bytes")),
+    },
+    BuiltinSig {
+        name: "multipart_field_text",
+        return_type: Some(BuiltinReturn::Named("string")),
+    },
+    BuiltinSig {
+        name: "multipart_form_data",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
+        name: "multipart_parse",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
         name: "mailbox_close",
         return_type: Some(BuiltinReturn::Named("bool")),
     },

@@ -1,0 +1,50 @@
+pipeline test(task) {
+  let fixture = multipart_form_data(
+    [
+    {name: "title", content: "Quarterly report"},
+    {
+    name: "upload",
+    filename: "report.bin",
+    content_type: "application/octet-stream",
+    content: bytes_from_hex("000102ff"),
+    headers: {["X-Test-Header"]: "fixture"},
+  },
+  ],
+  )
+  println(starts_with(fixture.content_type, "multipart/form-data; boundary="))
+  let form = multipart_parse(
+    fixture.body,
+    fixture.content_type,
+    {max_total_bytes: 1048576, max_field_bytes: 262144, max_fields: 8},
+  )
+  println(form.field_count)
+  println(form.total_bytes == bytes_len(fixture.body))
+  println(form.fields[0].name)
+  println(multipart_field_text(form.fields[0]))
+  println(form.fields[1].name)
+  println(form.fields[1].filename)
+  println(form.fields[1].content_type)
+  println(form.fields[1].headers["x-test-header"])
+  println(form.fields[1].text == nil)
+  println(bytes_to_hex(multipart_field_bytes(form.fields[1])))
+  let binary_text = try {
+    multipart_field_text(form.fields[1])
+  }
+  println(is_err(binary_text))
+  let malformed = try {
+    multipart_parse(fixture.body, "multipart/form-data; boundary=wrong")
+  }
+  println(is_err(malformed))
+  let too_many = try {
+    multipart_parse(fixture.body, fixture.content_type, {max_fields: 1})
+  }
+  println(is_err(too_many))
+  let too_large_total = try {
+    multipart_parse(fixture.body, fixture.content_type, {max_total_bytes: 8})
+  }
+  println(is_err(too_large_total))
+  let too_large_field = try {
+    multipart_parse(fixture.body, fixture.content_type, {max_field_bytes: 2})
+  }
+  println(is_err(too_large_field))
+}
