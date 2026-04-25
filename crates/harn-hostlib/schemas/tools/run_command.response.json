@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/tools/run_command.response.json",
+  "title": "tools.run_command response",
+  "type": "object",
+  "properties": {
+    "exit_code": { "type": "integer" },
+    "signal": { "type": ["string", "null"] },
+    "stdout": { "type": "string" },
+    "stderr": { "type": "string" },
+    "duration_ms": { "type": "integer", "minimum": 0 },
+    "timed_out": { "type": "boolean" }
+  },
+  "required": ["exit_code", "stdout", "stderr", "duration_ms", "timed_out"],
+  "additionalProperties": false
+}

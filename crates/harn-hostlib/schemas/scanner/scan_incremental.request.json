@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/scanner/scan_incremental.request.json",
+  "title": "scanner.scan_incremental request",
+  "description": "Compute a delta against a prior `scan_project` snapshot.",
+  "type": "object",
+  "properties": {
+    "snapshot_token": { "type": "string" }
+  },
+  "required": ["snapshot_token"],
+  "additionalProperties": false
+}

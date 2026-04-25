@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/tools/delete_file.request.json",
+  "title": "tools.delete_file request",
+  "type": "object",
+  "properties": {
+    "path": { "type": "string" },
+    "recursive": { "type": "boolean", "default": false }
+  },
+  "required": ["path"],
+  "additionalProperties": false
+}

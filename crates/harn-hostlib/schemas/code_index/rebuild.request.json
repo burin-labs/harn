@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/rebuild.request.json",
+  "title": "code_index.rebuild request",
+  "description": "Rebuild the code index from scratch. `force` skips the modification-time short-circuit.",
+  "type": "object",
+  "properties": {
+    "root": { "type": "string", "description": "Project root to index. Defaults to the current workspace root." },
+    "force": { "type": "boolean", "default": false }
+  },
+  "additionalProperties": false
+}

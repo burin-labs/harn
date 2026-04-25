@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/ast/parse_file.response.json",
+  "title": "ast.parse_file response",
+  "description": "Parsed tree-sitter result. The tree is reported as a flat node list to keep the wire format JSON-serializable; consumers reassemble parent/child relationships via `parent_id`.",
+  "type": "object",
+  "properties": {
+    "path": { "type": "string" },
+    "language": { "type": "string" },
+    "root_id": { "type": "integer", "minimum": 0 },
+    "nodes": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Node" }
+    },
+    "had_errors": { "type": "boolean" }
+  },
+  "required": ["path", "language", "root_id", "nodes", "had_errors"],
+  "additionalProperties": false,
+  "$defs": {
+    "Node": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "integer", "minimum": 0 },
+        "parent_id": { "type": ["integer", "null"], "minimum": 0 },
+        "kind": { "type": "string" },
+        "is_named": { "type": "boolean" },
+        "start_byte": { "type": "integer", "minimum": 0 },
+        "end_byte": { "type": "integer", "minimum": 0 },
+        "start_row": { "type": "integer", "minimum": 0 },
+        "start_col": { "type": "integer", "minimum": 0 },
+        "end_row": { "type": "integer", "minimum": 0 },
+        "end_col": { "type": "integer", "minimum": 0 }
+      },
+      "required": [
+        "id",
+        "parent_id",
+        "kind",
+        "is_named",
+        "start_byte",
+        "end_byte",
+        "start_row",
+        "start_col",
+        "end_row",
+        "end_col"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

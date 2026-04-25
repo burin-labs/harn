@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/stats.response.json",
+  "title": "code_index.stats response",
+  "type": "object",
+  "properties": {
+    "indexed_files": { "type": "integer", "minimum": 0 },
+    "trigrams": { "type": "integer", "minimum": 0 },
+    "words": { "type": "integer", "minimum": 0 },
+    "memory_bytes": { "type": "integer", "minimum": 0 },
+    "last_rebuild_unix_ms": { "type": ["integer", "null"], "minimum": 0 }
+  },
+  "required": ["indexed_files", "trigrams", "words", "memory_bytes", "last_rebuild_unix_ms"],
+  "additionalProperties": false
+}

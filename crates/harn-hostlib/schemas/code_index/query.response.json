@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/query.response.json",
+  "title": "code_index.query response",
+  "type": "object",
+  "properties": {
+    "results": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Hit" }
+    },
+    "truncated": {
+      "type": "boolean",
+      "description": "True when `max_results` was reached and more candidate files remain."
+    }
+  },
+  "required": ["results", "truncated"],
+  "additionalProperties": false,
+  "$defs": {
+    "Hit": {
+      "type": "object",
+      "properties": {
+        "path": { "type": "string" },
+        "score": { "type": "number" },
+        "match_count": { "type": "integer", "minimum": 0 }
+      },
+      "required": ["path", "score", "match_count"],
+      "additionalProperties": false
+    }
+  }
+}

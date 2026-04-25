@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/scanner/scan_incremental.response.json",
+  "title": "scanner.scan_incremental response",
+  "type": "object",
+  "properties": {
+    "snapshot_token": { "type": "string" },
+    "added": { "type": "array", "items": { "type": "string" } },
+    "modified": { "type": "array", "items": { "type": "string" } },
+    "removed": { "type": "array", "items": { "type": "string" } }
+  },
+  "required": ["snapshot_token", "added", "modified", "removed"],
+  "additionalProperties": false
+}

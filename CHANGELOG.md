@@ -9,6 +9,19 @@ granular archaeology.
 
 ## Unreleased
 
+### Added
+
+- **`harn-hostlib` crate scaffold (#563).** New opt-in crate housing
+  code-intelligence and deterministic-tool host builtins ported from
+  `burin-code`'s Swift `BurinCore` (tree-sitter AST, trigram/word index,
+  repo scanner, filesystem watcher, search/file/git/process tooling).
+  Every method registered today returns `HostlibError::Unimplemented`;
+  follow-up issues fill in module bodies. Module skeletons + JSON
+  Schema 2020-12 contracts ship in this PR so `burin-code`'s
+  schema-drift tests can lock the public surface immediately. Wired
+  into `harn-cli`'s ACP server behind the default-on `hostlib` cargo
+  feature.
+
 ### Removed
 
 - **`harn mcp-serve` (#594).** The hidden legacy alias for serving a

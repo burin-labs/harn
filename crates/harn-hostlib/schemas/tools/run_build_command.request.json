@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/tools/run_build_command.request.json",
+  "title": "tools.run_build_command request",
+  "type": "object",
+  "properties": {
+    "argv": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "cwd": { "type": "string" },
+    "target": { "type": "string" },
+    "release": { "type": "boolean", "default": false },
+    "timeout_ms": { "type": "integer", "minimum": 0 }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/tools/search.request.json",
+  "title": "tools.search request",
+  "description": "Ripgrep-style content search powered by `grep-searcher` + `ignore`.",
+  "type": "object",
+  "properties": {
+    "pattern": { "type": "string", "minLength": 1 },
+    "path": { "type": "string" },
+    "glob": { "type": "string" },
+    "case_insensitive": { "type": "boolean", "default": false },
+    "fixed_strings": {
+      "type": "boolean",
+      "description": "Treat `pattern` as a literal substring rather than a regex.",
+      "default": false
+    },
+    "max_matches": { "type": "integer", "minimum": 1, "default": 1000 },
+    "context_before": { "type": "integer", "minimum": 0, "default": 0 },
+    "context_after": { "type": "integer", "minimum": 0, "default": 0 },
+    "include_hidden": { "type": "boolean", "default": false }
+  },
+  "required": ["pattern"],
+  "additionalProperties": false
+}

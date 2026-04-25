@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/importers_of.request.json",
+  "title": "code_index.importers_of request",
+  "description": "Reverse import lookup: list every file that imports the given module/path.",
+  "type": "object",
+  "properties": {
+    "module": {
+      "type": "string",
+      "description": "Module identifier or absolute path."
+    }
+  },
+  "required": ["module"],
+  "additionalProperties": false
+}

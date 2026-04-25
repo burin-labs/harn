@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/query.request.json",
+  "title": "code_index.query request",
+  "description": "Query the trigram/word index for files containing a literal substring. Designed for fast suggest-style lookups; use `tools.search` for full regex.",
+  "type": "object",
+  "properties": {
+    "needle": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Literal substring to look up."
+    },
+    "case_sensitive": { "type": "boolean", "default": false },
+    "max_results": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 100
+    },
+    "scope": {
+      "type": "array",
+      "description": "Optional list of paths to restrict the query to.",
+      "items": { "type": "string" }
+    }
+  },
+  "required": ["needle"],
+  "additionalProperties": false
+}

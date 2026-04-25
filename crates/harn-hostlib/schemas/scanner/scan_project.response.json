@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/scanner/scan_project.response.json",
+  "title": "scanner.scan_project response",
+  "type": "object",
+  "properties": {
+    "root": { "type": "string" },
+    "files": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Entry" }
+    },
+    "snapshot_token": {
+      "type": "string",
+      "description": "Opaque cookie passed back to `scan_incremental` to compute deltas."
+    },
+    "truncated": { "type": "boolean" }
+  },
+  "required": ["root", "files", "snapshot_token", "truncated"],
+  "additionalProperties": false,
+  "$defs": {
+    "Entry": {
+      "type": "object",
+      "properties": {
+        "path": { "type": "string" },
+        "size": { "type": "integer", "minimum": 0 },
+        "modified_unix_ms": { "type": "integer", "minimum": 0 },
+        "is_dir": { "type": "boolean" }
+      },
+      "required": ["path", "size", "modified_unix_ms", "is_dir"],
+      "additionalProperties": false
+    }
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/ast/outline.response.json",
+  "title": "ast.outline response",
+  "type": "object",
+  "properties": {
+    "path": { "type": "string" },
+    "language": { "type": "string" },
+    "items": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/OutlineItem" }
+    }
+  },
+  "required": ["path", "language", "items"],
+  "additionalProperties": false,
+  "$defs": {
+    "OutlineItem": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "kind": { "type": "string" },
+        "start_row": { "type": "integer", "minimum": 0 },
+        "end_row": { "type": "integer", "minimum": 0 },
+        "children": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/OutlineItem" }
+        }
+      },
+      "required": ["name", "kind", "start_row", "end_row", "children"],
+      "additionalProperties": false
+    }
+  }
+}
