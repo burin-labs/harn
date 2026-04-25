@@ -169,6 +169,13 @@ fn append_profile_writes(profile_writes) {
     } else {
       ""
     }
+    // Dedup: skip bullets already present anywhere in the file. Cheap O(n)
+    // string match — profiles are tiny and this is the only correctness
+    // belt against a model that re-emits bullets it already saw via the
+    // injected <profile> block.
+    if contains(prior, "- ${bullet}\n") || contains(prior, "- ${bullet}") {
+      continue
+    }
     let header = "\n\n## Auto-learned ${today}\n"
     let body = if contains(prior, header) {
       "- ${bullet}\n"
@@ -308,6 +315,50 @@ fn build_tools(task_id, dir) {
   )
   registry = tool_define(
     registry,
+    "save_user_pref",
+    "Save a durable user preference learned in THIS conversation. Call this when the user explicitly states something they'd want remembered next time (branch policy, default response shape, naming conventions, framework choices, tone). Idempotent: bullets already in the profile are skipped. Scope: 'user' (any project), 'project' (this repo), 'cwd' (this experiment). Don't call this for facts derivable from the code.",
+    {
+    parameters: {
+    bullet: {
+    type: "string",
+    description: "One-line preference, written as the user would describe it. Example: \"All services should default to JSON responses with a status field, e.g. {status: 'ok'}.\"",
+  },
+    scope: {type: "string", description: "Where to save it: 'user', 'project', or 'cwd'. Default: 'project'."},
+    reason: {type: "string", description: "Optional audit note: which user message you learned this from."},
+  },
+    returns: {type: "string"},
+    handler: { args ->
+    let bullet = (args?.bullet ?? "").trim()
+    if bullet == "" {
+      return "Error: bullet was empty."
+    }
+    let scope = (args?.scope ?? "project").trim()
+    let allowed = ["user", "project", "cwd"]
+    var ok = false
+    for s in allowed {
+      if scope == s {
+        ok = true
+      }
+    }
+    if !ok {
+      return "Error: scope must be one of 'user', 'project', 'cwd'. Got '${scope}'."
+    }
+    let target = profile_path_for_scope(scope)
+    let prior = if file_exists(target) {
+    read_file(target)
+  } else {
+    ""
+  }
+    if contains(prior, "- ${bullet}") {
+      return "Already saved (no-op)."
+    }
+    append_profile_writes([{scope: scope, bullet: bullet}])
+    "Saved to ${scope} profile."
+  },
+  },
+  )
+  registry = tool_define(
+    registry,
     "ask_question",
     "Ask the user exactly one short question (max 3 sentences). The harness pauses after this and resumes when the user answers. Always offer a default or example so they don't have to think hard.",
     {
@@ -336,12 +387,12 @@ fn build_tools(task_id, dir) {
   registry = tool_define(
     registry,
     "exit_plan_mode",
-    "Emit the final structured plan and end the conversation. Pass the plan as a JSON object (or JSON-stringified). Always include profile_writes (possibly empty) for any durable preferences you learned this turn.",
+    "Emit the final structured plan and end the conversation. Pass the plan as a JSON object (or JSON-stringified). To save durable user preferences, call save_user_pref BEFORE this — exit_plan_mode does not handle preferences anymore.",
     {
     parameters: {
     plan: {
     type: "string",
-    description: "The plan as a JSON object. Top-level keys: mode, direction, targets, grounding, tasks, verification, ready, profile_writes.",
+    description: "The plan as a JSON object. Top-level keys: mode, direction, targets, grounding, tasks, verification, ready.",
   },
   },
     returns: {type: "string"},
@@ -360,6 +411,9 @@ fn build_tools(task_id, dir) {
   },
   },
   )
+  // profile_writes inside the plan body remains a defensive fallback
+  // for transcripts produced before save_user_pref existed; the tool
+  // is the new source of truth.
   // Idempotent — first plan in this iteration sticks.
   return registry
 }
@@ -372,18 +426,11 @@ fn system_prompt(profile_block) {
   return """
 You are a planning partner pairing with the user. The user types one short message; you reply with one short question, or commit to a final plan. A whole conversation is typically 1–5 exchanges.
 
-This invocation is ONE STEP of that conversation. A step is: optional discovery, then exactly one call to a terminal tool — ask_question or exit_plan_mode. The harness ends the step automatically the moment that terminal tool succeeds; you do not need to emit ##DONE## or anything else.
+This invocation is ONE STEP of that conversation. A step is: optional discovery (read/find), optional preference-saves (save_user_pref), then exactly one TERMINAL tool — ask_question or exit_plan_mode — that ends the step. Non-terminal tools can be called as many times as you need before the terminal one. The harness ends the step automatically the moment that terminal tool succeeds; you do not need to emit ##DONE## or anything else.
 
 Workflow this step:
 1. The user message starts with a <workspace> block listing every file (path + line count + first non-empty line). Treat that as your starting orientation; you usually don't need to call `find` to learn the layout. Use `find(query)` for token searches across filenames AND content (one tool — pass a single token like "auth", not a phrase). Use `read(path)` to fetch a specific file. Look BEFORE you ask — don't ask about facts that are obvious from the workspace block or from a read.
-2. Decide whether to ask or commit. You are a planning *partner*, not a code-completion model — defaulting to "I'll just pick" silently is the wrong move. Ask via ask_question(...) whenever ANY of the following is true:
-   - The user's request is open-ended ("improve performance", "make it more robust", "clean up", "refactor"). The scope is the question.
-   - A design parameter is not pinned by the code: rate limits, TTLs, cache sizes, library choices, error codes, retry/backoff, log verbosity, naming.
-   - There are 2+ sensible places to put the new code and the convention isn't obvious.
-   - The change is destructive or hard to undo: deleting/renaming files, dropping schema, mass rewrites, removing public API.
-   - You have a complete plan but at least one parameter you guessed at. In that case, summarize the plan in 1-2 sentences inside the question and ask "does this sound right? happy to adjust X/Y/Z." That's still ONE question and gives the user a chance to redirect cheaply.
-
-   Only call exit_plan_mode directly when the request is concrete AND every choice in the plan is pinned by the code or by a prior answer in this conversation.
+2. End the step with exactly one tool call — `ask_question(question="...")` or `exit_plan_mode(plan=...)`. NEVER answer in prose; if you find yourself writing "Before I plan, I need to understand..." or "Let me ask about X, Y, Z...", that's prose — stop, pick the single most important one, and call ask_question with that one. You are a planning *partner*, so defaulting to "I'll just pick" silently is wrong: ask whenever the request is open-ended (e.g. "improve performance"), a design parameter isn't pinned by the code (limits, TTLs, library choices, error codes, naming), there are multiple sensible placement spots, the change is destructive (deletes/renames/schema drops), or your plan has any parameter you guessed at (in which case lead the question with a 1-sentence plan summary and "sound good, or adjust X?"). Only call exit_plan_mode directly when the request is concrete AND every choice in the plan is pinned by the code or by an answer earlier in this conversation.
 
 If the user's request looks like a direct question (e.g. "explain this repo"), call exit_plan_mode without asking — the plan describes the reading and synthesis the implementation phase will produce; you do not answer in free prose.
 
@@ -406,11 +453,10 @@ Plan schema (exit_plan_mode):
   "grounding": [{"path": "...", "role": "sibling_exemplar|convention_anchor|source_under_change", "why": "phrase"}],
   "tasks": ["concrete step 1 referencing real paths/symbols", "..."],
   "verification": ["command or check"],
-  "ready": true,
-  "profile_writes": [{"scope": "user|project|cwd", "bullet": "Durable preference, e.g. 'Branch policy: edits go directly to main unless I say otherwise.'"}]
+  "ready": true
 }
 
-profile_writes: ONLY durable preferences the user expressed THIS conversation that would save you from re-asking next time. Never save derivable facts (paths, structure, code). Never save fix recipes. Empty list is fine.
+Saving user preferences: when the user expresses a durable preference IN THIS CONVERSATION (answers to your questions, or the original task text) that you'd want to remember next time — branch policy, response-shape defaults, naming conventions, framework choices, tone — call `save_user_pref(bullet="...", scope="user|project|cwd")` BEFORE exit_plan_mode. Don't save anything already shown in the <profile> block above (it's already saved). Don't save derivable facts (paths, structure, code) or fix recipes. If the user expressed no new preferences this turn, don't call save_user_pref at all.
 
 For read-only / "explain this" tasks: still call exit_plan_mode. The plan should describe the reading and the answer the implementation phase will produce — e.g. tasks=["Read README, api.ts, auth-guard.ts", "Write 2-paragraph explanation citing those paths"], mode="plan_then_execute".
 
@@ -459,7 +505,7 @@ fn build_user_prompt(task, qa_history) {
   lines = lines
     + [
     "",
-    "End this step with EXACTLY ONE call: ask_question or exit_plan_mode. The harness terminates immediately after. Anything else is wasted.",
+    "End this step with one TERMINAL call: ask_question or exit_plan_mode. The harness terminates immediately after the terminal call. Non-terminal tools (read, find, save_user_pref) can be called freely before the terminal one.",
   ]
   return join(lines, "\n")
 }
