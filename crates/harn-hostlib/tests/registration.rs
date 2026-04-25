@@ -113,7 +113,28 @@ fn tools_capability_registers_documented_methods() {
             "hostlib_tools_manage_packages",
         ]
     );
-    assert_all_unimplemented(&registry);
+    // Issue #568 implemented the 5 process-lifecycle tools. The remaining 7
+    // (search/fs/git) stay scaffolded under HostlibError::Unimplemented
+    // until issues C1 (search/fs) and C2 (git) land.
+    let still_scaffolded = [
+        "hostlib_tools_search",
+        "hostlib_tools_read_file",
+        "hostlib_tools_write_file",
+        "hostlib_tools_delete_file",
+        "hostlib_tools_list_directory",
+        "hostlib_tools_get_file_outline",
+        "hostlib_tools_git",
+    ];
+    for entry in registry.iter() {
+        if still_scaffolded.contains(&entry.name) {
+            let err = (entry.handler)(&[]).expect_err("scaffold methods must be unimplemented");
+            assert!(
+                matches!(err, HostlibError::Unimplemented { builtin } if builtin == entry.name),
+                "expected Unimplemented for {}, got {err:?}",
+                entry.name
+            );
+        }
+    }
 }
 
 #[test]
