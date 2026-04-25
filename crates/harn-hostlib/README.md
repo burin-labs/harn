@@ -18,6 +18,10 @@ Opt-in host builtins for the Harn VM that provide:
 
 [#563](https://github.com/burin-labs/harn/issues/563) introduced the
 scaffold (every method routed through `HostlibError::Unimplemented`).
+[#564](https://github.com/burin-labs/harn/issues/564) lights up the
+`ast/` surface — tree-sitter parsing, symbol extraction, and outline
+generation for 22 host languages, mirroring the Swift `ASTEngine`
+coverage verbatim.
 [#567](https://github.com/burin-labs/harn/issues/567) lights up the
 deterministic-tool surface: `search`, `read_file`, `write_file`,
 `delete_file`, `list_directory`, `get_file_outline`, and `git`.
@@ -25,10 +29,57 @@ deterministic-tool surface: `search`, `read_file`, `write_file`,
 process-lifecycle surface: `run_command`, `run_test`,
 `run_build_command`, `inspect_test_results`, and `manage_packages`.
 
+### `ast/` languages
+
+Tree-sitter grammars are pinned in [`Cargo.toml`](Cargo.toml). Adding or
+dropping a language requires a coordinated change here, in the Swift
+`TreeSitterLanguage` enum, and in burin-code's bridge consumer.
+
+| Language       | Grammar crate                 | Extensions      |
+|----------------|-------------------------------|-----------------|
+| TypeScript     | `tree-sitter-typescript`      | `.ts`           |
+| TSX            | `tree-sitter-typescript`      | `.tsx`          |
+| JavaScript     | `tree-sitter-javascript`      | `.js .mjs .cjs` |
+| JSX            | `tree-sitter-javascript`      | `.jsx`          |
+| Python         | `tree-sitter-python`          | `.py`           |
+| Go             | `tree-sitter-go`              | `.go`           |
+| Rust           | `tree-sitter-rust`            | `.rs`           |
+| Java           | `tree-sitter-java`            | `.java`         |
+| C              | `tree-sitter-c`               | `.c .h`         |
+| C++            | `tree-sitter-cpp`             | `.cpp .cc .hpp` |
+| C#             | `tree-sitter-c-sharp`         | `.cs`           |
+| Ruby           | `tree-sitter-ruby`            | `.rb`           |
+| Kotlin         | `tree-sitter-kotlin-ng`       | `.kt .kts`      |
+| PHP            | `tree-sitter-php`             | `.php`          |
+| Scala          | `tree-sitter-scala`           | `.scala .sc`    |
+| Bash / shell   | `tree-sitter-bash`            | `.sh .bash .zsh`|
+| Swift          | `tree-sitter-swift`           | `.swift`        |
+| Zig            | `tree-sitter-zig`             | `.zig`          |
+| Elixir         | `tree-sitter-elixir`          | `.ex .exs`      |
+| Lua            | `tree-sitter-lua`             | `.lua`          |
+| Haskell        | `tree-sitter-haskell`         | `.hs .lhs`      |
+| R              | `tree-sitter-r`               | `.r`            |
+
+The `ast::*` builtins emit row/column coordinates as **0-based** values
+(matching tree-sitter native `Point`s). Symbol kinds are normalized to
+the lowercase string set Swift's `ASTEngine` already produced
+(`function`, `method`, `class`, `struct`, `enum`, `interface`,
+`protocol`, `type`, `variable`, `module`, `other`).
+
+Per-language fixture goldens live at
+`tests/fixtures/ast/<language>/{source.<ext>,symbols.golden.json,outline.golden.json}`.
+To regenerate after a deliberate change, run
+
+```text
+HARN_AST_UPDATE_GOLDEN=1 cargo test -p harn-hostlib --test ast_fixtures
+```
+
+and commit the updated goldens.
+
 | Issue | Module | What lands | Status |
 |-------|--------|-----------|--------|
 | B1 (#563) | scaffold       | crate + schemas + registration plumbing                                                   | ✅ shipped |
-| B2    | `ast/`             | `parse_file`, `symbols`, `outline`                                                        | unimplemented |
+| B2 (#564) | `ast/`         | `parse_file`, `symbols`, `outline` (tree-sitter for 22 host languages)                    | ✅ shipped |
 | B3    | `code_index/`      | `query`, `rebuild`, `stats`, `imports_for`, `importers_of`                                | unimplemented |
 | B4    | `scanner/`         | `scan_project`, `scan_incremental`                                                        | unimplemented |
 | C1    | `fs_watch/`        | `subscribe`, `unsubscribe`                                                                | unimplemented |

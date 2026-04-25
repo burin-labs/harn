@@ -1,0 +1,17 @@
+[
+  {"name":"Speaker", "kind":"protocol", "signature":"protocol Speaker", "start_row":0, "end_row":2, "children":[]},
+  {"name":"Point", "kind":"struct", "signature":"struct Point", "start_row":4, "end_row":7, "children":
+    [
+      {"name":"x", "kind":"variable", "signature":"x", "start_row":5, "end_row":5, "children":[]},
+      {"name":"y", "kind":"variable", "signature":"y", "start_row":6, "end_row":6, "children":[]}
+    ]
+  },
+  {"name":"Color", "kind":"enum", "signature":"enum Color", "start_row":9, "end_row":13, "children":[]},
+  {"name":"Greeter", "kind":"class", "signature":"class Greeter", "start_row":15, "end_row":25, "children":
+    [
+      {"name":"name", "kind":"variable", "signature":"name", "start_row":16, "end_row":16, "children":[]},
+      {"name":"speak", "kind":"function", "signature":"func speak()", "start_row":22, "end_row":24, "children":[]}
+    ]
+  },
+  {"name":"shout", "kind":"function", "signature":"func shout()", "start_row":27, "end_row":29, "children":[]}
+]

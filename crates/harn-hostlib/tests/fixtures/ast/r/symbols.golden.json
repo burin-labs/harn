@@ -1,0 +1,5 @@
+[
+  {"name":"greet", "kind":"function", "container":null, "signature":"greet <- function(name)", "start_row":0, "start_col":0, "end_row":2, "end_col":1},
+  {"name":"shout", "kind":"function", "container":null, "signature":"shout <- function(s)", "start_row":4, "start_col":0, "end_row":6, "end_col":1},
+  {"name":"square", "kind":"function", "container":null, "signature":"square <- function(n)", "start_row":8, "start_col":0, "end_row":8, "end_col":27}
+]

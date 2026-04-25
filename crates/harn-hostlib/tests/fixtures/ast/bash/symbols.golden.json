@@ -1,0 +1,5 @@
+[
+  {"name":"greet", "kind":"function", "container":null, "signature":"function greet", "start_row":2, "start_col":0, "end_row":4, "end_col":1},
+  {"name":"shout", "kind":"function", "container":null, "signature":"function shout", "start_row":6, "start_col":0, "end_row":8, "end_col":1},
+  {"name":"main", "kind":"function", "container":null, "signature":"function main", "start_row":10, "start_col":0, "end_row":13, "end_col":1}
+]

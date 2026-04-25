@@ -1,0 +1,8 @@
+[
+  {"name":"Greeter", "kind":"struct", "container":null, "signature":"struct Greeter", "start_row":2, "start_col":0, "end_row":4, "end_col":1},
+  {"name":"Color", "kind":"enum", "container":null, "signature":"enum Color", "start_row":6, "start_col":0, "end_row":10, "end_col":1},
+  {"name":"Counter", "kind":"type", "container":null, "signature":"typedef Counter", "start_row":12, "start_col":0, "end_row":12, "end_col":20},
+  {"name":"add", "kind":"function", "container":null, "signature":"add(int a, int b)", "start_row":14, "start_col":0, "end_row":16, "end_col":1},
+  {"name":"greet", "kind":"function", "container":null, "signature":"greet(struct Greeter *g)", "start_row":18, "start_col":0, "end_row":20, "end_col":1},
+  {"name":"Greeter", "kind":"struct", "container":null, "signature":"struct Greeter", "start_row":18, "start_col":11, "end_row":18, "end_col":25}
+]

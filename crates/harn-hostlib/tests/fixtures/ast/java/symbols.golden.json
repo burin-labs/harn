@@ -1,0 +1,8 @@
+[
+  {"name":"Greeter", "kind":"class", "container":null, "signature":"class Greeter", "start_row":0, "start_col":0, "end_row":10, "end_col":1},
+  {"name":"Greeter", "kind":"method", "container":"Greeter", "signature":"Greeter(String name)", "start_row":3, "start_col":4, "end_row":5, "end_col":5},
+  {"name":"greet", "kind":"method", "container":"Greeter", "signature":"String greet()", "start_row":7, "start_col":4, "end_row":9, "end_col":5},
+  {"name":"Speaker", "kind":"interface", "container":null, "signature":"interface Speaker", "start_row":12, "start_col":0, "end_row":14, "end_col":1},
+  {"name":"speak", "kind":"method", "container":"Speaker", "signature":"String speak()", "start_row":13, "start_col":4, "end_row":13, "end_col":19},
+  {"name":"Color", "kind":"enum", "container":null, "signature":"enum Color", "start_row":16, "start_col":0, "end_row":20, "end_col":1}
+]

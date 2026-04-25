@@ -1,0 +1,10 @@
+[
+  {"name":"Speaker", "kind":"interface", "container":null, "signature":"interface Speaker", "start_row":0, "start_col":0, "end_row":2, "end_col":1},
+  {"name":"speak", "kind":"method", "container":"Speaker", "signature":"fun speak", "start_row":1, "start_col":4, "end_row":1, "end_col":23},
+  {"name":"Greeter", "kind":"class", "container":null, "signature":"class Greeter", "start_row":4, "start_col":0, "end_row":12, "end_col":1},
+  {"name":"speak", "kind":"method", "container":"Greeter", "signature":"fun speak", "start_row":5, "start_col":4, "end_row":7, "end_col":5},
+  {"name":"shout", "kind":"method", "container":"Greeter", "signature":"fun shout", "start_row":9, "start_col":4, "end_row":11, "end_col":5},
+  {"name":"Defaults", "kind":"class", "container":null, "signature":"object Defaults", "start_row":14, "start_col":0, "end_row":16, "end_col":1},
+  {"name":"world", "kind":"method", "container":"Defaults", "signature":"fun world", "start_row":15, "start_col":4, "end_row":15, "end_col":43},
+  {"name":"globalShout", "kind":"function", "container":null, "signature":"fun globalShout", "start_row":18, "start_col":0, "end_row":18, "end_col":50}
+]

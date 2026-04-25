@@ -1,0 +1,8 @@
+[
+  {"name":"Counter", "kind":"type", "container":null, "signature":"newtype Counter", "start_row":4, "start_col":0, "end_row":4, "end_col":29},
+  {"name":"Speaker", "kind":"interface", "container":null, "signature":"class Speaker", "start_row":6, "start_col":0, "end_row":7, "end_col":22},
+  {"name":"a", "kind":"function", "container":"Speaker", "signature":"a", "start_row":7, "start_col":11, "end_row":7, "end_col":22},
+  {"name":"String", "kind":"function", "container":null, "signature":"String", "start_row":9, "start_col":9, "end_row":9, "end_col":25},
+  {"name":"greet", "kind":"function", "container":null, "signature":"greet", "start_row":10, "start_col":0, "end_row":10, "end_col":29},
+  {"name":"String", "kind":"function", "container":null, "signature":"String", "start_row":12, "start_col":9, "end_row":12, "end_col":25}
+]

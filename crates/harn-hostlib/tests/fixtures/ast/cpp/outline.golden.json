@@ -1,0 +1,15 @@
+[
+  {"name":"fixture", "kind":"module", "signature":"namespace fixture", "start_row":0, "end_row":22, "children":
+    [
+      {"name":"Greeter", "kind":"class", "signature":"class Greeter", "start_row":2, "end_row":9, "children":
+        [
+          {"name":"Greeter", "kind":"method", "signature":"Greeter(const char *name)", "start_row":4, "end_row":4, "children":[]},
+          {"name":"greet", "kind":"method", "signature":"greet()", "start_row":5, "end_row":5, "children":[]}
+        ]
+      },
+      {"name":"Point", "kind":"struct", "signature":"struct Point", "start_row":11, "end_row":14, "children":[]},
+      {"name":"Color", "kind":"enum", "signature":"enum Color", "start_row":16, "end_row":16, "children":[]},
+      {"name":"add", "kind":"method", "signature":"add(int a, int b)", "start_row":18, "end_row":20, "children":[]}
+    ]
+  }
+]
