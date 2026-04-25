@@ -11,6 +11,7 @@ mod collections;
 mod compression;
 mod concurrency;
 mod connectors;
+mod cookies;
 mod crypto;
 mod csv;
 mod datetime;
@@ -79,6 +80,7 @@ pub fn register_core_stdlib(vm: &mut Vm) {
     csv::register_csv_builtins(vm);
     multipart::register_multipart_builtins(vm);
     url_parse::register_url_builtins(vm);
+    cookies::register_cookie_builtins(vm);
     path::register_path_helper_builtins(vm);
     sets::register_set_builtins(vm);
     collections::register_collection_builtins(vm);

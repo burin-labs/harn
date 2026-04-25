@@ -701,6 +701,61 @@ let token = jwt_sign(
 )
 ```
 
+### Cookies and sessions
+
+| Function | Parameters | Returns | Description |
+|---|---|---|---|
+| `cookie_parse(headers)` | headers: string, list, or dict | dict | Parse request `Cookie` header values into `{cookies, pairs, duplicates, invalid}`. `cookies` keeps the first value for each name; `duplicates` records all values for repeated names |
+| `cookie_serialize(name, value, options?)` | name: string, value: string, options: dict | string | Serialize one `Set-Cookie` value. Options support `http_only`, `secure`, `same_site`, `path`, `domain`, `max_age`, and `expires` |
+| `cookie_delete(name, options?)` | name: string, options: dict | string | Serialize a deletion cookie with `Max-Age=0` and a Unix epoch `Expires`; secure session defaults are applied unless overridden |
+| `cookie_sign(value, secret)` | value: string, secret: string | string | Return `value.signature` using HMAC-SHA256 and URL-safe base64 for tamper-evident cookie values |
+| `cookie_verify(signed_value, secret)` | signed_value: string, secret: string | dict | Verify a signed cookie value and return `{ok, value, error}` without throwing on signature failure |
+| `session_sign(payload, secret)` | payload: any JSON value, secret: string | string | Return a stateless signed session token containing the JSON payload |
+| `session_verify(token, secret)` | token: string, secret: string | dict | Verify a stateless session token and return `{ok, payload, error}` without throwing on signature failure |
+| `session_cookie(name, payload, secret, options?)` | name: string, payload: any JSON value, secret: string, options: dict | string | Serialize a signed session cookie. Defaults are `Path=/`, `HttpOnly`, `Secure`, and `SameSite=Lax` |
+| `session_from_cookies(headers, name, secret)` | headers: string/list/dict, name: string, secret: string | dict | Parse request cookies, read `name`, and verify it as a stateless session token |
+| `cookie_round_trip(request_cookie?, set_cookie)` | request_cookie: string/list/dict, set_cookie: string/list/dict | dict | Test helper that applies response `Set-Cookie` headers to an existing request cookie header and returns `{cookie_header, cookies}` for the next request |
+
+`cookie_parse` accepts a raw `Cookie` string, a list of strings, or a headers
+dict containing `Cookie`/`cookie`. Empty segments are ignored. Invalid segments
+are skipped and reported in `invalid`. When the same cookie name appears more
+than once, `cookies[name]` keeps the first value and `duplicates[name]` contains
+all observed values in wire order.
+
+```harn
+let parsed = cookie_parse("sid=abc; theme=light; sid=old")
+println(parsed.cookies.sid)       // abc
+println(parsed.duplicates.sid[1]) // old
+```
+
+`cookie_serialize` validates names and values before writing a `Set-Cookie`
+header. `SameSite=None` requires `Secure` so insecure cross-site cookies are
+rejected early.
+
+```harn
+let header = cookie_serialize("theme", "dark", {
+  path: "/",
+  max_age: 3600,
+  http_only: true,
+  secure: true,
+  same_site: "Strict",
+})
+```
+
+`session_*` helpers are stateless: all trusted session data lives inside the
+signed cookie token. For store-backed sessions, put only an opaque session ID in
+the cookie and store the mutable server-side state with `store_*`,
+`shared_map_*`, or an application database.
+
+```harn
+let set_cookie = session_cookie("harn_session", {user: "alice"}, secret)
+let next_request = cookie_round_trip(set_cookie)
+let session = session_from_cookies(next_request.cookie_header, "harn_session", secret)
+if !session.ok {
+  throw "invalid session"
+}
+```
+
 ## Date/Time
 
 | Function | Parameters | Returns | Description |

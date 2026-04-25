@@ -3388,6 +3388,32 @@ claims object. `ES256` expects a P-256 EC private key in PEM form; `RS256`
 expects an RSA private key in PEM form. Unsupported algorithms, non-dict
 claims, and invalid PEM keys throw runtime errors.
 
+### Cookie and session builtins
+
+| Function | Description |
+|---|---|
+| `cookie_parse(headers)` | Parses request `Cookie` header strings, lists, or header dicts into `{cookies, pairs, duplicates, invalid}` |
+| `cookie_serialize(name, value, options?)` | Serializes one `Set-Cookie` header value. Options support `HttpOnly`, `Secure`, `SameSite`, `Path`, `Domain`, `Max-Age`, and `Expires` through snake_case or header-style keys |
+| `cookie_delete(name, options?)` | Serializes a deletion cookie with `Max-Age=0` and an epoch `Expires` timestamp |
+| `cookie_sign(value, secret)` / `cookie_verify(value, secret)` | Signs and verifies a string cookie value using HMAC-SHA256 with URL-safe base64 signatures |
+| `session_sign(payload, secret)` / `session_verify(token, secret)` | Signs and verifies a stateless JSON session payload. Verification returns `{ok, payload, error}` and does not throw on bad signatures |
+| `session_cookie(name, payload, secret, options?)` | Serializes a signed session cookie with secure defaults: `Path=/`, `HttpOnly`, `Secure`, and `SameSite=Lax` |
+| `session_from_cookies(headers, name, secret)` | Parses request cookies and verifies the named cookie as a stateless session token |
+| `cookie_round_trip(request_cookie?, set_cookie)` | Test helper that applies response `Set-Cookie` headers to a request cookie header and returns the next `{cookie_header, cookies}` |
+
+Duplicate request cookies are deterministic: `cookies[name]` keeps the first
+valid value in wire order and `duplicates[name]` records every observed value
+for that name. Invalid cookie segments are skipped and returned in `invalid`.
+
+`cookie_serialize` validates names and values and rejects `SameSite=None`
+without `Secure`. `session_cookie` uses secure dashboard/operator defaults by
+default; callers may override them explicitly for local testing.
+
+Stateless signed sessions put the trusted payload in the cookie token. A
+store-backed session should instead place only an opaque session ID in the
+cookie and keep mutable state in `store_*`, `shared_map_*`, or an application
+database.
+
 ### Regex builtins
 
 | Function | Description |

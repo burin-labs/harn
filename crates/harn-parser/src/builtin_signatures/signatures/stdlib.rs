@@ -268,6 +268,30 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: None,
     },
     BuiltinSig {
+        name: "cookie_delete",
+        return_type: Some(BuiltinReturn::Named("string")),
+    },
+    BuiltinSig {
+        name: "cookie_parse",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
+        name: "cookie_round_trip",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
+        name: "cookie_serialize",
+        return_type: Some(BuiltinReturn::Named("string")),
+    },
+    BuiltinSig {
+        name: "cookie_sign",
+        return_type: Some(BuiltinReturn::Named("string")),
+    },
+    BuiltinSig {
+        name: "cookie_verify",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
         name: "copy_file",
         return_type: Some(BuiltinReturn::Named("nil")),
     },
@@ -1150,6 +1174,22 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
     BuiltinSig {
         name: "set_union",
         return_type: None,
+    },
+    BuiltinSig {
+        name: "session_cookie",
+        return_type: Some(BuiltinReturn::Named("string")),
+    },
+    BuiltinSig {
+        name: "session_from_cookies",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
+        name: "session_sign",
+        return_type: Some(BuiltinReturn::Named("string")),
+    },
+    BuiltinSig {
+        name: "session_verify",
+        return_type: Some(BuiltinReturn::Named("dict")),
     },
     BuiltinSig {
         name: "sha224",
