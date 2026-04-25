@@ -851,6 +851,8 @@ async fn load_module_runtime(
 ) -> Result<(Vm, BTreeMap<String, Rc<VmClosure>>), ConnectorError> {
     let mut base_vm = Vm::new();
     register_vm_stdlib(&mut base_vm);
+    let store_base = module_path.parent().unwrap_or_else(|| Path::new("."));
+    crate::store::register_store_builtins(&mut base_vm, store_base);
     if let Some(parent) = module_path.parent() {
         base_vm.set_source_dir(parent);
         base_vm.set_project_root(parent);
