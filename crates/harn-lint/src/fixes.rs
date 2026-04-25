@@ -61,6 +61,23 @@ pub(crate) fn simple_ident_rename_fix(
     }])
 }
 
+/// Replace an unnecessary conversion call (e.g. `to_string("hi")`) with
+/// the inner expression's source text. The outer call's span is replaced
+/// verbatim with the inner span's source slice, so formatting and any
+/// internal whitespace within the argument are preserved.
+pub(crate) fn unnecessary_cast_fix(
+    source: Option<&str>,
+    call_span: Span,
+    inner_span: Span,
+) -> Option<Vec<FixEdit>> {
+    let src = source?;
+    let inner_text = src.get(inner_span.start..inner_span.end)?;
+    Some(vec![FixEdit {
+        span: call_span,
+        replacement: inner_text.to_string(),
+    }])
+}
+
 /// Append a sink call (`.to_list()` / `.to_set()` / `.to_dict()`) to the
 /// end of an expression span.
 pub(crate) fn append_sink_fix(expr_span: Span, sink: &str) -> Vec<FixEdit> {

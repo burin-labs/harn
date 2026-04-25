@@ -220,10 +220,21 @@ harn lint src/ tests/
 
 Pass `--fix` to automatically apply safe fixes (e.g., `var` → `let` for
 never-reassigned bindings, boolean comparison simplification, unused import
-removal, and string interpolation conversion):
+removal, string interpolation conversion, and removing redundant
+`to_string(...)`/`to_int(...)`/`to_list(...)` casts):
 
 ```bash
 harn lint --fix main.harn
+```
+
+The Harn LSP also exposes these autofixes as quick-fix code actions
+(Cmd+./Ctrl+. in most editors) and as a bulk `source.fixAll.harn`
+action that VS Code can run on save:
+
+```jsonc
+"[harn]": {
+  "editor.codeActionsOnSave": { "source.fixAll.harn": "always" }
+}
 ```
 
 ## harn check
