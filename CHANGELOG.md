@@ -7,9 +7,26 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
-## Unreleased
+## v0.7.39
 
 ### Added
+
+- **Atom primitive for Harn Flow (#601).** New
+  `crates/harn-vm/src/flow/atom.rs` foundational primitive for Harn
+  Flow (parent epic #571): content-addressed, signed, and
+  constructively invertible.
+  `Atom { id, ops, parents, provenance, signature, inverse_of }`
+  carries a `Provenance { principal, persona, agent_run_id,
+  tool_call_id, trace_id, transcript_ref, timestamp }` plus dual
+  Ed25519 signatures (principal + persona) over the `AtomId`, ready
+  to chain into the trust graph in a follow-up.
+  `TextOp::{Insert, Delete}` apply / invert with deletes carrying the
+  removed bytes so the inverse is reconstructible without consulting
+  the document. Two round-tripping encodings on the same struct:
+  serde-JSON for interchange / event-log payloads and a versioned
+  length-prefixed canonical binary form (deterministic, used for
+  hashing and storage) — both decoders re-derive and verify the
+  content hash.
 
 - **`harn-hostlib` crate scaffold (#563).** New opt-in crate housing
   code-intelligence and deterministic-tool host builtins ported from
