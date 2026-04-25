@@ -6,11 +6,11 @@ use std::sync::Arc;
 use harn_serve::{
     A2aHttpServeOptions, A2aServer, A2aServerConfig, ApiKeyAuthConfig, AuthMethodConfig,
     AuthPolicy, DispatchCore, DispatchCoreConfig, ExportCatalog, ExportedCallableKind,
-    HmacAuthConfig, McpHttpServeOptions, McpServer, McpServerConfig,
+    HmacAuthConfig, HttpTlsConfig, McpHttpServeOptions, McpServer, McpServerConfig,
 };
 use time::Duration;
 
-use crate::cli::{A2aServeArgs, McpServeTransport, ServeAcpArgs, ServeMcpArgs};
+use crate::cli::{A2aServeArgs, McpServeTransport, ServeAcpArgs, ServeMcpArgs, ServeTlsMode};
 
 pub(crate) async fn run_acp_server(args: &ServeAcpArgs) -> Result<(), String> {
     crate::acp::run_acp_server(Some(&args.file)).await;
@@ -28,6 +28,7 @@ pub(crate) async fn run_a2a_server(args: &A2aServeArgs) -> Result<(), String> {
         .run_http(A2aHttpServeOptions {
             bind: SocketAddr::from(([0, 0, 0, 0], args.port)),
             public_url: args.public_url.clone(),
+            tls: build_tls_config(args.tls, args.cert.as_ref(), args.key.as_ref())?,
         })
         .await
 }
@@ -87,9 +88,34 @@ pub(crate) async fn run_mcp_server(args: &ServeMcpArgs) -> Result<(), String> {
                     path: args.path.clone(),
                     sse_path: args.sse_path.clone(),
                     messages_path: args.messages_path.clone(),
+                    tls: build_tls_config(args.tls, args.cert.as_ref(), args.key.as_ref())?,
                 })
                 .await
         }
+    }
+}
+
+fn build_tls_config(
+    mode: ServeTlsMode,
+    cert: Option<&std::path::PathBuf>,
+    key: Option<&std::path::PathBuf>,
+) -> Result<HttpTlsConfig, String> {
+    match (mode, cert, key) {
+        (ServeTlsMode::Plain, None, None) => Ok(HttpTlsConfig::plain()),
+        (ServeTlsMode::Plain, Some(cert), Some(key))
+        | (ServeTlsMode::Pem, Some(cert), Some(key)) => {
+            Ok(HttpTlsConfig::pem_files(cert.clone(), key.clone()))
+        }
+        (ServeTlsMode::Pem, None, None) => {
+            Err("`--tls pem` requires `--cert` and `--key`".to_string())
+        }
+        (_, Some(_), None) => Err("`--cert` requires `--key`".to_string()),
+        (_, None, Some(_)) => Err("`--key` requires `--cert`".to_string()),
+        (ServeTlsMode::Edge, None, None) => Ok(HttpTlsConfig::edge_terminated()),
+        (ServeTlsMode::SelfSignedDev, None, None) => Ok(HttpTlsConfig::self_signed_dev()),
+        (ServeTlsMode::Edge | ServeTlsMode::SelfSignedDev, Some(_), Some(_)) => Err(
+            "`--cert` and `--key` are only valid with `--tls pem` or default TLS mode".to_string(),
+        ),
     }
 }
 

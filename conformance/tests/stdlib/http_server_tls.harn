@@ -1,0 +1,36 @@
+pipeline test(task) {
+  let plain = http_server_tls_plain()
+  assert_eq(plain.mode, "plain")
+  assert_eq(plain.scheme, "http")
+  assert_eq(plain.terminate_tls, false)
+  assert_eq(http_server_security_headers(plain), {})
+  let edge = http_server_tls_edge({hsts_max_age_seconds: 300, hsts_include_subdomains: true})
+  assert_eq(edge.mode, "edge")
+  assert_eq(edge.scheme, "https")
+  assert_eq(edge.terminate_tls, false)
+  assert_eq(
+    http_server_security_headers(edge)["strict-transport-security"],
+    "max-age=300; includeSubDomains",
+  )
+  let dev = http_server_tls_self_signed_dev(["localhost"])
+  assert_eq(dev.mode, "self_signed_dev")
+  assert_eq(dev.terminate_tls, true)
+  assert(contains(dev.cert_pem, "BEGIN CERTIFICATE"))
+  assert(contains(dev.key_pem, "BEGIN PRIVATE KEY"))
+  assert_eq(http_server_security_headers(dev), {})
+  let dir = path_join(temp_dir(), "harn-http-server-tls-" + uuid())
+  mkdir(dir)
+  let cert_path = path_join(dir, "cert.pem")
+  let key_path = path_join(dir, "key.pem")
+  write_file(cert_path, dev.cert_pem)
+  write_file(key_path, dev.key_pem)
+  let pem = http_server_tls_pem(cert_path, key_path)
+  assert_eq(pem.mode, "pem")
+  assert_eq(pem.cert_path, cert_path)
+  assert(contains(http_server_security_headers(pem)["strict-transport-security"], "max-age="))
+  let missing = try {
+    http_server_tls_pem(path_join(dir, "missing.pem"), key_path)
+  }
+  assert(is_err(missing))
+  println("http_server_tls_ok")
+}

@@ -59,6 +59,9 @@ Run it with:
 ```bash
 harn serve mcp server.harn
 harn serve mcp --transport http server.harn
+harn serve mcp --transport http --tls edge --bind 127.0.0.1:8765 server.harn
+harn serve mcp --transport http --tls self-signed-dev --bind 127.0.0.1:8765 server.harn
+harn serve mcp --transport http --cert certs/prod.pem --key certs/prod-key.pem server.harn
 ```
 
 Behavior today:
@@ -66,6 +69,11 @@ Behavior today:
 - stdio transport for local subprocess-style MCP clients
 - Streamable HTTP `POST` / `GET` endpoint at `--path`
 - legacy SSE compatibility endpoints at `--sse-path` and `--messages-path`
+- TLS listener modes:
+  `plain` for intentional HTTP,
+  `edge` when public TLS is terminated by a proxy/load balancer,
+  `self-signed-dev` for local HTTPS testing,
+  and PEM cert/key files for in-process HTTPS termination
 - progress notifications when the caller provides `_meta.progressToken`
 - cooperative cancel propagation from `notifications/cancelled`
 - HTTP auth hooks built on the shared `AuthPolicy` surface:
@@ -100,6 +108,9 @@ Run it with:
 ```bash
 harn serve a2a server.harn
 harn serve a2a --port 3000 server.harn
+harn serve a2a --tls edge --public-url https://agent.example.com server.harn
+harn serve a2a --tls self-signed-dev --port 3443 server.harn
+harn serve a2a --cert certs/prod.pem --key certs/prod-key.pem server.harn
 ```
 
 Behavior today:
@@ -120,6 +131,31 @@ Behavior today:
   HMAC canonical-request signatures
 - optional HS256 agent-card signatures with
   `--card-signing-secret` or `HARN_SERVE_A2A_CARD_SECRET`
+
+## TLS Modes
+
+`harn serve` HTTP adapters accept the same TLS modes exposed by the HTTP
+stdlib helpers:
+
+- `--tls plain`: bind a plain HTTP listener. Use only for loopback,
+  trusted internal networks, or explicit cleartext development.
+- `--tls edge`: bind a plain HTTP listener because an edge proxy,
+  ingress, or load balancer terminates public TLS. The Harn layer treats the
+  advertised scheme as HTTPS and emits HSTS headers. For A2A, pass
+  `--public-url https://...` so agent cards point at the public edge URL.
+- `--tls self-signed-dev`: generate an ephemeral self-signed certificate and
+  serve HTTPS locally. This is for development only; HSTS is intentionally
+  disabled so browsers are not pinned to a throwaway certificate.
+- `--tls pem --cert <chain.pem> --key <key.pem>` or just `--cert ... --key ...`:
+  load a PEM certificate chain and private key before the listener starts. A
+  missing or invalid file is a startup failure, not a deferred request-time
+  error.
+
+Prefer edge termination for managed deployments where the platform already owns
+certificate issuance, renewal, WAF/rate-limit policy, or HTTP/2/HTTP/3
+negotiation. Prefer PEM termination only when the Harn process is the TLS
+boundary. ALPN and SNI routing are intentionally left to edge infrastructure
+until Harn has a concrete in-process need.
 
 ### ACP
 

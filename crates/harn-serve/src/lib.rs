@@ -5,6 +5,7 @@ mod core;
 mod error;
 mod exports;
 mod replay;
+pub mod tls;
 
 pub use adapter::{AdapterDescriptor, TransportAdapter};
 pub use adapters::a2a::{A2aHttpServeOptions, A2aServer, A2aServerConfig, A2A_PROTOCOL_VERSION};
@@ -26,3 +27,4 @@ pub use core::{
 pub use error::DispatchError;
 pub use exports::{ExportCatalog, ExportedCallableKind, ExportedFunction, ExportedParam};
 pub use replay::{InMemoryReplayCache, ReplayCache, ReplayCacheEntry, ReplayKey};
+pub use tls::{HstsConfig, HttpTlsConfig};
