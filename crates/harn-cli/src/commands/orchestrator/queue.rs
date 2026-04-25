@@ -135,6 +135,45 @@ async fn run_ls(
     println!();
     println!("Stranded envelopes:");
     render_stranded(&overview.dispatcher.stranded_envelopes);
+
+    println!();
+    println!(
+        "Scheduler policy: strategy={} fairness_key={}",
+        overview.scheduler.policy.strategy_name(),
+        overview.scheduler.policy.fairness_key.as_str(),
+    );
+    if overview.scheduler.per_queue.is_empty() {
+        println!("- no queues observed yet");
+    } else {
+        for queue in &overview.scheduler.per_queue {
+            println!(
+                "- queue={} rounds_completed={} starvation_promotions={}",
+                queue.queue, queue.rounds_completed, queue.starvation_promotions_total,
+            );
+            if queue.keys.is_empty() {
+                println!("    (no fairness keys observed)");
+            } else {
+                for stat in &queue.keys {
+                    let oldest = if stat.oldest_ready_age_ms > 0 {
+                        format_duration(StdDuration::from_millis(stat.oldest_ready_age_ms))
+                    } else {
+                        "-".to_string()
+                    };
+                    println!(
+                        "    key={} weight={} ready={} in_flight={} deficit={} selected={} deferred={} oldest_eligible={}",
+                        stat.fairness_key,
+                        stat.weight,
+                        stat.ready_jobs,
+                        stat.in_flight,
+                        stat.deficit,
+                        stat.selected_total,
+                        stat.deferred_total,
+                        oldest,
+                    );
+                }
+            }
+        }
+    }
     Ok(())
 }
 
@@ -385,10 +424,29 @@ async fn build_overview(
         .filter(|(_, event)| event.kind == "event_ingested")
         .count();
 
-    let worker_queues = harn_vm::WorkerQueue::new(event_log.clone())
-        .queue_summaries()
+    let worker_queue = harn_vm::WorkerQueue::new(event_log.clone());
+    let worker_queue_inspections = worker_queue
+        .inspect_all_queues()
         .await
         .map_err(|error| error.to_string())?;
+    let worker_queues = worker_queue_inspections
+        .iter()
+        .map(|snap| snap.summary.clone())
+        .collect();
+    let scheduler_overview = SchedulerOverview {
+        policy: worker_queue.policy(),
+        per_queue: worker_queue_inspections
+            .into_iter()
+            .map(|snap| SchedulerQueueOverview {
+                queue: snap.summary.queue.clone(),
+                strategy: snap.scheduler.strategy,
+                fairness_key: snap.scheduler.fairness_key,
+                rounds_completed: snap.scheduler.rounds_completed,
+                starvation_promotions_total: snap.scheduler.starvation_promotions_total,
+                keys: snap.scheduler.keys,
+            })
+            .collect(),
+    };
 
     Ok(QueueOverview {
         dispatcher: DispatcherQueueOverview {
@@ -408,6 +466,7 @@ async fn build_overview(
             stranded_envelopes: stranded,
         },
         worker_queues,
+        scheduler: scheduler_overview,
     })
 }
 
@@ -490,6 +549,23 @@ async fn stop_claim_heartbeat(handle: tokio::task::JoinHandle<()>) {
 struct QueueOverview {
     dispatcher: DispatcherQueueOverview,
     worker_queues: Vec<harn_vm::WorkerQueueSummary>,
+    scheduler: SchedulerOverview,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct SchedulerOverview {
+    policy: harn_vm::SchedulerPolicy,
+    per_queue: Vec<SchedulerQueueOverview>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct SchedulerQueueOverview {
+    queue: String,
+    strategy: String,
+    fairness_key: String,
+    rounds_completed: u64,
+    starvation_promotions_total: u64,
+    keys: Vec<harn_vm::SchedulerKeyStat>,
 }
 
 #[derive(Clone, Debug, Serialize)]

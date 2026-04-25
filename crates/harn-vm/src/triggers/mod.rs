@@ -3,6 +3,7 @@ pub mod event;
 pub mod flow_control;
 pub mod inbox;
 pub mod registry;
+pub mod scheduler;
 pub mod test_util;
 pub mod topics;
 pub mod worker_queue;
@@ -44,6 +45,12 @@ pub use registry::{
     TriggerMetricsSnapshot, TriggerPredicateSpec, TriggerPredicateState, TriggerRegistryError,
     TriggerState,
 };
+pub use scheduler::{
+    in_flight_by_key as scheduler_in_flight_by_key,
+    ready_stats_by_key as scheduler_ready_stats_by_key, FairnessKey, ReadyKeyStats, SchedulableJob,
+    SchedulerKeyStat, SchedulerPolicy, SchedulerSnapshot, SchedulerState, SchedulerStrategy,
+    DEFAULT_STARVATION_AGE_MS,
+};
 pub use test_util::{run_trigger_harness_fixture, TriggerHarnessResult, TRIGGER_TEST_FIXTURES};
 pub use topics::{
     classify_trigger_dlq_error, TRIGGERS_LIFECYCLE_TOPIC, TRIGGER_ATTEMPTS_TOPIC,
@@ -54,7 +61,7 @@ pub use topics::{
 pub use worker_queue::{
     claims_topic_name as worker_claims_topic_name, job_topic_name as worker_job_topic_name,
     response_topic_name as worker_response_topic_name, ClaimedWorkerJob, WorkerQueue,
-    WorkerQueueClaimHandle, WorkerQueueEnqueueReceipt, WorkerQueueJob, WorkerQueueJobState,
-    WorkerQueuePriority, WorkerQueueResponseRecord, WorkerQueueState, WorkerQueueSummary,
-    WORKER_QUEUE_CATALOG_TOPIC,
+    WorkerQueueClaimHandle, WorkerQueueEnqueueReceipt, WorkerQueueInspectSnapshot, WorkerQueueJob,
+    WorkerQueueJobState, WorkerQueuePriority, WorkerQueueResponseRecord, WorkerQueueState,
+    WorkerQueueSummary, WORKER_QUEUE_CATALOG_TOPIC,
 };

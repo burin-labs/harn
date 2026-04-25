@@ -855,6 +855,99 @@ impl MetricsRegistry {
         );
     }
 
+    /// Increment the scheduler-selection counter for a particular fairness key.
+    pub fn record_scheduler_selection(
+        &self,
+        queue: &str,
+        fairness_dimension: &str,
+        fairness_key: &str,
+    ) {
+        self.increment_counter(
+            "harn_scheduler_selections_total",
+            labels([
+                ("queue", queue),
+                ("fairness_dimension", fairness_dimension),
+                ("fairness_key", fairness_key),
+            ]),
+            1,
+        );
+    }
+
+    /// Increment the scheduler-deferred counter (queue had work but couldn't
+    /// be selected because the key was at its concurrency cap).
+    pub fn record_scheduler_deferral(
+        &self,
+        queue: &str,
+        fairness_dimension: &str,
+        fairness_key: &str,
+    ) {
+        self.increment_counter(
+            "harn_scheduler_deferrals_total",
+            labels([
+                ("queue", queue),
+                ("fairness_dimension", fairness_dimension),
+                ("fairness_key", fairness_key),
+            ]),
+            1,
+        );
+    }
+
+    /// Increment the scheduler starvation-promotion counter.
+    pub fn record_scheduler_starvation_promotion(
+        &self,
+        queue: &str,
+        fairness_dimension: &str,
+        fairness_key: &str,
+    ) {
+        self.increment_counter(
+            "harn_scheduler_starvation_promotions_total",
+            labels([
+                ("queue", queue),
+                ("fairness_dimension", fairness_dimension),
+                ("fairness_key", fairness_key),
+            ]),
+            1,
+        );
+    }
+
+    /// Set the current scheduler deficit gauge for a fairness key.
+    pub fn set_scheduler_deficit(
+        &self,
+        queue: &str,
+        fairness_dimension: &str,
+        fairness_key: &str,
+        deficit: i64,
+    ) {
+        self.set_gauge(
+            "harn_scheduler_deficit",
+            labels([
+                ("queue", queue),
+                ("fairness_dimension", fairness_dimension),
+                ("fairness_key", fairness_key),
+            ]),
+            deficit as f64,
+        );
+    }
+
+    /// Set the oldest-eligible-job-age gauge for a fairness key (seconds).
+    pub fn set_scheduler_oldest_eligible_age(
+        &self,
+        queue: &str,
+        fairness_dimension: &str,
+        fairness_key: &str,
+        age_ms: u64,
+    ) {
+        self.set_gauge(
+            "harn_scheduler_oldest_eligible_age_seconds",
+            labels([
+                ("queue", queue),
+                ("fairness_dimension", fairness_dimension),
+                ("fairness_key", fairness_key),
+            ]),
+            age_ms as f64 / 1000.0,
+        );
+    }
+
     pub fn set_orchestrator_pump_backlog(&self, topic: &str, count: u64) {
         self.set_gauge(
             "harn_orchestrator_pump_backlog",
@@ -1132,6 +1225,9 @@ fn metric_family_names(kind: MetricKind) -> &'static [&'static str] {
             "harn_llm_calls_total",
             "harn_llm_cost_usd_total",
             "harn_llm_cache_hits_total",
+            "harn_scheduler_selections_total",
+            "harn_scheduler_deferrals_total",
+            "harn_scheduler_starvation_promotions_total",
         ],
         MetricKind::Gauge => &[
             "harn_trigger_inflight",
@@ -1142,6 +1238,8 @@ fn metric_family_names(kind: MetricKind) -> &'static [&'static str] {
             "harn_orchestrator_pump_backlog",
             "harn_orchestrator_pump_outstanding",
             "harn_trigger_oldest_pending_age_seconds",
+            "harn_scheduler_deficit",
+            "harn_scheduler_oldest_eligible_age_seconds",
         ],
         MetricKind::Histogram => &[
             "harn_http_request_duration_seconds",

@@ -22,6 +22,25 @@ granular archaeology.
   into `harn-cli`'s ACP server behind the default-on `hostlib` cargo
   feature.
 
+- **Fair-share scheduler for worker-queue claims (#477).** New
+  deficit-round-robin policy in front of `WorkerQueue::claim_next` so a
+  hot tenant, binding, or trigger id can no longer monopolise a shared
+  queue. Default remains FIFO — single-tenant deployments see no
+  behaviour change unless they opt in via `HARN_SCHEDULER_STRATEGY=drr`.
+  Configurable via `HARN_SCHEDULER_*` env vars: fairness key
+  (`tenant`, `binding`, `trigger-id`, `tenant-and-binding`), per-key
+  weights, starvation-age promotion threshold, and per-key concurrency
+  caps. Existing per-binding flow-control gates still apply *after*
+  selection. `harn orchestrator queue ls --json` now exposes a
+  `scheduler` block with per-fairness-key deficit, weight, in-flight,
+  selected/deferred totals, and oldest-eligible age. New Prometheus
+  metrics: `harn_scheduler_selections_total`,
+  `harn_scheduler_deferrals_total`,
+  `harn_scheduler_starvation_promotions_total`,
+  `harn_scheduler_deficit`,
+  `harn_scheduler_oldest_eligible_age_seconds`. See
+  `docs/src/orchestrator/worker-dispatch.md` for the full reference.
+
 ### Deprecated
 
 - **Rust-side GitHub, Slack, Linear, and Notion provider connectors
