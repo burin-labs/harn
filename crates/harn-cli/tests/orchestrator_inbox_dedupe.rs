@@ -20,8 +20,13 @@ use tempfile::TempDir;
 // fail-after-emit test hook can terminate the process before the HTTP listener
 // readiness line is logged.
 const STARTUP_NEEDLE: &str = "activated connectors: cron(1)";
-const PROCESS_FAIL_FAST_TIMEOUT: Duration = Duration::from_secs(5);
-const EVENT_FAIL_FAST_TIMEOUT: Duration = Duration::from_secs(2);
+// The previous 5s/2s budgets caused intermittent CI failures on macOS where
+// dyld + amfi cold-cache lookups for the unsigned debug-build binary plus
+// nextest's cargo-test launch overhead pushed subprocess spawn past the
+// budget. Tests serialize through a process-wide file lock, so a generous
+// upper bound only affects the failure path.
+const PROCESS_FAIL_FAST_TIMEOUT: Duration = Duration::from_secs(60);
+const EVENT_FAIL_FAST_TIMEOUT: Duration = Duration::from_secs(10);
 
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -66,6 +71,9 @@ fn spawn_orchestrator(
         .arg("127.0.0.1:0")
         .arg("--role")
         .arg("single-tenant")
+        // Cap shutdown drain at 5s; the dedupe fixture has no real backlog.
+        .arg("--shutdown-timeout")
+        .arg("5")
         .stderr(Stdio::piped())
         .stdout(Stdio::null());
     for (key, value) in extra_env {
