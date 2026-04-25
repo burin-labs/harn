@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/fs_watch/unsubscribe.request.json",
+  "title": "fs_watch.unsubscribe request",
+  "type": "object",
+  "properties": {
+    "subscription_id": { "type": "string" }
+  },
+  "required": ["subscription_id"],
+  "additionalProperties": false
+}

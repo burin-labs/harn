@@ -14,6 +14,16 @@ impl AcpRuntimeConfigurator for CliAcpRuntimeConfigurator {
         vm: &mut harn_vm::Vm,
         source_path: Option<&Path>,
     ) -> Result<(), String> {
+        // Hostlib registration is independent of the package/extension flow:
+        // even a `harn run` invocation that hasn't loaded a manifest should
+        // see the `hostlib_*` builtins so callers can probe the surface.
+        // Behind the `hostlib` cargo feature (default-on); see
+        // `crates/harn-hostlib/README.md` for the boundary contract.
+        #[cfg(feature = "hostlib")]
+        {
+            let _ = harn_hostlib::install_default(vm);
+        }
+
         let Some(path) = source_path else {
             return Ok(());
         };

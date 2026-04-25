@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/tools/git.response.json",
+  "title": "tools.git response",
+  "description": "Free-form payload keyed by `operation`. Concrete shapes are nailed down in issue C2; until then the response is opaque JSON so the contract can evolve.",
+  "type": "object",
+  "properties": {
+    "operation": { "type": "string" },
+    "repo": { "type": "string" },
+    "data": {}
+  },
+  "required": ["operation", "data"],
+  "additionalProperties": false
+}

@@ -1,0 +1,328 @@
+//! Embedded JSON Schemas for every hostlib host method.
+//!
+//! Schemas live at `schemas/<module>/<method>.{request,response}.json` and
+//! are baked into the crate at compile time via `include_str!`. They're the
+//! source of truth for `burin-code`'s schema-drift tests: the schema files
+//! ship with the crate (see the `include` field in `Cargo.toml`), and
+//! consumers fetch them through this module.
+//!
+//! Schemas use JSON Schema draft 2020-12.
+
+/// Direction of a schema (request body vs. response body).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SchemaKind {
+    /// Schema for the *input* of a host method.
+    Request,
+    /// Schema for the *output* of a host method.
+    Response,
+}
+
+/// One `(module, method, kind, schema_text)` tuple for every shipped schema.
+///
+/// Embedders use this catalog to:
+/// - assert that every registered builtin has a matching schema (drift test);
+/// - export the schemas to consumers like burin-code;
+/// - validate live request/response payloads in tests.
+pub const SCHEMAS: &[(&str, &str, SchemaKind, &str)] = &[
+    // ast/
+    (
+        "ast",
+        "parse_file",
+        SchemaKind::Request,
+        include_str!("../schemas/ast/parse_file.request.json"),
+    ),
+    (
+        "ast",
+        "parse_file",
+        SchemaKind::Response,
+        include_str!("../schemas/ast/parse_file.response.json"),
+    ),
+    (
+        "ast",
+        "symbols",
+        SchemaKind::Request,
+        include_str!("../schemas/ast/symbols.request.json"),
+    ),
+    (
+        "ast",
+        "symbols",
+        SchemaKind::Response,
+        include_str!("../schemas/ast/symbols.response.json"),
+    ),
+    (
+        "ast",
+        "outline",
+        SchemaKind::Request,
+        include_str!("../schemas/ast/outline.request.json"),
+    ),
+    (
+        "ast",
+        "outline",
+        SchemaKind::Response,
+        include_str!("../schemas/ast/outline.response.json"),
+    ),
+    // code_index/
+    (
+        "code_index",
+        "query",
+        SchemaKind::Request,
+        include_str!("../schemas/code_index/query.request.json"),
+    ),
+    (
+        "code_index",
+        "query",
+        SchemaKind::Response,
+        include_str!("../schemas/code_index/query.response.json"),
+    ),
+    (
+        "code_index",
+        "rebuild",
+        SchemaKind::Request,
+        include_str!("../schemas/code_index/rebuild.request.json"),
+    ),
+    (
+        "code_index",
+        "rebuild",
+        SchemaKind::Response,
+        include_str!("../schemas/code_index/rebuild.response.json"),
+    ),
+    (
+        "code_index",
+        "stats",
+        SchemaKind::Request,
+        include_str!("../schemas/code_index/stats.request.json"),
+    ),
+    (
+        "code_index",
+        "stats",
+        SchemaKind::Response,
+        include_str!("../schemas/code_index/stats.response.json"),
+    ),
+    (
+        "code_index",
+        "imports_for",
+        SchemaKind::Request,
+        include_str!("../schemas/code_index/imports_for.request.json"),
+    ),
+    (
+        "code_index",
+        "imports_for",
+        SchemaKind::Response,
+        include_str!("../schemas/code_index/imports_for.response.json"),
+    ),
+    (
+        "code_index",
+        "importers_of",
+        SchemaKind::Request,
+        include_str!("../schemas/code_index/importers_of.request.json"),
+    ),
+    (
+        "code_index",
+        "importers_of",
+        SchemaKind::Response,
+        include_str!("../schemas/code_index/importers_of.response.json"),
+    ),
+    // scanner/
+    (
+        "scanner",
+        "scan_project",
+        SchemaKind::Request,
+        include_str!("../schemas/scanner/scan_project.request.json"),
+    ),
+    (
+        "scanner",
+        "scan_project",
+        SchemaKind::Response,
+        include_str!("../schemas/scanner/scan_project.response.json"),
+    ),
+    (
+        "scanner",
+        "scan_incremental",
+        SchemaKind::Request,
+        include_str!("../schemas/scanner/scan_incremental.request.json"),
+    ),
+    (
+        "scanner",
+        "scan_incremental",
+        SchemaKind::Response,
+        include_str!("../schemas/scanner/scan_incremental.response.json"),
+    ),
+    // fs_watch/
+    (
+        "fs_watch",
+        "subscribe",
+        SchemaKind::Request,
+        include_str!("../schemas/fs_watch/subscribe.request.json"),
+    ),
+    (
+        "fs_watch",
+        "subscribe",
+        SchemaKind::Response,
+        include_str!("../schemas/fs_watch/subscribe.response.json"),
+    ),
+    (
+        "fs_watch",
+        "unsubscribe",
+        SchemaKind::Request,
+        include_str!("../schemas/fs_watch/unsubscribe.request.json"),
+    ),
+    (
+        "fs_watch",
+        "unsubscribe",
+        SchemaKind::Response,
+        include_str!("../schemas/fs_watch/unsubscribe.response.json"),
+    ),
+    // tools/
+    (
+        "tools",
+        "search",
+        SchemaKind::Request,
+        include_str!("../schemas/tools/search.request.json"),
+    ),
+    (
+        "tools",
+        "search",
+        SchemaKind::Response,
+        include_str!("../schemas/tools/search.response.json"),
+    ),
+    (
+        "tools",
+        "read_file",
+        SchemaKind::Request,
+        include_str!("../schemas/tools/read_file.request.json"),
+    ),
+    (
+        "tools",
+        "read_file",
+        SchemaKind::Response,
+        include_str!("../schemas/tools/read_file.response.json"),
+    ),
+    (
+        "tools",
+        "write_file",
+        SchemaKind::Request,
+        include_str!("../schemas/tools/write_file.request.json"),
+    ),
+    (
+        "tools",
+        "write_file",
+        SchemaKind::Response,
+        include_str!("../schemas/tools/write_file.response.json"),
+    ),
+    (
+        "tools",
+        "delete_file",
+        SchemaKind::Request,
+        include_str!("../schemas/tools/delete_file.request.json"),
+    ),
+    (
+        "tools",
+        "delete_file",
+        SchemaKind::Response,
+        include_str!("../schemas/tools/delete_file.response.json"),
+    ),
+    (
+        "tools",
+        "list_directory",
+        SchemaKind::Request,
+        include_str!("../schemas/tools/list_directory.request.json"),
+    ),
+    (
+        "tools",
+        "list_directory",
+        SchemaKind::Response,
+        include_str!("../schemas/tools/list_directory.response.json"),
+    ),
+    (
+        "tools",
+        "get_file_outline",
+        SchemaKind::Request,
+        include_str!("../schemas/tools/get_file_outline.request.json"),
+    ),
+    (
+        "tools",
+        "get_file_outline",
+        SchemaKind::Response,
+        include_str!("../schemas/tools/get_file_outline.response.json"),
+    ),
+    (
+        "tools",
+        "git",
+        SchemaKind::Request,
+        include_str!("../schemas/tools/git.request.json"),
+    ),
+    (
+        "tools",
+        "git",
+        SchemaKind::Response,
+        include_str!("../schemas/tools/git.response.json"),
+    ),
+    (
+        "tools",
+        "run_command",
+        SchemaKind::Request,
+        include_str!("../schemas/tools/run_command.request.json"),
+    ),
+    (
+        "tools",
+        "run_command",
+        SchemaKind::Response,
+        include_str!("../schemas/tools/run_command.response.json"),
+    ),
+    (
+        "tools",
+        "run_test",
+        SchemaKind::Request,
+        include_str!("../schemas/tools/run_test.request.json"),
+    ),
+    (
+        "tools",
+        "run_test",
+        SchemaKind::Response,
+        include_str!("../schemas/tools/run_test.response.json"),
+    ),
+    (
+        "tools",
+        "run_build_command",
+        SchemaKind::Request,
+        include_str!("../schemas/tools/run_build_command.request.json"),
+    ),
+    (
+        "tools",
+        "run_build_command",
+        SchemaKind::Response,
+        include_str!("../schemas/tools/run_build_command.response.json"),
+    ),
+    (
+        "tools",
+        "inspect_test_results",
+        SchemaKind::Request,
+        include_str!("../schemas/tools/inspect_test_results.request.json"),
+    ),
+    (
+        "tools",
+        "inspect_test_results",
+        SchemaKind::Response,
+        include_str!("../schemas/tools/inspect_test_results.response.json"),
+    ),
+    (
+        "tools",
+        "manage_packages",
+        SchemaKind::Request,
+        include_str!("../schemas/tools/manage_packages.request.json"),
+    ),
+    (
+        "tools",
+        "manage_packages",
+        SchemaKind::Response,
+        include_str!("../schemas/tools/manage_packages.response.json"),
+    ),
+];
+
+/// Look up a single schema as raw JSON text.
+pub fn lookup(module: &str, method: &str, kind: SchemaKind) -> Option<&'static str> {
+    SCHEMAS
+        .iter()
+        .find(|(m, mt, k, _)| *m == module && *mt == method && *k == kind)
+        .map(|(_, _, _, body)| *body)
+}

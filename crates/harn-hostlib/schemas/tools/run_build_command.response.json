@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/tools/run_build_command.response.json",
+  "title": "tools.run_build_command response",
+  "type": "object",
+  "properties": {
+    "exit_code": { "type": "integer" },
+    "stdout": { "type": "string" },
+    "stderr": { "type": "string" },
+    "duration_ms": { "type": "integer", "minimum": 0 },
+    "diagnostics": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Diagnostic" }
+    }
+  },
+  "required": ["exit_code", "stdout", "stderr", "duration_ms"],
+  "additionalProperties": false,
+  "$defs": {
+    "Diagnostic": {
+      "type": "object",
+      "properties": {
+        "severity": {
+          "type": "string",
+          "enum": ["error", "warning", "note", "help"]
+        },
+        "message": { "type": "string" },
+        "path": { "type": ["string", "null"] },
+        "line": { "type": ["integer", "null"], "minimum": 1 },
+        "column": { "type": ["integer", "null"], "minimum": 1 }
+      },
+      "required": ["severity", "message"],
+      "additionalProperties": false
+    }
+  }
+}

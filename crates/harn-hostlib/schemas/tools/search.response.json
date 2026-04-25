@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/tools/search.response.json",
+  "title": "tools.search response",
+  "type": "object",
+  "properties": {
+    "matches": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Match" }
+    },
+    "truncated": { "type": "boolean" }
+  },
+  "required": ["matches", "truncated"],
+  "additionalProperties": false,
+  "$defs": {
+    "Match": {
+      "type": "object",
+      "properties": {
+        "path": { "type": "string" },
+        "line": { "type": "integer", "minimum": 1 },
+        "column": { "type": "integer", "minimum": 1 },
+        "text": { "type": "string" },
+        "context_before": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "context_after": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "required": ["path", "line", "column", "text"],
+      "additionalProperties": false
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/tools/inspect_test_results.request.json",
+  "title": "tools.inspect_test_results request",
+  "description": "Fetch structured per-test failure detail for a previous `run_test` invocation.",
+  "type": "object",
+  "properties": {
+    "result_handle": { "type": "string" },
+    "include_passing": { "type": "boolean", "default": false }
+  },
+  "required": ["result_handle"],
+  "additionalProperties": false
+}

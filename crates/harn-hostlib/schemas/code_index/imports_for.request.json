@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/imports_for.request.json",
+  "title": "code_index.imports_for request",
+  "description": "List the modules/files that the given file imports.",
+  "type": "object",
+  "properties": {
+    "path": { "type": "string" }
+  },
+  "required": ["path"],
+  "additionalProperties": false
+}

@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/ast/outline.request.json",
+  "title": "ast.outline request",
+  "description": "Produce a hierarchical outline (nested symbols) for a source file. Mirrors the Swift ASTEngine `Outline` shape.",
+  "type": "object",
+  "properties": {
+    "path": { "type": "string" },
+    "language": { "type": "string" },
+    "max_depth": { "type": "integer", "minimum": 0 }
+  },
+  "required": ["path"],
+  "additionalProperties": false
+}

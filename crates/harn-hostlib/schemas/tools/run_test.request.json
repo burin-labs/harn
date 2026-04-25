@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/tools/run_test.request.json",
+  "title": "tools.run_test request",
+  "description": "Run a project-defined test command. Resolves the runner from the workspace manifest unless `argv` is provided explicitly.",
+  "type": "object",
+  "properties": {
+    "argv": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "cwd": { "type": "string" },
+    "filter": {
+      "type": "string",
+      "description": "Optional test name / path filter passed through to the runner."
+    },
+    "timeout_ms": { "type": "integer", "minimum": 0 }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/ast/symbols.response.json",
+  "title": "ast.symbols response",
+  "type": "object",
+  "properties": {
+    "path": { "type": "string" },
+    "language": { "type": "string" },
+    "symbols": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Symbol" }
+    }
+  },
+  "required": ["path", "language", "symbols"],
+  "additionalProperties": false,
+  "$defs": {
+    "Symbol": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "kind": { "type": "string" },
+        "container": { "type": ["string", "null"] },
+        "start_row": { "type": "integer", "minimum": 0 },
+        "start_col": { "type": "integer", "minimum": 0 },
+        "end_row": { "type": "integer", "minimum": 0 },
+        "end_col": { "type": "integer", "minimum": 0 }
+      },
+      "required": ["name", "kind", "start_row", "start_col", "end_row", "end_col"],
+      "additionalProperties": false
+    }
+  }
+}

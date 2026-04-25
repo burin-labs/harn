@@ -1,0 +1,44 @@
+[package]
+name = "harn-hostlib"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Opt-in code-intelligence and deterministic-tool host builtins for the Harn VM"
+include = [
+    "src/**/*",
+    "schemas/**/*",
+    "tests/**/*",
+    "Cargo.toml",
+    "README.md",
+]
+
+[dependencies]
+harn-vm = { path = "../harn-vm", version = "0.7" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt", "macros", "sync", "fs", "process", "time"] }
+anyhow = "1"
+thiserror = "2"
+
+# Foundational dependencies for the upcoming module implementations
+# (B2/B3/B4/C1/C2/C3). They are wired in here so the workspace lockfile is
+# stable across follow-up issues — module code that lands later can use them
+# without bumping deps in a separate PR. Pinned to known-good releases at the
+# time of scaffolding.
+#
+# `gix` is intentionally not pinned here: 0.82 fails to compile on the
+# repo's current rustc against gix-hash 0.24's exhaustive match guards.
+# Issue C2 (the `tools/git` implementation) picks the version it needs
+# along with the toolchain bump; until then we shell out to the system
+# `git` if anything urgent comes up.
+tree-sitter = "0.26"
+grep-searcher = "0.1"
+ignore = "0.4"
+notify = "8"
+walkdir = "2"
+
+[dev-dependencies]
+tempfile = "3"
+serde_json = "1"

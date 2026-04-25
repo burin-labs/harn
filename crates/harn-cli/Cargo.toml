@@ -35,6 +35,7 @@ harn-lexer = { path = "../harn-lexer", version = "0.7" }
 harn-parser = { path = "../harn-parser", version = "0.7" }
 harn-ir = { path = "../harn-ir", version = "0.7" }
 harn-vm = { path = "../harn-vm", version = "0.7", features = ["otel"] }
+harn-hostlib = { path = "../harn-hostlib", version = "0.7", optional = true }
 harn-lint = { path = "../harn-lint", version = "0.7" }
 harn-modules = { path = "../harn-modules", version = "0.7" }
 harn-fmt = { path = "../harn-fmt", version = "0.7" }
@@ -71,6 +72,14 @@ jmespath = "0.5.0"
 rustls = { version = "0.23", features = ["aws-lc-rs"] }
 tracing = "0.1"
 fs2 = "0.4"
+
+[features]
+default = ["hostlib"]
+# Wire `harn-hostlib`'s code-intelligence and tool builtins into the ACP
+# server. Default-on so `harn run`-driven scripts that name a hostlib
+# builtin work without extra flags. Disable with `--no-default-features` if
+# you want a slimmer build that doesn't pull tree-sitter/notify/etc.
+hostlib = ["dep:harn-hostlib"]
 
 [dev-dependencies]
 hmac = "0.13"

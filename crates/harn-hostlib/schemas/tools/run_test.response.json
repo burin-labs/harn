@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/tools/run_test.response.json",
+  "title": "tools.run_test response",
+  "type": "object",
+  "properties": {
+    "exit_code": { "type": "integer" },
+    "stdout": { "type": "string" },
+    "stderr": { "type": "string" },
+    "duration_ms": { "type": "integer", "minimum": 0 },
+    "summary": {
+      "type": "object",
+      "properties": {
+        "passed": { "type": "integer", "minimum": 0 },
+        "failed": { "type": "integer", "minimum": 0 },
+        "skipped": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "result_handle": {
+      "type": "string",
+      "description": "Opaque handle that callers pass to `inspect_test_results` to retrieve structured failures."
+    }
+  },
+  "required": ["exit_code", "stdout", "stderr", "duration_ms"],
+  "additionalProperties": false
+}

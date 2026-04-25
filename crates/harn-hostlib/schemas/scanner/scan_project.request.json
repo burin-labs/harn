@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/scanner/scan_project.request.json",
+  "title": "scanner.scan_project request",
+  "description": "Walk the project root and return a deterministic file list. Honors `.gitignore` and friends through `ignore`.",
+  "type": "object",
+  "properties": {
+    "root": { "type": "string" },
+    "include_hidden": { "type": "boolean", "default": false },
+    "respect_gitignore": { "type": "boolean", "default": true },
+    "max_files": { "type": "integer", "minimum": 0, "default": 0 }
+  },
+  "required": ["root"],
+  "additionalProperties": false
+}

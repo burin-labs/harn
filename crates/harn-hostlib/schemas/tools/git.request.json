@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/tools/git.request.json",
+  "title": "tools.git request",
+  "description": "Read-only git inspection backed by `gix`. Commands that mutate the repo go through host-owned approval flows and are intentionally not part of this surface.",
+  "type": "object",
+  "properties": {
+    "operation": {
+      "type": "string",
+      "enum": [
+        "status",
+        "diff",
+        "log",
+        "blame",
+        "show",
+        "branch_list",
+        "current_branch",
+        "remote_list"
+      ]
+    },
+    "repo": { "type": "string" },
+    "path": { "type": "string" },
+    "rev": { "type": "string" },
+    "rev_range": { "type": "string" },
+    "max_count": { "type": "integer", "minimum": 1 }
+  },
+  "required": ["operation"],
+  "additionalProperties": false
+}

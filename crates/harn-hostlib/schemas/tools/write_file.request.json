@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/tools/write_file.request.json",
+  "title": "tools.write_file request",
+  "description": "Atomic file write. Hosts implement the actual on-disk mutation; this surface only describes the intent.",
+  "type": "object",
+  "properties": {
+    "path": { "type": "string" },
+    "content": { "type": "string" },
+    "encoding": {
+      "type": "string",
+      "enum": ["utf-8", "base64"],
+      "default": "utf-8"
+    },
+    "create_parents": { "type": "boolean", "default": true },
+    "overwrite": { "type": "boolean", "default": true }
+  },
+  "required": ["path", "content"],
+  "additionalProperties": false
+}
