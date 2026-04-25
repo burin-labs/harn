@@ -429,46 +429,131 @@ Reminder: no free-form prose answers. Every step ends with one tool call to ask_
 """.trim()
 }
 
-fn build_user_prompt(task, qa_history) {
-  var lines = ["The user's request:", "", task, ""]
-  // Workspace orientation block — Aider-style repo map but path+first-line
-  // (not tree-sitter symbols, which would need a parser per language).
-  // This is the single biggest information-density win: the model can
-  // skip 1-2 iterations of pure orientation calls.
-  lines = lines + ["<workspace>", repo_map_text(), "</workspace>", ""]
-  if len(qa_history) == 0 {
-    lines = lines
-      + [
-      "No prior Q&A yet. The workspace block above is your orientation — a `find` call is rarely needed before reading. Read 1-3 specific files if it'll change the plan, then ask the single most plan-changing question (or, if the request is concrete and every parameter is pinned by the code, commit to exit_plan_mode).",
-    ]
-  } else {
-    lines = lines + ["Prior Q&A in this conversation (oldest first):"]
-    for entry in qa_history {
-      let q = if type_of(entry?.question) == "string" {
-        entry.question
-      } else {
-        ""
-      }
-      let a = if type_of(entry?.answer) == "string" {
-        entry.answer
-      } else {
-        ""
-      }
-      lines = lines + ["- Q: ${q}"]
-      lines = lines + ["  A: ${a}"]
-    }
-    lines = lines
-      + [
-      "",
-      "You already have ${len(qa_history)} answer(s). DEFAULT toward calling exit_plan_mode now. Only ask another question if the answer would *meaningfully change the file list or approach*. Most tasks need 1–3 questions total, not 5+.",
-    ]
-  }
-  lines = lines
-    + [
+/**
+ * First-turn user prompt: full orientation. Workspace overview + the task
+ * + the "what to do this step" rubric.
+ */
+fn build_first_turn_prompt(task) {
+  let lines = [
+    "The user's request:",
+    "",
+    task,
+    "",
+    "<workspace>",
+    repo_map_text(),
+    "</workspace>",
+    "",
+    "The workspace block above is your orientation — a `find` call is rarely needed before reading. Read 1-3 specific files if it'll change the plan, then ask the single most plan-changing question (or, if the request is concrete and every parameter is pinned by the code, commit to exit_plan_mode).",
     "",
     "End this step with one TERMINAL call: ask_question or exit_plan_mode. The harness terminates immediately after the terminal call. Non-terminal tools (read, find, save_user_pref) can be called freely before the terminal one.",
   ]
   return join(lines, "\n")
+}
+
+/**
+ * Resume-turn user prompt: just the user's latest answer. The model already
+ * has its full prior tool-call/result history via the persisted session, so
+ * re-injecting qa_history textually would just bloat tokens.
+ */
+fn build_resume_turn_prompt(answer, qa_count) {
+  let lines = [
+    answer,
+    "",
+    "(That's answer ${qa_count}. You already have the full prior conversation — your reads, your tool results, your earlier questions — in context. DEFAULT toward exit_plan_mode now. Only ask another question if the answer would *meaningfully change the file list or approach*. End the step with one TERMINAL call.)",
+  ]
+  return join(lines, "\n")
+}
+
+// -----------------------------------------------------------------------------
+
+// Session persistence.
+//
+// `agent_session_*` is thread-local in harn-vm — each `harn playground`
+// invocation gets a fresh in-memory session store. We bridge that across
+// invocations by snapshotting the session messages to disk after each
+// `agent_loop` call and replaying them on the next call. The result is a
+// genuine continuous transcript: turn N sees turn N-1's tool calls and
+// tool results, not just a textual summary of Q&A.
+
+// -----------------------------------------------------------------------------
+
+fn session_id_for(task_id) {
+  return "qmode-${task_id}"
+}
+
+fn session_snapshot_path(dir) {
+  return path_join(dir, "session.json")
+}
+
+fn restore_session(session_id, snap_path, fresh_system_prompt) {
+  agent_session_open(session_id)
+  // Always start with the fresh system prompt — profile may have changed
+  // (e.g. save_user_pref ran in a prior turn), and we want the latest
+  // <profile> block visible.
+  agent_session_inject(session_id, {role: "system", content: fresh_system_prompt})
+  if !file_exists(snap_path) {
+    return false
+  }
+  // json_parse throws on invalid JSON, so guard it. A corrupted session
+  // file should NOT crash the pipeline — degrade gracefully to first-turn
+  // behaviour so the user can still make progress (the qa_history textual
+  // replay then becomes the model's only memory of prior turns).
+  let prior = try {
+    json_parse(read_file(snap_path))
+  } catch (e) {
+    nil
+  }
+  if type_of(prior) != "list" {
+    return false
+  }
+  for msg in prior {
+    if type_of(msg) != "dict" {
+      continue
+    }
+    // Skip the prior turn's system message; we already injected a fresh one.
+    if msg?.role == "system" {
+      continue
+    }
+    agent_session_inject(session_id, msg)
+  }
+  return true
+}
+
+/**
+ * Fallback when session.json is missing or corrupt but qa.jsonl exists.
+ *
+ * Replays the textual Q&A pairs into the session so the model has SOME
+ * memory of the prior turns — degraded from "full prior tool history" to
+ * "skeleton conversation", which is still better than starting over.
+ */
+fn replay_qa_history_into_session(session_id, qa_history) {
+  for entry in qa_history {
+    let q = if type_of(entry?.question) == "string" {
+      entry.question
+    } else {
+      ""
+    }
+    let a = if type_of(entry?.answer) == "string" {
+      entry.answer
+    } else {
+      ""
+    }
+    if q == "" || a == "" {
+      continue
+    }
+    agent_session_inject(session_id, {role: "assistant", content: q})
+    agent_session_inject(session_id, {role: "user", content: a})
+  }
+}
+
+fn save_session(session_id, snap_path) {
+  let snap = agent_session_snapshot(session_id)
+  let messages = if type_of(snap) == "dict" {
+    snap?.messages ?? []
+  } else {
+    []
+  }
+  write_file(snap_path, json_stringify(messages))
 }
 
 // -----------------------------------------------------------------------------
@@ -506,16 +591,66 @@ pipeline default() {
   let effective_task = task_meta?.task ?? task_text
   let qa_history = read_jsonl(qa_path(task_id))
   let profile_block = load_profile_layers()
-  let user_prompt = build_user_prompt(effective_task, qa_history)
   let sys_prompt = system_prompt(profile_block)
+  // Restore prior session messages from disk (if any). On turn 1 this is a
+  // no-op and the session is empty after the system message; on turn 2+ the
+  // session contains every prior tool call + result + assistant message.
+  let session_id = session_id_for(task_id)
+  let snap_path = session_snapshot_path(dir)
+  // Only restore prior session if qa.jsonl says we're on turn 2+. A
+  // session.json without qa.jsonl entries is an inconsistent state (e.g.
+  // turn 1 errored after agent_loop wrote the snapshot but before
+  // ask_question landed pending.json) — restoring it would inject prior
+  // user/assistant messages AND a fresh first-turn user prompt, confusing
+  // the model with duplicate intent. Treat it as a fresh first turn.
+  let resumed = if len(qa_history) > 0 {
+    restore_session(session_id, snap_path, sys_prompt)
+  } else {
+    agent_session_open(session_id)
+    agent_session_inject(session_id, {role: "system", content: sys_prompt})
+    false
+  }
+  // Three resume modes:
+  //   "session"          — clean restore from session.json (turn 2+, normal case)
+  //   "textual_fallback" — qa.jsonl has entries but session.json is missing
+  //                        or corrupt; replay Q&A pairs as text so the model
+  //                        still has a skeleton of the conversation.
+  //   "first_turn"       — turn 1, no qa_history, full workspace orientation.
+  let resume_mode = if resumed {
+    "session"
+  } else {
+    if len(qa_history) > 0 {
+      "textual_fallback"
+    } else {
+      "first_turn"
+    }
+  }
+  let user_prompt = if resume_mode == "session" {
+    let last = qa_history[len(qa_history) - 1]
+    let answer = if type_of(last?.answer) == "string" {
+    last.answer
+  } else {
+    ""
+  }
+    build_resume_turn_prompt(answer, len(qa_history))
+  } else {
+    if resume_mode == "textual_fallback" {
+      replay_qa_history_into_session(session_id, qa_history)
+      "(Continue from the prior conversation. End this step with one TERMINAL call: ask_question or exit_plan_mode.)"
+    } else {
+      build_first_turn_prompt(effective_task)
+    }
+  }
   write_file(
     path_join(dir, "last-prompt.txt"),
-    "===SYSTEM===\n${sys_prompt}\n===USER===\n${user_prompt}\n",
+    "===SYSTEM===\n${sys_prompt}\n===USER===\n${user_prompt}\n===RESUME-MODE===\n${resume_mode}\n",
   )
   // turn_policy forces a tool call (or explicit yield) on every iteration —
   // without it qwen3.6 happily emits prose + ##DONE##. stop_after_successful_tools
   // ends the loop the moment a terminal tool succeeds (Vercel AI SDK's
   // `stopWhen: hasToolCall(...)` / OpenAI Agents SDK's `StopAtTools(...)`).
+  // session_id makes the conversation persistent: prior tool calls and
+  // tool results from earlier turns stay in the model's context.
   let result = agent_loop(
     user_prompt,
     sys_prompt,
@@ -530,8 +665,11 @@ pipeline default() {
     llm_retries: 1,
     turn_policy: {require_action_or_yield: true, max_prose_chars: 280},
     stop_after_successful_tools: ["ask_question", "exit_plan_mode"],
+    session_id: session_id,
   },
   )
+  // Persist the updated session for the next turn.
+  save_session(session_id, snap_path)
   let outcome = if file_exists(path_join(dir, "plan.json")) {
     "exit_plan_mode"
   } else {
