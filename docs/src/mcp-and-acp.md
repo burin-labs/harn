@@ -319,12 +319,15 @@ pipeline main(task) {
 ### Running as an MCP server
 
 ```bash
-harn mcp-serve agent.harn
+harn serve mcp agent.harn
 ```
 
-All `print`/`println` output goes to stderr (stdout is the MCP
-transport). The server supports the `2025-11-25` MCP protocol version
-over stdio.
+`harn serve mcp` auto-detects whether the script exposes its surface
+through `pub fn` exports or through the `mcp_tools(...)` /
+`mcp_resource(...)` / `mcp_prompt(...)` registration builtins shown
+above and serves the appropriate one over stdio. All `print`/`println`
+output goes to stderr (stdout is the MCP transport). The server supports
+the `2025-11-25` MCP protocol version over stdio.
 
 #### Publishing a Server Card
 
@@ -332,7 +335,7 @@ Attach a Server Card so clients can discover your server's identity and
 capabilities before connecting:
 
 ```bash
-harn mcp-serve agent.harn --card ./card.json
+harn serve mcp agent.harn --card ./card.json
 ```
 
 The card JSON is embedded in the `initialize` response's
@@ -364,7 +367,7 @@ Add to `claude_desktop_config.json`:
   "mcpServers": {
     "my-agent": {
       "command": "harn",
-      "args": ["mcp-serve", "agent.harn"]
+      "args": ["serve", "mcp", "agent.harn"]
     }
   }
 }

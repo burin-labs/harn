@@ -73,9 +73,6 @@ SCRIPTING
     Connector(ConnectorArgs),
     /// Serve a Harn workflow over a transport adapter.
     Serve(ServeArgs),
-    /// Legacy alias: expose a .harn tool bundle as an MCP server on stdio.
-    #[command(hide = true, name = "mcp-serve")]
-    McpServe(LegacyMcpServeArgs),
     /// Manage remote MCP OAuth credentials and status.
     Mcp(McpArgs),
     /// Watch a .harn file and re-run it on changes.
@@ -638,7 +635,10 @@ pub(crate) enum ServeCommand {
     Acp(ServeAcpArgs),
     /// Serve a .harn agent over HTTP using A2A.
     A2a(A2aServeArgs),
-    /// Serve exported `pub fn` entrypoints as MCP tools.
+    /// Serve a `.harn` file as an MCP server. Exposes either exported
+    /// `pub fn` entrypoints (recommended) or, when the script registers
+    /// tools/resources/prompts via `mcp_tools(...)` / `mcp_resource(...)`
+    /// / `mcp_prompt(...)`, that script-driven surface over stdio.
     Mcp(ServeMcpArgs),
 }
 
@@ -701,20 +701,18 @@ pub(crate) struct ServeMcpArgs {
     /// Shared secret for HMAC request signing on HTTP transports.
     #[arg(long = "hmac-secret", env = "HARN_SERVE_HMAC_SECRET")]
     pub hmac_secret: Option<String>,
-    /// Path to the `.harn` file whose exported `pub fn` entrypoints are served.
-    pub file: String,
-}
-
-#[derive(Debug, Args)]
-pub(crate) struct LegacyMcpServeArgs {
-    /// Path to the .harn file that defines the MCP surface.
-    pub file: String,
     /// Optional Server Card JSON to advertise (MCP v2.1). Path to a
     /// `.json` file OR an inline JSON string. The card is embedded in
     /// the `initialize` response's `serverInfo.card` field AND exposed
-    /// as a static resource at `well-known://mcp-card`.
+    /// as a static resource at `well-known://mcp-card`. Honored when
+    /// the script uses the legacy `mcp_tools(...)` registration surface.
     #[arg(long = "card", value_name = "PATH_OR_JSON")]
     pub card: Option<String>,
+    /// Path to the `.harn` file whose exported `pub fn` entrypoints are
+    /// served. Scripts that instead call `mcp_tools(registry)` /
+    /// `mcp_resource(...)` / `mcp_prompt(...)` are detected and served
+    /// via the script-driven surface (over stdio).
+    pub file: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]

@@ -1,11 +1,12 @@
 use std::collections::BTreeSet;
 use std::net::SocketAddr;
+use std::path::Path;
 use std::sync::Arc;
 
 use harn_serve::{
     A2aHttpServeOptions, A2aServer, A2aServerConfig, ApiKeyAuthConfig, AuthMethodConfig,
-    AuthPolicy, DispatchCore, DispatchCoreConfig, HmacAuthConfig, McpHttpServeOptions, McpServer,
-    McpServerConfig,
+    AuthPolicy, DispatchCore, DispatchCoreConfig, ExportCatalog, ExportedCallableKind,
+    HmacAuthConfig, McpHttpServeOptions, McpServer, McpServerConfig,
 };
 use time::Duration;
 
@@ -36,6 +37,40 @@ pub(crate) async fn run_mcp_server(args: &ServeMcpArgs) -> Result<(), String> {
         && (!args.api_key.is_empty() || args.hmac_secret.is_some())
     {
         return Err("HTTP auth flags require `harn serve mcp --transport http`".to_string());
+    }
+
+    // Scripts that author the MCP surface explicitly through
+    // `mcp_tools(registry)` / `mcp_resource(...)` / `mcp_prompt(...)`
+    // typically don't expose any `pub fn` entrypoints. Dispatch those to
+    // the legacy script-driven runner that runs the script once,
+    // collects the registered tools/resources/prompts, and serves them
+    // over stdio. The DispatchCore-based adapter only knows how to
+    // route incoming MCP calls to `pub fn` exports.
+    let catalog = ExportCatalog::from_path(Path::new(&args.file))
+        .map_err(|error| format!("failed to load script: {error}"))?;
+    let has_pub_fn_exports = catalog
+        .functions
+        .values()
+        .any(|function| function.kind == ExportedCallableKind::Function);
+
+    if !has_pub_fn_exports {
+        if args.transport != McpServeTransport::Stdio {
+            return Err(
+                "scripts using `mcp_tools(...)` are only served over stdio; \
+                 either expose `pub fn` entrypoints or omit `--transport http`"
+                    .to_string(),
+            );
+        }
+        crate::commands::run::run_file_mcp_serve(&args.file, args.card.as_deref()).await;
+        return Ok(());
+    }
+
+    if args.card.is_some() {
+        return Err(
+            "`--card` is only honored for legacy `mcp_tools(...)` scripts; \
+             attach card metadata directly to your `pub fn` exports instead"
+                .to_string(),
+        );
     }
 
     let mut config = DispatchCoreConfig::for_script(&args.file);

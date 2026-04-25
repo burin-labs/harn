@@ -6,7 +6,7 @@ tools, static resources, resource templates, and prompts over stdio.
 Use the companion example as a baseline:
 
 ```bash
-cargo run --bin harn -- mcp-serve examples/mcp_server.harn
+cargo run --bin harn -- serve mcp examples/mcp_server.harn
 ```
 
 ## 1. Register tools
@@ -104,8 +104,13 @@ Once the pipeline calls `mcp_tools()`, `mcp_resource()`, or `mcp_prompt()`,
 launch the server with:
 
 ```bash
-harn mcp-serve examples/mcp_server.harn
+harn serve mcp examples/mcp_server.harn
 ```
+
+`harn serve mcp` automatically detects whether the script defines its
+surface through `pub fn` exports (the recommended path) or through the
+`mcp_tools(...)` / `mcp_resource(...)` / `mcp_prompt(...)` registration
+builtins shown above and serves the appropriate one over stdio.
 
 All user-visible output goes to stderr; the MCP transport stays on stdout.
 That keeps the server compatible with Claude Desktop, Cursor, and other MCP

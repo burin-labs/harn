@@ -807,6 +807,18 @@ derived from Harn type annotations. With `--transport http`, the server also
 supports Streamable HTTP on `--path` plus the legacy SSE compatibility
 endpoints `--sse-path` and `--messages-path`.
 
+For scripts that author the MCP surface through the registration
+builtins (`mcp_tools(registry)`, `mcp_resource(...)`, `mcp_prompt(...)`)
+instead of `pub fn` exports, `harn serve mcp` auto-detects that mode,
+runs the script once on stdio, and exposes the registered
+tools / resources / prompts. Pass `--card <PATH_OR_JSON>` to advertise
+an MCP v2.1 Server Card with the script-driven mode.
+
+```bash
+harn serve mcp agent.harn                  # auto-detect surface
+harn serve mcp agent.harn --card ./card.json
+```
+
 `harn serve a2a` uses the shared `harn-serve` dispatch core and exposes each
 exported `pub fn` in the target module as an A2A skill. The adapter publishes an
 agent card at `/.well-known/a2a-agent` and supports task send, send-and-wait,
@@ -822,22 +834,6 @@ notifications, and forwards permission prompts through
 
 See [MCP and ACP Integration](./mcp-and-acp.md) and
 [Outbound workflow server](./harn-serve.md) for protocol details.
-
-## harn mcp-serve
-
-Serve a Harn pipeline as an MCP server over stdio using the legacy
-tool-registry surface (`mcp_tools`, `mcp_resource`, `mcp_prompt`).
-
-```bash
-harn mcp-serve agent.harn
-```
-
-Use `harn serve mcp` when you want the newer `harn-serve` adapter that maps
-exported `pub fn` entrypoints automatically. Use `harn mcp-serve` when the
-server surface is authored explicitly through MCP registration builtins.
-
-See [MCP and ACP Integration](./mcp-and-acp.md) for details on defining
-tools, resources, and prompts.
 
 ## harn mcp
 

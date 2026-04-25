@@ -9,7 +9,7 @@
 //!   `.well-known/mcp-card` URL or a local file path, caches it in a
 //!   per-process LRU with a TTL so repeated reads are free.
 //! - **Publisher**: `load_server_card_from_path` parses a local card
-//!   file for `harn mcp-serve --card path/to/card.json`, which embeds
+//!   file for `harn serve mcp --card path/to/card.json`, which embeds
 //!   the card into the `initialize` response and exposes it as a static
 //!   resource at `well-known://mcp-card`.
 //!
@@ -124,7 +124,7 @@ pub async fn fetch_server_card(source: &str, ttl: Option<Duration>) -> Result<Va
     Ok(card)
 }
 
-/// Synchronous card loader from a local path — used by `harn mcp-serve
+/// Synchronous card loader from a local path — used by `harn serve mcp
 /// --card` at startup (before the tokio runtime is involved).
 pub fn load_server_card_from_path(path: &std::path::Path) -> Result<Value, CardError> {
     let contents = std::fs::read_to_string(path)

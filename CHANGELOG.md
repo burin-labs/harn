@@ -7,6 +7,21 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
+## Unreleased
+
+### Removed
+
+- **`harn mcp-serve` (#594).** The hidden legacy alias for serving a
+  `.harn` tool bundle as an MCP server is gone. Use `harn serve mcp
+  <file>` instead — it auto-detects whether the script exposes its
+  surface through `pub fn` exports (the recommended path) or through
+  the `mcp_tools(...)` / `mcp_resource(...)` / `mcp_prompt(...)`
+  registration builtins, and serves the appropriate one over stdio.
+  `--card <PATH_OR_JSON>` carried over to `harn serve mcp` and is
+  honored for the script-driven surface. Update any
+  `claude_desktop_config.json` / Cursor / Continue launch snippets that
+  pass `["mcp-serve", "<file>"]` to `["serve", "mcp", "<file>"]`.
+
 ## v0.7.38
 
 ### Added
