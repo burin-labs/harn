@@ -1557,12 +1557,124 @@ fn test_linux_process_sandbox_catches_ten_process_escapes() {
     assert!(!outside_dir.exists());
 }
 
+#[cfg(target_os = "windows")]
+#[test]
+fn test_windows_process_sandbox_allows_process_exec_in_workspace() {
+    let allowed = tempfile::tempdir().unwrap();
+    let allowed_file = allowed.path().join("allowed.txt");
+    let previous = std::env::var("HARN_HANDLER_SANDBOX").ok();
+    std::env::set_var("HARN_HANDLER_SANDBOX", "enforce");
+
+    let policy = crate::orchestration::CapabilityPolicy {
+        capabilities: std::collections::BTreeMap::from([
+            ("process".to_string(), vec!["exec".to_string()]),
+            ("workspace".to_string(), vec!["write_text".to_string()]),
+        ]),
+        workspace_roots: vec![allowed.path().display().to_string()],
+        side_effect_level: Some("process_exec".to_string()),
+        ..Default::default()
+    };
+    let command = format!("echo allowed> {}", windows_cmd_quote(&allowed_file));
+    let source = format!(
+        r#"pipeline t(task) {{ shell("{}") }}"#,
+        harn_string_escape(&command)
+    );
+    let result = run_harn_with_policy(&source, policy);
+
+    match previous {
+        Some(value) => std::env::set_var("HARN_HANDLER_SANDBOX", value),
+        None => std::env::remove_var("HARN_HANDLER_SANDBOX"),
+    }
+
+    result.unwrap();
+    assert!(allowed_file.exists());
+}
+
+#[cfg(target_os = "windows")]
+#[test]
+fn test_windows_process_sandbox_allows_exec_argv0() {
+    let allowed = tempfile::tempdir().unwrap();
+    let previous = std::env::var("HARN_HANDLER_SANDBOX").ok();
+    std::env::set_var("HARN_HANDLER_SANDBOX", "enforce");
+
+    let policy = crate::orchestration::CapabilityPolicy {
+        capabilities: std::collections::BTreeMap::from([(
+            "process".to_string(),
+            vec!["exec".to_string()],
+        )]),
+        workspace_roots: vec![allowed.path().display().to_string()],
+        side_effect_level: Some("process_exec".to_string()),
+        ..Default::default()
+    };
+    let result = run_harn_with_policy(
+        r#"pipeline t(task) { exec("cmd", "/C", "exit 0") }"#,
+        policy,
+    );
+
+    match previous {
+        Some(value) => std::env::set_var("HARN_HANDLER_SANDBOX", value),
+        None => std::env::remove_var("HARN_HANDLER_SANDBOX"),
+    }
+
+    result.unwrap();
+}
+
+#[cfg(target_os = "windows")]
+#[test]
+fn test_windows_process_sandbox_denies_write_outside_workspace() {
+    let allowed = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let outside_file = outside.path().join("blocked.txt");
+    let previous = std::env::var("HARN_HANDLER_SANDBOX").ok();
+    std::env::set_var("HARN_HANDLER_SANDBOX", "enforce");
+
+    let policy = crate::orchestration::CapabilityPolicy {
+        capabilities: std::collections::BTreeMap::from([
+            ("process".to_string(), vec!["exec".to_string()]),
+            ("workspace".to_string(), vec!["write_text".to_string()]),
+        ]),
+        workspace_roots: vec![allowed.path().display().to_string()],
+        side_effect_level: Some("process_exec".to_string()),
+        ..Default::default()
+    };
+    let command = format!("echo denied> {}", windows_cmd_quote(&outside_file));
+    let source = format!(
+        r#"pipeline t(task) {{ shell("{}") }}"#,
+        harn_string_escape(&command)
+    );
+    let err = run_harn_with_policy(&source, policy).unwrap_err();
+
+    match previous {
+        Some(value) => std::env::set_var("HARN_HANDLER_SANDBOX", value),
+        None => std::env::remove_var("HARN_HANDLER_SANDBOX"),
+    }
+
+    assert!(matches!(
+        err,
+        VmError::CategorizedError {
+            category: crate::value::ErrorCategory::ToolRejected,
+            ..
+        }
+    ));
+    assert!(
+        err.to_string().contains("sandbox violation")
+            || err.to_string().contains("process sandbox failed"),
+        "expected sandbox denial, got {err}"
+    );
+    assert!(!outside_file.exists());
+}
+
+#[cfg(target_os = "windows")]
+fn windows_cmd_quote(path: &std::path::Path) -> String {
+    format!(r#""{}""#, path.display())
+}
+
 #[cfg(target_os = "linux")]
 fn shell_quote(path: &std::path::Path) -> String {
     format!("'{}'", path.display().to_string().replace('\'', "'\\''"))
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 fn harn_string_escape(value: &str) -> String {
     value.replace('\\', "\\\\").replace('"', "\\\"")
 }

@@ -1299,35 +1299,25 @@ pub async fn execute_stage_node(
             .map(str::trim)
             .filter(|value| !value.is_empty())
         {
-            let mut process = if cfg!(target_os = "windows") {
-                crate::stdlib::sandbox::tokio_command_for(
-                    "cmd",
-                    &["/C".to_string(), command.to_string()],
-                )?
+            let (program, args) = if cfg!(target_os = "windows") {
+                ("cmd", vec!["/C".to_string(), command.to_string()])
             } else {
-                crate::stdlib::sandbox::tokio_command_for(
-                    "/bin/sh",
-                    &["-lc".to_string(), command.to_string()],
-                )?
+                ("/bin/sh", vec!["-lc".to_string(), command.to_string()])
             };
-            process.stdin(std::process::Stdio::null());
+            let mut process_config = crate::stdlib::sandbox::ProcessCommandConfig {
+                stdin_null: true,
+                ..Default::default()
+            };
             if let Some(context) = crate::stdlib::process::current_execution_context() {
                 if let Some(cwd) = context.cwd.filter(|cwd| !cwd.is_empty()) {
                     crate::stdlib::sandbox::enforce_process_cwd(std::path::Path::new(&cwd))?;
-                    process.current_dir(cwd);
+                    process_config.cwd = Some(std::path::PathBuf::from(cwd));
                 }
                 if !context.env.is_empty() {
-                    process.envs(context.env);
+                    process_config.env.extend(context.env);
                 }
             }
-            let output = process.output().await.map_err(|e| {
-                crate::stdlib::sandbox::process_spawn_error(&e).unwrap_or_else(|| {
-                    VmError::Runtime(format!("workflow verify exec failed: {e}"))
-                })
-            })?;
-            if let Some(error) = crate::stdlib::sandbox::process_violation_error(&output) {
-                return Err(error);
-            }
+            let output = crate::stdlib::sandbox::command_output(program, &args, &process_config)?;
             let stdout = String::from_utf8_lossy(&output.stdout).to_string();
             let stderr = String::from_utf8_lossy(&output.stderr).to_string();
             let combined = if stderr.is_empty() {

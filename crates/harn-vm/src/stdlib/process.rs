@@ -408,17 +408,9 @@ fn exec_command(
     cmd: &str,
     args: &[String],
 ) -> Result<std::process::Output, VmError> {
-    let mut command = crate::stdlib::sandbox::std_command_for(cmd, args)?;
-    apply_execution_context(&mut command, dir)?;
-    let output = command.output().map_err(|e| {
-        crate::stdlib::sandbox::process_spawn_error(&e).unwrap_or_else(|| {
-            VmError::Thrown(VmValue::String(Rc::from(format!("exec failed: {e}"))))
-        })
-    })?;
-    if let Some(error) = crate::stdlib::sandbox::process_violation_error(&output) {
-        return Err(error);
-    }
-    Ok(output)
+    let config = process_command_config(dir)?;
+    crate::stdlib::sandbox::command_output(cmd, args, &config)
+        .map_err(|error| prefix_process_error(error, "exec"))
 }
 
 fn exec_shell(
@@ -428,40 +420,44 @@ fn exec_shell(
     script: &str,
 ) -> Result<std::process::Output, VmError> {
     let args = vec![flag.to_string(), script.to_string()];
-    let mut command = crate::stdlib::sandbox::std_command_for(shell, &args)?;
-    apply_execution_context(&mut command, dir)?;
-    let output = command.output().map_err(|e| {
-        crate::stdlib::sandbox::process_spawn_error(&e).unwrap_or_else(|| {
-            VmError::Thrown(VmValue::String(Rc::from(format!("shell failed: {e}"))))
-        })
-    })?;
-    if let Some(error) = crate::stdlib::sandbox::process_violation_error(&output) {
-        return Err(error);
-    }
-    Ok(output)
+    let config = process_command_config(dir)?;
+    crate::stdlib::sandbox::command_output(shell, &args, &config)
+        .map_err(|error| prefix_process_error(error, "shell"))
 }
 
-fn apply_execution_context(
-    command: &mut std::process::Command,
+fn process_command_config(
     dir: Option<&str>,
-) -> Result<(), VmError> {
+) -> Result<crate::stdlib::sandbox::ProcessCommandConfig, VmError> {
+    let mut config = crate::stdlib::sandbox::ProcessCommandConfig {
+        stdin_null: true,
+        ..Default::default()
+    };
     if let Some(dir) = dir {
         let resolved = resolve_command_dir(dir);
         crate::stdlib::sandbox::enforce_process_cwd(&resolved)?;
-        command.current_dir(resolved);
+        config.cwd = Some(resolved);
     } else if let Some(context) = current_execution_context() {
         if let Some(cwd) = context.cwd.filter(|cwd| !cwd.is_empty()) {
             crate::stdlib::sandbox::enforce_process_cwd(std::path::Path::new(&cwd))?;
-            command.current_dir(cwd);
+            config.cwd = Some(std::path::PathBuf::from(cwd));
         }
         if !context.env.is_empty() {
-            command.envs(context.env);
+            config.env.extend(context.env);
         }
     }
     if let Some(value) = env_override(HARN_REPLAY_ENV) {
-        command.env(HARN_REPLAY_ENV, value);
+        config.env.push((HARN_REPLAY_ENV.to_string(), value));
     }
-    Ok(())
+    Ok(config)
+}
+
+fn prefix_process_error(error: VmError, prefix: &str) -> VmError {
+    match error {
+        VmError::Thrown(VmValue::String(message)) => VmError::Thrown(VmValue::String(Rc::from(
+            format!("{prefix} failed: {message}"),
+        ))),
+        other => other,
+    }
 }
 
 fn resolve_command_dir(dir: &str) -> PathBuf {

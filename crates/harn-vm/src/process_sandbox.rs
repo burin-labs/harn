@@ -4,7 +4,8 @@
 //! `harn-hostlib` deterministic-tool builtins) must funnel every spawn
 //! through these helpers so the active orchestration capability policy is
 //! enforced — Linux seccomp/landlock filters via `pre_exec`, macOS
-//! `sandbox-exec` wrapping, plus workspace-root cwd enforcement.
+//! `sandbox-exec` wrapping, Windows AppContainer + Job Object launches
+//! through `command_output`, plus workspace-root cwd enforcement.
 //!
 //! The helpers themselves live next to the rest of the sandbox state in
 //! [`crate::stdlib::sandbox`]. This module exists so external crates have a
@@ -12,6 +13,6 @@
 //! `stdlib::*` plumbing.
 
 pub use crate::stdlib::sandbox::{
-    enforce_process_cwd, process_spawn_error, process_violation_error, std_command_for,
-    tokio_command_for,
+    command_output, enforce_process_cwd, process_spawn_error, process_violation_error,
+    std_command_for, tokio_command_for, ProcessCommandConfig,
 };

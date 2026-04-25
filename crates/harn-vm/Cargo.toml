@@ -61,6 +61,18 @@ opentelemetry-otlp = { version = "0.31", default-features = false, features = ["
 tracing-opentelemetry = { version = "0.32", optional = true }
 zeroize = "1"
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_Security_Isolation",
+    "Win32_Storage_FileSystem",
+    "Win32_System_JobObjects",
+    "Win32_System_Pipes",
+    "Win32_System_Threading",
+] }
+
 [dev-dependencies]
 rcgen = "0.13"
 rustls = { version = "0.23", features = ["aws-lc-rs"] }
