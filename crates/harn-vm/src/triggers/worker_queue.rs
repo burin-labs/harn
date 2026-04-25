@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration as StdDuration;
 
 use serde::{Deserialize, Serialize};
@@ -9,6 +9,7 @@ use crate::event_log::{
     sanitize_topic_component, AnyEventLog, EventLog, LogError, LogEvent, Topic,
 };
 
+use super::scheduler::{self, SchedulableJob, SchedulerPolicy, SchedulerSnapshot, SchedulerState};
 use super::{DispatchOutcome, TriggerEvent};
 
 pub const WORKER_QUEUE_CATALOG_TOPIC: &str = "worker.queues";
@@ -34,7 +35,7 @@ impl WorkerQueuePriority {
         }
     }
 
-    fn effective_rank(self, enqueued_at_ms: i64, now_ms: i64) -> u8 {
+    pub fn effective_rank(self, enqueued_at_ms: i64, now_ms: i64) -> u8 {
         match self {
             Self::High => 0,
             Self::Normal if now_ms.saturating_sub(enqueued_at_ms) >= NORMAL_PROMOTION_AGE_MS => 0,
@@ -150,17 +151,37 @@ impl WorkerQueueState {
         }
     }
 
-    fn next_ready_job(&self, now_ms: i64) -> Option<&WorkerQueueJobState> {
-        self.jobs
+    /// Select the next ready job by consulting `scheduler` under `policy`.
+    ///
+    /// Under `Fifo` this is equivalent to picking the job with the lowest
+    /// `(priority_rank, enqueued_at_ms, job_event_id)` — the historical
+    /// behaviour. Under `DeficitRoundRobin`, candidates are grouped by the
+    /// configured fairness key and the scheduler rotates so a hot
+    /// tenant/binding cannot monopolise the queue.
+    fn next_ready_job_with_scheduler(
+        &self,
+        scheduler_state: &mut SchedulerState,
+        policy: &SchedulerPolicy,
+        now_ms: i64,
+    ) -> Option<&WorkerQueueJobState> {
+        let candidates: Vec<&WorkerQueueJobState> =
+            self.jobs.iter().filter(|job| job.is_ready()).collect();
+        if candidates.is_empty() {
+            return None;
+        }
+        let views: Vec<SchedulableJob<'_>> = candidates
             .iter()
-            .filter(|job| job.is_ready())
-            .min_by_key(|job| {
-                (
-                    job.job.priority.effective_rank(job.enqueued_at_ms, now_ms),
-                    job.enqueued_at_ms,
-                    job.job_event_id,
-                )
-            })
+            .map(|state| SchedulableJob::from_state(state))
+            .collect();
+
+        // Refresh authoritative in-flight count from the rebuilt queue state.
+        let in_flight = scheduler::in_flight_by_key(&self.jobs, policy);
+        scheduler_state.replace_in_flight(in_flight);
+
+        let pick = scheduler_state.select(&views, policy, now_ms)?;
+        candidates
+            .into_iter()
+            .find(|job| job.job_event_id == pick.job_event_id)
     }
 
     fn active_claim_for(&self, job_event_id: u64) -> Option<&WorkerQueueClaimHandle> {
@@ -174,11 +195,49 @@ impl WorkerQueueState {
 #[derive(Clone)]
 pub struct WorkerQueue {
     event_log: Arc<AnyEventLog>,
+    /// Active scheduler policy. Reads on every claim so it can be hot-swapped
+    /// at runtime without rebuilding the queue.
+    policy: Arc<RwLock<SchedulerPolicy>>,
+    /// Per-queue ephemeral scheduler state. Keyed by queue name; entries are
+    /// created lazily on first claim. Self-correcting — safe to lose on
+    /// process restart.
+    scheduler_states: Arc<Mutex<BTreeMap<String, SchedulerState>>>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct WorkerQueueInspectSnapshot {
+    pub summary: WorkerQueueSummary,
+    pub scheduler: SchedulerSnapshot,
 }
 
 impl WorkerQueue {
+    /// Construct a `WorkerQueue` using the policy derived from the
+    /// `HARN_SCHEDULER_*` environment variables (see
+    /// [`SchedulerPolicy::from_env`]). Defaults to FIFO so single-tenant
+    /// deployments behave exactly as before unless they opt in.
     pub fn new(event_log: Arc<AnyEventLog>) -> Self {
-        Self { event_log }
+        Self::with_policy(event_log, SchedulerPolicy::from_env())
+    }
+
+    pub fn with_policy(event_log: Arc<AnyEventLog>, policy: SchedulerPolicy) -> Self {
+        Self {
+            event_log,
+            policy: Arc::new(RwLock::new(policy)),
+            scheduler_states: Arc::new(Mutex::new(BTreeMap::new())),
+        }
+    }
+
+    /// Replace the active scheduler policy. Existing per-queue state is
+    /// preserved (deficits self-correct against the new weights).
+    pub fn set_policy(&self, policy: SchedulerPolicy) {
+        *self.policy.write().expect("scheduler policy poisoned") = policy;
+    }
+
+    pub fn policy(&self) -> SchedulerPolicy {
+        self.policy
+            .read()
+            .expect("scheduler policy poisoned")
+            .clone()
     }
 
     pub async fn enqueue(
@@ -449,11 +508,24 @@ impl WorkerQueue {
                 "worker queue consumer id cannot be empty".to_string(),
             ));
         }
+        let policy = self.policy();
         for _ in 0..8 {
             let now_ms = now_ms();
             let state = self.queue_state(queue_name).await?;
-            let Some(job) = state.next_ready_job(now_ms).cloned() else {
-                return Ok(None);
+            let (job, fairness_key) = {
+                let mut states = self
+                    .scheduler_states
+                    .lock()
+                    .expect("scheduler state poisoned");
+                let scheduler_state = states.entry(queue_name.to_string()).or_default();
+                let Some(job) =
+                    state.next_ready_job_with_scheduler(scheduler_state, &policy, now_ms)
+                else {
+                    return Ok(None);
+                };
+                let job = job.clone();
+                let fairness_key = policy.fairness_key_of(&SchedulableJob::from_state(&job));
+                (job, fairness_key)
             };
             let claim = WorkerQueueClaimRecord {
                 job_event_id: job.job_event_id,
@@ -477,6 +549,14 @@ impl WorkerQueue {
                 .active_claim_for(job.job_event_id)
                 .is_some_and(|active| active.claim_id == claim.claim_id)
             {
+                {
+                    let mut states = self
+                        .scheduler_states
+                        .lock()
+                        .expect("scheduler state poisoned");
+                    let scheduler_state = states.entry(queue_name.to_string()).or_default();
+                    scheduler_state.note_claim_committed(&fairness_key);
+                }
                 if let Some(metrics) = crate::active_metrics_registry() {
                     let summary = refreshed.summary(now_ms);
                     metrics.record_worker_queue_claim_age(
@@ -487,6 +567,27 @@ impl WorkerQueue {
                         queue_name,
                         (summary.ready + summary.in_flight) as u64,
                     );
+                    metrics.record_scheduler_selection(
+                        queue_name,
+                        policy.fairness_key.as_str(),
+                        &fairness_key,
+                    );
+                    if let Ok(snap) = self.inspect_queue(queue_name).await {
+                        for stat in &snap.scheduler.keys {
+                            metrics.set_scheduler_deficit(
+                                queue_name,
+                                policy.fairness_key.as_str(),
+                                &stat.fairness_key,
+                                stat.deficit,
+                            );
+                            metrics.set_scheduler_oldest_eligible_age(
+                                queue_name,
+                                policy.fairness_key.as_str(),
+                                &stat.fairness_key,
+                                stat.oldest_ready_age_ms,
+                            );
+                        }
+                    }
                 }
                 return Ok(Some(ClaimedWorkerJob {
                     handle: WorkerQueueClaimHandle {
@@ -501,6 +602,47 @@ impl WorkerQueue {
             }
         }
         Ok(None)
+    }
+
+    /// Build a fairness-aware inspect snapshot for `queue` that includes
+    /// scheduler state alongside the standard summary.
+    pub async fn inspect_queue(&self, queue: &str) -> Result<WorkerQueueInspectSnapshot, LogError> {
+        let queue_name = queue.trim();
+        if queue_name.is_empty() {
+            return Err(LogError::Config(
+                "worker queue name cannot be empty".to_string(),
+            ));
+        }
+        let now_ms = now_ms();
+        let state = self.queue_state(queue_name).await?;
+        let summary = state.summary(now_ms);
+        let policy = self.policy();
+        let ready = scheduler::ready_stats_by_key(&state.jobs, &policy, now_ms);
+        // Make sure in-flight stays authoritative against the rebuilt log.
+        let in_flight = scheduler::in_flight_by_key(&state.jobs, &policy);
+        let scheduler_snapshot = {
+            let mut states = self
+                .scheduler_states
+                .lock()
+                .expect("scheduler state poisoned");
+            let scheduler_state = states.entry(queue_name.to_string()).or_default();
+            scheduler_state.replace_in_flight(in_flight);
+            scheduler_state.snapshot(&policy, &ready)
+        };
+        Ok(WorkerQueueInspectSnapshot {
+            summary,
+            scheduler: scheduler_snapshot,
+        })
+    }
+
+    /// Inspect snapshots for every known queue.
+    pub async fn inspect_all_queues(&self) -> Result<Vec<WorkerQueueInspectSnapshot>, LogError> {
+        let mut snapshots = Vec::new();
+        for queue in self.known_queues().await? {
+            snapshots.push(self.inspect_queue(&queue).await?);
+        }
+        snapshots.sort_by(|left, right| left.summary.queue.cmp(&right.summary.queue));
+        Ok(snapshots)
     }
 
     pub async fn renew_claim(
@@ -735,6 +877,7 @@ mod tests {
     use crate::event_log::{AnyEventLog, MemoryEventLog};
     use crate::triggers::{
         event::{GenericWebhookPayload, KnownProviderPayload},
+        scheduler::{self, SchedulerStrategy},
         ProviderId, ProviderPayload, SignatureStatus, TraceId, TriggerEvent,
     };
 
@@ -936,5 +1079,316 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(claimed.job.event.id.0, "evt-old-normal");
+    }
+
+    fn tenant_event(id: &str, tenant: &str) -> TriggerEvent {
+        let mut event = test_event(id);
+        event.tenant_id = Some(crate::triggers::TenantId::new(tenant));
+        event
+    }
+
+    fn tenant_job(
+        queue: &str,
+        trigger_id: &str,
+        event_id: &str,
+        tenant: &str,
+        priority: WorkerQueuePriority,
+    ) -> WorkerQueueJob {
+        WorkerQueueJob {
+            queue: queue.to_string(),
+            trigger_id: trigger_id.to_string(),
+            binding_key: format!("{trigger_id}@v1"),
+            binding_version: 1,
+            event: tenant_event(event_id, tenant),
+            replay_of_event_id: None,
+            priority,
+        }
+    }
+
+    async fn ack_and_respond(queue: &WorkerQueue, queue_name: &str, claim: &ClaimedWorkerJob) {
+        queue
+            .append_response(
+                queue_name,
+                &WorkerQueueResponseRecord {
+                    queue: queue_name.to_string(),
+                    job_event_id: claim.handle.job_event_id,
+                    consumer_id: claim.handle.consumer_id.clone(),
+                    handled_at_ms: now_ms(),
+                    outcome: Some(DispatchOutcome {
+                        trigger_id: claim.job.trigger_id.clone(),
+                        binding_key: claim.job.binding_key.clone(),
+                        event_id: claim.job.event.id.0.clone(),
+                        attempt_count: 1,
+                        status: super::super::DispatchStatus::Succeeded,
+                        handler_kind: "local".to_string(),
+                        target_uri: "test::handler".to_string(),
+                        replay_of_event_id: None,
+                        result: None,
+                        error: None,
+                    }),
+                    error: None,
+                },
+            )
+            .await
+            .unwrap();
+        queue.ack_claim(&claim.handle).await.unwrap();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn drr_policy_rotates_across_tenants_through_claim_next() {
+        let log = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(256)));
+        let queue = WorkerQueue::with_policy(
+            log,
+            SchedulerPolicy::deficit_round_robin(scheduler::FairnessKey::Tenant),
+        );
+
+        // Tenant A enqueues 8 jobs before tenant B enqueues a single job.
+        for idx in 0..8 {
+            queue
+                .enqueue(&tenant_job(
+                    "triage",
+                    "trigger",
+                    &format!("a-{idx}"),
+                    "tenant-a",
+                    WorkerQueuePriority::Normal,
+                ))
+                .await
+                .unwrap();
+        }
+        queue
+            .enqueue(&tenant_job(
+                "triage",
+                "trigger",
+                "b-1",
+                "tenant-b",
+                WorkerQueuePriority::Normal,
+            ))
+            .await
+            .unwrap();
+
+        // Claim+ack 4 jobs back-to-back. Under FIFO, tenant B would never be
+        // touched. Under fair-share, B must be served within the first two
+        // claims.
+        let mut tenants_seen = Vec::new();
+        for n in 0..4 {
+            let consumer = format!("c-{n}");
+            let claim = queue
+                .claim_next("triage", &consumer, StdDuration::from_secs(60))
+                .await
+                .unwrap()
+                .expect("queue should still have ready jobs");
+            tenants_seen.push(
+                claim
+                    .job
+                    .event
+                    .tenant_id
+                    .as_ref()
+                    .map(|t| t.0.clone())
+                    .unwrap_or_default(),
+            );
+            ack_and_respond(&queue, "triage", &claim).await;
+        }
+
+        let saw_b = tenants_seen.iter().any(|t| t == "tenant-b");
+        assert!(
+            saw_b,
+            "tenant-b should have been served within the first 4 claims, got {tenants_seen:?}",
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn fifo_policy_preserves_legacy_behavior() {
+        let log = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(64)));
+        let queue = WorkerQueue::with_policy(log, SchedulerPolicy::fifo());
+
+        // Fill queue with tenant-a jobs first, then a single tenant-b job.
+        for idx in 0..4 {
+            queue
+                .enqueue(&tenant_job(
+                    "triage",
+                    "trigger",
+                    &format!("a-{idx}"),
+                    "tenant-a",
+                    WorkerQueuePriority::Normal,
+                ))
+                .await
+                .unwrap();
+        }
+        queue
+            .enqueue(&tenant_job(
+                "triage",
+                "trigger",
+                "b-1",
+                "tenant-b",
+                WorkerQueuePriority::Normal,
+            ))
+            .await
+            .unwrap();
+
+        // FIFO must drain all of tenant-a before touching tenant-b.
+        let first = queue
+            .claim_next("triage", "c-0", StdDuration::from_secs(60))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(first.job.event.tenant_id.unwrap().0, "tenant-a");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn inspect_queue_reports_per_tenant_fairness_state() {
+        let log = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(64)));
+        let queue = WorkerQueue::with_policy(
+            log,
+            SchedulerPolicy::deficit_round_robin(scheduler::FairnessKey::Tenant)
+                .with_weight("tenant-a", 2)
+                .with_weight("tenant-b", 1),
+        );
+
+        for idx in 0..3 {
+            queue
+                .enqueue(&tenant_job(
+                    "triage",
+                    "trigger",
+                    &format!("a-{idx}"),
+                    "tenant-a",
+                    WorkerQueuePriority::Normal,
+                ))
+                .await
+                .unwrap();
+        }
+        queue
+            .enqueue(&tenant_job(
+                "triage",
+                "trigger",
+                "b-1",
+                "tenant-b",
+                WorkerQueuePriority::Normal,
+            ))
+            .await
+            .unwrap();
+
+        for n in 0..2 {
+            let consumer = format!("c-{n}");
+            let claim = queue
+                .claim_next("triage", &consumer, StdDuration::from_secs(60))
+                .await
+                .unwrap()
+                .unwrap();
+            ack_and_respond(&queue, "triage", &claim).await;
+        }
+
+        let snap = queue.inspect_queue("triage").await.unwrap();
+        assert_eq!(snap.scheduler.strategy, "drr");
+        assert_eq!(snap.scheduler.fairness_key, "tenant");
+        assert!(snap
+            .scheduler
+            .keys
+            .iter()
+            .any(|k| k.fairness_key == "tenant-a"));
+        let weights: BTreeMap<String, u32> = snap
+            .scheduler
+            .keys
+            .iter()
+            .map(|k| (k.fairness_key.clone(), k.weight))
+            .collect();
+        assert_eq!(weights.get("tenant-a").copied(), Some(2));
+        assert_eq!(weights.get("tenant-b").copied(), Some(1));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn drr_with_max_concurrent_per_key_throttles_hot_tenant() {
+        let log = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(128)));
+        let queue = WorkerQueue::with_policy(
+            log,
+            SchedulerPolicy::deficit_round_robin(scheduler::FairnessKey::Tenant)
+                .with_max_concurrent_per_key(1),
+        );
+
+        for idx in 0..4 {
+            queue
+                .enqueue(&tenant_job(
+                    "triage",
+                    "trigger",
+                    &format!("a-{idx}"),
+                    "tenant-a",
+                    WorkerQueuePriority::Normal,
+                ))
+                .await
+                .unwrap();
+        }
+        queue
+            .enqueue(&tenant_job(
+                "triage",
+                "trigger",
+                "b-1",
+                "tenant-b",
+                WorkerQueuePriority::Normal,
+            ))
+            .await
+            .unwrap();
+
+        let first = queue
+            .claim_next("triage", "consumer-a", StdDuration::from_secs(60))
+            .await
+            .unwrap()
+            .unwrap();
+        // Without releasing the first claim, the second pick must skip the
+        // capped tenant-a and serve tenant-b instead.
+        let second = queue
+            .claim_next("triage", "consumer-b", StdDuration::from_secs(60))
+            .await
+            .unwrap()
+            .unwrap();
+        let pair = [
+            first.job.event.tenant_id.clone().unwrap().0,
+            second.job.event.tenant_id.clone().unwrap().0,
+        ];
+        assert!(
+            pair.contains(&"tenant-a".to_string()) && pair.contains(&"tenant-b".to_string()),
+            "max_concurrent_per_key=1 must release tenant-b within two claims, got {pair:?}",
+        );
+    }
+
+    #[test]
+    fn from_env_parses_drr_policy_from_lookup() {
+        let lookup = |name: &str| -> Option<String> {
+            match name {
+                "HARN_SCHEDULER_STRATEGY" => Some("drr".to_string()),
+                "HARN_SCHEDULER_FAIRNESS_KEY" => Some("tenant-and-binding".to_string()),
+                "HARN_SCHEDULER_QUANTUM" => Some("3".to_string()),
+                "HARN_SCHEDULER_STARVATION_AGE_MS" => Some("750".to_string()),
+                "HARN_SCHEDULER_MAX_CONCURRENT_PER_KEY" => Some("4".to_string()),
+                "HARN_SCHEDULER_DEFAULT_WEIGHT" => Some("2".to_string()),
+                "HARN_SCHEDULER_WEIGHTS" => Some("tenant-a:5,tenant-b:1, : ,bad:abc".to_string()),
+                _ => None,
+            }
+        };
+        let policy = SchedulerPolicy::from_env_lookup(lookup);
+        match policy.strategy {
+            SchedulerStrategy::DeficitRoundRobin {
+                quantum,
+                starvation_age_ms,
+            } => {
+                assert_eq!(quantum, 3);
+                assert_eq!(starvation_age_ms, Some(750));
+            }
+            other => panic!("expected DRR strategy, got {other:?}"),
+        }
+        assert_eq!(
+            policy.fairness_key,
+            scheduler::FairnessKey::TenantAndBinding
+        );
+        assert_eq!(policy.max_concurrent_per_key, 4);
+        assert_eq!(policy.default_weight, 2);
+        assert_eq!(policy.weight_for("tenant-a"), 5);
+        assert_eq!(policy.weight_for("tenant-b"), 1);
+        // Unknown key falls back to default_weight.
+        assert_eq!(policy.weight_for("tenant-c"), 2);
+    }
+
+    #[test]
+    fn from_env_defaults_to_fifo_when_missing() {
+        let policy = SchedulerPolicy::from_env_lookup(|_| None);
+        assert!(matches!(policy.strategy, SchedulerStrategy::Fifo));
     }
 }
