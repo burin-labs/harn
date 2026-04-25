@@ -1,0 +1,21 @@
+pipeline test(task) {
+  let doc = json_parse(
+    "{\"users\":[{\"name\":\"Ada\",\"email\":\"ada@example.com\",\"active\":true},{\"name\":\"Bob\",\"email\":\"bob@example.com\",\"active\":false}],\"a/b\":{\"~key\":7}}",
+  )
+  println(json_pointer(doc, ""))
+  println(json_pointer(doc, "/users/0/name"))
+  println(json_pointer(doc, "/a~1b/~0key"))
+  println(json_pointer(doc, "/users/99/name"))
+  let changed = json_pointer_set(doc, "/users/1/active", true)
+  println(json_pointer(changed, "/users/1/active"))
+  println(json_pointer(doc, "/users/1/active"))
+  let appended = json_pointer_set(doc, "/users/-", {name: "Cy", email: "cy@example.com", active: true})
+  println(json_pointer(appended, "/users/2/name"))
+  let inserted_key = json_pointer_set(doc, "/a~1b/new", "value")
+  println(json_pointer(inserted_key, "/a~1b/new"))
+  let deleted_key = json_pointer_delete(appended, "/users/0/email")
+  println(json_pointer(deleted_key, "/users/0/email"))
+  let deleted_item = json_pointer_delete(appended, "/users/1")
+  println(len(json_pointer(deleted_item, "/users")))
+  println(json_pointer(deleted_item, "/users/1/name"))
+}

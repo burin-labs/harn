@@ -340,6 +340,27 @@ top level. It's distinct from postfix `?`: `?` early-returns
 `Result.Err(...)` from a `Result`-returning function, while `try*`
 rethrows a thrown value into an enclosing catch.
 
+## JSON querying
+
+Use `json_pointer(value, ptr)` for RFC 6901 paths such as
+`/users/0/email`; escaping is `~0` for `~` and `~1` for `/`. Missing
+paths return `nil`. `json_pointer_set(value, ptr, new)` and
+`json_pointer_delete(value, ptr)` return modified copies.
+
+Use `jq(value, expr)` for a jq-like stream query; it always returns a
+list. Use `jq_first(value, expr)` when you expect one value or `nil`.
+Supported v1 forms include `.`, `.foo.bar`, `.[2]`, `.[2:5]`,
+`.[]`, `.["quoted key"]`, pipes, commas, `length`, `keys`,
+`values`, `type`, `map(...)`, `select(...)`, boolean comparisons,
+object construction, and recursive descent `..`.
+
+```harn
+let api = json_parse(response.body)
+let first_email = json_pointer(api, "/users/0/email")
+let active = jq(api, ".users[] | select(.active == true) | .email")
+let summary = jq_first(api, "{ count: .users | length, next: .meta.next }")
+```
+
 ## Concurrency
 
 ```harn

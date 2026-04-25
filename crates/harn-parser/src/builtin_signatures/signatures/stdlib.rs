@@ -508,11 +508,31 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("string")),
     },
     BuiltinSig {
+        name: "jq",
+        return_type: Some(BuiltinReturn::Named("list")),
+    },
+    BuiltinSig {
+        name: "jq_first",
+        return_type: None,
+    },
+    BuiltinSig {
         name: "json_extract",
         return_type: None,
     },
     BuiltinSig {
         name: "json_parse",
+        return_type: None,
+    },
+    BuiltinSig {
+        name: "json_pointer",
+        return_type: None,
+    },
+    BuiltinSig {
+        name: "json_pointer_delete",
+        return_type: None,
+    },
+    BuiltinSig {
+        name: "json_pointer_set",
         return_type: None,
     },
     BuiltinSig {
