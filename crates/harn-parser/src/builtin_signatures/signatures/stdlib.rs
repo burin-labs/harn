@@ -124,6 +124,14 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("string")),
     },
     BuiltinSig {
+        name: "brotli_decode",
+        return_type: Some(BuiltinReturn::Named("bytes")),
+    },
+    BuiltinSig {
+        name: "brotli_encode",
+        return_type: Some(BuiltinReturn::Named("bytes")),
+    },
+    BuiltinSig {
         name: "bytes_concat",
         return_type: Some(BuiltinReturn::Named("bytes")),
     },
@@ -434,6 +442,14 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
     BuiltinSig {
         name: "format",
         return_type: Some(BuiltinReturn::Named("string")),
+    },
+    BuiltinSig {
+        name: "gzip_decode",
+        return_type: Some(BuiltinReturn::Named("bytes")),
+    },
+    BuiltinSig {
+        name: "gzip_encode",
+        return_type: Some(BuiltinReturn::Named("bytes")),
     },
     BuiltinSig {
         name: "hash_value",
@@ -1116,6 +1132,14 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("float")),
     },
     BuiltinSig {
+        name: "tar_create",
+        return_type: Some(BuiltinReturn::Named("bytes")),
+    },
+    BuiltinSig {
+        name: "tar_extract",
+        return_type: Some(BuiltinReturn::Named("list")),
+    },
+    BuiltinSig {
         name: "task_current",
         return_type: Some(BuiltinReturn::Named("dict")),
     },
@@ -1274,6 +1298,22 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
     BuiltinSig {
         name: "write_file_bytes",
         return_type: Some(BuiltinReturn::Named("nil")),
+    },
+    BuiltinSig {
+        name: "zip_create",
+        return_type: Some(BuiltinReturn::Named("bytes")),
+    },
+    BuiltinSig {
+        name: "zip_extract",
+        return_type: Some(BuiltinReturn::Named("list")),
+    },
+    BuiltinSig {
+        name: "zstd_decode",
+        return_type: Some(BuiltinReturn::Named("bytes")),
+    },
+    BuiltinSig {
+        name: "zstd_encode",
+        return_type: Some(BuiltinReturn::Named("bytes")),
     },
     BuiltinSig {
         name: "yaml_parse",

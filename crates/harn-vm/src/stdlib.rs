@@ -6,6 +6,7 @@ mod agents;
 mod agents_daemon;
 pub(crate) mod assemble;
 mod bytes;
+mod compression;
 mod concurrency;
 mod connectors;
 mod crypto;
@@ -68,6 +69,7 @@ pub fn register_core_stdlib(vm: &mut Vm) {
     datetime::register_datetime_builtins(vm);
     regex::register_regex_builtins(vm);
     bytes::register_bytes_builtins(vm);
+    compression::register_compression_builtins(vm);
     crypto::register_crypto_builtins(vm);
     path::register_path_helper_builtins(vm);
     sets::register_set_builtins(vm);
