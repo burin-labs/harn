@@ -60,6 +60,11 @@ opentelemetry_sdk = { version = "0.31", optional = true, features = ["rt-tokio",
 opentelemetry-otlp = { version = "0.31", default-features = false, features = ["http-json", "reqwest-rustls"], optional = true }
 tracing-opentelemetry = { version = "0.32", optional = true }
 zeroize = "1"
+flate2 = "1.1.9"
+zstd = "0.13.3"
+brotli = "8.0.2"
+tar = { version = "0.4.45", default-features = false }
+zip = { version = "2", default-features = false, features = ["deflate-flate2", "flate2"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61.2", features = [

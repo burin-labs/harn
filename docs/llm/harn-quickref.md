@@ -485,6 +485,36 @@ let captures = regex_captures("(?P<day>[A-Z][a-z]+)", "Mon Tue")
 `regex_replace` and `regex_replace_all` both replace every match and
 both support `$1`, `$2`, `${name}` backrefs.
 
+## Encoding, Bytes, and Compression
+
+Use byte helpers when content may not be UTF-8:
+
+```harn
+let bytes = bytes_from_string("hello")
+let text = bytes_to_string(bytes)
+let hex = bytes_to_hex(bytes)
+let same = bytes_from_hex(hex)
+```
+
+Compression is in-memory and returns `bytes`. Encoders accept `bytes`
+or `string`; decoders always return `bytes`.
+
+```harn
+let gz = gzip_encode("hello", 6)       // level 0..9, default 6
+let zst = zstd_encode(bytes, 3)        // zstd level, default 3
+let br = brotli_encode("hello", 11)    // quality 0..11, default 11
+
+let hello = bytes_to_string(gzip_decode(gz))
+
+let tar = tar_create([
+  {path: "README.md", content: "# Hi\n", mode: 420},
+])
+let tar_entries = tar_extract(tar)     // [{path, content: bytes, mode}]
+
+let zip = zip_create([{path: "a.txt", content: "alpha"}])
+let zip_entries = zip_extract(zip)     // [{path, content: bytes}]
+```
+
 ## LLM surface
 
 ```harn

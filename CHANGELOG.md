@@ -11,6 +11,13 @@ granular archaeology.
 
 ### Added
 
+- **Compression stdlib builtins (#613).** Added in-memory
+  `gzip_encode`/`gzip_decode`, `zstd_encode`/`zstd_decode`,
+  `brotli_encode`/`brotli_decode`, `tar_create`/`tar_extract`, and
+  `zip_create`/`zip_extract` builtins. Encoders accept strings or
+  bytes, decoders return bytes, tar extraction preserves entry modes,
+  and conformance now covers all supported formats.
+
 - **`harn-hostlib` process-lifecycle tools (#568, #606).** Implemented
   `run_command`, `run_test`, `run_build_command`,
   `inspect_test_results`, and `manage_packages` under the gated

@@ -3332,6 +3332,16 @@ Sets are iterable with `for ... in` and support `len()`.
 | `sha256(str)` | Returns the hex-encoded SHA-256 hash of `str` |
 | `md5(str)` | Returns the hex-encoded MD5 hash of `str` |
 | `jwt_sign(alg, claims, private_key)` | Signs a compact JWT/JWS with a PEM private key. Supports `ES256` and `RS256` |
+| `gzip_encode(bytes_or_string, level?)` | Gzip-compresses bytes/string into `bytes`; `level` defaults to `6` and must be `0..9` |
+| `gzip_decode(bytes)` | Gzip-decompresses `bytes` and returns `bytes` |
+| `zstd_encode(bytes_or_string, level?)` | Zstd-compresses bytes/string into `bytes`; `level` defaults to `3` |
+| `zstd_decode(bytes)` | Zstd-decompresses `bytes` and returns `bytes` |
+| `brotli_encode(bytes_or_string, quality?)` | Brotli-compresses bytes/string into `bytes`; `quality` defaults to `11` and must be `0..11` |
+| `brotli_decode(bytes)` | Brotli-decompresses `bytes` and returns `bytes` |
+| `tar_create(entries)` | Creates an in-memory tar archive from `[{path, content, mode?}]` and returns `bytes`; `content` may be bytes or string |
+| `tar_extract(bytes)` | Extracts an in-memory tar archive into `[{path, content: bytes, mode}]` |
+| `zip_create(entries)` | Creates an in-memory deflated zip archive from `[{path, content}]` and returns `bytes`; `content` may be bytes or string |
+| `zip_extract(bytes)` | Extracts an in-memory zip archive into `[{path, content: bytes}]` |
 
 ```harn
 let encoded = base64_encode("hello world")  // "aGVsbG8gd29ybGQ="
@@ -3340,6 +3350,8 @@ let jwt = base64url_encode("{\"alg\":\"HS256\"}") // no `=` padding
 let text = hex_decode("68656c6c6f")         // "hello"
 let hash = sha256("hello")                  // hex string
 let md5hash = md5("hello")                  // hex string
+let gz = gzip_encode("hello")               // bytes
+let hello = bytes_to_string(gzip_decode(gz)) // "hello"
 ```
 
 `jwt_sign` requires `claims` to be a dict so it can be serialized as a JSON
