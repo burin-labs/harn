@@ -28,6 +28,18 @@ granular archaeology.
   formatter/lint/IR/LSP/viz/preflight handling alongside the existing
   `SubscriptAccess` paths.
 
+### Changed
+
+- **`http_mock` re-registration now replaces (#TBD).** Calling
+  `http_mock(method, url_pattern, ...)` a second time with the same
+  `(method, url_pattern)` tuple now replaces the prior mock instead of
+  appending behind it. Previously the first registration matched
+  forever and the second was dead code, which made it surprisingly
+  hard to override a per-case response (e.g. a happy `200` followed by
+  a deliberate `429` for a rate-limit cap test) without first calling
+  `http_mock_clear()`. Distinct `(method, url_pattern)` tuples are
+  unaffected.
+
 ### Fixed
 
 - **`persona_runtime_status_tick_and_budget_are_persisted` UTC-day
