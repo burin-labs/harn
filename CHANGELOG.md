@@ -208,6 +208,20 @@ granular archaeology.
   `windows-latest`, plus a `harn run` smoke. Existing
   Unix-gated tests (`#![cfg(unix)]` on the orchestrator suite,
   `cfg(target_os = ...)` on sandbox tests) auto-skip.
+- **Windows job is now path-conditional and faster.** PRs that don't
+  touch `crates/`, `conformance/`, `Cargo.toml`, `Cargo.lock`, `.cargo/`,
+  `rust-toolchain.toml`, or the CI workflow itself skip the Windows
+  build entirely (a no-op alias job satisfies branch protection).
+  When the job does run it now uses `cargo check --workspace --tests`
+  for compile sanity plus a focused `cargo build --bin harn`, instead
+  of `cargo build --workspace --tests --bin harn` — roughly halving
+  Windows wall time on cache misses. `merge_group` and `push` events
+  always run the full Windows job.
+- **Build warnings are errors workspace-wide.** CI runs with
+  `RUSTFLAGS=-D warnings` so platform-specific build warnings
+  (Windows-only deprecations, dead_code under `cfg`-gates, etc.) can't
+  silently accumulate. Clippy already ran with `-D warnings`; this
+  closes the same gap for `cargo build` / `cargo check`.
 - **Windows release artifact**:
   `.github/workflows/release.yml` matrix gains
   `x86_64-pc-windows-msvc` and packages a `harn-...zip` alongside the
