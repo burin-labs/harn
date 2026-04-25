@@ -1,0 +1,60 @@
+{
+  "schema": "receipt-2026-04-25",
+  "receipt_id": "receipt_invalid_missing_chain_hash",
+  "subject": {
+    "object": "task",
+    "id": "task_invalid"
+  },
+  "issuer": {
+    "id": "harness_test",
+    "kind": "harness"
+  },
+  "issued_at": "2026-04-25T19:17:33Z",
+  "identifiers": {
+    "workspace_ref": "workspace_repo_01",
+    "session_id": "session_invalid",
+    "task_id": "task_invalid"
+  },
+  "lifecycle": {
+    "started_at": "2026-04-25T19:16:14Z",
+    "completed_at": "2026-04-25T19:17:33Z",
+    "final_state": "FAILED"
+  },
+  "trust": {
+    "start_tier": "shadow",
+    "end_tier": "shadow"
+  },
+  "autonomy_budget": {
+    "consumed": {
+      "tool_calls": 0
+    }
+  },
+  "replay_input": {
+    "determinism": "unavailable",
+    "materials": [],
+    "unavailable_reason": "test fixture intentionally incomplete"
+  },
+  "model_route": {
+    "chosen_model": {
+      "provider": "none",
+      "model": "none"
+    },
+    "alternatives_considered": [],
+    "route_policy_reason": "no model call was made"
+  },
+  "cost": {
+    "currency": "USD",
+    "total": 0,
+    "provider_breakdown": []
+  },
+  "side_effects": {
+    "fs_writes": [],
+    "network_egress": [],
+    "tool_calls": [],
+    "a2a_handoffs": []
+  },
+  "final_artifacts": [],
+  "chain": {
+    "previous_receipt_hash": null
+  }
+}

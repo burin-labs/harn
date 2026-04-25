@@ -298,22 +298,40 @@ best-effort unless a transport explicitly promises a single stream order.
 
 ### Receipt
 
-A Receipt is a portable proof summary for a Task, Outcome, approval, tool use,
-or replay segment. Receipts are not full traces.
+A Receipt is a portable proof summary for a Task, Outcome, Event, Artifact,
+approval, tool use, or replay segment. Receipts are not full traces.
 
-Required fields for v1 placeholders:
+Required fields:
 
-- `id`: stable receipt id.
+- `schema`: receipt format discriminator. Current value:
+  `receipt-2026-04-25`.
+- `receipt_id`: stable receipt id.
 - `subject`: `{object, id}` pointer.
-- `format`: receipt format discriminator.
-- `summary`: human-readable summary.
-- `issued_at`: timestamp.
 - `issuer`: Harness identity.
+- `issued_at`: timestamp.
+- `identifiers`: tenant, persona, workspace, session, task, branch, and trace
+  identifiers known for the run.
+- `lifecycle`: lifecycle timestamps and final state.
+- `trust`: autonomy tier at start and end.
+- `autonomy_budget`: consumed autonomy budget.
+- `replay_input`: replay material references sufficient for deterministic
+  replay when available.
+- `model_route`: chosen model, alternatives considered, and route-policy
+  reason.
+- `cost`: total cost and per-provider breakdown.
+- `side_effects`: file-system writes, network egress, tool calls, and A2A
+  handoffs.
+- `final_artifacts`: final artifact references.
+- `chain`: previous receipt hash, current receipt hash, and optional Merkle
+  root.
 
-The exact cryptographic receipt wire format is intentionally deferred to the
-receipt-format specification. This protocol requires all receipt references to
-be stable and retrievable, but it does not define hash-chain, signature, or
-redaction details beyond the placeholder fields above.
+Optional fields include `approvals`, `redactions`, `signatures`, and
+`metadata`.
+
+The normative JSON Schema lives in
+`agents-protocol-receipts/schemas/receipt-2026-04-25.schema.json`. The Agents
+Protocol OpenAPI `Receipt` component MUST reference that schema instead of
+duplicating it.
 
 ### Memory
 
@@ -754,15 +772,19 @@ failure is visible in streams and receipts.
 
 ## Receipt Wire Format
 
-The receipt-format sibling spec defines the normative receipt envelope,
-canonicalization, hash inputs, signatures, redaction rules, and verification
-algorithm.
+The receipt-format sibling artifact defines the normative receipt envelope,
+canonicalization, hash inputs, signatures, redaction rules, verification
+algorithm, JSON Schema, fixtures, and optional CBOR archive encoding.
 
-Until that spec is finalized, implementations MUST treat `Receipt` resources
-as opaque protocol resources with stable ids. Task, Outcome, Event, and
-Artifact objects MAY reference receipts by id. Clients MUST NOT infer
-cryptographic validity from the presence of a `receipt_id`; they must call the
-receipt verification surface when available.
+Receipt JSON uses the `receipt-2026-04-25` schema marker. Producers MUST
+canonicalize receipt JSON with RFC 8785 before hashing or signing. The
+`chain.receipt_hash` value is computed over the canonical receipt with
+`chain.receipt_hash` and `signatures` removed. The stored value uses the
+`sha256:` prefix.
+
+Task, Outcome, Event, and Artifact objects MAY reference receipts by id.
+Clients MUST NOT infer cryptographic validity from the presence of a
+`receipt_id`; they must call the receipt verification surface when available.
 
 ## Replay Contract
 

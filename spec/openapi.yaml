@@ -1,0 +1,13 @@
+openapi: 3.1.0
+info:
+  title: Harn Agents Protocol v1
+  version: agents-protocol-2026-04-25
+  description: |
+    OpenAPI component anchor for the Harn Agents Protocol v1 REST surface.
+    REST paths are defined by the narrative spec as they land; shared resource
+    schemas live under components so endpoint specs can reuse one contract.
+paths: {}
+components:
+  schemas:
+    Receipt:
+      $ref: ../agents-protocol-receipts/schemas/receipt-2026-04-25.schema.json

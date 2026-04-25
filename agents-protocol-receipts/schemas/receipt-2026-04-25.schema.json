@@ -1,0 +1,604 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/agents-protocol/receipt-2026-04-25.schema.json",
+  "title": "Harn Agents Protocol Receipt",
+  "description": "Portable proof summary for a Harn Agents Protocol task, outcome, event, approval, tool use, artifact, or replay segment.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "receipt_id",
+    "subject",
+    "issuer",
+    "issued_at",
+    "identifiers",
+    "lifecycle",
+    "trust",
+    "autonomy_budget",
+    "replay_input",
+    "model_route",
+    "cost",
+    "side_effects",
+    "final_artifacts",
+    "chain"
+  ],
+  "properties": {
+    "schema": {
+      "const": "receipt-2026-04-25"
+    },
+    "receipt_id": {
+      "$ref": "#/$defs/nonEmptyString"
+    },
+    "subject": {
+      "$ref": "#/$defs/resourceRef"
+    },
+    "issuer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "kind": {
+          "type": "string",
+          "enum": ["harness", "host", "agent", "connector"]
+        },
+        "name": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "version": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "public_key_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      }
+    },
+    "issued_at": {
+      "$ref": "#/$defs/dateTime"
+    },
+    "identifiers": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["workspace_ref", "session_id", "task_id"],
+      "properties": {
+        "tenant_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "persona_ref": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "workspace_ref": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "session_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "task_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "branch_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "trace_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      }
+    },
+    "lifecycle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["started_at", "completed_at", "final_state"],
+      "properties": {
+        "created_at": {
+          "$ref": "#/$defs/dateTime"
+        },
+        "started_at": {
+          "$ref": "#/$defs/dateTime"
+        },
+        "completed_at": {
+          "$ref": "#/$defs/dateTime"
+        },
+        "final_state": {
+          "type": "string",
+          "enum": ["SUCCEEDED", "FAILED", "CANCELED"]
+        },
+        "failure": {
+          "type": ["object", "null"],
+          "additionalProperties": true
+        }
+      }
+    },
+    "approvals": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/approval"
+      },
+      "default": []
+    },
+    "trust": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["start_tier", "end_tier"],
+      "properties": {
+        "start_tier": {
+          "$ref": "#/$defs/trustTier"
+        },
+        "end_tier": {
+          "$ref": "#/$defs/trustTier"
+        },
+        "policy_ref": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      }
+    },
+    "autonomy_budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["consumed"],
+      "properties": {
+        "limit": {
+          "$ref": "#/$defs/budgetAmount"
+        },
+        "consumed": {
+          "$ref": "#/$defs/budgetAmount"
+        }
+      }
+    },
+    "replay_input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["determinism", "materials"],
+      "properties": {
+        "determinism": {
+          "type": "string",
+          "enum": ["byte_deterministic", "best_effort", "unavailable"]
+        },
+        "materials": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/replayMaterial"
+          }
+        },
+        "unavailable_reason": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      }
+    },
+    "model_route": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["chosen_model", "alternatives_considered", "route_policy_reason"],
+      "properties": {
+        "chosen_model": {
+          "$ref": "#/$defs/modelRef"
+        },
+        "alternatives_considered": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/modelRef"
+          }
+        },
+        "route_policy_reason": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      }
+    },
+    "cost": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["currency", "total", "provider_breakdown"],
+      "properties": {
+        "currency": {
+          "type": "string",
+          "pattern": "^[A-Z]{3}$"
+        },
+        "total": {
+          "type": "number",
+          "minimum": 0
+        },
+        "provider_breakdown": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/providerCost"
+          }
+        }
+      }
+    },
+    "side_effects": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fs_writes", "network_egress", "tool_calls", "a2a_handoffs"],
+      "properties": {
+        "fs_writes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/fileWrite"
+          }
+        },
+        "network_egress": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/networkEgress"
+          }
+        },
+        "tool_calls": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/toolCall"
+          }
+        },
+        "a2a_handoffs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/a2aHandoff"
+          }
+        }
+      }
+    },
+    "final_artifacts": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/artifactRef"
+      }
+    },
+    "chain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["previous_receipt_hash", "receipt_hash"],
+      "properties": {
+        "previous_receipt_hash": {
+          "type": ["string", "null"],
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "receipt_hash": {
+          "$ref": "#/$defs/sha256"
+        },
+        "merkle_root": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "redactions": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/redaction"
+      },
+      "default": []
+    },
+    "signatures": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/signature"
+      },
+      "default": []
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": true,
+      "default": {}
+    }
+  },
+  "$defs": {
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1
+    },
+    "dateTime": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "resourceRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["object", "id"],
+      "properties": {
+        "object": {
+          "type": "string",
+          "enum": ["task", "outcome", "event", "artifact", "approval", "tool_call", "replay_segment"]
+        },
+        "id": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      }
+    },
+    "trustTier": {
+      "type": "string",
+      "enum": ["shadow", "suggest", "act_with_approval", "act_auto"]
+    },
+    "approval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["actor", "action", "decision", "decided_at"],
+      "properties": {
+        "approval_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "actor": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "action": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "decision": {
+          "type": "string",
+          "enum": ["approved", "denied", "canceled", "timeout"]
+        },
+        "decided_at": {
+          "$ref": "#/$defs/dateTime"
+        },
+        "quorum_proof": {
+          "type": ["object", "null"],
+          "additionalProperties": true
+        },
+        "evidence_hash": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "budgetAmount": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "usd": {
+          "type": "number",
+          "minimum": 0
+        },
+        "input_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "output_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "tool_calls": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "wall_time_ms": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "replayMaterial": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["llm_provider_response", "mcp_tool_return", "event_log", "artifact", "host_fact"]
+        },
+        "id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "uri": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "content_type": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "bytes_base64": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "anyOf": [
+        {
+          "required": ["uri", "sha256"]
+        },
+        {
+          "required": ["bytes_base64", "sha256"]
+        },
+        {
+          "required": ["metadata"]
+        }
+      ]
+    },
+    "modelRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "model"],
+      "properties": {
+        "provider": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "model": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "version": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "reason": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      }
+    },
+    "providerCost": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "amount"],
+      "properties": {
+        "provider": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "model": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "amount": {
+          "type": "number",
+          "minimum": 0
+        },
+        "input_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "output_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    },
+    "fileWrite": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "operation"],
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "operation": {
+          "type": "string",
+          "enum": ["create", "modify", "delete", "rename"]
+        },
+        "before_sha256": {
+          "type": ["string", "null"],
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "after_sha256": {
+          "type": ["string", "null"],
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        }
+      }
+    },
+    "networkEgress": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["destination", "purpose"],
+      "properties": {
+        "destination": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "purpose": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "bytes_sent": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    },
+    "toolCall": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tool", "call_id", "status"],
+      "properties": {
+        "tool": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "call_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["succeeded", "failed", "canceled"]
+        },
+        "input_hash": {
+          "$ref": "#/$defs/sha256"
+        },
+        "output_hash": {
+          "$ref": "#/$defs/sha256"
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    },
+    "a2aHandoff": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["target_agent", "task_id", "status"],
+      "properties": {
+        "target_agent": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "task_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["accepted", "rejected", "failed", "completed"]
+        },
+        "receipt_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      }
+    },
+    "artifactRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifact_id", "kind"],
+      "properties": {
+        "artifact_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "kind": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "uri": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "redaction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["field", "reason"],
+      "properties": {
+        "field": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "reason": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "proof_hash": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "signature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key_id", "algorithm", "signature"],
+      "properties": {
+        "key_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "algorithm": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "signature": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "signed_at": {
+          "$ref": "#/$defs/dateTime"
+        }
+      }
+    }
+  }
+}
