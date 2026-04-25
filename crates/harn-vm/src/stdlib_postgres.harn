@@ -1,0 +1,15 @@
+/**
+ * std/postgres — Postgres persistence helpers.
+ *
+ * The pg_* functions are VM builtins registered by the Rust stdlib. This
+ * module carries the public handle shapes for import-aware tools.
+ */
+type PgPool = {_type: "pg_pool", id: string}
+
+type PgTx = {_type: "pg_tx", id: string}
+
+type PgMockPool = {_type: "pg_mock_pool", id: string}
+
+type PgHandle = PgPool | PgTx | PgMockPool
+
+type PgExecuteResult = {rows_affected: int}

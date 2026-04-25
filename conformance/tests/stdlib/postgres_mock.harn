@@ -1,0 +1,33 @@
+import "std/postgres"
+
+pipeline default() {
+  let db = pg_mock_pool(
+    [
+    {
+    sql: "select id, payload from receipts where tenant_id = $1",
+    params: ["tenant-a"],
+    rows: [{id: "r1", payload: {ok: true}, observed_at: "2024-01-02T03:04:05Z"}],
+  },
+    {
+    sql: "insert into audit_records(tenant_id, action) values ($1, $2)",
+    params: ["tenant-a", "receipt.read"],
+    rows_affected: 1,
+  },
+  ],
+  )
+  let rows = pg_query(db, "select id, payload from receipts where tenant_id = $1", ["tenant-a"])
+  println(rows[0].id)
+  println(rows[0].payload.ok)
+  println(
+    pg_query_one(db, "select id, payload from receipts where tenant_id = $1", ["tenant-a"]).observed_at,
+  )
+  let result = pg_execute(
+    db,
+    "insert into audit_records(tenant_id, action) values ($1, $2)",
+    ["tenant-a", "receipt.read"],
+  )
+  println(result.rows_affected)
+  let calls = pg_mock_calls(db)
+  println(len(calls))
+  println(calls[0].params[0])
+}

@@ -1122,6 +1122,53 @@ let chunk = http_stream_read(stream, 65536)
 http_stream_close(stream)
 ```
 
+## Postgres
+
+| Function | Parameters | Returns | Description |
+|---|---|---|---|
+| `pg_pool(source, options?)` | source: string or dict, options: dict | dict | Open a pooled Postgres connection |
+| `pg_connect(source, options?)` | source: string or dict, options: dict | dict | Open a single-connection Postgres pool |
+| `pg_query(handle, sql, params?)` | handle: dict, sql: string, params: list | list | Run a parameterized query and return decoded rows |
+| `pg_query_one(handle, sql, params?)` | handle: dict, sql: string, params: list | dict or nil | Return the first decoded row, or nil when no row matches |
+| `pg_execute(handle, sql, params?)` | handle: dict, sql: string, params: list | dict | Execute a parameterized statement and return `{rows_affected}` |
+| `pg_transaction(pool, callback, options?)` | pool: dict, callback: closure, options: dict | any | Run a closure with a transaction handle, commit on success, rollback on throw |
+| `pg_close(pool)` | pool: dict | bool | Close and unregister a pool |
+| `pg_mock_pool(fixtures)` | fixtures: list | dict | Create a fixture-backed Postgres handle for tests |
+| `pg_mock_calls(mock)` | mock: dict | list | Return recorded mock SQL calls |
+
+Connection sources may be raw Postgres URLs, `env:NAME`, `secret:namespace/name`,
+or `{url}`, `{env}`, or `{secret}` dictionaries. Pool options include
+`max_connections`, `min_connections`, `acquire_timeout_ms`, `idle_timeout_ms`,
+`max_lifetime_ms`, `ssl_mode`, `application_name`, and
+`statement_cache_capacity`.
+
+Use `params` for every dynamic value:
+
+```harn
+let rows = pg_query(
+  db,
+  "select id, payload from receipts where tenant_id = $1 and id = $2::uuid",
+  [tenant_id, receipt_id],
+)
+```
+
+Rows decode into dictionaries. JSON/JSONB becomes Harn values; UUID, date,
+time, timestamp, and timestamptz decode as strings. Transaction `options` may
+include `settings`, which are applied with transaction-local `set_config` for
+RLS policies:
+
+```harn
+pg_transaction(db, { tx ->
+  pg_execute(tx, "insert into event_log(tenant_id, kind) values ($1, $2)", [
+    tenant_id,
+    "receipt.created",
+  ])
+}, {settings: {"app.current_tenant_id": tenant_id}})
+```
+
+See [Postgres](./postgres.md) for the full persistence guide and mock fixture
+examples.
+
 ## Interactive input
 
 | Function | Parameters | Returns | Description |

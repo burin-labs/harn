@@ -912,6 +912,42 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("float")),
     },
     BuiltinSig {
+        name: "pg_close",
+        return_type: Some(BuiltinReturn::Named("bool")),
+    },
+    BuiltinSig {
+        name: "pg_connect",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
+        name: "pg_execute",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
+        name: "pg_mock_calls",
+        return_type: Some(BuiltinReturn::Named("list")),
+    },
+    BuiltinSig {
+        name: "pg_mock_pool",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
+        name: "pg_pool",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
+        name: "pg_query",
+        return_type: Some(BuiltinReturn::Named("list")),
+    },
+    BuiltinSig {
+        name: "pg_query_one",
+        return_type: None,
+    },
+    BuiltinSig {
+        name: "pg_transaction",
+        return_type: None,
+    },
+    BuiltinSig {
         name: "pi",
         return_type: Some(BuiltinReturn::Named("float")),
     },

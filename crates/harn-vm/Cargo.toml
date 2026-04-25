@@ -55,6 +55,8 @@ serde_path_to_error = "0.1"
 subtle = "2.6"
 time = { version = "0.3", features = ["formatting", "parsing", "serde"] }
 uuid = { version = "1", features = ["v4", "v5", "v7"] }
+sqlx-core = { version = "0.8", default-features = false, features = ["_rt-tokio", "_tls-rustls-aws-lc-rs", "json"] }
+sqlx-postgres = { version = "0.8", default-features = false, features = ["json", "time", "uuid"] }
 tokio-util = { version = "0.7", features = ["io"] }
 futures = "0.3"
 httpdate = "1"

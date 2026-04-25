@@ -90,6 +90,7 @@
 - [CLI reference](./cli-reference.md)
 - [Agents Protocol v1](./spec/agents-protocol/v1.md)
 - [Builtin functions](./builtins.md)
+- [Postgres](./postgres.md)
 - [Project scanning](./project-scan.md)
 - [Prompt templating](./prompt-templating.md)
 - [Configuring LLM providers](./providers.md)
