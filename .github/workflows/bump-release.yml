@@ -1,25 +1,22 @@
-name: Bump Release
+name: Bump Release (recovery)
 
-# Fires when a "Prepare vX.Y.Z release" commit lands on main through the
-# merge queue. Runs ./scripts/release_ship.sh --bump <type> under the
-# release-bot App identity, which audits, dry-run publishes, bumps
-# Cargo.toml + Cargo.lock, commits, pushes release/vX.Y.Z, and opens
-# the "Bump version to X.Y.Z" PR. The bump PR's CI fires normally
-# (App-pushed branch IS subject to downstream workflows), and once it
-# lands the Finalize Release workflow takes over to tag, publish to
-# crates.io, cascade to the Release workflow for binaries, and create
-# the GitHub release.
+# RECOVERY-ONLY workflow. Default release flow consolidates the prepare
+# and bump into a single human PR titled "Release vX.Y.Z" — see
+# .claude/commands/release-harn.md and .codex/commands/harn-release.md.
+# This workflow used to auto-fire on push to main; it now requires a
+# manual workflow_dispatch and exists for two recovery cases:
 #
-# End-state human flow: write and land "Prepare vX.Y.Z release". Walk
-# away. Everything else is automated.
+#   1. A "Prepare vX.Y.Z release"-style commit accidentally landed on
+#      main without the consolidated Cargo.toml/Cargo.lock bump. Run
+#      this workflow to open the bump PR after the fact.
+#   2. Bootstrapping a brand-new workspace crate (HARN_BOOTSTRAP_NEW_CRATES);
+#      the audit's package-audit lane needs special handling that the
+#      consolidated flow can also opt into, but historically lived here.
 #
-# workflow_dispatch is the manual recovery path — if this workflow
-# fails mid-run, re-run it; release_ship.sh's bump path is idempotent
-# in the sense that the existing release/vX.Y.Z branch will be
-# re-pushed cleanly.
+# Runs ./scripts/release_ship.sh --bump <type> under the
+# harn-release-bot App identity. Once this workflow's PR lands, the
+# Finalize Release workflow auto-fires on tag drift to ship.
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
     inputs:
       bootstrap_new_crates:
@@ -57,9 +54,9 @@ jobs:
   bump:
     name: Open bump PR
     runs-on: ubuntu-latest
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      startsWith(github.event.head_commit.message, 'Prepare v')
+    # workflow_dispatch only — the push trigger was removed when the
+    # release flow consolidated to a single PR.
+    if: github.event_name == 'workflow_dispatch'
     steps:
       # Mint a short-lived App installation token so the bump branch
       # push and the bump PR are authored by harn-release-bot. Using

@@ -1,10 +1,10 @@
-.PHONY: setup install-hooks configure-merge-drivers check fmt fmt-harn fmt-harn-fix lint lint-md lint-actions lint-harn spec-lint test test-cargo test-fast conformance bench-vm all release-gate portal portal-check portal-demo gen-highlight check-highlight gen-trigger-quickref check-trigger-quickref check-trigger-examples check-docs-snippets
+.PHONY: setup install-hooks configure-merge-drivers check fmt fmt-harn fmt-harn-fix lint lint-md lint-actions lint-harn spec-lint test test-cargo test-fast conformance bench-vm all release-gate portal portal-check portal-demo gen-highlight check-highlight gen-trigger-quickref check-trigger-quickref check-trigger-examples check-docs-snippets sync-language-spec check-language-spec
 
 # Full quality check: format first, then lint/test in parallel.
 # Usage: make all -j       (parallel checks after formatting)
 #        make all           (sequential, also works)
 all: fmt
-	$(MAKE) lint lint-md lint-actions lint-harn spec-lint fmt-harn test conformance check-highlight check-trigger-quickref check-trigger-examples check-docs-snippets portal-check
+	$(MAKE) lint lint-md lint-actions lint-harn spec-lint fmt-harn test conformance check-highlight check-language-spec check-trigger-quickref check-trigger-examples check-docs-snippets portal-check
 
 check: all
 
@@ -151,6 +151,25 @@ check-highlight:
 	@echo "=== Checking docs/theme/harn-keywords.js is up to date ==="
 	@cargo run --quiet -p harn-cli -- dump-highlight-keywords --check
 	@echo "    Harn keyword file OK."
+
+# Regenerate docs/src/language-spec.md from spec/HARN_SPEC.md (the
+# canonical authoring source). Mirrors what release_gate.sh audit's
+# sync_language_spec.sh step does.
+sync-language-spec:
+	./scripts/sync_language_spec.sh
+
+# CI guard: fail if docs/src/language-spec.md is stale relative to
+# spec/HARN_SPEC.md. `make sync-language-spec` fixes it.
+check-language-spec:
+	@echo "=== Checking docs/src/language-spec.md is up to date ==="
+	@./scripts/sync_language_spec.sh
+	@if ! git diff --quiet --exit-code -- docs/src/language-spec.md; then \
+		echo "error: docs/src/language-spec.md is stale relative to spec/HARN_SPEC.md" >&2; \
+		echo "hint: run 'make sync-language-spec' and commit the result" >&2; \
+		git diff --stat -- docs/src/language-spec.md >&2; \
+		exit 1; \
+	fi
+	@echo "    Language spec mirror OK."
 
 # Regenerate the LLM trigger quickref from the live ProviderCatalog metadata.
 gen-trigger-quickref:

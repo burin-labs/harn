@@ -65,6 +65,19 @@ else
   echo "=== Pre-commit: skipping highlight sync (no lexer/stdlib changes) ==="
 fi
 
+if hook_paths_match "$changed" "$HOOK_LANGSPEC_PATTERN"; then
+  # spec/HARN_SPEC.md is the authoring source; docs/src/language-spec.md
+  # is a `cat`-with-header mirror. Regen + restage is sub-second, so do
+  # the consistency fixup inline rather than failing the commit and
+  # leaving the human to run the script. Mirrors the highlight stanza.
+  echo "=== Pre-commit: syncing generated language spec ==="
+  ./scripts/sync_language_spec.sh
+  git add docs/src/language-spec.md
+  echo "    Language spec OK."
+else
+  echo "=== Pre-commit: skipping language spec sync (no spec changes) ==="
+fi
+
 if hook_paths_match "$changed" "$HOOK_MARKDOWN_PATTERN" && command -v npx >/dev/null 2>&1; then
   echo "=== Pre-commit: checking markdown ==="
   make lint-md

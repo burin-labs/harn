@@ -77,6 +77,16 @@ jobs:
       - run: make conformance
       - run: make lint-harn
       - run: make fmt-harn
+      # Audit gates promoted from release_gate.sh audit so a stale
+      # generated artifact (highlight keywords, language-spec mirror,
+      # trigger quickref, docs snippets, release metadata) fails the
+      # PR instead of waiting until release time.
+      - run: make check-highlight
+      - run: make check-language-spec
+      - run: make check-trigger-quickref
+      - run: make check-trigger-examples
+      - run: make check-docs-snippets
+      - run: python3 scripts/verify_release_metadata.py
 
   changes:
     name: Detect code changes

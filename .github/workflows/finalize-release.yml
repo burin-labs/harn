@@ -2,16 +2,26 @@ name: Finalize Release
 
 # Fires whenever main has tag drift — i.e. Cargo.toml's workspace version
 # is ahead of the latest `vX.Y.Z` git tag. Runs ./scripts/release_ship.sh
-# --finalize, which audits, dry-run publishes, tags, publishes to
-# crates.io, and creates/updates the GitHub release. The tag push (under
-# the harn-release-bot App identity) cascades to release.yml for binary
+# --finalize, which dry-run publishes, tags, publishes to crates.io, and
+# creates/updates the GitHub release. The tag push (under the
+# harn-release-bot App identity) cascades to release.yml for binary
 # tarballs + multi-arch container.
+#
+# In the consolidated release flow, the human's "Release vX.Y.Z" PR
+# carries both the changelog content AND the Cargo.toml bump. Once it
+# lands, this workflow detects the resulting tag drift and ships
+# vX.Y.Z without a second PR.
+#
+# Audit is skipped by default (RELEASE_FINALIZE_REAUDIT=0): the
+# merge-queue CI of the just-landed Release PR ran the same gates a
+# few minutes ago. Set the env var or pass `--reaudit` (workflow input
+# `reaudit: true`) to opt back in for paranoid local runs.
 #
 # Tag-drift detection (vs. the older "head commit starts with 'Bump
 # version to '" trigger) means this workflow auto-recovers when an
 # earlier finalize run failed BEFORE pushing the tag. Any subsequent
-# push to main will see drift still present and re-run audit + publish.
-# Once the tag exists at HEAD, drift goes away and the job no-ops.
+# push to main will see drift still present and re-run publish. Once
+# the tag exists at HEAD, drift goes away and the job no-ops.
 #
 # workflow_dispatch is the recovery path for the one residual case:
 # failure AFTER tag push but BEFORE crates.io publish completed (drift
@@ -37,6 +47,13 @@ on:
           Skip only the publish dry-run gate. Useful if the dry-run is
           flaky for an unrelated reason and you've already validated
           the release content elsewhere.
+        type: boolean
+        default: false
+      reaudit:
+        description: >-
+          Re-run the full release-gate audit before finalizing. Defaults
+          off — merge-queue CI of the just-landed Release PR already
+          ran the same gates a few minutes ago.
         type: boolean
         default: false
 
@@ -146,15 +163,18 @@ jobs:
         run: npm ci
 
       - name: Install ripgrep
-        # security-audit lane greps the repo via `rg` — install it
-        # explicitly so the runner matches the local dev expectation.
+        # security-audit lane (only runs under --reaudit) greps the
+        # repo via `rg` — install it explicitly so the runner matches
+        # the local dev expectation when reaudit is on.
+        if: inputs.reaudit
         run: sudo apt-get update && sudo apt-get install -y ripgrep
 
       - name: Build tree-sitter grammar
-        # grammar-audit's verify_tree_sitter_parse.py loads the
-        # compiled grammar from tree-sitter-harn/harn.{so,dylib}.
-        # `npm run build` runs `tree-sitter generate && tree-sitter
-        # build`, which produces harn.so on Linux.
+        # Only needed when --reaudit re-runs the grammar-audit lane
+        # (which loads tree-sitter-harn/harn.{so,dylib} via
+        # verify_tree_sitter_parse.py). The default no-audit finalize
+        # doesn't touch tree-sitter.
+        if: inputs.reaudit
         working-directory: tree-sitter-harn
         run: |
           npm ci
@@ -178,6 +198,11 @@ jobs:
           # check that fails when a path-dep crate isn't on crates.io
           # yet. Defaults to "0" on push events.
           HARN_BOOTSTRAP_NEW_CRATES: ${{ inputs.bootstrap_new_crates && '1' || '0' }}
+          # Default off — merge-queue CI of the just-landed Release PR
+          # already proved the same gates a few minutes ago. The
+          # `reaudit: true` workflow input opts back in for paranoid
+          # local recovery runs.
+          RELEASE_FINALIZE_REAUDIT: ${{ inputs.reaudit && '1' || '0' }}
         run: |
           args=(--finalize)
           if [[ "${{ inputs.skip_dry_run }}" == "true" ]]; then

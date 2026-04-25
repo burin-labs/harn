@@ -266,11 +266,20 @@ cmd_audit() {
 
 cmd_prepare() {
   local bump=""
+  local allow_dirty=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --bump)
         bump="${2:-}"
         shift 2
+        ;;
+      --allow-dirty)
+        # Used by `release_ship.sh --prepare`, which runs from a release
+        # branch that already has the human's authored release content
+        # (changelog, code, docs) staged or unstaged. The version-bump
+        # write below is additive; we don't need a clean tree.
+        allow_dirty=1
+        shift
         ;;
       *)
         echo "error: unknown prepare arg: $1"
@@ -283,7 +292,9 @@ cmd_prepare() {
     echo "error: prepare requires --bump patch|minor|major"
     exit 1
   fi
-  require_clean_tree
+  if [[ "$allow_dirty" -eq 0 ]]; then
+    require_clean_tree
+  fi
   local current next
   current="$(current_version)"
   next="$(next_version "$bump")"
@@ -292,9 +303,9 @@ cmd_prepare() {
   echo "Version updated: $current -> $next"
   echo "Next steps:"
   echo "  1. Review docs/release notes diff"
-  echo "  2. Commit on a release/v$next branch: git commit -am 'Bump version to $next'"
+  echo "  2. Commit on a release/v$next branch: git commit -am 'Release v$next'"
   echo "  3. Open a PR into main and let it land through the merge queue"
-  echo "  4. Finalize after merge: ./scripts/release_ship.sh --finalize"
+  echo "  4. Walk away — the Finalize Release workflow auto-fires on tag drift"
 }
 
 cmd_publish() {

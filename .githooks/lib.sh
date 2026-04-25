@@ -7,6 +7,7 @@ HOOK_MARKDOWN_PATTERN='\.md$'
 HOOK_ACTIONS_PATTERN='(^\.github/workflows/|^\.githooks/|^Makefile$)'
 HOOK_PORTAL_PATTERN='(^crates/harn-cli/portal/|^package(-lock)?\.json$)'
 HOOK_HIGHLIGHT_PATTERN='(^crates/harn-lexer/|^crates/harn-vm/src/(stdlib|stdlib_.*\.harn|lib\.rs)|^crates/harn-modules/|^docs/theme/harn-keywords\.js$)'
+HOOK_LANGSPEC_PATTERN='(^spec/HARN_SPEC\.md$|^docs/src/language-spec\.md$)'
 HOOK_HARN_FORMAT_SKIP=' semicolon_statements.harn semicolon_if_else_invalid.harn semicolon_try_catch_invalid.harn semicolon_empty_statement_invalid.harn '
 
 hook_paths_match() {
