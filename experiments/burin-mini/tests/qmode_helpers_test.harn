@@ -1,0 +1,75 @@
+// Unit tests for qmode's pure helper functions.
+//
+// These exercise the workspace search/listing and the LLM-mock-driven
+// pipeline. The test workspace at experiments/burin-mini/workspace/ is
+// the same one the eval set uses (auth demo with 7 files).
+//
+// Run with: cargo run --bin harn -- test experiments/burin-mini/tests/
+import { find_workspace, list_workspace_files, workspace_root } from "../lib/workspace.harn"
+
+// -----------------------------------------------------------------------------
+// list_workspace_files: deterministic ordering.
+// -----------------------------------------------------------------------------
+
+@test
+pipeline test_list_workspace_files_is_deterministic() {
+  let a = list_workspace_files()
+  let b = list_workspace_files()
+  assert(len(a) > 0, "workspace has files")
+  assert(json_stringify(a) == json_stringify(b), "rg --sort path is stable across calls")
+  // Verify alphabetical: a[0] should sort <= a[1].
+  if len(a) >= 2 {
+    assert(a[0] <= a[1], "first two entries sorted ascending")
+  }
+  log("test_list_workspace_files_is_deterministic passed")
+}
+
+// -----------------------------------------------------------------------------
+// find_workspace: filename matches, content matches, no-match shape.
+// -----------------------------------------------------------------------------
+
+@test
+pipeline test_find_workspace_no_match_returns_explicit_message() {
+  let result = find_workspace("xyzzy_nonexistent_token")
+  assert(contains(result, "(no matches for "), "no-match echoes the query")
+  assert(contains(result, "xyzzy_nonexistent_token"), "no-match includes the token in the message")
+  // Must NOT silently return empty string — that's the bug the unified tool fixed.
+  assert(result.trim() != "", "no-match never returns empty (information-poor)")
+  log("test_find_workspace_no_match_returns_explicit_message passed")
+}
+
+@test
+pipeline test_find_workspace_filename_match() {
+  let result = find_workspace("auth-guard")
+  assert(contains(result, "## Filename matches"), "filename-match section header present")
+  assert(contains(result, "auth-guard.ts"), "auth-guard.ts surfaces via filename match")
+  log("test_find_workspace_filename_match passed")
+}
+
+@test
+pipeline test_find_workspace_content_match_returns_grep_output() {
+  // "API_KEYS" appears literally in workspace/packages/server/src/middleware/auth-guard.ts
+  let result = find_workspace("API_KEYS")
+  assert(contains(result, "## Content matches"), "content-match section header present")
+  assert(contains(result, "auth-guard.ts"), "auth-guard.ts surfaced via content match")
+  log("test_find_workspace_content_match_returns_grep_output passed")
+}
+
+@test
+pipeline test_find_workspace_empty_query_is_handled() {
+  let result = find_workspace("")
+  assert(contains(result, "(empty query)"), "empty query returns explicit message")
+  log("test_find_workspace_empty_query_is_handled passed")
+}
+
+// -----------------------------------------------------------------------------
+// Workspace root path.
+// -----------------------------------------------------------------------------
+
+@test
+pipeline test_workspace_root_resolves_under_experiment_dir() {
+  let root = workspace_root()
+  assert(contains(root, "burin-mini"), "workspace_root contains experiment dir name")
+  assert(contains(root, "workspace"), "workspace_root points at the workspace folder")
+  log("test_workspace_root_resolves_under_experiment_dir passed")
+}
