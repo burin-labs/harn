@@ -1,0 +1,31 @@
+/** Verifies move_file, read_lines, walk_dir, and glob. */
+pipeline test(task) {
+  let root = path_join(temp_dir(), "fs_extras_test")
+  if file_exists(root) {
+    delete_file(root)
+  }
+  mkdir(path_join(root, "sub"))
+  write_file(path_join(root, "a.txt"), "alpha\nbeta\ngamma\n")
+  write_file(path_join(root, "b.txt"), "one\ntwo\n")
+  write_file(path_join(root, "sub", "c.md"), "deeper\n")
+  // read_lines splits without the trailing empty line
+  let lines = read_lines(path_join(root, "a.txt"))
+  log(len(lines))
+  log(lines[0])
+  log(lines[2])
+  // move_file across the same dir
+  move_file(path_join(root, "b.txt"), path_join(root, "renamed.txt"))
+  log(file_exists(path_join(root, "b.txt")))
+  log(file_exists(path_join(root, "renamed.txt")))
+  // glob "*.txt" only finds top-level .txt files (a.txt and renamed.txt)
+  let txts = glob("*.txt", root)
+  log(len(txts))
+  // glob "**/*.md" finds the nested md
+  let mds = glob("**/*.md", root)
+  log(len(mds))
+  // walk_dir returns dicts with path/is_dir/depth
+  let walked = walk_dir(root)
+  // 1 root dir + a.txt + renamed.txt + sub dir + sub/c.md = 5 entries
+  log(len(walked))
+  delete_file(root)
+}

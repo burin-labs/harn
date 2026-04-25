@@ -1772,7 +1772,9 @@ fn value_as_bool(value: &VmValue) -> Option<bool> {
     }
 }
 
-#[cfg(test)]
+// The integration tests below shell out to `git`/`gh` via a mocked POSIX
+// shell script, so they're Unix-only. On Windows, skip the entire module.
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;

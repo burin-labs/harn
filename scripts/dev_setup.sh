@@ -108,6 +108,7 @@ fi
 
 git config core.hooksPath .githooks
 echo "Configured git hooks path -> .githooks"
+./scripts/configure_merge_drivers.sh
 
 # Install optional but recommended Cargo tools.
 for tool_spec in "cargo-nextest:cargo-nextest --locked" "sccache:sccache --locked"; do

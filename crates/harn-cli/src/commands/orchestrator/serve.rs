@@ -30,6 +30,7 @@ use crate::package::{
 };
 
 const LIFECYCLE_TOPIC: &str = "orchestrator.lifecycle";
+#[cfg_attr(not(unix), allow(dead_code))]
 const MANIFEST_TOPIC: &str = "orchestrator.manifest";
 const STATE_SNAPSHOT_FILE: &str = "orchestrator-state.json";
 const PENDING_TOPIC: &str = "orchestrator.triggers.pending";
@@ -479,9 +480,11 @@ struct ConnectorRuntime {
     handles: Vec<harn_vm::connectors::ConnectorHandle>,
     providers: Vec<String>,
     activations: Vec<harn_vm::ActivationHandle>,
+    #[cfg_attr(not(unix), allow(dead_code))]
     provider_overrides: Vec<ResolvedProviderConnectorConfig>,
 }
 
+#[cfg_attr(not(unix), allow(dead_code))]
 #[derive(Clone, Debug, Default, Serialize)]
 struct ManifestReloadSummary {
     added: Vec<String>,
@@ -1754,6 +1757,7 @@ fn admission_delay(occurred_at_ms: i64) -> Duration {
     Duration::from_millis(now.saturating_sub(occurred_at_ms).max(0) as u64)
 }
 
+#[cfg_attr(not(unix), allow(dead_code))]
 async fn append_manifest_event(
     log: &Arc<harn_vm::event_log::AnyEventLog>,
     kind: &str,
@@ -2131,6 +2135,7 @@ async fn wait_for_runtime_signal_loop(
     }
 }
 
+#[cfg_attr(not(unix), allow(dead_code))]
 async fn handle_reload_request(
     ctx: &mut RuntimeSignalCtx<'_>,
     request: AdminReloadRequest,
@@ -2180,6 +2185,7 @@ async fn handle_reload_request(
     Ok(())
 }
 
+#[cfg_attr(not(unix), allow(dead_code))]
 fn write_running_state_snapshot(ctx: &RuntimeSignalCtx<'_>) -> Result<(), String> {
     let listener_metrics = ctx.listener.trigger_metrics();
     write_state_snapshot(
@@ -2215,6 +2221,7 @@ fn write_running_state_snapshot(ctx: &RuntimeSignalCtx<'_>) -> Result<(), String
     )
 }
 
+#[cfg_attr(not(unix), allow(dead_code))]
 async fn reload_manifest(ctx: &mut RuntimeSignalCtx<'_>) -> Result<ManifestReloadSummary, String> {
     let (manifest, manifest_dir) = load_manifest(ctx.config_path)?;
     let mut vm = ctx
@@ -2298,6 +2305,7 @@ async fn reload_manifest(ctx: &mut RuntimeSignalCtx<'_>) -> Result<ManifestReloa
     Ok(summary)
 }
 
+#[cfg_attr(not(unix), allow(dead_code))]
 async fn rollback_manifest_reload(
     ctx: &mut RuntimeSignalCtx<'_>,
     previous_manifest: &Manifest,
@@ -2317,6 +2325,7 @@ async fn rollback_manifest_reload(
     Ok(())
 }
 
+#[cfg_attr(not(unix), allow(dead_code))]
 fn summarize_manifest_reload(
     current: &[CollectedManifestTrigger],
     next: &[CollectedManifestTrigger],
@@ -2337,6 +2346,7 @@ fn summarize_manifest_reload(
     summary
 }
 
+#[cfg_attr(not(unix), allow(dead_code))]
 fn trigger_fingerprint_map(
     triggers: &[CollectedManifestTrigger],
     include_http_managed: bool,
@@ -2351,6 +2361,7 @@ fn trigger_fingerprint_map(
         .collect()
 }
 
+#[cfg_attr(not(unix), allow(dead_code))]
 fn connector_reload_fingerprint_map(
     triggers: &[CollectedManifestTrigger],
     provider_overrides: &[ResolvedProviderConnectorConfig],
@@ -2384,6 +2395,7 @@ fn connector_reload_fingerprint_map(
     by_provider
 }
 
+#[cfg_attr(not(unix), allow(dead_code))]
 fn provider_connector_fingerprint(config: &ResolvedProviderConnectorConfig) -> String {
     match &config.connector {
         ResolvedProviderConnectorKind::RustBuiltin => format!(
@@ -2406,6 +2418,7 @@ fn provider_connector_fingerprint(config: &ResolvedProviderConnectorConfig) -> S
     }
 }
 
+#[cfg_attr(not(unix), allow(dead_code))]
 fn is_http_managed_trigger(trigger: &CollectedManifestTrigger) -> bool {
     matches!(
         trigger.config.kind,

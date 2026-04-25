@@ -73,6 +73,43 @@ jobs:
       - run: make lint-harn
       - run: make fmt-harn
 
+  windows:
+    name: Rust on Windows (build + smoke test)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+      - uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1 # v2.9.1
+        with:
+          shared-key: workspace-windows
+          cache-on-failure: true
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@5f57d6cb7cd20b14a8a27f522884c4bc8a187458 # v2.75.19
+        continue-on-error: true
+        with:
+          tool: nextest@0.9.133
+      # Don't gate the whole pipeline on the full Windows test surface yet —
+      # this job exists to catch hard regressions (compile breaks, missing
+      # cfg-gates, hardcoded `/bin/sh`, etc.). It runs harn-lexer/parser/vm
+      # unit tests and a smoke `harn run`. Sandbox + signal-handler tests
+      # are skipped automatically via existing `#![cfg(unix)]` gates.
+      - name: Build workspace
+        run: cargo build --workspace --tests --bin harn
+      - name: Run unit tests for core crates
+        shell: bash
+        run: |
+          if command -v cargo-nextest >/dev/null 2>&1; then
+            cargo nextest run -p harn-lexer -p harn-parser -p harn-vm -p harn-fmt -p harn-lint -p harn-modules
+          else
+            cargo test -p harn-lexer -p harn-parser -p harn-vm -p harn-fmt -p harn-lint -p harn-modules
+          fi
+      - name: Smoke test harn run
+        shell: bash
+        run: |
+          echo 'pipeline main() { println("ok") }' > smoke.harn
+          ./target/debug/harn.exe run smoke.harn
+
   portal:
     name: Portal frontend
     runs-on: ubuntu-latest
@@ -102,7 +139,7 @@ jobs:
     name: Check status
     runs-on: ubuntu-latest
     if: always()
-    needs: [fmt, lint-md, rust, portal, actions]
+    needs: [fmt, lint-md, rust, windows, portal, actions]
     steps:
       - name: Verify required CI jobs
         run: |
@@ -110,6 +147,7 @@ jobs:
             ["Format check"]="${{ needs.fmt.result }}"
             ["Markdown lint"]="${{ needs['lint-md'].result }}"
             ["Rust (lint + test + conformance)"]="${{ needs.rust.result }}"
+            ["Rust on Windows (build + smoke test)"]="${{ needs.windows.result }}"
             ["Portal frontend"]="${{ needs.portal.result }}"
             ["GitHub Actions lint"]="${{ needs.actions.result }}"
           )

@@ -1,4 +1,5 @@
-use std::io::BufRead;
+use std::cell::RefCell;
+use std::io::{BufRead, IsTerminal, Read, Write};
 use std::rc::Rc;
 use std::sync::atomic::Ordering;
 
@@ -6,6 +7,136 @@ use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
 use super::logging::{vm_build_log_line, vm_escape_json_str_quoted, VM_MIN_LOG_LEVEL};
+
+#[derive(Clone, Copy, Default)]
+struct TtyMock {
+    stdin: Option<bool>,
+    stdout: Option<bool>,
+    stderr: Option<bool>,
+}
+
+#[derive(Clone, Copy, Default, PartialEq)]
+enum ColorMode {
+    #[default]
+    Auto,
+    Always,
+    Never,
+}
+
+thread_local! {
+    static STDIN_MOCK: RefCell<Option<String>> = const { RefCell::new(None) };
+    static STDIN_LINES: RefCell<Option<Vec<String>>> = const { RefCell::new(None) };
+    static STDERR_BUFFER: RefCell<String> = const { RefCell::new(String::new()) };
+    static STDERR_CAPTURING: RefCell<bool> = const { RefCell::new(false) };
+    static TTY_MOCK: RefCell<TtyMock> = const { RefCell::new(TtyMock { stdin: None, stdout: None, stderr: None }) };
+    static COLOR_MODE: RefCell<ColorMode> = const { RefCell::new(ColorMode::Auto) };
+}
+
+/// Reset all io thread-local state for test isolation.
+pub(crate) fn reset_io_state() {
+    STDIN_MOCK.with(|s| *s.borrow_mut() = None);
+    STDIN_LINES.with(|s| *s.borrow_mut() = None);
+    STDERR_BUFFER.with(|s| s.borrow_mut().clear());
+    STDERR_CAPTURING.with(|s| *s.borrow_mut() = false);
+    TTY_MOCK.with(|t| *t.borrow_mut() = TtyMock::default());
+    COLOR_MODE.with(|m| *m.borrow_mut() = ColorMode::Auto);
+}
+
+/// Drain and return the buffered stderr output. The CLI flushes this to
+/// the real stderr at the end of execution.
+pub fn take_stderr_buffer() -> String {
+    STDERR_BUFFER.with(|s| std::mem::take(&mut *s.borrow_mut()))
+}
+
+fn write_stderr(line: &str) {
+    let capturing = STDERR_CAPTURING.with(|c| *c.borrow());
+    if capturing {
+        STDERR_BUFFER.with(|s| s.borrow_mut().push_str(line));
+    } else {
+        // Pass through directly; the CLI flushes at end too if anything
+        // accumulated before capture toggled, but normally nothing does.
+        let _ = std::io::stderr().write_all(line.as_bytes());
+    }
+}
+
+fn read_stdin_all_real() -> Option<String> {
+    let mut buf = String::new();
+    if std::io::stdin().lock().read_to_string(&mut buf).is_ok() {
+        Some(buf)
+    } else {
+        None
+    }
+}
+
+fn read_stdin_line_real() -> Option<String> {
+    let mut buf = String::new();
+    if std::io::stdin().lock().read_line(&mut buf).is_ok() {
+        if buf.is_empty() {
+            None
+        } else {
+            // Trim trailing \n / \r\n but keep internal whitespace.
+            if buf.ends_with('\n') {
+                buf.pop();
+                if buf.ends_with('\r') {
+                    buf.pop();
+                }
+            }
+            Some(buf)
+        }
+    } else {
+        None
+    }
+}
+
+fn pop_mock_line() -> Option<String> {
+    STDIN_LINES.with(|lines| {
+        let mut borrow = lines.borrow_mut();
+        let queue = borrow.as_mut()?;
+        if queue.is_empty() {
+            None
+        } else {
+            Some(queue.remove(0))
+        }
+    })
+}
+
+fn is_tty_for(stream: &str) -> bool {
+    let mocked = TTY_MOCK.with(|t| {
+        let mock = *t.borrow();
+        match stream {
+            "stdin" => mock.stdin,
+            "stdout" => mock.stdout,
+            "stderr" => mock.stderr,
+            _ => None,
+        }
+    });
+    if let Some(v) = mocked {
+        return v;
+    }
+    match stream {
+        "stdin" => std::io::stdin().is_terminal(),
+        "stdout" => std::io::stdout().is_terminal(),
+        "stderr" => std::io::stderr().is_terminal(),
+        _ => false,
+    }
+}
+
+fn ansi_enabled_for_stream(stream: &str) -> bool {
+    let mode = COLOR_MODE.with(|m| *m.borrow());
+    match mode {
+        ColorMode::Always => true,
+        ColorMode::Never => false,
+        ColorMode::Auto => {
+            if std::env::var_os("FORCE_COLOR").is_some() {
+                return true;
+            }
+            if std::env::var_os("NO_COLOR").is_some() {
+                return false;
+            }
+            is_tty_for(stream)
+        }
+    }
+}
 
 pub(crate) fn register_io_builtins(vm: &mut Vm) {
     vm.register_builtin("log", |args, out| {
@@ -27,11 +158,17 @@ pub(crate) fn register_io_builtins(vm: &mut Vm) {
     vm.register_builtin("color", |args, _out| {
         let text = args.first().map(|a| a.display()).unwrap_or_default();
         let name = args.get(1).map(|a| a.display()).unwrap_or_default();
+        if !ansi_enabled_for_stream("stdout") {
+            return Ok(VmValue::String(Rc::from(text)));
+        }
         Ok(VmValue::String(Rc::from(ansi_colorize(&text, &name))))
     });
 
     vm.register_builtin("bold", |args, _out| {
         let text = args.first().map(|a| a.display()).unwrap_or_default();
+        if !ansi_enabled_for_stream("stdout") {
+            return Ok(VmValue::String(Rc::from(text)));
+        }
         Ok(VmValue::String(Rc::from(format!(
             "\u{1b}[1m{text}\u{1b}[0m"
         ))))
@@ -39,9 +176,142 @@ pub(crate) fn register_io_builtins(vm: &mut Vm) {
 
     vm.register_builtin("dim", |args, _out| {
         let text = args.first().map(|a| a.display()).unwrap_or_default();
+        if !ansi_enabled_for_stream("stdout") {
+            return Ok(VmValue::String(Rc::from(text)));
+        }
         Ok(VmValue::String(Rc::from(format!(
             "\u{1b}[2m{text}\u{1b}[0m"
         ))))
+    });
+
+    vm.register_builtin("set_color_mode", |args, _out| {
+        let mode = args.first().map(|a| a.display()).unwrap_or_default();
+        let parsed = match mode.as_str() {
+            "auto" => ColorMode::Auto,
+            "always" => ColorMode::Always,
+            "never" => ColorMode::Never,
+            other => {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                    "set_color_mode: invalid mode '{other}'. Expected 'auto', 'always', or 'never'."
+                )))));
+            }
+        };
+        COLOR_MODE.with(|m| *m.borrow_mut() = parsed);
+        Ok(VmValue::Nil)
+    });
+
+    vm.register_builtin("eprint", |args, _out| {
+        let msg = args.first().map(|a| a.display()).unwrap_or_default();
+        write_stderr(&msg);
+        Ok(VmValue::Nil)
+    });
+
+    vm.register_builtin("eprintln", |args, _out| {
+        let msg = args.first().map(|a| a.display()).unwrap_or_default();
+        write_stderr(&format!("{msg}\n"));
+        Ok(VmValue::Nil)
+    });
+
+    vm.register_builtin("read_stdin", |_args, _out| {
+        // Drain any remaining mocked stdin first.
+        let mocked = STDIN_MOCK.with(|s| s.borrow_mut().take());
+        if let Some(buf) = mocked {
+            // After read_stdin, future read_line calls return nil — stdin is consumed.
+            STDIN_LINES.with(|lines| *lines.borrow_mut() = Some(Vec::new()));
+            return Ok(VmValue::String(Rc::from(buf)));
+        }
+        match read_stdin_all_real() {
+            Some(s) => Ok(VmValue::String(Rc::from(s))),
+            None => Ok(VmValue::Nil),
+        }
+    });
+
+    vm.register_builtin("read_line", |_args, _out| {
+        // Mock case: prefer the line queue, then split the bulk mock if present.
+        if let Some(line) = pop_mock_line() {
+            return Ok(VmValue::String(Rc::from(line)));
+        }
+        let bulk = STDIN_MOCK.with(|s| s.borrow_mut().take());
+        if let Some(text) = bulk {
+            let mut lines: Vec<String> = text.split('\n').map(String::from).collect();
+            // The trailing empty element from a final newline is not a line.
+            if matches!(lines.last(), Some(l) if l.is_empty()) {
+                lines.pop();
+            }
+            let first = if lines.is_empty() {
+                None
+            } else {
+                Some(lines.remove(0))
+            };
+            STDIN_LINES.with(|q| *q.borrow_mut() = Some(lines));
+            return Ok(first
+                .map(|s| VmValue::String(Rc::from(s)))
+                .unwrap_or(VmValue::Nil));
+        }
+        // Real stdin path. EOF or read error returns nil.
+        match read_stdin_line_real() {
+            Some(line) => Ok(VmValue::String(Rc::from(line))),
+            None => Ok(VmValue::Nil),
+        }
+    });
+
+    vm.register_builtin("is_stdin_tty", |_args, _out| {
+        Ok(VmValue::Bool(is_tty_for("stdin")))
+    });
+    vm.register_builtin("is_stdout_tty", |_args, _out| {
+        Ok(VmValue::Bool(is_tty_for("stdout")))
+    });
+    vm.register_builtin("is_stderr_tty", |_args, _out| {
+        Ok(VmValue::Bool(is_tty_for("stderr")))
+    });
+
+    vm.register_builtin("mock_stdin", |args, _out| {
+        let text = args.first().map(|a| a.display()).unwrap_or_default();
+        STDIN_MOCK.with(|s| *s.borrow_mut() = Some(text));
+        STDIN_LINES.with(|s| *s.borrow_mut() = None);
+        Ok(VmValue::Nil)
+    });
+
+    vm.register_builtin("unmock_stdin", |_args, _out| {
+        STDIN_MOCK.with(|s| *s.borrow_mut() = None);
+        STDIN_LINES.with(|s| *s.borrow_mut() = None);
+        Ok(VmValue::Nil)
+    });
+
+    vm.register_builtin("mock_tty", |args, _out| {
+        let stream = args.first().map(|a| a.display()).unwrap_or_default();
+        let is_tty = matches!(args.get(1), Some(VmValue::Bool(true)));
+        TTY_MOCK.with(|t| {
+            let mut mock = t.borrow_mut();
+            match stream.as_str() {
+                "stdin" => mock.stdin = Some(is_tty),
+                "stdout" => mock.stdout = Some(is_tty),
+                "stderr" => mock.stderr = Some(is_tty),
+                other => {
+                    return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                        "mock_tty: invalid stream '{other}'. Expected 'stdin', 'stdout', or 'stderr'."
+                    )))));
+                }
+            }
+            Ok(VmValue::Nil)
+        })
+    });
+
+    vm.register_builtin("unmock_tty", |_args, _out| {
+        TTY_MOCK.with(|t| *t.borrow_mut() = TtyMock::default());
+        Ok(VmValue::Nil)
+    });
+
+    vm.register_builtin("capture_stderr_start", |_args, _out| {
+        STDERR_CAPTURING.with(|c| *c.borrow_mut() = true);
+        STDERR_BUFFER.with(|s| s.borrow_mut().clear());
+        Ok(VmValue::Nil)
+    });
+
+    vm.register_builtin("capture_stderr_take", |_args, _out| {
+        let buf = STDERR_BUFFER.with(|s| std::mem::take(&mut *s.borrow_mut()));
+        STDERR_CAPTURING.with(|c| *c.borrow_mut() = false);
+        Ok(VmValue::String(Rc::from(buf)))
     });
 
     vm.register_builtin("uuid", |_args, _out| {

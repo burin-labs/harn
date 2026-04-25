@@ -13,7 +13,7 @@ mod tests;
 use clap::{error::ErrorKind, CommandFactory, Parser as ClapParser};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::{env, fs, process};
+use std::{env, fs, process, thread};
 
 use cli::{
     Cli, Command, PackageCacheCommand, PackageCommand, PersonaCommand, RunsCommand, ServeCommand,
@@ -22,8 +22,33 @@ use cli::{
 use harn_lexer::Lexer;
 use harn_parser::{DiagnosticSeverity, Parser, TypeChecker};
 
-#[tokio::main]
-async fn main() {
+const CLI_RUNTIME_STACK_SIZE: usize = 16 * 1024 * 1024;
+
+fn main() {
+    let handle = thread::Builder::new()
+        .name("harn-cli".to_string())
+        .stack_size(CLI_RUNTIME_STACK_SIZE)
+        .spawn(|| {
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .unwrap_or_else(|error| {
+                    eprintln!("failed to start async runtime: {error}");
+                    process::exit(1);
+                });
+            runtime.block_on(async_main());
+        })
+        .unwrap_or_else(|error| {
+            eprintln!("failed to start CLI runtime thread: {error}");
+            process::exit(1);
+        });
+
+    if let Err(payload) = handle.join() {
+        std::panic::resume_unwind(payload);
+    }
+}
+
+async fn async_main() {
     let raw_args = normalize_serve_args(env::args().collect());
     if raw_args.len() == 2 && raw_args[1].ends_with(".harn") {
         commands::run::run_file(

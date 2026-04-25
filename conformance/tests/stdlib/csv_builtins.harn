@@ -1,0 +1,19 @@
+pipeline test(task) {
+  let text = "name,age\nalice,30\nbob,25\n"
+  // No headers: list of lists
+  let rows = csv_parse(text)
+  log(len(rows))
+  log(rows[0])
+  log(rows[1][1])
+  // With headers: list of dicts
+  let header_rows = csv_parse(text, {headers: true})
+  log(len(header_rows))
+  log(header_rows[0]["name"])
+  log(header_rows[1]["age"])
+  // round-trip dict rows back to csv
+  let out = csv_stringify(header_rows, {headers: true})
+  log(out)
+  // round-trip list rows
+  let listy = csv_stringify([["a", "b"], ["c", "d"]])
+  log(listy)
+}

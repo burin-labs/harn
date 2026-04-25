@@ -23,10 +23,47 @@ load `docs/llm/harn-triggers-quickref.md`.
   the pipeline body) or be a bare script with top-level statements.
 - Run: `harn run script.harn`.
 - Inline: `harn run -e 'println("hi")'`.
+- Shebang: a `#!/usr/bin/env harn` line at byte offset 0 of a `.harn`
+  file is skipped by the lexer, so executables on PATH can `chmod +x`
+  scripts and run them directly.
 - CLI arguments: `harn run script.harn -- a b c` exposes
   `argv: list<string>` as a global (`argv == ["a", "b", "c"]`).
-- Exit code: `exit(code)` terminates with that code. Uncaught errors
-  exit with code 1 and a rendered diagnostic.
+- Exit code: any of three paths sets the process exit code.
+  - `exit(code)` terminates immediately with that code.
+  - `pipeline main()` (or any pipeline used as the entry) — the value
+    flowing out of the body sets the exit code:
+    - `return n: int` → exits `n` (clamped 0..=255).
+    - `return Err(msg)` → writes `msg` to stderr, exits 1.
+    - `return Ok(_)` / no explicit return → exits 0.
+  - Uncaught errors exit with 1 and a rendered diagnostic.
+
+## stdin / stdout / stderr / TTY
+
+- `print(s)` / `println(s)` → stdout. `eprint(s)` / `eprintln(s)` →
+  stderr.
+- `read_stdin()` slurps the rest of stdin to a `string`. `read_line()`
+  reads one line (without trailing newline). Both return `nil` at EOF.
+- `is_stdin_tty()`, `is_stdout_tty()`, `is_stderr_tty()` — `bool`,
+  uses `std::io::IsTerminal`. Use these to decide between rich
+  interactive UI and pipe-friendly output.
+- `set_color_mode("auto"|"always"|"never")` controls whether
+  `color`/`bold`/`dim` emit ANSI. Auto honors `NO_COLOR` and
+  `FORCE_COLOR` env vars and only emits when stdout is a TTY.
+
+In tests: `mock_stdin(text)` / `unmock_stdin()`,
+`mock_tty(stream, bool)` / `unmock_tty()`,
+`capture_stderr_start()` / `capture_stderr_take()`.
+
+## Time, sleep, monotonic clock
+
+- `now_ms()` — wall-clock millis since UNIX_EPOCH (`int`).
+- `monotonic_ms()` — monotonic millis since process start (`int`).
+- `sleep_ms(n)` — async sleep. **Mock-aware**: under `mock_time`, this
+  advances mocked time instantly instead of blocking — so tests of
+  retry/backoff/timeout logic stay deterministic and fast.
+- `mock_time(ms)` / `advance_time(ms)` / `unmock_time()` —
+  `timestamp` and `elapsed` also route through this clock, so
+  every time-sensitive builtin is mockable.
 
 ## Strings
 
@@ -977,6 +1014,62 @@ plain terminal.
 - `host_tool_call(name, args)` invokes a host tool with a dict of
   arguments. Returns an opaque value — narrow it yourself before
   field access (strict types mode treats this as an untyped boundary).
+
+### Filesystem extras
+
+- `glob(pattern, base?)` → list of matching paths. Pattern is matched
+  against forward-slash paths relative to `base` (defaults to script
+  source dir); `**` glob is supported.
+- `walk_dir(root, opts?)` → list of `{path, is_dir, is_file, depth}`.
+  `opts.max_depth: int` and `opts.follow_symlinks: bool` are honored.
+- `move_file(src, dst)` — `rename` with cross-filesystem copy+delete
+  fallback.
+- `read_lines(path)` → list of lines (no trailing newline). Handles
+  CRLF correctly.
+
+### CSV
+
+```harn
+csv_parse("name,age\nalice,30\n", {headers: true})
+// → [{name: "alice", age: "30"}]
+
+csv_stringify([{name: "alice", age: 30}], {headers: true})
+// → "age,name\n30,alice\n"
+```
+
+Options: `headers: bool` (default false), `delimiter: ","`. Without
+headers, `csv_parse` returns list-of-lists; with headers, list of
+dicts (keys are sorted on stringify for determinism).
+
+### URL parsing
+
+```harn
+url_parse("https://api.example.com:8080/v1/items?q=hi#frag")
+// → {scheme: "https", host: "api.example.com", port: 8080,
+//     path: "/v1/items", query: "q=hi", fragment: "frag", ...}
+
+url_build({scheme: "https", host: "example.com", path: "/api",
+           query: "x=1&y=2"})
+// → "https://example.com/api?x=1&y=2"
+
+query_parse("?key=alpha&key=beta")
+// → [{key: "key", value: "alpha"}, {key: "key", value: "beta"}]
+
+query_stringify([{key: "name", value: "ali ce"}])
+// → "name=ali+ce"
+```
+
+### Modern crypto
+
+- Hashes: `sha3_256`, `sha3_512`, `blake3` (in addition to existing
+  SHA-2 family + MD5).
+- Ed25519 signatures: `ed25519_keypair() -> {private, public}` (hex),
+  `ed25519_sign(priv, msg) -> string` (hex sig),
+  `ed25519_verify(pub, msg, sig) -> bool`.
+- X25519 key agreement: `x25519_keypair() -> {private, public}`,
+  `x25519_agree(priv, peer_pub) -> string` (hex shared secret).
+- JWT verification: `jwt_verify(alg, token, key)` (HS256 / RS256 /
+  ES256). Pairs with the existing `jwt_sign`.
 
 ### HTTP builtins
 

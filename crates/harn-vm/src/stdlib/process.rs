@@ -115,14 +115,8 @@ pub(crate) fn register_process_builtins(vm: &mut Vm) {
         Ok(default)
     });
 
-    vm.register_builtin("timestamp", |_args, _out| {
-        use std::time::{SystemTime, UNIX_EPOCH};
-        let secs = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_secs_f64())
-            .unwrap_or(0.0);
-        Ok(VmValue::Float(secs))
-    });
+    // `timestamp` / `elapsed` are now registered by clock.rs so they
+    // honor mock_time / advance_time. Don't register here.
 
     vm.register_builtin("exit", |args, _out| {
         let code = args.first().and_then(|a| a.as_int()).unwrap_or(0);
@@ -202,11 +196,7 @@ pub(crate) fn register_process_builtins(vm: &mut Vm) {
         Ok(vm_output_to_value(output))
     });
 
-    vm.register_builtin("elapsed", |_args, _out| {
-        static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
-        let start = START.get_or_init(std::time::Instant::now);
-        Ok(VmValue::Int(start.elapsed().as_millis() as i64))
-    });
+    // `elapsed` registered by clock.rs (mockable). See note above.
 
     vm.register_builtin("username", |_args, _out| {
         let user = std::env::var("USER")

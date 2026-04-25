@@ -1,0 +1,13 @@
+[harn] alpha
+[harn] beta
+[harn] gamma
+[harn] nil
+[harn] hello
+world
+
+[harn] nil
+[harn] warn: disk full
+retry in 5s
+
+[harn] true
+[harn] false

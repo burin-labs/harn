@@ -612,7 +612,7 @@ pub(crate) async fn run_file_with_skill_dirs(
     let execution = local
         .run_until(async {
             match vm.execute(&chunk).await {
-                Ok(_) => Ok(vm.output()),
+                Ok(value) => Ok((vm.output(), value)),
                 Err(e) => Err(vm.format_runtime_error(&e)),
             }
         })
@@ -622,10 +622,23 @@ pub(crate) async fn run_file_with_skill_dirs(
         process::exit(1);
     }
 
+    // Always drain any captured stderr accumulated during execution.
+    let buffered_stderr = harn_vm::take_stderr_buffer();
+    if !buffered_stderr.is_empty() {
+        io::stderr().write_all(buffered_stderr.as_bytes()).ok();
+    }
+
     match execution {
-        Ok(output) => {
+        Ok((output, return_value)) => {
             if !output.is_empty() {
                 io::stdout().write_all(output.as_bytes()).ok();
+            }
+            if trace {
+                print_trace_summary();
+            }
+            let exit_code = exit_code_from_return_value(&return_value);
+            if exit_code != 0 {
+                process::exit(exit_code);
             }
         }
         Err(rendered_error) => {
@@ -636,9 +649,35 @@ pub(crate) async fn run_file_with_skill_dirs(
             process::exit(1);
         }
     }
+}
 
-    if trace {
-        print_trace_summary();
+/// Map a script's top-level return value to a process exit code.
+///
+/// - `int n`             → exit n (clamped to 0..=255)
+/// - `Result::Ok(_)`     → exit 0
+/// - `Result::Err(msg)`  → write msg to stderr, exit 1
+/// - anything else       → exit 0
+fn exit_code_from_return_value(value: &harn_vm::VmValue) -> i32 {
+    use harn_vm::VmValue;
+    match value {
+        VmValue::Int(n) => (*n).clamp(0, 255) as i32,
+        VmValue::EnumVariant {
+            enum_name,
+            variant,
+            fields,
+        } if enum_name.as_ref() == "Result" && variant.as_ref() == "Err" => {
+            let rendered = fields.first().map(|p| p.display()).unwrap_or_default();
+            let line = if rendered.is_empty() {
+                "error\n".to_string()
+            } else if rendered.ends_with('\n') {
+                rendered
+            } else {
+                format!("{rendered}\n")
+            };
+            io::stderr().write_all(line.as_bytes()).ok();
+            1
+        }
+        _ => 0,
     }
 }
 

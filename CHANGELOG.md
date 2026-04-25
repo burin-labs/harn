@@ -41,8 +41,8 @@ granular archaeology.
   command, code-pattern hints), sub-project boundary detection
   (`SubProjectDetector.swift`), and a token-budgeted text repo map
   (`RepoMapBuilder.swift`). Output shape mirrors burin-code's `ScanResult`
-  exactly so consumers can swap the Rust pipeline in via the bridge once
-  the `.harn-version` bump lands. `scan_project` persists a snapshot to
+  exactly so bridge consumers can use the Rust pipeline without changing
+  their result parser. `scan_project` persists a snapshot to
   `<root>/.harn/hostlib/scanner-snapshot.json`; `scan_incremental` diffs
   the workspace against that snapshot (mtime-based by default,
   optionally driven by an explicit `changed_paths` list) and falls back
@@ -50,6 +50,71 @@ granular archaeology.
   snapshot is missing. Unlike the deterministic-tools surface the
   scanner is ungated — emitting a `ScanResult` is read-only and the
   snapshot lives in the managed `.harn/` directory.
+
+- **General-purpose scripting support.** Harn scripts can now start
+  with a `#!/usr/bin/env harn` shebang, and the formatter preserves
+  that line on round-trip. Tree-sitter highlights the shebang as a
+  comment while ordinary `#` tokens elsewhere remain invalid.
+
+- **stderr / stdin / TTY builtins**:
+  - `eprint(s)`, `eprintln(s)` — write to stderr (separate from stdout
+    capture).
+  - `read_stdin()` — slurp piped stdin to a string; `read_line()` —
+    line-by-line iterator-style read; both return `nil` at EOF.
+  - `is_stdin_tty()` / `is_stdout_tty()` / `is_stderr_tty()` — uses
+    `std::io::IsTerminal` so `harn` programs can adapt to pipelines.
+  - `set_color_mode("auto"|"always"|"never")` — controls ANSI emission
+    from `color`/`bold`/`dim`. Auto honors `NO_COLOR` and `FORCE_COLOR`
+    and only emits when stdout is a TTY (the previous behavior was to
+    always emit, which produced garbage in pipes and on Windows
+    consoles without VT100).
+
+- **Mockable clock + sleep**:
+  - `now_ms()` — wall-clock millis since epoch.
+  - `monotonic_ms()` — monotonic millis (unaffected by NTP jumps).
+  - `sleep_ms(n)` — async sleep; under a clock mock, advances mocked
+    time instantly instead of suspending the runtime.
+  - `mock_time(ms)` / `advance_time(ms)` / `unmock_time()` — let
+    Harn-level tests pin time deterministically. `timestamp` and
+    `elapsed` now route through this clock so existing builtins are
+    mockable too.
+
+- **stdin / TTY mocks for tests**: `mock_stdin(text)` /
+  `unmock_stdin()`, `mock_tty(stream, bool)` / `unmock_tty()`,
+  `capture_stderr_start()` / `capture_stderr_take()` — all from `.harn`
+  test code.
+
+- **Exit code from `main()` return value**:
+  - `return n: int`           → process exits with `n` (clamped 0..=255).
+  - `return Err(msg)`         → writes `msg` to stderr, exits 1.
+  - `return Ok(_)` / implicit → exits 0.
+  - The `exit(code)` builtin still works for early termination.
+
+- **Filesystem helpers**:
+  `glob(pattern, base?)`, `walk_dir(root, opts?)`,
+  `move_file(src, dst)`, `read_lines(path)`. Backed by `globset` /
+  `walkdir`.
+
+- **CSV** (new `stdlib/csv.rs`): `csv_parse(text, opts?)` and
+  `csv_stringify(rows, opts?)`. Supports `headers: bool` (returns
+  list-of-dicts when on, list-of-lists otherwise) and
+  `delimiter: ","`.
+
+- **URL parsing & building** (new `stdlib/url_parse.rs`):
+  `url_parse(s)` returns `{scheme, host, port, path, query, fragment,
+  username, password}`; `url_build(parts)` round-trips back.
+  `query_parse(s)` returns a list of `{key, value}` (preserves
+  duplicate keys, RFC 3986 percent-decoded); `query_stringify(pairs)`
+  builds query strings with `+`/`%`-encoding.
+
+- **Modern crypto** (`stdlib/crypto.rs`):
+  - `sha3_256(input)`, `sha3_512(input)`, `blake3(input)`.
+  - `ed25519_keypair()`, `ed25519_sign(priv_hex, msg)`,
+    `ed25519_verify(pub_hex, msg, sig_hex)` for signatures.
+  - `x25519_keypair()`, `x25519_agree(priv_hex, peer_pub_hex)` for
+    Diffie-Hellman key agreement.
+  - `jwt_verify(alg, token, key)` for HS256/RS256/ES256 — completes
+    the existing `jwt_sign` round-trip.
 
 ### Changed
 
@@ -77,6 +142,33 @@ granular archaeology.
     and `harn-cli` so the per-crate fallback covers it. The
     merge-captain runbook (`.claude/commands/release-harn.md`) and
     the burin-code merge-captain skill carry the same pre-flight.
+
+### Fixed
+
+- **Cross-platform `process.exec` host capability**:
+  `crates/harn-vm/src/stdlib/host.rs` previously hardcoded
+  `/bin/sh -lc` for the `process.exec` host operation, breaking on
+  Windows. Now dispatches to `cmd /C` on Windows, `/bin/sh -lc`
+  elsewhere — mirroring the existing `process.shell` builtin.
+
+- **`color()` / `bold()` / `dim()` on non-TTY**: These previously
+  emitted raw ANSI escapes unconditionally, polluting piped output and
+  rendering as garbage on legacy Windows consoles. They now honor
+  `set_color_mode` and `NO_COLOR`/`FORCE_COLOR` env vars and the
+  computed TTY state of stdout.
+
+### CI
+
+- **Windows CI smoke job** (`.github/workflows/ci.yml`). Builds the
+  workspace and runs `harn-lexer` / `harn-parser` / `harn-vm` /
+  `harn-fmt` / `harn-lint` / `harn-modules` unit tests on
+  `windows-latest`, plus a `harn run` smoke. Existing
+  Unix-gated tests (`#![cfg(unix)]` on the orchestrator suite,
+  `cfg(target_os = ...)` on sandbox tests) auto-skip.
+- **Windows release artifact**:
+  `.github/workflows/release.yml` matrix gains
+  `x86_64-pc-windows-msvc` and packages a `harn-...zip` alongside the
+  Linux/macOS tarballs.
 
 ## v0.7.39
 

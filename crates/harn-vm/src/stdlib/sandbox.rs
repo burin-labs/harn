@@ -1081,6 +1081,7 @@ fn path_is_within(path: &Path, root: &Path) -> bool {
     path == root || path.starts_with(root)
 }
 
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "openbsd"))]
 fn policy_allows_network(policy: &CapabilityPolicy) -> bool {
     fn rank(value: &str) -> usize {
         match value {
