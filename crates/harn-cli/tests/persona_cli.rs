@@ -253,6 +253,10 @@ fn persona_runtime_status_tick_and_budget_are_persisted() {
         .unwrap()
         .starts_with("persona_lease_"));
 
+    // Pin the status query to the same UTC day as the tick above. Without
+    // --at, the budget window is computed from real wall-clock time, so the
+    // assertion silently breaks the moment the test runs after the tick's
+    // UTC midnight (i.e. roughly any time of day in PT/CT/ET).
     let status = Command::new(env!("CARGO_BIN_EXE_harn"))
         .current_dir(temp.path())
         .args([
@@ -261,6 +265,8 @@ fn persona_runtime_status_tick_and_budget_are_persisted() {
             state_dir.to_str().unwrap(),
             "status",
             "merge_captain",
+            "--at",
+            "2026-04-24T12:30:00Z",
             "--json",
         ])
         .output()

@@ -135,7 +135,11 @@ pub(crate) async fn run_status(
     let catalog = load_catalog_result(manifest)?;
     let binding = runtime_binding_or_err(&catalog, &args.name)?;
     let log = open_persona_log(state_dir)?;
-    let status = harn_vm::persona_status(&log, &binding, harn_vm::persona_now_ms()).await?;
+    let now_ms = match &args.at {
+        Some(at) => harn_vm::parse_persona_ms(at)?,
+        None => harn_vm::persona_now_ms(),
+    };
+    let status = harn_vm::persona_status(&log, &binding, now_ms).await?;
     print_status(&status, args.json);
     Ok(())
 }
