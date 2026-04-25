@@ -174,6 +174,7 @@ pub fn reset_stdlib_state() {
     json::reset_json_state();
     host::reset_host_state();
     hitl::reset_hitl_state();
+    crate::http::reset_http_state();
     monitors::reset_monitor_state();
     waitpoints::reset_waitpoint_state();
     waitpoint::reset_waitpoint_state();

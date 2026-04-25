@@ -742,6 +742,22 @@ println(text.source.sha256)
 | `websocket_send(socket, message, options?)` | socket: string, message: string or bytes, options: dict | bool | Send a WebSocket text/binary/ping/pong/close message |
 | `websocket_receive(socket, timeout_ms?)` | socket: string, timeout_ms: int | dict or nil | Receive one WebSocket message with timeout/backpressure |
 | `websocket_close(socket)` | socket: string | bool | Close a WebSocket handle |
+| `http_server(options?)` | options: dict | dict | Create an in-process inbound HTTP server definition for host adapters or synthetic tests |
+| `http_server_route(server, method, path_template, handler, options?)` | server: dict/string, method: string, path_template: string, handler: closure, options: dict | dict | Register a route. Templates support `{name}` and `:name` path params |
+| `http_server_before(server, handler)` | server: dict/string, handler: closure | dict | Register before middleware. Return a request to continue or a response dict to short-circuit |
+| `http_server_after(server, handler)` | server: dict/string, handler: closure | dict | Register after middleware. Receives `(response, request)` and may return a replacement response |
+| `http_server_request(server, request)` | server: dict/string, request: dict | dict | Dispatch a synthetic or host-adapted request through the server |
+| `http_server_test(server, request)` | server: dict/string, request: dict | dict | Alias for `http_server_request`, intended for script-level tests |
+| `http_server_set_ready(server, ready)` | server: dict/string, ready: bool | bool | Set the server readiness gate used by request dispatch |
+| `http_server_readiness(server, handler)` | server: dict/string, handler: closure | dict | Register a readiness callback for `http_server_ready` |
+| `http_server_ready(server)` | server: dict/string | bool | Return readiness, invoking the readiness callback when present |
+| `http_server_on_shutdown(server, handler)` | server: dict/string, handler: closure | dict | Register a shutdown lifecycle callback |
+| `http_server_shutdown(server)` | server: dict/string | bool | Mark the server shut down and run shutdown callbacks |
+| `http_response(status, body?, headers?)` | status: int, body: any, headers: dict | dict | Build a response dict |
+| `http_response_text(text, options?)` | text: any, options: dict | dict | Build a text response. Options include `status` and `headers` |
+| `http_response_json(value, options?)` | value: any, options: dict | dict | Build a JSON response with a JSON content type |
+| `http_response_bytes(bytes, options?)` | bytes: bytes/string, options: dict | dict | Build a bytes response |
+| `http_header(headers_or_message, name)` | headers/request/response: dict, name: string | string or nil | Read a header case-insensitively from a header dict, request, or response |
 
 `http_get/post/put/patch/delete/request/session_request` return
 `{status: int, headers: dict, body: string, ok: bool}`.
@@ -782,6 +798,74 @@ retry_ms}`. WebSocket receives return `{type: "text", data}`, `{type:
 "binary", data_base64}`, `{type: "ping", data_base64}`, `{type: "pong",
 data_base64}`, `{type: "close"}`, or `{type: "timeout"}`. Options include
 `max_events`/`max_messages` and `max_message_bytes`.
+
+### Inbound HTTP server primitives
+
+The server builtins define a Harn-native request router without binding a
+socket themselves. A host adapter can translate real HTTP requests into
+`http_server_request(...)`; tests can use the same path with
+`http_server_test(...)`.
+
+Requests passed to route handlers include:
+
+- `method`, `path`, `path_params`/`params`, `query`, and normalized lowercase
+  `headers`
+- `body` as text plus `raw_body` bytes when retained
+- `body_bytes`, `remote_addr`, and `client_ip`
+
+`http_server({max_body_bytes, retain_raw_body, ready})` sets defaults.
+Routes can override `max_body_bytes` and `retain_raw_body`. Body-limit
+rejections return status `413` before middleware or handlers run.
+
+Minimal webhook example:
+
+```harn
+pipeline default() {
+  let server = http_server({max_body_bytes: 1048576, retain_raw_body: true})
+
+  http_server_before(server, { req ->
+    if http_header(req, "origin") != nil {
+      return http_response_text("browser origins are rejected", {status: 403})
+    }
+    req
+  })
+
+  http_server_after(server, { response, _req ->
+    response + {
+      headers: response.headers + {
+        ["strict-transport-security"]: "max-age=31536000",
+      },
+    }
+  })
+
+  http_server_route(server, "POST", "/hooks/{tenant}/{trigger}", { req ->
+    let signature = http_header(req, "x-hub-signature-256")
+    let expected = "sha256=" + hmac_sha256(secret_get("github/webhook-secret"), req.body)
+    if signature != expected {
+      return http_response_text("invalid signature", {status: 401})
+    }
+
+    let payload = json_parse(req.body)
+    trigger_fire("github-webhook", {
+      tenant: req.path_params.tenant,
+      trigger: req.path_params.trigger,
+      payload: payload,
+      raw_body: req.raw_body,
+      client_ip: req.client_ip,
+    })
+    http_response_json({accepted: true}, {status: 202, headers: {["retry-after"]: "0"}})
+  })
+
+  let probe = http_server_test(server, {
+    method: "POST",
+    path: "/hooks/acme/push",
+    headers: {["x-hub-signature-256"]: "sha256=..."},
+    body: "{\"ok\":true}",
+    client_ip: "203.0.113.10",
+  })
+  println(probe.status)
+}
+```
 
 ### Mock HTTP
 
