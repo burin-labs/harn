@@ -145,14 +145,6 @@ jobs:
           echo 'pipeline main() { println("ok") }' > smoke.harn
           ./target/debug/harn.exe run smoke.harn
 
-  windows-skip:
-    name: Rust on Windows (build + smoke test)
-    runs-on: ubuntu-latest
-    needs: changes
-    if: needs.changes.outputs.rust == 'false' && github.event_name == 'pull_request'
-    steps:
-      - run: echo "Skipped — no Rust/CI changes in this PR."
-
   portal:
     name: Portal frontend
     runs-on: ubuntu-latest
@@ -182,7 +174,7 @@ jobs:
     name: Check status
     runs-on: ubuntu-latest
     if: always()
-    needs: [fmt, lint-md, rust, windows, windows-skip, portal, actions]
+    needs: [fmt, lint-md, rust, windows, portal, actions]
     steps:
       - name: Verify required CI jobs
         run: |
@@ -194,16 +186,13 @@ jobs:
             ["GitHub Actions lint"]="${{ needs.actions.result }}"
           )
 
-          # Windows runs in one of two flavors per PR (real or skip-alias).
-          # Whichever one ran needs to be green; the other is skipped.
-          windows_real="${{ needs.windows.result }}"
-          windows_skip="${{ needs['windows-skip'].result }}"
-          echo "Rust on Windows (real): $windows_real"
-          echo "Rust on Windows (skip alias): $windows_skip"
-          if [ "$windows_real" = "success" ] || [ "$windows_skip" = "success" ]; then
-            :
-          else
-            echo "::error::Windows job did not succeed in either real or skip variant."
+          # The Windows job is gated on `changes.outputs.rust` and is skipped
+          # on PRs that don't touch Rust/CI. Treat `skipped` as passing here;
+          # only an actual failure should fail the gate.
+          windows_result="${{ needs.windows.result }}"
+          echo "Rust on Windows (build + smoke test): $windows_result"
+          if [ "$windows_result" != "success" ] && [ "$windows_result" != "skipped" ]; then
+            echo "::error::Windows job failed."
             exit 1
           fi
 

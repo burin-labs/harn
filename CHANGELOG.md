@@ -7,7 +7,7 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
-## Unreleased
+## v0.7.40
 
 ### Added
 
@@ -28,6 +28,86 @@ granular archaeology.
   `Harn: Apply All Autofixes` command palette entry that triggers the
   same bulk action on demand. Per-diagnostic quick-fixes (Cmd+.)
   continue to work unchanged.
+- **HTTP server stdlib primitives (#650).** New in-process inbound HTTP
+  server surface: `http_server`, `http_route`, `http_request_*`,
+  `http_response_*`, before/after middleware, body-size limits,
+  readiness/shutdown hooks, and synthetic `http_dispatch` for
+  in-process integration tests. Routing supports path templates with
+  typed params and ordered middleware. Conformance covers routing,
+  param extraction, raw body, header shaping, status/header builders,
+  body-limit rejection, readiness/shutdown, and middleware order.
+- **HTTP server TLS configuration (#649).** Shared `harn-serve` TLS
+  modes (plain HTTP, edge-terminated HTTPS, self-signed development
+  HTTPS, PEM cert/key HTTPS) wired through `harn serve a2a` and
+  `harn serve mcp --transport http` with HSTS response headers for
+  edge and PEM modes. Adds matching HTTP stdlib helpers for TLS
+  config and header policy.
+- **Multipart form stdlib builtins (#651).** Buffered
+  `multipart/form-data` parsing for inbound request bodies via
+  `multipart_parse(body, content_type, options?)` with explicit
+  `max_total_bytes` / `max_field_bytes` / `max_fields` limits, parsed
+  field dicts (`name`, optional `filename` + `content_type`,
+  normalized `headers`, raw `bytes`, UTF-8 `text` when valid),
+  `multipart_field_bytes` / `multipart_field_text` accessors, and
+  deterministic `multipart_form_data(fields, options?)` fixture
+  generation.
+- **Cookie and session stdlib helpers (#652).** Parse request `Cookie`
+  headers into structured cookies (with ordered pairs, duplicate
+  values, and invalid-segment reporting), serialize `Set-Cookie`
+  values with `HttpOnly` / `Secure` / `SameSite` / `Path` / `Domain`
+  / `Max-Age` / `Expires` / deletion support, sign and verify string
+  cookie values and JSON stateless session tokens via HMAC-SHA256,
+  and ship secure signed-session-cookie defaults plus a
+  request/response cookie round-trip test helper.
+- **WebSocket server stdlib primitives (#653).** New
+  `websocket_server`, `websocket_route`, `websocket_accept`, and
+  `websocket_server_close` builtins reuse the existing WebSocket
+  send/receive/close-frame API for accepted inbound connections,
+  including text/binary/ping/pong frames, close code+reason, max
+  message limits, idle timeout, bearer upgrade auth, and bounded
+  outbound backpressure. Wired through parser signatures, lint/type
+  boundary awareness, LSP completions, IR/effect classification,
+  generated highlighting, docs, and conformance.
+- **Server-side SSE stdlib primitives (#655).** `text/event-stream`
+  response handles, event formatting, writes, heartbeat/comment
+  frames, flushing, close, cancel, disconnect observation, and
+  deterministic mock-client reads — registered through the runtime
+  stdlib, parser signatures, LSP constants, lint/type boundary
+  handling, IR side-effect classification, and autonomy mutation
+  policy.
+- **Signed URL stdlib helpers (#656).**
+  `signed_url(base, claims, secret, expires_at, options?)` for
+  absolute URLs and absolute paths plus
+  `verify_signed_url(url, secret_or_keys, now, options?)` with
+  constant-time signature comparison, expiry/skew handling, URL-safe
+  HMAC-SHA256 signatures, and optional `kid` key rotation.
+  Conformance covers canonicalization, tampering, expiry/skew, key
+  rotation, and path signing.
+- **Postgres stdlib builtins (#654).** VM-native Postgres surface:
+  `pg_pool`, `pg_connect`, `pg_close`, `pg_query`, `pg_query_one`,
+  `pg_execute`, `pg_transaction`, `pg_mock_pool`, `pg_mock_calls`.
+  Supports URL, env, and secret-backed connection sources; pool
+  timeout / TLS / application name / statement cache options;
+  parameterized queries; transaction-local RLS settings via
+  `set_config`; and decoding for JSON/JSONB, UUID, date/time/
+  timestamp/timestamptz, bytea, numbers, booleans, strings, and
+  nulls. Live coverage runs when `HARN_TEST_POSTGRES_URL` is set;
+  mock fixtures and call capture stay deterministic in default CI/dev
+  runs.
+- **JSON pointer + jq query stdlib (#624).** RFC 6901 `json_pointer`,
+  `json_pointer_set`, `json_pointer_delete` with proper escaping and
+  copy-on-write updates. New `jq` and `jq_first` builtins evaluate
+  the accepted v1 jq subset locally. Documentation and conformance
+  cover pointer mutation/escaping plus jq operator coverage.
+- **AST host builtins (#621).** Lights up
+  `hostlib_ast_parse_file`, `hostlib_ast_symbols`, and
+  `hostlib_ast_outline` for 22 host languages (TypeScript, TSX,
+  JavaScript, JSX, Python, Go, Rust, Java, C, C++, C#, Ruby, Kotlin,
+  PHP, Scala, Bash, Swift, Zig, Elixir, Lua, Haskell, R) on top of
+  pinned `tree-sitter` 0.26 grammars. Per-language extractors share
+  `walk_named` + `named_decl_with_keyword` / `push_func` helpers;
+  `symbols`/`outline` carry signatures with 0-based row/col
+  coordinates; `parse_file` flattens the tree breadth-first.
 - **Compression stdlib builtins (#613).** Added in-memory
   `gzip_encode`/`gzip_decode`, `zstd_encode`/`zstd_decode`,
   `brotli_encode`/`brotli_decode`, `tar_create`/`tar_extract`, and
@@ -157,6 +237,12 @@ granular archaeology.
     Diffie-Hellman key agreement.
   - `jwt_verify(alg, token, key)` for HS256/RS256/ES256 — completes
     the existing `jwt_sign` round-trip.
+- **`harn persona pause/resume/disable --at <RFC3339>` (#611).**
+  Mirrors the existing `--at` flag on `persona status / tick / trigger
+  / spend` so all wall-clock-sensitive persona commands share a single
+  override surface. Useful for deterministic replay and for fixing a
+  pre-existing UTC-day-boundary flake in
+  `persona_runtime_status_tick_and_budget_are_persisted`.
 - **HTTP client power features for stdlib builtins (#616).** Added
   `http_download` for file-backed transfers plus
   `http_stream_open` / `http_stream_read` / `http_stream_info` /
@@ -217,8 +303,54 @@ granular archaeology.
   installation-token caches) failed during contract verification with
   `Undefined builtin: store_*`.
 
+### Spec
+
+- **Agents Protocol v1 narrative spec (#646).** Adds the authoritative
+  spec for Harn Agents Protocol v1 at `spec/AGENTS_PROTOCOL.md` plus
+  an mdBook include at `docs/src/spec/agents-protocol/v1.md`. Covers
+  the resource model (Persona, Workspace, Session, Task, Branch,
+  Message/Part/Artifact, AgentCard, Event, Receipt, Memory, Vault,
+  Connector, Skill, Outcome, Quota), REST/SSE/WebSocket transports,
+  API key + OAuth2 client credentials auth, `Idempotency-Key`
+  semantics, A2A-aligned task lifecycle, event/error taxonomies, and
+  core/extended/receipts/replay conformance levels.
+- **Agents Protocol stdlib gap audit (#648).** Adds
+  `spec/agents-protocol-stdlib-audit.md` — first-cut survey of stdlib
+  gaps blocking a Harn-native Harness reference implementation, with
+  cross-references to the implementation sub-tickets that ship in
+  this release (#649–#656).
+
+### Platform
+
+- **Windows process sandbox (#626).** New Windows process launcher
+  runs policy-scoped commands in a no-capability `AppContainer` and
+  restrictive `Job Object`, granting AppContainer ACL access only to
+  workspace roots and cleaning those grants up after the child exits.
+  Internal exec/shell/workflow verify command paths now route through
+  a shared `command_output` helper. Brings macOS sandbox-exec / Linux
+  seccomp+landlock parity to Windows for `process_sandbox` consumers.
+
+### Tests
+
+- **Stabilize orchestrator/connector subprocess tests (#657).** Five
+  tests that intermittently timed out at the 60s nextest ceiling
+  (`slack_url_verification_returns_plaintext_challenge`,
+  `slack_webhook_acknowledges_before_handler_finishes`,
+  `stream_trigger_route_uses_generic_stream_connector`,
+  `watch_mode_reloads_manifest_changes`,
+  `restart_after_emit_does_not_duplicate_cron_dispatch`) now run in
+  1.0–6s. Fixes were three independent harness flakes: tightened
+  `PROCESS_FAIL_FAST_TIMEOUT` budgets too aggressive for cold macOS
+  dyld+amfi lookups, busy-poll file waits replaced with `notify`-based
+  watches, and generous spawn deadlines for cold-start orchestrator
+  binaries.
+
 ### CI
 
+- **Aggregate CI status gate (#625).** Added a final `Check status`
+  job that always evaluates the required CI jobs, with docs deployment
+  routed through this aggregate gate. Simplifies branch-protection
+  configuration to a single required check.
 - **Windows CI smoke job** (`.github/workflows/ci.yml`). Builds the
   workspace and runs `harn-lexer` / `harn-parser` / `harn-vm` /
   `harn-fmt` / `harn-lint` / `harn-modules` unit tests on
