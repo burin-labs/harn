@@ -16,21 +16,22 @@ Opt-in host builtins for the Harn VM that provide:
 
 ## Status
 
-This is the **scaffold** that issue
-[#563](https://github.com/burin-labs/harn/issues/563) introduced. Every host
-method registered here today returns
-`HostlibError::Unimplemented { builtin }`. Implementations land in the
-follow-up issues called out in the parent epic
-[`burin-labs/burin-code#289`](https://github.com/burin-labs/burin-code/issues/289):
+[#563](https://github.com/burin-labs/harn/issues/563) introduced the
+scaffold (every method routed through `HostlibError::Unimplemented`).
+[#567](https://github.com/burin-labs/harn/issues/567) lights up the
+deterministic-tool surface: `search`, `read_file`, `write_file`,
+`delete_file`, `list_directory`, `get_file_outline`, and `git`.
 
-| Issue | Module | What lands |
-|-------|--------|-----------|
-| B2    | `ast/`         | `parse_file`, `symbols`, `outline` |
-| B3    | `code_index/`  | `query`, `rebuild`, `stats`, `imports_for`, `importers_of` |
-| B4    | `scanner/`     | `scan_project`, `scan_incremental` |
-| C1    | `fs_watch/`    | `subscribe`, `unsubscribe` |
-| C2    | `tools/` (read & search) | `search`, `read_file`, `list_directory`, `get_file_outline`, `git` |
-| C3    | `tools/` (mutating) | `write_file`, `delete_file`, `run_command`, `run_test`, `run_build_command`, `inspect_test_results`, `manage_packages` |
+| Issue | Module | What lands | Status |
+|-------|--------|-----------|--------|
+| B1 (#563) | scaffold       | crate + schemas + registration plumbing                                                   | ✅ shipped |
+| B2    | `ast/`             | `parse_file`, `symbols`, `outline`                                                        | unimplemented |
+| B3    | `code_index/`      | `query`, `rebuild`, `stats`, `imports_for`, `importers_of`                                | unimplemented |
+| B4    | `scanner/`         | `scan_project`, `scan_incremental`                                                        | unimplemented |
+| C1    | `fs_watch/`        | `subscribe`, `unsubscribe`                                                                | unimplemented |
+| #567  | `tools/` (read & search) | `search`, `read_file`, `list_directory`, `get_file_outline`, `git`                 | ✅ shipped (this issue) |
+| #567  | `tools/` (mutating)      | `write_file`, `delete_file`                                                        | ✅ shipped (this issue) |
+| C2    | `tools/` (process)       | `run_command`, `run_test`, `run_build_command`, `inspect_test_results`, `manage_packages` | unimplemented |
 
 ## Why a separate crate?
 
@@ -46,6 +47,28 @@ transcript lifecycle, replay/eval, mutation session audit metadata —
 stays there. See
 [`AGENTS.md`](../../CLAUDE.md#trust-boundary) for the canonical trust
 boundary.
+
+## Per-session opt-in for deterministic tools
+
+The deterministic-tool surface (`tools/{search, read_file, write_file,
+delete_file, list_directory, get_file_outline, git}`) is **gated**.
+`install_default` registers the contract for every method, but the
+handlers refuse to run until the pipeline opts in by calling
+
+```text
+hostlib_enable("tools:deterministic")
+```
+
+(a builtin registered alongside the rest of the `tools/` surface). This
+matches the safety story called out in
+[#567](https://github.com/burin-labs/harn/issues/567): a Harn script that
+hasn't asked for filesystem / git / search access cannot get it even
+though the contract is wired in. The opt-in is per-thread, so each VM
+gets an independent enable set.
+
+Embedders that want to enable the surface from Rust without going through
+the builtin can use [`tools::permissions::enable_for_test`] (test-only)
+or call `tools::permissions::enable("tools:deterministic")` directly.
 
 ## How embedders consume it
 

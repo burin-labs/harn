@@ -21,6 +21,26 @@ granular archaeology.
   schema-drift tests can lock the public surface immediately. Wired
   into `harn-cli`'s ACP server behind the default-on `hostlib` cargo
   feature.
+- **Deterministic tool host builtins (#567).** `harn-hostlib`'s
+  `tools/` module gains live implementations for `search` (ripgrep
+  semantics via `grep-searcher` + `ignore` with structured matches and
+  context lines), `read_file` (utf-8 + base64 with offset/limit and
+  truncation reporting), `write_file` (parent-dir creation, overwrite
+  guard, base64 input), `delete_file` (recursive opt-in for
+  directories), `list_directory` (sorted entries, hidden filter,
+  pagination), `get_file_outline` (language-agnostic regex extractor
+  matching `ast.outline` shape), and `git` (read-only inspection:
+  `status`, `diff`, `log`, `blame`, `show`, `branch_list`,
+  `current_branch`, `remote_list` — shelling out to system `git` with
+  arg-list invocations only, never `sh -c`, plus rev-string validation
+  that rejects flag lookalikes and control bytes). The surface is
+  gated by a per-session opt-in: pipelines call
+  `hostlib_enable("tools:deterministic")` before any of the seven
+  deterministic tools will execute, otherwise calls fail with a
+  structured error pointing at the enable builtin. Process tools
+  (`run_command`, `run_test`, `run_build_command`,
+  `inspect_test_results`, `manage_packages`) remain
+  `Unimplemented`-routed for issue C2.
 
 - **Fair-share scheduler for worker-queue claims (#477).** New
   deficit-round-robin policy in front of `WorkerQueue::claim_next` so a

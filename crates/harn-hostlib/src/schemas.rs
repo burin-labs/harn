@@ -317,6 +317,18 @@ pub const SCHEMAS: &[(&str, &str, SchemaKind, &str)] = &[
         SchemaKind::Response,
         include_str!("../schemas/tools/manage_packages.response.json"),
     ),
+    (
+        "tools",
+        "enable",
+        SchemaKind::Request,
+        include_str!("../schemas/tools/enable.request.json"),
+    ),
+    (
+        "tools",
+        "enable",
+        SchemaKind::Response,
+        include_str!("../schemas/tools/enable.response.json"),
+    ),
 ];
 
 /// Look up a single schema as raw JSON text.

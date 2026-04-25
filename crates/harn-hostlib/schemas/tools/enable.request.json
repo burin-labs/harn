@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/tools/enable.request.json",
+  "title": "tools.enable request",
+  "description": "Per-session opt-in for the deterministic-tools surface. Pipelines call `hostlib_enable(\"tools:deterministic\")` before invoking any of `tools/{search, read_file, write_file, delete_file, list_directory, get_file_outline, git}`.",
+  "type": "object",
+  "properties": {
+    "feature": {
+      "type": "string",
+      "enum": ["tools:deterministic"]
+    }
+  },
+  "required": ["feature"],
+  "additionalProperties": false
+}
