@@ -1862,6 +1862,10 @@ pub(crate) struct PersonaInspectArgs {
 pub(crate) struct PersonaStatusArgs {
     /// Persona name to query.
     pub name: String,
+    /// RFC3339 timestamp to use for deterministic budget windows. When
+    /// omitted, falls back to the current UTC wall clock.
+    #[arg(long, value_name = "RFC3339")]
+    pub at: Option<String>,
     /// Emit stable JSON for Harn Cloud, Burin Code, or other hosts.
     #[arg(long)]
     pub json: bool,
