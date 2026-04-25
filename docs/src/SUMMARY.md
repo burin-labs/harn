@@ -89,6 +89,7 @@
 
 - [CLI reference](./cli-reference.md)
 - [Agents Protocol v1](./spec/agents-protocol/v1.md)
+- [Agents Protocol Receipt Format](./spec/agents-protocol/receipt-format-v1.md)
 - [Builtin functions](./builtins.md)
 - [Postgres](./postgres.md)
 - [Project scanning](./project-scan.md)
