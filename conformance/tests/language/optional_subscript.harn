@@ -1,0 +1,29 @@
+/**
+ * Optional subscript `obj?[index]` — symmetric counterpart to `obj?.member`.
+ * Returns nil when the object is nil; otherwise indexes normally. Lets
+ * connector authors safely chain into lists/dicts that may be nil.
+ */
+pipeline default() {
+  let xs = [10, 20, 30]
+  println(xs?[0])
+  println(xs?[1])
+  println(xs?[5])
+  // Nil object short-circuits without erroring.
+  let missing = nil
+  println(missing?[0])
+  // Mixed chain: optional property + optional subscript + optional property.
+  let payload = {commits: [{timestamp: "2026-01-01T00:00:00Z"}]}
+  println(payload?.commits?[0]?.timestamp)
+  // Same chain when an intermediate hop is nil.
+  let empty = {}
+  println(empty?.commits?[0]?.timestamp)
+  // Dict subscript by string key.
+  let d = {alpha: 1, beta: 2}
+  println(d?["alpha"])
+  println(d?["missing"])
+  let dnil = nil
+  println(dnil?["alpha"])
+  // Computed index.
+  let i = 2
+  println(xs?[i])
+}

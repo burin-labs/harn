@@ -162,7 +162,8 @@ fn collect_references(snode: &SNode, target_name: &str, refs: &mut Vec<Span>) {
         Node::PropertyAccess { object, .. } | Node::OptionalPropertyAccess { object, .. } => {
             collect_references(object, target_name, refs);
         }
-        Node::SubscriptAccess { object, index } => {
+        Node::SubscriptAccess { object, index }
+        | Node::OptionalSubscriptAccess { object, index } => {
             collect_references(object, target_name, refs);
             collect_references(index, target_name, refs);
         }

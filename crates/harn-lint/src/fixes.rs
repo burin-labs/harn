@@ -170,7 +170,8 @@ pub(crate) fn is_pure_expression(node: &Node) -> bool {
         Node::PropertyAccess { object, .. } | Node::OptionalPropertyAccess { object, .. } => {
             is_pure_expression(&object.node)
         }
-        Node::SubscriptAccess { object, index } => {
+        Node::SubscriptAccess { object, index }
+        | Node::OptionalSubscriptAccess { object, index } => {
             is_pure_expression(&object.node) && is_pure_expression(&index.node)
         }
         Node::SliceAccess { object, start, end } => {

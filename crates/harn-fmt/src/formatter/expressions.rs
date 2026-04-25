@@ -156,6 +156,14 @@ impl Formatter<'_> {
                 let idx = self.format_expr(index);
                 format!("{obj}[{idx}]")
             }
+            Node::OptionalSubscriptAccess { object, index } => {
+                let mut obj = self.format_expr(object);
+                if needs_parens_as_postfix_object(&object.node) {
+                    obj = format!("({obj})");
+                }
+                let idx = self.format_expr(index);
+                format!("{obj}?[{idx}]")
+            }
             Node::SliceAccess { object, start, end } => {
                 let mut obj = self.format_expr(object);
                 if needs_parens_as_postfix_object(&object.node) {

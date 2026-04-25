@@ -395,7 +395,8 @@ fn collect_mock_host_capabilities_from_node(
                 capabilities,
             );
         }
-        Node::SubscriptAccess { object, index } => {
+        Node::SubscriptAccess { object, index }
+        | Node::OptionalSubscriptAccess { object, index } => {
             collect_mock_host_capabilities_from_node(
                 object,
                 file_path,

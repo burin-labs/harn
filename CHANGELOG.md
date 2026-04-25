@@ -18,6 +18,16 @@ granular archaeology.
   on `spent_today_usd` / `tokens_today` without flaking when the
   test happens to run after `<T>`'s UTC midnight.
 
+- **Optional subscript `obj?[index]` (#TBD).** Symmetric counterpart to
+  `obj?.member`. Returns `nil` when the receiver is `nil`; otherwise
+  indexes normally. Lets connector authors safely chain into lists or
+  dicts that may be missing — `payload?.commits?[0]?.timestamp` now
+  parses and short-circuits hop-by-hop. Previously the parser tried
+  to interpret `?[` as the start of a ternary and bailed. Adds the
+  `OptionalSubscriptAccess` AST node, `SUBSCRIPT_OPT` opcode, and
+  formatter/lint/IR/LSP/viz/preflight handling alongside the existing
+  `SubscriptAccess` paths.
+
 ### Fixed
 
 - **`persona_runtime_status_tick_and_budget_are_persisted` UTC-day

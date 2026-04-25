@@ -659,7 +659,8 @@ fn scan_node_preflight(
                 diagnostics,
             );
         }
-        Node::SubscriptAccess { object, index } => {
+        Node::SubscriptAccess { object, index }
+        | Node::OptionalSubscriptAccess { object, index } => {
             scan_node_preflight(
                 object,
                 file_path,

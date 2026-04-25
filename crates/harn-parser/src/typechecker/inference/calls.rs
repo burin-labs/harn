@@ -490,7 +490,8 @@ impl TypeChecker {
             Node::PropertyAccess { object, .. } | Node::OptionalPropertyAccess { object, .. } => {
                 self.visit_for_deprecation(object)
             }
-            Node::SubscriptAccess { object, index } => {
+            Node::SubscriptAccess { object, index }
+            | Node::OptionalSubscriptAccess { object, index } => {
                 self.visit_for_deprecation(object);
                 self.visit_for_deprecation(index);
             }

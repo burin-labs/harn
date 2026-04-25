@@ -430,7 +430,10 @@ fn node_children_bundle(node: &SNode) -> Vec<&SNode> {
         | Node::Spread(object)
         | Node::TryOperator { operand: object }
         | Node::TryStar { operand: object } => vec![object.as_ref()],
-        Node::SubscriptAccess { object, index } => vec![object.as_ref(), index.as_ref()],
+        Node::SubscriptAccess { object, index }
+        | Node::OptionalSubscriptAccess { object, index } => {
+            vec![object.as_ref(), index.as_ref()]
+        }
         Node::SliceAccess { object, start, end } => {
             let mut children = vec![object.as_ref()];
             if let Some(start) = start.as_deref() {
