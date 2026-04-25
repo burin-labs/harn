@@ -38,6 +38,14 @@ granular archaeology.
   basically any time of day in PT/CT/ET). The status command now
   accepts the same `--at` flag and the test threads it through.
 
+- **Trailing binary operator + newline now parses (#TBD).** A binary
+  operator at the *end* of a line followed by the right operand on the
+  next line (e.g. `let x = a ??\n  b`) previously errored with
+  `expected expression, found \n`. Only the *leading*-operator
+  continuation form (`let x = a\n  ?? b`) worked. Both forms now
+  parse identically. Affects `|>`, `??`, `||`, `&&`, `==`, `!=`,
+  `<`, `>`, `<=`, `>=`, `in`, `not in`, `+`, `-`, `*`, `/`, `%`, `**`.
+
 ## v0.7.37
 
 ### Added
