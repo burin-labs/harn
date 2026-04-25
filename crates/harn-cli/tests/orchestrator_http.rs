@@ -35,12 +35,16 @@ use tokio::sync::oneshot;
 const STARTUP_PREFIX: &str = "[harn] HTTP listener ready on ";
 const STARTUP_NEEDLE: &str = "HTTP listener ready";
 const SHUTDOWN_NEEDLE: &str = "graceful shutdown complete";
-// Was 5s; bumped to 15s to absorb the cold-start latency the harn-cli
-// binary takes when nextest runs all 2k+ workspace tests in parallel
-// under load. Local fail-fast loops still trip well before any real
-// startup hang surfaces.
-const PROCESS_FAIL_FAST_TIMEOUT: Duration = Duration::from_secs(15);
-const EVENT_FAIL_FAST_TIMEOUT: Duration = Duration::from_secs(5);
+// Process-level deadline for spawning the orchestrator subprocess and
+// waiting for it to bind its listener / shut down. Tests serialize
+// through a cross-process file lock, so a generous deadline here only
+// affects the failure path — happy-path tests still complete in well
+// under a second of post-spawn wall time. A previous 15s ceiling
+// produced spurious "timed out waiting for listener startup" failures
+// on macOS when dyld + amfi cold-cache lookups for the unsigned
+// debug-build binary exceeded the budget under nextest load.
+const PROCESS_FAIL_FAST_TIMEOUT: Duration = Duration::from_secs(60);
+const EVENT_FAIL_FAST_TIMEOUT: Duration = Duration::from_secs(10);
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -404,6 +408,11 @@ fn spawn_orchestrator(
         .arg("single-tenant")
         .arg("--bind")
         .arg("127.0.0.1:0")
+        // The 30s default is calibrated for production drains; tests don't
+        // queue real backlogs, so cap shutdown at 5s to keep flake-recovery
+        // bounded.
+        .arg("--shutdown-timeout")
+        .arg("5")
         .stderr(Stdio::piped())
         .stdout(Stdio::null());
     for arg in extra_args {
@@ -443,8 +452,13 @@ struct OrchestratorProcess {
 impl OrchestratorProcess {
     fn wait_for_listener_url(&mut self) -> String {
         let deadline = Instant::now() + PROCESS_FAIL_FAST_TIMEOUT;
+        // Block on the stderr line stream with a coarse poll cadence. The
+        // recv_timeout only exists so we can periodically check whether the
+        // child died without printing the listener line — we don't need
+        // 25ms granularity for that.
+        let liveness_poll = Duration::from_millis(250);
         while Instant::now() < deadline {
-            match self.rx.recv_timeout(Duration::from_millis(25)) {
+            match self.rx.recv_timeout(liveness_poll) {
                 Ok(line) if line.contains(STARTUP_NEEDLE) => {
                     if let Some(url) = listener_url_from_line(&line) {
                         support::wait_for_readyz(&mut self.child, &url, PROCESS_FAIL_FAST_TIMEOUT)
@@ -631,12 +645,73 @@ fn json_headers() -> HeaderMap {
 }
 
 fn wait_for_path(path: &Path, timeout: Duration) {
+    use notify::event::EventKind;
+    use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
+
+    if path.exists() {
+        return;
+    }
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    if !parent.exists() {
+        panic!("watch parent directory missing: {}", parent.display());
+    }
+    let target_name = path
+        .file_name()
+        .unwrap_or_else(|| panic!("wait_for_path requires a file name: {}", path.display()))
+        .to_owned();
+
+    let (tx, rx) = std::sync::mpsc::channel::<()>();
+    let target_for_handler = target_name.clone();
+    let mut watcher: RecommendedWatcher =
+        notify::recommended_watcher(move |event: Result<Event, notify::Error>| {
+            let Ok(event) = event else { return };
+            // We only need a hint that *something* under the parent directory
+            // changed; the outer loop re-checks `path.exists()` so false
+            // positives just trigger an extra cheap stat call.
+            let interesting = matches!(
+                event.kind,
+                EventKind::Create(_) | EventKind::Modify(_) | EventKind::Any
+            );
+            if !interesting {
+                return;
+            }
+            if event
+                .paths
+                .iter()
+                .any(|candidate| candidate.file_name() == Some(target_for_handler.as_os_str()))
+            {
+                let _ = tx.send(());
+            }
+        })
+        .unwrap_or_else(|error| panic!("failed to install notify watcher: {error}"));
+    watcher
+        .watch(parent, RecursiveMode::NonRecursive)
+        .unwrap_or_else(|error| {
+            panic!("failed to watch {}: {error}", parent.display());
+        });
+
+    // Race: the file may have been created between the existence check above
+    // and the watcher being armed. Re-check, then block on either an event
+    // notification or the deadline. Notify events are advisory — fall back
+    // to a 250ms wakeup so platforms with eventual-consistency semantics
+    // (e.g. FSEvents coalescing) still complete promptly.
     let deadline = Instant::now() + timeout;
-    while Instant::now() < deadline {
+    loop {
         if path.exists() {
             return;
         }
-        thread::sleep(Duration::from_millis(50));
+        let remaining = match deadline.checked_duration_since(Instant::now()) {
+            Some(remaining) => remaining,
+            None => break,
+        };
+        match rx.recv_timeout(remaining.min(Duration::from_millis(250))) {
+            Ok(()) => continue,
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+        }
     }
     panic!("timed out waiting for {}", path.display());
 }
