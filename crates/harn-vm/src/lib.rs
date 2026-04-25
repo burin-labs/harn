@@ -104,6 +104,7 @@ pub use stdlib::hitl::{
     HITL_ESCALATIONS_TOPIC, HITL_QUESTIONS_TOPIC,
 };
 pub use stdlib::host::{clear_host_call_bridge, set_host_call_bridge, HostCallBridge};
+pub use stdlib::io::take_stderr_buffer;
 pub use stdlib::secret_scan::{
     append_secret_scan_audit, audit_secret_scan_active, scan_content as secret_scan_content,
     SecretFinding, SECRET_SCAN_AUDIT_TOPIC,

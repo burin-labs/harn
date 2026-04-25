@@ -1,0 +1,19 @@
+pipeline test(task) {
+  // Deterministic hashes from the empty string
+  log(sha3_256(""))
+  log(sha3_512(""))
+  log(blake3(""))
+  log(blake3("hello"))
+  // Ed25519 sign+verify roundtrip
+  let kp = ed25519_keypair()
+  let sig = ed25519_sign(kp["private"], "hello world")
+  log(ed25519_verify(kp["public"], "hello world", sig))
+  log(ed25519_verify(kp["public"], "tampered", sig))
+  // X25519 shared-secret agreement: each side computes the same secret
+  let alice = x25519_keypair()
+  let bob = x25519_keypair()
+  let alice_view = x25519_agree(alice["private"], bob["public"])
+  let bob_view = x25519_agree(bob["private"], alice["public"])
+  log(alice_view == bob_view)
+  log(len(alice_view))
+}

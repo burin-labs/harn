@@ -71,6 +71,14 @@ impl Lexer {
     fn tokenize_inner(&mut self, keep_comments: bool) -> Result<Vec<Token>, LexerError> {
         let mut tokens = Vec::new();
 
+        // Skip a `#!` shebang line if present at the very start of the file.
+        // Only valid at byte offset 0 — anywhere else, `#` is still an error.
+        if self.pos == 0 && self.source.starts_with(&['#', '!']) {
+            while self.pos < self.source.len() && self.source[self.pos] != '\n' {
+                self.advance();
+            }
+        }
+
         while self.pos < self.source.len() {
             let ch = self.source[self.pos];
 
@@ -849,6 +857,44 @@ fn strip_trailing_newline_segments(mut segments: Vec<StringSegment>) -> Vec<Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shebang_at_offset_zero_is_skipped() {
+        let src = "#!/usr/bin/env harn\nlet x = 1";
+        let mut lexer = Lexer::new(src);
+        let tokens = lexer.tokenize().expect("shebang should be skipped");
+        // Expect: Newline, Let, Identifier(x), Eq, IntLiteral(1)
+        assert_eq!(tokens[0].kind, TokenKind::Newline);
+        assert_eq!(tokens[1].kind, TokenKind::Let);
+        assert!(matches!(&tokens[2].kind, TokenKind::Identifier(n) if n == "x"));
+    }
+
+    #[test]
+    fn shebang_without_trailing_newline_is_skipped() {
+        let src = "#!/usr/bin/env harn";
+        let mut lexer = Lexer::new(src);
+        let tokens = lexer.tokenize().expect("shebang at EOF should be skipped");
+        // After the shebang there should be only the trailing EOF token.
+        let non_eof: Vec<_> = tokens
+            .iter()
+            .filter(|t| !matches!(t.kind, TokenKind::Eof))
+            .collect();
+        assert!(
+            non_eof.is_empty(),
+            "expected only EOF after shebang-only file, got {non_eof:?}"
+        );
+    }
+
+    #[test]
+    fn hash_in_middle_of_file_still_errors() {
+        let src = "let x = 1\n# not a shebang\n";
+        let mut lexer = Lexer::new(src);
+        let result = lexer.tokenize();
+        assert!(
+            matches!(result, Err(LexerError::UnexpectedCharacter('#', _))),
+            "got {result:?}"
+        );
+    }
 
     #[test]
     fn test_keywords() {

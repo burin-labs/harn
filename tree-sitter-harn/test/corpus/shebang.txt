@@ -1,0 +1,25 @@
+==================
+Shebang line at top of file
+==================
+
+#!/usr/bin/env harn
+let x = 1
+
+---
+
+(source_file
+  (comment)
+  (let_binding
+    name: (identifier)
+    value: (integer_literal)))
+
+==================
+Shebang only file
+==================
+
+#!/usr/bin/env harn
+
+---
+
+(source_file
+  (comment))

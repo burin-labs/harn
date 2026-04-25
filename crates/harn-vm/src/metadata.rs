@@ -984,7 +984,7 @@ fn scan_dir_recursive(
             .strip_prefix(base)
             .unwrap_or(entry.path().as_path())
             .to_string_lossy()
-            .into_owned();
+            .replace('\\', "/");
         if let Some(pat) = &options.pattern {
             if !glob_match(pat, &rel_path) {
                 if meta.is_dir() {

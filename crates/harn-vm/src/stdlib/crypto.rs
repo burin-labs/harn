@@ -251,6 +251,224 @@ pub(crate) fn register_crypto_builtins(vm: &mut Vm) {
             String::from_utf8_lossy(&result).into_owned(),
         )))
     });
+
+    // --- modern hashing -------------------------------------------------
+
+    vm.register_builtin("sha3_256", |args, _out| {
+        use sha3::{Digest, Sha3_256};
+        let input = bytes_or_string_input(args.first())?;
+        let digest = Sha3_256::digest(&input);
+        Ok(VmValue::String(Rc::from(hex::encode(digest))))
+    });
+
+    vm.register_builtin("sha3_512", |args, _out| {
+        use sha3::{Digest, Sha3_512};
+        let input = bytes_or_string_input(args.first())?;
+        let digest = Sha3_512::digest(&input);
+        Ok(VmValue::String(Rc::from(hex::encode(digest))))
+    });
+
+    vm.register_builtin("blake3", |args, _out| {
+        let input = bytes_or_string_input(args.first())?;
+        let digest = blake3::hash(&input);
+        Ok(VmValue::String(Rc::from(digest.to_hex().to_string())))
+    });
+
+    // --- ed25519 keypair / sign / verify --------------------------------
+
+    vm.register_builtin("ed25519_keypair", |_args, _out| {
+        use ed25519_dalek::{SigningKey, VerifyingKey};
+        use rand::RngExt;
+        let mut bytes = [0u8; 32];
+        rand::rng().fill(&mut bytes);
+        let signing = SigningKey::from_bytes(&bytes);
+        let verifying: VerifyingKey = signing.verifying_key();
+        let mut dict = std::collections::BTreeMap::new();
+        dict.insert(
+            "private".to_string(),
+            VmValue::String(Rc::from(hex::encode(signing.to_bytes()))),
+        );
+        dict.insert(
+            "public".to_string(),
+            VmValue::String(Rc::from(hex::encode(verifying.to_bytes()))),
+        );
+        Ok(VmValue::Dict(Rc::new(dict)))
+    });
+
+    vm.register_builtin("ed25519_sign", |args, _out| {
+        use ed25519_dalek::{Signer, SigningKey};
+        if args.len() < 2 {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(
+                "ed25519_sign: expected (private_hex, message)",
+            ))));
+        }
+        let priv_hex = args[0].display();
+        let msg = bytes_or_string_input(Some(&args[1]))?;
+        let priv_bytes = hex::decode(&priv_hex).map_err(|e| {
+            VmError::Thrown(VmValue::String(Rc::from(format!(
+                "ed25519_sign: invalid hex private key: {e}"
+            ))))
+        })?;
+        let priv_arr: [u8; 32] = priv_bytes.as_slice().try_into().map_err(|_| {
+            VmError::Thrown(VmValue::String(Rc::from(
+                "ed25519_sign: private key must be 32 bytes",
+            )))
+        })?;
+        let signing = SigningKey::from_bytes(&priv_arr);
+        let sig = signing.sign(&msg);
+        Ok(VmValue::String(Rc::from(hex::encode(sig.to_bytes()))))
+    });
+
+    vm.register_builtin("ed25519_verify", |args, _out| {
+        use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+        if args.len() < 3 {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(
+                "ed25519_verify: expected (public_hex, message, signature_hex)",
+            ))));
+        }
+        let pub_hex = args[0].display();
+        let msg = bytes_or_string_input(Some(&args[1]))?;
+        let sig_hex = args[2].display();
+
+        let pub_bytes = match hex::decode(&pub_hex) {
+            Ok(b) => b,
+            Err(_) => return Ok(VmValue::Bool(false)),
+        };
+        let sig_bytes = match hex::decode(&sig_hex) {
+            Ok(b) => b,
+            Err(_) => return Ok(VmValue::Bool(false)),
+        };
+        let pub_arr: [u8; 32] = match pub_bytes.as_slice().try_into() {
+            Ok(a) => a,
+            Err(_) => return Ok(VmValue::Bool(false)),
+        };
+        let sig_arr: [u8; 64] = match sig_bytes.as_slice().try_into() {
+            Ok(a) => a,
+            Err(_) => return Ok(VmValue::Bool(false)),
+        };
+        let verifying = match VerifyingKey::from_bytes(&pub_arr) {
+            Ok(v) => v,
+            Err(_) => return Ok(VmValue::Bool(false)),
+        };
+        let signature = Signature::from_bytes(&sig_arr);
+        Ok(VmValue::Bool(verifying.verify(&msg, &signature).is_ok()))
+    });
+
+    // --- x25519 keypair / agree -----------------------------------------
+
+    vm.register_builtin("x25519_keypair", |_args, _out| {
+        use rand::RngExt;
+        use x25519_dalek::{PublicKey, StaticSecret};
+        let mut bytes = [0u8; 32];
+        rand::rng().fill(&mut bytes);
+        let secret = StaticSecret::from(bytes);
+        let public = PublicKey::from(&secret);
+        let mut dict = std::collections::BTreeMap::new();
+        dict.insert(
+            "private".to_string(),
+            VmValue::String(Rc::from(hex::encode(secret.to_bytes()))),
+        );
+        dict.insert(
+            "public".to_string(),
+            VmValue::String(Rc::from(hex::encode(public.to_bytes()))),
+        );
+        Ok(VmValue::Dict(Rc::new(dict)))
+    });
+
+    vm.register_builtin("x25519_agree", |args, _out| {
+        use x25519_dalek::{PublicKey, StaticSecret};
+        if args.len() < 2 {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(
+                "x25519_agree: expected (private_hex, peer_public_hex)",
+            ))));
+        }
+        let priv_hex = args[0].display();
+        let pub_hex = args[1].display();
+        let priv_bytes = hex::decode(&priv_hex).map_err(|e| {
+            VmError::Thrown(VmValue::String(Rc::from(format!(
+                "x25519_agree: invalid private hex: {e}"
+            ))))
+        })?;
+        let pub_bytes = hex::decode(&pub_hex).map_err(|e| {
+            VmError::Thrown(VmValue::String(Rc::from(format!(
+                "x25519_agree: invalid public hex: {e}"
+            ))))
+        })?;
+        let priv_arr: [u8; 32] = priv_bytes.as_slice().try_into().map_err(|_| {
+            VmError::Thrown(VmValue::String(Rc::from(
+                "x25519_agree: private must be 32 bytes",
+            )))
+        })?;
+        let pub_arr: [u8; 32] = pub_bytes.as_slice().try_into().map_err(|_| {
+            VmError::Thrown(VmValue::String(Rc::from(
+                "x25519_agree: public must be 32 bytes",
+            )))
+        })?;
+        let secret = StaticSecret::from(priv_arr);
+        let peer = PublicKey::from(pub_arr);
+        let shared = secret.diffie_hellman(&peer);
+        Ok(VmValue::String(Rc::from(hex::encode(shared.as_bytes()))))
+    });
+
+    // --- jwt_verify (HS256 / RS256 / ES256) -----------------------------
+
+    vm.register_builtin("jwt_verify", |args, _out| {
+        use jsonwebtoken::{decode, DecodingKey, Validation};
+        if args.len() < 3 {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(
+                "jwt_verify: expected (alg, token, key)",
+            ))));
+        }
+        let alg = args[0].display();
+        let token = args[1].display();
+        let key_str = args[2].display();
+        let algorithm = match alg.as_str() {
+            "HS256" => Algorithm::HS256,
+            "ES256" => Algorithm::ES256,
+            "RS256" => Algorithm::RS256,
+            other => {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                    "jwt_verify: unsupported algorithm '{other}'"
+                )))));
+            }
+        };
+        let decoding_key = match algorithm {
+            Algorithm::HS256 => DecodingKey::from_secret(key_str.as_bytes()),
+            Algorithm::ES256 => DecodingKey::from_ec_pem(key_str.as_bytes()).map_err(|e| {
+                VmError::Thrown(VmValue::String(Rc::from(format!(
+                    "jwt_verify: invalid ES256 public key: {e}"
+                ))))
+            })?,
+            Algorithm::RS256 => DecodingKey::from_rsa_pem(key_str.as_bytes()).map_err(|e| {
+                VmError::Thrown(VmValue::String(Rc::from(format!(
+                    "jwt_verify: invalid RS256 public key: {e}"
+                ))))
+            })?,
+            _ => unreachable!(),
+        };
+        let mut validation = Validation::new(algorithm);
+        // Don't enforce exp/nbf/aud automatically — the caller can opt in
+        // by validating claims themselves.
+        validation.validate_exp = false;
+        validation.validate_nbf = false;
+        validation.required_spec_claims.clear();
+        let decoded = decode::<serde_json::Value>(&token, &decoding_key, &validation)
+            .map_err(|e| VmError::Thrown(VmValue::String(Rc::from(format!("jwt_verify: {e}")))))?;
+        let claims_value = crate::schema::json_to_vm_value(&decoded.claims);
+        let mut dict = std::collections::BTreeMap::new();
+        dict.insert("valid".to_string(), VmValue::Bool(true));
+        dict.insert("claims".to_string(), claims_value);
+        Ok(VmValue::Dict(Rc::new(dict)))
+    });
+}
+
+fn bytes_or_string_input(arg: Option<&VmValue>) -> Result<Vec<u8>, VmError> {
+    match arg {
+        Some(VmValue::Bytes(b)) => Ok(b.to_vec()),
+        Some(VmValue::String(s)) => Ok(s.as_bytes().to_vec()),
+        Some(other) => Ok(other.display().into_bytes()),
+        None => Ok(Vec::new()),
+    }
 }
 
 #[cfg(test)]

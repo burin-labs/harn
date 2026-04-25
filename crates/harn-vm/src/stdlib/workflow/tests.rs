@@ -247,7 +247,7 @@ async fn failed_verify_stage_preserves_verification_artifact_and_result() {
             ..Default::default()
         },
         verify: Some(serde_json::json!({
-            "command": "printf nope; exit 1",
+            "command": failing_verify_command(),
             "expect_status": 0,
         })),
         output_contract: crate::orchestration::StageContract {
@@ -278,6 +278,14 @@ async fn failed_verify_stage_preserves_verification_artifact_and_result() {
             .and_then(|value| value.as_bool()),
         Some(false)
     );
+}
+
+fn failing_verify_command() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "echo nope && exit /b 1"
+    } else {
+        "printf nope; exit 1"
+    }
 }
 
 #[tokio::test(flavor = "current_thread")]

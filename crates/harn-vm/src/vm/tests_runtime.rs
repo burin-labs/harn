@@ -1574,7 +1574,7 @@ fn test_windows_process_sandbox_allows_process_exec_in_workspace() {
         side_effect_level: Some("process_exec".to_string()),
         ..Default::default()
     };
-    let command = format!("echo allowed> {}", windows_cmd_quote(&allowed_file));
+    let command = format!("echo allowed>{}", allowed_file.display());
     let source = format!(
         r#"pipeline t(task) {{ shell("{}") }}"#,
         harn_string_escape(&command)
@@ -1637,7 +1637,7 @@ fn test_windows_process_sandbox_denies_write_outside_workspace() {
         side_effect_level: Some("process_exec".to_string()),
         ..Default::default()
     };
-    let command = format!("echo denied> {}", windows_cmd_quote(&outside_file));
+    let command = format!("echo denied>{}", outside_file.display());
     let source = format!(
         r#"pipeline t(task) {{ shell("{}") }}"#,
         harn_string_escape(&command)
@@ -1662,11 +1662,6 @@ fn test_windows_process_sandbox_denies_write_outside_workspace() {
         "expected sandbox denial, got {err}"
     );
     assert!(!outside_file.exists());
-}
-
-#[cfg(target_os = "windows")]
-fn windows_cmd_quote(path: &std::path::Path) -> String {
-    format!(r#""{}""#, path.display())
 }
 
 #[cfg(target_os = "linux")]

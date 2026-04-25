@@ -6,16 +6,18 @@ mod agents;
 mod agents_daemon;
 pub(crate) mod assemble;
 mod bytes;
+mod clock;
 mod compression;
 mod concurrency;
 mod connectors;
 mod crypto;
+mod csv;
 mod datetime;
 mod fs;
 pub(crate) mod hitl;
 mod hitl_read;
 pub mod host;
-mod io;
+pub(crate) mod io;
 mod iter;
 pub(crate) mod json;
 mod json_query;
@@ -43,6 +45,7 @@ pub mod tracing;
 mod transcript_compact;
 mod triggers_stdlib;
 mod types;
+mod url_parse;
 mod vision;
 pub(crate) mod waitpoint;
 mod waitpoints;
@@ -71,6 +74,8 @@ pub fn register_core_stdlib(vm: &mut Vm) {
     bytes::register_bytes_builtins(vm);
     compression::register_compression_builtins(vm);
     crypto::register_crypto_builtins(vm);
+    csv::register_csv_builtins(vm);
+    url_parse::register_url_builtins(vm);
     path::register_path_helper_builtins(vm);
     sets::register_set_builtins(vm);
     iter::register_iter_builtins(vm);
@@ -87,6 +92,9 @@ pub fn register_io_stdlib(vm: &mut Vm) {
     agent_state::register_agent_state_builtins(vm);
     process::register_process_builtins(vm);
     process::register_path_builtins(vm);
+    // Clock builtins overlay process::timestamp/elapsed so they honor
+    // mock_time / advance_time. Register AFTER process to take precedence.
+    clock::register_clock_builtins(vm);
     project::register_project_builtins(vm);
     tracing::register_tracing_builtins(vm);
 }
@@ -157,6 +165,8 @@ pub fn stdlib_builtin_names() -> Vec<String> {
 pub fn reset_stdlib_state() {
     logging::reset_logging_state();
     process::reset_process_state();
+    clock::reset_clock_state();
+    io::reset_io_state();
     sandbox::reset_sandbox_state();
     fs::reset_fs_state();
     json::reset_json_state();

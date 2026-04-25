@@ -391,6 +391,179 @@ pub(crate) fn register_fs_builtins(vm: &mut Vm) {
         }
         Ok(VmValue::Dict(Rc::new(info)))
     });
+
+    // --- scripting-polish additions ----------------------------------
+
+    vm.register_builtin("move_file", |args, _out| {
+        if args.len() < 2 {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(
+                "move_file: src and dst are required",
+            ))));
+        }
+        let src = resolve_fs_path(&args[0].display());
+        let dst = resolve_fs_path(&args[1].display());
+        crate::stdlib::sandbox::enforce_fs_path(
+            "move_file",
+            &src,
+            crate::stdlib::sandbox::FsAccess::Write,
+        )?;
+        crate::stdlib::sandbox::enforce_fs_path(
+            "move_file",
+            &dst,
+            crate::stdlib::sandbox::FsAccess::Write,
+        )?;
+        // Try rename first (fast, atomic on the same filesystem). Fall
+        // back to copy+delete which crosses filesystems.
+        if std::fs::rename(&src, &dst).is_ok() {
+            FILE_TEXT_CACHE.with(|c| {
+                let mut c = c.borrow_mut();
+                c.remove(&src);
+                c.remove(&dst);
+            });
+            return Ok(VmValue::Nil);
+        }
+        std::fs::copy(&src, &dst).map_err(|e| {
+            VmError::Thrown(VmValue::String(Rc::from(format!(
+                "move_file: copy failed: {e}"
+            ))))
+        })?;
+        std::fs::remove_file(&src).map_err(|e| {
+            VmError::Thrown(VmValue::String(Rc::from(format!(
+                "move_file: remove src failed: {e}"
+            ))))
+        })?;
+        FILE_TEXT_CACHE.with(|c| {
+            let mut c = c.borrow_mut();
+            c.remove(&src);
+            c.remove(&dst);
+        });
+        Ok(VmValue::Nil)
+    });
+
+    vm.register_builtin("read_lines", |args, _out| {
+        let path = args.first().map(|a| a.display()).unwrap_or_default();
+        let resolved = resolve_fs_path(&path);
+        crate::stdlib::sandbox::enforce_fs_path(
+            "read_lines",
+            &resolved,
+            crate::stdlib::sandbox::FsAccess::Read,
+        )?;
+        let content = std::fs::read_to_string(&resolved).map_err(|e| {
+            VmError::Thrown(VmValue::String(Rc::from(format!(
+                "read_lines: {}: {e}",
+                resolved.display()
+            ))))
+        })?;
+        // split_terminator drops the trailing empty element from a final
+        // newline; lines() handles \r\n correctly.
+        let lines: Vec<VmValue> = content
+            .lines()
+            .map(|l| VmValue::String(Rc::from(l)))
+            .collect();
+        Ok(VmValue::List(Rc::new(lines)))
+    });
+
+    vm.register_builtin("walk_dir", |args, _out| {
+        let root = args.first().map(|a| a.display()).unwrap_or_default();
+        if root.is_empty() {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(
+                "walk_dir: root path is required",
+            ))));
+        }
+        let resolved = resolve_fs_path(&root);
+        crate::stdlib::sandbox::enforce_fs_path(
+            "walk_dir",
+            &resolved,
+            crate::stdlib::sandbox::FsAccess::Read,
+        )?;
+        let mut max_depth: Option<usize> = None;
+        let mut follow_symlinks = false;
+        if let Some(VmValue::Dict(opts)) = args.get(1) {
+            if let Some(v) = opts.get("max_depth").and_then(|v| v.as_int()) {
+                if v >= 0 {
+                    max_depth = Some(v as usize);
+                }
+            }
+            if let Some(VmValue::Bool(b)) = opts.get("follow_symlinks") {
+                follow_symlinks = *b;
+            }
+        }
+        let mut walker = walkdir::WalkDir::new(&resolved).follow_links(follow_symlinks);
+        if let Some(d) = max_depth {
+            walker = walker.max_depth(d);
+        }
+        let mut entries: Vec<VmValue> = Vec::new();
+        for entry in walker.into_iter().filter_map(|e| e.ok()) {
+            let path = entry.path();
+            let depth = entry.depth() as i64;
+            let is_dir = entry.file_type().is_dir();
+            let mut dict = BTreeMap::new();
+            dict.insert(
+                "path".to_string(),
+                VmValue::String(Rc::from(path.to_string_lossy().replace('\\', "/"))),
+            );
+            dict.insert("is_dir".to_string(), VmValue::Bool(is_dir));
+            dict.insert(
+                "is_file".to_string(),
+                VmValue::Bool(entry.file_type().is_file()),
+            );
+            dict.insert("depth".to_string(), VmValue::Int(depth));
+            entries.push(VmValue::Dict(Rc::new(dict)));
+        }
+        Ok(VmValue::List(Rc::new(entries)))
+    });
+
+    vm.register_builtin("glob", |args, _out| {
+        let pattern = args.first().map(|a| a.display()).unwrap_or_default();
+        if pattern.is_empty() {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(
+                "glob: pattern is required",
+            ))));
+        }
+        // The pattern is matched against paths relative to the configured
+        // base. Default base is the script source directory; an explicit
+        // second argument overrides.
+        let base_str = args
+            .get(1)
+            .map(|a| a.display())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| ".".to_string());
+        let base = resolve_fs_path(&base_str);
+        crate::stdlib::sandbox::enforce_fs_path(
+            "glob",
+            &base,
+            crate::stdlib::sandbox::FsAccess::Read,
+        )?;
+        let mut builder = globset::GlobSetBuilder::new();
+        let glob = globset::Glob::new(&pattern)
+            .map_err(|e| VmError::Thrown(VmValue::String(Rc::from(format!("glob: {e}")))))?;
+        builder.add(glob);
+        let set = builder
+            .build()
+            .map_err(|e| VmError::Thrown(VmValue::String(Rc::from(format!("glob: {e}")))))?;
+        let mut matches: Vec<VmValue> = Vec::new();
+        for entry in walkdir::WalkDir::new(&base)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
+            // Match against path relative to base, using forward slashes.
+            let rel = match entry.path().strip_prefix(&base) {
+                Ok(p) => p.to_path_buf(),
+                Err(_) => continue,
+            };
+            let rel_str = rel.to_string_lossy().replace('\\', "/");
+            if rel_str.is_empty() {
+                continue;
+            }
+            if set.is_match(&rel_str) {
+                matches.push(VmValue::String(Rc::from(
+                    entry.path().to_string_lossy().replace('\\', "/"),
+                )));
+            }
+        }
+        matches.sort_by_key(|a| a.display());
+        Ok(VmValue::List(Rc::new(matches)))
+    });
 }
 
 #[cfg(test)]

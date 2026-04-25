@@ -37,9 +37,16 @@ tokio-stream = "0.1"
 base64 = "0.22"
 data-encoding = "2"
 ed25519-dalek = { version = "2", features = ["pem", "pkcs8", "rand_core"] }
+x25519-dalek = { version = "2", features = ["static_secrets"] }
 hex = "0.4"
 sha2 = "0.11"
+sha3 = "0.11"
+blake3 = "1"
 md-5 = "0.11"
+csv = "1"
+url = "2"
+globset = "0.4"
+walkdir = "2"
 toml = "1.1"
 serde_yaml = "0.9"
 serde = { version = "1", features = ["derive"] }

@@ -165,6 +165,10 @@ impl Compiler {
                     .find(|sn| matches!(peel_node(sn), Node::Pipeline { .. }))
             });
 
+        // When a pipeline body produces a final value, that value flows
+        // out of `vm.execute()` so the CLI can map it to a process exit
+        // code (int → exit n, Result::Err(msg) → stderr+exit 1).
+        let mut pipeline_emits_value = false;
         if let Some(sn) = main {
             self.compile_top_level_declarations(program)?;
             if let Node::Pipeline { body, extends, .. } = peel_node(sn) {
@@ -174,6 +178,7 @@ impl Compiler {
                 let saved = std::mem::replace(&mut self.module_level, false);
                 self.compile_block(body)?;
                 self.module_level = saved;
+                pipeline_emits_value = true;
             }
         } else {
             // Script mode: no pipeline found, treat top-level as implicit entry.
@@ -197,7 +202,9 @@ impl Compiler {
         for fb in self.all_pending_finallys() {
             self.compile_finally_inline(&fb)?;
         }
-        self.chunk.emit(Op::Nil, self.line);
+        if !pipeline_emits_value {
+            self.chunk.emit(Op::Nil, self.line);
+        }
         self.chunk.emit(Op::Return, self.line);
         Ok(self.chunk)
     }

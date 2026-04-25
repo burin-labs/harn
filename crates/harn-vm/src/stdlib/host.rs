@@ -416,9 +416,16 @@ async fn dispatch_host_operation(
     match (capability, operation) {
         ("process", "exec") => {
             let command = require_param(params, "command")?;
-            let output = tokio::process::Command::new("/bin/sh")
-                .arg("-lc")
-                .arg(&command)
+            let mut cmd = if cfg!(windows) {
+                let mut c = tokio::process::Command::new("cmd");
+                c.arg("/C").arg(&command);
+                c
+            } else {
+                let mut c = tokio::process::Command::new("/bin/sh");
+                c.arg("-lc").arg(&command);
+                c
+            };
+            let output = cmd
                 .stdin(Stdio::null())
                 .output()
                 .await

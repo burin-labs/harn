@@ -1,0 +1,13 @@
+[harn] https
+[harn] api.example.com
+[harn] 8080
+[harn] /v1/items
+[harn] q=hello&page=2
+[harn] frag
+[harn] user
+[harn] https://example.com/api?x=1&y=2
+[harn] 3
+[harn] key
+[harn] alpha
+[harn] beta
+[harn] name=ali+ce&ids=1%2C2%2C3

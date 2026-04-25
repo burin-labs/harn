@@ -1757,24 +1757,29 @@ async fn replay_dispatch_scopes_harn_replay_per_dispatch_and_child_process() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let (_dir, _log, dispatcher) = dispatcher_fixture(
-                r#"
+            let child_command = if cfg!(target_os = "windows") {
+                "echo %HARN_REPLAY%"
+            } else {
+                "printf '%s' \"$HARN_REPLAY\""
+            };
+            let source = r#"
 import "std/triggers"
 
 pub fn local_fn(event: TriggerEvent) -> dict {
-  let child = shell("printf '%s' \"$HARN_REPLAY\"")
+  let child = shell("__CHILD_COMMAND__")
   return {
     replay_env: env_or("HARN_REPLAY", "missing"),
     child_replay_env: child.stdout,
     dedupe_key: event.dedupe_key,
   }
 }
-"#,
-                "local_fn",
-                None,
-                TriggerRetryConfig::default(),
-            )
-            .await;
+"#
+            .replace(
+                "__CHILD_COMMAND__",
+                &child_command.replace('\\', "\\\\").replace('"', "\\\""),
+            );
+            let (_dir, _log, dispatcher) =
+                dispatcher_fixture(&source, "local_fn", None, TriggerRetryConfig::default()).await;
 
             let binding =
                 resolve_live_trigger_binding("github-new-issue", None).expect("resolve binding");
@@ -1813,7 +1818,13 @@ pub fn local_fn(event: TriggerEvent) -> dict {
                 assert_eq!(outcome.status, DispatchStatus::Succeeded);
                 let result = outcome.result.expect("replay result");
                 assert_eq!(result["replay_env"], serde_json::json!("1"));
-                assert_eq!(result["child_replay_env"], serde_json::json!("1"));
+                assert_eq!(
+                    result["child_replay_env"]
+                        .as_str()
+                        .expect("child replay env")
+                        .trim(),
+                    "1"
+                );
                 dedupe_keys.push(
                     result["dedupe_key"]
                         .as_str()

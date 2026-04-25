@@ -36,8 +36,18 @@ pub fn format_source(source: &str) -> Result<String, String> {
 
 /// Format Harn source code with explicit options.
 pub fn format_source_opts(source: &str, opts: &FmtOptions) -> Result<String, String> {
+    // Preserve a shebang line (`#!...`) at offset 0 — the lexer skips it
+    // entirely, so without explicit reattachment the formatter would drop it.
+    let (shebang, source_for_lex) = match source.starts_with("#!") {
+        true => match source.find('\n') {
+            Some(i) => (Some(&source[..=i]), &source[i + 1..]),
+            None => (Some(source), ""),
+        },
+        false => (None, source),
+    };
+
     // Lex with comments preserved, then split into (comments by line, parser tokens).
-    let mut lexer = Lexer::new(source);
+    let mut lexer = Lexer::new(source_for_lex);
     let all_tokens = lexer.tokenize_with_comments().map_err(|e| e.to_string())?;
 
     let mut comments: BTreeMap<usize, Vec<Comment>> = BTreeMap::new();
@@ -65,7 +75,19 @@ pub fn format_source_opts(source: &str, opts: &FmtOptions) -> Result<String, Str
     let mut parser = Parser::new(parser_tokens);
     let program = parser.parse().map_err(|e| e.to_string())?;
 
-    let mut fmt = Formatter::new(source, comments, opts.line_width, opts.separator_width);
+    let mut fmt = Formatter::new(
+        source_for_lex,
+        comments,
+        opts.line_width,
+        opts.separator_width,
+    );
     fmt.format_program(&program);
-    Ok(fmt.finish())
+    let formatted = fmt.finish();
+    Ok(match shebang {
+        Some(line) => {
+            let trailing = if line.ends_with('\n') { "" } else { "\n" };
+            format!("{line}{trailing}{formatted}")
+        }
+        None => formatted,
+    })
 }

@@ -1,0 +1,14 @@
+/** Verifies sleep_ms/monotonic_ms/now_ms honor mock_time + advance_time. */
+pipeline test(task) {
+  mock_time(1700000000000)
+  log(now_ms())
+  log(monotonic_ms())
+  // sleep advances mocked time instantly
+  sleep_ms(250)
+  log(now_ms())
+  log(monotonic_ms())
+  advance_time(1000)
+  log(now_ms())
+  log(monotonic_ms())
+  unmock_time()
+}

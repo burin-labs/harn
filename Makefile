@@ -1,4 +1,4 @@
-.PHONY: setup install-hooks check fmt fmt-harn fmt-harn-fix lint lint-md lint-actions lint-harn test test-cargo test-fast conformance bench-vm all release-gate portal portal-check portal-demo gen-highlight check-highlight gen-trigger-quickref check-trigger-quickref check-trigger-examples check-docs-snippets
+.PHONY: setup install-hooks configure-merge-drivers check fmt fmt-harn fmt-harn-fix lint lint-md lint-actions lint-harn test test-cargo test-fast conformance bench-vm all release-gate portal portal-check portal-demo gen-highlight check-highlight gen-trigger-quickref check-trigger-quickref check-trigger-examples check-docs-snippets
 
 # Full quality check: format first, then lint/test in parallel.
 # Usage: make all -j       (parallel checks after formatting)
@@ -13,6 +13,10 @@ setup:
 
 install-hooks:
 	git config core.hooksPath .githooks
+	./scripts/configure_merge_drivers.sh
+
+configure-merge-drivers:
+	./scripts/configure_merge_drivers.sh
 
 # Format all code
 fmt:

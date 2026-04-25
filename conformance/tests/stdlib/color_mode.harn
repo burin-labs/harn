@@ -1,0 +1,9 @@
+/** Verifies set_color_mode controls ANSI emission. */
+pipeline test(task) {
+  set_color_mode("never")
+  log(json_stringify(color("hi", "red")))
+  log(json_stringify(bold("hi")))
+  set_color_mode("always")
+  log(json_stringify(color("hi", "red")))
+  log(json_stringify(bold("hi")))
+}

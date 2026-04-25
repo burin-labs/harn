@@ -2,6 +2,9 @@ pipeline test(task) {
   let id = uuid()
   log(id.count())
   log(id.contains("-"))
+  // Force ANSI emission — conformance runs without a TTY, so the
+  // "auto" default would suppress these color escapes.
+  set_color_mode("always")
   log(json_stringify(color("hi", "red")))
   log(json_stringify(bold("hi")))
   log(json_stringify(dim("hi")))

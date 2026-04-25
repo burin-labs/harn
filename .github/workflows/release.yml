@@ -57,6 +57,8 @@ jobs:
             os: ubuntu-latest
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -87,7 +89,8 @@ jobs:
           CARGO_PROFILE_RELEASE_LTO: thin
         run: cargo build --release -p harn-cli -p harn-dap -p harn-lsp --target ${{ matrix.target }}
 
-      - name: Package
+      - name: Package (unix)
+        if: runner.os != 'Windows'
         run: |
           mkdir -p dist
           cp target/${{ matrix.target }}/release/harn dist/harn
@@ -96,11 +99,30 @@ jobs:
           cd dist
           tar czf harn-${{ matrix.target }}.tar.gz harn harn-dap harn-lsp
 
-      - name: Upload artifact
+      - name: Package (windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp target/${{ matrix.target }}/release/harn.exe dist/harn.exe
+          cp target/${{ matrix.target }}/release/harn-dap.exe dist/harn-dap.exe
+          cp target/${{ matrix.target }}/release/harn-lsp.exe dist/harn-lsp.exe
+          cd dist
+          7z a "harn-${{ matrix.target }}.zip" harn.exe harn-dap.exe harn-lsp.exe
+
+      - name: Upload artifact (unix)
+        if: runner.os != 'Windows'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: harn-${{ matrix.target }}
           path: dist/harn-${{ matrix.target }}.tar.gz
+
+      - name: Upload artifact (windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: harn-${{ matrix.target }}
+          path: dist/harn-${{ matrix.target }}.zip
 
   container:
     name: Publish Container

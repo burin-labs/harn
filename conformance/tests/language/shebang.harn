@@ -1,0 +1,4 @@
+#!/usr/bin/env harn
+pipeline test(task) {
+  log("ran with shebang")
+}

@@ -32,6 +32,10 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("string")),
     },
     BuiltinSig {
+        name: "advance_time",
+        return_type: Some(BuiltinReturn::Named("int")),
+    },
+    BuiltinSig {
         name: "append_file",
         return_type: Some(BuiltinReturn::Named("nil")),
     },
@@ -198,6 +202,14 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
     BuiltinSig {
         name: "cancel_graceful",
         return_type: None,
+    },
+    BuiltinSig {
+        name: "capture_stderr_start",
+        return_type: Some(BuiltinReturn::Named("nil")),
+    },
+    BuiltinSig {
+        name: "capture_stderr_take",
+        return_type: Some(BuiltinReturn::Named("string")),
     },
     BuiltinSig {
         name: "ceil",
@@ -1322,5 +1334,154 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
     BuiltinSig {
         name: "yaml_stringify",
         return_type: Some(BuiltinReturn::Named("string")),
+    },
+    // --- scripting-polish additions (mockable I/O, time, fs, csv, url, crypto) ---
+    BuiltinSig {
+        name: "eprint",
+        return_type: Some(BuiltinReturn::Named("nil")),
+    },
+    BuiltinSig {
+        name: "eprintln",
+        return_type: Some(BuiltinReturn::Named("nil")),
+    },
+    BuiltinSig {
+        name: "read_stdin",
+        return_type: Some(BuiltinReturn::Union(UNION_STRING_NIL)),
+    },
+    BuiltinSig {
+        name: "read_line",
+        return_type: Some(BuiltinReturn::Union(UNION_STRING_NIL)),
+    },
+    BuiltinSig {
+        name: "is_stdin_tty",
+        return_type: Some(BuiltinReturn::Named("bool")),
+    },
+    BuiltinSig {
+        name: "is_stdout_tty",
+        return_type: Some(BuiltinReturn::Named("bool")),
+    },
+    BuiltinSig {
+        name: "is_stderr_tty",
+        return_type: Some(BuiltinReturn::Named("bool")),
+    },
+    BuiltinSig {
+        name: "mock_stdin",
+        return_type: Some(BuiltinReturn::Named("nil")),
+    },
+    BuiltinSig {
+        name: "unmock_stdin",
+        return_type: Some(BuiltinReturn::Named("nil")),
+    },
+    BuiltinSig {
+        name: "mock_tty",
+        return_type: Some(BuiltinReturn::Named("nil")),
+    },
+    BuiltinSig {
+        name: "unmock_tty",
+        return_type: Some(BuiltinReturn::Named("nil")),
+    },
+    BuiltinSig {
+        name: "set_color_mode",
+        return_type: Some(BuiltinReturn::Named("nil")),
+    },
+    BuiltinSig {
+        name: "sleep_ms",
+        return_type: Some(BuiltinReturn::Named("nil")),
+    },
+    BuiltinSig {
+        name: "monotonic_ms",
+        return_type: Some(BuiltinReturn::Named("int")),
+    },
+    BuiltinSig {
+        name: "now_ms",
+        return_type: Some(BuiltinReturn::Named("int")),
+    },
+    BuiltinSig {
+        name: "mock_time",
+        return_type: Some(BuiltinReturn::Named("nil")),
+    },
+    BuiltinSig {
+        name: "unmock_time",
+        return_type: Some(BuiltinReturn::Named("nil")),
+    },
+    // Filesystem extensions
+    BuiltinSig {
+        name: "glob",
+        return_type: Some(BuiltinReturn::Named("list")),
+    },
+    BuiltinSig {
+        name: "walk_dir",
+        return_type: Some(BuiltinReturn::Named("list")),
+    },
+    BuiltinSig {
+        name: "move_file",
+        return_type: Some(BuiltinReturn::Named("nil")),
+    },
+    BuiltinSig {
+        name: "read_lines",
+        return_type: Some(BuiltinReturn::Named("list")),
+    },
+    // CSV
+    BuiltinSig {
+        name: "csv_parse",
+        return_type: Some(BuiltinReturn::Named("list")),
+    },
+    BuiltinSig {
+        name: "csv_stringify",
+        return_type: Some(BuiltinReturn::Named("string")),
+    },
+    // URL
+    BuiltinSig {
+        name: "url_parse",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
+        name: "url_build",
+        return_type: Some(BuiltinReturn::Named("string")),
+    },
+    BuiltinSig {
+        name: "query_parse",
+        return_type: Some(BuiltinReturn::Named("list")),
+    },
+    BuiltinSig {
+        name: "query_stringify",
+        return_type: Some(BuiltinReturn::Named("string")),
+    },
+    // Modern crypto
+    BuiltinSig {
+        name: "sha3_256",
+        return_type: Some(BuiltinReturn::Named("string")),
+    },
+    BuiltinSig {
+        name: "sha3_512",
+        return_type: Some(BuiltinReturn::Named("string")),
+    },
+    BuiltinSig {
+        name: "blake3",
+        return_type: Some(BuiltinReturn::Named("string")),
+    },
+    BuiltinSig {
+        name: "ed25519_keypair",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
+        name: "ed25519_sign",
+        return_type: Some(BuiltinReturn::Named("string")),
+    },
+    BuiltinSig {
+        name: "ed25519_verify",
+        return_type: Some(BuiltinReturn::Named("bool")),
+    },
+    BuiltinSig {
+        name: "x25519_keypair",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
+        name: "x25519_agree",
+        return_type: Some(BuiltinReturn::Named("string")),
+    },
+    BuiltinSig {
+        name: "jwt_verify",
+        return_type: Some(BuiltinReturn::Named("dict")),
     },
 ];

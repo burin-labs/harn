@@ -108,6 +108,9 @@ module.exports = grammar({
       token(
         choice(
           seq("//", /[^\n]*/),
+          // Shebang line. Lexer only honors at offset 0, but for editor
+          // highlighting we accept it anywhere (false positives are harmless).
+          seq("#!", /[^\n]*/),
           // Block comments, supports one level of nesting
           seq(
             "/*",
