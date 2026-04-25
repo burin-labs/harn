@@ -13,6 +13,11 @@ env:
   # eligible for cache hits.
   CARGO_INCREMENTAL: "0"
   SCCACHE_GHA_ENABLED: "true"
+  # Promote build warnings to errors so platform-specific warnings can't
+  # silently accumulate (Windows-only deprecations, dead_code for cfg-gated
+  # paths, etc). Clippy already runs with `-D warnings` via `make lint`;
+  # this gates `cargo build` / `cargo check` the same way.
+  RUSTFLAGS: "-D warnings"
 
 jobs:
   fmt:
@@ -73,9 +78,31 @@ jobs:
       - run: make lint-harn
       - run: make fmt-harn
 
+  changes:
+    name: Detect code changes
+    runs-on: ubuntu-latest
+    outputs:
+      rust: ${{ steps.filter.outputs.rust }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - id: filter
+        uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3.0.2
+        with:
+          filters: |
+            rust:
+              - 'crates/**'
+              - 'conformance/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - '.cargo/**'
+              - 'rust-toolchain.toml'
+              - '.github/workflows/ci.yml'
+
   windows:
     name: Rust on Windows (build + smoke test)
     runs-on: windows-latest
+    needs: changes
+    if: needs.changes.outputs.rust == 'true' || github.event_name == 'merge_group' || github.event_name == 'push'
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
@@ -94,8 +121,16 @@ jobs:
       # cfg-gates, hardcoded `/bin/sh`, etc.). It runs harn-lexer/parser/vm
       # unit tests and a smoke `harn run`. Sandbox + signal-handler tests
       # are skipped automatically via existing `#![cfg(unix)]` gates.
-      - name: Build workspace
-        run: cargo build --workspace --tests --bin harn
+      #
+      # `cargo check --workspace --tests` does the type/borrow check across
+      # the entire workspace without producing test binaries we won't run.
+      # Then we build only the harn binary (for the smoke test) and the
+      # test crates we actually run. This roughly halves Windows wall time
+      # vs. the previous `cargo build --workspace --tests`.
+      - name: Compile-check workspace + tests
+        run: cargo check --workspace --tests
+      - name: Build harn binary
+        run: cargo build --bin harn
       - name: Run unit tests for core crates
         shell: bash
         run: |
@@ -109,6 +144,14 @@ jobs:
         run: |
           echo 'pipeline main() { println("ok") }' > smoke.harn
           ./target/debug/harn.exe run smoke.harn
+
+  windows-skip:
+    name: Rust on Windows (build + smoke test)
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.rust == 'false' && github.event_name == 'pull_request'
+    steps:
+      - run: echo "Skipped — no Rust/CI changes in this PR."
 
   portal:
     name: Portal frontend
@@ -139,7 +182,7 @@ jobs:
     name: Check status
     runs-on: ubuntu-latest
     if: always()
-    needs: [fmt, lint-md, rust, windows, portal, actions]
+    needs: [fmt, lint-md, rust, windows, windows-skip, portal, actions]
     steps:
       - name: Verify required CI jobs
         run: |
@@ -147,10 +190,22 @@ jobs:
             ["Format check"]="${{ needs.fmt.result }}"
             ["Markdown lint"]="${{ needs['lint-md'].result }}"
             ["Rust (lint + test + conformance)"]="${{ needs.rust.result }}"
-            ["Rust on Windows (build + smoke test)"]="${{ needs.windows.result }}"
             ["Portal frontend"]="${{ needs.portal.result }}"
             ["GitHub Actions lint"]="${{ needs.actions.result }}"
           )
+
+          # Windows runs in one of two flavors per PR (real or skip-alias).
+          # Whichever one ran needs to be green; the other is skipped.
+          windows_real="${{ needs.windows.result }}"
+          windows_skip="${{ needs['windows-skip'].result }}"
+          echo "Rust on Windows (real): $windows_real"
+          echo "Rust on Windows (skip alias): $windows_skip"
+          if [ "$windows_real" = "success" ] || [ "$windows_skip" = "success" ]; then
+            :
+          else
+            echo "::error::Windows job did not succeed in either real or skip variant."
+            exit 1
+          fi
 
           failed=0
           for name in "${!results[@]}"; do

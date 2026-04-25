@@ -673,7 +673,7 @@ fn option_duration_ms(options: Option<&BTreeMap<String, VmValue>>, key: &str) ->
     options
         .and_then(|opts| opts.get(key))
         .and_then(|value| match value {
-            VmValue::Duration(ms) => Some(*ms),
+            VmValue::Duration(ms) if *ms >= 0 => Some(*ms as u64),
             VmValue::Int(ms) if *ms >= 0 => Some(*ms as u64),
             VmValue::Float(ms) if *ms >= 0.0 => Some(*ms as u64),
             _ => None,
