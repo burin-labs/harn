@@ -241,10 +241,18 @@ pub fn push_http_mock(
     } else {
         responses.into_iter().map(MockResponse::from).collect()
     };
+    let method = method.into();
+    let url_pattern = url_pattern.into();
     HTTP_MOCKS.with(|mocks| {
-        mocks.borrow_mut().push(HttpMock {
-            method: method.into(),
-            url_pattern: url_pattern.into(),
+        let mut mocks = mocks.borrow_mut();
+        // Re-registering the same (method, url_pattern) replaces the prior
+        // mock so tests can override per-case responses without first calling
+        // http_mock_clear(). Without this, the original mock keeps matching
+        // forever and the new one is dead.
+        mocks.retain(|mock| !(mock.method == method && mock.url_pattern == url_pattern));
+        mocks.push(HttpMock {
+            method,
+            url_pattern,
             responses,
             next_response: 0,
         });
@@ -531,6 +539,10 @@ pub fn register_http_builtins(vm: &mut Vm) {
     // --- Mock HTTP builtins ---
 
     // http_mock(method, url_pattern, response) -> nil
+    //
+    // Calling http_mock again with the same (method, url_pattern) tuple
+    // *replaces* the prior mock for that target — tests can override a
+    // per-case response without first calling http_mock_clear().
     vm.register_builtin("http_mock", |args, _out| {
         let method = args.first().map(|a| a.display()).unwrap_or_default();
         let url_pattern = args.get(1).map(|a| a.display()).unwrap_or_default();
@@ -542,7 +554,9 @@ pub fn register_http_builtins(vm: &mut Vm) {
         let responses = parse_mock_responses(&response);
 
         HTTP_MOCKS.with(|mocks| {
-            mocks.borrow_mut().push(HttpMock {
+            let mut mocks = mocks.borrow_mut();
+            mocks.retain(|mock| !(mock.method == method && mock.url_pattern == url_pattern));
+            mocks.push(HttpMock {
                 method,
                 url_pattern,
                 responses,

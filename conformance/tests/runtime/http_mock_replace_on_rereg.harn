@@ -1,0 +1,23 @@
+/**
+ * Re-registering http_mock with the same (method, url_pattern) replaces
+ * the prior mock. Lets tests override per-case responses without first
+ * calling http_mock_clear().
+ */
+pipeline default(task) {
+  http_mock("GET", "https://api.example.com/x", {status: 200, body: "first"})
+  http_mock("GET", "https://api.example.com/x", {status: 429, body: "second"})
+  let r = http_get("https://api.example.com/x")
+  println(r.status)
+  println(r.body)
+  // Different URL is unaffected by the replace above.
+  http_mock("GET", "https://api.example.com/y", {status: 201, body: "y-only"})
+  let other = http_get("https://api.example.com/y")
+  println(other.status)
+  println(other.body)
+  // Different method on the same path is also independent.
+  http_mock("POST", "https://api.example.com/x", {status: 202, body: "post-x"})
+  let posted = http_post("https://api.example.com/x", "{}", {})
+  println(posted.status)
+  println(posted.body)
+  http_mock_clear()
+}
