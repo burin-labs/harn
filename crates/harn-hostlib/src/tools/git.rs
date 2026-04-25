@@ -347,6 +347,15 @@ fn validate_rev(rev: &str) -> Result<(), HostlibError> {
 
 fn run_git(repo: &PathBuf, args: &[&str]) -> Result<String, HostlibError> {
     let mut cmd = Command::new("git");
+    // Strip ambient `GIT_*` environment variables so that being invoked
+    // from inside a parent `git` process (e.g. a pre-push hook running
+    // tests, or a git alias) doesn't leak `GIT_DIR` / `GIT_INDEX_FILE` /
+    // etc. into our isolated repo paths.
+    for (key, _) in std::env::vars() {
+        if key.starts_with("GIT_") {
+            cmd.env_remove(&key);
+        }
+    }
     cmd.arg("-C").arg(repo);
     for arg in args {
         cmd.arg(arg);

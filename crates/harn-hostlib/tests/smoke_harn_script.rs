@@ -170,12 +170,13 @@ fn end_to_end_git_via_harn_script() {
     let dir = TempDir::new().unwrap();
     let repo = dir.path();
     let run_git = |args: &[&str]| {
-        let output = std::process::Command::new("git")
-            .arg("-C")
-            .arg(repo)
-            .args(args)
-            .output()
-            .unwrap();
+        let mut cmd = std::process::Command::new("git");
+        for (key, _) in std::env::vars() {
+            if key.starts_with("GIT_") {
+                cmd.env_remove(&key);
+            }
+        }
+        let output = cmd.arg("-C").arg(repo).args(args).output().unwrap();
         assert!(
             output.status.success(),
             "git {args:?} failed: {}",

@@ -69,7 +69,16 @@ fn fixture_repo() -> TempDir {
 }
 
 fn run_git(repo: &Path, args: &[&str]) {
-    let output = Command::new("git")
+    let mut cmd = Command::new("git");
+    // Drop ambient GIT_* env vars so the test isn't perturbed by an
+    // outer `git push` hook (which would otherwise leak GIT_DIR etc.
+    // into the subprocess and silently break our tempdir isolation).
+    for (key, _) in std::env::vars() {
+        if key.starts_with("GIT_") {
+            cmd.env_remove(&key);
+        }
+    }
+    let output = cmd
         .arg("-C")
         .arg(repo)
         .args(args)
@@ -83,8 +92,10 @@ fn run_git(repo: &Path, args: &[&str]) {
         });
     assert!(
         output.status.success(),
-        "git {} stderr: {}",
+        "git {} (cwd={}) status={:?} stderr={}",
         args.join(" "),
+        repo.display(),
+        output.status,
         String::from_utf8_lossy(&output.stderr)
     );
 }
