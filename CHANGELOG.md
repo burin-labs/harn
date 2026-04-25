@@ -22,9 +22,11 @@ granular archaeology.
 - **`source.fixAll.harn` LSP code action.** The Harn LSP now advertises
   the `source.fixAll.harn` and `source.fixAll` code-action kinds and
   returns a single bulk action that applies every available autofix in
-  the document at once. VS Code users can wire this into save by adding
-  `"editor.codeActionsOnSave": { "source.fixAll.harn": "always" }` under
-  the `[harn]` language scope. Per-diagnostic quick-fixes (Cmd+.)
+  the document at once. The bundled VS Code extension turns on
+  `editor.formatOnSave` and `editor.codeActionsOnSave: { "source.fixAll.harn": "always" }`
+  for `[harn]` files by default and contributes a
+  `Harn: Apply All Autofixes` command palette entry that triggers the
+  same bulk action on demand. Per-diagnostic quick-fixes (Cmd+.)
   continue to work unchanged.
 - **Compression stdlib builtins (#613).** Added in-memory
   `gzip_encode`/`gzip_decode`, `zstd_encode`/`zstd_decode`,

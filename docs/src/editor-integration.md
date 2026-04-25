@@ -19,6 +19,17 @@ cd editors/vscode && npm install && npm run build
 Then use **Extensions: Install from VSIX** or symlink into
 `~/.vscode/extensions/`.
 
+The extension contributes:
+
+- A `Harn: Run Pipeline` command (terminal `harn run` on the active file)
+- A `Harn: Format File` command (terminal `harn fmt`)
+- A `Harn: Apply All Autofixes` command — invokes the LSP's bulk
+  `source.fixAll.harn` code action against the current document
+- Language-scoped defaults that turn on `editor.formatOnSave` and
+  `editor.codeActionsOnSave: { "source.fixAll.harn": "always" }` for
+  `[harn]` files. Override either in user settings if you don't want
+  autoformat-on-save or autofix-on-save.
+
 ## Language server (LSP)
 
 Start the LSP server with:
