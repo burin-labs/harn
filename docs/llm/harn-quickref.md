@@ -830,6 +830,25 @@ its own `tool_retries`, `max_iterations`, `max_nudges`, and
 native-tool stages that receive text-mode `<tool_call>` fallback
 output).
 
+Pass `stop_after_successful_tools: ["name", ...]` to terminate the loop
+the moment any of those tools is dispatched successfully. Same shape as
+Vercel AI SDK's `stopWhen: hasToolCall(name)` and OpenAI Agents SDK's
+`StopAtTools([name])`. Use this for "terminal" tools (e.g.
+`exit_plan_mode`, `submit_answer`, `ask_user`) that mark the end of an
+agent step:
+
+```harn
+agent_loop(task, sys, {
+  tools: registry,
+  stop_after_successful_tools: ["ask_question", "exit_plan_mode"],
+})
+```
+
+The check fires after each iteration's tool dispatch, so any other
+tool calls in the same iteration still run; only subsequent
+iterations are skipped. The loop exits with `status = "done"` and
+the tool name appears in `tools.successful`.
+
 Pass `permissions` to scope one agent below the ambient `policy` ceiling:
 
 ```harn

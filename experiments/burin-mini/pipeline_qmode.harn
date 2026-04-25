@@ -1,0 +1,561 @@
+// Question-at-a-time planning agent (qmode).
+//
+// The model asks the user one question at a time, may use read-only
+// discovery tools between questions, then calls exit_plan_mode with a
+// grounded JSON plan. State lives on disk in .qmode/<task_id>/ so the
+// loop pauses across `harn playground` invocations: the harness exits
+// after each ask_question or exit_plan_mode call, the user (or Claude)
+// records the answer, and reruns the pipeline.
+//
+// Reuses workspace tools from lib/workspace.harn.
+import "std/path"
+import "std/runtime"
+import {
+  find_workspace,
+  list_workspace_files,
+  read_workspace,
+  workspace_root,
+} from "lib/workspace.harn"
+
+// -----------------------------------------------------------------------------
+// Provider guard: hard-block remote inference.
+// -----------------------------------------------------------------------------
+
+fn provider_name() {
+  return env_or("BURIN_MINI_PROVIDER", env_or("HARN_LLM_PROVIDER", "ollama"))
+}
+
+fn generator_model() {
+  return env_or("BURIN_MINI_GENERATOR_MODEL", env_or("HARN_LLM_MODEL", "qwen3.6:35b-a3b-coding-nvfp4"))
+}
+
+fn assert_local_only() {
+  let p = lowercase(provider_name())
+  let allowed = ["ollama", "local", "mock"]
+  for name in allowed {
+    if p == name || starts_with(p, name + ":") {
+      return
+    }
+  }
+  throw "[qmode] provider '${p}' is not local-only. Allowed: ollama, local, mock. Set BURIN_MINI_PROVIDER=ollama and BURIN_MINI_GENERATOR_MODEL=qwen3.6:35b-a3b-coding-nvfp4."
+}
+
+// -----------------------------------------------------------------------------
+// Task state directory layout.
+// -----------------------------------------------------------------------------
+
+fn task_dir(task_id) {
+  return path_join(source_dir(), ".qmode", task_id)
+}
+
+fn ensure_task_dir(task_id) {
+  let dir = task_dir(task_id)
+  mkdir(dir)
+  return dir
+}
+
+fn qa_path(task_id) {
+  return path_join(task_dir(task_id), "qa.jsonl")
+}
+
+fn pending_path(task_id) {
+  return path_join(task_dir(task_id), "pending.json")
+}
+
+fn plan_path(task_id) {
+  return path_join(task_dir(task_id), "plan.json")
+}
+
+fn task_meta_path(task_id) {
+  return path_join(task_dir(task_id), "task.json")
+}
+
+// -----------------------------------------------------------------------------
+// JSONL helpers (newline-delimited JSON).
+// -----------------------------------------------------------------------------
+
+fn read_jsonl(path) {
+  if !file_exists(path) {
+    return []
+  }
+  let raw = read_file(path)
+  if (raw ?? "").trim() == "" {
+    return []
+  }
+  var entries = []
+  for line in split(raw, "\n") {
+    let trimmed = line.trim()
+    if trimmed == "" {
+      continue
+    }
+    let parsed = json_parse(trimmed)
+    if parsed != nil {
+      entries = entries + [parsed]
+    }
+  }
+  return entries
+}
+
+// -----------------------------------------------------------------------------
+
+// Three-layer USER_PROFILE.md loader.
+// Most-specific-last concatenation. Each layer is tagged with its scope.
+
+// -----------------------------------------------------------------------------
+
+fn read_profile_file(path, scope) {
+  if !file_exists(path) {
+    return ""
+  }
+  let body = read_file(path)
+  if body.trim() == "" {
+    return ""
+  }
+  return "<profile scope=\"${scope}\" path=\"${path}\">\n${body.trim()}\n</profile>"
+}
+
+fn load_profile_layers() {
+  let home = home_dir()
+  let user_global = path_join(home, ".harn", "USER_PROFILE.md")
+  let project = path_join(workspace_root(), ".harn", "USER_PROFILE.md")
+  let cwd_local = path_join(source_dir(), ".harn", "USER_PROFILE.md")
+  var blocks = []
+  let user_block = read_profile_file(user_global, "user")
+  if user_block != "" {
+    blocks = blocks + [user_block]
+  }
+  let project_block = read_profile_file(project, "project")
+  if project_block != "" {
+    blocks = blocks + [project_block]
+  }
+  let cwd_block = read_profile_file(cwd_local, "cwd")
+  if cwd_block != "" {
+    blocks = blocks + [cwd_block]
+  }
+  if len(blocks) == 0 {
+    return "(no prior preferences saved)"
+  }
+  return join(blocks, "\n\n")
+}
+
+fn profile_path_for_scope(scope) {
+  if scope == "user" {
+    return path_join(home_dir(), ".harn", "USER_PROFILE.md")
+  }
+  if scope == "project" {
+    return path_join(workspace_root(), ".harn", "USER_PROFILE.md")
+  }
+  return path_join(source_dir(), ".harn", "USER_PROFILE.md")
+}
+
+fn append_profile_writes(profile_writes) {
+  if type_of(profile_writes) != "list" || len(profile_writes) == 0 {
+    return
+  }
+  let today = date_iso().substring(0, 10)
+  for entry in profile_writes {
+    if type_of(entry) != "dict" {
+      continue
+    }
+    let scope = (entry?.scope ?? "project").trim()
+    let bullet = (entry?.bullet ?? "").trim()
+    if bullet == "" {
+      continue
+    }
+    let target = profile_path_for_scope(scope)
+    mkdir(path_parent(target))
+    let prior = if file_exists(target) {
+      read_file(target)
+    } else {
+      ""
+    }
+    let header = "\n\n## Auto-learned ${today}\n"
+    let body = if contains(prior, header) {
+      "- ${bullet}\n"
+    } else {
+      "${header}- ${bullet}\n"
+    }
+    append_file(target, body)
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Plan schema (compatible with burin-code's plan-json-schema partial).
+// -----------------------------------------------------------------------------
+
+fn _plan_schema() {
+  return {
+    type: "object",
+    required: ["mode", "direction", "tasks", "ready"],
+    properties: {
+    mode: {type: "string", enum: ["fast_execute", "plan_then_execute"]},
+    direction: {type: "string"},
+    targets: {type: "array", items: {type: "string"}},
+    grounding: {
+    type: "array",
+    items: {
+    type: "object",
+    properties: {path: {type: "string"}, role: {type: "string"}, why: {type: "string"}},
+  },
+  },
+    tasks: {type: "array", items: {type: "string"}},
+    verification: {type: "array", items: {type: "string"}},
+    ready: {type: "boolean"},
+    profile_writes: {
+    type: "array",
+    items: {
+    type: "object",
+    properties: {scope: {type: "string", enum: ["user", "project", "cwd"]}, bullet: {type: "string"}},
+  },
+  },
+  },
+  }
+}
+
+// -----------------------------------------------------------------------------
+
+// Repo map (Aider-style orientation, but token-cheap).
+//
+// We front-load the workspace tree + a one-line summary per file so the model
+// doesn't burn iterations on `glob` just to learn the layout. The first
+// non-empty line of each file is a surprisingly strong proxy for "what is
+// this file" across markdown, JS/TS, Python, shell, JSON, Rust, etc. — and
+// avoids the need for tree-sitter symbol extraction we don't have here.
+
+// -----------------------------------------------------------------------------
+
+fn _first_nonempty_line(path) {
+  let body = read_file(path)
+  if body == nil {
+    return ""
+  }
+  for line in split(body, "\n") {
+    let t = line.trim()
+    if t != "" {
+      let capped = if len(t) > 100 {
+        t[0:100] + "…"
+      } else {
+        t
+      }
+      return capped
+    }
+  }
+  return ""
+}
+
+fn repo_map_text() {
+  let files = list_workspace_files()
+  let root = workspace_root()
+  if len(files) == 0 {
+    return "(workspace is empty)"
+  }
+  let cap = 60
+  let visible = if len(files) > cap {
+    files[0:cap]
+  } else {
+    files
+  }
+  var lines = ["root: ${root}", "files (${len(files)}; ${len(visible)} shown):"]
+  for rel in visible {
+    let abs = path_join(root, rel)
+    let body = read_file(abs)
+    let line_count = if body == nil {
+      0
+    } else {
+      len(split(body, "\n"))
+    }
+    let summary = _first_nonempty_line(abs)
+    lines = lines + ["  ${rel} (${line_count}L)  ${summary}"]
+  }
+  if len(files) > cap {
+    lines = lines + ["  ... (${len(files) - cap} more files; use find to discover)"]
+  }
+  return join(lines, "\n")
+}
+
+// -----------------------------------------------------------------------------
+// Tools available to the model.
+// -----------------------------------------------------------------------------
+
+fn build_tools(task_id, dir) {
+  let pending_p = path_join(dir, "pending.json")
+  let plan_p = path_join(dir, "plan.json")
+  var registry = tool_registry()
+  registry = tool_define(
+    registry,
+    "find",
+    "Find files OR content in the workspace. Searches BOTH filenames (case-insensitive substring) and file contents (ripgrep, case-insensitive). Pass a single short token like 'auth', 'rate', 'middleware' — not a phrase. Output has two sections (filename matches, content matches) or '(no matches for ...)'.",
+    {
+    parameters: {
+    query: {
+    type: "string",
+    description: "A token or short pattern. Avoid multi-word natural-language phrases — those rarely match literally. Use 'auth' not 'auth middleware'.",
+  },
+  },
+    returns: {type: "string"},
+    handler: { args -> find_workspace(args?.query ?? "") },
+  },
+  )
+  registry = tool_define(
+    registry,
+    "read",
+    "Read a single workspace file. Path must be workspace-relative (matching the paths in the workspace tree above).",
+    {
+    parameters: {path: {type: "string", description: "Workspace-relative file path."}},
+    returns: {type: "string"},
+    handler: { args -> read_workspace(args.path) },
+  },
+  )
+  registry = tool_define(
+    registry,
+    "ask_question",
+    "Ask the user exactly one short question (max 3 sentences). The harness pauses after this and resumes when the user answers. Always offer a default or example so they don't have to think hard.",
+    {
+    parameters: {
+    question: {
+    type: "string",
+    description: "The next single question for the user. <=3 sentences. Friendly. Offer a default.",
+  },
+  },
+    returns: {type: "string"},
+    handler: { args ->
+    let q = (args?.question ?? "").trim()
+    if q == "" {
+      return "Error: question text was empty. Try again with a concrete question."
+    }
+    if !file_exists(pending_p) {
+      write_file(pending_p, json_stringify({question: q, asked_at: date_iso()}))
+    }
+    "Question recorded. The harness will pause and resume after the user answers."
+  },
+  },
+  )
+  // Idempotent: if multiple ask_question calls land in the same
+  // iteration (parallel tool-use), only the first sticks. agent_loop
+  // ends the step after this iteration via stop_after_successful_tools.
+  registry = tool_define(
+    registry,
+    "exit_plan_mode",
+    "Emit the final structured plan and end the conversation. Pass the plan as a JSON object (or JSON-stringified). Always include profile_writes (possibly empty) for any durable preferences you learned this turn.",
+    {
+    parameters: {
+    plan: {
+    type: "string",
+    description: "The plan as a JSON object. Top-level keys: mode, direction, targets, grounding, tasks, verification, ready, profile_writes.",
+  },
+  },
+    returns: {type: "string"},
+    handler: { args ->
+    if !file_exists(plan_p) {
+      let raw = args?.plan ?? args ?? {}
+      let plan = if type_of(raw) == "string" {
+    json_parse(raw) ?? {}
+  } else {
+    raw
+  }
+      write_file(plan_p, json_stringify(plan))
+      append_profile_writes(plan?.profile_writes ?? [])
+    }
+    "Plan recorded. The harness will end the step now."
+  },
+  },
+  )
+  // Idempotent — first plan in this iteration sticks.
+  return registry
+}
+
+// -----------------------------------------------------------------------------
+// Prompt construction.
+// -----------------------------------------------------------------------------
+
+fn system_prompt(profile_block) {
+  return """
+You are a planning partner pairing with the user. The user types one short message; you reply with one short question, or commit to a final plan. A whole conversation is typically 1–5 exchanges.
+
+This invocation is ONE STEP of that conversation. A step is: optional discovery, then exactly one call to a terminal tool — ask_question or exit_plan_mode. The harness ends the step automatically the moment that terminal tool succeeds; you do not need to emit ##DONE## or anything else.
+
+Workflow this step:
+1. The user message starts with a <workspace> block listing every file (path + line count + first non-empty line). Treat that as your starting orientation; you usually don't need to call `find` to learn the layout. Use `find(query)` for token searches across filenames AND content (one tool — pass a single token like "auth", not a phrase). Use `read(path)` to fetch a specific file. Look BEFORE you ask — don't ask about facts that are obvious from the workspace block or from a read.
+2. Decide whether to ask or commit. You are a planning *partner*, not a code-completion model — defaulting to "I'll just pick" silently is the wrong move. Ask via ask_question(...) whenever ANY of the following is true:
+   - The user's request is open-ended ("improve performance", "make it more robust", "clean up", "refactor"). The scope is the question.
+   - A design parameter is not pinned by the code: rate limits, TTLs, cache sizes, library choices, error codes, retry/backoff, log verbosity, naming.
+   - There are 2+ sensible places to put the new code and the convention isn't obvious.
+   - The change is destructive or hard to undo: deleting/renaming files, dropping schema, mass rewrites, removing public API.
+   - You have a complete plan but at least one parameter you guessed at. In that case, summarize the plan in 1-2 sentences inside the question and ask "does this sound right? happy to adjust X/Y/Z." That's still ONE question and gives the user a chance to redirect cheaply.
+
+   Only call exit_plan_mode directly when the request is concrete AND every choice in the plan is pinned by the code or by a prior answer in this conversation.
+
+If the user's request looks like a direct question (e.g. "explain this repo"), call exit_plan_mode without asking — the plan describes the reading and synthesis the implementation phase will produce; you do not answer in free prose.
+
+Conversation style for ask_question:
+- Friendly, colloquial, like a coworker pairing on the problem.
+- Plain English, no jargon, no bullet lists.
+- ≤ 3 sentences. Always include a default ("…or just say 'whatever you think' and I'll pick something sensible").
+- One thing at a time. If you need two answers, ask the most important one first; you can ask the next on the following turn.
+- For confirm-the-plan questions: lead with a 1-sentence summary of what you'd do, then "sound good, or want me to change X?".
+
+Stopping rule: 3–5 questions is typical. More than 7 is stalling. Once the user has confirmed the plan (or the plan is fully pinned by code), call exit_plan_mode.
+
+Skip anything covered by <profile> below — those are durable preferences the user already shared. Don't re-ask them.
+
+Plan schema (exit_plan_mode):
+{
+  "mode": "fast_execute" | "plan_then_execute",
+  "direction": "one sentence summarizing the approach",
+  "targets": ["workspace-relative/path.ext", ...],
+  "grounding": [{"path": "...", "role": "sibling_exemplar|convention_anchor|source_under_change", "why": "phrase"}],
+  "tasks": ["concrete step 1 referencing real paths/symbols", "..."],
+  "verification": ["command or check"],
+  "ready": true,
+  "profile_writes": [{"scope": "user|project|cwd", "bullet": "Durable preference, e.g. 'Branch policy: edits go directly to main unless I say otherwise.'"}]
+}
+
+profile_writes: ONLY durable preferences the user expressed THIS conversation that would save you from re-asking next time. Never save derivable facts (paths, structure, code). Never save fix recipes. Empty list is fine.
+
+For read-only / "explain this" tasks: still call exit_plan_mode. The plan should describe the reading and the answer the implementation phase will produce — e.g. tasks=["Read README, api.ts, auth-guard.ts", "Write 2-paragraph explanation citing those paths"], mode="plan_then_execute".
+
+<profile>
+${profile_block}
+</profile>
+
+Reminder: no free-form prose answers. Every step ends with one tool call to ask_question or exit_plan_mode.
+""".trim()
+}
+
+fn build_user_prompt(task, qa_history) {
+  var lines = ["The user's request:", "", task, ""]
+  // Workspace orientation block — Aider-style repo map but path+first-line
+  // (not tree-sitter symbols, which would need a parser per language).
+  // This is the single biggest information-density win: the model can
+  // skip 1-2 iterations of pure orientation calls.
+  lines = lines + ["<workspace>", repo_map_text(), "</workspace>", ""]
+  if len(qa_history) == 0 {
+    lines = lines
+      + [
+      "No prior Q&A yet. The workspace block above is your orientation — a `find` call is rarely needed before reading. Read 1-3 specific files if it'll change the plan, then ask the single most plan-changing question (or, if the request is concrete and every parameter is pinned by the code, commit to exit_plan_mode).",
+    ]
+  } else {
+    lines = lines + ["Prior Q&A in this conversation (oldest first):"]
+    for entry in qa_history {
+      let q = if type_of(entry?.question) == "string" {
+        entry.question
+      } else {
+        ""
+      }
+      let a = if type_of(entry?.answer) == "string" {
+        entry.answer
+      } else {
+        ""
+      }
+      lines = lines + ["- Q: ${q}"]
+      lines = lines + ["  A: ${a}"]
+    }
+    lines = lines
+      + [
+      "",
+      "You already have ${len(qa_history)} answer(s). DEFAULT toward calling exit_plan_mode now. Only ask another question if the answer would *meaningfully change the file list or approach*. Most tasks need 1–3 questions total, not 5+.",
+    ]
+  }
+  lines = lines
+    + [
+    "",
+    "End this step with EXACTLY ONE call: ask_question or exit_plan_mode. The harness terminates immediately after. Anything else is wasted.",
+  ]
+  return join(lines, "\n")
+}
+
+// -----------------------------------------------------------------------------
+// Main.
+// -----------------------------------------------------------------------------
+
+pipeline default() {
+  assert_local_only()
+  let task_id = env_or("QMODE_TASK_ID", "default")
+  let task_text = runtime_task()
+  let dir = ensure_task_dir(task_id)
+  // Reset step marker for this invocation; handlers overwrite it.
+  let step_marker = path_join(dir, "step.txt")
+  if file_exists(step_marker) {
+    delete_file(step_marker)
+  }
+  if file_exists(plan_path(task_id)) {
+    write_file(step_marker, "plan_already_exists")
+    return
+  }
+  if file_exists(pending_path(task_id)) {
+    throw "[qmode] pending.json exists at ${pending_path(task_id)}. The driver should have cleared it after recording the answer."
+  }
+  // Persist task metadata on first run.
+  if !file_exists(task_meta_path(task_id)) {
+    if task_text.trim() == "" {
+      throw "[qmode] no task text supplied. Pass --task '...' on first invocation."
+    }
+    write_file(
+      task_meta_path(task_id),
+      json_stringify({task: task_text, workspace_root: workspace_root(), started_at: date_iso()}),
+    )
+  }
+  let task_meta = json_parse(read_file(task_meta_path(task_id))) ?? {}
+  let effective_task = task_meta?.task ?? task_text
+  let qa_history = read_jsonl(qa_path(task_id))
+  let profile_block = load_profile_layers()
+  let user_prompt = build_user_prompt(effective_task, qa_history)
+  let sys_prompt = system_prompt(profile_block)
+  write_file(
+    path_join(dir, "last-prompt.txt"),
+    "===SYSTEM===\n${sys_prompt}\n===USER===\n${user_prompt}\n",
+  )
+  // 10 iterations is plenty once `glob` returns useful results (rg-backed,
+  // not the broken `ls` version that wasted 5+ iterations on errors).
+  let result = agent_loop(
+    user_prompt,
+    sys_prompt,
+    {
+    provider: provider_name(),
+    model: generator_model(),
+    tools: build_tools(task_id, dir),
+    tool_format: "native",
+    temperature: 0.2,
+    max_tokens: 2048,
+    max_iterations: 10,
+    llm_retries: 1,
+    turn_policy: {require_action_or_yield: true, max_prose_chars: 280},
+    stop_after_successful_tools: ["ask_question", "exit_plan_mode"],
+  },
+  )
+  // Force a tool call (or explicit yield) on every iteration; without
+  // this, qwen3.6 happily emits a prose answer + ##DONE##. With it,
+  // the model has to keep using tools until one of them is terminal.
+  // Stop the loop the moment a terminal tool succeeds — same shape as
+  // Vercel AI SDK's `stopWhen: hasToolCall(...)` and OpenAI Agents
+  // SDK's `StopAtTools(...)`.
+  // Step outcome for the driver to consume.
+  let outcome = if file_exists(path_join(dir, "plan.json")) {
+    "exit_plan_mode"
+  } else {
+    if file_exists(path_join(dir, "pending.json")) {
+      "ask_question"
+    } else {
+      "no_terminal"
+    }
+  }
+  let diag = {
+    outcome: outcome,
+    status: result?.status ?? "?",
+    iterations: result?.llm?.iterations ?? 0,
+    tool_calls: result?.tools?.calls ?? [],
+    visible_text: result?.visible_text ?? "",
+  }
+  write_file(path_join(dir, "step.txt"), outcome)
+  write_file(path_join(dir, "diag.json"), json_stringify(diag))
+  // Dump the full transcript for offline inspection.
+  write_file(
+    path_join(dir, "step-transcript.json"),
+    json_stringify({transcript: result?.transcript, task_ledger: result?.task_ledger}),
+  )
+  println("[qmode] step=${outcome} status=${diag?.status} iterations=${diag?.iterations}")
+  if outcome == "no_terminal" {
+    println("[qmode] WARN: model never called a terminal tool. visible_text:")
+    println(diag?.visible_text)
+  }
+}
