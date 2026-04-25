@@ -1,0 +1,40 @@
+import { process_exec } from "std/runtime"
+
+fn wait_for_file(path, attempts) {
+  var remaining = attempts
+  while !file_exists(path) && remaining > 0 {
+    sleep(50ms)
+    remaining = remaining - 1
+  }
+  require file_exists(path), "timed out waiting for " + path
+}
+
+pipeline default() {
+  let root = project_root() ?? cwd()
+  let helper = path_join(root, "conformance/helpers/http_proxy_server.py")
+  let state_dir = path_join(temp_dir(), "harn-http-proxy-" + uuid())
+  let port_path = path_join(state_dir, "port")
+  let state_path = path_join(state_dir, "state.json")
+  let pid_path = path_join(state_dir, "server.pid")
+  let log_path = path_join(state_dir, "server.log")
+  mkdir(state_dir)
+  let start = process_exec(
+    "python3 \"" + helper + "\" \"" + state_dir + "\" >\"" + log_path + "\" 2>&1 & echo $! > \""
+    + pid_path
+    + "\"",
+  )
+  require start?.success, "proxy server started"
+  wait_for_file(port_path, 100)
+  let proxy = "http://127.0.0.1:" + read_file(port_path).trim()
+  let response = http_get(
+    "http://example.invalid/proxy-check",
+    {proxy: proxy, proxy_auth: {user: "user", pass: "pass"}, timeout_ms: 1000},
+  )
+  wait_for_file(state_path, 100)
+  process_exec("kill $(cat \"" + pid_path + "\") >/dev/null 2>&1 || true")
+  let state = json_parse(read_file(state_path))
+  println(response.body)
+  println(state.method)
+  println(state.target)
+  println(state.headers["proxy-authorization"])
+}

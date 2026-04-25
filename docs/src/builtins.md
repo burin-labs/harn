@@ -727,9 +727,14 @@ println(text.source.sha256)
 | `http_patch(url, body, options?)` | url: string, body: string, options: dict | dict | PATCH request |
 | `http_delete(url, options?)` | url: string, options: dict | dict | DELETE request |
 | `http_request(method, url, options?)` | method: string, url: string, options: dict | dict | Generic HTTP request |
+| `http_download(url, dst_path, options?)` | url: string, dst_path: string, options: dict | dict | Stream a response body to a file |
 | `http_session(options?)` | options: dict | string | Create a reusable host-managed HTTP client/session handle |
 | `http_session_request(session, method, url, options?)` | session: string, method: string, url: string, options: dict | dict | Run an HTTP request through a reusable session |
 | `http_session_close(session)` | session: string | bool | Close a reusable HTTP session handle |
+| `http_stream_open(url, options?)` | url: string, options: dict | string | Open a streaming HTTP response handle |
+| `http_stream_read(stream, max_bytes?)` | stream: string, max_bytes: int | bytes or nil | Read the next response chunk |
+| `http_stream_info(stream)` | stream: string | dict | Return `{status, headers, ok}` for an open stream |
+| `http_stream_close(stream)` | stream: string | bool | Close a streaming HTTP response handle |
 | `sse_connect(method, url, options?)` | method: string, url: string, options: dict | string | Open an SSE/Streamable HTTP receive handle |
 | `sse_receive(stream, timeout_ms?)` | stream: string, timeout_ms: int | dict or nil | Receive one SSE event with timeout/backpressure |
 | `sse_close(stream)` | stream: string | bool | Close an SSE handle |
@@ -738,17 +743,33 @@ println(text.source.sha256)
 | `websocket_receive(socket, timeout_ms?)` | socket: string, timeout_ms: int | dict or nil | Receive one WebSocket message with timeout/backpressure |
 | `websocket_close(socket)` | socket: string | bool | Close a WebSocket handle |
 
-All HTTP functions return `{status: int, headers: dict, body: string, ok: bool}`.
-Options: `timeout_ms` (alias `timeout`, both in ms), `retry: {max, backoff_ms}`,
+`http_get/post/put/patch/delete/request/session_request` return
+`{status: int, headers: dict, body: string, ok: bool}`.
+`http_download` returns `{bytes_written, status, headers, ok}`.
+Options: `timeout_ms` (alias `timeout`, both in ms), `total_timeout_ms`,
+`connect_timeout_ms`, `read_timeout_ms`, `retry: {max, backoff_ms}`,
 legacy aliases `retries` / `backoff`, optional `retry_on` (status list),
 optional `retry_methods` (defaults to `GET`, `HEAD`, `PUT`, `DELETE`,
 `OPTIONS`), `headers` (dict), `auth` (string or `{bearer: "token"}` or
 `{basic: {user, password}}`), `follow_redirects` (bool),
-`max_redirects` (int), `body` (string). `timeout_ms` applies per attempt.
+`max_redirects` (int), `body` (string), `multipart`
+(`list<{name, value|value_base64|path, filename?, content_type?}>`),
+`proxy` (string or `{url, no_proxy?}`), `proxy_auth` (`{user, pass}`),
+`tls` (`{ca_bundle_path?, client_cert_path?, client_key_path?, client_identity_path?, pinned_sha256?}`),
+and `decompress` (bool, default `true`). `timeout_ms` and `total_timeout_ms`
+apply per attempt.
 Retryable responses default to `408`, `429`, `500`, `502`, `503`, and
 `504`; `Retry-After` is honored on `429` and `503` when retries are
 enabled. Throws on network errors. `http_request(..., {session: handle})`
-routes through an existing session when one is provided.
+routes through an existing session when one is provided. `http_post`,
+`http_put`, and `http_patch` accept an options dict as the second argument
+when you want to send multipart without a separate string body.
+
+`http_stream_open` uses the same request options as `http_request`. The
+returned handle can be inspected with `http_stream_info`, drained with
+repeated `http_stream_read(stream, max_bytes)`, and closed explicitly with
+`http_stream_close`. Reads return `bytes`; once the stream is exhausted they
+return `nil`.
 
 Transport handles are strings owned by the VM host. Rust keeps responsibility
 for TCP/TLS/socket lifecycle, HTTP pooling, SSE/WebSocket protocol parsing,
@@ -787,6 +808,17 @@ let resp = http_get("https://api.example.com/users", {
   retry: {max: 1, backoff_ms: 0}
 })
 assert_eq(resp.status, 200)
+```
+
+```harn
+let stream = http_stream_open("https://example.com/archive.tar.gz", {
+  decompress: false,
+  connect_timeout_ms: 5_000,
+  read_timeout_ms: 30_000,
+})
+let meta = http_stream_info(stream)
+let chunk = http_stream_read(stream, 65536)
+http_stream_close(stream)
 ```
 
 ## Interactive input

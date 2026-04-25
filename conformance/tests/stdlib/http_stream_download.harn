@@ -1,0 +1,28 @@
+pipeline default() {
+  http_mock(
+    "GET",
+    "https://api.example.com/stream",
+    {status: 200, body: "stream-body", headers: {["x-test"]: "yes"}},
+  )
+  let stream = http_stream_open("https://api.example.com/stream")
+  let info = http_stream_info(stream)
+  let first = http_stream_read(stream, 6)
+  let second = http_stream_read(stream, 64)
+  let end = http_stream_read(stream, 64)
+  let text = bytes_to_string(bytes_concat(first, second))
+  let closed = http_stream_close(stream)
+  let dst = path_join(temp_dir(), "harn-http-download-" + uuid() + ".txt")
+  http_mock(
+    "GET",
+    "https://api.example.com/download",
+    {status: 200, body: "downloaded", headers: {etag: "abc"}},
+  )
+  let download = http_download("https://api.example.com/download", dst)
+  println(info.status)
+  println(info.headers["x-test"])
+  println(text)
+  println(type_of(end))
+  println(closed)
+  println(download.bytes_written)
+  println(read_file(dst))
+}

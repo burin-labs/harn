@@ -1,14 +1,18 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::io::Write;
 use std::rc::Rc;
 use std::time::{Duration, SystemTime};
 
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
+use base64::Engine;
 use futures::{SinkExt, StreamExt};
 use reqwest_eventsource::{Event as SseEvent, EventSource};
+use sha2::{Digest, Sha256};
 use tokio_tungstenite::tungstenite::Message as WsMessage;
+use x509_parser::prelude::{FromDer, X509Certificate};
 
 // Mock HTTP framework (thread-local, mirrors the mock LLM pattern).
 
@@ -89,10 +93,31 @@ struct RetryConfig {
 
 #[derive(Clone)]
 struct HttpRequestConfig {
-    timeout_ms: u64,
+    total_timeout_ms: u64,
+    connect_timeout_ms: Option<u64>,
+    read_timeout_ms: Option<u64>,
     retry: RetryConfig,
     follow_redirects: bool,
     max_redirects: usize,
+    proxy: Option<HttpProxyConfig>,
+    tls: HttpTlsConfig,
+    decompress: bool,
+}
+
+#[derive(Clone, Default)]
+struct HttpTlsConfig {
+    ca_bundle_path: Option<String>,
+    client_cert_path: Option<String>,
+    client_key_path: Option<String>,
+    client_identity_path: Option<String>,
+    pinned_sha256: Vec<String>,
+}
+
+#[derive(Clone)]
+struct HttpProxyConfig {
+    url: String,
+    auth: Option<(String, String)>,
+    no_proxy: Option<String>,
 }
 
 #[derive(Clone)]
@@ -106,6 +131,34 @@ struct HttpRequestParts {
     headers: reqwest::header::HeaderMap,
     recorded_headers: BTreeMap<String, VmValue>,
     body: Option<String>,
+    multipart: Option<MultipartRequest>,
+}
+
+#[derive(Clone)]
+struct MultipartRequest {
+    parts: Vec<MultipartField>,
+    mock_body: String,
+}
+
+#[derive(Clone)]
+struct MultipartField {
+    name: String,
+    value: Vec<u8>,
+    filename: Option<String>,
+    content_type: Option<String>,
+}
+
+struct HttpStreamHandle {
+    kind: HttpStreamKind,
+    status: i64,
+    headers: BTreeMap<String, VmValue>,
+    pending: VecDeque<u8>,
+    closed: bool,
+}
+
+enum HttpStreamKind {
+    Real(Rc<tokio::sync::Mutex<reqwest::Response>>),
+    Fake,
 }
 
 struct SseMock {
@@ -192,14 +245,17 @@ const DEFAULT_TRANSPORT_RECEIVE_TIMEOUT_MS: u64 = 30_000;
 const DEFAULT_MAX_STREAM_EVENTS: usize = 10_000;
 const DEFAULT_MAX_MESSAGE_BYTES: usize = 1024 * 1024;
 const MAX_HTTP_SESSIONS: usize = 64;
+const MAX_HTTP_STREAMS: usize = 64;
 const MAX_SSE_STREAMS: usize = 64;
 const MAX_WEBSOCKETS: usize = 64;
+const MULTIPART_MOCK_BOUNDARY: &str = "harn-boundary";
 
 thread_local! {
     static HTTP_MOCKS: RefCell<Vec<HttpMock>> = const { RefCell::new(Vec::new()) };
     static HTTP_MOCK_CALLS: RefCell<Vec<HttpMockCall>> = const { RefCell::new(Vec::new()) };
     static HTTP_CLIENTS: RefCell<HashMap<String, reqwest::Client>> = RefCell::new(HashMap::new());
     static HTTP_SESSIONS: RefCell<HashMap<String, HttpSession>> = RefCell::new(HashMap::new());
+    static HTTP_STREAMS: RefCell<HashMap<String, HttpStreamHandle>> = RefCell::new(HashMap::new());
     static SSE_MOCKS: RefCell<Vec<SseMock>> = const { RefCell::new(Vec::new()) };
     static SSE_HANDLES: RefCell<HashMap<String, SseHandle>> = RefCell::new(HashMap::new());
     static WEBSOCKET_MOCKS: RefCell<Vec<WebSocketMock>> = const { RefCell::new(Vec::new()) };
@@ -214,6 +270,7 @@ pub fn reset_http_state() {
     HTTP_MOCK_CALLS.with(|c| c.borrow_mut().clear());
     HTTP_CLIENTS.with(|clients| clients.borrow_mut().clear());
     HTTP_SESSIONS.with(|sessions| sessions.borrow_mut().clear());
+    HTTP_STREAMS.with(|streams| streams.borrow_mut().clear());
     SSE_MOCKS.with(|mocks| mocks.borrow_mut().clear());
     SSE_HANDLES.with(|handles| {
         for handle in handles.borrow_mut().values_mut() {
@@ -326,6 +383,35 @@ fn build_http_response(status: i64, headers: BTreeMap<String, VmValue>, body: St
     VmValue::Dict(Rc::new(result))
 }
 
+fn build_http_download_response(
+    status: i64,
+    headers: BTreeMap<String, VmValue>,
+    bytes_written: u64,
+) -> VmValue {
+    let mut result = BTreeMap::new();
+    result.insert("status".to_string(), VmValue::Int(status));
+    result.insert("headers".to_string(), VmValue::Dict(Rc::new(headers)));
+    result.insert(
+        "bytes_written".to_string(),
+        VmValue::Int(bytes_written as i64),
+    );
+    result.insert(
+        "ok".to_string(),
+        VmValue::Bool((200..300).contains(&(status as u16))),
+    );
+    VmValue::Dict(Rc::new(result))
+}
+
+fn response_headers(headers: &reqwest::header::HeaderMap) -> BTreeMap<String, VmValue> {
+    let mut resp_headers = BTreeMap::new();
+    for (name, value) in headers {
+        if let Ok(v) = value.to_str() {
+            resp_headers.insert(name.as_str().to_string(), VmValue::String(Rc::from(v)));
+        }
+    }
+    resp_headers
+}
+
 fn vm_error(message: impl Into<String>) -> VmError {
     VmError::Thrown(VmValue::String(Rc::from(message.into())))
 }
@@ -368,6 +454,142 @@ fn merge_options(
         merged.insert(key.clone(), value.clone());
     }
     merged
+}
+
+fn resolve_http_path(
+    builtin: &str,
+    path: &str,
+    access: crate::stdlib::sandbox::FsAccess,
+) -> Result<std::path::PathBuf, VmError> {
+    let resolved = crate::stdlib::process::resolve_source_relative_path(path);
+    crate::stdlib::sandbox::enforce_fs_path(builtin, &resolved, access)?;
+    Ok(resolved)
+}
+
+fn value_to_bytes(value: &VmValue) -> Vec<u8> {
+    match value {
+        VmValue::Bytes(bytes) => bytes.as_ref().clone(),
+        other => other.display().into_bytes(),
+    }
+}
+
+fn parse_multipart_field(value: &VmValue) -> Result<MultipartField, VmError> {
+    let dict = value
+        .as_dict()
+        .ok_or_else(|| vm_error("http: multipart entries must be dicts"))?;
+    let name = dict
+        .get("name")
+        .map(|value| value.display())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| vm_error("http: multipart entry requires name"))?;
+    let content_type = dict
+        .get("content_type")
+        .or_else(|| dict.get("mime_type"))
+        .map(|value| value.display())
+        .filter(|value| !value.is_empty());
+
+    let mut filename = dict
+        .get("filename")
+        .map(|value| value.display())
+        .filter(|value| !value.is_empty());
+    let value = if let Some(path_value) = dict.get("path") {
+        let path = path_value.display();
+        let resolved = resolve_http_path(
+            "http multipart",
+            &path,
+            crate::stdlib::sandbox::FsAccess::Read,
+        )?;
+        if filename.is_none() {
+            filename = resolved
+                .file_name()
+                .and_then(|name| name.to_str())
+                .map(|name| name.to_string());
+        }
+        std::fs::read(&resolved).map_err(|error| {
+            vm_error(format!(
+                "http: failed to read multipart file {}: {error}",
+                resolved.display()
+            ))
+        })?
+    } else if let Some(base64_value) = dict.get("value_base64").or_else(|| dict.get("base64")) {
+        base64::engine::general_purpose::STANDARD
+            .decode(base64_value.display())
+            .map_err(|error| vm_error(format!("http: invalid multipart base64 value: {error}")))?
+    } else {
+        dict.get("value").map(value_to_bytes).ok_or_else(|| {
+            vm_error("http: multipart entry requires value, value_base64, or path")
+        })?
+    };
+
+    Ok(MultipartField {
+        name,
+        value,
+        filename,
+        content_type,
+    })
+}
+
+fn parse_multipart_request(
+    options: &BTreeMap<String, VmValue>,
+) -> Result<Option<MultipartRequest>, VmError> {
+    let Some(value) = options.get("multipart") else {
+        return Ok(None);
+    };
+    let VmValue::List(items) = value else {
+        return Err(vm_error("http: multipart must be a list"));
+    };
+    let parts = items
+        .iter()
+        .map(parse_multipart_field)
+        .collect::<Result<Vec<_>, _>>()?;
+    let mock_body = multipart_mock_body(&parts);
+    Ok(Some(MultipartRequest { parts, mock_body }))
+}
+
+fn multipart_mock_body(parts: &[MultipartField]) -> String {
+    let mut out = String::new();
+    for part in parts {
+        out.push_str("--");
+        out.push_str(MULTIPART_MOCK_BOUNDARY);
+        out.push_str("\r\nContent-Disposition: form-data; name=\"");
+        out.push_str(&part.name);
+        out.push('"');
+        if let Some(filename) = &part.filename {
+            out.push_str("; filename=\"");
+            out.push_str(filename);
+            out.push('"');
+        }
+        out.push_str("\r\n");
+        if let Some(content_type) = &part.content_type {
+            out.push_str("Content-Type: ");
+            out.push_str(content_type);
+            out.push_str("\r\n");
+        }
+        out.push_str("\r\n");
+        out.push_str(&String::from_utf8_lossy(&part.value));
+        out.push_str("\r\n");
+    }
+    out.push_str("--");
+    out.push_str(MULTIPART_MOCK_BOUNDARY);
+    out.push_str("--\r\n");
+    out
+}
+
+fn multipart_form(request: &MultipartRequest) -> Result<reqwest::multipart::Form, VmError> {
+    let mut form = reqwest::multipart::Form::new();
+    for field in &request.parts {
+        let mut part = reqwest::multipart::Part::bytes(field.value.clone());
+        if let Some(filename) = &field.filename {
+            part = part.file_name(filename.clone());
+        }
+        if let Some(content_type) = &field.content_type {
+            part = part.mime_str(content_type).map_err(|error| {
+                vm_error(format!("http: invalid multipart content_type: {error}"))
+            })?;
+        }
+        form = form.part(field.name.clone(), part);
+    }
+    Ok(form)
 }
 
 fn transport_limit_option(options: &BTreeMap<String, VmValue>, key: &str, default: usize) -> usize {
@@ -421,8 +643,9 @@ async fn http_verb_handler(
         )))));
     }
     let mut options = if has_body {
-        match args.get(2) {
-            Some(VmValue::Dict(d)) => (**d).clone(),
+        match (args.get(1), args.get(2)) {
+            (Some(VmValue::Dict(d)), None) => (**d).clone(),
+            (_, Some(VmValue::Dict(d))) => (**d).clone(),
             _ => BTreeMap::new(),
         }
     } else {
@@ -431,7 +654,7 @@ async fn http_verb_handler(
             _ => BTreeMap::new(),
         }
     };
-    if has_body {
+    if has_body && !(matches!(args.get(1), Some(VmValue::Dict(_))) && args.get(2).is_none()) {
         let body = args.get(1).map(|a| a.display()).unwrap_or_default();
         options.insert("body".to_string(), VmValue::String(Rc::from(body)));
     }
@@ -570,6 +793,7 @@ pub fn register_http_builtins(vm: &mut Vm) {
     vm.register_builtin("http_mock_clear", |_args, _out| {
         HTTP_MOCKS.with(|mocks| mocks.borrow_mut().clear());
         HTTP_MOCK_CALLS.with(|calls| calls.borrow_mut().clear());
+        HTTP_STREAMS.with(|streams| streams.borrow_mut().clear());
         Ok(VmValue::Nil)
     });
 
@@ -624,6 +848,58 @@ pub fn register_http_builtins(vm: &mut Vm) {
             _ => BTreeMap::new(),
         };
         vm_execute_http_request(&method, &url, &options).await
+    });
+
+    vm.register_async_builtin("http_download", |args| async move {
+        let url = args.first().map(|a| a.display()).unwrap_or_default();
+        if url.is_empty() {
+            return Err(vm_error("http_download: URL is required"));
+        }
+        let dst_path = args.get(1).map(|a| a.display()).unwrap_or_default();
+        if dst_path.is_empty() {
+            return Err(vm_error("http_download: destination path is required"));
+        }
+        let options = get_options_arg(&args, 2);
+        vm_http_download(&url, &dst_path, &options).await
+    });
+
+    vm.register_async_builtin("http_stream_open", |args| async move {
+        let url = args.first().map(|a| a.display()).unwrap_or_default();
+        if url.is_empty() {
+            return Err(vm_error("http_stream_open: URL is required"));
+        }
+        let options = get_options_arg(&args, 1);
+        vm_http_stream_open(&url, &options).await
+    });
+
+    vm.register_async_builtin("http_stream_read", |args| async move {
+        let Some(handle) = args.first() else {
+            return Err(vm_error("http_stream_read: requires a stream handle"));
+        };
+        let stream_id = handle_from_value(handle, "http_stream_read")?;
+        let max_bytes = args
+            .get(1)
+            .and_then(|value| value.as_int())
+            .map(|value| value.max(1) as usize)
+            .unwrap_or(DEFAULT_MAX_MESSAGE_BYTES);
+        vm_http_stream_read(&stream_id, max_bytes).await
+    });
+
+    vm.register_builtin("http_stream_info", |args, _out| {
+        let Some(handle) = args.first() else {
+            return Err(vm_error("http_stream_info: requires a stream handle"));
+        };
+        let stream_id = handle_from_value(handle, "http_stream_info")?;
+        vm_http_stream_info(&stream_id)
+    });
+
+    vm.register_builtin("http_stream_close", |args, _out| {
+        let Some(handle) = args.first() else {
+            return Err(vm_error("http_stream_close: requires a stream handle"));
+        };
+        let stream_id = handle_from_value(handle, "http_stream_close")?;
+        let removed = HTTP_STREAMS.with(|streams| streams.borrow_mut().remove(&stream_id));
+        Ok(VmValue::Bool(removed.is_some()))
     });
 
     vm.register_builtin("http_session", |args, _out| {
@@ -786,6 +1062,7 @@ pub fn register_http_builtins(vm: &mut Vm) {
     });
 
     vm.register_builtin("transport_mock_clear", |_args, _out| {
+        HTTP_STREAMS.with(|streams| streams.borrow_mut().clear());
         SSE_MOCKS.with(|mocks| mocks.borrow_mut().clear());
         SSE_HANDLES.with(|handles| handles.borrow_mut().clear());
         WEBSOCKET_MOCKS.with(|mocks| mocks.borrow_mut().clear());
@@ -826,6 +1103,87 @@ fn vm_get_int_option_prefer(
         .and_then(|value| value.as_int())
         .or_else(|| options.get(alias).and_then(|value| value.as_int()))
         .unwrap_or(default)
+}
+
+fn vm_get_optional_int_option(options: &BTreeMap<String, VmValue>, key: &str) -> Option<u64> {
+    options
+        .get(key)
+        .and_then(|value| value.as_int())
+        .map(|value| value.max(0) as u64)
+}
+
+fn string_option(options: &BTreeMap<String, VmValue>, key: &str) -> Option<String> {
+    options
+        .get(key)
+        .map(|value| value.display())
+        .filter(|value| !value.is_empty())
+}
+
+fn parse_proxy_config(options: &BTreeMap<String, VmValue>) -> Option<HttpProxyConfig> {
+    let proxy = options.get("proxy")?;
+    let (url, no_proxy) = match proxy {
+        VmValue::Dict(dict) => (
+            dict.get("url")
+                .map(|value| value.display())
+                .filter(|value| !value.is_empty())?,
+            dict.get("no_proxy")
+                .map(|value| value.display())
+                .filter(|value| !value.is_empty()),
+        ),
+        other => (other.display(), None),
+    };
+    if url.is_empty() {
+        return None;
+    }
+    let auth = options
+        .get("proxy_auth")
+        .and_then(|value| value.as_dict())
+        .map(|dict| {
+            (
+                dict.get("user")
+                    .map(|value| value.display())
+                    .unwrap_or_default(),
+                dict.get("pass")
+                    .or_else(|| dict.get("password"))
+                    .map(|value| value.display())
+                    .unwrap_or_default(),
+            )
+        })
+        .filter(|(user, _)| !user.is_empty());
+    Some(HttpProxyConfig {
+        url,
+        auth,
+        no_proxy,
+    })
+}
+
+fn parse_tls_config(options: &BTreeMap<String, VmValue>) -> HttpTlsConfig {
+    let Some(tls) = options.get("tls").and_then(|value| value.as_dict()) else {
+        return HttpTlsConfig::default();
+    };
+    let pinned_sha256 = match tls.get("pinned_sha256") {
+        Some(VmValue::List(values)) => values
+            .iter()
+            .map(|value| value.display())
+            .filter(|value| !value.is_empty())
+            .collect(),
+        Some(value) => {
+            let value = value.display();
+            if value.is_empty() {
+                Vec::new()
+            } else {
+                vec![value]
+            }
+        }
+        None => Vec::new(),
+    };
+    HttpTlsConfig {
+        ca_bundle_path: string_option(tls, "ca_bundle_path"),
+        client_cert_path: string_option(tls, "client_cert_path"),
+        client_key_path: string_option(tls, "client_key_path"),
+        client_identity_path: string_option(tls, "client_identity_path"),
+        pinned_sha256,
+    }
 }
 
 fn parse_retry_statuses(options: &BTreeMap<String, VmValue>) -> Vec<u16> {
@@ -872,13 +1230,13 @@ fn parse_retry_methods(options: &BTreeMap<String, VmValue>) -> Vec<String> {
 }
 
 fn parse_http_options(options: &BTreeMap<String, VmValue>) -> HttpRequestConfig {
-    let timeout_ms = vm_get_int_option_prefer(
-        options,
-        "timeout_ms",
-        "timeout",
-        DEFAULT_TIMEOUT_MS as i64,
-    )
-    .max(0) as u64;
+    let total_timeout_ms = vm_get_int_option(options, "total_timeout_ms", -1);
+    let total_timeout_ms = if total_timeout_ms >= 0 {
+        total_timeout_ms as u64
+    } else {
+        vm_get_int_option_prefer(options, "timeout_ms", "timeout", DEFAULT_TIMEOUT_MS as i64).max(0)
+            as u64
+    };
     let retry_options = options.get("retry").and_then(|value| value.as_dict());
     let retry_max = retry_options
         .and_then(|retry| retry.get("max"))
@@ -895,7 +1253,9 @@ fn parse_http_options(options: &BTreeMap<String, VmValue>) -> HttpRequestConfig 
     let max_redirects = vm_get_int_option(options, "max_redirects", 10).max(0) as usize;
 
     HttpRequestConfig {
-        timeout_ms,
+        total_timeout_ms,
+        connect_timeout_ms: vm_get_optional_int_option(options, "connect_timeout_ms"),
+        read_timeout_ms: vm_get_optional_int_option(options, "read_timeout_ms"),
         retry: RetryConfig {
             max: retry_max,
             backoff_ms: retry_backoff_ms,
@@ -905,13 +1265,41 @@ fn parse_http_options(options: &BTreeMap<String, VmValue>) -> HttpRequestConfig 
         },
         follow_redirects,
         max_redirects,
+        proxy: parse_proxy_config(options),
+        tls: parse_tls_config(options),
+        decompress: vm_get_bool_option(options, "decompress", true),
     }
 }
 
 fn http_client_key(config: &HttpRequestConfig) -> String {
     format!(
-        "follow_redirects={};max_redirects={}",
-        config.follow_redirects, config.max_redirects
+        "follow_redirects={};max_redirects={};connect_timeout={:?};read_timeout={:?};proxy={};proxy_auth={};no_proxy={};ca={};client_cert={};client_key={};identity={};pins={};decompress={}",
+        config.follow_redirects,
+        config.max_redirects,
+        config.connect_timeout_ms,
+        config.read_timeout_ms,
+        config
+            .proxy
+            .as_ref()
+            .map(|proxy| proxy.url.as_str())
+            .unwrap_or(""),
+        config
+            .proxy
+            .as_ref()
+            .and_then(|proxy| proxy.auth.as_ref())
+            .map(|(user, _)| user.as_str())
+            .unwrap_or(""),
+        config
+            .proxy
+            .as_ref()
+            .and_then(|proxy| proxy.no_proxy.as_deref())
+            .unwrap_or(""),
+        config.tls.ca_bundle_path.as_deref().unwrap_or(""),
+        config.tls.client_cert_path.as_deref().unwrap_or(""),
+        config.tls.client_key_path.as_deref().unwrap_or(""),
+        config.tls.client_identity_path.as_deref().unwrap_or(""),
+        config.tls.pinned_sha256.join(","),
+        config.decompress,
     )
 }
 
@@ -922,10 +1310,114 @@ fn build_http_client(config: &HttpRequestConfig) -> Result<reqwest::Client, VmEr
         reqwest::redirect::Policy::none()
     };
 
-    reqwest::Client::builder()
-        .redirect(redirect_policy)
+    let mut builder = reqwest::Client::builder().redirect(redirect_policy);
+    if let Some(ms) = config.connect_timeout_ms {
+        builder = builder.connect_timeout(Duration::from_millis(ms));
+    }
+    if let Some(ms) = config.read_timeout_ms {
+        builder = builder.read_timeout(Duration::from_millis(ms));
+    }
+    if !config.decompress {
+        builder = builder.no_gzip().no_brotli().no_deflate().no_zstd();
+    }
+    if let Some(proxy_config) = &config.proxy {
+        let mut proxy = reqwest::Proxy::all(&proxy_config.url)
+            .map_err(|e| vm_error(format!("http: invalid proxy '{}': {e}", proxy_config.url)))?;
+        if let Some((user, pass)) = &proxy_config.auth {
+            proxy = proxy.basic_auth(user, pass);
+        }
+        if let Some(no_proxy) = &proxy_config.no_proxy {
+            proxy = proxy.no_proxy(reqwest::NoProxy::from_string(no_proxy));
+        }
+        builder = builder.proxy(proxy);
+    }
+    builder = configure_tls(builder, &config.tls)?;
+    builder
         .build()
         .map_err(|e| vm_error(format!("http: failed to build client: {e}")))
+}
+
+fn configure_tls(
+    mut builder: reqwest::ClientBuilder,
+    tls: &HttpTlsConfig,
+) -> Result<reqwest::ClientBuilder, VmError> {
+    if let Some(path) = &tls.ca_bundle_path {
+        let resolved = resolve_http_path("http tls", path, crate::stdlib::sandbox::FsAccess::Read)?;
+        let bytes = std::fs::read(&resolved).map_err(|error| {
+            vm_error(format!(
+                "http: failed to read CA bundle {}: {error}",
+                resolved.display()
+            ))
+        })?;
+        match reqwest::Certificate::from_pem_bundle(&bytes) {
+            Ok(certs) => {
+                for cert in certs {
+                    builder = builder.add_root_certificate(cert);
+                }
+            }
+            Err(pem_error) => {
+                let cert = reqwest::Certificate::from_der(&bytes).map_err(|der_error| {
+                    vm_error(format!(
+                        "http: failed to parse CA bundle {} as PEM ({pem_error}) or DER ({der_error})",
+                        resolved.display()
+                    ))
+                })?;
+                builder = builder.add_root_certificate(cert);
+            }
+        }
+    }
+
+    if let Some(path) = &tls.client_identity_path {
+        let resolved = resolve_http_path("http tls", path, crate::stdlib::sandbox::FsAccess::Read)?;
+        let bytes = std::fs::read(&resolved).map_err(|error| {
+            vm_error(format!(
+                "http: failed to read client identity {}: {error}",
+                resolved.display()
+            ))
+        })?;
+        let identity = reqwest::Identity::from_pem(&bytes).map_err(|error| {
+            vm_error(format!(
+                "http: failed to parse client identity {}: {error}",
+                resolved.display()
+            ))
+        })?;
+        builder = builder.identity(identity);
+    } else if let Some(cert_path) = &tls.client_cert_path {
+        let cert = {
+            let resolved = resolve_http_path(
+                "http tls",
+                cert_path,
+                crate::stdlib::sandbox::FsAccess::Read,
+            )?;
+            std::fs::read(&resolved).map_err(|error| {
+                vm_error(format!(
+                    "http: failed to read client certificate {}: {error}",
+                    resolved.display()
+                ))
+            })?
+        };
+        let mut identity_pem = cert;
+        if let Some(key_path) = &tls.client_key_path {
+            let resolved =
+                resolve_http_path("http tls", key_path, crate::stdlib::sandbox::FsAccess::Read)?;
+            let key = std::fs::read(&resolved).map_err(|error| {
+                vm_error(format!(
+                    "http: failed to read client key {}: {error}",
+                    resolved.display()
+                ))
+            })?;
+            identity_pem.extend_from_slice(b"\n");
+            identity_pem.extend_from_slice(&key);
+        }
+        let identity = reqwest::Identity::from_pem(&identity_pem)
+            .map_err(|error| vm_error(format!("http: failed to parse client identity: {error}")))?;
+        builder = builder.identity(identity);
+    }
+
+    if !tls.pinned_sha256.is_empty() {
+        builder = builder.tls_info(true);
+    }
+    Ok(builder)
 }
 
 fn pooled_http_client(config: &HttpRequestConfig) -> Result<reqwest::Client, VmError> {
@@ -939,6 +1431,54 @@ fn pooled_http_client(config: &HttpRequestConfig) -> Result<reqwest::Client, VmE
         clients.borrow_mut().insert(key, client.clone());
     });
     Ok(client)
+}
+
+fn normalize_pin(value: &str) -> String {
+    let trimmed = value.trim();
+    let trimmed = trimmed
+        .strip_prefix("sha256/")
+        .or_else(|| trimmed.strip_prefix("sha256:"))
+        .unwrap_or(trimmed);
+    let compact = trimmed.replace(':', "");
+    if !compact.is_empty() && compact.chars().all(|ch| ch.is_ascii_hexdigit()) {
+        compact.to_ascii_lowercase()
+    } else {
+        compact
+    }
+}
+
+fn verify_tls_pin(response: &reqwest::Response, pins: &[String]) -> Result<(), VmError> {
+    if pins.is_empty() {
+        return Ok(());
+    }
+    let Some(info) = response.extensions().get::<reqwest::tls::TlsInfo>() else {
+        return Err(vm_error(
+            "http: TLS pinning requested but TLS info is unavailable",
+        ));
+    };
+    let Some(cert_der) = info.peer_certificate() else {
+        return Err(vm_error(
+            "http: TLS pinning requested but no peer certificate was presented",
+        ));
+    };
+    let (_, cert) = X509Certificate::from_der(cert_der)
+        .map_err(|error| vm_error(format!("http: failed to parse peer certificate: {error}")))?;
+    let digest = Sha256::digest(cert.tbs_certificate.subject_pki.raw);
+    let hex_pin = hex::encode(digest.as_slice());
+    let base64_pin = base64::engine::general_purpose::STANDARD.encode(digest);
+    let base64url_pin = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(digest);
+    let wanted = pins
+        .iter()
+        .map(|pin| normalize_pin(pin))
+        .collect::<Vec<_>>();
+    if wanted
+        .iter()
+        .any(|pin| pin == &hex_pin || pin == &base64_pin || pin == &base64url_pin)
+    {
+        Ok(())
+    } else {
+        Err(vm_error("http: TLS SPKI pin mismatch"))
+    }
 }
 
 fn parse_http_request_parts(
@@ -1008,11 +1548,31 @@ fn parse_http_request_parts(
         }
     }
 
+    let multipart = parse_multipart_request(options)?;
+    if multipart.is_some() {
+        if options.contains_key("body") {
+            return Err(vm_error(
+                "http: body and multipart options are mutually exclusive",
+            ));
+        }
+        recorded_headers.insert(
+            "content-type".to_string(),
+            VmValue::String(Rc::from(format!(
+                "multipart/form-data; boundary={MULTIPART_MOCK_BOUNDARY}"
+            ))),
+        );
+    }
+
     Ok(HttpRequestParts {
         method: req_method,
         headers: header_map,
         recorded_headers,
-        body: options.get("body").map(|v| v.display()),
+        body: if multipart.is_some() {
+            multipart.as_ref().map(|request| request.mock_body.clone())
+        } else {
+            options.get("body").map(|v| v.display())
+        },
+        multipart,
     })
 }
 
@@ -1475,13 +2035,16 @@ async fn vm_execute_http_request_with_client(
         let mut req = client.request(parts.method.clone(), url);
         req = req
             .headers(parts.headers.clone())
-            .timeout(Duration::from_millis(config.timeout_ms));
-        if let Some(ref b) = parts.body {
+            .timeout(Duration::from_millis(config.total_timeout_ms));
+        if let Some(multipart) = &parts.multipart {
+            req = req.multipart(multipart_form(multipart)?);
+        } else if let Some(ref b) = parts.body {
             req = req.body(b.clone());
         }
 
         match req.send().await {
             Ok(response) => {
+                verify_tls_pin(&response, &config.tls.pinned_sha256)?;
                 let status = response.status().as_u16();
                 if should_retry_response(config, &parts.method, status, attempt) {
                     let retry_after = response_retry_after(
@@ -1498,13 +2061,7 @@ async fn vm_execute_http_request_with_client(
                     continue;
                 }
 
-                let mut resp_headers = BTreeMap::new();
-                for (name, value) in response.headers() {
-                    if let Ok(v) = value.to_str() {
-                        resp_headers
-                            .insert(name.as_str().to_string(), VmValue::String(Rc::from(v)));
-                    }
-                }
+                let resp_headers = response_headers(response.headers());
 
                 let body_text = response
                     .text()
@@ -1524,6 +2081,265 @@ async fn vm_execute_http_request_with_client(
     }
 
     Err(vm_error("http: request failed"))
+}
+
+async fn vm_http_download(
+    url: &str,
+    dst_path: &str,
+    options: &BTreeMap<String, VmValue>,
+) -> Result<VmValue, VmError> {
+    let method = options
+        .get("method")
+        .map(|value| value.display())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "GET".to_string())
+        .to_uppercase();
+    let parts = parse_http_request_parts(&method, options)?;
+    if let Some(mock_response) = consume_http_mock(
+        &method,
+        url,
+        parts.recorded_headers.clone(),
+        parts.body.clone(),
+    ) {
+        let resolved = resolve_http_path(
+            "http_download",
+            dst_path,
+            crate::stdlib::sandbox::FsAccess::Write,
+        )?;
+        std::fs::write(&resolved, mock_response.body.as_bytes()).map_err(|error| {
+            vm_error(format!(
+                "http_download: failed to write {}: {error}",
+                resolved.display()
+            ))
+        })?;
+        return Ok(build_http_download_response(
+            mock_response.status,
+            mock_response.headers,
+            mock_response.body.len() as u64,
+        ));
+    }
+
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        return Err(vm_error(format!(
+            "http_download: URL must start with http:// or https://, got '{url}'"
+        )));
+    }
+    let config = parse_http_options(options);
+    let client = if let Some(session_id) = session_from_options(options) {
+        HTTP_SESSIONS
+            .with(|sessions| sessions.borrow().get(&session_id).cloned())
+            .map(|session| session.client)
+            .ok_or_else(|| {
+                vm_error(format!(
+                    "http_download: unknown HTTP session '{session_id}'"
+                ))
+            })?
+    } else {
+        pooled_http_client(&config)?
+    };
+    let mut request = client
+        .request(parts.method, url)
+        .headers(parts.headers)
+        .timeout(Duration::from_millis(config.total_timeout_ms));
+    if let Some(multipart) = &parts.multipart {
+        request = request.multipart(multipart_form(multipart)?);
+    } else if let Some(body) = parts.body {
+        request = request.body(body);
+    }
+    let mut response = request
+        .send()
+        .await
+        .map_err(|error| vm_error(format!("http_download: request failed: {error}")))?;
+    verify_tls_pin(&response, &config.tls.pinned_sha256)?;
+    let status = response.status().as_u16() as i64;
+    let headers = response_headers(response.headers());
+    let resolved = resolve_http_path(
+        "http_download",
+        dst_path,
+        crate::stdlib::sandbox::FsAccess::Write,
+    )?;
+    let mut file = std::fs::File::create(&resolved).map_err(|error| {
+        vm_error(format!(
+            "http_download: failed to create {}: {error}",
+            resolved.display()
+        ))
+    })?;
+    let mut bytes_written = 0_u64;
+    while let Some(chunk) = response.chunk().await.map_err(|error| {
+        vm_error(format!(
+            "http_download: failed to read response body: {error}"
+        ))
+    })? {
+        file.write_all(&chunk).map_err(|error| {
+            vm_error(format!(
+                "http_download: failed to write {}: {error}",
+                resolved.display()
+            ))
+        })?;
+        bytes_written += chunk.len() as u64;
+    }
+    Ok(build_http_download_response(status, headers, bytes_written))
+}
+
+async fn vm_http_stream_open(
+    url: &str,
+    options: &BTreeMap<String, VmValue>,
+) -> Result<VmValue, VmError> {
+    let method = options
+        .get("method")
+        .map(|value| value.display())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "GET".to_string())
+        .to_uppercase();
+    let parts = parse_http_request_parts(&method, options)?;
+    let id = next_transport_handle("http-stream");
+    if let Some(mock_response) = consume_http_mock(
+        &method,
+        url,
+        parts.recorded_headers.clone(),
+        parts.body.clone(),
+    ) {
+        let handle = HttpStreamHandle {
+            kind: HttpStreamKind::Fake,
+            status: mock_response.status,
+            headers: mock_response.headers,
+            pending: mock_response.body.into_bytes().into(),
+            closed: false,
+        };
+        HTTP_STREAMS.with(|streams| {
+            let mut streams = streams.borrow_mut();
+            if streams.len() >= MAX_HTTP_STREAMS {
+                return Err(vm_error(format!(
+                    "http_stream_open: maximum open streams ({MAX_HTTP_STREAMS}) reached"
+                )));
+            }
+            streams.insert(id.clone(), handle);
+            Ok(())
+        })?;
+        return Ok(VmValue::String(Rc::from(id)));
+    }
+
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        return Err(vm_error(format!(
+            "http_stream_open: URL must start with http:// or https://, got '{url}'"
+        )));
+    }
+    let config = parse_http_options(options);
+    let client = if let Some(session_id) = session_from_options(options) {
+        HTTP_SESSIONS
+            .with(|sessions| sessions.borrow().get(&session_id).cloned())
+            .map(|session| session.client)
+            .ok_or_else(|| {
+                vm_error(format!(
+                    "http_stream_open: unknown HTTP session '{session_id}'"
+                ))
+            })?
+    } else {
+        pooled_http_client(&config)?
+    };
+    let mut request = client
+        .request(parts.method, url)
+        .headers(parts.headers)
+        .timeout(Duration::from_millis(config.total_timeout_ms));
+    if let Some(multipart) = &parts.multipart {
+        request = request.multipart(multipart_form(multipart)?);
+    } else if let Some(body) = parts.body {
+        request = request.body(body);
+    }
+    let response = request
+        .send()
+        .await
+        .map_err(|error| vm_error(format!("http_stream_open: request failed: {error}")))?;
+    verify_tls_pin(&response, &config.tls.pinned_sha256)?;
+    let status = response.status().as_u16() as i64;
+    let headers = response_headers(response.headers());
+    let handle = HttpStreamHandle {
+        kind: HttpStreamKind::Real(Rc::new(tokio::sync::Mutex::new(response))),
+        status,
+        headers,
+        pending: VecDeque::new(),
+        closed: false,
+    };
+    HTTP_STREAMS.with(|streams| {
+        let mut streams = streams.borrow_mut();
+        if streams.len() >= MAX_HTTP_STREAMS {
+            return Err(vm_error(format!(
+                "http_stream_open: maximum open streams ({MAX_HTTP_STREAMS}) reached"
+            )));
+        }
+        streams.insert(id.clone(), handle);
+        Ok(())
+    })?;
+    Ok(VmValue::String(Rc::from(id)))
+}
+
+async fn vm_http_stream_read(stream_id: &str, max_bytes: usize) -> Result<VmValue, VmError> {
+    let (kind, mut pending, closed) = HTTP_STREAMS
+        .with(|streams| {
+            let mut streams = streams.borrow_mut();
+            let handle = streams.get_mut(stream_id)?;
+            let kind = match &handle.kind {
+                HttpStreamKind::Real(response) => HttpStreamKind::Real(response.clone()),
+                HttpStreamKind::Fake => HttpStreamKind::Fake,
+            };
+            let pending = std::mem::take(&mut handle.pending);
+            Some((kind, pending, handle.closed))
+        })
+        .ok_or_else(|| vm_error(format!("http_stream_read: unknown stream '{stream_id}'")))?;
+    if closed {
+        return Ok(VmValue::Nil);
+    }
+    if pending.is_empty() {
+        match kind {
+            HttpStreamKind::Fake => {}
+            HttpStreamKind::Real(response) => {
+                let mut response = response.lock().await;
+                if let Some(chunk) = response.chunk().await.map_err(|error| {
+                    vm_error(format!(
+                        "http_stream_read: failed to read response body: {error}"
+                    ))
+                })? {
+                    pending.extend(chunk);
+                }
+            }
+        }
+    }
+    if pending.is_empty() {
+        HTTP_STREAMS.with(|streams| {
+            if let Some(handle) = streams.borrow_mut().get_mut(stream_id) {
+                handle.closed = true;
+            }
+        });
+        return Ok(VmValue::Nil);
+    }
+    let take = pending.len().min(max_bytes.max(1));
+    let chunk = pending.drain(..take).collect::<Vec<_>>();
+    HTTP_STREAMS.with(|streams| {
+        if let Some(handle) = streams.borrow_mut().get_mut(stream_id) {
+            handle.pending = pending;
+        }
+    });
+    Ok(VmValue::Bytes(Rc::new(chunk)))
+}
+
+fn vm_http_stream_info(stream_id: &str) -> Result<VmValue, VmError> {
+    HTTP_STREAMS.with(|streams| {
+        let streams = streams.borrow();
+        let handle = streams
+            .get(stream_id)
+            .ok_or_else(|| vm_error(format!("http_stream_info: unknown stream '{stream_id}'")))?;
+        let mut dict = BTreeMap::new();
+        dict.insert("status".to_string(), VmValue::Int(handle.status));
+        dict.insert(
+            "headers".to_string(),
+            VmValue::Dict(Rc::new(handle.headers.clone())),
+        );
+        dict.insert(
+            "ok".to_string(),
+            VmValue::Bool((200..300).contains(&(handle.status as u16))),
+        );
+        Ok(VmValue::Dict(Rc::new(dict)))
+    })
 }
 
 async fn vm_sse_connect(
@@ -1588,7 +2404,7 @@ async fn vm_sse_connect(
     let mut request = client
         .request(parts.method, url)
         .headers(parts.headers)
-        .timeout(Duration::from_millis(config.timeout_ms));
+        .timeout(Duration::from_millis(config.total_timeout_ms));
     if let Some(body) = parts.body {
         request = request.body(body);
     }
@@ -1980,11 +2796,26 @@ async fn vm_websocket_close(socket_id: &str) -> Result<VmValue, VmError> {
 mod tests {
     use super::{
         compute_retry_delay, http_mock_calls_snapshot, parse_retry_after_value, push_http_mock,
-        reset_http_state, vm_execute_http_request, HttpMockResponse,
+        reset_http_state, vm_execute_http_request, vm_http_download, vm_http_stream_info,
+        vm_http_stream_open, vm_http_stream_read, HttpMockResponse,
+    };
+    use crate::connectors::test_util::{
+        accept_http_connection, read_http_request, write_http_response,
     };
     use crate::value::VmValue;
+    use base64::Engine;
+    use rcgen::generate_simple_self_signed;
+    use rustls::pki_types::PrivatePkcs8KeyDer;
+    use rustls::{ServerConfig, ServerConnection, StreamOwned};
+    use sha2::{Digest, Sha256};
     use std::collections::BTreeMap;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::rc::Rc;
+    use std::sync::{Arc, Once};
     use std::time::{Duration, SystemTime};
+    use tempfile::TempDir;
+    use x509_parser::prelude::{FromDer, X509Certificate};
 
     #[test]
     fn parses_retry_after_delta_seconds() {
@@ -2039,5 +2870,338 @@ mod tests {
         assert_eq!(calls.len(), 2);
         assert_eq!(calls[0].url, "https://api.example.com/retry");
         reset_http_state();
+    }
+
+    #[tokio::test]
+    async fn multipart_requests_are_mock_visible() {
+        reset_http_state();
+        push_http_mock(
+            "POST",
+            "https://api.example.com/upload",
+            vec![HttpMockResponse::new(201, "uploaded")],
+        );
+        let options = BTreeMap::from([(
+            "multipart".to_string(),
+            VmValue::List(Rc::new(vec![
+                VmValue::Dict(Rc::new(BTreeMap::from([
+                    ("name".to_string(), VmValue::String(Rc::from("meta"))),
+                    ("value".to_string(), VmValue::String(Rc::from("hello"))),
+                ]))),
+                VmValue::Dict(Rc::new(BTreeMap::from([
+                    ("name".to_string(), VmValue::String(Rc::from("blob"))),
+                    (
+                        "filename".to_string(),
+                        VmValue::String(Rc::from("blob.bin")),
+                    ),
+                    (
+                        "content_type".to_string(),
+                        VmValue::String(Rc::from("application/octet-stream")),
+                    ),
+                    (
+                        "value".to_string(),
+                        VmValue::Bytes(Rc::new(vec![0, 1, 2, 3])),
+                    ),
+                ]))),
+            ])),
+        )]);
+
+        let response = vm_execute_http_request("POST", "https://api.example.com/upload", &options)
+            .await
+            .expect("multipart mock request should succeed");
+        let response = response.as_dict().expect("response dict");
+        assert_eq!(response["status"].as_int(), Some(201));
+
+        let calls = http_mock_calls_snapshot();
+        assert_eq!(calls.len(), 1);
+        assert!(calls[0]
+            .headers
+            .get("content-type")
+            .expect("content-type recorded")
+            .contains("multipart/form-data"));
+        let body = calls[0].body.as_deref().expect("multipart body recorded");
+        assert!(body.contains("name=\"meta\""));
+        assert!(body.contains("hello"));
+        assert!(body.contains("filename=\"blob.bin\""));
+        reset_http_state();
+    }
+
+    #[tokio::test]
+    async fn http_stream_mock_reads_in_chunks() {
+        reset_http_state();
+        push_http_mock(
+            "GET",
+            "https://api.example.com/stream",
+            vec![HttpMockResponse::new(200, "stream-body")],
+        );
+
+        let handle = vm_http_stream_open("https://api.example.com/stream", &BTreeMap::new())
+            .await
+            .expect("stream open");
+        let stream_id = handle.display();
+        let info = vm_http_stream_info(&stream_id).expect("stream info");
+        let info = info.as_dict().expect("info dict");
+        assert_eq!(info["status"].as_int(), Some(200));
+
+        let first = vm_http_stream_read(&stream_id, 6)
+            .await
+            .expect("first chunk");
+        let second = vm_http_stream_read(&stream_id, 64)
+            .await
+            .expect("second chunk");
+        let end = vm_http_stream_read(&stream_id, 64)
+            .await
+            .expect("end marker");
+        assert_eq!(first.as_bytes().expect("bytes"), b"stream");
+        assert_eq!(second.as_bytes().expect("bytes"), b"-body");
+        assert!(matches!(end, VmValue::Nil));
+        reset_http_state();
+    }
+
+    #[tokio::test]
+    async fn http_download_mock_writes_file() {
+        reset_http_state();
+        let temp = TempDir::new().expect("tempdir");
+        let path = temp.path().join("download.bin");
+        push_http_mock(
+            "GET",
+            "https://api.example.com/download",
+            vec![HttpMockResponse::new(200, "downloaded")],
+        );
+
+        let response = vm_http_download(
+            "https://api.example.com/download",
+            &path.display().to_string(),
+            &BTreeMap::new(),
+        )
+        .await
+        .expect("download response");
+        let response = response.as_dict().expect("response dict");
+        assert_eq!(response["bytes_written"].as_int(), Some(10));
+        assert_eq!(
+            std::fs::read_to_string(path).expect("downloaded file"),
+            "downloaded"
+        );
+        reset_http_state();
+    }
+
+    #[tokio::test]
+    async fn http_proxy_routes_requests_through_configured_proxy() {
+        reset_http_state();
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind proxy listener");
+        let proxy_addr = listener.local_addr().expect("proxy addr");
+        let proxy_thread = std::thread::spawn(move || {
+            let mut stream = accept_http_connection(&listener, "proxy listener");
+            let request = read_http_request(&mut stream);
+            assert_eq!(request.method, "GET");
+            assert_eq!(request.path, "http://example.invalid/proxy-check");
+            assert_eq!(
+                request
+                    .headers
+                    .get("proxy-authorization")
+                    .map(String::as_str),
+                Some("Basic dXNlcjpwYXNz")
+            );
+            write_http_response(
+                &mut stream,
+                200,
+                &[("content-type", "text/plain".to_string())],
+                "proxied",
+            );
+        });
+
+        let options = BTreeMap::from([
+            (
+                "proxy".to_string(),
+                VmValue::String(Rc::from(format!("http://{proxy_addr}"))),
+            ),
+            (
+                "proxy_auth".to_string(),
+                VmValue::Dict(Rc::new(BTreeMap::from([
+                    ("user".to_string(), VmValue::String(Rc::from("user"))),
+                    ("pass".to_string(), VmValue::String(Rc::from("pass"))),
+                ]))),
+            ),
+            ("timeout_ms".to_string(), VmValue::Int(1_000)),
+        ]);
+
+        let response =
+            vm_execute_http_request("GET", "http://example.invalid/proxy-check", &options)
+                .await
+                .expect("proxied response");
+        let response = response.as_dict().expect("response dict");
+        assert_eq!(response["status"].as_int(), Some(200));
+        assert_eq!(response["body"].display(), "proxied");
+        proxy_thread.join().expect("proxy thread");
+        reset_http_state();
+    }
+
+    #[tokio::test]
+    async fn custom_tls_ca_bundle_and_pin_allow_request() {
+        reset_http_state();
+        install_rustls_provider();
+        let temp = TempDir::new().expect("tempdir");
+        let cert =
+            generate_simple_self_signed(vec!["localhost".to_string(), "127.0.0.1".to_string()])
+                .expect("generate cert");
+        let cert_pem = cert.cert.pem();
+        let cert_path = temp.path().join("cert.pem");
+        std::fs::write(&cert_path, cert_pem.as_bytes()).expect("write cert");
+        let pin = spki_pin_base64(cert.cert.der().as_ref());
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind tls listener");
+        let port = listener.local_addr().expect("tls addr").port();
+        let server_config = Arc::new(
+            ServerConfig::builder()
+                .with_no_client_auth()
+                .with_single_cert(
+                    vec![cert.cert.der().clone()],
+                    PrivatePkcs8KeyDer::from(cert.key_pair.serialize_der()).into(),
+                )
+                .expect("build tls config"),
+        );
+        let thread = std::thread::spawn(move || {
+            let (tcp, _) = listener.accept().expect("accept tls client");
+            let conn = ServerConnection::new(server_config).expect("server connection");
+            let mut stream = StreamOwned::new(conn, tcp);
+            let request = read_http_request_generic(&mut stream);
+            assert!(request.starts_with("GET /secure HTTP/1.1\r\n"));
+            write_http_response_generic(
+                &mut stream,
+                200,
+                &[("content-type", "text/plain".to_string())],
+                "secure",
+            );
+        });
+
+        let options = BTreeMap::from([(
+            "tls".to_string(),
+            VmValue::Dict(Rc::new(BTreeMap::from([
+                (
+                    "ca_bundle_path".to_string(),
+                    VmValue::String(Rc::from(cert_path.display().to_string())),
+                ),
+                (
+                    "pinned_sha256".to_string(),
+                    VmValue::List(Rc::new(vec![VmValue::String(Rc::from(pin))])),
+                ),
+            ]))),
+        )]);
+        let response =
+            vm_execute_http_request("GET", &format!("https://localhost:{port}/secure"), &options)
+                .await
+                .expect("tls request should succeed");
+        let response = response.as_dict().expect("response dict");
+        assert_eq!(response["body"].display(), "secure");
+        thread.join().expect("tls thread");
+        reset_http_state();
+    }
+
+    #[tokio::test]
+    async fn custom_tls_pin_mismatch_is_rejected() {
+        reset_http_state();
+        install_rustls_provider();
+        let temp = TempDir::new().expect("tempdir");
+        let cert =
+            generate_simple_self_signed(vec!["localhost".to_string(), "127.0.0.1".to_string()])
+                .expect("generate cert");
+        let cert_pem = cert.cert.pem();
+        let cert_path = temp.path().join("cert.pem");
+        std::fs::write(&cert_path, cert_pem.as_bytes()).expect("write cert");
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind tls listener");
+        let port = listener.local_addr().expect("tls addr").port();
+        let server_config = Arc::new(
+            ServerConfig::builder()
+                .with_no_client_auth()
+                .with_single_cert(
+                    vec![cert.cert.der().clone()],
+                    PrivatePkcs8KeyDer::from(cert.key_pair.serialize_der()).into(),
+                )
+                .expect("build tls config"),
+        );
+        let thread = std::thread::spawn(move || {
+            let (tcp, _) = listener.accept().expect("accept tls client");
+            let conn = ServerConnection::new(server_config).expect("server connection");
+            let mut stream = StreamOwned::new(conn, tcp);
+            let _ = read_http_request_generic(&mut stream);
+            write_http_response_generic(
+                &mut stream,
+                200,
+                &[("content-type", "text/plain".to_string())],
+                "secure",
+            );
+        });
+
+        let options = BTreeMap::from([(
+            "tls".to_string(),
+            VmValue::Dict(Rc::new(BTreeMap::from([
+                (
+                    "ca_bundle_path".to_string(),
+                    VmValue::String(Rc::from(cert_path.display().to_string())),
+                ),
+                (
+                    "pinned_sha256".to_string(),
+                    VmValue::List(Rc::new(vec![VmValue::String(Rc::from("deadbeef"))])),
+                ),
+            ]))),
+        )]);
+        let error =
+            vm_execute_http_request("GET", &format!("https://localhost:{port}/secure"), &options)
+                .await
+                .expect_err("pin mismatch should fail");
+        let message = error.to_string();
+        assert!(message.contains("TLS SPKI pin mismatch"), "{message}");
+        thread.join().expect("tls thread");
+        reset_http_state();
+    }
+
+    fn install_rustls_provider() {
+        static INSTALL: Once = Once::new();
+        INSTALL.call_once(|| {
+            let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+        });
+    }
+
+    fn spki_pin_base64(cert_der: &[u8]) -> String {
+        let (_, cert) = X509Certificate::from_der(cert_der).expect("parse cert");
+        base64::engine::general_purpose::STANDARD
+            .encode(Sha256::digest(cert.tbs_certificate.subject_pki.raw))
+    }
+
+    fn read_http_request_generic<T: Read>(stream: &mut T) -> String {
+        let mut buffer = Vec::new();
+        let mut chunk = [0u8; 4096];
+        loop {
+            let read = stream.read(&mut chunk).expect("read request");
+            assert!(read > 0, "request closed before headers");
+            buffer.extend_from_slice(&chunk[..read]);
+            if buffer.windows(4).any(|window| window == b"\r\n\r\n") {
+                return String::from_utf8_lossy(&buffer).into_owned();
+            }
+        }
+    }
+
+    fn write_http_response_generic<T: Write>(
+        stream: &mut T,
+        status: u16,
+        headers: &[(&str, String)],
+        body: &str,
+    ) {
+        let mut response = format!(
+            "HTTP/1.1 {status} OK\r\ncontent-length: {}\r\nconnection: close\r\n",
+            body.len()
+        );
+        for (name, value) in headers {
+            response.push_str(name);
+            response.push_str(": ");
+            response.push_str(value);
+            response.push_str("\r\n");
+        }
+        response.push_str("\r\n");
+        response.push_str(body);
+        stream
+            .write_all(response.as_bytes())
+            .expect("write response");
+        stream.flush().expect("flush response");
     }
 }
