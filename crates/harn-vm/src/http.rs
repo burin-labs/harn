@@ -193,6 +193,20 @@ struct FakeSseStream {
     closed: bool,
 }
 
+struct SseServerHandle {
+    status: i64,
+    headers: BTreeMap<String, VmValue>,
+    frames: VecDeque<String>,
+    max_event_bytes: usize,
+    max_buffered_events: usize,
+    sent_events: usize,
+    flushed_events: usize,
+    closed: bool,
+    disconnected: bool,
+    cancelled: bool,
+    cancel_reason: Option<String>,
+}
+
 struct WebSocketMock {
     url_pattern: String,
     messages: Vec<MockWsMessage>,
@@ -270,6 +284,7 @@ const DEFAULT_SERVER_MAX_BODY_BYTES: usize = 1024 * 1024;
 const MAX_HTTP_SESSIONS: usize = 64;
 const MAX_HTTP_STREAMS: usize = 64;
 const MAX_SSE_STREAMS: usize = 64;
+const MAX_SSE_SERVER_STREAMS: usize = 64;
 const MAX_WEBSOCKETS: usize = 64;
 const MULTIPART_MOCK_BOUNDARY: &str = "harn-boundary";
 const MAX_HTTP_SERVERS: usize = 128;
@@ -282,6 +297,7 @@ thread_local! {
     static HTTP_STREAMS: RefCell<HashMap<String, HttpStreamHandle>> = RefCell::new(HashMap::new());
     static SSE_MOCKS: RefCell<Vec<SseMock>> = const { RefCell::new(Vec::new()) };
     static SSE_HANDLES: RefCell<HashMap<String, SseHandle>> = RefCell::new(HashMap::new());
+    static SSE_SERVER_HANDLES: RefCell<HashMap<String, SseServerHandle>> = RefCell::new(HashMap::new());
     static WEBSOCKET_MOCKS: RefCell<Vec<WebSocketMock>> = const { RefCell::new(Vec::new()) };
     static WEBSOCKET_HANDLES: RefCell<HashMap<String, WebSocketHandle>> = RefCell::new(HashMap::new());
     static TRANSPORT_MOCK_CALLS: RefCell<Vec<TransportMockCall>> = const { RefCell::new(Vec::new()) };
@@ -307,6 +323,7 @@ pub fn reset_http_state() {
         }
         handles.borrow_mut().clear();
     });
+    SSE_SERVER_HANDLES.with(|handles| handles.borrow_mut().clear());
     WEBSOCKET_MOCKS.with(|mocks| mocks.borrow_mut().clear());
     WEBSOCKET_HANDLES.with(|handles| handles.borrow_mut().clear());
     TRANSPORT_MOCK_CALLS.with(|calls| calls.borrow_mut().clear());
@@ -646,6 +663,13 @@ fn timeout_event() -> VmValue {
 fn closed_event() -> VmValue {
     let mut dict = BTreeMap::new();
     dict.insert("type".to_string(), VmValue::String(Rc::from("close")));
+    VmValue::Dict(Rc::new(dict))
+}
+
+fn sse_server_closed_event() -> VmValue {
+    let mut dict = BTreeMap::new();
+    dict.insert("type".to_string(), VmValue::String(Rc::from("close")));
+    dict.insert("server_closed".to_string(), VmValue::Bool(true));
     VmValue::Dict(Rc::new(dict))
 }
 
@@ -1886,6 +1910,112 @@ pub fn register_http_builtins(vm: &mut Vm) {
         vm_sse_receive(&stream_id, timeout_ms).await
     });
 
+    vm.register_builtin("sse_event", |args, _out| {
+        let Some(event) = args.first() else {
+            return Err(vm_error("sse_event: requires event data or an event dict"));
+        };
+        let options = get_options_arg(args, 1);
+        Ok(VmValue::String(Rc::from(vm_sse_event_frame(
+            event, &options,
+        )?)))
+    });
+
+    vm.register_builtin("sse_server_response", |args, _out| {
+        let options = get_options_arg(args, 0);
+        vm_sse_server_response(&options)
+    });
+
+    vm.register_builtin("sse_server_send", |args, _out| {
+        if args.len() < 2 {
+            return Err(vm_error("sse_server_send: requires stream and event"));
+        }
+        let stream_id = handle_from_value(&args[0], "sse_server_send")?;
+        let options = get_options_arg(args, 2);
+        vm_sse_server_send(&stream_id, &args[1], &options)
+    });
+
+    vm.register_builtin("sse_server_heartbeat", |args, _out| {
+        let Some(handle) = args.first() else {
+            return Err(vm_error("sse_server_heartbeat: requires a stream handle"));
+        };
+        let stream_id = handle_from_value(handle, "sse_server_heartbeat")?;
+        vm_sse_server_heartbeat(&stream_id, args.get(1))
+    });
+
+    vm.register_builtin("sse_server_flush", |args, _out| {
+        let Some(handle) = args.first() else {
+            return Err(vm_error("sse_server_flush: requires a stream handle"));
+        };
+        let stream_id = handle_from_value(handle, "sse_server_flush")?;
+        vm_sse_server_flush(&stream_id)
+    });
+
+    vm.register_builtin("sse_server_close", |args, _out| {
+        let Some(handle) = args.first() else {
+            return Err(vm_error("sse_server_close: requires a stream handle"));
+        };
+        let stream_id = handle_from_value(handle, "sse_server_close")?;
+        vm_sse_server_close(&stream_id)
+    });
+
+    vm.register_builtin("sse_server_cancel", |args, _out| {
+        let Some(handle) = args.first() else {
+            return Err(vm_error("sse_server_cancel: requires a stream handle"));
+        };
+        let stream_id = handle_from_value(handle, "sse_server_cancel")?;
+        vm_sse_server_cancel(&stream_id, args.get(1))
+    });
+
+    vm.register_builtin("sse_server_status", |args, _out| {
+        let Some(handle) = args.first() else {
+            return Err(vm_error("sse_server_status: requires a stream handle"));
+        };
+        let stream_id = handle_from_value(handle, "sse_server_status")?;
+        vm_sse_server_status(&stream_id)
+    });
+
+    vm.register_builtin("sse_server_disconnected", |args, _out| {
+        let Some(handle) = args.first() else {
+            return Err(vm_error(
+                "sse_server_disconnected: requires a stream handle",
+            ));
+        };
+        let stream_id = handle_from_value(handle, "sse_server_disconnected")?;
+        vm_sse_server_observed_bool(&stream_id, "sse_server_disconnected", |handle| {
+            handle.disconnected
+        })
+    });
+
+    vm.register_builtin("sse_server_cancelled", |args, _out| {
+        let Some(handle) = args.first() else {
+            return Err(vm_error("sse_server_cancelled: requires a stream handle"));
+        };
+        let stream_id = handle_from_value(handle, "sse_server_cancelled")?;
+        vm_sse_server_observed_bool(&stream_id, "sse_server_cancelled", |handle| {
+            handle.cancelled
+        })
+    });
+
+    vm.register_builtin("sse_server_mock_receive", |args, _out| {
+        let Some(handle) = args.first() else {
+            return Err(vm_error(
+                "sse_server_mock_receive: requires a stream handle",
+            ));
+        };
+        let stream_id = handle_from_value(handle, "sse_server_mock_receive")?;
+        vm_sse_server_mock_receive(&stream_id)
+    });
+
+    vm.register_builtin("sse_server_mock_disconnect", |args, _out| {
+        let Some(handle) = args.first() else {
+            return Err(vm_error(
+                "sse_server_mock_disconnect: requires a stream handle",
+            ));
+        };
+        let stream_id = handle_from_value(handle, "sse_server_mock_disconnect")?;
+        vm_sse_server_mock_disconnect(&stream_id)
+    });
+
     vm.register_builtin("sse_close", |args, _out| {
         let Some(handle) = args.first() else {
             return Err(vm_error("sse_close: requires a stream handle"));
@@ -2647,6 +2777,522 @@ fn sse_event_value(event: &MockStreamEvent) -> VmValue {
         event.retry_ms.map(VmValue::Int).unwrap_or(VmValue::Nil),
     );
     VmValue::Dict(Rc::new(dict))
+}
+
+fn sse_server_response_value(id: &str, handle: &SseServerHandle) -> VmValue {
+    let mut dict = BTreeMap::new();
+    dict.insert("id".to_string(), VmValue::String(Rc::from(id)));
+    dict.insert(
+        "type".to_string(),
+        VmValue::String(Rc::from("sse_response")),
+    );
+    dict.insert("status".to_string(), VmValue::Int(handle.status));
+    dict.insert(
+        "headers".to_string(),
+        VmValue::Dict(Rc::new(handle.headers.clone())),
+    );
+    dict.insert("body".to_string(), VmValue::Nil);
+    dict.insert("streaming".to_string(), VmValue::Bool(true));
+    dict.insert(
+        "max_event_bytes".to_string(),
+        VmValue::Int(handle.max_event_bytes as i64),
+    );
+    dict.insert(
+        "max_buffered_events".to_string(),
+        VmValue::Int(handle.max_buffered_events as i64),
+    );
+    VmValue::Dict(Rc::new(dict))
+}
+
+fn default_sse_response_headers() -> BTreeMap<String, VmValue> {
+    BTreeMap::from([
+        (
+            "content-type".to_string(),
+            VmValue::String(Rc::from("text/event-stream; charset=utf-8")),
+        ),
+        (
+            "cache-control".to_string(),
+            VmValue::String(Rc::from("no-cache")),
+        ),
+        (
+            "connection".to_string(),
+            VmValue::String(Rc::from("keep-alive")),
+        ),
+        (
+            "x-accel-buffering".to_string(),
+            VmValue::String(Rc::from("no")),
+        ),
+    ])
+}
+
+fn sse_response_headers(options: &BTreeMap<String, VmValue>) -> BTreeMap<String, VmValue> {
+    let mut headers = default_sse_response_headers();
+    if let Some(VmValue::Dict(custom)) = options.get("headers") {
+        for (name, value) in custom.iter() {
+            headers.retain(|existing, _| !existing.eq_ignore_ascii_case(name));
+            headers.insert(name.clone(), VmValue::String(Rc::from(value.display())));
+        }
+    }
+    if !headers
+        .keys()
+        .any(|name| name.eq_ignore_ascii_case("content-type"))
+    {
+        headers.insert(
+            "content-type".to_string(),
+            VmValue::String(Rc::from("text/event-stream; charset=utf-8")),
+        );
+    }
+    headers
+}
+
+fn validate_sse_field(field: &str, value: &str) -> Result<(), VmError> {
+    if value.contains('\n') || value.contains('\r') {
+        return Err(vm_error(format!(
+            "sse_event: {field} must not contain newlines"
+        )));
+    }
+    Ok(())
+}
+
+fn push_sse_multiline_field(frame: &mut String, field: &str, value: &str) {
+    let normalized = value.replace("\r\n", "\n").replace('\r', "\n");
+    if normalized.is_empty() {
+        frame.push_str(field);
+        frame.push_str(": \n");
+        return;
+    }
+    for line in normalized.split('\n') {
+        frame.push_str(field);
+        frame.push_str(": ");
+        frame.push_str(line);
+        frame.push('\n');
+    }
+}
+
+fn vm_sse_event_frame(
+    event: &VmValue,
+    options: &BTreeMap<String, VmValue>,
+) -> Result<String, VmError> {
+    let mut frame = String::new();
+    let mut has_event_payload = false;
+
+    match event {
+        VmValue::Dict(dict) => {
+            if let Some(comment) = dict.get("comment").or_else(|| options.get("comment")) {
+                push_sse_comment(&mut frame, &comment.display());
+            }
+            if let Some(id) = dict.get("id").or_else(|| options.get("id")) {
+                let id = id.display();
+                validate_sse_field("id", &id)?;
+                frame.push_str("id: ");
+                frame.push_str(&id);
+                frame.push('\n');
+            }
+            if let Some(event_type) = dict
+                .get("event")
+                .or_else(|| dict.get("name"))
+                .or_else(|| options.get("event"))
+            {
+                let event_type = event_type.display();
+                validate_sse_field("event", &event_type)?;
+                frame.push_str("event: ");
+                frame.push_str(&event_type);
+                frame.push('\n');
+                has_event_payload = true;
+            }
+            if let Some(retry) = dict
+                .get("retry")
+                .or_else(|| dict.get("retry_ms"))
+                .or_else(|| options.get("retry"))
+                .or_else(|| options.get("retry_ms"))
+            {
+                let retry_ms = retry.as_int().ok_or_else(|| {
+                    vm_error("sse_event: retry/retry_ms must be a non-negative integer")
+                })?;
+                if retry_ms < 0 {
+                    return Err(vm_error(
+                        "sse_event: retry/retry_ms must be a non-negative integer",
+                    ));
+                }
+                frame.push_str("retry: ");
+                frame.push_str(&retry_ms.to_string());
+                frame.push('\n');
+                has_event_payload = true;
+            }
+            if let Some(data) = dict.get("data").or_else(|| options.get("data")) {
+                push_sse_multiline_field(&mut frame, "data", &data.display());
+                has_event_payload = true;
+            } else if !frame.is_empty() && !dict.contains_key("comment") {
+                push_sse_multiline_field(&mut frame, "data", "");
+                has_event_payload = true;
+            }
+        }
+        other => {
+            if let Some(comment) = options.get("comment") {
+                push_sse_comment(&mut frame, &comment.display());
+            }
+            if let Some(id) = options.get("id") {
+                let id = id.display();
+                validate_sse_field("id", &id)?;
+                frame.push_str("id: ");
+                frame.push_str(&id);
+                frame.push('\n');
+            }
+            if let Some(event_type) = options.get("event") {
+                let event_type = event_type.display();
+                validate_sse_field("event", &event_type)?;
+                frame.push_str("event: ");
+                frame.push_str(&event_type);
+                frame.push('\n');
+            }
+            if let Some(retry) = options.get("retry").or_else(|| options.get("retry_ms")) {
+                let retry_ms = retry.as_int().ok_or_else(|| {
+                    vm_error("sse_event: retry/retry_ms must be a non-negative integer")
+                })?;
+                if retry_ms < 0 {
+                    return Err(vm_error(
+                        "sse_event: retry/retry_ms must be a non-negative integer",
+                    ));
+                }
+                frame.push_str("retry: ");
+                frame.push_str(&retry_ms.to_string());
+                frame.push('\n');
+            }
+            push_sse_multiline_field(&mut frame, "data", &other.display());
+            has_event_payload = true;
+        }
+    }
+
+    if frame.is_empty() || !has_event_payload && !frame.starts_with(':') {
+        push_sse_comment(&mut frame, "");
+    }
+    frame.push('\n');
+    Ok(frame)
+}
+
+fn push_sse_comment(frame: &mut String, comment: &str) {
+    let normalized = comment.replace("\r\n", "\n").replace('\r', "\n");
+    if normalized.is_empty() {
+        frame.push_str(":\n");
+        return;
+    }
+    for line in normalized.split('\n') {
+        frame.push_str(": ");
+        frame.push_str(line);
+        frame.push('\n');
+    }
+}
+
+fn vm_sse_server_response(options: &BTreeMap<String, VmValue>) -> Result<VmValue, VmError> {
+    let id = next_transport_handle("sse-server");
+    let status = options
+        .get("status")
+        .and_then(|value| value.as_int())
+        .unwrap_or(200)
+        .clamp(100, 599);
+    let handle = SseServerHandle {
+        status,
+        headers: sse_response_headers(options),
+        frames: VecDeque::new(),
+        max_event_bytes: transport_limit_option(
+            options,
+            "max_event_bytes",
+            DEFAULT_MAX_MESSAGE_BYTES,
+        )
+        .max(1),
+        max_buffered_events: transport_limit_option(
+            options,
+            "max_buffered_events",
+            DEFAULT_MAX_STREAM_EVENTS,
+        )
+        .max(1),
+        sent_events: 0,
+        flushed_events: 0,
+        closed: false,
+        disconnected: false,
+        cancelled: false,
+        cancel_reason: None,
+    };
+    let value = sse_server_response_value(&id, &handle);
+    SSE_SERVER_HANDLES.with(|handles| {
+        let mut handles = handles.borrow_mut();
+        if handles.len() >= MAX_SSE_SERVER_STREAMS {
+            return Err(vm_error(format!(
+                "sse_server_response: maximum open streams ({MAX_SSE_SERVER_STREAMS}) reached"
+            )));
+        }
+        handles.insert(id, handle);
+        Ok(())
+    })?;
+    Ok(value)
+}
+
+fn sse_server_status_value(id: &str, handle: &SseServerHandle) -> VmValue {
+    let mut dict = BTreeMap::new();
+    dict.insert("id".to_string(), VmValue::String(Rc::from(id)));
+    dict.insert("status".to_string(), VmValue::Int(handle.status));
+    dict.insert(
+        "headers".to_string(),
+        VmValue::Dict(Rc::new(handle.headers.clone())),
+    );
+    dict.insert(
+        "buffered_events".to_string(),
+        VmValue::Int(handle.frames.len() as i64),
+    );
+    dict.insert(
+        "sent_events".to_string(),
+        VmValue::Int(handle.sent_events as i64),
+    );
+    dict.insert(
+        "flushed_events".to_string(),
+        VmValue::Int(handle.flushed_events as i64),
+    );
+    dict.insert("closed".to_string(), VmValue::Bool(handle.closed));
+    dict.insert(
+        "disconnected".to_string(),
+        VmValue::Bool(handle.disconnected),
+    );
+    dict.insert("cancelled".to_string(), VmValue::Bool(handle.cancelled));
+    dict.insert(
+        "cancel_reason".to_string(),
+        handle
+            .cancel_reason
+            .as_deref()
+            .map(|reason| VmValue::String(Rc::from(reason)))
+            .unwrap_or(VmValue::Nil),
+    );
+    dict.insert(
+        "max_event_bytes".to_string(),
+        VmValue::Int(handle.max_event_bytes as i64),
+    );
+    dict.insert(
+        "max_buffered_events".to_string(),
+        VmValue::Int(handle.max_buffered_events as i64),
+    );
+    VmValue::Dict(Rc::new(dict))
+}
+
+fn vm_sse_server_status(stream_id: &str) -> Result<VmValue, VmError> {
+    SSE_SERVER_HANDLES.with(|handles| {
+        handles
+            .borrow()
+            .get(stream_id)
+            .map(|handle| sse_server_status_value(stream_id, handle))
+            .ok_or_else(|| vm_error(format!("sse_server_status: unknown stream '{stream_id}'")))
+    })
+}
+
+fn vm_sse_server_send(
+    stream_id: &str,
+    event: &VmValue,
+    options: &BTreeMap<String, VmValue>,
+) -> Result<VmValue, VmError> {
+    let frame = vm_sse_event_frame(event, options)?;
+    SSE_SERVER_HANDLES.with(|handles| {
+        let mut handles = handles.borrow_mut();
+        let handle = handles
+            .get_mut(stream_id)
+            .ok_or_else(|| vm_error(format!("sse_server_send: unknown stream '{stream_id}'")))?;
+        if handle.closed || handle.cancelled || handle.disconnected {
+            return Ok(VmValue::Bool(false));
+        }
+        if frame.len() > handle.max_event_bytes {
+            return Err(vm_error(format!(
+                "sse_server_send: event exceeded max_event_bytes ({})",
+                handle.max_event_bytes
+            )));
+        }
+        if handle.frames.len() >= handle.max_buffered_events {
+            return Err(vm_error(format!(
+                "sse_server_send: buffered events exceeded max_buffered_events ({})",
+                handle.max_buffered_events
+            )));
+        }
+        handle.frames.push_back(frame);
+        handle.sent_events += 1;
+        Ok(VmValue::Bool(true))
+    })
+}
+
+fn vm_sse_server_heartbeat(stream_id: &str, comment: Option<&VmValue>) -> Result<VmValue, VmError> {
+    let mut frame = String::new();
+    push_sse_comment(
+        &mut frame,
+        &comment
+            .map(|value| value.display())
+            .unwrap_or_else(|| "heartbeat".to_string()),
+    );
+    frame.push('\n');
+    SSE_SERVER_HANDLES.with(|handles| {
+        let mut handles = handles.borrow_mut();
+        let handle = handles.get_mut(stream_id).ok_or_else(|| {
+            vm_error(format!(
+                "sse_server_heartbeat: unknown stream '{stream_id}'"
+            ))
+        })?;
+        if handle.closed || handle.cancelled || handle.disconnected {
+            return Ok(VmValue::Bool(false));
+        }
+        if frame.len() > handle.max_event_bytes {
+            return Err(vm_error(format!(
+                "sse_server_heartbeat: event exceeded max_event_bytes ({})",
+                handle.max_event_bytes
+            )));
+        }
+        if handle.frames.len() >= handle.max_buffered_events {
+            return Err(vm_error(format!(
+                "sse_server_heartbeat: buffered events exceeded max_buffered_events ({})",
+                handle.max_buffered_events
+            )));
+        }
+        handle.frames.push_back(frame);
+        handle.sent_events += 1;
+        Ok(VmValue::Bool(true))
+    })
+}
+
+fn vm_sse_server_flush(stream_id: &str) -> Result<VmValue, VmError> {
+    SSE_SERVER_HANDLES.with(|handles| {
+        let mut handles = handles.borrow_mut();
+        let handle = handles
+            .get_mut(stream_id)
+            .ok_or_else(|| vm_error(format!("sse_server_flush: unknown stream '{stream_id}'")))?;
+        if handle.disconnected || handle.cancelled {
+            return Ok(VmValue::Bool(false));
+        }
+        handle.flushed_events = handle.sent_events;
+        Ok(VmValue::Bool(!handle.closed))
+    })
+}
+
+fn vm_sse_server_close(stream_id: &str) -> Result<VmValue, VmError> {
+    SSE_SERVER_HANDLES.with(|handles| {
+        let mut handles = handles.borrow_mut();
+        let handle = handles
+            .get_mut(stream_id)
+            .ok_or_else(|| vm_error(format!("sse_server_close: unknown stream '{stream_id}'")))?;
+        if handle.closed {
+            return Ok(VmValue::Bool(false));
+        }
+        handle.closed = true;
+        Ok(VmValue::Bool(true))
+    })
+}
+
+fn vm_sse_server_cancel(stream_id: &str, reason: Option<&VmValue>) -> Result<VmValue, VmError> {
+    SSE_SERVER_HANDLES.with(|handles| {
+        let mut handles = handles.borrow_mut();
+        let handle = handles
+            .get_mut(stream_id)
+            .ok_or_else(|| vm_error(format!("sse_server_cancel: unknown stream '{stream_id}'")))?;
+        if handle.cancelled {
+            return Ok(VmValue::Bool(false));
+        }
+        handle.cancelled = true;
+        handle.closed = true;
+        handle.cancel_reason = reason
+            .map(|value| value.display())
+            .filter(|value| !value.is_empty());
+        Ok(VmValue::Bool(true))
+    })
+}
+
+fn vm_sse_server_observed_bool(
+    stream_id: &str,
+    builtin: &str,
+    predicate: impl Fn(&SseServerHandle) -> bool,
+) -> Result<VmValue, VmError> {
+    SSE_SERVER_HANDLES.with(|handles| {
+        handles
+            .borrow()
+            .get(stream_id)
+            .map(|handle| VmValue::Bool(predicate(handle)))
+            .ok_or_else(|| vm_error(format!("{builtin}: unknown stream '{stream_id}'")))
+    })
+}
+
+fn vm_sse_server_mock_receive(stream_id: &str) -> Result<VmValue, VmError> {
+    SSE_SERVER_HANDLES.with(|handles| {
+        let mut handles = handles.borrow_mut();
+        let handle = handles.get_mut(stream_id).ok_or_else(|| {
+            vm_error(format!(
+                "sse_server_mock_receive: unknown stream '{stream_id}'"
+            ))
+        })?;
+        if let Some(frame) = handle.frames.pop_front() {
+            return Ok(sse_server_mock_frame_value(&frame));
+        }
+        if handle.closed || handle.cancelled || handle.disconnected {
+            return Ok(sse_server_closed_event());
+        }
+        Ok(timeout_event())
+    })
+}
+
+fn vm_sse_server_mock_disconnect(stream_id: &str) -> Result<VmValue, VmError> {
+    SSE_SERVER_HANDLES.with(|handles| {
+        let mut handles = handles.borrow_mut();
+        let handle = handles.get_mut(stream_id).ok_or_else(|| {
+            vm_error(format!(
+                "sse_server_mock_disconnect: unknown stream '{stream_id}'"
+            ))
+        })?;
+        if handle.disconnected {
+            return Ok(VmValue::Bool(false));
+        }
+        handle.disconnected = true;
+        handle.closed = true;
+        Ok(VmValue::Bool(true))
+    })
+}
+
+fn sse_server_mock_frame_value(frame: &str) -> VmValue {
+    let mut event = MockStreamEvent {
+        event_type: "message".to_string(),
+        data: String::new(),
+        id: None,
+        retry_ms: None,
+    };
+    let mut data_lines = Vec::new();
+    let mut comments = Vec::new();
+    for raw in frame.lines() {
+        if raw.is_empty() {
+            continue;
+        }
+        if let Some(comment) = raw.strip_prefix(':') {
+            comments.push(comment.strip_prefix(' ').unwrap_or(comment).to_string());
+            continue;
+        }
+        let (field, value) = raw.split_once(':').unwrap_or((raw, ""));
+        let value = value.strip_prefix(' ').unwrap_or(value);
+        match field {
+            "event" => event.event_type = value.to_string(),
+            "data" => data_lines.push(value.to_string()),
+            "id" => event.id = Some(value.to_string()).filter(|value| !value.is_empty()),
+            "retry" => event.retry_ms = value.parse::<i64>().ok(),
+            _ => {}
+        }
+    }
+    if !data_lines.is_empty() {
+        event.data = data_lines.join("\n");
+    }
+    let mut value = if comments.is_empty() || !data_lines.is_empty() {
+        sse_event_value(&event)
+    } else {
+        let mut dict = BTreeMap::new();
+        dict.insert("type".to_string(), VmValue::String(Rc::from("comment")));
+        dict.insert(
+            "comment".to_string(),
+            VmValue::String(Rc::from(comments.join("\n"))),
+        );
+        VmValue::Dict(Rc::new(dict))
+    };
+    if let VmValue::Dict(dict) = &mut value {
+        let mut owned = (**dict).clone();
+        owned.insert("raw".to_string(), VmValue::String(Rc::from(frame)));
+        value = VmValue::Dict(Rc::new(owned));
+    }
+    value
 }
 
 fn real_sse_event_value(event: SseEvent) -> VmValue {
@@ -3791,9 +4437,12 @@ async fn vm_websocket_close(socket_id: &str) -> Result<VmValue, VmError> {
 #[cfg(test)]
 mod tests {
     use super::{
-        compute_retry_delay, http_mock_calls_snapshot, parse_retry_after_value, push_http_mock,
-        reset_http_state, vm_execute_http_request, vm_http_download, vm_http_stream_info,
-        vm_http_stream_open, vm_http_stream_read, HttpMockResponse,
+        compute_retry_delay, handle_from_value, http_mock_calls_snapshot, parse_retry_after_value,
+        push_http_mock, reset_http_state, vm_execute_http_request, vm_http_download,
+        vm_http_stream_info, vm_http_stream_open, vm_http_stream_read, vm_sse_event_frame,
+        vm_sse_server_cancel, vm_sse_server_heartbeat, vm_sse_server_mock_disconnect,
+        vm_sse_server_mock_receive, vm_sse_server_observed_bool, vm_sse_server_response,
+        vm_sse_server_send, HttpMockResponse,
     };
     use crate::connectors::test_util::{
         accept_http_connection, read_http_request, write_http_response,
@@ -3812,6 +4461,13 @@ mod tests {
     use std::time::{Duration, SystemTime};
     use tempfile::TempDir;
     use x509_parser::prelude::{FromDer, X509Certificate};
+
+    fn expect_bool(value: VmValue) -> bool {
+        let VmValue::Bool(value) = value else {
+            panic!("expected bool, got {}", value.display());
+        };
+        value
+    }
 
     #[test]
     fn parses_retry_after_delta_seconds() {
@@ -4199,5 +4855,119 @@ mod tests {
             .write_all(response.as_bytes())
             .expect("write response");
         stream.flush().expect("flush response");
+    }
+
+    #[test]
+    fn formats_sse_event_fields_and_multiline_data() {
+        let frame = vm_sse_event_frame(
+            &VmValue::Dict(Rc::new(BTreeMap::from([
+                ("event".to_string(), VmValue::String(Rc::from("progress"))),
+                ("data".to_string(), VmValue::String(Rc::from("one\ntwo"))),
+                ("id".to_string(), VmValue::String(Rc::from("evt-1"))),
+                ("retry_ms".to_string(), VmValue::Int(2500)),
+            ]))),
+            &BTreeMap::new(),
+        )
+        .expect("event frame");
+        assert_eq!(
+            frame,
+            "id: evt-1\nevent: progress\nretry: 2500\ndata: one\ndata: two\n\n"
+        );
+    }
+
+    #[test]
+    fn rejects_sse_event_control_fields_with_newlines() {
+        let err = vm_sse_event_frame(
+            &VmValue::Dict(Rc::new(BTreeMap::from([(
+                "event".to_string(),
+                VmValue::String(Rc::from("bad\nname")),
+            )]))),
+            &BTreeMap::new(),
+        )
+        .expect_err("newline should reject");
+        assert!(err.to_string().contains("event must not contain newlines"));
+    }
+
+    #[test]
+    fn server_sse_mock_client_observes_heartbeat_disconnect_and_cancel() {
+        reset_http_state();
+        let response = vm_sse_server_response(&BTreeMap::from([(
+            "max_buffered_events".to_string(),
+            VmValue::Int(4),
+        )]))
+        .expect("response");
+        let stream_id = handle_from_value(&response, "test").expect("handle");
+
+        assert!(expect_bool(
+            vm_sse_server_send(
+                &stream_id,
+                &VmValue::Dict(Rc::new(BTreeMap::from([
+                    ("event".to_string(), VmValue::String(Rc::from("progress")),),
+                    ("data".to_string(), VmValue::String(Rc::from("50"))),
+                ]))),
+                &BTreeMap::new(),
+            )
+            .expect("send")
+        ));
+        assert!(expect_bool(
+            vm_sse_server_heartbeat(&stream_id, Some(&VmValue::String(Rc::from("tick"))))
+                .expect("heartbeat")
+        ));
+
+        let first = vm_sse_server_mock_receive(&stream_id).expect("first");
+        let first = first.as_dict().expect("first dict");
+        assert_eq!(first["event"].display(), "progress");
+        assert_eq!(first["data"].display(), "50");
+        let heartbeat = vm_sse_server_mock_receive(&stream_id).expect("heartbeat read");
+        let heartbeat = heartbeat.as_dict().expect("heartbeat dict");
+        assert_eq!(heartbeat["type"].display(), "comment");
+        assert_eq!(heartbeat["comment"].display(), "tick");
+
+        assert!(expect_bool(
+            vm_sse_server_mock_disconnect(&stream_id).expect("disconnect")
+        ));
+        assert!(expect_bool(
+            vm_sse_server_observed_bool(&stream_id, "test", |handle| handle.disconnected)
+                .expect("observed")
+        ));
+        assert!(!expect_bool(
+            vm_sse_server_send(
+                &stream_id,
+                &VmValue::String(Rc::from("late")),
+                &BTreeMap::new()
+            )
+            .expect("late send")
+        ));
+
+        let cancelled = vm_sse_server_response(&BTreeMap::new()).expect("cancelled response");
+        let cancelled_id = handle_from_value(&cancelled, "test").expect("cancelled handle");
+        assert!(expect_bool(
+            vm_sse_server_cancel(&cancelled_id, Some(&VmValue::String(Rc::from("stop"))))
+                .expect("cancel")
+        ));
+        assert!(expect_bool(
+            vm_sse_server_observed_bool(&cancelled_id, "test", |handle| handle.cancelled)
+                .expect("cancelled observed")
+        ));
+        reset_http_state();
+    }
+
+    #[test]
+    fn server_sse_rejects_oversized_events() {
+        reset_http_state();
+        let response = vm_sse_server_response(&BTreeMap::from([(
+            "max_event_bytes".to_string(),
+            VmValue::Int(12),
+        )]))
+        .expect("response");
+        let stream_id = handle_from_value(&response, "test").expect("handle");
+        let err = vm_sse_server_send(
+            &stream_id,
+            &VmValue::String(Rc::from("this is too large")),
+            &BTreeMap::new(),
+        )
+        .expect_err("oversized event should reject");
+        assert!(err.to_string().contains("max_event_bytes"));
+        reset_http_state();
     }
 }
