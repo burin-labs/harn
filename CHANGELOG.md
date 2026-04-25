@@ -11,6 +11,23 @@ granular archaeology.
 
 ### Added
 
+- **`unnecessary-cast` lint with autofix.** Flags conversion-builtin
+  calls whose argument is already syntactically of the target type —
+  `to_string("hi")`, `to_int(42)`, `to_float(1.5)`, `to_list([1,2,3])`,
+  `to_dict({a: 1})`, and chained identity calls like
+  `to_string(to_string(x))`. The autofix removes the redundant wrapper
+  while preserving the inner expression's source formatting verbatim.
+  Genuine conversions (`to_int("42")`, `to_float(5)`, `to_list(set([...]))`)
+  do not trigger the lint.
+- **`source.fixAll.harn` LSP code action.** The Harn LSP now advertises
+  the `source.fixAll.harn` and `source.fixAll` code-action kinds and
+  returns a single bulk action that applies every available autofix in
+  the document at once. The bundled VS Code extension turns on
+  `editor.formatOnSave` and `editor.codeActionsOnSave: { "source.fixAll.harn": "always" }`
+  for `[harn]` files by default and contributes a
+  `Harn: Apply All Autofixes` command palette entry that triggers the
+  same bulk action on demand. Per-diagnostic quick-fixes (Cmd+.)
+  continue to work unchanged.
 - **HTTP server stdlib primitives (#650).** New in-process inbound HTTP
   server surface: `http_server`, `http_route`, `http_request_*`,
   `http_response_*`, before/after middleware, body-size limits,

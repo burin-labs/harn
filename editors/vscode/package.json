@@ -57,8 +57,20 @@
       {
         "command": "harn.formatFile",
         "title": "Harn: Format File"
+      },
+      {
+        "command": "harn.applyAllAutofixes",
+        "title": "Harn: Apply All Autofixes"
       }
     ],
+    "configurationDefaults": {
+      "[harn]": {
+        "editor.formatOnSave": true,
+        "editor.codeActionsOnSave": {
+          "source.fixAll.harn": "always"
+        }
+      }
+    },
     "debuggers": [
       {
         "type": "harn",

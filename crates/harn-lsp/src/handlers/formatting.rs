@@ -95,6 +95,7 @@ impl HarnLsp {
                         "invalid-binary-op-literal" => {
                             "Convert to string interpolation".to_string()
                         }
+                        "unnecessary-cast" => "Remove unnecessary cast".to_string(),
                         _ => ld
                             .suggestion
                             .clone()
@@ -227,8 +228,74 @@ impl HarnLsp {
             }
         }
 
+        if fix_all_requested(params.context.only.as_deref()) {
+            let mut all_edits: Vec<harn_lexer::FixEdit> = Vec::new();
+            for ld in &lint_diags {
+                if let Some(fix) = &ld.fix {
+                    all_edits.extend(fix.iter().cloned());
+                }
+            }
+            for td in &type_diags {
+                if let Some(fix) = &td.fix {
+                    all_edits.extend(fix.iter().cloned());
+                }
+            }
+            // Apply fixes right-to-left and drop overlaps to mirror the
+            // CLI's `harn lint --fix` semantics; this keeps the on-save
+            // path consistent with what `harn lint --fix` would produce.
+            all_edits.sort_by_key(|e| std::cmp::Reverse(e.span.start));
+            let mut accepted: Vec<harn_lexer::FixEdit> = Vec::new();
+            for edit in all_edits {
+                let overlaps = accepted
+                    .iter()
+                    .any(|prev| edit.span.start < prev.span.end && edit.span.end > prev.span.start);
+                if !overlaps {
+                    accepted.push(edit);
+                }
+            }
+            if !accepted.is_empty() {
+                let text_edits: Vec<TextEdit> = accepted
+                    .iter()
+                    .map(|fe| TextEdit {
+                        range: Range {
+                            start: offset_to_position(&source, fe.span.start),
+                            end: offset_to_position(&source, fe.span.end),
+                        },
+                        new_text: fe.replacement.clone(),
+                    })
+                    .collect();
+                let mut changes = HashMap::new();
+                changes.insert(uri.clone(), text_edits);
+                actions.push(CodeActionOrCommand::CodeAction(CodeAction {
+                    title: "Apply all Harn autofixes".to_string(),
+                    kind: Some(CodeActionKind::new("source.fixAll.harn")),
+                    edit: Some(WorkspaceEdit {
+                        changes: Some(changes),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }));
+            }
+        }
+
         Ok(Some(actions))
     }
+}
+
+/// Returns `true` when the editor's `CodeActionContext.only` filter
+/// explicitly asks for a fix-all kind. We deliberately do NOT opt in
+/// when `only` is `None` so the bulk action does not pollute the regular
+/// Cmd+. menu — it should only fire from `editor.codeActionsOnSave`
+/// (which sends `["source.fixAll"]` or `["source.fixAll.harn"]`) or the
+/// "Source Action…" command (which sends `["source"]`).
+fn fix_all_requested(only: Option<&[CodeActionKind]>) -> bool {
+    let Some(kinds) = only else {
+        return false;
+    };
+    kinds.iter().any(|k| {
+        let s = k.as_str();
+        s == "source.fixAll" || s == "source.fixAll.harn" || s == "source"
+    })
 }
 
 /// Build a `TextEdit` that inserts "missing" match arms just before

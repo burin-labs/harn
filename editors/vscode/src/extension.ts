@@ -117,6 +117,28 @@ export function activate(context: vscode.ExtensionContext) {
     }
   );
 
+  // --- Apply All Autofixes command ---
+  // Triggers the LSP's bulk `source.fixAll.harn` code action. Same path
+  // VS Code uses for `editor.codeActionsOnSave` — exposed as an explicit
+  // command so users can run it on demand without configuring on-save.
+  const applyAllFixesCommand = vscode.commands.registerCommand(
+    "harn.applyAllAutofixes",
+    async () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor || editor.document.languageId !== "harn") {
+        vscode.window.showWarningMessage("Open a .harn file first");
+        return;
+      }
+      await vscode.commands.executeCommand(
+        "editor.action.sourceAction",
+        {
+          kind: "source.fixAll.harn",
+          apply: "first",
+        }
+      );
+    }
+  );
+
   const debugConfigProvider = vscode.debug.registerDebugConfigurationProvider(
     "harn",
     new HarnDebugConfigurationProvider()
@@ -129,6 +151,7 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     runCommand,
     fmtCommand,
+    applyAllFixesCommand,
     debugConfigProvider,
     debugAdapterFactory
   );

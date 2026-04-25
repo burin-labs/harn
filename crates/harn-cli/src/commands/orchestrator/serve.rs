@@ -2080,6 +2080,9 @@ struct RuntimeSignalCtx<'a> {
     live_triggers: &'a mut Vec<CollectedManifestTrigger>,
     secret_provider: &'a Arc<dyn harn_vm::secrets::SecretProvider>,
     metrics_registry: &'a Arc<harn_vm::MetricsRegistry>,
+    // Only consumed by the Unix signal-loop branch; on Windows the orchestrator
+    // currently waits on Ctrl+C only and never drains the admin reload channel.
+    #[cfg_attr(not(unix), allow(dead_code))]
     reload_rx: &'a mut mpsc::UnboundedReceiver<AdminReloadRequest>,
 }
 
@@ -2104,7 +2107,7 @@ fn install_signal_streams() -> Result<SignalStreams, String> {
 }
 
 async fn wait_for_runtime_signal_loop(
-    mut ctx: RuntimeSignalCtx<'_>,
+    #[cfg_attr(not(unix), allow(unused_mut, unused_variables))] mut ctx: RuntimeSignalCtx<'_>,
     #[cfg(unix)] mut signals: SignalStreams,
 ) -> Result<(), String> {
     #[cfg(unix)]

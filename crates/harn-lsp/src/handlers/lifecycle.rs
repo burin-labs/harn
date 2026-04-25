@@ -44,7 +44,21 @@ impl HarnLsp {
                     work_done_progress_options: Default::default(),
                 }),
                 workspace_symbol_provider: Some(OneOf::Left(true)),
-                code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
+                code_action_provider: Some(CodeActionProviderCapability::Options(
+                    CodeActionOptions {
+                        // Advertise both per-diagnostic quick fixes and a
+                        // bulk `source.fixAll.harn` action so VS Code's
+                        // `editor.codeActionsOnSave` can apply every safe
+                        // autofix on save without prompting for each one.
+                        code_action_kinds: Some(vec![
+                            CodeActionKind::QUICKFIX,
+                            CodeActionKind::SOURCE_FIX_ALL,
+                            CodeActionKind::new("source.fixAll.harn"),
+                        ]),
+                        resolve_provider: Some(false),
+                        work_done_progress_options: Default::default(),
+                    },
+                )),
                 rename_provider: Some(OneOf::Left(true)),
                 document_formatting_provider: Some(OneOf::Left(true)),
                 inlay_hint_provider: Some(OneOf::Right(InlayHintServerCapabilities::Options(

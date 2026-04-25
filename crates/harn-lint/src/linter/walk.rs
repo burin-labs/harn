@@ -8,7 +8,10 @@ use harn_parser::{Node, SNode};
 use super::Linter;
 use crate::decls::{FnDeclaration, ImportInfo, TypeDeclaration};
 use crate::diagnostic::{LintDiagnostic, LintSeverity};
-use crate::fixes::{empty_statement_removal_fix, is_pure_expression, nil_fallback_ternary_parts};
+use crate::fixes::{
+    empty_statement_removal_fix, is_pure_expression, nil_fallback_ternary_parts,
+    unnecessary_cast_fix,
+};
 use crate::harndoc::extract_harndoc;
 use crate::naming::simplify_bool_comparison;
 
@@ -275,6 +278,21 @@ impl<'a> Linter<'a> {
                             fix: None,
                         });
                     }
+                }
+                if let Some(target) = unnecessary_cast_target(name, args) {
+                    let inner = &args[0];
+                    let fix = unnecessary_cast_fix(self.source, snode.span, inner.span);
+                    let article = if matches!(target, "int") { "an" } else { "a" };
+                    self.diagnostics.push(LintDiagnostic {
+                        rule: "unnecessary-cast",
+                        message: format!(
+                            "`{name}` is a no-op here — its argument is already {article} {target}"
+                        ),
+                        span: snode.span,
+                        severity: LintSeverity::Warning,
+                        suggestion: Some(format!("remove the redundant `{name}(...)` wrapper")),
+                        fix,
+                    });
                 }
                 for arg in args {
                     self.lint_node(arg);
@@ -1030,4 +1048,57 @@ impl<'a> Linter<'a> {
             }
         }
     }
+}
+
+/// If `name` is one of the conversion builtins (`to_string`, `to_int`,
+/// `to_float`, `to_list`, `to_dict`) and `args` is exactly one expression
+/// already syntactically known to be of the target type, return the
+/// human-readable target name (`"string"`, `"int"`, ...). Returns `None`
+/// otherwise — including for valid conversions like `to_int("42")` and for
+/// calls with the wrong arity, both of which the lint must leave alone.
+fn unnecessary_cast_target(name: &str, args: &[SNode]) -> Option<&'static str> {
+    if args.len() != 1 {
+        return None;
+    }
+    let arg = &args[0].node;
+    let target = match name {
+        "to_string" => "string",
+        "to_int" => "int",
+        "to_float" => "float",
+        "to_list" => "list",
+        "to_dict" => "dict",
+        _ => return None,
+    };
+    if expr_has_known_type(arg, name) {
+        Some(target)
+    } else {
+        None
+    }
+}
+
+/// Static-shape check: does `node` already produce a value of the type
+/// that `cast` would yield? Conservative — only literals of matching shape
+/// and a chained call to the same conversion builtin count.
+fn expr_has_known_type(node: &Node, cast: &str) -> bool {
+    // Chained `to_X(to_X(...))` — outer is always redundant regardless of
+    // what the inner expression is.
+    if let Node::FunctionCall {
+        name: inner_name,
+        args: inner_args,
+    } = node
+    {
+        if inner_name == cast && inner_args.len() == 1 {
+            return true;
+        }
+    }
+    matches!(
+        (cast, node),
+        (
+            "to_string",
+            Node::StringLiteral(_) | Node::RawStringLiteral(_) | Node::InterpolatedString(_),
+        ) | ("to_int", Node::IntLiteral(_))
+            | ("to_float", Node::FloatLiteral(_))
+            | ("to_list", Node::ListLiteral(_))
+            | ("to_dict", Node::DictLiteral(_))
+    )
 }
