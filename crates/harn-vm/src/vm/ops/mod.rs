@@ -93,6 +93,7 @@ impl super::Vm {
             Op::GetArgc => self.execute_get_argc(),
             Op::CheckType => self.execute_check_type()?,
             Op::TryUnwrap => self.execute_try_unwrap()?,
+            Op::TryWrapOk => self.execute_try_wrap_ok()?,
             Op::CallSpread => self.execute_call_spread().await?,
             Op::MethodCallSpread => self.execute_method_call_spread().await?,
             Op::Dup => self.execute_dup()?,

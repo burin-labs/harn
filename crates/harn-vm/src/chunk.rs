@@ -185,6 +185,8 @@ pub enum Op {
     // --- Result try operator ---
     /// Try-unwrap: if top is Result.Ok(v), replace with v. If Result.Err(e), return it.
     TryUnwrap,
+    /// Wrap top of stack in Result.Ok unless it is already a Result.
+    TryWrapOk,
 
     // --- Spread call ---
     /// Call with spread arguments. Stack: [callee, args_list] -> result.
@@ -315,6 +317,7 @@ impl Op {
         Op::GetArgc,
         Op::CheckType,
         Op::TryUnwrap,
+        Op::TryWrapOk,
         Op::CallSpread,
         Op::CallBuiltin,
         Op::CallBuiltinSpread,
@@ -1005,6 +1008,7 @@ impl Chunk {
                 }
                 x if x == Op::PopIterator as u8 => out.push_str("POP_ITERATOR\n"),
                 x if x == Op::TryUnwrap as u8 => out.push_str("TRY_UNWRAP\n"),
+                x if x == Op::TryWrapOk as u8 => out.push_str("TRY_WRAP_OK\n"),
                 x if x == Op::CallSpread as u8 => out.push_str("CALL_SPREAD\n"),
                 x if x == Op::CallBuiltin as u8 => {
                     let id = self.read_u64(ip);

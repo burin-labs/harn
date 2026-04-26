@@ -203,7 +203,8 @@ fn fetch_json(url) {
 
 When `catch` or `finally` follows `try`, the form is the handled
 expression described above; only the bare `try { body }` form wraps in
-`Result`.
+`Result`. If the bare `try` body already returns a `Result`, that result is
+returned unchanged instead of being nested as `Result.Ok(Result.Ok(...))`.
 
 ## Runtime shape validation errors
 

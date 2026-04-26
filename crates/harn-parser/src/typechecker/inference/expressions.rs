@@ -626,9 +626,19 @@ impl TypeChecker {
                 let ok_type = self
                     .infer_block_type(body, scope)
                     .unwrap_or_else(Self::wildcard_type);
-                let err_type = self
-                    .infer_try_error_type(body, scope)
-                    .unwrap_or_else(Self::wildcard_type);
+                let inferred_err_type = self.infer_try_error_type(body, scope);
+                if let TypeExpr::Applied { name, args } = &ok_type {
+                    if name == "Result" && args.len() == 2 {
+                        let err_type = inferred_err_type
+                            .map(|thrown| simplify_union(vec![args[1].clone(), thrown]))
+                            .unwrap_or_else(|| args[1].clone());
+                        return Some(TypeExpr::Applied {
+                            name: "Result".into(),
+                            args: vec![args[0].clone(), err_type],
+                        });
+                    }
+                }
+                let err_type = inferred_err_type.unwrap_or_else(Self::wildcard_type);
                 Some(TypeExpr::Applied {
                     name: "Result".into(),
                     args: vec![ok_type, err_type],

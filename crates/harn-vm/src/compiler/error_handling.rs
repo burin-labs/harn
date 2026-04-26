@@ -221,11 +221,9 @@ impl Compiler {
         self.handler_depth -= 1;
         self.chunk.emit(Op::PopHandler, self.line);
 
-        // Wrap success in Result.Ok.
-        let ok_idx = self.chunk.add_constant(Constant::String("Ok".to_string()));
-        self.chunk.emit_u16(Op::Constant, ok_idx, self.line);
-        self.chunk.emit(Op::Swap, self.line);
-        self.chunk.emit_u8(Op::Call, 1, self.line);
+        // Wrap non-Result successes in Result.Ok while avoiding Ok(Ok(...))
+        // when the try body already returns a Result.
+        self.chunk.emit(Op::TryWrapOk, self.line);
 
         let end_jump = self.chunk.emit_jump(Op::Jump, self.line);
 
