@@ -93,6 +93,7 @@ windows-sys = { version = "0.61.2", features = [
 ] }
 
 [dev-dependencies]
+proptest = "1"
 rcgen = "0.13"
 rustls = { version = "0.23", features = ["aws-lc-rs"] }
 tempfile = "3"
