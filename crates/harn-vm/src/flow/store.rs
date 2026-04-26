@@ -13,6 +13,7 @@ use std::sync::{Mutex, MutexGuard};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
 use time::format_description::well_known::Rfc3339;
+use time::OffsetDateTime;
 
 use super::backend::{AtomRef, FlowSlice, GitExportReceipt, ShipReceipt, VcsBackend};
 use super::{Atom, AtomId, Intent, IntentId, Slice as DerivedSlice, SliceId, VcsBackendError};
@@ -52,6 +53,13 @@ pub struct AtomDelta {
     pub atom: Atom,
     pub site_id: String,
     pub clock: u64,
+}
+
+/// Persisted derived slice plus immutable store audit metadata.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StoredDerivedSlice {
+    pub slice: DerivedSlice,
+    pub created_at: String,
 }
 
 /// SQLite-backed Flow store.
@@ -404,6 +412,15 @@ impl SqliteFlowStore {
         self.insert_slice_record(slice.id, &slice.atoms, "derived", body, false)
     }
 
+    /// Persist a derived Flow slice as shipped.
+    ///
+    /// This writes the immutable shipped record directly; callers should not
+    /// persist an unshipped row first and later mutate it.
+    pub fn put_shipped_derived_slice(&self, slice: &DerivedSlice) -> Result<(), VcsBackendError> {
+        let body = serde_json::to_vec(slice)?;
+        self.insert_slice_record(slice.id, &slice.atoms, "derived", body, true)
+    }
+
     pub fn get_derived_slice(&self, slice_id: SliceId) -> Result<DerivedSlice, VcsBackendError> {
         let conn = self.lock_conn()?;
         let body = conn
@@ -415,6 +432,38 @@ impl SqliteFlowStore {
             .optional()?
             .ok_or_else(|| VcsBackendError::NotFound(format!("slice {slice_id} not found")))?;
         serde_json::from_slice(&body).map_err(Into::into)
+    }
+
+    /// List shipped derived slices, optionally filtering by store creation
+    /// timestamp.
+    pub fn shipped_derived_slices_since(
+        &self,
+        since: Option<OffsetDateTime>,
+    ) -> Result<Vec<StoredDerivedSlice>, VcsBackendError> {
+        let since = since
+            .map(|value| value.format(&Rfc3339))
+            .transpose()
+            .map_err(|error| VcsBackendError::Invalid(format!("timestamp format: {error}")))?;
+        let conn = self.lock_conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT body_json, created_at FROM slices
+             WHERE slice_kind = 'derived'
+               AND shipped = 1
+               AND (?1 IS NULL OR created_at >= datetime(?1))
+             ORDER BY created_at, id",
+        )?;
+        let rows = stmt.query_map(params![since.as_deref()], |row| {
+            Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, String>(1)?))
+        })?;
+        let mut slices = Vec::new();
+        for row in rows {
+            let (body, created_at) = row?;
+            slices.push(StoredDerivedSlice {
+                slice: serde_json::from_slice(&body)?,
+                created_at,
+            });
+        }
+        Ok(slices)
     }
 
     fn insert_flow_slice(&self, slice: &FlowSlice, shipped: bool) -> Result<(), VcsBackendError> {
@@ -657,6 +706,30 @@ fn initialize_schema(conn: &Connection) -> Result<(), VcsBackendError> {
         BEFORE DELETE ON atom_parents
         BEGIN
             SELECT RAISE(ABORT, 'atom parent edges are append-only');
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS slices_no_update
+        BEFORE UPDATE ON slices
+        BEGIN
+            SELECT RAISE(ABORT, 'slices are append-only');
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS slices_no_delete
+        BEFORE DELETE ON slices
+        BEGIN
+            SELECT RAISE(ABORT, 'slices are append-only');
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS slice_atoms_no_update
+        BEFORE UPDATE ON slice_atoms
+        BEGIN
+            SELECT RAISE(ABORT, 'slice atom edges are append-only');
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS slice_atoms_no_delete
+        BEFORE DELETE ON slice_atoms
+        BEGIN
+            SELECT RAISE(ABORT, 'slice atom edges are append-only');
         END;
         "#,
     )?;
@@ -1093,6 +1166,45 @@ mod tests {
     }
 
     #[test]
+    fn lists_only_shipped_derived_slices_for_replay_audit() {
+        let store = SqliteFlowStore::in_memory("site-a").unwrap();
+        let first = atom(1, vec![]);
+        store.emit_atom(&first).unwrap();
+
+        let shipped = Slice {
+            id: SliceId([4; 32]),
+            atoms: vec![first.id],
+            intents: Vec::new(),
+            invariants_applied: vec![(
+                PredicateHash::new("sha256:retro"),
+                crate::flow::InvariantResult::allow(),
+            )],
+            required_tests: vec![TestId::new("flow-store")],
+            approval_chain: Vec::new(),
+            base_ref: first.id,
+            status: SliceStatus::Ready,
+        };
+        let unshipped = Slice {
+            id: SliceId([5; 32]),
+            atoms: vec![first.id],
+            intents: Vec::new(),
+            invariants_applied: Vec::new(),
+            required_tests: Vec::new(),
+            approval_chain: Vec::new(),
+            base_ref: first.id,
+            status: SliceStatus::Ready,
+        };
+
+        store.put_shipped_derived_slice(&shipped).unwrap();
+        store.put_derived_slice(&unshipped).unwrap();
+
+        let rows = store.shipped_derived_slices_since(None).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].slice, shipped);
+        assert!(!rows[0].created_at.is_empty());
+    }
+
+    #[test]
     fn atoms_are_append_only_at_sql_boundary() {
         let store = SqliteFlowStore::in_memory("site-a").unwrap();
         let first = atom(1, vec![]);
@@ -1106,5 +1218,32 @@ mod tests {
             )
             .unwrap_err();
         assert!(error.to_string().contains("atoms are append-only"));
+    }
+
+    #[test]
+    fn slices_are_append_only_at_sql_boundary() {
+        let store = SqliteFlowStore::in_memory("site-a").unwrap();
+        let first = atom(1, vec![]);
+        store.emit_atom(&first).unwrap();
+        let slice = Slice {
+            id: SliceId([6; 32]),
+            atoms: vec![first.id],
+            intents: Vec::new(),
+            invariants_applied: Vec::new(),
+            required_tests: Vec::new(),
+            approval_chain: Vec::new(),
+            base_ref: first.id,
+            status: SliceStatus::Ready,
+        };
+        store.put_shipped_derived_slice(&slice).unwrap();
+
+        let conn = store.lock_conn().unwrap();
+        let error = conn
+            .execute(
+                "DELETE FROM slices WHERE id = ?1",
+                params![slice.id.0.as_slice()],
+            )
+            .unwrap_err();
+        assert!(error.to_string().contains("slices are append-only"));
     }
 }

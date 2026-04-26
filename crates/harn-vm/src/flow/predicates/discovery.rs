@@ -11,8 +11,10 @@ use std::path::{Path, PathBuf};
 
 use harn_lexer::{Lexer, Span};
 use harn_parser::{peel_attributes, Attribute, AttributeArg, Node, Parser};
+use sha2::{Digest, Sha256};
 
 use super::executor::PredicateKind;
+use crate::flow::slice::PredicateHash;
 
 /// Filename used for per-directory Flow invariant declarations.
 pub const INVARIANTS_FILE: &str = "invariants.harn";
@@ -46,6 +48,10 @@ pub struct DiscoveredPredicate {
     /// Advisory historical flag — predicates that legalise existing state
     /// rather than gate new atoms.
     pub retroactive: bool,
+    /// Stable content hash of the predicate declaration, including Flow
+    /// attributes. Shipped slices pin this value so later predicate edits are
+    /// append-only audit drift instead of retroactive blockers.
+    pub source_hash: PredicateHash,
     /// Span of the function declaration in the source file (1-based).
     pub span: Span,
 }
@@ -150,7 +156,8 @@ pub fn parse_invariants_source(source: &str) -> ParsedInvariantFile {
         let Node::FnDecl { name, .. } = &inner.node else {
             continue;
         };
-        let Some(predicate) = predicate_from_attributes(name, attrs, inner.span, &mut diagnostics)
+        let Some(predicate) =
+            predicate_from_attributes(source, name, attrs, inner.span, &mut diagnostics)
         else {
             continue;
         };
@@ -171,6 +178,7 @@ pub struct ParsedInvariantFile {
 }
 
 fn predicate_from_attributes(
+    source: &str,
     name: &str,
     attrs: &[Attribute],
     span: Span,
@@ -222,14 +230,28 @@ fn predicate_from_attributes(
     }
 
     let retroactive = attrs.iter().any(|a| a.name == "retroactive");
+    let source_hash = predicate_source_hash(source, attrs, span);
 
     Some(DiscoveredPredicate {
         name: name.to_string(),
         kind,
         archivist,
         retroactive,
+        source_hash,
         span,
     })
+}
+
+fn predicate_source_hash(source: &str, attrs: &[Attribute], span: Span) -> PredicateHash {
+    let start = attrs
+        .iter()
+        .map(|attr| attr.span.start)
+        .min()
+        .unwrap_or(span.start)
+        .min(source.len());
+    let end = span.end.min(source.len()).max(start);
+    let bytes = &source.as_bytes()[start..end];
+    PredicateHash::new(format!("sha256:{}", hex::encode(Sha256::digest(bytes))))
 }
 
 fn parse_archivist_attribute(attr: &Attribute) -> ArchivistMetadata {
@@ -393,6 +415,18 @@ fn {name}(slice) -> bool {{
         assert_eq!(arch.evidence, vec!["https://example.com/spec".to_string()]);
         assert_eq!(arch.confidence, Some(0.95));
         assert_eq!(arch.source_date.as_deref(), Some("2026-04-01"));
+    }
+
+    #[test]
+    fn parse_pins_predicate_source_hash() {
+        let source = sample_predicate("foo");
+        let parsed = parse_invariants_source(&source);
+        let original = parsed.predicates[0].source_hash.clone();
+
+        let changed = sample_predicate("foo").replace("return true", "return false");
+        let reparsed = parse_invariants_source(&changed);
+        assert_ne!(reparsed.predicates[0].source_hash, original);
+        assert!(original.as_str().starts_with("sha256:"));
     }
 
     #[test]

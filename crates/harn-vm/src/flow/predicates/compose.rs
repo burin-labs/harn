@@ -253,7 +253,7 @@ fn is_ancestor_dir(ancestor: &str, descendant: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::flow::{Approver, InvariantBlockError, PredicateKind};
+    use crate::flow::{Approver, InvariantBlockError, PredicateHash, PredicateKind};
     use harn_lexer::Span;
     use std::path::PathBuf;
 
@@ -263,6 +263,7 @@ mod tests {
             kind: PredicateKind::Deterministic,
             archivist: None,
             retroactive: false,
+            source_hash: PredicateHash::new(format!("sha256:{name}")),
             span: Span::dummy(),
         }
     }
