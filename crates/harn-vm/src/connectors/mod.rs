@@ -71,6 +71,17 @@ pub use webhook::{GenericWebhookConnector, WebhookSignatureVariant};
 
 const OUTBOUND_CONNECTOR_HTTP_TIMEOUT: StdDuration = StdDuration::from_secs(30);
 
+/// Third-party provider ids that still ship Rust-side compatibility
+/// connectors while the pure-Harn connector packages complete their
+/// deprecation soak. New service connectors should be Harn packages that
+/// register through `[[providers]] connector = { harn = "..." }` instead.
+pub const RUST_PROVIDER_CONNECTOR_COMPAT_PROVIDERS: &[&str] =
+    &["github", "linear", "notion", "slack"];
+
+pub fn is_rust_provider_connector_compat_provider(provider: &str) -> bool {
+    RUST_PROVIDER_CONNECTOR_COMPAT_PROVIDERS.contains(&provider)
+}
+
 pub(crate) fn outbound_http_client(user_agent: &'static str) -> reqwest::Client {
     reqwest::Client::builder()
         .user_agent(user_agent)
@@ -2056,6 +2067,36 @@ mod tests {
         assert!(providers.contains(&ProviderId::from("cron")));
         assert!(providers.contains(&ProviderId::from("github")));
         assert!(providers.contains(&ProviderId::from("webhook")));
+    }
+
+    #[test]
+    fn pure_harn_pivot_only_keeps_core_or_compat_builtin_connectors() {
+        let core_runtime_providers = [
+            "a2a-push",
+            "cron",
+            "email",
+            "kafka",
+            "nats",
+            "postgres-cdc",
+            "pulsar",
+            "webhook",
+            "websocket",
+        ];
+
+        for provider in registered_provider_metadata() {
+            if !matches!(provider.runtime, ProviderRuntimeMetadata::Builtin { .. }) {
+                continue;
+            }
+
+            let allowed_core = core_runtime_providers.contains(&provider.provider.as_str());
+            let allowed_compat = is_rust_provider_connector_compat_provider(&provider.provider);
+            assert!(
+                allowed_core || allowed_compat,
+                "provider '{}' is registered as a Rust builtin connector; new service connectors \
+                 must ship as pure-Harn packages and register with connector = {{ harn = \"...\" }}",
+                provider.provider
+            );
+        }
     }
 
     #[test]

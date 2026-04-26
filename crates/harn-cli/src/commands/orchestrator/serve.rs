@@ -653,26 +653,19 @@ fn connector_for(
     }
 }
 
-/// Providers whose Rust-side business logic is on the deprecation path tracked
-/// by https://github.com/burin-labs/harn/issues/446. New deployments should
-/// configure the corresponding pure-Harn connector package on the
-/// `[[providers]]` table to silence the orchestrator-startup deprecation
-/// warning.
-const RUST_DEPRECATED_PROVIDERS: &[&str] = &["github", "linear", "notion", "slack"];
-
 /// Returns a one-line deprecation warning when a manifest leaves a Rust-side
 /// provider connector (github/slack/linear/notion) auto-selected. Pointing the
 /// `[[providers]]` table at the corresponding pure-Harn package suppresses the
 /// warning for that provider.
 fn rust_deprecated_provider_warning(provider: &str) -> Option<String> {
-    if !RUST_DEPRECATED_PROVIDERS.contains(&provider) {
+    if !harn_vm::is_rust_provider_connector_compat_provider(provider) {
         return None;
     }
     Some(format!(
         "warning: provider '{provider}' is using the deprecated Rust-side connector. \
          Set `connector = {{ harn = \"...\" }}` on the [[providers]] table to use the \
          pure-Harn `harn-{provider}-connector` package; see \
-         docs/migrations/rust-connectors-to-harn-packages.md (issue #446)."
+         docs/migrations/rust-connectors-to-harn-packages.md (issue #350)."
     ))
 }
 
@@ -2650,8 +2643,8 @@ mod tests {
                 "warning for '{provider}' should suggest the manifest override: {message}",
             );
             assert!(
-                message.contains("issue #446"),
-                "warning for '{provider}' should reference issue #446: {message}",
+                message.contains("issue #350"),
+                "warning for '{provider}' should reference issue #350: {message}",
             );
         }
     }

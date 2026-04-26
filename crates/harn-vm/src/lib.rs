@@ -63,13 +63,15 @@ pub use connectors::{
     },
     hmac::verify_hmac_signed,
     install_active_connector_clients, install_active_metrics_registry,
-    load_pending_webhook_handshakes, postprocess_normalized_event, ActivationHandle, ClientError,
-    Connector, ConnectorClient, ConnectorCtx, ConnectorError, ConnectorExportEffectClass,
-    ConnectorHttpResponse, ConnectorMetricsSnapshot, ConnectorNormalizeResult, ConnectorRegistry,
-    GenericWebhookConnector, GitHubConnector, HarnConnectorEffectPolicies, LinearConnector,
-    MetricsRegistry, NotionConnector, PersistedNotionWebhookHandshake, PostNormalizeOutcome,
-    ProviderPayloadSchema, RateLimitConfig, RateLimiterFactory, RawInbound, SlackConnector,
-    StreamConnector, TriggerBinding, TriggerKind, TriggerRegistry, WebhookSignatureVariant,
+    is_rust_provider_connector_compat_provider, load_pending_webhook_handshakes,
+    postprocess_normalized_event, ActivationHandle, ClientError, Connector, ConnectorClient,
+    ConnectorCtx, ConnectorError, ConnectorExportEffectClass, ConnectorHttpResponse,
+    ConnectorMetricsSnapshot, ConnectorNormalizeResult, ConnectorRegistry, GenericWebhookConnector,
+    GitHubConnector, HarnConnectorEffectPolicies, LinearConnector, MetricsRegistry,
+    NotionConnector, PersistedNotionWebhookHandshake, PostNormalizeOutcome, ProviderPayloadSchema,
+    RateLimitConfig, RateLimiterFactory, RawInbound, SlackConnector, StreamConnector,
+    TriggerBinding, TriggerKind, TriggerRegistry, WebhookSignatureVariant,
+    RUST_PROVIDER_CONNECTOR_COMPAT_PROVIDERS,
 };
 pub use http::{register_http_builtins, reset_http_state};
 pub use llm::register_llm_builtins;

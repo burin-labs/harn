@@ -1,8 +1,8 @@
 # GitHub App connector
 
-> **Deprecated.** The Rust-side `GitHubConnector` is on the sunset path tracked
-> by [#446](https://github.com/burin-labs/harn/issues/446). The recommended
-> implementation is the pure-Harn
+> **Deprecated.** The Rust-side `GitHubConnector` is a compatibility shim under
+> the [#350](https://github.com/burin-labs/harn/issues/350) pure-Harn connector
+> pivot. The recommended implementation is the pure-Harn
 > [`harn-github-connector`](https://github.com/burin-labs/harn-github-connector)
 > package. This page documents the existing Rust connector for users who have
 > not yet migrated; new deployments should configure the Harn package via
