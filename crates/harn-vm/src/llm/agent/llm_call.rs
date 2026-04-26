@@ -611,6 +611,7 @@ pub(super) fn provider_native_search_emissions(
                     status: ToolCallStatus::InProgress,
                     raw_input: query,
                     parsing: None,
+                    audit: crate::orchestration::current_mutation_session(),
                 });
             }
             Some("tool_search_result") => {
@@ -677,6 +678,7 @@ pub(super) fn provider_native_search_emissions(
 
                     raw_input: None,
                     raw_input_partial: None,
+                    audit: crate::orchestration::current_mutation_session(),
                 });
             }
             _ => {}

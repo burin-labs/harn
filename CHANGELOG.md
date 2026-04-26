@@ -42,6 +42,17 @@ granular archaeology.
   The `tool_dispatch.rs` lifecycle (`Pending → InProgress →
   Completed/Failed`) still owns the canonical end-of-call state with
   the fully-parsed args.
+- **Mutation-session audit on tool_call ACP events (#699).** Both
+  `tool_call` and `tool_call_update` `session/update` notifications now
+  carry an optional `audit` field mirroring the active
+  `MutationSessionRecord` (session id, run id, worker id, mutation
+  scope, approval policy). Hosts can now group every write-capable
+  dispatch into the right mutation session straight off the canonical
+  ACP stream — no more correlating against the
+  `session/request_permission.mutation` payload (which only fires on
+  approval-gated calls) or the `worker_update.audit` mirror. The field
+  is omitted when no mutation session is installed, so existing clients
+  see no wire change.
 
 ## v0.7.42
 

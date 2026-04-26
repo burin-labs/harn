@@ -24,7 +24,7 @@ use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use serde::{Deserialize, Serialize};
 
 use crate::event_log::{AnyEventLog, EventLog, LogEvent as EventLogRecord, Topic};
-use crate::orchestration::HandoffArtifact;
+use crate::orchestration::{HandoffArtifact, MutationSessionRecord};
 use crate::tool_annotations::ToolKind;
 
 /// One coalesced filesystem notification from a hostlib `fs_watch`
@@ -265,6 +265,11 @@ pub enum AgentEvent {
         /// existed.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         parsing: Option<bool>,
+        /// Mutation-session audit context active when the tool was
+        /// dispatched (see harn#699). Hosts use it to group every tool
+        /// emission belonging to the same write-capable session.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        audit: Option<MutationSessionRecord>,
     },
     ToolCallUpdate {
         session_id: String,
@@ -324,6 +329,12 @@ pub enum AgentEvent {
         /// with `raw_input`: clients render whichever is present.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         raw_input_partial: Option<String>,
+        /// Mutation-session audit context for the tool call. Carries the
+        /// same payload as on the paired `ToolCall` event so a host
+        /// processing a single update doesn't have to correlate against
+        /// the prior pending event.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        audit: Option<MutationSessionRecord>,
     },
     Plan {
         session_id: String,
@@ -928,6 +939,7 @@ mod tests {
 
             raw_input: None,
             raw_input_partial: None,
+            audit: None,
         };
         let value = serde_json::to_value(&terminal).unwrap();
         assert_eq!(value["duration_ms"], serde_json::json!(42));
@@ -951,6 +963,7 @@ mod tests {
 
             raw_input: None,
             raw_input_partial: None,
+            audit: None,
         };
         let value = serde_json::to_value(&intermediate).unwrap();
         let object = value.as_object().expect("update serializes as object");
@@ -1134,6 +1147,7 @@ mod tests {
 
             raw_input: None,
             raw_input_partial: None,
+            audit: None,
         };
         let v = serde_json::to_value(&event).unwrap();
         assert_eq!(v["type"], "tool_call_update");
@@ -1157,6 +1171,7 @@ mod tests {
 
             raw_input: None,
             raw_input_partial: None,
+            audit: None,
         };
         let v = serde_json::to_value(&event).unwrap();
         assert_eq!(v["error_category"], "schema_validation");
@@ -1183,6 +1198,7 @@ mod tests {
 
             raw_input: None,
             raw_input_partial: None,
+            audit: None,
         };
         let json = serde_json::to_value(&event).unwrap();
         assert!(json.get("executor").is_none(), "got: {json}");
@@ -1344,9 +1360,84 @@ mod tests {
 
             raw_input: None,
             raw_input_partial: None,
+            audit: None,
         };
         let json = serde_json::to_value(&event).unwrap();
         assert_eq!(json["executor"]["kind"], "mcp_server");
         assert_eq!(json["executor"]["server_name"], "github");
+    }
+
+    #[test]
+    fn tool_call_update_omits_audit_when_absent() {
+        let event = AgentEvent::ToolCallUpdate {
+            session_id: "s".into(),
+            tool_call_id: "tc-1".into(),
+            tool_name: "read".into(),
+            status: ToolCallStatus::Completed,
+            raw_output: None,
+            error: None,
+            duration_ms: None,
+            execution_duration_ms: None,
+            error_category: None,
+            executor: None,
+            parsing: None,
+            raw_input: None,
+            raw_input_partial: None,
+            audit: None,
+        };
+        let json = serde_json::to_value(&event).unwrap();
+        assert!(json.get("audit").is_none(), "got: {json}");
+    }
+
+    #[test]
+    fn tool_call_update_includes_audit_when_present() {
+        let audit = MutationSessionRecord {
+            session_id: "session_42".into(),
+            run_id: Some("run_42".into()),
+            mutation_scope: "apply_workspace".into(),
+            execution_kind: Some("worker".into()),
+            ..Default::default()
+        };
+        let event = AgentEvent::ToolCallUpdate {
+            session_id: "s".into(),
+            tool_call_id: "tc-1".into(),
+            tool_name: "edit_file".into(),
+            status: ToolCallStatus::Completed,
+            raw_output: None,
+            error: None,
+            duration_ms: None,
+            execution_duration_ms: None,
+            error_category: None,
+            executor: Some(ToolExecutor::HostBridge),
+            parsing: None,
+            raw_input: None,
+            raw_input_partial: None,
+            audit: Some(audit),
+        };
+        let json = serde_json::to_value(&event).unwrap();
+        assert_eq!(json["audit"]["session_id"], "session_42");
+        assert_eq!(json["audit"]["run_id"], "run_42");
+        assert_eq!(json["audit"]["mutation_scope"], "apply_workspace");
+        assert_eq!(json["audit"]["execution_kind"], "worker");
+    }
+
+    #[test]
+    fn tool_call_update_deserializes_without_audit_field_for_back_compat() {
+        let raw = serde_json::json!({
+            "type": "tool_call_update",
+            "session_id": "s",
+            "tool_call_id": "tc-1",
+            "tool_name": "read",
+            "status": "completed",
+            "raw_output": null,
+            "error": null,
+        });
+        let event: AgentEvent = serde_json::from_value(raw).expect("parses without audit key");
+        match event {
+            AgentEvent::ToolCallUpdate { audit, .. } => {
+                assert!(audit.is_none());
+            }
+            other => panic!("expected ToolCallUpdate, got {other:?}"),
+        }
     }
 }

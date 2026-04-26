@@ -525,6 +525,7 @@ pub(super) async fn run_tool_dispatch(
             format!("tool-{tool_id}")
         };
         let tool_kind = crate::orchestration::current_tool_annotations(tool_name).map(|a| a.kind);
+        let tool_audit = crate::orchestration::current_mutation_session();
         super::emit_agent_event(&AgentEvent::ToolCall {
             session_id: ctx.session_id.to_string(),
             tool_call_id: tool_call_id.clone(),
@@ -533,6 +534,7 @@ pub(super) async fn run_tool_dispatch(
             status: ToolCallStatus::Pending,
             raw_input: tool_args.clone(),
             parsing: None,
+            audit: tool_audit.clone(),
         })
         .await;
 
@@ -565,6 +567,7 @@ pub(super) async fn run_tool_dispatch(
 
                 raw_input: None,
                 raw_input_partial: None,
+                audit: tool_audit.clone(),
             })
             .await;
             if ctx.tool_format == "native" {
@@ -637,6 +640,7 @@ pub(super) async fn run_tool_dispatch(
 
                 raw_input: None,
                 raw_input_partial: None,
+                audit: tool_audit.clone(),
             })
             .await;
             if ctx.tool_format == "native" {
@@ -740,6 +744,7 @@ pub(super) async fn run_tool_dispatch(
 
                         raw_input: None,
                         raw_input_partial: None,
+                        audit: tool_audit.clone(),
                     })
                     .await;
                     if ctx.tool_format == "native" {
@@ -871,6 +876,7 @@ pub(super) async fn run_tool_dispatch(
 
                 raw_input: None,
                 raw_input_partial: None,
+                audit: tool_audit.clone(),
             })
             .await;
             if ctx.tool_format == "native" {
@@ -936,6 +942,7 @@ pub(super) async fn run_tool_dispatch(
 
                     raw_input: None,
                     raw_input_partial: None,
+                    audit: tool_audit.clone(),
                 })
                 .await;
                 if ctx.tool_format == "native" {
@@ -987,6 +994,7 @@ pub(super) async fn run_tool_dispatch(
 
                 raw_input: None,
                 raw_input_partial: None,
+                audit: tool_audit.clone(),
             })
             .await;
             if ctx.tool_format == "native" {
@@ -1035,6 +1043,7 @@ pub(super) async fn run_tool_dispatch(
 
             raw_input: None,
             raw_input_partial: None,
+            audit: tool_audit.clone(),
         })
         .await;
         let tool_span_id =
@@ -1117,6 +1126,7 @@ pub(super) async fn run_tool_dispatch(
 
                     raw_input: None,
                     raw_input_partial: None,
+                    audit: tool_audit.clone(),
                 })
                 .await;
                 continue;
@@ -1297,6 +1307,7 @@ pub(super) async fn run_tool_dispatch(
 
             raw_input: None,
             raw_input_partial: None,
+            audit: tool_audit.clone(),
         })
         .await;
 

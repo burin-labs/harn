@@ -102,6 +102,7 @@ impl AgentEventSink for AcpAgentEventSink {
                 status,
                 raw_input,
                 parsing,
+                audit,
             } => {
                 let mut update = serde_json::json!({
                     "sessionUpdate": "tool_call",
@@ -115,6 +116,11 @@ impl AgentEventSink for AcpAgentEventSink {
                 }
                 if let Some(p) = parsing {
                     update["parsing"] = serde_json::Value::Bool(*p);
+                }
+                if let Some(record) = audit {
+                    if let Ok(value) = serde_json::to_value(record) {
+                        update["audit"] = value;
+                    }
                 }
                 self.write_notification(serde_json::json!({
                     "sessionId": session_id,
@@ -135,6 +141,7 @@ impl AgentEventSink for AcpAgentEventSink {
                 parsing,
                 raw_input,
                 raw_input_partial,
+                audit,
             } => {
                 let mut update = serde_json::json!({
                     "sessionUpdate": "tool_call_update",
@@ -162,6 +169,11 @@ impl AgentEventSink for AcpAgentEventSink {
                 }
                 if let Some(p) = parsing {
                     update["parsing"] = serde_json::Value::Bool(*p);
+                }
+                if let Some(record) = audit {
+                    if let Ok(value) = serde_json::to_value(record) {
+                        update["audit"] = value;
+                    }
                 }
                 if let Some(input) = raw_input {
                     update["rawInput"] = input.clone();
@@ -364,7 +376,9 @@ mod tests {
         AgentEvent, AgentEventSink, FsWatchEvent, ToolCallErrorCategory, ToolCallStatus,
         ToolExecutor,
     };
-    use harn_vm::orchestration::{HandoffArtifact, HandoffTargetRecord};
+    use harn_vm::orchestration::{
+        HandoffArtifact, HandoffTargetRecord, MutationSessionRecord, ToolApprovalPolicy,
+    };
     use harn_vm::tool_annotations::ToolKind;
     use tokio::sync::mpsc;
 
@@ -535,6 +549,7 @@ mod tests {
                 status: ToolCallStatus::Pending,
                 raw_input: serde_json::json!({"path": "README.md"}),
                 parsing: None,
+                audit: None,
             },
             AgentEvent::ToolCallUpdate {
                 session_id: "session-1".to_string(),
@@ -551,6 +566,7 @@ mod tests {
 
                 raw_input: None,
                 raw_input_partial: None,
+                audit: None,
             },
             AgentEvent::Plan {
                 session_id: "session-1".to_string(),
@@ -661,6 +677,7 @@ mod tests {
 
             raw_input: None,
             raw_input_partial: None,
+            audit: None,
         });
         let line = rx.recv().await.expect("acp tool_call_update");
         let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
@@ -698,6 +715,7 @@ mod tests {
 
             raw_input: None,
             raw_input_partial: None,
+            audit: None,
         });
         let line = rx.recv().await.expect("acp tool_call_update");
         let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
@@ -723,6 +741,7 @@ mod tests {
             status: ToolCallStatus::Pending,
             raw_input: serde_json::json!({}),
             parsing: Some(true),
+            audit: None,
         });
         let line = rx.recv().await.expect("acp tool_call notification");
         let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
@@ -745,6 +764,7 @@ mod tests {
             raw_input: None,
 
             raw_input_partial: None,
+            audit: None,
         });
         let line = rx.recv().await.expect("acp tool_call_update notification");
         let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
@@ -769,6 +789,7 @@ mod tests {
             status: ToolCallStatus::Pending,
             raw_input: serde_json::json!({}),
             parsing: None,
+            audit: None,
         });
         let line = rx.recv().await.expect("acp tool_call notification");
         let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
@@ -818,6 +839,7 @@ mod tests {
 
                 raw_input: None,
                 raw_input_partial: None,
+                audit: None,
             });
             let line = rx.recv().await.expect("acp tool_call_update notification");
             let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
@@ -845,6 +867,7 @@ mod tests {
 
             raw_input: None,
             raw_input_partial: None,
+            audit: None,
         });
         let line = rx.recv().await.expect("acp tool_call_update notification");
         let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
@@ -877,6 +900,7 @@ mod tests {
             executor: None,
             raw_input: Some(serde_json::json!({"q": "hello"})),
             raw_input_partial: None,
+            audit: None,
 
             parsing: None,
         });
@@ -900,6 +924,7 @@ mod tests {
             parsing: None,
             raw_input: None,
             raw_input_partial: Some(r#"{"q":"hel"#.to_string()),
+            audit: None,
         });
         let line = rx.recv().await.expect("acp tool_call_update notification");
         let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
@@ -924,12 +949,149 @@ mod tests {
             parsing: None,
             raw_input: None,
             raw_input_partial: None,
+            audit: None,
         });
         let line = rx.recv().await.expect("acp tool_call_update notification");
         let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
         assert!(payload["params"]["update"].get("rawInput").is_none());
         assert!(payload["params"]["update"].get("rawInputPartial").is_none());
         assert_eq!(payload["params"]["update"]["status"], "completed");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn tool_call_includes_audit_when_mutation_session_is_active() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let sink = AcpAgentEventSink::new(AcpOutput::Channel(tx));
+        let policy = ToolApprovalPolicy {
+            require_approval: vec!["edit_*".into()],
+            write_path_allowlist: vec!["src/**".into()],
+            ..Default::default()
+        };
+        let audit = MutationSessionRecord {
+            session_id: "session_42".into(),
+            parent_session_id: Some("session_root".into()),
+            run_id: Some("run_42".into()),
+            worker_id: Some("worker_3".into()),
+            execution_kind: Some("worker".into()),
+            mutation_scope: "apply_workspace".into(),
+            approval_policy: Some(policy),
+        };
+        sink.handle_event(&AgentEvent::ToolCall {
+            session_id: "session-1".to_string(),
+            tool_call_id: "tool-1".to_string(),
+            tool_name: "edit_file".to_string(),
+            kind: None,
+            status: ToolCallStatus::Pending,
+            raw_input: serde_json::json!({"path": "src/main.rs"}),
+            parsing: None,
+            audit: Some(audit),
+        });
+        let line = rx.recv().await.expect("acp tool_call notification");
+        let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
+        let audit_value = &payload["params"]["update"]["audit"];
+        assert_eq!(audit_value["session_id"], "session_42");
+        assert_eq!(audit_value["parent_session_id"], "session_root");
+        assert_eq!(audit_value["run_id"], "run_42");
+        assert_eq!(audit_value["worker_id"], "worker_3");
+        assert_eq!(audit_value["execution_kind"], "worker");
+        assert_eq!(audit_value["mutation_scope"], "apply_workspace");
+        assert_eq!(
+            audit_value["approval_policy"]["require_approval"][0],
+            "edit_*"
+        );
+        assert_eq!(
+            audit_value["approval_policy"]["write_path_allowlist"][0],
+            "src/**"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn tool_call_omits_audit_when_no_mutation_session() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let sink = AcpAgentEventSink::new(AcpOutput::Channel(tx));
+        sink.handle_event(&AgentEvent::ToolCall {
+            session_id: "session-1".to_string(),
+            tool_call_id: "tool-1".to_string(),
+            tool_name: "read".to_string(),
+            kind: Some(ToolKind::Read),
+            status: ToolCallStatus::Pending,
+            raw_input: serde_json::json!({"path": "README.md"}),
+            parsing: None,
+            audit: None,
+        });
+        let line = rx.recv().await.expect("acp tool_call notification");
+        let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
+        assert!(
+            payload["params"]["update"].get("audit").is_none(),
+            "got: {payload}"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn tool_call_update_includes_audit_when_mutation_session_is_active() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let sink = AcpAgentEventSink::new(AcpOutput::Channel(tx));
+        let audit = MutationSessionRecord {
+            session_id: "session_42".into(),
+            run_id: Some("run_42".into()),
+            mutation_scope: "apply_workspace".into(),
+            execution_kind: Some("workflow".into()),
+            ..Default::default()
+        };
+        sink.handle_event(&AgentEvent::ToolCallUpdate {
+            session_id: "session-1".to_string(),
+            tool_call_id: "tool-1".to_string(),
+            tool_name: "edit_file".to_string(),
+            status: ToolCallStatus::Completed,
+            raw_output: Some(serde_json::json!({"text": "ok"})),
+            error: None,
+            duration_ms: Some(11),
+            execution_duration_ms: Some(7),
+            error_category: None,
+            executor: Some(ToolExecutor::HostBridge),
+            parsing: None,
+            raw_input: None,
+            raw_input_partial: None,
+            audit: Some(audit),
+        });
+        let line = rx.recv().await.expect("acp tool_call_update notification");
+        let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
+        let update = &payload["params"]["update"];
+        assert_eq!(update["sessionUpdate"], "tool_call_update");
+        assert_eq!(update["audit"]["session_id"], "session_42");
+        assert_eq!(update["audit"]["run_id"], "run_42");
+        assert_eq!(update["audit"]["mutation_scope"], "apply_workspace");
+        assert_eq!(update["audit"]["execution_kind"], "workflow");
+        assert_eq!(update["executor"], "host_bridge");
+        assert_eq!(update["durationMs"], 11);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn tool_call_update_omits_audit_when_no_mutation_session() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let sink = AcpAgentEventSink::new(AcpOutput::Channel(tx));
+        sink.handle_event(&AgentEvent::ToolCallUpdate {
+            session_id: "session-1".to_string(),
+            tool_call_id: "tool-1".to_string(),
+            tool_name: "read".to_string(),
+            status: ToolCallStatus::Completed,
+            raw_output: None,
+            error: None,
+            duration_ms: None,
+            execution_duration_ms: None,
+            error_category: None,
+            executor: None,
+            parsing: None,
+            raw_input: None,
+            raw_input_partial: None,
+            audit: None,
+        });
+        let line = rx.recv().await.expect("acp tool_call_update notification");
+        let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
+        assert!(
+            payload["params"]["update"].get("audit").is_none(),
+            "got: {payload}"
+        );
     }
 
     #[test]

@@ -25,6 +25,51 @@ Internally, the agent loop emits `AgentEvent::ToolCall` +
 translates them into `session/update` notifications via an `AgentEventSink` it
 registers per session.
 
+### `audit` tag
+
+Both `tool_call` and `tool_call_update` carry an optional `audit`
+field that mirrors the active mutation session for the dispatch (see
+[Trust boundary](../../spec/opentrustgraph.md)). Hosts use it to:
+
+- group every tool emission belonging to the same write-capable
+  session (so undo/redo and audit logs never cross sessions even when
+  multiple workers run in parallel);
+- correlate the canonical `tool_call` stream against
+  `session/update.worker_update.audit` and the optional
+  `session/request_permission.mutation` payloads — they all carry the
+  same `MutationSessionRecord`, so a host that already understands one
+  reuses the same codepath for the others;
+- decide whether to surface a tool dispatch in trust-boundary UX
+  (e.g. badge writes that escape `mutation_scope: read_only`) without
+  guessing from the tool name.
+
+Wire shape (snake_case fields, matching the existing `worker_update.audit`
+contract):
+
+```json
+{
+  "audit": {
+    "session_id": "session_42",
+    "parent_session_id": "session_root",
+    "run_id": "run_42",
+    "worker_id": "worker_3",
+    "execution_kind": "worker",
+    "mutation_scope": "apply_workspace",
+    "approval_policy": {
+      "auto_approve": [],
+      "auto_deny": [],
+      "require_approval": ["edit_*"],
+      "write_path_allowlist": ["src/**"]
+    }
+  }
+}
+```
+
+The field is omitted when no mutation session is installed (read-only
+`harn run` invocations, conformance fixtures, scripts that don't enter
+a workflow). Existing clients that don't know about `audit` see the
+same wire shape they always did.
+
 ### `executor` tag
 
 `tool_call_update` carries an optional `executor` field that names the
