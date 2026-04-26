@@ -22,9 +22,11 @@ pub use intent::{
     TranscriptSpan,
 };
 pub use predicates::{
-    CheapJudge, CheapJudgeRequest, CheapJudgeResponse, PredicateContext, PredicateExecutionRecord,
-    PredicateExecutionReport, PredicateExecutor, PredicateExecutorConfig, PredicateKind,
-    PredicateRunner,
+    discover_invariants, parse_invariants_source, resolve_predicates, ArchivistMetadata,
+    CheapJudge, CheapJudgeRequest, CheapJudgeResponse, DiscoveredInvariantFile,
+    DiscoveredPredicate, DiscoveryDiagnostic, DiscoveryDiagnosticSeverity, ParsedInvariantFile,
+    PredicateContext, PredicateExecutionRecord, PredicateExecutionReport, PredicateExecutor,
+    PredicateExecutorConfig, PredicateKind, PredicateRunner, INVARIANTS_FILE,
 };
 pub use slice::{
     derive_slice, Approval, CoverageMap, InvariantBlockError, InvariantResult, PredicateHash,
