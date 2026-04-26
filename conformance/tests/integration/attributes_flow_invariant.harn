@@ -1,0 +1,26 @@
+// Smoke test: parser accepts the full Flow predicate attribute stack
+// (`@invariant` + `@deterministic`/`@semantic` + `@archivist(...)` +
+// `@retroactive`) on a Harn function declaration and the runtime
+// executes it unchanged.
+@invariant
+@deterministic
+@archivist(evidence: ["https://example.com/spec", "https://example.com/changelog"], confidence: 0.95, source_date: "2026-04-01", coverage_examples: ["case-a", "case-b"])
+fn no_secrets_in_diff(_slice) -> bool {
+  return true
+}
+
+@invariant
+@semantic
+@retroactive
+@archivist(evidence: ["https://example.com/style"], confidence: 0.6)
+fn naming_style(_slice) -> bool {
+  return true
+}
+
+@test
+pipeline test_flow_attributes_smoke(task) {
+  // Both predicates remain ordinary callable functions.
+  assert(no_secrets_in_diff(nil), "deterministic predicate callable")
+  assert(naming_style(nil), "semantic predicate callable")
+  log("attributes_flow_invariant ok")
+}

@@ -239,6 +239,33 @@ mod tests {
     }
 
     #[test]
+    fn hover_captures_flow_predicate_attributes() {
+        let source = concat!(
+            "@invariant\n",
+            "@deterministic\n",
+            "@archivist(evidence: [\"https://example.com/spec\"], confidence: 0.9, source_date: \"2026-04-01\")\n",
+            "fn no_secrets(slice) -> bool {\n",
+            "  return true\n",
+            "}\n",
+        );
+        let state = DocumentState::new(source.to_string());
+        let sym = state
+            .symbols
+            .iter()
+            .find(|s| s.name == "no_secrets" && s.kind == HarnSymbolKind::Function)
+            .expect("should find no_secrets");
+        let names: Vec<&str> = sym.attributes.iter().map(|a| a.name.as_str()).collect();
+        assert_eq!(names, vec!["invariant", "deterministic", "archivist"]);
+        let block = crate::symbols::format_flow_attributes_block(&sym.attributes)
+            .expect("flow metadata block");
+        assert!(block.contains("@invariant"));
+        assert!(block.contains("@deterministic"));
+        assert!(block.contains("@archivist"));
+        assert!(block.contains("evidence"));
+        assert!(block.contains("https://example.com/spec"));
+    }
+
+    #[test]
     fn hover_generic_interface_signature() {
         let source = "interface Repository<T> {\n  fn map<U>(value: T, f: fn(T) -> U) -> U\n}\n";
         let state = DocumentState::new(source.to_string());

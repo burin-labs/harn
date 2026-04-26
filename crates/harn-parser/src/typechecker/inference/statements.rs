@@ -11,6 +11,8 @@
 
 use std::collections::BTreeMap;
 
+use harn_lexer::Span;
+
 use crate::ast::*;
 use crate::builtin_signatures;
 
@@ -1407,9 +1409,19 @@ impl TypeChecker {
 
     /// Validate attribute usage and emit warnings for unknown attributes.
     /// Recognized attribute names: `deprecated`, `test`, `complexity`,
-    /// `acp_tool`, `acp_skill`, `invariant`, `deterministic`, `semantic`.
-    /// All other names produce a warning so misspellings surface early without
-    /// breaking compilation.
+    /// `acp_tool`, `acp_skill`, `invariant`, `deterministic`, `semantic`,
+    /// `archivist`, `retroactive`. All other names produce a warning so
+    /// misspellings surface early without breaking compilation.
+    ///
+    /// Flow predicate cross-attribute rules (epic #571 / #579):
+    /// - A bare `@invariant` (no arguments) is the Flow predicate marker.
+    ///   It must be paired with exactly one of `@deterministic`/`@semantic`
+    ///   and an `@archivist(...)` provenance block. The handler-IR
+    ///   `@invariant("name", ...)` form (positional args) is a separate
+    ///   feature validated in `harn_ir` and is left untouched here.
+    /// - `@deterministic` and `@semantic` are mutually exclusive.
+    /// - `@archivist(...)` and `@retroactive` only make sense on Flow
+    ///   predicate functions; we warn if they appear without `@invariant`.
     pub(in crate::typechecker) fn check_attributes(
         &mut self,
         attributes: &[Attribute],
@@ -1418,7 +1430,7 @@ impl TypeChecker {
         for attr in attributes {
             match attr.name.as_str() {
                 "deprecated" | "test" | "complexity" | "acp_tool" | "acp_skill" | "invariant"
-                | "deterministic" | "semantic" => {}
+                | "deterministic" | "semantic" | "archivist" | "retroactive" => {}
                 other => {
                     self.warning_at(format!("unknown attribute `@{}`", other), attr.span);
                 }
@@ -1442,8 +1454,10 @@ impl TypeChecker {
                     attr.span,
                 );
             }
-            if matches!(attr.name.as_str(), "deterministic" | "semantic")
-                && !matches!(inner.node, Node::FnDecl { .. })
+            if matches!(
+                attr.name.as_str(),
+                "deterministic" | "semantic" | "archivist" | "retroactive"
+            ) && !matches!(inner.node, Node::FnDecl { .. })
             {
                 self.warning_at(
                     format!("`@{}` only applies to function declarations", attr.name),
@@ -1462,6 +1476,135 @@ impl TypeChecker {
                     attr.span,
                 );
             }
+        }
+
+        // Flow predicate companion-attribute rules. These only apply when a
+        // bare `@invariant` (no arguments) is present — that's the Flow
+        // predicate marker. Handler-IR-style `@invariant("name", ...)` keeps
+        // its existing semantics validated by `harn_ir`.
+        let flow_invariant = attributes
+            .iter()
+            .find(|a| a.name == "invariant" && a.args.is_empty());
+        let deterministic = attributes.iter().find(|a| a.name == "deterministic");
+        let semantic = attributes.iter().find(|a| a.name == "semantic");
+        let archivist = attributes.iter().find(|a| a.name == "archivist");
+        let retroactive = attributes.iter().find(|a| a.name == "retroactive");
+
+        if let (Some(det), Some(sem)) = (deterministic, semantic) {
+            self.warning_at(
+                "`@deterministic` and `@semantic` are mutually exclusive; \
+                 a Flow predicate is one mode or the other"
+                    .to_string(),
+                Span::merge(sem.span, det.span),
+            );
+        }
+
+        if let Some(inv) = flow_invariant {
+            if deterministic.is_none() && semantic.is_none() {
+                self.warning_at(
+                    "Flow `@invariant` requires exactly one of `@deterministic` \
+                     (default) or `@semantic`"
+                        .to_string(),
+                    inv.span,
+                );
+            }
+            if archivist.is_none() {
+                self.warning_at(
+                    "Flow `@invariant` is missing `@archivist(...)` provenance \
+                     (evidence, confidence, source_date, coverage_examples)"
+                        .to_string(),
+                    inv.span,
+                );
+            }
+        } else {
+            if let Some(arch) = archivist {
+                self.warning_at(
+                    "`@archivist(...)` only applies to Flow predicates marked \
+                     with `@invariant`"
+                        .to_string(),
+                    arch.span,
+                );
+            }
+            if let Some(retro) = retroactive {
+                self.warning_at(
+                    "`@retroactive` only applies to Flow predicates marked \
+                     with `@invariant`"
+                        .to_string(),
+                    retro.span,
+                );
+            }
+        }
+
+        if let Some(arch) = archivist {
+            self.validate_archivist_args(arch);
+        }
+    }
+
+    /// Sanity-check the shape of an `@archivist(...)` block.
+    ///
+    /// Recognized arguments (all optional individually, but `evidence`
+    /// must be present for the block to carry meaningful provenance):
+    /// - `evidence`: list of URL strings (the linter only checks that the
+    ///   key exists; deep validation lives in the Archivist persona).
+    /// - `confidence`: float between 0.0 and 1.0
+    /// - `source_date`: string (ISO-8601 date)
+    /// - `coverage_examples`: list of strings
+    ///
+    /// Unknown keys produce a warning so typos surface early.
+    pub(in crate::typechecker) fn validate_archivist_args(&mut self, attr: &Attribute) {
+        const KNOWN_KEYS: &[&str] = &["evidence", "confidence", "source_date", "coverage_examples"];
+
+        let mut has_evidence = false;
+        for arg in &attr.args {
+            let Some(name) = arg.name.as_deref() else {
+                self.warning_at(
+                    "`@archivist(...)` arguments must be named (e.g. \
+                     `evidence: [...], confidence: 0.9`)"
+                        .to_string(),
+                    arg.span,
+                );
+                continue;
+            };
+            if !KNOWN_KEYS.contains(&name) {
+                self.warning_at(
+                    format!(
+                        "unknown `@archivist` argument `{name}`; expected one of \
+                         {KNOWN_KEYS:?}"
+                    ),
+                    arg.span,
+                );
+                continue;
+            }
+            if name == "evidence" {
+                has_evidence = true;
+            }
+            // Confidence must be a number between 0 and 1 when supplied as a
+            // literal. Bare identifiers (e.g. a constant reference) are
+            // allowed and validated at runtime.
+            if name == "confidence" {
+                match &arg.value.node {
+                    Node::FloatLiteral(f) if (0.0..=1.0).contains(f) => {}
+                    Node::IntLiteral(i) if *i == 0 || *i == 1 => {}
+                    Node::Identifier(_) => {}
+                    _ => {
+                        self.warning_at(
+                            "`@archivist(confidence: ...)` must be a float in \
+                             [0.0, 1.0]"
+                                .to_string(),
+                            arg.span,
+                        );
+                    }
+                }
+            }
+        }
+
+        if !has_evidence {
+            self.warning_at(
+                "`@archivist(...)` should declare `evidence: [...]` so \
+                 predicates can be audited"
+                    .to_string(),
+                attr.span,
+            );
         }
     }
 }
