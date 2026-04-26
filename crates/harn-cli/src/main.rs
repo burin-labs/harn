@@ -719,6 +719,7 @@ async fn async_main() {
             }
         },
         Command::ModelInfo(args) => print_model_info(&args.model).await,
+        Command::ProviderCatalog(args) => print_provider_catalog(args.available_only),
         Command::Skills(args) => match args.command {
             SkillsCommand::List(list) => commands::skills::run_list(&list),
             SkillsCommand::Inspect(inspect) => commands::skills::run_inspect(&inspect),
@@ -763,24 +764,36 @@ fn print_version() {
 }
 
 async fn print_model_info(model: &str) {
-    let (resolved_id, resolved_provider) = harn_vm::llm_config::resolve_model(model);
-    let provider =
-        resolved_provider.unwrap_or_else(|| harn_vm::llm_config::infer_provider(&resolved_id));
-    let api_key_result = harn_vm::llm::resolve_api_key(&provider);
+    let resolved = harn_vm::llm_config::resolve_model_info(model);
+    let api_key_result = harn_vm::llm::resolve_api_key(&resolved.provider);
     let api_key_set = api_key_result.is_ok();
     let api_key = api_key_result.unwrap_or_default();
-    let tool_format = harn_vm::llm_config::default_tool_format(&resolved_id, &provider);
     let context_window =
-        harn_vm::llm::fetch_provider_max_context(&provider, &resolved_id, &api_key).await;
-    let readiness = local_openai_readiness(&provider, &resolved_id, &api_key).await;
+        harn_vm::llm::fetch_provider_max_context(&resolved.provider, &resolved.id, &api_key).await;
+    let readiness = local_openai_readiness(&resolved.provider, &resolved.id, &api_key).await;
+    let catalog = harn_vm::llm_config::model_catalog_entry(&resolved.id);
+    let capabilities = harn_vm::llm::capabilities::lookup(&resolved.provider, &resolved.id);
     let payload = serde_json::json!({
         "alias": model,
-        "id": resolved_id,
-        "provider": provider,
-        "tool_format": tool_format,
+        "id": resolved.id,
+        "provider": resolved.provider,
+        "resolved_alias": resolved.alias,
+        "tool_format": resolved.tool_format,
+        "tier": resolved.tier,
         "api_key_set": api_key_set,
         "context_window": context_window,
         "readiness": readiness,
+        "catalog": catalog,
+        "capabilities": {
+            "native_tools": capabilities.native_tools,
+            "defer_loading": capabilities.defer_loading,
+            "tool_search": capabilities.tool_search,
+            "max_tools": capabilities.max_tools,
+            "prompt_caching": capabilities.prompt_caching,
+            "thinking": capabilities.thinking,
+            "preserve_thinking": capabilities.preserve_thinking,
+        },
+        "qc_default_model": harn_vm::llm_config::qc_default_model(&resolved.provider),
     });
     println!(
         "{}",
@@ -810,6 +823,74 @@ async fn local_openai_readiness(
         "status": readiness.status,
         "available_models": readiness.available_models,
     }))
+}
+
+fn print_provider_catalog(available_only: bool) {
+    let provider_names = if available_only {
+        harn_vm::llm_config::available_provider_names()
+    } else {
+        harn_vm::llm_config::provider_names()
+    };
+    let providers: Vec<_> = provider_names
+        .into_iter()
+        .filter_map(|name| {
+            harn_vm::llm_config::provider_config(&name).map(|def| {
+                serde_json::json!({
+                    "name": name,
+                    "display_name": def.display_name,
+                    "icon": def.icon,
+                    "base_url": harn_vm::llm_config::resolve_base_url(&def),
+                    "base_url_env": def.base_url_env,
+                    "auth_style": def.auth_style,
+                    "auth_envs": harn_vm::llm_config::auth_env_names(&def.auth_env),
+                    "auth_available": harn_vm::llm_config::provider_key_available(&name),
+                    "features": def.features,
+                    "cost_per_1k_in": def.cost_per_1k_in,
+                    "cost_per_1k_out": def.cost_per_1k_out,
+                    "latency_p50_ms": def.latency_p50_ms,
+                })
+            })
+        })
+        .collect();
+    let models: Vec<_> = harn_vm::llm_config::model_catalog_entries()
+        .into_iter()
+        .map(|(id, model)| {
+            serde_json::json!({
+                "id": id,
+                "name": model.name,
+                "provider": model.provider,
+                "context_window": model.context_window,
+                "stream_timeout": model.stream_timeout,
+                "capabilities": model.capabilities,
+                "pricing": model.pricing,
+            })
+        })
+        .collect();
+    let aliases: Vec<_> = harn_vm::llm_config::alias_entries()
+        .into_iter()
+        .map(|(name, alias)| {
+            serde_json::json!({
+                "name": name,
+                "id": alias.id,
+                "provider": alias.provider,
+                "tool_format": alias.tool_format,
+            })
+        })
+        .collect();
+    let payload = serde_json::json!({
+        "providers": providers,
+        "known_model_names": harn_vm::llm_config::known_model_names(),
+        "available_providers": harn_vm::llm_config::available_provider_names(),
+        "aliases": aliases,
+        "models": models,
+        "qc_defaults": harn_vm::llm_config::qc_defaults(),
+    });
+    println!(
+        "{}",
+        serde_json::to_string(&payload).unwrap_or_else(|error| {
+            command_error(&format!("failed to serialize provider catalog: {error}"))
+        })
+    );
 }
 
 fn command_error(message: &str) -> ! {

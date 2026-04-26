@@ -119,12 +119,15 @@ pub(crate) fn register_tracing_builtins(vm: &mut Vm) {
     });
 
     vm.register_builtin("llm_info", |_args, _out| {
-        let provider = std::env::var("HARN_LLM_PROVIDER").unwrap_or_default();
-        let model = std::env::var("HARN_LLM_MODEL").unwrap_or_default();
-        let api_key_set = std::env::var("HARN_API_KEY")
-            .or_else(|_| std::env::var("OPENROUTER_API_KEY"))
-            .or_else(|_| std::env::var("ANTHROPIC_API_KEY"))
-            .is_ok();
+        let raw_model = std::env::var("HARN_LLM_MODEL").unwrap_or_default();
+        let resolved = crate::llm_config::resolve_model_info(&raw_model);
+        let provider = std::env::var("HARN_LLM_PROVIDER").unwrap_or(resolved.provider);
+        let model = if raw_model.is_empty() {
+            String::new()
+        } else {
+            resolved.id
+        };
+        let api_key_set = crate::llm_config::provider_key_available(&provider);
         let mut info = BTreeMap::new();
         info.insert("provider".to_string(), VmValue::String(Rc::from(provider)));
         info.insert("model".to_string(), VmValue::String(Rc::from(model)));

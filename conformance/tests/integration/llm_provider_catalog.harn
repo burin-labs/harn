@@ -1,0 +1,31 @@
+pipeline test(task) {
+  let local = llm_resolve_model("local:gemma-4-e4b-it")
+  assert_eq(local.id, "gemma-4-e4b-it")
+  assert_eq(local.provider, "local")
+  let ollama = llm_model_info("ollama:qwen3:30b-a3b")
+  assert_eq(ollama.id, "qwen3:30b-a3b")
+  assert_eq(ollama.provider, "ollama")
+  assert_eq(ollama.tool_format, "text")
+  assert(ollama.auth_available, "ollama should not require API auth")
+  let known = llm_known_models()
+  assert(len(known.filter({ name -> name == "mid" })) == 1, "known aliases include mid")
+  let available = llm_available_providers()
+  assert(
+    len(available.filter({ name -> name == "ollama" })) == 1,
+    "available providers include keyless ollama",
+  )
+  assert(
+    len(available.filter({ name -> name == "local" })) == 1,
+    "available providers include keyless local",
+  )
+  let catalog = llm_provider_catalog()
+  assert(len(catalog.providers) >= 6, "catalog exposes providers")
+  assert(len(catalog.aliases) >= 1, "catalog exposes alias mappings")
+  assert(len(catalog.models) >= 1, "catalog exposes model metadata")
+  assert(catalog.qc_defaults.ollama != nil, "catalog exposes QC defaults")
+  let mid = llm_model_info("mid")
+  assert_eq(mid.id, "gpt-4o-mini")
+  assert_eq(mid.catalog.pricing.input_per_mtok, 0.15)
+  assert(mid.capabilities.native_tools != nil, "capability lookup is present")
+  log("llm_provider_catalog passed")
+}

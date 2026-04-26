@@ -1,4 +1,4 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
@@ -21,6 +21,10 @@ pub struct ProvidersConfig {
     #[serde(default)]
     pub aliases: BTreeMap<String, AliasDef>,
     #[serde(default)]
+    pub models: BTreeMap<String, ModelDef>,
+    #[serde(default)]
+    pub qc_defaults: BTreeMap<String, String>,
+    #[serde(default)]
     pub inference_rules: Vec<InferenceRule>,
     #[serde(default)]
     pub tier_rules: Vec<TierRule>,
@@ -34,6 +38,8 @@ impl ProvidersConfig {
     pub fn is_empty(&self) -> bool {
         self.providers.is_empty()
             && self.aliases.is_empty()
+            && self.models.is_empty()
+            && self.qc_defaults.is_empty()
             && self.inference_rules.is_empty()
             && self.tier_rules.is_empty()
             && self.model_defaults.is_empty()
@@ -43,6 +49,8 @@ impl ProvidersConfig {
     pub fn merge_from(&mut self, overlay: &ProvidersConfig) {
         self.providers.extend(overlay.providers.clone());
         self.aliases.extend(overlay.aliases.clone());
+        self.models.extend(overlay.models.clone());
+        self.qc_defaults.extend(overlay.qc_defaults.clone());
 
         if !overlay.inference_rules.is_empty() {
             let mut merged = overlay.inference_rules.clone();
@@ -71,6 +79,10 @@ impl ProvidersConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct ProviderDef {
+    #[serde(default)]
+    pub display_name: Option<String>,
+    #[serde(default)]
+    pub icon: Option<String>,
     pub base_url: String,
     #[serde(default)]
     pub base_url_env: Option<String>,
@@ -116,6 +128,8 @@ pub struct ProviderDef {
 impl Default for ProviderDef {
     fn default() -> Self {
         Self {
+            display_name: None,
+            icon: None,
             base_url: String::new(),
             base_url_env: None,
             auth_style: default_bearer(),
@@ -163,7 +177,7 @@ pub struct HealthcheckDef {
     pub body: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct AliasDef {
     pub id: String,
     pub provider: String,
@@ -173,6 +187,38 @@ pub struct AliasDef {
     /// models better served by text-based tool calling use "text".
     #[serde(default)]
     pub tool_format: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+pub struct ModelPricing {
+    pub input_per_mtok: f64,
+    pub output_per_mtok: f64,
+    #[serde(default)]
+    pub cache_read_per_mtok: Option<f64>,
+    #[serde(default)]
+    pub cache_write_per_mtok: Option<f64>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+pub struct ModelDef {
+    pub name: String,
+    pub provider: String,
+    pub context_window: u64,
+    #[serde(default)]
+    pub stream_timeout: Option<f64>,
+    #[serde(default)]
+    pub capabilities: Vec<String>,
+    #[serde(default)]
+    pub pricing: Option<ModelPricing>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct ResolvedModel {
+    pub id: String,
+    pub provider: String,
+    pub alias: Option<String>,
+    pub tool_format: String,
+    pub tier: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -294,12 +340,71 @@ pub fn resolve_model(alias: &str) -> (String, Option<String>) {
     if let Some(a) = config.aliases.get(alias) {
         return (a.id.clone(), Some(a.provider.clone()));
     }
-    (alias.to_string(), None)
+    (normalize_model_id(alias), None)
+}
+
+/// Strip host/provider selector prefixes that identify transport, not the
+/// provider-native model id. This mirrors Burin's existing normalization so
+/// `ollama:qwen3:30b` reaches Ollama as `qwen3:30b` instead of an invalid
+/// model named `ollama`.
+pub fn normalize_model_id(raw: &str) -> String {
+    for prefix in ["ollama:", "local:", "huggingface:", "hf:"] {
+        if let Some(stripped) = raw.strip_prefix(prefix) {
+            return stripped.to_string();
+        }
+    }
+    raw.to_string()
+}
+
+/// Resolve an alias or selector into the complete catalog identity hosts need:
+/// provider inference, prefix-normalized model id, default tool format, and tier.
+pub fn resolve_model_info(selector: &str) -> ResolvedModel {
+    let config = effective_config();
+    if let Some(alias) = config.aliases.get(selector) {
+        let id = alias.id.clone();
+        let provider = alias.provider.clone();
+        let tool_format = alias
+            .tool_format
+            .clone()
+            .unwrap_or_else(|| default_tool_format_with_config(&config, &id, &provider));
+        return ResolvedModel {
+            tier: model_tier_with_config(&config, &id),
+            id,
+            provider,
+            alias: Some(selector.to_string()),
+            tool_format,
+        };
+    }
+
+    let provider = infer_provider_with_config(&config, selector);
+    let id = normalize_model_id(selector);
+    let tool_format = default_tool_format_with_config(&config, &id, &provider);
+    let tier = model_tier_with_config(&config, &id);
+    ResolvedModel {
+        id,
+        provider,
+        alias: None,
+        tool_format,
+        tier,
+    }
 }
 
 /// Infer provider from a model ID using inference rules.
 pub fn infer_provider(model_id: &str) -> String {
     let config = effective_config();
+    infer_provider_with_config(&config, model_id)
+}
+
+fn infer_provider_with_config(config: &ProvidersConfig, model_id: &str) -> String {
+    if model_id.starts_with("local:") {
+        return "local".to_string();
+    }
+    if model_id.starts_with("ollama:") {
+        return "ollama".to_string();
+    }
+    if model_id.starts_with("huggingface:") || model_id.starts_with("hf:") {
+        return "huggingface".to_string();
+    }
     for rule in &config.inference_rules {
         if let Some(exact) = &rule.exact {
             if model_id == exact {
@@ -321,11 +426,11 @@ pub fn infer_provider(model_id: &str) -> String {
     // Order matters: `local:` must beat the generic `:` → ollama rule, and
     // any prefix-based rule must beat the generic `/` → openrouter rule for
     // ids like `local:owner/model`.
-    if model_id.starts_with("local:") {
-        return "local".to_string();
-    }
     if model_id.starts_with("claude-") {
         return "anthropic".to_string();
+    }
+    if model_id.to_lowercase().starts_with("or-") {
+        return "openrouter".to_string();
     }
     if model_id.starts_with("gpt-") || model_id.starts_with("o1") || model_id.starts_with("o3") {
         return "openai".to_string();
@@ -342,6 +447,10 @@ pub fn infer_provider(model_id: &str) -> String {
 /// Get model tier ("small", "mid", "frontier").
 pub fn model_tier(model_id: &str) -> String {
     let config = effective_config();
+    model_tier_with_config(&config, model_id)
+}
+
+fn model_tier_with_config(config: &ProvidersConfig, model_id: &str) -> String {
     for rule in &config.tier_rules {
         if let Some(exact) = &rule.exact {
             if model_id == exact {
@@ -394,6 +503,100 @@ pub fn provider_names() -> Vec<String> {
     effective_config().providers.keys().cloned().collect()
 }
 
+/// Return every configured alias name, sorted deterministically.
+pub fn known_model_names() -> Vec<String> {
+    effective_config().aliases.keys().cloned().collect()
+}
+
+pub fn alias_entries() -> Vec<(String, AliasDef)> {
+    effective_config().aliases.into_iter().collect()
+}
+
+/// Return every configured model-catalog entry, sorted by provider then id.
+pub fn model_catalog_entries() -> Vec<(String, ModelDef)> {
+    let mut entries: Vec<_> = effective_config().models.into_iter().collect();
+    entries.sort_by(|(id_a, model_a), (id_b, model_b)| {
+        model_a
+            .provider
+            .cmp(&model_b.provider)
+            .then_with(|| id_a.cmp(id_b))
+    });
+    entries
+}
+
+pub fn model_catalog_entry(model_id: &str) -> Option<ModelDef> {
+    effective_config().models.get(model_id).cloned()
+}
+
+pub fn qc_default_model(provider: &str) -> Option<String> {
+    std::env::var("BURIN_QC_MODEL")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| {
+            effective_config()
+                .qc_defaults
+                .get(&provider.to_lowercase())
+                .cloned()
+        })
+}
+
+pub fn qc_defaults() -> BTreeMap<String, String> {
+    effective_config().qc_defaults
+}
+
+pub fn model_pricing_per_mtok(model_id: &str) -> Option<ModelPricing> {
+    effective_config()
+        .models
+        .get(model_id)
+        .and_then(|model| model.pricing.clone())
+}
+
+pub fn pricing_per_1k_for(provider: &str, model_id: &str) -> Option<(f64, f64)> {
+    model_pricing_per_mtok(model_id)
+        .map(|pricing| {
+            (
+                pricing.input_per_mtok / 1000.0,
+                pricing.output_per_mtok / 1000.0,
+            )
+        })
+        .or_else(|| {
+            let (input, output, _) = provider_economics(provider);
+            match (input, output) {
+                (Some(input), Some(output)) => Some((input, output)),
+                _ => None,
+            }
+        })
+}
+
+pub fn auth_env_names(auth_env: &AuthEnv) -> Vec<String> {
+    match auth_env {
+        AuthEnv::None => Vec::new(),
+        AuthEnv::Single(name) => vec![name.clone()],
+        AuthEnv::Multiple(names) => names.clone(),
+    }
+}
+
+pub fn provider_key_available(provider: &str) -> bool {
+    let Some(pdef) = provider_config(provider) else {
+        return provider == "ollama";
+    };
+    if pdef.auth_style == "none" || matches!(pdef.auth_env, AuthEnv::None) {
+        return true;
+    }
+    auth_env_names(&pdef.auth_env).into_iter().any(|env_name| {
+        std::env::var(env_name)
+            .ok()
+            .is_some_and(|value| !value.trim().is_empty())
+    })
+}
+
+pub fn available_provider_names() -> Vec<String> {
+    provider_names()
+        .into_iter()
+        .filter(|provider| provider_key_available(provider))
+        .collect()
+}
+
 /// Check if a provider advertises a feature (e.g., "native_tools").
 pub fn provider_has_feature(provider: &str, feature: &str) -> bool {
     provider_config(provider)
@@ -414,6 +617,14 @@ pub fn provider_economics(provider: &str) -> (Option<f64>, Option<f64>, Option<u
 /// Priority: alias `tool_format` (matched by model ID) > provider feature > "text".
 pub fn default_tool_format(model: &str, provider: &str) -> String {
     let config = effective_config();
+    default_tool_format_with_config(&config, model, provider)
+}
+
+fn default_tool_format_with_config(
+    config: &ProvidersConfig,
+    model: &str,
+    provider: &str,
+) -> String {
     // Aliases match by model ID + provider, or by alias name.
     for (name, alias) in &config.aliases {
         let matches = (alias.id == model && alias.provider == provider) || name == model;
@@ -423,7 +634,12 @@ pub fn default_tool_format(model: &str, provider: &str) -> String {
             }
         }
     }
-    if provider_has_feature(provider, "native_tools") {
+    if config
+        .providers
+        .get(provider)
+        .map(|p| p.features.iter().any(|f| f == "native_tools"))
+        .unwrap_or(false)
+    {
         "native".to_string()
     } else {
         "text".to_string()
@@ -1062,6 +1278,82 @@ fn default_config() -> ProvidersConfig {
         },
     );
 
+    config.qc_defaults.extend(BTreeMap::from([
+        (
+            "anthropic".to_string(),
+            "claude-3-5-haiku-20241022".to_string(),
+        ),
+        ("openai".to_string(), "gpt-4o-mini".to_string()),
+        (
+            "openrouter".to_string(),
+            "google/gemini-2.5-flash".to_string(),
+        ),
+        ("ollama".to_string(), "llama3.2".to_string()),
+        ("local".to_string(), "gpt-4o".to_string()),
+    ]));
+
+    config.models.extend(BTreeMap::from([
+        (
+            "claude-sonnet-4-20250514".to_string(),
+            ModelDef {
+                name: "Claude Sonnet 4".to_string(),
+                provider: "anthropic".to_string(),
+                context_window: 200_000,
+                stream_timeout: None,
+                capabilities: vec![
+                    "tools".to_string(),
+                    "streaming".to_string(),
+                    "prompt_caching".to_string(),
+                    "thinking".to_string(),
+                ],
+                pricing: Some(ModelPricing {
+                    input_per_mtok: 3.0,
+                    output_per_mtok: 15.0,
+                    cache_read_per_mtok: Some(0.3),
+                    cache_write_per_mtok: Some(3.75),
+                }),
+            },
+        ),
+        (
+            "gpt-4o-mini".to_string(),
+            ModelDef {
+                name: "GPT-4o Mini".to_string(),
+                provider: "openai".to_string(),
+                context_window: 128_000,
+                stream_timeout: None,
+                capabilities: vec!["tools".to_string(), "streaming".to_string()],
+                pricing: Some(ModelPricing {
+                    input_per_mtok: 0.15,
+                    output_per_mtok: 0.60,
+                    cache_read_per_mtok: None,
+                    cache_write_per_mtok: None,
+                }),
+            },
+        ),
+        (
+            "Qwen/Qwen3.5-9B".to_string(),
+            ModelDef {
+                name: "Qwen3.5 9B".to_string(),
+                provider: "openrouter".to_string(),
+                context_window: 131_072,
+                stream_timeout: None,
+                capabilities: vec!["tools".to_string(), "streaming".to_string()],
+                pricing: None,
+            },
+        ),
+        (
+            "llama3.2".to_string(),
+            ModelDef {
+                name: "Llama 3.2".to_string(),
+                provider: "ollama".to_string(),
+                context_window: 32_000,
+                stream_timeout: Some(300.0),
+                capabilities: vec!["tools".to_string(), "streaming".to_string()],
+                pricing: None,
+            },
+        ),
+    ]));
+
     config
 }
 
@@ -1117,6 +1409,21 @@ mod tests {
         assert_eq!(infer_provider("local:qwen2.5"), "local");
         // Even when the id also contains `/`, the `local:` prefix wins.
         assert_eq!(infer_provider("local:owner/model"), "local");
+    }
+
+    #[test]
+    fn test_resolve_model_info_normalizes_provider_prefixes() {
+        let local = resolve_model_info("local:gemma-4-e4b-it");
+        assert_eq!(local.id, "gemma-4-e4b-it");
+        assert_eq!(local.provider, "local");
+
+        let ollama = resolve_model_info("ollama:qwen3:30b-a3b");
+        assert_eq!(ollama.id, "qwen3:30b-a3b");
+        assert_eq!(ollama.provider, "ollama");
+
+        let hf = resolve_model_info("hf:Qwen/Qwen3.6-35B-A3B");
+        assert_eq!(hf.id, "Qwen/Qwen3.6-35B-A3B");
+        assert_eq!(hf.provider, "huggingface");
     }
 
     #[test]
@@ -1223,6 +1530,49 @@ mod tests {
         assert_eq!(
             provider_config("acme").map(|provider| provider.base_url),
             Some("https://llm.acme.test/v1".to_string())
+        );
+
+        reset_overrides();
+    }
+
+    #[test]
+    fn test_user_overrides_add_model_catalog_pricing_and_qc_defaults() {
+        reset_overrides();
+        let mut overlay = ProvidersConfig::default();
+        overlay.models.insert(
+            "acme/model-fast".to_string(),
+            ModelDef {
+                name: "Acme Fast".to_string(),
+                provider: "acme".to_string(),
+                context_window: 65_536,
+                stream_timeout: Some(42.0),
+                capabilities: vec!["tools".to_string(), "streaming".to_string()],
+                pricing: Some(ModelPricing {
+                    input_per_mtok: 1.25,
+                    output_per_mtok: 2.5,
+                    cache_read_per_mtok: Some(0.25),
+                    cache_write_per_mtok: None,
+                }),
+            },
+        );
+        overlay
+            .qc_defaults
+            .insert("acme".to_string(), "acme/model-cheap".to_string());
+        set_user_overrides(Some(overlay));
+
+        let entry = model_catalog_entry("acme/model-fast").expect("catalog entry");
+        assert_eq!(entry.context_window, 65_536);
+        assert_eq!(
+            entry.pricing.as_ref().map(|pricing| pricing.input_per_mtok),
+            Some(1.25)
+        );
+        assert_eq!(
+            pricing_per_1k_for("acme", "acme/model-fast"),
+            Some((0.00125, 0.0025))
+        );
+        assert_eq!(
+            qc_default_model("acme").as_deref(),
+            Some("acme/model-cheap")
         );
 
         reset_overrides();

@@ -164,6 +164,10 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: None,
     },
     BuiltinSig {
+        name: "llm_available_providers",
+        return_type: Some(BuiltinReturn::Named("list")),
+    },
+    BuiltinSig {
         name: "llm_infer_provider",
         return_type: Some(BuiltinReturn::Named("string")),
     },
@@ -188,12 +192,28 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("string")),
     },
     BuiltinSig {
+        name: "llm_model_info",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
+        name: "llm_known_models",
+        return_type: Some(BuiltinReturn::Named("list")),
+    },
+    BuiltinSig {
         name: "llm_pick_model",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
+        name: "llm_provider_catalog",
         return_type: Some(BuiltinReturn::Named("dict")),
     },
     BuiltinSig {
         name: "llm_providers",
         return_type: Some(BuiltinReturn::Named("list")),
+    },
+    BuiltinSig {
+        name: "llm_qc_default_model",
+        return_type: Some(BuiltinReturn::Union(UNION_STRING_NIL)),
     },
     BuiltinSig {
         name: "llm_rate_limit",

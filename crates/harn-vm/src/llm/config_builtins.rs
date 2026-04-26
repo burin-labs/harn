@@ -26,41 +26,7 @@ pub(crate) fn register_config_builtins(vm: &mut Vm) {
             ));
         }
         let caps = super::capabilities::lookup(&provider, &model);
-        let mut dict = BTreeMap::new();
-        dict.insert(
-            "provider".to_string(),
-            VmValue::String(Rc::from(provider.as_str())),
-        );
-        dict.insert(
-            "model".to_string(),
-            VmValue::String(Rc::from(model.as_str())),
-        );
-        dict.insert("native_tools".to_string(), VmValue::Bool(caps.native_tools));
-        dict.insert(
-            "defer_loading".to_string(),
-            VmValue::Bool(caps.defer_loading),
-        );
-        let tool_search: Vec<VmValue> = caps
-            .tool_search
-            .iter()
-            .map(|s| VmValue::String(Rc::from(s.as_str())))
-            .collect();
-        dict.insert(
-            "tool_search".to_string(),
-            VmValue::List(Rc::new(tool_search)),
-        );
-        dict.insert(
-            "max_tools".to_string(),
-            caps.max_tools
-                .map(|n| VmValue::Int(n as i64))
-                .unwrap_or(VmValue::Nil),
-        );
-        dict.insert(
-            "prompt_caching".to_string(),
-            VmValue::Bool(caps.prompt_caching),
-        );
-        dict.insert("thinking".to_string(), VmValue::Bool(caps.thinking));
-        Ok(VmValue::Dict(Rc::new(dict)))
+        Ok(capabilities_to_vm_value(&provider, &model, &caps))
     });
 
     // provider_capabilities_install(toml_src) — install capability
@@ -105,16 +71,41 @@ pub(crate) fn register_config_builtins(vm: &mut Vm) {
 
     vm.register_builtin("llm_resolve_model", |args, _out| {
         let alias = args.first().map(|a| a.display()).unwrap_or_default();
-        let (id, provider) = llm_config::resolve_model(&alias);
-        let mut dict = BTreeMap::new();
-        dict.insert("id".to_string(), VmValue::String(Rc::from(id)));
-        dict.insert(
-            "provider".to_string(),
-            provider
-                .map(|p| VmValue::String(Rc::from(p)))
-                .unwrap_or(VmValue::Nil),
-        );
-        Ok(VmValue::Dict(Rc::new(dict)))
+        Ok(resolved_model_to_vm_value(&llm_config::resolve_model_info(
+            &alias,
+        )))
+    });
+
+    vm.register_builtin("llm_model_info", |args, _out| {
+        let selector = args.first().map(|a| a.display()).unwrap_or_default();
+        let resolved = llm_config::resolve_model_info(&selector);
+        Ok(model_info_to_vm_value(&resolved))
+    });
+
+    vm.register_builtin("llm_known_models", |_args, _out| {
+        Ok(string_list_to_vm_value(llm_config::known_model_names()))
+    });
+
+    vm.register_builtin("llm_available_providers", |_args, _out| {
+        Ok(string_list_to_vm_value(
+            llm_config::available_provider_names(),
+        ))
+    });
+
+    vm.register_builtin("llm_qc_default_model", |args, _out| {
+        let provider = args.first().map(|a| a.display()).unwrap_or_default();
+        if provider.is_empty() {
+            return Err(crate::value::VmError::Runtime(
+                "llm_qc_default_model: provider name is required".to_string(),
+            ));
+        }
+        Ok(llm_config::qc_default_model(&provider)
+            .map(|model| VmValue::String(Rc::from(model)))
+            .unwrap_or(VmValue::Nil))
+    });
+
+    vm.register_builtin("llm_provider_catalog", |_args, _out| {
+        Ok(provider_catalog_to_vm_value())
     });
 
     vm.register_builtin("llm_pick_model", |args, _out| {
@@ -179,7 +170,7 @@ pub(crate) fn register_config_builtins(vm: &mut Vm) {
         match provider_name {
             Some(name) => {
                 if let Some(pdef) = llm_config::provider_config(&name) {
-                    Ok(provider_def_to_vm_value(&pdef))
+                    Ok(provider_def_to_vm_value(Some(&name), &pdef))
                 } else {
                     Ok(VmValue::Nil)
                 }
@@ -189,7 +180,7 @@ pub(crate) fn register_config_builtins(vm: &mut Vm) {
                 let mut dict = BTreeMap::new();
                 for name in llm_config::provider_names() {
                     if let Some(pdef) = llm_config::provider_config(&name) {
-                        dict.insert(name, provider_def_to_vm_value(&pdef));
+                        dict.insert(name.clone(), provider_def_to_vm_value(Some(&name), &pdef));
                     }
                 }
                 Ok(VmValue::Dict(Rc::new(dict)))
@@ -293,15 +284,45 @@ fn parse_healthcheck_args(args: &[VmValue]) -> (String, Option<String>) {
 }
 
 /// Convert a ProviderDef to a VmValue dict for the llm_config builtin.
-fn provider_def_to_vm_value(pdef: &llm_config::ProviderDef) -> VmValue {
+fn provider_def_to_vm_value(
+    provider_name: Option<&str>,
+    pdef: &llm_config::ProviderDef,
+) -> VmValue {
     let mut dict = BTreeMap::new();
+    if let Some(display_name) = &pdef.display_name {
+        dict.insert(
+            "display_name".to_string(),
+            VmValue::String(Rc::from(display_name.as_str())),
+        );
+    }
+    if let Some(icon) = &pdef.icon {
+        dict.insert("icon".to_string(), VmValue::String(Rc::from(icon.as_str())));
+    }
     dict.insert(
         "base_url".to_string(),
         VmValue::String(Rc::from(pdef.base_url.as_str())),
     );
+    if let Some(base_url_env) = &pdef.base_url_env {
+        dict.insert(
+            "base_url_env".to_string(),
+            VmValue::String(Rc::from(base_url_env.as_str())),
+        );
+    }
     dict.insert(
         "auth_style".to_string(),
         VmValue::String(Rc::from(pdef.auth_style.as_str())),
+    );
+    dict.insert(
+        "auth_envs".to_string(),
+        string_list_to_vm_value(llm_config::auth_env_names(&pdef.auth_env)),
+    );
+    dict.insert(
+        "auth_available".to_string(),
+        VmValue::Bool(
+            provider_name
+                .map(llm_config::provider_key_available)
+                .unwrap_or(pdef.auth_style == "none"),
+        ),
     );
     dict.insert(
         "chat_endpoint".to_string(),
@@ -337,6 +358,257 @@ fn provider_def_to_vm_value(pdef: &llm_config::ProviderDef) -> VmValue {
     if let Some(rpm) = pdef.rpm {
         dict.insert("rpm".to_string(), VmValue::Int(rpm as i64));
     }
+    if let Some(cost) = pdef.cost_per_1k_in {
+        dict.insert("cost_per_1k_in".to_string(), VmValue::Float(cost));
+    }
+    if let Some(cost) = pdef.cost_per_1k_out {
+        dict.insert("cost_per_1k_out".to_string(), VmValue::Float(cost));
+    }
+    if let Some(latency) = pdef.latency_p50_ms {
+        dict.insert("latency_p50_ms".to_string(), VmValue::Int(latency as i64));
+    }
+    VmValue::Dict(Rc::new(dict))
+}
+
+fn string_list_to_vm_value(items: Vec<String>) -> VmValue {
+    VmValue::List(Rc::new(
+        items
+            .into_iter()
+            .map(|item| VmValue::String(Rc::from(item)))
+            .collect(),
+    ))
+}
+
+fn resolved_model_to_vm_value(resolved: &llm_config::ResolvedModel) -> VmValue {
+    let mut dict = BTreeMap::new();
+    dict.insert(
+        "id".to_string(),
+        VmValue::String(Rc::from(resolved.id.as_str())),
+    );
+    dict.insert(
+        "provider".to_string(),
+        VmValue::String(Rc::from(resolved.provider.as_str())),
+    );
+    dict.insert(
+        "alias".to_string(),
+        resolved
+            .alias
+            .as_deref()
+            .map(|alias| VmValue::String(Rc::from(alias)))
+            .unwrap_or(VmValue::Nil),
+    );
+    dict.insert(
+        "tool_format".to_string(),
+        VmValue::String(Rc::from(resolved.tool_format.as_str())),
+    );
+    dict.insert(
+        "tier".to_string(),
+        VmValue::String(Rc::from(resolved.tier.as_str())),
+    );
+    VmValue::Dict(Rc::new(dict))
+}
+
+fn model_info_to_vm_value(resolved: &llm_config::ResolvedModel) -> VmValue {
+    let mut dict = match resolved_model_to_vm_value(resolved) {
+        VmValue::Dict(dict) => dict.as_ref().clone(),
+        _ => unreachable!("resolved_model_to_vm_value returns a dict"),
+    };
+    let caps = super::capabilities::lookup(&resolved.provider, &resolved.id);
+    dict.insert(
+        "capabilities".to_string(),
+        capabilities_to_vm_value(&resolved.provider, &resolved.id, &caps),
+    );
+    dict.insert(
+        "catalog".to_string(),
+        llm_config::model_catalog_entry(&resolved.id)
+            .map(|entry| model_def_to_vm_value(&resolved.id, &entry))
+            .unwrap_or(VmValue::Nil),
+    );
+    dict.insert(
+        "qc_default_model".to_string(),
+        llm_config::qc_default_model(&resolved.provider)
+            .map(|model| VmValue::String(Rc::from(model)))
+            .unwrap_or(VmValue::Nil),
+    );
+    dict.insert(
+        "auth_available".to_string(),
+        VmValue::Bool(llm_config::provider_key_available(&resolved.provider)),
+    );
+    VmValue::Dict(Rc::new(dict))
+}
+
+fn capabilities_to_vm_value(
+    provider: &str,
+    model: &str,
+    caps: &super::capabilities::Capabilities,
+) -> VmValue {
+    let mut dict = BTreeMap::new();
+    dict.insert(
+        "provider".to_string(),
+        VmValue::String(Rc::from(provider.to_string())),
+    );
+    dict.insert(
+        "model".to_string(),
+        VmValue::String(Rc::from(model.to_string())),
+    );
+    dict.insert("native_tools".to_string(), VmValue::Bool(caps.native_tools));
+    dict.insert(
+        "defer_loading".to_string(),
+        VmValue::Bool(caps.defer_loading),
+    );
+    dict.insert(
+        "tool_search".to_string(),
+        string_list_to_vm_value(caps.tool_search.clone()),
+    );
+    dict.insert(
+        "max_tools".to_string(),
+        caps.max_tools
+            .map(|n| VmValue::Int(n as i64))
+            .unwrap_or(VmValue::Nil),
+    );
+    dict.insert(
+        "prompt_caching".to_string(),
+        VmValue::Bool(caps.prompt_caching),
+    );
+    dict.insert("thinking".to_string(), VmValue::Bool(caps.thinking));
+    dict.insert(
+        "preserve_thinking".to_string(),
+        VmValue::Bool(caps.preserve_thinking),
+    );
+    VmValue::Dict(Rc::new(dict))
+}
+
+fn model_def_to_vm_value(id: &str, model: &llm_config::ModelDef) -> VmValue {
+    let mut dict = BTreeMap::new();
+    dict.insert("id".to_string(), VmValue::String(Rc::from(id.to_string())));
+    dict.insert(
+        "name".to_string(),
+        VmValue::String(Rc::from(model.name.as_str())),
+    );
+    dict.insert(
+        "provider".to_string(),
+        VmValue::String(Rc::from(model.provider.as_str())),
+    );
+    dict.insert(
+        "context_window".to_string(),
+        VmValue::Int(model.context_window as i64),
+    );
+    dict.insert(
+        "stream_timeout".to_string(),
+        model
+            .stream_timeout
+            .map(VmValue::Float)
+            .unwrap_or(VmValue::Nil),
+    );
+    dict.insert(
+        "capabilities".to_string(),
+        string_list_to_vm_value(model.capabilities.clone()),
+    );
+    dict.insert(
+        "pricing".to_string(),
+        model
+            .pricing
+            .as_ref()
+            .map(pricing_to_vm_value)
+            .unwrap_or(VmValue::Nil),
+    );
+    VmValue::Dict(Rc::new(dict))
+}
+
+fn pricing_to_vm_value(pricing: &llm_config::ModelPricing) -> VmValue {
+    let mut dict = BTreeMap::new();
+    dict.insert(
+        "input_per_mtok".to_string(),
+        VmValue::Float(pricing.input_per_mtok),
+    );
+    dict.insert(
+        "output_per_mtok".to_string(),
+        VmValue::Float(pricing.output_per_mtok),
+    );
+    dict.insert(
+        "cache_read_per_mtok".to_string(),
+        pricing
+            .cache_read_per_mtok
+            .map(VmValue::Float)
+            .unwrap_or(VmValue::Nil),
+    );
+    dict.insert(
+        "cache_write_per_mtok".to_string(),
+        pricing
+            .cache_write_per_mtok
+            .map(VmValue::Float)
+            .unwrap_or(VmValue::Nil),
+    );
+    VmValue::Dict(Rc::new(dict))
+}
+
+fn provider_catalog_to_vm_value() -> VmValue {
+    let mut dict = BTreeMap::new();
+
+    let mut providers = Vec::new();
+    for name in llm_config::provider_names() {
+        if let Some(pdef) = llm_config::provider_config(&name) {
+            let mut provider = match provider_def_to_vm_value(Some(&name), &pdef) {
+                VmValue::Dict(provider) => provider.as_ref().clone(),
+                _ => unreachable!("provider_def_to_vm_value returns a dict"),
+            };
+            provider.insert("name".to_string(), VmValue::String(Rc::from(name.clone())));
+            providers.push(VmValue::Dict(Rc::new(provider)));
+        }
+    }
+    dict.insert("providers".to_string(), VmValue::List(Rc::new(providers)));
+    dict.insert(
+        "known_model_names".to_string(),
+        string_list_to_vm_value(llm_config::known_model_names()),
+    );
+    dict.insert(
+        "available_providers".to_string(),
+        string_list_to_vm_value(llm_config::available_provider_names()),
+    );
+    let aliases = llm_config::alias_entries()
+        .into_iter()
+        .map(|(name, alias)| alias_def_to_vm_value(&name, &alias))
+        .collect();
+    dict.insert("aliases".to_string(), VmValue::List(Rc::new(aliases)));
+    let models = llm_config::model_catalog_entries()
+        .into_iter()
+        .map(|(id, model)| model_def_to_vm_value(&id, &model))
+        .collect();
+    dict.insert("models".to_string(), VmValue::List(Rc::new(models)));
+    let qc_defaults = llm_config::qc_defaults()
+        .into_iter()
+        .map(|(provider, model)| (provider, VmValue::String(Rc::from(model))))
+        .collect();
+    dict.insert(
+        "qc_defaults".to_string(),
+        VmValue::Dict(Rc::new(qc_defaults)),
+    );
+
+    VmValue::Dict(Rc::new(dict))
+}
+
+fn alias_def_to_vm_value(name: &str, alias: &llm_config::AliasDef) -> VmValue {
+    let mut dict = BTreeMap::new();
+    dict.insert(
+        "name".to_string(),
+        VmValue::String(Rc::from(name.to_string())),
+    );
+    dict.insert(
+        "id".to_string(),
+        VmValue::String(Rc::from(alias.id.as_str())),
+    );
+    dict.insert(
+        "provider".to_string(),
+        VmValue::String(Rc::from(alias.provider.as_str())),
+    );
+    dict.insert(
+        "tool_format".to_string(),
+        alias
+            .tool_format
+            .as_deref()
+            .map(|format| VmValue::String(Rc::from(format)))
+            .unwrap_or(VmValue::Nil),
+    );
     VmValue::Dict(Rc::new(dict))
 }
 

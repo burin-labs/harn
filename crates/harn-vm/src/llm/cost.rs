@@ -50,17 +50,21 @@ fn model_pricing_per_million(model: &str) -> Option<(f64, f64)> {
 
 /// Pricing per 1k tokens (input, output) in USD.
 pub(crate) fn model_pricing_per_1k(model: &str) -> Option<(f64, f64)> {
-    model_pricing_per_million(model).map(|(input, output)| (input / 1000.0, output / 1000.0))
+    crate::llm_config::model_pricing_per_mtok(model)
+        .map(|pricing| {
+            (
+                pricing.input_per_mtok / 1000.0,
+                pricing.output_per_mtok / 1000.0,
+            )
+        })
+        .or_else(|| {
+            model_pricing_per_million(model)
+                .map(|(input, output)| (input / 1000.0, output / 1000.0))
+        })
 }
 
 pub(crate) fn pricing_per_1k_for(provider: &str, model: &str) -> Option<(f64, f64)> {
-    model_pricing_per_1k(model).or_else(|| {
-        let (input, output, _) = crate::llm_config::provider_economics(provider);
-        match (input, output) {
-            (Some(input), Some(output)) => Some((input, output)),
-            _ => None,
-        }
-    })
+    model_pricing_per_1k(model).or_else(|| crate::llm_config::pricing_per_1k_for(provider, model))
 }
 
 pub(crate) fn latency_p50_ms_for(provider: &str) -> Option<u64> {
@@ -70,9 +74,9 @@ pub(crate) fn latency_p50_ms_for(provider: &str) -> Option<u64> {
 
 /// Calculate cost for a given model and token counts.
 pub fn calculate_cost(model: &str, input_tokens: i64, output_tokens: i64) -> f64 {
-    match model_pricing_per_million(model) {
+    match model_pricing_per_1k(model) {
         Some((input_rate, output_rate)) => {
-            (input_tokens as f64 * input_rate + output_tokens as f64 * output_rate) / 1_000_000.0
+            (input_tokens as f64 * input_rate + output_tokens as f64 * output_rate) / 1000.0
         }
         None => 0.0,
     }
@@ -169,4 +173,37 @@ pub(crate) fn register_cost_builtins(vm: &mut Vm) {
             None => Ok(VmValue::Nil),
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn calculate_cost_uses_catalog_pricing_before_static_fallback() {
+        let _guard = crate::llm::env_lock().lock().unwrap();
+        let mut overlay = crate::llm_config::ProvidersConfig::default();
+        overlay.models.insert(
+            "gpt-4o-mini".to_string(),
+            crate::llm_config::ModelDef {
+                name: "Test GPT-4o Mini".to_string(),
+                provider: "openai".to_string(),
+                context_window: 128_000,
+                stream_timeout: None,
+                capabilities: Vec::new(),
+                pricing: Some(crate::llm_config::ModelPricing {
+                    input_per_mtok: 10.0,
+                    output_per_mtok: 20.0,
+                    cache_read_per_mtok: None,
+                    cache_write_per_mtok: None,
+                }),
+            },
+        );
+        crate::llm_config::set_user_overrides(Some(overlay));
+
+        let cost = calculate_cost("gpt-4o-mini", 1000, 1000);
+        assert!((cost - 0.03).abs() < f64::EPSILON);
+
+        crate::llm_config::clear_user_overrides();
+    }
 }

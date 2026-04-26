@@ -1350,15 +1350,20 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 | `trust_query(filters)` | filters: dict | list | Query trust-graph records by `agent`, `action`, `since`, `until`, `tier`, `outcome`, `limit`, and/or `grouped_by_trace` |
 | `llm_info()` | — | dict | Current LLM config: `{provider, model, api_key_set}` |
 | `llm_usage()` | — | dict | Cumulative usage: `{input_tokens, output_tokens, total_duration_ms, call_count, total_calls}` |
-| `llm_resolve_model(alias)` | alias: string | dict | Resolve model alias to `{id, provider}` via providers.toml |
+| `llm_resolve_model(alias)` | alias: string | dict | Resolve model alias or provider-prefixed selector to `{id, provider, alias, tool_format, tier}` via providers.toml |
+| `llm_model_info(model)` | model: string | dict | Return resolved model/provider metadata plus catalog entry, capabilities, API-key availability, and QC default |
 | `llm_pick_model(target, options?)` | target: string, options: dict | dict | Resolve a model alias or tier to `{id, provider, tier}` |
 | `llm_infer_provider(model_id)` | model_id: string | string | Infer provider from model ID (e.g. `"claude-*"` → `"anthropic"`) |
 | `llm_model_tier(model_id)` | model_id: string | string | Get capability tier: `"small"`, `"mid"`, or `"frontier"` |
 | `llm_healthcheck(provider?, options?)` | provider: string or `{provider, api_key?, model?}`, options: `{api_key?, model?}` or model string | dict | Validate a configured provider healthcheck. Returns `{provider, valid, message, metadata}`; `api_key` lets hosts validate a candidate key without first exporting it. For OpenAI-compatible `/models` healthchecks, passing a `model` (positional, `{model: "..."}`, or `{provider, model: "..."}`) verifies the selected model/alias is served and surfaces distinct `metadata.category` values such as `unreachable`, `bad_status`, `model_missing`, and `invalid_url` |
 | `llm_rate_limit(provider, options?)` | provider: string, options: dict | int/nil/bool | Set (`{rpm: N}`), query, or clear (`{rpm: 0}`) per-provider rate limit |
 | `llm_providers()` | — | list | List all configured provider names |
+| `llm_available_providers()` | — | list | List providers usable in the current environment (auth configured or no auth required) |
+| `llm_known_models()` | — | list | List configured model alias names |
+| `llm_qc_default_model(provider)` | provider: string | string/nil | Return the configured cheap QC/repair model for a provider, honoring `BURIN_QC_MODEL` |
+| `llm_provider_catalog()` | — | dict | Return the loaded provider/model catalog: providers, aliases, model metadata, pricing, QC defaults, and availability |
 | `llm_config(provider?)` | provider: string | dict | Get provider config (base_url, auth_style, etc.) |
-| `llm_cost(model, input_tokens, output_tokens)` | model: string, input_tokens: int, output_tokens: int | float | Estimate USD cost from embedded pricing table |
+| `llm_cost(model, input_tokens, output_tokens)` | model: string, input_tokens: int, output_tokens: int | float | Estimate USD cost from catalog pricing, falling back to embedded pricing |
 | `llm_session_cost()` | — | dict | Session totals: `{total_cost, input_tokens, output_tokens, call_count}` |
 | `llm_budget(max_cost)` | max_cost: float | nil | Set session budget in USD. LLM calls throw if exceeded |
 | `llm_budget_remaining()` | — | float or nil | Remaining budget (nil if no budget set) |
