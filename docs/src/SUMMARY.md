@@ -40,6 +40,7 @@
 - [Workflow runtime](./workflow-runtime.md)
 - [Team learning and context packs](./team-learning.md)
 - [Workflow crystallization](./workflow-crystallization.md)
+- [Flow predicate language](./flow-predicates.md)
 - [Trigger manifests](./triggers/manifest.md)
 - [Trigger budgets](./triggers/budgets.md)
 - [Trigger event schema](./triggers/event-schema.md)
