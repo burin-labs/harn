@@ -791,6 +791,12 @@ Clients MUST NOT infer cryptographic validity from the presence of a
 The replay-as-API sibling spec defines exact REST paths and replay fixtures.
 This narrative spec requires:
 
+- `POST /v1/tasks/{task_id}/replay` creates a new Task by replaying the source
+  Task EventLog. The new Task MUST expose the source Task as `parent_task_id`.
+- Replay requests support `exact`, `with_overrides`, and `from_checkpoint`
+  modes. Overrides MUST be keyed deterministic substitutions for recorded
+  nondeterministic dependencies such as model responses, MCP tool returns,
+  secret values, clock reads, and host facts.
 - Events are durable enough to replay a Session or Task history within the
   server's advertised retention window.
 - Replayed stream events are marked as replayed.
@@ -799,6 +805,9 @@ This narrative spec requires:
 - Replay MUST NOT silently include refreshed Memory, changed secrets, or new
   host facts unless the replay request explicitly opts into non-deterministic
   refresh.
+- Applied substitutions MUST be recorded as Receipt deltas that identify the
+  override key, original event or material path, and before/after hashes when
+  available.
 - Replay failures MUST identify the first unavailable event, artifact, memory,
   receipt, or host dependency that prevents replay.
 

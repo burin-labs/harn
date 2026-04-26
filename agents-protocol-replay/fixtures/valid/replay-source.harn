@@ -1,0 +1,5 @@
+/** Deterministic replay conformance fixture entrypoint. */
+pub fn main(input) {
+  let stamped = {message: input?.message ?? "", verdict: "approved"}
+  return stamped
+}

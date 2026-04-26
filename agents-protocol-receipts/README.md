@@ -49,6 +49,8 @@ A receipt is a JSON object with these top-level fields:
   handoffs.
 - `final_artifacts`: final artifact references with stable hashes when bytes
   are available.
+- `deltas`: replay or repair substitutions applied to the receipt subject,
+  including override keys and before/after hashes when available.
 - `chain`: previous receipt hash, current receipt hash, and optional Merkle
   root.
 - `redactions`: omitted private material with reason and proof hash when
