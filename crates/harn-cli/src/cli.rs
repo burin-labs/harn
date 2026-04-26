@@ -2041,6 +2041,15 @@ pub(crate) struct FlowArchivistScanArgs {
     /// Repo root to scan.
     #[arg(value_name = "REPO", default_value = ".")]
     pub repo: PathBuf,
+    /// Optional persona manifest to validate. Defaults to repo-local Flow persona manifests when present.
+    #[arg(long, value_name = "PATH")]
+    pub manifest: Option<PathBuf>,
+    /// SQLite Flow store path used for shadow evaluation.
+    #[arg(long, value_name = "PATH", default_value = ".harn/flow.sqlite")]
+    pub store: PathBuf,
+    /// Number of recent atom days to include in shadow evaluation.
+    #[arg(long = "shadow-days", value_name = "DAYS", default_value_t = 30)]
+    pub shadow_days: u32,
     /// Write the proposal JSON to this path.
     #[arg(long, value_name = "PATH")]
     pub out: Option<PathBuf>,
@@ -2411,11 +2420,11 @@ mod tests {
     use std::time::Duration as StdDuration;
 
     use super::{
-        Cli, Command, ConnectCommand, FlowCommand, McpCommand, OrchestratorCommand,
-        OrchestratorDeployProvider, OrchestratorLogFormat, OrchestratorQueueCommand,
-        OrchestratorTenantCommand, PackageCacheCommand, PackageCommand, ProjectTemplate,
-        RunsCommand, SkillCommand, SkillKeyCommand, SkillTrustCommand, SkillsCommand, TraceCommand,
-        TriggerCommand, TrustCommand, TrustOutcomeArg, TrustTierArg,
+        Cli, Command, ConnectCommand, FlowArchivistCommand, FlowCommand, McpCommand,
+        OrchestratorCommand, OrchestratorDeployProvider, OrchestratorLogFormat,
+        OrchestratorQueueCommand, OrchestratorTenantCommand, PackageCacheCommand, PackageCommand,
+        ProjectTemplate, RunsCommand, SkillCommand, SkillKeyCommand, SkillTrustCommand,
+        SkillsCommand, TraceCommand, TriggerCommand, TrustCommand, TrustOutcomeArg, TrustTierArg,
     };
     use clap::Parser;
 
@@ -2856,6 +2865,46 @@ mod tests {
         assert_eq!(audit.since.as_deref(), Some("2026-04-26"));
         assert!(audit.fail_on_drift);
         assert!(audit.json);
+    }
+
+    #[test]
+    fn test_parses_flow_archivist_scan_flags() {
+        let cli = Cli::parse_from([
+            "harn",
+            "flow",
+            "archivist",
+            "scan",
+            ".",
+            "--manifest",
+            "examples/personas/flow.harn.toml",
+            "--store",
+            ".harn/flow.sqlite",
+            "--shadow-days",
+            "14",
+            "--out",
+            ".harn/archivist/proposals.json",
+            "--json",
+        ]);
+
+        let Command::Flow(args) = cli.command.unwrap() else {
+            panic!("expected flow command");
+        };
+        let FlowCommand::Archivist(archivist) = args.command else {
+            panic!("expected archivist command");
+        };
+        let FlowArchivistCommand::Scan(scan) = archivist.command;
+        assert_eq!(scan.repo, PathBuf::from("."));
+        assert_eq!(
+            scan.manifest,
+            Some(PathBuf::from("examples/personas/flow.harn.toml"))
+        );
+        assert_eq!(scan.store, PathBuf::from(".harn/flow.sqlite"));
+        assert_eq!(scan.shadow_days, 14);
+        assert_eq!(
+            scan.out,
+            Some(PathBuf::from(".harn/archivist/proposals.json"))
+        );
+        assert!(scan.json);
     }
 
     #[test]
