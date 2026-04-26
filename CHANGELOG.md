@@ -34,6 +34,14 @@ granular archaeology.
   invariant result, a `harn-vm` Fixer helper that re-signs suggested atoms as
   auditable Fixer atoms and derives a follow-up slice, plus the checked-in
   `personas/fixer` role manifest.
+- **Flow predicate composition and replay audit (#571, #582, #583, #584).**
+  Flow predicate discovery now pins content hashes that include
+  `@archivist(...)` metadata, keeps parent and child predicates applicable for
+  hierarchical composition, and exposes conservative stricter-child composition
+  checks. `harn flow replay-audit` compares historical slice predicate pins
+  with the current `invariants.harn` set, while `harn flow ship watch` and
+  `harn flow archivist scan` provide the Phase 0 Ship Captain and Archivist
+  command surfaces for shadow-mode workflows.
 - **First-class worker lifecycle events on ACP and A2A (#703).** Adds
   two new typed `WorkerEvent` variants (`WorkerProgressed`,
   `WorkerWaitingForInput`) and surfaces every worker lifecycle

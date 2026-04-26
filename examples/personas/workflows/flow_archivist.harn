@@ -1,0 +1,4 @@
+/** Return the propose-only Archivist action envelope for a Flow event. */
+pub fn run(event) {
+  {persona: "archivist", mode: "propose_only", event: event, action: "emit_predicate_proposals"}
+}
