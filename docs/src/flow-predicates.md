@@ -196,9 +196,39 @@ The v0 rule is:
   ceiling, Flow returns a structured `RequireApproval` or `Block` explaining
   the predicate explosion instead of silently skipping rules.
 
-The open implementation work is benchmarking and default limit selection. The
-design answer is still union, but the scheduler must make the cost visible and
-bounded before Ship Captain uses this path without a human in the loop.
+### Default ceiling
+
+The `PredicateCeiling::default()` in `crates/harn-vm/src/flow/predicates/compose.rs`
+sets:
+
+- `require_approval_threshold = 256` — at this size the `flow-platform` role
+  is asked to co-sign before the slice ships.
+- `block_threshold = 1024` — at this size Flow refuses the slice with the
+  stable error code `predicate_count_explosion`.
+
+These limits are operational, not perf. The
+`crates/harn-vm/benches/flow_predicate_union.rs` benchmarks measure resolve and
+ceiling-check cost across normal, high-fanout, and pathological fixtures: the
+union itself is microsecond-scale even at ~2000 predicates and the ceiling
+check is sub-100µs. The binding constraint is downstream evaluation —
+deterministic predicates carry a 50ms wall-clock budget each, so a 256-predicate
+slice can spend 13s of serial work before Ship Captain even renders results.
+The ceiling makes that cost visible to a human before it becomes load-bearing.
+
+The structured violation surfaces:
+
+- `count` and `threshold` so operators can see how far over budget the slice is.
+- Up to five `top_contributors`, each `{ relative_dir, count }`, so it is
+  obvious which directory's `invariants.harn` is fanning out.
+- `level` of `require_approval` or `block`.
+
+`harn flow ship watch` already routes the violation into its
+`predicate_validation.ceiling` payload and propagates the level into
+`mock_pr.validation_status`.
+
+The open implementation work is exhausted. Ship Captain may evaluate
+cross-directory unions without a human in the loop only because the ceiling
+makes the cost visible and bounded.
 
 ## Replay And Audit Contract
 
@@ -262,9 +292,11 @@ landed and in-review predicate tickets:
   fallback metadata and enforcement for `@semantic` predicates.
 - [#736](https://github.com/burin-labs/harn/issues/736): add cross-slice fair
   scheduling and aggregate per-slice predicate budget envelopes.
-- [#733](https://github.com/burin-labs/harn/issues/733): add
+- ~~[#733](https://github.com/burin-labs/harn/issues/733): add
   cross-directory union benchmarks and predicate-count explosion limits before
-  Ship Captain relies on unattended slice emission.
+  Ship Captain relies on unattended slice emission.~~ Closed by the
+  `PredicateCeiling` defaults documented above plus the
+  `flow_predicate_union` criterion bench.
 
 These are implementation follow-ups to #584, not new design questions.
 

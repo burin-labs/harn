@@ -32,14 +32,17 @@ pub use intent::{
     TranscriptSpan,
 };
 pub use predicates::{
-    compose_predicate_results, discover_invariants, parse_invariants_source, resolve_predicates,
-    resolve_predicates_for_touched_directories, Approver, ArchivistMetadata, ByteSpan, CheapJudge,
-    CheapJudgeRequest, CheapJudgeResponse, ComposedPredicateEvaluation, DiscoveredInvariantFile,
+    compose_predicate_results, discover_invariants, enforce_predicate_ceiling,
+    parse_invariants_source, resolve_predicates, resolve_predicates_for_touched_directories,
+    Approver, ArchivistMetadata, ByteSpan, CheapJudge, CheapJudgeRequest, CheapJudgeResponse,
+    ComposedPredicateEvaluation, DirectoryContribution, DiscoveredInvariantFile,
     DiscoveredPredicate, DiscoveryDiagnostic, DiscoveryDiagnosticSeverity, EvidenceItem,
-    InvariantBlockError, InvariantResult, ParsedInvariantFile, PredicateContext,
+    InvariantBlockError, InvariantResult, ParsedInvariantFile, PredicateCeiling,
+    PredicateCeilingLevel, PredicateCeilingOutcome, PredicateCeilingViolation, PredicateContext,
     PredicateEvaluation, PredicateExecutionRecord, PredicateExecutionReport, PredicateExecutor,
     PredicateExecutorConfig, PredicateKind, PredicateRunner, PredicateSource, Remediation,
     ResolvedPredicate, SemanticReplayAuditMetadata, Verdict, VerdictStrictness, INVARIANTS_FILE,
+    PREDICATE_COUNT_EXPLOSION_CODE,
 };
 pub use slice::{
     derive_slice, Approval, CoverageMap, PredicateHash, Slice, SliceDerivationError,

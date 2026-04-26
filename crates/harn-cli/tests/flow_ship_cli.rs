@@ -117,6 +117,13 @@ fn flow_ship_watch_injects_atoms_and_opens_mock_pr() {
             .len(),
         1
     );
+    assert_eq!(file_payload["predicate_validation"]["status"], "ok");
+    assert_eq!(file_payload["mock_pr"]["validation_status"], "ok");
+    let ceiling = &file_payload["predicate_validation"]["ceiling"];
+    assert_eq!(ceiling["status"], "within");
+    assert_eq!(ceiling["count"], 1);
+    assert_eq!(ceiling["require_approval_threshold"], 256);
+    assert_eq!(ceiling["block_threshold"], 1024);
     assert_eq!(
         file_payload["eval_packs"].as_array().unwrap(),
         &[
@@ -130,4 +137,93 @@ fn flow_ship_watch_injects_atoms_and_opens_mock_pr() {
         .as_str()
         .unwrap()
         .starts_with("sqlite://slices/"));
+}
+
+fn predicate_block(name: &str) -> String {
+    format!(
+        r#"
+@invariant
+@deterministic
+@archivist(
+  evidence: ["https://github.com/burin-labs/harn/issues/733"],
+  confidence: 0.9,
+  source_date: "2026-04-26",
+  coverage_examples: ["explosion-fixture"]
+)
+fn {name}(slice) {{
+  return flow_invariant_allow()
+}}
+"#,
+    )
+}
+
+fn write_invariants_with_many_predicates(dir: &std::path::Path, count: usize) {
+    fs::create_dir_all(dir).unwrap();
+    let mut body = String::new();
+    for index in 0..count {
+        body.push_str(&predicate_block(&format!("pred_{index:04}")));
+    }
+    fs::write(dir.join("invariants.harn"), body).unwrap();
+}
+
+#[test]
+fn flow_ship_watch_blocks_when_predicate_union_explodes() {
+    let temp = TempDir::new().unwrap();
+    let repo = temp.path();
+    fs::create_dir_all(repo.join(".harn")).unwrap();
+    // Far above the 1024 hard ceiling — the leaf alone contributes 1100
+    // sibling-specific predicates so de-dup cannot collapse them.
+    write_invariants_with_many_predicates(repo, 1100);
+
+    let store_path = repo.join(".harn/flow.sqlite");
+    let store = SqliteFlowStore::open(&store_path, "flow-explosion").unwrap();
+    let mut atoms = Vec::new();
+    for index in 0..3 {
+        let parents = atoms
+            .last()
+            .map(|atom: &Atom| vec![atom.id])
+            .unwrap_or_default();
+        atoms.push(atom(index, parents));
+    }
+    for atom in &atoms {
+        store.emit_atom(atom).unwrap();
+    }
+    drop(store);
+
+    let mock_pr_path = repo.join(".harn/flow/mock-pr.json");
+    let output = Command::new(env!("CARGO_BIN_EXE_harn"))
+        .current_dir(repo)
+        .args([
+            "flow",
+            "ship",
+            "watch",
+            "--store",
+            store_path.to_str().unwrap(),
+            "--mock-pr-out",
+            mock_pr_path.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stdout={}, stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let payload: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(payload["predicate_validation"]["status"], "blocked");
+    assert_eq!(payload["mock_pr"]["validation_status"], "blocked");
+    let ceiling = &payload["predicate_validation"]["ceiling"];
+    assert_eq!(ceiling["status"], "blocked");
+    assert_eq!(ceiling["count"], 1100);
+    assert_eq!(ceiling["threshold"], 1024);
+    let message = ceiling["message"].as_str().unwrap();
+    assert!(
+        message.contains("hard ceiling") && message.contains("1100"),
+        "unexpected ceiling message: {message}"
+    );
+    let contributors = ceiling["top_contributors"].as_array().unwrap();
+    assert!(!contributors.is_empty());
 }
