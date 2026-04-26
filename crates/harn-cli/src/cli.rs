@@ -81,6 +81,8 @@ SCRIPTING
     Portal(PortalArgs),
     /// Replay and inspect historical trigger dispatches from the event log.
     Trigger(TriggerArgs),
+    /// Inspect Harn Flow atom, slice, and predicate audit state.
+    Flow(FlowArgs),
     /// Import third-party eval traces into replayable Harn fixtures.
     Trace(TraceArgs),
     /// Mine repeated traces into a reviewable deterministic Harn workflow candidate.
@@ -1009,6 +1011,45 @@ pub(crate) struct CrystallizeArgs {
 pub(crate) struct TrustArgs {
     #[command(subcommand)]
     pub command: TrustCommand,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct FlowArgs {
+    #[command(subcommand)]
+    pub command: FlowCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum FlowCommand {
+    /// Audit historical shipped slices against current retroactive predicates.
+    #[command(name = "replay-audit")]
+    ReplayAudit(FlowReplayAuditArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct FlowReplayAuditArgs {
+    /// SQLite Flow store to audit.
+    #[arg(
+        long = "store",
+        value_name = "PATH",
+        default_value = ".harn/flow.sqlite"
+    )]
+    pub store: PathBuf,
+    /// Repository root used for `invariants.harn` discovery.
+    #[arg(long = "root", value_name = "PATH", default_value = ".")]
+    pub root: PathBuf,
+    /// Target directory whose effective current predicate set should be used.
+    #[arg(long = "target-dir", value_name = "PATH", default_value = ".")]
+    pub target_dir: PathBuf,
+    /// Include shipped slices created at or after this date/timestamp.
+    #[arg(long = "since", value_name = "DATE")]
+    pub since: String,
+    /// Exit non-zero when advisory drift is found.
+    #[arg(long = "fail-on-drift")]
+    pub fail_on_drift: bool,
+    /// Emit JSON instead of human-readable output.
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Debug, Subcommand)]
@@ -2302,11 +2343,11 @@ mod tests {
     use std::time::Duration as StdDuration;
 
     use super::{
-        Cli, Command, ConnectCommand, McpCommand, OrchestratorCommand, OrchestratorDeployProvider,
-        OrchestratorLogFormat, OrchestratorQueueCommand, OrchestratorTenantCommand,
-        PackageCacheCommand, PackageCommand, ProjectTemplate, RunsCommand, SkillCommand,
-        SkillKeyCommand, SkillTrustCommand, SkillsCommand, TraceCommand, TriggerCommand,
-        TrustCommand, TrustOutcomeArg, TrustTierArg,
+        Cli, Command, ConnectCommand, FlowCommand, McpCommand, OrchestratorCommand,
+        OrchestratorDeployProvider, OrchestratorLogFormat, OrchestratorQueueCommand,
+        OrchestratorTenantCommand, PackageCacheCommand, PackageCommand, ProjectTemplate,
+        RunsCommand, SkillCommand, SkillKeyCommand, SkillTrustCommand, SkillsCommand, TraceCommand,
+        TriggerCommand, TrustCommand, TrustOutcomeArg, TrustTierArg,
     };
     use clap::Parser;
 
@@ -2715,6 +2756,36 @@ mod tests {
         assert!(replay.diff);
         assert_eq!(replay.as_of.as_deref(), Some("2026-04-19T18:00:00Z"));
         assert!(replay.where_expr.is_none());
+    }
+
+    #[test]
+    fn test_parses_flow_replay_audit_flags() {
+        let cli = Cli::parse_from([
+            "harn",
+            "flow",
+            "replay-audit",
+            "--store",
+            ".harn/flow.sqlite",
+            "--root",
+            ".",
+            "--target-dir",
+            "crates/harn-vm",
+            "--since",
+            "2026-04-26",
+            "--fail-on-drift",
+            "--json",
+        ]);
+
+        let Command::Flow(args) = cli.command.unwrap() else {
+            panic!("expected flow command");
+        };
+        let FlowCommand::ReplayAudit(audit) = args.command;
+        assert_eq!(audit.store, PathBuf::from(".harn/flow.sqlite"));
+        assert_eq!(audit.root, PathBuf::from("."));
+        assert_eq!(audit.target_dir, PathBuf::from("crates/harn-vm"));
+        assert_eq!(audit.since, "2026-04-26");
+        assert!(audit.fail_on_drift);
+        assert!(audit.json);
     }
 
     #[test]

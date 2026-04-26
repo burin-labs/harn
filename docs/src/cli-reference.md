@@ -742,6 +742,29 @@ Every bulk replay appends an audit envelope to
 `trigger.operations.audit` describing who ran it, when, the normalized
 filter, and the affected records.
 
+## harn flow replay-audit
+
+Audit shipped Flow slices against the current `@retroactive` predicate hashes.
+Historical slices remain append-only: drift is advisory unless
+`--fail-on-drift` is set.
+The `--store` path must already exist; the audit command does not create an
+empty Flow store.
+
+```bash
+harn flow replay-audit --since 2026-04-26
+harn flow replay-audit --since 2026-04-26T12:00:00Z --json
+harn flow replay-audit --store .harn/flow.sqlite --root . --target-dir crates/harn-vm --since 2026-04-26 --fail-on-drift
+```
+
+| Flag | Description |
+|---|---|
+| `--since <date>` | Include shipped derived slices created at or after an RFC3339 timestamp, unix timestamp, or `YYYY-MM-DD` |
+| `--store <path>` | SQLite Flow store to audit (default: `.harn/flow.sqlite`) |
+| `--root <path>` | Repository root used for `invariants.harn` discovery |
+| `--target-dir <path>` | Directory whose effective current predicate set is audited |
+| `--fail-on-drift` | Exit non-zero when advisory drift is found |
+| `--json` | Emit the replay-audit report as JSON |
+
 ## harn trace import
 
 Convert a third-party eval trace into a standard `--llm-mock` fixture.

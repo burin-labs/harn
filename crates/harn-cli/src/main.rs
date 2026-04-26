@@ -16,8 +16,8 @@ use std::sync::Arc;
 use std::{env, fs, process, thread};
 
 use cli::{
-    Cli, Command, ModelInfoArgs, PackageCacheCommand, PackageCommand, PersonaCommand, RunsCommand,
-    ServeCommand, SkillCommand, SkillKeyCommand, SkillTrustCommand, SkillsCommand,
+    Cli, Command, FlowCommand, ModelInfoArgs, PackageCacheCommand, PackageCommand, PersonaCommand,
+    RunsCommand, ServeCommand, SkillCommand, SkillKeyCommand, SkillTrustCommand, SkillsCommand,
 };
 use harn_lexer::Lexer;
 use harn_parser::{DiagnosticSeverity, Parser, TypeChecker};
@@ -513,6 +513,16 @@ async fn async_main() {
                 process::exit(1);
             }
         }
+        Command::Flow(args) => match args.command {
+            FlowCommand::ReplayAudit(replay) => match commands::flow::run_replay_audit(&replay) {
+                Ok(code) => {
+                    if code != 0 {
+                        process::exit(code);
+                    }
+                }
+                Err(error) => command_error(&error),
+            },
+        },
         Command::Trace(args) => {
             if let Err(error) = commands::trace::handle(args).await {
                 eprintln!("error: {error}");

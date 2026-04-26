@@ -94,6 +94,15 @@ granular archaeology.
   composition. Ancestor and child declarations are evaluated together so a
   child can tighten an ancestor verdict, but cannot relax a shallower `Block`;
   equal-severity ties keep the shallower predicate canonical.
+- **Flow predicate hash replay audit (#583).** `invariants.harn`
+  discovery now pins a `sha256:` source hash for every Flow predicate,
+  shipped derived slices can be queried from the SQLite Flow store
+  without mutating history, and slice tables now reject direct
+  update/delete attempts at the SQLite boundary. The new
+  `harn flow replay-audit --since <date>` command compares shipped
+  slice predicate hashes against the current `@retroactive` predicate
+  set, reports advisory drift in human or JSON form, and exits non-zero
+  only when `--fail-on-drift` is requested.
 - **Flow `InvariantResult` graded-verdict types and Harn bindings (#581).**
   Predicates now return a structured `InvariantResult { verdict, evidence,
   remediation, confidence }` value where `verdict` grades as `Allow`, `Warn`,

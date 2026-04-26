@@ -5,6 +5,7 @@
 //! [`Atom`](atom::Atom), [`Intent`](intent::Intent), and [`Slice`](slice::Slice).
 
 pub mod atom;
+pub mod audit;
 pub mod backend;
 pub mod fixer;
 pub mod intent;
@@ -13,6 +14,10 @@ pub mod slice;
 pub mod store;
 
 pub use atom::{Atom, AtomError, AtomId, AtomSignature, Provenance, TextOp};
+pub use audit::{
+    audit_slice_against_current_predicates, replay_audit_report, ReplayAuditPredicate,
+    ReplayAuditReport, SliceReplayAudit,
+};
 pub use backend::{
     AtomRef, FlowNativeBackend, FlowSlice, GitExportReceipt, ShadowGitBackend, ShipReceipt,
     VcsBackend, VcsBackendError,
@@ -40,4 +45,4 @@ pub use slice::{
     derive_slice, Approval, CoverageMap, PredicateHash, Slice, SliceDerivationError,
     SliceDerivationInput, SliceId, SliceStatus, TestId, UnresolvedParent,
 };
-pub use store::{AtomDelta, SqliteFlowStore, StateVector};
+pub use store::{AtomDelta, SqliteFlowStore, StateVector, StoredDerivedSlice};

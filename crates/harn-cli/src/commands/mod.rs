@@ -9,6 +9,7 @@ pub(crate) mod doctor;
 pub(crate) mod dump_highlight_keywords;
 pub(crate) mod dump_trigger_quickref;
 pub(crate) mod explain;
+pub(crate) mod flow;
 pub(crate) mod init;
 pub(crate) mod mcp;
 pub(crate) mod orchestrator;
