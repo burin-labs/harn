@@ -11,6 +11,11 @@ granular archaeology.
 
 ### Added
 
+- **Ship Captain persona v0 (#585).** Adds the checked-in
+  `personas/ship_captain` pack and enriches `harn flow ship watch` so the
+  Phase 0 command groups stored atoms into intents, discovers predicate gates,
+  persists a local shipping receipt, and emits an approval-gated mock PR
+  receipt with the required eval-pack hooks.
 - **Flow predicate-language design record (#584).** Added
   `docs/src/flow-predicates.md` with explicit decisions for predicate budget
   semantics, bootstrap signing, semantic predicate determinism, and

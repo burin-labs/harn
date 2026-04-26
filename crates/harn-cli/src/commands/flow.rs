@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use harn_vm::flow::{SqliteFlowStore, VcsBackend};
+use harn_vm::flow::{IntentClusterer, ObservedAtom, SqliteFlowStore, VcsBackend};
 use serde_json::json;
 use time::format_description::well_known::Rfc3339;
 use time::{Date, OffsetDateTime, Time};
@@ -10,6 +10,13 @@ use time::{Date, OffsetDateTime, Time};
 use crate::cli::{
     FlowArchivistCommand, FlowArgs, FlowCommand, FlowReplayAuditArgs, FlowShipCommand,
 };
+
+const SHIP_CAPTAIN_EVAL_PACKS: [&str; 4] = [
+    "slice_quality",
+    "false_ship_rate",
+    "coverage_fidelity",
+    "latency_pr_to_merge",
+];
 
 pub(crate) fn run_flow(args: &FlowArgs) -> Result<i32, String> {
     match &args.command {
@@ -39,27 +46,12 @@ pub(crate) fn run_replay_audit(args: &FlowReplayAuditArgs) -> Result<i32, String
     })?;
 
     let chains = current_predicate_chains(&args.predicate_root, &args.touched_dirs);
-    let diagnostics = chains
-        .iter()
-        .flat_map(|chain| chain.iter())
-        .flat_map(|file| {
-            file.diagnostics
-                .iter()
-                .map(move |diagnostic| (file.path.display().to_string(), diagnostic))
-        })
-        .collect::<Vec<_>>();
-    let has_error = diagnostics.iter().any(|(_, diagnostic)| {
-        diagnostic.severity == harn_vm::flow::DiscoveryDiagnosticSeverity::Error
-    });
-    if has_error {
+    let diagnostics = discovery_diagnostics(&chains);
+    if has_discovery_error(&diagnostics) {
         return Err(render_discovery_diagnostics(&diagnostics));
     }
     if !args.json {
-        for (path, diagnostic) in diagnostics.iter().filter(|(_, diagnostic)| {
-            diagnostic.severity == harn_vm::flow::DiscoveryDiagnosticSeverity::Warning
-        }) {
-            eprintln!("warning: {path}: {}", diagnostic.message);
-        }
+        print_discovery_warnings(&diagnostics);
     }
 
     let current_predicates = harn_vm::flow::resolve_predicates_for_touched_directories(&chains);
@@ -96,11 +88,19 @@ pub(crate) fn run_replay_audit(args: &FlowReplayAuditArgs) -> Result<i32, String
 
 fn run_ship_watch(args: &crate::cli::FlowShipWatchArgs) -> Result<i32, String> {
     let store = open_store(&args.store)?;
-    let atoms = store
+    let atom_refs = store
         .list_atoms()
         .map_err(|error| format!("failed to list Flow atoms: {error}"))?;
-    if atoms.is_empty() {
-        let payload = json!({"status": "idle", "reason": "no_atoms"});
+    if atom_refs.is_empty() {
+        let payload = json!({
+            "status": "idle",
+            "reason": "no_atoms",
+            "persona": args.persona,
+            "phase": "phase_0",
+            "mode": "shadow",
+            "autonomy": "propose_with_approval",
+            "receipts_required": true,
+        });
         print_payload(
             args.json,
             "Ship Captain idle: no atoms in the Flow store.",
@@ -109,18 +109,115 @@ fn run_ship_watch(args: &crate::cli::FlowShipWatchArgs) -> Result<i32, String> {
         return Ok(0);
     }
 
-    let atom_ids: Vec<_> = atoms.iter().map(|atom| atom.atom_id).collect();
+    let atoms = atom_refs
+        .iter()
+        .map(|atom_ref| {
+            store
+                .get_atom(atom_ref.atom_id)
+                .map_err(|error| format!("failed to load atom {}: {error}", atom_ref.atom_id))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let intents = IntentClusterer::default().cluster(
+        atoms
+            .iter()
+            .enumerate()
+            .map(|(index, atom)| ObservedAtom::from_atom(atom, (index + 1) as u64)),
+    );
+    let intent_payload = intents
+        .iter()
+        .map(|intent| {
+            json!({
+                "id": intent.id,
+                "goal_description": intent.goal_description,
+                "atoms": intent.atoms,
+                "confidence": intent.confidence,
+                "origin_transcript_span": intent.origin_transcript_span,
+            })
+        })
+        .collect::<Vec<_>>();
+
+    let chains = current_predicate_chains(&args.predicate_root, &args.touched_dirs);
+    let diagnostics = discovery_diagnostics(&chains);
+    if has_discovery_error(&diagnostics) {
+        return Err(render_discovery_diagnostics(&diagnostics));
+    }
+    if !args.json {
+        print_discovery_warnings(&diagnostics);
+    }
+    let predicates = harn_vm::flow::resolve_predicates_for_touched_directories(&chains);
+    let predicate_payload = predicates
+        .iter()
+        .map(|predicate| {
+            json!({
+                "qualified_name": predicate.qualified_name,
+                "logical_name": predicate.logical_name,
+                "hash": predicate.predicate.source_hash,
+                "kind": predicate.predicate.kind,
+                "relative_dir": predicate.source.relative_dir,
+                "retroactive": predicate.predicate.retroactive,
+            })
+        })
+        .collect::<Vec<_>>();
+
+    let atom_ids: Vec<_> = atom_refs.iter().map(|atom| atom.atom_id).collect();
     let slice = store
         .derive_slice(&atom_ids)
         .map_err(|error| format!("failed to derive candidate slice: {error}"))?;
+    let ship_receipt = store
+        .ship_slice(&slice)
+        .map_err(|error| format!("failed to persist Ship Captain receipt: {error}"))?;
+    let created_at = OffsetDateTime::now_utc()
+        .format(&Rfc3339)
+        .map_err(|error| format!("failed to format receipt timestamp: {error}"))?;
+    let mock_pr = json!({
+        "number": 0,
+        "state": "open",
+        "url": format!("mock://github/pull/{}", slice.id),
+        "title": format!("Flow slice {}", slice.id),
+        "body": format!(
+            "Shadow-mode Ship Captain candidate slice.\n\nAtoms: {}\nIntents: {}\nPredicates discovered: {}\n\nNo remote PR was opened.",
+            slice.atoms.len(),
+            intents.len(),
+            predicates.len(),
+        ),
+        "requires_approval": true,
+    });
     let payload = json!({
-        "status": "candidate_slice",
-        "slice_id": slice.id,
-        "atoms": slice.atoms,
-        "mock_pr": {
-            "title": format!("Flow slice {}", slice.id),
-            "body": "Shadow-mode Ship Captain candidate slice. No remote PR was opened.",
+        "status": "mock_pr_opened",
+        "persona": args.persona,
+        "phase": "phase_0",
+        "mode": "shadow",
+        "autonomy": "propose_with_approval",
+        "receipts_required": true,
+        "created_at": created_at,
+        "slice": {
+            "id": slice.id,
+            "atoms": slice.atoms,
+            "atom_count": slice.atoms.len(),
         },
+        "intents": intent_payload,
+        "predicate_validation": {
+            "predicate_root": args.predicate_root,
+            "touched_dirs": if args.touched_dirs.is_empty() {
+                vec![PathBuf::from(".")]
+            } else {
+                args.touched_dirs.clone()
+            },
+            "status": "ok",
+            "predicates": predicate_payload,
+            "diagnostics": diagnostics.iter().map(|(path, diagnostic)| json!({
+                "path": path,
+                "severity": discovery_severity_label(diagnostic.severity),
+                "message": diagnostic.message,
+            })).collect::<Vec<_>>(),
+        },
+        "ship_receipt": {
+            "slice_id": ship_receipt.slice_id,
+            "commit": ship_receipt.commit,
+            "ref_name": ship_receipt.ref_name,
+        },
+        "mock_pr": mock_pr,
+        "eval_packs": SHIP_CAPTAIN_EVAL_PACKS,
     });
 
     if let Some(path) = &args.mock_pr_out {
@@ -129,10 +226,17 @@ fn run_ship_watch(args: &crate::cli::FlowShipWatchArgs) -> Result<i32, String> {
     }
     print_payload(
         args.json,
-        &format!("candidate slice {}", slice.id),
+        &format!("mock PR opened for candidate slice {}", slice.id),
         &payload,
     );
     Ok(0)
+}
+
+fn discovery_severity_label(severity: harn_vm::flow::DiscoveryDiagnosticSeverity) -> &'static str {
+    match severity {
+        harn_vm::flow::DiscoveryDiagnosticSeverity::Warning => "warning",
+        harn_vm::flow::DiscoveryDiagnosticSeverity::Error => "error",
+    }
 }
 
 fn run_archivist_scan(args: &crate::cli::FlowArchivistScanArgs) -> Result<i32, String> {
@@ -305,6 +409,34 @@ fn print_human_report(
                 println!("    - {}", hash.as_str());
             }
         }
+    }
+}
+
+fn discovery_diagnostics(
+    chains: &[Vec<harn_vm::flow::DiscoveredInvariantFile>],
+) -> Vec<(String, &harn_vm::flow::DiscoveryDiagnostic)> {
+    chains
+        .iter()
+        .flat_map(|chain| chain.iter())
+        .flat_map(|file| {
+            file.diagnostics
+                .iter()
+                .map(move |diagnostic| (file.path.display().to_string(), diagnostic))
+        })
+        .collect()
+}
+
+fn has_discovery_error(diagnostics: &[(String, &harn_vm::flow::DiscoveryDiagnostic)]) -> bool {
+    diagnostics.iter().any(|(_, diagnostic)| {
+        diagnostic.severity == harn_vm::flow::DiscoveryDiagnosticSeverity::Error
+    })
+}
+
+fn print_discovery_warnings(diagnostics: &[(String, &harn_vm::flow::DiscoveryDiagnostic)]) {
+    for (path, diagnostic) in diagnostics.iter().filter(|(_, diagnostic)| {
+        diagnostic.severity == harn_vm::flow::DiscoveryDiagnosticSeverity::Warning
+    }) {
+        eprintln!("warning: {path}: {}", diagnostic.message);
     }
 }
 

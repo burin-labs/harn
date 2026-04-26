@@ -2002,6 +2002,20 @@ pub(crate) struct FlowShipWatchArgs {
     /// SQLite Flow store path.
     #[arg(long, value_name = "PATH", default_value = ".harn/flow.sqlite")]
     pub store: PathBuf,
+    /// Repo root used to discover current `invariants.harn` predicates.
+    #[arg(
+        long = "predicate-root",
+        alias = "root",
+        value_name = "PATH",
+        default_value = "."
+    )]
+    pub predicate_root: PathBuf,
+    /// Touched directory to resolve predicates for. Repeat for cross-directory slices.
+    #[arg(long = "touched-dir", alias = "target-dir", value_name = "PATH")]
+    pub touched_dirs: Vec<PathBuf>,
+    /// Persona id written into the Phase 0 receipt.
+    #[arg(long, value_name = "NAME", default_value = "ship_captain")]
+    pub persona: String,
     /// Write the Phase 0 mock PR receipt to this path.
     #[arg(long = "mock-pr-out", value_name = "PATH")]
     pub mock_pr_out: Option<PathBuf>,
