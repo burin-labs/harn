@@ -32,6 +32,21 @@ granular archaeology.
 
 ### Added
 
+- **Structured `error_category` on `tool_call_update` events (#690).**
+  Adds `ToolCallErrorCategory` (snake_case wire enum:
+  `schema_validation`, `tool_error`, `mcp_server_error`,
+  `host_bridge_error`, `permission_denied`, `rejected_loop`, `timeout`,
+  `network`, `cancelled`, `unknown`) on `AgentEvent::ToolCallUpdate`
+  alongside the existing free-form `error` string. The dispatch loop
+  now categorizes every failure path — schema validation, parse-error
+  short-circuit, policy denial, dynamic permission denial, host
+  approval denial, pre-tool hook deny, loop-detector skip, and the
+  final completion/rejection branch — and propagates the category to
+  the ACP wire as `errorCategory`. Each early-failure path also emits
+  a paired `ToolCall(Pending)` + `ToolCallUpdate(Failed)` so clients
+  see a consistent two-event lifecycle for rejected calls instead of
+  silence. The category is mirrored on the `tool_execution` transcript
+  event metadata so replay engines see the same classification.
 - **Harn-owned Ollama runtime settings (#676).** Centralizes Ollama
   `num_ctx` and `keep_alive` precedence, defaults, normalization, and
   warmup request shaping in `harn-vm`. Hosts can pass raw persisted

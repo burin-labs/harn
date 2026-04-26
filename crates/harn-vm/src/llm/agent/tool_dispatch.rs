@@ -33,7 +33,7 @@
 
 use std::rc::Rc;
 
-use crate::agent_events::{AgentEvent, ToolCallStatus};
+use crate::agent_events::{AgentEvent, ToolCallErrorCategory, ToolCallStatus};
 use crate::bridge::HostBridge;
 use crate::value::{ErrorCategory, VmError, VmValue};
 
@@ -508,6 +508,30 @@ pub(super) async fn run_tool_dispatch(
             continue;
         }
 
+        // Hoisted before any failure check so early-exit paths (parse
+        // error, policy denial, schema validation, permission denial,
+        // hook deny) can emit a `ToolCall(Pending)` + `ToolCallUpdate(
+        // Failed, error_category=...)` pair. Clients that today saw
+        // nothing for these failures now get a structured failure event.
+        // Synthetic dispatchers above this point (`is_client_search`,
+        // `load_skill`) intentionally bypass this — they have their
+        // own observation paths.
+        let tool_call_id = if tool_id.is_empty() {
+            format!("tool-iter-{iteration}-{tc_index}")
+        } else {
+            format!("tool-{tool_id}")
+        };
+        let tool_kind = crate::orchestration::current_tool_annotations(tool_name).map(|a| a.kind);
+        super::emit_agent_event(&AgentEvent::ToolCall {
+            session_id: ctx.session_id.to_string(),
+            tool_call_id: tool_call_id.clone(),
+            tool_name: tool_name.to_string(),
+            kind: tool_kind,
+            status: ToolCallStatus::Pending,
+            raw_input: tool_args.clone(),
+        })
+        .await;
+
         if let Some(parse_err) = tool_args.get("__parse_error").and_then(|v| v.as_str()) {
             let result_text = format!("ERROR: {parse_err}");
             state.transcript_events.push(transcript_event(
@@ -519,8 +543,21 @@ pub(super) async fn run_tool_dispatch(
                     "tool_name": tool_name,
                     "tool_use_id": tool_id,
                     "rejected": true,
+                    "error_category": ToolCallErrorCategory::SchemaValidation.as_str(),
                 })),
             ));
+            super::emit_agent_event(&AgentEvent::ToolCallUpdate {
+                session_id: ctx.session_id.to_string(),
+                tool_call_id: tool_call_id.clone(),
+                tool_name: tool_name.to_string(),
+                status: ToolCallStatus::Failed,
+                raw_output: None,
+                error: Some(parse_err.to_string()),
+                duration_ms: None,
+                execution_duration_ms: None,
+                error_category: Some(ToolCallErrorCategory::SchemaValidation),
+            })
+            .await;
             if ctx.tool_format == "native" {
                 append_message_to_contexts(
                     &mut state.visible_messages,
@@ -544,6 +581,7 @@ pub(super) async fn run_tool_dispatch(
                 )
             });
         if let Err(error) = policy_result {
+            let error_message = error.to_string();
             let result_text = render_tool_result(&denied_tool_result(
                 tool_name,
                 format!(
@@ -559,7 +597,7 @@ pub(super) async fn run_tool_dispatch(
                     "PermissionDeny",
                     tool_name,
                     &tool_args,
-                    &error.to_string(),
+                    &error_message,
                     false,
                 ));
             state.transcript_events.push(transcript_event(
@@ -572,8 +610,21 @@ pub(super) async fn run_tool_dispatch(
                     "tool_use_id": tool_id,
                     "rejected": true,
                     "arguments": tool_args.clone(),
+                    "error_category": ToolCallErrorCategory::PermissionDenied.as_str(),
                 })),
             ));
+            super::emit_agent_event(&AgentEvent::ToolCallUpdate {
+                session_id: ctx.session_id.to_string(),
+                tool_call_id: tool_call_id.clone(),
+                tool_name: tool_name.to_string(),
+                status: ToolCallStatus::Failed,
+                raw_output: None,
+                error: Some(error_message),
+                duration_ms: None,
+                execution_duration_ms: None,
+                error_category: Some(ToolCallErrorCategory::PermissionDenied),
+            })
+            .await;
             if ctx.tool_format == "native" {
                 append_message_to_contexts(
                     &mut state.visible_messages,
@@ -640,6 +691,7 @@ pub(super) async fn run_tool_dispatch(
                             escalated,
                         ),
                     );
+                    let denial_reason = reason.clone();
                     let result_text = render_tool_result(&denied_tool_result(tool_name, reason));
                     if !state.rejected_tools.contains(&tool_name.to_string()) {
                         state.rejected_tools.push(tool_name.to_string());
@@ -656,8 +708,21 @@ pub(super) async fn run_tool_dispatch(
                             "arguments": tool_args.clone(),
                             "permission": "denied",
                             "escalated": escalated,
+                            "error_category": ToolCallErrorCategory::PermissionDenied.as_str(),
                         })),
                     ));
+                    super::emit_agent_event(&AgentEvent::ToolCallUpdate {
+                        session_id: ctx.session_id.to_string(),
+                        tool_call_id: tool_call_id.clone(),
+                        tool_name: tool_name.to_string(),
+                        status: ToolCallStatus::Failed,
+                        raw_output: None,
+                        error: Some(denial_reason),
+                        duration_ms: None,
+                        execution_duration_ms: None,
+                        error_category: Some(ToolCallErrorCategory::PermissionDenied),
+                    })
+                    .await;
                     if ctx.tool_format == "native" {
                         append_message_to_contexts(
                             &mut state.visible_messages,
@@ -769,8 +834,21 @@ pub(super) async fn run_tool_dispatch(
                     "rejected": true,
                     "arguments": tool_args.clone(),
                     "approval": approval_status,
+                    "error_category": ToolCallErrorCategory::PermissionDenied.as_str(),
                 })),
             ));
+            super::emit_agent_event(&AgentEvent::ToolCallUpdate {
+                session_id: ctx.session_id.to_string(),
+                tool_call_id: tool_call_id.clone(),
+                tool_name: tool_name.to_string(),
+                status: ToolCallStatus::Failed,
+                raw_output: None,
+                error: Some(reason),
+                duration_ms: None,
+                execution_duration_ms: None,
+                error_category: Some(ToolCallErrorCategory::PermissionDenied),
+            })
+            .await;
             if ctx.tool_format == "native" {
                 append_message_to_contexts(
                     &mut state.visible_messages,
@@ -802,6 +880,7 @@ pub(super) async fn run_tool_dispatch(
         match crate::orchestration::run_pre_tool_hooks(tool_name, &tool_args).await? {
             crate::orchestration::PreToolAction::Allow => {}
             crate::orchestration::PreToolAction::Deny(reason) => {
+                let denial_reason = reason.clone();
                 let result_text = render_tool_result(&denied_tool_result(tool_name, reason));
                 if !state.rejected_tools.contains(&tool_name.to_string()) {
                     state.rejected_tools.push(tool_name.to_string());
@@ -811,10 +890,25 @@ pub(super) async fn run_tool_dispatch(
                     "tool",
                     "internal",
                     &result_text,
-                    Some(
-                        serde_json::json!({"tool_name": tool_name, "tool_use_id": tool_id, "rejected": true}),
-                    ),
+                    Some(serde_json::json!({
+                        "tool_name": tool_name,
+                        "tool_use_id": tool_id,
+                        "rejected": true,
+                        "error_category": ToolCallErrorCategory::PermissionDenied.as_str(),
+                    })),
                 ));
+                super::emit_agent_event(&AgentEvent::ToolCallUpdate {
+                    session_id: ctx.session_id.to_string(),
+                    tool_call_id: tool_call_id.clone(),
+                    tool_name: tool_name.to_string(),
+                    status: ToolCallStatus::Failed,
+                    raw_output: None,
+                    error: Some(denial_reason),
+                    duration_ms: None,
+                    execution_duration_ms: None,
+                    error_category: Some(ToolCallErrorCategory::PermissionDenied),
+                })
+                .await;
                 if ctx.tool_format == "native" {
                     append_message_to_contexts(
                         &mut state.visible_messages,
@@ -834,6 +928,7 @@ pub(super) async fn run_tool_dispatch(
         }
 
         if let Err(msg) = validate_tool_args(tool_name, &tool_args, &tool_schemas) {
+            let validation_message = msg.clone();
             let result_text = format!("ERROR: {msg}");
             state.transcript_events.push(transcript_event(
                 "tool_execution",
@@ -845,8 +940,21 @@ pub(super) async fn run_tool_dispatch(
                     "tool_use_id": tool_id,
                     "rejected": true,
                     "arguments": tool_args.clone(),
+                    "error_category": ToolCallErrorCategory::SchemaValidation.as_str(),
                 })),
             ));
+            super::emit_agent_event(&AgentEvent::ToolCallUpdate {
+                session_id: ctx.session_id.to_string(),
+                tool_call_id: tool_call_id.clone(),
+                tool_name: tool_name.to_string(),
+                status: ToolCallStatus::Failed,
+                raw_output: None,
+                error: Some(validation_message),
+                duration_ms: None,
+                execution_duration_ms: None,
+                error_category: Some(ToolCallErrorCategory::SchemaValidation),
+            })
+            .await;
             if ctx.tool_format == "native" {
                 append_message_to_contexts(
                     &mut state.visible_messages,
@@ -872,21 +980,10 @@ pub(super) async fn run_tool_dispatch(
         let mutation_classification = classify_tool_mutation(tool_name);
         let declared_paths_current = declared_paths(tool_name, &tool_args);
         let tool_started_at = std::time::Instant::now();
-        let tool_call_id = if tool_id.is_empty() {
-            format!("tool-iter-{iteration}-{}", tools_used_this_iter.len())
-        } else {
-            format!("tool-{tool_id}")
-        };
-        let tool_kind = crate::orchestration::current_tool_annotations(tool_name).map(|a| a.kind);
-        super::emit_agent_event(&AgentEvent::ToolCall {
-            session_id: ctx.session_id.to_string(),
-            tool_call_id: tool_call_id.clone(),
-            tool_name: tool_name.to_string(),
-            kind: tool_kind,
-            status: ToolCallStatus::Pending,
-            raw_input: tool_args.clone(),
-        })
-        .await;
+        // `ToolCall(Pending)` was already emitted at the top of the loop
+        // body so early-failure paths can pair it with a failed update.
+        // The InProgress transition runs only once we've cleared every
+        // pre-flight check and are about to dispatch.
         super::emit_agent_event(&AgentEvent::ToolCallUpdate {
             session_id: ctx.session_id.to_string(),
             tool_call_id: tool_call_id.clone(),
@@ -896,6 +993,7 @@ pub(super) async fn run_tool_dispatch(
             error: None,
             duration_ms: None,
             execution_duration_ms: None,
+            error_category: None,
         })
         .await;
         let tool_span_id =
@@ -940,6 +1038,8 @@ pub(super) async fn run_tool_dispatch(
                         "tool_use_id": tool_id,
                         "loop_skipped": true,
                         "repeat_count": count,
+                        "rejected": true,
+                        "error_category": ToolCallErrorCategory::RejectedLoop.as_str(),
                     })),
                 ));
                 if ctx.tool_format == "native" {
@@ -968,6 +1068,7 @@ pub(super) async fn run_tool_dispatch(
                     )),
                     duration_ms: Some(tool_started_at.elapsed().as_millis() as u64),
                     execution_duration_ms: None,
+                    error_category: Some(ToolCallErrorCategory::RejectedLoop),
                 })
                 .await;
                 continue;
@@ -983,44 +1084,66 @@ pub(super) async fn run_tool_dispatch(
         };
 
         let tool_start = std::time::Instant::now();
-        let (is_rejected, result_text) = if let Some(fixture) = replay_hit {
-            (fixture.is_rejected, fixture.result.clone())
-        } else {
-            // Reuse the parallel pre-fetch result when present.
-            let exec_result = if let Some(cached) = parallel_results.remove(&tc_index) {
-                cached
+        let (is_rejected, result_text, dispatch_error_category) =
+            if let Some(fixture) = replay_hit {
+                let category = fixture
+                    .is_rejected
+                    .then_some(ToolCallErrorCategory::PermissionDenied);
+                (fixture.is_rejected, fixture.result.clone(), category)
             } else {
-                dispatch_tool_execution(
-                    tool_name,
-                    &tool_args,
-                    ctx.tools_val,
-                    ctx.bridge.as_ref(),
-                    ctx.tool_retries,
-                    ctx.tool_backoff_ms,
-                )
-                .await
-            };
+                // Reuse the parallel pre-fetch result when present.
+                let exec_result = if let Some(cached) = parallel_results.remove(&tc_index) {
+                    cached
+                } else {
+                    dispatch_tool_execution(
+                        tool_name,
+                        &tool_args,
+                        ctx.tools_val,
+                        ctx.bridge.as_ref(),
+                        ctx.tool_retries,
+                        ctx.tool_backoff_ms,
+                    )
+                    .await
+                };
 
-            let rejected = matches!(
-                &exec_result,
-                Err(VmError::CategorizedError {
-                    category: ErrorCategory::ToolRejected,
-                    ..
-                })
-            ) || exec_result.as_ref().ok().is_some_and(is_denied_tool_result);
-            let text = match &exec_result {
-                Ok(val) => render_tool_result(val),
-                Err(VmError::CategorizedError {
-                    message,
-                    category: ErrorCategory::ToolRejected,
-                }) => render_tool_result(&denied_tool_result(
-                    tool_name,
-                    format!("{message} Do not retry this tool."),
-                )),
-                Err(error) => format!("Error: {error}"),
+                let rejected = matches!(
+                    &exec_result,
+                    Err(VmError::CategorizedError {
+                        category: ErrorCategory::ToolRejected,
+                        ..
+                    })
+                ) || exec_result.as_ref().ok().is_some_and(is_denied_tool_result);
+                // Categorize before flattening to a string. `ToolRejected`
+                // (or a denied dict) collapses to `permission_denied`; any
+                // other categorized error projects through `from_internal`;
+                // anything else is generic `tool_error`. This is the only
+                // emission site that has the original `VmError` in scope —
+                // downstream code only sees the rendered text.
+                let category: Option<ToolCallErrorCategory> = match &exec_result {
+                    Ok(val) => is_denied_tool_result(val)
+                        .then_some(ToolCallErrorCategory::PermissionDenied),
+                    Err(VmError::CategorizedError {
+                        category: ErrorCategory::ToolRejected,
+                        ..
+                    }) => Some(ToolCallErrorCategory::PermissionDenied),
+                    Err(VmError::CategorizedError { category: cat, .. }) => {
+                        Some(ToolCallErrorCategory::from_internal(cat))
+                    }
+                    Err(_) => Some(ToolCallErrorCategory::ToolError),
+                };
+                let text = match &exec_result {
+                    Ok(val) => render_tool_result(val),
+                    Err(VmError::CategorizedError {
+                        message,
+                        category: ErrorCategory::ToolRejected,
+                    }) => render_tool_result(&denied_tool_result(
+                        tool_name,
+                        format!("{message} Do not retry this tool."),
+                    )),
+                    Err(error) => format!("Error: {error}"),
+                };
+                (rejected, text, category)
             };
-            (rejected, text)
-        };
 
         if is_rejected && !state.rejected_tools.contains(&tool_name.to_string()) {
             state.rejected_tools.push(tool_name.to_string());
@@ -1079,11 +1202,25 @@ pub(super) async fn run_tool_dispatch(
 
         let execution_duration_ms = tool_start.elapsed().as_millis() as u64;
         let duration_ms = tool_started_at.elapsed().as_millis() as u64;
+        // Treat "Error:" / "ERROR:" prefixes (from a non-rejected
+        // dispatch error or a tool that returned an error string) as a
+        // failure on the wire — they were already classified as `error`
+        // in the per-iteration tool_results aggregate (see `tool_status`
+        // below). Pre-categorization at dispatch time supplies the
+        // `error_category`; if that's unset (replay path with no
+        // metadata), fall back to `ToolError` for the prefix case.
+        let final_status_failed =
+            is_rejected || result_text.starts_with("Error:") || result_text.starts_with("ERROR:");
+        let final_error_category = if final_status_failed {
+            dispatch_error_category.or(Some(ToolCallErrorCategory::ToolError))
+        } else {
+            None
+        };
         super::emit_agent_event(&AgentEvent::ToolCallUpdate {
             session_id: ctx.session_id.to_string(),
             tool_call_id: tool_call_id.clone(),
             tool_name: tool_name.to_string(),
-            status: if is_rejected {
+            status: if final_status_failed {
                 ToolCallStatus::Failed
             } else {
                 ToolCallStatus::Completed
@@ -1092,13 +1229,14 @@ pub(super) async fn run_tool_dispatch(
                 "text": result_text,
                 "tool_use_id": tool_id,
             })),
-            error: if is_rejected {
+            error: if final_status_failed {
                 Some(result_text.clone())
             } else {
                 None
             },
             duration_ms: Some(duration_ms),
             execution_duration_ms: Some(execution_duration_ms),
+            error_category: final_error_category,
         })
         .await;
 
@@ -1162,16 +1300,21 @@ pub(super) async fn run_tool_dispatch(
             "rejected": is_rejected,
         }));
 
+        let mut transcript_metadata = serde_json::json!({
+            "tool_name": tool_name,
+            "tool_use_id": tool_id,
+            "rejected": is_rejected,
+        });
+        if let Some(cat) = final_error_category {
+            transcript_metadata["error_category"] =
+                serde_json::Value::String(cat.as_str().to_string());
+        }
         state.transcript_events.push(transcript_event(
             "tool_execution",
             "tool",
             "internal",
             &result_text,
-            Some(serde_json::json!({
-                "tool_name": tool_name,
-                "tool_use_id": tool_id,
-                "rejected": is_rejected,
-            })),
+            Some(transcript_metadata),
         ));
 
         if is_rejected {

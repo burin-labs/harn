@@ -84,6 +84,84 @@ pub enum ToolCallStatus {
     Failed,
 }
 
+/// Wire-level classification of a `ToolCallUpdate` failure. Pairs with the
+/// human-readable `error` string so clients can render each failure type
+/// distinctly (e.g. surface a "permission denied" badge, or a different
+/// retry affordance for `network` vs `tool_error`). The enum is
+/// deliberately extensible — `unknown` is the default when the runtime
+/// could not classify a failure.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolCallErrorCategory {
+    /// Host-side validation rejected the args (missing required field,
+    /// invalid type, malformed JSON).
+    SchemaValidation,
+    /// The tool ran and returned an error result (e.g. `read_file` on a
+    /// missing path) — distinguished from a transport failure.
+    ToolError,
+    /// MCP transport / server-protocol error.
+    McpServerError,
+    /// Burin Swift host bridge returned an error during dispatch.
+    HostBridgeError,
+    /// `session/request_permission` denied by the client, or a policy
+    /// rule (static or dynamic) refused the call.
+    PermissionDenied,
+    /// The harn loop detector skipped this call because the same
+    /// (tool, args) pair repeated past the configured threshold.
+    RejectedLoop,
+    /// The tool exceeded its time budget.
+    Timeout,
+    /// Transient network / rate-limited / 5xx provider failure.
+    Network,
+    /// The tool was cancelled (e.g. session aborted).
+    Cancelled,
+    /// Default when classification was not performed.
+    Unknown,
+}
+
+impl ToolCallErrorCategory {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::SchemaValidation => "schema_validation",
+            Self::ToolError => "tool_error",
+            Self::McpServerError => "mcp_server_error",
+            Self::HostBridgeError => "host_bridge_error",
+            Self::PermissionDenied => "permission_denied",
+            Self::RejectedLoop => "rejected_loop",
+            Self::Timeout => "timeout",
+            Self::Network => "network",
+            Self::Cancelled => "cancelled",
+            Self::Unknown => "unknown",
+        }
+    }
+
+    /// Map an internal `ErrorCategory` (used by the VM's `VmError`
+    /// classification) onto the wire enum. The internal taxonomy is
+    /// finer-grained — several transient categories collapse onto
+    /// `Network`, and the auth/quota family becomes `HostBridgeError`
+    /// because at the tool-dispatch boundary those errors come from
+    /// the bridge transport rather than the tool itself.
+    pub fn from_internal(category: &crate::value::ErrorCategory) -> Self {
+        use crate::value::ErrorCategory as Internal;
+        match category {
+            Internal::Timeout => Self::Timeout,
+            Internal::RateLimit
+            | Internal::Overloaded
+            | Internal::ServerError
+            | Internal::TransientNetwork => Self::Network,
+            Internal::SchemaValidation => Self::SchemaValidation,
+            Internal::ToolError => Self::ToolError,
+            Internal::ToolRejected => Self::PermissionDenied,
+            Internal::Cancelled => Self::Cancelled,
+            Internal::Auth
+            | Internal::EgressBlocked
+            | Internal::NotFound
+            | Internal::CircuitOpen
+            | Internal::Generic => Self::HostBridgeError,
+        }
+    }
+}
+
 /// Events emitted by the agent loop. The first five variants map 1:1
 /// to ACP `sessionUpdate` variants; the last three are harn-internal.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -126,6 +204,13 @@ pub enum AgentEvent {
         /// Populated only on the terminal update; `None` otherwise.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         execution_duration_ms: Option<u64>,
+        /// Structured classification of the failure (when `status` is
+        /// `Failed`). Paired with `error` so clients can render each
+        /// category distinctly without parsing free-form strings. Always
+        /// `None` for non-Failed updates and serialized as
+        /// `errorCategory` in the ACP wire format.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error_category: Option<ToolCallErrorCategory>,
     },
     Plan {
         session_id: String,
@@ -697,6 +782,7 @@ mod tests {
             error: None,
             duration_ms: Some(42),
             execution_duration_ms: Some(7),
+            error_category: None,
         };
         let value = serde_json::to_value(&terminal).unwrap();
         assert_eq!(value["duration_ms"], serde_json::json!(42));
@@ -714,6 +800,7 @@ mod tests {
             error: None,
             duration_ms: None,
             execution_duration_ms: None,
+            error_category: None,
         };
         let value = serde_json::to_value(&intermediate).unwrap();
         let object = value.as_object().expect("update serializes as object");
@@ -772,5 +859,116 @@ mod tests {
             serde_json::to_string(&ToolCallStatus::Failed).unwrap(),
             "\"failed\""
         );
+    }
+
+    #[test]
+    fn tool_call_error_category_serializes_as_snake_case() {
+        let pairs = [
+            (ToolCallErrorCategory::SchemaValidation, "schema_validation"),
+            (ToolCallErrorCategory::ToolError, "tool_error"),
+            (ToolCallErrorCategory::McpServerError, "mcp_server_error"),
+            (ToolCallErrorCategory::HostBridgeError, "host_bridge_error"),
+            (ToolCallErrorCategory::PermissionDenied, "permission_denied"),
+            (ToolCallErrorCategory::RejectedLoop, "rejected_loop"),
+            (ToolCallErrorCategory::Timeout, "timeout"),
+            (ToolCallErrorCategory::Network, "network"),
+            (ToolCallErrorCategory::Cancelled, "cancelled"),
+            (ToolCallErrorCategory::Unknown, "unknown"),
+        ];
+        for (variant, wire) in pairs {
+            let encoded = serde_json::to_string(&variant).unwrap();
+            assert_eq!(encoded, format!("\"{wire}\""));
+            assert_eq!(variant.as_str(), wire);
+            // Round-trip via deserialize so wire stability is enforced
+            // both ways.
+            let decoded: ToolCallErrorCategory = serde_json::from_str(&encoded).unwrap();
+            assert_eq!(decoded, variant);
+        }
+    }
+
+    #[test]
+    fn tool_call_error_category_from_internal_collapses_transient_family() {
+        use crate::value::ErrorCategory as Internal;
+        assert_eq!(
+            ToolCallErrorCategory::from_internal(&Internal::Timeout),
+            ToolCallErrorCategory::Timeout
+        );
+        for net in [
+            Internal::RateLimit,
+            Internal::Overloaded,
+            Internal::ServerError,
+            Internal::TransientNetwork,
+        ] {
+            assert_eq!(
+                ToolCallErrorCategory::from_internal(&net),
+                ToolCallErrorCategory::Network,
+                "{net:?} should map to Network",
+            );
+        }
+        assert_eq!(
+            ToolCallErrorCategory::from_internal(&Internal::SchemaValidation),
+            ToolCallErrorCategory::SchemaValidation
+        );
+        assert_eq!(
+            ToolCallErrorCategory::from_internal(&Internal::ToolError),
+            ToolCallErrorCategory::ToolError
+        );
+        assert_eq!(
+            ToolCallErrorCategory::from_internal(&Internal::ToolRejected),
+            ToolCallErrorCategory::PermissionDenied
+        );
+        assert_eq!(
+            ToolCallErrorCategory::from_internal(&Internal::Cancelled),
+            ToolCallErrorCategory::Cancelled
+        );
+        for bridge in [
+            Internal::Auth,
+            Internal::EgressBlocked,
+            Internal::NotFound,
+            Internal::CircuitOpen,
+            Internal::Generic,
+        ] {
+            assert_eq!(
+                ToolCallErrorCategory::from_internal(&bridge),
+                ToolCallErrorCategory::HostBridgeError,
+                "{bridge:?} should map to HostBridgeError",
+            );
+        }
+    }
+
+    #[test]
+    fn tool_call_update_event_omits_error_category_when_none() {
+        let event = AgentEvent::ToolCallUpdate {
+            session_id: "s".into(),
+            tool_call_id: "t".into(),
+            tool_name: "read".into(),
+            status: ToolCallStatus::Completed,
+            raw_output: None,
+            error: None,
+            duration_ms: None,
+            execution_duration_ms: None,
+            error_category: None,
+        };
+        let v = serde_json::to_value(&event).unwrap();
+        assert_eq!(v["type"], "tool_call_update");
+        assert!(v.get("error_category").is_none());
+    }
+
+    #[test]
+    fn tool_call_update_event_serializes_error_category_when_set() {
+        let event = AgentEvent::ToolCallUpdate {
+            session_id: "s".into(),
+            tool_call_id: "t".into(),
+            tool_name: "read".into(),
+            status: ToolCallStatus::Failed,
+            raw_output: None,
+            error: Some("missing required field".into()),
+            duration_ms: None,
+            execution_duration_ms: None,
+            error_category: Some(ToolCallErrorCategory::SchemaValidation),
+        };
+        let v = serde_json::to_value(&event).unwrap();
+        assert_eq!(v["error_category"], "schema_validation");
+        assert_eq!(v["error"], "missing required field");
     }
 }
