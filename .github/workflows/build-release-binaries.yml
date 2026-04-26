@@ -33,9 +33,40 @@ env:
   SCCACHE_GHA_ENABLED: "true"
 
 jobs:
+  runner-availability:
+    name: Detect self-hosted runner availability
+    runs-on: ubuntu-latest
+    outputs:
+      linux: ${{ steps.detect.outputs.linux }}
+      windows: ${{ steps.detect.outputs.windows }}
+      macos: ${{ steps.detect.outputs.macos }}
+    steps:
+      - id: detect
+        env:
+          OWNER: ${{ github.repository_owner }}
+          HARN_TAG: harn-ci
+        run: |
+          set -euo pipefail
+          RUNNER_LIST="$(gh api "/orgs/${OWNER}/actions/runners?per_page=100")"
+          if [ -z "$RUNNER_LIST" ]; then
+            {
+              echo "linux=false"
+              echo "windows=false"
+              echo "macos=false"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          for OS_LABEL in Linux Windows macOS; do
+            AVAILABLE="$(echo "$RUNNER_LIST" | jq -r --arg os "$OS_LABEL" --arg tag "${HARN_TAG}" '[.runners[] | select(.status == "online") | select(any(.labels[].name; . == $tag)) | select(any(.labels[].name; . == $os))] | length > 0')"
+            KEY="$(echo "$OS_LABEL" | tr '[:upper:]' '[:lower:]')"
+            printf "%s=%s\n" "$KEY" "$AVAILABLE"
+          done >> "$GITHUB_OUTPUT"
+
   setup:
     name: Resolve release context
-    runs-on: ubuntu-latest
+    needs: runner-availability
+    runs-on: ${{ needs.runner-availability.outputs.linux == 'true' && fromJSON('["self-hosted", "Linux", "harn-ci"]') || 'ubuntu-latest' }}
     outputs:
       ref: ${{ steps.resolve.outputs.ref }}
       is_release: ${{ steps.resolve.outputs.is_release }}
@@ -73,23 +104,76 @@ jobs:
             echo "major_minor=$MAJOR_MINOR"
           } >> "$GITHUB_OUTPUT"
 
-  build:
+  build-macos:
     name: Build ${{ matrix.target }}
-    needs: setup
-    runs-on: ${{ matrix.os }}
+    needs: [setup, runner-availability]
+    runs-on: ${{ needs.runner-availability.outputs.macos == 'true' && fromJSON('["self-hosted", "macOS", "harn-ci"]') || 'macos-latest' }}
+    strategy:
+      matrix:
+        target:
+          - x86_64-apple-darwin
+          - aarch64-apple-darwin
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ needs.setup.outputs.ref }}
+
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # master
+        with:
+          toolchain: stable
+
+      - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+
+      - uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1 # v2.9.1
+        with:
+          shared-key: release-${{ matrix.target }}
+          cache-on-failure: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Add cross-compile target to pinned toolchain
+        run: |
+          # rust-toolchain.toml pins the channel; `rustup show` triggers install
+          # of the pinned toolchain, then we add the matrix target to it.
+          rustup show active-toolchain || rustup show
+          rustup target add ${{ matrix.target }}
+
+      - name: Build
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+          # Scope the compile-time optimization tradeoff to release CI only.
+          CARGO_PROFILE_RELEASE_LTO: thin
+        run: cargo build --release -p harn-cli -p harn-dap -p harn-lsp --target ${{ matrix.target }}
+
+      - name: Package (unix)
+        run: |
+          mkdir -p dist
+          cp target/${{ matrix.target }}/release/harn dist/harn
+          cp target/${{ matrix.target }}/release/harn-dap dist/harn-dap
+          cp target/${{ matrix.target }}/release/harn-lsp dist/harn-lsp
+          cd dist
+          tar czf harn-${{ matrix.target }}.tar.gz harn harn-dap harn-lsp
+
+      - name: Upload artifact (unix)
+        if: needs.setup.outputs.is_release == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: harn-${{ matrix.target }}
+          path: dist/harn-${{ matrix.target }}.tar.gz
+
+  build-non-macos:
+    name: Build ${{ matrix.target }}
+    needs: [setup, runner-availability]
+    runs-on: ${{ (matrix.os == 'Linux' && (needs.runner-availability.outputs.linux == 'true' && fromJSON('["self-hosted", "Linux", "harn-ci"]') || 'ubuntu-latest')) || (matrix.os == 'Windows' && (needs.runner-availability.outputs.windows == 'true' && fromJSON('["self-hosted", "Windows", "harn-ci"]') || 'windows-latest')) }}
     strategy:
       matrix:
         include:
-          - target: x86_64-apple-darwin
-            os: macos-latest
-          - target: aarch64-apple-darwin
-            os: macos-latest
           - target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
+            os: Linux
           - target: aarch64-unknown-linux-gnu
-            os: ubuntu-latest
+            os: Linux
           - target: x86_64-pc-windows-msvc
-            os: windows-latest
+            os: Windows
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -165,9 +249,9 @@ jobs:
 
   container:
     name: Publish container
-    needs: [setup, build]
+    needs: [setup, runner-availability, build-macos, build-non-macos]
     if: needs.setup.outputs.is_release == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ${{ needs.runner-availability.outputs.linux == 'true' && fromJSON('["self-hosted", "Linux", "harn-ci"]') || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -216,9 +300,9 @@ jobs:
 
   release:
     name: Create GitHub release
-    needs: [setup, build]
+    needs: [setup, runner-availability, build-macos, build-non-macos]
     if: needs.setup.outputs.is_release == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ${{ needs.runner-availability.outputs.linux == 'true' && fromJSON('["self-hosted", "Linux", "harn-ci"]') || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:

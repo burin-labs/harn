@@ -20,9 +20,40 @@ env:
   RUSTFLAGS: "-D warnings"
 
 jobs:
+  runner-availability:
+    name: Detect self-hosted runner availability
+    runs-on: ubuntu-latest
+    outputs:
+      linux: ${{ steps.detect.outputs.linux }}
+      windows: ${{ steps.detect.outputs.windows }}
+      macos: ${{ steps.detect.outputs.macos }}
+    steps:
+      - id: detect
+        env:
+          OWNER: ${{ github.repository_owner }}
+          HARN_TAG: harn-ci
+        run: |
+          set -euo pipefail
+          RUNNER_LIST="$(gh api "/orgs/${OWNER}/actions/runners?per_page=100")"
+          if [ -z "$RUNNER_LIST" ]; then
+            {
+              echo "linux=false"
+              echo "windows=false"
+              echo "macos=false"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          for OS_LABEL in Linux Windows macOS; do
+            AVAILABLE="$(echo "$RUNNER_LIST" | jq -r --arg os "$OS_LABEL" --arg tag "harn-ci" '[.runners[] | select(.status == "online") | select(any(.labels[].name; . == $tag)) | select(any(.labels[].name; . == $os))] | length > 0')"
+            KEY="$(echo "$OS_LABEL" | tr '[:upper:]' '[:lower:]')"
+            printf "%s=%s\n" "$KEY" "$AVAILABLE"
+          done >> "$GITHUB_OUTPUT"
+
   fmt:
     name: Format check
-    runs-on: ubuntu-latest
+    needs: runner-availability
+    runs-on: ${{ needs.runner-availability.outputs.linux == 'true' && fromJSON('["self-hosted", "Linux", "harn-ci"]') || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
@@ -48,14 +79,16 @@ jobs:
 
   lint-md:
     name: Markdown lint
-    runs-on: ubuntu-latest
+    needs: runner-availability
+    runs-on: ${{ needs.runner-availability.outputs.linux == 'true' && fromJSON('["self-hosted", "Linux", "harn-ci"]') || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: DavidAnson/markdownlint-cli2-action@ce4853d43830c74c1753b39f3cf40f71c2031eb9 # v23.0.0
 
   rust:
     name: Rust (lint + test + conformance)
-    runs-on: ubuntu-latest
+    needs: runner-availability
+    runs-on: ${{ needs.runner-availability.outputs.linux == 'true' && fromJSON('["self-hosted", "Linux", "harn-ci"]') || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
@@ -90,7 +123,8 @@ jobs:
 
   changes:
     name: Detect code changes
-    runs-on: ubuntu-latest
+    needs: runner-availability
+    runs-on: ${{ needs.runner-availability.outputs.linux == 'true' && fromJSON('["self-hosted", "Linux", "harn-ci"]') || 'ubuntu-latest' }}
     outputs:
       rust: ${{ steps.filter.outputs.rust }}
     steps:
@@ -110,8 +144,8 @@ jobs:
 
   windows:
     name: Rust on Windows (build + smoke test)
-    runs-on: windows-latest
-    needs: changes
+    needs: [changes, runner-availability]
+    runs-on: ${{ needs.runner-availability.outputs.windows == 'true' && fromJSON('["self-hosted", "Windows", "harn-ci"]') || 'windows-latest' }}
     if: needs.changes.outputs.rust == 'true' || github.event_name == 'merge_group' || github.event_name == 'push'
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -155,7 +189,8 @@ jobs:
 
   portal:
     name: Portal frontend
-    runs-on: ubuntu-latest
+    needs: runner-availability
+    runs-on: ${{ needs.runner-availability.outputs.linux == 'true' && fromJSON('["self-hosted", "Linux", "harn-ci"]') || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
@@ -172,7 +207,8 @@ jobs:
 
   actions:
     name: GitHub Actions lint
-    runs-on: ubuntu-latest
+    needs: runner-availability
+    runs-on: ${{ needs.runner-availability.outputs.linux == 'true' && fromJSON('["self-hosted", "Linux", "harn-ci"]') || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
@@ -180,9 +216,9 @@ jobs:
 
   check-status:
     name: Check status
-    runs-on: ubuntu-latest
+    needs: [runner-availability, fmt, lint-md, rust, windows, portal, actions]
+    runs-on: ${{ needs.runner-availability.outputs.linux == 'true' && fromJSON('["self-hosted", "Linux", "harn-ci"]') || 'ubuntu-latest' }}
     if: always()
-    needs: [fmt, lint-md, rust, windows, portal, actions]
     steps:
       - name: Verify required CI jobs
         run: |
@@ -217,9 +253,9 @@ jobs:
 
   deploy-docs:
     name: Deploy docs
-    runs-on: ubuntu-latest
+    needs: [runner-availability, check-status]
+    runs-on: ${{ needs.runner-availability.outputs.linux == 'true' && fromJSON('["self-hosted", "Linux", "harn-ci"]') || 'ubuntu-latest' }}
     if: github.ref == 'refs/heads/main'
-    needs: [check-status]
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:

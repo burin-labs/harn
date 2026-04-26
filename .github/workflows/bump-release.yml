@@ -40,6 +40,7 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  actions: read
 
 concurrency:
   group: open-version-bump-pr
@@ -51,9 +52,40 @@ env:
   SCCACHE_GHA_ENABLED: "true"
 
 jobs:
+  runner-availability:
+    name: Detect self-hosted runner availability
+    runs-on: ubuntu-latest
+    outputs:
+      linux: ${{ steps.detect.outputs.linux }}
+      windows: ${{ steps.detect.outputs.windows }}
+      macos: ${{ steps.detect.outputs.macos }}
+    steps:
+      - id: detect
+        env:
+          OWNER: ${{ github.repository_owner }}
+          HARN_TAG: harn-ci
+        run: |
+          set -euo pipefail
+          RUNNER_LIST="$(gh api "/orgs/${OWNER}/actions/runners?per_page=100")"
+          if [ -z "$RUNNER_LIST" ]; then
+            {
+              echo "linux=false"
+              echo "windows=false"
+              echo "macos=false"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          for OS_LABEL in Linux Windows macOS; do
+            AVAILABLE="$(echo "$RUNNER_LIST" | jq -r --arg os "$OS_LABEL" --arg tag "${HARN_TAG}" '[.runners[] | select(.status == "online") | select(any(.labels[].name; . == $tag)) | select(any(.labels[].name; . == $os))] | length > 0')"
+            KEY="$(echo "$OS_LABEL" | tr '[:upper:]' '[:lower:]')"
+            printf "%s=%s\n" "$KEY" "$AVAILABLE"
+          done >> "$GITHUB_OUTPUT"
+
   open-bump-pr:
     name: Open version bump PR
-    runs-on: ubuntu-latest
+    needs: runner-availability
+    runs-on: ${{ needs.runner-availability.outputs.linux == 'true' && fromJSON('["self-hosted", "Linux", "harn-ci"]') || 'ubuntu-latest' }}
     # workflow_dispatch only — the push trigger was removed when the
     # release flow consolidated to a single PR.
     if: github.event_name == 'workflow_dispatch'
