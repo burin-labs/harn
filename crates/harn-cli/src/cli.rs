@@ -417,6 +417,9 @@ pub(crate) struct DoctorArgs {
 }
 
 #[derive(Debug, Args)]
+#[command(
+    after_long_help = "Registered provider commands:\n  harn connect <provider> [OPTIONS]\n\nIf <provider> is not one of the built-in subcommands, Harn reads OAuth metadata from the nearest harn.toml [[providers]] entry."
+)]
 pub(crate) struct ConnectArgs {
     /// Show authenticated connector tokens known to the local keyring.
     #[arg(long)]
@@ -476,6 +479,9 @@ pub(crate) enum ConnectCommand {
     Notion(ConnectOAuthArgs),
     /// Run the generic OAuth 2.1 flow for any compliant provider.
     Generic(ConnectGenericArgs),
+    /// Authorize a provider registered in harn.toml [[providers]] metadata.
+    #[command(external_subcommand)]
+    Provider(Vec<String>),
 }
 
 #[derive(Debug, Args)]
@@ -2352,6 +2358,34 @@ mod tests {
         };
         assert!(linear.url.is_none());
         assert_eq!(linear.client_id.as_deref(), Some("linear-client"));
+
+        let cli = Cli::parse_from([
+            "harn",
+            "connect",
+            "acme",
+            "--client-id",
+            "acme-client",
+            "--scope",
+            "tickets.read",
+            "--no-open",
+        ]);
+        let Command::Connect(args) = cli.command.unwrap() else {
+            panic!("expected connect command");
+        };
+        let Some(ConnectCommand::Provider(raw)) = args.command else {
+            panic!("expected external provider connect command");
+        };
+        assert_eq!(
+            raw,
+            vec![
+                "acme".to_string(),
+                "--client-id".to_string(),
+                "acme-client".to_string(),
+                "--scope".to_string(),
+                "tickets.read".to_string(),
+                "--no-open".to_string()
+            ]
+        );
     }
 
     #[test]

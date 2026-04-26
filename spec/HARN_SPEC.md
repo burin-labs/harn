@@ -3516,6 +3516,29 @@ denied by default. `activate` uses the activation class with the same default
 restrictions as connector-outbound setup. Hosts may override these defaults for
 trusted private connectors by supplying an explicit export policy.
 
+Provider entries may declare setup OAuth metadata. This metadata is consumed by
+`harn connect <provider>` so connector packages can describe their OAuth
+surface without adding provider-specific Rust code:
+
+```toml
+[[providers]]
+id = "acme"
+connector = { harn = ".harn/packages/acme-connector/lib.harn" }
+oauth = {
+  resource = "https://api.acme.example/",
+  authorization_endpoint = "https://auth.acme.example/oauth/authorize",
+  token_endpoint = "https://auth.acme.example/oauth/token",
+  registration_endpoint = "https://auth.acme.example/oauth/register",
+  scopes = "acme.read acme.write",
+  token_endpoint_auth_method = "none",
+}
+```
+
+`resource` is required unless the operator supplies `--resource`. The endpoint
+fields may be omitted for compliant protected resources that advertise OAuth
+metadata. `client_id`, `client_secret`, and `token_endpoint_auth_method` are
+defaults only; CLI flags override them for a single connect run.
+
 Poll-capable providers export `poll_tick(ctx)`. The orchestrator invokes this
 hook for `kind = "poll"` bindings using the binding's `poll` configuration:
 `interval`/`interval_ms`/`interval_secs`, optional

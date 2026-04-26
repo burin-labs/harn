@@ -953,6 +953,8 @@ pub struct RuntimeExtensions {
 pub struct ProviderManifestEntry {
     pub id: harn_vm::ProviderId,
     pub connector: ProviderConnectorManifest,
+    #[serde(default)]
+    pub oauth: Option<ProviderOAuthManifest>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -961,6 +963,26 @@ pub struct ProviderConnectorManifest {
     pub harn: Option<String>,
     #[serde(default)]
     pub rust: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+pub struct ProviderOAuthManifest {
+    #[serde(default, alias = "auth_url", alias = "authorization-endpoint")]
+    pub authorization_endpoint: Option<String>,
+    #[serde(default, alias = "token_url", alias = "token-endpoint")]
+    pub token_endpoint: Option<String>,
+    #[serde(default, alias = "registration_url", alias = "registration-endpoint")]
+    pub registration_endpoint: Option<String>,
+    #[serde(default)]
+    pub resource: Option<String>,
+    #[serde(default, alias = "scope")]
+    pub scopes: Option<String>,
+    #[serde(default, alias = "client-id")]
+    pub client_id: Option<String>,
+    #[serde(default, alias = "client-secret")]
+    pub client_secret: Option<String>,
+    #[serde(default, alias = "token_auth_method", alias = "token-auth-method")]
+    pub token_endpoint_auth_method: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -1010,6 +1032,7 @@ pub struct ResolvedProviderConnectorConfig {
     pub id: harn_vm::ProviderId,
     pub manifest_dir: PathBuf,
     pub connector: ResolvedProviderConnectorKind,
+    pub oauth: Option<ProviderOAuthManifest>,
 }
 
 #[derive(Debug, Clone)]
@@ -1574,6 +1597,7 @@ fn resolved_provider_connectors_from_manifest(
                 id: provider.id.clone(),
                 manifest_dir: manifest_dir.to_path_buf(),
                 connector,
+                oauth: provider.oauth.clone(),
             }
         })
         .collect()
@@ -8207,6 +8231,7 @@ handler = "acme::audit_edit"
 [[providers]]
 id = "echo"
 connector = { harn = "./echo_connector.harn" }
+oauth = { resource = "https://echo.example/mcp", authorization_endpoint = "https://auth.echo.example/authorize", token_endpoint = "https://auth.echo.example/token", scopes = "echo.read" }
 
 [[providers]]
 id = "github"
@@ -8223,6 +8248,20 @@ connector = { rust = "builtin" }
             &extensions.provider_connectors[0].connector,
             ResolvedProviderConnectorKind::Harn { module } if module == "./echo_connector.harn"
         ));
+        assert_eq!(
+            extensions.provider_connectors[0]
+                .oauth
+                .as_ref()
+                .and_then(|oauth| oauth.resource.as_deref()),
+            Some("https://echo.example/mcp")
+        );
+        assert_eq!(
+            extensions.provider_connectors[0]
+                .oauth
+                .as_ref()
+                .and_then(|oauth| oauth.scopes.as_deref()),
+            Some("echo.read")
+        );
         assert!(matches!(
             extensions.provider_connectors[1].connector,
             ResolvedProviderConnectorKind::RustBuiltin

@@ -29,6 +29,24 @@ harn connect generic acme https://mcp.example.com/mcp
 harn connect --generic acme https://mcp.example.com/mcp
 ```
 
+Connector packages can also declare their setup metadata in the registered
+provider entry, letting operators run `harn connect <provider>` without
+hardcoded provider logic in core:
+
+```toml
+[[providers]]
+id = "acme"
+connector = { harn = ".harn/packages/acme-connector/lib.harn" }
+oauth = {
+  resource = "https://mcp.example.com/mcp",
+  authorization_endpoint = "https://auth.example.com/oauth/authorize",
+  token_endpoint = "https://auth.example.com/oauth/token",
+  registration_endpoint = "https://auth.example.com/oauth/register",
+  scopes = "mcp.read mcp.write",
+  token_endpoint_auth_method = "none",
+}
+```
+
 When endpoints are not supplied, Harn discovers protected-resource metadata,
 then authorization-server metadata. If the server advertises dynamic client
 registration and no `--client-id` is supplied, Harn registers a loopback client

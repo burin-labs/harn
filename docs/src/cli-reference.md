@@ -445,6 +445,7 @@ harn connect notion \
   --client-secret "$NOTION_CLIENT_SECRET"
 harn connect generic acme https://mcp.example.com/mcp
 harn connect --generic acme https://mcp.example.com/mcp
+harn connect acme
 harn connect --list
 harn connect --refresh notion
 harn connect --revoke slack
@@ -457,6 +458,11 @@ enabled. Generic OAuth discovers protected-resource and authorization-server
 metadata when explicit endpoints are not supplied, attempts dynamic client
 registration when available, and sends the `resource` parameter to both the
 authorization and token endpoints.
+
+`harn connect <provider>` is available for providers registered in the nearest
+`harn.toml` `[[providers]]` table with `oauth = { ... }` metadata. CLI flags
+such as `--client-id`, `--scope`, `--auth-url`, and `--token-url` override the
+manifest metadata for that run.
 
 Stored OAuth tokens are written under connector-friendly secret ids:
 
