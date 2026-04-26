@@ -10,7 +10,7 @@ fn no_secrets_in_diff(_slice) -> bool {
 }
 
 @invariant
-@semantic
+@semantic(fallback: no_secrets_in_diff)
 @retroactive
 @archivist(evidence: ["https://example.com/style"], confidence: 0.6)
 fn naming_style(_slice) -> bool {

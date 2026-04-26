@@ -39,7 +39,7 @@ pub use predicates::{
     InvariantBlockError, InvariantResult, ParsedInvariantFile, PredicateContext,
     PredicateEvaluation, PredicateExecutionRecord, PredicateExecutionReport, PredicateExecutor,
     PredicateExecutorConfig, PredicateKind, PredicateRunner, PredicateSource, Remediation,
-    ResolvedPredicate, Verdict, VerdictStrictness, INVARIANTS_FILE,
+    ResolvedPredicate, SemanticReplayAuditMetadata, Verdict, VerdictStrictness, INVARIANTS_FILE,
 };
 pub use slice::{
     derive_slice, Approval, CoverageMap, PredicateHash, Slice, SliceDerivationError,

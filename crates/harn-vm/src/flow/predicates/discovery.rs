@@ -7,6 +7,7 @@
 //!
 //! See parent epic #571 and ticket #579 for the design rationale.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use harn_lexer::{Lexer, Span};
@@ -43,6 +44,9 @@ pub struct DiscoveredPredicate {
     pub name: String,
     /// `Deterministic` (default) or `Semantic`.
     pub kind: PredicateKind,
+    /// For `@semantic` predicates, the named deterministic predicate that
+    /// carries the replayable enforcement path.
+    pub fallback: Option<String>,
     /// Optional Archivist provenance block.
     pub archivist: Option<ArchivistMetadata>,
     /// Advisory historical flag — predicates that legalise existing state
@@ -114,6 +118,7 @@ pub fn discover_invariants(root: &Path, target_dir: &Path) -> Vec<DiscoveredInva
         });
     }
 
+    validate_semantic_fallbacks(&mut files);
     files
 }
 
@@ -230,16 +235,73 @@ fn predicate_from_attributes(
     }
 
     let retroactive = attrs.iter().any(|a| a.name == "retroactive");
+    let fallback = attrs
+        .iter()
+        .find(|a| a.name == "semantic")
+        .and_then(parse_semantic_fallback);
+    if kind == PredicateKind::Semantic && fallback.is_none() {
+        diagnostics.push(DiscoveryDiagnostic {
+            severity: DiagnosticSeverity::Error,
+            message: format!(
+                "semantic predicate `{name}` must declare a deterministic fallback with \
+                 `@semantic(fallback: \"predicate_name\")`"
+            ),
+            span: Some(span),
+        });
+    }
     let source_hash = predicate_source_hash(source, attrs, span);
 
     Some(DiscoveredPredicate {
         name: name.to_string(),
         kind,
+        fallback,
         archivist,
         retroactive,
         source_hash,
         span,
     })
+}
+
+fn parse_semantic_fallback(attr: &Attribute) -> Option<String> {
+    attr.args
+        .iter()
+        .find(|arg| arg.name.as_deref() == Some("fallback"))
+        .or_else(|| attr.args.iter().find(|arg| arg.name.is_none()))
+        .and_then(identifier_or_string_arg)
+}
+
+fn validate_semantic_fallbacks(files: &mut [DiscoveredInvariantFile]) {
+    let mut visible_deterministic = BTreeMap::<String, PredicateHash>::new();
+
+    for file in files {
+        for predicate in &file.predicates {
+            if predicate.kind == PredicateKind::Deterministic {
+                visible_deterministic.insert(predicate.name.clone(), predicate.source_hash.clone());
+            }
+        }
+
+        let diagnostics = file
+            .predicates
+            .iter()
+            .filter(|predicate| predicate.kind == PredicateKind::Semantic)
+            .filter_map(|predicate| {
+                let fallback = predicate.fallback.as_ref()?;
+                if visible_deterministic.contains_key(fallback) {
+                    return None;
+                }
+                Some(DiscoveryDiagnostic {
+                    severity: DiagnosticSeverity::Error,
+                    message: format!(
+                        "semantic predicate `{}` fallback `{fallback}` must name a \
+                         deterministic predicate in the same invariants.harn file or an ancestor file",
+                        predicate.name
+                    ),
+                    span: Some(predicate.span),
+                })
+            })
+            .collect::<Vec<_>>();
+        file.diagnostics.extend(diagnostics);
+    }
 }
 
 fn predicate_source_hash(source: &str, attrs: &[Attribute], span: Span) -> PredicateHash {
@@ -274,6 +336,13 @@ fn parse_archivist_attribute(attr: &Attribute) -> ArchivistMetadata {
 fn string_arg(arg: &AttributeArg) -> Option<String> {
     match &arg.value.node {
         Node::StringLiteral(s) | Node::RawStringLiteral(s) => Some(s.clone()),
+        _ => None,
+    }
+}
+
+fn identifier_or_string_arg(arg: &AttributeArg) -> Option<String> {
+    match &arg.value.node {
+        Node::Identifier(s) | Node::StringLiteral(s) | Node::RawStringLiteral(s) => Some(s.clone()),
         _ => None,
     }
 }
@@ -465,16 +534,102 @@ fn both_modes(slice) -> bool { return true }
     fn parse_recognises_semantic_mode_and_retroactive() {
         let source = r#"
 @invariant
-@semantic
+@semantic(fallback: "fallback_check")
 @retroactive
+@archivist(evidence: ["https://x"], confidence: 0.5)
+fn check(slice) -> bool { return true }
+
+@invariant
+@deterministic
+@archivist(evidence: ["https://x"])
+fn fallback_check(slice) -> bool { return true }
+"#;
+        let parsed = parse_invariants_source(source);
+        assert_eq!(parsed.predicates.len(), 2);
+        let pred = &parsed.predicates[0];
+        assert_eq!(pred.kind, PredicateKind::Semantic);
+        assert_eq!(pred.fallback.as_deref(), Some("fallback_check"));
+        assert!(pred.retroactive);
+    }
+
+    #[test]
+    fn parse_errors_when_semantic_fallback_missing() {
+        let source = r#"
+@invariant
+@semantic
 @archivist(evidence: ["https://x"], confidence: 0.5)
 fn check(slice) -> bool { return true }
 "#;
         let parsed = parse_invariants_source(source);
-        assert_eq!(parsed.predicates.len(), 1);
-        let pred = &parsed.predicates[0];
-        assert_eq!(pred.kind, PredicateKind::Semantic);
-        assert!(pred.retroactive);
+        assert!(parsed.diagnostics.iter().any(|d| {
+            d.severity == DiagnosticSeverity::Error
+                && d.message.contains("must declare a deterministic fallback")
+        }));
+    }
+
+    #[test]
+    fn discover_accepts_semantic_fallback_from_ancestor() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        write(root, INVARIANTS_FILE, &sample_predicate("root_fallback"));
+        let nested = root.join("crates");
+        write(
+            &nested,
+            INVARIANTS_FILE,
+            r#"
+@invariant
+@semantic(fallback: root_fallback)
+@archivist(evidence: ["https://x"], confidence: 0.5)
+fn semantic_check(slice) -> bool { return true }
+"#,
+        );
+
+        let files = discover_invariants(root, &nested);
+
+        assert!(files
+            .iter()
+            .flat_map(|file| file.diagnostics.iter())
+            .all(|diagnostic| diagnostic.severity != DiagnosticSeverity::Error));
+        let resolved = resolve_predicates(&files);
+        let semantic = resolved
+            .iter()
+            .find(|predicate| predicate.logical_name == "semantic_check")
+            .unwrap();
+        assert_eq!(
+            semantic.fallback_hash,
+            Some(files[0].predicates[0].source_hash.clone())
+        );
+    }
+
+    #[test]
+    fn discover_rejects_semantic_fallback_from_descendant_only() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        write(
+            root,
+            INVARIANTS_FILE,
+            r#"
+@invariant
+@semantic(fallback: child_fallback)
+@archivist(evidence: ["https://x"], confidence: 0.5)
+fn semantic_check(slice) -> bool { return true }
+"#,
+        );
+        let nested = root.join("crates");
+        write(
+            &nested,
+            INVARIANTS_FILE,
+            &sample_predicate("child_fallback"),
+        );
+
+        let files = discover_invariants(root, &nested);
+
+        assert!(files[0].diagnostics.iter().any(|diagnostic| {
+            diagnostic.severity == DiagnosticSeverity::Error
+                && diagnostic
+                    .message
+                    .contains("same invariants.harn file or an ancestor file")
+        }));
     }
 
     #[test]

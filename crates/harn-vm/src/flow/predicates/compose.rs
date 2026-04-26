@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use super::discovery::{DiscoveredInvariantFile, DiscoveredPredicate};
 use super::result::{InvariantResult, Verdict};
+use crate::flow::{PredicateHash, PredicateKind};
 
 /// Source location of a predicate within the directory hierarchy.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -46,6 +47,8 @@ pub struct ResolvedPredicate {
     pub source: PredicateSource,
     /// Stable source-order index within the resolved set.
     pub source_order: usize,
+    /// Resolved source hash of a semantic predicate's deterministic fallback.
+    pub fallback_hash: Option<PredicateHash>,
     pub predicate: DiscoveredPredicate,
 }
 
@@ -98,14 +101,26 @@ pub struct ComposedPredicateEvaluation {
 /// cannot relax an ancestor's blocking verdict.
 pub fn resolve_predicates(files: &[DiscoveredInvariantFile]) -> Vec<ResolvedPredicate> {
     let mut resolved = Vec::new();
+    let mut visible_deterministic = BTreeMap::<String, PredicateHash>::new();
     for file in files {
         let source = PredicateSource::new(&file.relative_dir);
         for predicate in &file.predicates {
+            if predicate.kind == PredicateKind::Deterministic {
+                visible_deterministic.insert(predicate.name.clone(), predicate.source_hash.clone());
+            }
+        }
+        for predicate in &file.predicates {
+            let fallback_hash = predicate
+                .fallback
+                .as_ref()
+                .and_then(|fallback| visible_deterministic.get(fallback))
+                .cloned();
             resolved.push(ResolvedPredicate {
                 qualified_name: qualified_name(&file.relative_dir, &predicate.name),
                 logical_name: predicate.name.clone(),
                 source: source.clone(),
                 source_order: resolved.len(),
+                fallback_hash,
                 predicate: predicate.clone(),
             });
         }
@@ -261,6 +276,7 @@ mod tests {
         DiscoveredPredicate {
             name: name.to_string(),
             kind: PredicateKind::Deterministic,
+            fallback: None,
             archivist: None,
             retroactive: false,
             source_hash: PredicateHash::new(format!("sha256:{name}")),

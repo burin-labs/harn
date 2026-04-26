@@ -142,9 +142,11 @@ mod tests {
             logical_name: name.to_string(),
             source: PredicateSource::new("."),
             source_order: 0,
+            fallback_hash: None,
             predicate: DiscoveredPredicate {
                 name: name.to_string(),
                 kind: PredicateKind::Deterministic,
+                fallback: None,
                 archivist: None,
                 retroactive,
                 source_hash: PredicateHash::new(hash),
