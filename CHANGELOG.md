@@ -18,6 +18,12 @@ granular archaeology.
   reduces persisted carried transcripts while preserving non-message events,
   and parent-facing `worker_result` artifacts now keep compact payloads that
   omit nested full transcripts/artifact lists by default.
+- **Persona value-ledger events (#715).** The persona runtime now exposes a
+  public `PersonaValueEvent`/`PersonaValueEventKind` contract and an
+  RAII-scoped `PersonaValueSink` subscription hook for cloud or self-hosted
+  ledger consumers. Runtime run boundaries also persist `persona.value.*`
+  events into the existing persona runtime topic, including deterministic
+  execution savings and frontier escalation paid-cost deltas.
 - **First-class worker lifecycle events on ACP and A2A (#703).** Adds
   two new typed `WorkerEvent` variants (`WorkerProgressed`,
   `WorkerWaitingForInput`) and surfaces every worker lifecycle
