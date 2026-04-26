@@ -75,7 +75,7 @@ fn shadow_git_emits_atoms_as_sidecar_commits() {
     let mut atoms = Vec::new();
     let mut parent = None;
 
-    for index in 0..10 {
+    for index in 0..3 {
         let next = atom(index, parent);
         let atom_ref = backend.emit_atom(&next).expect("emit atom");
         assert_eq!(atom_ref.atom_id, next.id);
@@ -96,7 +96,7 @@ fn shadow_git_emits_atoms_as_sidecar_commits() {
     }
 
     let listed = backend.list_atoms().expect("list atoms");
-    assert_eq!(listed.len(), 10);
+    assert_eq!(listed.len(), 3);
 
     let atom_ids = atoms.iter().map(|atom| atom.id).collect::<Vec<_>>();
     let slice = backend

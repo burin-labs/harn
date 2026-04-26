@@ -318,6 +318,9 @@ mod tests {
                 }
             };
             stream
+                .set_nonblocking(false)
+                .expect("set accepted stream blocking");
+            stream
                 .set_read_timeout(Some(std::time::Duration::from_secs(30)))
                 .ok();
             stream
