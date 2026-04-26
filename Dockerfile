@@ -39,7 +39,9 @@ RUN case "${TARGETARCH}" in \
 
 COPY . .
 
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
+RUN --mount=type=cache,id=harn-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,id=harn-cargo-git,target=/usr/local/cargo/git,sharing=locked \
+    --mount=type=cache,id=harn-cargo-target-${TARGETARCH},target=/tmp/harn-target,sharing=locked \
     RUST_TARGET="$(cat /tmp/rust-target)" \
     && if [ "${TARGETARCH}" = "arm64" ] && [ "${BUILDARCH}" != "arm64" ]; then export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc; fi \
     && if [ "${TARGETARCH}" = "amd64" ] && [ "${BUILDARCH}" != "amd64" ]; then export CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=x86_64-linux-gnu-gcc; fi \
