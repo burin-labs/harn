@@ -25,7 +25,7 @@ The design in this document assumes the following ticket state as of
 | `InvariantResult`, evidence, and remediation types | Landed in #581. |
 | Hierarchical predicate composition | In review in #731, closing #582. |
 | Predicate hash replay audit | In review in #730, closing #583. |
-| Archivist persona | Open in #586. |
+| Archivist persona | Landed in #586 as deterministic propose-only scan output. |
 | Fixer persona | In review in #729, closing #587. |
 
 ## Predicate Declarations
@@ -215,6 +215,41 @@ Replay audit is advisory by default:
 
 This matches the append-only Flow model: new facts create new atoms, slices, or
 audit records; they do not mutate old shipping decisions.
+
+## Archivist Proposal Scans
+
+Archivist v0 is intentionally dumb and review-first. It does not promote
+predicates and it does not fetch live evidence during slice evaluation. The CLI
+entrypoint inventories a repository, loads the Flow persona manifest when it is
+present, mines local convention and motion signals, and emits proposal records
+with concrete Harn predicate source:
+
+```bash
+harn flow archivist scan . --json
+harn flow archivist scan . --manifest examples/personas/flow.harn.toml \
+  --store .harn/flow.sqlite --shadow-days 30 --out .harn/archivist/proposals.json
+```
+
+The JSON payload contains:
+
+- `manifest`: whether the Archivist persona manifest loaded and which
+  `[[personas]]` entry was used.
+- `inventory`: detected stacks, lockfiles, config files, and source roots.
+- `convention_signals`: lint/config files and inline `invariant:` comments.
+- `motion_signals`: recent git-log buckets such as tests, formatting, Flow
+  predicates, and release docs.
+- `existing_predicates`: discovered `invariants.harn` predicates and discovery
+  diagnostics.
+- `proposals`: review-ready `@invariant` + `@archivist(...)` predicate source,
+  evidence URLs, confidence, source date, coverage examples, and a permanent
+  `propose_only` autonomy marker.
+- `shadow_evaluation`: best-effort coverage against recent Flow atoms in the
+  local SQLite store, including false-positive candidates with atom ids,
+  transcript refs, and diff spans.
+
+If no Flow store exists, `shadow_evaluation.status` is `no_flow_store` rather
+than an error. That keeps initial repo bootstrap useful while making the
+absence of atom history explicit.
 
 ## Follow-Up Implementation Tickets
 
