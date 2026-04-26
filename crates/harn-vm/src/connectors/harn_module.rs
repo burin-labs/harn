@@ -1527,6 +1527,13 @@ mod tests {
     fn raw_inbound(body: JsonValue) -> crate::RawInbound {
         let mut headers = BTreeMap::new();
         headers.insert("content-type".to_string(), "application/json".to_string());
+        raw_inbound_with_headers(body, headers)
+    }
+
+    fn raw_inbound_with_headers(
+        body: JsonValue,
+        headers: BTreeMap<String, String>,
+    ) -> crate::RawInbound {
         let mut raw = crate::RawInbound::new(
             "",
             headers,
@@ -1534,6 +1541,26 @@ mod tests {
         );
         raw.received_at = OffsetDateTime::parse("2026-04-22T12:34:56Z", &Rfc3339).unwrap();
         raw
+    }
+
+    async fn normalize_with_harn_connector(
+        source: &str,
+        body: JsonValue,
+        headers: BTreeMap<String, String>,
+    ) -> TriggerEvent {
+        let (_dir, module_path) = write_connector(source);
+        let log = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(32)));
+        let mut connector = HarnConnector::load(&module_path).await.unwrap();
+        connector.init(ctx(log).await).await.unwrap();
+        let result = connector
+            .normalize_inbound_result(raw_inbound_with_headers(body, headers))
+            .await
+            .unwrap();
+        connector.shutdown(StdDuration::ZERO).await.unwrap();
+        let ConnectorNormalizeResult::Event(event) = result else {
+            panic!("expected normalized event");
+        };
+        *event
     }
 
     fn event_value(kind: &str, dedupe_key: &str, id: &str) -> JsonValue {
@@ -1837,6 +1864,219 @@ pub fn normalize_inbound(raw) {
                 payload,
             )) => assert_eq!(payload.raw["id"], "evt-1"),
             other => panic!("unexpected provider payload: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn pure_harn_sunset_connectors_preserve_builtin_provider_payload_shapes() {
+        let github_event = normalize_with_harn_connector(
+            r#"
+pub fn provider_id() { return "github" }
+pub fn kinds() { return ["webhook"] }
+pub fn payload_schema() { return "GitHubEventPayload" }
+
+pub fn normalize_inbound(raw) {
+  let body = raw.body_json
+  return {
+    type: "event",
+    event: {
+      kind: raw.headers["X-GitHub-Event"],
+      dedupe_key: raw.headers["X-GitHub-Delivery"],
+      payload: body,
+      signature_status: {state: "verified"},
+    },
+  }
+}
+"#,
+            json!({
+                "action": "opened",
+                "installation": {"id": 101},
+                "issue": {"number": 42, "title": "Contract drift"}
+            }),
+            BTreeMap::from([
+                ("Content-Type".to_string(), "application/json".to_string()),
+                ("X-GitHub-Event".to_string(), "issues".to_string()),
+                ("X-GitHub-Delivery".to_string(), "delivery-gh-1".to_string()),
+            ]),
+        )
+        .await;
+        assert_eq!(github_event.kind, "issues");
+        assert_eq!(github_event.dedupe_key, "delivery-gh-1");
+        assert_eq!(github_event.signature_status, SignatureStatus::Verified);
+        match &github_event.provider_payload {
+            ProviderPayload::Known(crate::triggers::event::KnownProviderPayload::GitHub(
+                crate::triggers::GitHubEventPayload::Issues(payload),
+            )) => {
+                assert_eq!(payload.common.event, "issues");
+                assert_eq!(payload.common.action.as_deref(), Some("opened"));
+                assert_eq!(payload.common.delivery_id.as_deref(), Some("delivery-gh-1"));
+                assert_eq!(payload.common.installation_id, Some(101));
+                assert_eq!(payload.issue["number"], 42);
+            }
+            other => panic!("unexpected github payload: {other:?}"),
+        }
+
+        let slack_event = normalize_with_harn_connector(
+            r#"
+pub fn provider_id() { return "slack" }
+pub fn kinds() { return ["webhook"] }
+pub fn payload_schema() { return "SlackEventPayload" }
+
+pub fn normalize_inbound(raw) {
+  let body = raw.body_json
+  return {
+    type: "event",
+    event: {
+      kind: body.event.type + "." + body.event.channel_type,
+      dedupe_key: "slack:" + body.event_id,
+      payload: body,
+      signature_status: {state: "verified"},
+    },
+  }
+}
+"#,
+            json!({
+                "team_id": "T123ABC456",
+                "api_app_id": "A123ABC456",
+                "type": "event_callback",
+                "event_id": "Ev123MESSAGE",
+                "event": {
+                    "type": "message",
+                    "user": "U123ABC456",
+                    "text": "hello from a channel",
+                    "ts": "1715000000.000100",
+                    "channel": "C123ABC456",
+                    "channel_type": "channel",
+                    "event_ts": "1715000000.000100"
+                }
+            }),
+            BTreeMap::from([("Content-Type".to_string(), "application/json".to_string())]),
+        )
+        .await;
+        assert_eq!(slack_event.kind, "message.channel");
+        match &slack_event.provider_payload {
+            ProviderPayload::Known(crate::triggers::event::KnownProviderPayload::Slack(
+                payload,
+            )) => match payload.as_ref() {
+                crate::triggers::SlackEventPayload::Message(message) => {
+                    assert_eq!(message.common.event, "message.channel");
+                    assert_eq!(message.common.event_id.as_deref(), Some("Ev123MESSAGE"));
+                    assert_eq!(message.common.team_id.as_deref(), Some("T123ABC456"));
+                    assert_eq!(message.common.channel_id.as_deref(), Some("C123ABC456"));
+                    assert_eq!(message.channel_type.as_deref(), Some("channel"));
+                    assert_eq!(message.text.as_deref(), Some("hello from a channel"));
+                }
+                other => panic!("unexpected slack variant: {other:?}"),
+            },
+            other => panic!("unexpected slack payload: {other:?}"),
+        }
+
+        let linear_event = normalize_with_harn_connector(
+            r#"
+pub fn provider_id() { return "linear" }
+pub fn kinds() { return ["webhook"] }
+pub fn payload_schema() { return "LinearEventPayload" }
+
+pub fn normalize_inbound(raw) {
+  let body = raw.body_json
+  return {
+    type: "event",
+    event: {
+      kind: "issue." + body.action,
+      dedupe_key: raw.headers["Linear-Delivery"],
+      payload: body,
+      signature_status: {state: "verified"},
+    },
+  }
+}
+"#,
+            json!({
+                "action": "update",
+                "type": "Issue",
+                "organizationId": "org_123",
+                "webhookTimestamp": 1715000000000i64,
+                "webhookId": "wh_123",
+                "actor": {"id": "user_1", "name": "Ada"},
+                "data": {"id": "ISS-1", "title": "Fix Linear connector"},
+                "updatedFrom": {"title": "Previous title", "labelIds": ["lbl_1"]}
+            }),
+            BTreeMap::from([
+                ("Content-Type".to_string(), "application/json".to_string()),
+                (
+                    "Linear-Delivery".to_string(),
+                    "delivery-linear-1".to_string(),
+                ),
+            ]),
+        )
+        .await;
+        assert_eq!(linear_event.kind, "issue.update");
+        match &linear_event.provider_payload {
+            ProviderPayload::Known(crate::triggers::event::KnownProviderPayload::Linear(
+                crate::triggers::LinearEventPayload::Issue(issue),
+            )) => {
+                assert_eq!(issue.common.event, "issue");
+                assert_eq!(issue.common.action.as_deref(), Some("update"));
+                assert_eq!(
+                    issue.common.delivery_id.as_deref(),
+                    Some("delivery-linear-1")
+                );
+                assert_eq!(issue.issue["id"], "ISS-1");
+                assert!(issue.changes.iter().any(|change| matches!(
+                    change,
+                    crate::triggers::event::LinearIssueChange::Title { previous: Some(value) }
+                        if value == "Previous title"
+                )));
+            }
+            other => panic!("unexpected linear payload: {other:?}"),
+        }
+
+        let notion_event = normalize_with_harn_connector(
+            r#"
+pub fn provider_id() { return "notion" }
+pub fn kinds() { return ["webhook", "poll"] }
+pub fn payload_schema() { return "NotionEventPayload" }
+
+pub fn normalize_inbound(raw) {
+  let body = raw.body_json
+  return {
+    type: "event",
+    event: {
+      kind: body.type,
+      dedupe_key: "notion:" + body.entity.id,
+      payload: body,
+      signature_status: {state: "verified"},
+    },
+  }
+}
+"#,
+            json!({
+                "id": "evt_1",
+                "type": "page.content_updated",
+                "workspace_id": "ws_1",
+                "subscription_id": "sub_1",
+                "integration_id": "int_1",
+                "entity": {"id": "page_1", "type": "page"},
+                "api_version": "2022-06-28"
+            }),
+            BTreeMap::from([
+                ("Content-Type".to_string(), "application/json".to_string()),
+                ("request-id".to_string(), "req_123".to_string()),
+            ]),
+        )
+        .await;
+        assert_eq!(notion_event.kind, "page.content_updated");
+        match &notion_event.provider_payload {
+            ProviderPayload::Known(crate::triggers::event::KnownProviderPayload::Notion(
+                payload,
+            )) => {
+                assert_eq!(payload.event, "page.content_updated");
+                assert_eq!(payload.request_id.as_deref(), Some("req_123"));
+                assert_eq!(payload.workspace_id.as_deref(), Some("ws_1"));
+                assert_eq!(payload.entity_id.as_deref(), Some("page_1"));
+                assert_eq!(payload.entity_type.as_deref(), Some("page"));
+                assert_eq!(payload.subscription_id.as_deref(), Some("sub_1"));
+            }
+            other => panic!("unexpected notion payload: {other:?}"),
         }
     }
 
