@@ -357,7 +357,14 @@ pub(in super::super) fn spawn_worker_task(state: Rc<RefCell<WorkerState>>) {
                 }
                 let snapshot = worker_event_snapshot(&worker);
                 let event = match &result {
-                    Ok(_) if worker.carry_policy.retriggerable => None,
+                    // Retriggerable workers don't terminate when their
+                    // current cycle completes; they go into `awaiting`
+                    // and wait for the next host trigger. Surface that
+                    // explicitly so observers see the state transition
+                    // rather than radio silence.
+                    Ok(_) if worker.carry_policy.retriggerable => {
+                        Some(WorkerEvent::WorkerWaitingForInput)
+                    }
                     Ok(_) => Some(WorkerEvent::WorkerCompleted),
                     Err(VmError::CategorizedError {
                         category: crate::value::ErrorCategory::Cancelled,

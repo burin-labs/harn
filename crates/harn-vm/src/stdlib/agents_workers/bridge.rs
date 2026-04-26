@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use crate::agent_events::WorkerEvent;
+use crate::agent_events::{AgentEvent, WorkerEvent};
 use crate::orchestration::MutationSessionRecord;
 
 use super::{worker_provenance, WorkerState};
@@ -57,6 +57,29 @@ pub(in super::super) async fn emit_worker_event(
         }),
     )
     .await?;
+
+    // Canonical AgentEvent path. Routes worker lifecycle into the
+    // session-keyed `AgentEventSink` registry so ACP/A2A adapters can
+    // translate it into their respective wire formats from a single
+    // typed source. The session id is the parent agent session that
+    // spawned the worker, derived (in priority order) from the audit
+    // record's `parent_session_id`, the current thread-local agent
+    // session, or the active host bridge's session id.
+    if let Some(parent_session_id) = parent_session_id_for_emit(&snapshot.audit) {
+        let audit_value = serde_json::to_value(&snapshot.audit).ok();
+        crate::agent_events::emit_event(&AgentEvent::WorkerUpdate {
+            session_id: parent_session_id,
+            worker_id: snapshot.worker_id.clone(),
+            worker_name: snapshot.worker_name.clone(),
+            worker_task: snapshot.worker_task.clone(),
+            worker_mode: snapshot.worker_mode.clone(),
+            event,
+            status: status.to_string(),
+            metadata: snapshot.metadata.clone(),
+            audit: audit_value,
+        });
+    }
+
     if let Some(bridge) = crate::llm::current_host_bridge() {
         bridge.send_worker_update(
             &snapshot.worker_id,
@@ -79,6 +102,32 @@ pub(in super::super) async fn emit_worker_event(
         );
     }
     Ok(())
+}
+
+/// Resolve the parent agent-session id to attribute a worker event to.
+/// Order:
+/// 1. The mutation session's recorded `parent_session_id` — set on
+///    every delegated worker that originates from a parent VM scope.
+/// 2. The current thread-local agent session — set by ACP and other
+///    adapters that wrap their dispatch in `enter_current_session`.
+/// 3. The active host bridge's session id.
+///
+/// Returns `None` when no parent session is in scope (e.g. a worker
+/// spawned from a CLI-only context with no session). In that case the
+/// canonical `AgentEvent` fan-out is skipped — the bridge path still
+/// fires, so existing single-bridge consumers stay unaffected.
+fn parent_session_id_for_emit(audit: &MutationSessionRecord) -> Option<String> {
+    audit
+        .parent_session_id
+        .as_deref()
+        .map(str::to_string)
+        .filter(|value| !value.is_empty())
+        .or_else(|| crate::agent_sessions::current_session_id().filter(|value| !value.is_empty()))
+        .or_else(|| {
+            crate::llm::current_host_bridge()
+                .map(|bridge| bridge.get_session_id())
+                .filter(|value| !value.is_empty())
+        })
 }
 
 pub(in super::super) fn worker_event_snapshot(state: &WorkerState) -> WorkerEventSnapshot {

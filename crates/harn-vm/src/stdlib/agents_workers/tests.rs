@@ -302,3 +302,77 @@ fn worker_policy_intersects_explicit_policy_and_tools_shorthand() {
         })
     );
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn emit_worker_event_routes_through_parent_session_sink() {
+    // The bridge translation has been there for a while, but the
+    // canonical AgentEvent path is new (harn#703). Lock in the
+    // contract: an emitted worker lifecycle event must surface on the
+    // parent agent-session sink, with status string and typed event
+    // discriminator both populated, so ACP/A2A adapters subscribed to
+    // the registry observe it without polling the bridge.
+    use std::sync::Mutex;
+
+    use crate::agent_events::{
+        clear_session_sinks, register_sink, AgentEvent, AgentEventSink, WorkerEvent,
+    };
+
+    struct CapturingSink(Arc<Mutex<Vec<AgentEvent>>>);
+    impl AgentEventSink for CapturingSink {
+        fn handle_event(&self, event: &AgentEvent) {
+            self.0
+                .lock()
+                .expect("captured sink mutex poisoned")
+                .push(event.clone());
+        }
+    }
+
+    let parent_session = "parent-session-emit-test".to_string();
+    clear_session_sinks(&parent_session);
+    let captured: Arc<Mutex<Vec<AgentEvent>>> = Arc::new(Mutex::new(Vec::new()));
+    register_sink(
+        parent_session.clone(),
+        Arc::new(CapturingSink(captured.clone())),
+    );
+
+    let snapshot = super::bridge::WorkerEventSnapshot {
+        worker_id: "worker_e".to_string(),
+        worker_name: "n".to_string(),
+        worker_task: "do work".to_string(),
+        worker_mode: "delegated_stage".to_string(),
+        metadata: serde_json::json!({"started_at": "0193..."}),
+        audit: MutationSessionRecord {
+            parent_session_id: Some(parent_session.clone()),
+            ..Default::default()
+        }
+        .normalize(),
+    };
+
+    super::bridge::emit_worker_event(&snapshot, WorkerEvent::WorkerWaitingForInput)
+        .await
+        .expect("emit");
+
+    let received = captured.lock().unwrap().clone();
+    assert_eq!(received.len(), 1, "got: {received:?}");
+    match &received[0] {
+        AgentEvent::WorkerUpdate {
+            session_id,
+            worker_id,
+            event,
+            status,
+            metadata,
+            audit,
+            ..
+        } => {
+            assert_eq!(session_id, &parent_session);
+            assert_eq!(worker_id, "worker_e");
+            assert_eq!(*event, WorkerEvent::WorkerWaitingForInput);
+            assert_eq!(status, "awaiting_input");
+            assert_eq!(metadata["started_at"], serde_json::json!("0193..."));
+            assert!(audit.is_some(), "audit JSON should be attached");
+        }
+        other => panic!("expected WorkerUpdate, got {other:?}"),
+    }
+
+    clear_session_sinks(&parent_session);
+}

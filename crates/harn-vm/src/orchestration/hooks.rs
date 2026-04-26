@@ -22,6 +22,10 @@ pub enum HookEvent {
     PostAgentTurn,
     #[serde(rename = "WorkerSpawned")]
     WorkerSpawned,
+    #[serde(rename = "WorkerProgressed")]
+    WorkerProgressed,
+    #[serde(rename = "WorkerWaitingForInput")]
+    WorkerWaitingForInput,
     #[serde(rename = "WorkerCompleted")]
     WorkerCompleted,
     #[serde(rename = "WorkerFailed")]
@@ -38,6 +42,8 @@ impl HookEvent {
             Self::PreAgentTurn => "PreAgentTurn",
             Self::PostAgentTurn => "PostAgentTurn",
             Self::WorkerSpawned => "WorkerSpawned",
+            Self::WorkerProgressed => "WorkerProgressed",
+            Self::WorkerWaitingForInput => "WorkerWaitingForInput",
             Self::WorkerCompleted => "WorkerCompleted",
             Self::WorkerFailed => "WorkerFailed",
             Self::WorkerCancelled => "WorkerCancelled",
@@ -47,6 +53,8 @@ impl HookEvent {
     pub fn from_worker_event(event: WorkerEvent) -> Self {
         match event {
             WorkerEvent::WorkerSpawned => Self::WorkerSpawned,
+            WorkerEvent::WorkerProgressed => Self::WorkerProgressed,
+            WorkerEvent::WorkerWaitingForInput => Self::WorkerWaitingForInput,
             WorkerEvent::WorkerCompleted => Self::WorkerCompleted,
             WorkerEvent::WorkerFailed => Self::WorkerFailed,
             WorkerEvent::WorkerCancelled => Self::WorkerCancelled,

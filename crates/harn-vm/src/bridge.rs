@@ -430,7 +430,7 @@ impl HostBridge {
     }
 
     /// Get the session ID.
-    fn get_session_id(&self) -> String {
+    pub fn get_session_id(&self) -> String {
         self.session_id
             .lock()
             .unwrap_or_else(|e| e.into_inner())

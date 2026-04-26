@@ -60,6 +60,14 @@ pub struct CallRequest {
     pub parent_span_id: Option<String>,
     pub metadata: BTreeMap<String, serde_json::Value>,
     pub cancel_token: Option<Arc<AtomicBool>>,
+    /// Agent-session id to enter for the duration of the dispatch.
+    /// When set, `invoke_function` / `invoke_pipeline` push this id
+    /// onto the thread-local agent-session stack so worker lifecycle
+    /// events fire under it. Adapters use this to scope an
+    /// `AgentEventSink` to the request (e.g. A2A maps `task.id` to a
+    /// session id and registers a sink that publishes worker updates
+    /// onto the task event stream).
+    pub agent_session_id: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -278,11 +286,16 @@ impl DispatchCore {
             .cancel_token
             .clone()
             .unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
+        let agent_session_id = request.agent_session_id.clone();
 
         let local = LocalSet::new();
         local
             .run_until(async move {
                 let _event_log = install_scoped_event_log(self.event_log.clone());
+                let _session_guard = agent_session_id.as_deref().map(|session_id| {
+                    harn_vm::agent_sessions::open_or_create(Some(session_id.to_string()));
+                    harn_vm::agent_sessions::enter_current_session(session_id.to_string())
+                });
 
                 let mut vm = Vm::new();
                 harn_vm::register_vm_stdlib(&mut vm);
@@ -351,11 +364,16 @@ impl DispatchCore {
             .cancel_token
             .clone()
             .unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
+        let agent_session_id = request.agent_session_id.clone();
 
         let local = LocalSet::new();
         local
             .run_until(async move {
                 let _event_log = install_scoped_event_log(self.event_log.clone());
+                let _session_guard = agent_session_id.as_deref().map(|session_id| {
+                    harn_vm::agent_sessions::open_or_create(Some(session_id.to_string()));
+                    harn_vm::agent_sessions::enter_current_session(session_id.to_string())
+                });
 
                 let mut vm = Vm::new();
                 harn_vm::register_vm_stdlib(&mut vm);
@@ -571,6 +589,7 @@ pub fn greet(name: string) -> string {
                 parent_span_id: None,
                 metadata: BTreeMap::new(),
                 cancel_token: None,
+                agent_session_id: None,
             })
             .await
             .expect("dispatch");
@@ -609,6 +628,7 @@ pipeline default(task) {
                 parent_span_id: None,
                 metadata: BTreeMap::new(),
                 cancel_token: None,
+                agent_session_id: None,
             })
             .await
             .expect("dispatch");
@@ -664,6 +684,7 @@ pub fn greet(name: string) -> string {
                 parent_span_id: None,
                 metadata: BTreeMap::new(),
                 cancel_token: None,
+                agent_session_id: None,
             })
             .await
             .expect("dispatch");
@@ -702,6 +723,7 @@ pub fn greet(name: string) -> string {
                 parent_span_id: None,
                 metadata: BTreeMap::new(),
                 cancel_token: None,
+                agent_session_id: None,
             })
             .await
             .expect("dispatch");
@@ -748,6 +770,7 @@ pub fn spin() -> string {
                 parent_span_id: None,
                 metadata: BTreeMap::new(),
                 cancel_token: Some(cancel_token),
+                agent_session_id: None,
             })
             .await
             .expect("dispatch");
