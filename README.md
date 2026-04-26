@@ -152,9 +152,9 @@ enforcement.
 - `sub_agent_run(task, options?)` for isolated child agent loops that preserve a
   clean parent transcript while returning a typed summary envelope or a
   background worker handle.
-- Explicit continuation policy for delegated workers: artifact carryover,
-  transcript fork/reset/compaction, workflow resume control, and normalized
-  `worker_result` artifacts.
+- Explicit continuation policy for delegated workers: `carry.transcript_mode`
+  (`inherit`, `fork`, `reset`, `compact`), artifact carryover, workflow resume
+  control, and compact parent-facing `worker_result` artifacts.
 - Runtime schema helpers for structured LLM I/O: `schema_check(...)`,
   `schema_parse(...)`, `schema_is(...)`, JSON Schema/OpenAPI conversion, and
   schema composition helpers, plus a lazy `std/schema` builder module for

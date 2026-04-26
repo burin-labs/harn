@@ -87,6 +87,7 @@ fn worker_snapshot_round_trip_preserves_resume_fields() {
         child_run_path: Some(".harn-runs/run_1.json".to_string()),
         carry_policy: WorkerCarryPolicy {
             artifact_mode: "none".to_string(),
+            transcript_mode: "fork".to_string(),
             context_policy: ContextPolicy::default(),
             resume_workflow: false,
             persist_state: true,
@@ -120,6 +121,7 @@ fn worker_snapshot_round_trip_preserves_resume_fields() {
         Some(".harn-runs/run_1.json")
     );
     assert_eq!(loaded.carry_policy.artifact_mode, "none");
+    assert_eq!(loaded.carry_policy.transcript_mode, "fork");
     assert!(!loaded.carry_policy.resume_workflow);
     assert!(loaded.carry_policy.retriggerable);
     assert_eq!(
@@ -239,6 +241,100 @@ fn artifact_carry_policy_can_drop_all_artifacts() {
     }];
     let selected = apply_worker_artifact_policy(&artifacts, &policy);
     assert!(selected.is_empty());
+}
+
+#[test]
+fn transcript_carry_policy_can_reset_or_fork_transcripts() {
+    let transcript = crate::llm::helpers::new_transcript_with(
+        Some("parent-transcript".to_string()),
+        Vec::new(),
+        None,
+        None,
+    );
+    let reset = WorkerCarryPolicy {
+        transcript_mode: "reset".to_string(),
+        ..Default::default()
+    };
+    assert!(
+        apply_worker_transcript_policy(Some(transcript.clone()), &reset)
+            .unwrap()
+            .is_none()
+    );
+
+    let fork = WorkerCarryPolicy {
+        transcript_mode: "fork".to_string(),
+        ..Default::default()
+    };
+    let forked = apply_worker_transcript_policy(Some(transcript), &fork)
+        .unwrap()
+        .expect("forked transcript");
+    let dict = forked.as_dict().expect("transcript dict");
+    assert_ne!(
+        dict.get("id").map(VmValue::display).as_deref(),
+        Some("parent-transcript")
+    );
+    assert_eq!(
+        dict.get("metadata")
+            .and_then(VmValue::as_dict)
+            .and_then(|metadata| metadata.get("parent_transcript_id"))
+            .map(VmValue::display)
+            .as_deref(),
+        Some("parent-transcript")
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn compact_transcript_mode_reduces_carried_messages() {
+    let messages = vec![
+        VmValue::Dict(Rc::new(BTreeMap::from([
+            ("role".to_string(), VmValue::String(Rc::from("user"))),
+            ("content".to_string(), VmValue::String(Rc::from("one"))),
+        ]))),
+        VmValue::Dict(Rc::new(BTreeMap::from([
+            ("role".to_string(), VmValue::String(Rc::from("assistant"))),
+            ("content".to_string(), VmValue::String(Rc::from("two"))),
+        ]))),
+        VmValue::Dict(Rc::new(BTreeMap::from([
+            ("role".to_string(), VmValue::String(Rc::from("user"))),
+            ("content".to_string(), VmValue::String(Rc::from("three"))),
+        ]))),
+        VmValue::Dict(Rc::new(BTreeMap::from([
+            ("role".to_string(), VmValue::String(Rc::from("assistant"))),
+            ("content".to_string(), VmValue::String(Rc::from("four"))),
+        ]))),
+    ];
+    let transcript = crate::llm::helpers::new_transcript_with_events(
+        Some("compact-transcript".to_string()),
+        messages,
+        None,
+        None,
+        vec![crate::llm::helpers::transcript_event(
+            "worker_note",
+            "system",
+            "internal",
+            "preserve me",
+            None,
+        )],
+        Vec::new(),
+        None,
+    );
+
+    let compacted = compact_worker_transcript(transcript).await.unwrap();
+    let dict = compacted.as_dict().expect("transcript dict");
+    let messages = crate::llm::helpers::transcript_message_list(dict).unwrap();
+
+    assert!(messages.len() < 4);
+    assert!(dict.get("summary").is_some());
+    let events = dict
+        .get("events")
+        .and_then(|value| match value {
+            VmValue::List(list) => Some(list),
+            _ => None,
+        })
+        .expect("events");
+    assert!(events.iter().filter_map(VmValue::as_dict).any(|event| {
+        event.get("kind").map(VmValue::display).as_deref() == Some("worker_note")
+    }));
 }
 
 #[test]

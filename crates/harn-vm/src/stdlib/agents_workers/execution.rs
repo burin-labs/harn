@@ -10,9 +10,9 @@ use super::worktree::{
     cleanup_worker_execution, ensure_worker_worktree, WorkerMutationSessionResetGuard,
 };
 use super::{
-    clone_worker_state, next_worker_id, worker_provenance, worker_request_for_config,
-    WorkerCarryPolicy, WorkerConfig, WorkerExecutionProfile, WorkerExecutionResult, WorkerState,
-    WORKER_REGISTRY,
+    clone_worker_state, compact_worker_transcript, next_worker_id, worker_provenance,
+    worker_request_for_config, WorkerCarryPolicy, WorkerConfig, WorkerExecutionProfile,
+    WorkerExecutionResult, WorkerState, WORKER_REGISTRY,
 };
 use crate::agent_events::WorkerEvent;
 use crate::orchestration::{
@@ -241,7 +241,17 @@ async fn execute_worker_config(
 
 pub(in super::super) fn spawn_worker_task(state: Rc<RefCell<WorkerState>>) {
     let child_vm = crate::vm::clone_async_builtin_child_vm();
-    let (worker_id, task, config, prior_transcript, execution, cancel_token, worker_policy, audit) = {
+    let (
+        worker_id,
+        task,
+        config,
+        prior_transcript,
+        execution,
+        cancel_token,
+        worker_policy,
+        transcript_mode,
+        audit,
+    ) = {
         let worker = state.borrow();
         if worker.carry_policy.persist_state {
             persist_worker_state_snapshot(&worker).ok();
@@ -254,6 +264,7 @@ pub(in super::super) fn spawn_worker_task(state: Rc<RefCell<WorkerState>>) {
             worker.execution.clone(),
             worker.cancel_token.clone(),
             worker.carry_policy.policy.clone(),
+            worker.carry_policy.transcript_mode.clone(),
             worker.audit.clone(),
         )
     };
@@ -288,7 +299,7 @@ pub(in super::super) fn spawn_worker_task(state: Rc<RefCell<WorkerState>>) {
                 worker_id: Some(worker_id.clone()),
             },
         );
-        let result =
+        let mut result =
             execute_worker_config(worker_id, task, config, prior_transcript, execution, audit)
                 .await;
         if worker_approval.is_some() {
@@ -296,6 +307,26 @@ pub(in super::super) fn spawn_worker_task(state: Rc<RefCell<WorkerState>>) {
         }
         if worker_policy.is_some() {
             pop_execution_policy();
+        }
+        if transcript_mode == "compact" {
+            if let Ok(executed) = &mut result {
+                if let Some(transcript) = executed.transcript.take() {
+                    match compact_worker_transcript(transcript).await {
+                        Ok(compacted) => {
+                            if let Some(object) = executed.payload.as_object_mut() {
+                                object.insert(
+                                    "transcript".to_string(),
+                                    crate::llm::helpers::vm_value_to_json(&compacted),
+                                );
+                            }
+                            executed.transcript = Some(compacted);
+                        }
+                        Err(error) => {
+                            result = Err(error);
+                        }
+                    }
+                }
+            }
         }
         {
             let completion = {
@@ -410,7 +441,7 @@ fn worker_result_artifact(
             "request": state.request,
             "provenance": worker_provenance(state),
             "execution": state.execution,
-            "payload": payload,
+            "payload": compact_parent_worker_payload(payload),
             "produced_artifact_ids": produced.iter().map(|artifact| artifact.id.clone()).collect::<Vec<_>>(),
         })),
         source: Some(node_id.to_string()),
@@ -428,6 +459,24 @@ fn worker_result_artifact(
         ]),
     }
     .normalize()
+}
+
+fn compact_parent_worker_payload(payload: &serde_json::Value) -> serde_json::Value {
+    let Some(object) = payload.as_object() else {
+        return payload.clone();
+    };
+    let mut compacted = object.clone();
+    compacted.remove("transcript");
+    compacted.remove("artifacts");
+    if let Some(result) = compacted
+        .get_mut("result")
+        .and_then(|value| value.as_object_mut())
+    {
+        result.remove("transcript");
+        result.remove("artifacts");
+    }
+    compacted.insert("payload_compacted".to_string(), serde_json::json!(true));
+    serde_json::Value::Object(compacted)
 }
 
 pub(in super::super) async fn execute_delegated_stage(
@@ -479,6 +528,7 @@ pub(in super::super) async fn execute_delegated_stage(
         child_run_path: None,
         carry_policy: WorkerCarryPolicy {
             artifact_mode: "inherit".to_string(),
+            transcript_mode: "inherit".to_string(),
             context_policy: ContextPolicy::default(),
             resume_workflow: true,
             persist_state: true,
@@ -542,4 +592,35 @@ pub(in super::super) async fn execute_delegated_stage(
             .collect::<Vec<_>>(),
     ));
     Ok((result, produced, executed.transcript))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::compact_parent_worker_payload;
+
+    #[test]
+    fn compact_parent_payload_drops_nested_transcript_and_artifacts() {
+        let payload = serde_json::json!({
+            "status": "completed",
+            "transcript": {"messages": ["large"]},
+            "artifacts": [{"id": "artifact_1"}],
+            "result": {
+                "visible_text": "done",
+                "transcript": {"messages": ["nested"]},
+                "artifacts": [{"id": "artifact_2"}]
+            }
+        });
+
+        let compacted = compact_parent_worker_payload(&payload);
+
+        assert_eq!(compacted["payload_compacted"], serde_json::json!(true));
+        assert!(compacted.get("transcript").is_none());
+        assert!(compacted.get("artifacts").is_none());
+        assert!(compacted["result"].get("transcript").is_none());
+        assert!(compacted["result"].get("artifacts").is_none());
+        assert_eq!(
+            compacted["result"]["visible_text"],
+            serde_json::json!("done")
+        );
+    }
 }

@@ -1,0 +1,20 @@
+pipeline main() {
+  llm_mock({text: "first carried answer"})
+  llm_mock({text: "second reset answer"})
+  let worker = sub_agent_run(
+    "Answer the first prompt.",
+    {provider: "mock", background: true, carry: {transcript_mode: "reset"}},
+  )
+  let first = wait_agent(worker)
+  let first_snapshot = json_parse(read_file(first?.snapshot_path))
+  println(first_snapshot?.carry_policy?.transcript_mode == "reset")
+  println(
+    contains(json_stringify(first_snapshot?.transcript?.messages ?? []), "first carried answer"),
+  )
+  let resumed = send_input(first, "Answer the second prompt.")
+  let second = wait_agent(resumed)
+  let second_snapshot = json_parse(read_file(second?.snapshot_path))
+  let second_messages = json_stringify(second_snapshot?.transcript?.messages ?? [])
+  println(contains(second_messages, "second reset answer"))
+  println(!contains(second_messages, "first carried answer"))
+}
