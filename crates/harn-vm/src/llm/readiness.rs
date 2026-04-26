@@ -388,6 +388,7 @@ mod tests {
                     Err(error) => panic!("models stub: accept failed: {error}"),
                 }
             };
+            stream.set_nonblocking(false).expect("set stream blocking");
             let mut buf = vec![0u8; 4096];
             let n = stream.read(&mut buf).expect("read request");
             let request = String::from_utf8_lossy(&buf[..n]);
