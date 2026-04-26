@@ -39,10 +39,10 @@ use crate::value::VmError;
 use crate::orchestration::TurnPolicy;
 
 use super::super::agent_observe::{
-    dump_llm_interpreted_response, observed_llm_call, LlmRetryConfig,
+    dump_llm_interpreted_response, observed_llm_call, LlmRetryConfig, StreamingDetectorContext,
 };
 use super::super::helpers::transcript_event;
-use super::super::tools::parse_text_tool_calls_with_tools;
+use super::super::tools::{collect_tool_schemas, parse_text_tool_calls_with_tools};
 use super::helpers::{
     append_message_to_contexts, loop_state_requests_phase_change, prose_exceeds_budget,
     runtime_feedback_message, sentinel_without_action_nudge, trim_prose_for_history,
@@ -83,6 +83,29 @@ pub(super) async fn run_llm_call(
     ctx: &LlmCallContext<'_>,
     iteration: usize,
 ) -> Result<LlmCallResult, VmError> {
+    // Streaming text-mode candidate detector (harn#692). Only relevant
+    // when this stage actually parses text-mode tool calls — native
+    // tool-channel calls have their own server-side streaming path
+    // (harn#693 / H4 in the parent epic) so spinning up a text
+    // detector for them would surface false-positive candidates from
+    // any tool-shaped narration the model emits before its native
+    // tool block.
+    let streaming_detector = if ctx.has_tools && ctx.tool_format != "native" {
+        let mut known: std::collections::BTreeSet<String> =
+            collect_tool_schemas(ctx.tools_val, None)
+                .into_iter()
+                .map(|schema| schema.name)
+                .collect();
+        // Mirror the post-stream parsers' pseudo-tool registration.
+        known.insert("ledger".to_string());
+        known.insert("load_skill".to_string());
+        Some(StreamingDetectorContext {
+            session_id: state.session_id.clone(),
+            known_tools: known,
+        })
+    } else {
+        None
+    };
     let result = observed_llm_call(
         opts,
         Some(ctx.tool_format),
@@ -94,6 +117,7 @@ pub(super) async fn run_llm_call(
         Some(iteration),
         true,
         false, // agent_loop runs on the local set, not offthread
+        streaming_detector,
     )
     .await?;
 
@@ -580,6 +604,7 @@ pub(super) fn provider_native_search_emissions(
                     kind: Some(ToolKind::Search),
                     status: ToolCallStatus::InProgress,
                     raw_input: query,
+                    parsing: None,
                 });
             }
             Some("tool_search_result") => {
@@ -642,6 +667,7 @@ pub(super) fn provider_native_search_emissions(
                     execution_duration_ms: None,
                     error_category: None,
                     executor: Some(ToolExecutor::ProviderNative),
+                    parsing: None,
                 });
             }
             _ => {}

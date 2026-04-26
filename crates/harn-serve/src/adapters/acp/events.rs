@@ -101,6 +101,7 @@ impl AgentEventSink for AcpAgentEventSink {
                 kind,
                 status,
                 raw_input,
+                parsing,
             } => {
                 let mut update = serde_json::json!({
                     "sessionUpdate": "tool_call",
@@ -111,6 +112,9 @@ impl AgentEventSink for AcpAgentEventSink {
                 });
                 if let Some(k) = kind {
                     update["kind"] = serde_json::to_value(k).unwrap_or_default();
+                }
+                if let Some(p) = parsing {
+                    update["parsing"] = serde_json::Value::Bool(*p);
                 }
                 self.write_notification(serde_json::json!({
                     "sessionId": session_id,
@@ -128,6 +132,7 @@ impl AgentEventSink for AcpAgentEventSink {
                 execution_duration_ms,
                 error_category,
                 executor,
+                parsing,
             } => {
                 let mut update = serde_json::json!({
                     "sessionUpdate": "tool_call_update",
@@ -152,6 +157,9 @@ impl AgentEventSink for AcpAgentEventSink {
                 }
                 if let Some(exec) = executor {
                     update["executor"] = Self::executor_to_json(exec);
+                }
+                if let Some(p) = parsing {
+                    update["parsing"] = serde_json::Value::Bool(*p);
                 }
                 self.write_notification(serde_json::json!({
                     "sessionId": session_id,
@@ -392,6 +400,7 @@ mod tests {
                 kind: Some(ToolKind::Read),
                 status: ToolCallStatus::Pending,
                 raw_input: serde_json::json!({"path": "README.md"}),
+                parsing: None,
             },
             AgentEvent::ToolCallUpdate {
                 session_id: "session-1".to_string(),
@@ -404,6 +413,7 @@ mod tests {
                 execution_duration_ms: Some(5),
                 error_category: None,
                 executor: Some(ToolExecutor::HarnBuiltin),
+                parsing: None,
             },
             AgentEvent::Plan {
                 session_id: "session-1".to_string(),
@@ -510,6 +520,7 @@ mod tests {
             execution_duration_ms: None,
             error_category: Some(ToolCallErrorCategory::SchemaValidation),
             executor: None,
+            parsing: None,
         });
         let line = rx.recv().await.expect("acp tool_call_update");
         let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
@@ -543,11 +554,81 @@ mod tests {
             execution_duration_ms: None,
             error_category: None,
             executor: None,
+            parsing: None,
         });
         let line = rx.recv().await.expect("acp tool_call_update");
         let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
         assert!(payload["params"]["update"].get("errorCategory").is_none());
         assert!(payload["params"]["update"].get("error").is_none());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn tool_call_carries_parsing_flag_through_to_acp_wire() {
+        // Harn#692: when the streaming candidate detector emits a
+        // tool_call with `parsing: Some(true)`, the ACP wire must carry
+        // a literal `"parsing": true` so clients can render the
+        // in-flight chip. The terminal `tool_call_update` likewise
+        // carries `"parsing": false` to retract it.
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let sink = AcpAgentEventSink::new(AcpOutput::Channel(tx));
+
+        sink.handle_event(&AgentEvent::ToolCall {
+            session_id: "session-1".to_string(),
+            tool_call_id: "text-cand-1".to_string(),
+            tool_name: "edit".to_string(),
+            kind: None,
+            status: ToolCallStatus::Pending,
+            raw_input: serde_json::json!({}),
+            parsing: Some(true),
+        });
+        let line = rx.recv().await.expect("acp tool_call notification");
+        let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
+        assert_eq!(payload["params"]["update"]["sessionUpdate"], "tool_call");
+        assert_eq!(payload["params"]["update"]["parsing"], true);
+
+        sink.handle_event(&AgentEvent::ToolCallUpdate {
+            session_id: "session-1".to_string(),
+            tool_call_id: "text-cand-1".to_string(),
+            tool_name: "edit".to_string(),
+            status: ToolCallStatus::Failed,
+            raw_output: None,
+            error: Some("malformed args".to_string()),
+            duration_ms: None,
+            execution_duration_ms: None,
+            error_category: Some(ToolCallErrorCategory::ParseAborted),
+            executor: None,
+            parsing: Some(false),
+        });
+        let line = rx.recv().await.expect("acp tool_call_update notification");
+        let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
+        assert_eq!(
+            payload["params"]["update"]["sessionUpdate"],
+            "tool_call_update"
+        );
+        assert_eq!(payload["params"]["update"]["parsing"], false);
+        assert_eq!(
+            payload["params"]["update"]["errorCategory"],
+            "parse_aborted"
+        );
+
+        // Default `parsing: None` must not surface a `parsing` field
+        // at all, so existing ACP clients that don't know about the
+        // candidate phase don't see a misleading `null`.
+        sink.handle_event(&AgentEvent::ToolCall {
+            session_id: "session-1".to_string(),
+            tool_call_id: "tool-1".to_string(),
+            tool_name: "read".to_string(),
+            kind: None,
+            status: ToolCallStatus::Pending,
+            raw_input: serde_json::json!({}),
+            parsing: None,
+        });
+        let line = rx.recv().await.expect("acp tool_call notification");
+        let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
+        assert!(
+            payload["params"]["update"].get("parsing").is_none(),
+            "got: {payload}"
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -586,6 +667,7 @@ mod tests {
                 execution_duration_ms: None,
                 error_category: None,
                 executor: Some(executor),
+                parsing: None,
             });
             let line = rx.recv().await.expect("acp tool_call_update notification");
             let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
@@ -609,6 +691,7 @@ mod tests {
             execution_duration_ms: None,
             error_category: None,
             executor: None,
+            parsing: None,
         });
         let line = rx.recv().await.expect("acp tool_call_update notification");
         let payload: serde_json::Value = serde_json::from_str(&line).expect("json");

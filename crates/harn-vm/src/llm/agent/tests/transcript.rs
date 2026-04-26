@@ -37,6 +37,7 @@ async fn observed_llm_call_transcript_deduplicates_system_and_tool_schemas() {
             Some(iteration),
             false,
             false,
+            None,
         )
         .await
         .unwrap();
@@ -113,6 +114,7 @@ async fn observed_llm_call_transcript_uses_explicit_tool_format() {
         Some(0),
         false,
         false,
+        None,
     )
     .await
     .unwrap();
@@ -162,6 +164,7 @@ async fn observed_llm_call_transcript_records_thinking_settings() {
         Some(0),
         false,
         false,
+        None,
     )
     .await
     .unwrap();
@@ -214,6 +217,7 @@ async fn assert_observed_llm_call_bridge_user_visible(user_visible: bool) {
                 None,
                 user_visible,
                 false,
+                None,
             )
             .await
             .unwrap();

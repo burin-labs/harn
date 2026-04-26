@@ -204,7 +204,7 @@ pub(crate) fn ident_length(bytes: &[u8]) -> Option<usize> {
 /// `text`. Returns the parsed argument JSON and the number of bytes consumed
 /// (from the start of the name through the closing paren), or an error with
 /// a diagnostic suitable to show the model.
-pub(super) fn parse_ts_call_from(
+pub(crate) fn parse_ts_call_from(
     text: &str,
     name: String,
 ) -> Result<(serde_json::Value, usize), String> {

@@ -510,6 +510,11 @@ pub(crate) async fn execute_llm_call(
             None,
             user_visible,
             bridged, // offthread=true on the bridge path, local set otherwise
+            // Top-level `llm_call` host calls don't have a session in the
+            // sense the streaming detector needs (no agent loop, no
+            // session_id), so skip candidate detection here. The agent
+            // loop's `run_llm_call` is the integration point that owns it.
+            None,
         )
         .await?;
 

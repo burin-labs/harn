@@ -33,6 +33,7 @@ pub(crate) use native::{
     vm_tools_to_native,
 };
 pub(crate) use parse::parse_text_tool_calls_with_tools;
+pub(crate) use parse::StreamingToolCallDetector;
 #[cfg(test)]
 pub(crate) use parse::{parse_bare_calls_in_body, parse_native_json_tool_calls};
 

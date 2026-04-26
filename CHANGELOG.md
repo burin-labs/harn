@@ -59,6 +59,21 @@ granular archaeology.
   connector package repos alongside GitHub and GitLab in the connector
   catalog, and includes them in the generated trigger quick reference
   package table.
+- **Streaming text-mode tool-call candidate events (#692).** While the
+  model is still writing a `<tool_call>` body or a bare `name({...})`
+  call, the runtime now emits a candidate-lifecycle stream so ACP
+  clients can render an in-flight chip instead of waiting for the full
+  response. Adds a `parsing` boolean on both `tool_call` and
+  `tool_call_update`: `parsing: true` opens the chip when a candidate
+  shape is detected at line start (or inside `<tool_call>`); the
+  terminal `tool_call_update { parsing: false }` either promotes
+  (`status: pending` with the parsed `rawInput`) or aborts
+  (`status: failed`, new `error_category: parse_aborted`) once the
+  args resolve. The detector respects markdown code-fence context so
+  `function(x)` snippets inside a triple-backtick block do not trigger
+  spurious candidate events. Tool dispatch IDs are unchanged — this is
+  purely additive observability layered ahead of the post-stream
+  parser.
 - **Tool-call timing on ACP `tool_call_update` (#689).** Terminal
   `tool_call_update` events now carry `durationMs` (the parse-to-finish
   total — model emits the call → tool result is appended) and

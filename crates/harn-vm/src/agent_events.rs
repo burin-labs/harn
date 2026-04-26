@@ -109,6 +109,14 @@ pub enum ToolCallErrorCategory {
     /// The harn loop detector skipped this call because the same
     /// (tool, args) pair repeated past the configured threshold.
     RejectedLoop,
+    /// Streaming text candidate was detected (bare `name(` or
+    /// `<tool_call>` opener) but never resolved into a parseable call:
+    /// args parsed as malformed, the heredoc body broke, the tag closed
+    /// without a balanced expression, or the stream ended mid-call.
+    /// Used by the streaming candidate detector (harn#692) to retract a
+    /// `tool_call` candidate that turned out to be prose or syntactically
+    /// broken so clients can dismiss the in-flight chip.
+    ParseAborted,
     /// The tool exceeded its time budget.
     Timeout,
     /// Transient network / rate-limited / 5xx provider failure.
@@ -128,6 +136,7 @@ impl ToolCallErrorCategory {
             Self::HostBridgeError => "host_bridge_error",
             Self::PermissionDenied => "permission_denied",
             Self::RejectedLoop => "rejected_loop",
+            Self::ParseAborted => "parse_aborted",
             Self::Timeout => "timeout",
             Self::Network => "network",
             Self::Cancelled => "cancelled",
@@ -212,6 +221,20 @@ pub enum AgentEvent {
         kind: Option<ToolKind>,
         status: ToolCallStatus,
         raw_input: serde_json::Value,
+        /// Set to `Some(true)` by the streaming candidate detector
+        /// (harn#692) when this event represents a tool-call shape
+        /// detected in the model's in-flight assistant text but whose
+        /// arguments have not finished parsing yet. Clients can render a
+        /// spinner / placeholder while the model writes the body. The
+        /// detector follows up with a `ToolCallUpdate { parsing: false,
+        /// .. }` carrying either `status: pending` (promoted) or
+        /// `status: failed` with `error_category: parse_aborted`.
+        /// `None` (the default) means "this is a normal post-parse tool
+        /// call, no candidate phase was active" so the on-disk shape
+        /// stays compatible with replays recorded before this field
+        /// existed.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        parsing: Option<bool>,
     },
     ToolCallUpdate {
         session_id: String,
@@ -247,6 +270,16 @@ pub enum AgentEvent {
         /// dispatcher picks a backend).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         executor: Option<ToolExecutor>,
+        /// Companion to `ToolCall.parsing` (harn#692). The streaming
+        /// candidate detector emits the *terminal* candidate event as a
+        /// `ToolCallUpdate` with `parsing: Some(false)` to retract the
+        /// in-flight `parsing: true` chip — either by promoting the
+        /// candidate (`status: pending`, populated `raw_output: None`,
+        /// `error: None`) or aborting it (`status: failed`,
+        /// `error_category: parse_aborted`). `None` means this update is
+        /// not part of a candidate-phase transition.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        parsing: Option<bool>,
     },
     Plan {
         session_id: String,
@@ -820,6 +853,7 @@ mod tests {
             execution_duration_ms: Some(7),
             error_category: None,
             executor: None,
+            parsing: None,
         };
         let value = serde_json::to_value(&terminal).unwrap();
         assert_eq!(value["duration_ms"], serde_json::json!(42));
@@ -839,6 +873,7 @@ mod tests {
             execution_duration_ms: None,
             error_category: None,
             executor: None,
+            parsing: None,
         };
         let value = serde_json::to_value(&intermediate).unwrap();
         let object = value.as_object().expect("update serializes as object");
@@ -908,6 +943,7 @@ mod tests {
             (ToolCallErrorCategory::HostBridgeError, "host_bridge_error"),
             (ToolCallErrorCategory::PermissionDenied, "permission_denied"),
             (ToolCallErrorCategory::RejectedLoop, "rejected_loop"),
+            (ToolCallErrorCategory::ParseAborted, "parse_aborted"),
             (ToolCallErrorCategory::Timeout, "timeout"),
             (ToolCallErrorCategory::Network, "network"),
             (ToolCallErrorCategory::Cancelled, "cancelled"),
@@ -1017,6 +1053,7 @@ mod tests {
             execution_duration_ms: None,
             error_category: None,
             executor: None,
+            parsing: None,
         };
         let v = serde_json::to_value(&event).unwrap();
         assert_eq!(v["type"], "tool_call_update");
@@ -1036,6 +1073,7 @@ mod tests {
             execution_duration_ms: None,
             error_category: Some(ToolCallErrorCategory::SchemaValidation),
             executor: None,
+            parsing: None,
         };
         let v = serde_json::to_value(&event).unwrap();
         assert_eq!(v["error_category"], "schema_validation");
@@ -1058,6 +1096,7 @@ mod tests {
             execution_duration_ms: None,
             error_category: None,
             executor: None,
+            parsing: None,
         };
         let json = serde_json::to_value(&event).unwrap();
         assert!(json.get("executor").is_none(), "got: {json}");
@@ -1078,6 +1117,7 @@ mod tests {
             executor: Some(ToolExecutor::McpServer {
                 server_name: "github".into(),
             }),
+            parsing: None,
         };
         let json = serde_json::to_value(&event).unwrap();
         assert_eq!(json["executor"]["kind"], "mcp_server");
