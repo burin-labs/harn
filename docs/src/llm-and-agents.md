@@ -227,6 +227,70 @@ instead of string-sniffing the message.
 - Call sites that prefer explicit branching over `try` blocks:
   `llm_call_structured_safe` (the non-throwing envelope).
 
+## Tool executors
+
+Every tool registered through `tool_define` declares which backend
+executes it. The dispatcher and ACP transcript both honor that
+declaration verbatim, so `tool_call_update.executor` always reflects
+the source of truth instead of an inferred value (harn#743).
+
+| `executor` | Required field | Forbidden field | Backing |
+|---|---|---|---|
+| `"harn"` (default when `handler` is set) | `handler` closure | — | The closure runs in-VM. |
+| `"host_bridge"` | `host_capability: "capability.operation"` | `handler` | The host process answers via `HostBridge.builtin_call`. |
+| `"mcp_server"` | `mcp_server: "<configured server name>"` | `handler` | Routed to the named MCP client. |
+| `"provider_native"` | — | `handler` | The provider returns the result inline (e.g. OpenAI Responses-API server tools). |
+
+```harn
+var registry = tool_registry()
+// In-VM tool: handler closure runs locally.
+registry = tool_define(registry, "deploy", "Deploy to production", {
+  executor: "harn",
+  parameters: {env: {type: "string"}},
+  handler: { args -> shell("deploy " + args.env) },
+})
+// Host-backed tool: `harn check` validates `interaction.ask` against
+// the discovered host capability manifest before the first run.
+registry = tool_define(registry, "ask_user", "Ask the user", {
+  executor: "host_bridge",
+  host_capability: "interaction.ask",
+  parameters: {prompt: {type: "string"}},
+})
+// MCP-discovered tool registered explicitly.
+registry = tool_define(registry, "list_issues", "List Linear issues", {
+  executor: "mcp_server",
+  mcp_server: "linear",
+  parameters: {limit: {type: "integer"}},
+})
+```
+
+Validation rules `tool_define` enforces immediately:
+
+- A tool with no `handler` must declare an `executor`. Handler-less
+  declarations no longer fall through to the host bridge implicitly —
+  authors must opt in explicitly.
+- `executor: "harn"` requires a `handler` and forbids
+  `host_capability` / `mcp_server`.
+- `executor: "host_bridge"` forbids `handler` and requires a
+  `"capability.operation"`-shaped `host_capability` literal.
+- `executor: "mcp_server"` forbids `handler` and requires a non-empty
+  `mcp_server` name.
+- `executor: "provider_native"` forbids `handler`, `host_capability`,
+  and `mcp_server`.
+
+`agent_loop` re-checks the registry on entry: if any tool reaches the
+agent without an executable backend (e.g. a registry assembled by
+hand or merged across packages), the call fails fast with a clear
+diagnostic instead of an opaque `[builtin_call] unhandled` later.
+
+`harn check` walks every literal `tool_define(..., {executor:
+"host_bridge", host_capability: "..."})` call and flags capabilities
+that are not in the discovered host manifest. Add unfamiliar
+capabilities to `[check].host_capabilities`,
+`[check].host_capabilities_path`, `--host-capabilities`, or suppress
+with `[check].preflight_allow` for capabilities the host adds at
+runtime.
+
 ## Tool Vault
 
 Harn's Tool Vault is the progressive-tool-disclosure primitive: tool

@@ -5,7 +5,7 @@ fn list_tools() {
     "list_directory",
     "List directory contents",
     {
-    handler: nil,
+    handler: { args -> "ls " + args.path },
     parameters: {path: {type: "string", description: "Directory path"}},
     returns: {type: "string"},
   },
@@ -22,11 +22,7 @@ pipeline test(task) {
     tools: list_tools(),
     tool_format: "native",
     max_iterations: 1,
-    policy: {
-      tool_arg_constraints: [
-        {tool: "list_directory", arg_key: "path", arg_patterns: ["src/*"]},
-      ],
-    },
+    policy: {tool_arg_constraints: [{tool: "list_directory", arg_key: "path", arg_patterns: ["src/*"]}]},
   },
   )
   println(result?.tools?.rejected[0])

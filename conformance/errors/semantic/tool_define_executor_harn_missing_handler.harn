@@ -1,0 +1,7 @@
+// harn#743: executor: "harn" requires a `handler` closure. Empty
+// declarations would crash at the first dispatch call, so we reject
+// the definition up front.
+pipeline test(task) {
+  let r = tool_registry()
+  tool_define(r, "compute", "no handler", {executor: "harn", parameters: {}})
+}

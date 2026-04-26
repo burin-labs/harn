@@ -26,6 +26,23 @@ granular archaeology.
   fail (test process hangs past 60 s) when the canonicalize-before-seen
   block in `crates/harn-modules/src/lib.rs` is reverted, and to pass
   (sub-second per command) with the fix in place.
+### Changed
+
+- **Explicit tool executors on `tool_define` (#743).** Every tool now
+  declares which backend runs it. `tool_define` accepts
+  `executor: "harn" | "host_bridge" | "mcp_server" | "provider_native"`,
+  with required pairing fields (`handler` for `harn`, `host_capability`
+  for `host_bridge`, `mcp_server` for `mcp_server`). Definitions with
+  no handler and no executor are rejected up-front instead of falling
+  through to the host bridge. `agent_loop` re-checks the registry on
+  entry and refuses to start when any tool has no executable backend,
+  and `harn check` flags `host_capability` literals that are not in
+  the discovered host capability manifest. The dispatcher and ACP
+  transcript both honor the declared executor verbatim, so
+  `tool_call_update.executor` reflects the source of truth instead of
+  an inferred value. Existing scripts that pass a `handler` continue
+  to compile (executor defaults to `"harn"`); handler-less scripts
+  must pick an executor explicitly.
 
 ## v0.7.43
 

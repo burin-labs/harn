@@ -1,0 +1,16 @@
+// harn#743: executor: "host_bridge" forbids a `handler` so the
+// transcript truthfully reflects which backend ran the tool.
+pipeline test(task) {
+  let r = tool_registry()
+  tool_define(
+    r,
+    "ask_user",
+    "ask the user",
+    {
+    executor: "host_bridge",
+    host_capability: "interaction.ask",
+    handler: { args -> "ignored" },
+    parameters: {},
+  },
+  )
+}

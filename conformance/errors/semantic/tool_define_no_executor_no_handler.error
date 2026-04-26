@@ -1,0 +1,1 @@
+re:tool_define\("ghost"\): tool has no `handler` and no explicit `executor`

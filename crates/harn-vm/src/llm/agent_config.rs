@@ -405,6 +405,11 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
             let (skill_registry, skill_match, working_files) =
                 super::agent::parse_skill_config(&options);
             let mut opts = extract_llm_options(&args)?;
+            // harn#743: refuse to start with a registry that has any
+            // tool lacking an executable backend. See the bare
+            // `agent_loop` registration in `llm/mod.rs` for the
+            // matching guard — both sites must stay in lockstep.
+            crate::stdlib::tools::ensure_tools_have_executors(opts.tools.as_ref())?;
             let result = run_agent_loop_internal(
                 &mut opts,
                 AgentLoopConfig {

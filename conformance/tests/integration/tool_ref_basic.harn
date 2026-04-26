@@ -1,7 +1,17 @@
 pipeline main(task) {
   var r = tool_registry()
-  r = tool_define(r, "edit", "Edit a file in place", {parameters: {path: "string"}})
-  r = tool_define(r, "search", "Search the codebase", {parameters: {query: "string"}})
+  r = tool_define(
+    r,
+    "edit",
+    "Edit a file in place",
+    {parameters: {path: "string"}, handler: { args -> "edit:" + args.path }},
+  )
+  r = tool_define(
+    r,
+    "search",
+    "Search the codebase",
+    {parameters: {query: "string"}, handler: { args -> "search:" + args.query }},
+  )
   tool_bind(r)
   assert(tool_ref("edit") == "edit", "tool_ref returns the name when registered")
   assert(tool_ref("search") == "search", "tool_ref resolves another registered tool")

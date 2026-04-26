@@ -362,8 +362,9 @@ pub(crate) fn register_tool_builtins(vm: &mut Vm) {
         Ok(VmValue::Dict(Rc::new(schema)))
     });
 
-    // Unknown config keys (beyond parameters/handler/returns/annotations) are
-    // preserved verbatim so integrators can attach policy/effect metadata.
+    // Unknown config keys (beyond parameters/handler/returns/annotations/
+    // executor/host_capability/mcp_server) are preserved verbatim so
+    // integrators can attach policy/effect metadata.
     vm.register_builtin("tool_define", |args, _out| {
         if args.len() < 4 {
             return Err(VmError::Thrown(VmValue::String(Rc::from(
@@ -394,12 +395,20 @@ pub(crate) fn register_tool_builtins(vm: &mut Vm) {
         };
 
         let handler = config.get("handler").cloned().unwrap_or(VmValue::Nil);
+        let has_handler = !matches!(handler, VmValue::Nil);
 
         if config.contains_key("params") && !config.contains_key("parameters") {
             return Err(VmError::Thrown(VmValue::String(Rc::from(
                 "tool_define: use 'parameters', not 'params'",
             ))));
         }
+
+        // Resolve executor (harn#743). Authors must pick exactly one
+        // backend; the dispatcher and ACP transcript both honor the
+        // declared value verbatim so clients can render "via host
+        // bridge" / "via mcp:linear" badges without inferring backends
+        // from missing fields.
+        let executor = resolve_tool_executor(&name, config, has_handler)?;
 
         // `defer_loading` controls progressive-disclosure behavior on
         // capable providers (Anthropic Claude 4.0+ and OpenAI GPT 5.4+).
@@ -449,15 +458,23 @@ pub(crate) fn register_tool_builtins(vm: &mut Vm) {
         if !matches!(output_schema, VmValue::Nil) {
             tool_entry.insert("outputSchema".to_string(), output_schema);
         }
+        tool_entry.insert(
+            "executor".to_string(),
+            VmValue::String(Rc::from(executor.as_str())),
+        );
 
         if let Some(annotations) = config.get("annotations") {
             tool_entry.insert("annotations".to_string(), annotations.clone());
         }
 
         for (key, value) in config.iter() {
+            // `executor` is normalized into the canonical entry above
+            // (the resolver fills the default for legacy `harn` handlers
+            // and rejects mismatches), so skip the raw author input
+            // here. Same for the fields that have dedicated slots.
             if matches!(
                 key.as_str(),
-                "handler" | "parameters" | "returns" | "annotations"
+                "handler" | "parameters" | "returns" | "annotations" | "executor"
             ) {
                 continue;
             }
@@ -682,6 +699,264 @@ fn vm_validate_registry(name: &str, dict: &BTreeMap<String, VmValue>) -> Result<
             "{name}: argument must be a tool registry (created with tool_registry())"
         ))))),
     }
+}
+
+/// Canonical executor identifiers accepted by `tool_define`. The
+/// dispatcher (`crate::llm::agent_tools::dispatch_tool_execution`)
+/// reads the chosen value verbatim and ACP forwards it on every
+/// `tool_call_update`, so the names must stay in lockstep with
+/// [`crate::agent_events::ToolExecutor`] (harn#743).
+pub(crate) const EXECUTOR_HARN: &str = "harn";
+pub(crate) const EXECUTOR_HOST_BRIDGE: &str = "host_bridge";
+pub(crate) const EXECUTOR_MCP_SERVER: &str = "mcp_server";
+pub(crate) const EXECUTOR_PROVIDER_NATIVE: &str = "provider_native";
+
+/// Resolve the declared executor for an in-registry tool entry,
+/// applying the same legacy fall-back as [`resolve_tool_executor`]
+/// (handler present + executor absent → `EXECUTOR_HARN`, MCP-discovered
+/// entries with `_mcp_server` → `EXECUTOR_MCP_SERVER`). Returns `None`
+/// when neither signal is present *or* when an explicit `executor`
+/// value is not one of the canonical names — both cases mean the
+/// tool has no executable backend the dispatcher can route to
+/// (harn#743).
+pub(crate) fn declared_executor_for_entry(entry: &BTreeMap<String, VmValue>) -> Option<String> {
+    if let Some(VmValue::String(s)) = entry.get("executor") {
+        return if known_executor(s) {
+            Some(s.to_string())
+        } else {
+            None
+        };
+    }
+    if entry.contains_key("_mcp_server") {
+        return Some(EXECUTOR_MCP_SERVER.to_string());
+    }
+    if matches!(entry.get("handler"), Some(v) if !matches!(v, VmValue::Nil)) {
+        return Some(EXECUTOR_HARN.to_string());
+    }
+    None
+}
+
+/// Walk a tool registry value (dict with `tools: List[Dict]`) and
+/// return a list of tool names that have no executable backend. Used
+/// by `agent_loop` to refuse to start when the registry contains a
+/// tool that the dispatcher would later fail to handle (harn#743).
+/// Non-registry shapes return an empty list — the existing argument
+/// validators in `agent_loop` / `extract_llm_options` already reject
+/// the bad shape with their own diagnostics.
+pub(crate) fn tools_missing_executor(tools_val: &VmValue) -> Vec<String> {
+    let dict = match tools_val {
+        VmValue::Dict(d) => d,
+        _ => return Vec::new(),
+    };
+    let tools = match dict.get("tools") {
+        Some(VmValue::List(list)) => list,
+        _ => return Vec::new(),
+    };
+    let mut missing = Vec::new();
+    for tool in tools.iter() {
+        let entry = match tool {
+            VmValue::Dict(d) => d,
+            _ => continue,
+        };
+        if declared_executor_for_entry(entry).is_some() {
+            continue;
+        }
+        let name = entry
+            .get("name")
+            .map(|v| v.display())
+            .unwrap_or_else(|| "<unnamed>".to_string());
+        missing.push(name);
+    }
+    missing
+}
+
+/// Run the [`tools_missing_executor`] guard and convert any missing
+/// backends into the canonical agent-loop error. Both `agent_loop`
+/// registrations (the bare and the bridge-attached variants) call
+/// this so the diagnostic stays in lockstep regardless of which
+/// builtin is bound (harn#743).
+pub(crate) fn ensure_tools_have_executors(tools_val: Option<&VmValue>) -> Result<(), VmError> {
+    let Some(tools_val) = tools_val else {
+        return Ok(());
+    };
+    let missing = tools_missing_executor(tools_val);
+    if missing.is_empty() {
+        return Ok(());
+    }
+    Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+        "agent_loop: registry contains {} tool(s) with no executable backend: {}. \
+         Each tool must declare an `executor` (\"harn\", \"host_bridge\", \"mcp_server\", \
+         or \"provider_native\") with the matching backing field, or supply a `handler` \
+         closure for the legacy in-Harn case.",
+        missing.len(),
+        missing.join(", "),
+    )))))
+}
+
+fn known_executor(value: &str) -> bool {
+    matches!(
+        value,
+        EXECUTOR_HARN | EXECUTOR_HOST_BRIDGE | EXECUTOR_MCP_SERVER | EXECUTOR_PROVIDER_NATIVE
+    )
+}
+
+/// Validate the `executor` declaration on a `tool_define` config and
+/// return the canonical executor name. Authors must pick exactly one
+/// backend: missing handlers can no longer silently fall through to
+/// the host bridge (harn#743). When the author omits `executor` but
+/// provides a `handler`, this defaults to `EXECUTOR_HARN` so existing
+/// scripts keep compiling — the leaky case the issue calls out
+/// (handler-less tools relying on bridge fall-through) is the only
+/// one that has to declare an executor explicitly.
+fn resolve_tool_executor(
+    name: &str,
+    config: &BTreeMap<String, VmValue>,
+    has_handler: bool,
+) -> Result<String, VmError> {
+    let executor = match config.get("executor") {
+        Some(VmValue::String(s)) => Some(s.to_string()),
+        Some(VmValue::Nil) | None => None,
+        Some(other) => {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                "tool_define({name:?}): `executor` must be a string \
+                 (one of \"harn\", \"host_bridge\", \"mcp_server\", \"provider_native\"), \
+                 got {}",
+                other.display()
+            )))));
+        }
+    };
+
+    let host_capability = config.get("host_capability");
+    let mcp_server = config.get("mcp_server");
+
+    let executor = match executor {
+        Some(value) => {
+            if !known_executor(&value) {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                    "tool_define({name:?}): unknown executor {value:?}. \
+                     Expected one of \"harn\", \"host_bridge\", \"mcp_server\", \"provider_native\"."
+                )))));
+            }
+            value
+        }
+        None => {
+            if has_handler {
+                EXECUTOR_HARN.to_string()
+            } else {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                    "tool_define({name:?}): tool has no `handler` and no explicit `executor`. \
+                     Add `handler: ...` for an in-Harn tool, or declare \
+                     `executor: \"host_bridge\", host_capability: \"capability.operation\"` \
+                     for a tool the host backs (or `executor: \"mcp_server\", mcp_server: \"name\"` / \
+                     `executor: \"provider_native\"`)."
+                )))));
+            }
+        }
+    };
+
+    match executor.as_str() {
+        EXECUTOR_HARN => {
+            if !has_handler {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                    "tool_define({name:?}): executor: \"harn\" requires a `handler` closure. \
+                     Either supply `handler: {{ args -> ... }}` or pick a different executor."
+                )))));
+            }
+            if host_capability.is_some_and(|v| !matches!(v, VmValue::Nil)) {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                    "tool_define({name:?}): executor: \"harn\" must not declare \
+                     `host_capability`; that field is only valid for executor: \"host_bridge\"."
+                )))));
+            }
+            if mcp_server.is_some_and(|v| !matches!(v, VmValue::Nil)) {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                    "tool_define({name:?}): executor: \"harn\" must not declare \
+                     `mcp_server`; that field is only valid for executor: \"mcp_server\"."
+                )))));
+            }
+        }
+        EXECUTOR_HOST_BRIDGE => {
+            if has_handler {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                    "tool_define({name:?}): executor: \"host_bridge\" must not declare a \
+                     `handler` — the host owns execution. Drop the handler closure or pick \
+                     executor: \"harn\"."
+                )))));
+            }
+            match host_capability {
+                Some(VmValue::String(s)) if !s.is_empty() => {
+                    if s.split_once('.')
+                        .is_none_or(|(c, op)| c.is_empty() || op.is_empty())
+                    {
+                        return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                            "tool_define({name:?}): `host_capability` must look like \
+                             \"capability.operation\" (e.g. \"interaction.ask\"); got {s:?}."
+                        )))));
+                    }
+                }
+                _ => {
+                    return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                        "tool_define({name:?}): executor: \"host_bridge\" requires a \
+                         `host_capability: \"capability.operation\"` field so `harn check` can \
+                         validate the host backs the tool (e.g. \"interaction.ask\")."
+                    )))));
+                }
+            }
+            if mcp_server.is_some_and(|v| !matches!(v, VmValue::Nil)) {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                    "tool_define({name:?}): executor: \"host_bridge\" must not declare \
+                     `mcp_server`; that field is only valid for executor: \"mcp_server\"."
+                )))));
+            }
+        }
+        EXECUTOR_MCP_SERVER => {
+            if has_handler {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                    "tool_define({name:?}): executor: \"mcp_server\" must not declare a \
+                     `handler` — the MCP server owns execution. Drop the handler closure or \
+                     pick executor: \"harn\"."
+                )))));
+            }
+            match mcp_server {
+                Some(VmValue::String(s)) if !s.is_empty() => {}
+                _ => {
+                    return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                        "tool_define({name:?}): executor: \"mcp_server\" requires an \
+                         `mcp_server: \"<server name>\"` field naming the configured MCP server."
+                    )))));
+                }
+            }
+            if host_capability.is_some_and(|v| !matches!(v, VmValue::Nil)) {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                    "tool_define({name:?}): executor: \"mcp_server\" must not declare \
+                     `host_capability`; that field is only valid for executor: \"host_bridge\"."
+                )))));
+            }
+        }
+        EXECUTOR_PROVIDER_NATIVE => {
+            if has_handler {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                    "tool_define({name:?}): executor: \"provider_native\" must not declare a \
+                     `handler` — the provider already returns the executed result inline."
+                )))));
+            }
+            if host_capability.is_some_and(|v| !matches!(v, VmValue::Nil)) {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                    "tool_define({name:?}): executor: \"provider_native\" must not declare \
+                     `host_capability`."
+                )))));
+            }
+            if mcp_server.is_some_and(|v| !matches!(v, VmValue::Nil)) {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                    "tool_define({name:?}): executor: \"provider_native\" must not declare \
+                     `mcp_server`."
+                )))));
+            }
+        }
+        _ => unreachable!("known_executor guard above"),
+    }
+
+    Ok(executor)
 }
 
 fn vm_get_tools(dict: &BTreeMap<String, VmValue>) -> &[VmValue] {

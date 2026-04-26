@@ -1,0 +1,12 @@
+// harn#743: host_capability must be shaped "capability.operation"
+// (e.g. "interaction.ask"). A bare capability without an operation
+// can't be validated against the host manifest, so we reject it.
+pipeline test(task) {
+  let r = tool_registry()
+  tool_define(
+    r,
+    "ask_user",
+    "ask user",
+    {executor: "host_bridge", host_capability: "interaction", parameters: {}},
+  )
+}

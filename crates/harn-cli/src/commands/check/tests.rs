@@ -221,6 +221,101 @@ pipeline main() {
 }
 
 #[test]
+fn preflight_reports_unknown_host_capability_on_tool_define() {
+    // harn#743: tool_define(.., {executor: "host_bridge", host_capability:
+    // "...."}) should fail preflight when the named capability is not
+    // exposed by the host capability manifest.
+    let dir = unique_temp_dir("harn-check-tool-bridge");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("main.harn");
+    let source = r#"
+pipeline main() {
+  var registry = tool_registry()
+  registry = tool_define(registry, "ask", "ask user", {
+    executor: "host_bridge",
+    host_capability: "unknown_cap.do_thing",
+    parameters: {},
+  })
+}
+"#;
+    let program = parse_program(source);
+    let diagnostics =
+        collect_preflight_diagnostics(&file, source, &program, &CheckConfig::default());
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.message.contains("host_capability 'unknown_cap.do_thing'")),
+        "expected host_capability diagnostic, got: {:?}",
+        diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn preflight_accepts_known_host_capability_on_tool_define() {
+    let dir = unique_temp_dir("harn-check-tool-bridge-ok");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("main.harn");
+    let source = r#"
+pipeline main() {
+  var registry = tool_registry()
+  registry = tool_define(registry, "ask", "ask user", {
+    executor: "host_bridge",
+    host_capability: "interaction.ask",
+    parameters: {},
+  })
+}
+"#;
+    let program = parse_program(source);
+    let diagnostics =
+        collect_preflight_diagnostics(&file, source, &program, &CheckConfig::default());
+    assert!(
+        diagnostics
+            .iter()
+            .all(|d| !d.message.contains("host_capability")),
+        "unexpected host_capability diagnostic for known capability: {:?}",
+        diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn preflight_skips_tool_define_for_non_host_bridge_executors() {
+    // harn#743: only host_bridge declarations carry host_capability;
+    // Harn-handler / mcp_server / provider_native tools must not trip
+    // the preflight check even when no manifest is loaded.
+    let dir = unique_temp_dir("harn-check-tool-skip");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("main.harn");
+    let source = r#"
+pipeline main() {
+  var registry = tool_registry()
+  registry = tool_define(registry, "compute", "compute a thing", {
+    executor: "harn",
+    handler: { args -> "ok" },
+    parameters: {},
+  })
+  registry = tool_define(registry, "lookup", "look up", {
+    executor: "mcp_server",
+    mcp_server: "linear",
+    parameters: {},
+  })
+}
+"#;
+    let program = parse_program(source);
+    let diagnostics =
+        collect_preflight_diagnostics(&file, source, &program, &CheckConfig::default());
+    assert!(
+        diagnostics
+            .iter()
+            .all(|d| !d.message.contains("host_capability")),
+        "unexpected host_capability diagnostic for non-host_bridge tools: {:?}",
+        diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn check_file_inner_enforces_invariants_when_requested() {
     let dir = unique_temp_dir("harn-check-invariants");
     std::fs::create_dir_all(&dir).unwrap();

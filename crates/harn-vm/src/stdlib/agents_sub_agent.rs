@@ -729,6 +729,9 @@ pub(super) async fn execute_sub_agent(
         VmValue::Dict(Rc::new(spec.options.clone())),
     ];
     let mut llm_opts = crate::llm::helpers::extract_llm_options(&args)?;
+    // harn#743: surface tool-registry validation through the sub-agent
+    // path too — same guard the bare `agent_loop` builtin runs.
+    crate::stdlib::tools::ensure_tools_have_executors(llm_opts.tools.as_ref())?;
     let config = sub_agent_loop_options(&spec)?;
     let result = crate::llm::run_agent_loop_internal(&mut llm_opts, config).await;
 

@@ -1,0 +1,65 @@
+/**
+ * harn#743: tool_define stamps an explicit `executor` on every tool
+ * entry so the dispatcher and ACP transcript see a single source of
+ * truth for the backing. This test covers each accepted shape:
+ *   - executor: "harn" (explicit + inferred from handler)
+ *   - executor: "host_bridge" with host_capability
+ *   - executor: "mcp_server" with mcp_server name
+ *   - executor: "provider_native"
+ */
+pipeline test(task) {
+  var registry = tool_registry()
+  // Default: handler present, executor inferred → "harn".
+  registry = tool_define(
+    registry,
+    "compute",
+    "compute a thing",
+    {handler: { args -> "ok:" + args.x }, parameters: {x: {type: "string"}}},
+  )
+  let compute = tool_find(registry, "compute")
+  assert(compute.executor == "harn", "missing executor + handler defaults to harn")
+  // Explicit harn echoes back through the entry.
+  registry = tool_define(
+    registry,
+    "compute_explicit",
+    "explicit harn",
+    {executor: "harn", handler: { args -> args.x }, parameters: {}},
+  )
+  assert(
+    tool_find(registry, "compute_explicit").executor == "harn",
+    "explicit harn executor preserved",
+  )
+  // Host bridge: handler-less, host_capability is required.
+  registry = tool_define(
+    registry,
+    "ask_user",
+    "Ask the user",
+    {executor: "host_bridge", host_capability: "interaction.ask", parameters: {}},
+  )
+  let ask = tool_find(registry, "ask_user")
+  assert(ask.executor == "host_bridge", "host_bridge executor preserved")
+  assert(ask.host_capability == "interaction.ask", "host_capability preserved")
+  assert(ask.handler == nil, "host_bridge entry stays handler-less")
+  // MCP server: handler-less, mcp_server names the configured server.
+  registry = tool_define(
+    registry,
+    "list_issues",
+    "List Linear issues",
+    {executor: "mcp_server", mcp_server: "linear", parameters: {}},
+  )
+  let issues = tool_find(registry, "list_issues")
+  assert(issues.executor == "mcp_server", "mcp_server executor preserved")
+  assert(issues.mcp_server == "linear", "mcp_server name preserved")
+  // Provider native: handler-less, no other backing required.
+  registry = tool_define(
+    registry,
+    "web_search",
+    "Provider-native search",
+    {executor: "provider_native", parameters: {q: {type: "string"}}},
+  )
+  assert(
+    tool_find(registry, "web_search").executor == "provider_native",
+    "provider_native executor preserved",
+  )
+  log("tool_define_executor passed")
+}

@@ -1,0 +1,6 @@
+// harn#743: executor names are a closed set. Typos and aspirational
+// values would otherwise pass through to ACP transcript downstream.
+pipeline test(task) {
+  let r = tool_registry()
+  tool_define(r, "compute", "compute", {executor: "wasm", parameters: {}})
+}

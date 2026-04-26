@@ -5,7 +5,7 @@ fn agent_tools() {
     "read",
     "Read a file",
     {
-    handler: nil,
+    handler: { _ -> "(stub)" },
     parameters: {path: {type: "string", description: "Path to read"}},
     returns: {type: "string"},
   },
@@ -15,7 +15,7 @@ fn agent_tools() {
     "search",
     "Search project files",
     {
-    handler: nil,
+    handler: { _ -> "(stub)" },
     parameters: {
     pattern: {type: "string", description: "Pattern to search"},
     file_glob: {type: "string", description: "Optional file glob", required: false},

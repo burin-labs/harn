@@ -978,6 +978,14 @@ pub fn register_llm_builtins(vm: &mut Vm) {
         let (skill_registry, skill_match, working_files) =
             crate::llm::agent::parse_skill_config(&options);
         let mut opts = extract_llm_options(&args)?;
+        // harn#743: refuse to start when the registry contains a tool
+        // with no executable backend. `tool_define` rejects this at
+        // definition time, but the agent loop is also fed registries
+        // that came from MCP discovery, manual dict construction, or
+        // tools merged across packages — re-check here so the error
+        // surfaces before the first model call rather than as an
+        // opaque `[builtin_call] unhandled` later.
+        crate::stdlib::tools::ensure_tools_have_executors(opts.tools.as_ref())?;
         let result = run_agent_loop_internal(
             &mut opts,
             AgentLoopConfig {

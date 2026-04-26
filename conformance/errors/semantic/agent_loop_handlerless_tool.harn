@@ -1,0 +1,15 @@
+// harn#743: agent_loop refuses to start when the registry contains
+// a tool with no executable backend. tool_define rejects this at
+// definition time, but a registry assembled by hand (or merged
+// across packages) could still slip a handlerless entry through.
+// Match the same diagnostic before the first model call so the
+// failure surfaces with a clear message instead of an opaque
+// `[builtin_call] unhandled` later.
+pipeline test(task) {
+  let bare = {_type: "tool_registry", tools: [{name: "ghost", description: "no backing", parameters: {}}]}
+  agent_loop(
+    "Try the ghost tool",
+    "You are helpful",
+    {provider: "mock", tools: bare, max_iterations: 1},
+  )
+}

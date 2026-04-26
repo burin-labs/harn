@@ -4,13 +4,13 @@ pipeline main() {
     stage_tools,
     "edit",
     "Edit a file",
-    {handler: nil, parameters: {path: {type: "string"}}, returns: {type: "string"}},
+    {handler: { _ -> "(stub)" }, parameters: {path: {type: "string"}}, returns: {type: "string"}},
   )
   stage_tools = tool_define(
     stage_tools,
     "run",
     "Run a command",
-    {handler: nil, parameters: {command: {type: "string"}}, returns: {type: "string"}},
+    {handler: { _ -> "(stub)" }, parameters: {command: {type: "string"}}, returns: {type: "string"}},
   )
   let flow = workflow_graph(
     {

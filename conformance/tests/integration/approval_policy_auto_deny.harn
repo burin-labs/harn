@@ -5,7 +5,7 @@ fn write_tools() {
     "shell_exec",
     "Run shell command",
     {
-    handler: nil,
+    handler: { _ -> "(stub)" },
     parameters: {cmd: {type: "string", description: "Command"}},
     returns: {type: "string"},
   },

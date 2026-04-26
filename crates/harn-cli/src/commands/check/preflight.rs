@@ -241,6 +241,45 @@ fn scan_node_preflight(
                 diagnostics,
             );
         }
+        Node::FunctionCall { name, args } if name == "tool_define" => {
+            // harn#743: when a tool declares `executor: "host_bridge"`,
+            // its `host_capability: "capability.operation"` literal must
+            // resolve against the loaded host capability manifest. The
+            // dispatcher would otherwise silently fall back to a
+            // not-available error at the first model call. We only flag
+            // declarations that pass a string literal for both fields —
+            // dynamic values are out of scope for static validation.
+            if let Some((cap, op, host_cap_span)) = parse_tool_define_host_capability(args) {
+                if !is_known_host_operation(host_capabilities, &cap, &op) {
+                    diagnostics.push(PreflightDiagnostic {
+                        path: file_path.display().to_string(),
+                        source: source.to_string(),
+                        span: host_cap_span,
+                        message: format!(
+                            "preflight: tool_define declares host_capability '{cap}.{op}' \
+                             that is not exposed by the host"
+                        ),
+                        help: Some(
+                            "declare the capability in [check].host_capabilities, \
+                             [check].host_capabilities_path, --host-capabilities, or \
+                             suppress with [check].preflight_allow if the host adds it at \
+                             runtime"
+                                .to_string(),
+                        ),
+                        tags: Some(format!("{cap}.{op}")),
+                    });
+                }
+            }
+            scan_children(
+                args,
+                file_path,
+                source,
+                config,
+                host_capabilities,
+                visited,
+                diagnostics,
+            );
+        }
         Node::FunctionCall { name, args } if name == "host_call" => {
             if let Some((cap, op, params_arg)) = parse_host_call_args(args) {
                 if !is_known_host_operation(host_capabilities, &cap, &op) {
@@ -1070,6 +1109,39 @@ pub(super) fn parse_host_call_args(args: &[SNode]) -> Option<(String, String, Op
     };
     let (capability, operation) = name.split_once('.')?;
     Some((capability.to_string(), operation.to_string(), args.get(1)))
+}
+
+/// Extract the `host_capability` field from a `tool_define(...)` config
+/// dict, returning `(capability, operation, span)` only when:
+///   1. arg 3 (the config) is a literal dict,
+///   2. it sets `executor: "host_bridge"` literally,
+///   3. it sets `host_capability: "capability.operation"` literally.
+///
+/// Anything dynamic (computed strings, variable executor, etc.) is out
+/// of scope for the static preflight check — at runtime `tool_define`
+/// itself rejects malformed declarations.
+pub(super) fn parse_tool_define_host_capability(
+    args: &[SNode],
+) -> Option<(String, String, harn_lexer::Span)> {
+    let config = args.get(3)?;
+    let Node::DictLiteral(_) = &config.node else {
+        return None;
+    };
+    let executor = dict_literal_field(config, "executor").and_then(literal_string)?;
+    if executor != "host_bridge" {
+        return None;
+    }
+    let host_cap_node = dict_literal_field(config, "host_capability")?;
+    let host_cap = literal_string(host_cap_node)?;
+    let (capability, operation) = host_cap.split_once('.')?;
+    if capability.is_empty() || operation.is_empty() {
+        return None;
+    }
+    Some((
+        capability.to_string(),
+        operation.to_string(),
+        host_cap_node.span,
+    ))
 }
 
 pub(super) fn literal_string(node: &SNode) -> Option<String> {

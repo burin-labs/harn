@@ -5,7 +5,7 @@ fn list_tools() {
     "list_directory",
     "List directory contents",
     {
-    handler: nil,
+    handler: { _ -> "(stub)" },
     parameters: {path: {type: "string", description: "Directory path"}},
     returns: {type: "string"},
   },

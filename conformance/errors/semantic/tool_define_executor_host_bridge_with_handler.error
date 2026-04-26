@@ -1,0 +1,1 @@
+re:executor: "host_bridge" must not declare a `handler`

@@ -597,6 +597,58 @@ println(response.output_tokens)
 | `llm_backoff_ms` | int | 2000 | Base exponential backoff. |
 | `stream` | bool | true | SSE streaming transport. |
 
+### Tool executors
+
+Every `tool_define` declares which backend runs the tool. The
+declaration is the source of truth — the dispatcher and ACP
+transcript both honor the `executor` field verbatim (harn#743).
+
+```harn
+// In-VM (default when handler is set; can be made explicit).
+tool_define(registry, "deploy", "Deploy", {
+  executor: "harn",
+  handler: { args -> shell("deploy " + args.env) },
+  parameters: {env: {type: "string"}},
+})
+// Host-backed: handler-less, declares which host capability backs it.
+tool_define(registry, "ask_user", "Ask the user", {
+  executor: "host_bridge",
+  host_capability: "interaction.ask",
+  parameters: {prompt: {type: "string"}},
+})
+// MCP-backed: handler-less, names the configured server.
+tool_define(registry, "list_issues", "Linear issues", {
+  executor: "mcp_server",
+  mcp_server: "linear",
+  parameters: {limit: {type: "integer"}},
+})
+// Provider-native (e.g. OpenAI Responses-API server tools).
+tool_define(registry, "web_search", "Web search", {
+  executor: "provider_native",
+  parameters: {q: {type: "string"}},
+})
+```
+
+Rules `tool_define` enforces immediately (errors thrown at definition
+time, not the first model call):
+
+- A tool with no `handler` must declare an `executor`. Handler-less
+  tools no longer fall through to the host bridge implicitly.
+- `executor: "harn"` requires `handler`; forbids `host_capability` /
+  `mcp_server`.
+- `executor: "host_bridge"` forbids `handler`; requires
+  `host_capability: "capability.operation"`.
+- `executor: "mcp_server"` forbids `handler`; requires `mcp_server`
+  (server name).
+- `executor: "provider_native"` forbids `handler`, `host_capability`,
+  `mcp_server`.
+
+`agent_loop` re-checks the registry on entry and refuses to start if
+any tool is missing an executable backend. `harn check` flags
+literal `host_capability` values that aren't in the host capability
+manifest (`[check].host_capabilities`,
+`[check].host_capabilities_path`, `--host-capabilities`).
+
 ### Tool loading & search
 
 Mark tools that the model rarely needs with `defer_loading: true` and

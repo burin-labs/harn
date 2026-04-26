@@ -1,0 +1,6 @@
+// harn#743: executor: "mcp_server" requires the configured server
+// name so the dispatcher knows which MCP client to route through.
+pipeline test(task) {
+  let r = tool_registry()
+  tool_define(r, "lookup", "lookup", {executor: "mcp_server", parameters: {}})
+}

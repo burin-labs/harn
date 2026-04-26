@@ -1,0 +1,8 @@
+// harn#743: a tool with neither `handler` nor `executor` has no
+// executable backend. tool_define rejects it at definition time so
+// the dispatcher never produces an opaque "tool unavailable" error
+// later in the agent loop.
+pipeline test(task) {
+  let r = tool_registry()
+  tool_define(r, "ghost", "no backing", {parameters: {}})
+}

@@ -5,7 +5,7 @@ fn write_tools() {
     "write_note",
     "Write a note",
     {
-    handler: nil,
+    handler: { _ -> "(stub)" },
     parameters: {path: {type: "string", description: "Path to write"}},
     returns: {type: "string"},
   },

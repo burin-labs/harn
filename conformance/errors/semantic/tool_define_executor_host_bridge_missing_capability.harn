@@ -1,0 +1,7 @@
+// harn#743: executor: "host_bridge" requires a host_capability tag
+// shaped "capability.operation" so `harn check` can validate the host
+// surfaces it.
+pipeline test(task) {
+  let r = tool_registry()
+  tool_define(r, "ask_user", "ask user", {executor: "host_bridge", parameters: {}})
+}

@@ -273,82 +273,96 @@ pub(super) async fn dispatch_tool_execution(
 
     let mut attempt = 0usize;
     let mut executor: Option<ToolExecutor> = None;
+    // harn#743: when the registry declares an executor for this tool
+    // (`tool_define(..., {executor: "..."})`), pin the transcript tag
+    // to the declared value. Falls back to dispatch-time inference for
+    // VM-stdlib tools and registries that pre-date the declaration.
+    let declared_executor = declared_executor_for_tool(tools_val, tool_name);
     loop {
-        let result = if let Some(local_result) = handle_tool_locally(tool_name, tool_args) {
-            // VM-stdlib short-circuit (read_file / list_directory). Any
-            // other tool falls through to the script-handler / bridge
-            // path below.
-            executor = Some(ToolExecutor::HarnBuiltin);
-            Ok(serde_json::Value::String(local_result))
-        } else if let Some(handler) = find_tool_handler(tools_val, tool_name) {
-            // A Harn-side handler closure exists — but if the tool was
-            // sourced from `mcp_list_tools`, the dict carries the
-            // originating server name as `_mcp_server`, and the call is
-            // semantically "served by MCP" even though dispatch goes
-            // through a Harn closure that ultimately invokes mcp_call.
-            executor = Some(match mcp_server_for_tool(tools_val, tool_name) {
-                Some(server_name) => ToolExecutor::McpServer { server_name },
-                None => ToolExecutor::HarnBuiltin,
-            });
-            let Some(mut vm) = crate::vm::clone_async_builtin_child_vm() else {
-                return ToolDispatchOutcome {
-                    result: Err(VmError::CategorizedError {
-                        message: format!(
+        let result =
+            if let Some(local_result) = handle_tool_locally(tool_name, tool_args) {
+                // VM-stdlib short-circuit (read_file / list_directory). Any
+                // other tool falls through to the script-handler / bridge
+                // path below.
+                executor = Some(
+                    declared_executor
+                        .clone()
+                        .unwrap_or(ToolExecutor::HarnBuiltin),
+                );
+                Ok(serde_json::Value::String(local_result))
+            } else if let Some(handler) = find_tool_handler(tools_val, tool_name) {
+                // A Harn-side handler closure exists — but if the tool was
+                // sourced from `mcp_list_tools`, the dict carries the
+                // originating server name as `_mcp_server`, and the call is
+                // semantically "served by MCP" even though dispatch goes
+                // through a Harn closure that ultimately invokes mcp_call.
+                executor = Some(declared_executor.clone().unwrap_or_else(|| {
+                    match mcp_server_for_tool(tools_val, tool_name) {
+                        Some(server_name) => ToolExecutor::McpServer { server_name },
+                        None => ToolExecutor::HarnBuiltin,
+                    }
+                }));
+                let Some(mut vm) = crate::vm::clone_async_builtin_child_vm() else {
+                    return ToolDispatchOutcome {
+                        result: Err(VmError::CategorizedError {
+                            message: format!(
                             "tool '{tool_name}' is Harn-owned but no child VM context was available"
                         ),
-                        category: ErrorCategory::ToolRejected,
-                    }),
-                    executor,
+                            category: ErrorCategory::ToolRejected,
+                        }),
+                        executor,
+                    };
                 };
-            };
-            let args_vm = crate::stdlib::json_to_vm_value(tool_args);
-            let _trusted_bridge_guard = crate::orchestration::allow_trusted_bridge_calls();
-            match vm.call_closure_pub(&handler, &[args_vm]).await {
-                Ok(val) => Ok(serde_json::Value::String(val.display())),
+                let args_vm = crate::stdlib::json_to_vm_value(tool_args);
+                let _trusted_bridge_guard = crate::orchestration::allow_trusted_bridge_calls();
+                match vm.call_closure_pub(&handler, &[args_vm]).await {
+                    Ok(val) => Ok(serde_json::Value::String(val.display())),
+                    Err(VmError::CategorizedError {
+                        message,
+                        category: ErrorCategory::ToolRejected,
+                    }) => Ok(denied_tool_result(tool_name, message)),
+                    Err(e) => Ok(serde_json::Value::String(format!("Error: {e}"))),
+                }
+            } else if let Some(bridge) = bridge {
+                // Same `_mcp_server` discriminator: a host that surfaces an
+                // MCP server's tools without a Harn-side closure (e.g. the
+                // CLI's eager-connect path) still routes through the bridge,
+                // but the executor is the MCP server, not the bridge itself.
+                executor = Some(declared_executor.clone().unwrap_or_else(|| {
+                    match mcp_server_for_tool(tools_val, tool_name) {
+                        Some(server_name) => ToolExecutor::McpServer { server_name },
+                        None => ToolExecutor::HostBridge,
+                    }
+                }));
+                match bridge
+                    .call(
+                        "builtin_call",
+                        serde_json::json!({
+                            "name": tool_name,
+                            "args": [tool_args],
+                        }),
+                    )
+                    .await
+                {
+                    Err(VmError::CategorizedError {
+                        message,
+                        category: ErrorCategory::ToolRejected,
+                    }) => Ok(denied_tool_result(tool_name, message)),
+                    other => other,
+                }
+            } else {
+                // No backend could claim the call — leave executor unset so
+                // the caller reports "tool unavailable" rather than blaming
+                // a specific backend.
                 Err(VmError::CategorizedError {
-                    message,
-                    category: ErrorCategory::ToolRejected,
-                }) => Ok(denied_tool_result(tool_name, message)),
-                Err(e) => Ok(serde_json::Value::String(format!("Error: {e}"))),
-            }
-        } else if let Some(bridge) = bridge {
-            // Same `_mcp_server` discriminator: a host that surfaces an
-            // MCP server's tools without a Harn-side closure (e.g. the
-            // CLI's eager-connect path) still routes through the bridge,
-            // but the executor is the MCP server, not the bridge itself.
-            executor = Some(match mcp_server_for_tool(tools_val, tool_name) {
-                Some(server_name) => ToolExecutor::McpServer { server_name },
-                None => ToolExecutor::HostBridge,
-            });
-            match bridge
-                .call(
-                    "builtin_call",
-                    serde_json::json!({
-                        "name": tool_name,
-                        "args": [tool_args],
-                    }),
-                )
-                .await
-            {
-                Err(VmError::CategorizedError {
-                    message,
-                    category: ErrorCategory::ToolRejected,
-                }) => Ok(denied_tool_result(tool_name, message)),
-                other => other,
-            }
-        } else {
-            // No backend could claim the call — leave executor unset so
-            // the caller reports "tool unavailable" rather than blaming
-            // a specific backend.
-            Err(VmError::CategorizedError {
-                message: format!(
-                    "Tool '{}' is not available in the current environment. \
+                    message: format!(
+                        "Tool '{}' is not available in the current environment. \
                      Use only the tools listed in the tool-calling contract.",
-                    tool_name
-                ),
-                category: ErrorCategory::ToolRejected,
-            })
-        };
+                        tool_name
+                    ),
+                    category: ErrorCategory::ToolRejected,
+                })
+            };
         match &result {
             Ok(_) => break ToolDispatchOutcome { result, executor },
             Err(VmError::CategorizedError {
@@ -432,6 +446,89 @@ pub(super) fn find_tool_handler(
             }
             return None;
         }
+    }
+    None
+}
+
+/// Map a tool entry's declared executor to the [`ToolExecutor`] tag.
+/// `executor: "mcp_server"` honors the entry's own `mcp_server` field,
+/// falling back to a `_mcp_server` tag (e.g. from `mcp_list_tools`)
+/// when the author defined the tool through `tool_define` but only
+/// named the server elsewhere — keeps the wire-level executor consistent
+/// with how MCP-discovered tools are tagged today (harn#743).
+fn executor_from_entry(
+    entry: &std::collections::BTreeMap<String, VmValue>,
+) -> Option<ToolExecutor> {
+    use crate::stdlib::tools::{
+        EXECUTOR_HARN, EXECUTOR_HOST_BRIDGE, EXECUTOR_MCP_SERVER, EXECUTOR_PROVIDER_NATIVE,
+    };
+    let kind = match entry.get("executor") {
+        Some(VmValue::String(s)) => s.to_string(),
+        _ => return None,
+    };
+    match kind.as_str() {
+        EXECUTOR_HARN => Some(ToolExecutor::HarnBuiltin),
+        EXECUTOR_HOST_BRIDGE => Some(ToolExecutor::HostBridge),
+        EXECUTOR_MCP_SERVER => {
+            let server_name = match entry.get("mcp_server") {
+                Some(VmValue::String(s)) if !s.is_empty() => s.to_string(),
+                _ => match entry.get("_mcp_server") {
+                    Some(VmValue::String(s)) if !s.is_empty() => s.to_string(),
+                    _ => return None,
+                },
+            };
+            Some(ToolExecutor::McpServer { server_name })
+        }
+        EXECUTOR_PROVIDER_NATIVE => Some(ToolExecutor::ProviderNative),
+        _ => None,
+    }
+}
+
+/// Read the declared executor for a tool from `tools_val`. The
+/// declaration wins over dispatch-time inference so the ACP transcript
+/// reflects the source-of-truth executor identity (harn#743). Falls
+/// back to the `_mcp_server` tag for MCP-discovered tools that never
+/// went through `tool_define`.
+pub(super) fn declared_executor_for_tool(
+    tools_val: Option<&VmValue>,
+    tool_name: &str,
+) -> Option<ToolExecutor> {
+    let dict = tools_val?.as_dict()?;
+    let tools_list = match dict.get("tools") {
+        Some(VmValue::List(l)) => l,
+        _ => return None,
+    };
+    for tool in tools_list.iter() {
+        let entry: &std::collections::BTreeMap<String, VmValue> = match tool {
+            VmValue::Dict(d) => d,
+            _ => continue,
+        };
+        let name = match entry.get("name") {
+            Some(v) => v.display(),
+            None => entry
+                .get("function")
+                .and_then(|f| f.as_dict())
+                .and_then(|f| f.get("name"))
+                .map(|v| v.display())
+                .unwrap_or_default(),
+        };
+        if name != tool_name {
+            continue;
+        }
+        if let Some(executor) = executor_from_entry(entry) {
+            return Some(executor);
+        }
+        // Legacy / MCP-discovered entries with no `executor` field but
+        // a `_mcp_server` tag — match what `mcp_server_for_tool`
+        // returns to keep the executor tag consistent.
+        if let Some(VmValue::String(s)) = entry.get("_mcp_server") {
+            if !s.is_empty() {
+                return Some(ToolExecutor::McpServer {
+                    server_name: s.to_string(),
+                });
+            }
+        }
+        return None;
     }
     None
 }
@@ -600,5 +697,74 @@ mod tests {
                 .await;
         assert!(outcome.result.is_err());
         assert!(outcome.executor.is_none());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn dispatch_honors_declared_host_bridge_executor_over_mcp_tag() {
+        // harn#743: when an entry declares `executor: "host_bridge"`
+        // the transcript must reflect the declaration even if the
+        // entry also carries an `_mcp_server` tag (e.g. a host-shimmed
+        // tool that proxies a fake server name). The declaration is
+        // the source of truth.
+        let bridge = crate::bridge::HostBridge::from_parts_with_writer(
+            Arc::new(Mutex::new(std::collections::HashMap::new())),
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(|_| Err("test bridge".to_string())),
+            1,
+        );
+        let bridge = Rc::new(bridge);
+        let mut entry = BTreeMap::new();
+        entry.insert(
+            "executor".to_string(),
+            VmValue::String(Rc::from("host_bridge".to_string())),
+        );
+        entry.insert(
+            "host_capability".to_string(),
+            VmValue::String(Rc::from("interaction.ask".to_string())),
+        );
+        // Decoy `_mcp_server`: would normally tag the executor as
+        // McpServer, but the declared `host_bridge` wins.
+        entry.insert(
+            "_mcp_server".to_string(),
+            VmValue::String(Rc::from("linear".to_string())),
+        );
+        let tools = tools_dict(vec![("ask_user", entry)]);
+        let args = serde_json::json!({});
+        let outcome =
+            dispatch_tool_execution("ask_user", &args, Some(&tools), Some(&bridge), 0, 0).await;
+        assert_eq!(outcome.executor, Some(ToolExecutor::HostBridge));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn dispatch_honors_declared_mcp_server_executor() {
+        // harn#743: `executor: "mcp_server"` with an explicit
+        // `mcp_server` field maps straight to McpServer { server_name }
+        // in the transcript.
+        let bridge = crate::bridge::HostBridge::from_parts_with_writer(
+            Arc::new(Mutex::new(std::collections::HashMap::new())),
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(|_| Err("test bridge".to_string())),
+            1,
+        );
+        let bridge = Rc::new(bridge);
+        let mut entry = BTreeMap::new();
+        entry.insert(
+            "executor".to_string(),
+            VmValue::String(Rc::from("mcp_server".to_string())),
+        );
+        entry.insert(
+            "mcp_server".to_string(),
+            VmValue::String(Rc::from("github".to_string())),
+        );
+        let tools = tools_dict(vec![("create_pr", entry)]);
+        let args = serde_json::json!({});
+        let outcome =
+            dispatch_tool_execution("create_pr", &args, Some(&tools), Some(&bridge), 0, 0).await;
+        assert_eq!(
+            outcome.executor,
+            Some(ToolExecutor::McpServer {
+                server_name: "github".to_string()
+            })
+        );
     }
 }
