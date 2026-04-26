@@ -1,0 +1,12 @@
+pipeline test(task) {
+  let unknown = llm_healthcheck("not-a-provider")
+  assert_eq(unknown.provider, "not-a-provider")
+  assert_eq(unknown.valid, false)
+  assert_eq(unknown.metadata.reason, "unknown_provider")
+  assert(contains(unknown.message, "Unknown provider"))
+  let shaped = llm_healthcheck({provider: "also-not-a-provider", api_key: "candidate"})
+  assert_eq(shaped.provider, "also-not-a-provider")
+  assert_eq(shaped.valid, false)
+  assert_eq(shaped.metadata.reason, "unknown_provider")
+  log("llm_healthcheck shape ok")
+}

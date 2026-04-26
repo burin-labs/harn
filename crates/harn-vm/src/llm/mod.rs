@@ -95,6 +95,7 @@ pub use api::{
 pub use mock::{
     drain_tool_recordings, load_tool_replay_fixtures, set_tool_recording_mode, ToolRecordingMode,
 };
+mod healthcheck;
 pub(crate) mod provider;
 pub(crate) mod providers;
 pub(crate) mod rate_limit;
@@ -376,6 +377,10 @@ pub use self::api::{
     supports_model_readiness_probe, ModelReadiness,
 };
 pub use self::cost::{calculate_cost_for_provider, peek_total_cost};
+pub use self::healthcheck::{
+    build_healthcheck_url, run_provider_healthcheck, run_provider_healthcheck_with_options,
+    ProviderHealthcheckOptions, ProviderHealthcheckResult,
+};
 pub(crate) use self::helpers::extract_llm_options;
 pub use self::helpers::resolve_api_key;
 pub use self::helpers::vm_value_to_json;

@@ -2,15 +2,13 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::Duration;
 
-use harn_vm::llm_config::{self, AuthEnv, ProviderDef};
+use harn_vm::llm_config::{self, AuthEnv};
 use harn_vm::runtime_paths;
 use harn_vm::secrets::{
     configured_default_chain, EnvSecretProvider, KeyringSecretProvider, SecretId,
     DEFAULT_SECRET_PROVIDER_CHAIN, SECRET_PROVIDER_CHAIN_ENV,
 };
-use reqwest::{header::CONTENT_TYPE, Method};
 
 use crate::package;
 
@@ -544,17 +542,12 @@ async fn check_provider_health(network: bool) -> Vec<DoctorCheck> {
     providers.sort();
 
     let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(5))
+        .timeout(std::time::Duration::from_secs(5))
         .build()
         .expect("reqwest client");
 
     let mut checks = Vec::new();
     for provider_name in providers {
-        let Some(def) = llm_config::provider_config(&provider_name) else {
-            continue;
-        };
-
-        let auth = resolve_auth_env(&def.auth_env);
         if !network {
             checks.push(DoctorCheck {
                 status: DoctorStatus::Skip,
@@ -564,47 +557,43 @@ async fn check_provider_health(network: bool) -> Vec<DoctorCheck> {
             continue;
         }
 
-        if !auth.available && !matches!(def.auth_env, AuthEnv::None) {
-            checks.push(DoctorCheck {
-                status: DoctorStatus::Warn,
-                label: format!("provider:{provider_name}"),
-                detail: format!("missing credentials ({})", auth.candidates.join(", ")),
-            });
-            continue;
-        }
-
-        let Some(healthcheck) = def.healthcheck.as_ref() else {
-            checks.push(DoctorCheck {
-                status: DoctorStatus::Skip,
-                label: format!("provider:{provider_name}"),
-                detail: "no healthcheck configured".to_string(),
-            });
-            continue;
-        };
-
-        if harn_vm::llm::supports_model_readiness_probe(&def) {
-            if let Some(model) = harn_vm::llm::selected_model_for_provider(&provider_name) {
-                checks.push(run_model_readiness(&provider_name, &model, &auth.value).await);
-                continue;
+        // Local OpenAI-compatible providers expose loaded models through
+        // `/v1/models`. Probe the selected model directly so a missing model
+        // surfaces with the distinct `model_missing` category rather than a
+        // generic 200 OK from the unified healthcheck.
+        if let Some(def) = llm_config::provider_config(&provider_name) {
+            if harn_vm::llm::supports_model_readiness_probe(&def) {
+                if let Some(model) = harn_vm::llm::selected_model_for_provider(&provider_name) {
+                    let api_key = match &def.auth_env {
+                        AuthEnv::None => String::new(),
+                        AuthEnv::Single(name) => std::env::var(name).unwrap_or_default(),
+                        AuthEnv::Multiple(names) => names
+                            .iter()
+                            .find_map(|name| std::env::var(name).ok())
+                            .unwrap_or_default(),
+                    };
+                    checks.push(run_model_readiness(&provider_name, &model, &api_key).await);
+                    continue;
+                }
             }
         }
 
-        checks.push(run_healthcheck(&client, &provider_name, &def, &auth, healthcheck).await);
+        let result = harn_vm::llm::run_provider_healthcheck_with_options(
+            &provider_name,
+            harn_vm::llm::ProviderHealthcheckOptions {
+                api_key: None,
+                client: Some(client.clone()),
+            },
+        )
+        .await;
+        checks.push(healthcheck_result_to_doctor_check(result));
     }
     checks
 }
 
-async fn run_model_readiness(
-    provider_name: &str,
-    model: &str,
-    api_key: &Option<String>,
-) -> DoctorCheck {
-    let readiness = harn_vm::llm::probe_openai_compatible_model(
-        provider_name,
-        model,
-        api_key.as_deref().unwrap_or(""),
-    )
-    .await;
+async fn run_model_readiness(provider_name: &str, model: &str, api_key: &str) -> DoctorCheck {
+    let readiness =
+        harn_vm::llm::probe_openai_compatible_model(provider_name, model, api_key).await;
     let status = if readiness.valid {
         DoctorStatus::Ok
     } else {
@@ -620,127 +609,55 @@ async fn run_model_readiness(
     }
 }
 
-async fn run_healthcheck(
-    client: &reqwest::Client,
-    provider_name: &str,
-    def: &ProviderDef,
-    auth: &ResolvedAuth,
-    healthcheck: &harn_vm::llm_config::HealthcheckDef,
+fn healthcheck_result_to_doctor_check(
+    result: harn_vm::llm::ProviderHealthcheckResult,
 ) -> DoctorCheck {
-    let url = build_healthcheck_url(def, healthcheck);
-    let method = Method::from_bytes(healthcheck.method.as_bytes()).unwrap_or(Method::GET);
-    let mut request = client.request(method, &url);
-
-    match def.auth_style.as_str() {
-        "bearer" => {
-            if let Some(value) = auth.value.as_deref() {
-                request = request.bearer_auth(value);
-            }
-        }
-        "header" => {
-            if let (Some(header), Some(value)) = (def.auth_header.as_deref(), auth.value.as_deref())
-            {
-                request = request.header(header, value);
-            }
-        }
-        _ => {}
-    }
-
-    for (name, value) in &def.extra_headers {
-        request = request.header(name, value);
-    }
-
-    if let Some(body) = &healthcheck.body {
-        request = request
-            .header(CONTENT_TYPE, "application/json")
-            .body(body.clone());
-    }
-
-    match request.send().await {
-        Ok(response) if response.status().is_success() => DoctorCheck {
-            status: DoctorStatus::Ok,
-            label: format!("provider:{provider_name}"),
-            detail: format!("{} {}", response.status().as_u16(), url),
-        },
-        Ok(response) if response.status().as_u16() == 401 || response.status().as_u16() == 403 => {
-            DoctorCheck {
-                status: DoctorStatus::Fail,
-                label: format!("provider:{provider_name}"),
-                detail: format!(
-                    "auth rejected with {} at {}",
-                    response.status().as_u16(),
-                    url
-                ),
-            }
-        }
-        Ok(response) => DoctorCheck {
-            status: DoctorStatus::Warn,
-            label: format!("provider:{provider_name}"),
-            detail: format!("unexpected HTTP {} at {}", response.status().as_u16(), url),
-        },
-        Err(error) => DoctorCheck {
-            status: DoctorStatus::Fail,
-            label: format!("provider:{provider_name}"),
-            detail: format!("request failed for {}: {error}", url),
-        },
-    }
-}
-
-#[derive(Debug, Clone)]
-struct ResolvedAuth {
-    available: bool,
-    value: Option<String>,
-    candidates: Vec<String>,
-}
-
-fn resolve_auth_env(auth_env: &AuthEnv) -> ResolvedAuth {
-    match auth_env {
-        AuthEnv::None => ResolvedAuth {
-            available: true,
-            value: None,
-            candidates: Vec::new(),
-        },
-        AuthEnv::Single(env_name) => {
-            let value = std::env::var(env_name)
-                .ok()
-                .filter(|value| !value.trim().is_empty());
-            ResolvedAuth {
-                available: value.is_some(),
-                value,
-                candidates: vec![env_name.clone()],
-            }
-        }
-        AuthEnv::Multiple(env_names) => {
-            let value = env_names.iter().find_map(|env_name| {
-                std::env::var(env_name)
-                    .ok()
-                    .filter(|value| !value.trim().is_empty())
-            });
-            ResolvedAuth {
-                available: value.is_some(),
-                value,
-                candidates: env_names.clone(),
-            }
-        }
-    }
-}
-
-fn build_healthcheck_url(
-    def: &ProviderDef,
-    healthcheck: &harn_vm::llm_config::HealthcheckDef,
-) -> String {
-    if let Some(url) = &healthcheck.url {
-        return url.clone();
-    }
-
-    let base = llm_config::resolve_base_url(def);
-    let path = healthcheck.path.as_deref().unwrap_or("");
-    if path.starts_with('/') {
-        format!("{}{}", base.trim_end_matches('/'), path)
-    } else if path.is_empty() {
-        base
+    let reason = result
+        .metadata
+        .get("reason")
+        .and_then(|value| value.as_str())
+        .unwrap_or("unknown");
+    let status_code = result
+        .metadata
+        .get("status")
+        .and_then(|value| value.as_u64())
+        .unwrap_or_default();
+    let status = if result.valid {
+        DoctorStatus::Ok
     } else {
-        format!("{}/{}", base.trim_end_matches('/'), path)
+        match reason {
+            "no_healthcheck" => DoctorStatus::Skip,
+            "missing_credentials" => DoctorStatus::Warn,
+            "http_status" if status_code == 401 || status_code == 403 => DoctorStatus::Fail,
+            "http_status" => DoctorStatus::Warn,
+            _ => DoctorStatus::Fail,
+        }
+    };
+    let detail = if result.valid {
+        let url = result
+            .metadata
+            .get("url")
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
+        let status = result
+            .metadata
+            .get("status")
+            .and_then(|value| value.as_u64())
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "ok".to_string());
+        if url.is_empty() {
+            status
+        } else {
+            format!("{status} {url}")
+        }
+    } else {
+        result.message
+    };
+
+    DoctorCheck {
+        status,
+        label: format!("provider:{}", result.provider),
+        detail,
     }
 }
 
@@ -783,10 +700,13 @@ fn read_manifest(path: &Path) -> Result<package::Manifest, String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_healthcheck_url, check_event_log, check_manifest, find_nearest_manifest,
-        format_trigger_metrics, read_manifest, DoctorStatus,
+        check_event_log, check_manifest, find_nearest_manifest, format_trigger_metrics,
+        healthcheck_result_to_doctor_check, read_manifest, DoctorStatus,
     };
+    use harn_vm::llm::ProviderHealthcheckResult;
     use harn_vm::llm_config::{AuthEnv, HealthcheckDef, ProviderDef};
+    use serde_json::json;
+    use std::collections::BTreeMap;
 
     #[test]
     fn build_healthcheck_url_uses_base_and_path() {
@@ -802,8 +722,46 @@ mod tests {
         };
 
         assert_eq!(
-            build_healthcheck_url(&def, &healthcheck),
+            harn_vm::llm::build_healthcheck_url(&def, &healthcheck),
             "https://example.com/api/health"
+        );
+    }
+
+    #[test]
+    fn doctor_maps_healthcheck_results_to_existing_statuses() {
+        let missing = ProviderHealthcheckResult {
+            provider: "openai".to_string(),
+            valid: false,
+            message: "Missing credentials".to_string(),
+            metadata: BTreeMap::from([("reason".to_string(), json!("missing_credentials"))]),
+        };
+        let auth_rejected = ProviderHealthcheckResult {
+            provider: "openai".to_string(),
+            valid: false,
+            message: "openai returned HTTP 401".to_string(),
+            metadata: BTreeMap::from([
+                ("reason".to_string(), json!("http_status")),
+                ("status".to_string(), json!(401)),
+            ]),
+        };
+        let no_probe = ProviderHealthcheckResult {
+            provider: "custom".to_string(),
+            valid: false,
+            message: "No healthcheck configured".to_string(),
+            metadata: BTreeMap::from([("reason".to_string(), json!("no_healthcheck"))]),
+        };
+
+        assert_eq!(
+            healthcheck_result_to_doctor_check(missing).status,
+            DoctorStatus::Warn
+        );
+        assert_eq!(
+            healthcheck_result_to_doctor_check(auth_rejected).status,
+            DoctorStatus::Fail
+        );
+        assert_eq!(
+            healthcheck_result_to_doctor_check(no_probe).status,
+            DoctorStatus::Skip
         );
     }
 
