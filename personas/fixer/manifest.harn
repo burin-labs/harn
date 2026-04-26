@@ -1,0 +1,23 @@
+fn fixer_manifest() {
+  return {
+    name: "fixer",
+    version: "0.1.0",
+    trigger: "invariant.blocked_with_remediation",
+    autonomy_tier: "act_with_approval",
+    receipt_policy: "required",
+    behavior: [
+    "Read the blocked slice and predicate remediation.",
+    "Materialize each suggested atom as a Fixer-signed atom.",
+    "Use the original author's principal co-signature when the host can obtain it.",
+    "Propose a follow-up slice containing the blocked slice atoms and remediation atoms.",
+    "Record a receipt so the fix is auditable as its own shipping event.",
+  ],
+    required_capabilities: ["git.get_diff", "project.scan", "runtime.approved_plan", "runtime.dry_run", "runtime.record_run"],
+  }
+}
+
+pipeline run(task) {
+  let manifest = fixer_manifest()
+  println(json_stringify(manifest))
+  return manifest
+}

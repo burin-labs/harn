@@ -24,6 +24,11 @@ granular archaeology.
   ledger consumers. Runtime run boundaries also persist `persona.value.*`
   events into the existing persona runtime topic, including deterministic
   execution savings and frontier escalation paid-cost deltas.
+- **Fixer persona v0 for Flow remediation (#587).** Adds the
+  `invariant.blocked_with_remediation` surface, a remediation-bearing
+  invariant result, a `harn-vm` Fixer helper that re-signs suggested atoms as
+  auditable Fixer atoms and derives a follow-up slice, plus the checked-in
+  `personas/fixer` role manifest.
 - **First-class worker lifecycle events on ACP and A2A (#703).** Adds
   two new typed `WorkerEvent` variants (`WorkerProgressed`,
   `WorkerWaitingForInput`) and surfaces every worker lifecycle
