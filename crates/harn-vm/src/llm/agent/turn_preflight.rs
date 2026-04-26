@@ -161,6 +161,15 @@ pub(super) async fn run_turn_preflight(
             content: content.clone(),
         })
         .await;
+        crate::llm::agent_observe::append_llm_observability_entry(
+            "feedback_injected",
+            serde_json::Map::from_iter([
+                ("iteration".to_string(), serde_json::json!(ctx.iteration)),
+                ("session_id".to_string(), serde_json::json!(ctx.session_id)),
+                ("kind".to_string(), serde_json::json!(kind.clone())),
+                ("content".to_string(), serde_json::json!(content.clone())),
+            ]),
+        );
         if kind == "prefill_assistant" {
             opts.prefill = Some(content);
             continue;

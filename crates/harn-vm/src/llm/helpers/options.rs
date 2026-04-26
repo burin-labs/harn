@@ -375,11 +375,15 @@ pub(crate) fn extract_llm_options(
         .and_then(|v| match v {
             VmValue::Bool(true) => Some(ThinkingConfig::Enabled),
             VmValue::Dict(d) => {
-                let budget = d
-                    .get("budget_tokens")
-                    .and_then(|b| b.as_int())
-                    .unwrap_or(10000);
-                Some(ThinkingConfig::WithBudget(budget))
+                if d.get("enabled").is_some_and(|enabled| !enabled.is_truthy()) {
+                    None
+                } else {
+                    let budget = d
+                        .get("budget_tokens")
+                        .and_then(|b| b.as_int())
+                        .unwrap_or(10000);
+                    Some(ThinkingConfig::WithBudget(budget))
+                }
             }
             _ if v.is_truthy() => Some(ThinkingConfig::Enabled),
             _ => None,
@@ -1033,5 +1037,32 @@ mod routing_tests {
         assert_eq!(opts.model, "fast-mid-model");
         crate::llm_config::clear_user_overrides();
         super::super::reset_provider_key_cache();
+    }
+
+    #[test]
+    fn thinking_dict_enabled_false_disables_thinking() {
+        let mut options = BTreeMap::new();
+        options.insert(
+            "provider".to_string(),
+            VmValue::String(Rc::from("mock".to_string())),
+        );
+        options.insert(
+            "model".to_string(),
+            VmValue::String(Rc::from("gpt-5.4".to_string())),
+        );
+        options.insert(
+            "thinking".to_string(),
+            VmValue::Dict(Rc::new(BTreeMap::from([(
+                "enabled".to_string(),
+                VmValue::Bool(false),
+            )]))),
+        );
+        let opts = extract_llm_options(&[
+            VmValue::String(Rc::from("hello".to_string())),
+            VmValue::Nil,
+            VmValue::Dict(Rc::new(options)),
+        ])
+        .expect("options");
+        assert!(opts.thinking.is_none());
     }
 }

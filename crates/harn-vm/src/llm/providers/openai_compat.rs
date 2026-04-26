@@ -186,29 +186,29 @@ impl OpenAiCompatibleProvider {
         if let Some(ref tc) = opts.tool_choice {
             body["tool_choice"] = tc.clone();
         }
-        // Always set explicitly: Qwen templates default enabled when
-        // absent, making fast tool-call turns waste budget on thinking.
-        // OpenRouter / Anthropic-routed strip it via transform_request().
-        // When prefill is present we also set `add_generation_prompt:
-        // false` so vLLM continues the final assistant message instead
-        // of starting a fresh assistant turn after it.
-        let mut chat_template_kwargs = serde_json::json!({
-            "enable_thinking": opts.thinking.is_some(),
-        });
-        if opts.prefill.is_some() {
-            chat_template_kwargs["add_generation_prompt"] = serde_json::json!(false);
-            chat_template_kwargs["continue_final_message"] = serde_json::json!(true);
-        }
-        // Qwen3.6 introduced `preserve_thinking`. When the capability
-        // matrix says the current (provider, model) pair honours it,
-        // emit the flag so the chat template carries `<think>` blocks
-        // across turns. Alibaba recommends it for long-horizon tool
-        // loops. Providers that don't understand the kwarg ignore it.
         let caps = crate::llm::capabilities::lookup(&opts.provider, &opts.model);
-        if caps.preserve_thinking {
-            chat_template_kwargs["preserve_thinking"] = serde_json::json!(true);
+        if caps.honors_chat_template_kwargs {
+            // Always set explicitly for compatible Qwen/DeepSeek
+            // templates: some default thinking on when absent, making
+            // fast tool-call turns waste budget on reasoning.
+            // When prefill is present, continue the final assistant
+            // message instead of starting a fresh assistant turn.
+            let mut chat_template_kwargs = serde_json::json!({
+                "enable_thinking": opts.thinking.is_some(),
+            });
+            if opts.prefill.is_some() {
+                chat_template_kwargs["add_generation_prompt"] = serde_json::json!(false);
+                chat_template_kwargs["continue_final_message"] = serde_json::json!(true);
+            }
+            // Qwen3.6 introduced `preserve_thinking`. When the capability
+            // matrix says the current (provider, model) pair honours it,
+            // emit the flag so the chat template carries `<think>` blocks
+            // across turns.
+            if caps.preserve_thinking {
+                chat_template_kwargs["preserve_thinking"] = serde_json::json!(true);
+            }
+            body["chat_template_kwargs"] = chat_template_kwargs;
         }
-        body["chat_template_kwargs"] = chat_template_kwargs;
         body
     }
 
@@ -351,19 +351,26 @@ mod tests {
     }
 
     #[test]
-    fn qwen35_does_not_emit_preserve_thinking() {
+    fn ollama_qwen35_does_not_emit_chat_template_kwargs() {
         let mut payload = base_request_payload();
         payload.provider = "ollama".to_string();
         payload.model = "qwen3.5:35b-a3b-coding-nvfp4".to_string();
         payload.thinking = Some(ThinkingConfig::Enabled);
         let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
         assert!(
-            body["chat_template_kwargs"]
-                .get("preserve_thinking")
-                .is_none(),
-            "Qwen3.5 lacks the kwarg — we shouldn't send it"
+            body.get("chat_template_kwargs").is_none(),
+            "Ollama silently drops chat_template_kwargs today; gate them so strict validation would not break requests"
         );
-        assert_eq!(body["chat_template_kwargs"]["enable_thinking"], true);
+    }
+
+    #[test]
+    fn qwen35_local_disables_thinking_when_absent() {
+        let mut payload = base_request_payload();
+        payload.provider = "local".to_string();
+        payload.model = "Qwen/Qwen3.5-Coder-32B".to_string();
+        payload.thinking = None;
+        let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+        assert_eq!(body["chat_template_kwargs"]["enable_thinking"], false);
     }
 
     fn base_request_payload() -> LlmRequestPayload {

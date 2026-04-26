@@ -65,10 +65,6 @@ granular archaeology.
   block on hover so the function declaration stays the single source of
   truth. Attribute argument syntax also accepts list literals and
   multi-line forms so provenance blocks can carry rich evidence.
-## Unreleased
-
-### Added
-
 - **Flow `InvariantResult` graded-verdict types and Harn bindings (#581).**
   Predicates now return a structured `InvariantResult { verdict, evidence,
   remediation, confidence }` value where `verdict` grades as `Allow`, `Warn`,
