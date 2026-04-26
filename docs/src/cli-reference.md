@@ -442,6 +442,22 @@ unparsable model listings, and missing models. It does not run local launcher
 scripts; host applications that auto-start local servers should report launch
 failures themselves and then call this probe again.
 
+## harn model-info
+
+Print resolved model metadata as JSON. For Ollama models, `--verify` probes
+`/api/tags` and checks the selected tag. `--warm` implies `--verify` and sends
+an empty `/api/generate` request to preload the matched tag.
+
+```bash
+harn model-info llama3.2:latest
+harn model-info --verify llama3.2
+harn model-info --warm --keep-alive 30m llama3.2
+```
+
+Ollama readiness failures use stable `readiness.status` values, including
+`daemon_down`, `bad_status`, `invalid_response`, `model_missing`, and
+`warmup_failed`. `--verify` and `--warm` exit non-zero when readiness fails.
+
 ## harn connect
 
 Authorize connector providers and store local connector secrets in the

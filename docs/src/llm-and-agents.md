@@ -1255,7 +1255,7 @@ println("Remaining: $${llm_budget_remaining()}")
 
 ### Ollama
 
-- Endpoint: `<OLLAMA_HOST>/v1/chat/completions`
+- Endpoint: `<OLLAMA_HOST>/api/chat`
 - Default host: `http://localhost:11434`
 - No authentication required
 - Same message format as OpenAI

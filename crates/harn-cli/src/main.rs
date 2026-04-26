@@ -16,8 +16,8 @@ use std::sync::Arc;
 use std::{env, fs, process, thread};
 
 use cli::{
-    Cli, Command, PackageCacheCommand, PackageCommand, PersonaCommand, RunsCommand, ServeCommand,
-    SkillCommand, SkillKeyCommand, SkillTrustCommand, SkillsCommand,
+    Cli, Command, ModelInfoArgs, PackageCacheCommand, PackageCommand, PersonaCommand, RunsCommand,
+    ServeCommand, SkillCommand, SkillKeyCommand, SkillTrustCommand, SkillsCommand,
 };
 use harn_lexer::Lexer;
 use harn_parser::{DiagnosticSeverity, Parser, TypeChecker};
@@ -718,7 +718,11 @@ async fn async_main() {
                 }
             }
         },
-        Command::ModelInfo(args) => print_model_info(&args.model).await,
+        Command::ModelInfo(args) => {
+            if !print_model_info(&args).await {
+                process::exit(1);
+            }
+        }
         Command::ProviderCatalog(args) => print_provider_catalog(args.available_only),
         Command::ProviderReady(args) => {
             run_provider_ready(
@@ -772,8 +776,8 @@ fn print_version() {
     );
 }
 
-async fn print_model_info(model: &str) {
-    let resolved = harn_vm::llm_config::resolve_model_info(model);
+async fn print_model_info(args: &ModelInfoArgs) -> bool {
+    let resolved = harn_vm::llm_config::resolve_model_info(&args.model);
     let api_key_result = harn_vm::llm::resolve_api_key(&resolved.provider);
     let api_key_set = api_key_result.is_ok();
     let api_key = api_key_result.unwrap_or_default();
@@ -782,8 +786,8 @@ async fn print_model_info(model: &str) {
     let readiness = local_openai_readiness(&resolved.provider, &resolved.id, &api_key).await;
     let catalog = harn_vm::llm_config::model_catalog_entry(&resolved.id);
     let capabilities = harn_vm::llm::capabilities::lookup(&resolved.provider, &resolved.id);
-    let payload = serde_json::json!({
-        "alias": model,
+    let mut payload = serde_json::json!({
+        "alias": args.model,
         "id": resolved.id,
         "provider": resolved.provider,
         "resolved_alias": resolved.alias,
@@ -804,12 +808,47 @@ async fn print_model_info(model: &str) {
         },
         "qc_default_model": harn_vm::llm_config::qc_default_model(&resolved.provider),
     });
+
+    let should_verify = args.verify || args.warm;
+    let mut ok = true;
+    if should_verify {
+        if resolved.provider == "ollama" {
+            let mut readiness = harn_vm::llm::OllamaReadinessOptions::new(resolved.id.clone());
+            readiness.warm = args.warm;
+            readiness.keep_alive = args
+                .keep_alive
+                .as_deref()
+                .and_then(harn_vm::llm::normalize_ollama_keep_alive);
+            let result = harn_vm::llm::ollama_readiness(readiness).await;
+            ok = result.valid;
+            payload["readiness"] = serde_json::to_value(&result).unwrap_or_else(|error| {
+                serde_json::json!({
+                    "valid": false,
+                    "status": "serialization_error",
+                    "message": format!("failed to serialize readiness result: {error}"),
+                })
+            });
+        } else {
+            ok = false;
+            payload["readiness"] = serde_json::json!({
+                "valid": false,
+                "status": "unsupported_provider",
+                "message": format!(
+                    "model-info --verify is only supported for Ollama models; resolved provider is '{}'",
+                    resolved.provider
+                ),
+                "provider": resolved.provider,
+            });
+        }
+    }
+
     println!(
         "{}",
         serde_json::to_string(&payload).unwrap_or_else(|error| {
             command_error(&format!("failed to serialize model info: {error}"))
         })
     );
+    ok
 }
 
 async fn local_openai_readiness(
