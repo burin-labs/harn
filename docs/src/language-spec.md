@@ -4375,6 +4375,8 @@ The following environment variables configure runtime behavior:
 | `HF_TOKEN` | API key for the HuggingFace provider. |
 | `HUGGINGFACE_API_KEY` | Alternate API key name for the HuggingFace provider. |
 | `OLLAMA_HOST` | Override the Ollama host. Default `http://localhost:11434`. |
+| `HARN_OLLAMA_NUM_CTX` | Preferred Ollama context window for Harn-owned Ollama chat, completion, context-window fallback, and warmup requests. Must be a positive integer. Takes precedence over `OLLAMA_CONTEXT_LENGTH` and `OLLAMA_NUM_CTX`; default `32768`. Hosts that persist IDE preferences should pass the raw stored value here and let Harn validate/default it. |
+| `HARN_OLLAMA_KEEP_ALIVE` | Preferred Ollama keep-alive for Harn-owned Ollama chat, completion, and warmup requests. Takes precedence over `OLLAMA_KEEP_ALIVE`; default `30m`. `forever`, `infinite`, and `-1` normalize to Ollama's numeric `-1`; `default` normalizes to `30m`. |
 | `LOCAL_LLM_BASE_URL` | Base URL for a local OpenAI-compatible server. Default `http://localhost:8000`. |
 | `LOCAL_LLM_MODEL` | Default model ID for the local OpenAI-compatible provider. |
 

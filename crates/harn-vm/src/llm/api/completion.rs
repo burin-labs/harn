@@ -8,7 +8,6 @@ use std::rc::Rc;
 use crate::value::{VmError, VmValue};
 
 use super::auth::apply_auth_headers;
-use super::ollama::{ollama_keep_alive_override, ollama_num_ctx_override};
 use super::options::LlmCallOptions;
 use super::response::{extract_cache_read_tokens, extract_cache_write_tokens};
 use super::result::{mock_completion_response, LlmResult};
@@ -151,9 +150,6 @@ async fn vm_call_completion_ollama(
         .unwrap_or("/api/generate");
 
     let mut options = serde_json::Map::new();
-    if let Some(num_ctx) = ollama_num_ctx_override() {
-        options.insert("num_ctx".to_string(), serde_json::json!(num_ctx));
-    }
     if let Some(temp) = opts.temperature {
         options.insert("temperature".to_string(), serde_json::json!(temp));
     }
@@ -187,16 +183,7 @@ async fn vm_call_completion_ollama(
     if let Some(system) = &opts.system {
         body["system"] = serde_json::json!(system);
     }
-    if let Some(keep_alive) = ollama_keep_alive_override() {
-        body["keep_alive"] = keep_alive;
-    }
-    if let Some(overrides) = &opts.provider_overrides {
-        if let Some(obj) = overrides.as_object() {
-            for (k, v) in obj {
-                body[k] = v.clone();
-            }
-        }
-    }
+    super::apply_ollama_runtime_settings(&mut body, opts.provider_overrides.as_ref());
 
     let req = client
         .post(format!("{base_url}{endpoint}"))

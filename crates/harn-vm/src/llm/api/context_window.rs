@@ -114,14 +114,7 @@ async fn fetch_ollama_context_window(model: &str, base_url: &str) -> Option<usiz
     {
         return Some(n as usize);
     }
-    // OLLAMA_NUM_CTX env override for a user-configured context window.
-    if let Ok(val) = std::env::var("OLLAMA_NUM_CTX") {
-        if let Ok(n) = val.parse::<usize>() {
-            return Some(n);
-        }
-    }
-    // Let caller use its default threshold (Ollama defaults vary 2048-8192).
-    None
+    Some(super::ollama::ollama_runtime_settings_from_env().num_ctx as usize)
 }
 
 /// Fetch context window from an OpenAI-compatible `/models` endpoint.
