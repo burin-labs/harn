@@ -29,7 +29,7 @@ def changelog_section_body(version: str) -> str:
     """Return the body content under `## vX.Y.Z` up to the next heading."""
     text = CHANGELOG.read_text()
     match = re.search(
-        rf"(?ms)^## v{re.escape(version)}\n(.*?)(?=^## v|\Z)",
+        rf"(?ms)^## v{re.escape(version)}\n(.*?)(?=^## |\Z)",
         text,
     )
     return match.group(1).strip() if match else ""

@@ -97,6 +97,8 @@ module.exports = grammar({
         $.true,
         $.false,
         $.nil,
+        $.list_literal,
+        $.dict_literal,
         $.identifier
       ),
 

@@ -42,6 +42,13 @@ granular archaeology.
   with the current `invariants.harn` set, while `harn flow ship watch` and
   `harn flow archivist scan` provide the Phase 0 Ship Captain and Archivist
   command surfaces for shadow-mode workflows.
+- **Flow `InvariantResult` graded-verdict types and Harn bindings (#581).**
+  Predicates now return a structured `InvariantResult { verdict, evidence,
+  remediation, confidence }` value where `verdict` grades as `Allow`, `Warn`,
+  `Block`, or `RequireApproval` (routing to a specific `Principal` or
+  `Role`). Evidence items cover `AtomPointer`, `MetadataPath`,
+  `TranscriptExcerpt`, and `ExternalCitation`. Matching Harn-side builtins let
+  `.harn` predicates produce these values idiomatically.
 - **First-class worker lifecycle events on ACP and A2A (#703).** Adds
   two new typed `WorkerEvent` variants (`WorkerProgressed`,
   `WorkerWaitingForInput`) and surfaces every worker lifecycle
@@ -96,38 +103,6 @@ granular archaeology.
   block on hover so the function declaration stays the single source of
   truth. Attribute argument syntax also accepts list literals and
   multi-line forms so provenance blocks can carry rich evidence.
-
-## Unreleased
-
-### Added
-
-- **Flow hierarchical predicate composition (#582).** Adds
-  `crates/harn-vm/src/flow/predicates/compose.rs` with depth-stamped
-  predicate resolution, touched-directory union, and strictness-based result
-  composition. Ancestor and child declarations are evaluated together so a
-  child can tighten an ancestor verdict, but cannot relax a shallower `Block`;
-  equal-severity ties keep the shallower predicate canonical.
-- **Flow predicate hash replay audit (#583).** `invariants.harn`
-  discovery now pins a `sha256:` source hash for every Flow predicate,
-  shipped derived slices can be queried from the SQLite Flow store
-  without mutating history, and slice tables now reject direct
-  update/delete attempts at the SQLite boundary. The new
-  `harn flow replay-audit --since <date>` command compares shipped
-  slice predicate hashes against the current `@retroactive` predicate
-  set, reports advisory drift in human or JSON form, and exits non-zero
-  only when `--fail-on-drift` is requested.
-- **Flow `InvariantResult` graded-verdict types and Harn bindings (#581).**
-  Predicates now return a structured `InvariantResult { verdict, evidence,
-  remediation, confidence }` value where `verdict` grades as `Allow`, `Warn`,
-  `Block`, or `RequireApproval` (routing to a specific `Principal` or
-  `Role`). Evidence items cover `AtomPointer`, `MetadataPath`,
-  `TranscriptExcerpt`, and `ExternalCitation`. The Rust types live in
-  `crates/harn-vm/src/flow/predicates/result.rs`; matching Harn-side
-  builtins (`flow_invariant_allow`/`warn`/`block`/`require_approval`,
-  `flow_evidence_*`, `flow_remediation`, `flow_with_*`,
-  `flow_invariant_kind`/`is_blocking`/`confidence`) let `.harn` predicates
-  produce these values idiomatically. Remediations are inert and earmarked
-  for the future Fixer persona (#587).
 
 ### Fixed
 

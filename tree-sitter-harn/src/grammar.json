@@ -386,6 +386,14 @@
         },
         {
           "type": "SYMBOL",
+          "name": "list_literal"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "dict_literal"
+        },
+        {
+          "type": "SYMBOL",
           "name": "identifier"
         }
       ]

@@ -18,6 +18,7 @@
     "node_modules",
     "**/node_modules",
     "target",
+    "docs/dist",
     ".burin",
     ".claude",
     "docs/src/SUMMARY.md",
