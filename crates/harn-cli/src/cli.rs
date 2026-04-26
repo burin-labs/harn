@@ -122,6 +122,8 @@ SCRIPTING
     Persona(PersonaArgs),
     /// Print resolved metadata for a model alias or model id as JSON.
     ModelInfo(ModelInfoArgs),
+    /// Print the provider/model catalog Harn loaded as JSON.
+    ProviderCatalog(ProviderCatalogArgs),
     /// Manage and inspect Harn skills (list, inspect, match, install, new).
     Skills(SkillsArgs),
     /// Manage skill provenance: keys, signatures, verification, and trust policy.
@@ -2018,6 +2020,13 @@ pub(crate) struct ModelInfoArgs {
 }
 
 #[derive(Debug, Args)]
+pub(crate) struct ProviderCatalogArgs {
+    /// Only include providers that are usable in the current environment.
+    #[arg(long)]
+    pub available_only: bool,
+}
+
+#[derive(Debug, Args)]
 pub(crate) struct SkillsArgs {
     #[command(subcommand)]
     pub command: SkillsCommand,
@@ -3544,5 +3553,15 @@ mod tests {
             panic!("expected model-info command");
         };
         assert_eq!(args.model, "tog-gemma4-31b");
+    }
+
+    #[test]
+    fn test_parses_provider_catalog_args() {
+        let cli = Cli::parse_from(["harn", "provider-catalog", "--available-only"]);
+
+        let Command::ProviderCatalog(args) = cli.command.unwrap() else {
+            panic!("expected provider-catalog command");
+        };
+        assert!(args.available_only);
     }
 }
