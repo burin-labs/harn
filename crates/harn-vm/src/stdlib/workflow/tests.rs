@@ -1,12 +1,12 @@
 use super::artifact::{load_run_tree, snapshot_trace_spans};
 use super::map::{execute_join_policy, LocalTask};
 use super::register::execute_workflow;
-use super::stage::{classify_stage_outcome, execute_stage_attempts};
+use super::stage::{classify_stage_outcome, execute_stage_attempts, replay_stage};
 use crate::orchestration::{
     inject_workflow_verification_contracts, render_artifacts_context, render_workflow_prompt,
     save_run_record, workflow_verification_contracts, RunChildRecord, RunExecutionRecord,
-    RunRecord, VerificationContract, VerificationRequirement, WorkflowEdge, WorkflowGraph,
-    WorkflowNode,
+    RunRecord, RunStageRecord, VerificationContract, VerificationRequirement, WorkflowEdge,
+    WorkflowGraph, WorkflowNode,
 };
 use crate::tracing::{set_tracing_enabled, span_end, span_start, SpanKind};
 use crate::value::VmValue;
@@ -84,6 +84,86 @@ fn load_run_tree_recurses_into_child_runs() {
     assert_eq!(tree["children"][0]["run"]["id"], "child");
 
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn load_run_tree_recovers_child_runs_from_stage_worker_metadata() {
+    let dir = std::env::temp_dir().join(format!("harn-run-tree-{}", uuid::Uuid::now_v7()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let child_path = dir.join("child.json");
+    let parent_path = dir.join("parent.json");
+
+    let child = RunRecord {
+        id: "child".to_string(),
+        workflow_id: "wf".to_string(),
+        root_run_id: Some("parent".to_string()),
+        parent_run_id: Some("parent".to_string()),
+        status: "completed".to_string(),
+        ..Default::default()
+    };
+    let parent = RunRecord {
+        id: "parent".to_string(),
+        workflow_id: "wf".to_string(),
+        root_run_id: Some("parent".to_string()),
+        status: "completed".to_string(),
+        stages: vec![RunStageRecord {
+            id: "stage_1".to_string(),
+            node_id: "delegate".to_string(),
+            metadata: BTreeMap::from([(
+                "worker".to_string(),
+                serde_json::json!({
+                    "id": "worker_1",
+                    "name": "worker",
+                    "task": "delegate",
+                    "status": "completed",
+                    "child_run_id": "child",
+                    "child_run_path": child_path.to_string_lossy(),
+                    "snapshot_path": ".harn/workers/worker_1.json",
+                }),
+            )]),
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+
+    save_run_record(&child, Some(child_path.to_str().unwrap())).unwrap();
+    save_run_record(&parent, Some(parent_path.to_str().unwrap())).unwrap();
+
+    let tree = load_run_tree(parent_path.to_str().unwrap()).unwrap();
+    assert_eq!(tree["run"]["child_runs"][0]["run_id"], "child");
+    assert_eq!(tree["children"][0]["run"]["id"], "child");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn deterministic_replay_preserves_worker_child_run_metadata() {
+    let child_path = ".harn-runs/child.json";
+    let mut stages = std::collections::VecDeque::from(vec![RunStageRecord {
+        id: "run:delegate:1".to_string(),
+        node_id: "delegate".to_string(),
+        kind: "subagent".to_string(),
+        status: "completed".to_string(),
+        outcome: "subagent_completed".to_string(),
+        branch: Some("success".to_string()),
+        metadata: BTreeMap::from([(
+            "worker".to_string(),
+            serde_json::json!({
+                "id": "worker_1",
+                "name": "delegate",
+                "task": "delegate task",
+                "status": "completed",
+                "child_run_id": "child",
+                "child_run_path": child_path,
+            }),
+        )]),
+        ..Default::default()
+    }]);
+
+    let replayed = replay_stage("delegate", &mut stages).unwrap();
+    assert_eq!(replayed.result["worker"]["id"], "worker_1");
+    assert_eq!(replayed.result["worker"]["child_run_id"], "child");
+    assert_eq!(replayed.result["worker"]["child_run_path"], child_path);
 }
 
 #[test]

@@ -267,14 +267,19 @@ saved artifacts, transcript state, and traversed run-graph edges.
 Deterministic replay is now a runtime mode rather than a CLI-only inspection
 tool: passing a prior run via `replay_run` or `replay_path` replays saved stage
 records and artifacts through the workflow engine without calling providers or
-tools again.
+tools again. For delegated stages, replay also preserves the recorded worker
+envelope from stage metadata so replayed parent runs keep the same child
+run/snapshot pointers for inspection and evals.
 
 Delegated runs surface child worker lineage in each delegated stage's metadata.
 This makes replay/eval and host timelines able to distinguish parent execution
 from child execution without reconstructing that structure from plain text.
 Persisted runs also retain explicit `parent_run_id`, `root_run_id`, and
 `child_runs` lineage, and `load_run_tree(path)` materializes that hierarchy
-recursively for inspection or host-side task views.
+recursively for inspection or host-side task views. When a process exits after a
+stage record is written but before the parent `child_runs` list is refreshed,
+subsequent save/load/normalize passes recover the child entry from the stage's
+worker metadata before exposing or replaying the run.
 
 Map nodes can now execute branch work in parallel. `node.join_policy.strategy`
 accepts:
