@@ -12,7 +12,7 @@ pub mod slice;
 pub use atom::{Atom, AtomError, AtomId, AtomSignature, Provenance, TextOp};
 pub use backend::{
     AtomRef, FlowNativeBackend, FlowSlice, GitExportReceipt, ShadowGitBackend, ShipReceipt,
-    SliceId, VcsBackend, VcsBackendError,
+    VcsBackend, VcsBackendError,
 };
 pub use intent::{
     Intent, IntentBoundaryClassifier, IntentBoundaryDecision, IntentBoundaryDispute,

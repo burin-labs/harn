@@ -13,11 +13,11 @@ use std::process::{Command, Stdio};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use super::slice::SliceId;
 use super::{Atom, AtomError, AtomId};
 
 const ATOM_REF_PREFIX: &str = "refs/flow/atoms";
 const SLICE_REF_PREFIX: &str = "refs/flow/slices";
-const SLICE_ID_BYTES: usize = 32;
 
 /// Errors produced by Flow VCS backends.
 #[derive(Debug)]
@@ -85,51 +85,6 @@ impl From<serde_json::Error> for VcsBackendError {
 impl From<std::io::Error> for VcsBackendError {
     fn from(error: std::io::Error) -> Self {
         Self::Io(error.to_string())
-    }
-}
-
-/// Deterministic identifier for a shippable Flow slice.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct SliceId(pub [u8; SLICE_ID_BYTES]);
-
-impl SliceId {
-    /// Produce a hex-encoded representation suitable for refs and logs.
-    pub fn to_hex(&self) -> String {
-        hex::encode(self.0)
-    }
-}
-
-impl fmt::Debug for SliceId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "SliceId({})", self.to_hex())
-    }
-}
-
-impl fmt::Display for SliceId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.to_hex())
-    }
-}
-
-impl Serialize for SliceId {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(&self.to_hex())
-    }
-}
-
-impl<'de> Deserialize<'de> for SliceId {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let raw = String::deserialize(deserializer)?;
-        let bytes = hex::decode(&raw).map_err(serde::de::Error::custom)?;
-        if bytes.len() != SLICE_ID_BYTES {
-            return Err(serde::de::Error::custom(format!(
-                "SliceId must be {SLICE_ID_BYTES} bytes, got {}",
-                bytes.len()
-            )));
-        }
-        let mut out = [0u8; SLICE_ID_BYTES];
-        out.copy_from_slice(&bytes);
-        Ok(Self(out))
     }
 }
 
