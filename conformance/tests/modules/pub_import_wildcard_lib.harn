@@ -1,0 +1,7 @@
+pub fn one() {
+  return 1
+}
+
+pub fn two() {
+  return 2
+}

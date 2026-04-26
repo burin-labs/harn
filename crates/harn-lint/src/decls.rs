@@ -20,6 +20,11 @@ pub(crate) struct Declaration {
 pub(crate) struct ImportInfo {
     pub(crate) names: Vec<String>,
     pub(crate) span: Span,
+    /// True for `pub import { ... } from "..."`. The selectively listed
+    /// names are part of the module's public surface, so the
+    /// `unused-import` lint must not flag them as unused even if no
+    /// local code references them.
+    pub(crate) is_pub: bool,
 }
 
 /// A parameter declaration tracked during linting.

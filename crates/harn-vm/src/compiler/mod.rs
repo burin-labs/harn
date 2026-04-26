@@ -408,11 +408,11 @@ impl Compiler {
             } => {
                 self.compile_struct_construct(struct_name, fields)?;
             }
-            Node::ImportDecl { path } => {
+            Node::ImportDecl { path, .. } => {
                 let idx = self.chunk.add_constant(Constant::String(path.clone()));
                 self.chunk.emit_u16(Op::Import, idx, self.line);
             }
-            Node::SelectiveImport { names, path } => {
+            Node::SelectiveImport { names, path, .. } => {
                 let path_idx = self.chunk.add_constant(Constant::String(path.clone()));
                 let names_str = names.join(",");
                 let names_idx = self.chunk.add_constant(Constant::String(names_str));

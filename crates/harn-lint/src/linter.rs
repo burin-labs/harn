@@ -866,6 +866,12 @@ impl<'a> Linter<'a> {
         }
 
         for import in &self.imports {
+            // `pub import { ... } from "..."` re-exports the listed names as
+            // part of this module's public surface. They will not have local
+            // references in the file by design, so silence `unused-import`.
+            if import.is_pub {
+                continue;
+            }
             let unused: Vec<&String> = import
                 .names
                 .iter()

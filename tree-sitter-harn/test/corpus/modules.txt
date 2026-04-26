@@ -110,6 +110,32 @@ import {
     (string_literal)))
 
 ==================
+Public Wildcard Re-Export
+==================
+
+pub import "lib/shared"
+
+---
+
+(source_file
+  (import_declaration
+    (string_literal)))
+
+==================
+Public Selective Re-Export
+==================
+
+pub import { greet, add } from "lib/helpers"
+
+---
+
+(source_file
+  (import_declaration
+    (identifier)
+    (identifier)
+    (string_literal)))
+
+==================
 Public And Generic Declarations
 ==================
 

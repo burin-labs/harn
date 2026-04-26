@@ -225,7 +225,7 @@ fn scan_node_bundle(
     manifest: &mut BundleManifestBuilder,
 ) {
     match &node.node {
-        Node::ImportDecl { path } | Node::SelectiveImport { path, .. } => {
+        Node::ImportDecl { path, .. } | Node::SelectiveImport { path, .. } => {
             if path.starts_with("std/") {
                 return;
             }

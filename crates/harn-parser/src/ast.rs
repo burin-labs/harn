@@ -120,11 +120,17 @@ pub enum Node {
     },
     ImportDecl {
         path: String,
+        /// When true, the wildcard import is a re-export: every public symbol
+        /// from the target module becomes part of this module's public surface.
+        is_pub: bool,
     },
     /// Selective import: import { foo, bar } from "module"
     SelectiveImport {
         names: Vec<String>,
         path: String,
+        /// When true, the listed names are re-exported as part of this
+        /// module's public surface.
+        is_pub: bool,
     },
     EnumDecl {
         name: String,

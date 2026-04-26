@@ -149,8 +149,9 @@ module.exports = grammar({
 
     import_declaration: ($) =>
       choice(
-        seq("import", $.string_literal),
+        seq(optional("pub"), "import", $.string_literal),
         seq(
+          optional("pub"),
           "import",
           "{",
           commaSep1($.identifier),
@@ -160,6 +161,7 @@ module.exports = grammar({
           $.string_literal
         ),
         seq(
+          optional("pub"),
           "import",
           "{",
           $._newline,

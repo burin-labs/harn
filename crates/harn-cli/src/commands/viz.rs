@@ -338,10 +338,18 @@ fn summarize_node(node: &SNode) -> String {
                 inline_label(value)
             )
         }
-        Node::ImportDecl { path } => format!("import \"{}\"", truncate(path)),
-        Node::SelectiveImport { names, path } => {
+        Node::ImportDecl { path, is_pub } => {
+            let prefix = if *is_pub { "pub " } else { "" };
+            format!("{prefix}import \"{}\"", truncate(path))
+        }
+        Node::SelectiveImport {
+            names,
+            path,
+            is_pub,
+        } => {
+            let prefix = if *is_pub { "pub " } else { "" };
             format!(
-                "import {{{}}} from \"{}\"",
+                "{prefix}import {{{}}} from \"{}\"",
                 names.join(", "),
                 truncate(path)
             )

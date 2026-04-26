@@ -8,7 +8,7 @@ use crate::package::CheckConfig;
 use crate::parse_source_file;
 
 use super::host_capabilities::{is_known_host_operation, load_host_capabilities};
-use super::imports::scan_import_collisions;
+use super::imports::{scan_import_collisions, scan_re_export_conflicts};
 use super::mock_host::collect_mock_host_capabilities;
 
 pub(super) struct PreflightDiagnostic {
@@ -71,6 +71,7 @@ pub(super) fn collect_preflight_diagnostics(
     );
 
     scan_import_collisions(&canonical, source, program, &mut diagnostics);
+    scan_re_export_conflicts(&canonical, source, program, &mut diagnostics);
 
     diagnostics
 }
@@ -113,7 +114,7 @@ fn scan_node_preflight(
     diagnostics: &mut Vec<PreflightDiagnostic>,
 ) {
     match &node.node {
-        Node::ImportDecl { path } | Node::SelectiveImport { path, .. } => {
+        Node::ImportDecl { path, .. } | Node::SelectiveImport { path, .. } => {
             if path.starts_with("std/") {
                 return;
             }

@@ -1,0 +1,5 @@
+import "pub_import_duplicate_facade"
+
+pipeline default() {
+  println(duplicate())
+}

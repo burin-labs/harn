@@ -51,8 +51,25 @@ struct ModuleInfo {
     /// All declarations visible in this module (for local symbol lookup and
     /// go-to-definition resolution).
     declarations: HashMap<String, DefSite>,
-    /// Public exports exposed by wildcard imports.
+    /// Names exported by this module after re-export resolution. Equal to
+    /// [`own_exports`] union the keys of [`selective_re_exports`] union the
+    /// transitive exports of [`wildcard_re_export_paths`]. Populated in
+    /// `build()` after all modules are loaded.
     exports: HashSet<String>,
+    /// Names declared locally and exported by this module — i.e. `pub fn`,
+    /// `pub struct`, etc., or every `fn` under the no-`pub fn` fallback.
+    own_exports: HashSet<String>,
+    /// Selective re-exports introduced by `pub import { name } from "..."`.
+    /// Maps the re-exported name to every canonical source module path it
+    /// could originate from. Multiple entries per name indicate a conflict
+    /// (`pub import { foo } from "a"` and `pub import { foo } from "b"`)
+    /// and are surfaced by [`ModuleGraph::re_export_conflicts`]. Lookup
+    /// callers (e.g. go-to-definition) follow the first recorded source.
+    selective_re_exports: HashMap<String, Vec<PathBuf>>,
+    /// Wildcard re-exports introduced by `pub import "..."`. Each entry is
+    /// the canonical path of a module whose entire public export surface
+    /// this module re-exports.
+    wildcard_re_export_paths: Vec<PathBuf>,
     /// Names introduced by selective imports across this module.
     selective_import_names: HashSet<String>,
     /// Import references encountered in this file.
@@ -132,7 +149,47 @@ pub fn build(files: &[PathBuf]) -> ModuleGraph {
         }
         modules.insert(path, module);
     }
+    resolve_re_exports(&mut modules);
     ModuleGraph { modules }
+}
+
+/// Iteratively expand each module's `exports` set to include the transitive
+/// public surface of its `pub import "..."` re-export targets. Cycles are
+/// safe because the loop only adds names — once no module's set grows in a
+/// pass, the fixpoint is reached.
+fn resolve_re_exports(modules: &mut HashMap<PathBuf, ModuleInfo>) {
+    let keys: Vec<PathBuf> = modules.keys().cloned().collect();
+    loop {
+        let mut changed = false;
+        for path in &keys {
+            // Snapshot the wildcard target list and gather the union of
+            // their current exports without holding a mutable borrow.
+            let wildcard_paths = modules
+                .get(path)
+                .map(|m| m.wildcard_re_export_paths.clone())
+                .unwrap_or_default();
+            if wildcard_paths.is_empty() {
+                continue;
+            }
+            let mut additions: Vec<String> = Vec::new();
+            for src in &wildcard_paths {
+                let src_canonical = normalize_path(src);
+                if let Some(src_module) = modules.get(src).or_else(|| modules.get(&src_canonical)) {
+                    additions.extend(src_module.exports.iter().cloned());
+                }
+            }
+            if let Some(module) = modules.get_mut(path) {
+                for name in additions {
+                    if module.exports.insert(name) {
+                        changed = true;
+                    }
+                }
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
 }
 
 /// Resolve an import string relative to the importing file.
@@ -340,11 +397,11 @@ impl ModuleGraph {
     /// behavior instead of emitting spurious "undefined name" errors.
     ///
     /// The returned set contains:
-    /// - all public exports from wildcard-imported modules, and
-    /// - selectively imported names that exist as declarations in their
-    ///   target module (unresolvable selective names are still included,
-    ///   but only if the target file itself resolved — if the file failed
-    ///   to parse, the caller will see `None`).
+    /// - all public exports from wildcard-imported modules (transitively
+    ///   following `pub import` re-export chains), and
+    /// - selectively imported names that exist either as local
+    ///   declarations in their target module or as a re-exported name —
+    ///   matching what the VM accepts at runtime.
     pub fn imported_names_for_file(&self, file: &Path) -> Option<HashSet<String>> {
         let file = normalize_path(file);
         let module = self.modules.get(&file)?;
@@ -365,7 +422,9 @@ impl ModuleGraph {
                 }
                 Some(selective) => {
                     for name in selective {
-                        if imported.declarations.contains_key(name) {
+                        if imported.declarations.contains_key(name)
+                            || imported.exports.contains(name)
+                        {
                             names.insert(name.clone());
                         }
                     }
@@ -392,78 +451,199 @@ impl ModuleGraph {
                 .modules
                 .get(import_path)
                 .or_else(|| self.modules.get(&normalize_path(import_path)))?;
-            match &import.selective_names {
-                None => {
-                    for decl in &imported.type_declarations {
-                        if let Some(name) = type_decl_name(decl) {
-                            if imported.exports.contains(name) {
-                                decls.push(decl.clone());
-                            }
-                        }
-                    }
-                }
-                Some(selective) => {
-                    for decl in &imported.type_declarations {
-                        if let Some(name) = type_decl_name(decl) {
-                            if selective.contains(name) {
-                                decls.push(decl.clone());
-                            }
-                        }
-                    }
+            let names_to_collect: Vec<String> = match &import.selective_names {
+                None => imported.exports.iter().cloned().collect(),
+                Some(selective) => selective.iter().cloned().collect(),
+            };
+            for name in &names_to_collect {
+                let mut visited = HashSet::new();
+                if let Some(decl) = self.find_exported_type_decl(import_path, name, &mut visited) {
+                    decls.push(decl);
                 }
             }
         }
         Some(decls)
     }
 
+    /// Walk a module's local type declarations and re-export chains to find
+    /// the SNode for an exported type/struct/enum/interface named `name`.
+    fn find_exported_type_decl(
+        &self,
+        path: &Path,
+        name: &str,
+        visited: &mut HashSet<PathBuf>,
+    ) -> Option<SNode> {
+        let canonical = normalize_path(path);
+        if !visited.insert(canonical.clone()) {
+            return None;
+        }
+        let module = self
+            .modules
+            .get(&canonical)
+            .or_else(|| self.modules.get(path))?;
+        for decl in &module.type_declarations {
+            if type_decl_name(decl) == Some(name) && module.own_exports.contains(name) {
+                return Some(decl.clone());
+            }
+        }
+        if let Some(sources) = module.selective_re_exports.get(name) {
+            for source in sources {
+                if let Some(decl) = self.find_exported_type_decl(source, name, visited) {
+                    return Some(decl);
+                }
+            }
+        }
+        for source in &module.wildcard_re_export_paths {
+            if let Some(decl) = self.find_exported_type_decl(source, name, visited) {
+                return Some(decl);
+            }
+        }
+        None
+    }
+
     /// Find the definition of `name` visible from `file`.
+    ///
+    /// Recurses through `pub import` re-export chains so go-to-definition
+    /// lands on the symbol's actual declaration site instead of the facade
+    /// module that forwarded it.
     pub fn definition_of(&self, file: &Path, name: &str) -> Option<DefSite> {
+        let mut visited = HashSet::new();
+        self.definition_of_inner(file, name, &mut visited)
+    }
+
+    fn definition_of_inner(
+        &self,
+        file: &Path,
+        name: &str,
+        visited: &mut HashSet<PathBuf>,
+    ) -> Option<DefSite> {
         let file = normalize_path(file);
+        if !visited.insert(file.clone()) {
+            return None;
+        }
         let current = self.modules.get(&file)?;
 
         if let Some(local) = current.declarations.get(name) {
             return Some(local.clone());
         }
 
-        for import in &current.imports {
-            if let Some(selective_names) = &import.selective_names {
-                if !selective_names.contains(name) {
-                    continue;
-                }
-            } else {
-                continue;
-            }
-
-            if let Some(path) = &import.path {
-                if let Some(symbol) = self
-                    .modules
-                    .get(path)
-                    .or_else(|| self.modules.get(&normalize_path(path)))
-                    .and_then(|module| module.declarations.get(name))
-                {
-                    return Some(symbol.clone());
+        // `pub import { name } from "..."` — follow the first recorded
+        // source. Conflicting re-exports surface separately as
+        // diagnostics; here we just pick a canonical destination so
+        // go-to-definition lands somewhere useful.
+        if let Some(sources) = current.selective_re_exports.get(name) {
+            for source in sources {
+                if let Some(def) = self.definition_of_inner(source, name, visited) {
+                    return Some(def);
                 }
             }
         }
 
+        // `pub import "..."` — chase each wildcard re-export source.
+        for source in &current.wildcard_re_export_paths {
+            if let Some(def) = self.definition_of_inner(source, name, visited) {
+                return Some(def);
+            }
+        }
+
+        // Private selective imports.
+        for import in &current.imports {
+            let Some(selective_names) = &import.selective_names else {
+                continue;
+            };
+            if !selective_names.contains(name) {
+                continue;
+            }
+            if let Some(path) = &import.path {
+                if let Some(def) = self.definition_of_inner(path, name, visited) {
+                    return Some(def);
+                }
+            }
+        }
+
+        // Private wildcard imports.
         for import in &current.imports {
             if import.selective_names.is_some() {
                 continue;
             }
             if let Some(path) = &import.path {
-                if let Some(symbol) = self
-                    .modules
-                    .get(path)
-                    .or_else(|| self.modules.get(&normalize_path(path)))
-                    .and_then(|module| module.declarations.get(name))
-                {
-                    return Some(symbol.clone());
+                if let Some(def) = self.definition_of_inner(path, name, visited) {
+                    return Some(def);
                 }
             }
         }
 
         None
     }
+
+    /// Diagnostics for re-export conflicts inside `file`. Each diagnostic
+    /// names the conflicting symbol and the modules that contributed it,
+    /// so check-time errors can be precise.
+    pub fn re_export_conflicts(&self, file: &Path) -> Vec<ReExportConflict> {
+        let file = normalize_path(file);
+        let Some(module) = self.modules.get(&file) else {
+            return Vec::new();
+        };
+
+        // Build, for each re-exported name, the set of source modules it
+        // could resolve to. Names that resolve to more than one source are
+        // ambiguous and reported.
+        let mut sources: HashMap<String, Vec<PathBuf>> = HashMap::new();
+
+        for (name, srcs) in &module.selective_re_exports {
+            sources
+                .entry(name.clone())
+                .or_default()
+                .extend(srcs.iter().cloned());
+        }
+        for src in &module.wildcard_re_export_paths {
+            let canonical = normalize_path(src);
+            let Some(src_module) = self
+                .modules
+                .get(&canonical)
+                .or_else(|| self.modules.get(src))
+            else {
+                continue;
+            };
+            for name in &src_module.exports {
+                sources
+                    .entry(name.clone())
+                    .or_default()
+                    .push(canonical.clone());
+            }
+        }
+
+        // A re-export that collides with a locally exported declaration is
+        // also an error: the facade module cannot expose two different
+        // bindings under the same name.
+        for name in &module.own_exports {
+            if let Some(entry) = sources.get_mut(name) {
+                entry.push(file.clone());
+            }
+        }
+
+        let mut conflicts = Vec::new();
+        for (name, mut srcs) in sources {
+            srcs.sort();
+            srcs.dedup();
+            if srcs.len() > 1 {
+                conflicts.push(ReExportConflict {
+                    name,
+                    sources: srcs,
+                });
+            }
+        }
+        conflicts.sort_by(|a, b| a.name.cmp(&b.name));
+        conflicts
+    }
+}
+
+/// A duplicate or ambiguous re-export inside a single module. Reported by
+/// [`ModuleGraph::re_export_conflicts`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReExportConflict {
+    pub name: String,
+    pub sources: Vec<PathBuf>,
 }
 
 fn load_module(path: &Path) -> ModuleInfo {
@@ -500,9 +680,16 @@ fn load_module(path: &Path) -> ModuleInfo {
     // `pub fn`, every fn is implicitly exported.
     if !module.has_pub_fn {
         for name in &module.fn_names {
-            module.exports.insert(name.clone());
+            module.own_exports.insert(name.clone());
         }
     }
+    // Seed the transitive `exports` set from local exports plus selective
+    // re-export names. Wildcard re-exports are folded in by
+    // [`resolve_re_exports`] after every module has been loaded.
+    module.exports.extend(module.own_exports.iter().cloned());
+    module
+        .exports
+        .extend(module.selective_re_exports.keys().cloned());
     module
 }
 
@@ -522,7 +709,7 @@ fn collect_module_info(file: &Path, snode: &SNode, module: &mut ModuleInfo) {
             ..
         } => {
             if *is_pub {
-                module.exports.insert(name.clone());
+                module.own_exports.insert(name.clone());
                 module.has_pub_fn = true;
             }
             module.fn_names.push(name.clone());
@@ -539,7 +726,7 @@ fn collect_module_info(file: &Path, snode: &SNode, module: &mut ModuleInfo) {
         }
         Node::Pipeline { name, is_pub, .. } => {
             if *is_pub {
-                module.exports.insert(name.clone());
+                module.own_exports.insert(name.clone());
             }
             module.declarations.insert(
                 name.clone(),
@@ -548,7 +735,7 @@ fn collect_module_info(file: &Path, snode: &SNode, module: &mut ModuleInfo) {
         }
         Node::ToolDecl { name, is_pub, .. } => {
             if *is_pub {
-                module.exports.insert(name.clone());
+                module.own_exports.insert(name.clone());
             }
             module.declarations.insert(
                 name.clone(),
@@ -557,7 +744,7 @@ fn collect_module_info(file: &Path, snode: &SNode, module: &mut ModuleInfo) {
         }
         Node::SkillDecl { name, is_pub, .. } => {
             if *is_pub {
-                module.exports.insert(name.clone());
+                module.own_exports.insert(name.clone());
             }
             module.declarations.insert(
                 name.clone(),
@@ -566,7 +753,7 @@ fn collect_module_info(file: &Path, snode: &SNode, module: &mut ModuleInfo) {
         }
         Node::StructDecl { name, is_pub, .. } => {
             if *is_pub {
-                module.exports.insert(name.clone());
+                module.own_exports.insert(name.clone());
             }
             module.declarations.insert(
                 name.clone(),
@@ -575,7 +762,7 @@ fn collect_module_info(file: &Path, snode: &SNode, module: &mut ModuleInfo) {
         }
         Node::EnumDecl { name, is_pub, .. } => {
             if *is_pub {
-                module.exports.insert(name.clone());
+                module.own_exports.insert(name.clone());
             }
             module.declarations.insert(
                 name.clone(),
@@ -583,14 +770,14 @@ fn collect_module_info(file: &Path, snode: &SNode, module: &mut ModuleInfo) {
             );
         }
         Node::InterfaceDecl { name, .. } => {
-            module.exports.insert(name.clone());
+            module.own_exports.insert(name.clone());
             module.declarations.insert(
                 name.clone(),
                 decl_site(file, snode.span, name, DefKind::Interface),
             );
         }
         Node::TypeDecl { name, .. } => {
-            module.exports.insert(name.clone());
+            module.own_exports.insert(name.clone());
             module.declarations.insert(
                 name.clone(),
                 decl_site(file, snode.span, name, DefKind::Type),
@@ -604,20 +791,43 @@ fn collect_module_info(file: &Path, snode: &SNode, module: &mut ModuleInfo) {
                 );
             }
         }
-        Node::ImportDecl { path } => {
+        Node::ImportDecl { path, is_pub } => {
             let import_path = resolve_import_path(file, path);
             if import_path.is_none() {
                 module.has_unresolved_wildcard_import = true;
+            }
+            if *is_pub {
+                if let Some(resolved) = &import_path {
+                    module
+                        .wildcard_re_export_paths
+                        .push(normalize_path(resolved));
+                }
             }
             module.imports.push(ImportRef {
                 path: import_path,
                 selective_names: None,
             });
         }
-        Node::SelectiveImport { names, path } => {
+        Node::SelectiveImport {
+            names,
+            path,
+            is_pub,
+        } => {
             let import_path = resolve_import_path(file, path);
             if import_path.is_none() {
                 module.has_unresolved_selective_import = true;
+            }
+            if *is_pub {
+                if let Some(resolved) = &import_path {
+                    let canonical = normalize_path(resolved);
+                    for name in names {
+                        module
+                            .selective_re_exports
+                            .entry(name.clone())
+                            .or_default()
+                            .push(canonical.clone());
+                    }
+                }
             }
             let names: HashSet<String> = names.iter().cloned().collect();
             module.selective_import_names.extend(names.iter().cloned());
@@ -943,6 +1153,112 @@ mod tests {
             .imported_names_for_file(&entry)
             .expect("cyclic imports still resolve to known exports");
         assert!(imported.contains("b_fn"));
+    }
+
+    #[test]
+    fn pub_import_selective_re_exports_named_symbols() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        write_file(
+            root,
+            "src.harn",
+            "pub fn alpha() { 1 }\npub fn beta() { 2 }\n",
+        );
+        write_file(root, "facade.harn", "pub import { alpha } from \"./src\"\n");
+        let entry = write_file(root, "entry.harn", "import \"./facade\"\nalpha()\n");
+
+        let graph = build(std::slice::from_ref(&entry));
+        let imported = graph
+            .imported_names_for_file(&entry)
+            .expect("entry should resolve");
+        assert!(imported.contains("alpha"), "selective re-export missing");
+        assert!(
+            !imported.contains("beta"),
+            "non-listed name leaked through facade"
+        );
+
+        let facade_path = root.join("facade.harn");
+        let def = graph
+            .definition_of(&facade_path, "alpha")
+            .expect("definition_of should chase re-export");
+        assert!(def.file.ends_with("src.harn"));
+    }
+
+    #[test]
+    fn pub_import_wildcard_re_exports_full_surface() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        write_file(
+            root,
+            "src.harn",
+            "pub fn alpha() { 1 }\npub fn beta() { 2 }\n",
+        );
+        write_file(root, "facade.harn", "pub import \"./src\"\n");
+        let entry = write_file(root, "entry.harn", "import \"./facade\"\nalpha()\n");
+
+        let graph = build(std::slice::from_ref(&entry));
+        let imported = graph
+            .imported_names_for_file(&entry)
+            .expect("entry should resolve");
+        assert!(imported.contains("alpha"));
+        assert!(imported.contains("beta"));
+    }
+
+    #[test]
+    fn pub_import_chain_resolves_definition_to_origin() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        write_file(root, "inner.harn", "pub fn deep() { 1 }\n");
+        write_file(
+            root,
+            "middle.harn",
+            "pub import { deep } from \"./inner\"\n",
+        );
+        write_file(
+            root,
+            "outer.harn",
+            "pub import { deep } from \"./middle\"\n",
+        );
+        let entry = write_file(
+            root,
+            "entry.harn",
+            "import { deep } from \"./outer\"\ndeep()\n",
+        );
+
+        let graph = build(std::slice::from_ref(&entry));
+        let def = graph
+            .definition_of(&entry, "deep")
+            .expect("definition_of should follow chain");
+        assert!(def.file.ends_with("inner.harn"));
+
+        let imported = graph
+            .imported_names_for_file(&entry)
+            .expect("entry should resolve");
+        assert!(imported.contains("deep"));
+    }
+
+    #[test]
+    fn duplicate_pub_import_reports_re_export_conflict() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        write_file(root, "a.harn", "pub fn shared() { 1 }\n");
+        write_file(root, "b.harn", "pub fn shared() { 2 }\n");
+        let facade = write_file(
+            root,
+            "facade.harn",
+            "pub import { shared } from \"./a\"\npub import { shared } from \"./b\"\n",
+        );
+
+        let graph = build(std::slice::from_ref(&facade));
+        let conflicts = graph.re_export_conflicts(&facade);
+        assert_eq!(
+            conflicts.len(),
+            1,
+            "expected exactly one re-export conflict, got {:?}",
+            conflicts
+        );
+        assert_eq!(conflicts[0].name, "shared");
+        assert_eq!(conflicts[0].sources.len(), 2);
     }
 
     #[test]

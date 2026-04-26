@@ -198,13 +198,13 @@ impl<'a> Formatter<'a> {
 
     fn import_sort_key(node: &SNode) -> (u8, String, u8, String) {
         match &node.node {
-            Node::ImportDecl { path } => (
+            Node::ImportDecl { path, .. } => (
                 u8::from(!path.starts_with("std/")),
                 path.clone(),
                 0,
                 String::new(),
             ),
-            Node::SelectiveImport { names, path } => {
+            Node::SelectiveImport { names, path, .. } => {
                 let mut sorted_names = names.clone();
                 sorted_names.sort();
                 (
