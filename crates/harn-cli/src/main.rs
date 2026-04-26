@@ -305,6 +305,36 @@ async fn async_main() {
             commands::check::fmt_targets(&targets, args.check, &opts);
         }
         Command::Test(args) => {
+            if args.target.as_deref() == Some("agents-conformance") {
+                if args.selection.is_some() {
+                    command_error(
+                        "`harn test agents-conformance` does not accept a second positional target; use --category instead",
+                    );
+                }
+                if args.evals || args.determinism || args.record || args.replay || args.watch {
+                    command_error(
+                        "`harn test agents-conformance` cannot be combined with --evals, --determinism, --record, --replay, or --watch",
+                    );
+                }
+                let Some(target_url) = args.agents_target.clone() else {
+                    command_error("`harn test agents-conformance` requires --target <url>");
+                };
+                commands::agents_conformance::run_agents_conformance(
+                    commands::agents_conformance::AgentsConformanceConfig {
+                        target_url,
+                        api_key: args.agents_api_key.clone(),
+                        categories: args.agents_category.clone(),
+                        timeout_ms: args.timeout,
+                        verbose: args.verbose,
+                        json: args.json,
+                        json_out: args.json_out.clone(),
+                        workspace_id: args.agents_workspace_id.clone(),
+                        session_id: args.agents_session_id.clone(),
+                    },
+                )
+                .await;
+                return;
+            }
             if args.evals {
                 if args.determinism || args.record || args.replay || args.watch {
                     command_error("--evals cannot be combined with --determinism, --record, --replay, or --watch");

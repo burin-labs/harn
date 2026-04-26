@@ -314,6 +314,27 @@ pub(crate) struct TestArgs {
     /// Only run tests whose names or paths contain this pattern.
     #[arg(long)]
     pub filter: Option<String>,
+    /// Agents Protocol Harness base URL when running `harn test agents-conformance`.
+    #[arg(long = "target", value_name = "URL")]
+    pub agents_target: Option<String>,
+    /// Bearer API key for `harn test agents-conformance`.
+    #[arg(long = "api-key", env = "HARN_AGENTS_CONFORMANCE_API_KEY")]
+    pub agents_api_key: Option<String>,
+    /// Restrict `harn test agents-conformance` to one category. Repeatable or comma-separated.
+    #[arg(long = "category", value_name = "NAME")]
+    pub agents_category: Vec<String>,
+    /// Emit the agents conformance leaderboard-shaped JSON report to stdout.
+    #[arg(long, action = ArgAction::SetTrue)]
+    pub json: bool,
+    /// Write the agents conformance leaderboard-shaped JSON report to this path.
+    #[arg(long = "json-out", value_name = "PATH")]
+    pub json_out: Option<String>,
+    /// Existing workspace id to reuse for agents conformance probes.
+    #[arg(long = "workspace-id", value_name = "ID")]
+    pub agents_workspace_id: Option<String>,
+    /// Existing session id to reuse for agents conformance probes.
+    #[arg(long = "session-id", value_name = "ID")]
+    pub agents_session_id: Option<String>,
     /// Write a JUnit XML report to this path.
     #[arg(long)]
     pub junit: Option<String>,
@@ -2202,6 +2223,31 @@ mod tests {
             Some("tests/worktree_runtime.harn")
         );
         assert!(args.verbose);
+    }
+
+    #[test]
+    fn test_parses_agents_conformance_target_url() {
+        let cli = Cli::parse_from([
+            "harn",
+            "test",
+            "agents-conformance",
+            "--target",
+            "http://localhost:8080",
+            "--api-key",
+            "test-key",
+            "--category",
+            "core,streaming",
+            "--json",
+        ]);
+
+        let Command::Test(args) = cli.command.unwrap() else {
+            panic!("expected test command");
+        };
+        assert_eq!(args.target.as_deref(), Some("agents-conformance"));
+        assert_eq!(args.agents_target.as_deref(), Some("http://localhost:8080"));
+        assert_eq!(args.agents_api_key.as_deref(), Some("test-key"));
+        assert_eq!(args.agents_category, vec!["core,streaming"]);
+        assert!(args.json);
     }
 
     #[test]
