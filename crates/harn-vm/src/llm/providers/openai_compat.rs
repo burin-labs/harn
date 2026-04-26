@@ -372,6 +372,7 @@ mod tests {
             model: "google/gemini-2.5-pro".to_string(),
             api_key: String::new(),
             fallback_chain: Vec::new(),
+            session_id: None,
             messages: vec![json!({"role": "user", "content": "hello"})],
             system: None,
             max_tokens: 64,

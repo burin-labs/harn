@@ -310,6 +310,20 @@ pub enum AgentEvent {
         /// not part of a candidate-phase transition.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         parsing: Option<bool>,
+        /// Best-effort partial parse of the streamed tool-call arguments.
+        /// Populated by the SSE transport on `Pending` updates as the
+        /// model streams `input_json_delta` (Anthropic) or
+        /// `tool_calls[].function.arguments` deltas (OpenAI). `None` on
+        /// terminal updates and on emissions from non-streaming paths
+        /// (#693). When the partial bytes are not yet parseable as JSON
+        /// the transport falls back to `raw_input_partial`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        raw_input: Option<serde_json::Value>,
+        /// Raw concatenated bytes of the streamed tool-call arguments
+        /// when a permissive parse failed (#693). Mutually exclusive
+        /// with `raw_input`: clients render whichever is present.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        raw_input_partial: Option<String>,
     },
     Plan {
         session_id: String,
@@ -911,6 +925,9 @@ mod tests {
             error_category: None,
             executor: None,
             parsing: None,
+
+            raw_input: None,
+            raw_input_partial: None,
         };
         let value = serde_json::to_value(&terminal).unwrap();
         assert_eq!(value["duration_ms"], serde_json::json!(42));
@@ -931,6 +948,9 @@ mod tests {
             error_category: None,
             executor: None,
             parsing: None,
+
+            raw_input: None,
+            raw_input_partial: None,
         };
         let value = serde_json::to_value(&intermediate).unwrap();
         let object = value.as_object().expect("update serializes as object");
@@ -1111,6 +1131,9 @@ mod tests {
             error_category: None,
             executor: None,
             parsing: None,
+
+            raw_input: None,
+            raw_input_partial: None,
         };
         let v = serde_json::to_value(&event).unwrap();
         assert_eq!(v["type"], "tool_call_update");
@@ -1131,6 +1154,9 @@ mod tests {
             error_category: Some(ToolCallErrorCategory::SchemaValidation),
             executor: None,
             parsing: None,
+
+            raw_input: None,
+            raw_input_partial: None,
         };
         let v = serde_json::to_value(&event).unwrap();
         assert_eq!(v["error_category"], "schema_validation");
@@ -1154,6 +1180,9 @@ mod tests {
             error_category: None,
             executor: None,
             parsing: None,
+
+            raw_input: None,
+            raw_input_partial: None,
         };
         let json = serde_json::to_value(&event).unwrap();
         assert!(json.get("executor").is_none(), "got: {json}");
@@ -1312,6 +1341,9 @@ mod tests {
                 server_name: "github".into(),
             }),
             parsing: None,
+
+            raw_input: None,
+            raw_input_partial: None,
         };
         let json = serde_json::to_value(&event).unwrap();
         assert_eq!(json["executor"]["kind"], "mcp_server");
