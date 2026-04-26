@@ -253,6 +253,16 @@ pub(crate) fn register_config_builtins(vm: &mut Vm) {
             }
         };
 
+        let requested_model = healthcheck_model_arg(&args)
+            .or_else(|| super::selected_model_for_provider(&provider_name));
+        if let Some(model) = requested_model.filter(|model| !model.trim().is_empty()) {
+            if super::supports_model_readiness_probe(&pdef) {
+                let readiness =
+                    super::probe_openai_compatible_model(&provider_name, &model, &api_key).await;
+                return Ok(readiness_result(&readiness));
+            }
+        }
+
         let hc = match &pdef.healthcheck {
             Some(h) => h,
             None => {
@@ -362,6 +372,62 @@ fn provider_def_to_vm_value(pdef: &llm_config::ProviderDef) -> VmValue {
         dict.insert("rpm".to_string(), VmValue::Int(rpm as i64));
     }
     VmValue::Dict(Rc::new(dict))
+}
+
+fn healthcheck_model_arg(args: &[VmValue]) -> Option<String> {
+    let raw = match args.get(1) {
+        Some(VmValue::Dict(dict)) => dict
+            .get("model")
+            .or_else(|| dict.get("alias"))
+            .map(|value| value.display())?,
+        Some(VmValue::Nil) => return None,
+        Some(value) => value.display(),
+        None => return None,
+    };
+    let (resolved, _) = llm_config::resolve_model(raw.trim());
+    Some(resolved)
+}
+
+fn readiness_result(readiness: &super::ModelReadiness) -> VmValue {
+    let mut meta = BTreeMap::new();
+    meta.insert(
+        "category".to_string(),
+        VmValue::String(Rc::from(readiness.category.as_str())),
+    );
+    meta.insert(
+        "provider".to_string(),
+        VmValue::String(Rc::from(readiness.provider.as_str())),
+    );
+    meta.insert(
+        "model".to_string(),
+        VmValue::String(Rc::from(readiness.model.as_str())),
+    );
+    meta.insert(
+        "url".to_string(),
+        readiness
+            .url
+            .as_ref()
+            .map(|url| VmValue::String(Rc::from(url.as_str())))
+            .unwrap_or(VmValue::Nil),
+    );
+    meta.insert(
+        "status".to_string(),
+        readiness
+            .status
+            .map(|status| VmValue::Int(status as i64))
+            .unwrap_or(VmValue::Nil),
+    );
+    meta.insert(
+        "available_models".to_string(),
+        VmValue::List(Rc::new(
+            readiness
+                .available_models
+                .iter()
+                .map(|model| VmValue::String(Rc::from(model.as_str())))
+                .collect(),
+        )),
+    );
+    healthcheck_result_with_meta(readiness.valid, &readiness.message, meta)
 }
 
 /// Build a healthcheck result dict with optional metadata.

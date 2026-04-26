@@ -365,8 +365,11 @@ pub use self::agent_config::{
     register_agent_loop_with_bridge, register_llm_call_structured_with_bridge,
     register_llm_call_with_bridge,
 };
-pub use self::api::fetch_provider_max_context;
 pub(crate) use self::api::vm_call_llm_full;
+pub use self::api::{
+    fetch_provider_max_context, probe_openai_compatible_model, selected_model_for_provider,
+    supports_model_readiness_probe, ModelReadiness,
+};
 pub use self::cost::{calculate_cost_for_provider, peek_total_cost};
 pub(crate) use self::helpers::extract_llm_options;
 pub use self::helpers::resolve_api_key;
