@@ -108,6 +108,7 @@ impl AgentEventSink for AcpAgentEventSink {
                 error,
                 duration_ms,
                 execution_duration_ms,
+                error_category,
             } => {
                 let mut update = serde_json::json!({
                     "sessionUpdate": "tool_call_update",
@@ -126,6 +127,9 @@ impl AgentEventSink for AcpAgentEventSink {
                 }
                 if let Some(d) = execution_duration_ms {
                     update["executionDurationMs"] = serde_json::Value::from(*d);
+                }
+                if let Some(cat) = error_category {
+                    update["errorCategory"] = serde_json::Value::String(cat.as_str().to_string());
                 }
                 self.write_notification(serde_json::json!({
                     "sessionId": session_id,
@@ -288,7 +292,9 @@ impl AgentEventSink for AcpAgentEventSink {
 
 #[cfg(test)]
 mod tests {
-    use harn_vm::agent_events::{AgentEvent, AgentEventSink, FsWatchEvent, ToolCallStatus};
+    use harn_vm::agent_events::{
+        AgentEvent, AgentEventSink, FsWatchEvent, ToolCallErrorCategory, ToolCallStatus,
+    };
     use harn_vm::orchestration::{HandoffArtifact, HandoffTargetRecord};
     use harn_vm::tool_annotations::ToolKind;
     use tokio::sync::mpsc;
@@ -373,6 +379,7 @@ mod tests {
                 error: None,
                 duration_ms: Some(7),
                 execution_duration_ms: Some(5),
+                error_category: None,
             },
             AgentEvent::Plan {
                 session_id: "session-1".to_string(),
@@ -462,6 +469,59 @@ mod tests {
             assert_eq!(payload["params"]["sessionId"], "session-1");
             assert_eq!(payload["params"]["update"]["sessionUpdate"], expected);
         }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn tool_call_update_serializes_error_category_in_camel_case() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let sink = AcpAgentEventSink::new(AcpOutput::Channel(tx));
+        sink.handle_event(&AgentEvent::ToolCallUpdate {
+            session_id: "session-1".to_string(),
+            tool_call_id: "tool-7".to_string(),
+            tool_name: "read".to_string(),
+            status: ToolCallStatus::Failed,
+            raw_output: None,
+            error: Some("missing required arg `path`".to_string()),
+            duration_ms: None,
+            execution_duration_ms: None,
+            error_category: Some(ToolCallErrorCategory::SchemaValidation),
+        });
+        let line = rx.recv().await.expect("acp tool_call_update");
+        let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
+        assert_eq!(
+            payload["params"]["update"]["sessionUpdate"],
+            "tool_call_update"
+        );
+        assert_eq!(payload["params"]["update"]["status"], "failed");
+        assert_eq!(
+            payload["params"]["update"]["errorCategory"],
+            "schema_validation"
+        );
+        assert_eq!(
+            payload["params"]["update"]["error"],
+            "missing required arg `path`"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn tool_call_update_omits_error_category_when_none() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let sink = AcpAgentEventSink::new(AcpOutput::Channel(tx));
+        sink.handle_event(&AgentEvent::ToolCallUpdate {
+            session_id: "session-1".to_string(),
+            tool_call_id: "tool-7".to_string(),
+            tool_name: "read".to_string(),
+            status: ToolCallStatus::Completed,
+            raw_output: Some(serde_json::json!({"ok": true})),
+            error: None,
+            duration_ms: None,
+            execution_duration_ms: None,
+            error_category: None,
+        });
+        let line = rx.recv().await.expect("acp tool_call_update");
+        let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
+        assert!(payload["params"]["update"].get("errorCategory").is_none());
+        assert!(payload["params"]["update"].get("error").is_none());
     }
 
     #[test]
