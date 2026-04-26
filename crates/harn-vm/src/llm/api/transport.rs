@@ -9,7 +9,7 @@ use crate::value::{VmError, VmValue};
 
 use super::errors::classify_http_error;
 use super::openai_normalize::{
-    append_paragraph, debug_log_message_shapes, extract_openai_message_field_as_text,
+    append_paragraph, debug_log_message_shapes, extract_openai_delta_field_str,
 };
 use super::options::{DeltaSender, LlmRequestPayload};
 use super::response::{extract_cache_read_tokens, extract_cache_write_tokens, parse_llm_response};
@@ -508,10 +508,21 @@ async fn vm_call_llm_api_sse_from_response(
                     blocks.push(serde_json::json!({"type": "output_text", "text": visible, "visibility": "public"}));
                 }
             }
+            // Streaming deltas for `reasoning` (Ollama OpenAI-compat,
+            // OpenRouter passthrough) and `reasoning_content` (DashScope,
+            // Together) arrive as token-sized fragments — `"Here"`,
+            // `"'s"`, `" a"`, `" thinking"`. Concatenate them verbatim;
+            // `extract_openai_message_field_as_text` + `append_paragraph`
+            // would `.trim()` each fragment (losing inter-token spaces)
+            // and inject a newline between every chunk, producing the
+            // one-token-per-line reasoning text we used to surface as
+            // `"The\ntask\nis\nto\nextend"`. The non-streaming response
+            // path still uses `append_paragraph` because there each
+            // field arrives as a single complete block.
             let reasoning_delta =
-                extract_openai_message_field_as_text(delta, &["reasoning", "reasoning_content"]);
+                extract_openai_delta_field_str(delta, &["reasoning", "reasoning_content"]);
             if !reasoning_delta.is_empty() {
-                append_paragraph(&mut thinking_text, &reasoning_delta);
+                thinking_text.push_str(reasoning_delta);
                 blocks.push(serde_json::json!({"type": "reasoning", "text": reasoning_delta, "visibility": "private"}));
             }
 

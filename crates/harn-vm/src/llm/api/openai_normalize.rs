@@ -94,6 +94,28 @@ pub(super) fn append_paragraph(target: &mut String, text: &str) {
     target.push_str(text.trim());
 }
 
+/// Extract a streaming-delta field as a raw `&str` without trimming or
+/// paragraph-joining. Use this for the per-chunk path where deltas are
+/// fragments that must concatenate verbatim (`"Here"`, `"'s"`, `" a"`)
+/// — `extract_openai_message_field_as_text` would `.trim()` each fragment
+/// and lose the inter-token whitespace, and `append_paragraph` would
+/// inject a newline between every chunk, producing one-token-per-line
+/// reasoning text. Returns the empty string when no recognised field is
+/// present.
+pub(super) fn extract_openai_delta_field_str<'a>(
+    delta: &'a serde_json::Value,
+    field_names: &[&str],
+) -> &'a str {
+    for field_name in field_names {
+        if let Some(s) = delta.get(*field_name).and_then(serde_json::Value::as_str) {
+            if !s.is_empty() {
+                return s;
+            }
+        }
+    }
+    ""
+}
+
 pub(super) fn normalize_openai_message_text(message: &serde_json::Value) -> (String, String) {
     let raw_text = extract_openai_message_field_as_text(message, &["content"]);
     let reasoning_text =
@@ -185,7 +207,10 @@ pub(crate) fn debug_log_message_shapes(label: &str, messages: &[serde_json::Valu
 
 #[cfg(test)]
 mod tests {
-    use super::normalize_openai_message_text;
+    use super::{
+        extract_openai_delta_field_str, extract_openai_message_field_as_text,
+        normalize_openai_message_text,
+    };
 
     #[test]
     fn normalize_openai_message_text_uses_reasoning_when_content_missing() {
@@ -206,5 +231,60 @@ mod tests {
         let (visible, thinking) = normalize_openai_message_text(&message);
         assert_eq!(visible, "visible answer");
         assert_eq!(thinking, "separate reasoning\ninline reasoning");
+    }
+
+    #[test]
+    fn extract_openai_delta_field_str_returns_raw_chunk_with_inter_token_whitespace() {
+        // Ollama's qwen3.6 streaming delivers reasoning as token-sized
+        // fragments — leading/trailing whitespace must survive so the
+        // accumulated text reads "Here's a thinking process" not
+        // "Here'sathinking" or "Here\n's\na\nthinking\nprocess".
+        for chunk in [r#""Here""#, r#""'s""#, r#"" a""#, r#"" thinking""#] {
+            let delta: serde_json::Value =
+                serde_json::from_str(&format!(r#"{{"reasoning":{chunk}}}"#)).unwrap();
+            let raw = extract_openai_delta_field_str(&delta, &["reasoning", "reasoning_content"]);
+            assert_eq!(raw, chunk.trim_matches('"'));
+        }
+    }
+
+    #[test]
+    fn extract_openai_delta_field_str_prefers_first_present_field() {
+        let delta = serde_json::json!({
+            "reasoning_content": "from-content",
+            "reasoning": "from-bare",
+        });
+        let raw = extract_openai_delta_field_str(&delta, &["reasoning", "reasoning_content"]);
+        assert_eq!(raw, "from-bare");
+    }
+
+    #[test]
+    fn extract_openai_delta_field_str_skips_empty_fields() {
+        let delta = serde_json::json!({
+            "reasoning": "",
+            "reasoning_content": " token-with-leading-space",
+        });
+        let raw = extract_openai_delta_field_str(&delta, &["reasoning", "reasoning_content"]);
+        assert_eq!(raw, " token-with-leading-space");
+    }
+
+    #[test]
+    fn extract_openai_delta_field_str_returns_empty_for_missing_fields() {
+        let delta = serde_json::json!({"content": "anything"});
+        let raw = extract_openai_delta_field_str(&delta, &["reasoning", "reasoning_content"]);
+        assert!(raw.is_empty());
+    }
+
+    #[test]
+    fn extract_openai_message_field_still_paragraph_joins_for_non_streaming_blocks() {
+        // The non-streaming response normalizer keeps paragraph-style
+        // joining: each `field_names` entry is a complete block, not a
+        // streaming delta.
+        let message = serde_json::json!({
+            "reasoning": "  block one  ",
+            "reasoning_content": "block two",
+        });
+        let combined =
+            extract_openai_message_field_as_text(&message, &["reasoning", "reasoning_content"]);
+        assert_eq!(combined, "block one\nblock two");
     }
 }
