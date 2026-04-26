@@ -198,6 +198,7 @@ pub(crate) async fn run_tick(
         harn_vm::PersonaRunCost {
             cost_usd: args.cost_usd,
             tokens: args.tokens,
+            ..Default::default()
         },
         now_ms,
     )
@@ -226,6 +227,7 @@ pub(crate) async fn run_trigger(
         harn_vm::PersonaRunCost {
             cost_usd: args.cost_usd,
             tokens: args.tokens,
+            ..Default::default()
         },
         now_ms,
     )
@@ -250,6 +252,7 @@ pub(crate) async fn run_spend(
         harn_vm::PersonaRunCost {
             cost_usd: args.cost_usd,
             tokens: args.tokens,
+            ..Default::default()
         },
         now_ms,
     )
@@ -313,6 +316,7 @@ fn runtime_binding_or_err(
         })?;
     Ok(harn_vm::PersonaRuntimeBinding {
         name: persona.name.clone().unwrap_or_default(),
+        template_ref: persona_template_ref(persona),
         entry_workflow: persona.entry_workflow.clone().unwrap_or_default(),
         schedules: persona.schedules.clone(),
         triggers: persona.triggers.clone(),
@@ -323,6 +327,23 @@ fn runtime_binding_or_err(
             max_tokens: persona.budget.max_tokens,
         },
     })
+}
+
+fn persona_template_ref(persona: &PersonaManifestEntry) -> Option<String> {
+    persona
+        .package_source
+        .package
+        .as_ref()
+        .zip(persona.version.as_ref())
+        .map(|(package, version)| format!("{package}@{version}"))
+        .or_else(|| persona.package_source.package.clone())
+        .or_else(|| {
+            persona
+                .name
+                .as_ref()
+                .zip(persona.version.as_ref())
+                .map(|(name, version)| format!("{name}@{version}"))
+        })
 }
 
 fn open_persona_log(state_dir: &Path) -> Result<Arc<AnyEventLog>, String> {

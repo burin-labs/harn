@@ -96,9 +96,11 @@ pub use metadata::{register_metadata_builtins, register_scan_builtins};
 pub use personas::{
     disable_persona, fire_schedule as fire_persona_schedule, fire_trigger as fire_persona_trigger,
     format_ms as format_persona_ms, now_ms as persona_now_ms, parse_rfc3339_ms as parse_persona_ms,
-    pause_persona, persona_status, record_persona_spend, resume_persona, PersonaBudgetPolicy,
-    PersonaBudgetStatus, PersonaLease, PersonaLifecycleState, PersonaRunCost, PersonaRunReceipt,
-    PersonaRuntimeBinding, PersonaStatus, PersonaTriggerEnvelope, PERSONA_RUNTIME_TOPIC,
+    pause_persona, persona_status, record_persona_spend, register_persona_value_sink,
+    resume_persona, PersonaBudgetPolicy, PersonaBudgetStatus, PersonaLease, PersonaLifecycleState,
+    PersonaRunCost, PersonaRunReceipt, PersonaRuntimeBinding, PersonaStatus,
+    PersonaTriggerEnvelope, PersonaValueEvent, PersonaValueEventKind, PersonaValueSink,
+    PersonaValueSinkRegistration, PERSONA_RUNTIME_TOPIC,
 };
 pub use record_filter::{normalize_record_filter_expression, CompiledRecordFilter};
 pub use schema::json_to_vm_value;

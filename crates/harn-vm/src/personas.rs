@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, OnceLock, RwLock};
 
 use chrono::{TimeZone, Utc};
 use croner::Cron;
@@ -55,6 +56,8 @@ pub struct PersonaBudgetPolicy {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PersonaRuntimeBinding {
     pub name: String,
+    #[serde(default)]
+    pub template_ref: Option<String>,
     pub entry_workflow: String,
     #[serde(default)]
     pub schedules: Vec<String>,
@@ -122,6 +125,8 @@ pub struct PersonaTriggerEnvelope {
 pub struct PersonaRunReceipt {
     pub status: String,
     pub persona: String,
+    #[serde(default)]
+    pub run_id: Option<Uuid>,
     pub work_key: String,
     pub lease: Option<PersonaLease>,
     pub queued: bool,
@@ -133,6 +138,94 @@ pub struct PersonaRunReceipt {
 pub struct PersonaRunCost {
     pub cost_usd: f64,
     pub tokens: u64,
+    #[serde(default)]
+    pub avoided_cost_usd: f64,
+    #[serde(default)]
+    pub deterministic_steps: i64,
+    #[serde(default)]
+    pub llm_steps: i64,
+    #[serde(default)]
+    pub frontier_escalations: i64,
+    #[serde(default)]
+    pub metadata: serde_json::Value,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PersonaValueEventKind {
+    RunStarted,
+    RunCompleted,
+    AcceptedOutcome,
+    FrontierEscalation,
+    DeterministicExecution,
+    PromotionSavings,
+    ApprovalWait,
+}
+
+impl PersonaValueEventKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::RunStarted => "run_started",
+            Self::RunCompleted => "run_completed",
+            Self::AcceptedOutcome => "accepted_outcome",
+            Self::FrontierEscalation => "frontier_escalation",
+            Self::DeterministicExecution => "deterministic_execution",
+            Self::PromotionSavings => "promotion_savings",
+            Self::ApprovalWait => "approval_wait",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PersonaValueEvent {
+    pub persona_id: String,
+    pub template_ref: Option<String>,
+    pub run_id: Option<Uuid>,
+    pub kind: PersonaValueEventKind,
+    pub paid_cost_usd: f64,
+    pub avoided_cost_usd: f64,
+    pub deterministic_steps: i64,
+    pub llm_steps: i64,
+    pub metadata: serde_json::Value,
+    pub occurred_at: OffsetDateTime,
+}
+
+pub trait PersonaValueSink: Send + Sync {
+    fn handle_value_event(&self, event: &PersonaValueEvent);
+}
+
+type PersonaValueSinkRegistry = RwLock<Vec<(u64, Arc<dyn PersonaValueSink>)>>;
+
+fn persona_value_sinks() -> &'static PersonaValueSinkRegistry {
+    static REGISTRY: OnceLock<PersonaValueSinkRegistry> = OnceLock::new();
+    REGISTRY.get_or_init(|| RwLock::new(Vec::new()))
+}
+
+fn next_persona_value_sink_id() -> u64 {
+    static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+    NEXT_ID.fetch_add(1, Ordering::Relaxed)
+}
+
+pub struct PersonaValueSinkRegistration {
+    id: u64,
+}
+
+impl Drop for PersonaValueSinkRegistration {
+    fn drop(&mut self) {
+        if let Ok(mut sinks) = persona_value_sinks().write() {
+            sinks.retain(|(id, _)| *id != self.id);
+        }
+    }
+}
+
+pub fn register_persona_value_sink(
+    sink: Arc<dyn PersonaValueSink>,
+) -> PersonaValueSinkRegistration {
+    let id = next_persona_value_sink_id();
+    if let Ok(mut sinks) = persona_value_sinks().write() {
+        sinks.push((id, sink));
+    }
+    PersonaValueSinkRegistration { id }
 }
 
 pub async fn persona_status(
@@ -447,6 +540,7 @@ async fn run_for_envelope(
             return Ok(PersonaRunReceipt {
                 status: "queued".to_string(),
                 persona: binding.name.clone(),
+                run_id: None,
                 work_key: envelope.subject_key,
                 lease: None,
                 queued: true,
@@ -470,6 +564,7 @@ async fn run_for_envelope(
             return Ok(PersonaRunReceipt {
                 status: "dead_lettered".to_string(),
                 persona: binding.name.clone(),
+                run_id: None,
                 work_key: envelope.subject_key,
                 lease: None,
                 queued: false,
@@ -484,6 +579,7 @@ async fn run_for_envelope(
         return Ok(PersonaRunReceipt {
             status: "budget_exhausted".to_string(),
             persona: binding.name.clone(),
+            run_id: None,
             work_key: envelope.subject_key,
             lease: None,
             queued: false,
@@ -508,6 +604,7 @@ async fn run_for_envelope(
         return Ok(PersonaRunReceipt {
             status: "duplicate".to_string(),
             persona: binding.name.clone(),
+            run_id: None,
             work_key: envelope.subject_key,
             lease: None,
             queued: false,
@@ -529,6 +626,7 @@ async fn run_for_envelope(
         return Ok(PersonaRunReceipt {
             status: "lease_busy".to_string(),
             persona: binding.name.clone(),
+            run_id: None,
             work_key: envelope.subject_key,
             lease: status.active_lease,
             queued: false,
@@ -537,12 +635,15 @@ async fn run_for_envelope(
         });
     };
 
+    let run_id = Uuid::now_v7();
+    let value_metadata = run_value_metadata(&envelope, &lease, &cost);
     append_persona_event(
         log,
         &binding.name,
         "persona.run.started",
         json!({
             "work_key": envelope.subject_key,
+            "run_id": run_id,
             "started_at_ms": now_ms,
             "entry_workflow": binding.entry_workflow,
             "lease_id": lease.id,
@@ -550,14 +651,83 @@ async fn run_for_envelope(
         now_ms,
     )
     .await?;
+    emit_persona_value_event(
+        log,
+        binding,
+        run_id,
+        PersonaValueEventDelta {
+            kind: PersonaValueEventKind::RunStarted,
+            metadata: value_metadata.clone(),
+            ..Default::default()
+        },
+        now_ms,
+    )
+    .await?;
     let budget_receipt_id =
         append_budget_record(log, &binding.name, &cost, Some(&lease.id), now_ms).await?;
+    if cost.avoided_cost_usd > 0.0 || cost.deterministic_steps > 0 {
+        emit_persona_value_event(
+            log,
+            binding,
+            run_id,
+            PersonaValueEventDelta {
+                kind: PersonaValueEventKind::DeterministicExecution,
+                avoided_cost_usd: cost.avoided_cost_usd,
+                deterministic_steps: cost.deterministic_steps.max(1),
+                metadata: value_metadata.clone(),
+                ..Default::default()
+            },
+            now_ms,
+        )
+        .await?;
+    }
+    if cost.frontier_escalations > 0 {
+        emit_persona_value_event(
+            log,
+            binding,
+            run_id,
+            PersonaValueEventDelta {
+                kind: PersonaValueEventKind::FrontierEscalation,
+                paid_cost_usd: cost.cost_usd,
+                llm_steps: cost.llm_steps.max(cost.frontier_escalations),
+                metadata: value_metadata.clone(),
+                ..Default::default()
+            },
+            now_ms,
+        )
+        .await?;
+    }
+    let completion_paid_cost = if cost.frontier_escalations > 0 {
+        0.0
+    } else {
+        cost.cost_usd
+    };
+    let completion_llm_steps = if cost.frontier_escalations > 0 {
+        0
+    } else {
+        cost.llm_steps
+    };
+    emit_persona_value_event(
+        log,
+        binding,
+        run_id,
+        PersonaValueEventDelta {
+            kind: PersonaValueEventKind::RunCompleted,
+            paid_cost_usd: completion_paid_cost,
+            llm_steps: completion_llm_steps,
+            metadata: value_metadata,
+            ..Default::default()
+        },
+        now_ms,
+    )
+    .await?;
     append_persona_event(
         log,
         &binding.name,
         "persona.run.completed",
         json!({
             "work_key": envelope.subject_key,
+            "run_id": run_id,
             "completed_at_ms": now_ms,
             "entry_workflow": binding.entry_workflow,
             "lease_id": lease.id,
@@ -580,6 +750,7 @@ async fn run_for_envelope(
     Ok(PersonaRunReceipt {
         status: "completed".to_string(),
         persona: binding.name.clone(),
+        run_id: Some(run_id),
         work_key: envelope.subject_key,
         lease: Some(lease),
         queued: false,
@@ -895,6 +1066,107 @@ async fn append_persona_event(
         .map_err(|error| error.to_string())
 }
 
+struct PersonaValueEventDelta {
+    kind: PersonaValueEventKind,
+    paid_cost_usd: f64,
+    avoided_cost_usd: f64,
+    deterministic_steps: i64,
+    llm_steps: i64,
+    metadata: serde_json::Value,
+}
+
+impl Default for PersonaValueEventDelta {
+    fn default() -> Self {
+        Self {
+            kind: PersonaValueEventKind::RunCompleted,
+            paid_cost_usd: 0.0,
+            avoided_cost_usd: 0.0,
+            deterministic_steps: 0,
+            llm_steps: 0,
+            metadata: serde_json::Value::Null,
+        }
+    }
+}
+
+async fn emit_persona_value_event(
+    log: &Arc<AnyEventLog>,
+    binding: &PersonaRuntimeBinding,
+    run_id: Uuid,
+    delta: PersonaValueEventDelta,
+    now_ms: i64,
+) -> Result<(), String> {
+    let event = PersonaValueEvent {
+        persona_id: binding.name.clone(),
+        template_ref: binding.template_ref.clone(),
+        run_id: Some(run_id),
+        kind: delta.kind,
+        paid_cost_usd: delta.paid_cost_usd.max(0.0),
+        avoided_cost_usd: delta.avoided_cost_usd.max(0.0),
+        deterministic_steps: delta.deterministic_steps.max(0),
+        llm_steps: delta.llm_steps.max(0),
+        metadata: delta.metadata,
+        occurred_at: offset_datetime_from_ms(now_ms),
+    };
+    append_persona_event(
+        log,
+        &binding.name,
+        &format!("persona.value.{}", event.kind.as_str()),
+        serde_json::to_value(&event).map_err(|error| error.to_string())?,
+        now_ms,
+    )
+    .await?;
+    emit_persona_value_sink_event(&event);
+    Ok(())
+}
+
+fn emit_persona_value_sink_event(event: &PersonaValueEvent) {
+    let sinks = persona_value_sinks()
+        .read()
+        .map(|sinks| {
+            sinks
+                .iter()
+                .map(|(_, sink)| Arc::clone(sink))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    for sink in sinks {
+        sink.handle_value_event(event);
+    }
+}
+
+fn run_value_metadata(
+    envelope: &PersonaTriggerEnvelope,
+    lease: &PersonaLease,
+    cost: &PersonaRunCost,
+) -> serde_json::Value {
+    let mut metadata = serde_json::Map::new();
+    metadata.insert("work_key".to_string(), json!(envelope.subject_key));
+    metadata.insert("trigger_provider".to_string(), json!(envelope.provider));
+    metadata.insert("trigger_kind".to_string(), json!(envelope.kind));
+    metadata.insert("lease_id".to_string(), json!(lease.id));
+    metadata.insert("tokens".to_string(), json!(cost.tokens));
+    if cost.frontier_escalations > 0 {
+        metadata.insert(
+            "frontier_escalations".to_string(),
+            json!(cost.frontier_escalations),
+        );
+    }
+    match &cost.metadata {
+        serde_json::Value::Null => {}
+        serde_json::Value::Object(extra) => {
+            metadata.extend(
+                extra
+                    .iter()
+                    .map(|(key, value)| (key.clone(), value.clone())),
+            );
+        }
+        extra => {
+            metadata.insert("run_cost_metadata".to_string(), extra.clone());
+        }
+    }
+    serde_json::Value::Object(metadata)
+}
+
 fn budget_status(
     policy: &PersonaBudgetPolicy,
     spent: &[(i64, f64, u64)],
@@ -990,9 +1262,13 @@ pub fn now_ms() -> i64 {
     OffsetDateTime::now_utc().unix_timestamp_nanos() as i64 / 1_000_000
 }
 
-pub fn format_ms(ms: i64) -> String {
+fn offset_datetime_from_ms(ms: i64) -> OffsetDateTime {
     OffsetDateTime::from_unix_timestamp_nanos((ms as i128) * 1_000_000)
         .unwrap_or(OffsetDateTime::UNIX_EPOCH)
+}
+
+pub fn format_ms(ms: i64) -> String {
+    offset_datetime_from_ms(ms)
         .format(&Rfc3339)
         .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())
 }
@@ -1011,10 +1287,22 @@ fn runtime_topic() -> Result<Topic, String> {
 mod tests {
     use super::*;
     use crate::event_log::{AnyEventLog, MemoryEventLog};
+    use std::sync::Mutex;
+
+    struct CapturingValueSink {
+        events: Arc<Mutex<Vec<PersonaValueEvent>>>,
+    }
+
+    impl PersonaValueSink for CapturingValueSink {
+        fn handle_value_event(&self, event: &PersonaValueEvent) {
+            self.events.lock().unwrap().push(event.clone());
+        }
+    }
 
     fn binding() -> PersonaRuntimeBinding {
         PersonaRuntimeBinding {
             name: "merge_captain".to_string(),
+            template_ref: Some("software_factory@v0".to_string()),
             entry_workflow: "workflows/merge.harn#run".to_string(),
             schedules: vec!["*/30 * * * *".to_string()],
             triggers: vec!["github.pr_opened".to_string()],
@@ -1042,6 +1330,7 @@ mod tests {
             PersonaRunCost {
                 cost_usd: 0.01,
                 tokens: 10,
+                ..Default::default()
             },
             now,
         )
@@ -1166,6 +1455,7 @@ mod tests {
             PersonaRunCost {
                 cost_usd: 0.02,
                 tokens: 1,
+                ..Default::default()
             },
             now,
         )
@@ -1176,5 +1466,127 @@ mod tests {
         assert_eq!(status.budget.reason.as_deref(), Some("daily_usd"));
         assert!(status.budget.exhausted);
         assert!(status.last_error.as_deref().unwrap().contains("daily_usd"));
+    }
+
+    #[tokio::test]
+    async fn deterministic_predicate_hit_emits_value_event_with_avoided_cost() {
+        let log = log();
+        let binding = binding();
+        let captured = Arc::new(Mutex::new(Vec::new()));
+        let _registration = register_persona_value_sink(Arc::new(CapturingValueSink {
+            events: captured.clone(),
+        }));
+        let now = parse_rfc3339_ms("2026-04-24T12:00:00Z").unwrap();
+
+        let receipt = fire_trigger(
+            &log,
+            &binding,
+            "github",
+            "pull_request",
+            BTreeMap::from([
+                ("repository".to_string(), "burin-labs/harn".to_string()),
+                ("number".to_string(), "715".to_string()),
+            ]),
+            PersonaRunCost {
+                avoided_cost_usd: 0.0042,
+                deterministic_steps: 1,
+                metadata: json!({
+                    "predicate": "pr_already_green",
+                    "would_have_called_model": "gpt-5.4-mini",
+                }),
+                ..Default::default()
+            },
+            now,
+        )
+        .await
+        .unwrap();
+
+        let run_id = receipt.run_id.expect("completed run has run_id");
+        let events = captured.lock().unwrap().clone();
+        let deterministic = events
+            .iter()
+            .find(|event| {
+                event.kind == PersonaValueEventKind::DeterministicExecution
+                    && event.run_id == Some(run_id)
+            })
+            .expect("deterministic execution value event");
+        assert_eq!(deterministic.persona_id, "merge_captain");
+        assert_eq!(
+            deterministic.template_ref.as_deref(),
+            Some("software_factory@v0")
+        );
+        assert_eq!(deterministic.run_id, Some(run_id));
+        assert_eq!(deterministic.paid_cost_usd, 0.0);
+        assert_eq!(deterministic.avoided_cost_usd, 0.0042);
+        assert_eq!(deterministic.deterministic_steps, 1);
+        assert_eq!(
+            deterministic.metadata["predicate"].as_str(),
+            Some("pr_already_green")
+        );
+
+        let persisted = read_persona_events(&log, &binding.name).await.unwrap();
+        assert!(persisted.iter().any(|(_, event)| {
+            event.kind == "persona.value.deterministic_execution"
+                && event.payload["avoided_cost_usd"] == json!(0.0042)
+        }));
+    }
+
+    #[tokio::test]
+    async fn frontier_escalation_run_emits_value_event_with_paid_cost() {
+        let log = log();
+        let binding = binding();
+        let captured = Arc::new(Mutex::new(Vec::new()));
+        let _registration = register_persona_value_sink(Arc::new(CapturingValueSink {
+            events: captured.clone(),
+        }));
+        let now = parse_rfc3339_ms("2026-04-24T12:00:00Z").unwrap();
+
+        let receipt = fire_trigger(
+            &log,
+            &binding,
+            "linear",
+            "issue",
+            BTreeMap::from([("issue_key".to_string(), "HAR-715".to_string())]),
+            PersonaRunCost {
+                cost_usd: 0.011,
+                tokens: 20,
+                llm_steps: 1,
+                frontier_escalations: 1,
+                metadata: json!({
+                    "frontier_model": "gpt-5.4",
+                    "escalation_reason": "high_risk_merge",
+                }),
+                ..Default::default()
+            },
+            now,
+        )
+        .await
+        .unwrap();
+
+        let run_id = receipt.run_id.expect("completed run has run_id");
+        let events = captured.lock().unwrap().clone();
+        let escalation = events
+            .iter()
+            .find(|event| {
+                event.kind == PersonaValueEventKind::FrontierEscalation
+                    && event.run_id == Some(run_id)
+            })
+            .expect("frontier escalation value event");
+        assert_eq!(escalation.run_id, Some(run_id));
+        assert_eq!(escalation.paid_cost_usd, 0.011);
+        assert_eq!(escalation.avoided_cost_usd, 0.0);
+        assert_eq!(escalation.llm_steps, 1);
+        assert_eq!(
+            escalation.metadata["frontier_model"].as_str(),
+            Some("gpt-5.4")
+        );
+
+        let completion = events
+            .iter()
+            .find(|event| {
+                event.kind == PersonaValueEventKind::RunCompleted && event.run_id == Some(run_id)
+            })
+            .expect("run completed value event");
+        assert_eq!(completion.paid_cost_usd, 0.0);
     }
 }
