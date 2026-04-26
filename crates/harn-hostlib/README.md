@@ -32,6 +32,9 @@ process-lifecycle surface: `run_command`, `run_test`,
 `code_index` surface: trigram + word index, dep graph, and the five
 host builtins (`query`, `rebuild`, `stats`, `imports_for`,
 `importers_of`).
+[#569](https://github.com/burin-labs/harn/issues/569) lights up the
+`fs_watch` surface: cross-platform `notify` subscriptions with
+debounced AgentEvent batches.
 
 ### `ast/` languages
 
@@ -86,7 +89,7 @@ and commit the updated goldens.
 | B2 (#564) | `ast/`         | `parse_file`, `symbols`, `outline` (tree-sitter for 22 host languages)                    | ✅ shipped |
 | B3 (#565) | `code_index/`  | `query`, `rebuild`, `stats`, `imports_for`, `importers_of`                                | ✅ shipped |
 | B4 (#566) | `scanner/`     | `scan_project`, `scan_incremental`                                                        | ✅ shipped |
-| C1    | `fs_watch/`        | `subscribe`, `unsubscribe`                                                                | unimplemented |
+| #569  | `fs_watch/`        | `subscribe`, `unsubscribe`                                                                | ✅ shipped |
 | #567  | `tools/` (read & search) | `search`, `read_file`, `list_directory`, `get_file_outline`, `git`                 | ✅ shipped |
 | #567  | `tools/` (mutating)      | `write_file`, `delete_file`                                                        | ✅ shipped |
 | #568  | `tools/` (process)       | `run_command`, `run_test`, `run_build_command`, `inspect_test_results`, `manage_packages` | ✅ shipped |

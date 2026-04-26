@@ -27,6 +27,17 @@ use crate::event_log::{AnyEventLog, EventLog, LogEvent as EventLogRecord, Topic}
 use crate::orchestration::HandoffArtifact;
 use crate::tool_annotations::ToolKind;
 
+/// One coalesced filesystem notification from a hostlib `fs_watch`
+/// subscription.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct FsWatchEvent {
+    pub kind: String,
+    pub paths: Vec<String>,
+    pub relative_paths: Vec<String>,
+    pub raw_kind: String,
+    pub error: Option<String>,
+}
+
 /// Typed worker lifecycle events emitted by delegated/background agent
 /// execution. Bridge-facing worker updates still derive a string status
 /// from these variants, but the runtime no longer passes raw status
@@ -207,6 +218,11 @@ pub enum AgentEvent {
         artifact_id: String,
         handoff: Box<HandoffArtifact>,
     },
+    FsWatch {
+        session_id: String,
+        subscription_id: String,
+        events: Vec<FsWatchEvent>,
+    },
 }
 
 impl AgentEvent {
@@ -229,7 +245,8 @@ impl AgentEvent {
             | Self::ToolSearchQuery { session_id, .. }
             | Self::ToolSearchResult { session_id, .. }
             | Self::TranscriptCompacted { session_id, .. }
-            | Self::Handoff { session_id, .. } => session_id,
+            | Self::Handoff { session_id, .. }
+            | Self::FsWatch { session_id, .. } => session_id,
         }
     }
 }

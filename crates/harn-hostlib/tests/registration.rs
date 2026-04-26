@@ -19,22 +19,6 @@ fn collect_into_registry<C: HostlibCapability>(cap: C) -> BuiltinRegistry {
     registry
 }
 
-fn assert_all_unimplemented(registry: &BuiltinRegistry) {
-    for entry in registry.iter() {
-        let err = (entry.handler)(&[]).expect_err("scaffold methods must be unimplemented");
-        match err {
-            HostlibError::Unimplemented { builtin } => {
-                assert_eq!(
-                    builtin, entry.name,
-                    "builtin name mismatch: registry says {} but handler says {builtin}",
-                    entry.name
-                );
-            }
-            other => panic!("expected Unimplemented, got {other:?}"),
-        }
-    }
-}
-
 #[test]
 fn ast_capability_registers_documented_methods() {
     let registry = collect_into_registry(AstCapability);
@@ -128,7 +112,14 @@ fn fs_watch_capability_registers_documented_methods() {
         names,
         vec!["hostlib_fs_watch_subscribe", "hostlib_fs_watch_unsubscribe"]
     );
-    assert_all_unimplemented(&registry);
+    for entry in registry.iter() {
+        let err = (entry.handler)(&[]).expect_err("handler must reject empty args");
+        assert!(
+            !matches!(err, HostlibError::Unimplemented { .. }),
+            "fs_watch method {} should be implemented, got {err:?}",
+            entry.name
+        );
+    }
 }
 
 #[test]

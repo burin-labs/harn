@@ -145,9 +145,9 @@ jobs:
         shell: bash
         run: |
           if command -v cargo-nextest >/dev/null 2>&1; then
-            cargo nextest run -p harn-lexer -p harn-parser -p harn-vm -p harn-fmt -p harn-lint -p harn-modules
+            cargo nextest run -p harn-lexer -p harn-parser -p harn-vm -p harn-hostlib -p harn-fmt -p harn-lint -p harn-modules
           else
-            cargo test -p harn-lexer -p harn-parser -p harn-vm -p harn-fmt -p harn-lint -p harn-modules
+            cargo test -p harn-lexer -p harn-parser -p harn-vm -p harn-hostlib -p harn-fmt -p harn-lint -p harn-modules
           fi
       - name: Smoke test harn run
         shell: bash

@@ -131,8 +131,9 @@ fn compare_or_update(path: &Path, actual: &str, update: bool) -> Result<(), Stri
         fs::write(path, &pretty).map_err(|err| format!("write {}: {err}", path.display()))?;
         return Ok(());
     }
-    let expected =
+    let expected_raw =
         fs::read_to_string(path).map_err(|err| format!("read {}: {err}", path.display()))?;
+    let expected = normalize_line_endings(&expected_raw);
     if expected != pretty {
         // Compute a small diff so the failure message is actionable.
         let mismatch = first_mismatch(&expected, &pretty);
@@ -143,6 +144,10 @@ fn compare_or_update(path: &Path, actual: &str, update: bool) -> Result<(), Stri
         ));
     }
     Ok(())
+}
+
+fn normalize_line_endings(text: &str) -> String {
+    text.replace("\r\n", "\n").replace('\r', "\n")
 }
 
 fn first_mismatch(a: &str, b: &str) -> String {

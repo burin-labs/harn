@@ -135,7 +135,7 @@ pub fn scan_project(root: &Path, opts: ScanProjectOptions) -> ScanResult {
     let test_commands = commands::detect_test_commands(&canonical);
     let code_patterns = commands::detect_code_patterns(&files, &canonical);
     let project = folders::build_project_metadata(
-        &canonical.to_string_lossy(),
+        &canonical,
         &files,
         test_commands,
         code_patterns,
@@ -281,7 +281,7 @@ pub fn scan_incremental(
     let test_commands = commands::detect_test_commands(&canonical);
     let code_patterns = commands::detect_code_patterns(&files, &canonical);
     let project = folders::build_project_metadata(
-        &canonical.to_string_lossy(),
+        &canonical,
         &files,
         test_commands,
         code_patterns,

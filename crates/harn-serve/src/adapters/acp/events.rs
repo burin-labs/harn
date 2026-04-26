@@ -252,6 +252,20 @@ impl AgentEventSink for AcpAgentEventSink {
                     },
                 }));
             }
+            AgentEvent::FsWatch {
+                session_id,
+                subscription_id,
+                events,
+            } => {
+                self.write_notification(serde_json::json!({
+                    "sessionId": session_id,
+                    "update": {
+                        "sessionUpdate": "fs_watch",
+                        "subscriptionId": subscription_id,
+                        "events": events,
+                    },
+                }));
+            }
             // Pipeline-loop milestones with no canonical ACP session/update
             // mapping; deliberately not forwarded.
             AgentEvent::TurnStart { .. }
@@ -266,7 +280,7 @@ impl AgentEventSink for AcpAgentEventSink {
 
 #[cfg(test)]
 mod tests {
-    use harn_vm::agent_events::{AgentEvent, AgentEventSink, ToolCallStatus};
+    use harn_vm::agent_events::{AgentEvent, AgentEventSink, FsWatchEvent, ToolCallStatus};
     use harn_vm::orchestration::{HandoffArtifact, HandoffTargetRecord};
     use harn_vm::tool_annotations::ToolKind;
     use tokio::sync::mpsc;
@@ -399,6 +413,17 @@ mod tests {
                 artifact_id: "artifact-1".to_string(),
                 handoff: Box::new(handoff),
             },
+            AgentEvent::FsWatch {
+                session_id: "session-1".to_string(),
+                subscription_id: "fsw-1".to_string(),
+                events: vec![FsWatchEvent {
+                    kind: "modify".to_string(),
+                    paths: vec!["/tmp/project/src/lib.rs".to_string()],
+                    relative_paths: vec!["src/lib.rs".to_string()],
+                    raw_kind: "Modify(Any)".to_string(),
+                    error: None,
+                }],
+            },
         ];
         let expected_updates = [
             "agent_message_chunk",
@@ -413,6 +438,7 @@ mod tests {
             "tool_search_result",
             "transcript_compacted",
             "handoff",
+            "fs_watch",
         ];
 
         for event in &events {
