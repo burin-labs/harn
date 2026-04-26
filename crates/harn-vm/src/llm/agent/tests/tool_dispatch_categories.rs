@@ -70,6 +70,18 @@ fn read_tool_registry() -> VmValue {
             "parameters".to_string(),
             VmValue::Dict(Rc::new(tool_params)),
         ),
+        // Declared executor satisfies the agent_loop pre-flight check
+        // (harn#743). These tests assert dispatch-error categorization
+        // — schema validation fails before the dispatcher cares about
+        // the missing bridge.
+        (
+            "executor".to_string(),
+            VmValue::String(Rc::from("host_bridge")),
+        ),
+        (
+            "host_capability".to_string(),
+            VmValue::String(Rc::from("workspace.read_text")),
+        ),
     ])));
     VmValue::Dict(Rc::new(BTreeMap::from([(
         "tools".to_string(),

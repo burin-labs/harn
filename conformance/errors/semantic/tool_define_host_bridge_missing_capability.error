@@ -1,0 +1,1 @@
+tool_define: tool "ask_user" declares executor: "host_bridge" but is missing `host_capability`. Set it to the canonical bridge identifier (e.g. "interaction.ask") so `harn check` can validate the binding against the host capability manifest.

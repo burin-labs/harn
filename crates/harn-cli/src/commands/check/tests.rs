@@ -197,6 +197,135 @@ pipeline main() {
 }
 
 #[test]
+fn preflight_reports_tool_define_unknown_host_capability() {
+    // harn#743: a host_bridge tool's host_capability binding is
+    // validated against the same capability map host_call uses, so
+    // typos surface during `harn check` rather than at first model
+    // call.
+    let dir = unique_temp_dir("harn-check-tool-define-cap");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("main.harn");
+    let source = r#"
+pipeline main() {
+  let r = tool_registry()
+  tool_define(
+    r,
+    "ask_user",
+    "Ask the user",
+    {
+      parameters: {prompt: "string"},
+      executor: "host_bridge",
+      host_capability: "interaction.unknown_op",
+    },
+  )
+}
+"#;
+    let program = parse_program(source);
+    let diagnostics =
+        collect_preflight_diagnostics(&file, source, &program, &CheckConfig::default());
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.message.contains("interaction.unknown_op")
+                && d.message.contains("not declared by the host")),
+        "expected tool_define host_capability diagnostic, got: {:?}",
+        diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn preflight_accepts_tool_define_known_host_capability() {
+    let dir = unique_temp_dir("harn-check-tool-define-cap-ok");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("main.harn");
+    let source = r#"
+pipeline main() {
+  let r = tool_registry()
+  tool_define(
+    r,
+    "ask_user",
+    "Ask the user",
+    {
+      parameters: {prompt: "string"},
+      executor: "host_bridge",
+      host_capability: "interaction.ask",
+    },
+  )
+}
+"#;
+    let program = parse_program(source);
+    let diagnostics =
+        collect_preflight_diagnostics(&file, source, &program, &CheckConfig::default());
+    assert!(
+        diagnostics
+            .iter()
+            .all(|d| !d.message.contains("not declared by the host")),
+        "unexpected diagnostic: {:?}",
+        diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn preflight_reports_tool_define_host_bridge_missing_capability() {
+    let dir = unique_temp_dir("harn-check-tool-define-missing");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("main.harn");
+    let source = r#"
+pipeline main() {
+  let r = tool_registry()
+  tool_define(
+    r,
+    "ask_user",
+    "Ask the user",
+    {parameters: {prompt: "string"}, executor: "host_bridge"},
+  )
+}
+"#;
+    let program = parse_program(source);
+    let diagnostics =
+        collect_preflight_diagnostics(&file, source, &program, &CheckConfig::default());
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.message.contains("no `host_capability` binding")),
+        "expected missing-capability diagnostic, got: {:?}",
+        diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn preflight_reports_tool_define_unknown_executor_value() {
+    let dir = unique_temp_dir("harn-check-tool-define-executor");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("main.harn");
+    let source = r#"
+pipeline main() {
+  let r = tool_registry()
+  tool_define(
+    r,
+    "fly",
+    "Fly",
+    {parameters: {distance: "int"}, executor: "rocketship"},
+  )
+}
+"#;
+    let program = parse_program(source);
+    let diagnostics =
+        collect_preflight_diagnostics(&file, source, &program, &CheckConfig::default());
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.message.contains("unknown executor \"rocketship\"")),
+        "expected unknown-executor diagnostic, got: {:?}",
+        diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn preflight_accepts_known_host_capabilities() {
     let dir = unique_temp_dir("harn-check-host-ok");
     std::fs::create_dir_all(&dir).unwrap();

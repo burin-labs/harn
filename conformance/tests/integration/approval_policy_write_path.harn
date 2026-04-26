@@ -5,7 +5,7 @@ fn write_tools() {
     "write_file",
     "Write a file",
     {
-      handler: nil,
+      handler: { args -> "" },
       parameters: {path: {type: "string", description: "Path"}},
       returns: {type: "string"},
       metadata: {path_params: ["path"], mutation_classification: "apply_workspace"},

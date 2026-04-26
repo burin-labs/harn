@@ -1,0 +1,1 @@
+tool_define: tool "ask_user" declares executor: "host_bridge" but also has a `handler`. Drop the handler — host-bridge tools are dispatched by the host shell, not the VM.

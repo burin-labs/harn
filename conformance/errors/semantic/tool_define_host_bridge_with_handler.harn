@@ -1,0 +1,16 @@
+pipeline test(task) {
+  // host_bridge tools are dispatched by the host shell, never the VM,
+  // so attaching a handler is contradictory.
+  let r = tool_registry()
+  tool_define(
+    r,
+    "ask_user",
+    "Ask the user",
+    {
+      parameters: {prompt: "string"},
+      executor: "host_bridge",
+      host_capability: "interaction.ask",
+      handler: { args -> args.prompt },
+    },
+  )
+}

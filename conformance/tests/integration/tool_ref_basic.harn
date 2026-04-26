@@ -1,7 +1,19 @@
 pipeline main(task) {
   var r = tool_registry()
-  r = tool_define(r, "edit", "Edit a file in place", {parameters: {path: "string"}})
-  r = tool_define(r, "search", "Search the codebase", {parameters: {query: "string"}})
+  // tool_ref/tool_def operate on registry metadata, not dispatch, so
+  // declare an explicit executor instead of attaching dummy handlers.
+  r = tool_define(
+    r,
+    "edit",
+    "Edit a file in place",
+    {parameters: {path: "string"}, executor: "host_bridge", host_capability: "workspace.apply_edit"},
+  )
+  r = tool_define(
+    r,
+    "search",
+    "Search the codebase",
+    {parameters: {query: "string"}, executor: "host_bridge", host_capability: "project.scan"},
+  )
   tool_bind(r)
   assert(tool_ref("edit") == "edit", "tool_ref returns the name when registered")
   assert(tool_ref("search") == "search", "tool_ref resolves another registered tool")

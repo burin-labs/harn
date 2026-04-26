@@ -1784,6 +1784,41 @@ multi-tool registries.
 
 Like `fn`, `tool` may be prefixed with `pub`.
 
+#### Tool execution backend (`executor`)
+
+Every entry registered through `tool_define` declares its execution
+backend. The runtime uses the declared executor to dispatch the call
+and to populate `tool_call_update.executor` on the ACP wire so clients
+can route badges and latency by transport.
+
+| `executor` | Required companion field | Backend |
+|---|---|---|
+| `"harn"` *(alias `"harn_builtin"`)* | `handler` (closure) | In-VM Harn handler. The VM stdlib short-circuits `read_file` / `list_directory` even without a registered handler. |
+| `"host_bridge"` | `host_capability: "cap.op"` | Host shell `builtin_call` bridge. `harn check` validates the binding against the host capability manifest. |
+| `"mcp_server"` | `mcp_server: "<server_name>"` | Configured MCP server. Tools sourced from `mcp_list_tools` carry the equivalent `_mcp_server` annotation. |
+| `"provider_native"` | *(none)* | Provider-side server tools (e.g. OpenAI Responses-API). Never dispatched locally. |
+
+`tool_define` rejects invalid combinations (`executor: "host_bridge"`
+plus a handler, `executor: "harn"` without a handler outside the
+VM-stdlib short-circuit set, missing `host_capability` /
+`mcp_server`, unknown executor strings) at definition time. When
+`executor` is omitted, the registration is interpreted as
+`"harn"` if a handler is present, and rejected otherwise — eliminating
+the historical `[builtin_call] unhandled: <name>` runtime failure.
+
+`agent_loop` re-validates at startup and refuses to run if any tool in
+the bound registry has no executable backend. The error message names
+the offending tool and the documented set of executors.
+
+```harn
+let registry = tool_registry()
+registry = tool_define(registry, "ask_user", "Ask the user", {
+  parameters: {prompt: "string"},
+  executor: "host_bridge",
+  host_capability: "interaction.ask",
+})
+```
+
 #### Deferred tool loading (`defer_loading`)
 
 A tool registered through `tool_define` may set `defer_loading: true`

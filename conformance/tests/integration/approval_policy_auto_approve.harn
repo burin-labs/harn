@@ -4,7 +4,11 @@ fn read_tools() {
     tools,
     "read_file",
     "Read a file",
-    {handler: nil, parameters: {path: {type: "string", description: "Path"}}, returns: {type: "string"}},
+    {
+      handler: { args -> "" },
+      parameters: {path: {type: "string", description: "Path"}},
+      returns: {type: "string"},
+    },
   )
   return tools
 }

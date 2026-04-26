@@ -53,6 +53,22 @@ pub(super) fn resolve_local_tool_path(path: &str) -> std::path::PathBuf {
     crate::stdlib::process::resolve_source_relative_path(path)
 }
 
+/// Tool names that the VM-stdlib short-circuit (`handle_tool_locally`)
+/// services without delegating to a registered handler or the host
+/// bridge. The agent_loop pre-flight validator (harn#743) consults this
+/// list so `executor: "harn"` declarations on these names are accepted
+/// even without a registered handler closure — `handle_tool_locally`
+/// provides the implicit Harn-side handler.
+pub(crate) const VM_STDLIB_SHORT_CIRCUIT_TOOLS: &[&str] = &["read_file", "list_directory"];
+
+/// Returns `true` when `name` is a tool the VM stdlib services
+/// directly via `handle_tool_locally`. Kept in lockstep with the match
+/// arms below — adding a new arm without updating this list would
+/// resurrect the harn#743 foot-gun.
+pub(crate) fn is_vm_stdlib_short_circuit(name: &str) -> bool {
+    VM_STDLIB_SHORT_CIRCUIT_TOOLS.contains(&name)
+}
+
 /// Handle read-only tools locally in the VM without bridging to the host.
 /// This reduces latency and split-brain for passive operations.
 pub(crate) fn handle_tool_locally(name: &str, args: &serde_json::Value) -> Option<String> {

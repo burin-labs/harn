@@ -1,0 +1,11 @@
+pipeline test(task) {
+  // host_bridge tools must declare a host_capability so harn check
+  // can validate the binding against the host capability manifest.
+  let r = tool_registry()
+  tool_define(
+    r,
+    "ask_user",
+    "Ask the user",
+    {parameters: {prompt: "string"}, executor: "host_bridge"},
+  )
+}

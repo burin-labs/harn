@@ -1,0 +1,11 @@
+pipeline test(task) {
+  // Unknown executor values must error so typos don't silently
+  // create handlerless tools.
+  let r = tool_registry()
+  tool_define(
+    r,
+    "fly",
+    "Fly",
+    {parameters: {distance: "int"}, executor: "rocketship"},
+  )
+}
