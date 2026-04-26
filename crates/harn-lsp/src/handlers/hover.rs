@@ -7,7 +7,8 @@ use tower_lsp::lsp_types::*;
 use crate::constants::{builtin_doc, keyword_doc, BUILTINS};
 use crate::helpers::{lsp_position_to_offset, word_at_position};
 use crate::symbols::{
-    format_shape_expanded, format_union_shapes_expanded, HarnSymbolKind, SymbolInfo,
+    format_flow_attributes_block, format_shape_expanded, format_union_shapes_expanded,
+    HarnSymbolKind, SymbolInfo,
 };
 use crate::HarnLsp;
 
@@ -148,6 +149,10 @@ impl HarnLsp {
 
             if let Some(ref doc) = sym.doc_comment {
                 hover_text.push_str(&format!("\n---\n\n{doc}"));
+            }
+
+            if let Some(block) = format_flow_attributes_block(&sym.attributes) {
+                hover_text.push_str(&block);
             }
 
             return Ok(Some(Hover {

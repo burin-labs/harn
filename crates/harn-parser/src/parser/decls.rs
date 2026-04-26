@@ -151,8 +151,10 @@ impl Parser {
         let mut args = Vec::new();
         if self.check(&TokenKind::LParen) {
             self.advance();
+            self.skip_newlines();
             while !self.check(&TokenKind::RParen) {
                 args.push(self.parse_attribute_arg()?);
+                self.skip_newlines();
                 if self.check(&TokenKind::Comma) {
                     self.advance();
                     self.skip_newlines();
@@ -195,8 +197,10 @@ impl Parser {
 
     /// Parse a literal-or-identifier expression for an attribute argument.
     /// Restricted to keep attribute evaluation purely compile-time:
-    /// strings, ints, floats, bools, nil, and bare identifiers (typically
-    /// type names like `EditArgs` or sentinel values like `allow`).
+    /// strings, ints, floats, bools, nil, bare identifiers (typically
+    /// type names like `EditArgs` or sentinel values like `allow`), and
+    /// list literals containing the same restricted values (used by Flow
+    /// `@archivist(evidence: [...])` and similar provenance attributes).
     pub(super) fn parse_attribute_value(&mut self) -> Result<SNode, ParserError> {
         let span = self.current_span();
         let tok = self.current().ok_or_else(|| ParserError::UnexpectedEof {
@@ -212,6 +216,26 @@ impl Parser {
             TokenKind::False => Node::BoolLiteral(false),
             TokenKind::Nil => Node::NilLiteral,
             TokenKind::Identifier(name) => Node::Identifier(name.clone()),
+            TokenKind::LBracket => {
+                self.advance();
+                self.skip_newlines();
+                let mut items = Vec::new();
+                while !self.check(&TokenKind::RBracket) {
+                    items.push(self.parse_attribute_value()?);
+                    self.skip_newlines();
+                    if self.check(&TokenKind::Comma) {
+                        self.advance();
+                        self.skip_newlines();
+                    } else {
+                        break;
+                    }
+                }
+                self.consume(&TokenKind::RBracket, "]")?;
+                return Ok(spanned(
+                    Node::ListLiteral(items),
+                    Span::merge(span, self.prev_span()),
+                ));
+            }
             TokenKind::Minus => {
                 self.advance();
                 let inner_tok = self.current().ok_or_else(|| ParserError::UnexpectedEof {

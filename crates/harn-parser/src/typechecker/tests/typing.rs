@@ -85,6 +85,153 @@ pipeline invalid(task) {}
 }
 
 #[test]
+fn test_flow_invariant_archivist_attributes_recognized() {
+    let warns = warnings(
+        r#"
+@invariant
+@deterministic
+@archivist(evidence: ["https://example.com/spec"], confidence: 0.95, source_date: "2026-04-01", coverage_examples: ["case-a"])
+@retroactive
+fn complete_predicate(slice) -> bool { return true }
+"#,
+    );
+    assert!(
+        warns
+            .iter()
+            .all(|warning| !warning.contains("unknown attribute")),
+        "archivist/retroactive attributes should be recognised: {warns:?}"
+    );
+}
+
+#[test]
+fn test_flow_invariant_requires_kind_and_archivist() {
+    let warns = warnings(
+        r#"
+@invariant
+fn bare_predicate(slice) -> bool { return true }
+"#,
+    );
+    assert!(
+        warns.iter().any(|w| w.contains("requires exactly one of")),
+        "expected kind-required warning, got {warns:?}"
+    );
+    assert!(
+        warns
+            .iter()
+            .any(|w| w.contains("missing `@archivist(...)`")),
+        "expected archivist-required warning, got {warns:?}"
+    );
+}
+
+#[test]
+fn test_flow_invariant_with_kind_only_still_warns_about_archivist() {
+    let warns = warnings(
+        r#"
+@invariant
+@deterministic
+fn kinded_predicate(slice) -> bool { return true }
+"#,
+    );
+    assert!(
+        warns
+            .iter()
+            .any(|w| w.contains("missing `@archivist(...)`")),
+        "expected archivist-required warning, got {warns:?}"
+    );
+    assert!(
+        warns.iter().all(|w| !w.contains("requires exactly one of")),
+        "should not also warn about missing kind: {warns:?}"
+    );
+}
+
+#[test]
+fn test_flow_invariant_kinds_are_mutually_exclusive() {
+    let warns = warnings(
+        r#"
+@invariant
+@deterministic
+@semantic
+@archivist(evidence: ["x"])
+fn confused(slice) -> bool { return true }
+"#,
+    );
+    assert!(
+        warns.iter().any(|w| w.contains("mutually exclusive")),
+        "expected mutual-exclusion warning, got {warns:?}"
+    );
+}
+
+#[test]
+fn test_archivist_without_invariant_warns() {
+    let warns = warnings(
+        r#"
+@archivist(evidence: ["https://x"])
+fn standalone() -> int { return 1 }
+"#,
+    );
+    assert!(
+        warns
+            .iter()
+            .any(|w| w.contains("only applies to Flow predicates marked")),
+        "expected standalone-archivist warning, got {warns:?}"
+    );
+}
+
+#[test]
+fn test_handler_ir_invariant_does_not_trigger_flow_lints() {
+    // `@invariant("name")` is the harn-ir handler form, validated
+    // separately. Flow lints must not fire for it.
+    let warns = warnings(
+        r#"
+@invariant("approval.reachability")
+fn handler() -> int { return 1 }
+"#,
+    );
+    assert!(
+        warns
+            .iter()
+            .all(|w| !w.contains("`@archivist(...)`") && !w.contains("requires exactly one of")),
+        "handler-IR @invariant should not trigger Flow lints: {warns:?}"
+    );
+}
+
+#[test]
+fn test_archivist_unknown_arg_warns() {
+    let warns = warnings(
+        r#"
+@invariant
+@deterministic
+@archivist(evidence: ["x"], typo_key: "oops")
+fn oops(slice) -> bool { return true }
+"#,
+    );
+    assert!(
+        warns
+            .iter()
+            .any(|w| w.contains("unknown `@archivist` argument `typo_key`")),
+        "expected unknown-arg warning, got {warns:?}"
+    );
+}
+
+#[test]
+fn test_archivist_confidence_out_of_range_warns() {
+    let warns = warnings(
+        r#"
+@invariant
+@deterministic
+@archivist(evidence: ["x"], confidence: 1.5)
+fn loud(slice) -> bool { return true }
+"#,
+    );
+    assert!(
+        warns
+            .iter()
+            .any(|w| w.contains("confidence") && w.contains("[0.0, 1.0]")),
+        "expected confidence-range warning, got {warns:?}"
+    );
+}
+
+#[test]
 fn test_fn_arg_type_mismatch() {
     let errs = errors(
         r#"pipeline t(task) { fn add(a: int, b: int) -> int { return a + b }

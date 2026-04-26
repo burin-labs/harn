@@ -53,6 +53,18 @@ granular archaeology.
   approval-gated calls) or the `worker_update.audit` mirror. The field
   is omitted when no mutation session is installed, so existing clients
   see no wire change.
+- **Flow `invariants.harn` discovery + provenance attributes (#579).**
+  Adds the discovery walker that mirrors `metadata_resolve` semantics
+  (root-to-leaf, stricter-child overrides) for per-directory
+  `invariants.harn` Flow predicate files, the structured
+  `@archivist(evidence: [...], confidence, source_date,
+  coverage_examples)` provenance attribute, and the advisory
+  `@retroactive` flag. The typechecker now warns when a bare
+  `@invariant` is missing exactly one of `@deterministic`/`@semantic` or
+  is missing `@archivist(...)`, and the LSP surfaces the full attribute
+  block on hover so the function declaration stays the single source of
+  truth. Attribute argument syntax also accepts list literals and
+  multi-line forms so provenance blocks can carry rich evidence.
 
 ## v0.7.42
 

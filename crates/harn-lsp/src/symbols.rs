@@ -1,5 +1,7 @@
 use harn_lexer::Span;
-use harn_parser::{format_type, DictEntry, Node, SNode, ShapeField, TypeExpr, TypeParam};
+use harn_parser::{
+    format_type, Attribute, DictEntry, Node, SNode, ShapeField, TypeExpr, TypeParam,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum HarnSymbolKind {
@@ -37,15 +39,98 @@ pub(crate) struct SymbolInfo {
     pub(crate) fields: Vec<ShapeField>,
     /// Enum variants available on this enum symbol.
     pub(crate) enum_variants: Vec<EnumVariantInfo>,
+    /// Attributes (`@invariant`, `@archivist`, `@deterministic`, …)
+    /// attached to the immediately-preceding declaration. Used by hover
+    /// to surface Flow predicate metadata as a single source of truth.
+    pub(crate) attributes: Vec<Attribute>,
 }
 
 /// Walk the parsed AST and collect all definitions.
 pub(crate) fn build_symbol_table(program: &[SNode], source: &str) -> Vec<SymbolInfo> {
     let mut symbols = Vec::new();
     for snode in program {
-        collect_symbols(snode, &mut symbols, None, source, None);
+        collect_symbols(snode, &mut symbols, None, source, None, &[]);
     }
     symbols
+}
+
+/// Pretty-print a Flow predicate metadata block from the attribute list
+/// attached to a declaration. Returns `None` when no attribute is
+/// recognised, so hover can keep its existing layout for non-Flow
+/// symbols.
+pub(crate) fn format_flow_attributes_block(attributes: &[Attribute]) -> Option<String> {
+    if attributes.is_empty() {
+        return None;
+    }
+    let mut lines: Vec<String> = Vec::new();
+    let mut saw_relevant = false;
+    for attr in attributes {
+        match attr.name.as_str() {
+            "invariant" if attr.args.is_empty() => {
+                lines.push("- `@invariant` — Flow predicate".to_string());
+                saw_relevant = true;
+            }
+            "deterministic" => {
+                lines.push("- `@deterministic` — pure, replay-checked".to_string());
+                saw_relevant = true;
+            }
+            "semantic" => {
+                lines.push(
+                    "- `@semantic` — may invoke `cheap_judge` over pre-baked evidence".to_string(),
+                );
+                saw_relevant = true;
+            }
+            "retroactive" => {
+                lines.push(
+                    "- `@retroactive` — advisory historical flag (does not gate)".to_string(),
+                );
+                saw_relevant = true;
+            }
+            "archivist" => {
+                let mut detail: Vec<String> = Vec::new();
+                for arg in &attr.args {
+                    let Some(name) = arg.name.as_deref() else {
+                        continue;
+                    };
+                    let value = format_attribute_arg_value(&arg.value.node);
+                    if let Some(value) = value {
+                        detail.push(format!("    - `{name}`: {value}"));
+                    } else {
+                        detail.push(format!("    - `{name}`"));
+                    }
+                }
+                lines.push("- `@archivist(...)` — provenance:".to_string());
+                lines.extend(detail);
+                saw_relevant = true;
+            }
+            _ => {}
+        }
+    }
+    if !saw_relevant {
+        return None;
+    }
+    let mut block = String::from("\n---\n\n**Flow predicate metadata**\n\n");
+    block.push_str(&lines.join("\n"));
+    Some(block)
+}
+
+fn format_attribute_arg_value(node: &Node) -> Option<String> {
+    match node {
+        Node::StringLiteral(s) | Node::RawStringLiteral(s) => Some(format!("\"{s}\"")),
+        Node::IntLiteral(i) => Some(i.to_string()),
+        Node::FloatLiteral(f) => Some(format!("{f:.3}")),
+        Node::BoolLiteral(b) => Some(b.to_string()),
+        Node::NilLiteral => Some("nil".to_string()),
+        Node::Identifier(id) => Some(format!("`{id}`")),
+        Node::ListLiteral(items) => {
+            let rendered: Vec<String> = items
+                .iter()
+                .filter_map(|n| format_attribute_arg_value(&n.node))
+                .collect();
+            Some(format!("[{}]", rendered.join(", ")))
+        }
+        _ => None,
+    }
 }
 
 /// Extract leading `///` lines immediately above a span in the source.
@@ -131,6 +216,7 @@ fn collect_symbols(
     scope_span: Option<Span>,
     source: &str,
     impl_type_name: Option<&str>,
+    pending_attrs: &[Attribute],
 ) {
     // Helper macro for simple SymbolInfo with no doc/impl fields
     macro_rules! simple_sym {
@@ -146,6 +232,7 @@ fn collect_symbols(
                 impl_type: None,
                 fields: Vec::new(),
                 enum_variants: Vec::new(),
+                attributes: Vec::new(),
             }
         };
     }
@@ -153,7 +240,7 @@ fn collect_symbols(
     // Shorthand for recursive calls
     macro_rules! recurse {
         ($child:expr, $scope:expr) => {
-            collect_symbols($child, symbols, $scope, source, None)
+            collect_symbols($child, symbols, $scope, source, None, &[])
         };
     }
 
@@ -182,6 +269,7 @@ fn collect_symbols(
                 impl_type: None,
                 fields: Vec::new(),
                 enum_variants: Vec::new(),
+                attributes: pending_attrs.to_vec(),
             });
             // Params are plain strings (no individual spans), register them scoped to body.
             for p in params {
@@ -226,6 +314,7 @@ fn collect_symbols(
                 impl_type: impl_type_name.map(String::from),
                 fields: Vec::new(),
                 enum_variants: Vec::new(),
+                attributes: pending_attrs.to_vec(),
             });
             for p in params {
                 symbols.push(simple_sym!(
@@ -269,6 +358,7 @@ fn collect_symbols(
                 impl_type: None,
                 fields: Vec::new(),
                 enum_variants: Vec::new(),
+                attributes: pending_attrs.to_vec(),
             });
             for p in params {
                 symbols.push(simple_sym!(
@@ -302,6 +392,7 @@ fn collect_symbols(
                 impl_type: None,
                 fields: Vec::new(),
                 enum_variants: Vec::new(),
+                attributes: Vec::new(),
             });
             for (_k, value) in fields {
                 recurse!(value, Some(snode.span));
@@ -381,6 +472,7 @@ fn collect_symbols(
                             .collect(),
                     })
                     .collect(),
+                attributes: Vec::new(),
             });
         }
         Node::StructDecl {
@@ -426,6 +518,7 @@ fn collect_symbols(
                 impl_type: None,
                 fields: shape_fields,
                 enum_variants: Vec::new(),
+                attributes: Vec::new(),
             });
         }
         Node::InterfaceDecl {
@@ -472,6 +565,7 @@ fn collect_symbols(
                 impl_type: None,
                 fields: Vec::new(),
                 enum_variants: Vec::new(),
+                attributes: Vec::new(),
             });
         }
         Node::ImplBlock {
@@ -488,9 +582,10 @@ fn collect_symbols(
                 impl_type: None,
                 fields: Vec::new(),
                 enum_variants: Vec::new(),
+                attributes: Vec::new(),
             });
             for m in methods {
-                collect_symbols(m, symbols, Some(snode.span), source, Some(type_name));
+                collect_symbols(m, symbols, Some(snode.span), source, Some(type_name), &[]);
             }
         }
         Node::ForIn {
@@ -778,6 +873,7 @@ fn collect_symbols(
                 impl_type: None,
                 fields: Vec::new(),
                 enum_variants: Vec::new(),
+                attributes: Vec::new(),
             });
             for s in body {
                 recurse!(s, Some(snode.span));
@@ -809,13 +905,13 @@ fn collect_symbols(
         | Node::BreakStmt
         | Node::ContinueStmt => {}
 
-        Node::AttributedDecl { inner, .. } => {
-            collect_symbols(inner, symbols, scope_span, source, None);
+        Node::AttributedDecl { attributes, inner } => {
+            collect_symbols(inner, symbols, scope_span, source, None, attributes);
         }
 
         Node::OrPattern(alternatives) => {
             for alt in alternatives {
-                collect_symbols(alt, symbols, scope_span, source, None);
+                collect_symbols(alt, symbols, scope_span, source, None, &[]);
             }
         }
     }
@@ -828,8 +924,8 @@ fn collect_dict_entries(
     source: &str,
 ) {
     for entry in entries {
-        collect_symbols(&entry.key, symbols, scope_span, source, None);
-        collect_symbols(&entry.value, symbols, scope_span, source, None);
+        collect_symbols(&entry.key, symbols, scope_span, source, None, &[]);
+        collect_symbols(&entry.value, symbols, scope_span, source, None, &[]);
     }
 }
 
