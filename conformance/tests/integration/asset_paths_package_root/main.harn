@@ -1,0 +1,23 @@
+// Package-root prompt asset addressing (issue #742).
+//
+// `@/...` and `@<alias>/...` resolve from the calling file's project
+// root (nearest `harn.toml` ancestor), so a renderer in a deeply
+// nested file uses the same path string as one at the project root.
+import "subdir/deeply/nested/caller"
+
+pipeline test() {
+  // Top-level caller — anchor is the project root next to harn.toml.
+  let direct = render_prompt("@/prompts/greeting.harn.prompt", {who: "Alice"})
+  println(direct)
+  let aliased = render_prompt("@partials/greeting.harn.prompt", {who: "Alice"})
+  println(aliased)
+  // Deeply nested caller using the same `@/...` string — same output.
+  println(render_root("Alice"))
+  println(render_alias("Alice"))
+  // Templates can include each other via `@/...` regardless of nesting.
+  println(render_wrapper())
+  // Inline templates passed to `render_string(...)` honor `@/...` in
+  // their `{{ include }}` directives too — same project-root anchor.
+  let inline = "inline -> {{ include \"@/prompts/greeting.harn.prompt\" }}"
+  println(render_string(inline, {who: "Carol"}))
+}

@@ -191,7 +191,14 @@ impl BundleManifestBuilder {
 }
 
 fn classify_bundle_asset(target: &str, via: &str) -> &'static str {
-    if via == "render_prompt" || target.ends_with(".harn.prompt") || target.ends_with(".prompt") {
+    // Package-root forms address prompt assets by stable name; treat
+    // them as prompt assets even when the file extension is omitted
+    // (e.g. `@partials/tool-examples`).
+    if via == "render_prompt"
+        || target.ends_with(".harn.prompt")
+        || target.ends_with(".prompt")
+        || target.starts_with('@')
+    {
         "prompt_asset"
     } else {
         "template_asset"

@@ -117,7 +117,7 @@ fn render_template_string(args: &[VmValue]) -> Result<VmValue, VmError> {
 
 fn render_asset(args: &[VmValue]) -> Result<VmValue, VmError> {
     let path = args.first().map(|a| a.display()).unwrap_or_default();
-    let resolved = crate::stdlib::process::resolve_source_asset_path(&path);
+    let resolved = resolve_render_target(&path)?;
     let template = std::fs::read_to_string(&resolved).map_err(|e| {
         VmError::Thrown(VmValue::String(Rc::from(format!(
             "Failed to read template {}: {e}",
@@ -131,6 +131,14 @@ fn render_asset(args: &[VmValue]) -> Result<VmValue, VmError> {
     Ok(VmValue::String(Rc::from(rendered)))
 }
 
+/// Resolve a `render(...)` / `render_prompt(...)` target, honoring the
+/// `@/` and `@<alias>/` package-root forms (issue #742) and falling back
+/// to the legacy source-relative path resolver for plain strings.
+fn resolve_render_target(path: &str) -> Result<std::path::PathBuf, VmError> {
+    crate::stdlib::asset_paths::resolve_or_source_relative(path, None)
+        .map_err(|msg| VmError::Thrown(VmValue::String(Rc::from(msg))))
+}
+
 /// `render_with_provenance(path, bindings)` — the debugger's hook for
 /// the prompt-template source-map UX (burin-code #93/#94). Returns
 /// `{ text: string, template_uri: string, spans: list<dict> }` where
@@ -139,7 +147,7 @@ fn render_asset(args: &[VmValue]) -> Result<VmValue, VmError> {
 /// section when a user clicks a chunk of the rendered prompt.
 fn render_asset_with_provenance(args: &[VmValue]) -> Result<VmValue, VmError> {
     let path = args.first().map(|a| a.display()).unwrap_or_default();
-    let resolved = crate::stdlib::process::resolve_source_asset_path(&path);
+    let resolved = resolve_render_target(&path)?;
     let template = std::fs::read_to_string(&resolved).map_err(|e| {
         VmError::Thrown(VmValue::String(Rc::from(format!(
             "Failed to read template {}: {e}",

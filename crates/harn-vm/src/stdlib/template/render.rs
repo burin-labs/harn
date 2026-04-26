@@ -260,7 +260,25 @@ fn render_node(
                     ));
                 }
             };
-            let resolved: PathBuf = if Path::new(&path_str).is_absolute() {
+            let asset_ref_opt = crate::stdlib::asset_paths::parse(&path_str);
+            let resolved: PathBuf = if let Some(asset_ref) = &asset_ref_opt {
+                // `{{ include "@/..." }}` and `{{ include "@alias/..." }}`
+                // anchor at the project root of the *currently-rendering*
+                // template — `rc.current_path` — not the entry pipeline,
+                // so a bundled prompt fragment can pull in sibling
+                // partials by stable name regardless of how it got
+                // included transitively (#742). Fall back to the VM's
+                // thread-local source dir when no current path is set
+                // (the entry-render case for inline templates).
+                let anchor = rc
+                    .current_path
+                    .as_deref()
+                    .and_then(Path::parent)
+                    .map(Path::to_path_buf)
+                    .unwrap_or_else(crate::stdlib::process::source_root_path);
+                crate::stdlib::asset_paths::resolve(asset_ref, &anchor)
+                    .map_err(|msg| TemplateError::new(*line, *col, msg))?
+            } else if Path::new(&path_str).is_absolute() {
                 PathBuf::from(&path_str)
             } else if let Some(base) = &rc.base {
                 base.join(&path_str)
@@ -268,17 +286,23 @@ fn render_node(
                 crate::stdlib::process::resolve_source_asset_path(&path_str)
             };
             let canonical = resolved.canonicalize().unwrap_or(resolved.clone());
-            if let Some(root) = &rc.include_root {
-                if !canonical.starts_with(root) {
-                    return Err(TemplateError::new(
-                        *line,
-                        *col,
-                        format!(
-                            "include path {} escapes template root {}",
-                            canonical.display(),
-                            root.display()
-                        ),
-                    ));
+            // Package-root forms have their own safety boundary (the
+            // project root, enforced by `safe_relative` rejecting `..`),
+            // so they're allowed to address siblings outside the
+            // calling template's directory — that's the entire point.
+            if asset_ref_opt.is_none() {
+                if let Some(root) = &rc.include_root {
+                    if !canonical.starts_with(root) {
+                        return Err(TemplateError::new(
+                            *line,
+                            *col,
+                            format!(
+                                "include path {} escapes template root {}",
+                                canonical.display(),
+                                root.display()
+                            ),
+                        ));
+                    }
                 }
             }
             if rc.include_stack.iter().any(|p| p == &canonical) {

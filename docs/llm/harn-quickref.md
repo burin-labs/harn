@@ -1397,6 +1397,27 @@ Load file-backed templates via `render("path.prompt", bindings)` or
 template source lives inline in a string literal. File paths resolve relative
 to the calling module's directory.
 
+**Package-root paths** — prefer `@/...` and `@<alias>/...` over
+`../../partials/foo.harn.prompt`. They anchor at the calling file's
+project root (nearest `harn.toml`) so refactors that move callers don't
+break asset references:
+
+```harn,ignore
+render_prompt("@/prompts/tool-examples.harn.prompt", bindings)  // project-root
+render_prompt("@partials/tool-examples.harn.prompt", bindings)  // [asset_roots] alias
+```
+
+Define aliases in `harn.toml`:
+
+```toml
+[asset_roots]
+partials = "Sources/BurinCore/Resources/pipelines/partials"
+```
+
+Both `render_prompt(...)` and `{{ include "@/..." }}` honor the same
+syntax. `harn check` validates the resolved files exist; bundle manifests
+and LSP go-to-definition follow `@`-paths to the target file.
+
 - `{{ name }}` — interpolation; nested with `{{ a.b[0] }}`.
 - `{{ if expr }}..{{ elif expr }}..{{ else }}..{{ end }}` — expression
   operators: `==`, `!=`, `<`, `<=`, `>`, `>=`, `and`/`&&`, `or`/`||`,
@@ -1405,7 +1426,8 @@ to the calling module's directory.
   Inside: `{{ loop.index }}`, `.index0`, `.first`, `.last`, `.length`.
   Dict iteration: `{{ for k, v in dict }}..{{ end }}`.
 - `{{ include "partial.prompt" }}` or `{{ include "..." with { x: y } }}`
-  — resolves relative to the including file; cycle detection is built in.
+  — resolves relative to the including file; `{{ include "@/..." }}`
+  resolves from the project root; cycle detection is built in.
 - Filters: `{{ name | upper | default: "anon" }}`. Built-ins: `upper`,
   `lower`, `title`, `trim`, `capitalize`, `length`, `first`, `last`,
   `reverse`, `join:sep`, `default:fallback`, `json`, `indent:n`, `lines`,

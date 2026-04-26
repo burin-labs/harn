@@ -511,6 +511,56 @@ declaration.
 Plain `import` (without `pub`) remains private — the imported names are
 visible only inside the importing file.
 
+## Package-root prompt assets
+
+`render(...)`, `render_prompt(...)`, the `template.render` host
+capability, and `{{ include "..." }}` directives accept two
+package-root forms in addition to plain source-relative paths. They
+exist to keep prompt-asset references stable across pipeline file
+moves — a refactor that relocates the caller no longer breaks the
+asset path.
+
+```harn,ignore
+render_prompt("@/prompts/tool-examples.harn.prompt", bindings)
+render_prompt("@partials/tool-examples.harn.prompt", bindings)
+```
+
+Resolution rules:
+
+- **`@/<rel>`** — resolves from the calling file's project root (the
+  nearest `harn.toml` ancestor). The resulting absolute path is the
+  same regardless of how deep the caller sits in the workspace.
+- **`@<alias>/<rel>`** — resolves from a `[asset_roots]` entry in the
+  project's `harn.toml`:
+
+  ```toml
+  [asset_roots]
+  partials = "Sources/BurinCore/Resources/pipelines/partials"
+  prompts  = "Sources/BurinCore/Resources/pipelines"
+  ```
+
+Both forms reject `..` segments and absolute targets so a
+package-rooted asset can never escape the project root. Plain (non-`@`)
+paths keep the legacy source-relative behavior unchanged — back-compat
+is exact.
+
+`{{ include "@/..." }}` is honored inside `.harn.prompt` files too,
+so a deeply-included partial can pull in its sibling fragments by the
+same stable name regardless of which entry pipeline rendered it.
+
+`harn check` resolves `@`-paths during preflight and fails the run
+when:
+
+- the calling file has no `harn.toml` ancestor;
+- an `@<alias>/...` reference targets an alias that isn't defined in
+  `[asset_roots]`;
+- the resolved file does not exist.
+
+`harn contracts bundle` records every resolved `@`-path under
+`prompt_assets`, so packagers don't need to maintain a separate file
+list. The Harn LSP's go-to-definition jumps straight from a literal
+`render_prompt("@/...")` argument to the target prompt file.
+
 ## Import behavior
 
 Import paths resolve in this order:

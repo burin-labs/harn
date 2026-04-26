@@ -144,6 +144,32 @@ inner render only:
 {{ include "partials/item.prompt" with { item: x, style: "bold" } }}
 ```
 
+### Package-root paths
+
+Refactor-safe alternatives to `../../partials/foo.harn.prompt`:
+
+```text
+{{ include "@/prompts/header.harn.prompt" }}
+{{ include "@partials/header.harn.prompt" }}
+```
+
+- `@/<rel>` — anchored at the calling file's project root (nearest
+  `harn.toml` ancestor).
+- `@<alias>/<rel>` — anchored at an entry in the project's
+  `[asset_roots]` table:
+
+  ```toml
+  # harn.toml
+  [asset_roots]
+  partials = "src/prompts/partials"
+  ```
+
+These forms work in both the runtime template engine and the
+`render(...)` / `render_prompt(...)` builtins. `harn check` validates
+them against `harn.toml`. See
+[modules.md](./modules.md#package-root-prompt-assets) for the full
+reference.
+
 **Safety:**
 
 - Circular includes are detected (e.g. `a.prompt` includes `b.prompt` which
@@ -151,6 +177,8 @@ inner render only:
   the full chain.
 - Include depth is capped at 32 levels.
 - A missing included file fails with `failed to read included template <path>`.
+- `@/...` and `@<alias>/...` reject `..` segments and absolute targets;
+  package-rooted assets cannot escape the project root.
 
 ## Comments
 

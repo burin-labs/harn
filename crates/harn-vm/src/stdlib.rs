@@ -5,6 +5,7 @@ pub mod agent_state;
 mod agents;
 mod agents_daemon;
 pub(crate) mod assemble;
+pub mod asset_paths;
 mod bytes;
 mod clock;
 mod collections;
