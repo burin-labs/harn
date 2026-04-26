@@ -484,6 +484,33 @@ Import specific functions from any module:
 import { extract_paths, parse_cells } from "std/text"
 ```
 
+### Public re-exports
+
+A facade module can re-publish symbols from other modules as part of its
+own public surface by prefixing any import with `pub`:
+
+```harn,ignore
+// Facade that exposes a curated public API while the implementation
+// lives in shard files.
+pub import { enrich_source_batch, enrich_source_dir } from "enrich-source"
+pub import { enrich_test_batch, enrich_test_dir } from "enrich-test"
+pub import "shared"
+```
+
+- `pub import "module"` re-exports every public name from the target
+  module — the wildcard form.
+- `pub import { name } from "module"` re-exports only the listed names.
+
+Re-exports compose: a facade can re-export from another facade and the
+chain is followed transitively. `harn check` flags re-export conflicts
+when two `pub import`s contribute the same name from different sources,
+or when a re-exported name collides with a local `pub` declaration.
+Editor go-to-definition follows re-export chains to the originating
+declaration.
+
+Plain `import` (without `pub`) remains private — the imported names are
+visible only inside the importing file.
+
 ## Import behavior
 
 Import paths resolve in this order:

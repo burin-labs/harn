@@ -943,13 +943,14 @@ impl<'a> Linter<'a> {
                     self.record_param_type_references(&variant.fields);
                 }
             }
-            Node::SelectiveImport { names, .. } => {
+            Node::SelectiveImport { names, is_pub, .. } => {
                 for name in names {
                     self.known_functions.insert(name.clone());
                 }
                 self.imports.push(ImportInfo {
                     names: names.clone(),
                     span: snode.span,
+                    is_pub: *is_pub,
                 });
             }
 

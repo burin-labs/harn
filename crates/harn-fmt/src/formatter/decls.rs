@@ -230,12 +230,18 @@ impl Formatter<'_> {
             }
             Node::BreakStmt => self.writeln("break"),
             Node::ContinueStmt => self.writeln("continue"),
-            Node::ImportDecl { path } => {
-                self.writeln(&format!("import \"{path}\""));
+            Node::ImportDecl { path, is_pub } => {
+                let prefix = if *is_pub { "pub " } else { "" };
+                self.writeln(&format!("{prefix}import \"{path}\""));
             }
-            Node::SelectiveImport { names, path } => {
+            Node::SelectiveImport {
+                names,
+                path,
+                is_pub,
+            } => {
+                let prefix = if *is_pub { "pub " } else { "" };
                 let line = self.format_selective_import_names(names, path, self.indent);
-                self.writeln(&line);
+                self.writeln(&format!("{prefix}{line}"));
             }
             Node::MatchExpr { value, arms } => {
                 let val = self.format_expr(value, self.indent);

@@ -63,7 +63,7 @@ fn collect_mock_host_capabilities_from_node(
                 );
             }
         }
-        Node::ImportDecl { path } | Node::SelectiveImport { path, .. } => {
+        Node::ImportDecl { path, .. } | Node::SelectiveImport { path, .. } => {
             if path.starts_with("std/") {
                 return;
             }

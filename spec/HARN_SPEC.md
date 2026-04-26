@@ -304,8 +304,8 @@ attr_value         ::= STRING_LITERAL | RAW_STRING | INT_LITERAL
                      | FLOAT_LITERAL | 'true' | 'false' | 'nil'
                      | IDENTIFIER | '-' INT_LITERAL | '-' FLOAT_LITERAL
 
-import_decl        ::= 'import' STRING_LITERAL
-                     | 'import' '{' IDENTIFIER (',' IDENTIFIER)* '}'
+import_decl        ::= ['pub'] 'import' STRING_LITERAL
+                     | ['pub'] 'import' '{' IDENTIFIER (',' IDENTIFIER)* '}'
                        'from' STRING_LITERAL
 
 pipeline_decl      ::= ['pub'] 'pipeline' IDENTIFIER '(' param_list ')'
@@ -883,6 +883,22 @@ declared file inside the installed `acme` package.
 Selective imports: `import { name1, name2 } from "module"` imports only
 the specified functions. Functions marked `pub` are exported by default;
 if no `pub` functions exist, all functions are exported.
+
+Public re-exports: prefixing any `import` with `pub` re-exports the
+imported symbols as part of the importing module's public surface, so
+downstream importers see them as if they were declared there directly:
+
+- `pub import "module"` — re-export every name the target module
+  exports. Equivalent to wildcard re-export.
+- `pub import { name } from "module"` — re-export only the listed
+  names. Other names from the source module remain private to the
+  importing module.
+
+Re-exports compose: a facade module that `pub import`s from another
+facade transitively forwards every reachable name. Two re-exports of
+the same name from different sources — or a re-export that shadows a
+local `pub` declaration — are reported by `harn check` as a re-export
+conflict naming every contributing module.
 
 Imported pipelines are registered for later invocation.
 Non-pipeline top-level statements (fn declarations, let bindings) are executed immediately.

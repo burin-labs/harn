@@ -1,0 +1,1 @@
+pub import { deep } from "pub_import_chained_middle"

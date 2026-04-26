@@ -518,9 +518,18 @@ impl Formatter<'_> {
                 let val = self.format_expr(value, indent);
                 format!("var {pat}{type_str} = {val}")
             }
-            Node::ImportDecl { path } => format!("import \"{path}\""),
-            Node::SelectiveImport { names, path } => {
-                self.format_selective_import_names(names, path, indent)
+            Node::ImportDecl { path, is_pub } => {
+                let prefix = if *is_pub { "pub " } else { "" };
+                format!("{prefix}import \"{path}\"")
+            }
+            Node::SelectiveImport {
+                names,
+                path,
+                is_pub,
+            } => {
+                let prefix = if *is_pub { "pub " } else { "" };
+                let line = self.format_selective_import_names(names, path, indent);
+                format!("{prefix}{line}")
             }
             Node::EnumDecl { name, .. } => format!("/* enum {name} */"),
             Node::StructDecl { name, .. } => format!("/* struct {name} */"),

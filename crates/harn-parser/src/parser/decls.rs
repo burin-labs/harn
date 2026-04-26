@@ -50,6 +50,10 @@ impl Parser {
     }
 
     pub(super) fn parse_import(&mut self) -> Result<SNode, ParserError> {
+        self.parse_import_with_pub(false)
+    }
+
+    pub(super) fn parse_import_with_pub(&mut self, is_pub: bool) -> Result<SNode, ParserError> {
         let start = self.current_span();
         self.consume(&TokenKind::Import, "import")?;
 
@@ -74,7 +78,11 @@ impl Parser {
                     let path = path.clone();
                     self.advance();
                     return Ok(spanned(
-                        Node::SelectiveImport { names, path },
+                        Node::SelectiveImport {
+                            names,
+                            path,
+                            is_pub,
+                        },
                         Span::merge(start, self.prev_span()),
                     ));
                 }
@@ -87,7 +95,7 @@ impl Parser {
                 let path = path.clone();
                 self.advance();
                 return Ok(spanned(
-                    Node::ImportDecl { path },
+                    Node::ImportDecl { path, is_pub },
                     Span::merge(start, self.prev_span()),
                 ));
             }

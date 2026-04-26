@@ -1,0 +1,2 @@
+pub import { duplicate } from "pub_import_duplicate_a"
+pub import { duplicate } from "pub_import_duplicate_b"

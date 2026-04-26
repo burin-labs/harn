@@ -178,12 +178,13 @@ impl Vm {
 
             for node in program {
                 match &node.node {
-                    harn_parser::Node::ImportDecl { path: sub_path } => {
+                    harn_parser::Node::ImportDecl { path: sub_path, .. } => {
                         self.execute_import(sub_path, None).await?;
                     }
                     harn_parser::Node::SelectiveImport {
                         names,
                         path: sub_path,
+                        ..
                     } => {
                         self.execute_import(sub_path, Some(names)).await?;
                     }
@@ -291,6 +292,61 @@ impl Vm {
                 }
             }
 
+            // Re-export pass: for every `pub import ...` declaration in
+            // the module, surface the imported closures in this module's
+            // `functions`/`public_names` so callers that import this
+            // module see the re-exported names.
+            for node in program {
+                let (sub_path, selective_names, is_pub_import) = match &node.node {
+                    harn_parser::Node::ImportDecl {
+                        path: sub_path,
+                        is_pub,
+                    } => (sub_path.clone(), None, *is_pub),
+                    harn_parser::Node::SelectiveImport {
+                        names,
+                        path: sub_path,
+                        is_pub,
+                    } => (sub_path.clone(), Some(names.clone()), *is_pub),
+                    _ => continue,
+                };
+                if !is_pub_import {
+                    continue;
+                }
+                let cache_key = self.cache_key_for_import(&sub_path);
+                let Some(loaded) = self.module_cache.get(&cache_key).cloned() else {
+                    return Err(VmError::Runtime(format!(
+                        "Re-export error: imported module '{sub_path}' was not loaded"
+                    )));
+                };
+                let names_to_reexport: Vec<String> = match selective_names {
+                    Some(names) => names,
+                    None => {
+                        if loaded.public_names.is_empty() {
+                            loaded.functions.keys().cloned().collect()
+                        } else {
+                            loaded.public_names.iter().cloned().collect()
+                        }
+                    }
+                };
+                for name in names_to_reexport {
+                    let Some(closure) = loaded.functions.get(&name) else {
+                        return Err(VmError::Runtime(format!(
+                            "Re-export error: '{name}' is not exported by '{sub_path}'"
+                        )));
+                    };
+                    if let Some(existing) = functions.get(&name) {
+                        if !Rc::ptr_eq(existing, closure) {
+                            return Err(VmError::Runtime(format!(
+                                "Re-export collision: '{name}' is defined here and also \
+                                 re-exported from '{sub_path}'"
+                            )));
+                        }
+                    }
+                    functions.insert(name.clone(), Rc::clone(closure));
+                    public_names.insert(name);
+                }
+            }
+
             self.env = caller_env;
             self.source_dir = old_source_dir;
 
@@ -299,6 +355,22 @@ impl Vm {
                 public_names,
             })
         })
+    }
+
+    /// Return the path key that `execute_import` would use to cache the
+    /// LoadedModule for this import string. Used by the re-export pass to
+    /// look up the already-loaded source module after `execute_import`
+    /// has populated [`Vm::module_cache`].
+    fn cache_key_for_import(&self, path: &str) -> PathBuf {
+        if let Some(module) = path.strip_prefix("std/") {
+            return PathBuf::from(format!("<stdlib>/{module}.harn"));
+        }
+        let base = self
+            .source_dir
+            .clone()
+            .unwrap_or_else(|| PathBuf::from("."));
+        let file_path = resolve_module_import_path(&base, path);
+        file_path.canonicalize().unwrap_or(file_path)
     }
 
     /// Load a module file and return the exported function closures that

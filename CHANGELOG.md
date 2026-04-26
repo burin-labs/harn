@@ -27,6 +27,22 @@ granular archaeology.
   block in `crates/harn-modules/src/lib.rs` is reverted, and to pass
   (sub-second per command) with the fix in place.
 
+### Added
+
+- **`pub import` re-exports for facade modules (#740).** Prefixing any
+  `import` with `pub` now re-exports the imported symbols as part of the
+  importing module's public surface:
+  `pub import "module"` re-exports every public name; `pub import { foo,
+  bar } from "module"` re-exports only the listed names. Re-exports
+  compose across facade chains, so a `mod.harn` can be the stable public
+  entry point while implementation shards move freely behind it. `harn
+  check` reports a re-export conflict when two `pub import`s contribute
+  the same name from different sources or shadow a local `pub`
+  declaration. Editor go-to-definition follows re-export chains to the
+  originating declaration. Spec, modules guide, tree-sitter grammar, and
+  conformance fixtures (selective, wildcard, chained, duplicate) updated
+  to match.
+
 ## v0.7.43
 
 ### Added
