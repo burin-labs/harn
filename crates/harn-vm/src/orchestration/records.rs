@@ -677,6 +677,161 @@ pub struct RunChildRecord {
     pub execution: Option<RunExecutionRecord>,
 }
 
+pub(crate) fn run_child_record_from_worker_metadata(
+    parent_stage_id: Option<String>,
+    worker: &serde_json::Value,
+) -> Option<RunChildRecord> {
+    let worker_id = worker.get("id").and_then(|value| value.as_str())?;
+    if worker_id.is_empty() {
+        return None;
+    }
+    Some(RunChildRecord {
+        worker_id: worker_id.to_string(),
+        worker_name: worker
+            .get("name")
+            .and_then(|value| value.as_str())
+            .unwrap_or("worker")
+            .to_string(),
+        parent_stage_id,
+        session_id: worker
+            .get("audit")
+            .and_then(|value| value.get("session_id"))
+            .and_then(|value| value.as_str())
+            .map(str::to_string),
+        parent_session_id: worker
+            .get("audit")
+            .and_then(|value| value.get("parent_session_id"))
+            .and_then(|value| value.as_str())
+            .map(str::to_string),
+        mutation_scope: worker
+            .get("audit")
+            .and_then(|value| value.get("mutation_scope"))
+            .and_then(|value| value.as_str())
+            .map(str::to_string),
+        approval_policy: worker
+            .get("audit")
+            .and_then(|value| value.get("approval_policy"))
+            .and_then(|value| {
+                serde_json::from_value::<super::ToolApprovalPolicy>(value.clone()).ok()
+            }),
+        task: worker
+            .get("task")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default()
+            .to_string(),
+        request: worker.get("request").cloned(),
+        provenance: worker.get("provenance").cloned(),
+        status: worker
+            .get("status")
+            .and_then(|value| value.as_str())
+            .unwrap_or("completed")
+            .to_string(),
+        started_at: worker
+            .get("started_at")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default()
+            .to_string(),
+        finished_at: worker
+            .get("finished_at")
+            .and_then(|value| value.as_str())
+            .map(str::to_string),
+        run_id: worker
+            .get("child_run_id")
+            .and_then(|value| value.as_str())
+            .map(str::to_string),
+        run_path: worker
+            .get("child_run_path")
+            .and_then(|value| value.as_str())
+            .map(str::to_string),
+        snapshot_path: worker
+            .get("snapshot_path")
+            .and_then(|value| value.as_str())
+            .map(str::to_string),
+        execution: worker
+            .get("execution")
+            .cloned()
+            .and_then(|value| serde_json::from_value(value).ok()),
+    })
+}
+
+fn run_child_from_stage_metadata(stage: &RunStageRecord) -> Option<RunChildRecord> {
+    let parent_stage_id = if stage.id.is_empty() {
+        None
+    } else {
+        Some(stage.id.clone())
+    };
+    run_child_record_from_worker_metadata(parent_stage_id, stage.metadata.get("worker")?)
+}
+
+fn fill_missing_child_run_fields(existing: &mut RunChildRecord, child: RunChildRecord) {
+    if existing.worker_name.is_empty() {
+        existing.worker_name = child.worker_name;
+    }
+    if existing.parent_stage_id.is_none() {
+        existing.parent_stage_id = child.parent_stage_id;
+    }
+    if existing.session_id.is_none() {
+        existing.session_id = child.session_id;
+    }
+    if existing.parent_session_id.is_none() {
+        existing.parent_session_id = child.parent_session_id;
+    }
+    if existing.mutation_scope.is_none() {
+        existing.mutation_scope = child.mutation_scope;
+    }
+    if existing.approval_policy.is_none() {
+        existing.approval_policy = child.approval_policy;
+    }
+    if existing.task.is_empty() {
+        existing.task = child.task;
+    }
+    if existing.request.is_none() {
+        existing.request = child.request;
+    }
+    if existing.provenance.is_none() {
+        existing.provenance = child.provenance;
+    }
+    if existing.status.is_empty() {
+        existing.status = child.status;
+    }
+    if existing.started_at.is_empty() {
+        existing.started_at = child.started_at;
+    }
+    if existing.finished_at.is_none() {
+        existing.finished_at = child.finished_at;
+    }
+    if existing.run_id.is_none() {
+        existing.run_id = child.run_id;
+    }
+    if existing.run_path.is_none() {
+        existing.run_path = child.run_path;
+    }
+    if existing.snapshot_path.is_none() {
+        existing.snapshot_path = child.snapshot_path;
+    }
+    if existing.execution.is_none() {
+        existing.execution = child.execution;
+    }
+}
+
+fn materialize_child_runs_from_stage_metadata(run: &mut RunRecord) {
+    for child in run
+        .stages
+        .iter()
+        .filter_map(run_child_from_stage_metadata)
+        .collect::<Vec<_>>()
+    {
+        match run
+            .child_runs
+            .iter_mut()
+            .find(|existing| existing.worker_id == child.worker_id)
+        {
+            Some(existing) => fill_missing_child_run_fields(existing, child),
+            None => run.child_runs.push(child),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct RunExecutionRecord {
@@ -1581,6 +1736,7 @@ pub fn normalize_run_record(value: &VmValue) -> Result<RunRecord, VmError> {
         run.replay_fixture = Some(replay_fixture_from_run(&run));
     }
     merge_hitl_questions_from_active_log(&mut run);
+    materialize_child_runs_from_stage_metadata(&mut run);
     sync_run_handoffs(&mut run);
     if run.observability.is_none() {
         let persisted_path = run.persisted_path.clone();
@@ -2504,6 +2660,7 @@ pub fn save_run_record(run: &RunRecord, path: Option<&str>) -> Result<String, Vm
         .unwrap_or_else(|| default_run_dir().join(format!("{}.json", run.id)));
     let mut materialized = run.clone();
     merge_hitl_questions_from_active_log(&mut materialized);
+    materialize_child_runs_from_stage_metadata(&mut materialized);
     if materialized.replay_fixture.is_none() {
         materialized.replay_fixture = Some(replay_fixture_from_run(&materialized));
     }
@@ -2536,6 +2693,7 @@ pub fn load_run_record(path: &Path) -> Result<RunRecord, VmError> {
         .map_err(|e| VmError::Runtime(format!("failed to read run record: {e}")))?;
     let mut run: RunRecord = serde_json::from_str(&content)
         .map_err(|e| VmError::Runtime(format!("failed to parse run record: {e}")))?;
+    materialize_child_runs_from_stage_metadata(&mut run);
     if run.replay_fixture.is_none() {
         run.replay_fixture = Some(replay_fixture_from_run(&run));
     }

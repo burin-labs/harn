@@ -45,15 +45,31 @@ pub(super) fn replay_stage(
             stage.node_id
         )));
     }
+    let mut result = serde_json::json!({
+        "status": stage.status,
+        "visible_text": stage.visible_text,
+        "private_reasoning": stage.private_reasoning,
+    });
+    for key in [
+        "worker",
+        "prompt",
+        "system_prompt",
+        "rendered_context",
+        "verification_contracts",
+        "rendered_verification_context",
+        "selected_artifact_ids",
+        "selected_artifact_titles",
+        "tools",
+    ] {
+        if let Some(value) = stage.metadata.get(key) {
+            result[key] = value.clone();
+        }
+    }
     Ok(ExecutedStage {
         status: stage.status.clone(),
         outcome: stage.outcome.clone(),
         branch: stage.branch.clone(),
-        result: serde_json::json!({
-            "status": stage.status,
-            "visible_text": stage.visible_text,
-            "private_reasoning": stage.private_reasoning,
-        }),
+        result,
         artifacts: stage.artifacts.clone(),
         transcript: stage
             .transcript

@@ -3,8 +3,8 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use crate::orchestration::{
-    load_run_record, save_run_record, ArtifactRecord, RunCheckpointRecord, RunChildRecord,
-    RunExecutionRecord, RunRecord, RunTraceSpanRecord,
+    load_run_record, run_child_record_from_worker_metadata, save_run_record, ArtifactRecord,
+    RunCheckpointRecord, RunExecutionRecord, RunRecord, RunTraceSpanRecord,
 };
 use crate::value::{VmError, VmValue};
 
@@ -133,80 +133,9 @@ pub(super) fn append_child_run_record(
     let Some(worker) = stage.get("worker") else {
         return;
     };
-    let worker_id = worker
-        .get("id")
-        .and_then(|value| value.as_str())
-        .unwrap_or_default();
-    if worker_id.is_empty() {
+    let Some(child) = run_child_record_from_worker_metadata(Some(stage_id.to_string()), worker)
+    else {
         return;
-    }
-    let child = RunChildRecord {
-        worker_id: worker_id.to_string(),
-        worker_name: worker
-            .get("name")
-            .and_then(|value| value.as_str())
-            .unwrap_or("worker")
-            .to_string(),
-        parent_stage_id: Some(stage_id.to_string()),
-        session_id: worker
-            .get("audit")
-            .and_then(|value| value.get("session_id"))
-            .and_then(|value| value.as_str())
-            .map(|value| value.to_string()),
-        parent_session_id: worker
-            .get("audit")
-            .and_then(|value| value.get("parent_session_id"))
-            .and_then(|value| value.as_str())
-            .map(|value| value.to_string()),
-        mutation_scope: worker
-            .get("audit")
-            .and_then(|value| value.get("mutation_scope"))
-            .and_then(|value| value.as_str())
-            .map(|value| value.to_string()),
-        approval_policy: worker
-            .get("audit")
-            .and_then(|value| value.get("approval_policy"))
-            .and_then(|value| {
-                serde_json::from_value::<crate::orchestration::ToolApprovalPolicy>(value.clone())
-                    .ok()
-            }),
-        task: worker
-            .get("task")
-            .and_then(|value| value.as_str())
-            .unwrap_or_default()
-            .to_string(),
-        request: worker.get("request").cloned(),
-        provenance: worker.get("provenance").cloned(),
-        status: worker
-            .get("status")
-            .and_then(|value| value.as_str())
-            .unwrap_or("completed")
-            .to_string(),
-        started_at: worker
-            .get("started_at")
-            .and_then(|value| value.as_str())
-            .unwrap_or_default()
-            .to_string(),
-        finished_at: worker
-            .get("finished_at")
-            .and_then(|value| value.as_str())
-            .map(|value| value.to_string()),
-        run_id: worker
-            .get("child_run_id")
-            .and_then(|value| value.as_str())
-            .map(|value| value.to_string()),
-        run_path: worker
-            .get("child_run_path")
-            .and_then(|value| value.as_str())
-            .map(|value| value.to_string()),
-        snapshot_path: worker
-            .get("snapshot_path")
-            .and_then(|value| value.as_str())
-            .map(|value| value.to_string()),
-        execution: worker
-            .get("execution")
-            .cloned()
-            .and_then(|value| serde_json::from_value(value).ok()),
     };
     run.child_runs
         .retain(|existing| existing.worker_id != child.worker_id);

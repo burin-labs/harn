@@ -144,6 +144,7 @@ async fn execute_worker_config(
     restore_worker_transcript(&config, prior_transcript.as_ref());
     let execution_record = execution_record(&execution);
     crate::stdlib::process::set_thread_execution_context(Some(execution_record.clone()));
+    let parent_run_id = audit.run_id.clone();
     crate::orchestration::install_current_mutation_session(Some(audit));
     let _mutation_guard = WorkerMutationSessionResetGuard;
     match config {
@@ -152,6 +153,16 @@ async fn execute_worker_config(
             artifacts,
             mut options,
         } => {
+            let resumes_existing_run =
+                options.contains_key("resume_path") || options.contains_key("resume_run");
+            if !resumes_existing_run && !options.contains_key("parent_run_id") {
+                if let Some(parent_run_id) = parent_run_id.clone() {
+                    options.insert(
+                        "parent_run_id".to_string(),
+                        VmValue::String(Rc::from(parent_run_id)),
+                    );
+                }
+            }
             if let Some(parent_worker_id) = options
                 .get("parent_worker_id")
                 .map(|value| value.display())
