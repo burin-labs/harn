@@ -14,7 +14,7 @@ type AgentMessageChunk = {sessionUpdate: string, content: {type: string, text: s
 
 type ToolCall = {sessionUpdate: string, toolCallId: string, title: string | nil, kind: string | nil, status: string | nil, content: list<dict> | nil, locations: list<dict> | nil, rawInput: dict | nil, rawOutput: dict | nil}
 
-type ToolCallUpdate = {sessionUpdate: string, toolCallId: string, status: string | nil, title: string | nil, content: list<dict> | nil, locations: list<dict> | nil, rawOutput: dict | nil}
+type ToolCallUpdate = {sessionUpdate: string, toolCallId: string, status: string | nil, title: string | nil, content: list<dict> | nil, locations: list<dict> | nil, rawOutput: dict | nil, executor: string | dict | nil}
 
 type Plan = {sessionUpdate: string, entries: list<{content: string, priority: string | nil, status: string | nil}>}
 
@@ -51,6 +51,7 @@ pub fn tool_call_update(tool_call_id, status) {
     content: nil,
     locations: nil,
     rawOutput: nil,
+    executor: nil,
   }
 }
 

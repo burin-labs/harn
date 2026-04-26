@@ -162,6 +162,36 @@ impl ToolCallErrorCategory {
     }
 }
 
+/// Where a tool actually ran. Tags `ToolCallUpdate` so clients can render
+/// "via mcp:linear" / "via host bridge" badges, attribute latency by
+/// transport, and route errors to the right surface (harn#691).
+///
+/// On the wire this serializes adjacently-tagged so the `mcp_server`
+/// case carries the configured server name. The ACP adapter rewrites
+/// unit variants as bare strings (`"harn_builtin"`, `"host_bridge"`,
+/// `"provider_native"`) and the `McpServer` case as
+/// `{"kind": "mcp_server", "serverName": "..."}` to match the protocol's
+/// camelCase convention.
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ToolExecutor {
+    /// VM-stdlib (`read_file`, `write_file`, `exec`, `http_*`, `mcp_*`)
+    /// or any Harn-side handler closure registered in `tools_val`.
+    HarnBuiltin,
+    /// Capability provided by the host through `HostBridge.builtin_call`
+    /// (Swift-side IDE bridge, BurinApp, BurinCLI host shells).
+    HostBridge,
+    /// Tool dispatched against a configured MCP server. Detected by the
+    /// `_mcp_server` tag that `mcp_list_tools` injects on every tool
+    /// dict before the agent loop sees it.
+    McpServer { server_name: String },
+    /// Provider-side server-side tool execution — currently OpenAI
+    /// Responses-API server tools (e.g. native `tool_search`). The
+    /// runtime never dispatches these locally; the model returns the
+    /// already-executed result inline.
+    ProviderNative,
+}
+
 /// Events emitted by the agent loop. The first five variants map 1:1
 /// to ACP `sessionUpdate` variants; the last three are harn-internal.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -211,6 +241,12 @@ pub enum AgentEvent {
         /// `errorCategory` in the ACP wire format.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         error_category: Option<ToolCallErrorCategory>,
+        /// Where the tool actually ran. `None` only for events emitted
+        /// from sites that pre-date the dispatch decision (e.g. the
+        /// pending → in-progress transition the loop emits before the
+        /// dispatcher picks a backend).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        executor: Option<ToolExecutor>,
     },
     Plan {
         session_id: String,
@@ -783,6 +819,7 @@ mod tests {
             duration_ms: Some(42),
             execution_duration_ms: Some(7),
             error_category: None,
+            executor: None,
         };
         let value = serde_json::to_value(&terminal).unwrap();
         assert_eq!(value["duration_ms"], serde_json::json!(42));
@@ -801,6 +838,7 @@ mod tests {
             duration_ms: None,
             execution_duration_ms: None,
             error_category: None,
+            executor: None,
         };
         let value = serde_json::to_value(&intermediate).unwrap();
         let object = value.as_object().expect("update serializes as object");
@@ -887,6 +925,36 @@ mod tests {
     }
 
     #[test]
+    fn tool_executor_round_trips_with_adjacent_tag() {
+        // Adjacent tagging keeps the wire shape uniform — every variant
+        // is a JSON object with a `kind` discriminator. The ACP adapter
+        // rewrites unit variants as bare strings; the on-disk event log
+        // keeps the object shape so deserialize can recover the variant.
+        for executor in [
+            ToolExecutor::HarnBuiltin,
+            ToolExecutor::HostBridge,
+            ToolExecutor::McpServer {
+                server_name: "linear".to_string(),
+            },
+            ToolExecutor::ProviderNative,
+        ] {
+            let json = serde_json::to_value(&executor).unwrap();
+            let kind = json.get("kind").and_then(|v| v.as_str()).unwrap();
+            match &executor {
+                ToolExecutor::HarnBuiltin => assert_eq!(kind, "harn_builtin"),
+                ToolExecutor::HostBridge => assert_eq!(kind, "host_bridge"),
+                ToolExecutor::McpServer { server_name } => {
+                    assert_eq!(kind, "mcp_server");
+                    assert_eq!(json["server_name"], *server_name);
+                }
+                ToolExecutor::ProviderNative => assert_eq!(kind, "provider_native"),
+            }
+            let recovered: ToolExecutor = serde_json::from_value(json).unwrap();
+            assert_eq!(recovered, executor);
+        }
+    }
+
+    #[test]
     fn tool_call_error_category_from_internal_collapses_transient_family() {
         use crate::value::ErrorCategory as Internal;
         assert_eq!(
@@ -948,6 +1016,7 @@ mod tests {
             duration_ms: None,
             execution_duration_ms: None,
             error_category: None,
+            executor: None,
         };
         let v = serde_json::to_value(&event).unwrap();
         assert_eq!(v["type"], "tool_call_update");
@@ -966,9 +1035,52 @@ mod tests {
             duration_ms: None,
             execution_duration_ms: None,
             error_category: Some(ToolCallErrorCategory::SchemaValidation),
+            executor: None,
         };
         let v = serde_json::to_value(&event).unwrap();
         assert_eq!(v["error_category"], "schema_validation");
         assert_eq!(v["error"], "missing required field");
+    }
+
+    #[test]
+    fn tool_call_update_omits_executor_when_absent() {
+        // `executor: None` must not appear in the serialized event so
+        // the on-disk shape stays backward-compatible with replays
+        // recorded before harn#691.
+        let event = AgentEvent::ToolCallUpdate {
+            session_id: "s".into(),
+            tool_call_id: "tc-1".into(),
+            tool_name: "read".into(),
+            status: ToolCallStatus::Completed,
+            raw_output: None,
+            error: None,
+            duration_ms: None,
+            execution_duration_ms: None,
+            error_category: None,
+            executor: None,
+        };
+        let json = serde_json::to_value(&event).unwrap();
+        assert!(json.get("executor").is_none(), "got: {json}");
+    }
+
+    #[test]
+    fn tool_call_update_includes_executor_when_present() {
+        let event = AgentEvent::ToolCallUpdate {
+            session_id: "s".into(),
+            tool_call_id: "tc-1".into(),
+            tool_name: "read".into(),
+            status: ToolCallStatus::Completed,
+            raw_output: None,
+            error: None,
+            duration_ms: None,
+            execution_duration_ms: None,
+            error_category: None,
+            executor: Some(ToolExecutor::McpServer {
+                server_name: "github".into(),
+            }),
+        };
+        let json = serde_json::to_value(&event).unwrap();
+        assert_eq!(json["executor"]["kind"], "mcp_server");
+        assert_eq!(json["executor"]["server_name"], "github");
     }
 }

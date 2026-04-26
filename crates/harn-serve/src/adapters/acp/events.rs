@@ -1,7 +1,7 @@
 //! ACP AgentEventSink — translates canonical `AgentEvent` variants into ACP
 //! `session/update` notifications. Registered per-session at prompt start.
 
-use harn_vm::agent_events::{AgentEvent, AgentEventSink};
+use harn_vm::agent_events::{AgentEvent, AgentEventSink, ToolExecutor};
 use harn_vm::visible_text::sanitize_visible_assistant_text;
 
 use super::AcpOutput;
@@ -36,6 +36,24 @@ impl AcpAgentEventSink {
             InProgress => "in_progress",
             Completed => "completed",
             Failed => "failed",
+        }
+    }
+
+    /// Render a `ToolExecutor` for the wire as either a bare string
+    /// (unit variants) or `{"kind": "mcp_server", "serverName": "..."}`
+    /// for the MCP variant. Matches harn#691's contract: clients can
+    /// `typeof executor === "string"` first, then drill into `kind`.
+    fn executor_to_json(executor: &ToolExecutor) -> serde_json::Value {
+        match executor {
+            ToolExecutor::HarnBuiltin => serde_json::Value::String("harn_builtin".to_string()),
+            ToolExecutor::HostBridge => serde_json::Value::String("host_bridge".to_string()),
+            ToolExecutor::McpServer { server_name } => serde_json::json!({
+                "kind": "mcp_server",
+                "serverName": server_name,
+            }),
+            ToolExecutor::ProviderNative => {
+                serde_json::Value::String("provider_native".to_string())
+            }
         }
     }
 }
@@ -109,6 +127,7 @@ impl AgentEventSink for AcpAgentEventSink {
                 duration_ms,
                 execution_duration_ms,
                 error_category,
+                executor,
             } => {
                 let mut update = serde_json::json!({
                     "sessionUpdate": "tool_call_update",
@@ -130,6 +149,9 @@ impl AgentEventSink for AcpAgentEventSink {
                 }
                 if let Some(cat) = error_category {
                     update["errorCategory"] = serde_json::Value::String(cat.as_str().to_string());
+                }
+                if let Some(exec) = executor {
+                    update["executor"] = Self::executor_to_json(exec);
                 }
                 self.write_notification(serde_json::json!({
                     "sessionId": session_id,
@@ -294,6 +316,7 @@ impl AgentEventSink for AcpAgentEventSink {
 mod tests {
     use harn_vm::agent_events::{
         AgentEvent, AgentEventSink, FsWatchEvent, ToolCallErrorCategory, ToolCallStatus,
+        ToolExecutor,
     };
     use harn_vm::orchestration::{HandoffArtifact, HandoffTargetRecord};
     use harn_vm::tool_annotations::ToolKind;
@@ -380,6 +403,7 @@ mod tests {
                 duration_ms: Some(7),
                 execution_duration_ms: Some(5),
                 error_category: None,
+                executor: Some(ToolExecutor::HarnBuiltin),
             },
             AgentEvent::Plan {
                 session_id: "session-1".to_string(),
@@ -485,6 +509,7 @@ mod tests {
             duration_ms: None,
             execution_duration_ms: None,
             error_category: Some(ToolCallErrorCategory::SchemaValidation),
+            executor: None,
         });
         let line = rx.recv().await.expect("acp tool_call_update");
         let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
@@ -517,11 +542,80 @@ mod tests {
             duration_ms: None,
             execution_duration_ms: None,
             error_category: None,
+            executor: None,
         });
         let line = rx.recv().await.expect("acp tool_call_update");
         let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
         assert!(payload["params"]["update"].get("errorCategory").is_none());
         assert!(payload["params"]["update"].get("error").is_none());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn tool_call_update_serializes_executor_per_acp_wire_format() {
+        // Harn#691: clients render badges off the ACP `executor` field.
+        // The wire shape must distinguish bare-string variants from the
+        // McpServer object-with-serverName form so a UI can branch on
+        // `typeof executor === "string"`.
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let sink = AcpAgentEventSink::new(AcpOutput::Channel(tx));
+
+        let cases = [
+            (ToolExecutor::HarnBuiltin, serde_json::json!("harn_builtin")),
+            (ToolExecutor::HostBridge, serde_json::json!("host_bridge")),
+            (
+                ToolExecutor::McpServer {
+                    server_name: "linear".into(),
+                },
+                serde_json::json!({"kind": "mcp_server", "serverName": "linear"}),
+            ),
+            (
+                ToolExecutor::ProviderNative,
+                serde_json::json!("provider_native"),
+            ),
+        ];
+
+        for (executor, expected) in cases {
+            sink.handle_event(&AgentEvent::ToolCallUpdate {
+                session_id: "session-1".to_string(),
+                tool_call_id: "tool-1".to_string(),
+                tool_name: "demo".to_string(),
+                status: ToolCallStatus::Completed,
+                raw_output: None,
+                error: None,
+                duration_ms: None,
+                execution_duration_ms: None,
+                error_category: None,
+                executor: Some(executor),
+            });
+            let line = rx.recv().await.expect("acp tool_call_update notification");
+            let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
+            assert_eq!(
+                payload["params"]["update"]["sessionUpdate"],
+                "tool_call_update"
+            );
+            assert_eq!(payload["params"]["update"]["executor"], expected);
+        }
+
+        // `executor: None` must not surface on the wire so existing
+        // clients that don't know about the field aren't surprised.
+        sink.handle_event(&AgentEvent::ToolCallUpdate {
+            session_id: "session-1".to_string(),
+            tool_call_id: "tool-2".to_string(),
+            tool_name: "demo".to_string(),
+            status: ToolCallStatus::InProgress,
+            raw_output: None,
+            error: None,
+            duration_ms: None,
+            execution_duration_ms: None,
+            error_category: None,
+            executor: None,
+        });
+        let line = rx.recv().await.expect("acp tool_call_update notification");
+        let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
+        assert!(
+            payload["params"]["update"].get("executor").is_none(),
+            "got: {payload}"
+        );
     }
 
     #[test]

@@ -47,6 +47,17 @@ granular archaeology.
   see a consistent two-event lifecycle for rejected calls instead of
   silence. The category is mirrored on the `tool_execution` transcript
   event metadata so replay engines see the same classification.
+- **`tool_call_update.executor` tag (#691).** Distinguishes where a
+  tool ran — `harn_builtin`, `host_bridge`, `{kind: "mcp_server",
+  serverName: "..."}`, or `provider_native`. Lets ACP clients render
+  "via X" badges, attribute latency by transport, and route errors
+  correctly. Detection is automatic: the `_mcp_server` annotation that
+  `mcp_list_tools` injects survives through bridge-proxied dispatch,
+  so MCP-served tools tag correctly even when they physically call
+  the host bridge. Provider-native server tools (OpenAI Responses
+  `tool_search` etc.) emit a paired `tool_call`/`tool_call_update`
+  alongside the existing `tool_search_*` events so badge-rendering
+  clients don't have to special-case the search variants.
 - **Harn-owned Ollama runtime settings (#676).** Centralizes Ollama
   `num_ctx` and `keep_alive` precedence, defaults, normalization, and
   warmup request shaping in `harn-vm`. Hosts can pass raw persisted

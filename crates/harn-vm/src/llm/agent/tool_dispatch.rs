@@ -33,14 +33,14 @@
 
 use std::rc::Rc;
 
-use crate::agent_events::{AgentEvent, ToolCallErrorCategory, ToolCallStatus};
+use crate::agent_events::{AgentEvent, ToolCallErrorCategory, ToolCallStatus, ToolExecutor};
 use crate::bridge::HostBridge;
 use crate::value::{ErrorCategory, VmError, VmValue};
 
 use super::super::agent_tools::{
     classify_tool_mutation, declared_paths, denied_tool_result, dispatch_tool_execution,
     is_denied_tool_result, loop_intervention_message, render_tool_result, stable_hash,
-    stable_hash_str, LoopIntervention,
+    stable_hash_str, LoopIntervention, ToolDispatchOutcome,
 };
 use super::super::helpers::transcript_event;
 use super::super::tools::{
@@ -338,8 +338,10 @@ pub(super) async fn run_tool_dispatch(
     } else {
         Vec::new()
     };
-    let mut parallel_results: std::collections::HashMap<usize, Result<serde_json::Value, VmError>> =
-        std::collections::HashMap::new();
+    let mut parallel_results: std::collections::HashMap<
+        usize,
+        (Result<serde_json::Value, VmError>, Option<ToolExecutor>),
+    > = std::collections::HashMap::new();
     if !parallel_indices.is_empty() {
         // Use raw pre-hook tool_args; re-running a read-only tool when
         // a hook modifies/denies is at worst wasted work.
@@ -364,9 +366,10 @@ pub(super) async fn run_tool_dispatch(
                 .await
             }
         });
-        let joined: Vec<Result<serde_json::Value, VmError>> = join_all(futures).await;
+        let joined: Vec<ToolDispatchOutcome> = join_all(futures).await;
         for (i, idx) in parallel_indices.iter().enumerate() {
-            parallel_results.insert(*idx, joined[i].clone());
+            let outcome = &joined[i];
+            parallel_results.insert(*idx, (outcome.result.clone(), outcome.executor.clone()));
         }
     }
 
@@ -556,6 +559,7 @@ pub(super) async fn run_tool_dispatch(
                 duration_ms: None,
                 execution_duration_ms: None,
                 error_category: Some(ToolCallErrorCategory::SchemaValidation),
+                executor: None,
             })
             .await;
             if ctx.tool_format == "native" {
@@ -623,6 +627,7 @@ pub(super) async fn run_tool_dispatch(
                 duration_ms: None,
                 execution_duration_ms: None,
                 error_category: Some(ToolCallErrorCategory::PermissionDenied),
+                executor: None,
             })
             .await;
             if ctx.tool_format == "native" {
@@ -721,6 +726,7 @@ pub(super) async fn run_tool_dispatch(
                         duration_ms: None,
                         execution_duration_ms: None,
                         error_category: Some(ToolCallErrorCategory::PermissionDenied),
+                        executor: None,
                     })
                     .await;
                     if ctx.tool_format == "native" {
@@ -847,6 +853,7 @@ pub(super) async fn run_tool_dispatch(
                 duration_ms: None,
                 execution_duration_ms: None,
                 error_category: Some(ToolCallErrorCategory::PermissionDenied),
+                executor: None,
             })
             .await;
             if ctx.tool_format == "native" {
@@ -907,6 +914,7 @@ pub(super) async fn run_tool_dispatch(
                     duration_ms: None,
                     execution_duration_ms: None,
                     error_category: Some(ToolCallErrorCategory::PermissionDenied),
+                    executor: None,
                 })
                 .await;
                 if ctx.tool_format == "native" {
@@ -953,6 +961,7 @@ pub(super) async fn run_tool_dispatch(
                 duration_ms: None,
                 execution_duration_ms: None,
                 error_category: Some(ToolCallErrorCategory::SchemaValidation),
+                executor: None,
             })
             .await;
             if ctx.tool_format == "native" {
@@ -994,6 +1003,9 @@ pub(super) async fn run_tool_dispatch(
             duration_ms: None,
             execution_duration_ms: None,
             error_category: None,
+            // The dispatcher picks the backend below; the in-progress
+            // emission is unconditional and runs before that choice.
+            executor: None,
         })
         .await;
         let tool_span_id =
@@ -1069,6 +1081,9 @@ pub(super) async fn run_tool_dispatch(
                     duration_ms: Some(tool_started_at.elapsed().as_millis() as u64),
                     execution_duration_ms: None,
                     error_category: Some(ToolCallErrorCategory::RejectedLoop),
+                    // Loop intervention preempts the backend choice —
+                    // the tool never ran.
+                    executor: None,
                 })
                 .await;
                 continue;
@@ -1084,18 +1099,23 @@ pub(super) async fn run_tool_dispatch(
         };
 
         let tool_start = std::time::Instant::now();
+        let mut tool_executor: Option<ToolExecutor> = None;
         let (is_rejected, result_text, dispatch_error_category) =
             if let Some(fixture) = replay_hit {
                 let category = fixture
                     .is_rejected
                     .then_some(ToolCallErrorCategory::PermissionDenied);
+                // Replay fixtures pre-date the dispatch decision; the
+                // recording captured the result, not where it ran.
                 (fixture.is_rejected, fixture.result.clone(), category)
             } else {
                 // Reuse the parallel pre-fetch result when present.
-                let exec_result = if let Some(cached) = parallel_results.remove(&tc_index) {
-                    cached
+                let (exec_result, executor) = if let Some((cached_result, cached_executor)) =
+                    parallel_results.remove(&tc_index)
+                {
+                    (cached_result, cached_executor)
                 } else {
-                    dispatch_tool_execution(
+                    let outcome = dispatch_tool_execution(
                         tool_name,
                         &tool_args,
                         ctx.tools_val,
@@ -1103,8 +1123,10 @@ pub(super) async fn run_tool_dispatch(
                         ctx.tool_retries,
                         ctx.tool_backoff_ms,
                     )
-                    .await
+                    .await;
+                    (outcome.result, outcome.executor)
                 };
+                tool_executor = executor;
 
                 let rejected = matches!(
                     &exec_result,
@@ -1237,6 +1259,7 @@ pub(super) async fn run_tool_dispatch(
             duration_ms: Some(duration_ms),
             execution_duration_ms: Some(execution_duration_ms),
             error_category: final_error_category,
+            executor: tool_executor.clone(),
         })
         .await;
 
