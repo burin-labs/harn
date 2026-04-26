@@ -1819,6 +1819,7 @@ dependencies = [
  "base64",
  "blake3",
  "brotli",
+ "bytes",
  "chrono",
  "chrono-tz",
  "criterion",
