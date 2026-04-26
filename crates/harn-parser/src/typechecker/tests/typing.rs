@@ -30,6 +30,61 @@ fn test_correct_typed_fn() {
 }
 
 #[test]
+fn test_flow_predicate_mode_attributes_are_recognized_on_functions() {
+    let warns = warnings(
+        r#"
+@deterministic
+fn pure_check(slice) -> bool { return true }
+
+@semantic
+fn semantic_check(slice) -> bool { return true }
+"#,
+    );
+    assert!(
+        warns
+            .iter()
+            .all(|warning| !warning.contains("unknown attribute")),
+        "predicate mode attributes should not warn as unknown: {warns:?}"
+    );
+}
+
+#[test]
+fn test_runtime_attributes_are_recognized_on_valid_declarations() {
+    let warns = warnings(
+        r#"
+@test
+pipeline smoke(task) {}
+
+@acp_skill(name: "deploy", when_to_use: "ship", invocation: "explicit")
+fn deploy_activate() -> string { return "ready" }
+"#,
+    );
+    assert!(
+        warns
+            .iter()
+            .all(|warning| !warning.contains("unknown attribute")
+                && !warning.contains("only applies")),
+        "runtime attributes should not warn on valid declarations: {warns:?}"
+    );
+}
+
+#[test]
+fn test_flow_predicate_mode_attributes_warn_off_functions() {
+    let warns = warnings(
+        r#"
+@deterministic
+pipeline invalid(task) {}
+"#,
+    );
+    assert!(
+        warns
+            .iter()
+            .any(|warning| warning.contains("`@deterministic` only applies to function")),
+        "expected placement warning, got {warns:?}"
+    );
+}
+
+#[test]
 fn test_fn_arg_type_mismatch() {
     let errs = errors(
         r#"pipeline t(task) { fn add(a: int, b: int) -> int { return a + b }

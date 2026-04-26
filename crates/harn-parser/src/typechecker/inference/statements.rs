@@ -1407,26 +1407,46 @@ impl TypeChecker {
 
     /// Validate attribute usage and emit warnings for unknown attributes.
     /// Recognized attribute names: `deprecated`, `test`, `complexity`,
-    /// `acp_tool`, `invariant`. All other names produce a warning so misspellings
-    /// surface early without breaking compilation.
-    fn check_attributes(&mut self, attributes: &[Attribute], inner: &SNode) {
+    /// `acp_tool`, `acp_skill`, `invariant`, `deterministic`, `semantic`.
+    /// All other names produce a warning so misspellings surface early without
+    /// breaking compilation.
+    pub(in crate::typechecker) fn check_attributes(
+        &mut self,
+        attributes: &[Attribute],
+        inner: &SNode,
+    ) {
         for attr in attributes {
             match attr.name.as_str() {
-                "deprecated" | "test" | "complexity" | "acp_tool" | "invariant" => {}
+                "deprecated" | "test" | "complexity" | "acp_tool" | "acp_skill" | "invariant"
+                | "deterministic" | "semantic" => {}
                 other => {
                     self.warning_at(format!("unknown attribute `@{}`", other), attr.span);
                 }
             }
-            // `@test` only applies to functions.
-            if attr.name == "test" && !matches!(inner.node, Node::FnDecl { .. }) {
+            // `@test` marks test pipelines discovered by `harn test`.
+            if attr.name == "test" && !matches!(inner.node, Node::Pipeline { .. }) {
                 self.warning_at(
-                    "`@test` only applies to function declarations".to_string(),
+                    "`@test` only applies to pipeline declarations".to_string(),
                     attr.span,
                 );
             }
             if attr.name == "acp_tool" && !matches!(inner.node, Node::FnDecl { .. }) {
                 self.warning_at(
                     "`@acp_tool` only applies to function declarations".to_string(),
+                    attr.span,
+                );
+            }
+            if attr.name == "acp_skill" && !matches!(inner.node, Node::FnDecl { .. }) {
+                self.warning_at(
+                    "`@acp_skill` only applies to function declarations".to_string(),
+                    attr.span,
+                );
+            }
+            if matches!(attr.name.as_str(), "deterministic" | "semantic")
+                && !matches!(inner.node, Node::FnDecl { .. })
+            {
+                self.warning_at(
+                    format!("`@{}` only applies to function declarations", attr.name),
                     attr.span,
                 );
             }

@@ -66,8 +66,10 @@ impl TypeChecker {
         for snode in program {
             // Transparently process attributed wrappers around top-level
             // declarations. Attribute-specific semantics (deprecation,
-            // unknown-attribute warnings) were already applied above and
-            // by `check_attributes`.
+            // unknown-attribute warnings) are applied before unwrapping.
+            if let Node::AttributedDecl { attributes, inner } = &snode.node {
+                self.check_attributes(attributes, inner);
+            }
             let inner_node = match &snode.node {
                 Node::AttributedDecl { inner, .. } => inner.as_ref(),
                 _ => snode,
