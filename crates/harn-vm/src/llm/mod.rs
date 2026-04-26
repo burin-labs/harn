@@ -1282,6 +1282,7 @@ mod tests {
             route_policy: super::api::LlmRoutePolicy::Manual,
             fallback_chain: Vec::new(),
             routing_decision: None,
+            session_id: None,
             messages: Vec::new(),
             system: None,
             transcript_summary: None,

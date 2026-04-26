@@ -118,6 +118,7 @@ mod tests {
             model: "qwen3.5:35b-a3b-coding-nvfp4".to_string(),
             api_key: String::new(),
             fallback_chain: Vec::new(),
+            session_id: None,
             messages: vec![serde_json::json!({"role": "user", "content": "hello"})],
             system: None,
             max_tokens: 64,

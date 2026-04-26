@@ -27,6 +27,21 @@ granular archaeology.
   `worker_trigger` emits `Progressed` on resume so observers see the
   re-arming transition. Bridge protocol docs document the new
   lifecycle states and wire shape.
+- **Streaming partial native tool-call arguments (#693).** Anthropic
+  `input_json_delta` and OpenAI `tool_calls[].function.arguments` deltas
+  now drive `AgentEvent::ToolCall(Pending)` + a coalesced sequence of
+  `AgentEvent::ToolCallUpdate(Pending, raw_input | raw_input_partial)`
+  events from the SSE transport, so ACP/A2A clients can render tool
+  arguments live ("calling search_web…", "edit path=foo.swift,
+  replace=…") instead of staring at a black box until `content_block_stop`.
+  When the streamed bytes still parse as JSON (strict or after a
+  permissive recovery pass closes dangling brackets/strings) the wire
+  carries `raw_input`; if neither parse succeeds the raw concatenated
+  bytes go on `raw_input_partial`. Updates are coalesced to one per
+  ~50 ms per tool block to avoid event-storm pressure on slow clients.
+  The `tool_dispatch.rs` lifecycle (`Pending → InProgress →
+  Completed/Failed`) still owns the canonical end-of-call state with
+  the fully-parsed args.
 
 ## v0.7.42
 

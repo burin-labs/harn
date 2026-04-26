@@ -138,6 +138,10 @@ impl StreamingToolCallDetector {
                     error_category: Some(ToolCallErrorCategory::ParseAborted),
                     executor: None,
                     parsing: Some(false),
+
+                    raw_input: None,
+
+                    raw_input_partial: None,
                 });
             }
             DetectorState::InBareCall {
@@ -413,6 +417,10 @@ fn promote_event(
         error_category: None,
         executor: None,
         parsing: Some(false),
+
+        raw_input: None,
+
+        raw_input_partial: None,
     }
 }
 
@@ -434,6 +442,10 @@ fn abort_event(
         error_category: Some(ToolCallErrorCategory::ParseAborted),
         executor: None,
         parsing: Some(false),
+
+        raw_input: None,
+
+        raw_input_partial: None,
     }
 }
 

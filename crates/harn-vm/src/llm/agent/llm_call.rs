@@ -106,6 +106,12 @@ pub(super) async fn run_llm_call(
     } else {
         None
     };
+    // Forward the agent session id into the LLM-call options so the SSE
+    // transport can emit `AgentEvent::ToolCall` / `AgentEvent::ToolCallUpdate`
+    // for streaming native tool-call deltas (#693). Without this, the
+    // transport has no session to attribute streaming partial-arg events
+    // to and falls back to the dispatch-time lifecycle only.
+    opts.session_id = Some(state.session_id.clone());
     let result = observed_llm_call(
         opts,
         Some(ctx.tool_format),
@@ -668,6 +674,9 @@ pub(super) fn provider_native_search_emissions(
                     error_category: None,
                     executor: Some(ToolExecutor::ProviderNative),
                     parsing: None,
+
+                    raw_input: None,
+                    raw_input_partial: None,
                 });
             }
             _ => {}

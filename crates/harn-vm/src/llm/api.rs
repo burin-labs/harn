@@ -11,6 +11,7 @@ mod errors;
 mod ollama;
 mod openai_normalize;
 mod options;
+mod partial_tool_args;
 mod readiness;
 mod response;
 mod result;

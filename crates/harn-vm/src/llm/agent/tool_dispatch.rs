@@ -562,6 +562,9 @@ pub(super) async fn run_tool_dispatch(
                 error_category: Some(ToolCallErrorCategory::SchemaValidation),
                 executor: None,
                 parsing: None,
+
+                raw_input: None,
+                raw_input_partial: None,
             })
             .await;
             if ctx.tool_format == "native" {
@@ -631,6 +634,9 @@ pub(super) async fn run_tool_dispatch(
                 error_category: Some(ToolCallErrorCategory::PermissionDenied),
                 executor: None,
                 parsing: None,
+
+                raw_input: None,
+                raw_input_partial: None,
             })
             .await;
             if ctx.tool_format == "native" {
@@ -731,6 +737,9 @@ pub(super) async fn run_tool_dispatch(
                         error_category: Some(ToolCallErrorCategory::PermissionDenied),
                         executor: None,
                         parsing: None,
+
+                        raw_input: None,
+                        raw_input_partial: None,
                     })
                     .await;
                     if ctx.tool_format == "native" {
@@ -859,6 +868,9 @@ pub(super) async fn run_tool_dispatch(
                 error_category: Some(ToolCallErrorCategory::PermissionDenied),
                 executor: None,
                 parsing: None,
+
+                raw_input: None,
+                raw_input_partial: None,
             })
             .await;
             if ctx.tool_format == "native" {
@@ -921,6 +933,9 @@ pub(super) async fn run_tool_dispatch(
                     error_category: Some(ToolCallErrorCategory::PermissionDenied),
                     executor: None,
                     parsing: None,
+
+                    raw_input: None,
+                    raw_input_partial: None,
                 })
                 .await;
                 if ctx.tool_format == "native" {
@@ -969,6 +984,9 @@ pub(super) async fn run_tool_dispatch(
                 error_category: Some(ToolCallErrorCategory::SchemaValidation),
                 executor: None,
                 parsing: None,
+
+                raw_input: None,
+                raw_input_partial: None,
             })
             .await;
             if ctx.tool_format == "native" {
@@ -1014,6 +1032,9 @@ pub(super) async fn run_tool_dispatch(
             // emission is unconditional and runs before that choice.
             executor: None,
             parsing: None,
+
+            raw_input: None,
+            raw_input_partial: None,
         })
         .await;
         let tool_span_id =
@@ -1093,6 +1114,9 @@ pub(super) async fn run_tool_dispatch(
                     // the tool never ran.
                     executor: None,
                     parsing: None,
+
+                    raw_input: None,
+                    raw_input_partial: None,
                 })
                 .await;
                 continue;
@@ -1270,6 +1294,9 @@ pub(super) async fn run_tool_dispatch(
             error_category: final_error_category,
             executor: tool_executor.clone(),
             parsing: None,
+
+            raw_input: None,
+            raw_input_partial: None,
         })
         .await;
 

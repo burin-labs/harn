@@ -651,6 +651,7 @@ pub(crate) fn extract_llm_options(
         route_policy,
         fallback_chain,
         routing_decision,
+        session_id: None,
         messages,
         system,
         transcript_summary: None,

@@ -4,7 +4,9 @@
 //! the wire-format layer below that.
 
 use std::rc::Rc;
+use std::time::Instant;
 
+use crate::agent_events::{AgentEvent, ToolCallStatus};
 use crate::value::{VmError, VmValue};
 
 use super::errors::classify_http_error;
@@ -12,6 +14,7 @@ use super::openai_normalize::{
     append_paragraph, debug_log_message_shapes, extract_openai_delta_field_str,
 };
 use super::options::{DeltaSender, LlmRequestPayload};
+use super::partial_tool_args::{project_partial, DeltaCoalescer, PartialToolArgs};
 use super::response::{extract_cache_read_tokens, extract_cache_write_tokens, parse_llm_response};
 use super::result::LlmResult;
 use super::thinking::ThinkingStreamSplitter;
@@ -267,7 +270,14 @@ pub(crate) async fn vm_call_llm_api_with_body(
             .and_then(|v| v.to_str().ok())
             .unwrap_or("");
         if ct.contains("text/event-stream") {
-            return vm_call_llm_api_sse_from_response(response, model, &resolved, tx).await;
+            return vm_call_llm_api_sse_from_response(
+                response,
+                model,
+                &resolved,
+                tx,
+                opts.session_id.as_deref(),
+            )
+            .await;
         }
         return vm_call_llm_api_ndjson_from_response(response, model, tx).await;
     }
@@ -303,20 +313,98 @@ pub(crate) async fn vm_call_llm_api_with_body(
 }
 
 /// Consume an SSE streaming response from an already-sent request.
-/// Parses `data: {...}` lines from the response body.
+/// Parses `data: {...}` lines from the response body, then defers to
+/// [`consume_sse_lines`] for the parsing and event-emission logic so
+/// tests can drive the same code path against an in-memory `AsyncBufRead`.
 async fn vm_call_llm_api_sse_from_response(
     response: reqwest::Response,
     model: &str,
     resolved: &crate::llm::helpers::ResolvedProvider,
     delta_tx: DeltaSender,
+    session_id: Option<&str>,
 ) -> Result<LlmResult, VmError> {
-    use tokio::io::AsyncBufReadExt;
     use tokio_stream::StreamExt;
 
     let stream = response.bytes_stream();
     let reader = tokio::io::BufReader::new(tokio_util::io::StreamReader::new(
         stream.map(|r| r.map_err(std::io::Error::other)),
     ));
+    consume_sse_lines(
+        reader,
+        model,
+        resolved.is_anthropic_style,
+        delta_tx,
+        session_id,
+    )
+    .await
+}
+
+/// Try to publish the live `(tool_call_id, tool_name, accumulated_bytes)`
+/// triple as a `ToolCallUpdate(Pending, raw_input | raw_input_partial)`
+/// event. Coalescing + partial-parse logic lives here so both the
+/// Anthropic and OpenAI branches of the SSE loop share one emit site.
+fn try_emit_partial_tool_args(
+    session_id: Option<&str>,
+    tool_call_id: &str,
+    tool_name: &str,
+    accumulated: &str,
+    coalescer: &mut DeltaCoalescer,
+    now: Instant,
+) {
+    let Some(session_id) = session_id else {
+        return;
+    };
+    if !coalescer.should_emit(now) {
+        return;
+    }
+    let PartialToolArgs { value, raw_partial } = project_partial(accumulated);
+    if value.is_none() && raw_partial.is_none() {
+        return;
+    }
+    let event = AgentEvent::ToolCallUpdate {
+        session_id: session_id.to_string(),
+        tool_call_id: tool_call_id.to_string(),
+        tool_name: tool_name.to_string(),
+        status: ToolCallStatus::Pending,
+        raw_output: None,
+        error: None,
+        duration_ms: None,
+        execution_duration_ms: None,
+        error_category: None,
+        executor: None,
+        raw_input: value,
+        raw_input_partial: raw_partial,
+
+        parsing: None,
+    };
+    crate::llm::agent::emit_agent_event_sync(&event);
+}
+
+/// Map an Anthropic `tool_use` block id (or, as a fallback, an
+/// iteration-relative index) to the canonical `tool-{id}` shape that
+/// `tool_dispatch.rs` later emits from. Keeping the two sites in sync
+/// lets clients correlate streaming `Pending` updates with the eventual
+/// `InProgress`/`Completed` lifecycle.
+fn streaming_tool_call_id(provider_id: &str, fallback_index: usize) -> String {
+    if provider_id.is_empty() {
+        format!("tool-stream-{fallback_index}")
+    } else {
+        format!("tool-{provider_id}")
+    }
+}
+
+/// Pure SSE-line consumer extracted so #693's streaming-partial-args
+/// behavior can be tested against canned byte streams without standing
+/// up a full `reqwest::Response`. The Anthropic / OpenAI branches and
+/// the trailing accumulator drain that finalize the call live here.
+pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
+    reader: R,
+    model: &str,
+    is_anthropic_style: bool,
+    delta_tx: DeltaSender,
+    session_id: Option<&str>,
+) -> Result<LlmResult, VmError> {
+    use tokio::io::AsyncBufReadExt;
     let mut lines = reader.lines();
 
     let mut text = String::new();
@@ -329,6 +417,15 @@ async fn vm_call_llm_api_sse_from_response(
         id: String,
         name: String,
         input_json: String,
+        /// Stable id used for `AgentEvent::ToolCall*` streaming
+        /// emissions (#693). Must match the shape `tool_dispatch.rs`
+        /// constructs later so clients can correlate the streaming
+        /// `Pending` updates with the eventual `InProgress`/`Completed`
+        /// lifecycle.
+        tool_call_id: String,
+        /// Coalescing gate so a tool that arrives in 30 small deltas
+        /// emits ~6 `ToolCallUpdate` events instead of 30.
+        coalescer: DeltaCoalescer,
     }
     let mut current_tool: Option<ToolBlock> = None;
     // Mirror structure for server-side tool-search queries: Anthropic
@@ -346,8 +443,27 @@ async fn vm_call_llm_api_sse_from_response(
     let mut stop_reason: Option<String> = None;
     let mut cache_read_tokens: i64 = 0;
     let mut cache_write_tokens: i64 = 0;
+    // Counter for fallback streaming-tool-call ids when a provider sent
+    // an empty id on the first tool_use block. Kept stable across the
+    // stream so the coalesced updates reuse the same id the dispatcher
+    // would compute.
+    let mut anth_tool_block_index: usize = 0;
 
-    let mut oai_tool_map: std::collections::HashMap<u64, (String, String, String)> =
+    /// Per-tool-call OpenAI streaming state. Tracks the accumulated
+    /// arguments string, the tool name (filled when the first delta
+    /// carries `function.name`), the synthetic `tool_call_id` we use
+    /// for `AgentEvent::ToolCall` emission, whether the initial
+    /// `ToolCall(Pending)` event has fired yet, and a coalescer so
+    /// argument-delta storms don't fan out per-byte.
+    struct OaiToolStream {
+        id: String,
+        name: String,
+        args: String,
+        tool_call_id: String,
+        announced: bool,
+        coalescer: DeltaCoalescer,
+    }
+    let mut oai_tool_map: std::collections::HashMap<u64, OaiToolStream> =
         std::collections::HashMap::new();
     // Qwen3/3.5 via vLLM emit inline `<think>...</think>`. Strip these
     // out of the visible delta stream so the tool-call parser / progress
@@ -368,7 +484,7 @@ async fn vm_call_llm_api_sse_from_response(
             Err(_) => continue,
         };
 
-        if resolved.is_anthropic_style {
+        if is_anthropic_style {
             match json["type"].as_str() {
                 Some("message_start") => {
                     if let Some(n) = json["message"]["usage"]["input_tokens"].as_i64() {
@@ -388,10 +504,34 @@ async fn vm_call_llm_api_sse_from_response(
                     let block = &json["content_block"];
                     match block["type"].as_str() {
                         Some("tool_use") => {
+                            let id = block["id"].as_str().unwrap_or("").to_string();
+                            let name = block["name"].as_str().unwrap_or("").to_string();
+                            anth_tool_block_index += 1;
+                            let tool_call_id = streaming_tool_call_id(&id, anth_tool_block_index);
+                            // Streaming announcement: emit before any
+                            // arg deltas so ACP clients can render
+                            // "calling search_web…" with zero latency.
+                            if let Some(sid) = session_id {
+                                let tool_kind =
+                                    crate::orchestration::current_tool_annotations(&name)
+                                        .map(|a| a.kind);
+                                crate::llm::agent::emit_agent_event_sync(&AgentEvent::ToolCall {
+                                    session_id: sid.to_string(),
+                                    tool_call_id: tool_call_id.clone(),
+                                    tool_name: name.clone(),
+                                    kind: tool_kind,
+                                    status: ToolCallStatus::Pending,
+                                    raw_input: serde_json::Value::Object(Default::default()),
+
+                                    parsing: None,
+                                });
+                            }
                             current_tool = Some(ToolBlock {
-                                id: block["id"].as_str().unwrap_or("").to_string(),
-                                name: block["name"].as_str().unwrap_or("").to_string(),
+                                id,
+                                name,
                                 input_json: String::new(),
+                                tool_call_id,
+                                coalescer: DeltaCoalescer::new(),
                             });
                         }
                         Some("server_tool_use") => {
@@ -444,6 +584,14 @@ async fn vm_call_llm_api_sse_from_response(
                                 if let Some(j) = delta["partial_json"].as_str() {
                                     tool.input_json.push_str(j);
                                 }
+                                try_emit_partial_tool_args(
+                                    session_id,
+                                    &tool.tool_call_id,
+                                    &tool.name,
+                                    &tool.input_json,
+                                    &mut tool.coalescer,
+                                    Instant::now(),
+                                );
                             } else if let Some(ref mut server_tool) = current_server_tool {
                                 if let Some(j) = delta["partial_json"].as_str() {
                                     server_tool.input_json.push_str(j);
@@ -576,13 +724,76 @@ async fn vm_call_llm_api_sse_from_response(
                         continue;
                     }
                     let idx = tc["index"].as_u64().unwrap_or(0);
+                    let stream_index = idx as usize + 1;
                     let entry = oai_tool_map.entry(idx).or_insert_with(|| {
                         let id = tc["id"].as_str().unwrap_or("").to_string();
                         let name = tc["function"]["name"].as_str().unwrap_or("").to_string();
-                        (id, name, String::new())
+                        let tool_call_id = streaming_tool_call_id(&id, stream_index);
+                        OaiToolStream {
+                            id,
+                            name,
+                            args: String::new(),
+                            tool_call_id,
+                            announced: false,
+                            coalescer: DeltaCoalescer::new(),
+                        }
                     });
+                    // OpenAI sometimes splits the metadata across deltas:
+                    // the first one carries `name`, later ones carry only
+                    // `arguments`. Patch missing fields if a later delta
+                    // fills them in.
+                    if entry.id.is_empty() {
+                        if let Some(id) = tc["id"].as_str() {
+                            if !id.is_empty() {
+                                entry.id = id.to_string();
+                                entry.tool_call_id =
+                                    streaming_tool_call_id(&entry.id, stream_index);
+                            }
+                        }
+                    }
+                    if entry.name.is_empty() {
+                        if let Some(name) = tc["function"]["name"].as_str() {
+                            if !name.is_empty() {
+                                entry.name = name.to_string();
+                            }
+                        }
+                    }
+                    // Announce the tool call as soon as we have a name —
+                    // before any arg deltas, so clients render "calling
+                    // X…" immediately. If only arguments arrive first
+                    // (rare; some self-hosted vLLM builds), we hold off
+                    // and announce on the first real partial-args emit
+                    // below.
+                    if !entry.announced && !entry.name.is_empty() {
+                        if let Some(sid) = session_id {
+                            let tool_kind =
+                                crate::orchestration::current_tool_annotations(&entry.name)
+                                    .map(|a| a.kind);
+                            crate::llm::agent::emit_agent_event_sync(&AgentEvent::ToolCall {
+                                session_id: sid.to_string(),
+                                tool_call_id: entry.tool_call_id.clone(),
+                                tool_name: entry.name.clone(),
+                                kind: tool_kind,
+                                status: ToolCallStatus::Pending,
+                                raw_input: serde_json::Value::Object(Default::default()),
+
+                                parsing: None,
+                            });
+                            entry.announced = true;
+                        }
+                    }
                     if let Some(args) = tc["function"]["arguments"].as_str() {
-                        entry.2.push_str(args);
+                        entry.args.push_str(args);
+                    }
+                    if entry.announced {
+                        try_emit_partial_tool_args(
+                            session_id,
+                            &entry.tool_call_id,
+                            &entry.name,
+                            &entry.args,
+                            &mut entry.coalescer,
+                            Instant::now(),
+                        );
                     }
                 }
             }
@@ -606,13 +817,19 @@ async fn vm_call_llm_api_sse_from_response(
         }
     }
 
-    for (_, (id, name, args_str)) in oai_tool_map {
-        let args = serde_json::from_str::<serde_json::Value>(&args_str)
+    for (_, stream) in oai_tool_map {
+        let args = serde_json::from_str::<serde_json::Value>(&stream.args)
             .unwrap_or(serde_json::Value::Object(Default::default()));
         tool_calls.push(serde_json::json!({
-            "id": id, "name": name, "arguments": args,
+            "id": stream.id, "name": stream.name, "arguments": args,
         }));
-        blocks.push(serde_json::json!({"type": "tool_call", "id": id, "name": name, "arguments": args, "visibility": "internal"}));
+        blocks.push(serde_json::json!({
+            "type": "tool_call",
+            "id": stream.id,
+            "name": stream.name,
+            "arguments": args,
+            "visibility": "internal",
+        }));
     }
 
     let final_visible = oai_thinking_splitter.flush();
@@ -657,7 +874,7 @@ async fn vm_call_llm_api_sse_from_response(
         cache_read_tokens,
         cache_write_tokens,
         model: model.to_string(),
-        provider: if resolved.is_anthropic_style {
+        provider: if is_anthropic_style {
             "anthropic".to_string()
         } else {
             "openai".to_string()
@@ -822,5 +1039,342 @@ mod tests {
         assert_eq!(tool_calls[0]["arguments"]["path"], "README.md");
         assert_eq!(blocks.len(), 1);
         assert_eq!(blocks[0]["type"], "tool_call");
+    }
+}
+
+#[cfg(test)]
+mod streaming_tool_call_tests {
+    //! Streaming-tool-call partial-arg event tests (#693). Drive
+    //! [`consume_sse_lines`] against canned byte streams that mimic the
+    //! Anthropic / OpenAI wire format and assert the
+    //! `AgentEvent::ToolCall` / `AgentEvent::ToolCallUpdate` sequence
+    //! lands as expected: an initial `Pending` announcement, one or
+    //! more coalesced partial-arg updates, and `raw_input_partial`
+    //! when the partial bytes can't be parsed as JSON yet.
+    //!
+    //! Events are captured via the global session-sink registry (which
+    //! is what real ACP/A2A consumers use) rather than the per-loop
+    //! thread-local — drive a fresh session id per test so they don't
+    //! cross-talk under `cargo test`'s thread pool.
+
+    use super::*;
+    use crate::agent_events::{
+        clear_session_sinks, register_sink, AgentEvent, AgentEventSink, ToolCallStatus,
+    };
+    use std::sync::{Arc, Mutex};
+
+    struct CapturingSink {
+        events: Arc<Mutex<Vec<AgentEvent>>>,
+    }
+
+    impl AgentEventSink for CapturingSink {
+        fn handle_event(&self, event: &AgentEvent) {
+            self.events
+                .lock()
+                .expect("capture mutex")
+                .push(event.clone());
+        }
+    }
+
+    fn install_capturing_sink(session_id: &str) -> Arc<Mutex<Vec<AgentEvent>>> {
+        let events: Arc<Mutex<Vec<AgentEvent>>> = Arc::new(Mutex::new(Vec::new()));
+        register_sink(
+            session_id,
+            Arc::new(CapturingSink {
+                events: events.clone(),
+            }),
+        );
+        events
+    }
+
+    /// Build a fresh per-test session id so concurrent test threads
+    /// can't poison each other's captured-event vector via the global
+    /// registry.
+    fn fresh_session_id(label: &str) -> String {
+        format!("{label}-{}", uuid::Uuid::now_v7())
+    }
+
+    /// Drive `consume_sse_lines` against a canned SSE byte buffer and
+    /// return the captured agent events plus the parsed `LlmResult`.
+    /// Helper so each test can stay focused on the assertion.
+    async fn drive(
+        bytes: &[u8],
+        session_id: &str,
+        is_anthropic: bool,
+    ) -> (LlmResult, Vec<AgentEvent>) {
+        let events = install_capturing_sink(session_id);
+        let (delta_tx, _delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        let reader = tokio::io::BufReader::new(bytes);
+        let result = consume_sse_lines(
+            reader,
+            "test-model",
+            is_anthropic,
+            delta_tx,
+            Some(session_id),
+        )
+        .await
+        .expect("sse parse should succeed");
+        let captured = events.lock().expect("capture mutex").clone();
+        (result, captured)
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn anthropic_stream_announces_tool_call_then_streams_partials() {
+        // Force COALESCE_WINDOW pauses by emitting deltas across the
+        // 50ms boundary so the coalescer flushes more than once.
+        let body = concat!(
+            "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":3}}}\n",
+            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_a1\",\"name\":\"search_web\"}}\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"q\\\":\\\"ant\"}}\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"hropic\"}}\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"\\\"}\"}}\n",
+            "data: {\"type\":\"content_block_stop\",\"index\":0}\n",
+            "data: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":5},\"delta\":{\"stop_reason\":\"tool_use\"}}\n",
+            "data: [DONE]\n",
+        );
+        let session_id = fresh_session_id("anth-stream");
+        let (result, events) = drive(body.as_bytes(), &session_id, true).await;
+
+        // ── Initial ToolCall(Pending) announcement ──────────────────
+        let announcements: Vec<&AgentEvent> = events
+            .iter()
+            .filter(|e| matches!(e, AgentEvent::ToolCall { .. }))
+            .collect();
+        assert_eq!(
+            announcements.len(),
+            1,
+            "expected exactly one initial ToolCall(Pending), got {events:#?}"
+        );
+        match announcements[0] {
+            AgentEvent::ToolCall {
+                tool_name,
+                status,
+                tool_call_id,
+                raw_input,
+                ..
+            } => {
+                assert_eq!(tool_name, "search_web");
+                assert_eq!(*status, ToolCallStatus::Pending);
+                assert_eq!(tool_call_id, "tool-toolu_a1");
+                assert_eq!(*raw_input, serde_json::json!({}));
+            }
+            _ => unreachable!(),
+        }
+
+        // ── Partial-arg ToolCallUpdate(Pending) updates fired before
+        //    content_block_stop ─────────────────────────────────────
+        let partial_updates: Vec<&AgentEvent> = events
+            .iter()
+            .filter(|e| {
+                matches!(
+                    e,
+                    AgentEvent::ToolCallUpdate {
+                        status: ToolCallStatus::Pending,
+                        ..
+                    }
+                )
+            })
+            .collect();
+        assert!(
+            !partial_updates.is_empty(),
+            "expected at least one Pending tool_call_update from streaming deltas, got {events:#?}"
+        );
+        // Some update must carry either a parsed `raw_input` or a
+        // `raw_input_partial` so clients can render the args live.
+        let has_payload = partial_updates.iter().any(|e| match e {
+            AgentEvent::ToolCallUpdate {
+                raw_input,
+                raw_input_partial,
+                ..
+            } => raw_input.is_some() || raw_input_partial.is_some(),
+            _ => false,
+        });
+        assert!(
+            has_payload,
+            "expected at least one Pending update to carry raw_input or raw_input_partial; got {partial_updates:#?}"
+        );
+
+        // ── Final tool call result was still parsed correctly ───────
+        assert_eq!(result.tool_calls.len(), 1);
+        assert_eq!(result.tool_calls[0]["name"], "search_web");
+        assert_eq!(result.tool_calls[0]["arguments"]["q"], "anthropic");
+
+        clear_session_sinks(&session_id);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn anthropic_stream_emits_raw_input_partial_when_args_unparseable() {
+        // The model emits an unterminated string before the close —
+        // the recovery path can't synthesize a value, so the transport
+        // must publish `raw_input_partial` carrying the raw bytes.
+        let body = concat!(
+            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_b1\",\"name\":\"edit\"}}\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"path\\\":\\\"foo.swift\\\",\\\"replace\\\":\\\"hello\"}}\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\" world\\\"}\"}}\n",
+            "data: {\"type\":\"content_block_stop\",\"index\":0}\n",
+            "data: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":3},\"delta\":{\"stop_reason\":\"tool_use\"}}\n",
+            "data: [DONE]\n",
+        );
+        let session_id = fresh_session_id("anth-raw-partial");
+        let (_, events) = drive(body.as_bytes(), &session_id, true).await;
+
+        // The first Pending update fires immediately after the first
+        // delta. At that point the buffer contains an unterminated
+        // string, so `raw_input_partial` should be set.
+        let first_partial = events.iter().find_map(|e| match e {
+            AgentEvent::ToolCallUpdate {
+                status: ToolCallStatus::Pending,
+                raw_input,
+                raw_input_partial,
+                ..
+            } => Some((raw_input.clone(), raw_input_partial.clone())),
+            _ => None,
+        });
+        let (first_value, first_raw) =
+            first_partial.expect("expected at least one Pending tool_call_update during streaming");
+        assert!(
+            first_value.is_none() && first_raw.is_some(),
+            "first partial must surface raw_input_partial when JSON isn't yet parseable; got value={first_value:?} raw={first_raw:?}"
+        );
+        assert!(
+            first_raw.unwrap().contains("hello"),
+            "raw_input_partial should carry the concatenated bytes verbatim"
+        );
+
+        clear_session_sinks(&session_id);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn openai_stream_announces_and_streams_partials() {
+        // OpenAI Chat-Completions-style: tool name on the first delta,
+        // arguments string concatenated across subsequent deltas.
+        let body = concat!(
+            "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_a\",\"function\":{\"name\":\"read_file\",\"arguments\":\"{\\\"pa\"}}]}}]}\n",
+            "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"th\\\":\\\"REA\"}}]}}]}\n",
+            "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"DME.md\\\"}\"}}]}}]}\n",
+            "data: {\"choices\":[{\"index\":0,\"finish_reason\":\"tool_calls\",\"delta\":{}}],\"usage\":{\"prompt_tokens\":4,\"completion_tokens\":3}}\n",
+            "data: [DONE]\n",
+        );
+        let session_id = fresh_session_id("oai-stream");
+        let (result, events) = drive(body.as_bytes(), &session_id, false).await;
+
+        // Initial ToolCall(Pending) announcement on the first delta
+        // that carries `function.name`.
+        let announcements: Vec<&AgentEvent> = events
+            .iter()
+            .filter(|e| matches!(e, AgentEvent::ToolCall { .. }))
+            .collect();
+        assert_eq!(
+            announcements.len(),
+            1,
+            "expected one initial ToolCall(Pending); got {events:#?}"
+        );
+        match announcements[0] {
+            AgentEvent::ToolCall {
+                tool_name,
+                tool_call_id,
+                status,
+                ..
+            } => {
+                assert_eq!(tool_name, "read_file");
+                assert_eq!(*status, ToolCallStatus::Pending);
+                assert_eq!(tool_call_id, "tool-call_a");
+            }
+            _ => unreachable!(),
+        }
+
+        // At least one partial-arg ToolCallUpdate fired during streaming.
+        let partial_updates = events
+            .iter()
+            .filter(|e| {
+                matches!(
+                    e,
+                    AgentEvent::ToolCallUpdate {
+                        status: ToolCallStatus::Pending,
+                        ..
+                    }
+                )
+            })
+            .count();
+        assert!(
+            partial_updates >= 1,
+            "expected at least one Pending tool_call_update during streaming; got {events:#?}"
+        );
+
+        // Final tool call result still surfaces the canonical args.
+        assert_eq!(result.tool_calls.len(), 1);
+        assert_eq!(result.tool_calls[0]["name"], "read_file");
+        assert_eq!(result.tool_calls[0]["arguments"]["path"], "README.md");
+
+        clear_session_sinks(&session_id);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn no_session_id_means_no_streaming_events() {
+        // Without an opt-in session id the transport must remain silent
+        // — the dispatch-time lifecycle still owns the canonical events
+        // for raw `llm_call(...)` invocations from script context.
+        let body = concat!(
+            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_x\",\"name\":\"fake\"}}\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"k\\\":1}\"}}\n",
+            "data: {\"type\":\"content_block_stop\",\"index\":0}\n",
+            "data: [DONE]\n",
+        );
+        let session_id = fresh_session_id("anth-silent");
+        let events = install_capturing_sink(&session_id);
+        let (delta_tx, _delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        let reader = tokio::io::BufReader::new(body.as_bytes());
+        let _result = consume_sse_lines(reader, "test-model", true, delta_tx, None)
+            .await
+            .expect("parse");
+        let captured = events.lock().expect("capture mutex").clone();
+        assert!(
+            captured.is_empty(),
+            "transport must emit no events when session_id is None; got {captured:#?}"
+        );
+        clear_session_sinks(&session_id);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn coalescing_caps_event_count_under_burst() {
+        // Build a burst of 20 input_json_deltas emitted in tight
+        // succession (no real timer pauses inside the test). With
+        // 50ms coalescing, only the very first delta should fire an
+        // immediate ToolCallUpdate; the others should fold into it.
+        let mut body = String::new();
+        body.push_str(
+            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_burst\",\"name\":\"big\"}}\n",
+        );
+        for i in 0..20 {
+            body.push_str(&format!(
+                "data: {{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{{\"type\":\"input_json_delta\",\"partial_json\":\"chunk{i} \"}}}}\n",
+            ));
+        }
+        body.push_str("data: {\"type\":\"content_block_stop\",\"index\":0}\n");
+        body.push_str("data: [DONE]\n");
+        let session_id = fresh_session_id("anth-coalesce");
+        let (_, events) = drive(body.as_bytes(), &session_id, true).await;
+
+        // 20 deltas in well under 50ms must not produce 20 events.
+        // We allow up to 3 (first delta + boundary races) so the test
+        // tolerates clock jitter on busy CI hardware while still
+        // guarding against the per-byte regression.
+        let pending_updates = events
+            .iter()
+            .filter(|e| {
+                matches!(
+                    e,
+                    AgentEvent::ToolCallUpdate {
+                        status: ToolCallStatus::Pending,
+                        ..
+                    }
+                )
+            })
+            .count();
+        assert!(
+            pending_updates < 20,
+            "coalescing must cap the burst — got {pending_updates} pending updates from 20 deltas"
+        );
+        clear_session_sinks(&session_id);
     }
 }

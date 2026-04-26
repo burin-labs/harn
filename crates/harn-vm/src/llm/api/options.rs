@@ -245,6 +245,15 @@ pub(crate) struct LlmCallOptions {
     pub fallback_chain: Vec<String>,
     pub routing_decision: Option<LlmRoutingDecision>,
 
+    // --- Observability ---
+    /// Agent session id, when this call is driven from `run_agent_loop_internal`.
+    /// Forwarded to the SSE transport so streaming native tool-call deltas
+    /// (#693) can emit `AgentEvent::ToolCall` / `AgentEvent::ToolCallUpdate`
+    /// against the right session even before the dispatch phase fires its
+    /// own lifecycle events. `None` for raw `llm_call(...)` invocations
+    /// from script context — those have no agent session to attach to.
+    pub session_id: Option<String>,
+
     // --- Conversation ---
     pub messages: Vec<serde_json::Value>,
     pub system: Option<String>,
@@ -359,6 +368,11 @@ pub(crate) struct LlmRequestPayload {
     pub stream: bool,
     pub provider_overrides: Option<serde_json::Value>,
     pub prefill: Option<String>,
+    /// Forwarded session id for streaming-tool-call event emission (#693).
+    /// Cloned out of `LlmCallOptions::session_id` so the transport layer
+    /// can fire `AgentEvent::ToolCall` / `AgentEvent::ToolCallUpdate`
+    /// against the right session. `None` for non-agent-loop calls.
+    pub session_id: Option<String>,
 }
 
 impl LlmRequestPayload {
@@ -394,6 +408,7 @@ impl From<&LlmCallOptions> for LlmRequestPayload {
             stream: opts.stream,
             provider_overrides: opts.provider_overrides.clone(),
             prefill: opts.prefill.clone(),
+            session_id: opts.session_id.clone(),
         }
     }
 }
@@ -408,6 +423,7 @@ pub(super) fn base_opts(provider: &str) -> LlmCallOptions {
         route_policy: LlmRoutePolicy::Manual,
         fallback_chain: Vec::new(),
         routing_decision: None,
+        session_id: None,
         messages: vec![serde_json::json!({"role": "user", "content": "hello"})],
         system: None,
         transcript_summary: Some("summary".to_string()),

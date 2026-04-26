@@ -75,6 +75,26 @@ impl Drop for LoopSinkGuard {
     }
 }
 
+/// Synchronously emit an event to external sinks (the global registry)
+/// and to the top-of-stack per-loop sink installed by `LoopSinkGuard`.
+/// Skips closure subscribers because they are async + VM-bound and
+/// cannot be safely awaited from sites that may run outside the agent
+/// loop's `LocalSet` task — currently the SSE transport (#693) which
+/// fires `ToolCall(Pending)` / `ToolCallUpdate(Pending, raw_input)` per
+/// streamed delta.
+///
+/// Closure subscribers still see the canonical lifecycle (`Pending →
+/// InProgress → Completed/Failed`) emitted later by `tool_dispatch.rs`
+/// via `emit_agent_event` — this sync path is for the streaming-args
+/// observation surface only.
+pub(crate) fn emit_agent_event_sync(event: &AgentEvent) {
+    agent_events::emit_event(event);
+    let loop_sink = CURRENT_LOOP_SINKS.with(|stack| stack.borrow().last().cloned());
+    if let Some(sink) = loop_sink {
+        sink.handle_event(event);
+    }
+}
+
 /// Emit an event through both external sinks (sync) and closure
 /// subscribers (async, via the agent-loop's VM context). Called by the
 /// turn loop at every phase.

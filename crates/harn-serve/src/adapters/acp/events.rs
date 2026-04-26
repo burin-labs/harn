@@ -133,6 +133,8 @@ impl AgentEventSink for AcpAgentEventSink {
                 error_category,
                 executor,
                 parsing,
+                raw_input,
+                raw_input_partial,
             } => {
                 let mut update = serde_json::json!({
                     "sessionUpdate": "tool_call_update",
@@ -160,6 +162,12 @@ impl AgentEventSink for AcpAgentEventSink {
                 }
                 if let Some(p) = parsing {
                     update["parsing"] = serde_json::Value::Bool(*p);
+                }
+                if let Some(input) = raw_input {
+                    update["rawInput"] = input.clone();
+                }
+                if let Some(partial) = raw_input_partial {
+                    update["rawInputPartial"] = serde_json::Value::String(partial.clone());
                 }
                 self.write_notification(serde_json::json!({
                     "sessionId": session_id,
@@ -540,6 +548,9 @@ mod tests {
                 error_category: None,
                 executor: Some(ToolExecutor::HarnBuiltin),
                 parsing: None,
+
+                raw_input: None,
+                raw_input_partial: None,
             },
             AgentEvent::Plan {
                 session_id: "session-1".to_string(),
@@ -647,6 +658,9 @@ mod tests {
             error_category: Some(ToolCallErrorCategory::SchemaValidation),
             executor: None,
             parsing: None,
+
+            raw_input: None,
+            raw_input_partial: None,
         });
         let line = rx.recv().await.expect("acp tool_call_update");
         let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
@@ -681,6 +695,9 @@ mod tests {
             error_category: None,
             executor: None,
             parsing: None,
+
+            raw_input: None,
+            raw_input_partial: None,
         });
         let line = rx.recv().await.expect("acp tool_call_update");
         let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
@@ -724,6 +741,10 @@ mod tests {
             error_category: Some(ToolCallErrorCategory::ParseAborted),
             executor: None,
             parsing: Some(false),
+
+            raw_input: None,
+
+            raw_input_partial: None,
         });
         let line = rx.recv().await.expect("acp tool_call_update notification");
         let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
@@ -794,6 +815,9 @@ mod tests {
                 error_category: None,
                 executor: Some(executor),
                 parsing: None,
+
+                raw_input: None,
+                raw_input_partial: None,
             });
             let line = rx.recv().await.expect("acp tool_call_update notification");
             let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
@@ -818,6 +842,9 @@ mod tests {
             error_category: None,
             executor: None,
             parsing: None,
+
+            raw_input: None,
+            raw_input_partial: None,
         });
         let line = rx.recv().await.expect("acp tool_call_update notification");
         let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
@@ -825,6 +852,84 @@ mod tests {
             payload["params"]["update"].get("executor").is_none(),
             "got: {payload}"
         );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn tool_call_update_streams_raw_input_and_raw_input_partial_per_acp_wire_format() {
+        // #693: ACP wire format must mirror raw_input as `rawInput` and
+        // raw_input_partial as `rawInputPartial`. Both fields skip
+        // serialization when None so older clients see no surprise
+        // keys.
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let sink = AcpAgentEventSink::new(AcpOutput::Channel(tx));
+
+        // Parsed partial value → `rawInput` populated, `rawInputPartial` absent.
+        sink.handle_event(&AgentEvent::ToolCallUpdate {
+            session_id: "session-1".to_string(),
+            tool_call_id: "tool-streaming".to_string(),
+            tool_name: "search".to_string(),
+            status: ToolCallStatus::Pending,
+            raw_output: None,
+            error: None,
+            duration_ms: None,
+            execution_duration_ms: None,
+            error_category: None,
+            executor: None,
+            raw_input: Some(serde_json::json!({"q": "hello"})),
+            raw_input_partial: None,
+
+            parsing: None,
+        });
+        let line = rx.recv().await.expect("acp tool_call_update notification");
+        let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
+        assert_eq!(payload["params"]["update"]["rawInput"]["q"], "hello");
+        assert!(payload["params"]["update"].get("rawInputPartial").is_none());
+
+        // Unparseable partial bytes → `rawInputPartial` populated, `rawInput` absent.
+        sink.handle_event(&AgentEvent::ToolCallUpdate {
+            session_id: "session-1".to_string(),
+            tool_call_id: "tool-streaming".to_string(),
+            tool_name: "search".to_string(),
+            status: ToolCallStatus::Pending,
+            raw_output: None,
+            error: None,
+            duration_ms: None,
+            execution_duration_ms: None,
+            error_category: None,
+            executor: None,
+            parsing: None,
+            raw_input: None,
+            raw_input_partial: Some(r#"{"q":"hel"#.to_string()),
+        });
+        let line = rx.recv().await.expect("acp tool_call_update notification");
+        let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
+        assert!(payload["params"]["update"].get("rawInput").is_none());
+        assert_eq!(
+            payload["params"]["update"]["rawInputPartial"],
+            r#"{"q":"hel"#
+        );
+
+        // Terminal updates (None / None) must not introduce these keys.
+        sink.handle_event(&AgentEvent::ToolCallUpdate {
+            session_id: "session-1".to_string(),
+            tool_call_id: "tool-streaming".to_string(),
+            tool_name: "search".to_string(),
+            status: ToolCallStatus::Completed,
+            raw_output: Some(serde_json::json!({"ok": true})),
+            error: None,
+            duration_ms: Some(12),
+            execution_duration_ms: Some(8),
+            error_category: None,
+            executor: None,
+            parsing: None,
+            raw_input: None,
+            raw_input_partial: None,
+        });
+        let line = rx.recv().await.expect("acp tool_call_update notification");
+        let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
+        assert!(payload["params"]["update"].get("rawInput").is_none());
+        assert!(payload["params"]["update"].get("rawInputPartial").is_none());
+        assert_eq!(payload["params"]["update"]["status"], "completed");
     }
 
     #[test]
