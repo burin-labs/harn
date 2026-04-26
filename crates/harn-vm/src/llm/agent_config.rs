@@ -595,6 +595,10 @@ pub fn register_llm_call_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Host
                 None,
                 user_visible,
                 true,
+                // Direct `llm_call` host invocations are not part of an
+                // agent loop, so the streaming candidate detector
+                // (harn#692) doesn't fire here.
+                None,
             )
             .await?;
 

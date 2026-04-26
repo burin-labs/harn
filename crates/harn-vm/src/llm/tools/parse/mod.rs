@@ -7,6 +7,7 @@
 
 mod bare;
 mod native_json;
+mod streaming;
 mod syntax;
 mod tagged;
 
@@ -14,6 +15,7 @@ mod tagged;
 pub(crate) use bare::parse_bare_calls_in_body;
 #[cfg(test)]
 pub(crate) use native_json::parse_native_json_tool_calls;
+pub(crate) use streaming::StreamingToolCallDetector;
 pub(crate) use syntax::ident_length;
 pub(crate) use tagged::parse_text_tool_calls_with_tools;
 

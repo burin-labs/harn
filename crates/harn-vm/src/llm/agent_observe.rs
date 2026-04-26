@@ -498,23 +498,107 @@ pub(super) fn chrono_now() -> String {
     format!("{}.{:03}", now.as_secs(), now.subsec_millis())
 }
 
+/// Inputs required to wire a streaming candidate detector (harn#692)
+/// into a delta-forwarding task. When supplied, the detector consumes
+/// each text delta in parallel with the bridge progress notifier and
+/// emits `AgentEvent::ToolCall { parsing: true, .. }` /
+/// `AgentEvent::ToolCallUpdate { parsing: false, .. }` events through
+/// the global session sink registry so ACP clients render an in-flight
+/// chip while the model is still writing the args.
+pub(crate) struct StreamingDetectorContext {
+    pub session_id: String,
+    pub known_tools: std::collections::BTreeSet<String>,
+}
+
 /// Create an unbounded channel and spawn a local task that forwards text
-/// deltas to `bridge.send_call_progress()`.
+/// deltas to `bridge.send_call_progress()`. When `detector_ctx` is
+/// `Some`, the same task also drives a streaming text-tool-call
+/// candidate detector — emitting candidate-start / promoted / aborted
+/// events via the global session sink registry as the buffer grows
+/// (harn#692).
 pub(super) fn spawn_progress_forwarder(
     bridge: &Rc<crate::bridge::HostBridge>,
     call_id: String,
     user_visible: bool,
+    detector_ctx: Option<StreamingDetectorContext>,
 ) -> DeltaSender {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
     let bridge = bridge.clone();
+    let mut detector = detector_ctx.map(|ctx| {
+        crate::llm::tools::StreamingToolCallDetector::new(ctx.session_id, ctx.known_tools)
+    });
     tokio::task::spawn_local(async move {
         let mut token_count: u64 = 0;
         while let Some(delta) = rx.recv().await {
             token_count += 1;
             bridge.send_call_progress(&call_id, &delta, token_count, user_visible);
+            if let Some(d) = detector.as_mut() {
+                for event in d.push(&delta) {
+                    crate::agent_events::emit_event(&event);
+                }
+            }
+        }
+        if let Some(mut d) = detector {
+            for event in d.finalize() {
+                crate::agent_events::emit_event(&event);
+            }
         }
     });
     tx
+}
+
+/// No-bridge twin of `spawn_progress_forwarder`. Drives only the
+/// streaming candidate detector — the deltas are otherwise discarded
+/// (the bridge progress channel is the only consumer, and we don't have
+/// one). Used so non-bridge callers (offthread VM, CLI loops without an
+/// attached host) still see candidate events when they have a
+/// `StreamingDetectorContext`.
+pub(super) fn spawn_detector_only_forwarder(detector_ctx: StreamingDetectorContext) -> DeltaSender {
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    tokio::task::spawn_local(run_detector_loop(detector_ctx, rx));
+    tx
+}
+
+/// Inner loop driving a [`StreamingToolCallDetector`] from a delta
+/// channel. Pulled out of `spawn_detector_only_forwarder` so tests can
+/// drive the same logic deterministically (await directly) without
+/// depending on `spawn_local` task scheduling.
+///
+/// `sink` is the function each emitted event flows through. Production
+/// passes `crate::agent_events::emit_event` so events fan out through
+/// the global session-keyed sink registry. Tests pass a closure that
+/// captures into a local buffer — sidestepping the global registry,
+/// which other tests in this binary mutate via `reset_all_sinks` and
+/// can race the per-session install.
+async fn run_detector_loop_with_sink(
+    detector_ctx: StreamingDetectorContext,
+    mut rx: tokio::sync::mpsc::UnboundedReceiver<String>,
+    mut sink: impl FnMut(&crate::agent_events::AgentEvent),
+) {
+    let mut detector = crate::llm::tools::StreamingToolCallDetector::new(
+        detector_ctx.session_id,
+        detector_ctx.known_tools,
+    );
+    while let Some(delta) = rx.recv().await {
+        for event in detector.push(&delta) {
+            sink(&event);
+        }
+    }
+    for event in detector.finalize() {
+        sink(&event);
+    }
+}
+
+/// Production wrapper: forwards every detector event through the global
+/// session sink registry so ACP / external sinks see them.
+async fn run_detector_loop(
+    detector_ctx: StreamingDetectorContext,
+    rx: tokio::sync::mpsc::UnboundedReceiver<String>,
+) {
+    run_detector_loop_with_sink(detector_ctx, rx, |event| {
+        crate::agent_events::emit_event(event);
+    })
+    .await;
 }
 
 /// Configuration for LLM call retries.
@@ -561,6 +645,7 @@ pub(crate) async fn observed_llm_call(
     iteration: Option<usize>,
     user_visible: bool,
     offthread: bool,
+    streaming_detector: Option<StreamingDetectorContext>,
 ) -> Result<super::api::LlmResult, VmError> {
     let effective_tool_format = tool_format
         .map(str::to_string)
@@ -626,15 +711,32 @@ pub(crate) async fn observed_llm_call(
         );
 
         let start = std::time::Instant::now();
+        // The streaming detector runs once per LLM call. Move the
+        // context into whichever forwarder we end up spawning so the
+        // detector finalizes when the stream closes (or never spawns
+        // if this call is non-streamed and there's nothing to listen
+        // to).
+        let detector_ctx = streaming_detector
+            .as_ref()
+            .map(|c| StreamingDetectorContext {
+                session_id: c.session_id.clone(),
+                known_tools: c.known_tools.clone(),
+            });
         let llm_result = if let Some(b) = bridge {
-            let delta_tx = spawn_progress_forwarder(b, call_id.clone(), user_visible);
+            let delta_tx = spawn_progress_forwarder(b, call_id.clone(), user_visible, detector_ctx);
             if offthread {
                 vm_call_llm_full_streaming_offthread(opts, delta_tx).await
             } else {
                 vm_call_llm_full_streaming(opts, delta_tx).await
             }
         } else if offthread {
-            let (delta_tx, _delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+            let delta_tx = match detector_ctx {
+                Some(ctx) => spawn_detector_only_forwarder(ctx),
+                None => {
+                    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+                    tx
+                }
+            };
             vm_call_llm_full_streaming_offthread(opts, delta_tx).await
         } else {
             super::api::vm_call_llm_full(opts).await
@@ -919,5 +1021,115 @@ mod retry_tests {
     #[test]
     fn retry_after_malformed_returns_none() {
         assert_eq!(parse_retry_after("retry-after: soon-ish"), None);
+    }
+}
+
+#[cfg(test)]
+mod streaming_detector_tests {
+    //! Verify the streaming candidate detector glue (harn#692). The
+    //! unit tests in `crate::llm::tools::parse::streaming` already cover
+    //! the detector's state machine; these tests cover the loop body
+    //! that pumps deltas through the detector and dispatches each event
+    //! to a sink. Uses `run_detector_loop_with_sink` with a captured
+    //! buffer so the test doesn't depend on the global session sink
+    //! registry — other tests in this binary mutate the registry via
+    //! `reset_all_sinks` and can race a per-session install otherwise.
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    use crate::agent_events::{AgentEvent, ToolCallStatus};
+
+    use super::{run_detector_loop_with_sink, StreamingDetectorContext};
+
+    /// Pipe `chunks` through `run_detector_loop_with_sink`, await its
+    /// completion, and return the captured events in arrival order.
+    async fn drive(session_id: &str, known: &[&str], chunks: &[&str]) -> Vec<AgentEvent> {
+        let captured: Rc<RefCell<Vec<AgentEvent>>> = Rc::new(RefCell::new(Vec::new()));
+        let sink_buf = captured.clone();
+        let known_tools = known.iter().map(|s| (*s).to_string()).collect();
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        for chunk in chunks {
+            tx.send((*chunk).to_string()).expect("send delta");
+        }
+        drop(tx);
+        run_detector_loop_with_sink(
+            StreamingDetectorContext {
+                session_id: session_id.to_string(),
+                known_tools,
+            },
+            rx,
+            move |event| sink_buf.borrow_mut().push(event.clone()),
+        )
+        .await;
+        let events = captured.borrow().clone();
+        events
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn detector_loop_emits_start_and_promoted_through_sink() {
+        let events = drive(
+            "session-stream-promote",
+            &["read"],
+            &["read({ path: \"a.md\" })"],
+        )
+        .await;
+        assert_eq!(
+            events.len(),
+            2,
+            "expected start + promoted, got: {events:#?}"
+        );
+        match &events[0] {
+            AgentEvent::ToolCall {
+                parsing,
+                tool_name,
+                status,
+                ..
+            } => {
+                assert_eq!(*parsing, Some(true));
+                assert_eq!(tool_name, "read");
+                assert_eq!(*status, ToolCallStatus::Pending);
+            }
+            other => panic!("expected ToolCall, got {other:?}"),
+        }
+        match &events[1] {
+            AgentEvent::ToolCallUpdate {
+                parsing,
+                status,
+                error_category,
+                ..
+            } => {
+                assert_eq!(*parsing, Some(false));
+                assert_eq!(*status, ToolCallStatus::Pending);
+                assert!(error_category.is_none());
+            }
+            other => panic!("expected ToolCallUpdate, got {other:?}"),
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn detector_loop_finalizes_unclosed_tagged_block_as_aborted() {
+        let events = drive(
+            "session-stream-abort",
+            &["run"],
+            &["<tool_call>\nrun({ command: \"ls\""],
+        )
+        .await;
+        assert_eq!(events.len(), 2, "events={events:#?}");
+        match &events[1] {
+            AgentEvent::ToolCallUpdate {
+                status,
+                error_category,
+                parsing,
+                ..
+            } => {
+                assert_eq!(*status, ToolCallStatus::Failed);
+                assert_eq!(
+                    *error_category,
+                    Some(crate::agent_events::ToolCallErrorCategory::ParseAborted)
+                );
+                assert_eq!(*parsing, Some(false));
+            }
+            other => panic!("expected ToolCallUpdate, got {other:?}"),
+        }
     }
 }
