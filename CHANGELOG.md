@@ -11,6 +11,11 @@ granular archaeology.
 
 ### Added
 
+- **Flow predicate-language design record (#584).** Added
+  `docs/src/flow-predicates.md` with explicit decisions for predicate budget
+  semantics, bootstrap signing, semantic predicate determinism, and
+  cross-directory slice composition, plus concrete implementation follow-ups
+  for the remaining Flow predicate work.
 - **Delegated worker transcript carry policies (#700).** `spawn_agent(...)`
   and background `sub_agent_run(...)` workers now persist explicit
   `carry.transcript_mode` semantics: `inherit`, `fork`, `reset`, and
