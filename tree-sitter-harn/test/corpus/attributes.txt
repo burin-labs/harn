@@ -1,0 +1,44 @@
+==================
+Attribute Literal Values
+==================
+
+@invariant
+@deterministic
+@archivist(evidence: ["https://example.com/spec"], confidence: 0.95, metadata: {source: "design"})
+fn no_secrets(slice) -> bool {
+  return true
+}
+
+---
+
+(source_file
+  (attributed_declaration
+    (attribute
+      name: (identifier))
+    (attribute
+      name: (identifier))
+    (attribute
+      name: (identifier)
+      (attribute_arg
+        name: (identifier)
+        value: (list_literal
+          (string_literal)))
+      (attribute_arg
+        name: (identifier)
+        value: (float_literal))
+      (attribute_arg
+        name: (identifier)
+        value: (dict_literal
+          (dict_entry
+            key: (identifier)
+            value: (string_literal)))))
+    (fn_declaration
+      name: (identifier)
+      (parameter_list
+        (typed_parameter
+          name: (identifier)))
+      (type_annotation
+        (identifier))
+      body: (block
+        (return_statement
+          (true))))))

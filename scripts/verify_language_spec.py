@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import json
 import re
 import shutil
 import subprocess
@@ -78,10 +79,26 @@ def should_skip_snippet(snippet: str) -> bool:
 
 
 def harn_check_command() -> list[str]:
-    debug_binary = ROOT / "target" / "debug" / "harn"
+    override = os.environ.get("HARN_CHECK_BIN")
+    if override:
+        return [override, "check"]
+
+    metadata = subprocess.run(
+        ["cargo", "metadata", "--format-version=1", "--no-deps"],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+    )
+    if metadata.returncode == 0:
+        target_dir = Path(json.loads(metadata.stdout)["target_directory"])
+        binary_name = "harn.exe" if sys.platform == "win32" else "harn"
+        debug_binary = target_dir / "debug" / binary_name
+    else:
+        debug_binary = ROOT / "target" / "debug" / "harn"
+
     if debug_binary.exists() and os.access(debug_binary, os.X_OK):
         return [str(debug_binary), "check"]
-    return ["cargo", "run", "-q", "-p", "harn-cli", "--", "check"]
+    return ["cargo", "run", "--quiet", "--bin", "harn", "--", "check"]
 
 
 def main() -> int:

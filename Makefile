@@ -77,7 +77,8 @@ lint-actions:
 lint-harn:
 	@echo "=== Linting Harn conformance tests ==="
 	@cargo build --quiet --bin harn
-	@workers=$$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 8); \
+	@harn_bin=$$(cargo metadata --format-version=1 --no-deps | python3 -c 'import json,sys; meta=json.load(sys.stdin); suffix=".exe" if sys.platform == "win32" else ""; print(meta["target_directory"] + "/debug/harn" + suffix)'); \
+	workers=$$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 8); \
 	tmp=$$(mktemp -d); \
 	status=0; \
 	find conformance/tests -name '*.harn' -print0 | while IFS= read -r -d '' f; do \
@@ -86,11 +87,11 @@ lint-harn:
 		printf '%s\0' "$$f"; \
 	done | \
 		TMP_RESULTS="$$tmp" xargs -0 -P "$$workers" -I{} sh -c '\
-			output=$$(target/debug/harn check "$$1" 2>&1); \
+			output=$$("$$0" check "$$1" 2>&1); \
 			if echo "$$output" | grep -qE "^.+: (warning|error)\["; then \
 				printf "%s\n" "$$output" | grep -v ": ok$$" > "$$TMP_RESULTS/$$(basename "$$1").out"; \
 				exit 1; \
-			fi' sh {} || status=$$?; \
+			fi' "$$harn_bin" {} || status=$$?; \
 	if ls "$$tmp"/*.out >/dev/null 2>&1; then \
 		cat "$$tmp"/*.out; \
 	fi; \

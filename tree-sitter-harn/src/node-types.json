@@ -423,6 +423,10 @@
         "required": false,
         "types": [
           {
+            "type": "dict_literal",
+            "named": true
+          },
+          {
             "type": "false",
             "named": true
           },
@@ -436,6 +440,10 @@
           },
           {
             "type": "integer_literal",
+            "named": true
+          },
+          {
+            "type": "list_literal",
             "named": true
           },
           {
@@ -462,6 +470,10 @@
       "required": false,
       "types": [
         {
+          "type": "dict_literal",
+          "named": true
+        },
+        {
           "type": "false",
           "named": true
         },
@@ -475,6 +487,10 @@
         },
         {
           "type": "integer_literal",
+          "named": true
+        },
+        {
+          "type": "list_literal",
           "named": true
         },
         {

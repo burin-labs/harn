@@ -178,8 +178,8 @@ cmd_audit() {
   # Serial warm prebuild before spawning the parallel lanes. The 3
   # cargo-using lanes (rust-audit runs clippy + nextest; harn-audit
   # runs `cargo build --bin harn` via `make lint-harn` and `cargo run`
-  # via conformance/fmt-harn; grammar-audit shells `target/debug/harn`
-  # via verify_language_spec.py) otherwise race for the same
+  # via conformance/fmt-harn; grammar-audit shells the active Cargo
+  # target-dir harn binary via verify_language_spec.py) otherwise race for the same
   # `.cargo-lock` and repeatedly invalidate each other's incremental
   # artifacts. Historically the harn lint phase alone stretched to
   # ~12 min cold because it was waiting on the shared target dir

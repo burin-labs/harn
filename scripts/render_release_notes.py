@@ -37,7 +37,7 @@ def changelog_versions(changelog: str) -> list[str]:
 
 def extract_section(changelog: str, version: str) -> str:
     match = re.search(
-        rf"(?ms)^## v{re.escape(version)}\n(.*?)(?=^## v|\Z)",
+        rf"(?ms)^## v{re.escape(version)}\n(.*?)(?=^## |\Z)",
         changelog,
     )
     if not match:
