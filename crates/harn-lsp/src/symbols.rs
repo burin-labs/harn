@@ -76,7 +76,7 @@ pub(crate) fn format_flow_attributes_block(attributes: &[Attribute]) -> Option<S
             }
             "semantic" => {
                 lines.push(
-                    "- `@semantic` — may invoke `cheap_judge` over pre-baked evidence".to_string(),
+                    "- `@semantic(fallback: name)` — may invoke `cheap_judge` over pre-baked evidence with a deterministic fallback".to_string(),
                 );
                 saw_relevant = true;
             }

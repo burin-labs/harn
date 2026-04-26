@@ -45,14 +45,27 @@ Every shipping predicate is a top-level Harn function marked with
 fn no_raw_tokens(slice) {
   return flow_invariant_allow()
 }
+
+@invariant
+@semantic(fallback: no_raw_tokens)
+@archivist(
+  evidence: ["https://example.com/team/security-rule"],
+  confidence: 0.84,
+  source_date: "2026-04-26",
+  coverage_examples: ["crates/api/src/auth.rs"]
+)
+fn no_raw_tokens_semantic_review(slice) {
+  return flow_invariant_warn("semantic review found risky token-like text")
+}
 ```
 
 `@deterministic` predicates are pure Harn. They cannot use the network, shell,
 LLM calls, host tools, clocks, random sources, or mutable ambient state.
 
-`@semantic` predicates may make one cheap judge call over pre-baked evidence
-captured in `@archivist(...)`. They still cannot fetch fresh evidence during
-slice evaluation.
+`@semantic(fallback: name)` predicates may make one cheap judge call over
+pre-baked evidence captured in `@archivist(...)`. The fallback must name a
+deterministic predicate declared in the same `invariants.harn` file or an
+ancestor file. They still cannot fetch fresh evidence during slice evaluation.
 
 The result is an `InvariantResult`:
 
@@ -210,7 +223,7 @@ landed and in-review predicate tickets:
 
 - [#734](https://github.com/burin-labs/harn/issues/734): add
   `meta-invariants.harn` bootstrap validation and approval-chain checks.
-- [#735](https://github.com/burin-labs/harn/issues/735): add deterministic
+- [#735](https://github.com/burin-labs/harn/issues/735): deterministic
   fallback metadata and enforcement for `@semantic` predicates.
 - [#736](https://github.com/burin-labs/harn/issues/736): add cross-slice fair
   scheduling and aggregate per-slice predicate budget envelopes.

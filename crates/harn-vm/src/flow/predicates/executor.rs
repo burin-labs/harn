@@ -16,6 +16,7 @@ use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use super::compose::verdict_strictness;
 use crate::flow::{InvariantBlockError, InvariantResult, PredicateHash, Slice};
 
 const DEFAULT_DETERMINISTIC_BUDGET: Duration = Duration::from_millis(50);
@@ -51,6 +52,26 @@ pub struct CheapJudgeResponse {
     pub input_tokens: u64,
     #[serde(default)]
     pub output_tokens: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cheap_judge_version: Option<String>,
+}
+
+/// Replay-audit metadata for a semantic predicate's judge call.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SemanticReplayAuditMetadata {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_id: Option<String>,
+    pub prompt_hash: String,
+    pub evidence_hashes: BTreeMap<String, String>,
+    pub token_cap: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cheap_judge_version: Option<String>,
 }
 
 /// Host-provided adapter for semantic predicate judging.
@@ -67,6 +88,9 @@ pub trait CheapJudge {
 pub trait PredicateRunner {
     fn hash(&self) -> PredicateHash;
     fn kind(&self) -> PredicateKind;
+    fn fallback_hash(&self) -> Option<PredicateHash> {
+        None
+    }
 
     /// Static evidence captured when the predicate was authored. Semantic
     /// predicates may only judge over this map; the executor never fetches
@@ -99,6 +123,7 @@ struct JudgeBudgetState {
     calls: u64,
     tokens: u64,
     block_error: Option<InvariantBlockError>,
+    semantic_audit: Option<SemanticReplayAuditMetadata>,
 }
 
 impl PredicateContext {
@@ -198,15 +223,31 @@ impl PredicateContext {
 
         let response = match judge
             .cheap_judge(CheapJudgeRequest {
-                prompt,
-                evidence_key,
-                evidence,
+                prompt: prompt.clone(),
+                evidence_key: evidence_key.clone(),
+                evidence: evidence.clone(),
             })
             .await
         {
             Ok(response) => response,
             Err(error) => return Err(self.record_block(error)),
         };
+        {
+            let mut state = self.inner.judge_state.borrow_mut();
+            state.semantic_audit = Some(SemanticReplayAuditMetadata {
+                provider_id: response.provider_id.clone(),
+                model_id: response.model_id.clone(),
+                prompt_hash: stable_hash(prompt.as_bytes()),
+                evidence_hashes: self
+                    .inner
+                    .evidence
+                    .iter()
+                    .map(|(key, value)| (key.clone(), stable_hash(value.as_bytes())))
+                    .collect(),
+                token_cap: self.inner.semantic_token_cap,
+                cheap_judge_version: response.cheap_judge_version.clone(),
+            });
+        }
         let response_tokens = response.input_tokens.saturating_add(response.output_tokens);
         {
             let mut state = self.inner.judge_state.borrow_mut();
@@ -229,6 +270,10 @@ impl PredicateContext {
 
     fn block_error(&self) -> Option<InvariantBlockError> {
         self.inner.judge_state.borrow().block_error.clone()
+    }
+
+    fn semantic_audit(&self) -> Option<SemanticReplayAuditMetadata> {
+        self.inner.judge_state.borrow().semantic_audit.clone()
     }
 
     fn record_block(&self, error: InvariantBlockError) -> InvariantBlockError {
@@ -301,6 +346,7 @@ impl PredicateExecutor {
             .await;
 
         let mut records = records;
+        self.apply_semantic_fallbacks(&mut records);
         records.sort_by(|left, right| left.predicate_hash.cmp(&right.predicate_hash));
         PredicateExecutionReport { records }
     }
@@ -314,18 +360,19 @@ impl PredicateExecutor {
         let predicate_hash = runner.hash();
         let kind = runner.kind();
         let first = self.run_attempt(slice.clone(), runner).await;
-        let first_hash = hash_result(&first);
-        let mut result = first;
+        let first_hash = hash_result(&first.result);
+        let mut result = first.result;
         let mut attempts = 1;
         let mut second_hash = None;
+        let semantic_replay_audit = first.semantic_audit;
 
         if kind == PredicateKind::Deterministic && !result.is_blocking() {
             let second = self.run_attempt(slice, runner).await;
             attempts = 2;
-            let replay_hash = hash_result(&second);
+            let replay_hash = hash_result(&second.result);
             second_hash = replay_hash.clone();
-            if second.is_blocking() {
-                result = second;
+            if second.result.is_blocking() {
+                result = second.result;
             } else {
                 match (first_hash.as_ref(), replay_hash.as_ref()) {
                     (Some(left), Some(right)) if left == right => {}
@@ -349,16 +396,22 @@ impl PredicateExecutor {
         PredicateExecutionRecord {
             predicate_hash,
             kind,
+            fallback_hash: runner.fallback_hash(),
             result,
             elapsed_ms: started.elapsed().as_millis() as u64,
             attempts,
             replayable: kind == PredicateKind::Deterministic,
             first_result_hash: first_hash,
             second_result_hash: second_hash,
+            semantic_replay_audit,
         }
     }
 
-    async fn run_attempt(&self, slice: Rc<Slice>, runner: &dyn PredicateRunner) -> InvariantResult {
+    async fn run_attempt(
+        &self,
+        slice: Rc<Slice>,
+        runner: &dyn PredicateRunner,
+    ) -> PredicateAttempt {
         let kind = runner.kind();
         let timeout = match kind {
             PredicateKind::Deterministic => self.config.deterministic_budget,
@@ -373,17 +426,69 @@ impl PredicateExecutor {
             Arc::new(AtomicBool::new(false)),
         );
         match tokio::time::timeout(timeout, runner.evaluate(context.clone())).await {
-            Ok(result) => context
-                .block_error()
-                .map(InvariantResult::block)
-                .unwrap_or(result),
+            Ok(result) => PredicateAttempt {
+                result: context
+                    .block_error()
+                    .map(InvariantResult::block)
+                    .unwrap_or(result),
+                semantic_audit: context.semantic_audit(),
+            },
             Err(_) => {
                 context.cancel();
-                InvariantResult::block(InvariantBlockError::budget_exceeded(format!(
-                    "{kind:?} predicate exceeded {}ms budget",
-                    timeout.as_millis()
-                )))
+                PredicateAttempt {
+                    result: InvariantResult::block(InvariantBlockError::budget_exceeded(format!(
+                        "{kind:?} predicate exceeded {}ms budget",
+                        timeout.as_millis()
+                    ))),
+                    semantic_audit: context.semantic_audit(),
+                }
             }
+        }
+    }
+
+    fn apply_semantic_fallbacks(&self, records: &mut [PredicateExecutionRecord]) {
+        let by_hash = records
+            .iter()
+            .map(|record| {
+                (
+                    record.predicate_hash.clone(),
+                    (record.kind, record.result.clone()),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+
+        for record in records {
+            if record.kind != PredicateKind::Semantic {
+                continue;
+            }
+            let Some(fallback_hash) = record.fallback_hash.as_ref() else {
+                record.result = InvariantResult::block(InvariantBlockError::new(
+                    "fallback_missing",
+                    "semantic predicate did not declare a deterministic fallback",
+                ));
+                continue;
+            };
+            let Some((fallback_kind, fallback_result)) = by_hash.get(fallback_hash) else {
+                record.result = InvariantResult::block(InvariantBlockError::new(
+                    "fallback_missing",
+                    format!(
+                        "semantic predicate fallback {} was not evaluated",
+                        fallback_hash.as_str()
+                    ),
+                ));
+                continue;
+            };
+            if *fallback_kind != PredicateKind::Deterministic {
+                record.result = InvariantResult::block(InvariantBlockError::new(
+                    "fallback_not_deterministic",
+                    format!(
+                        "semantic predicate fallback {} is not deterministic",
+                        fallback_hash.as_str()
+                    ),
+                ));
+                continue;
+            }
+            record.result = stricter_result(&record.result, fallback_result);
         }
     }
 }
@@ -399,6 +504,8 @@ impl Default for PredicateExecutor {
 pub struct PredicateExecutionRecord {
     pub predicate_hash: PredicateHash,
     pub kind: PredicateKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fallback_hash: Option<PredicateHash>,
     pub result: InvariantResult,
     pub elapsed_ms: u64,
     pub attempts: u8,
@@ -407,6 +514,8 @@ pub struct PredicateExecutionRecord {
     pub first_result_hash: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub second_result_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub semantic_replay_audit: Option<SemanticReplayAuditMetadata>,
 }
 
 /// Complete result of executing all predicates for one slice.
@@ -429,8 +538,25 @@ fn hash_result(result: &InvariantResult) -> Option<String> {
     Some(hex::encode(Sha256::digest(bytes)))
 }
 
+fn stable_hash(bytes: &[u8]) -> String {
+    format!("sha256:{}", hex::encode(Sha256::digest(bytes)))
+}
+
+fn stricter_result(left: &InvariantResult, right: &InvariantResult) -> InvariantResult {
+    if verdict_strictness(&left.verdict) >= verdict_strictness(&right.verdict) {
+        left.clone()
+    } else {
+        right.clone()
+    }
+}
+
 fn estimate_tokens(value: &str) -> u64 {
     value.split_whitespace().count().max(1) as u64
+}
+
+struct PredicateAttempt {
+    result: InvariantResult,
+    semantic_audit: Option<SemanticReplayAuditMetadata>,
 }
 
 #[cfg(test)]
@@ -455,6 +581,7 @@ mod tests {
     struct StaticPredicate {
         hash: &'static str,
         kind: PredicateKind,
+        fallback_hash: Option<&'static str>,
         result: InvariantResult,
         delay: Duration,
     }
@@ -467,6 +594,10 @@ mod tests {
 
         fn kind(&self) -> PredicateKind {
             self.kind
+        }
+
+        fn fallback_hash(&self) -> Option<PredicateHash> {
+            self.fallback_hash.map(PredicateHash::new)
         }
 
         async fn evaluate(&self, _context: PredicateContext) -> InvariantResult {
@@ -504,6 +635,7 @@ mod tests {
 
     struct SemanticPredicate {
         calls: u8,
+        fallback_hash: Option<&'static str>,
     }
 
     #[async_trait(?Send)]
@@ -514,6 +646,10 @@ mod tests {
 
         fn kind(&self) -> PredicateKind {
             PredicateKind::Semantic
+        }
+
+        fn fallback_hash(&self) -> Option<PredicateHash> {
+            self.fallback_hash.map(PredicateHash::new)
         }
 
         fn evidence(&self) -> BTreeMap<String, String> {
@@ -544,6 +680,9 @@ mod tests {
                 reason: None,
                 input_tokens: 2,
                 output_tokens: 1,
+                provider_id: Some("mock-provider".to_string()),
+                model_id: Some("mock-model-1".to_string()),
+                cheap_judge_version: Some("cheap-judge-v1".to_string()),
             })
         }
     }
@@ -580,6 +719,7 @@ mod tests {
         let predicates: Vec<Rc<dyn PredicateRunner>> = vec![Rc::new(StaticPredicate {
             hash: "stable",
             kind: PredicateKind::Deterministic,
+            fallback_hash: None,
             result: InvariantResult::allow(),
             delay: Duration::ZERO,
         })];
@@ -615,6 +755,7 @@ mod tests {
         let predicates: Vec<Rc<dyn PredicateRunner>> = vec![Rc::new(StaticPredicate {
             hash: "slow",
             kind: PredicateKind::Deterministic,
+            fallback_hash: None,
             result: InvariantResult::allow(),
             delay: Duration::from_millis(20),
         })];
@@ -656,13 +797,119 @@ mod tests {
             PredicateExecutorConfig::default(),
             Rc::new(PassingJudge),
         );
-        let predicates: Vec<Rc<dyn PredicateRunner>> =
-            vec![Rc::new(SemanticPredicate { calls: 2 })];
+        let predicates: Vec<Rc<dyn PredicateRunner>> = vec![
+            Rc::new(SemanticPredicate {
+                calls: 2,
+                fallback_hash: Some("fallback"),
+            }),
+            Rc::new(StaticPredicate {
+                hash: "fallback",
+                kind: PredicateKind::Deterministic,
+                fallback_hash: None,
+                result: InvariantResult::allow(),
+                delay: Duration::ZERO,
+            }),
+        ];
+
+        let report = executor.execute_slice(&slice(), &predicates).await;
+
+        let semantic = report
+            .records
+            .iter()
+            .find(|record| record.kind == PredicateKind::Semantic)
+            .unwrap();
+        let block = semantic.result.block_error().expect("blocked");
+        assert_eq!(block.code, "budget_exceeded");
+    }
+
+    #[tokio::test]
+    async fn semantic_and_fallback_agree_records_both_results() {
+        let executor = PredicateExecutor::default();
+        let predicates: Vec<Rc<dyn PredicateRunner>> = vec![
+            Rc::new(StaticPredicate {
+                hash: "semantic",
+                kind: PredicateKind::Semantic,
+                fallback_hash: Some("fallback"),
+                result: InvariantResult::warn("semantic concern"),
+                delay: Duration::ZERO,
+            }),
+            Rc::new(StaticPredicate {
+                hash: "fallback",
+                kind: PredicateKind::Deterministic,
+                fallback_hash: None,
+                result: InvariantResult::warn("fallback concern"),
+                delay: Duration::ZERO,
+            }),
+        ];
+
+        let report = executor.execute_slice(&slice(), &predicates).await;
+
+        assert_eq!(report.records.len(), 2);
+        assert_eq!(report.invariants_applied().len(), 2);
+        let semantic = report
+            .records
+            .iter()
+            .find(|record| record.predicate_hash == PredicateHash::new("semantic"))
+            .unwrap();
+        assert_eq!(semantic.fallback_hash, Some(PredicateHash::new("fallback")));
+        assert!(matches!(
+            semantic.result.verdict,
+            crate::flow::Verdict::Warn { .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn semantic_fallback_disagreement_selects_stricter_verdict() {
+        let executor = PredicateExecutor::default();
+        let predicates: Vec<Rc<dyn PredicateRunner>> = vec![
+            Rc::new(StaticPredicate {
+                hash: "semantic",
+                kind: PredicateKind::Semantic,
+                fallback_hash: Some("fallback"),
+                result: InvariantResult::allow(),
+                delay: Duration::ZERO,
+            }),
+            Rc::new(StaticPredicate {
+                hash: "fallback",
+                kind: PredicateKind::Deterministic,
+                fallback_hash: None,
+                result: InvariantResult::block(InvariantBlockError::new(
+                    "fallback_policy",
+                    "fallback blocked",
+                )),
+                delay: Duration::ZERO,
+            }),
+        ];
+
+        let report = executor.execute_slice(&slice(), &predicates).await;
+        let semantic = report
+            .records
+            .iter()
+            .find(|record| record.predicate_hash == PredicateHash::new("semantic"))
+            .unwrap();
+
+        let block = semantic
+            .result
+            .block_error()
+            .expect("stricter fallback wins");
+        assert_eq!(block.code, "fallback_policy");
+    }
+
+    #[tokio::test]
+    async fn semantic_missing_fallback_blocks() {
+        let executor = PredicateExecutor::default();
+        let predicates: Vec<Rc<dyn PredicateRunner>> = vec![Rc::new(StaticPredicate {
+            hash: "semantic",
+            kind: PredicateKind::Semantic,
+            fallback_hash: None,
+            result: InvariantResult::allow(),
+            delay: Duration::ZERO,
+        })];
 
         let report = executor.execute_slice(&slice(), &predicates).await;
 
         let block = report.records[0].result.block_error().expect("blocked");
-        assert_eq!(block.code, "budget_exceeded");
+        assert_eq!(block.code, "fallback_missing");
     }
 
     #[tokio::test]
@@ -679,6 +926,10 @@ mod tests {
                 PredicateKind::Semantic
             }
 
+            fn fallback_hash(&self) -> Option<PredicateHash> {
+                Some(PredicateHash::new("fallback"))
+            }
+
             async fn evaluate(&self, context: PredicateContext) -> InvariantResult {
                 match context.cheap_judge("judge", "missing").await {
                     Ok(_) => InvariantResult::allow(),
@@ -691,11 +942,67 @@ mod tests {
             PredicateExecutorConfig::default(),
             Rc::new(PassingJudge),
         );
-        let predicates: Vec<Rc<dyn PredicateRunner>> = vec![Rc::new(MissingEvidence)];
+        let predicates: Vec<Rc<dyn PredicateRunner>> = vec![
+            Rc::new(MissingEvidence),
+            Rc::new(StaticPredicate {
+                hash: "fallback",
+                kind: PredicateKind::Deterministic,
+                fallback_hash: None,
+                result: InvariantResult::allow(),
+                delay: Duration::ZERO,
+            }),
+        ];
 
         let report = executor.execute_slice(&slice(), &predicates).await;
 
-        let block = report.records[0].result.block_error().expect("blocked");
+        let semantic = report
+            .records
+            .iter()
+            .find(|record| record.kind == PredicateKind::Semantic)
+            .unwrap();
+        let block = semantic.result.block_error().expect("blocked");
         assert_eq!(block.code, "evidence_missing");
+    }
+
+    #[tokio::test]
+    async fn semantic_replay_audit_records_judge_hashes() {
+        let executor = PredicateExecutor::with_cheap_judge(
+            PredicateExecutorConfig::default(),
+            Rc::new(PassingJudge),
+        );
+        let predicates: Vec<Rc<dyn PredicateRunner>> = vec![
+            Rc::new(SemanticPredicate {
+                calls: 1,
+                fallback_hash: Some("fallback"),
+            }),
+            Rc::new(StaticPredicate {
+                hash: "fallback",
+                kind: PredicateKind::Deterministic,
+                fallback_hash: None,
+                result: InvariantResult::allow(),
+                delay: Duration::ZERO,
+            }),
+        ];
+
+        let report = executor.execute_slice(&slice(), &predicates).await;
+        let semantic = report
+            .records
+            .iter()
+            .find(|record| record.kind == PredicateKind::Semantic)
+            .unwrap();
+        let audit = semantic
+            .semantic_replay_audit
+            .as_ref()
+            .expect("semantic audit metadata");
+
+        assert_eq!(audit.provider_id.as_deref(), Some("mock-provider"));
+        assert_eq!(audit.model_id.as_deref(), Some("mock-model-1"));
+        assert_eq!(audit.prompt_hash, stable_hash("judge the case".as_bytes()));
+        let expected_evidence_hash = stable_hash("pre-baked evidence".as_bytes());
+        assert_eq!(
+            audit.evidence_hashes.get("case").map(String::as_str),
+            Some(expected_evidence_hash.as_str())
+        );
+        assert_eq!(audit.token_cap, DEFAULT_SEMANTIC_TOKEN_CAP);
     }
 }

@@ -151,6 +151,7 @@ fn run_archivist_scan(args: &crate::cli::FlowArchivistScanArgs) -> Result<i32, S
                     "name": predicate.name,
                     "hash": predicate.source_hash,
                     "kind": predicate.kind,
+                    "fallback": predicate.fallback,
                     "relative_dir": relative_dir.clone(),
                     "retroactive": predicate.retroactive,
                     "archivist": predicate.archivist.map(|archivist| json!({
