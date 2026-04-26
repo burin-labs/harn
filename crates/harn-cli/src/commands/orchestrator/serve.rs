@@ -23,7 +23,7 @@ use super::listener::{
 use super::origin_guard::OriginAllowList;
 use super::role::OrchestratorRole;
 use super::tls::TlsFiles;
-use crate::cli::{OrchestratorLogFormat, OrchestratorServeArgs};
+use crate::cli::{OrchestratorLocalArgs, OrchestratorLogFormat, OrchestratorServeArgs};
 use crate::package::{
     self, CollectedManifestTrigger, CollectedTriggerHandler, Manifest,
     ResolvedProviderConnectorConfig, ResolvedProviderConnectorKind, ResolvedTriggerConfig,
@@ -211,6 +211,31 @@ async fn run_local(args: OrchestratorServeArgs) -> Result<(), String> {
         "[harn] activated connectors: {}",
         format_activation_summary(&connector_runtime.activations)
     );
+    let mcp_router = if args.mcp {
+        validate_mcp_paths(&args.mcp_path, &args.mcp_sse_path, &args.mcp_messages_path)?;
+        if !has_orchestrator_api_keys_configured() {
+            return Err(
+                "--mcp requires HARN_ORCHESTRATOR_API_KEYS so the embedded MCP management surface is authenticated"
+                    .to_string(),
+            );
+        }
+        let router = crate::commands::mcp::serve::http_router_for_local(
+            OrchestratorLocalArgs {
+                config: config_path.clone(),
+                state_dir: state_dir.clone(),
+            },
+            args.mcp_path.clone(),
+            args.mcp_sse_path.clone(),
+            args.mcp_messages_path.clone(),
+        )?;
+        eprintln!(
+            "[harn] embedded MCP server mounted at {} (legacy SSE {}, messages {})",
+            args.mcp_path, args.mcp_sse_path, args.mcp_messages_path
+        );
+        Some(router)
+    } else {
+        None
+    };
 
     let dispatcher = harn_vm::Dispatcher::with_event_log_and_metrics(
         vm,
@@ -308,6 +333,7 @@ async fn run_local(args: OrchestratorServeArgs) -> Result<(), String> {
         ),
         metrics_registry: metrics_registry.clone(),
         admin_reload: Some(admin_reload.clone()),
+        mcp_router,
         routes: route_configs,
         tenant_store: tenant_store.clone(),
     })
@@ -472,6 +498,47 @@ fn log_format(format: OrchestratorLogFormat) -> harn_vm::observability::otel::Lo
         OrchestratorLogFormat::Pretty => harn_vm::observability::otel::LogFormat::Pretty,
         OrchestratorLogFormat::Json => harn_vm::observability::otel::LogFormat::Json,
     }
+}
+
+fn has_orchestrator_api_keys_configured() -> bool {
+    std::env::var("HARN_ORCHESTRATOR_API_KEYS")
+        .ok()
+        .is_some_and(|value| value.split(',').any(|segment| !segment.trim().is_empty()))
+}
+
+fn validate_mcp_paths(path: &str, sse_path: &str, messages_path: &str) -> Result<(), String> {
+    let reserved = [
+        "/health",
+        "/healthz",
+        "/readyz",
+        "/metrics",
+        "/admin/reload",
+        "/acp",
+    ];
+    let mut seen = BTreeSet::new();
+    for (label, value) in [
+        ("--mcp-path", path),
+        ("--mcp-sse-path", sse_path),
+        ("--mcp-messages-path", messages_path),
+    ] {
+        if !value.starts_with('/') {
+            return Err(format!("{label} must start with '/'"));
+        }
+        if value == "/" {
+            return Err(format!("{label} cannot be '/'"));
+        }
+        if reserved.contains(&value) {
+            return Err(format!(
+                "{label} cannot use reserved listener path '{value}'"
+            ));
+        }
+        if !seen.insert(value) {
+            return Err(format!(
+                "embedded MCP paths must be unique; duplicate '{value}'"
+            ));
+        }
+    }
+    Ok(())
 }
 
 struct ConnectorRuntime {

@@ -208,16 +208,20 @@ pub(crate) async fn run(args: &McpServeArgs) -> Result<(), String> {
 
 impl McpOrchestratorService {
     fn new(args: &McpServeArgs) -> Result<Self, String> {
-        let manifest_source = std::fs::read_to_string(&args.local.config).map_err(|error| {
+        Self::new_local(args.local.clone())
+    }
+
+    pub(crate) fn new_local(local: OrchestratorLocalArgs) -> Result<Self, String> {
+        let manifest_source = std::fs::read_to_string(&local.config).map_err(|error| {
             format!(
                 "failed to read manifest {}: {error}",
-                args.local.config.display()
+                local.config.display()
             )
         })?;
         let auth = ListenerAuth::from_env(false)?;
         Ok(Self {
-            config_path: args.local.config.clone(),
-            state_dir: args.local.state_dir.clone(),
+            config_path: local.config,
+            state_dir: local.state_dir,
             manifest_source: Arc::new(manifest_source),
             auth,
         })
@@ -1006,32 +1010,58 @@ async fn run_stdio(service: Arc<McpOrchestratorService>) -> Result<(), String> {
 }
 
 async fn run_http(service: Arc<McpOrchestratorService>, args: &McpServeArgs) -> Result<(), String> {
+    let router = http_router(
+        service,
+        args.path.clone(),
+        args.sse_path.clone(),
+        args.messages_path.clone(),
+    );
+    serve_http_router(router, args.bind, &args.path).await
+}
+
+pub(crate) fn http_router_for_local(
+    local: OrchestratorLocalArgs,
+    path: String,
+    sse_path: String,
+    messages_path: String,
+) -> Result<Router, String> {
+    let service = Arc::new(McpOrchestratorService::new_local(local)?);
+    Ok(http_router(service, path, sse_path, messages_path))
+}
+
+fn http_router(
+    service: Arc<McpOrchestratorService>,
+    path: String,
+    sse_path: String,
+    messages_path: String,
+) -> Router {
     let rpc = RpcBridge::start(service.clone());
     let state = HttpState {
         service,
         rpc,
         sessions: Arc::new(Mutex::new(HashMap::new())),
-        mcp_path: args.path.clone(),
-        messages_path: args.messages_path.clone(),
+        mcp_path: path.clone(),
+        messages_path: messages_path.clone(),
     };
-    let router = Router::new()
-        .route(
-            &args.path,
-            post(http_post_request).delete(http_delete_session),
-        )
-        .route(&args.sse_path, get(legacy_sse_stream))
-        .route(&args.messages_path, post(legacy_sse_message))
-        .with_state(state.clone());
-    let listener = tokio::net::TcpListener::bind(args.bind)
+    Router::new()
+        .route(&path, post(http_post_request).delete(http_delete_session))
+        .route(&sse_path, get(legacy_sse_stream))
+        .route(&messages_path, post(legacy_sse_message))
+        .with_state(state)
+}
+
+async fn serve_http_router(
+    router: Router,
+    bind: std::net::SocketAddr,
+    path: &str,
+) -> Result<(), String> {
+    let listener = tokio::net::TcpListener::bind(bind)
         .await
-        .map_err(|error| format!("failed to bind {}: {error}", args.bind))?;
+        .map_err(|error| format!("failed to bind {bind}: {error}"))?;
     let local_addr = listener
         .local_addr()
         .map_err(|error| format!("failed to read local addr: {error}"))?;
-    eprintln!(
-        "[harn] MCP HTTP listener ready on http://{local_addr}{}",
-        args.path
-    );
+    eprintln!("[harn] MCP HTTP listener ready on http://{local_addr}{path}");
     axum::serve(listener, router)
         .await
         .map_err(|error| format!("MCP HTTP server failed: {error}"))

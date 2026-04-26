@@ -12,6 +12,7 @@ Today, the command:
 - resolve and register manifest triggers
 - activate connectors for the manifest's providers
 - bind an HTTP listener for `webhook` and `a2a-push` triggers
+- optionally mount the orchestrator MCP HTTP server on that same listener
 - expose `/metrics` and configurable process logs for production observability
 - write a state snapshot and stay up until shutdown
 
@@ -31,6 +32,7 @@ harn orchestrator serve \
   --cert certs/dev.pem \
   --key certs/dev-key.pem \
   --pump-max-outstanding 64 \
+  --mcp \
   --log-format json \
   --role single-tenant
 ```
@@ -242,6 +244,32 @@ SHA256(BODY)
 string, `TIMESTAMP` is a Unix epoch seconds value, and `SHA256(BODY)` is
 the lowercase hex digest of the raw request body. Timestamps outside the
 5-minute replay window are rejected with `401 Unauthorized`.
+
+### Embedded MCP
+
+Pass `--mcp` to mount the orchestrator MCP Streamable HTTP server on the
+same listener as webhooks and A2A push routes:
+
+```bash
+harn orchestrator serve \
+  --config harn.toml \
+  --state-dir ./.harn/orchestrator \
+  --bind 0.0.0.0:8080 \
+  --mcp
+```
+
+The default paths are:
+
+- `POST /mcp` for Streamable HTTP
+- `GET /sse` for legacy SSE streams
+- `POST /messages` for legacy SSE messages
+
+Override them with `--mcp-path`, `--mcp-sse-path`, and
+`--mcp-messages-path`. Embedded MCP requires
+`HARN_ORCHESTRATOR_API_KEYS`; clients authenticate with
+`Authorization: Bearer <api-key>` or `x-api-key`, and MCP `initialize`
+must include the same key in the Harn extension field documented in
+[Orchestrator MCP Server](./mcp-server.md).
 
 ## Deployment
 

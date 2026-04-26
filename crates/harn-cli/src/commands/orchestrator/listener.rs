@@ -59,6 +59,7 @@ pub(crate) struct ListenerConfig {
     pub(crate) max_body_bytes: usize,
     pub(crate) metrics_registry: Arc<harn_vm::MetricsRegistry>,
     pub(crate) admin_reload: Option<AdminReloadHandle>,
+    pub(crate) mcp_router: Option<Router>,
     pub(crate) routes: Vec<RouteConfig>,
     pub(crate) tenant_store: Option<Arc<harn_vm::TenantStore>>,
 }
@@ -191,6 +192,9 @@ impl ListenerRuntime {
                 post(admin_reload_endpoint).layer(Extension(admin_state)),
             );
         }
+        if let Some(mcp_router) = config.mcp_router {
+            app = app.merge(mcp_router);
+        }
         let app = app.route(
             "/{*path}",
             post(ingest_trigger).layer(Extension(routes.clone())),
@@ -201,8 +205,7 @@ impl ListenerRuntime {
             .layer(middleware::from_fn_with_state(
                 origin_state.clone(),
                 enforce_allowed_origin,
-            ))
-            .with_state(origin_state);
+            ));
 
         let server = ServerRuntime::start(config.bind, app, config.tls.as_ref()).await?;
         Ok(Self { server, routes })
@@ -3292,6 +3295,7 @@ mod tests {
             max_body_bytes: DEFAULT_MAX_BODY_BYTES,
             metrics_registry: Arc::new(harn_vm::MetricsRegistry::default()),
             admin_reload: None,
+            mcp_router: None,
             routes: Vec::new(),
             tenant_store: None,
         })
@@ -3641,6 +3645,7 @@ mod tests {
             max_body_bytes: DEFAULT_MAX_BODY_BYTES,
             metrics_registry: Arc::new(harn_vm::MetricsRegistry::default()),
             admin_reload: None,
+            mcp_router: None,
             routes: vec![route("/a2a/v1", 1)],
             tenant_store: None,
         })
@@ -3760,6 +3765,7 @@ mod tests {
             max_body_bytes: DEFAULT_MAX_BODY_BYTES,
             metrics_registry: Arc::new(harn_vm::MetricsRegistry::default()),
             admin_reload: None,
+            mcp_router: None,
             routes: vec![webhook_route("/hooks/github")],
             tenant_store: None,
         })
@@ -3827,6 +3833,7 @@ mod tests {
             max_body_bytes: DEFAULT_MAX_BODY_BYTES,
             metrics_registry: metrics.clone(),
             admin_reload: None,
+            mcp_router: None,
             routes: vec![webhook_route("/hooks/github")],
             tenant_store: None,
         })
@@ -3903,6 +3910,7 @@ mod tests {
             max_body_bytes: DEFAULT_MAX_BODY_BYTES,
             metrics_registry: Arc::new(harn_vm::MetricsRegistry::default()),
             admin_reload: None,
+            mcp_router: None,
             routes: vec![webhook_route("/hooks/github")],
             tenant_store: None,
         })
@@ -3974,6 +3982,7 @@ mod tests {
             max_body_bytes: DEFAULT_MAX_BODY_BYTES,
             metrics_registry: Arc::new(harn_vm::MetricsRegistry::default()),
             admin_reload: None,
+            mcp_router: None,
             routes: vec![route],
             tenant_store: None,
         })

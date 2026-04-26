@@ -1247,6 +1247,22 @@ pub(crate) struct OrchestratorServeArgs {
         value_name = "COUNT"
     )]
     pub pump_max_outstanding: Option<usize>,
+    /// Mount the orchestrator MCP HTTP server on this listener.
+    #[arg(long = "mcp", default_value_t = false, action = ArgAction::SetTrue)]
+    pub mcp: bool,
+    /// Streamable HTTP endpoint path for the embedded MCP server.
+    #[arg(long = "mcp-path", default_value = "/mcp", value_name = "PATH")]
+    pub mcp_path: String,
+    /// Legacy SSE endpoint path for older MCP clients.
+    #[arg(long = "mcp-sse-path", default_value = "/sse", value_name = "PATH")]
+    pub mcp_sse_path: String,
+    /// Legacy SSE POST endpoint path for older MCP clients.
+    #[arg(
+        long = "mcp-messages-path",
+        default_value = "/messages",
+        value_name = "PATH"
+    )]
+    pub mcp_messages_path: String,
     /// Watch the manifest file and trigger reloads on changes.
     #[arg(long)]
     pub watch: bool,
@@ -2807,6 +2823,13 @@ mod tests {
             "9",
             "--pump-max-outstanding",
             "4",
+            "--mcp",
+            "--mcp-path",
+            "/ops/mcp",
+            "--mcp-sse-path",
+            "/ops/sse",
+            "--mcp-messages-path",
+            "/ops/messages",
             "--log-format",
             "json",
             "--role",
@@ -2828,6 +2851,10 @@ mod tests {
         assert_eq!(serve.drain_max_items, Some(256));
         assert_eq!(serve.drain_deadline, Some(9));
         assert_eq!(serve.pump_max_outstanding, Some(4));
+        assert!(serve.mcp);
+        assert_eq!(serve.mcp_path, "/ops/mcp");
+        assert_eq!(serve.mcp_sse_path, "/ops/sse");
+        assert_eq!(serve.mcp_messages_path, "/ops/messages");
         assert_eq!(serve.log_format, OrchestratorLogFormat::Json);
         assert_eq!(
             serve.role,
