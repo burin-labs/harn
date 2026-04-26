@@ -8,6 +8,7 @@ pub mod atom;
 pub mod backend;
 pub mod intent;
 pub mod slice;
+pub mod store;
 
 pub use atom::{Atom, AtomError, AtomId, AtomSignature, Provenance, TextOp};
 pub use backend::{
@@ -23,3 +24,4 @@ pub use slice::{
     derive_slice, Approval, CoverageMap, InvariantResult, PredicateHash, Slice,
     SliceDerivationError, SliceDerivationInput, SliceId, SliceStatus, TestId, UnresolvedParent,
 };
+pub use store::{AtomDelta, SqliteFlowStore, StateVector};
