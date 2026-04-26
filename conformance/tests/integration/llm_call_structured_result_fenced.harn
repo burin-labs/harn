@@ -1,0 +1,15 @@
+/**
+ * Fenced JSON inside a markdown code block: the envelope sets
+ * extracted_json: true so callers can tell the model wrapped its
+ * answer in prose / fences.
+ */
+pipeline default() {
+  let schema = {type: "object", required: ["k"], properties: {k: {type: "string"}}}
+  llm_mock({text: "Sure thing!\n```json\n{\"k\": \"v\"}\n```\nDone."})
+  let r = llm_call_structured_result("Q?", schema, {provider: "mock"})
+  println(r.ok)
+  println(r.data.k)
+  println(r.extracted_json)
+  println(r.attempts)
+  println(r.repaired)
+}

@@ -27,6 +27,7 @@ pub(crate) mod mock;
 pub(crate) mod permissions;
 pub mod readiness;
 pub(crate) mod structural_experiments;
+pub(crate) mod structured_envelope;
 pub(crate) mod tool_search;
 mod transcript_stats;
 
@@ -469,10 +470,65 @@ pub(crate) fn build_llm_error_dict(err: &VmError, provider: &str, model: &str) -
 }
 
 pub(crate) async fn execute_llm_call(
-    mut opts: api::LlmCallOptions,
+    opts: api::LlmCallOptions,
     options: Option<std::collections::BTreeMap<String, VmValue>>,
     bridge: Option<&Rc<crate::bridge::HostBridge>>,
 ) -> Result<VmValue, VmError> {
+    let outcome = execute_schema_retry_loop(opts, options, bridge).await?;
+    if outcome.errors.is_empty() {
+        return Ok(outcome.vm_result);
+    }
+    // Schema retries exhausted — honor the caller's output_validation mode.
+    let hint = if outcome.schema_retries_budget == 0 {
+        " (hint: set `schema_retries: N` in the llm_call options to automatically re-prompt the model with a corrective nudge)"
+    } else {
+        " (hint: schema_retries budget exhausted — the model did not produce conforming output after the configured retries; consider raising `schema_retries` or relaxing the schema)"
+    };
+    let message = format!(
+        "LLM output failed schema validation: {}{hint}",
+        outcome.errors.join("; ")
+    );
+    match outcome.output_validation_mode.as_str() {
+        "error" => Err(crate::value::VmError::CategorizedError {
+            message,
+            category: crate::value::ErrorCategory::SchemaValidation,
+        }),
+        "warn" => {
+            crate::events::log_warn("llm", &message);
+            Ok(outcome.vm_result)
+        }
+        _ => Ok(outcome.vm_result),
+    }
+}
+
+/// Outcome of the schema-retry loop, exposing both the final attempt's
+/// payload and the telemetry that envelope-shaped callers (e.g.
+/// `llm_call_structured_result`) need to surface diagnostics. Transport
+/// errors short-circuit the loop and propagate as `Err`; schema failures
+/// after exhaustion return `Ok(...)` with `errors` populated so the
+/// caller can decide between throwing, warning, or building a result
+/// envelope.
+pub(crate) struct SchemaLoopOutcome {
+    /// Final attempt's vm_result dict (regardless of validation success).
+    pub vm_result: VmValue,
+    /// Final attempt's raw model text — preserved for diagnostics and
+    /// repair input even when JSON couldn't be extracted.
+    pub raw_text: String,
+    /// Validation errors from the final attempt (empty = success).
+    pub errors: Vec<String>,
+    /// Number of model calls made (1-indexed; 1 = no retries used).
+    pub attempts: usize,
+    /// Configured `schema_retries` budget (0 means "no retries").
+    pub schema_retries_budget: usize,
+    /// `output_validation` mode the caller configured (off / warn / error).
+    pub output_validation_mode: String,
+}
+
+pub(crate) async fn execute_schema_retry_loop(
+    mut opts: api::LlmCallOptions,
+    options: Option<std::collections::BTreeMap<String, VmValue>>,
+    bridge: Option<&Rc<crate::bridge::HostBridge>>,
+) -> Result<SchemaLoopOutcome, VmError> {
     let _ = structural_experiments::apply_structural_experiment(&mut opts, None).await?;
     // Default `llm_retries` to 2 for resilience against transient
     // HTTP / provider failures on the non-bridge path; bridge callers
@@ -495,6 +551,8 @@ pub(crate) async fn execute_llm_call(
     let tool_format = helpers::opt_str(&options, "tool_format");
     let bridged = bridge.is_some();
     let user_visible = bridged && helpers::opt_bool(&options, "user_visible");
+    let output_validation_mode = output_validation_mode(&opts).to_string();
+    let expects_structured = helpers::expects_structured_output(&opts);
     // Snapshot the caller's original messages once. Each schema retry
     // replays this snapshot plus a single corrective user message, so
     // the invalid response never pollutes subsequent attempts — the
@@ -518,20 +576,34 @@ pub(crate) async fn execute_llm_call(
         )
         .await?;
 
+        let raw_text = result.text.clone();
         // Non-bridge path runs schema validation; bridge path
         // delegates validation to the host.
         let vm_result = agent_config::build_llm_call_result(&result, &opts);
-        if !helpers::expects_structured_output(&opts) {
-            return Ok(vm_result);
+        if !expects_structured {
+            return Ok(SchemaLoopOutcome {
+                vm_result,
+                raw_text,
+                errors: Vec::new(),
+                attempts: attempt + 1,
+                schema_retries_budget: schema_retries,
+                output_validation_mode,
+            });
         }
         let errors = structured_output_errors(&vm_result, &opts);
         if errors.is_empty() {
-            return Ok(vm_result);
+            return Ok(SchemaLoopOutcome {
+                vm_result,
+                raw_text,
+                errors,
+                attempts: attempt + 1,
+                schema_retries_budget: schema_retries,
+                output_validation_mode,
+            });
         }
 
         let more_attempts = attempt < schema_retries;
-        let should_retry = more_attempts;
-        if should_retry {
+        if more_attempts {
             let nudge = build_schema_nudge(&errors, opts.output_schema.as_ref(), &nudge_mode);
             emit_agent_event(AgentTraceEvent::SchemaRetry {
                 attempt: attempt + 1,
@@ -555,29 +627,15 @@ pub(crate) async fn execute_llm_call(
             continue;
         }
 
-        // Attempts exhausted: honor the caller's output_validation mode.
-        let hint = if schema_retries == 0 {
-            " (hint: set `schema_retries: N` in the llm_call options to automatically re-prompt the model with a corrective nudge)"
-        } else {
-            " (hint: schema_retries budget exhausted — the model did not produce conforming output after the configured retries; consider raising `schema_retries` or relaxing the schema)"
-        };
-        let message = format!(
-            "LLM output failed schema validation: {}{hint}",
-            errors.join("; ")
-        );
-        match output_validation_mode(&opts) {
-            "error" => {
-                return Err(crate::value::VmError::CategorizedError {
-                    message,
-                    category: crate::value::ErrorCategory::SchemaValidation,
-                });
-            }
-            "warn" => {
-                crate::events::log_warn("llm", &message);
-                return Ok(vm_result);
-            }
-            _ => return Ok(vm_result),
-        }
+        // Attempts exhausted with errors. Surface the failure to the caller.
+        return Ok(SchemaLoopOutcome {
+            vm_result,
+            raw_text,
+            errors,
+            attempts: attempt + 1,
+            schema_retries_budget: schema_retries,
+            output_validation_mode,
+        });
     }
     unreachable!("schema retry loop exited without returning");
 }
@@ -781,6 +839,18 @@ pub fn register_llm_builtins(vm: &mut Vm) {
             ))),
             Err(err) => Ok(structured_safe_envelope_err(&err)),
         }
+    });
+
+    // `llm_call_structured_result(prompt, schema, options?)` returns a
+    // diagnostic envelope `{ok, data, raw_text, error, error_category,
+    // attempts, repaired, extracted_json, usage, model, provider}` so
+    // production agent pipelines can preserve raw model text, attempt
+    // counts, and validation/repair state without hand-rolling
+    // safe_parse/json_extract/repair chains. Never throws on
+    // transport/schema failures — `ok: false` + `error_category`
+    // dispatches branch on the failure mode. See harn#744.
+    vm.register_async_builtin("llm_call_structured_result", |args| async move {
+        structured_envelope::llm_call_structured_result_impl(args, None).await
     });
 
     // `with_rate_limit(provider, fn() -> T, opts?) -> T` — acquires a

@@ -1,0 +1,24 @@
+/**
+ * `llm_call_structured_result` happy path: clean JSON parses on the
+ * first attempt, the envelope reports ok=true, attempts=1, and zero
+ * repair / extraction flags.
+ */
+pipeline default() {
+  let schema = {
+    type: "object",
+    required: ["name", "age"],
+    properties: {name: {type: "string"}, age: {type: "integer"}},
+  }
+  llm_mock({text: "{\"name\": \"Ada\", \"age\": 36}"})
+  let r = llm_call_structured_result("Summarize", schema, {provider: "mock"})
+  println(r.ok)
+  println(r.data.name)
+  println(r.data.age)
+  println(r.attempts)
+  println(r.repaired)
+  println(r.extracted_json)
+  println(r.error)
+  println(r.error_category == nil)
+  println(r.usage.input_tokens >= 0)
+  println(r.provider)
+}

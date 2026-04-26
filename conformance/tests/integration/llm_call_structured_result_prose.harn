@@ -1,0 +1,10 @@
+/** JSON embedded in plain prose (no code fence): extracted_json: true. */
+pipeline default() {
+  let schema = {type: "object", required: ["verdict"], properties: {verdict: {type: "string"}}}
+  llm_mock({text: "Here is my judgment: {\"verdict\": \"PASS\"} — looks good to me."})
+  let r = llm_call_structured_result("Grade", schema, {provider: "mock"})
+  println(r.ok)
+  println(r.data.verdict)
+  println(r.extracted_json)
+  println(r.attempts)
+}

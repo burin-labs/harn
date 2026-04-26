@@ -818,10 +818,44 @@ if !r.ok {
 println(r.data.verdict)
 ```
 
+Diagnostic envelope `llm_call_structured_result(prompt, schema,
+options?)` returns the full failure-mode breakdown
+production agent pipelines need — `{ok, data, raw_text, error,
+error_category, attempts, repaired, extracted_json, usage, model,
+provider}`. Never throws; dispatch on `ok` / `error_category`:
+
+```harn
+let r = llm_call_structured_result(prompt, schema, {
+  provider: "auto",
+  schema_retries: 2,
+  // Optional repair pass — runs only when the main call's JSON is
+  // malformed or schema-invalid. Skipped on transport failures.
+  repair: {
+    enabled: true,
+    model: "cheapest_over_quality(low)",
+    max_tokens: 600,
+  },
+})
+if r.ok {
+  println(r.data.verdict)
+} else {
+  // error_category ∈ "transport" | "missing_json" | "schema_validation"
+  // | "repair_failed" — plus retryable transport categories
+  // ("rate_limit", "timeout", ...) when the underlying call failed.
+  log("grade failed:", r.error_category, "raw:", r.raw_text)
+}
+```
+
+`r.attempts` counts model calls (1 = no retries used; ≥2 = one or
+more schema retries were spent). `r.repaired: true` means the repair
+pass succeeded. `r.extracted_json: true` flags responses where
+JSON had to be lifted from prose / markdown fences.
+
 Options: everything `llm_call` accepts flows through, plus
 `retries` as an alias for `schema_retries`. Provider options,
 `system`, `provider`, `model`, `max_tokens`, etc. are all passed
-through unchanged.
+through unchanged. The `repair` block is recognized only by
+`llm_call_structured_result`.
 
 If you need the raw response (token counts, transcript, thinking
 trace) alongside the parsed data, call `llm_call` directly:

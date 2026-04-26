@@ -2870,6 +2870,24 @@ wrappers pick up the same narrowing.
 - `llm_call<T>(prompt, system, options: {output_schema: Schema<T>, ...})
   -> {data: T, text: string, ...}`
 - `llm_completion<T>` has the same signature.
+- `llm_call_structured<T>(prompt, schema: Schema<T>, options?) -> T`
+- `llm_call_structured_safe<T>(prompt, schema: Schema<T>, options?) ->
+  {ok: bool, data: T | nil, error: dict | nil}`
+- `llm_call_structured_result<T>(prompt, schema: Schema<T>, options?) ->
+  {ok: bool, data: T | nil, raw_text: string, error: string,
+  error_category: string | nil, attempts: int, repaired: bool,
+  extracted_json: bool, usage: {input_tokens: int, output_tokens: int,
+  cache_read_tokens: int, cache_write_tokens: int}, model: string,
+  provider: string}`. Never throws on transport / schema failures —
+  callers dispatch on `ok` / `error_category`. Recognized
+  `error_category` values: `transport`-class categories pass through
+  the underlying enum (`rate_limit`, `timeout`, `auth`,
+  `transient_network`, ...); JSON / schema failures surface as
+  `missing_json`, `schema_validation`, or `repair_failed` when an
+  optional repair pass was attempted and also failed. Options accept a
+  `repair: {enabled: bool, ...llm_call_overrides}` block — the repair
+  pass runs a single shot on malformed JSON only and is skipped on
+  transport-layer failures.
 - `schema_parse<T>(value: unknown, schema: Schema<T>) -> Result<T, string>`
 - `schema_check<T>(value: unknown, schema: Schema<T>) -> Result<T, string>`
 - `schema_expect<T>(value: unknown, schema: Schema<T>) -> T`

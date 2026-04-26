@@ -1,0 +1,21 @@
+/**
+ * Repair pass also fails: ok=false with error_category="repair_failed"
+ * so callers can distinguish "tried and failed" from a baseline
+ * schema_validation failure.
+ */
+pipeline default() {
+  let schema = {type: "object", required: ["verdict"], properties: {verdict: {type: "string"}}}
+  // Main call: missing required key.
+  llm_mock({text: "{\"note\": \"nope\"}"})
+  // Repair call: still invalid.
+  llm_mock({text: "{\"note\": \"still nope\"}"})
+  let r = llm_call_structured_result("Grade", schema, {provider: "mock", retries: 0, repair: {enabled: true}})
+  println(r.ok)
+  println(r.data == nil)
+  println(r.error_category)
+  println(r.repaired)
+  // raw_text comes from the main call (the input the repair pass tried
+  // to fix), not the repair output.
+  println(contains(r.raw_text, "nope"))
+  println(len(llm_mock_calls()))
+}

@@ -1,0 +1,19 @@
+/**
+ * Repair pass success: first call produces malformed-but-salvageable
+ * JSON, repair pass returns valid JSON. Envelope marks repaired=true.
+ */
+pipeline default() {
+  let schema = {type: "object", required: ["verdict"], properties: {verdict: {type: "string"}}}
+  // Main call: schema-invalid (missing required key) — burns 1 attempt
+  // (retries: 0 forces immediate repair fallback).
+  llm_mock({text: "{\"note\": \"missing verdict\"}"})
+  // Repair call: produces conforming JSON.
+  llm_mock({text: "{\"verdict\": \"PASS\"}"})
+  let r = llm_call_structured_result("Grade", schema, {provider: "mock", retries: 0, repair: {enabled: true}})
+  println(r.ok)
+  println(r.data.verdict)
+  println(r.repaired)
+  println(r.attempts)
+  // Two underlying LLM calls were made: main (1) + repair (1).
+  println(len(llm_mock_calls()))
+}

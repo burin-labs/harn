@@ -1,0 +1,20 @@
+/**
+ * Schema-as-type narrowing: when the schema argument is `schema_of(T)`,
+ * the envelope's `data` field narrows to `T | nil` so callers dot-walk
+ * the parsed payload with the type checker's blessing.
+ */
+type Verdict = {verdict: "pass" | "fail", note: string}
+
+pipeline default() {
+  llm_mock({text: "{\"verdict\": \"pass\", \"note\": \"clean\"}"})
+  let r = llm_call_structured_result("Grade", schema_of(Verdict), {provider: "mock"})
+  // Narrow `data` from `Verdict | nil` to `Verdict` via an
+  // explicit nil guard. The result envelope's `data` field
+  // surfaces the schema-derived type.
+  if r.data != nil {
+    println(r.data.verdict)
+    println(r.data.note)
+  } else {
+    println("unexpected failure")
+  }
+}

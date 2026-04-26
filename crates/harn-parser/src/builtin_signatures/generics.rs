@@ -12,6 +12,7 @@ pub(crate) fn lookup_generic_builtin_sig(name: &str) -> Option<BuiltinGenericSig
         "hitl_pending" => Some(hitl_pending_builtin_sig()),
         "llm_call" | "llm_completion" => Some(llm_call_generic_sig()),
         "llm_call_structured" => Some(llm_call_structured_generic_sig()),
+        "llm_call_structured_result" => Some(llm_call_structured_result_generic_sig()),
         "project_fingerprint" => Some(project_fingerprint_builtin_sig()),
         "request_approval" => Some(request_approval_builtin_sig()),
         "schema_parse" | "schema_check" => Some(schema_parse_generic_sig()),
@@ -161,6 +162,110 @@ fn llm_call_structured_generic_sig() -> BuiltinGenericSig {
             ]),
         ],
         return_type: TypeExpr::Named("T".into()),
+    }
+}
+
+fn llm_call_structured_result_generic_sig() -> BuiltinGenericSig {
+    // `llm_call_structured_result(prompt, schema, options?)` returns
+    // a diagnostic envelope. When `schema: Schema<T>`, the envelope's
+    // `data` narrows to `T | nil` (nil on failure). Other envelope
+    // fields are stably-typed regardless of T. See harn#744.
+    let usage_shape = TypeExpr::Shape(vec![
+        ShapeField {
+            name: "input_tokens".into(),
+            type_expr: TypeExpr::Named("int".into()),
+            optional: false,
+        },
+        ShapeField {
+            name: "output_tokens".into(),
+            type_expr: TypeExpr::Named("int".into()),
+            optional: false,
+        },
+        ShapeField {
+            name: "cache_read_tokens".into(),
+            type_expr: TypeExpr::Named("int".into()),
+            optional: false,
+        },
+        ShapeField {
+            name: "cache_write_tokens".into(),
+            type_expr: TypeExpr::Named("int".into()),
+            optional: false,
+        },
+    ]);
+    let envelope_shape = TypeExpr::Shape(vec![
+        ShapeField {
+            name: "ok".into(),
+            type_expr: TypeExpr::Named("bool".into()),
+            optional: false,
+        },
+        ShapeField {
+            name: "data".into(),
+            type_expr: TypeExpr::Union(vec![
+                TypeExpr::Named("T".into()),
+                TypeExpr::Named("nil".into()),
+            ]),
+            optional: false,
+        },
+        ShapeField {
+            name: "raw_text".into(),
+            type_expr: TypeExpr::Named("string".into()),
+            optional: false,
+        },
+        ShapeField {
+            name: "error".into(),
+            type_expr: TypeExpr::Named("string".into()),
+            optional: false,
+        },
+        ShapeField {
+            name: "error_category".into(),
+            type_expr: TypeExpr::Union(vec![
+                TypeExpr::Named("string".into()),
+                TypeExpr::Named("nil".into()),
+            ]),
+            optional: false,
+        },
+        ShapeField {
+            name: "attempts".into(),
+            type_expr: TypeExpr::Named("int".into()),
+            optional: false,
+        },
+        ShapeField {
+            name: "repaired".into(),
+            type_expr: TypeExpr::Named("bool".into()),
+            optional: false,
+        },
+        ShapeField {
+            name: "extracted_json".into(),
+            type_expr: TypeExpr::Named("bool".into()),
+            optional: false,
+        },
+        ShapeField {
+            name: "usage".into(),
+            type_expr: usage_shape,
+            optional: false,
+        },
+        ShapeField {
+            name: "model".into(),
+            type_expr: TypeExpr::Named("string".into()),
+            optional: false,
+        },
+        ShapeField {
+            name: "provider".into(),
+            type_expr: TypeExpr::Named("string".into()),
+            optional: false,
+        },
+    ]);
+    BuiltinGenericSig {
+        type_params: vec!["T".into()],
+        params: vec![
+            TypeExpr::Named("string".into()),
+            schema_of_t(),
+            TypeExpr::Union(vec![
+                TypeExpr::Named("dict".into()),
+                TypeExpr::Named("nil".into()),
+            ]),
+        ],
+        return_type: envelope_shape,
     }
 }
 
