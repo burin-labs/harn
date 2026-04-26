@@ -1058,10 +1058,27 @@ drop carried artifacts, or disable workflow resume against the previous child
 run record. Worker configs may also include `execution` to pin delegated work
 to an explicit cwd/env overlay or a managed git worktree:
 
+`carry.transcript_mode` is explicit and accepts:
+
+- `inherit` (default): pass the completed worker transcript into the next
+  `send_input(...)` / trigger cycle.
+- `fork`: start the next cycle from a copy of the completed transcript with a
+  fresh transcript id and `metadata.parent_transcript_id` pointing at the
+  source transcript.
+- `reset`: start the next cycle with no carried transcript.
+- `compact`: compact the completed worker transcript before it is persisted and
+  inherited by the next cycle.
+
+Worker result artifacts are parent-facing summaries. Their `data.payload`
+omits bulky nested `transcript` and `artifacts` fields by default while keeping
+the worker request, provenance, execution profile, result text/status, and
+produced artifact ids available for routing and audit.
+
 ```harn
 let worker = spawn_agent({
   task: "Run the repo-local verification pass",
   graph: some_graph,
+  carry: {transcript_mode: "compact", artifact_mode: "inherit"},
   execution: {
     worktree: {
       repo: ".",

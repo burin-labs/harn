@@ -8,8 +8,8 @@ use super::super::{parse_artifact_list, parse_context_policy, SubAgentRunSpec};
 use super::audit::parse_worker_audit;
 use super::bridge::worker_snapshot_path;
 use super::policy::{
-    parse_worker_carry_policy, parse_worker_policy_value, resolve_worker_policy,
-    worker_policy_value,
+    parse_transcript_mode, parse_worker_carry_policy, parse_worker_policy_value,
+    resolve_worker_policy, worker_policy_value,
 };
 use super::{
     WorkerCarryPolicy, WorkerConfig, WorkerExecutionProfile, WorkerInit, WorkerRequestRecord,
@@ -201,6 +201,7 @@ pub(in super::super) fn persist_worker_state_snapshot(state: &WorkerState) -> Re
         "child_run_path": state.child_run_path,
         "carry_policy": {
             "artifact_mode": state.carry_policy.artifact_mode,
+            "transcript_mode": state.carry_policy.transcript_mode,
             "context_policy": state.carry_policy.context_policy,
             "resume_workflow": state.carry_policy.resume_workflow,
             "persist_state": state.carry_policy.persist_state,
@@ -241,8 +242,14 @@ pub(in super::super) fn load_worker_state_snapshot(target: &str) -> Result<Worke
             .map(|value| value.display())
             .filter(|value| !value.is_empty())
             .unwrap_or_else(|| "inherit".to_string());
+        let transcript_mode = dict
+            .get("transcript_mode")
+            .map(parse_transcript_mode)
+            .transpose()?
+            .unwrap_or_else(|| "inherit".to_string());
         WorkerCarryPolicy {
             artifact_mode,
+            transcript_mode,
             context_policy: parse_context_policy(dict.get("context_policy"))?,
             resume_workflow: !matches!(dict.get("resume_workflow"), Some(VmValue::Bool(false))),
             persist_state: !matches!(dict.get("persist_state"), Some(VmValue::Bool(false))),

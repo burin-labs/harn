@@ -27,7 +27,8 @@ pub(super) use execution::{
     ensure_worker_config_session_ids, execute_delegated_stage, spawn_worker_task,
 };
 pub(super) use policy::{
-    apply_worker_artifact_policy, parse_worker_carry_policy, resolve_inherited_worker_policy,
+    apply_worker_artifact_policy, apply_worker_transcript_policy, compact_worker_transcript,
+    parse_worker_carry_policy, resolve_inherited_worker_policy,
 };
 
 #[derive(Clone)]
@@ -58,6 +59,7 @@ pub(super) struct WorkerExecutionResult {
 #[derive(Clone, Default)]
 pub(super) struct WorkerCarryPolicy {
     pub(super) artifact_mode: String,
+    pub(super) transcript_mode: String,
     pub(super) context_policy: ContextPolicy,
     pub(super) resume_workflow: bool,
     pub(super) persist_state: bool,

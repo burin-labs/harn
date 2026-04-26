@@ -11,6 +11,13 @@ granular archaeology.
 
 ### Added
 
+- **Delegated worker transcript carry policies (#700).** `spawn_agent(...)`
+  and background `sub_agent_run(...)` workers now persist explicit
+  `carry.transcript_mode` semantics: `inherit`, `fork`, `reset`, and
+  `compact`. Worker snapshots round-trip the selected mode, compact mode
+  reduces persisted carried transcripts while preserving non-message events,
+  and parent-facing `worker_result` artifacts now keep compact payloads that
+  omit nested full transcripts/artifact lists by default.
 - **First-class worker lifecycle events on ACP and A2A (#703).** Adds
   two new typed `WorkerEvent` variants (`WorkerProgressed`,
   `WorkerWaitingForInput`) and surfaces every worker lifecycle

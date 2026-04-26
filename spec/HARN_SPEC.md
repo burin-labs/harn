@@ -1323,6 +1323,18 @@ mailboxes are shared by every task that receives or resolves the handle.
 mailboxes, shared state handles, `agent_state_*`, or host storage for data
 exchange outside the transcript.
 
+Delegated workers accept `carry.transcript_mode` to define continuation
+semantics across `send_input(...)`, retriggered workers, and resumed snapshots.
+`inherit` carries the completed worker transcript into the next cycle. `fork`
+copies the completed transcript under a fresh transcript id and records the
+source id in `metadata.parent_transcript_id`. `reset` starts the next cycle
+without a carried transcript. `compact` compacts the completed worker
+transcript before persistence and subsequent inheritance. Parent-facing
+`worker_result` artifacts are compact summary artifacts: their `data.payload`
+must omit nested full `transcript` and `artifacts` payloads by default, while
+preserving request, provenance, execution profile, compact result fields, and
+the ids of artifacts produced by the worker.
+
 `agent_loop`, `sub_agent_run`, and `spawn_agent` accept a `permissions` option
 that scopes one agent below the ambient capability policy. `permissions.allow`
 and `permissions.deny` are tool-name glob lists or dicts keyed by tool-name

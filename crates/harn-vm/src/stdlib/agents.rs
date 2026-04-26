@@ -20,11 +20,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use self::agents_workers::{
-    apply_worker_artifact_policy, emit_worker_event, ensure_worker_config_session_ids,
-    load_worker_state_snapshot, next_worker_id, parse_worker_config, persist_worker_state_snapshot,
-    spawn_worker_task, with_worker_state, worker_event_snapshot, worker_id_from_value,
-    worker_request_for_config, worker_snapshot_path, worker_summary, worker_trigger_payload_text,
-    worker_wait_blocks, WorkerConfig, WorkerState, WORKER_REGISTRY,
+    apply_worker_artifact_policy, apply_worker_transcript_policy, emit_worker_event,
+    ensure_worker_config_session_ids, load_worker_state_snapshot, next_worker_id,
+    parse_worker_config, persist_worker_state_snapshot, spawn_worker_task, with_worker_state,
+    worker_event_snapshot, worker_id_from_value, worker_request_for_config, worker_snapshot_path,
+    worker_summary, worker_trigger_payload_text, worker_wait_blocks, WorkerConfig, WorkerState,
+    WORKER_REGISTRY,
 };
 use self::sub_agent::{execute_sub_agent, parse_sub_agent_request};
 use crate::value::{VmError, VmValue};
@@ -53,7 +54,11 @@ pub(super) struct SubAgentExecutionResult {
     pub(super) transcript: VmValue,
 }
 
-fn restart_worker_run(worker: &mut WorkerState, next_task: &str, clear_latest_payload: bool) {
+fn restart_worker_run(
+    worker: &mut WorkerState,
+    next_task: &str,
+    clear_latest_payload: bool,
+) -> Result<(), VmError> {
     worker.cancel_token = Arc::new(AtomicBool::new(false));
     worker.task = next_task.to_string();
     worker.history.push(next_task.to_string());
@@ -67,7 +72,9 @@ fn restart_worker_run(worker: &mut WorkerState, next_task: &str, clear_latest_pa
         worker.latest_payload = None;
     }
     let next_artifacts = apply_worker_artifact_policy(&worker.artifacts, &worker.carry_policy);
-    let next_transcript = worker.transcript.clone();
+    let next_transcript =
+        apply_worker_transcript_policy(worker.transcript.clone(), &worker.carry_policy)?;
+    worker.transcript = next_transcript.clone();
     let worker_parent = worker.id.clone();
     let worker_id = worker.id.clone();
     let resume_workflow = worker.carry_policy.resume_workflow;
@@ -112,8 +119,15 @@ fn restart_worker_run(worker: &mut WorkerState, next_task: &str, clear_latest_pa
         }
         WorkerConfig::SubAgent { spec } => {
             spec.task = next_task.to_string();
+            if matches!(
+                worker.carry_policy.transcript_mode.as_str(),
+                "fork" | "reset"
+            ) {
+                spec.session_id = format!("sub_agent_session_{}", uuid::Uuid::now_v7());
+            }
         }
     }
+    Ok(())
 }
 
 async fn wait_for_worker_terminal(
@@ -377,7 +391,7 @@ pub(crate) fn register_agent_builtins(vm: &mut Vm) {
                     worker.id
                 )));
             }
-            restart_worker_run(&mut worker, &next_task, true);
+            restart_worker_run(&mut worker, &next_task, true)?;
             if worker.carry_policy.persist_state {
                 persist_worker_state_snapshot(&worker)?;
             }
@@ -426,7 +440,7 @@ pub(crate) fn register_agent_builtins(vm: &mut Vm) {
                     worker.id, worker.status
                 )));
             }
-            restart_worker_run(&mut worker, &next_task, false);
+            restart_worker_run(&mut worker, &next_task, false)?;
             if worker.carry_policy.persist_state {
                 persist_worker_state_snapshot(&worker)?;
             }
