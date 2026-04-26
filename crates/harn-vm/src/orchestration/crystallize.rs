@@ -21,6 +21,25 @@ use crate::value::VmError;
 const TRACE_SCHEMA_VERSION: u32 = 1;
 const DEFAULT_MIN_EXAMPLES: usize = 2;
 
+/// Stable schema marker for `candidate.json` inside a crystallization
+/// bundle. Cloud importers and other downstream consumers should refuse
+/// bundles whose `schema` field is anything else.
+pub const BUNDLE_SCHEMA: &str = "harn.crystallization.candidate.bundle";
+/// Versioned schema number for the bundle manifest. Cloud importers and
+/// other consumers should refuse bundles whose `schema_version` is newer
+/// than the highest version they understand.
+pub const BUNDLE_SCHEMA_VERSION: u32 = 1;
+/// Conventional file names inside a crystallization bundle directory.
+pub const BUNDLE_MANIFEST_FILE: &str = "candidate.json";
+pub const BUNDLE_REPORT_FILE: &str = "report.json";
+pub const BUNDLE_WORKFLOW_FILE: &str = "workflow.harn";
+pub const BUNDLE_EVAL_PACK_FILE: &str = "harn.eval.toml";
+pub const BUNDLE_FIXTURES_DIR: &str = "fixtures";
+
+/// Default rollout policy applied when a bundle is emitted without one
+/// explicitly configured. Hosted promotion surfaces can override it.
+const DEFAULT_ROLLOUT_POLICY: &str = "shadow_then_canary";
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct CrystallizationTrace {
@@ -1424,6 +1443,931 @@ fn escape_harn_string(value: &str) -> String {
     value.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
+// ===== Crystallization bundle =====
+//
+// A bundle is a directory layout that Harn writes and Harn Cloud (or any
+// other importer) reads without bespoke glue. The contract is:
+//
+//   bundle/
+//     candidate.json        # versioned manifest documented below
+//     workflow.harn         # generated/reviewable workflow code
+//     report.json           # full mining/shadow/eval report
+//     harn.eval.toml        # generated eval pack when available (optional)
+//     fixtures/             # redacted replay fixtures referenced by the
+//                           # report (optional, only when --bundle is used
+//                           # with `harn crystallize` and traces were on disk)
+//
+// `candidate.json` is the authoritative manifest. It must include the
+// `schema` and `schema_version` markers. Cloud importers MUST reject any
+// bundle whose `schema` is not exactly `harn.crystallization.candidate.bundle`
+// or whose `schema_version` is greater than the highest version they
+// understand. Only the documented additive fields may be added without
+// bumping `schema_version`.
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct BundleGenerator {
+    pub tool: String,
+    pub version: String,
+}
+
+impl Default for BundleGenerator {
+    fn default() -> Self {
+        Self {
+            tool: "harn".to_string(),
+            version: env!("CARGO_PKG_VERSION").to_string(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct BundleWorkflowRef {
+    /// Relative path inside the bundle directory.
+    pub path: String,
+    /// Short identifier used in `pipeline NAME(...)`.
+    pub name: String,
+    /// Logical package name promotion uses to register the workflow.
+    pub package_name: String,
+    /// Initial workflow version proposed for promotion.
+    pub package_version: String,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct BundleSourceTrace {
+    pub trace_id: String,
+    pub source_hash: String,
+    /// Optional human-visible URL (PR, issue, run record path) for the
+    /// trace. `None` when the trace was loaded from an in-memory store.
+    pub source_url: Option<String>,
+    /// Optional cloud-side receipt id when the trace was already promoted
+    /// into a tenant receipt. Cloud importers use this to wire candidate
+    /// evidence to existing receipts without round-tripping the raw payload.
+    pub source_receipt_id: Option<String>,
+    /// Relative path of the redacted fixture inside the bundle, if one
+    /// was emitted.
+    pub fixture_path: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct BundleStep {
+    pub index: usize,
+    pub kind: String,
+    pub name: String,
+    pub segment: SegmentKind,
+    pub parameter_refs: Vec<String>,
+    pub side_effects: Vec<CrystallizationSideEffect>,
+    pub capabilities: Vec<String>,
+    pub required_secrets: Vec<String>,
+    pub approval: Option<CrystallizationApproval>,
+    pub review_notes: Vec<String>,
+}
+
+impl BundleStep {
+    fn from_candidate_step(step: &WorkflowCandidateStep) -> Self {
+        Self {
+            index: step.index,
+            kind: step.kind.clone(),
+            name: step.name.clone(),
+            segment: step.segment.clone(),
+            parameter_refs: step.parameter_refs.clone(),
+            side_effects: step.side_effects.clone(),
+            capabilities: step.capabilities.clone(),
+            required_secrets: step.required_secrets.clone(),
+            approval: step.approval.clone(),
+            review_notes: step.review_notes.clone(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct BundleEvalPackRef {
+    /// Relative path of the eval pack inside the bundle directory.
+    pub path: String,
+    /// Optional external link the eval pack also lives at (e.g. a hosted
+    /// `eval-pack://` URI when the bundle was promoted into a tenant).
+    pub link: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct BundleFixtureRef {
+    pub path: String,
+    pub trace_id: String,
+    pub source_hash: String,
+    pub redacted: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct BundlePromotion {
+    pub owner: Option<String>,
+    pub approver: Option<String>,
+    pub author: Option<String>,
+    /// Logical rollout strategy. Defaults to `shadow_then_canary`. Hosted
+    /// surfaces may extend this enum but must keep existing values stable.
+    pub rollout_policy: String,
+    pub rollback_target: Option<String>,
+    pub created_at: String,
+    pub workflow_version: String,
+    pub package_name: String,
+}
+
+impl Default for BundlePromotion {
+    fn default() -> Self {
+        Self {
+            owner: None,
+            approver: None,
+            author: None,
+            rollout_policy: DEFAULT_ROLLOUT_POLICY.to_string(),
+            rollback_target: None,
+            created_at: String::new(),
+            workflow_version: String::new(),
+            package_name: String::new(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct BundleRedactionSummary {
+    pub applied: bool,
+    pub rules: Vec<String>,
+    pub summary: String,
+    /// Number of fixture files copied into the bundle (0 when no fixture
+    /// directory was emitted).
+    pub fixture_count: usize,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct CrystallizationBundleManifest {
+    pub schema: String,
+    pub schema_version: u32,
+    pub generated_at: String,
+    pub generator: BundleGenerator,
+    pub kind: BundleKind,
+    pub candidate_id: String,
+    pub external_key: String,
+    pub title: String,
+    pub team: Option<String>,
+    pub repo: Option<String>,
+    pub risk_level: String,
+    pub workflow: BundleWorkflowRef,
+    pub source_trace_hashes: Vec<String>,
+    pub source_traces: Vec<BundleSourceTrace>,
+    pub deterministic_steps: Vec<BundleStep>,
+    pub fuzzy_steps: Vec<BundleStep>,
+    pub side_effects: Vec<CrystallizationSideEffect>,
+    pub capabilities: Vec<String>,
+    pub required_secrets: Vec<String>,
+    pub savings: SavingsEstimate,
+    pub shadow: ShadowRunReport,
+    pub eval_pack: Option<BundleEvalPackRef>,
+    pub fixtures: Vec<BundleFixtureRef>,
+    pub promotion: BundlePromotion,
+    pub redaction: BundleRedactionSummary,
+    pub confidence: f64,
+    pub rejection_reasons: Vec<String>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BundleKind {
+    /// A normal candidate that passed shadow comparison and is ready for
+    /// review and promotion.
+    #[default]
+    Candidate,
+    /// A "plan-only" candidate: every step has a side-effect-free, in-process
+    /// outcome (e.g. classify and write a receipt). Cloud importers can
+    /// promote these without explicit external-side-effect approval.
+    PlanOnly,
+    /// No safe candidate was selected. The bundle still records what was
+    /// attempted, the rejection reasons, and any rejected candidates so
+    /// reviewers can debug or feed it back into mining.
+    Rejected,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct BundleOptions {
+    /// Stable identifier downstream cloud importers use to dedupe bundles
+    /// across runs (defaults to a sanitized workflow name).
+    pub external_key: Option<String>,
+    pub title: Option<String>,
+    pub team: Option<String>,
+    pub repo: Option<String>,
+    pub risk_level: Option<String>,
+    pub rollout_policy: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct CrystallizationBundle {
+    pub manifest: CrystallizationBundleManifest,
+    pub report: CrystallizationReport,
+    pub harn_code: String,
+    pub eval_pack_toml: String,
+    pub fixtures: Vec<CrystallizationTrace>,
+}
+
+/// Errors surfaced when validating a bundle on disk.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct BundleValidation {
+    pub bundle_dir: String,
+    pub schema: String,
+    pub schema_version: u32,
+    pub kind: BundleKind,
+    pub candidate_id: String,
+    pub manifest_ok: bool,
+    pub workflow_ok: bool,
+    pub report_ok: bool,
+    pub eval_pack_ok: bool,
+    pub fixtures_ok: bool,
+    pub redaction_ok: bool,
+    pub problems: Vec<String>,
+}
+
+impl BundleValidation {
+    pub fn is_ok(&self) -> bool {
+        self.problems.is_empty()
+    }
+}
+
+/// Build an in-memory bundle from already-mined artifacts. The traces
+/// passed here are the same normalized traces used to mine the candidate;
+/// they will be redacted before being attached as fixtures.
+pub fn build_crystallization_bundle(
+    artifacts: CrystallizationArtifacts,
+    traces: &[CrystallizationTrace],
+    options: BundleOptions,
+) -> Result<CrystallizationBundle, VmError> {
+    let CrystallizationArtifacts {
+        report,
+        harn_code,
+        eval_pack_toml,
+    } = artifacts;
+
+    let (selected, kind) = match report
+        .selected_candidate_id
+        .as_deref()
+        .and_then(|id| report.candidates.iter().find(|c| c.id == id))
+    {
+        Some(candidate) => {
+            let kind = if candidate_is_plan_only(candidate) {
+                BundleKind::PlanOnly
+            } else {
+                BundleKind::Candidate
+            };
+            (Some(candidate), kind)
+        }
+        None => (None, BundleKind::Rejected),
+    };
+
+    let workflow_name = selected
+        .map(|candidate| candidate.name.clone())
+        .unwrap_or_else(|| "crystallized_workflow".to_string());
+    let package_name = selected
+        .map(|candidate| candidate.promotion.package_name.clone())
+        .unwrap_or_else(|| workflow_name.replace('_', "-"));
+    let workflow_version = selected
+        .map(|candidate| candidate.promotion.version.clone())
+        .unwrap_or_else(|| "0.0.0".to_string());
+
+    let manifest_workflow = BundleWorkflowRef {
+        path: BUNDLE_WORKFLOW_FILE.to_string(),
+        name: workflow_name.clone(),
+        package_name: package_name.clone(),
+        package_version: workflow_version.clone(),
+    };
+
+    let external_key = options
+        .external_key
+        .clone()
+        .filter(|key| !key.trim().is_empty())
+        .unwrap_or_else(|| sanitize_external_key(&workflow_name));
+    let title = options
+        .title
+        .clone()
+        .filter(|title| !title.trim().is_empty())
+        .unwrap_or_else(|| infer_bundle_title(selected, &workflow_name));
+    let risk_level = options
+        .risk_level
+        .clone()
+        .filter(|risk| !risk.trim().is_empty())
+        .unwrap_or_else(|| infer_risk_level(selected));
+    let rollout_policy = options
+        .rollout_policy
+        .clone()
+        .filter(|policy| !policy.trim().is_empty())
+        .unwrap_or_else(|| DEFAULT_ROLLOUT_POLICY.to_string());
+
+    let (deterministic_steps, fuzzy_steps) = match selected {
+        Some(candidate) => candidate
+            .steps
+            .iter()
+            .map(BundleStep::from_candidate_step)
+            .partition::<Vec<_>, _>(|step| step.segment == SegmentKind::Deterministic),
+        None => (Vec::new(), Vec::new()),
+    };
+
+    let source_trace_hashes = selected
+        .map(|candidate| candidate.promotion.source_trace_hashes.clone())
+        .unwrap_or_default();
+
+    let mut source_traces = Vec::new();
+    let mut fixture_refs = Vec::new();
+    let mut fixture_payloads = Vec::new();
+    if let Some(candidate) = selected {
+        for example in &candidate.examples {
+            let trace = traces.iter().find(|trace| trace.id == example.trace_id);
+            let fixture_relative = trace.map(|trace| {
+                format!(
+                    "{BUNDLE_FIXTURES_DIR}/{}.json",
+                    sanitize_fixture_name(&trace.id)
+                )
+            });
+            source_traces.push(BundleSourceTrace {
+                trace_id: example.trace_id.clone(),
+                source_hash: example.source_hash.clone(),
+                source_url: trace.and_then(|trace| trace.source.clone()),
+                source_receipt_id: trace
+                    .and_then(|trace| trace.metadata.get("source_receipt_id"))
+                    .and_then(|value| value.as_str().map(str::to_string)),
+                fixture_path: fixture_relative.clone(),
+            });
+            if let (Some(trace), Some(fixture_path)) = (trace, fixture_relative.clone()) {
+                let mut redacted = trace.clone();
+                redact_trace_for_bundle(&mut redacted);
+                fixture_refs.push(BundleFixtureRef {
+                    path: fixture_path,
+                    trace_id: trace.id.clone(),
+                    source_hash: trace.source_hash.clone().unwrap_or_default(),
+                    redacted: true,
+                });
+                fixture_payloads.push(redacted);
+            }
+        }
+    }
+
+    // Owner defaults to author so cloud importers always have a populated
+    // ownership pointer, but stays separate from `author` so reviewers can
+    // assign a different owner in the manifest before promotion.
+    let author = selected.and_then(|candidate| candidate.promotion.author.clone());
+    let promotion = BundlePromotion {
+        owner: author.clone(),
+        approver: selected.and_then(|candidate| candidate.promotion.approver.clone()),
+        author,
+        rollout_policy,
+        rollback_target: selected.and_then(|candidate| candidate.promotion.rollback_target.clone()),
+        created_at: now_rfc3339(),
+        workflow_version,
+        package_name: package_name.clone(),
+    };
+
+    let redaction = BundleRedactionSummary {
+        applied: !fixture_payloads.is_empty(),
+        rules: vec![
+            "sensitive_keys".to_string(),
+            "secret_value_heuristic".to_string(),
+        ],
+        summary: if fixture_payloads.is_empty() {
+            "no fixtures emitted".to_string()
+        } else {
+            "fixture payloads scrubbed of secret-like values and sensitive keys before write"
+                .to_string()
+        },
+        fixture_count: fixture_payloads.len(),
+    };
+
+    let eval_pack = if eval_pack_toml.trim().is_empty() {
+        None
+    } else {
+        Some(BundleEvalPackRef {
+            path: BUNDLE_EVAL_PACK_FILE.to_string(),
+            link: selected
+                .and_then(|candidate| candidate.promotion.eval_pack_link.clone())
+                .filter(|link| !link.trim().is_empty()),
+        })
+    };
+
+    let manifest = CrystallizationBundleManifest {
+        schema: BUNDLE_SCHEMA.to_string(),
+        schema_version: BUNDLE_SCHEMA_VERSION,
+        generated_at: now_rfc3339(),
+        generator: BundleGenerator::default(),
+        kind,
+        candidate_id: selected
+            .map(|candidate| candidate.id.clone())
+            .unwrap_or_default(),
+        external_key,
+        title,
+        team: options.team,
+        repo: options.repo,
+        risk_level,
+        workflow: manifest_workflow,
+        source_trace_hashes,
+        source_traces,
+        deterministic_steps,
+        fuzzy_steps,
+        side_effects: selected
+            .map(|candidate| candidate.side_effects.clone())
+            .unwrap_or_default(),
+        capabilities: selected
+            .map(|candidate| candidate.capabilities.clone())
+            .unwrap_or_default(),
+        required_secrets: selected
+            .map(|candidate| candidate.required_secrets.clone())
+            .unwrap_or_default(),
+        savings: selected
+            .map(|candidate| candidate.savings.clone())
+            .unwrap_or_default(),
+        shadow: selected
+            .map(|candidate| candidate.shadow.clone())
+            .unwrap_or_default(),
+        eval_pack,
+        fixtures: fixture_refs,
+        promotion,
+        redaction,
+        confidence: selected
+            .map(|candidate| candidate.confidence)
+            .unwrap_or(0.0),
+        rejection_reasons: report
+            .rejected_candidates
+            .iter()
+            .flat_map(|candidate| candidate.rejection_reasons.iter().cloned())
+            .collect(),
+        warnings: report.warnings.clone(),
+    };
+
+    Ok(CrystallizationBundle {
+        manifest,
+        report,
+        harn_code,
+        eval_pack_toml,
+        fixtures: fixture_payloads,
+    })
+}
+
+/// Write a bundle to a directory. Creates the directory if it does not
+/// already exist. Returns the manifest with `generated_at` and any
+/// runtime-resolved metadata filled in.
+pub fn write_crystallization_bundle(
+    bundle: &CrystallizationBundle,
+    bundle_dir: &Path,
+) -> Result<CrystallizationBundleManifest, VmError> {
+    std::fs::create_dir_all(bundle_dir).map_err(|error| {
+        VmError::Runtime(format!(
+            "failed to create bundle dir {}: {error}",
+            bundle_dir.display()
+        ))
+    })?;
+    write_bytes(
+        &bundle_dir.join(BUNDLE_WORKFLOW_FILE),
+        bundle.harn_code.as_bytes(),
+    )?;
+    let report_json = serde_json::to_vec_pretty(&bundle.report)
+        .map_err(|error| VmError::Runtime(format!("failed to encode report JSON: {error}")))?;
+    write_bytes(&bundle_dir.join(BUNDLE_REPORT_FILE), &report_json)?;
+
+    if !bundle.eval_pack_toml.trim().is_empty() {
+        write_bytes(
+            &bundle_dir.join(BUNDLE_EVAL_PACK_FILE),
+            bundle.eval_pack_toml.as_bytes(),
+        )?;
+    }
+
+    if !bundle.fixtures.is_empty() {
+        let fixtures_dir = bundle_dir.join(BUNDLE_FIXTURES_DIR);
+        std::fs::create_dir_all(&fixtures_dir).map_err(|error| {
+            VmError::Runtime(format!(
+                "failed to create fixtures dir {}: {error}",
+                fixtures_dir.display()
+            ))
+        })?;
+        for trace in &bundle.fixtures {
+            let path = fixtures_dir.join(format!("{}.json", sanitize_fixture_name(&trace.id)));
+            let payload = serde_json::to_vec_pretty(trace).map_err(|error| {
+                VmError::Runtime(format!("failed to encode fixture {}: {error}", trace.id))
+            })?;
+            write_bytes(&path, &payload)?;
+        }
+    }
+
+    let manifest_json = serde_json::to_vec_pretty(&bundle.manifest)
+        .map_err(|error| VmError::Runtime(format!("failed to encode manifest JSON: {error}")))?;
+    write_bytes(&bundle_dir.join(BUNDLE_MANIFEST_FILE), &manifest_json)?;
+    Ok(bundle.manifest.clone())
+}
+
+/// Read a bundle manifest from disk. Verifies the schema marker but does
+/// not cross-check workflow/report/eval-pack sibling files; for a richer
+/// check use [`validate_crystallization_bundle`].
+pub fn load_crystallization_bundle_manifest(
+    bundle_dir: &Path,
+) -> Result<CrystallizationBundleManifest, VmError> {
+    let manifest_path = bundle_dir.join(BUNDLE_MANIFEST_FILE);
+    let bytes = std::fs::read(&manifest_path).map_err(|error| {
+        VmError::Runtime(format!(
+            "failed to read bundle manifest {}: {error}",
+            manifest_path.display()
+        ))
+    })?;
+    let manifest: CrystallizationBundleManifest =
+        serde_json::from_slice(&bytes).map_err(|error| {
+            VmError::Runtime(format!(
+                "failed to decode bundle manifest {}: {error}",
+                manifest_path.display()
+            ))
+        })?;
+    if manifest.schema != BUNDLE_SCHEMA {
+        return Err(VmError::Runtime(format!(
+            "bundle {} has unrecognized schema {:?} (expected {})",
+            bundle_dir.display(),
+            manifest.schema,
+            BUNDLE_SCHEMA
+        )));
+    }
+    if manifest.schema_version > BUNDLE_SCHEMA_VERSION {
+        return Err(VmError::Runtime(format!(
+            "bundle {} schema_version {} is newer than supported {}",
+            bundle_dir.display(),
+            manifest.schema_version,
+            BUNDLE_SCHEMA_VERSION
+        )));
+    }
+    Ok(manifest)
+}
+
+/// Read every fixture trace referenced by the bundle manifest. Returns
+/// the manifest plus loaded traces, in the order they appear in the
+/// manifest. Fixtures with `path: None` are skipped.
+pub fn load_crystallization_bundle(
+    bundle_dir: &Path,
+) -> Result<(CrystallizationBundleManifest, Vec<CrystallizationTrace>), VmError> {
+    let manifest = load_crystallization_bundle_manifest(bundle_dir)?;
+    let mut traces = Vec::new();
+    for fixture in &manifest.fixtures {
+        let path = bundle_dir.join(&fixture.path);
+        traces.push(load_crystallization_trace(&path)?);
+    }
+    Ok((manifest, traces))
+}
+
+/// Validate a bundle directory layout and contents. Cheap enough to call
+/// from a CLI smoke command; performs no live side effects.
+pub fn validate_crystallization_bundle(bundle_dir: &Path) -> Result<BundleValidation, VmError> {
+    let mut validation = BundleValidation {
+        bundle_dir: bundle_dir.display().to_string(),
+        ..BundleValidation::default()
+    };
+    let manifest = match load_crystallization_bundle_manifest(bundle_dir) {
+        Ok(manifest) => manifest,
+        Err(error) => {
+            validation.problems.push(error.to_string());
+            return Ok(validation);
+        }
+    };
+    validation.manifest_ok = true;
+    validation.schema = manifest.schema.clone();
+    validation.schema_version = manifest.schema_version;
+    validation.kind = manifest.kind.clone();
+    validation.candidate_id = manifest.candidate_id.clone();
+
+    let workflow_path = bundle_dir.join(&manifest.workflow.path);
+    if workflow_path.exists() {
+        validation.workflow_ok = true;
+    } else {
+        validation
+            .problems
+            .push(format!("missing workflow file {}", workflow_path.display()));
+    }
+
+    let report_path = bundle_dir.join(BUNDLE_REPORT_FILE);
+    match std::fs::read(&report_path) {
+        Ok(bytes) => match serde_json::from_slice::<CrystallizationReport>(&bytes) {
+            Ok(report) => {
+                validation.report_ok = true;
+                if matches!(manifest.kind, BundleKind::Candidate | BundleKind::PlanOnly)
+                    && manifest.candidate_id.is_empty()
+                {
+                    validation
+                        .problems
+                        .push("manifest is non-rejected but has empty candidate_id".to_string());
+                }
+                if matches!(manifest.kind, BundleKind::Candidate | BundleKind::PlanOnly)
+                    && report.selected_candidate_id.as_deref() != Some(&manifest.candidate_id)
+                {
+                    validation.problems.push(format!(
+                        "report selected_candidate_id {:?} does not match manifest candidate_id {}",
+                        report.selected_candidate_id, manifest.candidate_id
+                    ));
+                }
+            }
+            Err(error) => {
+                validation
+                    .problems
+                    .push(format!("invalid report.json: {error}"));
+            }
+        },
+        Err(error) => {
+            validation.problems.push(format!(
+                "missing report file {}: {error}",
+                report_path.display()
+            ));
+        }
+    }
+
+    if let Some(eval_pack) = &manifest.eval_pack {
+        let path = bundle_dir.join(&eval_pack.path);
+        if path.exists() {
+            validation.eval_pack_ok = true;
+        } else {
+            validation.problems.push(format!(
+                "manifest references eval pack {} but file is missing",
+                path.display()
+            ));
+        }
+    } else {
+        validation.eval_pack_ok = true;
+    }
+
+    let mut fixtures_problem = false;
+    for fixture in &manifest.fixtures {
+        let path = bundle_dir.join(&fixture.path);
+        if !path.exists() {
+            validation
+                .problems
+                .push(format!("missing fixture {}", path.display()));
+            fixtures_problem = true;
+            continue;
+        }
+        if !fixture.redacted {
+            validation.problems.push(format!(
+                "fixture {} is not marked redacted; bundle must not ship raw private payloads",
+                fixture.path
+            ));
+            fixtures_problem = true;
+        }
+    }
+    validation.fixtures_ok = !fixtures_problem;
+
+    if !manifest.redaction.applied && !manifest.fixtures.is_empty() {
+        validation
+            .problems
+            .push("redaction.applied is false but bundle includes fixtures".to_string());
+    } else {
+        validation.redaction_ok = true;
+    }
+    if !manifest
+        .required_secrets
+        .iter()
+        .all(|secret| secret_id_looks_logical(secret))
+    {
+        validation.problems.push(
+            "required_secrets contains a non-logical id (looks like a raw secret)".to_string(),
+        );
+    }
+
+    Ok(validation)
+}
+
+/// Replay shadow comparison from a bundle: re-runs the deterministic
+/// shadow check in-process against the bundle's redacted fixtures, with
+/// no live side effects. Returns the manifest and the freshly computed
+/// `ShadowRunReport`. The returned report is suitable for cloud import or
+/// for asserting determinism in CI.
+pub fn shadow_replay_bundle(
+    bundle_dir: &Path,
+) -> Result<(CrystallizationBundleManifest, ShadowRunReport), VmError> {
+    let (manifest, traces) = load_crystallization_bundle(bundle_dir)?;
+    let report_path = bundle_dir.join(BUNDLE_REPORT_FILE);
+    let bytes = std::fs::read(&report_path).map_err(|error| {
+        VmError::Runtime(format!(
+            "failed to read bundle report {}: {error}",
+            report_path.display()
+        ))
+    })?;
+    let report: CrystallizationReport = serde_json::from_slice(&bytes).map_err(|error| {
+        VmError::Runtime(format!(
+            "failed to decode bundle report {}: {error}",
+            report_path.display()
+        ))
+    })?;
+    let candidate = report
+        .selected_candidate_id
+        .as_deref()
+        .and_then(|id| report.candidates.iter().find(|c| c.id == id))
+        .ok_or_else(|| {
+            VmError::Runtime(format!(
+                "bundle {} has no selected candidate to replay",
+                bundle_dir.display()
+            ))
+        })?;
+    let shadow = shadow_candidate(candidate, &traces);
+    Ok((manifest, shadow))
+}
+
+fn write_bytes(path: &Path, bytes: &[u8]) -> Result<(), VmError> {
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        std::fs::create_dir_all(parent).map_err(|error| {
+            VmError::Runtime(format!(
+                "failed to create parent dir {}: {error}",
+                parent.display()
+            ))
+        })?;
+    }
+    std::fs::write(path, bytes)
+        .map_err(|error| VmError::Runtime(format!("failed to write {}: {error}", path.display())))
+}
+
+fn sanitize_fixture_name(raw: &str) -> String {
+    let cleaned = raw
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    if cleaned.trim_matches('_').is_empty() {
+        "trace".to_string()
+    } else {
+        cleaned.trim_matches('_').to_string()
+    }
+}
+
+fn sanitize_external_key(raw: &str) -> String {
+    let mut out = String::new();
+    let mut prev_dash = false;
+    for ch in raw.chars() {
+        let lowered = ch.to_ascii_lowercase();
+        if lowered.is_ascii_alphanumeric() {
+            out.push(lowered);
+            prev_dash = false;
+        } else if !prev_dash && !out.is_empty() {
+            out.push('-');
+            prev_dash = true;
+        }
+    }
+    let trimmed = out.trim_matches('-').to_string();
+    if trimmed.is_empty() {
+        "crystallized-workflow".to_string()
+    } else {
+        trimmed
+    }
+}
+
+fn infer_bundle_title(candidate: Option<&WorkflowCandidate>, fallback_name: &str) -> String {
+    if let Some(candidate) = candidate {
+        format!(
+            "{} ({} step{})",
+            candidate.name,
+            candidate.steps.len(),
+            if candidate.steps.len() == 1 { "" } else { "s" }
+        )
+    } else {
+        format!("rejected: {fallback_name}")
+    }
+}
+
+fn infer_risk_level(candidate: Option<&WorkflowCandidate>) -> String {
+    let Some(candidate) = candidate else {
+        return "high".to_string();
+    };
+    let touches_external = candidate.side_effects.iter().any(side_effect_is_external);
+    let needs_secret = !candidate.required_secrets.is_empty();
+    if touches_external && needs_secret {
+        "high".to_string()
+    } else if touches_external || needs_secret {
+        "medium".to_string()
+    } else {
+        "low".to_string()
+    }
+}
+
+fn side_effect_is_external(effect: &CrystallizationSideEffect) -> bool {
+    let kind = effect.kind.to_ascii_lowercase();
+    if kind.is_empty() {
+        return false;
+    }
+    // Plan-only side effects stay inside Harn's own data plane: they
+    // write receipts, append to the in-process event log, or stash plans.
+    // None of those touch tenant-external systems.
+    let internal = kind.contains("receipt")
+        || kind.contains("event_log")
+        || kind.contains("memo")
+        || kind.contains("plan");
+    if internal {
+        return false;
+    }
+    kind.contains("post")
+        || kind.contains("write")
+        || kind.contains("publish")
+        || kind.contains("delete")
+        || kind.contains("send")
+}
+
+fn candidate_is_plan_only(candidate: &WorkflowCandidate) -> bool {
+    if candidate.steps.is_empty() {
+        return false;
+    }
+    candidate.side_effects.iter().all(|effect| {
+        let kind = effect.kind.to_ascii_lowercase();
+        // Plan-only side effects stay inside Harn's own data plane: receipt
+        // writes, in-memory event-log appends, file-only mutations, etc.
+        kind.is_empty()
+            || kind.contains("receipt")
+            || kind.contains("event_log")
+            || kind.contains("memo")
+            || kind.contains("plan")
+            || (kind.contains("file") && !kind.contains("publish"))
+    })
+}
+
+fn redact_trace_for_bundle(trace: &mut CrystallizationTrace) {
+    for action in &mut trace.actions {
+        redact_bundle_value(&mut action.inputs);
+        if let Some(output) = action.output.as_mut() {
+            redact_bundle_value(output);
+        }
+        if let Some(observed) = action.observed_output.as_mut() {
+            redact_bundle_value(observed);
+        }
+        for value in action.parameters.values_mut() {
+            redact_bundle_value(value);
+        }
+        for (_, value) in action.metadata.iter_mut() {
+            redact_bundle_value(value);
+        }
+    }
+    for (_, value) in trace.metadata.iter_mut() {
+        redact_bundle_value(value);
+    }
+}
+
+fn redact_bundle_value(value: &mut JsonValue) {
+    match value {
+        JsonValue::String(text) if looks_like_secret_value(text) => {
+            *text = "[redacted]".to_string();
+        }
+        JsonValue::Array(items) => {
+            for item in items {
+                redact_bundle_value(item);
+            }
+        }
+        JsonValue::Object(map) => {
+            for (key, child) in map.iter_mut() {
+                if is_sensitive_bundle_key(key) {
+                    *child = JsonValue::String("[redacted]".to_string());
+                } else {
+                    redact_bundle_value(child);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn is_sensitive_bundle_key(key: &str) -> bool {
+    let lower = key.to_ascii_lowercase();
+    lower.contains("secret")
+        || lower.contains("token")
+        || lower.contains("password")
+        || lower.contains("api_key")
+        || lower.contains("apikey")
+        || lower == "authorization"
+        || lower == "cookie"
+        || lower == "set-cookie"
+}
+
+fn looks_like_secret_value(value: &str) -> bool {
+    let trimmed = value.trim();
+    trimmed.starts_with("sk-")
+        || trimmed.starts_with("ghp_")
+        || trimmed.starts_with("ghs_")
+        || trimmed.starts_with("xoxb-")
+        || trimmed.starts_with("xoxp-")
+        || trimmed.starts_with("AKIA")
+        || (trimmed.len() > 48
+            && trimmed
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-'))
+}
+
+fn secret_id_looks_logical(value: &str) -> bool {
+    !looks_like_secret_value(value) && !value.trim().is_empty()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1577,5 +2521,370 @@ mod tests {
             .any(|step| step.segment == SegmentKind::Fuzzy));
         assert!(candidate.savings.remaining_model_calls > 0);
         assert!(artifacts.harn_code.contains("TODO: fuzzy segment"));
+    }
+
+    fn plan_only_trace(id: &str, suffix: &str) -> CrystallizationTrace {
+        CrystallizationTrace {
+            id: id.to_string(),
+            actions: vec![
+                CrystallizationAction {
+                    id: format!("{id}-classify"),
+                    kind: "tool_call".to_string(),
+                    name: "classify_issue".to_string(),
+                    parameters: BTreeMap::from([
+                        ("issue_id".to_string(), json!(format!("HAR-{suffix}"))),
+                        ("team_key".to_string(), json!("HAR")),
+                    ]),
+                    capabilities: vec!["linear.read".to_string()],
+                    deterministic: Some(true),
+                    duration_ms: Some(15),
+                    ..CrystallizationAction::default()
+                },
+                CrystallizationAction {
+                    id: format!("{id}-receipt"),
+                    kind: "receipt_write".to_string(),
+                    name: "emit_receipt".to_string(),
+                    inputs: json!({"summary": format!("plan only #{suffix}"), "kind": "plan"}),
+                    parameters: BTreeMap::from([
+                        ("kind".to_string(), json!("plan")),
+                        ("summary".to_string(), json!(format!("plan only #{suffix}"))),
+                    ]),
+                    side_effects: vec![CrystallizationSideEffect {
+                        kind: "receipt_write".to_string(),
+                        target: "tenant_event_log".to_string(),
+                        capability: Some("receipt.write".to_string()),
+                        ..CrystallizationSideEffect::default()
+                    }],
+                    capabilities: vec!["receipt.write".to_string()],
+                    deterministic: Some(true),
+                    duration_ms: Some(5),
+                    ..CrystallizationAction::default()
+                },
+            ],
+            ..CrystallizationTrace::default()
+        }
+    }
+
+    fn version_traces(count: usize) -> Vec<CrystallizationTrace> {
+        (0..count)
+            .map(|idx| {
+                version_trace(
+                    &format!("trace_{idx}"),
+                    &format!("0.7.{idx}"),
+                    "release-branch",
+                    false,
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn build_bundle_assembles_versioned_manifest() {
+        let traces = version_traces(5);
+        let artifacts = crystallize_traces(
+            traces.clone(),
+            CrystallizeOptions {
+                workflow_name: Some("version_bump".to_string()),
+                package_name: Some("release-workflows".to_string()),
+                author: Some("ops@example.com".to_string()),
+                approver: Some("lead@example.com".to_string()),
+                eval_pack_link: Some("eval-pack://release-workflows/v1".to_string()),
+                ..CrystallizeOptions::default()
+            },
+        )
+        .unwrap();
+
+        let bundle = build_crystallization_bundle(
+            artifacts,
+            &traces,
+            BundleOptions {
+                team: Some("platform".to_string()),
+                repo: Some("burin-labs/harn".to_string()),
+                ..BundleOptions::default()
+            },
+        )
+        .unwrap();
+
+        let manifest = &bundle.manifest;
+        assert_eq!(manifest.schema, BUNDLE_SCHEMA);
+        assert_eq!(manifest.schema_version, BUNDLE_SCHEMA_VERSION);
+        assert_eq!(manifest.kind, BundleKind::Candidate);
+        assert!(!manifest.candidate_id.is_empty());
+        assert_eq!(manifest.workflow.name, "version_bump");
+        assert_eq!(manifest.workflow.package_name, "release-workflows");
+        assert_eq!(manifest.workflow.path, BUNDLE_WORKFLOW_FILE);
+        assert_eq!(manifest.team.as_deref(), Some("platform"));
+        assert_eq!(manifest.repo.as_deref(), Some("burin-labs/harn"));
+        assert_eq!(manifest.external_key, "version-bump");
+        assert_eq!(manifest.promotion.rollout_policy, "shadow_then_canary");
+        assert_eq!(
+            manifest.promotion.author.as_deref(),
+            Some("ops@example.com")
+        );
+        assert_eq!(
+            manifest.promotion.approver.as_deref(),
+            Some("lead@example.com")
+        );
+        assert_eq!(manifest.promotion.workflow_version, "0.1.0");
+        assert!(manifest.deterministic_steps.len() + manifest.fuzzy_steps.len() > 0);
+        assert_eq!(manifest.source_traces.len(), traces.len());
+        assert_eq!(manifest.fixtures.len(), traces.len());
+        assert!(manifest.fixtures.iter().all(|fixture| fixture.redacted));
+        assert!(manifest.redaction.applied);
+        assert!(manifest.redaction.fixture_count > 0);
+        assert!(manifest
+            .eval_pack
+            .as_ref()
+            .is_some_and(|eval| eval.path == BUNDLE_EVAL_PACK_FILE));
+        assert!(manifest
+            .required_secrets
+            .iter()
+            .all(|secret| !secret.is_empty()));
+    }
+
+    #[test]
+    fn write_bundle_round_trips_through_disk() {
+        let traces = version_traces(5);
+        let artifacts = crystallize_traces(
+            traces.clone(),
+            CrystallizeOptions {
+                workflow_name: Some("version_bump".to_string()),
+                ..CrystallizeOptions::default()
+            },
+        )
+        .unwrap();
+        let bundle =
+            build_crystallization_bundle(artifacts, &traces, BundleOptions::default()).unwrap();
+
+        let dir = tempfile::tempdir().unwrap();
+        let written = write_crystallization_bundle(&bundle, dir.path()).unwrap();
+        assert_eq!(written.candidate_id, bundle.manifest.candidate_id);
+
+        // Files exist on disk.
+        for relative in [
+            BUNDLE_MANIFEST_FILE,
+            BUNDLE_REPORT_FILE,
+            BUNDLE_WORKFLOW_FILE,
+            BUNDLE_EVAL_PACK_FILE,
+        ] {
+            assert!(dir.path().join(relative).exists(), "missing {relative}");
+        }
+        let fixtures_dir = dir.path().join(BUNDLE_FIXTURES_DIR);
+        assert!(fixtures_dir.is_dir());
+        assert_eq!(
+            std::fs::read_dir(&fixtures_dir).unwrap().count(),
+            traces.len()
+        );
+
+        // Manifest round-trips.
+        let (loaded_manifest, loaded_traces) = load_crystallization_bundle(dir.path()).unwrap();
+        assert_eq!(loaded_manifest, bundle.manifest);
+        assert_eq!(loaded_traces.len(), traces.len());
+
+        // Validation passes.
+        let validation = validate_crystallization_bundle(dir.path()).unwrap();
+        assert!(
+            validation.problems.is_empty(),
+            "unexpected problems: {:?}",
+            validation.problems
+        );
+        assert!(validation.is_ok());
+        assert!(validation.workflow_ok && validation.report_ok);
+        assert!(validation.fixtures_ok && validation.redaction_ok);
+
+        // Shadow replay matches the persisted shadow report.
+        let (replay_manifest, shadow) = shadow_replay_bundle(dir.path()).unwrap();
+        assert_eq!(replay_manifest.candidate_id, bundle.manifest.candidate_id);
+        assert!(shadow.pass, "shadow should still pass");
+        assert_eq!(shadow.compared_traces, traces.len());
+    }
+
+    #[test]
+    fn validate_rejects_bundle_with_missing_workflow() {
+        let traces = version_traces(3);
+        let artifacts = crystallize_traces(traces.clone(), CrystallizeOptions::default()).unwrap();
+        let bundle =
+            build_crystallization_bundle(artifacts, &traces, BundleOptions::default()).unwrap();
+
+        let dir = tempfile::tempdir().unwrap();
+        write_crystallization_bundle(&bundle, dir.path()).unwrap();
+        std::fs::remove_file(dir.path().join(BUNDLE_WORKFLOW_FILE)).unwrap();
+
+        let validation = validate_crystallization_bundle(dir.path()).unwrap();
+        assert!(!validation.is_ok());
+        assert!(validation
+            .problems
+            .iter()
+            .any(|problem| problem.contains("missing workflow file")));
+    }
+
+    #[test]
+    fn validate_rejects_bundle_with_unredacted_fixture() {
+        let traces = version_traces(3);
+        let artifacts = crystallize_traces(traces.clone(), CrystallizeOptions::default()).unwrap();
+        let mut bundle =
+            build_crystallization_bundle(artifacts, &traces, BundleOptions::default()).unwrap();
+        // Force a fixture to claim it is unredacted; this must trip
+        // validation so a malicious or careless producer cannot ship raw
+        // private payloads under the bundle contract.
+        bundle.manifest.fixtures[0].redacted = false;
+        let dir = tempfile::tempdir().unwrap();
+        write_crystallization_bundle(&bundle, dir.path()).unwrap();
+
+        let validation = validate_crystallization_bundle(dir.path()).unwrap();
+        assert!(!validation.is_ok());
+        assert!(validation
+            .problems
+            .iter()
+            .any(|problem| problem.contains("not marked redacted")));
+    }
+
+    #[test]
+    fn validate_rejects_unsupported_schema_version() {
+        let traces = version_traces(3);
+        let artifacts = crystallize_traces(traces.clone(), CrystallizeOptions::default()).unwrap();
+        let mut bundle =
+            build_crystallization_bundle(artifacts, &traces, BundleOptions::default()).unwrap();
+        bundle.manifest.schema_version = BUNDLE_SCHEMA_VERSION + 1;
+        let dir = tempfile::tempdir().unwrap();
+        write_crystallization_bundle(&bundle, dir.path()).unwrap();
+
+        let validation = validate_crystallization_bundle(dir.path()).unwrap();
+        assert!(!validation.is_ok());
+        assert!(validation
+            .problems
+            .iter()
+            .any(|problem| problem.contains("schema_version")));
+    }
+
+    #[test]
+    fn redacts_secret_like_values_in_fixtures() {
+        // Build secret-shaped strings at runtime so we exercise the
+        // redaction prefixes (`xoxb-`, `ghp_`, `sk-`) without checking in
+        // source that looks like a real credential to secret scanners.
+        let slack_prefix = format!("{}{}", "xo", "xb-");
+        let github_prefix = format!("{}{}", "gh", "p_");
+        let openai_prefix = "sk-".to_string();
+        let pad = "A".repeat(48);
+        let slack_secret = format!("{slack_prefix}1234567890-{pad}");
+        let github_secret = format!("{github_prefix}{pad}");
+        let openai_secret = format!("{openai_prefix}{pad}");
+
+        let mut secret_action = CrystallizationAction {
+            id: "secret".to_string(),
+            kind: "tool_call".to_string(),
+            name: "post_release_to_slack".to_string(),
+            parameters: BTreeMap::from([
+                ("slack_token".to_string(), json!(slack_secret)),
+                ("channel".to_string(), json!("#releases")),
+            ]),
+            inputs: json!({
+                "authorization": format!("Bearer {github_secret}"),
+                "version": "0.7.1",
+            }),
+            ..CrystallizationAction::default()
+        };
+        secret_action
+            .metadata
+            .insert("api_key".to_string(), json!(openai_secret));
+
+        let mut trace = CrystallizationTrace {
+            id: "trace_secret".to_string(),
+            actions: vec![secret_action],
+            ..CrystallizationTrace::default()
+        };
+        redact_trace_for_bundle(&mut trace);
+        let action = &trace.actions[0];
+        assert_eq!(
+            action.parameters.get("slack_token"),
+            Some(&json!("[redacted]"))
+        );
+        assert_eq!(action.parameters.get("channel"), Some(&json!("#releases")));
+        let inputs = action.inputs.as_object().unwrap();
+        assert_eq!(inputs.get("authorization"), Some(&json!("[redacted]")));
+        assert_eq!(inputs.get("version"), Some(&json!("0.7.1")));
+        assert_eq!(action.metadata.get("api_key"), Some(&json!("[redacted]")));
+    }
+
+    #[test]
+    fn plan_only_fixture_yields_plan_only_kind() {
+        let traces = (0..3)
+            .map(|idx| plan_only_trace(&format!("plan_{idx}"), &format!("{idx}")))
+            .collect::<Vec<_>>();
+        let artifacts = crystallize_traces(
+            traces.clone(),
+            CrystallizeOptions {
+                workflow_name: Some("plan_only_triage".to_string()),
+                ..CrystallizeOptions::default()
+            },
+        )
+        .unwrap();
+        let bundle =
+            build_crystallization_bundle(artifacts, &traces, BundleOptions::default()).unwrap();
+        assert_eq!(bundle.manifest.kind, BundleKind::PlanOnly);
+        assert_eq!(bundle.manifest.risk_level, "low");
+    }
+
+    #[test]
+    fn rejected_bundle_has_rejected_kind() {
+        let traces = vec![
+            version_trace("trace_a", "0.7.1", "release-branch", false),
+            version_trace("trace_b", "0.7.2", "main", false),
+            version_trace("trace_c", "0.7.3", "release-branch", false),
+        ];
+        let artifacts = crystallize_traces(traces.clone(), CrystallizeOptions::default()).unwrap();
+        let bundle =
+            build_crystallization_bundle(artifacts, &traces, BundleOptions::default()).unwrap();
+        assert_eq!(bundle.manifest.kind, BundleKind::Rejected);
+        assert!(bundle.manifest.candidate_id.is_empty());
+        assert!(!bundle.manifest.rejection_reasons.is_empty());
+        assert!(bundle.fixtures.is_empty());
+    }
+
+    #[test]
+    fn validate_round_trips_rejected_bundle() {
+        let traces = vec![
+            version_trace("trace_a", "0.7.1", "release-branch", false),
+            version_trace("trace_b", "0.7.2", "main", false),
+            version_trace("trace_c", "0.7.3", "release-branch", false),
+        ];
+        let artifacts = crystallize_traces(traces.clone(), CrystallizeOptions::default()).unwrap();
+        let bundle =
+            build_crystallization_bundle(artifacts, &traces, BundleOptions::default()).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        write_crystallization_bundle(&bundle, dir.path()).unwrap();
+
+        let validation = validate_crystallization_bundle(dir.path()).unwrap();
+        assert!(validation.is_ok(), "{:?}", validation.problems);
+        assert_eq!(validation.kind, BundleKind::Rejected);
+    }
+
+    #[test]
+    fn shadow_replay_fails_when_fixture_diverges() {
+        let traces = version_traces(3);
+        let artifacts = crystallize_traces(traces.clone(), CrystallizeOptions::default()).unwrap();
+        let bundle =
+            build_crystallization_bundle(artifacts, &traces, BundleOptions::default()).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        write_crystallization_bundle(&bundle, dir.path()).unwrap();
+
+        // Tamper with one redacted fixture so its action list no longer
+        // matches the candidate signature; the replay must fail without
+        // panicking.
+        let fixture_dir = dir.path().join(BUNDLE_FIXTURES_DIR);
+        let some_fixture = std::fs::read_dir(&fixture_dir)
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path();
+        let mut tampered: CrystallizationTrace =
+            serde_json::from_slice(&std::fs::read(&some_fixture).unwrap()).unwrap();
+        tampered.actions.truncate(1);
+        std::fs::write(&some_fixture, serde_json::to_vec_pretty(&tampered).unwrap()).unwrap();
+
+        let (_, shadow) = shadow_replay_bundle(dir.path()).unwrap();
+        assert!(!shadow.pass);
+        assert!(!shadow.failures.is_empty());
     }
 }

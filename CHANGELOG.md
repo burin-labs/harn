@@ -36,6 +36,19 @@ granular archaeology.
   Phase 0 command groups stored atoms into intents, discovers predicate gates,
   persists a local shipping receipt, and emits an approval-gated mock PR
   receipt with the required eval-pack hooks.
+- **Crystallization candidate bundle (#746).** Added the stable
+  `harn.crystallization.candidate.bundle` directory layout
+  (`candidate.json`, `workflow.harn`, `report.json`, `harn.eval.toml`, and
+  a redacted `fixtures/` tree) that Harn Cloud and other downstream
+  importers can consume without bespoke glue. `harn crystallize
+  --bundle BUNDLE_DIR` emits the bundle, `harn crystallize validate
+  BUNDLE_DIR` smoke-checks it (schema marker, required files, redaction,
+  logical-only secret ids), and `harn crystallize shadow BUNDLE_DIR`
+  re-runs the deterministic shadow comparison from the bundle's redacted
+  fixtures with no live side effects. Bundle redaction scrubs sensitive
+  keys (`token`, `secret`, `password`, `api_key`, `authorization`,
+  `cookie`) and secret-shaped values (`sk-…`, `ghp_…`, `xoxb-…`,
+  `AKIA…`, long credential-shaped runs) before fixtures are written.
 - **Flow predicate-language design record (#584).** Added
   `docs/src/flow-predicates.md` with explicit decisions for predicate budget
   semantics, bootstrap signing, semantic predicate determinism, and
