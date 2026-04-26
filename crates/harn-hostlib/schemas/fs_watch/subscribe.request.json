@@ -2,22 +2,37 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://harnlang.com/schemas/hostlib/fs_watch/subscribe.request.json",
   "title": "fs_watch.subscribe request",
-  "description": "Subscribe to filesystem change events under one or more paths. Returns a handle that the host uses to deliver events back over the bridge.",
+  "description": "Subscribe to filesystem change events under a root. Returns a handle; matching events are emitted as AgentEvent fs_watch batches for the current or supplied session.",
   "type": "object",
   "properties": {
+    "session_id": {
+      "type": "string",
+      "description": "Optional explicit AgentEvent session id. Defaults to the current agent session."
+    },
+    "root": {
+      "type": "string",
+      "description": "Root directory used for relative glob and gitignore matching. If paths is omitted, this is also the watched path."
+    },
     "paths": {
       "type": "array",
       "minItems": 1,
+      "description": "Optional paths to watch. Relative paths are resolved against root.",
+      "items": { "type": "string" }
+    },
+    "globs": {
+      "type": "array",
+      "description": "Optional globset patterns matched against paths relative to root.",
       "items": { "type": "string" }
     },
     "recursive": { "type": "boolean", "default": true },
     "debounce_ms": { "type": "integer", "minimum": 0, "default": 50 },
+    "respect_gitignore": { "type": "boolean", "default": false },
     "kinds": {
       "type": "array",
-      "description": "Optional filter on event kinds (`create`, `modify`, `remove`, `rename`).",
+      "description": "Optional filter on event kinds (`create`, `modify`, `remove`, `rename`). Defaults to those four mutation kinds.",
       "items": { "type": "string", "enum": ["create", "modify", "remove", "rename"] }
     }
   },
-  "required": ["paths"],
+  "anyOf": [{ "required": ["root"] }, { "required": ["paths"] }],
   "additionalProperties": false
 }

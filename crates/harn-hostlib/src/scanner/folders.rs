@@ -3,6 +3,7 @@
 //! on the Swift side.
 
 use std::collections::BTreeMap;
+use std::path::Path;
 
 use crate::scanner::extensions::folder_key;
 use crate::scanner::result::{
@@ -78,13 +79,18 @@ pub fn build_folder_records(files: &[FileRecord], symbols: &[SymbolRecord]) -> V
 
 /// Build [`ProjectMetadata`] from the file/symbol/folder lists.
 pub fn build_project_metadata(
-    root_path: &str,
+    root_path: &Path,
     files: &[FileRecord],
     test_commands: BTreeMap<String, String>,
     code_patterns: Vec<String>,
     last_scanned_at: String,
 ) -> ProjectMetadata {
-    let name = root_path.rsplit('/').next().unwrap_or("").to_string();
+    let root_path_string = root_path.to_string_lossy().replace('\\', "/");
+    let name = root_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("")
+        .to_string();
     let total_lines: usize = files.iter().map(|f| f.line_count).sum();
     let total_files = files.len();
 
@@ -118,7 +124,7 @@ pub fn build_project_metadata(
 
     ProjectMetadata {
         name,
-        root_path: root_path.to_string(),
+        root_path: root_path_string,
         languages,
         test_commands,
         detected_test_command,
@@ -259,7 +265,7 @@ mod tests {
     fn project_metadata_language_breakdown_sorted_by_lines() {
         let files = vec![file("a.rs", "rs", 10), file("b.ts", "ts", 50)];
         let proj = build_project_metadata(
-            "/repo/proj",
+            Path::new("/repo/proj"),
             &files,
             BTreeMap::new(),
             Vec::new(),
