@@ -71,6 +71,12 @@ Prefer pure-Harn packages for provider business logic. The Rust providers remain
 | Slack | <https://github.com/burin-labs/harn-slack-connector> | `harn add github.com/burin-labs/harn-slack-connector@v0.1.0` | `harn connector check . --provider slack` |
 | Linear | <https://github.com/burin-labs/harn-linear-connector> | `harn add github.com/burin-labs/harn-linear-connector@v0.1.0` | `harn connector check . --provider linear` |
 | Notion | <https://github.com/burin-labs/harn-notion-connector> | `harn add github.com/burin-labs/harn-notion-connector@v0.1.0` | `harn connector check . --provider notion --run-poll-tick` |
+| GitLab | <https://github.com/burin-labs/harn-gitlab-connector> | `harn add github.com/burin-labs/harn-gitlab-connector@v0.1.0` | `harn connector check . --provider gitlab` |
+| Forgejo | <https://github.com/burin-labs/harn-forgejo-connector> | `harn add github.com/burin-labs/harn-forgejo-connector@v0.1.0` | `harn connector check . --provider forgejo` |
+| Gitea | <https://github.com/burin-labs/harn-gitea-connector> | `harn add github.com/burin-labs/harn-gitea-connector@v0.1.0` | `harn connector check . --provider gitea` |
+| Bitbucket | <https://github.com/burin-labs/harn-bitbucket-connector> | `harn add github.com/burin-labs/harn-bitbucket-connector@v0.1.0` | `harn connector check . --provider bitbucket` |
+| SourceHut | <https://github.com/burin-labs/harn-sourcehut-connector> | `harn add github.com/burin-labs/harn-sourcehut-connector@v0.1.0` | `harn connector check . --provider sourcehut` |
+| Subversion | <https://github.com/burin-labs/harn-svn-connector> | `harn add github.com/burin-labs/harn-svn-connector@v0.1.0` | `harn connector check . --provider svn --run-poll-tick` |
 
 Community connectors are Harn packages that declare `connector_contract = "v1"` and export the connector functions below. Direct GitHub refs are enough for private or pre-registry packages; registry names such as `@burin/notion-connector` are for discoverable package-index entries.
 

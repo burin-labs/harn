@@ -98,6 +98,11 @@ Each first-party connector repo should publish:
 | Linear | <https://github.com/burin-labs/harn-linear-connector> | `harn add github.com/burin-labs/harn-linear-connector@v0.1.0` | `harn connector check . --provider linear` | Webhook signing secret; optional API key/access token for outbound GraphQL. | `Issue`, `Comment`, `IssueLabel`, `Project`, `Cycle`, `Customer`, `CustomerRequest`; outbound GraphQL. |
 | Notion | <https://github.com/burin-labs/harn-notion-connector> | `harn add github.com/burin-labs/harn-notion-connector@v0.1.0` | `harn connector check . --provider notion --run-poll-tick` | Webhook verification token; outbound API token. Notion integration capabilities depend on pages/databases/comments used. | Webhook events such as subscription verification, page updates, comments, data source schema updates; `poll_tick` database/page watchers; outbound Notion API via `notion-sdk-harn`. |
 | GitLab | <https://github.com/burin-labs/harn-gitlab-connector> | `harn add github.com/burin-labs/harn-gitlab-connector@v0.1.0` | `harn connector check . --provider gitlab` | Webhook signing secret (plain shared-secret `X-Gitlab-Token`, not HMAC); for outbound, an OAuth2 access token, PAT, or project/group access token with `api` scope. | `push`, `tag_push`, `merge_request`, `note`, `issue`, `pipeline`; outbound REST (notes, MR update/changes/approve, commit status, repository files), GraphQL passthrough, and OAuth2 helpers. |
+| Forgejo | <https://github.com/burin-labs/harn-forgejo-connector> | `harn add github.com/burin-labs/harn-forgejo-connector@v0.1.0` | `harn connector check . --provider forgejo` | Webhook signing secret verified as HMAC-SHA256 from `X-Gitea-Signature`; for outbound, a user, organization, or repository access token accepted by the instance API. | `push`, `pull_request`, `issues`, `issue_comment`, `release`, `repository`, `star`; outbound REST for comments, PR updates, commit statuses, repository contents, and raw API passthrough. |
+| Gitea | <https://github.com/burin-labs/harn-gitea-connector> | `harn add github.com/burin-labs/harn-gitea-connector@v0.1.0` | `harn connector check . --provider gitea` | Webhook signing secret verified as HMAC-SHA256 from `X-Gitea-Signature`; for outbound, an access token scoped to the target self-hosted instance. | `push`, `pull_request`, `issues`, `issue_comment`, `release`, `repository`, `star`; outbound REST for comments, PR updates, commit statuses, repository contents, and raw API passthrough. |
+| Bitbucket | <https://github.com/burin-labs/harn-bitbucket-connector> | `harn add github.com/burin-labs/harn-bitbucket-connector@v0.1.0` | `harn connector check . --provider bitbucket` | Optional webhook signing secret verified as HMAC-SHA256 from `X-Hub-Signature`; `X-Hook-UUID` and `X-Request-UUID` are preserved for dedupe. For outbound, app password, OAuth2 token, or Data Center PAT. | Cloud and Data Center `repo:push`, `pullrequest:*`, `issue:*`, `repo:commit_status_*`; outbound PR comments/updates, commit statuses, repository file fetches, and raw API passthrough. |
+| SourceHut | <https://github.com/burin-labs/harn-sourcehut-connector> | `harn add github.com/burin-labs/harn-sourcehut-connector@v0.1.0` | `harn connector check . --provider sourcehut` | Webhook public key verified with Ed25519 over the raw payload; outbound GraphQL/REST calls use an OAuth2 token or PAT. | Repository push/update events, todo/ticket changes, build notifications, mailing-list oriented message metadata; outbound GraphQL/REST passthrough. |
+| Subversion | <https://github.com/burin-labs/harn-svn-connector> | `harn add github.com/burin-labs/harn-svn-connector@v0.1.0` | `harn connector check . --provider svn --run-poll-tick` | Optional post-commit hook HMAC secret; polling credentials are repository URL plus username/password, SSH key, or ambient host-managed credential helper. | `commit`, `branch`, `tag`, `property_change`; webhook-style post-commit normalization plus `poll_tick` revision scanning for repositories that cannot install hooks. |
 
 Direct GitHub installs are the MVP path. Registry names such as
 `@burin/notion-connector` should be used once the hosted first-party index is
@@ -156,6 +161,31 @@ secrets = { verification_token = "notion/verification-token" }
 ```
 
 See `examples/triggers/notion-database-watcher`.
+
+### Git forge quickstart demo
+
+GitHub, GitLab, and Forgejo can be wired side by side with only provider
+package changes. Each provider owns its verification and outbound API details
+inside its pure-Harn connector package:
+
+```toml
+[dependencies]
+harn-github-connector = { git = "https://github.com/burin-labs/harn-github-connector", rev = "v0.1.0" }
+harn-gitlab-connector = { git = "https://github.com/burin-labs/harn-gitlab-connector", rev = "v0.1.0" }
+harn-forgejo-connector = { git = "https://github.com/burin-labs/harn-forgejo-connector", rev = "v0.1.0" }
+
+[[providers]]
+id = "github"
+connector = { harn = "harn-github-connector" }
+
+[[providers]]
+id = "gitlab"
+connector = { harn = "harn-gitlab-connector" }
+
+[[providers]]
+id = "forgejo"
+connector = { harn = "harn-forgejo-connector" }
+```
 
 ## Community connector discovery
 

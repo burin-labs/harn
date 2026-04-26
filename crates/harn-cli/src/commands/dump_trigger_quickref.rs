@@ -12,6 +12,76 @@ use harn_vm::{
     SignatureVerificationMetadata,
 };
 
+struct FirstPartyConnectorPackage {
+    provider: &'static str,
+    package_url: &'static str,
+    install: &'static str,
+    contract_check: &'static str,
+}
+
+const FIRST_PARTY_CONNECTOR_PACKAGES: &[FirstPartyConnectorPackage] = &[
+    FirstPartyConnectorPackage {
+        provider: "GitHub",
+        package_url: "https://github.com/burin-labs/harn-github-connector",
+        install: "harn add github.com/burin-labs/harn-github-connector@v0.1.0",
+        contract_check: "harn connector check . --provider github",
+    },
+    FirstPartyConnectorPackage {
+        provider: "Slack",
+        package_url: "https://github.com/burin-labs/harn-slack-connector",
+        install: "harn add github.com/burin-labs/harn-slack-connector@v0.1.0",
+        contract_check: "harn connector check . --provider slack",
+    },
+    FirstPartyConnectorPackage {
+        provider: "Linear",
+        package_url: "https://github.com/burin-labs/harn-linear-connector",
+        install: "harn add github.com/burin-labs/harn-linear-connector@v0.1.0",
+        contract_check: "harn connector check . --provider linear",
+    },
+    FirstPartyConnectorPackage {
+        provider: "Notion",
+        package_url: "https://github.com/burin-labs/harn-notion-connector",
+        install: "harn add github.com/burin-labs/harn-notion-connector@v0.1.0",
+        contract_check: "harn connector check . --provider notion --run-poll-tick",
+    },
+    FirstPartyConnectorPackage {
+        provider: "GitLab",
+        package_url: "https://github.com/burin-labs/harn-gitlab-connector",
+        install: "harn add github.com/burin-labs/harn-gitlab-connector@v0.1.0",
+        contract_check: "harn connector check . --provider gitlab",
+    },
+    FirstPartyConnectorPackage {
+        provider: "Forgejo",
+        package_url: "https://github.com/burin-labs/harn-forgejo-connector",
+        install: "harn add github.com/burin-labs/harn-forgejo-connector@v0.1.0",
+        contract_check: "harn connector check . --provider forgejo",
+    },
+    FirstPartyConnectorPackage {
+        provider: "Gitea",
+        package_url: "https://github.com/burin-labs/harn-gitea-connector",
+        install: "harn add github.com/burin-labs/harn-gitea-connector@v0.1.0",
+        contract_check: "harn connector check . --provider gitea",
+    },
+    FirstPartyConnectorPackage {
+        provider: "Bitbucket",
+        package_url: "https://github.com/burin-labs/harn-bitbucket-connector",
+        install: "harn add github.com/burin-labs/harn-bitbucket-connector@v0.1.0",
+        contract_check: "harn connector check . --provider bitbucket",
+    },
+    FirstPartyConnectorPackage {
+        provider: "SourceHut",
+        package_url: "https://github.com/burin-labs/harn-sourcehut-connector",
+        install: "harn add github.com/burin-labs/harn-sourcehut-connector@v0.1.0",
+        contract_check: "harn connector check . --provider sourcehut",
+    },
+    FirstPartyConnectorPackage {
+        provider: "Subversion",
+        package_url: "https://github.com/burin-labs/harn-svn-connector",
+        install: "harn add github.com/burin-labs/harn-svn-connector@v0.1.0",
+        contract_check: "harn connector check . --provider svn --run-poll-tick",
+    },
+];
+
 pub(crate) fn run(output_path: &str, check_only: bool) {
     let generated = generate_file();
     let path = Path::new(output_path);
@@ -85,10 +155,13 @@ fn generate_file() -> String {
     out.push_str("Prefer pure-Harn packages for provider business logic. The Rust providers remain compatibility defaults while the pure-Harn packages soak.\n\n");
     out.push_str("| Provider | Package | Install | Contract check |\n");
     out.push_str("|---|---|---|---|\n");
-    out.push_str("| GitHub | <https://github.com/burin-labs/harn-github-connector> | `harn add github.com/burin-labs/harn-github-connector@v0.1.0` | `harn connector check . --provider github` |\n");
-    out.push_str("| Slack | <https://github.com/burin-labs/harn-slack-connector> | `harn add github.com/burin-labs/harn-slack-connector@v0.1.0` | `harn connector check . --provider slack` |\n");
-    out.push_str("| Linear | <https://github.com/burin-labs/harn-linear-connector> | `harn add github.com/burin-labs/harn-linear-connector@v0.1.0` | `harn connector check . --provider linear` |\n");
-    out.push_str("| Notion | <https://github.com/burin-labs/harn-notion-connector> | `harn add github.com/burin-labs/harn-notion-connector@v0.1.0` | `harn connector check . --provider notion --run-poll-tick` |\n\n");
+    for package in FIRST_PARTY_CONNECTOR_PACKAGES {
+        out.push_str(&format!(
+            "| {} | <{}> | `{}` | `{}` |\n",
+            package.provider, package.package_url, package.install, package.contract_check
+        ));
+    }
+    out.push('\n');
     out.push_str("Community connectors are Harn packages that declare `connector_contract = \"v1\"` and export the connector functions below. Direct GitHub refs are enough for private or pre-registry packages; registry names such as `@burin/notion-connector` are for discoverable package-index entries.\n\n");
 
     out.push_str("## Connector Contract V1\n\n");
@@ -231,6 +304,8 @@ mod tests {
         assert!(out.contains("| `github` | `webhook` | `GitHubEventPayload` |"));
         assert!(out.contains("Connector Contract V1"));
         assert!(out.contains("harn connector check ."));
+        assert!(out.contains("harn-forgejo-connector"));
+        assert!(out.contains("harn-svn-connector"));
     }
 
     #[test]

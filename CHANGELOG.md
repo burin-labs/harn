@@ -25,6 +25,11 @@ granular archaeology.
   `HARN_ORCHESTRATOR_API_KEYS` so trigger fire/list/replay, queue,
   DLQ, inspect, trust-query, and secret-scan tools remain behind the
   same bearer or `x-api-key` auth used by the orchestrator runtime.
+- **Alternate git forge connector catalog (#305).** Registers the
+  first-party pure-Harn Forgejo, Gitea, Bitbucket, SourceHut, and SVN
+  connector package repos alongside GitHub and GitLab in the connector
+  catalog, and includes them in the generated trigger quick reference
+  package table.
 - **Tool-call timing on ACP `tool_call_update` (#689).** Terminal
   `tool_call_update` events now carry `durationMs` (the parse-to-finish
   total — model emits the call → tool result is appended) and
