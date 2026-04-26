@@ -42,18 +42,35 @@ pub struct FsWatchEvent {
 /// execution. Bridge-facing worker updates still derive a string status
 /// from these variants, but the runtime no longer passes raw status
 /// strings around internally.
+///
+/// `Spawned`/`Completed`/`Failed`/`Cancelled` are the four terminal-or-start
+/// states. `Progressed` is fired on intermediate milestones (e.g. a
+/// retriggerable worker resuming from `awaiting_input`, or a workflow
+/// stage completing without ending the worker). `WaitingForInput` covers
+/// retriggerable workers that finish a cycle but stay alive pending the
+/// next host-supplied trigger payload.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub enum WorkerEvent {
     WorkerSpawned,
+    WorkerProgressed,
+    WorkerWaitingForInput,
     WorkerCompleted,
     WorkerFailed,
     WorkerCancelled,
 }
 
 impl WorkerEvent {
+    /// Wire-level status string used by bridge `worker_update` payloads
+    /// and ACP `worker_update` session updates. The four canonical
+    /// states are mirrored from harn's internal worker `status` field
+    /// (`running`/`completed`/`failed`/`cancelled`), and the two newer
+    /// lifecycle states pick names that don't collide with any existing
+    /// status string.
     pub fn as_status(self) -> &'static str {
         match self {
             Self::WorkerSpawned => "running",
+            Self::WorkerProgressed => "progressed",
+            Self::WorkerWaitingForInput => "awaiting_input",
             Self::WorkerCompleted => "completed",
             Self::WorkerFailed => "failed",
             Self::WorkerCancelled => "cancelled",
@@ -63,10 +80,23 @@ impl WorkerEvent {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::WorkerSpawned => "WorkerSpawned",
+            Self::WorkerProgressed => "WorkerProgressed",
+            Self::WorkerWaitingForInput => "WorkerWaitingForInput",
             Self::WorkerCompleted => "WorkerCompleted",
             Self::WorkerFailed => "WorkerFailed",
             Self::WorkerCancelled => "WorkerCancelled",
         }
+    }
+
+    /// True for lifecycle events that mean the worker has reached a
+    /// final, non-resumable state. Retriggerable awaiting and
+    /// progressed milestones are *not* terminal — the worker keeps
+    /// running or is waiting for a trigger.
+    pub fn is_terminal(self) -> bool {
+        matches!(
+            self,
+            Self::WorkerCompleted | Self::WorkerFailed | Self::WorkerCancelled
+        )
     }
 }
 
@@ -358,6 +388,32 @@ pub enum AgentEvent {
         subscription_id: String,
         events: Vec<FsWatchEvent>,
     },
+    /// Lifecycle update for a delegated/background worker. Carries the
+    /// canonical typed `event` variant alongside the worker's current
+    /// `status` string and the structured `metadata` payload that
+    /// `worker_bridge_metadata` builds (task, mode, timing, child
+    /// run/snapshot paths, audit-session, etc.). The `audit` field is
+    /// the same `MutationSessionRecord` JSON serialization carried on
+    /// the bridge wire so ACP/A2A consumers don't need to re-derive it.
+    ///
+    /// One-to-one with the bridge-side `worker_update` session-update
+    /// notification: ACP and A2A adapters subscribe to this variant
+    /// and translate it into their respective wire formats. The
+    /// `session_id` is the parent agent session that owns the worker
+    /// (i.e. the session whose VM spawned the worker), so a single
+    /// host stays subscribed to the same sink for both message and
+    /// worker traffic.
+    WorkerUpdate {
+        session_id: String,
+        worker_id: String,
+        worker_name: String,
+        worker_task: String,
+        worker_mode: String,
+        event: WorkerEvent,
+        status: String,
+        metadata: serde_json::Value,
+        audit: Option<serde_json::Value>,
+    },
 }
 
 impl AgentEvent {
@@ -381,7 +437,8 @@ impl AgentEvent {
             | Self::ToolSearchResult { session_id, .. }
             | Self::TranscriptCompacted { session_id, .. }
             | Self::Handoff { session_id, .. }
-            | Self::FsWatch { session_id, .. } => session_id,
+            | Self::FsWatch { session_id, .. }
+            | Self::WorkerUpdate { session_id, .. } => session_id,
         }
     }
 }
@@ -1061,6 +1118,143 @@ mod tests {
         };
         let json = serde_json::to_value(&event).unwrap();
         assert!(json.get("executor").is_none(), "got: {json}");
+    }
+
+    #[test]
+    fn worker_event_status_strings_cover_all_variants() {
+        // Wire-level status strings flow into both bridge `worker_update`
+        // payloads and ACP `session/update` notifications. Pinning every
+        // variant here so a future addition can't silently land without
+        // a docs/wire decision.
+        assert_eq!(WorkerEvent::WorkerSpawned.as_status(), "running");
+        assert_eq!(WorkerEvent::WorkerProgressed.as_status(), "progressed");
+        assert_eq!(
+            WorkerEvent::WorkerWaitingForInput.as_status(),
+            "awaiting_input"
+        );
+        assert_eq!(WorkerEvent::WorkerCompleted.as_status(), "completed");
+        assert_eq!(WorkerEvent::WorkerFailed.as_status(), "failed");
+        assert_eq!(WorkerEvent::WorkerCancelled.as_status(), "cancelled");
+
+        for terminal in [
+            WorkerEvent::WorkerCompleted,
+            WorkerEvent::WorkerFailed,
+            WorkerEvent::WorkerCancelled,
+        ] {
+            assert!(terminal.is_terminal(), "{terminal:?} should be terminal");
+        }
+        for non_terminal in [
+            WorkerEvent::WorkerSpawned,
+            WorkerEvent::WorkerProgressed,
+            WorkerEvent::WorkerWaitingForInput,
+        ] {
+            assert!(
+                !non_terminal.is_terminal(),
+                "{non_terminal:?} should not be terminal"
+            );
+        }
+    }
+
+    #[test]
+    fn worker_update_event_routes_through_session_keyed_sink() {
+        // Worker lifecycle events ride the same session-keyed
+        // `AgentEventSink` registry as message and tool events. This
+        // is the canonical path ACP and A2A subscribe to — gate it
+        // here so a registry-routing regression breaks loudly.
+        reset_all_sinks();
+        let captured: Arc<Mutex<Vec<AgentEvent>>> = Arc::new(Mutex::new(Vec::new()));
+        struct CapturingSink(Arc<Mutex<Vec<AgentEvent>>>);
+        impl AgentEventSink for CapturingSink {
+            fn handle_event(&self, event: &AgentEvent) {
+                self.0
+                    .lock()
+                    .expect("captured sink mutex poisoned")
+                    .push(event.clone());
+            }
+        }
+        register_sink(
+            "worker-session-1",
+            Arc::new(CapturingSink(captured.clone())),
+        );
+        emit_event(&AgentEvent::WorkerUpdate {
+            session_id: "worker-session-1".into(),
+            worker_id: "worker_42".into(),
+            worker_name: "review_captain".into(),
+            worker_task: "review pr".into(),
+            worker_mode: "delegated_stage".into(),
+            event: WorkerEvent::WorkerWaitingForInput,
+            status: WorkerEvent::WorkerWaitingForInput.as_status().to_string(),
+            metadata: serde_json::json!({"awaiting_started_at": "0193..."}),
+            audit: None,
+        });
+        // Other sessions don't receive cross-talk.
+        emit_event(&AgentEvent::WorkerUpdate {
+            session_id: "other-session".into(),
+            worker_id: "w2".into(),
+            worker_name: "n2".into(),
+            worker_task: "t2".into(),
+            worker_mode: "delegated_stage".into(),
+            event: WorkerEvent::WorkerCompleted,
+            status: "completed".into(),
+            metadata: serde_json::json!({}),
+            audit: None,
+        });
+        let received = captured.lock().unwrap().clone();
+        assert_eq!(received.len(), 1, "got: {received:?}");
+        match &received[0] {
+            AgentEvent::WorkerUpdate {
+                session_id,
+                worker_id,
+                event,
+                status,
+                ..
+            } => {
+                assert_eq!(session_id, "worker-session-1");
+                assert_eq!(worker_id, "worker_42");
+                assert_eq!(*event, WorkerEvent::WorkerWaitingForInput);
+                assert_eq!(status, "awaiting_input");
+            }
+            other => panic!("expected WorkerUpdate, got {other:?}"),
+        }
+        reset_all_sinks();
+    }
+
+    #[test]
+    fn worker_update_event_serializes_to_canonical_shape() {
+        // Persisted event-log entries flatten the AgentEvent envelope,
+        // so the WorkerUpdate variant must serialize with a `type` of
+        // `worker_update` and the worker fields directly on the
+        // top-level object (matching the `#[serde(tag = "type", ...)]`
+        // shape the rest of AgentEvent uses).
+        let event = AgentEvent::WorkerUpdate {
+            session_id: "s".into(),
+            worker_id: "w".into(),
+            worker_name: "n".into(),
+            worker_task: "t".into(),
+            worker_mode: "delegated_stage".into(),
+            event: WorkerEvent::WorkerProgressed,
+            status: "progressed".into(),
+            metadata: serde_json::json!({"started_at": "0193..."}),
+            audit: Some(serde_json::json!({"run_id": "run_x"})),
+        };
+        let value = serde_json::to_value(&event).unwrap();
+        assert_eq!(value["type"], "worker_update");
+        assert_eq!(value["session_id"], "s");
+        assert_eq!(value["worker_id"], "w");
+        assert_eq!(value["status"], "progressed");
+        assert_eq!(value["audit"]["run_id"], "run_x");
+
+        // Round-trip: the persisted event log must deserialize the
+        // canonical shape back into the typed variant so replay
+        // tooling can re-derive lifecycle state offline.
+        let recovered: AgentEvent = serde_json::from_value(value).unwrap();
+        match recovered {
+            AgentEvent::WorkerUpdate {
+                event: recovered_event,
+                ..
+            } => assert_eq!(recovered_event, WorkerEvent::WorkerProgressed),
+            other => panic!("expected WorkerUpdate, got {other:?}"),
+        }
     }
 
     #[test]

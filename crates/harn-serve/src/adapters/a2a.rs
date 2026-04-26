@@ -428,6 +428,18 @@ impl A2aServer {
 
     async fn run_task_to_completion(self: &Arc<Self>, task: &PreparedTask) {
         self.transition(&task.id, TaskStatus::Working);
+        // Subscribe a per-task `AgentEventSink` that translates worker
+        // lifecycle events into A2A task events. The session id used by
+        // the inner dispatch (set via `agent_session_id` on the
+        // CallRequest) must match — both sides are derived from the
+        // task id so a single key wires emit -> sink -> task stream.
+        let session_id = a2a_worker_session_id(&task.id);
+        let sink: Arc<dyn harn_vm::agent_events::AgentEventSink> = Arc::new(A2aWorkerSink {
+            task_id: task.id.clone(),
+            tasks: self.tasks.clone(),
+        });
+        harn_vm::agent_events::register_sink(session_id.clone(), sink);
+
         let result = self
             .executor
             .call(CallRequest {
@@ -441,8 +453,13 @@ impl A2aServer {
                 parent_span_id: None,
                 metadata: BTreeMap::new(),
                 cancel_token: Some(task.cancel_token.clone()),
+                agent_session_id: Some(session_id.clone()),
             })
             .await;
+
+        // Drop the sink so a re-used task id can't deliver to the old
+        // task's event stream.
+        harn_vm::agent_events::clear_session_sinks(&session_id);
 
         if self.is_cancelled(&task.id) {
             return;
@@ -1119,6 +1136,72 @@ fn derived_agent_name(catalog: &ExportCatalog) -> String {
         .to_string()
 }
 
+/// Agent-session id used by the A2A adapter when scoping worker events
+/// to a task. Prefixed so it can't collide with a user-supplied
+/// session id and so the sink registry can be inspected for A2A entries
+/// in tests.
+fn a2a_worker_session_id(task_id: &str) -> String {
+    format!("a2a:{task_id}")
+}
+
+/// `AgentEventSink` implementation that publishes worker lifecycle
+/// updates onto an A2A task's event stream. Other variants are
+/// deliberately ignored — only worker-scoped events are first-class on
+/// the A2A surface today, and forwarding chat/tool chunks would mix
+/// concerns.
+struct A2aWorkerSink {
+    task_id: String,
+    tasks: TaskStore,
+}
+
+impl harn_vm::agent_events::AgentEventSink for A2aWorkerSink {
+    fn handle_event(&self, event: &harn_vm::agent_events::AgentEvent) {
+        let harn_vm::agent_events::AgentEvent::WorkerUpdate {
+            worker_id,
+            worker_name,
+            worker_task,
+            worker_mode,
+            event,
+            status,
+            metadata,
+            audit,
+            ..
+        } = event
+        else {
+            return;
+        };
+        let mut payload = json!({
+            "type": "worker_update",
+            "taskId": self.task_id,
+            "workerId": worker_id,
+            "workerName": worker_name,
+            "workerTask": worker_task,
+            "workerMode": worker_mode,
+            "event": event.as_str(),
+            "status": status,
+            "terminal": event.is_terminal(),
+            "metadata": metadata,
+        });
+        if let Some(audit) = audit {
+            payload["audit"] = audit.clone();
+        }
+        let task_for_push = {
+            let mut tasks = self.tasks.lock().expect("tasks poisoned");
+            let Some(task) = tasks.get_mut(&self.task_id) else {
+                return;
+            };
+            publish_locked(task, payload);
+            task_to_json(task)
+        };
+        // No `deliver_push` here: worker_update events stream live to
+        // active subscribers but don't fire push-config webhooks. Push
+        // delivery is reserved for the canonical task lifecycle
+        // transitions so high-volume worker traffic doesn't flood
+        // outbound HTTP endpoints.
+        let _ = task_for_push;
+    }
+}
+
 struct A2aPrepareError {
     code: i64,
     message: String,
@@ -1361,5 +1444,163 @@ pub fn triage(task: string) -> string {
 
         assert_eq!(card["signatures"][0]["alg"], "HS256");
         assert!(card["signatures"][0]["signature"].as_str().unwrap().len() > 16);
+    }
+
+    use harn_vm::agent_events::AgentEventSink as _;
+
+    #[test]
+    fn a2a_worker_sink_publishes_worker_update_to_task_stream() {
+        // The per-task `AgentEventSink` translates canonical worker
+        // lifecycle events into A2A task events of type
+        // `worker_update`. This is the A2A side of the ACP/A2A parity
+        // contract — same canonical AgentEvent, mapped onto each
+        // protocol's wire shape from a single source.
+        let task_id = "task-1".to_string();
+        let task = TaskState {
+            id: task_id.clone(),
+            context_id: None,
+            status: TaskStatus::Working,
+            history: Vec::new(),
+            metadata: BTreeMap::new(),
+            push_configs: Vec::new(),
+            events: Vec::new(),
+            subscribers: Vec::new(),
+            cancel_token: None,
+        };
+        let tasks: TaskStore = Arc::new(Mutex::new(HashMap::from([(task_id.clone(), task)])));
+        let sink = super::A2aWorkerSink {
+            task_id: task_id.clone(),
+            tasks: tasks.clone(),
+        };
+
+        sink.handle_event(&harn_vm::agent_events::AgentEvent::WorkerUpdate {
+            session_id: super::a2a_worker_session_id(&task_id),
+            worker_id: "worker-9".into(),
+            worker_name: "review".into(),
+            worker_task: "review pr".into(),
+            worker_mode: "delegated_stage".into(),
+            event: harn_vm::agent_events::WorkerEvent::WorkerWaitingForInput,
+            status: "awaiting_input".into(),
+            metadata: serde_json::json!({"awaiting_started_at": "0193..."}),
+            audit: Some(serde_json::json!({"run_id": "run_x"})),
+        });
+
+        // Non-worker events are ignored — the sink is intentionally
+        // narrow so chat/tool chunks don't bleed into the A2A task
+        // stream.
+        sink.handle_event(&harn_vm::agent_events::AgentEvent::AgentMessageChunk {
+            session_id: super::a2a_worker_session_id(&task_id),
+            content: "ignored".into(),
+        });
+
+        let tasks = tasks.lock().expect("tasks");
+        let task = tasks.get(&task_id).expect("task");
+        let worker_events: Vec<&JsonValue> = task
+            .events
+            .iter()
+            .filter(|event| event.get("type").and_then(JsonValue::as_str) == Some("worker_update"))
+            .collect();
+        assert_eq!(worker_events.len(), 1, "events: {:?}", task.events);
+        let event = worker_events[0];
+        assert_eq!(event["taskId"], task_id);
+        assert_eq!(event["workerId"], "worker-9");
+        assert_eq!(event["status"], "awaiting_input");
+        assert_eq!(event["terminal"], false);
+        assert_eq!(event["audit"]["run_id"], "run_x");
+    }
+
+    #[tokio::test]
+    async fn worker_event_emitted_during_dispatch_streams_to_task_subscribers() {
+        // End-to-end: a Harn function that emits a `WorkerUpdate`
+        // through the canonical sink registry must surface as a task
+        // event on the A2A SSE stream. This is the integration that
+        // closes harn#703's A2A leg — verifying the dispatch wraps
+        // execution in the agent-session id the sink subscribes to.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let script = dir.path().join("server.harn");
+        std::fs::write(
+            &script,
+            r#"
+pub fn run(task: string) -> string {
+  return task
+}
+"#,
+        )
+        .expect("write script");
+        let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
+        let server = Arc::new(A2aServer::new(A2aServerConfig::new(core)));
+
+        let task_id = "task-stream-worker".to_string();
+        let session_id = super::a2a_worker_session_id(&task_id);
+        // Pre-stage a task so the A2aWorkerSink has somewhere to
+        // deliver. Subscribe before emitting so the SSE channel
+        // captures the event live.
+        {
+            let mut tasks = server.tasks.lock().expect("tasks");
+            tasks.insert(
+                task_id.clone(),
+                TaskState {
+                    id: task_id.clone(),
+                    context_id: None,
+                    status: TaskStatus::Working,
+                    history: Vec::new(),
+                    metadata: BTreeMap::new(),
+                    push_configs: Vec::new(),
+                    events: Vec::new(),
+                    subscribers: Vec::new(),
+                    cancel_token: None,
+                },
+            );
+        }
+        let mut subscriber = server.subscribe(&task_id).expect("subscriber");
+        let sink: Arc<dyn harn_vm::agent_events::AgentEventSink> = Arc::new(super::A2aWorkerSink {
+            task_id: task_id.clone(),
+            tasks: server.tasks.clone(),
+        });
+        harn_vm::agent_events::register_sink(session_id.clone(), sink);
+        // Push the session so emit_event routes correctly even though
+        // we're not going through the full dispatch wrapper here. In
+        // production, `invoke_function` does this via the
+        // `agent_session_id` request field.
+        harn_vm::agent_sessions::open_or_create(Some(session_id.clone()));
+        let _guard = harn_vm::agent_sessions::enter_current_session(session_id.clone());
+
+        harn_vm::agent_events::emit_event(&harn_vm::agent_events::AgentEvent::WorkerUpdate {
+            session_id: session_id.clone(),
+            worker_id: "w-1".into(),
+            worker_name: "review".into(),
+            worker_task: "review pr".into(),
+            worker_mode: "delegated_stage".into(),
+            event: harn_vm::agent_events::WorkerEvent::WorkerCompleted,
+            status: "completed".into(),
+            metadata: serde_json::json!({"finished_at": "0193..."}),
+            audit: None,
+        });
+
+        let event = tokio::time::timeout(std::time::Duration::from_secs(2), subscriber.next())
+            .await
+            .expect("worker event emitted")
+            .expect("subscriber stream open");
+        assert_eq!(
+            event.pointer("/result/type").and_then(JsonValue::as_str),
+            Some("worker_update"),
+            "got: {event}"
+        );
+        assert_eq!(
+            event.pointer("/result/event").and_then(JsonValue::as_str),
+            Some("WorkerCompleted")
+        );
+        assert_eq!(
+            event.pointer("/result/status").and_then(JsonValue::as_str),
+            Some("completed")
+        );
+        assert_eq!(
+            event
+                .pointer("/result/terminal")
+                .and_then(JsonValue::as_bool),
+            Some(true)
+        );
+
+        harn_vm::agent_events::clear_session_sinks(&session_id);
     }
 }

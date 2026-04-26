@@ -89,6 +89,79 @@ content. Those payloads include lifecycle timing, child run/snapshot paths,
 and audit-session metadata so hosts can render background work without
 scraping plain-text logs.
 
+### Lifecycle states
+
+The runtime emits one of six typed lifecycle events per worker
+transition. The wire `status` string is the same value harn writes to
+the worker's persisted state, so it round-trips through the bridge
+unchanged:
+
+| Event                   | `status`         | Meaning                                                                                                            |
+| ----------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `WorkerSpawned`         | `running`        | A worker (delegated stage, workflow, or sub-agent) has begun a new cycle.                                          |
+| `WorkerProgressed`      | `progressed`     | A retriggerable worker is resuming after `worker_trigger`. Followed shortly by another `running` from the new cycle. |
+| `WorkerWaitingForInput` | `awaiting_input` | A retriggerable worker has finished its current cycle and is parked waiting for the next host trigger payload.     |
+| `WorkerCompleted`       | `completed`      | A non-retriggerable worker has finished successfully (terminal).                                                   |
+| `WorkerFailed`          | `failed`         | A worker terminated with an error (terminal).                                                                      |
+| `WorkerCancelled`       | `cancelled`      | A worker was cancelled via `close_agent` or upstream cancellation (terminal).                                      |
+
+The three terminal events end the worker's lifetime. `Progressed` and
+`WaitingForInput` are explicitly non-terminal — observers should
+expect more events on the same `worker_id` after they fire.
+
+### `worker_update` notification shape
+
+ACP and A2A adapters subscribe to the canonical `AgentEvent::WorkerUpdate`
+variant and translate it into their respective wire formats from one
+typed source. ACP emits a `session/update` with `sessionUpdate:
+"worker_update"`:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "session/update",
+  "params": {
+    "sessionId": "session_123",
+    "update": {
+      "sessionUpdate": "worker_update",
+      "workerId": "worker_abc",
+      "workerName": "review_captain",
+      "workerTask": "Review PR #42",
+      "workerMode": "delegated_stage",
+      "event": "WorkerWaitingForInput",
+      "status": "awaiting_input",
+      "terminal": false,
+      "metadata": {
+        "task": "Review PR #42",
+        "mode": "delegated_stage",
+        "started_at": "0193...",
+        "finished_at": null,
+        "awaiting_started_at": "0193...",
+        "child_run_id": "run_xyz",
+        "child_run_path": ".harn-runs/run_xyz",
+        "snapshot_path": ".harn/workers/worker_abc.json",
+        "audit": { "...": "MutationSessionRecord" },
+        "error": null
+      },
+      "audit": { "...": "MutationSessionRecord" }
+    }
+  }
+}
+```
+
+The `event` discriminator is the typed `WorkerEvent` variant name; the
+`status` field is the same lower-case value the legacy bridge `status`
+field carried. `terminal` is a derived hint so clients can decide whether
+to retain the worker in their tracking UI without parsing the event
+name.
+
+A2A surfaces the same event as a task-stream entry of type
+`worker_update`, scoped to the task whose dispatch spawned the worker.
+The payload mirrors the ACP shape (worker fields under camelCase keys
+plus `metadata`/`audit`). Subscribers receive these alongside the
+existing `status`/`message` events on the SSE / push-notification
+streams.
+
 ## Daemon idle/resume notifications
 
 Daemon agents stay alive after text-only turns and wait for host activity with adaptive

@@ -7,6 +7,27 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
+## v0.7.43
+
+### Added
+
+- **First-class worker lifecycle events on ACP and A2A (#703).** Adds
+  two new typed `WorkerEvent` variants (`WorkerProgressed`,
+  `WorkerWaitingForInput`) and surfaces every worker lifecycle
+  transition through a canonical `AgentEvent::WorkerUpdate`. The ACP
+  adapter now translates worker updates into `session/update`
+  notifications with a `worker_update` discriminator carrying the
+  typed event name, status string, terminal hint, full bridge metadata,
+  and audit-session record. The A2A adapter registers a per-task
+  `AgentEventSink` that publishes `worker_update` events onto the
+  task's SSE / replay event stream, scoped via a new
+  `agent_session_id` field on `CallRequest` so the sink delivers only
+  to the originating task. Retriggerable workers now emit
+  `WaitingForInput` instead of going silent when a cycle ends, and
+  `worker_trigger` emits `Progressed` on resume so observers see the
+  re-arming transition. Bridge protocol docs document the new
+  lifecycle states and wire shape.
+
 ## v0.7.42
 
 ### Added

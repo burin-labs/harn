@@ -300,6 +300,36 @@ impl AgentEventSink for AcpAgentEventSink {
                     },
                 }));
             }
+            AgentEvent::WorkerUpdate {
+                session_id,
+                worker_id,
+                worker_name,
+                worker_task,
+                worker_mode,
+                event,
+                status,
+                metadata,
+                audit,
+            } => {
+                let mut update = serde_json::json!({
+                    "sessionUpdate": "worker_update",
+                    "workerId": worker_id,
+                    "workerName": worker_name,
+                    "workerTask": worker_task,
+                    "workerMode": worker_mode,
+                    "event": event.as_str(),
+                    "status": status,
+                    "terminal": event.is_terminal(),
+                    "metadata": metadata,
+                });
+                if let Some(audit) = audit {
+                    update["audit"] = audit.clone();
+                }
+                self.write_notification(serde_json::json!({
+                    "sessionId": session_id,
+                    "update": update,
+                }));
+            }
             // Pipeline-loop milestones with no canonical ACP session/update
             // mapping; deliberately not forwarded.
             AgentEvent::TurnStart { .. }
@@ -323,6 +353,102 @@ mod tests {
     use tokio::sync::mpsc;
 
     use super::{AcpAgentEventSink, AcpOutput};
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn worker_update_serializes_to_session_update_with_lifecycle_metadata() {
+        // Every typed `WorkerEvent` must round-trip onto the ACP
+        // `session/update` stream as a `worker_update` entry. The
+        // adapter pins a stable wire shape: status string, event
+        // discriminator, terminal hint, plus the structured metadata
+        // and audit fields hosts render without re-parsing.
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let sink = AcpAgentEventSink::new(AcpOutput::Channel(tx));
+
+        let cases = [
+            (
+                harn_vm::agent_events::WorkerEvent::WorkerSpawned,
+                "running",
+                false,
+            ),
+            (
+                harn_vm::agent_events::WorkerEvent::WorkerProgressed,
+                "progressed",
+                false,
+            ),
+            (
+                harn_vm::agent_events::WorkerEvent::WorkerWaitingForInput,
+                "awaiting_input",
+                false,
+            ),
+            (
+                harn_vm::agent_events::WorkerEvent::WorkerCompleted,
+                "completed",
+                true,
+            ),
+            (
+                harn_vm::agent_events::WorkerEvent::WorkerFailed,
+                "failed",
+                true,
+            ),
+            (
+                harn_vm::agent_events::WorkerEvent::WorkerCancelled,
+                "cancelled",
+                true,
+            ),
+        ];
+
+        for (worker_event, status, terminal) in cases {
+            sink.handle_event(&AgentEvent::WorkerUpdate {
+                session_id: "session-1".into(),
+                worker_id: "worker-1".into(),
+                worker_name: "review".into(),
+                worker_task: "review pr".into(),
+                worker_mode: "delegated_stage".into(),
+                event: worker_event,
+                status: worker_event.as_status().to_string(),
+                metadata: serde_json::json!({
+                    "child_run_id": "run_x",
+                    "child_run_path": ".harn-runs/run_x",
+                }),
+                audit: Some(serde_json::json!({"run_id": "run_x"})),
+            });
+            let line = rx.recv().await.expect("acp worker_update notification");
+            let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
+            assert_eq!(payload["method"], "session/update");
+            assert_eq!(payload["params"]["sessionId"], "session-1");
+            let update = &payload["params"]["update"];
+            assert_eq!(update["sessionUpdate"], "worker_update");
+            assert_eq!(update["workerId"], "worker-1");
+            assert_eq!(update["workerName"], "review");
+            assert_eq!(update["workerTask"], "review pr");
+            assert_eq!(update["workerMode"], "delegated_stage");
+            assert_eq!(update["event"], worker_event.as_str());
+            assert_eq!(update["status"], status);
+            assert_eq!(update["terminal"], terminal);
+            assert_eq!(update["metadata"]["child_run_id"], "run_x");
+            assert_eq!(update["audit"]["run_id"], "run_x");
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn worker_update_omits_audit_when_absent() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let sink = AcpAgentEventSink::new(AcpOutput::Channel(tx));
+        sink.handle_event(&AgentEvent::WorkerUpdate {
+            session_id: "session-1".into(),
+            worker_id: "w".into(),
+            worker_name: "n".into(),
+            worker_task: "t".into(),
+            worker_mode: "delegated_stage".into(),
+            event: harn_vm::agent_events::WorkerEvent::WorkerSpawned,
+            status: "running".into(),
+            metadata: serde_json::json!({}),
+            audit: None,
+        });
+        let line = rx.recv().await.expect("acp worker_update notification");
+        let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
+        assert!(payload["params"]["update"].get("audit").is_none());
+    }
 
     #[tokio::test(flavor = "current_thread")]
     async fn handoff_event_serializes_as_session_update() {

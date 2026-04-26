@@ -388,7 +388,7 @@ pub(crate) fn register_agent_builtins(vm: &mut Vm) {
         })
     });
 
-    vm.register_builtin("worker_trigger", |args, _out| {
+    vm.register_async_builtin("worker_trigger", |args| async move {
         if args.len() < 2 {
             return Err(VmError::Runtime(
                 "worker_trigger: requires worker handle and payload".to_string(),
@@ -401,7 +401,12 @@ pub(crate) fn register_agent_builtins(vm: &mut Vm) {
                 "worker_trigger: payload must not be empty".to_string(),
             ));
         }
-        with_worker_state(&worker_id, |state| {
+        // Snapshot the about-to-resume worker state and validate
+        // preconditions in a `with_worker_state` borrow that also
+        // restarts the run. The borrow has to be dropped before we
+        // await the lifecycle event emission, so we pull the snapshot
+        // out and run `emit_worker_event` after the closure returns.
+        let progressed_snapshot = with_worker_state(&worker_id, |state| {
             let mut worker = state.borrow_mut();
             if !worker.carry_policy.retriggerable {
                 return Err(VmError::Runtime(format!(
@@ -425,10 +430,20 @@ pub(crate) fn register_agent_builtins(vm: &mut Vm) {
             if worker.carry_policy.persist_state {
                 persist_worker_state_snapshot(&worker)?;
             }
+            let snapshot = worker_event_snapshot(&worker);
             drop(worker);
             spawn_worker_task(state.clone());
-            worker_summary(&state.borrow())
-        })
+            Ok(snapshot)
+        })?;
+        // Emit the progressed lifecycle *after* the new cycle has been
+        // spawned. Hosts see `progressed` (re-arming the run) followed
+        // by `running` from the inner `WorkerSpawned` emission.
+        emit_worker_event(
+            &progressed_snapshot,
+            crate::agent_events::WorkerEvent::WorkerProgressed,
+        )
+        .await?;
+        with_worker_state(&worker_id, |state| worker_summary(&state.borrow()))
     });
 
     vm.register_builtin("resume_agent", |args, _out| {

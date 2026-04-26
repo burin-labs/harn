@@ -924,6 +924,7 @@ fn build_call_request(
         parent_span_id: None,
         metadata: BTreeMap::new(),
         cancel_token: Some(cancel_token),
+        agent_session_id: None,
     })
 }
 
