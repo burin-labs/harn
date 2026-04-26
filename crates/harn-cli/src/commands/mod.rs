@@ -1,3 +1,4 @@
+pub(crate) mod agents_conformance;
 pub(crate) mod bench;
 pub(crate) mod check;
 pub(crate) mod connect;

@@ -75,11 +75,17 @@ harn test conformance --verbose        # show per-test timing
 harn test conformance --timing         # show timing summary without verbose failures
 harn test tests/ --record              # record LLM fixtures
 harn test tests/ --replay              # replay LLM fixtures
+harn test agents-conformance --target http://localhost:8080 --api-key "$KEY"
 ```
 
 | Flag | Description |
 |---|---|
 | `--filter <pattern>` | Only run tests matching pattern |
+| `--target <url>` | Harness base URL for `harn test agents-conformance` |
+| `--api-key <key>` | Bearer API key for `harn test agents-conformance` |
+| `--category <name>` | Agents conformance category to run; repeatable or comma-separated |
+| `--json` / `--json-out <path>` | Emit or write the agents conformance leaderboard-shaped JSON report |
+| `--workspace-id <id>` / `--session-id <id>` | Reuse existing Harness resources for agents conformance setup |
 | `--parallel` | Run tests concurrently |
 | `--watch` | Re-run tests on file changes |
 | `--verbose` / `-v` | Show per-test timing and detailed failures |
