@@ -83,6 +83,17 @@ granular archaeology.
   block on hover so the function declaration stays the single source of
   truth. Attribute argument syntax also accepts list literals and
   multi-line forms so provenance blocks can carry rich evidence.
+
+## Unreleased
+
+### Added
+
+- **Flow hierarchical predicate composition (#582).** Adds
+  `crates/harn-vm/src/flow/predicates/compose.rs` with depth-stamped
+  predicate resolution, touched-directory union, and strictness-based result
+  composition. Ancestor and child declarations are evaluated together so a
+  child can tighten an ancestor verdict, but cannot relax a shallower `Block`;
+  equal-severity ties keep the shallower predicate canonical.
 - **Flow `InvariantResult` graded-verdict types and Harn bindings (#581).**
   Predicates now return a structured `InvariantResult { verdict, evidence,
   remediation, confidence }` value where `verdict` grades as `Allow`, `Warn`,

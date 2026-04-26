@@ -1,13 +1,12 @@
 //! Discovery and parsing of `invariants.harn` Flow predicate files.
 //!
 //! Mirrors `metadata_resolve` semantics: predicates declared in higher
-//! directories apply to all descendants, with stricter (closer-to-leaf)
-//! files overriding when names collide. This module owns the walk + parse;
-//! evaluation lives in [`super::executor`].
+//! directories apply to all descendants. This module owns the walk + parse;
+//! hierarchy merging lives in [`super::compose`], and evaluation lives in
+//! [`super::executor`].
 //!
 //! See parent epic #571 and ticket #579 for the design rationale.
 
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use harn_lexer::{Lexer, Span};
@@ -37,8 +36,8 @@ pub struct DiscoveredInvariantFile {
 /// One Flow predicate declaration parsed out of an invariants file.
 #[derive(Clone, Debug)]
 pub struct DiscoveredPredicate {
-    /// Function name. Composition uses `relative_dir + name` as the
-    /// identity for stricter-child overrides.
+    /// Function name. Composition uses this name plus the source directory
+    /// ancestry to identify stricter-child override lineages.
     pub name: String,
     /// `Deterministic` (default) or `Semantic`.
     pub kind: PredicateKind,
@@ -79,8 +78,8 @@ pub enum DiagnosticSeverity {
 /// Walk from `root` down through every component of `target_dir`,
 /// collecting `invariants.harn` at each level.
 ///
-/// Returns the files in root-to-leaf order so callers can apply
-/// stricter-child overrides simply by iterating in order.
+/// Returns the files in root-to-leaf order so composition can stamp source
+/// depth and evaluate ancestor/child predicates together.
 ///
 /// `target_dir` is interpreted relative to `root`. Absolute paths or
 /// paths that escape `root` are silently clamped — discovery never reads
@@ -331,33 +330,10 @@ fn relative_dir_label(root: &Path, dir: &Path) -> String {
     }
 }
 
-/// Resolve a directory's effective predicate set.
-///
-/// Walks the discovered files in root-to-leaf order, layering them so a
-/// stricter (closer-to-leaf) declaration with the same name overrides the
-/// ancestor. Returns predicates in deterministic source order, oldest
-/// ancestor first then newest within each level.
-pub fn resolve_predicates(files: &[DiscoveredInvariantFile]) -> Vec<(String, DiscoveredPredicate)> {
-    // Use a BTreeMap for stable iteration so callers get deterministic
-    // output regardless of disk ordering.
-    let mut effective: BTreeMap<String, (String, DiscoveredPredicate)> = BTreeMap::new();
-    for file in files {
-        for predicate in &file.predicates {
-            let key = predicate.name.clone();
-            let qualified = if file.relative_dir == "." {
-                predicate.name.clone()
-            } else {
-                format!("{}::{}", file.relative_dir, predicate.name)
-            };
-            effective.insert(key, (qualified, predicate.clone()));
-        }
-    }
-    effective.into_values().collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::flow::resolve_predicates;
     use std::fs;
     use tempfile::TempDir;
 
@@ -480,7 +456,7 @@ fn handler_check(slice) -> bool { return true }
     }
 
     #[test]
-    fn resolve_predicates_overrides_ancestors() {
+    fn resolve_predicates_keeps_ancestors_for_composition() {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         write(root, INVARIANTS_FILE, &sample_predicate("shared"));
@@ -498,12 +474,12 @@ fn handler_check(slice) -> bool { return true }
 
         let files = discover_invariants(root, &nested);
         let resolved = resolve_predicates(&files);
-        let qualified: Vec<_> = resolved.iter().map(|(q, _)| q.clone()).collect();
-        // `shared` is overridden by the deeper file → qualified path.
+        let qualified: Vec<_> = resolved.iter().map(|p| p.qualified_name.clone()).collect();
+        // Composition needs both versions so child results can tighten but
+        // cannot relax ancestor verdicts.
+        assert!(qualified.contains(&"shared".to_string()));
         assert!(qualified.contains(&"crates::shared".to_string()));
         // `extra` only exists in the deeper file.
         assert!(qualified.contains(&"crates::extra".to_string()));
-        // The root version should not appear in the resolved set.
-        assert!(!qualified.contains(&"shared".to_string()));
     }
 }

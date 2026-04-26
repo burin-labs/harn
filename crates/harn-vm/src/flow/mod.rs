@@ -27,12 +27,14 @@ pub use intent::{
     TranscriptSpan,
 };
 pub use predicates::{
-    discover_invariants, parse_invariants_source, resolve_predicates, Approver, ArchivistMetadata,
-    ByteSpan, CheapJudge, CheapJudgeRequest, CheapJudgeResponse, DiscoveredInvariantFile,
+    compose_predicate_results, discover_invariants, parse_invariants_source, resolve_predicates,
+    resolve_predicates_for_touched_directories, Approver, ArchivistMetadata, ByteSpan, CheapJudge,
+    CheapJudgeRequest, CheapJudgeResponse, ComposedPredicateEvaluation, DiscoveredInvariantFile,
     DiscoveredPredicate, DiscoveryDiagnostic, DiscoveryDiagnosticSeverity, EvidenceItem,
     InvariantBlockError, InvariantResult, ParsedInvariantFile, PredicateContext,
-    PredicateExecutionRecord, PredicateExecutionReport, PredicateExecutor, PredicateExecutorConfig,
-    PredicateKind, PredicateRunner, Remediation, Verdict, INVARIANTS_FILE,
+    PredicateEvaluation, PredicateExecutionRecord, PredicateExecutionReport, PredicateExecutor,
+    PredicateExecutorConfig, PredicateKind, PredicateRunner, PredicateSource, Remediation,
+    ResolvedPredicate, Verdict, VerdictStrictness, INVARIANTS_FILE,
 };
 pub use slice::{
     derive_slice, Approval, CoverageMap, PredicateHash, Slice, SliceDerivationError,
