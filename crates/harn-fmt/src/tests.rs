@@ -273,6 +273,68 @@ fn test_wraps_long_dict_literals() {
 }
 
 #[test]
+fn test_indents_nested_list_in_call_args() {
+    // Regression for #741: nested list/dict literals inside multiline call
+    // arguments must indent relative to their own opener.
+    let source = r#"host_mock("project", "skills", [{name: "ship", description: "Ship a production release", when_to_use: "User says ship/release/deploy", body: "Follow the deploy runbook. One command at a time.", allowed_tools: ["deploy_service"], user_invocable: true}, {name: "inspect", description: "Inspect observability signals", body: "Query metrics, summarize anomalies.", allowed_tools: ["query_metrics", "look"]}], {})"#;
+    let expected = r#"host_mock(
+  "project",
+  "skills",
+  [
+    {
+      name: "ship",
+      description: "Ship a production release",
+      when_to_use: "User says ship/release/deploy",
+      body: "Follow the deploy runbook. One command at a time.",
+      allowed_tools: ["deploy_service"],
+      user_invocable: true,
+    },
+    {
+      name: "inspect",
+      description: "Inspect observability signals",
+      body: "Query metrics, summarize anomalies.",
+      allowed_tools: ["query_metrics", "look"],
+    },
+  ],
+  {},
+)
+"#;
+    let result = format_source(source).unwrap();
+    assert_eq!(result, expected);
+    assert_roundtrip(source);
+}
+
+#[test]
+fn test_indents_nested_dict_in_call_args() {
+    // Same bug as above but with the outer arg being a dict literal whose
+    // values are themselves wrapped collections.
+    let source = r#"build_workflow("worker-flow", "act", {act: {kind: "stage", mode: "llm", model_policy: {provider: "mock"}, output_contract: {output_kinds: ["summary", "details"]}}})"#;
+    let result = format_source(source).unwrap();
+    // Outer call args sit at indent 2; inner dict body at indent 4; inner-inner
+    // dict body at indent 6.
+    assert!(
+        result.contains("\n  {\n    act: {\n"),
+        "Expected nested dict-in-call to indent relative to opener, got:\n{result}"
+    );
+    assert_roundtrip(source);
+}
+
+#[test]
+fn test_indents_nested_collection_inside_pipeline_body() {
+    // Same shape as #741 but one level deeper, inside a pipeline body.
+    let source = r#"pipeline default(task) {
+  host_mock("project", "skills", [{name: "ship", description: "Ship a production release", when_to_use: "User says ship/release/deploy", body: "Follow the deploy runbook. One command at a time.", allowed_tools: ["deploy_service"], user_invocable: true}], {})
+}"#;
+    let result = format_source(source).unwrap();
+    // The list opener sits at indent 4 (depth 2). Items must land at indent 6.
+    assert!(
+        result.contains("    [\n      {\n        name: \"ship\",\n"),
+        "Expected nested dict in pipeline-body call to indent relative to opener, got:\n{result}"
+    );
+    assert_roundtrip(source);
+}
+
+#[test]
 fn test_wraps_long_struct_construction() {
     let source = r#"struct BuildPlan {
   first_really_long_key_name: string

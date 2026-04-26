@@ -16,7 +16,7 @@ impl Formatter<'_> {
                 then_body,
                 else_body,
             } => {
-                let cond = self.format_expr(condition);
+                let cond = self.format_expr(condition, indent_level);
                 let inner = indent_level + 1;
                 let close = "  ".repeat(indent_level);
                 let mut result = format!("if {cond} {{\n");
@@ -39,12 +39,12 @@ impl Formatter<'_> {
                 body,
             } => {
                 let pat = format_pattern(pattern);
-                let iter_str = self.format_expr(iterable);
-                self.format_block_at(&format!("for {pat} in {iter_str} {{"), body, indent_level)
+                let iter_str = self.format_expr(iterable, indent_level);
+                self.format_block_expr(&format!("for {pat} in {iter_str} {{"), body, indent_level)
             }
             Node::WhileLoop { condition, body } => {
-                let cond = self.format_expr(condition);
-                self.format_block_at(&format!("while {cond} {{"), body, indent_level)
+                let cond = self.format_expr(condition, indent_level);
+                self.format_block_expr(&format!("while {cond} {{"), body, indent_level)
             }
             Node::FnDecl {
                 name,
@@ -65,7 +65,7 @@ impl Formatter<'_> {
                     where_clauses,
                     indent_level,
                 );
-                self.format_block_at(&format!("{sig} {{"), body, indent_level)
+                self.format_block_expr(&format!("{sig} {{"), body, indent_level)
             }
             Node::ToolDecl {
                 name,
@@ -82,7 +82,7 @@ impl Formatter<'_> {
                     String::new()
                 };
                 let prefix_len = indent_level * 2 + pub_prefix.len() + 5 + name.len() + 1;
-                let params_str = self.format_typed_params_wrapped(params, prefix_len);
+                let params_str = self.format_typed_params_wrapped(params, prefix_len, indent_level);
                 let mut effective_body = Vec::new();
                 if let Some(desc) = description {
                     let escaped = escape_string(desc);
@@ -92,7 +92,7 @@ impl Formatter<'_> {
                     }));
                 }
                 effective_body.extend(body.iter().cloned());
-                self.format_block_at(
+                self.format_block_expr(
                     &format!("{pub_prefix}tool {name}({params_str}){ret} {{"),
                     &effective_body,
                     indent_level,
@@ -108,7 +108,7 @@ impl Formatter<'_> {
                 let close_indent = "  ".repeat(indent_level);
                 let mut inner = String::new();
                 for (field_name, field_expr) in fields {
-                    let expr_str = self.format_expr(field_expr);
+                    let expr_str = self.format_expr(field_expr, indent_level + 1);
                     inner.push_str(&item_indent);
                     inner.push_str(field_name);
                     inner.push(' ');
@@ -124,7 +124,7 @@ impl Formatter<'_> {
             } => {
                 let pat = format_pattern(pattern);
                 let type_str = format_type_ann(type_ann);
-                let val = self.format_expr(value);
+                let val = self.format_expr(value, indent_level);
                 format!("let {pat}{type_str} = {val}")
             }
             Node::VarBinding {
@@ -134,7 +134,7 @@ impl Formatter<'_> {
             } => {
                 let pat = format_pattern(pattern);
                 let type_str = format_type_ann(type_ann);
-                let val = self.format_expr(value);
+                let val = self.format_expr(value, indent_level);
                 format!("var {pat}{type_str} = {val}")
             }
             Node::TryCatch {
@@ -163,13 +163,7 @@ impl Formatter<'_> {
                 result.push('}');
                 result
             }
-            _ => self.format_expr(node),
+            _ => self.format_expr(node, indent_level),
         }
-    }
-
-    fn format_block_at(&self, opening: &str, body: &[SNode], indent_level: usize) -> String {
-        let inner = self.format_body_string(body, indent_level + 1);
-        let close = "  ".repeat(indent_level);
-        format!("{opening}\n{inner}{close}}}")
     }
 }

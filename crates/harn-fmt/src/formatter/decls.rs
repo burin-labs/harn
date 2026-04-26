@@ -31,7 +31,7 @@ impl Formatter<'_> {
                     String::new()
                 };
                 let prefix_len = self.indent * 2 + pub_prefix.len() + 9 + name.len() + 1;
-                let params_str = self.format_string_list_wrapped(params, prefix_len);
+                let params_str = self.format_string_list_wrapped(params, prefix_len, self.indent);
                 self.writeln(&format!(
                     "{pub_prefix}pipeline {name}({params_str}){ret}{ext} {{"
                 ));
@@ -47,7 +47,7 @@ impl Formatter<'_> {
             } => {
                 let pat = format_pattern(pattern);
                 let type_str = format_type_ann(type_ann);
-                let val = self.format_expr(value);
+                let val = self.format_expr(value, self.indent);
                 self.writeln(&format!("let {pat}{type_str} = {val}"));
             }
             Node::VarBinding {
@@ -57,7 +57,7 @@ impl Formatter<'_> {
             } => {
                 let pat = format_pattern(pattern);
                 let type_str = format_type_ann(type_ann);
-                let val = self.format_expr(value);
+                let val = self.format_expr(value, self.indent);
                 self.writeln(&format!("var {pat}{type_str} = {val}"));
             }
             Node::FnDecl {
@@ -100,7 +100,7 @@ impl Formatter<'_> {
                     String::new()
                 };
                 let prefix_len = self.indent * 2 + pub_prefix.len() + 5 + name.len() + 1;
-                let params_str = self.format_typed_params_wrapped(params, prefix_len);
+                let params_str = self.format_typed_params_wrapped(params, prefix_len, self.indent);
                 self.writeln(&format!("{pub_prefix}tool {name}({params_str}){ret} {{"));
                 self.indent();
                 if let Some(desc) = description {
@@ -120,7 +120,7 @@ impl Formatter<'_> {
                 self.writeln(&format!("{pub_prefix}skill {name} {{"));
                 self.indent();
                 for (field_name, field_expr) in fields {
-                    let expr_str = self.format_expr(field_expr);
+                    let expr_str = self.format_expr(field_expr, self.indent);
                     self.writeln(&format!("{field_name} {expr_str}"));
                 }
                 self.dedent();
@@ -131,7 +131,7 @@ impl Formatter<'_> {
                 then_body,
                 else_body,
             } => {
-                let cond = self.format_expr(condition);
+                let cond = self.format_expr(condition, self.indent);
                 self.writeln(&format!("if {cond} {{"));
                 self.indent();
                 self.format_body(then_body, node_line);
@@ -160,7 +160,7 @@ impl Formatter<'_> {
                 body,
             } => {
                 let pat = format_pattern(pattern);
-                let iter_str = self.format_expr(iterable);
+                let iter_str = self.format_expr(iterable, self.indent);
                 self.writeln(&format!("for {pat} in {iter_str} {{"));
                 self.indent();
                 self.format_body(body, node_line);
@@ -168,7 +168,7 @@ impl Formatter<'_> {
                 self.writeln("}");
             }
             Node::WhileLoop { condition, body } => {
-                let cond = self.format_expr(condition);
+                let cond = self.format_expr(condition, self.indent);
                 self.writeln(&format!("while {cond} {{"));
                 self.indent();
                 self.format_body(body, node_line);
@@ -176,7 +176,7 @@ impl Formatter<'_> {
                 self.writeln("}");
             }
             Node::Retry { count, body } => {
-                let cnt = self.format_expr(count);
+                let cnt = self.format_expr(count, self.indent);
                 self.writeln(&format!("retry {cnt} {{"));
                 self.indent();
                 self.format_body(body, node_line);
@@ -218,14 +218,14 @@ impl Formatter<'_> {
             }
             Node::ReturnStmt { value } => {
                 if let Some(val) = value {
-                    let v = self.format_expr(val);
+                    let v = self.format_expr(val, self.indent);
                     self.writeln(&format!("return {v}"));
                 } else {
                     self.writeln("return");
                 }
             }
             Node::ThrowStmt { value } => {
-                let v = self.format_expr(value);
+                let v = self.format_expr(value, self.indent);
                 self.writeln(&format!("throw {v}"));
             }
             Node::BreakStmt => self.writeln("break"),
@@ -234,10 +234,11 @@ impl Formatter<'_> {
                 self.writeln(&format!("import \"{path}\""));
             }
             Node::SelectiveImport { names, path } => {
-                self.writeln(&self.format_selective_import_names(names, path));
+                let line = self.format_selective_import_names(names, path, self.indent);
+                self.writeln(&line);
             }
             Node::MatchExpr { value, arms } => {
-                let val = self.format_expr(value);
+                let val = self.format_expr(value, self.indent);
                 self.writeln(&format!("match {val} {{"));
                 self.indent();
                 for arm in arms {
@@ -300,7 +301,8 @@ impl Formatter<'_> {
                 for m in methods {
                     let method_generics = format_type_params(&m.type_params);
                     let prefix_len = self.indent * 2 + 3 + m.name.len() + method_generics.len() + 1;
-                    let params = self.format_typed_params_wrapped(&m.params, prefix_len);
+                    let params =
+                        self.format_typed_params_wrapped(&m.params, prefix_len, self.indent);
                     if let Some(ret) = &m.return_type {
                         self.writeln(&format!(
                             "fn {}{}({}) -> {}",
@@ -330,7 +332,7 @@ impl Formatter<'_> {
                 body,
                 options,
             } => {
-                let e = self.format_expr(expr);
+                let e = self.format_expr(expr, self.indent);
                 let mode_word = match mode {
                     ParallelMode::Count => "",
                     ParallelMode::Each => "each ",
@@ -341,7 +343,9 @@ impl Formatter<'_> {
                 } else {
                     let formatted: Vec<String> = options
                         .iter()
-                        .map(|(key, value)| format!("{key}: {}", self.format_expr(value)))
+                        .map(|(key, value)| {
+                            format!("{key}: {}", self.format_expr(value, self.indent))
+                        })
                         .collect();
                     format!(" with {{ {} }}", formatted.join(", "))
                 };
@@ -367,7 +371,7 @@ impl Formatter<'_> {
                 condition,
                 else_body,
             } => {
-                let cond = self.format_expr(condition);
+                let cond = self.format_expr(condition, self.indent);
                 self.writeln(&format!("guard {cond} else {{"));
                 self.indent();
                 self.format_body(else_body, node_line);
@@ -375,15 +379,16 @@ impl Formatter<'_> {
                 self.writeln("}");
             }
             Node::RequireStmt { condition, message } => {
-                let cond = self.format_expr(condition);
+                let cond = self.format_expr(condition, self.indent);
                 if let Some(message) = message {
-                    self.writeln(&format!("require {cond}, {}", self.format_expr(message)));
+                    let msg = self.format_expr(message, self.indent);
+                    self.writeln(&format!("require {cond}, {msg}"));
                 } else {
                     self.writeln(&format!("require {cond}"));
                 }
             }
             Node::DeadlineBlock { duration, body } => {
-                let dur = self.format_expr(duration);
+                let dur = self.format_expr(duration, self.indent);
                 self.writeln(&format!("deadline {dur} {{"));
                 self.indent();
                 self.format_body(body, node_line);
@@ -399,7 +404,7 @@ impl Formatter<'_> {
             }
             Node::YieldExpr { value } => {
                 if let Some(val) = value {
-                    let v = self.format_expr(val);
+                    let v = self.format_expr(val, self.indent);
                     self.writeln(&format!("yield {v}"));
                 } else {
                     self.writeln("yield");
@@ -407,7 +412,7 @@ impl Formatter<'_> {
             }
             Node::OverrideDecl { name, params, body } => {
                 let prefix_len = self.indent * 2 + 9 + name.len() + 1;
-                let params_str = self.format_string_list_wrapped(params, prefix_len);
+                let params_str = self.format_string_list_wrapped(params, prefix_len, self.indent);
                 self.writeln(&format!("override {name}({params_str}) {{"));
                 self.indent();
                 self.format_body(body, node_line);
@@ -448,7 +453,7 @@ impl Formatter<'_> {
                 self.format_node(inner);
             }
             _ => {
-                let expr = self.format_expr(node);
+                let expr = self.format_expr(node, self.indent);
                 self.writeln(&expr);
             }
         }
@@ -463,7 +468,7 @@ impl Formatter<'_> {
             else_body,
         } = &node.node
         {
-            let cond = self.format_expr(condition);
+            let cond = self.format_expr(condition, self.indent);
             self.output.push_str(&format!("if {cond} {{\n"));
             self.indent();
             self.format_body(then_body, line);
@@ -489,9 +494,9 @@ impl Formatter<'_> {
     }
 
     fn format_match_arm(&mut self, arm: &harn_parser::MatchArm) {
-        let pattern = self.format_expr(&arm.pattern);
+        let pattern = self.format_expr(&arm.pattern, self.indent);
         if arm.body.len() == 1 && crate::helpers::is_simple_expr(&arm.body[0]) {
-            let expr = self.format_expr(&arm.body[0]);
+            let expr = self.format_expr(&arm.body[0], self.indent);
             self.writeln(&format!("{pattern} -> {{ {expr} }}"));
         } else {
             self.writeln(&format!("{pattern} -> {{"));
@@ -507,7 +512,7 @@ impl Formatter<'_> {
             self.writeln(&v.name);
         } else {
             let prefix_len = self.indent * 2 + v.name.len() + 1;
-            let fields = self.format_typed_params_wrapped(&v.fields, prefix_len);
+            let fields = self.format_typed_params_wrapped(&v.fields, prefix_len, self.indent);
             self.writeln(&format!("{}({fields})", v.name));
         }
     }

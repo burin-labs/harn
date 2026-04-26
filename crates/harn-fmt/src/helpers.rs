@@ -10,7 +10,7 @@ use crate::Formatter;
 /// Format a default-value expression in a destructuring pattern.
 fn format_default_expr(node: &SNode) -> String {
     let fmt = Formatter::new("", BTreeMap::new(), 100, 80);
-    fmt.format_expr(node)
+    fmt.format_expr(node, 0)
 }
 
 /// Format a single attribute as `@name` or `@name(arg, key: value)`.
@@ -299,7 +299,7 @@ pub(crate) fn format_where_clauses(clauses: &[WhereClause]) -> String {
 /// Format an expression inline for use in parameter defaults.
 pub(crate) fn format_inline_expr(node: &SNode) -> String {
     let fmt = Formatter::new("", BTreeMap::new(), 100, 80);
-    fmt.format_expr(node)
+    fmt.format_expr(node, 0)
 }
 
 /// Render typed params to individual strings (without joining).

@@ -79,7 +79,7 @@ impl<'a> Formatter<'a> {
     }
 
     /// Inner lines of a block — does NOT include opening/closing braces.
-    fn format_body_string(&self, body: &[SNode], indent_level: usize) -> String {
+    pub(super) fn format_body_string(&self, body: &[SNode], indent_level: usize) -> String {
         let mut out = String::new();
         let indent_str = "  ".repeat(indent_level);
         for n in body {
@@ -91,21 +91,31 @@ impl<'a> Formatter<'a> {
         out
     }
 
-    fn format_block_expr(&self, opening: &str, body: &[SNode]) -> String {
-        let inner = self.format_body_string(body, self.indent + 1);
-        let close = "  ".repeat(self.indent);
+    pub(super) fn format_block_expr(&self, opening: &str, body: &[SNode], indent: usize) -> String {
+        let inner = self.format_body_string(body, indent + 1);
+        let close = "  ".repeat(indent);
         format!("{opening}\n{inner}{close}}}")
     }
 
-    fn format_comma_sequence(&self, rendered: Vec<String>, prefix_len: usize) -> String {
+    /// Render a comma-separated sequence at logical depth `indent`. When the
+    /// sequence wraps, items are placed at `indent + 1` and the closing
+    /// delimiter aligns with `indent`. Pre-rendered items are expected to have
+    /// been formatted at depth `indent + 1` so that any of their internal
+    /// wraps land at the correct deeper indent.
+    pub(super) fn format_comma_sequence(
+        &self,
+        rendered: Vec<String>,
+        prefix_len: usize,
+        indent: usize,
+    ) -> String {
         let inline = rendered.join(", ");
         let should_wrap = !rendered.is_empty()
             && (inline.contains('\n') || prefix_len + inline.len() + 1 > self.line_width);
         if !should_wrap {
             return inline;
         }
-        let item_indent = "  ".repeat(self.indent + 1);
-        let close_indent = "  ".repeat(self.indent);
+        let item_indent = "  ".repeat(indent + 1);
+        let close_indent = "  ".repeat(indent);
         let mut out = String::new();
         out.push('\n');
         for arg in rendered {
@@ -117,32 +127,55 @@ impl<'a> Formatter<'a> {
         out
     }
 
-    fn format_typed_params_wrapped(&self, params: &[TypedParam], prefix_len: usize) -> String {
-        self.format_comma_sequence(render_typed_params(params), prefix_len)
+    pub(super) fn format_typed_params_wrapped(
+        &self,
+        params: &[TypedParam],
+        prefix_len: usize,
+        indent: usize,
+    ) -> String {
+        self.format_comma_sequence(render_typed_params(params), prefix_len, indent)
     }
 
-    fn format_string_list_wrapped(&self, items: &[String], prefix_len: usize) -> String {
-        self.format_comma_sequence(items.to_vec(), prefix_len)
+    pub(super) fn format_string_list_wrapped(
+        &self,
+        items: &[String],
+        prefix_len: usize,
+        indent: usize,
+    ) -> String {
+        self.format_comma_sequence(items.to_vec(), prefix_len, indent)
     }
 
-    fn format_call_args(&self, args: &[SNode], prefix_len: usize) -> String {
+    pub(super) fn format_call_args(
+        &self,
+        args: &[SNode],
+        prefix_len: usize,
+        indent: usize,
+    ) -> String {
+        // Each arg may itself wrap; if it does, it will land at `indent + 1`
+        // so we render children at that depth so their internal wraps are
+        // aligned correctly.
         let rendered = args
             .iter()
-            .map(|arg| self.format_expr(arg))
+            .map(|arg| self.format_expr(arg, indent + 1))
             .collect::<Vec<_>>();
-        self.format_comma_sequence(rendered, prefix_len)
+        self.format_comma_sequence(rendered, prefix_len, indent)
     }
 
     /// Format selective import names, wrapping when they exceed `line_width`.
-    fn format_selective_import_names(&self, names: &[String], path: &str) -> String {
+    pub(super) fn format_selective_import_names(
+        &self,
+        names: &[String],
+        path: &str,
+        indent: usize,
+    ) -> String {
         let mut sorted_names = names.to_vec();
         sorted_names.sort();
         let inline = sorted_names.join(", ");
-        let prefix_len = self.indent * 2 + 9; // "import { "
+        let prefix_len = indent * 2 + 9; // "import { "
         let total = prefix_len + inline.len() + " } ".len() + 6 + path.len() + 1;
         if total > self.line_width {
-            let item_indent = "  ".repeat(self.indent + 1);
-            let close_indent = "  ".repeat(self.indent);
+            let item_indent = "  ".repeat(indent + 1);
+            let close_indent = "  ".repeat(indent);
             let mut inner = String::from("\n");
             for name in &sorted_names {
                 inner.push_str(&item_indent);
@@ -207,7 +240,7 @@ impl<'a> Formatter<'a> {
         }
     }
 
-    fn format_fn_signature(
+    pub(super) fn format_fn_signature(
         &self,
         pub_prefix: &str,
         name: &str,
@@ -225,7 +258,7 @@ impl<'a> Formatter<'a> {
         };
         let where_str = format_where_clauses(where_clauses);
         let prefix_len = indent_level * 2 + pub_prefix.len() + 3 + name.len() + generics.len() + 1;
-        let params_str = self.format_typed_params_wrapped(params, prefix_len);
+        let params_str = self.format_typed_params_wrapped(params, prefix_len, indent_level);
         format!("{pub_prefix}fn {name}{generics}({params_str}){ret}{where_str}")
     }
 
