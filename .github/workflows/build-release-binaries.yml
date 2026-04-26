@@ -2,7 +2,16 @@ name: Build release binaries
 
 on:
   push:
+    branches: [main]
     tags: ['v*']
+    paths:
+      - 'Cargo.lock'
+      - 'Cargo.toml'
+      - 'crates/**'
+      - '.cargo/**'
+      - 'rust-toolchain.toml'
+      - 'Dockerfile'
+      - '.github/workflows/build-release-binaries.yml'
   workflow_dispatch:
     inputs:
       tag:
@@ -14,30 +23,52 @@ permissions:
   contents: write
   packages: write
 
+concurrency:
+  group: build-release-binaries-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref == 'refs/heads/main' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  SCCACHE_GHA_ENABLED: "true"
+
 jobs:
   setup:
-    name: Resolve target tag
+    name: Resolve release context
     runs-on: ubuntu-latest
     outputs:
-      tag: ${{ steps.resolve.outputs.tag }}
+      ref: ${{ steps.resolve.outputs.ref }}
+      is_release: ${{ steps.resolve.outputs.is_release }}
       version: ${{ steps.resolve.outputs.version }}
       major_minor: ${{ steps.resolve.outputs.major_minor }}
     steps:
-      - name: Resolve tag from event
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Resolve release context
         id: resolve
         env:
           INPUT_TAG: ${{ inputs.tag }}
+          REF_TYPE: ${{ github.ref_type }}
           REF_NAME: ${{ github.ref_name }}
         run: |
-          TAG="${INPUT_TAG:-$REF_NAME}"
-          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::expected tag of form vX.Y.Z, got '$TAG'"
-            exit 1
+          REF="${INPUT_TAG:-$REF_NAME}"
+          IS_RELEASE=false
+          if [[ -n "$INPUT_TAG" || "$REF_TYPE" == "tag" ]]; then
+            IS_RELEASE=true
+            if [[ ! "$REF" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "::error::expected tag of form vX.Y.Z, got '$REF'"
+              exit 1
+            fi
+            VERSION="${REF#v}"
+          else
+            VERSION="$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')"
           fi
-          VERSION="${TAG#v}"
           MAJOR_MINOR="$(echo "$VERSION" | awk -F. '{print $1"."$2}')"
           {
-            echo "tag=$TAG"
+            echo "ref=$REF"
+            echo "is_release=$IS_RELEASE"
             echo "version=$VERSION"
             echo "major_minor=$MAJOR_MINOR"
           } >> "$GITHUB_OUTPUT"
@@ -63,11 +94,19 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          ref: ${{ needs.setup.outputs.tag }}
+          ref: ${{ needs.setup.outputs.ref }}
 
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # master
         with:
           toolchain: stable
+
+      - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+
+      - uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1 # v2.9.1
+        with:
+          shared-key: release-${{ matrix.target }}
+          cache-on-failure: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Add cross-compile target to pinned toolchain
         run: |
@@ -111,14 +150,14 @@ jobs:
           7z a "harn-${{ matrix.target }}.zip" harn.exe harn-dap.exe harn-lsp.exe
 
       - name: Upload artifact (unix)
-        if: runner.os != 'Windows'
+        if: needs.setup.outputs.is_release == 'true' && runner.os != 'Windows'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: harn-${{ matrix.target }}
           path: dist/harn-${{ matrix.target }}.tar.gz
 
       - name: Upload artifact (windows)
-        if: runner.os == 'Windows'
+        if: needs.setup.outputs.is_release == 'true' && runner.os == 'Windows'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: harn-${{ matrix.target }}
@@ -127,11 +166,12 @@ jobs:
   container:
     name: Publish container
     needs: [setup, build]
+    if: needs.setup.outputs.is_release == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          ref: ${{ needs.setup.outputs.tag }}
+          ref: ${{ needs.setup.outputs.ref }}
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
@@ -177,11 +217,12 @@ jobs:
   release:
     name: Create GitHub release
     needs: [setup, build, container]
+    if: needs.setup.outputs.is_release == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          ref: ${{ needs.setup.outputs.tag }}
+          ref: ${{ needs.setup.outputs.ref }}
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -198,6 +239,8 @@ jobs:
       - name: Create or update GitHub release
         uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
         with:
-          tag_name: ${{ needs.setup.outputs.tag }}
+          tag_name: ${{ needs.setup.outputs.ref }}
           body_path: release-notes.md
-          files: artifacts/*.tar.gz
+          files: |
+            artifacts/*.tar.gz
+            artifacts/*.zip
