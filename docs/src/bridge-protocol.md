@@ -25,6 +25,33 @@ Internally, the agent loop emits `AgentEvent::ToolCall` +
 translates them into `session/update` notifications via an `AgentEventSink` it
 registers per session.
 
+### `executor` tag
+
+`tool_call_update` carries an optional `executor` field that names the
+backend that ran the tool, so clients can render "via mcp:linear" /
+"via host bridge" badges, attribute latency by transport, and route
+errors correctly. Variants:
+
+- `"harn_builtin"` — VM-stdlib (e.g. `read_file`, `write_file`,
+  `exec`, `http_*`, `mcp_*`) or any Harn-side handler closure
+  registered in the script's `tools` table.
+- `"host_bridge"` — capability provided by the host through the bridge
+  (Swift IDE bridge, BurinApp, BurinCLI host shells).
+- `{"kind": "mcp_server", "serverName": "<name>"}` — tool came from
+  `mcp_list_tools` against the named server. The agent loop detects
+  this from the `_mcp_server` annotation `mcp_list_tools` injects on
+  every dict, so the tag survives even when the call physically
+  proxies through a bridge.
+- `"provider_native"` — provider executed the tool server-side and
+  inlined the result (currently only OpenAI Responses-API
+  `tool_search` and the equivalent Anthropic native search; the agent
+  never dispatches these locally).
+
+Unit variants serialize as bare strings; the `mcp_server` case carries
+the configured server name. The field is omitted when unknown — most
+commonly for the in-progress emission that fires before the dispatch
+backend is picked.
+
 ### `session/request_permission`
 
 Request payload (harn-issued):

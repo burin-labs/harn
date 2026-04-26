@@ -31,8 +31,9 @@
 
 use std::rc::Rc;
 
-use crate::agent_events::AgentEvent;
+use crate::agent_events::{AgentEvent, ToolCallStatus, ToolExecutor};
 use crate::bridge::HostBridge;
+use crate::tool_annotations::ToolKind;
 use crate::value::VmError;
 
 use crate::orchestration::TurnPolicy;
@@ -150,91 +151,13 @@ pub(super) async fn run_llm_call(
         } else {
             "openai"
         };
-    for block in &result.blocks {
-        match block.get("type").and_then(|v| v.as_str()) {
-            Some("tool_search_query") => {
-                let tool_use_id = block
-                    .get("id")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let name = block
-                    .get("name")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let query = block
-                    .get("query")
-                    .cloned()
-                    .unwrap_or(serde_json::Value::Null);
-                state.transcript_events.push(transcript_event(
-                    "tool_search_query",
-                    "assistant",
-                    "internal",
-                    "",
-                    Some(serde_json::json!({
-                        "id": tool_use_id,
-                        "name": name,
-                        "query": query,
-                        "mode": native_search_mode,
-                    })),
-                ));
-                super::emit_agent_event(&AgentEvent::ToolSearchQuery {
-                    session_id: state.session_id.clone(),
-                    tool_use_id,
-                    name,
-                    query,
-                    // Native paths don't expose a strategy knob — the
-                    // provider chooses. Use an empty string so replays
-                    // can still match against `ev.metadata?.strategy`
-                    // without a nil guard.
-                    strategy: String::new(),
-                    mode: native_search_mode.to_string(),
-                })
-                .await;
-            }
-            Some("tool_search_result") => {
-                let tool_use_id = block
-                    .get("tool_use_id")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let promoted: Vec<String> = block
-                    .get("tool_references")
-                    .and_then(|v| v.as_array())
-                    .map(|arr| {
-                        arr.iter()
-                            .filter_map(|r| {
-                                r.get("tool_name")
-                                    .and_then(|n| n.as_str())
-                                    .map(String::from)
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                state.transcript_events.push(transcript_event(
-                    "tool_search_result",
-                    "tool",
-                    "internal",
-                    "",
-                    Some(serde_json::json!({
-                        "tool_use_id": tool_use_id,
-                        "tool_references": block.get("tool_references").cloned().unwrap_or(serde_json::Value::Array(Vec::new())),
-                        "promoted": promoted,
-                        "mode": native_search_mode,
-                    })),
-                ));
-                super::emit_agent_event(&AgentEvent::ToolSearchResult {
-                    session_id: state.session_id.clone(),
-                    tool_use_id,
-                    promoted,
-                    strategy: String::new(),
-                    mode: native_search_mode.to_string(),
-                })
-                .await;
-            }
-            _ => {}
-        }
+    let native_emissions =
+        provider_native_search_emissions(&result.blocks, &state.session_id, native_search_mode);
+    for transcript in native_emissions.transcript_events {
+        state.transcript_events.push(transcript);
+    }
+    for event in native_emissions.agent_events {
+        super::emit_agent_event(&event).await;
     }
 
     let mut tool_parse_errors: Vec<String> = Vec::new();
@@ -585,4 +508,218 @@ pub(super) async fn run_llm_call(
         input_tokens: result.input_tokens,
         output_tokens: result.output_tokens,
     })
+}
+
+/// Per-block translation of provider-native `tool_search_*` content into
+/// transcript + agent events. Pure: no global state, no I/O — the
+/// caller dispatches the produced events. Pulled out so harn#691 can
+/// unit-test the `ProviderNative` executor tagging without standing up
+/// an entire agent loop.
+pub(super) struct ProviderNativeSearchEmissions {
+    pub agent_events: Vec<AgentEvent>,
+    pub transcript_events: Vec<crate::value::VmValue>,
+}
+
+pub(super) fn provider_native_search_emissions(
+    blocks: &[serde_json::Value],
+    session_id: &str,
+    native_search_mode: &str,
+) -> ProviderNativeSearchEmissions {
+    let mut agent_events: Vec<AgentEvent> = Vec::new();
+    let mut transcript_events: Vec<crate::value::VmValue> = Vec::new();
+    for block in blocks {
+        match block.get("type").and_then(|v| v.as_str()) {
+            Some("tool_search_query") => {
+                let tool_use_id = block
+                    .get("id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let name = block
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let query = block
+                    .get("query")
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Null);
+                transcript_events.push(transcript_event(
+                    "tool_search_query",
+                    "assistant",
+                    "internal",
+                    "",
+                    Some(serde_json::json!({
+                        "id": tool_use_id,
+                        "name": name,
+                        "query": query,
+                        "mode": native_search_mode,
+                    })),
+                ));
+                agent_events.push(AgentEvent::ToolSearchQuery {
+                    session_id: session_id.to_string(),
+                    tool_use_id: tool_use_id.clone(),
+                    name: name.clone(),
+                    query: query.clone(),
+                    // Native paths don't expose a strategy knob — the
+                    // provider chooses. Use an empty string so replays
+                    // can still match against `ev.metadata?.strategy`
+                    // without a nil guard.
+                    strategy: String::new(),
+                    mode: native_search_mode.to_string(),
+                });
+                // Mirror the search-specific emission as a generic
+                // tool-call pair tagged `ProviderNative` (harn#691).
+                // Clients keying off `ToolCall`/`ToolCallUpdate` to
+                // render badges can attribute the run to the provider
+                // without having to special-case `tool_search` blocks.
+                agent_events.push(AgentEvent::ToolCall {
+                    session_id: session_id.to_string(),
+                    tool_call_id: format!("provider-{tool_use_id}"),
+                    tool_name: name,
+                    kind: Some(ToolKind::Search),
+                    status: ToolCallStatus::InProgress,
+                    raw_input: query,
+                });
+            }
+            Some("tool_search_result") => {
+                let tool_use_id = block
+                    .get("tool_use_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let promoted: Vec<String> = block
+                    .get("tool_references")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|r| {
+                                r.get("tool_name")
+                                    .and_then(|n| n.as_str())
+                                    .map(String::from)
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let tool_references = block
+                    .get("tool_references")
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Array(Vec::new()));
+                transcript_events.push(transcript_event(
+                    "tool_search_result",
+                    "tool",
+                    "internal",
+                    "",
+                    Some(serde_json::json!({
+                        "tool_use_id": tool_use_id,
+                        "tool_references": tool_references.clone(),
+                        "promoted": promoted,
+                        "mode": native_search_mode,
+                    })),
+                ));
+                agent_events.push(AgentEvent::ToolSearchResult {
+                    session_id: session_id.to_string(),
+                    tool_use_id: tool_use_id.clone(),
+                    promoted: promoted.clone(),
+                    strategy: String::new(),
+                    mode: native_search_mode.to_string(),
+                });
+                // Pair the ToolCall emitted on the corresponding query
+                // block. The `provider-` prefix matches above so a UI
+                // can correlate the two events.
+                agent_events.push(AgentEvent::ToolCallUpdate {
+                    session_id: session_id.to_string(),
+                    tool_call_id: format!("provider-{tool_use_id}"),
+                    tool_name: "tool_search".to_string(),
+                    status: ToolCallStatus::Completed,
+                    raw_output: Some(serde_json::json!({
+                        "tool_references": tool_references,
+                        "promoted": promoted,
+                        "mode": native_search_mode,
+                    })),
+                    error: None,
+                    duration_ms: None,
+                    execution_duration_ms: None,
+                    error_category: None,
+                    executor: Some(ToolExecutor::ProviderNative),
+                });
+            }
+            _ => {}
+        }
+    }
+    ProviderNativeSearchEmissions {
+        agent_events,
+        transcript_events,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! Harn#691: assert the `ProviderNative` executor variant is
+    //! emitted when the response carries provider-native server-tool
+    //! result blocks (currently `tool_search_result`).
+
+    use super::*;
+
+    #[test]
+    fn tool_search_result_block_emits_provider_native_tool_call_update() {
+        let blocks = vec![
+            serde_json::json!({
+                "type": "tool_search_query",
+                "id": "tsq-1",
+                "name": "tool_search",
+                "query": {"q": "github"},
+            }),
+            serde_json::json!({
+                "type": "tool_search_result",
+                "tool_use_id": "tsq-1",
+                "tool_references": [{"tool_name": "create_issue"}],
+            }),
+        ];
+        let emissions = provider_native_search_emissions(&blocks, "session-1", "anthropic");
+        let updates: Vec<&AgentEvent> = emissions
+            .agent_events
+            .iter()
+            .filter(|e| matches!(e, AgentEvent::ToolCallUpdate { .. }))
+            .collect();
+        assert_eq!(updates.len(), 1, "expected exactly one ToolCallUpdate");
+        match updates[0] {
+            AgentEvent::ToolCallUpdate {
+                executor,
+                tool_call_id,
+                status,
+                ..
+            } => {
+                assert_eq!(*status, ToolCallStatus::Completed);
+                assert_eq!(tool_call_id, "provider-tsq-1");
+                assert_eq!(*executor, Some(ToolExecutor::ProviderNative));
+            }
+            _ => unreachable!(),
+        }
+        // The corresponding query block should have produced an
+        // in-progress ToolCall paired by the same `provider-` prefix.
+        let calls: Vec<&AgentEvent> = emissions
+            .agent_events
+            .iter()
+            .filter(|e| matches!(e, AgentEvent::ToolCall { .. }))
+            .collect();
+        assert_eq!(calls.len(), 1);
+        match calls[0] {
+            AgentEvent::ToolCall { tool_call_id, .. } => {
+                assert_eq!(tool_call_id, "provider-tsq-1");
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn unrelated_blocks_do_not_emit_provider_native_events() {
+        let blocks = vec![
+            serde_json::json!({"type": "output_text", "text": "hi"}),
+            serde_json::json!({"type": "reasoning", "text": "thinking"}),
+        ];
+        let emissions = provider_native_search_emissions(&blocks, "session-1", "openai");
+        assert!(emissions.agent_events.is_empty());
+        assert!(emissions.transcript_events.is_empty());
+    }
 }
