@@ -3,19 +3,19 @@ pipeline main() {
   let with_asset = transcript_add_asset(
     base,
     {
-    kind: "image",
-    name: "diagram.png",
-    mime_type: "image/png",
-    storage: {path: ".harn/assets/diagram.png"},
-  },
+      kind: "image",
+      name: "diagram.png",
+      mime_type: "image/png",
+      storage: {path: ".harn/assets/diagram.png"},
+    },
   )
   let asset_id = transcript_assets(with_asset)[0].id
   let multimodal = add_user(
     with_asset,
     [
-    {type: "image", asset_id: asset_id, name: "diagram.png", visibility: "public"},
-    {type: "text", text: "review this diagram", visibility: "public"},
-  ],
+      {type: "image", asset_id: asset_id, name: "diagram.png", visibility: "public"},
+      {type: "text", text: "review this diagram", visibility: "public"},
+    ],
   )
   println(len(transcript_assets(multimodal)) == 1)
   println(transcript_messages(multimodal)[0].content[0].asset_id == asset_id)

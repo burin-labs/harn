@@ -90,8 +90,8 @@ pipeline test(task) {
   let crash_start = shell_at(
     root,
     "nohup env HARN_SECRET_PROVIDERS=env HARN_EVENT_LOG_BACKEND=file HARN_ORCHESTRATOR_API_KEYS=test-key HARN_ORCHESTRATOR_HMAC_SECRET=shared-secret HARN_TEST_DISPATCHER_FAIL_BEFORE_OUTBOX=1 "
-    + harn_bin
-    + " orchestrator serve --config harn.toml --state-dir ./state --role single-tenant --bind 127.0.0.1:0 >/dev/null 2>orchestrator-crash.log </dev/null & echo $!",
+      + harn_bin
+      + " orchestrator serve --config harn.toml --state-dir ./state --role single-tenant --bind 127.0.0.1:0 >/dev/null 2>orchestrator-crash.log </dev/null & echo $!",
   )
   let crash_pid = crash_start.stdout.trim()
   assert(crash_start.success && crash_pid != "", "failed to start crashing orchestrator")
@@ -102,16 +102,16 @@ pipeline test(task) {
     "POST",
     crash_url + "/a2a/review",
     {
-    body: "{\"kind\":\"a2a.task.received\",\"task\":{\"id\":\"task-242\"}}",
-    headers: {["Content-Type"]: "application/json", Authorization: "Bearer test-key"},
-  },
+      body: "{\"kind\":\"a2a.task.received\",\"task\":{\"id\":\"task-242\"}}",
+      headers: {["Content-Type"]: "application/json", Authorization: "Bearer test-key"},
+    },
   )
   println(response.status == 200 && wait_for_exit(crash_pid))
   let restart = shell_at(
     root,
     "nohup env HARN_SECRET_PROVIDERS=env HARN_EVENT_LOG_BACKEND=file HARN_ORCHESTRATOR_API_KEYS=test-key HARN_ORCHESTRATOR_HMAC_SECRET=shared-secret "
-    + harn_bin
-    + " orchestrator serve --config harn.toml --state-dir ./state --role single-tenant --bind 127.0.0.1:0 >/dev/null 2>orchestrator-restart.log </dev/null & echo $!",
+      + harn_bin
+      + " orchestrator serve --config harn.toml --state-dir ./state --role single-tenant --bind 127.0.0.1:0 >/dev/null 2>orchestrator-restart.log </dev/null & echo $!",
   )
   let restart_pid = restart.stdout.trim()
   assert(restart.success && restart_pid != "", "failed to restart orchestrator")
@@ -123,33 +123,33 @@ pipeline test(task) {
   let queue = shell_at(
     root,
     "env HARN_EVENT_LOG_BACKEND=file "
-    + harn_bin
-    + " orchestrator queue --config "
-    + config_path
-    + " --state-dir "
-    + state_dir,
+      + harn_bin
+      + " orchestrator queue --config "
+      + config_path
+      + " --state-dir "
+      + state_dir,
   )
   println(
     queue.success
-    && queue.stdout.contains("stranded_envelopes=1")
-    && queue.stdout.contains("Stranded envelopes:")
-    && !queue.stdout.contains("dispatch_succeeded"),
+      && queue.stdout.contains("stranded_envelopes=1")
+      && queue.stdout.contains("Stranded envelopes:")
+      && !queue.stdout.contains("dispatch_succeeded"),
   )
   let recover = shell_at(
     root,
     "env HARN_EVENT_LOG_BACKEND=file "
-    + harn_bin
-    + " orchestrator recover --config "
-    + config_path
-    + " --state-dir "
-    + state_dir
-    + " --envelope-age 0s --dry-run",
+      + harn_bin
+      + " orchestrator recover --config "
+      + config_path
+      + " --state-dir "
+      + state_dir
+      + " --envelope-age 0s --dry-run",
   )
   println(
     recover.success
-    && recover.stdout.contains("stranded_envelopes=1")
-    && recover.stdout.contains("Candidates:")
-    && recover.stdout.contains("event_id=trigger_evt_"),
+      && recover.stdout.contains("stranded_envelopes=1")
+      && recover.stdout.contains("Candidates:")
+      && recover.stdout.contains("event_id=trigger_evt_"),
   )
   let _ = shell("kill -TERM " + restart_pid)
   wait_for_exit(restart_pid)

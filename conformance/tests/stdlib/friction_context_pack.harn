@@ -4,82 +4,82 @@ pipeline main() {
   friction_clear()
   let disabled = friction_record(
     {
-    kind: "repeated_query",
-    source: "incident-triage",
-    actor: "sre",
-    tool: "splunk",
-    provider: "splunk",
-    redacted_summary: "Checkout incident needed the same query token=secret",
-  },
+      kind: "repeated_query",
+      source: "incident-triage",
+      actor: "sre",
+      tool: "splunk",
+      provider: "splunk",
+      redacted_summary: "Checkout incident needed the same query token=secret",
+    },
     {enabled: false},
   )
   println(!disabled.recorded && len(friction_events()) == 0)
   let first = friction_record(
     {
-    kind: "repeated_query",
-    source: "incident-triage",
-    actor: "sre",
-    tool: "splunk",
-    provider: "splunk",
-    redacted_summary: "Checkout incident needed the same Splunk search token=secret",
-    estimated_time_ms: 300000,
-    estimated_cost_usd: 0.12,
-    recurrence_hints: ["checkout incident queries"],
-    metadata: {
-    query: "index=checkout service=api error",
-    capability: "splunk.search",
-    secret_ref: "SPLUNK_READ_TOKEN",
-    output_slot: "splunk_errors",
-    api_key: "sk-live-secret",
-  },
-  },
+      kind: "repeated_query",
+      source: "incident-triage",
+      actor: "sre",
+      tool: "splunk",
+      provider: "splunk",
+      redacted_summary: "Checkout incident needed the same Splunk search token=secret",
+      estimated_time_ms: 300000,
+      estimated_cost_usd: 0.12,
+      recurrence_hints: ["checkout incident queries"],
+      metadata: {
+        query: "index=checkout service=api error",
+        capability: "splunk.search",
+        secret_ref: "SPLUNK_READ_TOKEN",
+        output_slot: "splunk_errors",
+        api_key: "sk-live-secret",
+      },
+    },
   )
   friction_record(
     {
-    kind: "repeated_query",
-    source: "incident-triage",
-    actor: "sre",
-    tool: "splunk",
-    provider: "splunk",
-    redacted_summary: "Checkout triage repeated the same Splunk search",
-    estimated_time_ms: 240000,
-    estimated_cost_usd: 0.1,
-    recurrence_hints: ["checkout incident queries"],
-    metadata: {
-    query: "index=checkout service=api error",
-    capability: "splunk.search",
-    secret_ref: "SPLUNK_READ_TOKEN",
-    output_slot: "splunk_errors",
-  },
-  },
+      kind: "repeated_query",
+      source: "incident-triage",
+      actor: "sre",
+      tool: "splunk",
+      provider: "splunk",
+      redacted_summary: "Checkout triage repeated the same Splunk search",
+      estimated_time_ms: 240000,
+      estimated_cost_usd: 0.1,
+      recurrence_hints: ["checkout incident queries"],
+      metadata: {
+        query: "index=checkout service=api error",
+        capability: "splunk.search",
+        secret_ref: "SPLUNK_READ_TOKEN",
+        output_slot: "splunk_errors",
+      },
+    },
   )
   let events = friction_events()
   let suggestions = context_pack_suggestions(events, {min_occurrences: 2, owner: "sre"})
   let pack = context_pack_manifest(
     {
-    name: "Checkout incident context",
-    owner: "sre",
-    triggers: [{kind: "repeated_query", source: "incident-triage"}],
-    included_queries: [{id: "splunk_errors", provider: "splunk", query: "index=checkout service=api error"}],
-    secrets: [{name: "SPLUNK_READ_TOKEN", capability: "splunk.search", required: true}],
-    capabilities: ["splunk.search"],
-    output_slots: [{name: "splunk_errors", artifact_kind: "context"}],
-  },
+      name: "Checkout incident context",
+      owner: "sre",
+      triggers: [{kind: "repeated_query", source: "incident-triage"}],
+      included_queries: [{id: "splunk_errors", provider: "splunk", query: "index=checkout service=api error"}],
+      secrets: [{name: "SPLUNK_READ_TOKEN", capability: "splunk.search", required: true}],
+      capabilities: ["splunk.search"],
+      output_slots: [{name: "splunk_errors", artifact_kind: "context"}],
+    },
   )
   let eval = friction_eval_fixture(
     {
-    events: events,
-    options: {min_occurrences: 2},
-    expected_suggestions: [
-    {
-    min_suggestions: 1,
-    recommended_artifact: "context_pack",
-    title_contains: "incident",
-    required_capability: "splunk.search",
-    required_output_slot: "splunk_errors",
-  },
-  ],
-  },
+      events: events,
+      options: {min_occurrences: 2},
+      expected_suggestions: [
+        {
+          min_suggestions: 1,
+          recommended_artifact: "context_pack",
+          title_contains: "incident",
+          required_capability: "splunk.search",
+          required_output_slot: "splunk_errors",
+        },
+      ],
+    },
   )
   println(first.recorded && first.sink == "memory")
   println(len(events) == 2 && contains(events[0].redacted_summary, "[redacted]"))

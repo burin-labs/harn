@@ -1,6 +1,8 @@
-// harn v0.7.20 Gap 3: `namespace:<tag>` entries in a skill's
-// `allowed_tools` list match any tool declared with that namespace,
-// instead of requiring an exact tool-name enumeration.
+/**
+ * harn v0.7.20 Gap 3: `namespace:<tag>` entries in a skill's
+ * `allowed_tools` list match any tool declared with that namespace,
+ * instead of requiring an exact tool-name enumeration.
+ */
 pipeline test(task) {
   llm_mock_clear()
   var tools = tool_registry()
@@ -15,20 +17,20 @@ pipeline test(task) {
     "list_files",
     "List files",
     {
-    parameters: {path: {type: "string"}},
-    namespace: "read",
-    handler: { args -> "listed " + args.path },
-  },
+      parameters: {path: {type: "string"}},
+      namespace: "read",
+      handler: { args -> "listed " + args.path },
+    },
   )
   tools = tool_define(
     tools,
     "write_file",
     "Write a file",
     {
-    parameters: {path: {type: "string"}, content: {type: "string"}},
-    namespace: "write",
-    handler: { args -> "wrote " + args.path },
-  },
+      parameters: {path: {type: "string"}, content: {type: "string"}},
+      namespace: "write",
+      handler: { args -> "wrote " + args.path },
+    },
   )
   skill explorer {
     description "Explore a codebase"

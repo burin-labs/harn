@@ -1,13 +1,15 @@
-// Skills & Tool Vault phase 3 (harn#74): `sticky: false` triggers
-// the reassess phase before each turn, swapping skills when later
-// user context outgrows the earlier match.
-//
-// Flow:
-//   Turn 0: user prompt names a draft task → `draft` activates.
-//   Turn 0 response: text+tool call → post_turn_callback fires and
-//     injects a pivot user message ("review this instead").
-//   Turn 1: sticky=false, reassess re-reads visible_messages,
-//     scores the pivot, activates `review`, deactivates `draft`.
+/**
+ * Skills & Tool Vault phase 3 (harn#74): `sticky: false` triggers
+ * the reassess phase before each turn, swapping skills when later
+ * user context outgrows the earlier match.
+ *
+ * Flow:
+ *   Turn 0: user prompt names a draft task → `draft` activates.
+ *   Turn 0 response: text+tool call → post_turn_callback fires and
+ *     injects a pivot user message ("review this instead").
+ *   Turn 1: sticky=false, reassess re-reads visible_messages,
+ *     scores the pivot, activates `review`, deactivates `draft`.
+ */
 pipeline test(task) {
   llm_mock_clear()
   var tools = tool_registry()
@@ -35,20 +37,20 @@ pipeline test(task) {
     "Please draft the launch memo",
     nil,
     {
-    provider: "mock",
-    tools: tools,
-    tool_format: "native",
-    max_iterations: 2,
-    persistent: true,
-    skills: registry,
-    skill_match: {strategy: "metadata", top_n: 1, sticky: false},
-    post_turn_callback: { info ->
-    if info?.iteration == 0 {
-      return {message: "Actually, please review the existing launch memo."}
-    }
-    return ""
-  },
-  },
+      provider: "mock",
+      tools: tools,
+      tool_format: "native",
+      max_iterations: 2,
+      persistent: true,
+      skills: registry,
+      skill_match: {strategy: "metadata", top_n: 1, sticky: false},
+      post_turn_callback: { info ->
+        if info?.iteration == 0 {
+          return {message: "Actually, please review the existing launch memo."}
+        }
+        return ""
+      },
+    },
   )
   let events = transcript_events(result?.transcript)
   var draft_activate = false

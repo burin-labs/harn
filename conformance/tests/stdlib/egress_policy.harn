@@ -3,10 +3,10 @@ pipeline test(task) {
   transport_mock_clear()
   egress_policy(
     {
-    allow: ["allowed.example.test", "*.wild.example.test", "127.0.0.0/8", "port.example.test:8443"],
-    deny: ["blocked.wild.example.test", "127.0.0.66"],
-    default: "deny",
-  },
+      allow: ["allowed.example.test", "*.wild.example.test", "127.0.0.0/8", "port.example.test:8443"],
+      deny: ["blocked.wild.example.test", "127.0.0.66"],
+      default: "deny",
+    },
   )
   http_mock("GET", "https://allowed.example.test/ok", {status: 200, body: "allowed"})
   let allowed = http_get("https://allowed.example.test/ok")

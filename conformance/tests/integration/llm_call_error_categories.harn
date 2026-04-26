@@ -27,8 +27,8 @@ pipeline default(task) {
     } catch (e) {
       println(
         category + " thrown=" + e.category + " msg=" + e.message + " provider=" + e.provider
-        + " model="
-        + e.model,
+          + " model="
+          + e.model,
       )
     }
     // Parity: llm_call_safe wraps the exact same fields.

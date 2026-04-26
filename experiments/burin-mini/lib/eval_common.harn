@@ -110,20 +110,20 @@ pub fn task_reference(task_id) {
     return {
       task_id: task_id,
       ideal_trace: [
-      "Run one focused research pass against auth-guard.ts and context.ts.",
-      "Make one scoped edit to auth-guard.ts that only adds an accurate module comment.",
-      "Verify the exact required text with the provided grep command.",
-    ],
+        "Run one focused research pass against auth-guard.ts and context.ts.",
+        "Make one scoped edit to auth-guard.ts that only adds an accurate module comment.",
+        "Verify the exact required text with the provided grep command.",
+      ],
       rubric: [
-      "Reward a short direct path from research to write to verify.",
-      "Reward preserving runtime behavior and keeping edits scoped to auth-guard.ts.",
-      "Penalize extra writes, generic rewrites, or skipped verification.",
-    ],
+        "Reward a short direct path from research to write to verify.",
+        "Reward preserving runtime behavior and keeping edits scoped to auth-guard.ts.",
+        "Penalize extra writes, generic rewrites, or skipped verification.",
+      ],
       anti_patterns: [
-      "Editing files outside auth-guard.ts for a comment-only task.",
-      "Changing runtime behavior instead of only adding a comment.",
-      "Looping on repeated verify or read calls after the edit is already correct.",
-    ],
+        "Editing files outside auth-guard.ts for a comment-only task.",
+        "Changing runtime behavior instead of only adding a comment.",
+        "Looping on repeated verify or read calls after the edit is already correct.",
+      ],
       required_strings: ["auth-guard.ts", "Auth guard middleware"],
       expected_paths: ["packages/server/src/middleware/auth-guard.ts"],
       max_iterations_per_stage: 3,
@@ -133,49 +133,49 @@ pub fn task_reference(task_id) {
     return {
       task_id: task_id,
       ideal_trace: [
-      "Research middleware exports, route wiring, and the exact verify requirements before writing.",
-      "First batch creates packages/server/src/middleware/rate-limit.ts and exports rateLimit from the middleware index.",
-      "Second batch wires rateLimit into api.ts while preserving the existing withMiddleware architecture.",
-      "Final verify runs ./scripts/verify-rate-limit.sh and stops once it passes.",
-    ],
+        "Research middleware exports, route wiring, and the exact verify requirements before writing.",
+        "First batch creates packages/server/src/middleware/rate-limit.ts and exports rateLimit from the middleware index.",
+        "Second batch wires rateLimit into api.ts while preserving the existing withMiddleware architecture.",
+        "Final verify runs ./scripts/verify-rate-limit.sh and stops once it passes.",
+      ],
       rubric: [
-      "Reward verifier-exact identifier usage, especially the export name rateLimit.",
-      "Reward keeping edits inside the intended middleware and route files.",
-      "Reward preserving the withMiddleware structure instead of replacing the file with generic framework boilerplate.",
-      "Reward a dedicated final verify batch that runs once after implementation; do not require verification to be folded into the final write batch.",
-      "Penalize verify rediscovery loops, broad rewrites, or architecture drift.",
-    ],
+        "Reward verifier-exact identifier usage, especially the export name rateLimit.",
+        "Reward keeping edits inside the intended middleware and route files.",
+        "Reward preserving the withMiddleware structure instead of replacing the file with generic framework boilerplate.",
+        "Reward a dedicated final verify batch that runs once after implementation; do not require verification to be folded into the final write batch.",
+        "Penalize verify rediscovery loops, broad rewrites, or architecture drift.",
+      ],
       anti_patterns: [
-      "Replacing api.ts with generic Express router boilerplate.",
-      "Writing unrelated files or changing the host-layer architecture.",
-      "Repeatedly rerunning verification without making grounded fixes.",
-    ],
+        "Replacing api.ts with generic Express router boilerplate.",
+        "Writing unrelated files or changing the host-layer architecture.",
+        "Repeatedly rerunning verification without making grounded fixes.",
+      ],
       required_strings: ["rateLimit", "withMiddleware", "verify"],
       expected_paths: [
-      "packages/server/src/middleware/rate-limit.ts",
-      "packages/server/src/middleware/index.ts",
-      "packages/server/src/routes/api.ts",
-    ],
+        "packages/server/src/middleware/rate-limit.ts",
+        "packages/server/src/middleware/index.ts",
+        "packages/server/src/routes/api.ts",
+      ],
       max_iterations_per_stage: 3,
     }
   }
   return {
     task_id: task_id,
     ideal_trace: [
-    "Gather only the minimum repo facts needed to answer the question.",
-    "Return a concise grounded explanation naming the key API and auth files.",
-    "Do not write or run anything for a read-only explanation task.",
-  ],
+      "Gather only the minimum repo facts needed to answer the question.",
+      "Return a concise grounded explanation naming the key API and auth files.",
+      "Do not write or run anything for a read-only explanation task.",
+    ],
     rubric: [
-    "Reward minimal research and a direct grounded answer.",
-    "Reward naming the route file and auth middleware file explicitly.",
-    "Penalize unnecessary tools, writes, or vague explanations.",
-  ],
+      "Reward minimal research and a direct grounded answer.",
+      "Reward naming the route file and auth middleware file explicitly.",
+      "Penalize unnecessary tools, writes, or vague explanations.",
+    ],
     anti_patterns: [
-    "Writing files during a read-only explanation task.",
-    "Using the shell or verify path when no deterministic check is needed.",
-    "Answering without naming the key files.",
-  ],
+      "Writing files during a read-only explanation task.",
+      "Using the shell or verify path when no deterministic check is needed.",
+      "Answering without naming the key files.",
+    ],
     required_strings: ["routes/api.ts", "middleware/auth-guard.ts"],
     expected_paths: [],
     max_iterations_per_stage: 2,
@@ -272,9 +272,9 @@ pub fn render_inference_transcripts(task_root) {
   }
   return join(
     [
-    render_file_bundle(path_join(task_root, "llm"), "Top-level and provider transcripts"),
-    render_file_bundle(path_join(task_root, "events"), "Event logs and forked session traces"),
-  ],
+      render_file_bundle(path_join(task_root, "llm"), "Top-level and provider transcripts"),
+      render_file_bundle(path_join(task_root, "events"), "Event logs and forked session traces"),
+    ],
     "\n\n",
   )
 }
@@ -283,11 +283,11 @@ pub fn render_inference_transcripts(task_root) {
 pub fn render_ideal_reference(reference) {
   return join(
     [
-    "Ideal trace:\n${render_list(reference?.ideal_trace ?? [])}",
-    "Rubric:\n${render_list(reference?.rubric ?? [])}",
-    "Anti-patterns:\n${render_list(reference?.anti_patterns ?? [])}",
-    "Expected paths:\n${render_list(reference?.expected_paths ?? [])}",
-  ],
+      "Ideal trace:\n${render_list(reference?.ideal_trace ?? [])}",
+      "Rubric:\n${render_list(reference?.rubric ?? [])}",
+      "Anti-patterns:\n${render_list(reference?.anti_patterns ?? [])}",
+      "Expected paths:\n${render_list(reference?.expected_paths ?? [])}",
+    ],
     "\n\n",
   )
 }
@@ -385,23 +385,23 @@ pub fn heuristic_semantic_eval(report, run, reference) {
   return {
     method: "heuristic",
     overall_verdict: if len(gating_failures) == 0 {
-    "pass"
-  } else {
-    "fail"
-  },
+      "pass"
+    } else {
+      "fail"
+    },
     overall_score: overall_score,
     confidence: 0.55,
     summary: if len(gating_failures) == 0 {
-    "The run matched the reference shape closely enough on the objective gates."
-  } else {
-    "The run missed one or more objective gates and should not be treated as a clean success."
-  },
+      "The run matched the reference shape closely enough on the objective gates."
+    } else {
+      "The run missed one or more objective gates and should not be treated as a clean success."
+    },
     dimension_scores: {
-    task_completion: completion_score,
-    convergence: convergence_score,
-    tool_discipline: tool_discipline_score,
-    architecture_fidelity: architecture_score,
-  },
+      task_completion: completion_score,
+      convergence: convergence_score,
+      tool_discipline: tool_discipline_score,
+      architecture_fidelity: architecture_score,
+    },
     strengths: strengths,
     weaknesses: weaknesses,
     gating_failures: gating_failures,

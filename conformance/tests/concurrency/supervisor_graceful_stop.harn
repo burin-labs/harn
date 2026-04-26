@@ -2,27 +2,27 @@ pipeline default() {
   let drained = atomic(0)
   let sup = supervisor_start(
     {
-    name: "persona",
-    strategy: "one_for_one",
-    children: [
-    {
-    name: "continuous-persona",
-    kind: "persona_loop",
-    restart: "never",
-    task: { _ctx ->
-    while !is_cancelled() {
-      try {
-        sleep(1ms)
-      } catch (_e) {
-        nil
-      }
-    }
-    atomic_set(drained, 1)
-    "drained"
-  },
-  },
-  ],
-  },
+      name: "persona",
+      strategy: "one_for_one",
+      children: [
+        {
+          name: "continuous-persona",
+          kind: "persona_loop",
+          restart: "never",
+          task: { _ctx ->
+            while !is_cancelled() {
+              try {
+                sleep(1ms)
+              } catch (_e) {
+                nil
+              }
+            }
+            atomic_set(drained, 1)
+            "drained"
+          },
+        },
+      ],
+    },
   )
   sleep(1ms)
   let stopped = supervisor_stop(sup, 50ms)

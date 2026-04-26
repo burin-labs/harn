@@ -9,9 +9,9 @@ pipeline test(task) {
   assert_eq(bytes_to_hex(brotli_decode(brotli_encode(bytes, 4))), "000102fffefd")
   let tar_archive = tar_create(
     [
-    {path: "docs/readme.txt", content: text, mode: 420},
-    {path: "bin/run", content: bytes_from_string("echo hi\n"), mode: 493},
-  ],
+      {path: "docs/readme.txt", content: text, mode: 420},
+      {path: "bin/run", content: bytes_from_string("echo hi\n"), mode: 493},
+    ],
   )
   let tar_entries = tar_extract(tar_archive)
   assert_eq(len(tar_entries), 2)

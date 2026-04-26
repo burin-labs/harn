@@ -18,14 +18,14 @@ pipeline test(task) {
   llm_mock({text: "handled Bar.swift"})
   let daemon = daemon_spawn(
     {
-    name: "reviewer",
-    task: "Wait for daemon trigger messages and acknowledge the latest file path.",
-    system: "You are a daemon reviewer.",
-    provider: "mock",
-    persist_path: root,
-    wake_interval_ms: 5,
-    max_iterations: 200,
-  },
+      name: "reviewer",
+      task: "Wait for daemon trigger messages and acknowledge the latest file path.",
+      system: "You are a daemon reviewer.",
+      provider: "mock",
+      persist_path: root,
+      wake_interval_ms: 5,
+      max_iterations: 200,
+    },
   )
   let first = daemon_snapshot(daemon)
   println(daemon?.status == "running")

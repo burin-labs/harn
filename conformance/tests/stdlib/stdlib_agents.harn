@@ -4,13 +4,13 @@ import "std/context"
 pipeline default() {
   let flow = workflow(
     {
-    name: "demo",
-    model_tier: "mid",
-    persistent: false,
-    act: {mode: "llm", context: context([section("brief", "Stay concise.", nil)], nil)},
-    verify: {assert_text: "not present"},
-    repair: {mode: "llm", model_tier: "frontier"},
-  },
+      name: "demo",
+      model_tier: "mid",
+      persistent: false,
+      act: {mode: "llm", context: context([section("brief", "Stay concise.", nil)], nil)},
+      verify: {assert_text: "not present"},
+      repair: {mode: "llm", model_tier: "frontier"},
+    },
   )
   let result = task_run("Write a note", flow, {provider: "mock"})
   println(result?.status)

@@ -14,12 +14,12 @@ pipeline main() {
     "Call read",
     "You are helpful",
     {
-    provider: "mock",
-    tools: read_tools(),
-    tool_format: "native",
-    max_iterations: 1,
-    approval_policy: {auto_approve: ["read*"], auto_deny: ["shell*"]},
-  },
+      provider: "mock",
+      tools: read_tools(),
+      tool_format: "native",
+      max_iterations: 1,
+      approval_policy: {auto_approve: ["read*"], auto_deny: ["shell*"]},
+    },
   )
   println(len(result?.tools?.rejected) == 0)
 }

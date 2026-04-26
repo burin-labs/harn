@@ -323,16 +323,16 @@ fn append_verifier_hints_to_task(profile, task, target_paths, allowed_tools) {
     hints = hints
       + [
       "Use the exact verifier-required identifiers: "
-      + join(required_identifiers, ", ")
-      + ".",
+        + join(required_identifiers, ", ")
+        + ".",
     ]
   }
   if len(required_text) > 0 {
     hints = hints
       + [
       "Include the exact verifier-required text verbatim: "
-      + join(required_text, " ; ")
-      + ".",
+        + join(required_text, " ; ")
+        + ".",
     ]
   }
   if len(notes) > 0 {
@@ -386,14 +386,14 @@ fn infer_action_dependencies(actions) {
     normalized = normalized
       + [
       {
-      id: action?.id ?? "",
-      title: action?.title ?? "",
-      task: action?.task ?? "",
-      depends_on: depends_on,
-      allowed_tools: action?.allowed_tools ?? [],
-      target_paths: action?.target_paths ?? [],
-      command: action?.command ?? "",
-    },
+        id: action?.id ?? "",
+        title: action?.title ?? "",
+        task: action?.task ?? "",
+        depends_on: depends_on,
+        allowed_tools: action?.allowed_tools ?? [],
+        target_paths: action?.target_paths ?? [],
+        command: action?.command ?? "",
+      },
     ]
   }
   return normalized
@@ -418,14 +418,14 @@ fn ensure_terminal_verify_action(profile, actions) {
   return actions
     + [
     {
-    id: "verify_output",
-    title: "Run verification command",
-    task: "Run `${verify_command}` exactly and report whether it passed.",
-    depends_on: depends_on,
-    allowed_tools: ["run"],
-    target_paths: [],
-    command: verify_command,
-  },
+      id: "verify_output",
+      title: "Run verification command",
+      task: "Run `${verify_command}` exactly and report whether it passed.",
+      depends_on: depends_on,
+      allowed_tools: ["run"],
+      target_paths: [],
+      command: verify_command,
+    },
   ]
 }
 
@@ -577,18 +577,18 @@ pub fn plan_to_action_graph(task, plan) {
     actions = actions
       + [
       {
-      _type: "action_item",
-      id: action?.id ?? "",
-      title: action?.title ?? "",
-      instruction: action?.task ?? action?.title ?? "",
-      phase: action_phase(action),
-      depends_on: action?.depends_on ?? [],
-      tools: action?.allowed_tools ?? [],
-      tool_class: action_tool_class(action),
-      target_paths: action?.target_paths ?? [],
-      command: action?.command ?? "",
-      metadata: {target_paths: action?.target_paths ?? [], command: action?.command ?? ""},
-    },
+        _type: "action_item",
+        id: action?.id ?? "",
+        title: action?.title ?? "",
+        instruction: action?.task ?? action?.title ?? "",
+        phase: action_phase(action),
+        depends_on: action?.depends_on ?? [],
+        tools: action?.allowed_tools ?? [],
+        tool_class: action_tool_class(action),
+        target_paths: action?.target_paths ?? [],
+        command: action?.command ?? "",
+        metadata: {target_paths: action?.target_paths ?? [], command: action?.command ?? ""},
+      },
     ]
   }
   return {_type: "action_graph", task: task, summary: plan?.plan_summary ?? "", actions: actions}
@@ -685,40 +685,40 @@ pub fn planner_schema() {
   return {
     type: "object",
     properties: {
-    ready: {type: "boolean"},
-    plan_summary: {type: "string"},
-    final_response: {type: "string"},
-    questions: schema_nullable(
-    {
-    type: "array",
-    items: {
-    type: "object",
-    properties: {
-    id: {type: "string"},
-    question: {type: "string"},
-    tools: schema_nullable({type: "array", items: {type: "string"}}),
-  },
-  },
-  },
-  ),
-    actions: schema_nullable(
-    {
-    type: "array",
-    items: {
-    type: "object",
-    properties: {
-    id: {type: "string"},
-    title: {type: "string"},
-    task: {type: "string"},
-    depends_on: schema_nullable({type: "array", items: {type: "string"}}),
-    allowed_tools: schema_nullable({type: "array", items: {type: "string"}}),
-    target_paths: schema_nullable({type: "array", items: {type: "string"}}),
-    command: schema_nullable({type: "string"}),
-  },
-  },
-  },
-  ),
-  },
+      ready: {type: "boolean"},
+      plan_summary: {type: "string"},
+      final_response: {type: "string"},
+      questions: schema_nullable(
+        {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              id: {type: "string"},
+              question: {type: "string"},
+              tools: schema_nullable({type: "array", items: {type: "string"}}),
+            },
+          },
+        },
+      ),
+      actions: schema_nullable(
+        {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              id: {type: "string"},
+              title: {type: "string"},
+              task: {type: "string"},
+              depends_on: schema_nullable({type: "array", items: {type: "string"}}),
+              allowed_tools: schema_nullable({type: "array", items: {type: "string"}}),
+              target_paths: schema_nullable({type: "array", items: {type: "string"}}),
+              command: schema_nullable({type: "string"}),
+            },
+          },
+        },
+      ),
+    },
   }
 }
 
@@ -727,11 +727,11 @@ pub fn research_schema() {
   return {
     type: "object",
     properties: {
-    question: {type: "string"},
-    answer: {type: "string"},
-    evidence_paths: {type: "array", items: {type: "string"}},
-    next_steps: {type: "array", items: {type: "string"}},
-  },
+      question: {type: "string"},
+      answer: {type: "string"},
+      evidence_paths: {type: "array", items: {type: "string"}},
+      next_steps: {type: "array", items: {type: "string"}},
+    },
   }
 }
 

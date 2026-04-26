@@ -5,10 +5,10 @@ fn search_tools() {
     "search",
     "Search the repo",
     {
-    handler: { args -> "found " + args.query },
-    parameters: {query: {type: "string"}},
-    returns: {type: "string"},
-  },
+      handler: { args -> "found " + args.query },
+      parameters: {query: {type: "string"}},
+      returns: {type: "string"},
+    },
   )
   return tools
 }
@@ -16,21 +16,21 @@ fn search_tools() {
 pipeline main() {
   llm_mock(
     {
-    tool_calls: [{id: "budget_1", name: "search", arguments: {query: "token budget"}}],
-    input_tokens: 20,
-    output_tokens: 12,
-  },
+      tool_calls: [{id: "budget_1", name: "search", arguments: {query: "token budget"}}],
+      input_tokens: 20,
+      output_tokens: 12,
+    },
   )
   let budgeted = sub_agent_run(
     "Investigate under a tiny budget.",
     {
-    provider: "mock",
-    tools: search_tools(),
-    allowed_tools: ["search"],
-    tool_format: "native",
-    max_iterations: 3,
-    token_budget: 8,
-  },
+      provider: "mock",
+      tools: search_tools(),
+      allowed_tools: ["search"],
+      tool_format: "native",
+      max_iterations: 3,
+      token_budget: 8,
+    },
   )
   println(budgeted?.budget_exceeded)
   println(budgeted?.tokens_used >= 32)
@@ -46,13 +46,13 @@ pipeline main() {
   let tool_handle = sub_agent_run(
     "Search in the background with a Harn-owned tool.",
     {
-    provider: "mock",
-    background: true,
-    tools: search_tools(),
-    allowed_tools: ["search"],
-    tool_format: "native",
-    max_iterations: 3,
-  },
+      provider: "mock",
+      background: true,
+      tools: search_tools(),
+      allowed_tools: ["search"],
+      tool_format: "native",
+      max_iterations: 3,
+    },
   )
   println(tool_handle?.mode == "sub_agent")
   let tool_done = wait_agent(tool_handle)

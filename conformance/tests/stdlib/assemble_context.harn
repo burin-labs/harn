@@ -11,13 +11,13 @@ pipeline test(task) {
   // Relevance strategy with enough budget to include both short artifacts.
   let packed = assemble_context(
     {
-    artifacts: [short_a, short_b, large],
-    budget_tokens: 64,
-    dedup: "chunked",
-    strategy: "relevance",
-    query: "parser drift diagnostics",
-    microcompact_threshold: 20,
-  },
+      artifacts: [short_a, short_b, large],
+      budget_tokens: 64,
+      dedup: "chunked",
+      strategy: "relevance",
+      query: "parser drift diagnostics",
+      microcompact_threshold: 20,
+    },
   )
   println(packed.budget_tokens == 64)
   println(len(packed.chunks) > 0)
@@ -26,13 +26,13 @@ pipeline test(task) {
   // Chunk ids are content-addressed: same text → same id across calls.
   let second = assemble_context(
     {
-    artifacts: [short_a, short_b, large],
-    budget_tokens: 64,
-    dedup: "chunked",
-    strategy: "relevance",
-    query: "parser drift diagnostics",
-    microcompact_threshold: 20,
-  },
+      artifacts: [short_a, short_b, large],
+      budget_tokens: 64,
+      dedup: "chunked",
+      strategy: "relevance",
+      query: "parser drift diagnostics",
+      microcompact_threshold: 20,
+    },
   )
   println(packed.chunks[0].id == second.chunks[0].id)
   // Large artifact was microcompacted into multiple chunks.
@@ -66,12 +66,12 @@ pipeline test(task) {
   let rr_b = artifact({id: "rr_b", kind: "summary", text: "delta dddd\n\nepsilon ee\n\nzeta ff"})
   let rr = assemble_context(
     {
-    artifacts: [rr_a, rr_b],
-    budget_tokens: 10000,
-    dedup: "none",
-    strategy: "round_robin",
-    microcompact_threshold: 3,
-  },
+      artifacts: [rr_a, rr_b],
+      budget_tokens: 10000,
+      dedup: "none",
+      strategy: "round_robin",
+      microcompact_threshold: 3,
+    },
   )
   println(len(rr.chunks) >= 4)
   println(rr.chunks[0].artifact_id == "rr_a")
@@ -81,34 +81,34 @@ pipeline test(task) {
   // Custom ranker callback overrides default keyword scoring.
   let custom = assemble_context(
     {
-    artifacts: [short_a, short_b],
-    budget_tokens: 14,
-    dedup: "none",
-    strategy: "relevance",
-    query: "parser",
-    ranker_callback: { _q, chunks -> chunks
-    .map(
-    { c ->
-    if c.artifact_id == "short_b" {
-      0.99
-    } else {
-      0.01
-    }
-  },
-  ) },
-  },
+      artifacts: [short_a, short_b],
+      budget_tokens: 14,
+      dedup: "none",
+      strategy: "relevance",
+      query: "parser",
+      ranker_callback: { _q, chunks -> chunks
+        .map(
+        { c ->
+          if c.artifact_id == "short_b" {
+            0.99
+          } else {
+            0.01
+          }
+        },
+      ) },
+    },
   )
   println(len(custom.chunks) == 1)
   println(custom.chunks[0].artifact_id == "short_b")
   // Budget enforcement: chunks over budget get reported in dropped/reasons.
   let tight = assemble_context(
     {
-    artifacts: [large],
-    budget_tokens: 10,
-    dedup: "none",
-    strategy: "recency",
-    microcompact_threshold: 5,
-  },
+      artifacts: [large],
+      budget_tokens: 10,
+      dedup: "none",
+      strategy: "recency",
+      microcompact_threshold: 5,
+    },
   )
   println(tight.total_tokens <= 10)
   var saw_budget = false

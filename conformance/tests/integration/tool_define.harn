@@ -6,23 +6,23 @@ pipeline test(task) {
     "search_code",
     "Search for code patterns",
     {
-    parameters: {
-    query: {type: "string", description: "Search query"},
-    path: {type: "string", description: "Optional path scope"},
-  },
-    returns: {type: "object", properties: {matches: {type: "array"}}},
-    handler: { args -> "found: " + args.query },
-  },
+      parameters: {
+        query: {type: "string", description: "Search query"},
+        path: {type: "string", description: "Optional path scope"},
+      },
+      returns: {type: "object", properties: {matches: {type: "array"}}},
+      handler: { args -> "found: " + args.query },
+    },
   )
   registry = tool_define(
     registry,
     "read",
     "Read file contents",
     {
-    parameters: {path: {type: "string", description: "Path to read"}},
-    returns: {type: "string"},
-    handler: { args -> "content of " + args.path },
-  },
+      parameters: {path: {type: "string", description: "Path to read"}},
+      returns: {type: "string"},
+      handler: { args -> "content of " + args.path },
+    },
   )
   // Verify tools registered
   assert(tool_count(registry) == 2, "should have 2 tools")

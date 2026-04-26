@@ -1,8 +1,10 @@
-// Skills & Tool Vault phase 3 (harn#74): `paths:` auto-trigger.
-//
-// When the user prompt contains no keyword overlap with any skill,
-// the `working_files:` option feeds the path-glob matcher — and a
-// path hit alone is enough to activate.
+/**
+ * Skills & Tool Vault phase 3 (harn#74): `paths:` auto-trigger.
+ *
+ * When the user prompt contains no keyword overlap with any skill,
+ * the `working_files:` option feeds the path-glob matcher — and a
+ * path hit alone is enough to activate.
+ */
 pipeline test(task) {
   llm_mock_clear()
   skill infra_touch {
@@ -20,11 +22,11 @@ pipeline test(task) {
     "fix the edge case",
     nil,
     {
-    provider: "mock",
-    max_iterations: 1,
-    skills: registry,
-    working_files: ["infra/terraform/cluster.tf", "README.md"],
-  },
+      provider: "mock",
+      max_iterations: 1,
+      skills: registry,
+      working_files: ["infra/terraform/cluster.tf", "README.md"],
+    },
   )
   assert(result?.status == "done", "loop completes on path-only match")
   // Exactly one skill should have activated — the infra one.

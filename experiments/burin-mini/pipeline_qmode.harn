@@ -260,92 +260,92 @@ fn build_tools(dir) {
     "find",
     "Find files OR content in the workspace. Searches BOTH filenames (case-insensitive substring) and file contents (ripgrep, case-insensitive). Pass a single short token like 'auth', 'rate', 'middleware' — not a phrase. Output has two sections (filename matches, content matches) or '(no matches for ...)'.",
     {
-    parameters: {
-    query: {
-    type: "string",
-    description: "A token or short pattern. Avoid multi-word natural-language phrases — those rarely match literally. Use 'auth' not 'auth middleware'.",
-  },
-  },
-    returns: {type: "string"},
-    handler: { args -> find_workspace(args?.query ?? "") },
-  },
+      parameters: {
+        query: {
+          type: "string",
+          description: "A token or short pattern. Avoid multi-word natural-language phrases — those rarely match literally. Use 'auth' not 'auth middleware'.",
+        },
+      },
+      returns: {type: "string"},
+      handler: { args -> find_workspace(args?.query ?? "") },
+    },
   )
   registry = tool_define(
     registry,
     "read",
     "Read a single workspace file. Path must be workspace-relative (matching the paths in the workspace tree above).",
     {
-    parameters: {path: {type: "string", description: "Workspace-relative file path."}},
-    returns: {type: "string"},
-    handler: { args -> read_workspace(args.path) },
-  },
+      parameters: {path: {type: "string", description: "Workspace-relative file path."}},
+      returns: {type: "string"},
+      handler: { args -> read_workspace(args.path) },
+    },
   )
   registry = tool_define(
     registry,
     "save_user_pref",
     "Save a durable user preference learned in THIS conversation. Call this when the user explicitly states something they'd want remembered next time (branch policy, default response shape, naming conventions, framework choices, tone). Idempotent: bullets already in the profile are skipped. Scope: 'user' (any project), 'project' (this repo), 'cwd' (this experiment). Don't call this for facts derivable from the code.",
     {
-    parameters: {
-    bullet: {
-    type: "string",
-    description: "One-line preference, written as the user would describe it. Example: \"All services should default to JSON responses with a status field, e.g. {status: 'ok'}.\"",
-  },
-    scope: {type: "string", description: "Where to save it: 'user', 'project', or 'cwd'. Default: 'project'."},
-  },
-    returns: {type: "string"},
-    handler: { args ->
-    let bullet = (args?.bullet ?? "").trim()
-    if bullet == "" {
-      return "Error: bullet was empty."
-    }
-    let scope = (args?.scope ?? "project").trim()
-    let allowed = ["user", "project", "cwd"]
-    var ok = false
-    for s in allowed {
-      if scope == s {
-        ok = true
-      }
-    }
-    if !ok {
-      return "Error: scope must be one of 'user', 'project', 'cwd'. Got '${scope}'."
-    }
-    let target = profile_path_for_scope(scope)
-    let prior = if file_exists(target) {
-    read_file(target)
-  } else {
-    ""
-  }
-    if contains(prior, "- ${bullet}") {
-      return "Already saved (no-op)."
-    }
-    append_profile_writes([{scope: scope, bullet: bullet}])
-    "Saved to ${scope} profile."
-  },
-  },
+      parameters: {
+        bullet: {
+          type: "string",
+          description: "One-line preference, written as the user would describe it. Example: \"All services should default to JSON responses with a status field, e.g. {status: 'ok'}.\"",
+        },
+        scope: {type: "string", description: "Where to save it: 'user', 'project', or 'cwd'. Default: 'project'."},
+      },
+      returns: {type: "string"},
+      handler: { args ->
+        let bullet = (args?.bullet ?? "").trim()
+        if bullet == "" {
+          return "Error: bullet was empty."
+        }
+        let scope = (args?.scope ?? "project").trim()
+        let allowed = ["user", "project", "cwd"]
+        var ok = false
+        for s in allowed {
+          if scope == s {
+            ok = true
+          }
+        }
+        if !ok {
+          return "Error: scope must be one of 'user', 'project', 'cwd'. Got '${scope}'."
+        }
+        let target = profile_path_for_scope(scope)
+        let prior = if file_exists(target) {
+          read_file(target)
+        } else {
+          ""
+        }
+        if contains(prior, "- ${bullet}") {
+          return "Already saved (no-op)."
+        }
+        append_profile_writes([{scope: scope, bullet: bullet}])
+        "Saved to ${scope} profile."
+      },
+    },
   )
   registry = tool_define(
     registry,
     "ask_question",
     "Ask the user exactly one short question (max 3 sentences). The harness pauses after this and resumes when the user answers. Always offer a default or example so they don't have to think hard.",
     {
-    parameters: {
-    question: {
-    type: "string",
-    description: "The next single question for the user. <=3 sentences. Friendly. Offer a default.",
-  },
-  },
-    returns: {type: "string"},
-    handler: { args ->
-    let q = (args?.question ?? "").trim()
-    if q == "" {
-      return "Error: question text was empty. Try again with a concrete question."
-    }
-    if !file_exists(pending_p) {
-      write_file(pending_p, json_stringify({question: q, asked_at: date_iso()}))
-    }
-    "Question recorded. The harness will pause and resume after the user answers."
-  },
-  },
+      parameters: {
+        question: {
+          type: "string",
+          description: "The next single question for the user. <=3 sentences. Friendly. Offer a default.",
+        },
+      },
+      returns: {type: "string"},
+      handler: { args ->
+        let q = (args?.question ?? "").trim()
+        if q == "" {
+          return "Error: question text was empty. Try again with a concrete question."
+        }
+        if !file_exists(pending_p) {
+          write_file(pending_p, json_stringify({question: q, asked_at: date_iso()}))
+        }
+        "Question recorded. The harness will pause and resume after the user answers."
+      },
+    },
   )
   // Idempotent: if multiple ask_question calls land in the same
   // iteration (parallel tool-use), only the first sticks. agent_loop
@@ -355,26 +355,26 @@ fn build_tools(dir) {
     "exit_plan_mode",
     "Emit the final structured plan and end the conversation. Pass the plan as a JSON object (or JSON-stringified). To save durable user preferences, call save_user_pref BEFORE this.",
     {
-    parameters: {
-    plan: {
-    type: "string",
-    description: "The plan as a JSON object. Top-level keys: mode, direction, targets, grounding, tasks, verification, ready.",
-  },
-  },
-    returns: {type: "string"},
-    handler: { args ->
-    if !file_exists(plan_p) {
-      let raw = args?.plan ?? args ?? {}
-      let plan = if type_of(raw) == "string" {
-    json_parse(raw) ?? {}
-  } else {
-    raw
-  }
-      write_file(plan_p, json_stringify(plan))
-    }
-    "Plan recorded. The harness will end the step now."
-  },
-  },
+      parameters: {
+        plan: {
+          type: "string",
+          description: "The plan as a JSON object. Top-level keys: mode, direction, targets, grounding, tasks, verification, ready.",
+        },
+      },
+      returns: {type: "string"},
+      handler: { args ->
+        if !file_exists(plan_p) {
+          let raw = args?.plan ?? args ?? {}
+          let plan = if type_of(raw) == "string" {
+            json_parse(raw) ?? {}
+          } else {
+            raw
+          }
+          write_file(plan_p, json_stringify(plan))
+        }
+        "Plan recorded. The harness will end the step now."
+      },
+    },
   )
   return registry
 }
@@ -628,10 +628,10 @@ pipeline default() {
   let user_prompt = if resume_mode == "session" {
     let last = qa_history[len(qa_history) - 1]
     let answer = if type_of(last?.answer) == "string" {
-    last.answer
-  } else {
-    ""
-  }
+      last.answer
+    } else {
+      ""
+    }
     build_resume_turn_prompt(answer, len(qa_history))
   } else {
     if resume_mode == "textual_fallback" {
@@ -655,18 +655,18 @@ pipeline default() {
     user_prompt,
     sys_prompt,
     {
-    provider: provider_name(),
-    model: generator_model(),
-    tools: build_tools(dir),
-    tool_format: "native",
-    temperature: 0.2,
-    max_tokens: 2048,
-    max_iterations: 10,
-    llm_retries: 1,
-    turn_policy: {require_action_or_yield: true, max_prose_chars: 280},
-    stop_after_successful_tools: ["ask_question", "exit_plan_mode"],
-    session_id: session_id,
-  },
+      provider: provider_name(),
+      model: generator_model(),
+      tools: build_tools(dir),
+      tool_format: "native",
+      temperature: 0.2,
+      max_tokens: 2048,
+      max_iterations: 10,
+      llm_retries: 1,
+      turn_policy: {require_action_or_yield: true, max_prose_chars: 280},
+      stop_after_successful_tools: ["ask_question", "exit_plan_mode"],
+      session_id: session_id,
+    },
   )
   // Persist the updated session for the next turn.
   save_session(session_id, snap_path)

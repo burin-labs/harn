@@ -1,13 +1,15 @@
-// harn v0.7.20 Gap 1: promote `tool_search_query` / `tool_search_result`
-// to canonical `AgentEvent` variants so ACP / agent_subscribe consumers
-// see the search lifecycle in real time (not just on transcript replay).
-//
-// Mirrors `tool_search_client_bm25.harn` but wires an `agent_subscribe`
-// callback. Closure subscribers run in a cloned child VM whose env is
-// a snapshot — direct outer-var mutation doesn't propagate back — so
-// we instead have the callback side-effect into `agent_inject_feedback`
-// and assert the feedback surfaces on the next turn's user messages.
-// That proves the subscriber fired live (not on post-turn replay).
+/**
+ * harn v0.7.20 Gap 1: promote `tool_search_query` / `tool_search_result`
+ * to canonical `AgentEvent` variants so ACP / agent_subscribe consumers
+ * see the search lifecycle in real time (not just on transcript replay).
+ *
+ * Mirrors `tool_search_client_bm25.harn` but wires an `agent_subscribe`
+ * callback. Closure subscribers run in a cloned child VM whose env is
+ * a snapshot — direct outer-var mutation doesn't propagate back — so
+ * we instead have the callback side-effect into `agent_inject_feedback`
+ * and assert the feedback surfaces on the next turn's user messages.
+ * That proves the subscriber fired live (not on post-turn replay).
+ */
 pipeline test(task) {
   llm_mock_clear()
   var registry = tool_registry()
@@ -22,46 +24,46 @@ pipeline test(task) {
     "deploy_service",
     "Deploy the production service stack",
     {
-    parameters: {env: {type: "string"}},
-    defer_loading: true,
-    handler: { args -> "deployed to " + args.env },
-  },
+      parameters: {env: {type: "string"}},
+      defer_loading: true,
+      handler: { args -> "deployed to " + args.env },
+    },
   )
   registry = tool_define(
     registry,
     "query_metrics",
     "Query observability metrics",
     {
-    parameters: {query: {type: "string"}},
-    defer_loading: true,
-    handler: { args -> "metrics: " + args.query },
-  },
+      parameters: {query: {type: "string"}},
+      defer_loading: true,
+      handler: { args -> "metrics: " + args.query },
+    },
   )
   let events_session = "ts_events_session"
   agent_subscribe(
     events_session,
     { ev ->
-    if ev?.type == "tool_search_query" {
-      agent_inject_feedback(events_session, "observed_ts_query", "LIVE_TS_QUERY_FIRED")
-    }
-    if ev?.type == "tool_search_result" {
-      agent_inject_feedback(events_session, "observed_ts_result", "LIVE_TS_RESULT_FIRED")
-    }
-  },
+      if ev?.type == "tool_search_query" {
+        agent_inject_feedback(events_session, "observed_ts_query", "LIVE_TS_QUERY_FIRED")
+      }
+      if ev?.type == "tool_search_result" {
+        agent_inject_feedback(events_session, "observed_ts_result", "LIVE_TS_RESULT_FIRED")
+      }
+    },
   )
   // Turn 1: model calls the synthetic search tool with "deploy".
   llm_mock(
     {
-    text: "Looking up deploy tooling.",
-    tool_calls: [{id: "srv1", name: "__harn_tool_search", arguments: {query: "deploy"}}],
-  },
+      text: "Looking up deploy tooling.",
+      tool_calls: [{id: "srv1", name: "__harn_tool_search", arguments: {query: "deploy"}}],
+    },
   )
   // Turn 2: model calls the freshly-promoted deploy tool.
   llm_mock(
     {
-    text: "Deploying now.",
-    tool_calls: [{id: "tool2", name: "deploy_service", arguments: {env: "prod"}}],
-  },
+      text: "Deploying now.",
+      tool_calls: [{id: "tool2", name: "deploy_service", arguments: {env: "prod"}}],
+    },
   )
   // Turn 3: signal completion.
   llm_mock({text: "<done>##DONE##</done>"})
@@ -69,13 +71,13 @@ pipeline test(task) {
     "Ship the release",
     nil,
     {
-    provider: "mock",
-    tools: registry,
-    tool_search: {variant: "bm25", mode: "client"},
-    persistent: true,
-    max_iterations: 5,
-    session_id: events_session,
-  },
+      provider: "mock",
+      tools: registry,
+      tool_search: {variant: "bm25", mode: "client"},
+      persistent: true,
+      max_iterations: 5,
+      session_id: events_session,
+    },
   )
   assert(result?.status == "done", "loop completes")
   // Turn 2's recorded messages must include the two feedback markers

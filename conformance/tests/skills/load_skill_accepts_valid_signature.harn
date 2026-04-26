@@ -3,23 +3,23 @@ pipeline test(task) {
   let catalog = render_always_on_catalog(skills_catalog_entries(skills), 2000)
   llm_mock(
     {
-    text: "Load the signed instructions.",
-    tool_calls: [{id: "ls1", name: "load_skill", arguments: {name: "signed-review"}}],
-  },
+      text: "Load the signed instructions.",
+      tool_calls: [{id: "ls1", name: "load_skill", arguments: {name: "signed-review"}}],
+    },
   )
   llm_mock({text: "<done>##DONE##</done>"})
   let result = agent_loop(
     "Use the signed skill",
     catalog,
     {
-    provider: "mock",
-    model: "gpt-5.4",
-    tool_format: "native",
-    persistent: true,
-    max_iterations: 3,
-    session_id: "skills-signed-accept",
-    skills: skills,
-  },
+      provider: "mock",
+      model: "gpt-5.4",
+      tool_format: "native",
+      persistent: true,
+      max_iterations: 3,
+      session_id: "skills-signed-accept",
+      skills: skills,
+    },
   )
   assert(result?.status == "done", "agent loop finishes")
   let calls = llm_mock_calls()
@@ -32,8 +32,8 @@ pipeline test(task) {
   var saw_record = false
   for ev in events {
     if ev?.kind == "skill.loaded" && ev?.metadata?.skill_id == "signed-review" {
-      assert(ev?.metadata?.signed == true, "trust record marks skill as signed")
-      assert(ev?.metadata?.trusted == true, "trust record marks skill as trusted")
+      assert(ev?.metadata?.signed, "trust record marks skill as signed")
+      assert(ev?.metadata?.trusted, "trust record marks skill as trusted")
       saw_record = true
     }
   }

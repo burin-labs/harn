@@ -1,8 +1,8 @@
 pipeline test(task) {
   let result = try {
     mutex {
-    throw "boom"
-  }
+      throw "boom"
+    }
   }
   println(is_err(result))
   let permit = sync_mutex_acquire("__default__", 0)

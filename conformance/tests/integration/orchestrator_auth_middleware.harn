@@ -49,8 +49,8 @@ pipeline test(task) {
   let start = shell_at(
     root,
     "nohup env HARN_SECRET_PROVIDERS=env HARN_ORCHESTRATOR_API_KEYS=test-key-1,test-key-2 HARN_ORCHESTRATOR_HMAC_SECRET=shared-secret "
-    + harn_bin
-    + " orchestrator serve --config harn.toml --state-dir ./state --role single-tenant --bind 127.0.0.1:0 >/dev/null 2>orchestrator.log </dev/null & echo $!",
+      + harn_bin
+      + " orchestrator serve --config harn.toml --state-dir ./state --role single-tenant --bind 127.0.0.1:0 >/dev/null 2>orchestrator.log </dev/null & echo $!",
   )
   let pid = start.stdout.trim()
   assert(start.success, "failed to start orchestrator")
@@ -66,12 +66,12 @@ pipeline test(task) {
     "POST",
     url + "/a2a/review",
     {
-    body: body,
-    headers: {
-    ["Content-Type"]: "application/json",
-    Authorization: "HMAC-SHA256 timestamp=" + ts + ",signature=AAAAAAAAAAAAAAAAAAAAAA==",
-  },
-  },
+      body: body,
+      headers: {
+        ["Content-Type"]: "application/json",
+        Authorization: "HMAC-SHA256 timestamp=" + ts + ",signature=AAAAAAAAAAAAAAAAAAAAAA==",
+      },
+    },
   )
   println(wrong_hmac.status == 401)
   let bearer = http_request(

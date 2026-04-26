@@ -3,11 +3,11 @@ pipeline test(task) {
     type: "dict",
     required: ["name", "age"],
     properties: {
-    name: {type: "string", min_length: 2},
-    age: {type: "int", min: 0},
-    role: {type: "string", enum: ["admin", "user"], default: "user"},
-    tags: {type: "list", min_items: 1, items: {type: "string", pattern: "^[a-z]+$"}},
-  },
+      name: {type: "string", min_length: 2},
+      age: {type: "int", min: 0},
+      role: {type: "string", enum: ["admin", "user"], default: "user"},
+      tags: {type: "list", min_items: 1, items: {type: "string", pattern: "^[a-z]+$"}},
+    },
   }
   let ok = schema_parse({name: "Ada", age: 36, tags: ["core"]}, schema)
   println(is_ok(ok))

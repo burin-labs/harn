@@ -1,11 +1,13 @@
-// `try* EXPR` evaluates EXPR. If EXPR throws, the throw is rethrown
-// (running pending finally blocks between the rethrow and the
-// enclosing catch). Otherwise `try* EXPR` evaluates to EXPR's value.
-//
-// Per issue #26, the desugaring is:
-//   try* EXPR  ===  { let _r = try { EXPR }
-//                      guard is_ok(_r) else { throw unwrap_err(_r) }
-//                      unwrap(_r) }
+/**
+ * `try* EXPR` evaluates EXPR. If EXPR throws, the throw is rethrown
+ * (running pending finally blocks between the rethrow and the
+ * enclosing catch). Otherwise `try* EXPR` evaluates to EXPR's value.
+ *
+ * Per issue #26, the desugaring is:
+ *   try* EXPR  ===  { let _r = try { EXPR }
+ *                      guard is_ok(_r) else { throw unwrap_err(_r) }
+ *                      unwrap(_r) }
+ */
 pipeline test(task) {
   fn ok() {
     return 42
@@ -52,11 +54,11 @@ pipeline test(task) {
   //     touched when inner handles the rethrow. ---
   let outer_untouched = try {
     let inner = try {
-    let _ = try* boom()
-    "u1"
-  } catch (e) {
-    "inner:${e}"
-  }
+      let _ = try* boom()
+      "u1"
+    } catch (e) {
+      "inner:${e}"
+    }
     inner
   } catch (e) {
     "outer:${e}"

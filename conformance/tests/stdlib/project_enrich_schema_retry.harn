@@ -18,31 +18,31 @@ pipeline test(task) {
     type: "object",
     required: ["framework", "indent_style", "naming_conventions", "test_runner"],
     properties: {
-    framework: {type: "string"},
-    indent_style: {type: "string"},
-    naming_conventions: {type: "array", items: {type: "string"}},
-    test_runner: {type: "string"},
-  },
+      framework: {type: "string"},
+      indent_style: {type: "string"},
+      naming_conventions: {type: "array", items: {type: "string"}},
+      test_runner: {type: "string"},
+    },
   }
   let result = project_enrich(
     base_dir,
     {
-    base_evidence: base,
-    prompt: prompt,
-    schema: schema,
-    budget_tokens: 4000,
-    provider: "mock",
-    model: "mock-model",
-    cache_key: "retry-v1",
-    schema_retries: 1,
-    include_operator_meta: false,
-  },
+      base_evidence: base,
+      prompt: prompt,
+      schema: schema,
+      budget_tokens: 4000,
+      provider: "mock",
+      model: "mock-model",
+      cache_key: "retry-v1",
+      schema_retries: 1,
+      include_operator_meta: false,
+    },
   )
   let calls = llm_mock_calls()
   let retry_messages = calls[1].messages
   let retry_last = retry_messages[len(retry_messages) - 1]
   println(result.test_runner == "cargo nextest")
-  println(result._provenance.cached == false)
+  println(!result._provenance.cached)
   println(len(calls) == 2)
   println(contains(retry_last.content, "schema"))
 }

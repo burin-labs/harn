@@ -5,15 +5,15 @@ pipeline test(task) {
   let agent_id = "trust-graph-api-" + unique
   let entry_id: TrustEntryId = trust_graph_record(
     {
-    agent: agent_id,
-    action: "deploy.prod",
-    approver: "reviewer-1",
-    outcome: "success",
-    trace_id: "trace-" + unique,
-    autonomy_tier: "suggest",
-    cost_usd: 0.25,
-    metadata: {ticket: "INC-1"},
-  },
+      agent: agent_id,
+      action: "deploy.prod",
+      approver: "reviewer-1",
+      outcome: "success",
+      trace_id: "trace-" + unique,
+      autonomy_tier: "suggest",
+      cost_usd: 0.25,
+      metadata: {ticket: "INC-1"},
+    },
   )
   let score: TrustScore = trust_graph_query(agent_id, "deploy.prod")
   let policy: CapabilityPolicy = trust_graph_policy_for(agent_id)

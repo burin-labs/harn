@@ -29,9 +29,9 @@ pipeline default() {
   mkdir(state_dir)
   let start = process_exec(
     "python3 \"" + server_script + "\" \"" + state_dir + "\" >\"" + log_path
-    + "\" 2>&1 & echo $! > \""
-    + pid_path
-    + "\"",
+      + "\" 2>&1 & echo $! > \""
+      + pid_path
+      + "\"",
   )
   assert(start?.success, "linear mock server started")
   wait_for_file(port_path, 100)

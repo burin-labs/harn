@@ -1,11 +1,11 @@
 pipeline test(task) {
   let base = transcript_from_messages(
     [
-    {role: "user", content: "Investigate parser drift."},
-    {role: "assistant", content: "I inspected the lexer and parser entrypoints."},
-    {role: "user", content: "Focus on diagnostics next."},
-    {role: "assistant", content: "I found three likely hotspots."},
-  ],
+      {role: "user", content: "Investigate parser drift."},
+      {role: "assistant", content: "I inspected the lexer and parser entrypoints."},
+      {role: "user", content: "Focus on diagnostics next."},
+      {role: "assistant", content: "I found three likely hotspots."},
+    ],
   )
   let truncated = transcript_compact(base, {strategy: "truncate", keep_last: 1, target_tokens: 1})
   println(transcript_summary(truncated).contains("auto-compacted"))
@@ -19,11 +19,11 @@ pipeline test(task) {
   }
   let masked_base = transcript_from_messages(
     [
-    {role: "assistant", content: "I ran the generator."},
-    {role: "user", content: "error: compile failed\n" + verbose_lines},
-    {role: "assistant", content: "I will inspect the failure."},
-    {role: "user", content: "All right."},
-  ],
+      {role: "assistant", content: "I ran the generator."},
+      {role: "user", content: "error: compile failed\n" + verbose_lines},
+      {role: "assistant", content: "I will inspect the failure."},
+      {role: "user", content: "All right."},
+    ],
   )
   let masked = transcript_compact(masked_base, {strategy: "observation_mask", keep_last: 1, target_tokens: 1})
   println(transcript_summary(masked).contains("masked"))
@@ -33,11 +33,11 @@ pipeline test(task) {
   let llm_compacted = transcript_compact(
     base,
     {
-    provider: "mock",
-    strategy: "llm",
-    keep_last: 1,
-    summarize_prompt: "compact_transcript_summary.harn.prompt",
-  },
+      provider: "mock",
+      strategy: "llm",
+      keep_last: 1,
+      summarize_prompt: "compact_transcript_summary.harn.prompt",
+    },
   )
   println(transcript_summary(llm_compacted).contains("LLM compact summary"))
   let llm_calls = llm_mock_calls()
@@ -51,31 +51,31 @@ pipeline test(task) {
   agent_subscribe(
     stream_session,
     { ev ->
-    if ev?.type == "transcript_compacted" {
-      agent_session_inject(stream_session, {role: "assistant", content: "LIVE_COMPACTION_EVENT"})
-    }
-  },
+      if ev?.type == "transcript_compacted" {
+        agent_session_inject(stream_session, {role: "assistant", content: "LIVE_COMPACTION_EVENT"})
+      }
+    },
   )
   let session_snapshot = agent_session_snapshot(stream_session)
   let _ = transcript_compact(session_snapshot, {strategy: "truncate", keep_last: 1, target_tokens: 1})
   println(
     json_stringify(transcript_messages(agent_session_snapshot(stream_session)))
-    .contains(
-    "LIVE_COMPACTION_EVENT",
-  ),
+      .contains(
+      "LIVE_COMPACTION_EVENT",
+    ),
   )
   let run = run_record(
     {
-    _type: "run_record",
-    id: "compact-run",
-    workflow_id: "wf",
-    status: "completed",
-    stages: [
-    {id: "stage-truncate", node_id: "truncate", transcript: truncated},
-    {id: "stage-mask", node_id: "mask", transcript: masked},
-    {id: "stage-llm", node_id: "llm", transcript: llm_compacted},
-  ],
-  },
+      _type: "run_record",
+      id: "compact-run",
+      workflow_id: "wf",
+      status: "completed",
+      stages: [
+        {id: "stage-truncate", node_id: "truncate", transcript: truncated},
+        {id: "stage-mask", node_id: "mask", transcript: masked},
+        {id: "stage-llm", node_id: "llm", transcript: llm_compacted},
+      ],
+    },
   )
   println(run.observability?.schema_version == 4)
   println(len(run.observability?.compaction_events) == 3)

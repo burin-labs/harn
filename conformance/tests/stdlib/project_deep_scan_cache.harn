@@ -9,17 +9,17 @@ pipeline test(task) {
   let first = project_deep_scan(
     root,
     {
-    namespace: namespace,
-    tiers: ["ambient", "config", "enriched"],
-    incremental: true,
-    depth: nil,
-    enrichment: {
-    prompt: "Return valid JSON only.",
-    provider: "mock",
-    schema: {purpose: "string"},
-    budget_tokens_per_dir: 256,
-  },
-  },
+      namespace: namespace,
+      tiers: ["ambient", "config", "enriched"],
+      incremental: true,
+      depth: nil,
+      enrichment: {
+        prompt: "Return valid JSON only.",
+        provider: "mock",
+        schema: {purpose: "string"},
+        budget_tokens_per_dir: 256,
+      },
+    },
   )
   let calls = llm_mock_calls()
   println(len(keys(first)) == 1)
@@ -29,17 +29,17 @@ pipeline test(task) {
   let second = project_deep_scan(
     root,
     {
-    namespace: namespace,
-    tiers: ["ambient", "config", "enriched"],
-    incremental: true,
-    depth: nil,
-    enrichment: {
-    prompt: "Return valid JSON only.",
-    provider: "mock",
-    schema: {purpose: "string"},
-    budget_tokens_per_dir: 256,
-  },
-  },
+      namespace: namespace,
+      tiers: ["ambient", "config", "enriched"],
+      incremental: true,
+      depth: nil,
+      enrichment: {
+        prompt: "Return valid JSON only.",
+        provider: "mock",
+        schema: {purpose: "string"},
+        budget_tokens_per_dir: 256,
+      },
+    },
   )
   let second_status = project_deep_scan_status(namespace, root)
   println(second["."].enriched.purpose == "root")

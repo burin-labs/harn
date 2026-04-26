@@ -3,18 +3,18 @@ pipeline main() {
   let crafted = {
     _type: "transcript",
     messages: [
-    {role: "user", content: "hi"},
-    {role: "assistant", content: "hey"},
-    {role: "assistant", content: "", tool_calls: [{id: "a"}, {id: "b"}]},
-    {role: "tool", content: "ok", tool_use_id: "a"},
-    {role: "tool_result", content: "ok", tool_use_id: "b"},
-    {role: "system", content: "ignore"},
-  ],
+      {role: "user", content: "hi"},
+      {role: "assistant", content: "hey"},
+      {role: "assistant", content: "", tool_calls: [{id: "a"}, {id: "b"}]},
+      {role: "tool", content: "ok", tool_use_id: "a"},
+      {role: "tool_result", content: "ok", tool_use_id: "b"},
+      {role: "system", content: "ignore"},
+    ],
     events: [
-    {kind: "message", visibility: "visible"},
-    {kind: "tool_result", visibility: "hidden"},
-    {kind: "message", visibility: "visible"},
-  ],
+      {kind: "message", visibility: "visible"},
+      {kind: "tool_result", visibility: "hidden"},
+      {kind: "message", visibility: "visible"},
+    ],
   }
   let stats = transcript_stats(crafted)
   println(stats?.message_count == 6)
@@ -36,15 +36,15 @@ pipeline main() {
   // --- Integration: transcript continuity across a persistent 2-stage workflow ---
   let flow = workflow_graph(
     {
-    name: "continuity_demo",
-    entry: "act",
-    persistent: true,
-    nodes: {
-    act: {kind: "stage", mode: "llm", model_policy: {provider: "mock", session_id: "transcript-stats-demo"}},
-    review: {kind: "stage", mode: "llm", model_policy: {provider: "mock", session_id: "transcript-stats-demo"}},
-  },
-    edges: [{from: "act", to: "review"}],
-  },
+      name: "continuity_demo",
+      entry: "act",
+      persistent: true,
+      nodes: {
+        act: {kind: "stage", mode: "llm", model_policy: {provider: "mock", session_id: "transcript-stats-demo"}},
+        review: {kind: "stage", mode: "llm", model_policy: {provider: "mock", session_id: "transcript-stats-demo"}},
+      },
+      edges: [{from: "act", to: "review"}],
+    },
   )
   // Both stages share a session id, so their transcripts
   // automatically flow together via the session store.

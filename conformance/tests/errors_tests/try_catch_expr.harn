@@ -1,9 +1,11 @@
-// Comprehensive coverage for `try/catch/finally` used as an expression.
-//
-// Every form must produce a bindable value whose type is inferable and
-// whose runtime value matches semantics documented in spec/HARN_SPEC.md.
-// Explicit type annotations on the `let` are exercised alongside the
-// untyped form to pin down type-checker behavior, not just the runtime.
+/**
+ * Comprehensive coverage for `try/catch/finally` used as an expression.
+ *
+ * Every form must produce a bindable value whose type is inferable and
+ * whose runtime value matches semantics documented in spec/HARN_SPEC.md.
+ * Explicit type annotations on the `let` are exercised alongside the
+ * untyped form to pin down type-checker behavior, not just the runtime.
+ */
 pipeline test(task) {
   enum AppError {
     NotFound(msg)
@@ -113,16 +115,16 @@ pipeline test(task) {
   //     call directly; exercises expression-position outside a binding. ---
   log(
     try {
-    "inline-ok"
-  } catch (e) {
-    "inline-err"
-  },
+      "inline-ok"
+    } catch (e) {
+      "inline-err"
+    },
   )
   log(
     try {
-    throw "x"
-  } catch (e) {
-    "inline-caught"
-  },
+      throw "x"
+    } catch (e) {
+      "inline-caught"
+    },
   )
 }

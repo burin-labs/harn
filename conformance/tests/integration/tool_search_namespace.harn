@@ -1,8 +1,10 @@
-// Tool Vault phase 3 (harn#71): `namespace` field on tool registry
-// entries groups deferred tools for OpenAI's `tool_search` meta-tool.
-// Anthropic ignores the field; Harn passes it through either way so
-// replays remain faithful and future versions can adopt the semantic
-// without another round of schema plumbing.
+/**
+ * Tool Vault phase 3 (harn#71): `namespace` field on tool registry
+ * entries groups deferred tools for OpenAI's `tool_search` meta-tool.
+ * Anthropic ignores the field; Harn passes it through either way so
+ * replays remain faithful and future versions can adopt the semantic
+ * without another round of schema plumbing.
+ */
 pipeline test(task) {
   llm_mock_clear()
   var registry = tool_registry()
@@ -17,33 +19,33 @@ pipeline test(task) {
     "deploy_api",
     "Deploy the API service",
     {
-    parameters: {env: {type: "string"}},
-    defer_loading: true,
-    namespace: "ops",
-    handler: { args -> "deployed api to " + args.env },
-  },
+      parameters: {env: {type: "string"}},
+      defer_loading: true,
+      namespace: "ops",
+      handler: { args -> "deployed api to " + args.env },
+    },
   )
   registry = tool_define(
     registry,
     "deploy_web",
     "Deploy the web frontend",
     {
-    parameters: {env: {type: "string"}},
-    defer_loading: true,
-    namespace: "ops",
-    handler: { args -> "deployed web to " + args.env },
-  },
+      parameters: {env: {type: "string"}},
+      defer_loading: true,
+      namespace: "ops",
+      handler: { args -> "deployed web to " + args.env },
+    },
   )
   registry = tool_define(
     registry,
     "lookup_customer",
     "Look up a customer record",
     {
-    parameters: {id: {type: "string"}},
-    defer_loading: true,
-    namespace: "crm",
-    handler: { args -> "customer " + args.id },
-  },
+      parameters: {id: {type: "string"}},
+      defer_loading: true,
+      namespace: "crm",
+      handler: { args -> "customer " + args.id },
+    },
   )
   // Registry inspection: namespace survives into tool_list metadata.
   let tools = tool_list(registry)
@@ -67,11 +69,11 @@ pipeline test(task) {
     "x",
     nil,
     {
-    provider: "mock",
-    model: "gpt-5.4-preview",
-    tools: registry,
-    tool_search: {variant: "bm25", mode: "native"},
-  },
+      provider: "mock",
+      model: "gpt-5.4-preview",
+      tools: registry,
+      tool_search: {variant: "bm25", mode: "native"},
+    },
   )
   let calls = llm_mock_calls()
   let meta = calls[0].tools[0]
@@ -97,11 +99,11 @@ pipeline test(task) {
   // Type validation: a non-string namespace is rejected by tool_define.
   let caught_bad_ns = try {
     tool_define(
-    tool_registry(),
-    "busted",
-    "bad namespace",
-    {parameters: {}, namespace: 42, handler: { _ -> "ok" }},
-  )
+      tool_registry(),
+      "busted",
+      "bad namespace",
+      {parameters: {}, namespace: 42, handler: { _ -> "ok" }},
+    )
     false
   } catch (e) {
     true

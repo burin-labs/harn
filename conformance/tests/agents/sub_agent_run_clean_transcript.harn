@@ -5,20 +5,20 @@ fn child_tools() {
     "search",
     "Search the repo",
     {
-    handler: { args -> "search result for " + args.query },
-    parameters: {query: {type: "string"}},
-    returns: {type: "string"},
-  },
+      handler: { args -> "search result for " + args.query },
+      parameters: {query: {type: "string"}},
+      returns: {type: "string"},
+    },
   )
   tools = tool_define(
     tools,
     "read",
     "Read a file",
     {
-    handler: { args -> "file contents from " + args.path },
-    parameters: {path: {type: "string"}},
-    returns: {type: "string"},
-  },
+      handler: { args -> "file contents from " + args.path },
+      parameters: {path: {type: "string"}},
+      returns: {type: "string"},
+    },
   )
   return tools
 }
@@ -30,19 +30,19 @@ fn parent_tools() {
     "delegate",
     "Run a sub-agent",
     {
-    handler: { args -> sub_agent_run(
-    args.task,
-    {
-    provider: "mock",
-    tools: child_tools(),
-    allowed_tools: ["search", "read"],
-    tool_format: "native",
-    max_iterations: 3,
-  },
-  ) },
-    parameters: {task: {type: "string"}},
-    returns: {type: "object"},
-  },
+      handler: { args -> sub_agent_run(
+        args.task,
+        {
+          provider: "mock",
+          tools: child_tools(),
+          allowed_tools: ["search", "read"],
+          tool_format: "native",
+          max_iterations: 3,
+        },
+      ) },
+      parameters: {task: {type: "string"}},
+      returns: {type: "object"},
+    },
   )
   return tools
 }

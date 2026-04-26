@@ -17,24 +17,24 @@ pipeline test(task) {
   assert(contains(catalog, "rust-scripting"), "catalog contains the skill id")
   llm_mock(
     {
-    text: "Load the rust instructions.",
-    tool_calls: [{id: "ls1", name: "load_skill", arguments: {name: "rust-scripting"}}],
-  },
+      text: "Load the rust instructions.",
+      tool_calls: [{id: "ls1", name: "load_skill", arguments: {name: "rust-scripting"}}],
+    },
   )
   llm_mock({text: "<done>##DONE##</done>"})
   let result = agent_loop(
     "Help with rust scripting",
     catalog,
     {
-    provider: "mock",
-    model: "gpt-5.4",
-    tools: tools,
-    tool_format: "native",
-    persistent: true,
-    max_iterations: 3,
-    session_id: "skills-load-skill",
-    skills: skills,
-  },
+      provider: "mock",
+      model: "gpt-5.4",
+      tools: tools,
+      tool_format: "native",
+      persistent: true,
+      max_iterations: 3,
+      session_id: "skills-load-skill",
+      skills: skills,
+    },
   )
   assert(result?.status == "done", "agent loop finishes")
   let calls = llm_mock_calls()
@@ -47,7 +47,7 @@ pipeline test(task) {
   assert(contains(second_messages, "Args: []"), "$ARGUMENTS is substituted")
   assert(
     contains(second_messages, ".harn/skills/rust-scripting")
-    || contains(second_messages, ".harn\\\\skills\\\\rust-scripting"),
+      || contains(second_messages, ".harn\\\\skills\\\\rust-scripting"),
     "skill dir is substituted",
   )
   let second_tools = json_stringify(calls[1].tools)

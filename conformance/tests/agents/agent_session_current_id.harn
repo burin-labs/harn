@@ -10,14 +10,14 @@ pipeline main(task) {
     "read_current_id",
     "Return the current session id",
     {
-    handler: { _args ->
-    let current = agent_session_current_id()
-    assert(current == session, "tool handler sees the session it is running under")
-    return current
-  },
-    parameters: {},
-    returns: {type: "string"},
-  },
+      handler: { _args ->
+        let current = agent_session_current_id()
+        assert(current == session, "tool handler sees the session it is running under")
+        return current
+      },
+      parameters: {},
+      returns: {type: "string"},
+    },
   )
   llm_mock(
     {text: "Checking the session.", tool_calls: [{id: "sid1", name: "read_current_id", arguments: {}}]},
@@ -27,13 +27,13 @@ pipeline main(task) {
     "Report the current session id",
     nil,
     {
-    provider: "mock",
-    tools: tools,
-    tool_format: "native",
-    persistent: true,
-    max_iterations: 4,
-    session_id: session,
-  },
+      provider: "mock",
+      tools: tools,
+      tool_format: "native",
+      persistent: true,
+      max_iterations: 4,
+      session_id: session,
+    },
   )
   assert(result?.status == "done", "loop completes")
   let calls = llm_mock_calls()

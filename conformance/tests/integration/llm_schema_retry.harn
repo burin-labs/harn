@@ -12,12 +12,12 @@ pipeline default() {
     "Grade this",
     nil,
     {
-    provider: "mock",
-    output_schema: schema,
-    output_validation: "error",
-    schema_retries: 2,
-    response_format: "json",
-  },
+      provider: "mock",
+      output_schema: schema,
+      output_validation: "error",
+      schema_retries: 2,
+      response_format: "json",
+    },
   )
   println(r.data.verdict)
   // Exactly two calls happened — one initial + one retry.
@@ -60,16 +60,16 @@ pipeline default() {
   llm_mock({text: "{\"improvement\": \"try again\"}"})
   let err = try {
     llm_call(
-    "Grade again",
-    nil,
-    {
-    provider: "mock",
-    output_schema: schema,
-    output_validation: "error",
-    schema_retries: 0,
-    response_format: "json",
-  },
-  )
+      "Grade again",
+      nil,
+      {
+        provider: "mock",
+        output_schema: schema,
+        output_validation: "error",
+        schema_retries: 0,
+        response_format: "json",
+      },
+    )
   }
   println(contains(unwrap_err(err).message, "schema"))
   println(len(llm_mock_calls()))
@@ -82,13 +82,13 @@ pipeline default() {
     "Grade with bare retry",
     nil,
     {
-    provider: "mock",
-    output_schema: schema,
-    output_validation: "error",
-    schema_retries: 1,
-    schema_retry_nudge: false,
-    response_format: "json",
-  },
+      provider: "mock",
+      output_schema: schema,
+      output_validation: "error",
+      schema_retries: 1,
+      schema_retry_nudge: false,
+      response_format: "json",
+    },
   )
   println(bare.data.verdict)
   let bare_calls = llm_mock_calls()
@@ -105,16 +105,16 @@ pipeline default() {
   llm_mock({text: "Examining the failed run"})
   let prose_err = try {
     llm_call(
-    "Grade prose-only output",
-    nil,
-    {
-    provider: "mock",
-    output_schema: schema,
-    output_validation: "error",
-    schema_retries: 1,
-    response_format: "json",
-  },
-  )
+      "Grade prose-only output",
+      nil,
+      {
+        provider: "mock",
+        output_schema: schema,
+        output_validation: "error",
+        schema_retries: 1,
+        response_format: "json",
+      },
+    )
   }
   println(contains(unwrap_err(prose_err).message, "parseable JSON"))
 }

@@ -2,22 +2,22 @@ pipeline test(task) {
   // Register a static resource
   let r1 = mcp_resource(
     {
-    uri: "docs://readme",
-    name: "README",
-    description: "Project readme",
-    mime_type: "text/markdown",
-    text: "# Hello World",
-  },
+      uri: "docs://readme",
+      name: "README",
+      description: "Project readme",
+      mime_type: "text/markdown",
+      text: "# Hello World",
+    },
   )
   assert(r1 == nil, "mcp_resource should return nil")
   // Register a resource template
   let r2 = mcp_resource_template(
     {
-    uri_template: "file:///{path}",
-    name: "Project Files",
-    description: "Access project files",
-    handler: { args -> "contents of " + args.path },
-  },
+      uri_template: "file:///{path}",
+      name: "Project Files",
+      description: "Access project files",
+      handler: { args -> "contents of " + args.path },
+    },
   )
   assert(r2 == nil, "mcp_resource_template should return nil")
   println("mcp_resource and mcp_resource_template registered")

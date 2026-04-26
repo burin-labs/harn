@@ -11,10 +11,10 @@ fn child_tools() {
     "write_file",
     "Write a file",
     {
-    parameters: {path: {type: "string"}, content: {type: "string"}},
-    namespace: "write",
-    handler: { args -> "wrote " + args.path },
-  },
+      parameters: {path: {type: "string"}, content: {type: "string"}},
+      namespace: "write",
+      handler: { args -> "wrote " + args.path },
+    },
   )
   return tools
 }
@@ -26,12 +26,12 @@ fn workflow_tools() {
     "delegate_readonly",
     "Delegate a read-only investigation",
     {
-    parameters: {task: {type: "string"}},
-    handler: { args -> sub_agent_run(
-    args.task,
-    {provider: "mock", tools: child_tools(), tool_format: "native", max_iterations: 1},
-  ) },
-  },
+      parameters: {task: {type: "string"}},
+      handler: { args -> sub_agent_run(
+        args.task,
+        {provider: "mock", tools: child_tools(), tool_format: "native", max_iterations: 1},
+      ) },
+    },
   )
   return tools
 }
@@ -46,23 +46,23 @@ pipeline test(task) {
   }
   let flow = workflow_graph(
     {
-    name: "workflow-sub-agent-skill-context",
-    entry: "delegate",
-    nodes: {
-    delegate: {
-    kind: "stage",
-    mode: "agent",
-    model_policy: {provider: "mock", tool_format: "native", max_iterations: 2},
-    tools: workflow_tools(),
-  },
-  },
-    edges: [],
-  },
+      name: "workflow-sub-agent-skill-context",
+      entry: "delegate",
+      nodes: {
+        delegate: {
+          kind: "stage",
+          mode: "agent",
+          model_policy: {provider: "mock", tool_format: "native", max_iterations: 2},
+          tools: workflow_tools(),
+        },
+      },
+      edges: [],
+    },
   )
   llm_mock(
     {
-    tool_calls: [{id: "stage_1", name: "delegate_readonly", arguments: {task: "Inspect the config file"}}],
-  },
+      tool_calls: [{id: "stage_1", name: "delegate_readonly", arguments: {task: "Inspect the config file"}}],
+    },
   )
   llm_mock({text: "I inspected the config path."})
   llm_mock({text: "Delegation finished."})

@@ -8,21 +8,21 @@ pipeline test(task) {
   write_file(
     catalog_path,
     "[[prompt_fragments]]\n"
-    + "id = \"rust-repo-conventions-v1\"\n"
-    + "title = \"Rust repo conventions\"\n"
-    + "tags = [\"rust\", \"testing\"]\n"
-    + "token_budget = 16\n"
-    + "cache_ttl = \"5m\"\n"
-    + "body = \"Use nextest for {{crate}} and keep sccache warm.\"\n",
+      + "id = \"rust-repo-conventions-v1\"\n"
+      + "title = \"Rust repo conventions\"\n"
+      + "tags = [\"rust\", \"testing\"]\n"
+      + "token_budget = 16\n"
+      + "cache_ttl = \"5m\"\n"
+      + "body = \"Use nextest for {{crate}} and keep sccache warm.\"\n",
   )
   write_file(
     front_path,
     "---\n"
-    + "id = \"ops-prefix\"\n"
-    + "title = \"Ops prefix\"\n"
-    + "tags = [\"ops\"]\n"
-    + "---\n"
-    + "Operate in {{env}} with low-noise status updates.",
+      + "id = \"ops-prefix\"\n"
+      + "title = \"Ops prefix\"\n"
+      + "tags = [\"ops\"]\n"
+      + "---\n"
+      + "Operate in {{env}} with low-noise status updates.",
   )
   let library = prompt_library_load([catalog_path, front_path])
   assert_eq(
@@ -46,39 +46,39 @@ pipeline test(task) {
   )
   assert(
     contains(
-    prompt_library_inject_cluster(library, {tag: "rust", max_tokens: 20}, {crate: "parser"}),
-    "parser",
-  ),
+      prompt_library_inject_cluster(library, {tag: "rust", max_tokens: 20}, {crate: "parser"}),
+      "parser",
+    ),
   )
   let conversations = [
     {
-    id: "a1",
-    tenant_id: "tenant-a",
-    text: "System repo rust testing conventions use nextest sccache cargo workspace shared alpha",
-    embedding: [0.0, 0.0],
-  },
+      id: "a1",
+      tenant_id: "tenant-a",
+      text: "System repo rust testing conventions use nextest sccache cargo workspace shared alpha",
+      embedding: [0.0, 0.0],
+    },
     {
-    id: "a2",
-    tenant_id: "tenant-a",
-    text: "System repo rust testing conventions use nextest sccache cargo workspace shared beta",
-    embedding: [0.0, 0.1],
-  },
+      id: "a2",
+      tenant_id: "tenant-a",
+      text: "System repo rust testing conventions use nextest sccache cargo workspace shared beta",
+      embedding: [0.0, 0.1],
+    },
     {
-    id: "b1",
-    tenant_id: "tenant-b",
-    text: "System docs api reference conventions publish mdbook snippets separately",
-    embedding: [10.0, 10.0],
-  },
+      id: "b1",
+      tenant_id: "tenant-b",
+      text: "System docs api reference conventions publish mdbook snippets separately",
+      embedding: [10.0, 10.0],
+    },
   ]
   let proposals = prompt_library_hotspots(
     conversations,
     {
-    tenant_id: "tenant-a",
-    k: 1,
-    min_shared_tokens: 8,
-    dollars_per_token: 0.01,
-    daily_invocation_count: 1,
-  },
+      tenant_id: "tenant-a",
+      k: 1,
+      min_shared_tokens: 8,
+      dollars_per_token: 0.01,
+      daily_invocation_count: 1,
+    },
   )
   assert_eq(len(proposals), 1)
   assert_eq(proposals[0].provenance, "kmeans")

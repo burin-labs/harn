@@ -4,11 +4,11 @@ import "std/context"
 pipeline default() {
   let flow = workflow(
     {
-    name: "session-demo",
-    model_tier: "mid",
-    persistent: false,
-    act: {mode: "llm", context: context([section("brief", "Stay concise.", nil)], nil)},
-  },
+      name: "session-demo",
+      model_tier: "mid",
+      persistent: false,
+      act: {mode: "llm", context: context([section("brief", "Stay concise.", nil)], nil)},
+    },
   )
   let result = task_run("Write a note", flow, {provider: "mock"})
   let session = workflow_session(result)

@@ -5,10 +5,10 @@ fn write_tools() {
     "shell_exec",
     "Run shell command",
     {
-    handler: nil,
-    parameters: {cmd: {type: "string", description: "Command"}},
-    returns: {type: "string"},
-  },
+      handler: nil,
+      parameters: {cmd: {type: "string", description: "Command"}},
+      returns: {type: "string"},
+    },
   )
   return tools
 }
@@ -18,12 +18,12 @@ pipeline main() {
     "Try to run shell",
     "You are helpful",
     {
-    provider: "mock",
-    tools: write_tools(),
-    tool_format: "native",
-    max_iterations: 1,
-    approval_policy: {auto_deny: ["shell*"]},
-  },
+      provider: "mock",
+      tools: write_tools(),
+      tool_format: "native",
+      max_iterations: 1,
+      approval_policy: {auto_deny: ["shell*"]},
+    },
   )
   println(denied?.tools?.rejected[0] == "shell_exec")
   let transcript = json_stringify(transcript_messages(denied?.transcript))

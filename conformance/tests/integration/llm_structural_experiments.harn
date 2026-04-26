@@ -9,10 +9,10 @@ pipeline main() {
   let custom_exp = custom(
     "tail_echo",
     { ctx ->
-    let latest = latest_string_user_message(ctx.messages)
-    let rewritten = replace_message(ctx.messages, latest.index, message("user", latest.message.content + "\n\nTAIL"))
-    return {messages: rewritten, metadata: {kind: "tail_echo"}}
-  },
+      let latest = latest_string_user_message(ctx.messages)
+      let rewritten = replace_message(ctx.messages, latest.index, message("user", latest.message.content + "\n\nTAIL"))
+      return {messages: rewritten, metadata: {kind: "tail_echo"}}
+    },
   )
   llm_call(
     "alpha\n\nbeta\n\ngamma",

@@ -3,29 +3,29 @@ pipeline test(task) {
   let catalog = render_always_on_catalog(skills_catalog_entries(skills), 2000)
   llm_mock(
     {
-    text: "Try the gated skill.",
-    tool_calls: [{id: "ls1", name: "load_skill", arguments: {name: "secure-review"}}],
-  },
+      text: "Try the gated skill.",
+      tool_calls: [{id: "ls1", name: "load_skill", arguments: {name: "secure-review"}}],
+    },
   )
   llm_mock(
     {
-    text: "Try a missing skill.",
-    tool_calls: [{id: "ls2", name: "load_skill", arguments: {name: "does-not-exist"}}],
-  },
+      text: "Try a missing skill.",
+      tool_calls: [{id: "ls2", name: "load_skill", arguments: {name: "does-not-exist"}}],
+    },
   )
   llm_mock({text: "<done>##DONE##</done>"})
   let result = agent_loop(
     "Use the skills catalog",
     catalog,
     {
-    provider: "mock",
-    model: "gpt-5.4",
-    tool_format: "native",
-    persistent: true,
-    max_iterations: 5,
-    session_id: "skills-load-skill-errors",
-    skills: skills,
-  },
+      provider: "mock",
+      model: "gpt-5.4",
+      tool_format: "native",
+      persistent: true,
+      max_iterations: 5,
+      session_id: "skills-load-skill-errors",
+      skills: skills,
+    },
   )
   assert(result?.status == "done", "agent loop completes")
   let calls = llm_mock_calls()

@@ -1,7 +1,9 @@
-// Tool Vault phase 2 (harn#70): client-executed `tool_search` fallback
-// with the regex strategy. Variant = regex → the model is shown a
-// regex-flavoured prompt and the dispatch path runs Rust's `regex`
-// crate (case-insensitive, no backreferences/lookaround).
+/**
+ * Tool Vault phase 2 (harn#70): client-executed `tool_search` fallback
+ * with the regex strategy. Variant = regex → the model is shown a
+ * regex-flavoured prompt and the dispatch path runs Rust's `regex`
+ * crate (case-insensitive, no backreferences/lookaround).
+ */
 pipeline test(task) {
   llm_mock_clear()
   var registry = tool_registry()
@@ -16,20 +18,20 @@ pipeline test(task) {
     "edit_file",
     "Edit an existing file",
     {
-    parameters: {path: {type: "string"}},
-    defer_loading: true,
-    handler: { args -> "edited " + args.path },
-  },
+      parameters: {path: {type: "string"}},
+      defer_loading: true,
+      handler: { args -> "edited " + args.path },
+    },
   )
   registry = tool_define(
     registry,
     "create_file",
     "Create a new file",
     {
-    parameters: {path: {type: "string"}},
-    defer_loading: true,
-    handler: { args -> "created " + args.path },
-  },
+      parameters: {path: {type: "string"}},
+      defer_loading: true,
+      handler: { args -> "created " + args.path },
+    },
   )
   registry = tool_define(
     registry,
@@ -40,9 +42,9 @@ pipeline test(task) {
   // Turn 1: model runs a regex alternation.
   llm_mock(
     {
-    text: "Looking up edit/create tools via regex.",
-    tool_calls: [{id: "rgx1", name: "__harn_tool_search", arguments: {query: "edit|create"}}],
-  },
+      text: "Looking up edit/create tools via regex.",
+      tool_calls: [{id: "rgx1", name: "__harn_tool_search", arguments: {query: "edit|create"}}],
+    },
   )
   // Turn 2: call one of the promoted tools.
   llm_mock(
@@ -54,12 +56,12 @@ pipeline test(task) {
     "Refactor the file",
     nil,
     {
-    provider: "mock",
-    tools: registry,
-    tool_search: {variant: "regex", mode: "client"},
-    persistent: true,
-    max_iterations: 5,
-  },
+      provider: "mock",
+      tools: registry,
+      tool_search: {variant: "regex", mode: "client"},
+      persistent: true,
+      max_iterations: 5,
+    },
   )
   // Explicit `mode: "client"` — mock spoofs native tool_search for
   // Claude 4.0+ / GPT 5.4+ default models after harn#71, so

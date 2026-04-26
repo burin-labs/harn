@@ -68,9 +68,9 @@ pipeline default(task) {
   )
   println(
     first_data.summary.in_flight == 1
-    && first_data.summary.responses == 1
-    && first_data.responses[0].outcome?.status == "dlq"
-    && first_data.responses[0].outcome?.error != nil,
+      && first_data.summary.responses == 1
+      && first_data.responses[0].outcome?.status == "dlq"
+      && first_data.responses[0].outcome?.error != nil,
   )
   sleep(120ms)
   let second = exec(
@@ -89,18 +89,19 @@ pipeline default(task) {
   )
   let second_data = json_parse(second.stdout)
   println(
-    second.success && second_data.drained == 1 && second_data.acked == 1 && second_data.deferred == 0,
+    second.success && second_data.drained == 1 && second_data.acked == 1
+      && second_data.deferred == 0,
   )
   let first_has_response = len(first_data.responses ?? []) > 0
   let second_has_response = len(second_data.responses ?? []) > 0
   println(
     first_has_response
-    && second_has_response
-    && second_data.responses[0].job_event_id == first_data.responses[0].job_event_id
-    && second_data.responses[0].outcome?.status == "succeeded",
+      && second_has_response
+      && second_data.responses[0].job_event_id == first_data.responses[0].job_event_id
+      && second_data.responses[0].outcome?.status == "succeeded",
   )
   println(
     second_data.summary.ready == 0 && second_data.summary.in_flight == 0
-    && second_data.summary.responses == 2,
+      && second_data.summary.responses == 2,
   )
 }

@@ -2,23 +2,23 @@ pipeline default() {
   let starts = atomic(0)
   let sup = supervisor_start(
     {
-    name: "windowed",
-    strategy: "one_for_one",
-    children: [
-    {
-    name: "windowed-worker",
-    kind: "workflow_runner",
-    restart: {mode: "on_failure", max_restarts: 1, window_ms: 1, backoff_ms: 5},
-    task: { _ctx ->
-    let attempt = atomic_add(starts, 1) + 1
-    if attempt < 3 {
-      throw "transient"
-    }
-    "recovered-after-window"
-  },
-  },
-  ],
-  },
+      name: "windowed",
+      strategy: "one_for_one",
+      children: [
+        {
+          name: "windowed-worker",
+          kind: "workflow_runner",
+          restart: {mode: "on_failure", max_restarts: 1, window_ms: 1, backoff_ms: 5},
+          task: { _ctx ->
+            let attempt = atomic_add(starts, 1) + 1
+            if attempt < 3 {
+              throw "transient"
+            }
+            "recovered-after-window"
+          },
+        },
+      ],
+    },
   )
   sleep(30ms)
   let state = supervisor_state(sup)

@@ -1,15 +1,15 @@
 pipeline test(task) {
   let fixture = multipart_form_data(
     [
-    {name: "title", content: "Quarterly report"},
-    {
-    name: "upload",
-    filename: "report.bin",
-    content_type: "application/octet-stream",
-    content: bytes_from_hex("000102ff"),
-    headers: {["X-Test-Header"]: "fixture"},
-  },
-  ],
+      {name: "title", content: "Quarterly report"},
+      {
+        name: "upload",
+        filename: "report.bin",
+        content_type: "application/octet-stream",
+        content: bytes_from_hex("000102ff"),
+        headers: {["X-Test-Header"]: "fixture"},
+      },
+    ],
   )
   println(starts_with(fixture.content_type, "multipart/form-data; boundary="))
   let form = multipart_parse(
