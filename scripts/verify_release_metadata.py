@@ -25,6 +25,41 @@ def changelog_versions() -> list[str]:
     return re.findall(r"^## v([0-9]+\.[0-9]+\.[0-9]+)$", text, re.M)
 
 
+def changelog_section_body(version: str) -> str:
+    """Return the body content under `## vX.Y.Z` up to the next heading."""
+    text = CHANGELOG.read_text()
+    match = re.search(
+        rf"(?ms)^## v{re.escape(version)}\n(.*?)(?=^## v|\Z)",
+        text,
+    )
+    return match.group(1).strip() if match else ""
+
+
+def detect_misformatted_headings() -> list[str]:
+    """Catch headings that look like version markers but won't parse.
+
+    The canonical regex is `^## vX.Y.Z$` (no trailing whitespace, no
+    suffix). Variants like `## v0.7.41 ` or `## v0.7.41-rc1` would
+    silently fall through the strict version finder, masking a typo
+    as "missing entry" later.
+
+    Only flags lines that already contain a full 3-component vX.Y.Z
+    prefix followed by extra characters — historical headings like
+    `## v0.5 series (0.5.0 – 0.5.83)` only have two dot components
+    and aren't trying to be release headings.
+    """
+    text = CHANGELOG.read_text()
+    suspicious = []
+    for line in text.splitlines():
+        m = re.match(r"^## v\d+\.\d+\.\d+", line)
+        if not m:
+            continue
+        rest = line[len(m.group(0)):]
+        if rest:
+            suspicious.append(line)
+    return suspicious
+
+
 def parse_semver(version: str) -> tuple[int, int, int]:
     major, minor, patch = version.split(".")
     return int(major), int(minor), int(patch)
@@ -44,6 +79,18 @@ def verify_release_notes(version: str) -> None:
 
 
 def verify_tag_state(version: str) -> None:
+    """Reject states that would silently re-release or rewrite history.
+
+    Passes when:
+      - the tag does not exist yet (we're staging a future release), OR
+      - HEAD is at the tagged commit, OR
+      - HEAD descends from the tagged commit (released; main has moved on
+        with non-release commits — fine, the next release PR will bump).
+
+    Fails only when HEAD is an ancestor of the tag, or unrelated — both
+    of which mean Cargo.toml is at version X.Y.Z but HEAD doesn't
+    contain the X.Y.Z release commit, which would tag the wrong state.
+    """
     tag = f"v{version}"
     tag_lookup = subprocess.run(
         ["git", "rev-parse", "-q", "--verify", f"refs/tags/{tag}"],
@@ -67,11 +114,21 @@ def verify_tag_state(version: str) -> None:
         capture_output=True,
         check=True,
     ).stdout.strip()
-    if head != tag_commit:
-        raise SystemExit(
-            f"error: current version {version} is already tagged at {tag_commit}, "
-            f"but HEAD is {head}; bump the version or move off the released tag state"
-        )
+    if head == tag_commit:
+        return
+    is_descendant = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", tag_commit, head],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+    )
+    if is_descendant.returncode == 0:
+        return
+    raise SystemExit(
+        f"error: current version {version} is already tagged at {tag_commit}, "
+        f"but HEAD ({head}) does not include that commit; either bump the "
+        f"version or rebase onto the tagged commit before continuing"
+    )
 
 
 def is_bump_ahead(cargo_version: str, changelog_version: str) -> bool:
@@ -93,10 +150,24 @@ def is_bump_ahead(cargo_version: str, changelog_version: str) -> bool:
 
 def main() -> int:
     version = current_version()
+    misformatted = detect_misformatted_headings()
+    if misformatted:
+        joined = "\n  ".join(misformatted)
+        raise SystemExit(
+            "error: CHANGELOG.md has heading(s) that look like version markers but "
+            "don't match the canonical `## vX.Y.Z` regex (no trailing whitespace, "
+            "no suffix):\n  " + joined
+        )
     versions = changelog_versions()
     if not versions:
         raise SystemExit("error: CHANGELOG.md does not contain any version headings")
     top = versions[0]
+    body = changelog_section_body(top)
+    if not body:
+        raise SystemExit(
+            f"error: CHANGELOG.md '## v{top}' section has no body content; release "
+            "notes would be empty. Add bullet points describing the release."
+        )
     effective_version = version
     if top != version:
         if is_bump_ahead(version, top):

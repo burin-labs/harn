@@ -59,30 +59,86 @@ log_step() {
 usage() {
   cat <<'EOF'
 Usage:
-  ./scripts/release_ship.sh [--bump patch|minor|major] [--skip-dry-run] [--base main]
-  ./scripts/release_ship.sh --finalize [--skip-dry-run] [--notes-output path] [--base main]
+  ./scripts/release_ship.sh --prepare --bump patch|minor|major [--skip-audit] [--skip-dry-run]
+  ./scripts/release_ship.sh --bump patch|minor|major [--skip-dry-run] [--base main]   # recovery
+  ./scripts/release_ship.sh --finalize [--skip-dry-run] [--reaudit] [--notes-output path] [--base main]
 
 Merge-queue-safe release sequence for a prepared Harn release.
 
-Assumptions:
-  - Codex or a human has already reviewed pending tracked/untracked work.
-  - README.md, CLAUDE.md, docs/, spec/, and CHANGELOG.md were updated as needed.
-  - The intended release content has already landed on main through the merge queue.
-  - The current worktree is clean before this script starts.
+==============================================================================
+DEFAULT FLOW (one human PR, then bot finalizes)
+==============================================================================
 
-Default mode then:
-  1. Runs ./scripts/release_gate.sh audit
-  2. Optionally runs ./scripts/release_gate.sh publish --dry-run
-  3. Creates release/vX.Y.Z
-  4. Runs ./scripts/release_gate.sh prepare --bump ...
-  5. Commits the version bump
-  6. Pushes release/vX.Y.Z and opens a "Bump version to X.Y.Z" PR.
+  1. Branch off main and write the release content:
+       git checkout -b release/vX.Y.Z
+       # author code/docs changes
+       # add `## vX.Y.Z` heading at the top of CHANGELOG.md
 
-After that PR lands through the merge queue, run:
+  2. Stage release-content files but do NOT commit yet.
 
-  ./scripts/release_ship.sh --finalize
+  3. Run prepare-here, which audits, dry-run-publishes, bumps
+     Cargo.toml/Cargo.lock, regenerates derived files, and stages
+     everything ready for a single commit:
+       ./scripts/release_ship.sh --prepare --bump patch
 
-Environment variables:
+  4. Commit + push + open PR (one commit, one PR for the whole release):
+       git commit -m "Release vX.Y.Z"
+       git push -u origin release/vX.Y.Z
+       gh pr create
+
+  5. Land the PR through the merge queue. Walk away — the Finalize
+     Release workflow auto-fires on tag drift, tags vX.Y.Z, publishes
+     to crates.io, and creates the GitHub release. No second PR.
+
+==============================================================================
+PREPARE MODE
+==============================================================================
+
+  - Runs from a non-main branch with the release content already authored.
+  - Detects bump type via --bump and confirms it matches the CHANGELOG
+    top entry (CHANGELOG must be at the next vX.Y.Z heading already).
+  - Runs the full audit (skip with --skip-audit) and publish dry-run
+    (skip with --skip-dry-run) so failures surface before push.
+  - Bumps Cargo.toml + crates/*/Cargo.toml + Cargo.lock to vX.Y.Z.
+  - Regenerates derived files (`docs/src/language-spec.md`,
+    `docs/theme/harn-keywords.js`).
+  - Stages everything; the human commits and pushes.
+
+==============================================================================
+LEGACY BUMP MODE (recovery only)
+==============================================================================
+
+  Pre-consolidation behavior kept for the recovery workflow_dispatch
+  path on .github/workflows/bump-release.yml. Runs from main, opens a
+  "Bump version to X.Y.Z" PR from a release/vX.Y.Z branch. Use only
+  when a "Prepare vX.Y.Z release"-style commit landed on main without
+  the consolidated bump (the workflow flips itself out of the default
+  push-trigger to make this an explicit recovery action).
+
+==============================================================================
+FINALIZE MODE
+==============================================================================
+
+  Trusts the merge-queue CI that just landed the consolidated PR (CI
+  runs the full audit set: cargo fmt/clippy/tests, conformance,
+  highlight + language-spec sync checks, docs-snippets, trigger
+  quickref + examples, verify_release_metadata, portal lint+build).
+
+  1. Builds the portal frontend (needed for the cargo-publish include).
+  2. Runs the publish dry-run as a quick pre-publish sanity check.
+  3. Creates and pushes tag vX.Y.Z from main.
+  4. Runs cargo publish to upload crates to crates.io.
+  5. Renders changelog-backed release notes.
+  6. Creates/updates a GitHub release with the rendered notes.
+
+  Set RELEASE_FINALIZE_REAUDIT=1 (or pass --reaudit) to opt back into
+  the full release-gate audit before finalizing — useful when running
+  --finalize locally after manual repo edits.
+
+==============================================================================
+ENVIRONMENT VARIABLES
+==============================================================================
+
   HARN_BOOTSTRAP_NEW_CRATES=1
     First-release bootstrap mode for a brand-new workspace crate that
     an already-published crate now depends on. Skips the publish
@@ -92,13 +148,10 @@ Environment variables:
     `cargo publish --workspace`, which orders intra-workspace deps
     correctly. See harn#609.
 
-Finalize mode:
-  1. Runs ./scripts/release_gate.sh audit
-  2. Optionally runs ./scripts/release_gate.sh publish --dry-run
-  3. Creates/pushes tag vX.Y.Z from main
-  4. Runs ./scripts/release_gate.sh publish to upload crates to crates.io
-  5. Renders changelog-backed release notes
-  6. Creates/updates a GitHub release with the rendered notes
+  RELEASE_FINALIZE_REAUDIT=1
+    Force --finalize to re-run the full release-gate audit. Defaults
+    off — merge-queue CI already proved the same gates a few minutes
+    ago. Use when finalizing locally after edits.
 EOF
 }
 
@@ -166,6 +219,85 @@ require_base_branch() {
   fi
 }
 
+# Sync local base branch to origin/base instead of asserting strict
+# equality. Used by --finalize where the GHA runner clones main early
+# in setup, then sits through ~30s of toolchain installs before this
+# script runs — main can move during that window. The bump intent is
+# already in main's history regardless of where HEAD is now, so the
+# right move is to fast-forward the local clone and tag whichever
+# commit Cargo.toml's version is set on.
+sync_base_branch() {
+  local base="$1"
+  local branch
+  branch="$(git branch --show-current)"
+  if [[ "$branch" != "$base" ]]; then
+    echo "error: release_ship.sh --finalize must run from $base; current branch is ${branch:-detached}"
+    exit 1
+  fi
+  git fetch origin "$base" --quiet
+  local local_head remote_head
+  local_head="$(git rev-parse HEAD)"
+  remote_head="$(git rev-parse "origin/$base")"
+  if [[ "$local_head" != "$remote_head" ]]; then
+    echo "Local $base behind origin/$base; fast-forwarding."
+    echo "  was:  $local_head"
+    echo "  now:  $remote_head"
+    git pull --ff-only origin "$base" --quiet
+  fi
+  # Re-read Cargo.toml after the fast-forward — if main has continued
+  # past the bump and someone else has already bumped to a newer
+  # version, abort rather than silently tagging the wrong commit.
+  local fresh_version
+  fresh_version="$(current_version)"
+  if [[ -n "${EXPECTED_VERSION:-}" && "$fresh_version" != "$EXPECTED_VERSION" ]]; then
+    echo "error: Cargo.toml version moved from $EXPECTED_VERSION to $fresh_version while finalizing"
+    echo "hint: re-trigger publish-release.yml — it'll detect drift for the new version"
+    exit 1
+  fi
+}
+
+require_release_branch() {
+  local base="$1"
+  local branch
+  branch="$(git branch --show-current)"
+  if [[ -z "$branch" ]]; then
+    echo "error: detached HEAD; create a release branch first (git checkout -b release/vX.Y.Z)"
+    exit 1
+  fi
+  if [[ "$branch" == "$base" ]]; then
+    echo "error: --prepare must run from a release branch, not $base"
+    echo "hint: git checkout -b release/vX.Y.Z"
+    exit 1
+  fi
+}
+
+# Verify the top CHANGELOG.md heading matches the expected next version.
+# The human is expected to have authored "## vX.Y.Z" before running prepare.
+require_changelog_top_matches() {
+  local expected="$1"
+  local top
+  top="$(python3 - <<'PY'
+from pathlib import Path
+import re
+text = Path("CHANGELOG.md").read_text()
+for line in text.splitlines():
+    m = re.match(r"^## v(\d+\.\d+\.\d+)\s*$", line)
+    if m:
+        print(m.group(1))
+        break
+PY
+)"
+  if [[ -z "$top" ]]; then
+    echo "error: CHANGELOG.md has no '## vX.Y.Z' heading"
+    exit 1
+  fi
+  if [[ "$top" != "$expected" ]]; then
+    echo "error: CHANGELOG.md top heading is v$top but --bump implies v$expected"
+    echo "hint: edit CHANGELOG.md to add '## v$expected' as the new top entry, then re-run"
+    exit 1
+  fi
+}
+
 run_common_gates() {
   # Build the portal frontend up front so `portal-dist/` exists for every
   # downstream step. The `harn-cli` crate embeds portal-dist via `include_dir!`
@@ -190,13 +322,26 @@ run_common_gates() {
     SKIP_DRY_RUN=1
   fi
 
-  log_step "Release audit"
-  ./scripts/release_gate.sh audit
+  if [[ "$SKIP_AUDIT" -eq 0 ]]; then
+    log_step "Release audit"
+    ./scripts/release_gate.sh audit
+  else
+    log_step "Skipping release audit (already proved by merge-queue CI)"
+  fi
 
   if [[ "$SKIP_DRY_RUN" -eq 0 ]]; then
     log_step "Publish dry run"
     ./scripts/release_gate.sh publish --dry-run
   fi
+}
+
+regenerate_derived_files() {
+  log_step "Regenerate derived files"
+  # Both targets are idempotent no-ops when the generated artifact is
+  # already current. They exist as Makefile targets so the same
+  # canonical command works locally and from CI.
+  make sync-language-spec
+  make gen-highlight
 }
 
 open_bump_pr() {
@@ -273,6 +418,55 @@ EOF
   echo "  Finalize after merge queue lands it: ./scripts/release_ship.sh --finalize"
 }
 
+prepare_here() {
+  local previous="$1"
+  local next="$2"
+  local branch
+  branch="$(git branch --show-current)"
+
+  # Run audit + dry-run from the dirty release branch. The audit's
+  # cargo steps don't care about uncommitted changes; the publish
+  # dry-run already auto-detects dirtiness and falls back to
+  # --allow-dirty (see scripts/publish.sh).
+  run_common_gates
+
+  log_step "Version bump (in place)"
+  ./scripts/release_gate.sh prepare --bump "$BUMP" --allow-dirty
+  local actual_next
+  actual_next="$(current_version)"
+  if [[ "$actual_next" != "$next" ]]; then
+    echo "error: expected version $next, got $actual_next"
+    exit 1
+  fi
+
+  regenerate_derived_files
+
+  log_step "Stage release content"
+  # Stage the version bump deterministically and then sweep tracked
+  # changes (changelog, code, docs, generated mirrors) so the human's
+  # next `git commit` captures the whole release in one shot.
+  git add Cargo.toml Cargo.lock crates/*/Cargo.toml
+  git add docs/src/language-spec.md docs/theme/harn-keywords.js
+  git add -u
+
+  log_step "Prepare-here ready"
+  TOTAL_NS=$(( $(_ship_now_ns) - SHIP_START_NS ))
+  echo ""
+  echo "Release content staged on $branch:"
+  echo "  Previous version: $previous"
+  echo "  Next version:     $next"
+  echo "  Total wall time:  $(_ship_fmt_ns "$TOTAL_NS")"
+  echo ""
+  echo "Next steps:"
+  echo "  git status                                # review staged changes"
+  echo "  git commit -m \"Release v$next\""
+  echo "  git push -u origin $branch"
+  echo "  gh pr create --title \"Release v$next\" --body \"...\""
+  echo ""
+  echo "After the PR lands through the merge queue, the publish-release"
+  echo "workflow auto-fires on tag drift and ships v$next."
+}
+
 tag_exists() {
   local tag="$1"
   git rev-parse -q --verify "refs/tags/$tag" >/dev/null
@@ -296,6 +490,7 @@ ensure_tag_at_head() {
 
 BUMP="patch"
 SKIP_DRY_RUN=0
+SKIP_AUDIT=0
 MODE="bump-pr"
 BASE_BRANCH="main"
 NOTES_OUTPUT=""
@@ -305,6 +500,10 @@ while [[ $# -gt 0 ]]; do
     --bump)
       BUMP="${2:-}"
       shift 2
+      ;;
+    --prepare)
+      MODE="prepare-here"
+      shift
       ;;
     --finalize)
       MODE="finalize"
@@ -316,6 +515,17 @@ while [[ $# -gt 0 ]]; do
       ;;
     --skip-dry-run)
       SKIP_DRY_RUN=1
+      shift
+      ;;
+    --skip-audit)
+      SKIP_AUDIT=1
+      shift
+      ;;
+    --reaudit)
+      # --finalize defaults to skipping the audit (merge-queue CI just
+      # proved the same set). --reaudit forces it back on.
+      SKIP_AUDIT=0
+      RELEASE_FINALIZE_REAUDIT=1
       shift
       ;;
     --notes-output)
@@ -347,13 +557,41 @@ case "$BUMP" in
     ;;
 esac
 
-require_clean_tree
-require_base_branch "$BASE_BRANCH"
+# Mode-specific guards. Each mode runs against a different baseline:
+#   prepare-here: feature branch with dirty tree (release content authored)
+#   bump-pr:      clean main, opens recovery release branch
+#   finalize:     clean main with Cargo.toml ahead of latest tag
+if [[ "$MODE" == "prepare-here" ]]; then
+  require_release_branch "$BASE_BRANCH"
+elif [[ "$MODE" == "finalize" ]]; then
+  require_clean_tree
+  EXPECTED_VERSION="$(current_version)"
+  sync_base_branch "$BASE_BRANCH"
+  # Trust the merge-queue CI by default; opt-in re-audit via env var or
+  # --reaudit flag.
+  if [[ "${RELEASE_FINALIZE_REAUDIT:-0}" != "1" ]]; then
+    SKIP_AUDIT=1
+  fi
+else
+  require_clean_tree
+  require_base_branch "$BASE_BRANCH"
+fi
 
 PREVIOUS_VERSION="$(current_version)"
 if [[ -z "$PREVIOUS_VERSION" ]]; then
   echo "error: failed to detect current version"
   exit 1
+fi
+
+if [[ "$MODE" == "prepare-here" ]]; then
+  NEXT_VERSION="$(next_version "$BUMP")"
+  if [[ "$NEXT_VERSION" == "$PREVIOUS_VERSION" ]]; then
+    echo "error: --bump $BUMP would leave version unchanged at $PREVIOUS_VERSION"
+    exit 1
+  fi
+  require_changelog_top_matches "$NEXT_VERSION"
+  prepare_here "$PREVIOUS_VERSION" "$NEXT_VERSION"
+  exit 0
 fi
 
 if [[ "$MODE" == "bump-pr" ]]; then

@@ -1,4 +1,4 @@
-name: Release
+name: Build release binaries
 
 on:
   push:
@@ -125,7 +125,7 @@ jobs:
           path: dist/harn-${{ matrix.target }}.zip
 
   container:
-    name: Publish Container
+    name: Publish container
     needs: [setup, build]
     runs-on: ubuntu-latest
     steps:
@@ -175,7 +175,7 @@ jobs:
           cache-to: type=gha,mode=max
 
   release:
-    name: Create Release
+    name: Create GitHub release
     needs: [setup, build, container]
     runs-on: ubuntu-latest
     steps:
@@ -195,7 +195,7 @@ jobs:
             --version "${{ needs.setup.outputs.version }}" \
             --output release-notes.md
 
-      - name: Create or update GitHub Release
+      - name: Create or update GitHub release
         uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
         with:
           tag_name: ${{ needs.setup.outputs.tag }}
