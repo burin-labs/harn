@@ -106,6 +106,8 @@ impl AgentEventSink for AcpAgentEventSink {
                 status,
                 raw_output,
                 error,
+                duration_ms,
+                execution_duration_ms,
             } => {
                 let mut update = serde_json::json!({
                     "sessionUpdate": "tool_call_update",
@@ -118,6 +120,12 @@ impl AgentEventSink for AcpAgentEventSink {
                 }
                 if let Some(err) = error {
                     update["error"] = serde_json::Value::String(err.clone());
+                }
+                if let Some(d) = duration_ms {
+                    update["durationMs"] = serde_json::Value::from(*d);
+                }
+                if let Some(d) = execution_duration_ms {
+                    update["executionDurationMs"] = serde_json::Value::from(*d);
                 }
                 self.write_notification(serde_json::json!({
                     "sessionId": session_id,
@@ -363,6 +371,8 @@ mod tests {
                 status: ToolCallStatus::Completed,
                 raw_output: Some(serde_json::json!({"ok": true})),
                 error: None,
+                duration_ms: Some(7),
+                execution_duration_ms: Some(5),
             },
             AgentEvent::Plan {
                 session_id: "session-1".to_string(),

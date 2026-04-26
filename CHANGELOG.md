@@ -7,6 +7,27 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
+## v0.7.41
+
+### Added
+
+- **Tool-call timing on ACP `tool_call_update` (#689).** Terminal
+  `tool_call_update` events now carry `durationMs` (the parse-to-finish
+  total — model emits the call → tool result is appended) and
+  `executionDurationMs` (only the inner host/builtin/MCP dispatch
+  window). Both fields are absent on intermediate `pending` /
+  `in_progress` updates so older clients see no shape change. ACP
+  clients (Burin CLI/TUI/IDE) can render duration without measuring
+  wall-clock time themselves.
+- **Per-loop `AgentEvent` sink wired through `AgentLoopConfig`.**
+  `AgentLoopConfig.event_sink` was previously a dead field; the loop
+  now installs the sink as a thread-local for the duration of the run
+  via a new `LoopSinkGuard`. Per-loop sinks fan out alongside the
+  global session-keyed registry, immune to concurrent
+  `reset_all_sinks` / `reset_thread_local_state` calls. Lets host
+  embedders observe a single loop's events without contending on the
+  shared registry.
+
 ## v0.7.40
 
 ### Added

@@ -112,6 +112,20 @@ pub enum AgentEvent {
         status: ToolCallStatus,
         raw_output: Option<serde_json::Value>,
         error: Option<String>,
+        /// Wall-clock milliseconds from the parse-to-execution boundary
+        /// to the terminal `Completed`/`Failed` update. Includes the
+        /// time spent in any wrapping orchestration logic (loop checks,
+        /// post-tool hooks, microcompaction). Populated only on the
+        /// terminal update — `None` on intermediate `Pending` /
+        /// `InProgress` updates so clients can ignore the field until
+        /// it shows up.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        duration_ms: Option<u64>,
+        /// Milliseconds spent in the actual host/builtin/MCP dispatch
+        /// call only (the inner `dispatch_tool_execution` window).
+        /// Populated only on the terminal update; `None` otherwise.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        execution_duration_ms: Option<u64>,
     },
     Plan {
         session_id: String,
@@ -666,6 +680,78 @@ mod tests {
         }
         assert_eq!(last_idx, 4);
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn tool_call_update_durations_serialize_when_present_and_skip_when_absent() {
+        // Terminal update with both durations populated — both fields
+        // appear in the JSON. Snake_case keys here because this is the
+        // canonical AgentEvent shape; the ACP adapter renames to
+        // camelCase separately.
+        let terminal = AgentEvent::ToolCallUpdate {
+            session_id: "s".into(),
+            tool_call_id: "tc-1".into(),
+            tool_name: "read".into(),
+            status: ToolCallStatus::Completed,
+            raw_output: None,
+            error: None,
+            duration_ms: Some(42),
+            execution_duration_ms: Some(7),
+        };
+        let value = serde_json::to_value(&terminal).unwrap();
+        assert_eq!(value["duration_ms"], serde_json::json!(42));
+        assert_eq!(value["execution_duration_ms"], serde_json::json!(7));
+
+        // In-progress update with `None` for both — both keys must be
+        // absent (not `null`) so older ACP clients that key off
+        // presence don't see a misleading zero.
+        let intermediate = AgentEvent::ToolCallUpdate {
+            session_id: "s".into(),
+            tool_call_id: "tc-1".into(),
+            tool_name: "read".into(),
+            status: ToolCallStatus::InProgress,
+            raw_output: None,
+            error: None,
+            duration_ms: None,
+            execution_duration_ms: None,
+        };
+        let value = serde_json::to_value(&intermediate).unwrap();
+        let object = value.as_object().expect("update serializes as object");
+        assert!(
+            !object.contains_key("duration_ms"),
+            "duration_ms must be omitted when None: {value}"
+        );
+        assert!(
+            !object.contains_key("execution_duration_ms"),
+            "execution_duration_ms must be omitted when None: {value}"
+        );
+    }
+
+    #[test]
+    fn tool_call_update_deserializes_without_duration_fields_for_back_compat() {
+        // Persisted event-log entries written before the fields existed
+        // must still deserialize cleanly. The missing keys map to None.
+        let raw = serde_json::json!({
+            "type": "tool_call_update",
+            "session_id": "s",
+            "tool_call_id": "tc-1",
+            "tool_name": "read",
+            "status": "completed",
+            "raw_output": null,
+            "error": null,
+        });
+        let event: AgentEvent = serde_json::from_value(raw).expect("parses without duration keys");
+        match event {
+            AgentEvent::ToolCallUpdate {
+                duration_ms,
+                execution_duration_ms,
+                ..
+            } => {
+                assert!(duration_ms.is_none());
+                assert!(execution_duration_ms.is_none());
+            }
+            other => panic!("expected ToolCallUpdate, got {other:?}"),
+        }
     }
 
     #[test]
