@@ -5,9 +5,6 @@ use crate::llm_config;
 use crate::value::VmValue;
 use crate::vm::Vm;
 
-use super::api::apply_auth_headers;
-use super::helpers::resolve_api_key;
-
 /// Register config-based LLM builtins (llm_infer_provider, llm_resolve_model, etc.).
 pub(crate) fn register_config_builtins(vm: &mut Vm) {
     vm.register_builtin("provider_capabilities", |args, _out| {
@@ -236,94 +233,63 @@ pub(crate) fn register_config_builtins(vm: &mut Vm) {
     });
 
     vm.register_async_builtin("llm_healthcheck", |args| async move {
-        let provider_name = args
-            .first()
-            .map(|a| a.display())
-            .unwrap_or_else(|| "anthropic".to_string());
-
-        let api_key = resolve_api_key(&provider_name).unwrap_or_default();
-
-        let pdef = match llm_config::provider_config(&provider_name) {
-            Some(p) => p,
-            None => {
-                return Ok(healthcheck_result(
-                    false,
-                    &format!("Unknown provider: {provider_name}"),
-                ));
-            }
-        };
-
+        let (provider_name, api_key) = parse_healthcheck_args(&args);
         let requested_model = healthcheck_model_arg(&args)
             .or_else(|| super::selected_model_for_provider(&provider_name));
+
         if let Some(model) = requested_model.filter(|model| !model.trim().is_empty()) {
-            if super::supports_model_readiness_probe(&pdef) {
-                let readiness =
-                    super::probe_openai_compatible_model(&provider_name, &model, &api_key).await;
-                return Ok(readiness_result(&readiness));
-            }
-        }
-
-        let hc = match &pdef.healthcheck {
-            Some(h) => h,
-            None => {
-                return Ok(healthcheck_result(
-                    false,
-                    &format!("No healthcheck configured for {provider_name}"),
-                ));
-            }
-        };
-
-        // Build URL
-        let url = if let Some(absolute_url) = &hc.url {
-            absolute_url.clone()
-        } else {
-            let base = llm_config::resolve_base_url(&pdef);
-            let path = hc.path.as_deref().unwrap_or("");
-            format!("{base}{path}")
-        };
-
-        let client = super::shared_utility_client();
-
-        let mut req = match hc.method.to_uppercase().as_str() {
-            "POST" => {
-                let mut r = client.post(&url).header("Content-Type", "application/json");
-                if let Some(body) = &hc.body {
-                    r = r.body(body.clone());
+            if let Some(pdef) = llm_config::provider_config(&provider_name) {
+                if super::supports_model_readiness_probe(&pdef) {
+                    let key = api_key
+                        .clone()
+                        .or_else(|| super::resolve_api_key(&provider_name).ok())
+                        .unwrap_or_default();
+                    let readiness =
+                        super::probe_openai_compatible_model(&provider_name, &model, &key).await;
+                    return Ok(readiness_result(&readiness));
                 }
-                r
-            }
-            _ => client.get(&url),
-        };
-
-        // Apply auth
-        req = apply_auth_headers(req, &api_key, Some(&pdef));
-        if let Some(p) = llm_config::provider_config(&provider_name) {
-            for (k, v) in &p.extra_headers {
-                req = req.header(k.as_str(), v.as_str());
             }
         }
 
-        match req.send().await {
-            Ok(response) => {
-                let status = response.status().as_u16();
-                let valid = response.status().is_success();
-                let body_text = response.text().await.unwrap_or_default();
-                let message = if valid {
-                    format!("{provider_name} is reachable (HTTP {status})")
-                } else {
-                    format!("{provider_name} returned HTTP {status}: {body_text}")
-                };
-                let mut meta = BTreeMap::new();
-                meta.insert("status".to_string(), VmValue::Int(status as i64));
-                meta.insert("url".to_string(), VmValue::String(Rc::from(url)));
-                Ok(healthcheck_result_with_meta(valid, &message, meta))
-            }
-            Err(e) => Ok(healthcheck_result(
-                false,
-                &format!("{provider_name} healthcheck failed: {e}"),
-            )),
-        }
+        let result = super::run_provider_healthcheck_with_options(
+            &provider_name,
+            super::ProviderHealthcheckOptions {
+                api_key,
+                client: Some(super::shared_utility_client().clone()),
+            },
+        )
+        .await;
+        let json = serde_json::to_value(result).map_err(|error| {
+            crate::value::VmError::Runtime(format!("llm_healthcheck: serialize result: {error}"))
+        })?;
+        Ok(crate::schema::json_to_vm_value(&json))
     });
+}
+
+fn parse_healthcheck_args(args: &[VmValue]) -> (String, Option<String>) {
+    let mut provider = "anthropic".to_string();
+    let mut api_key = None;
+
+    if let Some(first) = args.first() {
+        if let Some(dict) = first.as_dict() {
+            if let Some(value) = dict.get("provider") {
+                provider = value.display();
+            }
+            if let Some(value) = dict.get("api_key") {
+                api_key = Some(value.display());
+            }
+        } else {
+            provider = first.display();
+        }
+    }
+
+    if let Some(options) = args.get(1).and_then(|value| value.as_dict()) {
+        if let Some(value) = options.get("api_key") {
+            api_key = Some(value.display());
+        }
+    }
+
+    (provider, api_key)
 }
 
 /// Convert a ProviderDef to a VmValue dict for the llm_config builtin.
@@ -375,14 +341,22 @@ fn provider_def_to_vm_value(pdef: &llm_config::ProviderDef) -> VmValue {
 }
 
 fn healthcheck_model_arg(args: &[VmValue]) -> Option<String> {
-    let raw = match args.get(1) {
-        Some(VmValue::Dict(dict)) => dict
-            .get("model")
-            .or_else(|| dict.get("alias"))
-            .map(|value| value.display())?,
-        Some(VmValue::Nil) => return None,
-        Some(value) => value.display(),
-        None => return None,
+    let dict_model = args
+        .first()
+        .and_then(|value| value.as_dict())
+        .and_then(|dict| dict.get("model").or_else(|| dict.get("alias")))
+        .map(|value| value.display());
+    let raw = match dict_model {
+        Some(value) => value,
+        None => match args.get(1) {
+            Some(VmValue::Dict(dict)) => dict
+                .get("model")
+                .or_else(|| dict.get("alias"))
+                .map(|value| value.display())?,
+            Some(VmValue::Nil) => return None,
+            Some(value) => value.display(),
+            None => return None,
+        },
     };
     let (resolved, _) = llm_config::resolve_model(raw.trim());
     Some(resolved)
@@ -441,9 +415,4 @@ fn healthcheck_result_with_meta(
     dict.insert("message".to_string(), VmValue::String(Rc::from(message)));
     dict.insert("metadata".to_string(), VmValue::Dict(Rc::new(meta)));
     VmValue::Dict(Rc::new(dict))
-}
-
-/// Build a healthcheck result dict.
-fn healthcheck_result(valid: bool, message: &str) -> VmValue {
-    healthcheck_result_with_meta(valid, message, BTreeMap::new())
 }
