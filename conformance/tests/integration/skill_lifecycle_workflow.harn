@@ -1,8 +1,10 @@
-// harn v0.7.20 Gap 2: `skills:` / `skill_match:` pass through
-// `workflow_execute` to every per-node agent loop. Mirrors
-// `skill_lifecycle_metadata.harn` (direct `agent_loop` call) but runs
-// the same assertions against a 2-node workflow graph so the
-// workflow-level skill wiring is no longer silently dropped.
+/**
+ * harn v0.7.20 Gap 2: `skills:` / `skill_match:` pass through
+ * `workflow_execute` to every per-node agent loop. Mirrors
+ * `skill_lifecycle_metadata.harn` (direct `agent_loop` call) but runs
+ * the same assertions against a 2-node workflow graph so the
+ * workflow-level skill wiring is no longer silently dropped.
+ */
 pipeline test(task) {
   llm_mock_clear()
   var tools = tool_registry()
@@ -32,19 +34,19 @@ pipeline test(task) {
   let registry = skill_define(ship, "inspect", skill_find(inspect, "inspect"))
   let flow = workflow_graph(
     {
-    name: "deploy",
-    entry: "execute",
-    nodes: {
-    execute: {
-    kind: "stage",
-    mode: "agent",
-    model_policy: {provider: "mock", tool_format: "native", max_iterations: 1},
-    tools: tools,
-  },
-    verify: {kind: "verify", mode: "llm", model_policy: {provider: "mock"}},
-  },
-    edges: [{from: "execute", to: "verify"}],
-  },
+      name: "deploy",
+      entry: "execute",
+      nodes: {
+        execute: {
+          kind: "stage",
+          mode: "agent",
+          model_policy: {provider: "mock", tool_format: "native", max_iterations: 1},
+          tools: tools,
+        },
+        verify: {kind: "verify", mode: "llm", model_policy: {provider: "mock"}},
+      },
+      edges: [{from: "execute", to: "verify"}],
+    },
   )
   // One-shot mock per stage (2 stages, 2 calls). The execute stage is
   // the only one with tools + skills attached, so only its system

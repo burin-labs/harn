@@ -3,15 +3,15 @@ import "std/agents"
 pipeline main() {
   let stage_worker = spawn_agent(
     {
-    name: "stage-worker",
-    task: "Draft a short note",
-    node: {
-    kind: "subagent",
-    mode: "llm",
-    model_policy: {provider: "mock"},
-    output_contract: {output_kinds: ["summary"]},
-  },
-  },
+      name: "stage-worker",
+      task: "Draft a short note",
+      node: {
+        kind: "subagent",
+        mode: "llm",
+        model_policy: {provider: "mock"},
+        output_contract: {output_kinds: ["summary"]},
+      },
+    },
   )
   println(stage_worker?.status)
   println(stage_worker?.mode)
@@ -27,18 +27,18 @@ pipeline main() {
   println(len(list_agents()) >= 1)
   let flow = workflow_graph(
     {
-    name: "worker-flow",
-    entry: "act",
-    nodes: {
-    act: {
-    kind: "stage",
-    mode: "llm",
-    model_policy: {provider: "mock"},
-    output_contract: {output_kinds: ["summary"]},
-  },
-  },
-    edges: [],
-  },
+      name: "worker-flow",
+      entry: "act",
+      nodes: {
+        act: {
+          kind: "stage",
+          mode: "llm",
+          model_policy: {provider: "mock"},
+          output_contract: {output_kinds: ["summary"]},
+        },
+      },
+      edges: [],
+    },
   )
   let workflow_worker = spawn_agent(
     {name: "flow-worker", task: "Write a workflow summary", graph: flow, options: {max_steps: 2}},

@@ -8,12 +8,12 @@ pipeline default() {
     "Grade this",
     nil,
     {
-    provider: "mock",
-    output_schema: GraderOut,
-    output_validation: "error",
-    schema_retries: 2,
-    response_format: "json",
-  },
+      provider: "mock",
+      output_schema: GraderOut,
+      output_validation: "error",
+      schema_retries: 2,
+      response_format: "json",
+    },
   )
   println(r.data.verdict)
   println(r.data.summary)

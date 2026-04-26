@@ -1,16 +1,18 @@
-// Tool Vault phase 2 (harn#70): client-executed `tool_search` fallback
-// with the BM25 strategy, exercised in text-mode (mock provider).
-//
-// Validates the full lifecycle:
-//   1. Options parsing injects the synthetic `__harn_tool_search` tool
-//      and hides deferred tools from the initial turn's contract
-//      prompt.
-//   2. When the model calls the synthetic tool, Harn runs BM25
-//      in-process and returns matching tool names.
-//   3. The matching tool gets promoted into the next turn's prompt.
-//   4. `tool_search_query` / `tool_search_result` transcript events
-//      land with the Anthropic-compatible shape (tagged `mode:
-//      "client"` so replayers can distinguish path-1 from path-2).
+/**
+ * Tool Vault phase 2 (harn#70): client-executed `tool_search` fallback
+ * with the BM25 strategy, exercised in text-mode (mock provider).
+ *
+ * Validates the full lifecycle:
+ *   1. Options parsing injects the synthetic `__harn_tool_search` tool
+ *      and hides deferred tools from the initial turn's contract
+ *      prompt.
+ *   2. When the model calls the synthetic tool, Harn runs BM25
+ *      in-process and returns matching tool names.
+ *   3. The matching tool gets promoted into the next turn's prompt.
+ *   4. `tool_search_query` / `tool_search_result` transcript events
+ *      land with the Anthropic-compatible shape (tagged `mode:
+ *      "client"` so replayers can distinguish path-1 from path-2).
+ */
 pipeline test(task) {
   llm_mock_clear()
   var registry = tool_registry()
@@ -25,34 +27,34 @@ pipeline test(task) {
     "deploy_service",
     "Deploy the production service stack",
     {
-    parameters: {env: {type: "string"}},
-    defer_loading: true,
-    handler: { args -> "deployed to " + args.env },
-  },
+      parameters: {env: {type: "string"}},
+      defer_loading: true,
+      handler: { args -> "deployed to " + args.env },
+    },
   )
   registry = tool_define(
     registry,
     "query_metrics",
     "Query observability metrics",
     {
-    parameters: {query: {type: "string"}},
-    defer_loading: true,
-    handler: { args -> "metrics: " + args.query },
-  },
+      parameters: {query: {type: "string"}},
+      defer_loading: true,
+      handler: { args -> "metrics: " + args.query },
+    },
   )
   // Turn 1: model calls the synthetic search tool with "deploy".
   llm_mock(
     {
-    text: "Looking up deploy tooling.",
-    tool_calls: [{id: "srv1", name: "__harn_tool_search", arguments: {query: "deploy"}}],
-  },
+      text: "Looking up deploy tooling.",
+      tool_calls: [{id: "srv1", name: "__harn_tool_search", arguments: {query: "deploy"}}],
+    },
   )
   // Turn 2: model calls the freshly-promoted deploy tool.
   llm_mock(
     {
-    text: "Deploying now.",
-    tool_calls: [{id: "tool2", name: "deploy_service", arguments: {env: "prod"}}],
-  },
+      text: "Deploying now.",
+      tool_calls: [{id: "tool2", name: "deploy_service", arguments: {env: "prod"}}],
+    },
   )
   // Turn 3: signal completion.
   llm_mock({text: "<done>##DONE##</done>"})
@@ -60,12 +62,12 @@ pipeline test(task) {
     "Ship the release",
     nil,
     {
-    provider: "mock",
-    tools: registry,
-    tool_search: {variant: "bm25", mode: "client"},
-    persistent: true,
-    max_iterations: 5,
-  },
+      provider: "mock",
+      tools: registry,
+      tool_search: {variant: "bm25", mode: "client"},
+      persistent: true,
+      max_iterations: 5,
+    },
   )
   // Explicit `mode: "client"` — the mock provider now spoofs native
   // tool_search when its (default) model looks like Claude 4.0+ or

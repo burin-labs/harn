@@ -3,15 +3,15 @@ import "std/agents"
 pipeline default() {
   let normalized = action_graph(
     {
-    task: "Fix parser diagnostics",
-    summary: "Inspect first, then patch, then verify.",
-    steps: [
-    {id: "inspect", kind: "research", title: "Inspect parser and tests", tools: ["read", "search"]},
-    {id: "patch", title: "Patch parser error text", tools: ["edit"]},
-    {id: "docs", title: "Update release notes", tools: ["edit"]},
-    {id: "qa", kind: "verify", title: "Run verification", dependsOn: ["patch"], tools: ["run"]},
-  ],
-  },
+      task: "Fix parser diagnostics",
+      summary: "Inspect first, then patch, then verify.",
+      steps: [
+        {id: "inspect", kind: "research", title: "Inspect parser and tests", tools: ["read", "search"]},
+        {id: "patch", title: "Patch parser error text", tools: ["edit"]},
+        {id: "docs", title: "Update release notes", tools: ["edit"]},
+        {id: "qa", kind: "verify", title: "Run verification", dependsOn: ["patch"], tools: ["run"]},
+      ],
+    },
   )
   println(normalized?._type == "action_graph")
   println(len(normalized.actions) == 4)
@@ -27,13 +27,13 @@ pipeline default() {
   println(contains(rendered, "depends on: action-1"))
   let execution_plan = action_graph(
     {
-    task: "Fix parser diagnostics",
-    steps: [
-    {id: "inspect", kind: "research", title: "Inspect parser and tests", tools: ["read", "search"]},
-    {id: "patch", title: "Patch parser error text", tools: ["edit"]},
-    {id: "docs", title: "Update release notes", tools: ["edit"]},
-  ],
-  },
+      task: "Fix parser diagnostics",
+      steps: [
+        {id: "inspect", kind: "research", title: "Inspect parser and tests", tools: ["read", "search"]},
+        {id: "patch", title: "Patch parser error text", tools: ["edit"]},
+        {id: "docs", title: "Update release notes", tools: ["edit"]},
+      ],
+    },
   )
   let config = {
     name: "action_graph_runtime",

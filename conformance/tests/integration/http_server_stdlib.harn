@@ -5,45 +5,45 @@ pipeline default() {
   http_server_after(
     server,
     { response, _req ->
-    let prior = response.headers["x-order"] ?? ""
-    response + {headers: response.headers + {["x-order"]: prior + ",after-a"}}
-  },
+      let prior = response.headers["x-order"] ?? ""
+      response + {headers: response.headers + {["x-order"]: prior + ",after-a"}}
+    },
   )
   http_server_after(
     server,
     { response, _req ->
-    let prior = response.headers["x-order"] ?? ""
-    response
-    + {headers: response.headers + {["x-order"]: prior + ",after-b", ["x-after"]: "after-b"}}
-  },
+      let prior = response.headers["x-order"] ?? ""
+      response
+        + {headers: response.headers + {["x-order"]: prior + ",after-b", ["x-after"]: "after-b"}}
+    },
   )
   http_server_route(
     server,
     "POST",
     "/hooks/{tenant}/{trigger}",
     { req ->
-    assert(req.path_params.tenant == "acme", "tenant path param")
-    assert(req.path_params.trigger == "push", "trigger path param")
-    assert(req.query.mode == "fast", "query param")
-    assert(http_header(req, "X-Signature") == "sig", "case-insensitive header")
-    assert(bytes_to_string(req.raw_body) == "{\"ok\":true}", "raw body is retained")
-    assert(req.client_ip == "203.0.113.7", "client IP metadata")
-    http_response_json(
-    {accepted: req.path_params.trigger, tenant: req.path_params.tenant},
-    {status: 202, headers: {["x-handler"]: "ok", ["x-order"]: req.order + ",handler"}},
-  )
-  },
+      assert(req.path_params.tenant == "acme", "tenant path param")
+      assert(req.path_params.trigger == "push", "trigger path param")
+      assert(req.query.mode == "fast", "query param")
+      assert(http_header(req, "X-Signature") == "sig", "case-insensitive header")
+      assert(bytes_to_string(req.raw_body) == "{\"ok\":true}", "raw body is retained")
+      assert(req.client_ip == "203.0.113.7", "client IP metadata")
+      http_response_json(
+        {accepted: req.path_params.trigger, tenant: req.path_params.tenant},
+        {status: 202, headers: {["x-handler"]: "ok", ["x-order"]: req.order + ",handler"}},
+      )
+    },
     {max_body_bytes: 64},
   )
   let response = http_server_test(
     server,
     {
-    method: "post",
-    path: "/hooks/acme/push?mode=fast",
-    headers: {["X-Signature"]: "sig"},
-    body: "{\"ok\":true}",
-    client_ip: "203.0.113.7",
-  },
+      method: "post",
+      path: "/hooks/acme/push?mode=fast",
+      headers: {["X-Signature"]: "sig"},
+      body: "{\"ok\":true}",
+      client_ip: "203.0.113.7",
+    },
   )
   println(response.status)
   println(http_header(response, "X-After"))

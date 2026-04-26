@@ -1,19 +1,19 @@
 pipeline main() {
   let flow = workflow_graph(
     {
-    name: "delegated-flow",
-    entry: "delegate",
-    nodes: {
-    delegate: {
-    kind: "subagent",
-    mode: "llm",
-    model_policy: {provider: "mock"},
-    output_contract: {output_kinds: ["summary"]},
-    metadata: {worker_name: "delegate-1", request: {source: "workflow"}, workflow_stages: ["delegate"]},
-  },
-  },
-    edges: [],
-  },
+      name: "delegated-flow",
+      entry: "delegate",
+      nodes: {
+        delegate: {
+          kind: "subagent",
+          mode: "llm",
+          model_policy: {provider: "mock"},
+          output_contract: {output_kinds: ["summary"]},
+          metadata: {worker_name: "delegate-1", request: {source: "workflow"}, workflow_stages: ["delegate"]},
+        },
+      },
+      edges: [],
+    },
   )
   let result = workflow_execute("Write a delegated note", flow, [], {max_steps: 2})
   println(result?.status)

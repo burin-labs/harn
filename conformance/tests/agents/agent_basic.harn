@@ -5,23 +5,23 @@ fn agent_tools() {
     "read",
     "Read a file",
     {
-    handler: nil,
-    parameters: {path: {type: "string", description: "Path to read"}},
-    returns: {type: "string"},
-  },
+      handler: nil,
+      parameters: {path: {type: "string", description: "Path to read"}},
+      returns: {type: "string"},
+    },
   )
   tools = tool_define(
     tools,
     "search",
     "Search project files",
     {
-    handler: nil,
-    parameters: {
-    pattern: {type: "string", description: "Pattern to search"},
-    file_glob: {type: "string", description: "Optional file glob", required: false},
-  },
-    returns: {type: "string"},
-  },
+      handler: nil,
+      parameters: {
+        pattern: {type: "string", description: "Pattern to search"},
+        file_glob: {type: "string", description: "Optional file glob", required: false},
+      },
+      returns: {type: "string"},
+    },
   )
   return tools
 }
@@ -31,12 +31,12 @@ pipeline test(task) {
   let classifier = agent(
     "classifier",
     {
-    system: "You classify code directories",
-    provider: "mock",
-    model: "test-model",
-    max_iterations: 5,
-    tools: agent_tools(),
-  },
+      system: "You classify code directories",
+      provider: "mock",
+      model: "test-model",
+      max_iterations: 5,
+      tools: agent_tools(),
+    },
   )
   // Check agent dict shape
   assert(classifier._type == "agent", "should be agent type")

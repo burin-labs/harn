@@ -20,12 +20,12 @@ pipeline default() {
     "Exercise manifest hooks",
     nil,
     {
-    provider: "mock",
-    tools: registry,
-    persistent: true,
-    max_iterations: 4,
-    session_id: "manifest-hooks-runtime",
-  },
+      provider: "mock",
+      tools: registry,
+      persistent: true,
+      max_iterations: 4,
+      session_id: "manifest-hooks-runtime",
+    },
   )
   assert(result?.status == "done", "loop completes")
   let calls = llm_mock_calls()

@@ -1,7 +1,9 @@
-// `try*` rethrows must run pending `finally` blocks between the
-// rethrow site and the enclosing catch — exactly once each. This
-// mirrors the exactly-once guarantee documented in
-// `finally_runs_once.harn` for plain `throw`.
+/**
+ * `try*` rethrows must run pending `finally` blocks between the
+ * rethrow site and the enclosing catch — exactly once each. This
+ * mirrors the exactly-once guarantee documented in
+ * `finally_runs_once.harn` for plain `throw`.
+ */
 pipeline test(task) {
   fn boom() {
     throw "x"
@@ -39,11 +41,11 @@ pipeline test(task) {
   var counter_c = 0
   let r_c = try {
     let inner = try {
-    let _ = try* boom()
-    "u3"
-  } catch (e) {
-    "inner:${e}"
-  }
+      let _ = try* boom()
+      "u3"
+    } catch (e) {
+      "inner:${e}"
+    }
     inner
   } finally {
     counter_c = counter_c + 1

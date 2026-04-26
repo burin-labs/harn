@@ -20,8 +20,8 @@ pipeline default() {
   mkdir(state_dir)
   let start = process_exec(
     "python3 \"" + helper + "\" \"" + state_dir + "\" >\"" + log_path + "\" 2>&1 & echo $! > \""
-    + pid_path
-    + "\"",
+      + pid_path
+      + "\"",
   )
   require start?.success, "proxy server started"
   wait_for_file(port_path, 100)

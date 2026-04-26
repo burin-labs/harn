@@ -12,18 +12,18 @@ pipeline test(task) {
   )
   assert(
     stream_providers
-    .all(
-    { provider -> provider.runtime.kind == "builtin" && provider.runtime.connector == "stream" },
-  ),
+      .all(
+      { provider -> provider.runtime.kind == "builtin" && provider.runtime.connector == "stream" },
+    ),
     "stream providers should use the generic stream ingress connector",
   )
   assert(
     stream_providers.any({ provider -> provider.provider == "kafka" })
-    && stream_providers.any({ provider -> provider.provider == "nats" })
-    && stream_providers.any({ provider -> provider.provider == "pulsar" })
-    && stream_providers.any({ provider -> provider.provider == "postgres-cdc" })
-    && stream_providers.any({ provider -> provider.provider == "email" })
-    && stream_providers.any({ provider -> provider.provider == "websocket" }),
+      && stream_providers.any({ provider -> provider.provider == "nats" })
+      && stream_providers.any({ provider -> provider.provider == "pulsar" })
+      && stream_providers.any({ provider -> provider.provider == "postgres-cdc" })
+      && stream_providers.any({ provider -> provider.provider == "email" })
+      && stream_providers.any({ provider -> provider.provider == "websocket" }),
     "catalog should include every STREAM-01 provider",
   )
   let cron = builtin.find({ provider -> provider.provider == "cron" })
@@ -206,9 +206,9 @@ pipeline test(task) {
   assert(len(notion_secrets) == 1, "notion should publish its webhook verification secret")
   assert(
     notion_secrets
-    .any(
-    { secret -> secret.name == "verification_token" && secret.namespace == "notion" },
-  ),
+      .any(
+      { secret -> secret.name == "verification_token" && secret.namespace == "notion" },
+    ),
     "notion should require verification_token in the notion namespace",
   )
   let notion_methods = notion?.outbound_methods ?? []

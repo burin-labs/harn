@@ -18,28 +18,28 @@ pipeline test(task) {
     type: "object",
     required: ["framework", "indent_style", "naming_conventions", "test_runner"],
     properties: {
-    framework: {type: "string"},
-    indent_style: {type: "string"},
-    naming_conventions: {type: "array", items: {type: "string"}},
-    test_runner: {type: "string"},
-  },
+      framework: {type: "string"},
+      indent_style: {type: "string"},
+      naming_conventions: {type: "array", items: {type: "string"}},
+      test_runner: {type: "string"},
+    },
   }
   let result = project_enrich(
     base_dir,
     {
-    base_evidence: base,
-    prompt: prompt,
-    schema: schema,
-    budget_tokens: 4000,
-    provider: "mock",
-    model: "mock-model",
-    cache_key: "retry-v1",
-    schema_retries: 1,
-    include_operator_meta: false,
-  },
+      base_evidence: base,
+      prompt: prompt,
+      schema: schema,
+      budget_tokens: 4000,
+      provider: "mock",
+      model: "mock-model",
+      cache_key: "retry-v1",
+      schema_retries: 1,
+      include_operator_meta: false,
+    },
   )
   println(contains(result.validation_error, "schema"))
   println(result.base_evidence.package_name == "project-enrich-envelope")
-  println(result._provenance.cached == false)
+  println(!result._provenance.cached)
   println(len(llm_mock_calls()) == 2)
 }

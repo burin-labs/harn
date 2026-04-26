@@ -1,17 +1,19 @@
-// Tool Vault phase 3 (harn#71): native OpenAI Responses-API
-// `tool_search` payload emission for GPT 5.4+. Verifies that:
-//   1. Opting into `tool_search` routes auto-resolution to native
-//      mode when the provider+model supports it.
-//   2. The payload prepends the OpenAI-shape meta-tool
-//      `{"type": "tool_search", "mode": "hosted"}` to the tools
-//      array (distinct from Anthropic's versioned
-//      `tool_search_tool_*_20251119`).
-//   3. `defer_loading: true` flows to the OpenAI-shape wrapper so
-//      the server knows which user tools to hide from the model
-//      until a `tool_search_call` surfaces them.
-//   4. `mode: "native"` against a pre-5.4 GPT model fires the same
-//      "does not expose native" diagnostic as other non-supporting
-//      providers.
+/**
+ * Tool Vault phase 3 (harn#71): native OpenAI Responses-API
+ * `tool_search` payload emission for GPT 5.4+. Verifies that:
+ *   1. Opting into `tool_search` routes auto-resolution to native
+ *      mode when the provider+model supports it.
+ *   2. The payload prepends the OpenAI-shape meta-tool
+ *      `{"type": "tool_search", "mode": "hosted"}` to the tools
+ *      array (distinct from Anthropic's versioned
+ *      `tool_search_tool_*_20251119`).
+ *   3. `defer_loading: true` flows to the OpenAI-shape wrapper so
+ *      the server knows which user tools to hide from the model
+ *      until a `tool_search_call` surfaces them.
+ *   4. `mode: "native"` against a pre-5.4 GPT model fires the same
+ *      "does not expose native" diagnostic as other non-supporting
+ *      providers.
+ */
 pipeline test(task) {
   llm_mock_clear()
   var registry = tool_registry()
@@ -26,20 +28,20 @@ pipeline test(task) {
     "deploy_service",
     "Deploy the service stack",
     {
-    parameters: {env: {type: "string"}},
-    defer_loading: true,
-    handler: { args -> "deployed to " + args.env },
-  },
+      parameters: {env: {type: "string"}},
+      defer_loading: true,
+      handler: { args -> "deployed to " + args.env },
+    },
   )
   registry = tool_define(
     registry,
     "query_metrics",
     "Query observability metrics",
     {
-    parameters: {query: {type: "string"}},
-    defer_loading: true,
-    handler: { args -> "metrics: " + args.query },
-  },
+      parameters: {query: {type: "string"}},
+      defer_loading: true,
+      handler: { args -> "metrics: " + args.query },
+    },
   )
   // One-shot llm_call: with mode:"native" + a supported gpt-5.4 model,
   // options parsing must inject the OpenAI meta-tool and preserve the
@@ -51,11 +53,11 @@ pipeline test(task) {
     "do a thing",
     nil,
     {
-    provider: "mock",
-    model: "gpt-5.4-preview",
-    tools: registry,
-    tool_search: {variant: "bm25", mode: "native"},
-  },
+      provider: "mock",
+      model: "gpt-5.4-preview",
+      tools: registry,
+      tool_search: {variant: "bm25", mode: "native"},
+    },
   )
   let calls = llm_mock_calls()
   assert(len(calls) >= 1, "at least one LLM call happened")
@@ -75,11 +77,11 @@ pipeline test(task) {
     if t.type == "function" {
       let fname = t.function?.name
       if fname == "deploy_service" {
-        assert(t.defer_loading == true, "deploy_service keeps defer_loading: true")
+        assert(t.defer_loading, "deploy_service keeps defer_loading: true")
         saw_deploy_deferred = true
       }
       if fname == "query_metrics" {
-        assert(t.defer_loading == true, "query_metrics keeps defer_loading: true")
+        assert(t.defer_loading, "query_metrics keeps defer_loading: true")
         saw_metrics_deferred = true
       }
       if fname == "lookup_account" {
@@ -96,10 +98,10 @@ pipeline test(task) {
   llm_mock_clear()
   let pre54_err = try {
     llm_call(
-    "x",
-    nil,
-    {provider: "mock", model: "gpt-4o", tools: registry, tool_search: {variant: "bm25", mode: "native"}},
-  )
+      "x",
+      nil,
+      {provider: "mock", model: "gpt-4o", tools: registry, tool_search: {variant: "bm25", mode: "native"}},
+    )
     nil
   } catch (e) {
     e

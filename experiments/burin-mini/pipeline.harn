@@ -34,22 +34,22 @@ fn read_search_tools() {
     "search",
     "Search the workspace with ripgrep.",
     {
-    policy: {kind: "search"},
-    parameters: {query: {type: "string"}},
-    returns: {type: "string"},
-    handler: { args -> search_workspace(args.query) },
-  },
+      policy: {kind: "search"},
+      parameters: {query: {type: "string"}},
+      returns: {type: "string"},
+      handler: { args -> search_workspace(args.query) },
+    },
   )
   tools = tool_define(
     tools,
     "read",
     "Read one workspace file.",
     {
-    policy: {kind: "read", path_params: ["path"]},
-    parameters: {path: {type: "string"}},
-    returns: {type: "string"},
-    handler: { args -> read_workspace(args.path) },
-  },
+      policy: {kind: "read", path_params: ["path"]},
+      parameters: {path: {type: "string"}},
+      returns: {type: "string"},
+      handler: { args -> read_workspace(args.path) },
+    },
   )
   return tools
 }
@@ -61,22 +61,22 @@ fn edit_tools() {
     "write",
     "Write one workspace file.",
     {
-    policy: {kind: "edit", path_params: ["path"]},
-    parameters: {path: {type: "string"}, content: {type: "string"}},
-    returns: {type: "string"},
-    handler: { args -> write_workspace(args.path, args.content) },
-  },
+      policy: {kind: "edit", path_params: ["path"]},
+      parameters: {path: {type: "string"}, content: {type: "string"}},
+      returns: {type: "string"},
+      handler: { args -> write_workspace(args.path, args.content) },
+    },
   )
   tools = tool_define(
     tools,
     "run",
     "Run one shell command inside the workspace.",
     {
-    policy: {kind: "execute"},
-    parameters: {command: {type: "string"}},
-    returns: {type: "object"},
-    handler: { args -> run_workspace(args.command) },
-  },
+      policy: {kind: "execute"},
+      parameters: {command: {type: "string"}},
+      returns: {type: "object"},
+      handler: { args -> run_workspace(args.command) },
+    },
   )
   return tools
 }
@@ -102,9 +102,9 @@ fn planner_prompt(task, workspace_root, profile, facts, round_no, force_ready) {
     + "Action tool names may only be: read, search, write, run.\n"
     + if force_ready {
     "Research budget is exhausted for this task.\n"
-    + "Do not ask more research questions.\n"
-    + "Return the best concrete action list you can support from the current facts, target paths, verifier contract, and completion bar.\n"
-    + "If a write batch may need one supporting read later, encode that in the action via allowed_tools instead of requesting another planner research round.\n"
+      + "Do not ask more research questions.\n"
+      + "Return the best concrete action list you can support from the current facts, target paths, verifier contract, and completion bar.\n"
+      + "If a write batch may need one supporting read later, encode that in the action via allowed_tools instead of requesting another planner research round.\n"
   } else {
     ""
   }
@@ -143,7 +143,7 @@ fn planner_system(force_ready) {
     + "- For read-only tasks, leave actions empty and put the user-facing answer in final_response.\n"
     + if force_ready {
     "- Research budget is exhausted. Return `ready: true` with the best concrete action graph you can justify from the existing facts.\n"
-    + "- Do not emit more research questions in this final planning pass.\n"
+      + "- Do not emit more research questions in this final planning pass.\n"
   } else {
     ""
   }
@@ -202,7 +202,7 @@ fn run_planner(task, workspace_root, profile, facts, round_no, force_ready) {
   let result = sub_agent_run(
     planner_prompt(task, workspace_root, profile, facts, round_no, force_ready),
     generator_options(planner_system(force_ready), tool_registry(), [])
-    + {response_format: "json", returns: {schema: planner_schema()}},
+      + {response_format: "json", returns: {schema: planner_schema()}},
   )
   if result?.ok {
     let parsed = result?.data ?? parse_json_object(result?.summary ?? "")
@@ -221,11 +221,11 @@ fn run_research(workspace_root, profile, question) {
   let result = sub_agent_run(
     research_prompt(workspace_root, profile, question),
     generator_options(research_system(), read_search_tools(), question?.tools ?? [])
-    + {
-    response_format: "json",
-    returns: {schema: research_schema()},
-    turn_policy: {require_action_or_yield: true, allow_done_sentinel: true},
-  },
+      + {
+      response_format: "json",
+      returns: {schema: research_schema()},
+      turn_policy: {require_action_or_yield: true, allow_done_sentinel: true},
+    },
   )
   if result?.ok {
     return {ok: true, error: nil, data: normalize_research_fact(question, result?.data ?? {})}
@@ -265,15 +265,15 @@ fn research_artifacts(facts, profile) {
     artifacts = artifacts
       + [
       artifact(
-      {
-      kind: "summary",
-      title: "Grounded research fact",
-      text: render_facts([fact]),
-      data: {fact: fact},
-      relevance: 1.0,
-      metadata: {evidence_paths: fact?.evidence_paths ?? []},
-    },
-    ),
+        {
+          kind: "summary",
+          title: "Grounded research fact",
+          text: render_facts([fact]),
+          data: {fact: fact},
+          relevance: 1.0,
+          metadata: {evidence_paths: fact?.evidence_paths ?? []},
+        },
+      ),
     ]
   }
   return artifacts
@@ -285,13 +285,13 @@ fn graph_research_template() {
     tools: read_search_tools(),
     system: research_system(),
     model_policy: {
-    provider: provider_name(),
-    model: generator_model(),
-    tool_format: "native",
-    temperature: 0,
-    max_iterations: 6,
-    turn_policy: {require_action_or_yield: true, allow_done_sentinel: true, max_prose_chars: 280},
-  },
+      provider: provider_name(),
+      model: generator_model(),
+      tool_format: "native",
+      temperature: 0,
+      max_iterations: 6,
+      turn_policy: {require_action_or_yield: true, allow_done_sentinel: true, max_prose_chars: 280},
+    },
     output_contract: {output_kinds: ["summary"]},
   }
 }
@@ -302,13 +302,13 @@ fn graph_execute_template() {
     tools: edit_tools(),
     system: execute_system(),
     model_policy: {
-    provider: provider_name(),
-    model: generator_model(),
-    tool_format: "native",
-    temperature: 0,
-    max_iterations: 8,
-    turn_policy: {require_action_or_yield: true, allow_done_sentinel: true, max_prose_chars: 360},
-  },
+      provider: provider_name(),
+      model: generator_model(),
+      tool_format: "native",
+      temperature: 0,
+      max_iterations: 8,
+      turn_policy: {require_action_or_yield: true, allow_done_sentinel: true, max_prose_chars: 360},
+    },
     output_contract: {output_kinds: ["summary"]},
   }
 }
@@ -321,10 +321,10 @@ fn graph_verify_template(profile) {
   }
   return {
     command: if command == "none" {
-    nil
-  } else {
-    command
-  },
+      nil
+    } else {
+      command
+    },
     expect_status: 0,
     verify: contract,
   }
@@ -336,38 +336,38 @@ fn execute_graph(task, profile, facts, plan) {
     task,
     graph,
     {
-    name: "burin_mini_${profile?.id}",
-    research: graph_research_template(),
-    execute: graph_execute_template(),
-    verify: graph_verify_template(profile),
-  },
+      name: "burin_mini_${profile?.id}",
+      research: graph_research_template(),
+      execute: graph_execute_template(),
+      verify: graph_verify_template(profile),
+    },
     {
-    artifacts: research_artifacts(facts, profile),
-    max_steps: 8,
-    persist_path: path_join(source_dir(), "evals", "generated", "${profile?.id}-run.json"),
-  },
+      artifacts: research_artifacts(facts, profile),
+      max_steps: 8,
+      persist_path: path_join(source_dir(), "evals", "generated", "${profile?.id}-run.json"),
+    },
   )
 }
 
 fn run_read_only_evaluator(task, workspace_root, profile, plan, facts, final_response) {
   let result = sub_agent_run(
     "[evaluator][task_id=${profile?.id}][token=final]\n"
-    + "Original task: ${task}\n"
-    + "Workspace root: ${workspace_root}\n"
-    + "Plan summary: ${plan?.plan_summary}\n"
-    + "Success criteria:\n${render_list(plan?.success_criteria ?? profile?.success_criteria ?? [])}\n"
-    + "Research facts:\n${render_facts(facts)}\n"
-    + "User-facing response draft:\n${final_response}\n"
-    + "Return strict JSON only with keys: verdict, reason, strengths, gaps.",
+      + "Original task: ${task}\n"
+      + "Workspace root: ${workspace_root}\n"
+      + "Plan summary: ${plan?.plan_summary}\n"
+      + "Success criteria:\n${render_list(plan?.success_criteria ?? profile?.success_criteria ?? [])}\n"
+      + "Research facts:\n${render_facts(facts)}\n"
+      + "User-facing response draft:\n${final_response}\n"
+      + "Return strict JSON only with keys: verdict, reason, strengths, gaps.",
     evaluator_options(
-    "You are a separate evaluator model.\n"
-    + "Grade the read-only answer against the success criteria.\n"
-    + "Use read/search/run only if needed.\n"
-    + "Pass only if the draft is grounded in the research facts or your own tool results.\n"
-    + "Return a strict JSON verdict with concise strengths and gaps.",
-    verify_tools(),
-  )
-    + {response_format: "json"},
+      "You are a separate evaluator model.\n"
+        + "Grade the read-only answer against the success criteria.\n"
+        + "Use read/search/run only if needed.\n"
+        + "Pass only if the draft is grounded in the research facts or your own tool results.\n"
+        + "Return a strict JSON verdict with concise strengths and gaps.",
+      verify_tools(),
+    )
+      + {response_format: "json"},
   )
   if result?.ok {
     let data = result?.data ?? {}

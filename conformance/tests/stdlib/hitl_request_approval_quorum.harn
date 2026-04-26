@@ -7,9 +7,9 @@ pipeline test(task) {
     "hitl",
     "approval",
     [
-    {approved: true, reviewer: "alice", reason: "checked"},
-    {approved: true, reviewer: "bob", reason: "approved"},
-  ],
+      {approved: true, reviewer: "alice", reason: "checked"},
+      {approved: true, reviewer: "bob", reason: "approved"},
+    ],
   )
   let record: {approved: bool, reviewers: list<string>, approved_at: string, reason: string | nil, signatures: list<{reviewer: string, signed_at: string, signature: string}>} = request_approval("deploy production", {quorum: 2, reviewers: ["alice", "bob", "carol"]})
   println(record.approved)

@@ -19,42 +19,42 @@ pipeline test(task) {
     type: "object",
     required: ["framework", "indent_style", "naming_conventions", "test_runner"],
     properties: {
-    framework: {type: "string"},
-    indent_style: {type: "string"},
-    naming_conventions: {type: "array", items: {type: "string"}},
-    test_runner: {type: "string"},
-  },
+      framework: {type: "string"},
+      indent_style: {type: "string"},
+      naming_conventions: {type: "array", items: {type: "string"}},
+      test_runner: {type: "string"},
+    },
   }
   let first = project_enrich(
     base_dir,
     {
-    base_evidence: base,
-    prompt: prompt,
-    schema: schema,
-    budget_tokens: 4000,
-    provider: "mock",
-    model: "mock-model",
-    cache_key: "cache-v1",
-    include_operator_meta: false,
-  },
+      base_evidence: base,
+      prompt: prompt,
+      schema: schema,
+      budget_tokens: 4000,
+      provider: "mock",
+      model: "mock-model",
+      cache_key: "cache-v1",
+      include_operator_meta: false,
+    },
   )
   let second = project_enrich(
     base_dir,
     {
-    base_evidence: base,
-    prompt: prompt,
-    schema: schema,
-    budget_tokens: 4000,
-    provider: "mock",
-    model: "mock-model",
-    cache_key: "cache-v1",
-    include_operator_meta: false,
-  },
+      base_evidence: base,
+      prompt: prompt,
+      schema: schema,
+      budget_tokens: 4000,
+      provider: "mock",
+      model: "mock-model",
+      cache_key: "cache-v1",
+      include_operator_meta: false,
+    },
   )
   let calls = llm_mock_calls()
   println(first.framework == "axum")
-  println(first._provenance.cached == false)
-  println(second._provenance.cached == true)
+  println(!first._provenance.cached)
+  println(second._provenance.cached)
   println(len(calls) == 1)
   println(contains(calls[0].messages[0].content, "FILE src/lib.rs"))
 }

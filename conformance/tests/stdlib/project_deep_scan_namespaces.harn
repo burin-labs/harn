@@ -11,43 +11,43 @@ pipeline test(task) {
   let alpha = project_deep_scan(
     root,
     {
-    namespace: alpha_namespace,
-    tiers: ["ambient", "enriched"],
-    incremental: true,
-    depth: nil,
-    enrichment: {prompt: "Return valid JSON only.", provider: "mock", schema: {purpose: "string"}},
-  },
+      namespace: alpha_namespace,
+      tiers: ["ambient", "enriched"],
+      incremental: true,
+      depth: nil,
+      enrichment: {prompt: "Return valid JSON only.", provider: "mock", schema: {purpose: "string"}},
+    },
   )
   llm_mock({text: "{\"purpose\":\"beta root\"}"})
   let beta = project_deep_scan(
     root,
     {
-    namespace: beta_namespace,
-    tiers: ["ambient", "enriched"],
-    incremental: true,
-    depth: nil,
-    enrichment: {prompt: "Return valid JSON only.", provider: "mock", schema: {purpose: "string"}},
-  },
+      namespace: beta_namespace,
+      tiers: ["ambient", "enriched"],
+      incremental: true,
+      depth: nil,
+      enrichment: {prompt: "Return valid JSON only.", provider: "mock", schema: {purpose: "string"}},
+    },
   )
   let alpha_cached = project_deep_scan(
     root,
     {
-    namespace: alpha_namespace,
-    tiers: ["ambient", "enriched"],
-    incremental: true,
-    depth: nil,
-    enrichment: {prompt: "Return valid JSON only.", provider: "mock", schema: {purpose: "string"}},
-  },
+      namespace: alpha_namespace,
+      tiers: ["ambient", "enriched"],
+      incremental: true,
+      depth: nil,
+      enrichment: {prompt: "Return valid JSON only.", provider: "mock", schema: {purpose: "string"}},
+    },
   )
   let beta_cached = project_deep_scan(
     root,
     {
-    namespace: beta_namespace,
-    tiers: ["ambient", "enriched"],
-    incremental: true,
-    depth: nil,
-    enrichment: {prompt: "Return valid JSON only.", provider: "mock", schema: {purpose: "string"}},
-  },
+      namespace: beta_namespace,
+      tiers: ["ambient", "enriched"],
+      incremental: true,
+      depth: nil,
+      enrichment: {prompt: "Return valid JSON only.", provider: "mock", schema: {purpose: "string"}},
+    },
   )
   println(alpha["."].enriched.purpose == "alpha root")
   println(beta["."].enriched.purpose == "beta root")

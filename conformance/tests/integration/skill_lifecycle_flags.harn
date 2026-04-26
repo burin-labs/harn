@@ -1,9 +1,11 @@
-// Skills & Tool Vault phase 3 (harn#74): flag honouring.
-//
-// - `disable-model-invocation: true` excludes a skill from the
-//   matcher even when keywords would otherwise land it.
-// - An empty top-1 match produces `skill_matched` with no candidates
-//   and no activation.
+/**
+ * Skills & Tool Vault phase 3 (harn#74): flag honouring.
+ *
+ * - `disable-model-invocation: true` excludes a skill from the
+ *   matcher even when keywords would otherwise land it.
+ * - An empty top-1 match produces `skill_matched` with no candidates
+ *   and no activation.
+ */
 pipeline test(task) {
   llm_mock_clear()
   skill private_work {
@@ -18,12 +20,12 @@ pipeline test(task) {
     private_work,
     "private_work",
     {
-    description: "Rotate database credentials",
-    when_to_use: "User requests a credential rotation",
-    prompt: "Never execute without manual approval.",
-    allowed_tools: ["rotate"],
-    ["disable-model-invocation"]: true,
-  },
+      description: "Rotate database credentials",
+      when_to_use: "User requests a credential rotation",
+      prompt: "Never execute without manual approval.",
+      allowed_tools: ["rotate"],
+      ["disable-model-invocation"]: true,
+    },
   )
   llm_mock({text: "Nothing to do."})
   let result = agent_loop(

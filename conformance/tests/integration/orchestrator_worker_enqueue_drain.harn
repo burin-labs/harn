@@ -49,10 +49,10 @@ pipeline default(task) {
   let before = json_parse(queue_before.stdout)
   println(
     fire.success
-    && contains(fire.stdout, "\"queue\":\"triage\"")
-    && queue_before.success
-    && before.worker_queues[0].queue == "triage"
-    && before.worker_queues[0].ready == 1,
+      && contains(fire.stdout, "\"queue\":\"triage\"")
+      && queue_before.success
+      && before.worker_queues[0].queue == "triage"
+      && before.worker_queues[0].ready == 1,
   )
   let drain = exec(
     harn_bin,

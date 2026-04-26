@@ -5,10 +5,10 @@ fn write_tools() {
     "write_note",
     "Write a note",
     {
-    handler: nil,
-    parameters: {path: {type: "string", description: "Path to write"}},
-    returns: {type: "string"},
-  },
+      handler: nil,
+      parameters: {path: {type: "string", description: "Path to write"}},
+      returns: {type: "string"},
+    },
   )
   return tools
 }
@@ -18,12 +18,12 @@ pipeline main() {
     "Try to write a note",
     "You are helpful",
     {
-    provider: "mock",
-    tools: write_tools(),
-    tool_format: "native",
-    max_iterations: 1,
-    policy: {tools: ["read_only"]},
-  },
+      provider: "mock",
+      tools: write_tools(),
+      tool_format: "native",
+      max_iterations: 1,
+      policy: {tools: ["read_only"]},
+    },
   )
   println(denied?.tools?.rejected[0] == "write_note")
   let transcript = json_stringify(transcript_messages(denied?.transcript))

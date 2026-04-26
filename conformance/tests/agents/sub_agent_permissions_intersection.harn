@@ -5,10 +5,10 @@ fn write_tools() {
     "write_note",
     "Write a note",
     {
-    handler: { args -> "wrote " + args.path },
-    parameters: {path: {type: "string"}},
-    returns: {type: "string"},
-  },
+      handler: { args -> "wrote " + args.path },
+      parameters: {path: {type: "string"}},
+      returns: {type: "string"},
+    },
   )
   return tools
 }
@@ -18,13 +18,13 @@ pipeline main() {
   let denied = sub_agent_run(
     "Try to write.",
     {
-    provider: "mock",
-    tools: write_tools(),
-    tool_format: "native",
-    max_iterations: 1,
-    policy: {tools: ["read_note"]},
-    permissions: {allow: {write_note: { args -> true }}},
-  },
+      provider: "mock",
+      tools: write_tools(),
+      tool_format: "native",
+      max_iterations: 1,
+      policy: {tools: ["read_note"]},
+      permissions: {allow: {write_note: { args -> true }}},
+    },
   )
   println(!denied?.ok)
   println(denied?.error?.category == "permission_denied")

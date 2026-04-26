@@ -5,11 +5,11 @@ fn write_tools() {
     "write_file",
     "Write a file",
     {
-    handler: nil,
-    parameters: {path: {type: "string", description: "Path"}},
-    returns: {type: "string"},
-    metadata: {path_params: ["path"], mutation_classification: "apply_workspace"},
-  },
+      handler: nil,
+      parameters: {path: {type: "string", description: "Path"}},
+      returns: {type: "string"},
+      metadata: {path_params: ["path"], mutation_classification: "apply_workspace"},
+    },
   )
   return tools
 }
@@ -19,12 +19,12 @@ pipeline main() {
     "Try to write outside allowlist",
     "You are helpful",
     {
-    provider: "mock",
-    tools: write_tools(),
-    tool_format: "native",
-    max_iterations: 1,
-    approval_policy: {write_path_allowlist: ["/tmp/*"]},
-  },
+      provider: "mock",
+      tools: write_tools(),
+      tool_format: "native",
+      max_iterations: 1,
+      approval_policy: {write_path_allowlist: ["/tmp/*"]},
+    },
   )
   println(len(denied?.tools?.rejected) == 0 || denied?.tools?.rejected[0] == "write_file")
 }

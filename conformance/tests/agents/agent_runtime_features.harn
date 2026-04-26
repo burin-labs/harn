@@ -5,10 +5,10 @@ fn list_tools() {
     "list_directory",
     "List directory contents",
     {
-    handler: nil,
-    parameters: {path: {type: "string", description: "Directory path"}},
-    returns: {type: "string"},
-  },
+      handler: nil,
+      parameters: {path: {type: "string", description: "Directory path"}},
+      returns: {type: "string"},
+    },
   )
   return tools
 }
@@ -23,7 +23,7 @@ pipeline test(task) {
   println(denied?.tools?.rejected[0])
   println(
     json_stringify(transcript_messages(denied?.transcript))
-    .contains("permission_denied"),
+      .contains("permission_denied"),
   )
   clear_tool_hooks()
   var trunc_tools = tool_registry()
@@ -52,49 +52,49 @@ pipeline test(task) {
   let custom_compacted = transcript_auto_compact(
     base_messages,
     {
-    keep_last: 1,
-    compact_strategy: "custom",
-    compact_callback: { archived -> {summary: "custom compact " + to_string(len(archived))} },
-  },
+      keep_last: 1,
+      compact_strategy: "custom",
+      compact_callback: { archived -> {summary: "custom compact " + to_string(len(archived))} },
+    },
   )
   println(custom_compacted[0].content.contains("custom compact 2"))
   let loop_compacted = agent_loop(
     "Inspect the workspace",
     "You are helpful",
     {
-    provider: "mock",
-    tools: list_tools(),
-    tool_format: "native",
-    max_iterations: 2,
-    auto_compact: true,
-    compact_threshold: 1,
-    compact_keep_last: 1,
-    compact_strategy: "custom",
-    compact_callback: { archived -> {summary: "loop compact " + to_string(len(archived))} },
-  },
+      provider: "mock",
+      tools: list_tools(),
+      tool_format: "native",
+      max_iterations: 2,
+      auto_compact: true,
+      compact_threshold: 1,
+      compact_keep_last: 1,
+      compact_strategy: "custom",
+      compact_callback: { archived -> {summary: "loop compact " + to_string(len(archived))} },
+    },
   )
   println(transcript_summary(loop_compacted?.transcript).contains("loop compact"))
   let stopped_after_tool_turn = agent_loop(
     "Inspect the workspace",
     "You are helpful",
     {
-    provider: "mock",
-    tools: list_tools(),
-    tool_format: "native",
-    max_iterations: 3,
-    post_turn_callback: { info ->
-    if info?.tool_results?.count ?? 0 > 0
-    && info?.tool_results[0]?.tool_name == "list_directory"
-    && info?.tool_results[0]?.status == "ok" {
-      return {message: "handoff now", stop: true}
-    }
-    return ""
-  },
-  },
+      provider: "mock",
+      tools: list_tools(),
+      tool_format: "native",
+      max_iterations: 3,
+      post_turn_callback: { info ->
+        if info?.tool_results?.count ?? 0 > 0
+          && info?.tool_results[0]?.tool_name == "list_directory"
+          && info?.tool_results[0]?.status == "ok" {
+          return {message: "handoff now", stop: true}
+        }
+        return ""
+      },
+    },
   )
   println(stopped_after_tool_turn?.llm?.iterations == 1)
   println(
     json_stringify(transcript_messages(stopped_after_tool_turn?.transcript))
-    .contains("handoff now"),
+      .contains("handoff now"),
   )
 }

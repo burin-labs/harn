@@ -18,10 +18,10 @@ pipeline default() {
   // Nested in function call args.
   println(
     if false {
-    "a"
-  } else {
-    "b"
-  },
+      "a"
+    } else {
+      "b"
+    },
   )
   // Multiple branches via chained else-if still work.
   let grade = if 75 >= 90 {

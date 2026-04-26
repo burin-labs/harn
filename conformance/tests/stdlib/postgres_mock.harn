@@ -3,17 +3,17 @@ import "std/postgres"
 pipeline default() {
   let db = pg_mock_pool(
     [
-    {
-    sql: "select id, payload from receipts where tenant_id = $1",
-    params: ["tenant-a"],
-    rows: [{id: "r1", payload: {ok: true}, observed_at: "2024-01-02T03:04:05Z"}],
-  },
-    {
-    sql: "insert into audit_records(tenant_id, action) values ($1, $2)",
-    params: ["tenant-a", "receipt.read"],
-    rows_affected: 1,
-  },
-  ],
+      {
+        sql: "select id, payload from receipts where tenant_id = $1",
+        params: ["tenant-a"],
+        rows: [{id: "r1", payload: {ok: true}, observed_at: "2024-01-02T03:04:05Z"}],
+      },
+      {
+        sql: "insert into audit_records(tenant_id, action) values ($1, $2)",
+        params: ["tenant-a", "receipt.read"],
+        rows_affected: 1,
+      },
+    ],
   )
   let rows = pg_query(db, "select id, payload from receipts where tenant_id = $1", ["tenant-a"])
   println(rows[0].id)

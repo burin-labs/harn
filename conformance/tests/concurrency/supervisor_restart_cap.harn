@@ -2,20 +2,20 @@ pipeline default() {
   let starts = atomic(0)
   let sup = supervisor_start(
     {
-    name: "capped",
-    strategy: "one_for_one",
-    children: [
-    {
-    name: "bad-stream",
-    kind: "connector_stream",
-    restart: {mode: "on_failure", max_restarts: 1, window_ms: 1000, backoff_ms: 1},
-    task: { _ctx ->
-    atomic_add(starts, 1)
-    throw "stream-failed"
-  },
-  },
-  ],
-  },
+      name: "capped",
+      strategy: "one_for_one",
+      children: [
+        {
+          name: "bad-stream",
+          kind: "connector_stream",
+          restart: {mode: "on_failure", max_restarts: 1, window_ms: 1000, backoff_ms: 1},
+          task: { _ctx ->
+            atomic_add(starts, 1)
+            throw "stream-failed"
+          },
+        },
+      ],
+    },
   )
   sleep(25ms)
   let state = supervisor_state(sup)

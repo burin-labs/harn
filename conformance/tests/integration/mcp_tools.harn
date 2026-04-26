@@ -6,10 +6,10 @@ pipeline test(task) {
     "echo",
     "Echo input",
     {
-    parameters: {text: "string"},
-    handler: { args -> args.text },
-    annotations: {title: "Echo Tool", readOnlyHint: true, destructiveHint: false},
-  },
+      parameters: {text: "string"},
+      handler: { args -> args.text },
+      annotations: {title: "Echo Tool", readOnlyHint: true, destructiveHint: false},
+    },
   )
   let result = mcp_tools(tools)
   assert(result == nil, "mcp_tools should return nil")

@@ -6,23 +6,23 @@ pipeline default() {
     "search",
     "Search the web",
     {
-    handler: { query -> return "results for: " + query },
-    parameters: {query: {type: "string", description: "Search query"}},
-    returns: {type: "object", properties: {results: {type: "array"}}},
-  },
+      handler: { query -> return "results for: " + query },
+      parameters: {query: {type: "string", description: "Search query"}},
+      returns: {type: "object", properties: {results: {type: "array"}}},
+    },
   )
   tools = tool_define(
     tools,
     "calculate",
     "Evaluate math",
     {
-    handler: { _expr -> return "42" },
-    parameters: {
-    expression: {type: "string", description: "Expression to evaluate"},
-    precision: {type: "integer", description: "Optional decimal precision"},
-  },
-    returns: {type: "string"},
-  },
+      handler: { _expr -> return "42" },
+      parameters: {
+        expression: {type: "string", description: "Expression to evaluate"},
+        precision: {type: "integer", description: "Optional decimal precision"},
+      },
+      returns: {type: "string"},
+    },
   )
   // Test tool_schema generates OpenAPI-like schema
   let schema = tool_schema(tools)

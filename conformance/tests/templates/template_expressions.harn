@@ -5,15 +5,15 @@ pipeline default() {
   println("---")
   println(
     render(
-    "fixtures/template/expressions.prompt",
-    {count: 5, name: "alice", active: true, role: "user"},
-  ),
+      "fixtures/template/expressions.prompt",
+      {count: 5, name: "alice", active: true, role: "user"},
+    ),
   )
   println("---")
   println(
     render(
-    "fixtures/template/expressions.prompt",
-    {count: 99, name: "bob", active: false, role: "admin"},
-  ),
+      "fixtures/template/expressions.prompt",
+      {count: 99, name: "bob", active: false, role: "admin"},
+    ),
   )
 }

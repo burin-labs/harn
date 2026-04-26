@@ -5,14 +5,14 @@ pipeline main() {
   let handle = sub_agent_run(
     "Investigate worker provenance",
     {
-    provider: "mock",
-    background: true,
-    request: {topic: "provenance", owner: "parent"},
-    research_questions: ["Which fields survive wait?"],
-    action_items: [{id: "action_1", title: "Read agents_workers"}],
-    workflow_stages: ["research", "implement"],
-    verification_steps: ["cargo test -p harn-vm agents_workers"],
-  },
+      provider: "mock",
+      background: true,
+      request: {topic: "provenance", owner: "parent"},
+      research_questions: ["Which fields survive wait?"],
+      action_items: [{id: "action_1", title: "Read agents_workers"}],
+      workflow_stages: ["research", "implement"],
+      verification_steps: ["cargo test -p harn-vm agents_workers"],
+    },
   )
   println(worker_request(handle)?.payload?.topic == "provenance")
   println(len(worker_research_questions(handle)) == 1)

@@ -5,10 +5,10 @@ fn read_only_tools() {
     "read",
     "Read a file",
     {
-    handler: nil,
-    parameters: {path: {type: "string", description: "Path to read"}},
-    returns: {type: "string"},
-  },
+      handler: nil,
+      parameters: {path: {type: "string", description: "Path to read"}},
+      returns: {type: "string"},
+    },
   )
   return tools
 }
@@ -27,13 +27,13 @@ pipeline test(task) {
   let a2 = agent(
     "full",
     {
-    system: "You are helpful",
-    provider: "mock",
-    model: "test",
-    max_iterations: 3,
-    tool_format: "native",
-    tools: read_only_tools(),
-  },
+      system: "You are helpful",
+      provider: "mock",
+      model: "test",
+      max_iterations: 3,
+      tool_format: "native",
+      tools: read_only_tools(),
+    },
   )
   let cfg2 = agent_config(a2, "test")
   assert(cfg2.options.provider == "mock")

@@ -1,4 +1,4 @@
-// Test tool registry builtins
+/** Test tool registry builtins */
 pipeline default(task) {
   // Create registry
   var tools = tool_registry()
@@ -10,23 +10,23 @@ pipeline default(task) {
     "greet",
     "Say hello",
     {
-    handler: { args -> "hi " + args.name },
-    parameters: {name: {type: "string", description: "Name to greet"}},
-    returns: {type: "string"},
-  },
+      handler: { args -> "hi " + args.name },
+      parameters: {name: {type: "string", description: "Name to greet"}},
+      returns: {type: "string"},
+    },
   )
   tools = tool_define(
     tools,
     "add",
     "Add numbers",
     {
-    handler: { args -> args.a + args.b },
-    parameters: {
-    a: {type: "integer", description: "First operand"},
-    b: {type: "integer", description: "Second operand"},
-  },
-    returns: {type: "integer"},
-  },
+      handler: { args -> args.a + args.b },
+      parameters: {
+        a: {type: "integer", description: "First operand"},
+        b: {type: "integer", description: "Second operand"},
+      },
+      returns: {type: "integer"},
+    },
   )
   println(tool_count(tools))
   // tool_list

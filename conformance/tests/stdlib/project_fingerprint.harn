@@ -3,18 +3,18 @@ import "std/project"
 fn fingerprint_signature(fp: ProjectFingerprint) -> string {
   return json_stringify(
     [
-    fp.primary_language,
-    fp.frameworks,
-    fp.package_manager,
-    fp.package_managers,
-    fp.test_runner,
-    fp.build_tool,
-    fp.vcs,
-    fp.ci,
-    fp.has_tests,
-    fp.has_ci,
-    fp.lockfile_paths,
-  ],
+      fp.primary_language,
+      fp.frameworks,
+      fp.package_manager,
+      fp.package_managers,
+      fp.test_runner,
+      fp.build_tool,
+      fp.vcs,
+      fp.ci,
+      fp.has_tests,
+      fp.has_ci,
+      fp.lockfile_paths,
+    ],
   )
 }
 

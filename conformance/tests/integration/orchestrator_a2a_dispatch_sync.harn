@@ -44,48 +44,48 @@ pipeline test(task) {
   let start = shell_at(
     root,
     "nohup " + harn_bin + " serve --port " + to_string(port)
-    + " receiver.harn >receiver.log 2>&1 </dev/null & echo $!",
+      + " receiver.harn >receiver.log 2>&1 </dev/null & echo $!",
   )
   let pid = start.stdout.trim()
   assert(start.success, "failed to start A2A receiver")
   assert(pid != "", "missing A2A receiver pid")
   assert(
     wait_for_log_line(
-    path_join(root, "receiver.log"),
-    "Harn A2A server listening on http://localhost:" + to_string(port),
-  ),
+      path_join(root, "receiver.log"),
+      "Harn A2A server listening on http://localhost:" + to_string(port),
+    ),
     "A2A receiver did not start",
   )
   let trigger_id = "github-a2a-review-" + unique
   let trace_id = "trace-a2a-" + unique
   let handle: TriggerHandle = trigger_register(
     {
-    id: trigger_id,
-    kind: "issue.opened",
-    provider: "github",
-    handler: "a2a://127.0.0.1:" + to_string(port) + "/triage",
-    allow_cleartext: true,
-    when: nil,
-    retry: {max: 1, backoff: "immediate"},
-    match: {events: ["issue.opened"]},
-    events: nil,
-    budget: nil,
-    dedupe_key: nil,
-    filter: nil,
-    manifest_path: nil,
-    package_name: "conformance",
-  },
+      id: trigger_id,
+      kind: "issue.opened",
+      provider: "github",
+      handler: "a2a://127.0.0.1:" + to_string(port) + "/triage",
+      allow_cleartext: true,
+      when: nil,
+      retry: {max: 1, backoff: "immediate"},
+      match: {events: ["issue.opened"]},
+      events: nil,
+      budget: nil,
+      dedupe_key: nil,
+      filter: nil,
+      manifest_path: nil,
+      package_name: "conformance",
+    },
   )
   println(handle.id == trigger_id && handle.handler_kind == "a2a")
   let fire: DispatchHandle = trigger_fire(
     handle,
     {
-    id: "evt-" + unique,
-    provider: "github",
-    kind: "issue.opened",
-    trace_id: trace_id,
-    headers: {x_delivery: "evt-" + unique},
-  },
+      id: "evt-" + unique,
+      provider: "github",
+      kind: "issue.opened",
+      trace_id: trace_id,
+      headers: {x_delivery: "evt-" + unique},
+    },
   )
   println(fire.status == "dispatched" && fire.error == nil)
   println(fire.result?.trace_id == trace_id)

@@ -3,11 +3,11 @@ pipeline default() {
   let response = http_post(
     "https://api.example.com/upload",
     {
-    multipart: [
-    {name: "meta", value: "hello"},
-    {name: "blob", filename: "blob.txt", content_type: "text/plain", value: "payload"},
-  ],
-  },
+      multipart: [
+        {name: "meta", value: "hello"},
+        {name: "blob", filename: "blob.txt", content_type: "text/plain", value: "payload"},
+      ],
+    },
   )
   let calls = http_mock_calls()
   let body = calls[0].body ?? ""

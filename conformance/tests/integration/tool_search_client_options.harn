@@ -1,6 +1,8 @@
-// Tool Vault phase 2 (harn#70): advanced client-mode options —
-// `mode: "client"`, `budget_tokens` cap with oldest-eviction, and the
-// `name` override for the synthetic tool.
+/**
+ * Tool Vault phase 2 (harn#70): advanced client-mode options —
+ * `mode: "client"`, `budget_tokens` cap with oldest-eviction, and the
+ * `name` override for the synthetic tool.
+ */
 pipeline test(task) {
   // ---------- Explicit mode:"client" + custom tool name ----------
   llm_mock_clear()
@@ -20,21 +22,21 @@ pipeline test(task) {
   // Turn 1: model invokes the renamed search tool.
   llm_mock(
     {
-    text: "Searching via the custom name.",
-    tool_calls: [{id: "s1", name: "find_a_tool", arguments: {query: "deploy"}}],
-  },
+      text: "Searching via the custom name.",
+      tool_calls: [{id: "s1", name: "find_a_tool", arguments: {query: "deploy"}}],
+    },
   )
   llm_mock({text: "<done>##DONE##</done>"})
   let result = agent_loop(
     "deploy",
     nil,
     {
-    provider: "mock",
-    tools: registry,
-    tool_search: {mode: "client", name: "find_a_tool"},
-    persistent: true,
-    max_iterations: 3,
-  },
+      provider: "mock",
+      tools: registry,
+      tool_search: {mode: "client", name: "find_a_tool"},
+      persistent: true,
+      max_iterations: 3,
+    },
   )
   let calls = llm_mock_calls()
   assert(contains(calls[0].system, "find_a_tool"), "custom synthetic tool name advertised")
@@ -99,12 +101,12 @@ pipeline test(task) {
     "go",
     nil,
     {
-    provider: "mock",
-    tools: big,
-    tool_search: {variant: "bm25", mode: "client", budget_tokens: 150},
-    persistent: true,
-    max_iterations: 5,
-  },
+      provider: "mock",
+      tools: big,
+      tool_search: {variant: "bm25", mode: "client", budget_tokens: 150},
+      persistent: true,
+      max_iterations: 5,
+    },
   )
   // Explicit `mode: "client"` — mock now spoofs native tool_search
   // for its default Claude model after harn#71.

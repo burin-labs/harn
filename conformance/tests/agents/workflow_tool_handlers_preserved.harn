@@ -9,11 +9,11 @@ pipeline main() {
   tools = tool_define(tools, "edit", "Edit file", {handler: { _args -> "replace-body-ok" }, parameters: {}})
   let flow = workflow_graph(
     {
-    name: "preserve_handlers",
-    entry: "act",
-    nodes: {act: {kind: "stage", mode: "agent", model_policy: {provider: "mock"}, tools: tools}},
-    edges: [],
-  },
+      name: "preserve_handlers",
+      entry: "act",
+      nodes: {act: {kind: "stage", mode: "agent", model_policy: {provider: "mock"}, tools: tools}},
+      edges: [],
+    },
   )
   let scaffold = tool_find(flow.nodes.act.tools, "scaffold")
   let edit = tool_find(flow.nodes.act.tools, "edit")

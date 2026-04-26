@@ -30,9 +30,9 @@ pipeline default() {
   mkdir(state_dir)
   let start = process_exec(
     "python3 \"" + server_script + "\" \"" + state_dir + "\" >\"" + log_path
-    + "\" 2>&1 & echo $! > \""
-    + pid_path
-    + "\"",
+      + "\" 2>&1 & echo $! > \""
+      + pid_path
+      + "\"",
   )
   assert(start?.success, "slack mock server started")
   wait_for_file(port_path, 100)
@@ -44,11 +44,11 @@ pipeline default() {
   let opened = open_view(
     "12345.98765.abcd2358fdea",
     {
-    type: "modal",
-    title: {type: "plain_text", text: "Status"},
-    close: {type: "plain_text", text: "Close"},
-    blocks: [],
-  },
+      type: "modal",
+      title: {type: "plain_text", text: "Status"},
+      close: {type: "plain_text", text: "Close"},
+      blocks: [],
+    },
   )
   let user = user_info("U123ABC456", {include_locale: true})
   let auth = api_call("auth.test")

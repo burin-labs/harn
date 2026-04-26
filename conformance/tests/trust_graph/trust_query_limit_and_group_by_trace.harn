@@ -5,24 +5,24 @@ pipeline test(task) {
   let agent_id = "trust-grouped-" + unique
   let handle: TriggerHandle = trigger_register(
     {
-    id: agent_id,
-    kind: "issue.opened",
-    provider: "github",
-    autonomy_tier: "act_auto",
-    handler: { event ->
-    let _ = trust_record(agent_id, "audit.note", nil, "success", "suggest")
-    return handler_context()
-  },
-    when: nil,
-    retry: nil,
-    match: {events: ["issue.opened"]},
-    events: nil,
-    dedupe_key: nil,
-    filter: nil,
-    budget: nil,
-    manifest_path: "runtime://trust-graph",
-    package_name: "conformance",
-  },
+      id: agent_id,
+      kind: "issue.opened",
+      provider: "github",
+      autonomy_tier: "act_auto",
+      handler: { event ->
+        let _ = trust_record(agent_id, "audit.note", nil, "success", "suggest")
+        return handler_context()
+      },
+      when: nil,
+      retry: nil,
+      match: {events: ["issue.opened"]},
+      events: nil,
+      dedupe_key: nil,
+      filter: nil,
+      budget: nil,
+      manifest_path: "runtime://trust-graph",
+      package_name: "conformance",
+    },
   )
   let first: DispatchHandle = trigger_fire(
     handle,
