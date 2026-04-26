@@ -4,6 +4,12 @@ pipeline test(task) {
     42
   }
   log(r1)
+  // Success preserves an existing Result instead of nesting Ok(Ok(...))
+  let r1_flat = try {
+    Ok(7)
+  }
+  log(r1_flat)
+  log(unwrap(r1_flat))
   // Error wraps in Err
   let r2 = try {
     throw "boom"

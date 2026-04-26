@@ -1,0 +1,38 @@
+import "std/schema"
+
+type Payload = {x: string}
+
+pipeline test(task) {
+  let dict_schema = {type: "dict", required: ["x"], properties: {x: {type: "string"}}}
+  let checked = try {
+    schema_check({x: "ok"}, dict_schema)
+  }
+  if is_ok(checked) {
+    println("OK " + json_stringify(unwrap(checked)))
+  }
+  let direct_checked = schema_check({x: "direct"}, dict_schema)
+  println(unwrap(direct_checked).x)
+  let object_schema = {type: "object", required: ["x"], properties: {x: {type: "string"}}}
+  println(json_stringify(unwrap(schema_check({x: "object"}, object_schema))))
+  let list_schema = {type: "list", items: {type: "int"}}
+  let checked_list = unwrap(schema_check([1, 2, 3], list_schema))
+  println(json_stringify(checked_list))
+  let default_schema = {
+    type: "dict",
+    required: ["name"],
+    properties: {name: {type: "string"}, role: {type: "string", default: "user"}},
+  }
+  let parsed = unwrap(schema_parse({name: "Ada"}, default_schema))
+  println(parsed.name + ":" + parsed.role)
+  let typed: Payload = unwrap(schema_check({x: "typed"}, schema_of(Payload)))
+  println(typed.x)
+  let typed_checked: Result<Payload, string> = try {
+    schema_check({x: "trytyped"}, schema_of(Payload))
+  }
+  println(unwrap(typed_checked).x)
+  let helper_value = get_typed_value({x: "helper"}, dict_schema)
+  println(helper_value.x)
+  let failed = schema_check({x: 1}, dict_schema)
+  println(is_err(failed))
+  println(unwrap_err(failed).value.x)
+}

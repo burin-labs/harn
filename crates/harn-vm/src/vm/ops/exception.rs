@@ -54,4 +54,18 @@ impl super::super::Vm {
             ))),
         }
     }
+
+    pub(super) fn execute_try_wrap_ok(&mut self) -> Result<(), VmError> {
+        let val = self.pop()?;
+        match &val {
+            VmValue::EnumVariant { enum_name, .. } if enum_name.as_ref() == "Result" => {
+                self.stack.push(val);
+            }
+            _ => {
+                self.stack
+                    .push(VmValue::enum_variant("Result", "Ok", vec![val]));
+            }
+        }
+        Ok(())
+    }
 }

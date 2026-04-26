@@ -2107,11 +2107,16 @@ The `try` keyword used without a `catch` block acts as a try-expression.
 It evaluates the body and wraps the result in a `Result`:
 
 - If the body succeeds, returns `Result.Ok(value)`.
+- If the body succeeds with an existing `Result`, returns that `Result`
+  unchanged instead of nesting it as `Result.Ok(Result.Ok(...))`.
 - If the body throws an error, returns `Result.Err(error)`.
 
 ```harn
 let result = try { json_parse(raw_input) }
 // result is Result.Ok(parsed_data) or Result.Err("invalid JSON: ...")
+
+let checked = try { schema_check(data, schema) }
+// checked is schema_check's Result directly, not Result.Ok(Result.Ok(...))
 ```
 
 The try-expression is the complement of the `?` operator: `try` enters
