@@ -45,6 +45,7 @@
 - [Trigger dispatcher](./triggers/dispatcher.md)
 - [Trigger observability in the action graph](./observability/triggers-in-action-graph.md)
 - [Connector authoring](./connectors/authoring.md)
+- [Connector architecture status](./connectors/architecture.md)
 - [Connector catalog](./connectors/catalog.md)
 - [Connector testkit](./connectors/testkit.md)
 - [Trigger registry](./triggers/registry.md)

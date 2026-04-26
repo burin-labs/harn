@@ -11,6 +11,9 @@ transition plan:
 - Community connectors are Harn packages that export connector contract v1 and
   pass `harn connector check`.
 
+For the architecture and ownership split that closes the old connector-library
+epic, see [Connector architecture status](./architecture.md).
+
 > **Deprecated: Rust-side GitHub, Slack, Linear, and Notion connectors.**
 > Per [#446](https://github.com/burin-labs/harn/issues/446), the Rust-side
 > business logic for these four providers is on a sunset path. New deployments

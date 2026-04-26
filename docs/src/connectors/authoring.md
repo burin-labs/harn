@@ -444,8 +444,8 @@ checks. The helper enforces the non-negotiable rules from issue `#167`:
 - timestamped schemes reject outside a caller-provided window
 - rejection paths write an audit event to the `audit.signature_verify` topic
 
-The helper currently supports the three MVP HMAC header styles needed by the
-planned connector tickets:
+The helper supports the raw-body HMAC header styles used by the built-in
+compatibility shims and first-party connector packages:
 
 - GitHub: `X-Hub-Signature-256: sha256=<hex>`
 - Notion: `X-Notion-Signature: sha256=<hex>`
@@ -461,12 +461,11 @@ process-local token bucket keyed by `(provider_id, scope_key)`. That keeps the
 first landing trait-pure while giving upcoming provider clients one place to
 enforce per-installation or per-tenant quotas.
 
-## What is deliberately not here yet
+## Ownership boundary
 
-This foundation PR does not define:
-
-- outbound stdlib client wrappers for connector-specific APIs
-- third-party manifest ABI for external connector packages
-
-Those land in follow-up tickets once the shared trait, provider catalog,
-runtime registry, audit, and verification primitives are in place.
+New provider business logic belongs in Harn connector packages, not in new
+Rust-side provider modules. Keep Harn core changes focused on the shared
+runtime substrate: `RawInbound`, `TriggerEvent`, signing helpers, the package
+contract adapter, the connector testkit, effect policy, scheduling, and
+dispatcher integration. Provider packages can then ship event-specific
+normalization and outbound methods on their own release cadence.
