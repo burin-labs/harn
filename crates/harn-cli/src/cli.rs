@@ -68,7 +68,7 @@ SCRIPTING
     /// Diagnose the local Harn environment and provider setup.
     Doctor(DoctorArgs),
     /// Register outbound connector resources with a provider.
-    Connect(ConnectArgs),
+    Connect(Box<ConnectArgs>),
     /// Validate pure-Harn connector packages against the connector contract.
     Connector(ConnectorArgs),
     /// Serve a Harn workflow over a transport adapter.
@@ -1123,7 +1123,7 @@ pub(crate) enum OrchestratorCommand {
     /// Load manifests, initialize registries, and idle until shutdown.
     Serve(OrchestratorServeArgs),
     /// Generate and run a cloud deploy for a manifest-driven orchestrator.
-    Deploy(OrchestratorDeployArgs),
+    Deploy(Box<OrchestratorDeployArgs>),
     /// Request a hot reload from a running orchestrator.
     Reload(OrchestratorReloadArgs),
     /// Inspect orchestrator state.
@@ -1326,6 +1326,22 @@ pub(crate) struct OrchestratorDeployArgs {
     /// Railway environment id/name for variable sync and deploy targeting.
     #[arg(long = "railway-environment", value_name = "ENV")]
     pub railway_environment: Option<String>,
+    /// Railway project id for API-backed secret synchronization.
+    #[arg(
+        long = "railway-project",
+        env = "RAILWAY_PROJECT_ID",
+        value_name = "PROJECT_ID"
+    )]
+    pub railway_project: Option<String>,
+    /// Render API key for API-backed secret synchronization.
+    #[arg(long = "render-api-key", env = "RENDER_API_KEY", value_name = "TOKEN")]
+    pub render_api_key: Option<String>,
+    /// Fly API token for API-backed secret synchronization.
+    #[arg(long = "fly-api-token", env = "FLY_API_TOKEN", value_name = "TOKEN")]
+    pub fly_api_token: Option<String>,
+    /// Railway API token for API-backed secret synchronization.
+    #[arg(long = "railway-token", env = "RAILWAY_TOKEN", value_name = "TOKEN")]
+    pub railway_token: Option<String>,
     /// Build and push the deploy image before running the provider deploy.
     #[arg(long)]
     pub build: bool,
@@ -2870,6 +2886,8 @@ mod tests {
             "60",
             "--region",
             "sjc",
+            "--fly-api-token",
+            "fly-token",
             "--build",
             "--env",
             "RUST_LOG=debug",
@@ -2894,6 +2912,7 @@ mod tests {
         assert_eq!(deploy.disk_size_gb, 20);
         assert_eq!(deploy.shutdown_timeout, 60);
         assert_eq!(deploy.region.as_deref(), Some("sjc"));
+        assert_eq!(deploy.fly_api_token.as_deref(), Some("fly-token"));
         assert!(deploy.build);
         assert_eq!(deploy.env, vec!["RUST_LOG=debug".to_string()]);
         assert_eq!(deploy.secret, vec!["OPENAI_API_KEY=sk-test".to_string()]);

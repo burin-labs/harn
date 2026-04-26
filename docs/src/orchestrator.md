@@ -284,10 +284,13 @@ sync locally available secrets, and run the provider CLI:
 ```bash
 harn orchestrator deploy --provider fly --manifest ./harn.toml --build
 harn orchestrator deploy --provider render --manifest ./harn.toml --render-service srv-...
-harn orchestrator deploy --provider railway --manifest ./harn.toml
+harn orchestrator deploy --provider railway --manifest ./harn.toml --railway-project prj_...
 ```
 
-Provider-specific templates and notes live under:
+Provider secret sync uses cloud APIs when `--secret` or locally available
+manifest secrets are present. Set `FLY_API_TOKEN`, `RENDER_API_KEY`, or
+`RAILWAY_TOKEN`/`RAILWAY_PROJECT_ID` for the matching provider, or pass the
+equivalent deploy flags. Provider-specific templates and notes live under:
 
 - [Render](./deploy/render.md)
 - [Fly.io](./deploy/fly.md)

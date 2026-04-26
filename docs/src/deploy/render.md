@@ -20,9 +20,11 @@ project on top of the published Harn runtime image so local handlers and
 prompt assets are available at `/app` in the container.
 
 Render secrets should live in the `harn-secrets` environment group referenced
-by the Blueprint. When `--render-service` is supplied, `--secret KEY=VALUE`
-values and locally set Harn secret env vars are also pushed through the Render
-CLI before the deploy command runs.
+by the Blueprint. When `--render-service` and `--render-api-key` are supplied,
+`--secret KEY=VALUE` values and locally set Harn secret env vars are pushed to
+the service with Render's environment-variable API before the deploy command
+runs. `RENDER_API_KEY` can provide the API key without putting it on the
+command line.
 
 The generated service uses:
 
