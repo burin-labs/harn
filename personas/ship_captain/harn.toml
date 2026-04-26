@@ -1,0 +1,31 @@
+[package]
+name = "harn-ship-captain-persona"
+version = "0.1.0"
+
+[[personas]]
+name = "ship_captain"
+version = "0.1.0"
+description = "Watches Flow atoms, groups intents, derives candidate slices, and emits approval-gated Phase 0 mock PR receipts."
+entry_workflow = "manifest.harn#run"
+tools = ["github", "mcp"]
+capabilities = [
+  "git.get_diff",
+  "project.scan",
+  "project.scope_test_command",
+  "project.test_commands",
+  "runtime.approved_plan",
+  "runtime.dry_run",
+  "runtime.record_run",
+]
+autonomy_tier = "act_with_approval"
+receipt_policy = "required"
+triggers = ["flow.atom_stream_updated", "flow.slice_candidate_requested"]
+schedules = ["*/15 * * * *"]
+handoffs = []
+context_packs = ["flow_substrate", "repo_policy", "predicate_receipts"]
+evals = ["slice_quality", "false_ship_rate", "coverage_fidelity", "latency_pr_to_merge"]
+owner = "platform"
+budget = { daily_usd = 6.0, frontier_escalations = 1, max_tokens = 50000, max_runtime_seconds = 300 }
+model_policy = { default_model = "gpt-5.4-mini", escalation_model = "gpt-5.4", fallback_models = ["gpt-5.2"], reasoning_effort = "medium" }
+rollout_policy = { mode = "approval_only", percentage = 100, cohorts = ["flow-phase-0"] }
+package_source = { package = "harn-ship-captain-persona", path = "personas/ship_captain" }

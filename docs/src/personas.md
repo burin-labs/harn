@@ -162,6 +162,18 @@ The pack is intentionally conservative:
 Treat these as code and policy that your team forks and edits. They are not
 opaque hosted behavior.
 
+Flow persona packs live under `personas/`:
+
+- `personas/ship_captain`: Phase 0 shadow-mode PR emitter for Flow slices.
+- `personas/fixer`: consumes inert predicate remediation and proposes follow-up
+  slices.
+
+Ship Captain can be inspected with:
+
+```bash
+harn persona --manifest personas/ship_captain/harn.toml inspect ship_captain --json
+```
+
 ## Current v1 gaps
 
 Persona manifest v1 is a contract and runtime-control surface, not a managed

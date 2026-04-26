@@ -146,7 +146,8 @@ Inspect and operate the Flow shipping substrate.
 ```bash
 harn flow replay-audit --store .harn/flow.sqlite --predicate-root . --touched-dir crates/harn-vm
 harn flow replay-audit --since 2026-04-26 --fail-on-drift --json
-harn flow ship watch --store .harn/flow.sqlite --mock-pr-out .harn/flow/mock-pr.json --json
+harn flow ship watch --store .harn/flow.sqlite --predicate-root . \
+  --touched-dir crates/harn-vm --mock-pr-out .harn/flow/mock-pr.json --json
 harn flow archivist scan . --out .harn/flow/archivist-proposals.json --json
 ```
 
@@ -154,9 +155,11 @@ harn flow archivist scan . --out .harn/flow/archivist-proposals.json --json
 current `invariants.harn` predicate set. Drift is advisory unless
 `--fail-on-drift` is present.
 
-`ship watch` is the Phase 0 Ship Captain shadow-mode surface. It derives a
-candidate slice from stored atoms and can write a mock PR receipt without
-touching a remote GitHub repository.
+`ship watch` is the Phase 0 Ship Captain shadow-mode surface. It groups stored
+atoms into intent summaries, derives a candidate slice, discovers applicable
+`invariants.harn` predicates for the touched directories, persists a local
+shipping receipt, and can write a mock PR receipt without touching a remote
+GitHub repository.
 
 `archivist scan` emits review-ready predicate proposal metadata from the repo's
 stack hints and existing Flow predicates. It is propose-only; it does not edit
