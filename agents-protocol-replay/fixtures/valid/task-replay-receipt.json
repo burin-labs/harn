@@ -1,0 +1,123 @@
+{
+  "schema": "receipt-2026-04-25",
+  "receipt_id": "receipt_replay_01JZ6Y3B5K0QJ9GM61VZKX7P6G",
+  "subject": {
+    "object": "replay_segment",
+    "id": "task_replay_01JZ6Y2ZKMB8H8DMXBGXR1FPGS"
+  },
+  "issuer": {
+    "id": "harness_conformance",
+    "kind": "harness",
+    "name": "Harn replay conformance",
+    "version": "agents-protocol-2026-04-25"
+  },
+  "issued_at": "2026-04-25T19:17:33Z",
+  "identifiers": {
+    "workspace_ref": "workspace_replay_fixture",
+    "session_id": "session_replay_fixture",
+    "task_id": "task_replay_01JZ6Y2ZKMB8H8DMXBGXR1FPGS",
+    "trace_id": "trace_replay_fixture"
+  },
+  "lifecycle": {
+    "created_at": "2026-04-25T19:16:10Z",
+    "started_at": "2026-04-25T19:16:14Z",
+    "completed_at": "2026-04-25T19:17:33Z",
+    "final_state": "SUCCEEDED",
+    "failure": null
+  },
+  "trust": {
+    "start_tier": "act_auto",
+    "end_tier": "act_auto",
+    "policy_ref": "policy_replay_conformance"
+  },
+  "autonomy_budget": {
+    "consumed": {
+      "usd": 0,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "tool_calls": 0,
+      "wall_time_ms": 0
+    }
+  },
+  "replay_input": {
+    "determinism": "byte_deterministic",
+    "materials": [
+      {
+        "kind": "event_log",
+        "id": "event_log_source_task",
+        "uri": "artifact://artifact_event_log_source_task",
+        "sha256": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "content_type": "application/jsonl"
+      },
+      {
+        "kind": "llm_provider_response",
+        "id": "llm:main:1",
+        "sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "metadata": {
+          "override_key": "llm:main:1"
+        }
+      }
+    ]
+  },
+  "model_route": {
+    "chosen_model": {
+      "provider": "fixture",
+      "model": "replay-fixture"
+    },
+    "alternatives_considered": [],
+    "route_policy_reason": "replayed from recorded provider response"
+  },
+  "cost": {
+    "currency": "USD",
+    "total": 0,
+    "provider_breakdown": []
+  },
+  "side_effects": {
+    "fs_writes": [],
+    "network_egress": [],
+    "tool_calls": [],
+    "a2a_handoffs": []
+  },
+  "final_artifacts": [
+    {
+      "artifact_id": "artifact_replay_output",
+      "kind": "dataset",
+      "uri": "artifact://artifact_replay_output",
+      "sha256": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    }
+  ],
+  "chain": {
+    "previous_receipt_hash": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "receipt_hash": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "merkle_root": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+  },
+  "deltas": [
+    {
+      "delta_id": "delta_llm_main_1",
+      "operation": "replace",
+      "path": "/replay_input/materials/llm:main:1",
+      "override_key": "llm:main:1",
+      "event_id": "event_01JZ7001",
+      "before_sha256": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "after_sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "reason": "agents-protocol replay conformance fixture"
+    },
+    {
+      "delta_id": "delta_time_started_at",
+      "operation": "replace",
+      "path": "/lifecycle/started_at",
+      "override_key": "time:started_at",
+      "event_id": "event_01JZ7000",
+      "before_sha256": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "after_sha256": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "reason": "pin replay clock"
+    }
+  ],
+  "redactions": [],
+  "signatures": [],
+  "metadata": {
+    "source": "agents-protocol-replay-conformance-fixture",
+    "source_task_id": "task_source_01JZ6Y2ZKMB8H8DMXBGXR1FPGS",
+    "replay_mode": "with_overrides"
+  }
+}

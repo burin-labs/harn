@@ -620,6 +620,38 @@ paths:
         default:
           $ref: "#/components/responses/Error"
 
+  /v1/tasks/{task_id}/replay:
+    post:
+      tags: [Tasks]
+      operationId: replayTask
+      summary: Replay a Task from its durable EventLog.
+      description: |
+        Creates a new Task by replaying the original Task's durable event log.
+        The returned Task is the replay Task and MUST set `parent_task_id` to
+        the source Task id. Overrides substitute recorded nondeterministic
+        dependencies such as LLM responses, MCP tool returns, secret values,
+        clock reads, and host facts; every applied substitution MUST be
+        represented as a replay Receipt delta.
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/TaskId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReplayTaskRequest"
+      responses:
+        "202":
+          description: Accepted replay Task.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+        default:
+          $ref: "#/components/responses/Error"
+
   /v1/tasks/{task_id}/messages:
     post:
       tags: [Messages]
@@ -1760,6 +1792,7 @@ components:
               type: [string, "null"]
             parent_task_id:
               type: [string, "null"]
+              description: Source Task id for replay and delegated child Tasks, otherwise null.
             assigned_agent_id:
               type: [string, "null"]
             receipt_id:
@@ -1821,6 +1854,103 @@ components:
       type: object
       properties:
         reason:
+          type: [string, "null"]
+    ReplayMode:
+      type: string
+      enum: [exact, with_overrides, from_checkpoint]
+      description: |
+        `exact` reuses only recorded event-log material, `with_overrides`
+        applies explicit substitutions, and `from_checkpoint` resumes from a
+        recorded checkpoint before replaying later events.
+    ReplayTaskRequest:
+      type: object
+      properties:
+        mode:
+          $ref: "#/components/schemas/ReplayMode"
+          default: exact
+        override:
+          type: object
+          description: Map from stable override key to replacement replay material.
+          additionalProperties:
+            $ref: "#/components/schemas/ReplayOverride"
+          default: {}
+        checkpoint_id:
+          type: [string, "null"]
+          description: Required when `mode` is `from_checkpoint` unless `checkpoint_event_id` is supplied.
+        checkpoint_event_id:
+          type: [string, "null"]
+          description: Event id of the checkpoint boundary for `from_checkpoint` replay.
+        reason:
+          type: [string, "null"]
+        metadata:
+          $ref: "#/components/schemas/Metadata"
+      examples:
+        - mode: with_overrides
+          override:
+            llm:main:1:
+              kind: llm_provider_response
+              event_id: event_01JZ7001
+              value:
+                id: chatcmpl_fixture_1
+                choices:
+                  - message:
+                      role: assistant
+                      content: Done.
+              sha256: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    ReplayOverride:
+      type: object
+      required: [kind]
+      properties:
+        kind:
+          type: string
+          enum:
+            - llm_provider_response
+            - mcp_tool_return
+            - secret_value
+            - time
+            - host_fact
+            - tool_result
+            - event_payload
+            - checkpoint_value
+        event_id:
+          type: [string, "null"]
+          description: Original EventLog event this override substitutes when known.
+        target:
+          type: [string, "null"]
+          description: Stable dependency key such as a model call id, tool call id, secret name, or clock label.
+        value:
+          $ref: "#/components/schemas/JsonValue"
+        artifact_id:
+          type: [string, "null"]
+          description: Artifact containing replacement material when the value is large or receipt-only.
+        sha256:
+          type: [string, "null"]
+          pattern: "^sha256:[0-9a-f]{64}$"
+        visibility:
+          type: string
+          enum: [public, internal, receipt_only]
+          default: receipt_only
+        reason:
+          type: [string, "null"]
+    ReplayEventMetadata:
+      type: object
+      required: [source_task_id, replay_task_id]
+      properties:
+        source_task_id:
+          type: string
+        replay_task_id:
+          type: string
+        original_event_id:
+          type: [string, "null"]
+        replay_cursor:
+          type: [string, "null"]
+          description: Cursor clients can use when replay remaps event ids.
+        mode:
+          $ref: "#/components/schemas/ReplayMode"
+        override_key:
+          type: [string, "null"]
+          description: Override map key applied to produce this replayed event, when any.
+        receipt_delta_id:
           type: [string, "null"]
 
     Branch:
@@ -2212,6 +2342,10 @@ components:
             replayed:
               type: boolean
               default: false
+            replay:
+              oneOf:
+                - $ref: "#/components/schemas/ReplayEventMetadata"
+                - type: "null"
     EventList:
       allOf:
         - $ref: "#/components/schemas/PaginatedList"

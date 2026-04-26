@@ -1,0 +1,34 @@
+{
+  "mode": "with_overrides",
+  "override": {
+    "llm:main:1": {
+      "kind": "llm_provider_response",
+      "event_id": "event_01JZ7001",
+      "target": "main",
+      "value": {
+        "id": "chatcmpl_fixture_1",
+        "choices": [
+          {
+            "message": {
+              "role": "assistant",
+              "content": "approved"
+            }
+          }
+        ]
+      },
+      "sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "visibility": "receipt_only",
+      "reason": "agents-protocol replay conformance fixture"
+    },
+    "time:started_at": {
+      "kind": "time",
+      "event_id": "event_01JZ7000",
+      "target": "started_at",
+      "value": "2026-04-25T19:16:14Z",
+      "sha256": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "visibility": "internal",
+      "reason": "pin replay clock"
+    }
+  },
+  "reason": "byte-deterministic replay conformance"
+}

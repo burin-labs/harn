@@ -29,6 +29,7 @@ GET /v1/tasks
 POST /v1/tasks
 GET /v1/tasks/{task_id}
 POST /v1/tasks/{task_id}/cancel
+POST /v1/tasks/{task_id}/replay
 POST /v1/tasks/{task_id}/messages
 GET /v1/tasks/{task_id}/events
 GET /v1/tasks/{task_id}/stream
@@ -87,6 +88,10 @@ TaskStatus
 TaskList
 SubmitTaskRequest
 CancelTaskRequest
+ReplayMode
+ReplayTaskRequest
+ReplayOverride
+ReplayEventMetadata
 Branch
 BranchList
 CreateBranchRequest

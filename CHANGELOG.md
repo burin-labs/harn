@@ -11,6 +11,12 @@ granular archaeology.
 
 ### Added
 
+- **Agents Protocol replay-as-API contract (#636).** Adds
+  `POST /v1/tasks/{task_id}/replay` to the v1 OpenAPI surface with
+  `exact`, `with_overrides`, and `from_checkpoint` modes, deterministic
+  override maps, replay event metadata, and Receipt delta requirements.
+  The new `agents-protocol-replay/` artifact documents the EventLog replay
+  contract and ships fixtures for byte-identical replay Receipt conformance.
 - **`unnecessary-cast` lint with autofix.** Flags conversion-builtin
   calls whose argument is already syntactically of the target type —
   `to_string("hi")`, `to_int(42)`, `to_float(1.5)`, `to_list([1,2,3])`,
