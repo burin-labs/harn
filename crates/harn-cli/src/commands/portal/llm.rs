@@ -8,7 +8,9 @@ pub(super) async fn build_llm_options() -> PortalLlmOptions {
         .ok()
         .filter(|value| !value.is_empty())
         .or_else(|| {
-            if std::env::var("LOCAL_LLM_BASE_URL").is_ok() {
+            if std::env::var("MLX_BASE_URL").is_ok() || std::env::var("MLX_MODEL_ID").is_ok() {
+                Some("mlx".to_string())
+            } else if std::env::var("LOCAL_LLM_BASE_URL").is_ok() {
                 Some("local".to_string())
             } else {
                 None
@@ -18,9 +20,18 @@ pub(super) async fn build_llm_options() -> PortalLlmOptions {
         .ok()
         .filter(|value| !value.is_empty())
         .or_else(|| {
-            std::env::var("LOCAL_LLM_MODEL")
+            std::env::var("MLX_MODEL_ID")
                 .ok()
                 .filter(|value| !value.is_empty())
+        })
+        .or_else(|| {
+            if std::env::var("LOCAL_LLM_BASE_URL").is_ok() {
+                std::env::var("LOCAL_LLM_MODEL")
+                    .ok()
+                    .filter(|value| !value.is_empty())
+            } else {
+                None
+            }
         });
 
     let mut providers = Vec::new();
@@ -117,6 +128,10 @@ fn default_model_for_provider(provider: &str) -> Option<String> {
                     .filter(|value| !value.is_empty())
             })
             .or_else(|| Some("gpt-4o".to_string())),
+        "mlx" => std::env::var("MLX_MODEL_ID")
+            .ok()
+            .filter(|value| !value.is_empty())
+            .or_else(|| Some("unsloth/Qwen3.6-27B-UD-MLX-4bit".to_string())),
         "openai" => Some("gpt-4o".to_string()),
         "ollama" => Some("llama3.2".to_string()),
         "openrouter" => Some("Qwen/Qwen3.5-9B".to_string()),

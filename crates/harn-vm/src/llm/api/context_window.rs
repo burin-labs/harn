@@ -192,6 +192,7 @@ async fn fetch_provider_max_context_uncached(
         provider,
         "local"
             | "openai"
+            | "mlx"
             | "vllm"
             | "groq"
             | "together"

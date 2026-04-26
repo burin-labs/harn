@@ -70,6 +70,19 @@ export LOCAL_LLM_BASE_URL=http://localhost:11434
 export LOCAL_LLM_MODEL=llama3
 ```
 
+For an MLX OpenAI-compatible server:
+
+```bash
+export MLX_BASE_URL=http://127.0.0.1:8002
+export MLX_MODEL_ID=unsloth/Qwen3.6-27B-UD-MLX-4bit
+harn provider-ready mlx --model mlx-qwen36-27b
+```
+
+The readiness probe checks `/v1/models` and reports distinct failures for
+an unreachable server, a bad HTTP status, an unparsable model listing, or
+a missing model. Harn does not run optional host launcher scripts; hosts
+should surface launcher failures separately and then re-run the probe.
+
 Harn will automatically fall back to a local provider if no cloud API key
 is configured. This makes it easy to develop and test without incurring
 API costs.
