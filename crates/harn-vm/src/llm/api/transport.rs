@@ -110,9 +110,13 @@ pub(super) async fn vm_call_llm_api(
     let is_ollama = provider == "ollama" || resolved.endpoint.contains("/api/chat");
     let is_anthropic = resolved.is_anthropic_style;
 
-    let body = if is_ollama {
-        crate::llm::providers::OllamaProvider::build_request_body(opts)
-    } else if is_anthropic {
+    if is_ollama {
+        return crate::llm::providers::OllamaProvider
+            .chat_impl(opts, delta_tx)
+            .await;
+    }
+
+    let body = if is_anthropic {
         crate::llm::providers::AnthropicProvider::build_request_body(opts)
     } else {
         crate::llm::providers::OpenAiCompatibleProvider::build_request_body(opts, false)

@@ -30,6 +30,11 @@
 #                     Used by harn-lint to warn about oversized registries.
 #   prompt_caching  : whether the provider honors cache_control blocks.
 #   thinking        : whether extended / adaptive thinking is available.
+#   preserve_thinking: whether prior <think> blocks should be carried forward.
+#   server_parser   : server-side response parser that transforms model output.
+#   honors_chat_template_kwargs: whether chat_template_kwargs are honored.
+#   recommended_endpoint: preferred endpoint family for this route.
+#   text_tool_wire_format_supported: whether Harn text tool calls survive.
 
 # ---------- Anthropic (Claude) ------------------------------------------------
 
@@ -164,11 +169,19 @@ model_match = "qwen3.6*"
 native_tools = true
 thinking = true
 preserve_thinking = true
+server_parser = "ollama_qwen3coder"
+honors_chat_template_kwargs = false
+recommended_endpoint = "/api/generate-raw"
+text_tool_wire_format_supported = false
 
 [[provider.ollama]]
 model_match = "qwen3*"
 native_tools = true
 thinking = true
+server_parser = "ollama_qwen3coder"
+honors_chat_template_kwargs = false
+recommended_endpoint = "/api/generate-raw"
+text_tool_wire_format_supported = false
 
 # llama.cpp / llama-server speaks OpenAI-compat but is a separate
 # provider entry from Ollama. Give it the same Qwen3.6 wiring so the
@@ -178,11 +191,19 @@ model_match = "*qwen3.6*"
 native_tools = true
 thinking = true
 preserve_thinking = true
+server_parser = "none"
+honors_chat_template_kwargs = true
+recommended_endpoint = "/v1/chat/completions"
+text_tool_wire_format_supported = true
 
 [[provider.llamacpp]]
 model_match = "*qwen3*"
 native_tools = true
 thinking = true
+server_parser = "none"
+honors_chat_template_kwargs = true
+recommended_endpoint = "/v1/chat/completions"
+text_tool_wire_format_supported = true
 
 # Local vLLM / SGLang — same story. The capability rules here gate
 # chat_template_kwargs emission in openai_compat; the actual model has
@@ -192,11 +213,19 @@ model_match = "*qwen3.6*"
 native_tools = true
 thinking = true
 preserve_thinking = true
+server_parser = "none"
+honors_chat_template_kwargs = true
+recommended_endpoint = "/v1/chat/completions"
+text_tool_wire_format_supported = true
 
 [[provider.local]]
 model_match = "*qwen3*"
 native_tools = true
 thinking = true
+server_parser = "none"
+honors_chat_template_kwargs = true
+recommended_endpoint = "/v1/chat/completions"
+text_tool_wire_format_supported = true
 
 # Apple Silicon MLX server (mlx-vlm). OpenAI-compat with vision; honors
 # the same `chat_template_kwargs.preserve_thinking` knob as vLLM, since
@@ -206,37 +235,57 @@ model_match = "*qwen3.6*"
 native_tools = true
 thinking = true
 preserve_thinking = true
+server_parser = "none"
+honors_chat_template_kwargs = true
+recommended_endpoint = "/v1/chat/completions"
+text_tool_wire_format_supported = true
 
 [[provider.mlx]]
 model_match = "*qwen3*"
 native_tools = true
 thinking = true
+server_parser = "none"
+honors_chat_template_kwargs = true
+recommended_endpoint = "/v1/chat/completions"
+text_tool_wire_format_supported = true
 
 # ---------- Qwen3.6 family (routed providers) --------------------------------
 #
-# DashScope is the authoritative Qwen host; Fireworks and OpenRouter
-# carry the closed Plus variant. They all speak OpenAI-compat + honour
-# the Qwen `chat_template_kwargs`, so the wiring is identical to local
-# vLLM. The sibling fallthrough to `[[provider.openai]]` would match the
-# gpt-* rules (which don't apply) so we declare Qwen explicitly here to
-# prevent a silent fallthrough to empty capabilities.
+# DashScope is the authoritative Qwen host; Fireworks and the local
+# OpenAI-compatible servers honor Qwen `chat_template_kwargs`.
+# OpenRouter forwards thinking through its `reasoning` field instead.
+# The sibling fallthrough to `[[provider.openai]]` would match the gpt-*
+# rules (which don't apply) so we declare Qwen explicitly here to prevent
+# a silent fallthrough to empty capabilities.
 
 [[provider.dashscope]]
 model_match = "qwen3.6*"
 native_tools = true
 thinking = true
 preserve_thinking = true
+server_parser = "none"
+honors_chat_template_kwargs = true
+recommended_endpoint = "/v1/chat/completions"
+text_tool_wire_format_supported = true
 
 [[provider.dashscope]]
 model_match = "qwen*"
 native_tools = true
 thinking = true
+server_parser = "none"
+honors_chat_template_kwargs = true
+recommended_endpoint = "/v1/chat/completions"
+text_tool_wire_format_supported = true
 
 [[provider.fireworks]]
 model_match = "*qwen3.6*"
 native_tools = true
 thinking = true
 preserve_thinking = true
+server_parser = "none"
+honors_chat_template_kwargs = true
+recommended_endpoint = "/v1/chat/completions"
+text_tool_wire_format_supported = true
 
 # Fireworks's own model IDs squash dots to `p` (`qwen3p6`, `qwen3p5`),
 # so we need a second rule to catch their canonical naming.
@@ -245,11 +294,19 @@ model_match = "*qwen3p6*"
 native_tools = true
 thinking = true
 preserve_thinking = true
+server_parser = "none"
+honors_chat_template_kwargs = true
+recommended_endpoint = "/v1/chat/completions"
+text_tool_wire_format_supported = true
 
 [[provider.fireworks]]
 model_match = "*qwen*"
 native_tools = true
 thinking = true
+server_parser = "none"
+honors_chat_template_kwargs = true
+recommended_endpoint = "/v1/chat/completions"
+text_tool_wire_format_supported = true
 
 # OpenRouter: forwards Qwen thinking via its `reasoning` field (not
 # chat_template_kwargs — transform_request strips that). Preservation
@@ -260,11 +317,19 @@ model_match = "qwen/qwen3.6*"
 native_tools = true
 thinking = true
 preserve_thinking = true
+server_parser = "none"
+honors_chat_template_kwargs = false
+recommended_endpoint = "/v1/chat/completions"
+text_tool_wire_format_supported = true
 
 [[provider.openrouter]]
 model_match = "qwen/*"
 native_tools = true
 thinking = true
+server_parser = "none"
+honors_chat_template_kwargs = false
+recommended_endpoint = "/v1/chat/completions"
+text_tool_wire_format_supported = true
 
 # HuggingFace router + Together pass Qwen chat_template_kwargs through
 # unchanged. Match the qwen3.6 model card shape (`Qwen/Qwen3.6-*`).
@@ -273,22 +338,38 @@ model_match = "qwen/qwen3.6*"
 native_tools = true
 thinking = true
 preserve_thinking = true
+server_parser = "none"
+honors_chat_template_kwargs = true
+recommended_endpoint = "/v1/chat/completions"
+text_tool_wire_format_supported = true
 
 [[provider.huggingface]]
 model_match = "qwen/*"
 native_tools = true
 thinking = true
+server_parser = "none"
+honors_chat_template_kwargs = true
+recommended_endpoint = "/v1/chat/completions"
+text_tool_wire_format_supported = true
 
 [[provider.together]]
 model_match = "qwen/qwen3.6*"
 native_tools = true
 thinking = true
 preserve_thinking = true
+server_parser = "none"
+honors_chat_template_kwargs = true
+recommended_endpoint = "/v1/chat/completions"
+text_tool_wire_format_supported = true
 
 [[provider.together]]
 model_match = "qwen/*"
 native_tools = true
 thinking = true
+server_parser = "none"
+honors_chat_template_kwargs = true
+recommended_endpoint = "/v1/chat/completions"
+text_tool_wire_format_supported = true
 
 # ---------- DeepSeek reasoning (across host providers) -----------------------
 #
@@ -303,18 +384,24 @@ model_match = "deepseek-ai/deepseek-v3*"
 native_tools = true
 thinking = true
 prompt_caching = true
+server_parser = "none"
+honors_chat_template_kwargs = true
 
 [[provider.huggingface]]
 model_match = "deepseek-ai/deepseek-v3*"
 native_tools = true
 thinking = true
 prompt_caching = true
+server_parser = "none"
+honors_chat_template_kwargs = true
 
 [[provider.openrouter]]
 model_match = "deepseek/deepseek-v3*"
 native_tools = true
 thinking = true
 prompt_caching = true
+server_parser = "none"
+honors_chat_template_kwargs = false
 
 # ---------- Google Gemini + Gemma 4 (via OpenRouter) -------------------------
 #

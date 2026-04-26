@@ -811,6 +811,10 @@ async fn print_model_info(args: &ModelInfoArgs) -> bool {
             "prompt_caching": capabilities.prompt_caching,
             "thinking": capabilities.thinking,
             "preserve_thinking": capabilities.preserve_thinking,
+            "server_parser": capabilities.server_parser,
+            "honors_chat_template_kwargs": capabilities.honors_chat_template_kwargs,
+            "recommended_endpoint": capabilities.recommended_endpoint,
+            "text_tool_wire_format_supported": capabilities.text_tool_wire_format_supported,
         },
         "qc_default_model": harn_vm::llm_config::qc_default_model(&resolved.provider),
     });

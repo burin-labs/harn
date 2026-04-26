@@ -76,12 +76,30 @@ pub struct ProviderRule {
     /// the same role there.
     #[serde(default)]
     pub preserve_thinking: Option<bool>,
+    /// Name of any server-side response parser that can transform model
+    /// bytes before Harn sees them. `none` means the provider returns the
+    /// model text/tool channel without an implicit parser.
+    #[serde(default)]
+    pub server_parser: Option<String>,
+    /// Whether provider-specific `chat_template_kwargs` are honored.
+    /// Some OpenAI-compatible servers silently drop unknown kwargs.
+    #[serde(default)]
+    pub honors_chat_template_kwargs: Option<bool>,
+    /// Preferred endpoint family for this provider/model route. Values
+    /// are descriptive labels consumed by providers, e.g.
+    /// `/api/generate-raw` for Ollama raw prompt bypass.
+    #[serde(default)]
+    pub recommended_endpoint: Option<String>,
+    /// Whether Harn's text-tool protocol (`<tool_call>name({...})`) can
+    /// survive the provider route and return in the visible response body.
+    #[serde(default)]
+    pub text_tool_wire_format_supported: Option<bool>,
 }
 
 /// Resolved capabilities for a `(provider, model)` pair. Unset rule
 /// fields resolve to `false` / empty / `None` so callers never have to
 /// unwrap an `Option<bool>` for what are really boolean gates.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Capabilities {
     pub native_tools: bool,
     pub defer_loading: bool,
@@ -90,6 +108,28 @@ pub struct Capabilities {
     pub prompt_caching: bool,
     pub thinking: bool,
     pub preserve_thinking: bool,
+    pub server_parser: String,
+    pub honors_chat_template_kwargs: bool,
+    pub recommended_endpoint: Option<String>,
+    pub text_tool_wire_format_supported: bool,
+}
+
+impl Default for Capabilities {
+    fn default() -> Self {
+        Self {
+            native_tools: false,
+            defer_loading: false,
+            tool_search: Vec::new(),
+            max_tools: None,
+            prompt_caching: false,
+            thinking: false,
+            preserve_thinking: false,
+            server_parser: "none".to_string(),
+            honors_chat_template_kwargs: false,
+            recommended_endpoint: None,
+            text_tool_wire_format_supported: true,
+        }
+    }
 }
 
 thread_local! {
@@ -244,6 +284,13 @@ fn rule_to_caps(rule: &ProviderRule) -> Capabilities {
         prompt_caching: rule.prompt_caching.unwrap_or(false),
         thinking: rule.thinking.unwrap_or(false),
         preserve_thinking: rule.preserve_thinking.unwrap_or(false),
+        server_parser: rule
+            .server_parser
+            .clone()
+            .unwrap_or_else(|| "none".to_string()),
+        honors_chat_template_kwargs: rule.honors_chat_template_kwargs.unwrap_or(false),
+        recommended_endpoint: rule.recommended_endpoint.clone(),
+        text_tool_wire_format_supported: rule.text_tool_wire_format_supported.unwrap_or(true),
     }
 }
 
@@ -410,6 +457,13 @@ mod tests {
             caps.preserve_thinking,
             "Qwen3.6 should enable preserve_thinking by default for long-horizon loops"
         );
+        assert_eq!(caps.server_parser, "ollama_qwen3coder");
+        assert!(!caps.honors_chat_template_kwargs);
+        assert_eq!(
+            caps.recommended_endpoint.as_deref(),
+            Some("/api/generate-raw")
+        );
+        assert!(!caps.text_tool_wire_format_supported);
     }
 
     #[test]
@@ -422,6 +476,8 @@ mod tests {
             !caps.preserve_thinking,
             "Qwen3.5 lacks the preserve_thinking kwarg — rely on the chat template's rolling checkpoint instead"
         );
+        assert_eq!(caps.server_parser, "ollama_qwen3coder");
+        assert!(!caps.text_tool_wire_format_supported);
     }
 
     #[test]
@@ -445,7 +501,24 @@ mod tests {
                 "{provider}/{model}: preserve_thinking must be on for Qwen3.6"
             );
             assert!(caps.native_tools, "{provider}/{model}: native_tools");
+            assert_ne!(
+                caps.server_parser, "ollama_qwen3coder",
+                "{provider}/{model}: only Ollama routes through the qwen3coder response parser"
+            );
         }
+    }
+
+    #[test]
+    fn llamacpp_qwen_keeps_text_tool_wire_format() {
+        reset();
+        let caps = lookup("llamacpp", "unsloth/Qwen3.5-Coder-GGUF");
+        assert_eq!(caps.server_parser, "none");
+        assert!(caps.honors_chat_template_kwargs);
+        assert!(caps.text_tool_wire_format_supported);
+        assert_eq!(
+            caps.recommended_endpoint.as_deref(),
+            Some("/v1/chat/completions")
+        );
     }
 
     #[test]

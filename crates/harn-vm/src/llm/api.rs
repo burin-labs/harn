@@ -51,6 +51,7 @@ pub use readiness::{
     ModelReadiness,
 };
 pub(crate) use result::{vm_build_llm_result, LlmResult};
+pub(crate) use thinking::{split_openai_thinking_blocks, ThinkingStreamSplitter};
 pub(crate) use transport::vm_call_llm_api_with_body;
 
 use transport::vm_call_llm_api;
@@ -325,7 +326,8 @@ mod tests {
     fn openai_compat_prefill_appends_assistant_and_sets_chat_template_kwargs() {
         use crate::llm::providers::OpenAiCompatibleProvider;
 
-        let mut opts = base_opts("openai");
+        let mut opts = base_opts("local");
+        opts.model = "Qwen/Qwen3.5-Coder-32B".to_string();
         opts.prefill = Some("<done>##DONE##</done>".to_string());
         let payload = LlmRequestPayload::from(&opts);
         let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
@@ -643,6 +645,43 @@ mod tests {
         (addr, handle)
     }
 
+    fn spawn_ollama_raw_generate_stub(
+        captured: std::sync::Arc<std::sync::Mutex<Option<String>>>,
+    ) -> (std::net::SocketAddr, std::thread::JoinHandle<()>) {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind ollama raw stub");
+        let addr = listener.local_addr().expect("stub addr");
+        let handle = std::thread::spawn(move || {
+            let mut stream = accept_with_deadline(&listener, "ollama raw stub");
+            let mut buf = vec![0u8; 16384];
+            let n = stream.read(&mut buf).expect("read request");
+            let request = String::from_utf8_lossy(&buf[..n]).to_string();
+            assert!(request.starts_with("POST /api/generate HTTP/1.1\r\n"));
+            let body = request
+                .split("\r\n\r\n")
+                .nth(1)
+                .unwrap_or_default()
+                .to_string();
+            *captured.lock().expect("capture body") = Some(body);
+
+            let body = concat!(
+                "{\"response\":\"<tool_call>\\nedit({ path: \\\"a.rs\\\" })\\n</tool_call>\",\"done\":false,\"model\":\"qwen3.5:stub\"}\n",
+                "{\"done\":true,\"prompt_eval_count\":7,\"eval_count\":11,\"model\":\"qwen3.5:stub\",\"done_reason\":\"stop\"}\n"
+            );
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/x-ndjson\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream
+                .write_all(response.as_bytes())
+                .expect("write response");
+        });
+        (addr, handle)
+    }
+
     #[test]
     fn offthread_streaming_completes_inside_localset() {
         let _guard = env_lock().lock().expect("env lock");
@@ -757,6 +796,76 @@ mod tests {
             let json: serde_json::Value = serde_json::from_str(&body).expect("valid request json");
             assert_eq!(json["keep_alive"].as_i64(), Some(-1));
             assert_eq!(json["options"]["num_ctx"].as_u64(), Some(131072));
+        });
+    }
+
+    #[test]
+    fn ollama_qwen_text_tool_route_bypasses_chat_parser_with_raw_generate() {
+        let _guard = env_lock().lock().expect("env lock");
+        let _allow_llm_transport = allow_stubbed_llm_transport();
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .worker_threads(2)
+            .build()
+            .expect("runtime");
+
+        runtime.block_on(async {
+            let captured = std::sync::Arc::new(std::sync::Mutex::new(None));
+            let (addr, server) = spawn_ollama_raw_generate_stub(captured.clone());
+            let prev_ollama_host = std::env::var("OLLAMA_HOST").ok();
+            unsafe {
+                std::env::set_var("OLLAMA_HOST", format!("http://{addr}"));
+            }
+
+            let local = tokio::task::LocalSet::new();
+            let result = local
+                .run_until(async {
+                    let mut opts = base_opts("ollama");
+                    opts.model = "qwen3.5:35b-a3b-coding-nvfp4".to_string();
+                    opts.native_tools = None;
+                    opts.response_format = None;
+                    opts.json_schema = None;
+                    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+                    let result = vm_call_llm_full_streaming_offthread(&opts, tx)
+                        .await
+                        .expect("raw-generate route should succeed");
+                    let mut deltas = Vec::new();
+                    while let Ok(delta) = rx.try_recv() {
+                        deltas.push(delta);
+                    }
+                    (result, deltas)
+                })
+                .await;
+
+            match prev_ollama_host {
+                Some(value) => unsafe { std::env::set_var("OLLAMA_HOST", value) },
+                None => unsafe { std::env::remove_var("OLLAMA_HOST") },
+            }
+
+            server.join().expect("stub server");
+            let (result, deltas) = result;
+            assert_eq!(
+                result.text,
+                "<tool_call>\nedit({ path: \"a.rs\" })\n</tool_call>"
+            );
+            assert_eq!(deltas.join(""), result.text);
+            assert_eq!(result.model, "qwen3.5:stub");
+            assert_eq!(result.input_tokens, 7);
+            assert_eq!(result.output_tokens, 11);
+            assert_eq!(result.stop_reason.as_deref(), Some("stop"));
+
+            let body = captured
+                .lock()
+                .expect("captured body")
+                .clone()
+                .expect("request body");
+            let json: serde_json::Value = serde_json::from_str(&body).expect("valid request json");
+            assert_eq!(json["raw"].as_bool(), Some(true));
+            assert!(json["prompt"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("<|im_start|>assistant\n"));
+            assert!(json.get("chat_template_kwargs").is_none());
         });
     }
 
