@@ -7,6 +7,35 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
+## v0.7.42
+
+### Added
+
+- **Flow predicate executor (#704).** Added predicate-mode Flow execution
+  with runtime attribute recognition for predicate declarations, pipelines,
+  and ACP skill surfaces. The release also tightens attribute placement
+  diagnostics so valid runtime annotations pass conformance while invalid
+  placements still warn.
+- **Workflow crystallization substrate (#713).** Added the substrate for
+  persisting and replaying crystallized workflows, including durable atom
+  storage and operator-facing hooks that let Harn turn repeated orchestration
+  patterns into reusable workflow state.
+- **Alternate forge connector catalog (#712).** Registers the pure-Harn
+  Forgejo, Gitea, Bitbucket, SourceHut, and SVN connector package repos in
+  the connector catalog and generated trigger quick reference alongside the
+  existing forge integrations.
+
+### Changed
+
+- **Embedded orchestrator MCP serving (#709).** `harn orchestrator serve`
+  now exposes the orchestrator MCP surface from the deployable listener so
+  trigger, queue, replay, inspection, trust-query, and secret-scan tools can
+  be served behind the orchestrator auth boundary.
+- **Connector and durability cleanup (#706, #707, #708, #710, #711).**
+  Adds the SQLite Flow atom store, closes connector epic documentation gaps,
+  hardens event-log durability paths, completes the pure-Harn connector pivot
+  guardrails, and strengthens orchestrator deploy secret synchronization.
+
 ## v0.7.41
 
 ### Added
