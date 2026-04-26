@@ -111,6 +111,14 @@ granular archaeology.
 
 ### Fixed
 
+- **Decouple GitHub release from the multi-arch container publish.** The
+  `release` job in `build-release-binaries.yml` no longer waits on the
+  `Publish container` job, so the release tag and binary tarballs/zip
+  attach as soon as the build matrix completes. The container still
+  gates on the build matrix and publishes on its own schedule. This
+  shaves the container build's wall-clock (~5–15 min) off the
+  end-to-end release latency, which previously held up
+  `fetch-harn.sh`-driven downstream consumers.
 - **Stabilize integration tests under full nextest load.**
   `PROCESS_READY_TIMEOUT` in `harn_serve_mcp_cli` and `mcp_server_cli` was
   raised from 15s to 60s after observing 30–40s cold-starts of the debug
