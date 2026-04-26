@@ -128,25 +128,23 @@ jobs:
           tool: nextest@0.9.133
       # Don't gate the whole pipeline on the full Windows test surface yet —
       # this job exists to catch hard regressions (compile breaks, missing
-      # cfg-gates, hardcoded `/bin/sh`, etc.). It runs harn-lexer/parser/vm
-      # unit tests and a smoke `harn run`. Sandbox + signal-handler tests
-      # are skipped automatically via existing `#![cfg(unix)]` gates.
+      # cfg-gates, hardcoded `/bin/sh`, etc.). It compiles the whole workspace
+      # test graph, then runs harn-lexer/parser/vm and adjacent core crate unit
+      # tests plus a smoke `harn run`. Sandbox + signal-handler tests are
+      # skipped automatically via existing `#![cfg(unix)]` gates.
       #
-      # `cargo check --workspace --tests` does the type/borrow check across
-      # the entire workspace without producing test binaries we won't run.
-      # Then we build only the harn binary (for the smoke test) and the
-      # test crates we actually run. This roughly halves Windows wall time
-      # vs. the previous `cargo build --workspace --tests`.
-      - name: Compile-check workspace + tests
-        run: cargo check --workspace --tests
-      - name: Build harn binary
-        run: cargo build --bin harn
-      - name: Run unit tests for core crates
+      # Keep the Rust work in one test-profile build. Mixing `cargo check`,
+      # `cargo build`, and nextest made Windows recompile the same local crates
+      # three times in separate artifact sets; `--workspace` preserves compile
+      # coverage while the filter limits the tests that actually execute.
+      - name: Compile workspace tests and run Windows unit slice
         shell: bash
         run: |
+          windows_filter='package(harn-lexer) or package(harn-parser) or package(harn-vm) or package(harn-hostlib) or package(harn-fmt) or package(harn-lint) or package(harn-modules)'
           if command -v cargo-nextest >/dev/null 2>&1; then
-            cargo nextest run -p harn-lexer -p harn-parser -p harn-vm -p harn-hostlib -p harn-fmt -p harn-lint -p harn-modules
+            cargo nextest run --workspace -E "$windows_filter"
           else
+            cargo test --workspace --no-run
             cargo test -p harn-lexer -p harn-parser -p harn-vm -p harn-hostlib -p harn-fmt -p harn-lint -p harn-modules
           fi
       - name: Smoke test harn run
