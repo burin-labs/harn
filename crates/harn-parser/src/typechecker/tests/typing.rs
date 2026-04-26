@@ -49,6 +49,26 @@ fn semantic_check(slice) -> bool { return true }
 }
 
 #[test]
+fn test_runtime_attributes_are_recognized_on_valid_declarations() {
+    let warns = warnings(
+        r#"
+@test
+pipeline smoke(task) {}
+
+@acp_skill(name: "deploy", when_to_use: "ship", invocation: "explicit")
+fn deploy_activate() -> string { return "ready" }
+"#,
+    );
+    assert!(
+        warns
+            .iter()
+            .all(|warning| !warning.contains("unknown attribute")
+                && !warning.contains("only applies")),
+        "runtime attributes should not warn on valid declarations: {warns:?}"
+    );
+}
+
+#[test]
 fn test_flow_predicate_mode_attributes_warn_off_functions() {
     let warns = warnings(
         r#"
