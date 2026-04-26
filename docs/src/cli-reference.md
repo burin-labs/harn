@@ -828,8 +828,46 @@ parameters, side effects, approval points, capability and secret requirements,
 shadow-mode pass/fail details, promotion metadata, and cost/token savings.
 Candidates with divergent side effects are rejected instead of promoted.
 
+Pass `--bundle <DIR>` to also emit a portable
+`harn.crystallization.candidate.bundle` directory (`candidate.json`,
+`workflow.harn`, `report.json`, `harn.eval.toml`, redacted `fixtures/`)
+that Harn Cloud or any other importer can consume without bespoke glue:
+
+```bash
+harn crystallize \
+  --from fixtures/crystallize/version-bump \
+  --out workflows/version_bump.harn \
+  --report reports/version_bump.crystallize.json \
+  --eval-pack evals/version_bump.toml \
+  --bundle bundles/version-bump \
+  --bundle-team platform \
+  --bundle-repo burin-labs/harn \
+  --bundle-risk-level medium \
+  --workflow-name version_bump
+```
+
+### harn crystallize validate
+
+Smoke-check a bundle on disk: confirms the schema marker and version, that
+every referenced file exists, that fixtures are marked redacted, and that
+`required_secrets` only lists logical ids (never raw secret values).
+
+```bash
+harn crystallize validate bundles/version-bump
+```
+
+### harn crystallize shadow
+
+Re-run the deterministic shadow comparison from a bundle's redacted fixtures
+in-process, with no live side effects. Returns non-zero on divergence, so it
+fits in CI gates.
+
+```bash
+harn crystallize shadow bundles/version-bump
+```
+
 See [Workflow crystallization](./workflow-crystallization.md) for the trace
-schema and review loop.
+schema, bundle layout, and review loop.
 
 ## harn trigger cancel
 

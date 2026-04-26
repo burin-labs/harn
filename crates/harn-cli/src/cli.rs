@@ -978,18 +978,48 @@ pub(crate) struct TraceImportArgs {
 
 #[derive(Debug, Args)]
 pub(crate) struct CrystallizeArgs {
+    #[command(subcommand)]
+    pub command: Option<CrystallizeCommand>,
+
     /// Directory containing crystallization trace JSON files or persisted run records.
+    /// Required when no subcommand is given.
     #[arg(long = "from", value_name = "TRACE_DIR")]
-    pub from: String,
+    pub from: Option<String>,
     /// Output path for the generated .harn workflow candidate.
+    /// Required when no subcommand is given.
     #[arg(long = "out", value_name = "WORKFLOW")]
-    pub out: String,
+    pub out: Option<String>,
     /// Output path for the machine-readable crystallization report.
+    /// Required when no subcommand is given.
     #[arg(long = "report", value_name = "REPORT_JSON")]
-    pub report: String,
+    pub report: Option<String>,
     /// Optional output path for a minimal eval pack manifest.
     #[arg(long = "eval-pack", value_name = "HARN_EVAL_TOML")]
     pub eval_pack: Option<String>,
+    /// Optional bundle directory. When set, the CLI also emits a portable
+    /// crystallization bundle (`candidate.json`, `workflow.harn`,
+    /// `report.json`, `harn.eval.toml`, redacted `fixtures/`) ready for
+    /// Harn Cloud import.
+    #[arg(long = "bundle", value_name = "BUNDLE_DIR")]
+    pub bundle: Option<String>,
+    /// Override the bundle's external_key (defaults to a sanitized workflow name).
+    #[arg(long = "bundle-external-key", value_name = "KEY")]
+    pub bundle_external_key: Option<String>,
+    /// Override the bundle's title.
+    #[arg(long = "bundle-title", value_name = "TITLE")]
+    pub bundle_title: Option<String>,
+    /// Optional team label to place in the bundle manifest.
+    #[arg(long = "bundle-team", value_name = "TEAM")]
+    pub bundle_team: Option<String>,
+    /// Optional repo identifier to place in the bundle manifest.
+    #[arg(long = "bundle-repo", value_name = "REPO")]
+    pub bundle_repo: Option<String>,
+    /// Override the bundle's risk level (low/medium/high).
+    #[arg(long = "bundle-risk-level", value_name = "LEVEL")]
+    pub bundle_risk_level: Option<String>,
+    /// Override the bundle's rollout policy (defaults to `shadow_then_canary`).
+    #[arg(long = "bundle-rollout-policy", value_name = "POLICY")]
+    pub bundle_rollout_policy: Option<String>,
     /// Minimum number of traces that must contain the repeated sequence.
     #[arg(long = "min-examples", default_value_t = 2)]
     pub min_examples: usize,
@@ -1005,6 +1035,26 @@ pub(crate) struct CrystallizeArgs {
     /// Approver to include in promotion metadata.
     #[arg(long = "approver", value_name = "USER")]
     pub approver: Option<String>,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum CrystallizeCommand {
+    /// Validate a crystallization candidate bundle on disk.
+    Validate(CrystallizeValidateArgs),
+    /// Re-run shadow comparison from a bundle's redacted fixtures (no live side effects).
+    Shadow(CrystallizeShadowArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct CrystallizeValidateArgs {
+    /// Path to the bundle directory.
+    pub bundle_dir: String,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct CrystallizeShadowArgs {
+    /// Path to the bundle directory.
+    pub bundle_dir: String,
 }
 
 #[derive(Debug, Args)]
@@ -2420,8 +2470,8 @@ mod tests {
     use std::time::Duration as StdDuration;
 
     use super::{
-        Cli, Command, ConnectCommand, FlowArchivistCommand, FlowCommand, McpCommand,
-        OrchestratorCommand, OrchestratorDeployProvider, OrchestratorLogFormat,
+        Cli, Command, ConnectCommand, CrystallizeCommand, FlowArchivistCommand, FlowCommand,
+        McpCommand, OrchestratorCommand, OrchestratorDeployProvider, OrchestratorLogFormat,
         OrchestratorQueueCommand, OrchestratorTenantCommand, PackageCacheCommand, PackageCommand,
         ProjectTemplate, RunsCommand, SkillCommand, SkillKeyCommand, SkillTrustCommand,
         SkillsCommand, TraceCommand, TriggerCommand, TrustCommand, TrustOutcomeArg, TrustTierArg,
@@ -2792,12 +2842,54 @@ mod tests {
         let Command::Crystallize(args) = cli.command.unwrap() else {
             panic!("expected crystallize command");
         };
-        assert_eq!(args.from, "fixtures/crystallize");
-        assert_eq!(args.out, "workflows/version_bump.harn");
-        assert_eq!(args.report, "reports/version_bump.json");
+        assert!(args.command.is_none());
+        assert_eq!(args.from.as_deref(), Some("fixtures/crystallize"));
+        assert_eq!(args.out.as_deref(), Some("workflows/version_bump.harn"));
+        assert_eq!(args.report.as_deref(), Some("reports/version_bump.json"));
         assert_eq!(args.eval_pack.as_deref(), Some("harn.eval.toml"));
         assert_eq!(args.min_examples, 5);
         assert_eq!(args.workflow_name.as_deref(), Some("version_bump"));
+    }
+
+    #[test]
+    fn test_parses_crystallize_validate_subcommand() {
+        let cli = Cli::parse_from(["harn", "crystallize", "validate", "bundles/version-bump"]);
+
+        let Command::Crystallize(args) = cli.command.unwrap() else {
+            panic!("expected crystallize command");
+        };
+        let Some(CrystallizeCommand::Validate(validate)) = args.command else {
+            panic!("expected validate subcommand");
+        };
+        assert_eq!(validate.bundle_dir, "bundles/version-bump");
+    }
+
+    #[test]
+    fn test_parses_crystallize_bundle_flag() {
+        let cli = Cli::parse_from([
+            "harn",
+            "crystallize",
+            "--from",
+            "fixtures/crystallize",
+            "--out",
+            "workflows/version_bump.harn",
+            "--report",
+            "reports/version_bump.json",
+            "--bundle",
+            "bundles/version-bump",
+            "--bundle-team",
+            "platform",
+            "--bundle-risk-level",
+            "medium",
+        ]);
+
+        let Command::Crystallize(args) = cli.command.unwrap() else {
+            panic!("expected crystallize command");
+        };
+        assert!(args.command.is_none());
+        assert_eq!(args.bundle.as_deref(), Some("bundles/version-bump"));
+        assert_eq!(args.bundle_team.as_deref(), Some("platform"));
+        assert_eq!(args.bundle_risk_level.as_deref(), Some("medium"));
     }
 
     #[test]
