@@ -142,6 +142,7 @@ impl StreamingToolCallDetector {
                     raw_input: None,
 
                     raw_input_partial: None,
+                    audit: None,
                 });
             }
             DetectorState::InBareCall {
@@ -247,6 +248,7 @@ impl StreamingToolCallDetector {
                         status: ToolCallStatus::Pending,
                         raw_input: serde_json::json!({}),
                         parsing: Some(true),
+                        audit: None,
                     });
                     self.state = DetectorState::InTaggedBlock {
                         body_start,
@@ -286,6 +288,7 @@ impl StreamingToolCallDetector {
                                 status: ToolCallStatus::Pending,
                                 raw_input: serde_json::json!({}),
                                 parsing: Some(true),
+                                audit: None,
                             });
                             self.state = DetectorState::InBareCall {
                                 name_start: j,
@@ -421,6 +424,7 @@ fn promote_event(
         raw_input: None,
 
         raw_input_partial: None,
+        audit: None,
     }
 }
 
@@ -446,6 +450,7 @@ fn abort_event(
         raw_input: None,
 
         raw_input_partial: None,
+        audit: None,
     }
 }
 

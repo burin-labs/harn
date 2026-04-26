@@ -374,6 +374,7 @@ fn try_emit_partial_tool_args(
         executor: None,
         raw_input: value,
         raw_input_partial: raw_partial,
+        audit: crate::orchestration::current_mutation_session(),
 
         parsing: None,
     };
@@ -522,6 +523,7 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
                                     kind: tool_kind,
                                     status: ToolCallStatus::Pending,
                                     raw_input: serde_json::Value::Object(Default::default()),
+                                    audit: crate::orchestration::current_mutation_session(),
 
                                     parsing: None,
                                 });
@@ -776,6 +778,7 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
                                 kind: tool_kind,
                                 status: ToolCallStatus::Pending,
                                 raw_input: serde_json::Value::Object(Default::default()),
+                                audit: crate::orchestration::current_mutation_session(),
 
                                 parsing: None,
                             });
