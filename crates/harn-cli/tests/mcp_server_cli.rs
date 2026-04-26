@@ -17,7 +17,10 @@ use std::time::Duration;
 use serde_json::{json, Value as JsonValue};
 use tempfile::TempDir;
 
-const PROCESS_READY_TIMEOUT: Duration = Duration::from_secs(15);
+// See `harn_serve_mcp_cli::PROCESS_READY_TIMEOUT` for the rationale on the 60s
+// budget — cold-starting the debug `harn` binary takes 30–40s under full
+// nextest load.
+const PROCESS_READY_TIMEOUT: Duration = Duration::from_secs(60);
 
 fn lock_mcp_cli_tests() -> mcp_support::HarnProcessTestLock {
     mcp_support::lock_mcp_process_tests()

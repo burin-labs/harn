@@ -1076,7 +1076,7 @@ mod tests {
             intents: vec![intent.id],
             invariants_applied: vec![(
                 PredicateHash::new("pred"),
-                crate::flow::InvariantResult::Passed,
+                crate::flow::InvariantResult::allow(),
             )],
             required_tests: vec![TestId::new("flow-store")],
             approval_chain: vec![Approval {

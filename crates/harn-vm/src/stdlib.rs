@@ -15,6 +15,7 @@ mod cookies;
 mod crypto;
 mod csv;
 mod datetime;
+mod flow;
 mod fs;
 pub(crate) mod hitl;
 mod hitl_read;
@@ -88,6 +89,7 @@ pub fn register_core_stdlib(vm: &mut Vm) {
     iter::register_iter_builtins(vm);
     shapes::register_shape_builtins(vm);
     testing::register_testing_builtins(vm);
+    flow::register_flow_builtins(vm);
 }
 
 /// Register I/O builtins (requires OS access).

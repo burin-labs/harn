@@ -11,6 +11,7 @@ use std::fmt;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sha2::{Digest, Sha256};
 
+use super::predicates::InvariantResult;
 use super::{Atom, AtomId, IntentId};
 
 const SLICE_ID_BYTES: usize = 32;
@@ -117,40 +118,6 @@ impl From<&str> for PredicateHash {
 impl From<String> for PredicateHash {
     fn from(value: String) -> Self {
         Self::new(value)
-    }
-}
-
-/// Result of applying an invariant predicate while deriving a slice.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "status", rename_all = "snake_case")]
-pub enum InvariantResult {
-    Passed,
-    Failed { reason: String },
-    Waived { reason: String },
-    Blocked { error: InvariantBlockError },
-}
-
-/// Structured hard-block reason for invariant execution failures.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct InvariantBlockError {
-    pub code: String,
-    pub message: String,
-}
-
-impl InvariantBlockError {
-    pub fn new(code: impl Into<String>, message: impl Into<String>) -> Self {
-        Self {
-            code: code.into(),
-            message: message.into(),
-        }
-    }
-
-    pub fn budget_exceeded(message: impl Into<String>) -> Self {
-        Self::new("budget_exceeded", message)
-    }
-
-    pub fn nondeterministic_drift(message: impl Into<String>) -> Self {
-        Self::new("nondeterministic_drift", message)
     }
 }
 
