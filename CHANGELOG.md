@@ -18,6 +18,13 @@ granular archaeology.
   Updated generic webhook docs to describe the current route-backed listener,
   raw-body `TriggerEvent` path, and durable inbox dedupe instead of the old
   O-02/T-09 deferrals.
+- **Embedded orchestrator MCP endpoint (#152).** `harn orchestrator serve`
+  now accepts `--mcp` to mount the existing orchestrator MCP HTTP server
+  on the deployable listener, with configurable Streamable HTTP and
+  legacy SSE paths. The embedded surface requires
+  `HARN_ORCHESTRATOR_API_KEYS` so trigger fire/list/replay, queue,
+  DLQ, inspect, trust-query, and secret-scan tools remain behind the
+  same bearer or `x-api-key` auth used by the orchestrator runtime.
 - **Tool-call timing on ACP `tool_call_update` (#689).** Terminal
   `tool_call_update` events now carry `durationMs` (the parse-to-finish
   total — model emits the call → tool result is appended) and

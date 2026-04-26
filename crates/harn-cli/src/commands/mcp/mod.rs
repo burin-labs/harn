@@ -12,7 +12,7 @@ use url::Url;
 use crate::cli::{McpCommand, McpLoginArgs, McpServerRefArgs};
 use crate::package::{self, McpServerConfig};
 
-mod serve;
+pub(crate) mod serve;
 
 const DEFAULT_REDIRECT_URI: &str = "http://127.0.0.1:9783/oauth/callback";
 const KEYRING_SERVICE: &str = "dev.harn.mcp";

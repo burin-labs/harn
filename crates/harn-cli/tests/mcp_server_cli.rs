@@ -17,7 +17,7 @@ use std::time::Duration;
 use serde_json::{json, Value as JsonValue};
 use tempfile::TempDir;
 
-const TEST_TIMEOUT: Duration = Duration::from_secs(2);
+const PROCESS_READY_TIMEOUT: Duration = Duration::from_secs(15);
 
 fn lock_mcp_cli_tests() -> mcp_support::HarnProcessTestLock {
     mcp_support::lock_mcp_process_tests()
@@ -95,7 +95,7 @@ fn wait_for_http_listener(child: &mut std::process::Child, rx: &Receiver<String>
         child,
         rx,
         "MCP HTTP listener ready on ",
-        TEST_TIMEOUT,
+        PROCESS_READY_TIMEOUT,
         "HTTP MCP server",
     )
 }

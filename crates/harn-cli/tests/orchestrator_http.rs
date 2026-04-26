@@ -1716,6 +1716,91 @@ async fn a2a_push_route_requires_bearer_or_valid_hmac() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn embedded_mcp_endpoint_serves_orchestrator_tools_on_listener() {
+    let _lock = lock_orchestrator_tests();
+    let temp = TempDir::new().unwrap();
+    write_file(temp.path(), "harn.toml", &a2a_manifest(None));
+    write_file(temp.path(), "lib.harn", a2a_handler_module());
+
+    let envs = [
+        ("HARN_SECRET_PROVIDERS", "env"),
+        ("HARN_ORCHESTRATOR_API_KEYS", "mcp-key"),
+        ("HARN_ORCHESTRATOR_HMAC_SECRET", "shared-secret"),
+    ];
+    let mut process = spawn_orchestrator(&temp, &["--mcp"], &envs);
+    let base_url = process.wait_for_listener_url();
+
+    let client = reqwest::Client::new();
+    let mut auth_headers = json_headers();
+    auth_headers.insert(AUTHORIZATION, HeaderValue::from_static("Bearer mcp-key"));
+    let initialize = client
+        .post(format!("{base_url}/mcp"))
+        .headers(auth_headers.clone())
+        .json(&serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-11-25",
+                "clientInfo": { "name": "orchestrator-test", "version": "0" },
+                "capabilities": { "harn": { "apiKey": "mcp-key" } }
+            }
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(initialize.status(), StatusCode::OK);
+    let session_id = initialize
+        .headers()
+        .get("mcp-session-id")
+        .and_then(|value| value.to_str().ok())
+        .expect("MCP session header")
+        .to_string();
+    let initialize_body: JsonValue = initialize.json().await.unwrap();
+    assert_eq!(
+        initialize_body["result"]["serverInfo"]["name"],
+        serde_json::json!("harn-orchestrator")
+    );
+
+    auth_headers.insert(
+        "mcp-session-id",
+        HeaderValue::from_str(&session_id).unwrap(),
+    );
+    let tools = client
+        .post(format!("{base_url}/mcp"))
+        .headers(auth_headers)
+        .json(&serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/list",
+            "params": {}
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(tools.status(), StatusCode::OK);
+    let tools_body: JsonValue = tools.json().await.unwrap();
+    assert!(
+        tools_body["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|tool| tool["name"] == "harn.orchestrator.inspect"),
+        "tools={tools_body}"
+    );
+
+    send_sigterm(&process.child);
+    let status = wait_for_exit_async(&mut process.child).await;
+    let stderr = process.join_stderr();
+    assert!(status.success(), "status={status} stderr={stderr}");
+    assert!(
+        stderr.contains("embedded MCP server mounted at /mcp"),
+        "stderr={stderr}"
+    );
+    assert!(stderr.contains(SHUTDOWN_NEEDLE), "stderr={stderr}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn admin_reload_endpoint_applies_manifest_changes() {
     let _lock = lock_orchestrator_tests();
     let temp = TempDir::new().unwrap();
