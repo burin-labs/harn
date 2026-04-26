@@ -5376,8 +5376,17 @@ mod tests {
         reset_http_state();
     }
 
+    // Holding the std-lib egress test mutex across `.await` is
+    // intentional: the lock simply serializes whole-test bodies
+    // against the egress::tests suite (uncontended outside tests).
+    #[allow(clippy::await_holding_lock)]
     #[tokio::test]
     async fn http_proxy_routes_requests_through_configured_proxy() {
+        // Real-network tests share the global egress policy with the
+        // egress::tests suite — hold the shared lock so a sibling
+        // test installing `default: "deny"` cannot mid-flight block
+        // our localhost proxy request.
+        let _egress_guard = crate::egress::egress_test_guard();
         reset_http_state();
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind proxy listener");
         let proxy_addr = listener.local_addr().expect("proxy addr");
@@ -5427,8 +5436,10 @@ mod tests {
         reset_http_state();
     }
 
+    #[allow(clippy::await_holding_lock)]
     #[tokio::test]
     async fn custom_tls_ca_bundle_and_pin_allow_request() {
+        let _egress_guard = crate::egress::egress_test_guard();
         reset_http_state();
         install_rustls_provider();
         let temp = TempDir::new().expect("tempdir");
@@ -5488,8 +5499,10 @@ mod tests {
         reset_http_state();
     }
 
+    #[allow(clippy::await_holding_lock)]
     #[tokio::test]
     async fn custom_tls_pin_mismatch_is_rejected() {
+        let _egress_guard = crate::egress::egress_test_guard();
         reset_http_state();
         install_rustls_provider();
         let temp = TempDir::new().expect("tempdir");

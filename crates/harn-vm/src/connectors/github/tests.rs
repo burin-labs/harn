@@ -496,8 +496,17 @@ async fn normalizes_monitor_github_webhook_events() {
     }
 }
 
+// Holding the std egress test mutex across `.await` is intentional:
+// the lock simply serializes whole-test bodies against the
+// egress::tests suite (uncontended outside tests).
+#[allow(clippy::await_holding_lock)]
 #[tokio::test]
 async fn outbound_methods_share_cached_installation_token() {
+    // Connector tests share the global egress policy with the
+    // egress::tests suite. Hold the lock for the duration so a
+    // sibling deny policy can't flake the localhost mock-server
+    // request.
+    let _egress_guard = crate::egress::egress_test_guard();
     let scenario = Arc::new(Mutex::new(MockScenario::default()));
     let (base_url, server) = spawn_mock_server(8, scenario.clone());
     let client = initialized_client(Arc::new(StaticSecretProvider {
@@ -580,8 +589,10 @@ async fn outbound_methods_share_cached_installation_token() {
     assert_eq!(state.api_requests[6].path, "/repos/octo/demo/issues");
 }
 
+#[allow(clippy::await_holding_lock)]
 #[tokio::test]
 async fn api_call_uses_authenticated_github_rest_request() {
+    let _egress_guard = crate::egress::egress_test_guard();
     let scenario = Arc::new(Mutex::new(MockScenario::default()));
     let (base_url, server) = spawn_mock_server(2, scenario.clone());
     let client = initialized_client(Arc::new(StaticSecretProvider {
@@ -629,8 +640,10 @@ async fn api_call_uses_authenticated_github_rest_request() {
     assert_eq!(response["ok"], json!(true));
 }
 
+#[allow(clippy::await_holding_lock)]
 #[tokio::test]
 async fn unauthorized_response_invalidates_token_and_remints() {
+    let _egress_guard = crate::egress::egress_test_guard();
     let scenario = Arc::new(Mutex::new(MockScenario {
         unauthorized_once: HashSet::from(["/repos/octo/demo/issues/123/comments".to_string()]),
         ..MockScenario::default()
@@ -663,8 +676,10 @@ async fn unauthorized_response_invalidates_token_and_remints() {
     assert!(first_auth.contains("token-2"));
 }
 
+#[allow(clippy::await_holding_lock)]
 #[tokio::test]
 async fn rate_limited_response_retries_once() {
+    let _egress_guard = crate::egress::egress_test_guard();
     let scenario = Arc::new(Mutex::new(MockScenario {
         rate_limit_once: HashSet::from(["/repos/octo/demo/issues/123/comments".to_string()]),
         ..MockScenario::default()

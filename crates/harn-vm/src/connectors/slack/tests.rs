@@ -491,8 +491,13 @@ fn spawn_mock_server(
     (format!("http://{addr}"), handle)
 }
 
+// Holding the std egress test mutex across `.await` is intentional:
+// the lock simply serializes whole-test bodies against the
+// egress::tests suite (uncontended outside tests).
+#[allow(clippy::await_holding_lock)]
 #[tokio::test]
 async fn slack_outbound_helpers_hit_expected_api_methods() {
+    let _egress_guard = crate::egress::egress_test_guard();
     let client = initialized_client().await;
     let scenario = Arc::new(Mutex::new(MockScenario::default()));
     let (base_url, handle) = spawn_mock_server(9, scenario.clone());

@@ -149,6 +149,46 @@ pub fn reset_egress_policy_for_tests() {
     reset_egress_policy_for_host();
 }
 
+/// Process-wide mutex serializing every test that touches the global
+/// egress policy. Held for the duration of:
+///
+/// - `egress::tests::*`, which install/uninstall a deny policy.
+/// - `http::tests::*` real-network tests (TLS pinning, proxy
+///   routing) — these don't touch the policy themselves but a
+///   parallel `egress::tests::*` test installing `deny` would
+///   otherwise flake their `vm_execute_http_request` calls with
+///   `EgressBlocked`.
+/// - Connector test-kit tests (`connectors::github/notion/slack/...`)
+///   that spin up a localhost mock server.
+///
+/// The lock keeps these suites mutually exclusive without changing
+/// production behavior. Pair it with `reset_egress_policy_for_tests()`
+/// at the start of each test to clear any policy left behind by a
+/// previous panicking run.
+#[cfg(test)]
+pub(crate) fn egress_test_lock() -> &'static std::sync::Mutex<()> {
+    use std::sync::Mutex;
+    static LOCK: Mutex<()> = Mutex::new(());
+    &LOCK
+}
+
+/// Acquire the [`egress_test_lock`] and reset the global egress
+/// policy, returning a `MutexGuard` that holds the lock for the
+/// caller's scope. Tests should bind it to `let _guard = ...` so the
+/// lock is released when the test returns.
+#[cfg(test)]
+pub(crate) fn egress_test_guard() -> std::sync::MutexGuard<'static, ()> {
+    // `MutexGuard::map` is unstable; instead handle the poisoned-lock
+    // recovery here so tests aren't tripped up by an earlier panic
+    // poisoning the mutex.
+    let guard = match egress_test_lock().lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    reset_egress_policy_for_tests();
+    guard
+}
+
 fn check_url(surface: &str, raw_url: &str) -> Result<Option<EgressBlocked>, VmError> {
     ensure_env_seeded()?;
     let configured = {
@@ -581,11 +621,10 @@ impl std::fmt::Display for EgressBlocked {
 mod tests {
     use super::*;
 
-    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
     fn install(config: &[(&str, VmValue)]) -> std::sync::MutexGuard<'static, ()> {
-        let guard = ENV_LOCK.lock().unwrap();
-        reset_egress_policy_for_tests();
+        // `egress_test_guard` already takes the shared lock and resets
+        // any leftover policy.
+        let guard = egress_test_guard();
         let map = config
             .iter()
             .cloned()
@@ -664,8 +703,7 @@ mod tests {
 
     #[test]
     fn env_seeding_is_honored() {
-        let _guard = ENV_LOCK.lock().unwrap();
-        reset_egress_policy_for_tests();
+        let _guard = egress_test_guard();
         std::env::set_var(HARN_EGRESS_ALLOW_ENV, "env.example.com");
         std::env::set_var(HARN_EGRESS_DENY_ENV, "");
         std::env::set_var(HARN_EGRESS_DEFAULT_ENV, "deny");

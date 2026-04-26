@@ -316,8 +316,13 @@ fn spawn_mock_server(
     (format!("http://{}", addr), handle)
 }
 
+// Holding the std egress test mutex across `.await` is intentional:
+// the lock simply serializes whole-test bodies against the
+// egress::tests suite (uncontended outside tests).
+#[allow(clippy::await_holding_lock)]
 #[tokio::test]
 async fn notion_client_methods_use_current_api_headers_and_paths() {
+    let _egress_guard = crate::egress::egress_test_guard();
     let captured = Arc::new(Mutex::new(Vec::<CapturedRequest>::new()));
     let (base_url, handle) = spawn_mock_server(
         7,
@@ -417,8 +422,10 @@ async fn notion_client_methods_use_current_api_headers_and_paths() {
     assert_eq!(requests[6].path, "/pages/page_1");
 }
 
+#[allow(clippy::await_holding_lock)]
 #[tokio::test]
 async fn notion_client_retries_once_after_rate_limit() {
+    let _egress_guard = crate::egress::egress_test_guard();
     let captured = Arc::new(Mutex::new(Vec::<CapturedRequest>::new()));
     let (base_url, handle) = spawn_mock_server(
         2,
@@ -464,8 +471,10 @@ async fn notion_client_retries_once_after_rate_limit() {
     );
 }
 
+#[allow(clippy::await_holding_lock)]
 #[tokio::test]
 async fn notion_poll_binding_emits_targeted_inbox_event_and_persists_high_water() {
+    let _egress_guard = crate::egress::egress_test_guard();
     let captured = Arc::new(Mutex::new(Vec::<CapturedRequest>::new()));
     let page = json!({
         "id": "page_1",

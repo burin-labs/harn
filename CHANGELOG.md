@@ -26,6 +26,7 @@ granular archaeology.
   fail (test process hangs past 60 s) when the canonicalize-before-seen
   block in `crates/harn-modules/src/lib.rs` is reverted, and to pass
   (sub-second per command) with the fix in place.
+
 ### Changed
 
 - **Explicit tool executors on `tool_define` (#743).** Every tool now

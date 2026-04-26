@@ -382,8 +382,13 @@ async fn linear_connector_rejects_stale_timestamps_and_records_metric() {
     assert_eq!(metrics.snapshot().linear_timestamp_rejections_total, 1);
 }
 
+// Holding the std egress test mutex across `.await` is intentional:
+// the lock simply serializes whole-test bodies against the
+// egress::tests suite (uncontended outside tests).
+#[allow(clippy::await_holding_lock)]
 #[tokio::test]
 async fn linear_client_supports_typed_methods_and_escape_hatch() {
+    let _egress_guard = crate::egress::egress_test_guard();
     let requests = Arc::new(Mutex::new(Vec::<CapturedRequest>::new()));
     let (base_url, handle) = spawn_mock_server(requests.clone(), 5);
     let client = initialized_client(&base_url).await;
