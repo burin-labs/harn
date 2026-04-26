@@ -18,7 +18,7 @@ pub(crate) use components::ComponentRegistry;
 pub(crate) use contract_prompt::build_tool_calling_contract_prompt;
 #[cfg(test)]
 pub(crate) use contract_prompt::TEXT_RESPONSE_PROTOCOL_HELP;
-pub(crate) use handle_local::handle_tool_locally;
+pub(crate) use handle_local::{handle_tool_locally, is_vm_stdlib_short_circuit};
 #[cfg(test)]
 pub(crate) use json_schema::json_schema_to_type_expr;
 pub(crate) use messages::{

@@ -5,7 +5,7 @@ fn read_only_tools() {
     "read",
     "Read a file",
     {
-      handler: nil,
+      handler: { args -> "" },
       parameters: {path: {type: "string", description: "Path to read"}},
       returns: {type: "string"},
     },

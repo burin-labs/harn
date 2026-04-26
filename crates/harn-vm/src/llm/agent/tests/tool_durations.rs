@@ -48,6 +48,11 @@ fn read_file_tool_decl() -> VmValue {
         VmValue::String(Rc::from("Read a file.")),
     );
     tool.insert("parameters".to_string(), VmValue::Dict(Rc::new(params)));
+    // `read_file` is a VM-stdlib short-circuit served by
+    // `handle_tool_locally`, so the executor declaration satisfies
+    // the agent_loop pre-flight check (harn#743) without needing a
+    // registered handler closure.
+    tool.insert("executor".to_string(), VmValue::String(Rc::from("harn")));
     let mut envelope = std::collections::BTreeMap::new();
     envelope.insert(
         "tools".to_string(),

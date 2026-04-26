@@ -27,6 +27,33 @@ granular archaeology.
   block in `crates/harn-modules/src/lib.rs` is reverted, and to pass
   (sub-second per command) with the fix in place.
 
+### Changed (breaking)
+
+- **Explicit tool executors and pre-flight tool-registry validation
+  (#743).** `tool_define` now requires every registration to declare
+  its dispatch backend via an `executor` field — `"harn"` (with a
+  callable `handler`), `"host_bridge"` (with a `host_capability:
+  "cap.op"` binding), `"mcp_server"` (with a `mcp_server: "<name>"`
+  binding), or `"provider_native"`. When `executor` is omitted, a
+  registration with a handler is treated as `"harn"` for back-compat;
+  a registration with neither handler nor executor is rejected at
+  definition time with a clear error pointing at the missing backend
+  rather than the historical `[builtin_call] unhandled: <name>`
+  runtime failure. `agent_loop` re-validates at startup and refuses
+  to run a registry with any handlerless, undeclared tool.
+  Dispatch tags `tool_call_update.executor` on the ACP wire from the
+  declared backend (host-bridge tools always tag as `HostBridge`, etc.),
+  so clients no longer have to infer "via mcp:linear" / "via host
+  bridge" from `_mcp_server` annotations alone. `harn check` validates
+  `executor: "host_bridge"` `host_capability` bindings against the
+  same capability map `host_call(...)` uses, so unknown bindings
+  surface during the static check rather than at first model call.
+  See `spec/HARN_SPEC.md#tool-execution-backend-executor` and
+  `docs/llm/harn-quickref.md#tool-executor-declarations` for the new
+  contract; the VM-stdlib short-circuit set (`read_file`,
+  `list_directory`) continues to dispatch through `handle_tool_locally`
+  and accepts `executor: "harn"` without a registered handler.
+
 ### Added
 
 - **`pub import` re-exports for facade modules (#740).** Prefixing any

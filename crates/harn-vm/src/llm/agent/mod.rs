@@ -249,6 +249,12 @@ pub async fn run_agent_loop_internal(
     let tools_owned = opts.tools.clone();
     let tools_val = tools_owned.as_ref();
 
+    // harn#743: refuse to start the loop if any registered tool has
+    // no executable backend. This converts the historical
+    // `[builtin_call] unhandled: <name>` runtime failure into a clear,
+    // pre-flight error that names the culprit.
+    super::agent_tools::validate_tool_registry_executors(tools_val)?;
+
     let _tool_registry_guard = ToolRegistryGuard::install(tools_owned.clone());
 
     // Snapshot config/state fields as locals so phase contexts can hold

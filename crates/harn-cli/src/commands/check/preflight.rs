@@ -262,6 +262,31 @@ fn scan_node_preflight(
                 diagnostics,
             );
         }
+        Node::FunctionCall { name, args } if name == "tool_define" => {
+            // harn#743: when a tool declares `executor: "host_bridge"`,
+            // its `host_capability` must point at a real host operation
+            // — otherwise the model gets a tool whose dispatch will
+            // fail at runtime with no static feedback today. Validate
+            // the same capability map `host_call(...)` checks against
+            // so the failure surfaces during `harn check`.
+            scan_tool_define_preflight(
+                node,
+                args,
+                host_capabilities,
+                file_path,
+                source,
+                diagnostics,
+            );
+            scan_children(
+                args,
+                file_path,
+                source,
+                config,
+                host_capabilities,
+                visited,
+                diagnostics,
+            );
+        }
         Node::FunctionCall { name, args } if name == "host_call" => {
             if let Some((cap, op, params_arg)) = parse_host_call_args(args) {
                 if !is_known_host_operation(host_capabilities, &cap, &op) {
@@ -1129,6 +1154,121 @@ pub(super) fn literal_string(node: &SNode) -> Option<String> {
     match &node.node {
         Node::StringLiteral(value) => Some(value.clone()),
         _ => None,
+    }
+}
+
+/// Validate `tool_define(reg, name, desc, {executor: ..., ...})` calls.
+/// When the declared executor is `"host_bridge"`, the bound
+/// `host_capability` is checked against the same capability map the
+/// `host_call(...)` preflight uses; unknown bindings produce a tagged
+/// diagnostic so projects can suppress via `[check].preflight_allow`.
+///
+/// All checks here are best-effort: a non-literal config dict (e.g. a
+/// variable reference or a builder helper) silently skips. This
+/// matches the broader preflight philosophy — only static literals
+/// produce diagnostics.
+fn scan_tool_define_preflight(
+    node: &SNode,
+    args: &[SNode],
+    host_capabilities: &HashMap<String, HashSet<String>>,
+    file_path: &Path,
+    source: &str,
+    diagnostics: &mut Vec<PreflightDiagnostic>,
+) {
+    let Some(config_arg) = args.get(3) else {
+        return;
+    };
+    let Some(executor_node) = dict_literal_field(config_arg, "executor") else {
+        return;
+    };
+    let Some(executor) = literal_string(executor_node) else {
+        return;
+    };
+    let tool_name = args
+        .get(1)
+        .and_then(literal_string)
+        .unwrap_or_else(|| "<dynamic>".to_string());
+
+    if executor != "harn"
+        && executor != "harn_builtin"
+        && executor != "host_bridge"
+        && executor != "mcp_server"
+        && executor != "provider_native"
+    {
+        diagnostics.push(PreflightDiagnostic {
+            path: file_path.display().to_string(),
+            source: source.to_string(),
+            span: executor_node.span,
+            message: format!(
+                "preflight: tool '{tool_name}' declares unknown executor \"{executor}\""
+            ),
+            help: Some(
+                "expected one of: \"harn\", \"host_bridge\", \"mcp_server\", \"provider_native\""
+                    .to_string(),
+            ),
+            tags: None,
+        });
+        return;
+    }
+
+    if executor != "host_bridge" {
+        return;
+    }
+    let Some(capability_node) = dict_literal_field(config_arg, "host_capability") else {
+        diagnostics.push(PreflightDiagnostic {
+            path: file_path.display().to_string(),
+            source: source.to_string(),
+            span: node.span,
+            message: format!(
+                "preflight: tool '{tool_name}' declares executor: \"host_bridge\" \
+                 but no `host_capability` binding"
+            ),
+            help: Some(
+                "set host_capability to the canonical bridge identifier (e.g. \"interaction.ask\") \
+                 so the binding can be validated against the host capability manifest"
+                    .to_string(),
+            ),
+            tags: None,
+        });
+        return;
+    };
+    let Some(capability) = literal_string(capability_node) else {
+        return;
+    };
+    let Some((cap, op)) = capability.split_once('.') else {
+        diagnostics.push(PreflightDiagnostic {
+            path: file_path.display().to_string(),
+            source: source.to_string(),
+            span: capability_node.span,
+            message: format!(
+                "preflight: tool '{tool_name}' has invalid host_capability \"{capability}\" \
+                 (expected \"capability.operation\")"
+            ),
+            help: Some(
+                "use the canonical \"capability.operation\" form so harn check can \
+                 match it against host capability declarations"
+                    .to_string(),
+            ),
+            tags: None,
+        });
+        return;
+    };
+    if !is_known_host_operation(host_capabilities, cap, op) {
+        diagnostics.push(PreflightDiagnostic {
+            path: file_path.display().to_string(),
+            source: source.to_string(),
+            span: capability_node.span,
+            message: format!(
+                "preflight: tool '{tool_name}' binds host_capability '{cap}.{op}' \
+                 which is not declared by the host"
+            ),
+            help: Some(
+                "declare the capability in [check].host_capabilities or \
+                 [check].host_capabilities_path, or suppress via [check].preflight_allow"
+                    .to_string(),
+            ),
+            tags: Some(format!("{cap}.{op}")),
+        });
     }
 }
 

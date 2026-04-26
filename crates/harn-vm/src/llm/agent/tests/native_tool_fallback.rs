@@ -19,6 +19,17 @@ fn read_tool_registry() -> VmValue {
             "parameters".to_string(),
             VmValue::Dict(Rc::new(tool_params)),
         ),
+        // Declared executor — host_bridge — satisfies the agent_loop
+        // pre-flight check (harn#743). The fallback tests don't dispatch
+        // the call, so the missing bridge never matters.
+        (
+            "executor".to_string(),
+            VmValue::String(Rc::from("host_bridge")),
+        ),
+        (
+            "host_capability".to_string(),
+            VmValue::String(Rc::from("workspace.read_text")),
+        ),
     ])));
     VmValue::Dict(Rc::new(std::collections::BTreeMap::from([(
         "tools".to_string(),

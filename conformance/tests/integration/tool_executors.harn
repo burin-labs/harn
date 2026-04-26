@@ -1,0 +1,57 @@
+pipeline test(task) {
+  // harn#743: every tool declares its execution backend explicitly.
+  // tool_define stamps the resolved executor onto the registry entry
+  // so dispatch and ACP events have a single source of truth.
+  var r = tool_registry()
+  // Harn handler — the canonical case. `executor: "harn_builtin"`
+  // accepted as a back-compat alias and canonicalized to "harn".
+  r = tool_define(
+    r,
+    "echo",
+    "Echo the prompt",
+    {parameters: {prompt: "string"}, handler: { args -> args.prompt }},
+  )
+  // Host-bridge tool — handler-less by design.
+  r = tool_define(
+    r,
+    "ask_user",
+    "Ask the user a question via the host shell",
+    {parameters: {prompt: "string"}, executor: "host_bridge", host_capability: "interaction.ask"},
+  )
+  // MCP-served tool — declared with the configured server name.
+  r = tool_define(
+    r,
+    "github_search_issues",
+    "Search GitHub issues via MCP",
+    {parameters: {query: "string"}, executor: "mcp_server", mcp_server: "github"},
+  )
+  // Provider-native — runtime never dispatches; the model returns the
+  // already-executed result inline.
+  r = tool_define(
+    r,
+    "tool_search",
+    "Provider-native tool search (OpenAI Responses API)",
+    {parameters: {query: "string"}, executor: "provider_native"},
+  )
+  let echo = tool_find(r, "echo")
+  assert(echo.executor == "harn", "harn-handler tool defaults to executor=harn")
+  let ask = tool_find(r, "ask_user")
+  assert(ask.executor == "host_bridge", "host_bridge declaration stored verbatim")
+  assert(ask.host_capability == "interaction.ask", "host_capability binding preserved on the entry")
+  let mcp_tool = tool_find(r, "github_search_issues")
+  assert(mcp_tool.executor == "mcp_server", "mcp_server executor stored verbatim")
+  assert(mcp_tool.mcp_server == "github", "mcp_server name preserved on the entry")
+  let pn = tool_find(r, "tool_search")
+  assert(pn.executor == "provider_native", "provider_native executor stored verbatim")
+  // Back-compat alias resolution: "harn_builtin" canonicalizes to "harn".
+  var r2 = tool_registry()
+  r2 = tool_define(
+    r2,
+    "alias_check",
+    "",
+    {parameters: {x: "string"}, executor: "harn_builtin", handler: { args -> args.x }},
+  )
+  let alias_tool = tool_find(r2, "alias_check")
+  assert(alias_tool.executor == "harn", "harn_builtin alias canonicalizes to harn")
+  log("tool_executors tests passed")
+}

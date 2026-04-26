@@ -271,10 +271,125 @@ pub(super) async fn dispatch_tool_execution(
 ) -> ToolDispatchOutcome {
     use super::tools::handle_tool_locally;
 
+    // Honor the declared executor (harn#743) ahead of the historic
+    // heuristic so a tool defined as `executor: "host_bridge"` always
+    // reports `HostBridge` on the wire — even if a stale handler value
+    // happens to be on the dict, and even if the host bridge is also
+    // capable of serving builtins.
+    let declared = declared_executor_for_tool(tools_val, tool_name);
     let mut attempt = 0usize;
     let mut executor: Option<ToolExecutor> = None;
     loop {
-        let result = if let Some(local_result) = handle_tool_locally(tool_name, tool_args) {
+        let result = if matches!(declared.as_deref(), Some("provider_native")) {
+            // The runtime never dispatches provider-native tools — the
+            // model returns the already-executed result inline. Reaching
+            // here means the model emitted a tool call against a tool
+            // we're not supposed to run; surface that explicitly so the
+            // turn doesn't silently swallow it.
+            executor = Some(ToolExecutor::ProviderNative);
+            Err(VmError::CategorizedError {
+                message: format!(
+                    "tool '{tool_name}' is declared executor: \"provider_native\" — \
+                     the runtime does not dispatch these locally; the provider must \
+                     have already executed the call"
+                ),
+                category: ErrorCategory::ToolRejected,
+            })
+        } else if matches!(declared.as_deref(), Some("host_bridge")) {
+            // Force-route declared host-bridge tools through the bridge
+            // even if a stale `handler` value is present. Without a
+            // bridge, fail clearly instead of silently falling back.
+            let Some(bridge) = bridge else {
+                executor = Some(ToolExecutor::HostBridge);
+                return ToolDispatchOutcome {
+                    result: Err(VmError::CategorizedError {
+                        message: format!(
+                            "tool '{tool_name}' is declared executor: \"host_bridge\" \
+                             but no host bridge is connected to this environment"
+                        ),
+                        category: ErrorCategory::ToolRejected,
+                    }),
+                    executor,
+                };
+            };
+            executor = Some(ToolExecutor::HostBridge);
+            match bridge
+                .call(
+                    "builtin_call",
+                    serde_json::json!({
+                        "name": tool_name,
+                        "args": [tool_args],
+                    }),
+                )
+                .await
+            {
+                Err(VmError::CategorizedError {
+                    message,
+                    category: ErrorCategory::ToolRejected,
+                }) => Ok(denied_tool_result(tool_name, message)),
+                other => other,
+            }
+        } else if matches!(declared.as_deref(), Some("mcp_server")) {
+            // Declared MCP-served — prefer the configured `mcp_server`
+            // field, fall back to the `_mcp_server` annotation.
+            let server_name = declared_mcp_server_for_tool(tools_val, tool_name)
+                .or_else(|| mcp_server_for_tool(tools_val, tool_name))
+                .unwrap_or_else(|| "mcp".to_string());
+            executor = Some(ToolExecutor::McpServer {
+                server_name: server_name.clone(),
+            });
+            // MCP-served tools defined by the host are typically served
+            // through the host bridge today; preserve that path. A
+            // Harn-side `handler` overrides (custom MCP wrappers).
+            if let Some(handler) = find_tool_handler(tools_val, tool_name) {
+                let Some(mut vm) = crate::vm::clone_async_builtin_child_vm() else {
+                    return ToolDispatchOutcome {
+                        result: Err(VmError::CategorizedError {
+                            message: format!(
+                                "tool '{tool_name}' is MCP-served but no child VM context was available"
+                            ),
+                            category: ErrorCategory::ToolRejected,
+                        }),
+                        executor,
+                    };
+                };
+                let args_vm = crate::stdlib::json_to_vm_value(tool_args);
+                let _trusted_bridge_guard = crate::orchestration::allow_trusted_bridge_calls();
+                match vm.call_closure_pub(&handler, &[args_vm]).await {
+                    Ok(val) => Ok(serde_json::Value::String(val.display())),
+                    Err(VmError::CategorizedError {
+                        message,
+                        category: ErrorCategory::ToolRejected,
+                    }) => Ok(denied_tool_result(tool_name, message)),
+                    Err(e) => Ok(serde_json::Value::String(format!("Error: {e}"))),
+                }
+            } else if let Some(bridge) = bridge {
+                match bridge
+                    .call(
+                        "builtin_call",
+                        serde_json::json!({
+                            "name": tool_name,
+                            "args": [tool_args],
+                        }),
+                    )
+                    .await
+                {
+                    Err(VmError::CategorizedError {
+                        message,
+                        category: ErrorCategory::ToolRejected,
+                    }) => Ok(denied_tool_result(tool_name, message)),
+                    other => other,
+                }
+            } else {
+                Err(VmError::CategorizedError {
+                    message: format!(
+                        "tool '{tool_name}' (mcp_server: \"{server_name}\") cannot be \
+                         dispatched: no bridge and no Harn handler"
+                    ),
+                    category: ErrorCategory::ToolRejected,
+                })
+            }
+        } else if let Some(local_result) = handle_tool_locally(tool_name, tool_args) {
             // VM-stdlib short-circuit (read_file / list_directory). Any
             // other tool falls through to the script-handler / bridge
             // path below.
@@ -407,6 +522,70 @@ pub(super) fn mcp_server_for_tool(tools_val: Option<&VmValue>, tool_name: &str) 
     None
 }
 
+/// Return the canonical declared executor for `tool_name`, if the
+/// registry entry carries one (harn#743). The wire form
+/// (`"harn_builtin"`) is canonicalized to `"harn"` on storage; this
+/// helper returns whatever is stored, so callers can compare against
+/// the documented set without re-aliasing.
+///
+/// `None` means the entry pre-dates the `executor` field (e.g. an
+/// `mcp_list_tools` result the user pushed straight into the
+/// registry) — callers fall back to the historic
+/// handler/`_mcp_server`/bridge heuristic.
+pub(super) fn declared_executor_for_tool(
+    tools_val: Option<&VmValue>,
+    tool_name: &str,
+) -> Option<String> {
+    let dict = tools_val?.as_dict()?;
+    let tools_list = match dict.get("tools") {
+        Some(VmValue::List(l)) => l,
+        _ => return None,
+    };
+    for tool in tools_list.iter() {
+        let entry: &std::collections::BTreeMap<String, VmValue> = match tool {
+            VmValue::Dict(d) => d,
+            _ => continue,
+        };
+        let name = match entry.get("name") {
+            Some(v) => v.display(),
+            None => continue,
+        };
+        if name != tool_name {
+            continue;
+        }
+        if let Some(VmValue::String(s)) = entry.get("executor") {
+            return Some(s.to_string());
+        }
+        return None;
+    }
+    None
+}
+
+/// Return the configured `mcp_server` name on `tool_name`'s entry, set
+/// either via `tool_define({executor: "mcp_server", mcp_server: "..."})`
+/// or via the implicit `_mcp_server` annotation `mcp_list_tools` injects.
+fn declared_mcp_server_for_tool(tools_val: Option<&VmValue>, tool_name: &str) -> Option<String> {
+    let dict = tools_val?.as_dict()?;
+    let tools_list = match dict.get("tools") {
+        Some(VmValue::List(l)) => l,
+        _ => return None,
+    };
+    for tool in tools_list.iter() {
+        let entry: &std::collections::BTreeMap<String, VmValue> = match tool {
+            VmValue::Dict(d) => d,
+            _ => continue,
+        };
+        if entry.get("name").map(|v| v.display()).as_deref() != Some(tool_name) {
+            continue;
+        }
+        if let Some(VmValue::String(s)) = entry.get("mcp_server") {
+            return Some(s.to_string());
+        }
+        return None;
+    }
+    None
+}
+
 /// Look up the Harn-defined handler closure for a tool, if any.
 pub(super) fn find_tool_handler(
     tools_val: Option<&VmValue>,
@@ -434,6 +613,106 @@ pub(super) fn find_tool_handler(
         }
     }
     None
+}
+
+/// Refuse to start an agent loop whose tool registry contains entries
+/// with no executable backend (harn#743). The validator runs once at
+/// loop entry so a misconfigured registry surfaces here, with a tool
+/// name and the documented set of executors, instead of failing later
+/// at the first model call with an unhelpful `[builtin_call]
+/// unhandled: <name>` error.
+///
+/// A tool entry is considered backed when any one of:
+/// - it has a callable `handler` (a `Closure` value) — the canonical
+///   `executor: "harn"` shape;
+/// - its `executor` field is set to one of the documented backends
+///   (`"host_bridge"`, `"mcp_server"`, `"provider_native"`, or the
+///   `"harn"`/`"harn_builtin"` aliases — handler-required cases are
+///   already caught by the harn-executor branch above);
+/// - it carries the `_mcp_server` annotation that `mcp_list_tools`
+///   injects on every tool dict, signalling MCP-served dispatch even
+///   when the user pushed the raw entry into the registry without
+///   going through `tool_define`.
+///
+/// Synthetic tools surfaced via `opts.native_tools` (e.g. the OpenAI
+/// `__harn_tool_search` meta-tool) live outside `tools_val` and are
+/// not considered here — those are dispatched through provider-native
+/// paths regardless of the user's registry.
+pub(crate) fn validate_tool_registry_executors(tools_val: Option<&VmValue>) -> Result<(), VmError> {
+    let Some(dict) = tools_val.and_then(|v| v.as_dict()) else {
+        return Ok(());
+    };
+    let tools_list = match dict.get("tools") {
+        Some(VmValue::List(l)) => l,
+        _ => return Ok(()),
+    };
+    for tool in tools_list.iter() {
+        let entry: &std::collections::BTreeMap<String, VmValue> = match tool {
+            VmValue::Dict(d) => d,
+            _ => continue,
+        };
+        let name = entry.get("name").map(|v| v.display()).unwrap_or_default();
+        if name.is_empty() {
+            continue;
+        }
+        if matches!(entry.get("handler"), Some(VmValue::Closure(_))) {
+            continue;
+        }
+        let executor = entry.get("executor").and_then(|v| match v {
+            VmValue::String(s) => Some(s.to_string()),
+            _ => None,
+        });
+        if let Some(executor) = executor.as_deref() {
+            match executor {
+                "host_bridge" | "mcp_server" | "provider_native" => continue,
+                // `harn`/`harn_builtin` reaches here only when the
+                // handler closure was lost between `tool_define` and
+                // `agent_loop` — `tool_define` rejects this combo at
+                // definition time, but the runtime still has to guard
+                // against tools mutated/copied after registration.
+                // The exception is the VM-stdlib short-circuit set
+                // (`read_file`, `list_directory`): `handle_tool_locally`
+                // provides the implicit Harn-side handler, so the entry
+                // is dispatchable even without a registered closure.
+                "harn" | "harn_builtin" if super::tools::is_vm_stdlib_short_circuit(&name) => {
+                    continue
+                }
+                "harn" | "harn_builtin" => {
+                    return Err(VmError::Runtime(format!(
+                        "agent_loop: tool '{name}' declares executor: \"{executor}\" \
+                         but has no callable `handler`. Reattach the handler fn or \
+                         change the executor to a backend that does not require one."
+                    )));
+                }
+                other => {
+                    return Err(VmError::Runtime(format!(
+                        "agent_loop: tool '{name}' declares unknown executor \"{other}\". \
+                         Expected one of: \"harn\", \"host_bridge\", \"mcp_server\", \
+                         \"provider_native\"."
+                    )));
+                }
+            }
+        }
+        if matches!(entry.get("_mcp_server"), Some(VmValue::String(_))) {
+            continue;
+        }
+        if let Some(VmValue::Dict(func)) = entry.get("function") {
+            if matches!(func.get("_mcp_server"), Some(VmValue::String(_))) {
+                continue;
+            }
+        }
+        return Err(VmError::Runtime(format!(
+            "agent_loop: tool '{name}' has no executable backend — no `handler` \
+             closure, no declared `executor`, and no `_mcp_server` annotation. \
+             Either attach a handler fn (executor: \"harn\"), declare an \
+             alternate backend (executor: \"host_bridge\" + host_capability, \
+             executor: \"mcp_server\" + mcp_server, or executor: \"provider_native\"), \
+             or remove the tool from the registry. Starting the loop with this \
+             tool would surface as `[builtin_call] unhandled: {name}` at the \
+             first model call."
+        )));
+    }
+    Ok(())
 }
 
 pub(super) fn classify_tool_mutation(tool_name: &str) -> String {
@@ -600,5 +879,164 @@ mod tests {
                 .await;
         assert!(outcome.result.is_err());
         assert!(outcome.executor.is_none());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn dispatch_honors_declared_host_bridge_executor() {
+        // harn#743: when a tool declares `executor: "host_bridge"`, the
+        // dispatcher tags the event as HostBridge regardless of the
+        // historic handler/`_mcp_server` heuristic.
+        let bridge = crate::bridge::HostBridge::from_parts_with_writer(
+            Arc::new(Mutex::new(std::collections::HashMap::new())),
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(|_| Err("test bridge".to_string())),
+            1,
+        );
+        let bridge = Rc::new(bridge);
+        let mut entry = BTreeMap::new();
+        entry.insert(
+            "executor".to_string(),
+            VmValue::String(Rc::from("host_bridge")),
+        );
+        entry.insert(
+            "host_capability".to_string(),
+            VmValue::String(Rc::from("interaction.ask")),
+        );
+        let tools = tools_dict(vec![("ask_user", entry)]);
+        let outcome = dispatch_tool_execution(
+            "ask_user",
+            &serde_json::json!({"prompt": "x"}),
+            Some(&tools),
+            Some(&bridge),
+            0,
+            0,
+        )
+        .await;
+        assert_eq!(outcome.executor, Some(ToolExecutor::HostBridge));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn dispatch_honors_declared_provider_native_executor() {
+        // Provider-native tools must never reach a runtime backend.
+        // The dispatcher rejects with ProviderNative as the executor so
+        // the ACP event reflects "model already executed this".
+        let mut entry = BTreeMap::new();
+        entry.insert(
+            "executor".to_string(),
+            VmValue::String(Rc::from("provider_native")),
+        );
+        let tools = tools_dict(vec![("tool_search", entry)]);
+        let outcome = dispatch_tool_execution(
+            "tool_search",
+            &serde_json::json!({}),
+            Some(&tools),
+            None,
+            0,
+            0,
+        )
+        .await;
+        assert_eq!(outcome.executor, Some(ToolExecutor::ProviderNative));
+        assert!(outcome.result.is_err());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn dispatch_honors_declared_mcp_server_executor() {
+        // Declared mcp_server uses the configured server name, not the
+        // implicit `_mcp_server` annotation.
+        let bridge = crate::bridge::HostBridge::from_parts_with_writer(
+            Arc::new(Mutex::new(std::collections::HashMap::new())),
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(|_| Err("test bridge".to_string())),
+            1,
+        );
+        let bridge = Rc::new(bridge);
+        let mut entry = BTreeMap::new();
+        entry.insert(
+            "executor".to_string(),
+            VmValue::String(Rc::from("mcp_server")),
+        );
+        entry.insert(
+            "mcp_server".to_string(),
+            VmValue::String(Rc::from("github")),
+        );
+        let tools = tools_dict(vec![("github_search_issues", entry)]);
+        let outcome = dispatch_tool_execution(
+            "github_search_issues",
+            &serde_json::json!({"query": "x"}),
+            Some(&tools),
+            Some(&bridge),
+            0,
+            0,
+        )
+        .await;
+        assert_eq!(
+            outcome.executor,
+            Some(ToolExecutor::McpServer {
+                server_name: "github".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn validate_tool_registry_rejects_handlerless_undeclared_tool() {
+        // harn#743 pre-flight: no handler, no executor, no
+        // `_mcp_server` annotation — the loop refuses to start.
+        let mut entry = BTreeMap::new();
+        entry.insert(
+            "name".to_string(),
+            VmValue::String(Rc::from("ask_user".to_string())),
+        );
+        let tools = tools_dict(vec![("ask_user", entry)]);
+        let err = validate_tool_registry_executors(Some(&tools)).unwrap_err();
+        let message = err.to_string();
+        assert!(
+            message.contains("ask_user"),
+            "error must name the offending tool: {message}"
+        );
+        assert!(
+            message.contains("no executable backend"),
+            "error must mention missing backend: {message}"
+        );
+    }
+
+    #[test]
+    fn validate_tool_registry_accepts_declared_host_bridge_tool() {
+        // A host_bridge declaration with no handler is valid — the
+        // bridge serves the call.
+        let mut entry = BTreeMap::new();
+        entry.insert(
+            "executor".to_string(),
+            VmValue::String(Rc::from("host_bridge")),
+        );
+        let tools = tools_dict(vec![("ask_user", entry)]);
+        validate_tool_registry_executors(Some(&tools))
+            .expect("host_bridge declaration must satisfy pre-flight");
+    }
+
+    #[test]
+    fn validate_tool_registry_accepts_vm_stdlib_short_circuit_without_handler() {
+        // `read_file` and `list_directory` are served by
+        // `handle_tool_locally` — they don't need a registered handler
+        // to be dispatchable.
+        let mut entry = BTreeMap::new();
+        entry.insert("executor".to_string(), VmValue::String(Rc::from("harn")));
+        let tools = tools_dict(vec![("read_file", entry)]);
+        validate_tool_registry_executors(Some(&tools))
+            .expect("VM-stdlib short-circuit must satisfy pre-flight without a handler");
+    }
+
+    #[test]
+    fn validate_tool_registry_accepts_mcp_list_tools_entry() {
+        // Tools pushed in straight from `mcp_list_tools` carry the
+        // `_mcp_server` annotation; the validator treats that as a
+        // sufficient backend declaration.
+        let mut entry = BTreeMap::new();
+        entry.insert(
+            "_mcp_server".to_string(),
+            VmValue::String(Rc::from("github")),
+        );
+        let tools = tools_dict(vec![("github_search", entry)]);
+        validate_tool_registry_executors(Some(&tools))
+            .expect("_mcp_server-tagged entry must satisfy pre-flight");
     }
 }

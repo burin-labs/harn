@@ -1,0 +1,7 @@
+pipeline test(task) {
+  // tool_define rejects a registration with no handler and no
+  // executor: this is the foot-gun that used to surface as
+  // `[builtin_call] unhandled: <name>` at the first model call.
+  let r = tool_registry()
+  tool_define(r, "ask_user", "Ask the user a question", {parameters: {prompt: "string"}})
+}

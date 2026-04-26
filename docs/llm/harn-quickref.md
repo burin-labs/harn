@@ -597,6 +597,55 @@ println(response.output_tokens)
 | `llm_backoff_ms` | int | 2000 | Base exponential backoff. |
 | `stream` | bool | true | SSE streaming transport. |
 
+### Tool executor declarations
+
+Every `tool_define(...)` registration declares **how the tool is
+dispatched**. The runtime uses this to decide where the call runs and
+to tag ACP `tool_call_update.executor` events so clients can render
+"via host bridge" / "via mcp:linear" badges.
+
+| `executor` value | Required companion field | Where it dispatches |
+|---|---|---|
+| `"harn"` *(or `"harn_builtin"` alias)* | `handler` (a closure) | In-VM via the registered handler. The VM stdlib short-circuits `read_file` / `list_directory` even without a handler. |
+| `"host_bridge"` | `host_capability: "cap.op"` | Through the host shell's `builtin_call` bridge (Swift IDE bridge, BurinApp, BurinCLI). `harn check` validates the binding against the host capability manifest when one is configured. |
+| `"mcp_server"` | `mcp_server: "<server_name>"` | Through the configured MCP server. Tools sourced from `mcp_list_tools` carry the `_mcp_server` annotation and don't need the explicit declaration. |
+| `"provider_native"` | *(none)* | Provider-side (e.g. OpenAI Responses API server tools). The runtime never dispatches these locally — the model returns the already-executed result inline. |
+
+```harn
+// Harn handler (default when `handler` is present and `executor` is
+// omitted — back-compat path).
+registry = tool_define(registry, "look", "Read files", {
+  parameters: {path: "string"},
+  handler: { args -> read_file(args.path) },
+})
+
+// Host-bridge tool — handler-less by design.
+registry = tool_define(registry, "ask_user", "Ask the user", {
+  parameters: {prompt: "string"},
+  executor: "host_bridge",
+  host_capability: "interaction.ask",
+})
+
+// MCP-served tool with explicit server binding.
+registry = tool_define(registry, "github_search", "Search issues", {
+  parameters: {query: "string"},
+  executor: "mcp_server",
+  mcp_server: "github",
+})
+
+// Provider-native — runtime never dispatches.
+registry = tool_define(registry, "tool_search", "...", {
+  parameters: {query: "string"},
+  executor: "provider_native",
+})
+```
+
+`tool_define` rejects invalid combinations at definition time, and
+`agent_loop` refuses to start if the registry contains a tool with no
+executable backend. The historical `[builtin_call] unhandled: <name>`
+runtime failure is replaced by a clear error pointing at the offending
+tool.
+
 ### Tool loading & search
 
 Mark tools that the model rarely needs with `defer_loading: true` and

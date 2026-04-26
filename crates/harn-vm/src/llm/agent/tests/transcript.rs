@@ -531,6 +531,17 @@ async fn user_response_block_can_complete_persistent_loop_without_done_sentinel(
             "parameters".to_string(),
             VmValue::Dict(Rc::new(tool_params)),
         ),
+        // Declared executor satisfies the agent_loop pre-flight check
+        // (harn#743). The transcript tests don't actually dispatch the
+        // tool — they only assert on emitted events.
+        (
+            "executor".to_string(),
+            VmValue::String(Rc::from("host_bridge")),
+        ),
+        (
+            "host_capability".to_string(),
+            VmValue::String(Rc::from("workspace.read_text")),
+        ),
     ])));
     opts.tools = Some(VmValue::Dict(Rc::new(std::collections::BTreeMap::from([
         (
@@ -690,6 +701,17 @@ async fn ledger_tool_is_rejected_when_no_task_ledger_is_active() {
         (
             "parameters".to_string(),
             VmValue::Dict(Rc::new(tool_params)),
+        ),
+        // Declared executor satisfies the agent_loop pre-flight check
+        // (harn#743). The transcript tests don't actually dispatch the
+        // tool — they only assert on emitted events.
+        (
+            "executor".to_string(),
+            VmValue::String(Rc::from("host_bridge")),
+        ),
+        (
+            "host_capability".to_string(),
+            VmValue::String(Rc::from("workspace.read_text")),
         ),
     ])));
     opts.tools = Some(VmValue::Dict(Rc::new(std::collections::BTreeMap::from([
