@@ -1213,6 +1213,20 @@ fn register_llm_mock_builtins(vm: &mut Vm) {
         reset_llm_mock_state();
         Ok(VmValue::Nil)
     });
+
+    vm.register_builtin("llm_mock_push_scope", |_args, _out| {
+        mock::push_llm_mock_scope();
+        Ok(VmValue::Nil)
+    });
+
+    vm.register_builtin("llm_mock_pop_scope", |_args, _out| {
+        if !mock::pop_llm_mock_scope() {
+            return Err(crate::value::VmError::Thrown(VmValue::String(Rc::from(
+                "llm_mock_pop_scope: no scope to pop",
+            ))));
+        }
+        Ok(VmValue::Nil)
+    });
 }
 
 /// Register llm_stream builtin.

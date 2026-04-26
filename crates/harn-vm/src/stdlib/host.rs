@@ -28,11 +28,40 @@ struct HostMockCall {
 thread_local! {
     static HOST_MOCKS: RefCell<Vec<HostMock>> = const { RefCell::new(Vec::new()) };
     static HOST_MOCK_CALLS: RefCell<Vec<HostMockCall>> = const { RefCell::new(Vec::new()) };
+    static HOST_MOCK_SCOPES: RefCell<Vec<(Vec<HostMock>, Vec<HostMockCall>)>> =
+        const { RefCell::new(Vec::new()) };
 }
 
 pub(crate) fn reset_host_state() {
     HOST_MOCKS.with(|mocks| mocks.borrow_mut().clear());
     HOST_MOCK_CALLS.with(|calls| calls.borrow_mut().clear());
+    HOST_MOCK_SCOPES.with(|scopes| scopes.borrow_mut().clear());
+}
+
+/// Push the current host-mock state onto an internal stack and start a
+/// fresh empty scope. Paired with `pop_host_mock_scope`. Used by the
+/// `with_host_mocks` helper in `std/testing` to give tests automatic
+/// cleanup, including when the body throws.
+fn push_host_mock_scope() {
+    let mocks = HOST_MOCKS.with(|v| std::mem::take(&mut *v.borrow_mut()));
+    let calls = HOST_MOCK_CALLS.with(|v| std::mem::take(&mut *v.borrow_mut()));
+    HOST_MOCK_SCOPES.with(|v| v.borrow_mut().push((mocks, calls)));
+}
+
+/// Restore the most recently pushed host-mock state, replacing any
+/// mocks or recorded calls accumulated inside the scope. Returns
+/// `false` if there is no saved scope to pop, so callers can surface a
+/// clear "imbalanced scope" error rather than silently no-op'ing.
+fn pop_host_mock_scope() -> bool {
+    let entry = HOST_MOCK_SCOPES.with(|v| v.borrow_mut().pop());
+    match entry {
+        Some((mocks, calls)) => {
+            HOST_MOCKS.with(|v| *v.borrow_mut() = mocks);
+            HOST_MOCK_CALLS.with(|v| *v.borrow_mut() = calls);
+            true
+        }
+        None => false,
+    }
 }
 
 fn capability_manifest_map() -> BTreeMap<String, VmValue> {
@@ -526,6 +555,20 @@ pub(crate) fn register_host_builtins(vm: &mut Vm) {
                 .collect::<Vec<_>>()
         });
         Ok(VmValue::List(Rc::new(calls)))
+    });
+
+    vm.register_builtin("host_mock_push_scope", |_args, _out| {
+        push_host_mock_scope();
+        Ok(VmValue::Nil)
+    });
+
+    vm.register_builtin("host_mock_pop_scope", |_args, _out| {
+        if !pop_host_mock_scope() {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(
+                "host_mock_pop_scope: no scope to pop",
+            ))));
+        }
+        Ok(VmValue::Nil)
     });
 
     vm.register_builtin("host_capabilities", |_args, _out| {

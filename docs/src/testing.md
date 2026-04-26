@@ -113,6 +113,75 @@ pipeline default(task) {
 }
 ```
 
+### Scoped fixtures (`with_host_mocks` / `with_llm_mocks` / `with_mocks`)
+
+Pipeline tests with many capabilities accumulate manual `host_mock_clear()`
+pairs around each test. A failing assertion can skip the clear step and leak
+mocks into the next test. Scoped fixtures handle that lifecycle for you and
+clean up reliably even when the body throws.
+
+| Helper | Description |
+|----------|-------------|
+| `with_host_mocks(mocks, body)` | Push a fresh host-mock scope, register `mocks`, run `body()`, restore on exit |
+| `with_llm_mocks(mocks, body)` | Same shape for LLM mocks (FIFO + `match` patterns) |
+| `with_mocks({host_mocks, llm_mocks}, body)` | Combined scope for tests that exercise both surfaces |
+| `llm_calls()` / `llm_call_count()` | Inspect the LLM call log captured inside the current scope |
+
+Each entry in the host-mock list is a dict shaped like the existing
+`host_mock(...)` config:
+
+```harn
+{capability: "runtime", operation: "pipeline_input", result: {}, params: {}}
+{capability: "project", operation: "metadata_set", error: "denied"}
+```
+
+`error` (if non-nil) takes precedence over `result`, mirroring
+`mock_host_error` / `mock_host_result`.
+
+```harn,ignore
+import { with_host_mocks, assert_host_called } from "std/testing"
+
+pipeline test_skill_registry() {
+  with_host_mocks(
+    [
+      {capability: "runtime", operation: "pipeline_input", result: {}},
+      {capability: "project", operation: "skills", result: []},
+    ],
+    { ->
+      let registry = skill_registry_from_host()
+      assert_eq(len(registry.skills), 0, "no skills registered")
+      assert_host_called("project", "skills", nil, nil)
+    },
+  )
+}
+```
+
+Key properties:
+
+- The body runs inside a fresh host-mock and host-call log; nothing inside
+  leaks out, and nothing outside is visible inside.
+- The prior state is restored before the helper returns, including when the
+  body throws — the thrown error is re-raised after cleanup.
+- Scopes nest: an inner `with_host_mocks` sees only its own mocks while
+  active, then pops back to the outer scope on exit.
+- `with_llm_mocks` follows the same shape; entries are passed straight to
+  `llm_mock(...)`, so any field accepted by that builtin (including
+  `match` / `consume_match` / `error`) is supported.
+
+`with_mocks(config, body)` is the unified form for tests that need both:
+
+```harn,ignore
+with_mocks(
+  {
+    host_mocks: [{capability: "ws", operation: "read", result: "ok"}],
+    llm_mocks: [{text: "agreed"}],
+  },
+  { ->
+    run_pipeline_under_test()
+  },
+)
+```
+
 ## LLM mocking
 
 For testing agent loops without real LLM calls, use `llm_mock()`:

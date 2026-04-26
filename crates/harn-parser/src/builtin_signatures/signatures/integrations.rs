@@ -52,6 +52,14 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("nil")),
     },
     BuiltinSig {
+        name: "host_mock_pop_scope",
+        return_type: Some(BuiltinReturn::Named("nil")),
+    },
+    BuiltinSig {
+        name: "host_mock_push_scope",
+        return_type: Some(BuiltinReturn::Named("nil")),
+    },
+    BuiltinSig {
         name: "http_delete",
         return_type: Some(BuiltinReturn::Named("dict")),
     },
