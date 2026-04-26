@@ -6,6 +6,7 @@
 
 pub mod atom;
 pub mod backend;
+pub mod fixer;
 pub mod intent;
 pub mod predicates;
 pub mod slice;
@@ -15,6 +16,10 @@ pub use atom::{Atom, AtomError, AtomId, AtomSignature, Provenance, TextOp};
 pub use backend::{
     AtomRef, FlowNativeBackend, FlowSlice, GitExportReceipt, ShadowGitBackend, ShipReceipt,
     VcsBackend, VcsBackendError,
+};
+pub use fixer::{
+    propose_follow_up_slice, FixerError, FixerFollowUpProposal, FixerProposalInput, FixerReceipt,
+    FixerSigningContext, FIXER_PERSONA_NAME, FIXER_TRIGGER,
 };
 pub use intent::{
     Intent, IntentBoundaryClassifier, IntentBoundaryDecision, IntentBoundaryDispute,

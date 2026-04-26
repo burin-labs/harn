@@ -1,0 +1,29 @@
+[package]
+name = "harn-fixer-persona"
+version = "0.1.0"
+
+[[personas]]
+name = "fixer"
+version = "0.1.0"
+description = "Consumes inert Flow remediation suggestions and proposes auditable follow-up slices."
+entry_workflow = "manifest.harn#run"
+tools = ["github", "mcp"]
+capabilities = [
+  "git.get_diff",
+  "project.scan",
+  "runtime.approved_plan",
+  "runtime.dry_run",
+  "runtime.record_run",
+]
+autonomy_tier = "act_with_approval"
+receipt_policy = "required"
+triggers = ["invariant.blocked_with_remediation"]
+schedules = []
+handoffs = []
+context_packs = []
+evals = []
+owner = "platform"
+budget = { daily_usd = 4.0, frontier_escalations = 1, max_tokens = 40000, max_runtime_seconds = 300 }
+model_policy = { default_model = "gpt-5.4-mini", escalation_model = "gpt-5.4", fallback_models = ["gpt-5.2"], reasoning_effort = "medium" }
+rollout_policy = { mode = "approval_only", percentage = 100, cohorts = ["flow-v0"] }
+package_source = { package = "harn-fixer-persona", path = "personas/fixer" }

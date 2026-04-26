@@ -195,6 +195,35 @@ fn persona_manifest_flag_loads_example_personas() {
 }
 
 #[test]
+fn persona_manifest_flag_loads_fixer_persona() {
+    let output = Command::new(env!("CARGO_BIN_EXE_harn"))
+        .args([
+            "persona",
+            "--manifest",
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../personas/fixer/harn.toml"
+            ),
+            "inspect",
+            "fixer",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stdout={}, stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let persona: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(persona["name"], "fixer");
+    assert_eq!(persona["triggers"][0], "invariant.blocked_with_remediation");
+    assert_eq!(persona["entry_workflow"], "manifest.harn#run");
+    assert_eq!(persona["receipt_policy"], "required");
+}
+
+#[test]
 fn persona_runtime_status_tick_and_budget_are_persisted() {
     let temp = write_manifest(valid_manifest());
     let state_dir = temp.path().join(".harn-personas-test");
