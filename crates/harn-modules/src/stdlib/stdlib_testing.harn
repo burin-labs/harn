@@ -1,5 +1,4 @@
-// std/testing — helpers for writing Harn tests.
-
+/** std/testing — helpers for writing Harn tests. */
 fn params_subset_match(expected, actual) {
   if expected == nil {
     return true
@@ -49,9 +48,8 @@ pub fn host_calls() {
 
 /** host_calls_for. */
 pub fn host_calls_for(cap: string, op: string) {
-  return host_mock_calls().filter({ call ->
-    return call?.capability == cap && call?.operation == op
-  })
+  return host_mock_calls()
+    .filter({ call -> return call?.capability == cap && call?.operation == op })
 }
 
 /** host_call_count. */
@@ -92,4 +90,128 @@ pub fn assert_host_call_count(expected_count: int, cap: string, op: string, mess
   let actual_count = host_call_count_for(cap, op)
   let default_message = "Expected " + to_string(expected_count) + " host calls, got " + to_string(actual_count)
   return assert_eq(actual_count, expected_count, message ?? default_message)
+}
+
+/**
+ * Apply a single host-mock fixture entry. Each entry is a dict with:
+ *   { capability, operation, result?, error?, params? }
+ * `error` (string) takes precedence over `result` so an entry may
+ * either mock a successful response or an exception, never both.
+ */
+fn apply_host_mock_entry(entry) {
+  if type_of(entry) != "dict" {
+    throw "with_host_mocks: each entry must be a dict, got " + type_of(entry)
+  }
+  let cap = entry?.capability
+  let op = entry?.operation
+  if cap == nil || op == nil {
+    throw "with_host_mocks: each entry must include 'capability' and 'operation'"
+  }
+  if entry?.error != nil {
+    return mock_host_error(cap, op, entry.error, entry?.params)
+  }
+  return mock_host_result(cap, op, entry?.result, entry?.params)
+}
+
+/**
+ * Run `body` with a fresh host-mock scope. Each entry in `mocks` is
+ * applied via `mock_host_result` / `mock_host_error`, the body runs,
+ * and the prior host-mock state plus call log is restored on exit —
+ * even if the body throws. Nested scopes stack: an inner
+ * `with_host_mocks` does not leak into the outer scope.
+ *
+ * Returns whatever `body` returns. Re-raises any thrown error after
+ * cleanup.
+ */
+pub fn with_host_mocks(mocks, body) {
+  host_mock_push_scope()
+  // Registration runs inside the same try/catch as the body so a
+  // malformed entry takes the cleanup path instead of leaking the
+  // pushed scope.
+  try {
+    for entry in mocks ?? [] {
+      apply_host_mock_entry(entry)
+    }
+    let result = body()
+    host_mock_pop_scope()
+    return result
+  } catch (e) {
+    host_mock_pop_scope()
+    throw e
+  }
+}
+
+/** llm_calls. Returns the LLM mock call log for the current scope. */
+pub fn llm_calls() {
+  return llm_mock_calls()
+}
+
+/** llm_call_count. Number of LLM calls recorded in the current scope. */
+pub fn llm_call_count() -> int {
+  return len(llm_mock_calls())
+}
+
+/**
+ * Run `body` with a fresh LLM-mock scope. Each entry in `mocks` is
+ * pushed via `llm_mock(...)` and consumed in order by the body. The
+ * prior LLM-mock queue plus call log is restored on exit — even if
+ * the body throws. Nested scopes stack the same way as
+ * `with_host_mocks`.
+ *
+ * Returns whatever `body` returns. Re-raises any thrown error after
+ * cleanup.
+ */
+pub fn with_llm_mocks(mocks, body) {
+  llm_mock_push_scope()
+  try {
+    for entry in mocks ?? [] {
+      if type_of(entry) != "dict" {
+        throw "with_llm_mocks: each entry must be a dict, got " + type_of(entry)
+      }
+      llm_mock(entry)
+    }
+    let result = body()
+    llm_mock_pop_scope()
+    return result
+  } catch (e) {
+    llm_mock_pop_scope()
+    throw e
+  }
+}
+
+/**
+ * Unified scoped fixture for tests that mix host and LLM mocks.
+ * `config` is a dict with optional `host_mocks` and `llm_mocks` lists,
+ * each shaped like the entries accepted by `with_host_mocks` and
+ * `with_llm_mocks`. Both scopes are pushed before the body runs and
+ * popped (in reverse order) after — including on thrown errors.
+ */
+pub fn with_mocks(config, body) {
+  let host_entries = config?.host_mocks ?? []
+  let llm_entries = config?.llm_mocks ?? []
+  host_mock_push_scope()
+  llm_mock_push_scope()
+  // Wrap registration *and* body together so a malformed entry
+  // (e.g. a missing capability) still triggers the same restore path
+  // that a thrown body would. Without this, an exception during
+  // registration would leak both pushed scopes.
+  try {
+    for entry in host_entries {
+      apply_host_mock_entry(entry)
+    }
+    for entry in llm_entries {
+      if type_of(entry) != "dict" {
+        throw "with_mocks: each llm_mocks entry must be a dict, got " + type_of(entry)
+      }
+      llm_mock(entry)
+    }
+    let result = body()
+    llm_mock_pop_scope()
+    host_mock_pop_scope()
+    return result
+  } catch (e) {
+    llm_mock_pop_scope()
+    host_mock_pop_scope()
+    throw e
+  }
 }

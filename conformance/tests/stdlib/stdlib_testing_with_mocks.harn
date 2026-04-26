@@ -1,0 +1,155 @@
+import {
+  assert_host_call_count,
+  assert_host_called,
+  clear_host_mocks,
+  host_call_count,
+  host_calls,
+  llm_call_count,
+  llm_calls,
+  mock_host_result,
+  with_host_mocks,
+  with_llm_mocks,
+  with_mocks,
+} from "std/testing"
+
+fn body_basic_host_scope() {
+  let v = host_call("inner.op", {})
+  return {v: v, inner_count: host_call_count(), inner_calls: host_calls()}
+}
+
+fn body_thrown_inner() {
+  host_call("inner.op", {})
+  throw "boom"
+}
+
+fn body_inner_nested() {
+  let v = host_call("inner.op", {})
+  return {v: v, count: host_call_count()}
+}
+
+fn body_outer_nested() {
+  let outer_v = host_call("outer.op", {})
+  let inner_summary = with_host_mocks([{capability: "inner", operation: "op", result: "inner_v"}], body_inner_nested)
+  let after = host_call("outer.op", {})
+  return {outer_v: outer_v, inner_summary: inner_summary, after: after, outer_count: host_call_count()}
+}
+
+fn body_call_assertions() {
+  let read = host_call("ws.read", {path: "x"})
+  let write_err = try {
+    host_call("ws.write", {path: "y"})
+  } catch (e) {
+    e
+  }
+  // Exercise the existing assert_* helpers from inside the scope so
+  // they read against the fresh, scoped call log rather than any
+  // outer state that the caller may have accumulated.
+  assert_host_called("ws", "read", {path: "x"}, nil)
+  assert_host_call_count(1, "ws", "write", nil)
+  return {read: read, write_err: write_err, total_calls: len(host_calls())}
+}
+
+fn body_llm_capture() {
+  let r = llm_call("hello", nil, {provider: "mock"})
+  return {text: r.text, count: llm_call_count(), calls: llm_calls()}
+}
+
+fn body_combined_mocks() {
+  let h = host_call("h.op", {})
+  let l = llm_call("ask", nil, {provider: "mock"})
+  return {h: h, l: l.text}
+}
+
+pipeline test_with_mocks(task) {
+  // === basic host scope ===
+  clear_host_mocks()
+  llm_mock_clear()
+  mock_host_result("outer", "op", "outer_result", nil)
+  host_call("outer.op", {})
+  assert_eq(host_call_count(), 1)
+  let basic = with_host_mocks(
+    [{capability: "inner", operation: "op", result: "inner_result"}],
+    body_basic_host_scope,
+  )
+  assert_eq(basic.v, "inner_result")
+  assert_eq(basic.inner_count, 1)
+  assert_eq(len(basic.inner_calls), 1)
+  // Outer state restored.
+  assert_eq(host_call_count(), 1)
+  assert_eq(host_call("outer.op", {}), "outer_result")
+  // === thrown body still cleans up ===
+  clear_host_mocks()
+  mock_host_result("outer", "op", "outer_result", nil)
+  let caught = try {
+    with_host_mocks([{capability: "inner", operation: "op", result: "inner_result"}], body_thrown_inner)
+    "unreachable"
+  } catch (e) {
+    e
+  }
+  assert_eq(caught, "boom")
+  assert_eq(host_call_count(), 0)
+  assert_eq(host_call("outer.op", {}), "outer_result")
+  // === nested scopes ===
+  clear_host_mocks()
+  let nested = with_host_mocks([{capability: "outer", operation: "op", result: "outer_v"}], body_outer_nested)
+  assert_eq(nested.outer_v, "outer_v")
+  assert_eq(nested.inner_summary.v, "inner_v")
+  assert_eq(nested.inner_summary.count, 1)
+  assert_eq(nested.after, "outer_v")
+  assert_eq(nested.outer_count, 2)
+  // === host call assertions inside scope ===
+  clear_host_mocks()
+  let asserted = with_host_mocks(
+    [
+      {capability: "ws", operation: "read", result: "data", params: {path: "x"}},
+      {capability: "ws", operation: "write", error: "denied", params: {path: "y"}},
+    ],
+    body_call_assertions,
+  )
+  assert_eq(asserted.read, "data")
+  assert_eq(asserted.write_err, "denied")
+  assert_eq(asserted.total_calls, 2)
+  // Outside the scope, the call log is restored — capture-after-pop.
+  assert_eq(host_call_count(), 0)
+  // === LLM mock scope captures calls ===
+  clear_host_mocks()
+  llm_mock_clear()
+  let captured = with_llm_mocks([{text: "scoped"}], body_llm_capture)
+  assert_eq(captured.text, "scoped")
+  assert_eq(captured.count, 1)
+  assert_eq(len(captured.calls), 1)
+  assert_eq(llm_call_count(), 0)
+  // === malformed mock entry rolls back the scope ===
+  // A missing capability should propagate a clear error AND leave the
+  // outer scope clean (no leaked pushed scope, no leaked outer mock).
+  clear_host_mocks()
+  mock_host_result("outer", "op", "outer_result", nil)
+  let bad_entry_err = try {
+    with_host_mocks([{operation: "broken"}], body_basic_host_scope)
+    "unreachable"
+  } catch (e) {
+    e
+  }
+  assert_eq(host_call("outer.op", {}), "outer_result")
+  assert(contains(bad_entry_err, "with_host_mocks"))
+  // Pop with no matching push must throw a clear error.
+  let pop_err = try {
+    host_mock_pop_scope()
+    "unreachable"
+  } catch (e) {
+    e
+  }
+  assert(contains(pop_err, "no scope to pop"))
+  // === with_mocks combines host and llm ===
+  clear_host_mocks()
+  llm_mock_clear()
+  let combined = with_mocks(
+    {host_mocks: [{capability: "h", operation: "op", result: "host_v"}], llm_mocks: [{text: "llm_v"}]},
+    body_combined_mocks,
+  )
+  assert_eq(combined.h, "host_v")
+  assert_eq(combined.l, "llm_v")
+  assert_eq(host_call_count(), 0)
+  assert_eq(llm_call_count(), 0)
+  println("ok")
+}

@@ -81,6 +81,8 @@ thread_local! {
     static CLI_LLM_MOCKS: RefCell<Vec<LlmMock>> = const { RefCell::new(Vec::new()) };
     static CLI_LLM_RECORDINGS: RefCell<Vec<LlmMock>> = const { RefCell::new(Vec::new()) };
     static LLM_MOCK_CALLS: RefCell<Vec<LlmMockCall>> = const { RefCell::new(Vec::new()) };
+    static LLM_MOCK_SCOPES: RefCell<Vec<(Vec<LlmMock>, Vec<LlmMockCall>)>> =
+        const { RefCell::new(Vec::new()) };
 }
 
 pub(crate) fn push_llm_mock(mock: LlmMock) {
@@ -97,6 +99,34 @@ pub(crate) fn reset_llm_mock_state() {
     CLI_LLM_MOCKS.with(|v| v.borrow_mut().clear());
     CLI_LLM_RECORDINGS.with(|v| v.borrow_mut().clear());
     LLM_MOCK_CALLS.with(|v| v.borrow_mut().clear());
+    LLM_MOCK_SCOPES.with(|v| v.borrow_mut().clear());
+}
+
+/// Save the current builtin LLM mock queue and recorded-calls list, then
+/// start a fresh empty scope. Paired with `pop_llm_mock_scope`. Backs
+/// the `with_llm_mocks` helper in `std/testing` so tests reliably
+/// roll back to the prior state, including when the body throws.
+pub(crate) fn push_llm_mock_scope() {
+    let mocks = LLM_MOCKS.with(|v| std::mem::take(&mut *v.borrow_mut()));
+    let calls = LLM_MOCK_CALLS.with(|v| std::mem::take(&mut *v.borrow_mut()));
+    LLM_MOCK_SCOPES.with(|v| v.borrow_mut().push((mocks, calls)));
+}
+
+/// Restore the most recently pushed builtin LLM mock scope. Returns
+/// `false` when there is nothing to pop, so the builtin can surface a
+/// clear "imbalanced scope" error rather than silently corrupting
+/// state. CLI-installed mocks are intentionally untouched: they are an
+/// outer harness and should not flicker on each per-test scope swap.
+pub(crate) fn pop_llm_mock_scope() -> bool {
+    let entry = LLM_MOCK_SCOPES.with(|v| v.borrow_mut().pop());
+    match entry {
+        Some((mocks, calls)) => {
+            LLM_MOCKS.with(|v| *v.borrow_mut() = mocks);
+            LLM_MOCK_CALLS.with(|v| *v.borrow_mut() = calls);
+            true
+        }
+        None => false,
+    }
 }
 
 pub fn clear_cli_llm_mock_mode() {

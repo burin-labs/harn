@@ -65,6 +65,15 @@ granular archaeology.
   keys (`token`, `secret`, `password`, `api_key`, `authorization`,
   `cookie`) and secret-shaped values (`sk-…`, `ghp_…`, `xoxb-…`,
   `AKIA…`, long credential-shaped runs) before fixtures are written.
+- **Scoped host/LLM mock fixtures (#745).** `std/testing` now ships
+  `with_host_mocks(mocks, body)`, `with_llm_mocks(mocks, body)`, and
+  `with_mocks({host_mocks, llm_mocks}, body)` helpers that snapshot the
+  current host and LLM mock state, register the supplied fixtures, run the
+  body, and restore the prior state on exit — including when the body
+  throws. Nested scopes stack cleanly. New `host_mock_push_scope` /
+  `host_mock_pop_scope` and `llm_mock_push_scope` / `llm_mock_pop_scope`
+  builtins back the helpers and are usable directly when a scope outlives
+  a single closure.
 - **Flow predicate-language design record (#584).** Added
   `docs/src/flow-predicates.md` with explicit decisions for predicate budget
   semantics, bootstrap signing, semantic predicate determinism, and
