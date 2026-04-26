@@ -226,7 +226,7 @@ async fn async_main() {
             commands::contracts::handle_contracts_command(args).await;
         }
         Command::Connect(args) => {
-            commands::connect::run_connect(args).await;
+            commands::connect::run_connect(*args).await;
         }
         Command::Lint(args) => {
             let targets: Vec<&str> = args.targets.iter().map(String::as_str).collect();

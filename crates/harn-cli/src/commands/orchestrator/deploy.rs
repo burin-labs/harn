@@ -5,12 +5,20 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
+use reqwest::blocking::Client;
+use reqwest::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE};
+use reqwest::Method;
+use serde_json::Value as JsonValue;
+
 use crate::cli::{OrchestratorDeployArgs, OrchestratorDeployProvider, OrchestratorLocalArgs};
 use crate::package::{Manifest, TriggerKind};
 
 use super::common;
 
 const CONTAINER_MANIFEST_PATH: &str = "/app/harn.toml";
+const RENDER_API_BASE: &str = "https://api.render.com/v1";
+const FLY_MACHINES_API_BASE: &str = "https://api.machines.dev/v1";
+const RAILWAY_GRAPHQL_ENDPOINT: &str = "https://backboard.railway.com/graphql/v2";
 
 #[derive(Debug)]
 struct ValidatedManifest {
@@ -62,27 +70,38 @@ pub(crate) async fn run(args: OrchestratorDeployArgs) -> Result<(), String> {
         println!("{}", bundle.spec_contents);
     }
 
-    let mut plan = Vec::new();
+    let secret_sync_plan = if args.no_secret_sync || env.secrets.is_empty() {
+        None
+    } else {
+        Some(secret_sync_plan(&args, &env.secrets)?)
+    };
+
+    let mut pre_deploy_plan = Vec::new();
     if args.build {
-        plan.push(build_image_command(&args, &bundle));
+        pre_deploy_plan.push(build_image_command(&args, &bundle));
     }
-    plan.extend(public_env_sync_commands(&args, &env.public));
-    if !args.no_secret_sync && !env.secrets.is_empty() {
-        plan.extend(secret_sync_commands(&args, &env.secrets));
-    }
-    plan.push(provider_deploy_command(&args, &bundle));
+    pre_deploy_plan.extend(public_env_sync_commands(&args, &env.public));
+    let deploy_command = provider_deploy_command(&args, &bundle);
 
     if args.dry_run {
         println!("dry run; commands not executed:");
-        for command in &plan {
+        for command in &pre_deploy_plan {
             println!("  {}", command.display());
         }
+        if let Some(secret_sync_plan) = &secret_sync_plan {
+            println!("  {}", secret_sync_plan.display());
+        }
+        println!("  {}", deploy_command.display());
         return Ok(());
     }
 
-    for command in plan {
+    for command in pre_deploy_plan {
         run_checked(command)?;
     }
+    if let Some(secret_sync_plan) = secret_sync_plan {
+        run_secret_sync(secret_sync_plan)?;
+    }
+    run_checked(deploy_command)?;
 
     if let Some(url) = args
         .health_url
@@ -403,53 +422,227 @@ fn build_image_command(args: &OrchestratorDeployArgs, bundle: &DeployBundle) -> 
     command
 }
 
-fn secret_sync_commands(
-    args: &OrchestratorDeployArgs,
-    secrets: &BTreeMap<String, String>,
-) -> Vec<PlannedCommand> {
-    match args.provider {
-        OrchestratorDeployProvider::Fly => {
-            let mut command = PlannedCommand::new("fly");
-            command.args(["secrets", "set"]);
-            for (key, value) in secrets {
-                command.arg_sensitive(format!("{key}={value}"));
+#[derive(Debug, Clone)]
+struct SecretSyncPlan {
+    provider: OrchestratorDeployProvider,
+    target: String,
+    secrets: BTreeMap<String, String>,
+    auth_token: String,
+    railway_project: Option<String>,
+    railway_environment: Option<String>,
+}
+
+impl SecretSyncPlan {
+    fn display(&self) -> String {
+        let keys = self.secrets.keys().cloned().collect::<Vec<_>>().join(", ");
+        match self.provider {
+            OrchestratorDeployProvider::Render => {
+                format!(
+                    "sync {} secret(s) to Render service {} via API: {}",
+                    self.secrets.len(),
+                    shell_quote(&self.target),
+                    keys
+                )
             }
-            command.args(["--app", args.name.as_str()]);
-            vec![command]
-        }
-        OrchestratorDeployProvider::Railway => secrets
-            .iter()
-            .map(|(key, value)| {
-                let mut command = PlannedCommand::new("railway");
-                command.args(["variable", "set"]);
-                command.arg_sensitive(format!("{key}={value}"));
-                command.arg("--skip-deploys");
-                if let Some(service) = &args.railway_service {
-                    command.args(["--service", service.as_str()]);
-                }
-                if let Some(environment) = &args.railway_environment {
-                    command.args(["--environment", environment.as_str()]);
-                }
-                command
-            })
-            .collect(),
-        OrchestratorDeployProvider::Render => {
-            let Some(service) = &args.render_service else {
-                return Vec::new();
-            };
-            secrets
-                .iter()
-                .map(|(key, value)| {
-                    let mut command = PlannedCommand::new("render");
-                    command.args(["services", "update", service.as_str()]);
-                    command.arg("--env-var");
-                    command.arg_sensitive(format!("{key}={value}"));
-                    command.arg("--confirm");
-                    command
-                })
-                .collect()
+            OrchestratorDeployProvider::Fly => {
+                format!(
+                    "sync {} secret(s) to Fly app {} via Machines API: {}",
+                    self.secrets.len(),
+                    shell_quote(&self.target),
+                    keys
+                )
+            }
+            OrchestratorDeployProvider::Railway => {
+                format!(
+                    "sync {} secret(s) to Railway service {} via GraphQL API: {}",
+                    self.secrets.len(),
+                    shell_quote(&self.target),
+                    keys
+                )
+            }
         }
     }
+}
+
+fn secret_sync_plan(
+    args: &OrchestratorDeployArgs,
+    secrets: &BTreeMap<String, String>,
+) -> Result<SecretSyncPlan, String> {
+    match args.provider {
+        OrchestratorDeployProvider::Render => {
+            let service = args.render_service.as_ref().ok_or_else(|| {
+                "Render secret sync requires --render-service so Harn can target the Render API"
+                    .to_string()
+            })?;
+            let token = optional_api_token(
+                args.render_api_key.as_deref(),
+                args.dry_run,
+                "Render secret sync requires --render-api-key or RENDER_API_KEY",
+            )?;
+            Ok(SecretSyncPlan {
+                provider: args.provider,
+                target: service.clone(),
+                secrets: secrets.clone(),
+                auth_token: token,
+                railway_project: None,
+                railway_environment: None,
+            })
+        }
+        OrchestratorDeployProvider::Fly => {
+            let token = optional_api_token(
+                args.fly_api_token.as_deref(),
+                args.dry_run,
+                "Fly secret sync requires --fly-api-token or FLY_API_TOKEN",
+            )?;
+            Ok(SecretSyncPlan {
+                provider: args.provider,
+                target: args.name.clone(),
+                secrets: secrets.clone(),
+                auth_token: token,
+                railway_project: None,
+                railway_environment: None,
+            })
+        }
+        OrchestratorDeployProvider::Railway => {
+            let token = optional_api_token(
+                args.railway_token.as_deref(),
+                args.dry_run,
+                "Railway secret sync requires --railway-token or RAILWAY_TOKEN",
+            )?;
+            let project = args.railway_project.as_ref().ok_or_else(|| {
+                "Railway secret sync requires --railway-project or RAILWAY_PROJECT_ID".to_string()
+            })?;
+            let service = args.railway_service.as_ref().ok_or_else(|| {
+                "Railway secret sync requires --railway-service with a Railway service id"
+                    .to_string()
+            })?;
+            let environment = args.railway_environment.as_ref().ok_or_else(|| {
+                "Railway secret sync requires --railway-environment with a Railway environment id"
+                    .to_string()
+            })?;
+            Ok(SecretSyncPlan {
+                provider: args.provider,
+                target: service.clone(),
+                secrets: secrets.clone(),
+                auth_token: token,
+                railway_project: Some(project.clone()),
+                railway_environment: Some(environment.clone()),
+            })
+        }
+    }
+}
+
+fn optional_api_token(
+    token: Option<&str>,
+    dry_run: bool,
+    missing_message: &str,
+) -> Result<String, String> {
+    match token {
+        Some(token) if !token.is_empty() => Ok(token.to_string()),
+        _ if dry_run => Ok(String::new()),
+        _ => Err(missing_message.to_string()),
+    }
+}
+
+fn run_secret_sync(plan: SecretSyncPlan) -> Result<(), String> {
+    println!("running: {}", plan.display());
+    let client = Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .map_err(|error| format!("failed to create provider API client: {error}"))?;
+    match plan.provider {
+        OrchestratorDeployProvider::Render => sync_render_secrets(&client, &plan),
+        OrchestratorDeployProvider::Fly => sync_fly_secrets(&client, &plan),
+        OrchestratorDeployProvider::Railway => sync_railway_secrets(&client, &plan),
+    }
+}
+
+fn sync_render_secrets(client: &Client, plan: &SecretSyncPlan) -> Result<(), String> {
+    for (key, value) in &plan.secrets {
+        let url = format!(
+            "{}/services/{}/env-vars/{}",
+            RENDER_API_BASE,
+            path_segment(&plan.target),
+            path_segment(key)
+        );
+        let body = serde_json::json!({ "value": value });
+        let response = client
+            .request(Method::PUT, &url)
+            .header(AUTHORIZATION, bearer_auth(&plan.auth_token))
+            .header(ACCEPT, "application/json")
+            .header(CONTENT_TYPE, "application/json")
+            .json(&body)
+            .send()
+            .map_err(|error| format!("failed to sync Render secret {key}: {error}"))?;
+        ensure_success(response, &format!("sync Render secret {key}"))?;
+    }
+    Ok(())
+}
+
+fn sync_fly_secrets(client: &Client, plan: &SecretSyncPlan) -> Result<(), String> {
+    let url = format!(
+        "{}/apps/{}/secrets",
+        FLY_MACHINES_API_BASE,
+        path_segment(&plan.target)
+    );
+    let values = plan
+        .secrets
+        .iter()
+        .map(|(key, value)| (key.clone(), JsonValue::String(value.clone())))
+        .collect::<serde_json::Map<_, _>>();
+    let body = serde_json::json!({ "values": values });
+    let response = client
+        .request(Method::POST, &url)
+        .header(AUTHORIZATION, fly_auth(&plan.auth_token))
+        .header(ACCEPT, "application/json")
+        .header(CONTENT_TYPE, "application/json")
+        .json(&body)
+        .send()
+        .map_err(|error| format!("failed to sync Fly secrets: {error}"))?;
+    ensure_success(response, "sync Fly secrets")
+}
+
+fn sync_railway_secrets(client: &Client, plan: &SecretSyncPlan) -> Result<(), String> {
+    let project_id = plan
+        .railway_project
+        .as_deref()
+        .ok_or_else(|| "Railway secret sync missing project id".to_string())?;
+    let environment_id = plan
+        .railway_environment
+        .as_deref()
+        .ok_or_else(|| "Railway secret sync missing environment id".to_string())?;
+    let variables = plan
+        .secrets
+        .iter()
+        .map(|(key, value)| (key.clone(), JsonValue::String(value.clone())))
+        .collect::<serde_json::Map<_, _>>();
+    let body = serde_json::json!({
+        "query": r#"mutation variableCollectionUpsert($input: VariableCollectionUpsertInput!) {
+  variableCollectionUpsert(input: $input)
+}"#,
+        "variables": {
+            "input": {
+                "projectId": project_id,
+                "environmentId": environment_id,
+                "serviceId": plan.target,
+                "variables": variables,
+                "skipDeploys": true
+            }
+        }
+    });
+    let response = client
+        .request(Method::POST, RAILWAY_GRAPHQL_ENDPOINT)
+        .header(AUTHORIZATION, bearer_auth(&plan.auth_token))
+        .header(ACCEPT, "application/json")
+        .header(CONTENT_TYPE, "application/json")
+        .json(&body)
+        .send()
+        .map_err(|error| format!("failed to sync Railway secrets: {error}"))?;
+    let payload = ensure_success_json(response, "sync Railway secrets")?;
+    if let Some(errors) = payload.get("errors") {
+        return Err(format!("Railway GraphQL secret sync failed: {errors}"));
+    }
+    Ok(())
 }
 
 fn public_env_sync_commands(
@@ -543,13 +736,6 @@ impl PlannedCommand {
         self
     }
 
-    fn arg_sensitive(&mut self, arg: impl AsRef<OsStr>) -> &mut Self {
-        let index = self.args.len();
-        self.arg(arg);
-        self.sensitive_args.insert(index);
-        self
-    }
-
     fn args<I, S>(&mut self, args: I) -> &mut Self
     where
         I: IntoIterator<Item = S>,
@@ -601,6 +787,30 @@ fn run_checked(command: PlannedCommand) -> Result<(), String> {
             command.display()
         ))
     }
+}
+
+fn ensure_success(response: reqwest::blocking::Response, action: &str) -> Result<(), String> {
+    let status = response.status();
+    if status.is_success() {
+        return Ok(());
+    }
+    let body = response.text().unwrap_or_default();
+    Err(format!("{action} failed with HTTP {status}: {body}"))
+}
+
+fn ensure_success_json(
+    response: reqwest::blocking::Response,
+    action: &str,
+) -> Result<JsonValue, String> {
+    let status = response.status();
+    let body = response
+        .text()
+        .map_err(|error| format!("{action} failed to read response body: {error}"))?;
+    if !status.is_success() {
+        return Err(format!("{action} failed with HTTP {status}: {body}"));
+    }
+    serde_json::from_str(&body)
+        .map_err(|error| format!("{action} returned invalid JSON: {error}: {body}"))
 }
 
 fn probe_health(url: &str) -> Result<(), String> {
@@ -737,6 +947,30 @@ fn yaml_plain(value: &str) -> String {
     }
 }
 
+fn bearer_auth(token: &str) -> String {
+    if token.starts_with("Bearer ") || token.starts_with("FlyV1 ") {
+        token.to_string()
+    } else {
+        format!("Bearer {token}")
+    }
+}
+
+fn fly_auth(token: &str) -> String {
+    if token.starts_with("Bearer ") || token.starts_with("FlyV1 ") {
+        return token.to_string();
+    }
+    let trimmed = token.trim_start();
+    if trimmed.starts_with("fm1r_") || trimmed.starts_with("fm1a_") || trimmed.starts_with("fm2_") {
+        format!("FlyV1 {trimmed}")
+    } else {
+        format!("Bearer {trimmed}")
+    }
+}
+
+fn path_segment(value: &str) -> String {
+    url::form_urlencoded::byte_serialize(value.as_bytes()).collect()
+}
+
 fn shell_quote(value: &str) -> String {
     if value
         .chars()
@@ -773,6 +1007,10 @@ mod tests {
             render_service: Some("srv-123".to_string()),
             railway_service: Some("harn-prod".to_string()),
             railway_environment: Some("production".to_string()),
+            railway_project: Some("project-123".to_string()),
+            render_api_key: Some("render-token".to_string()),
+            fly_api_token: Some("fly-token".to_string()),
+            railway_token: Some("railway-token".to_string()),
             build: false,
             no_push: false,
             env: vec![],
@@ -852,11 +1090,26 @@ mod tests {
     fn provider_commands_are_rendered_without_secrets_in_specs() {
         let mut secrets = BTreeMap::new();
         secrets.insert("OPENAI_API_KEY".to_string(), "sk-test".to_string());
-        let commands = secret_sync_commands(&args(OrchestratorDeployProvider::Fly), &secrets);
-        assert_eq!(commands.len(), 1);
-        assert!(commands[0].display().contains("fly secrets set"));
-        assert!(commands[0].display().contains("OPENAI_API_KEY=***"));
-        assert!(!commands[0].display().contains("sk-test"));
+        let plan = secret_sync_plan(&args(OrchestratorDeployProvider::Fly), &secrets).unwrap();
+        assert!(plan.display().contains("Fly app"));
+        assert!(plan.display().contains("OPENAI_API_KEY"));
+        assert!(!plan.display().contains("sk-test"));
+    }
+
+    #[test]
+    fn dry_run_secret_plan_does_not_require_provider_token() {
+        let mut args = args(OrchestratorDeployProvider::Fly);
+        args.fly_api_token = None;
+        let secrets = BTreeMap::from([("OPENAI_API_KEY".to_string(), "sk-test".to_string())]);
+        let plan = secret_sync_plan(&args, &secrets).unwrap();
+        assert_eq!(plan.auth_token, "");
+        assert!(plan.display().contains("OPENAI_API_KEY"));
+    }
+
+    #[test]
+    fn fly_auth_uses_flyv1_for_macaroon_tokens() {
+        assert_eq!(fly_auth("fm2_example"), "FlyV1 fm2_example");
+        assert_eq!(fly_auth("plain-token"), "Bearer plain-token");
     }
 
     #[test]

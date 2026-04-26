@@ -25,10 +25,12 @@ workloads do not miss scheduled fires during scale-to-zero cold starts. It
 uses `/healthz` for HTTP checks and exposes Harn's Prometheus metrics from
 `/metrics` on the same internal listener port.
 
-Secret sync uses `fly secrets set`. The deploy helper syncs values supplied
+Secret sync uses the Fly Machines API. The deploy helper syncs values supplied
 with `--secret KEY=VALUE`, common provider keys such as `OPENAI_API_KEY`, and
 env-backed manifest secrets like `HARN_SECRET_GITHUB_WEBHOOK_SECRET` when
-those variables are already present locally.
+those variables are already present locally. Pass `--fly-api-token` or set
+`FLY_API_TOKEN`; Harn stages the secret changes before `fly deploy` so the new
+release picks them up.
 
 Fly provides automatic TLS on the public hostname. Keep the orchestrator
 container on plain HTTP with `HARN_ORCHESTRATOR_LISTEN=0.0.0.0:8080`.
