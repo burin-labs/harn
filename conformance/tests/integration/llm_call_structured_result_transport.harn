@@ -1,0 +1,18 @@
+/**
+ * Transport-level failure: the underlying LLM call errors out (e.g.
+ * rate limit). The envelope surfaces ok=false, error_category=
+ * "rate_limit" (the underlying category — not "transport"), and skips
+ * any repair pass (no raw text to salvage).
+ */
+pipeline default() {
+  let schema = {type: "object", required: ["k"], properties: {k: {type: "string"}}}
+  llm_mock({error: {category: "rate_limit", message: "429 slow down"}})
+  let r = llm_call_structured_result("Q", schema, {provider: "mock", llm_retries: 0, repair: {enabled: true}})
+  println(r.ok)
+  println(r.data == nil)
+  println(r.error_category)
+  println(contains(r.error, "429"))
+  println(r.repaired)
+  println(r.attempts)
+  println(r.raw_text)
+}

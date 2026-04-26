@@ -628,7 +628,7 @@ pub fn register_llm_call_structured_with_bridge(
             Ok(crate::llm::extract_structured_data(response))
         }
     });
-    let b2 = bridge;
+    let b2 = bridge.clone();
     vm.register_async_builtin("llm_call_structured_safe", move |args| {
         let bridge = b2.clone();
         async move {
@@ -647,6 +647,14 @@ pub fn register_llm_call_structured_with_bridge(
                 )),
                 Err(err) => Ok(crate::llm::structured_safe_envelope_err(&err)),
             }
+        }
+    });
+    let b3 = bridge;
+    vm.register_async_builtin("llm_call_structured_result", move |args| {
+        let bridge = b3.clone();
+        async move {
+            crate::llm::structured_envelope::llm_call_structured_result_impl(args, Some(&bridge))
+                .await
         }
     });
 }

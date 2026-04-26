@@ -214,6 +214,63 @@ let person = r.data
 `"transient_network"`, `"generic"`, …) — match on the category
 instead of string-sniffing the message.
 
+### Diagnostic envelope variant
+
+`llm_call_structured_result(prompt, schema, options?)` returns the
+full failure-mode envelope production agent pipelines need, so
+callers can keep raw model text, attempt counts, and validation /
+repair state without hand-rolling parse / repair chains. It never
+throws on transport or schema failures — `ok: false` plus
+`error_category` distinguishes the failure mode.
+
+```harn
+let r = llm_call_structured_result(prompt, schema, {
+  provider: "auto",
+  schema_retries: 2,
+  // Optional repair pass — runs only on malformed JSON or
+  // schema-invalid output. Skipped on transport failures.
+  repair: {
+    enabled: true,
+    model: "cheapest_over_quality(low)",
+    max_tokens: 600,
+  },
+})
+if r.ok {
+  let person = r.data
+  // ...
+} else {
+  log("structured call failed:", r.error_category, "raw:", r.raw_text)
+}
+```
+
+Envelope fields:
+
+| Field | Type | Description |
+|---|---|---|
+| `ok` | bool | `true` when the parsed payload validated against the schema. |
+| `data` | `T \| nil` | Validated payload, or `nil` on failure. Narrows to `T` when `schema: Schema<T>`. |
+| `raw_text` | string | Final attempt's raw model text. Preserved on failure for offline diagnostics or manual repair. |
+| `error` | string | Human-readable error message (empty on success). |
+| `error_category` | `string \| nil` | `nil` on success. On failure, one of `transport`-class categories (`rate_limit`, `timeout`, `auth`, `transient_network`, …) or `missing_json` / `schema_validation` / `repair_failed`. |
+| `attempts` | int | Number of model calls made. `1` = no retries; `2+` = schema retries kicked in. `0` only when arg parsing failed before any call. |
+| `repaired` | bool | `true` when the repair pass produced valid JSON. |
+| `extracted_json` | bool | `true` when JSON had to be lifted from prose / markdown fences. |
+| `usage` | `{input_tokens, output_tokens, cache_read_tokens, cache_write_tokens}` | Token counts from the final attempt. |
+| `model` | string | Model that produced the final attempt. |
+| `provider` | string | Provider that produced the final attempt. |
+
+Repair-pass semantics:
+
+- The `repair` block is recognized only by
+  `llm_call_structured_result`. Pass `repair: {enabled: true, ...}`
+  to enable it; presence of the dict implies opt-in.
+- Repair runs at most once, with `schema_retries: 0`, only when the
+  main call ended with malformed JSON or schema-invalid output. It
+  is skipped on transport failures because there is no raw text to
+  salvage.
+- Override keys (`model`, `provider`, `max_tokens`, `system`, …) are
+  merged onto the main call's options for the repair attempt.
+
 ### When to use which helper
 
 - Product code that needs just the parsed payload: prefer
@@ -226,6 +283,12 @@ instead of string-sniffing the message.
   dict.
 - Call sites that prefer explicit branching over `try` blocks:
   `llm_call_structured_safe` (the non-throwing envelope).
+- Production agent pipelines that need raw-text retention, attempt
+  counts, and an optional repair pass on malformed JSON:
+  `llm_call_structured_result` — replaces the
+  `llm_call → response.data → safe_parse → json_extract → repair →
+  schema_check` chain that downstream callers would otherwise
+  hand-roll.
 
 ## Tool Vault
 

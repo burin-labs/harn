@@ -1,0 +1,16 @@
+/**
+ * Schema-validation failure with no repair: ok=false,
+ * error_category="schema_validation", raw_text preserved for
+ * downstream diagnostics.
+ */
+pipeline default() {
+  let schema = {type: "object", required: ["verdict"], properties: {verdict: {type: "string"}}}
+  llm_mock({text: "{\"verdict\": 42}"})
+  let r = llm_call_structured_result("Grade", schema, {provider: "mock", retries: 0})
+  println(r.ok)
+  println(r.data == nil)
+  println(r.error_category)
+  println(contains(r.raw_text, "verdict"))
+  println(r.repaired)
+  println(r.attempts)
+}

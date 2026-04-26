@@ -29,6 +29,31 @@ granular archaeology.
 
 ### Added
 
+- **`llm_call_structured_result` diagnostic envelope (#744).** Adds a
+  third structured-output entry point that returns a stable
+  `{ok, data, raw_text, error, error_category, attempts, repaired,
+  extracted_json, usage, model, provider}` dict so production agent
+  pipelines can preserve raw model text, attempt counts, and
+  validation / repair state without hand-rolling
+  `safe_parse → json_extract → repair → schema_check` chains. Never
+  throws on transport / schema failures — `error_category` ∈
+  `transport`-class categories (`rate_limit`, `timeout`, `auth`, …) or
+  `missing_json` / `schema_validation` / `repair_failed`. Options
+  accept a `repair: {enabled, ...llm_call_overrides}` block: an
+  optional one-shot repair pass that reissues a separate LLM call on
+  malformed JSON only and is skipped on transport failures.
+  Schema-as-type narrowing flows through the envelope's `data` field
+  (`Schema<T>` → `data: T | nil`). Bridge and non-bridge registration
+  paths share one implementation so the envelope shape is identical
+  across ACP and direct execution. The
+  `crates/harn-vm/src/llm/structured_envelope.rs` module owns the
+  envelope builder; `execute_llm_call` is refactored to share its
+  schema-retry loop with the envelope path via the new
+  `execute_schema_retry_loop` helper. Conformance fixtures
+  (`llm_call_structured_result_*.harn`) cover clean JSON, fenced JSON,
+  prose-wrapped JSON, schema retry recovery, schema-validation
+  failure, repair success, repair failure, transport failure, and
+  schema-as-type narrowing.
 - **`pub import` re-exports for facade modules (#740).** Prefixing any
   `import` with `pub` now re-exports the imported symbols as part of the
   importing module's public surface:

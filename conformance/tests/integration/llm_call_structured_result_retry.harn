@@ -1,0 +1,20 @@
+/**
+ * Schema-retry recovery: first response is missing the required key,
+ * second response satisfies the schema. The envelope reports
+ * attempts=2 and ok=true.
+ */
+pipeline default() {
+  let schema = {
+    type: "object",
+    required: ["verdict"],
+    properties: {verdict: {type: "string"}, note: {type: "string"}},
+  }
+  llm_mock({text: "{\"note\": \"hmm\"}"})
+  llm_mock({text: "{\"verdict\": \"PASS\", \"note\": \"\"}"})
+  let r = llm_call_structured_result("Grade", schema, {provider: "mock"})
+  println(r.ok)
+  println(r.data.verdict)
+  println(r.attempts)
+  println(r.repaired)
+  println(r.extracted_json)
+}
