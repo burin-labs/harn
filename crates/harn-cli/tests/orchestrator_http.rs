@@ -93,6 +93,35 @@ secrets = { signing_secret = "github/webhook-secret" }
     manifest
 }
 
+fn github_harn_override_manifest(orchestrator_block: Option<&str>) -> String {
+    let mut manifest = r#"
+[package]
+name = "fixture"
+
+[exports]
+handlers = "lib.harn"
+
+[[providers]]
+id = "github"
+connector = { harn = "github_connector.harn" }
+
+[[triggers]]
+id = "github-new-issue"
+kind = "webhook"
+provider = "github"
+match = { events = ["issues"] }
+handler = "handlers::on_issue"
+secrets = { signing_secret = "github/webhook-secret" }
+"#
+    .to_string();
+    if let Some(block) = orchestrator_block {
+        manifest.push('\n');
+        manifest.push_str(block);
+        manifest.push('\n');
+    }
+    manifest
+}
+
 fn handler_module() -> &'static str {
     r#"
 import "std/triggers"
@@ -101,6 +130,19 @@ pub fn on_issue(event: TriggerEvent) {
   log(event.kind)
 }
 "#
+}
+
+fn github_marker_handler_module(marker_path: &Path) -> String {
+    format!(
+        r#"
+import "std/triggers"
+
+pub fn on_issue(event: TriggerEvent) {{
+  write_file({marker:?}, event.kind)
+}}
+"#,
+        marker = marker_path.display().to_string()
+    )
 }
 
 fn slack_manifest(orchestrator_block: Option<&str>) -> String {
@@ -350,6 +392,51 @@ pub fn call(method, args) {
     }
   }
 
+  throw "method_not_found:" + method
+}
+"#
+}
+
+fn github_override_connector_module() -> &'static str {
+    r#"
+pub fn provider_id() {
+  return "github"
+}
+
+pub fn kinds() {
+  return ["webhook"]
+}
+
+pub fn payload_schema() {
+  return "GitHubEventPayload"
+}
+
+pub fn init(_ctx) {
+  event_log_emit("connectors.github.override", "init", {provider: "github"})
+}
+
+pub fn activate(bindings) {
+  metrics_inc("github_override_activate_bindings", len(bindings))
+}
+
+pub fn normalize_inbound(raw) {
+  let body = raw.body_json ?? json_parse(raw.body_text)
+  event_log_emit("connectors.github.override", "normalize", {
+    id: body.id,
+    action: body.action,
+  })
+  return {
+    type: "event",
+    event: {
+      kind: raw.headers["X-GitHub-Event"] ?? raw.headers["x-github-event"],
+      dedupe_key: "harn-github:" + body.id,
+      payload: body,
+      signature_status: {state: "unsigned"},
+    },
+  }
+}
+
+pub fn call(method, _args) {
   throw "method_not_found:" + method
 }
 "#
@@ -955,6 +1042,71 @@ async fn github_webhook_delivery_is_accepted_and_persisted() {
         snapshot.contains("\"dispatched\": 1"),
         "snapshot={snapshot}"
     );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn github_provider_prefers_configured_harn_connector_over_deprecated_rust_default() {
+    let _lock = lock_orchestrator_tests();
+    let temp = TempDir::new().unwrap();
+    let marker_path = temp.path().join("github-override-handler.txt");
+    write_file(
+        temp.path(),
+        "harn.toml",
+        &github_harn_override_manifest(None),
+    );
+    write_file(
+        temp.path(),
+        "lib.harn",
+        &github_marker_handler_module(&marker_path),
+    );
+    write_file(
+        temp.path(),
+        "github_connector.harn",
+        github_override_connector_module(),
+    );
+
+    let envs = [
+        ("HARN_SECRET_PROVIDERS", "env"),
+        ("HARN_SECRET_GITHUB_WEBHOOK_SECRET", "override-secret"),
+    ];
+    let mut process = spawn_orchestrator(&temp, &[], &envs);
+    let base_url = process.wait_for_listener_url();
+
+    let body = serde_json::to_vec(&serde_json::json!({
+        "id": "evt-gh-override-1",
+        "action": "opened",
+        "issue": {"number": 42, "title": "Harn connector override"}
+    }))
+    .unwrap();
+    let response = reqwest::Client::new()
+        .post(format!("{base_url}/triggers/github-new-issue"))
+        .header(CONTENT_TYPE, "application/json")
+        .header("X-GitHub-Event", "issues")
+        .body(body)
+        .send()
+        .await
+        .unwrap();
+    assert_status(response, StatusCode::OK).await;
+
+    wait_for_path(&marker_path, EVENT_FAIL_FAST_TIMEOUT);
+    let marker = fs::read_to_string(&marker_path).unwrap();
+    assert_eq!(marker, "issues");
+
+    send_sigterm(&process.child);
+    let status = wait_for_exit_async(&mut process.child).await;
+    let stderr = process.join_stderr();
+    assert!(status.success(), "status={status} stderr={stderr}");
+    assert!(
+        !stderr.contains("deprecated Rust-side connector"),
+        "Harn connector overrides must suppress Rust sunset warnings; stderr={stderr}"
+    );
+
+    let lifecycle = read_topic_events(&temp, "connectors.github.override").await;
+    let lifecycle_kinds: Vec<_> = lifecycle
+        .iter()
+        .map(|(_, event)| event.kind.as_str())
+        .collect();
+    assert_eq!(lifecycle_kinds, vec!["init", "normalize"]);
 }
 
 #[tokio::test(flavor = "multi_thread")]

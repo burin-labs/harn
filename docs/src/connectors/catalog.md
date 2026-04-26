@@ -192,6 +192,8 @@ headers = { "content-type" = "application/json" }
 body_json = { id = "evt-1", type = "thing.created" }
 expect_type = "event"
 expect_kind = "acme.thing.created"
+expect_dedupe_key = "evt-1"
+expect_payload_contains = { provider = "acme", event = "thing.created", id = "evt-1" }
 expect_event_count = 1
 ```
 

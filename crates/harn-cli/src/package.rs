@@ -1015,6 +1015,16 @@ pub struct ConnectorContractFixture {
     #[serde(default)]
     pub expect_kind: Option<String>,
     #[serde(default)]
+    pub expect_dedupe_key: Option<String>,
+    #[serde(default)]
+    pub expect_signature_state: Option<String>,
+    #[serde(default)]
+    pub expect_payload_contains: Option<toml::Value>,
+    #[serde(default)]
+    pub expect_response_status: Option<u16>,
+    #[serde(default)]
+    pub expect_response_body: Option<toml::Value>,
+    #[serde(default)]
     pub expect_event_count: Option<usize>,
     #[serde(default)]
     pub expect_error_contains: Option<String>,

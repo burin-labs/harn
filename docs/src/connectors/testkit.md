@@ -10,7 +10,7 @@ testkit pieces they need:
 ```rust,ignore
 use harn_vm::connectors::testkit::{
     ConnectorTestkit, HttpMockGuard, HttpMockResponse, MemorySecretProvider,
-    github_ping_fixture, scoped_secret_id,
+    github_ping_fixture, notion_page_content_updated_fixture, scoped_secret_id,
 };
 ```
 
@@ -76,6 +76,7 @@ Webhook fixtures cover common first-party shapes:
 - `github_ping_fixture(secret, received_at)`
 - `slack_message_fixture(secret, timestamp, received_at)`
 - `linear_issue_update_fixture(secret, received_at)`
+- `notion_page_content_updated_fixture(secret, received_at)`
 
 They return a `WebhookFixture` containing the signed `RawInbound` and original
 body bytes. Use `.with_binding(...)` and `.with_tenant(...)` to attach runtime

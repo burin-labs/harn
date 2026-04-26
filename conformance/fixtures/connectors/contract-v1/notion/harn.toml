@@ -13,8 +13,11 @@ version = 1
 provider = "notion"
 name = "page webhook"
 kind = "webhook"
-headers = { "content-type" = "application/json" }
-body_json = { id = "notion-evt-1", type = "page.updated", page_id = "page-1" }
+headers = { "request-id" = "req-notion-1", "content-type" = "application/json" }
+body_json = { id = "notion-evt-1", type = "page.content_updated", workspace_id = "ws-1", subscription_id = "sub-1", integration_id = "int-1", entity = { id = "page-1", type = "page" }, api_version = "2022-06-28" }
 expect_type = "event"
-expect_kind = "notion.page.updated"
+expect_kind = "page.content_updated"
+expect_dedupe_key = "notion:page-1"
+expect_signature_state = "verified"
+expect_payload_contains = { provider = "notion", event = "page.content_updated", workspace_id = "ws-1", request_id = "req-notion-1", subscription_id = "sub-1", integration_id = "int-1", entity_id = "page-1", entity_type = "page", api_version = "2022-06-28" }
 expect_event_count = 1
