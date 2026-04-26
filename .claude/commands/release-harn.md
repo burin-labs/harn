@@ -4,7 +4,7 @@ Run the merge-queue-safe Harn release workflow.
 
 The release is **one** human PR titled `Release vX.Y.Z`. It carries the
 changelog, code, docs, AND the `Cargo.toml`/`Cargo.lock` version bump together.
-After it lands through the merge queue, the Finalize Release workflow
+After it lands through the merge queue, the Publish release workflow
 auto-fires on tag drift, ships to crates.io, tags `vX.Y.Z`, and triggers the
 binary/container build. No second PR.
 
@@ -12,7 +12,7 @@ binary/container build. No second PR.
 human/agent: write & land "Release vX.Y.Z" PR
         │
         ▼  PR lands through merge queue (full audit ran in CI)
-bot:    Finalize Release workflow auto-fires on tag drift
+bot:    Publish release workflow auto-fires on tag drift
         │   pushes vX.Y.Z, runs cargo publish, creates GH release
         ▼  tag push cascades
 bot:    Release workflow builds binaries + multi-arch container
@@ -86,7 +86,7 @@ Steps 1-9 are the only steps that need judgment. After step 9 you are done
    `make check-highlight`, `make check-language-spec`,
    `make check-trigger-quickref`, `make check-trigger-examples`,
    `make check-docs-snippets`, `verify_release_metadata.py`, portal
-   lint+build, Windows smoke). Once it lands, Finalize Release fires.
+   lint+build, Windows smoke). Once it lands, Publish release fires.
 
 ## New-crate first-release pre-flight (harn#609)
 
@@ -123,14 +123,14 @@ HARN_BOOTSTRAP_NEW_CRATES=1 ./scripts/release_ship.sh --prepare --bump patch
 
 The flag tells `release_ship.sh` to skip the publish dry-run AND tells
 `verify_crate_packages.sh` to skip the harn-cli package check. The bump
-proceeds normally. After the consolidated PR lands, the Finalize Release
+proceeds normally. After the consolidated PR lands, the Publish release
 workflow's `cargo publish --workspace` orders intra-workspace deps
 correctly and publishes `harn-foo` before `harn-cli`.
 
 If finalize itself fails the same way, re-trigger it with the input set:
 
 ```bash
-gh workflow run finalize-release.yml -f bootstrap_new_crates=true
+gh workflow run publish-release.yml -f bootstrap_new_crates=true
 ```
 
 **For maintenance.** Add the new crate to:
@@ -143,14 +143,14 @@ gh workflow run finalize-release.yml -f bootstrap_new_crates=true
 
 ## What happens automatically after the release PR lands
 
-10. **Finalize Release** workflow (`.github/workflows/finalize-release.yml`)
+10. **Publish release** workflow (`.github/workflows/publish-release.yml`)
     detects tag drift (`Cargo.toml` ahead of latest `vX.Y.Z` tag) and runs
     `./scripts/release_ship.sh --finalize` under the App identity:
     portal-check + publish dry-run + push tag + `cargo publish` + render
     notes + create or update the GitHub release. **Audit is skipped** —
     the merge-queue CI just proved it.
-11. The tag push triggers **Release** workflow
-    (`.github/workflows/release.yml`), which builds darwin/linux × x86/arm
+11. The tag push triggers **Build release binaries** workflow
+    (`.github/workflows/build-release-binaries.yml`), which builds darwin/linux × x86/arm
     binary tarballs, publishes a multi-arch GHCR container image, and
     attaches the binaries to the GitHub release.
 
@@ -162,10 +162,10 @@ gh workflow run finalize-release.yml -f bootstrap_new_crates=true
   points where it should, `gh release` is view-then-edit-or-create. Pass
   `reaudit: true` if you want it to re-run the full audit (slower; only
   needed if something on main has changed since the PR landed).
-- **Release workflow needs to re-emit binaries** for an already-tagged
-  version: `gh workflow run release.yml --ref main -f tag=vX.Y.Z`.
+- **Build release binaries workflow needs to re-emit binaries** for an already-tagged
+  version: `gh workflow run build-release-binaries.yml --ref main -f tag=vX.Y.Z`.
 - **Accidentally landed a "Prepare vX.Y.Z release"-style commit on main
-  without the consolidated bump**: the `Bump Release (recovery)`
+  without the consolidated bump**: the `Open version bump PR (recovery)`
   workflow exists for this. Trigger via `gh workflow run
   bump-release.yml` to open the historical bump PR pattern.
 - **Truly stuck local recovery (rare)**: `./scripts/release_ship.sh
@@ -227,7 +227,7 @@ lanes (`rust-audit`, `harn-audit`, `docs-audit`, `grammar-audit`,
   investigating, not cold-cache cost.
 
 In CI, the merge-queue CI of the Release PR pays cold-cache cost
-(~10-15 min). The Finalize Release workflow no longer pays for an
+(~10-15 min). The Publish release workflow no longer pays for an
 audit (~7 min savings vs. the legacy two-PR flow).
 
 ## Useful shortcuts
@@ -240,8 +240,8 @@ audit (~7 min savings vs. the legacy two-PR flow).
 ./scripts/release_gate.sh notes
 
 # Manually re-trigger workflows (recovery):
-gh workflow run finalize-release.yml --ref main
-gh workflow run finalize-release.yml --ref main -f reaudit=true
-gh workflow run release.yml --ref main -f tag=vX.Y.Z
+gh workflow run publish-release.yml --ref main
+gh workflow run publish-release.yml --ref main -f reaudit=true
+gh workflow run build-release-binaries.yml --ref main -f tag=vX.Y.Z
 gh workflow run bump-release.yml          # legacy two-PR recovery
 ```

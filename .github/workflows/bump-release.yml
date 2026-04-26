@@ -1,4 +1,4 @@
-name: Bump Release (recovery)
+name: Open version bump PR (recovery)
 
 # RECOVERY-ONLY workflow. Default release flow consolidates the prepare
 # and bump into a single human PR titled "Release vX.Y.Z" — see
@@ -15,7 +15,7 @@ name: Bump Release (recovery)
 #
 # Runs ./scripts/release_ship.sh --bump <type> under the
 # harn-release-bot App identity. Once this workflow's PR lands, the
-# Finalize Release workflow auto-fires on tag drift to ship.
+# publish-release.yml workflow auto-fires on tag drift to ship.
 on:
   workflow_dispatch:
     inputs:
@@ -42,7 +42,7 @@ permissions:
   pull-requests: write
 
 concurrency:
-  group: bump-release
+  group: open-version-bump-pr
   cancel-in-progress: false
 
 env:
@@ -51,8 +51,8 @@ env:
   SCCACHE_GHA_ENABLED: "true"
 
 jobs:
-  bump:
-    name: Open bump PR
+  open-bump-pr:
+    name: Open version bump PR
     runs-on: ubuntu-latest
     # workflow_dispatch only — the push trigger was removed when the
     # release flow consolidated to a single PR.

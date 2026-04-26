@@ -10,6 +10,45 @@ harn_lint_files=$(mktemp)
 trap 'rm -f "$changed" "$harn_format_files" "$harn_lint_files"' EXIT
 hook_write_push_files "$changed"
 
+# Merge-queue guard. GitHub does not reject pushes to a PR that's already
+# in the merge queue — it just keeps using the snapshot it took when the
+# PR was enqueued. Any commit pushed after that point is silently dropped
+# from the merged state. Bypass with `--no-verify` if you mean it.
+if command -v gh >/dev/null 2>&1; then
+  branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)
+  if [ -n "$branch" ] && [ "$branch" != "HEAD" ] && [ "$branch" != "main" ]; then
+    queued_branches=$(gh api graphql -f query='
+      query($owner: String!, $name: String!) {
+        repository(owner: $owner, name: $name) {
+          mergeQueue(branch: "main") {
+            entries(first: 100) {
+              nodes { pullRequest { headRefName } }
+            }
+          }
+        }
+      }' -f owner=burin-labs -f name=harn \
+      --jq '.data.repository.mergeQueue.entries.nodes[].pullRequest.headRefName' \
+      2>/dev/null || true)
+    if [ -n "$queued_branches" ] && echo "$queued_branches" | grep -Fxq "$branch"; then
+      echo ""
+      echo "error: branch '$branch' is currently in the merge queue."
+      echo ""
+      echo "  GitHub snapshotted your PR when it entered the queue. Pushing"
+      echo "  more commits now silently drops them from the merged state."
+      echo ""
+      echo "  Fix:"
+      echo "    1. gh pr merge $branch --disable-auto      # dequeue"
+      echo "       (if --disable-auto says 'already queued',"
+      echo "        use the GraphQL dequeuePullRequest mutation)"
+      echo "    2. git push                                  # push again"
+      echo "    3. gh pr merge $branch --auto                # re-enqueue"
+      echo ""
+      echo "  Or bypass: git push --no-verify"
+      exit 1
+    fi
+  fi
+fi
+
 echo "=== Pre-push: running fast release-quality checks ==="
 if hook_paths_match "$changed" "$HOOK_TEST_PATTERN"; then
   make test

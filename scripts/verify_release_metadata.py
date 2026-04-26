@@ -79,6 +79,18 @@ def verify_release_notes(version: str) -> None:
 
 
 def verify_tag_state(version: str) -> None:
+    """Reject states that would silently re-release or rewrite history.
+
+    Passes when:
+      - the tag does not exist yet (we're staging a future release), OR
+      - HEAD is at the tagged commit, OR
+      - HEAD descends from the tagged commit (released; main has moved on
+        with non-release commits — fine, the next release PR will bump).
+
+    Fails only when HEAD is an ancestor of the tag, or unrelated — both
+    of which mean Cargo.toml is at version X.Y.Z but HEAD doesn't
+    contain the X.Y.Z release commit, which would tag the wrong state.
+    """
     tag = f"v{version}"
     tag_lookup = subprocess.run(
         ["git", "rev-parse", "-q", "--verify", f"refs/tags/{tag}"],
@@ -102,11 +114,21 @@ def verify_tag_state(version: str) -> None:
         capture_output=True,
         check=True,
     ).stdout.strip()
-    if head != tag_commit:
-        raise SystemExit(
-            f"error: current version {version} is already tagged at {tag_commit}, "
-            f"but HEAD is {head}; bump the version or move off the released tag state"
-        )
+    if head == tag_commit:
+        return
+    is_descendant = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", tag_commit, head],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+    )
+    if is_descendant.returncode == 0:
+        return
+    raise SystemExit(
+        f"error: current version {version} is already tagged at {tag_commit}, "
+        f"but HEAD ({head}) does not include that commit; either bump the "
+        f"version or rebase onto the tagged commit before continuing"
+    )
 
 
 def is_bump_ahead(cargo_version: str, changelog_version: str) -> bool:

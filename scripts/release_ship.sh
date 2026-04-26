@@ -219,6 +219,43 @@ require_base_branch() {
   fi
 }
 
+# Sync local base branch to origin/base instead of asserting strict
+# equality. Used by --finalize where the GHA runner clones main early
+# in setup, then sits through ~30s of toolchain installs before this
+# script runs — main can move during that window. The bump intent is
+# already in main's history regardless of where HEAD is now, so the
+# right move is to fast-forward the local clone and tag whichever
+# commit Cargo.toml's version is set on.
+sync_base_branch() {
+  local base="$1"
+  local branch
+  branch="$(git branch --show-current)"
+  if [[ "$branch" != "$base" ]]; then
+    echo "error: release_ship.sh --finalize must run from $base; current branch is ${branch:-detached}"
+    exit 1
+  fi
+  git fetch origin "$base" --quiet
+  local local_head remote_head
+  local_head="$(git rev-parse HEAD)"
+  remote_head="$(git rev-parse "origin/$base")"
+  if [[ "$local_head" != "$remote_head" ]]; then
+    echo "Local $base behind origin/$base; fast-forwarding."
+    echo "  was:  $local_head"
+    echo "  now:  $remote_head"
+    git pull --ff-only origin "$base" --quiet
+  fi
+  # Re-read Cargo.toml after the fast-forward — if main has continued
+  # past the bump and someone else has already bumped to a newer
+  # version, abort rather than silently tagging the wrong commit.
+  local fresh_version
+  fresh_version="$(current_version)"
+  if [[ -n "${EXPECTED_VERSION:-}" && "$fresh_version" != "$EXPECTED_VERSION" ]]; then
+    echo "error: Cargo.toml version moved from $EXPECTED_VERSION to $fresh_version while finalizing"
+    echo "hint: re-trigger publish-release.yml — it'll detect drift for the new version"
+    exit 1
+  fi
+}
+
 require_release_branch() {
   local base="$1"
   local branch
@@ -426,7 +463,7 @@ prepare_here() {
   echo "  git push -u origin $branch"
   echo "  gh pr create --title \"Release v$next\" --body \"...\""
   echo ""
-  echo "After the PR lands through the merge queue, the Finalize Release"
+  echo "After the PR lands through the merge queue, the publish-release"
   echo "workflow auto-fires on tag drift and ships v$next."
 }
 
@@ -528,7 +565,8 @@ if [[ "$MODE" == "prepare-here" ]]; then
   require_release_branch "$BASE_BRANCH"
 elif [[ "$MODE" == "finalize" ]]; then
   require_clean_tree
-  require_base_branch "$BASE_BRANCH"
+  EXPECTED_VERSION="$(current_version)"
+  sync_base_branch "$BASE_BRANCH"
   # Trust the merge-queue CI by default; opt-in re-audit via env var or
   # --reaudit flag.
   if [[ "${RELEASE_FINALIZE_REAUDIT:-0}" != "1" ]]; then

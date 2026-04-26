@@ -305,7 +305,7 @@ cmd_prepare() {
   echo "  1. Review docs/release notes diff"
   echo "  2. Commit on a release/v$next branch: git commit -am 'Release v$next'"
   echo "  3. Open a PR into main and let it land through the merge queue"
-  echo "  4. Walk away — the Finalize Release workflow auto-fires on tag drift"
+  echo "  4. Walk away — the publish-release workflow auto-fires on tag drift"
 }
 
 cmd_publish() {

@@ -4,7 +4,7 @@ Run the merge-queue-safe Harn release workflow.
 
 The release is **one** human PR titled `Release vX.Y.Z`. It carries the
 changelog, code, docs, AND the `Cargo.toml`/`Cargo.lock` bump together. After
-it lands through the merge queue, the Finalize Release workflow auto-fires on
+it lands through the merge queue, the Publish release workflow auto-fires on
 tag drift and ships everything. No second PR.
 
 ## End-state flow
@@ -12,7 +12,7 @@ tag drift and ships everything. No second PR.
 ```text
 human/agent: write & land "Release vX.Y.Z" PR (changelog + code + docs + bump)
         │  ↓ merge queue runs full audit set in CI
-bot:    Finalize Release workflow auto-fires on tag drift
+bot:    Publish release workflow auto-fires on tag drift
         │   pushes vX.Y.Z, runs cargo publish, creates GH release notes
         │  ↓ tag push cascades
 bot:    Release workflow builds binaries + multi-arch container
@@ -71,34 +71,34 @@ That's it. Stop here. The bot takes over once the PR lands.
 
 ## What happens automatically after the release PR lands
 
-- **`Finalize Release`** workflow
-  (`.github/workflows/finalize-release.yml`) detects tag drift
+- **`Publish release`** workflow
+  (`.github/workflows/publish-release.yml`) detects tag drift
   (`Cargo.toml` ahead of latest `vX.Y.Z` tag) and runs
   `./scripts/release_ship.sh --finalize` under the App identity:
   portal-check + publish dry-run + push tag + `cargo publish` + render
   notes + create or update the GitHub release. **Audit is skipped** —
   the merge-queue CI of the just-landed Release PR proved the same
   gates a few minutes ago.
-- The tag push triggers **`Release`** workflow
-  (`.github/workflows/release.yml`), which builds the darwin/linux ×
+- The tag push triggers **`Build release binaries`** workflow
+  (`.github/workflows/build-release-binaries.yml`), which builds the darwin/linux ×
   x86/arm binary tarballs, publishes the multi-arch GHCR container,
   and attaches the binaries to the GitHub release.
 
 ## Recovery (only when something breaks)
 
 - **Finalize failed mid-run**: re-trigger from the GitHub Actions UI
-  (`gh workflow run finalize-release.yml`). Scripts are idempotent —
+  (`gh workflow run publish-release.yml`). Scripts are idempotent —
   per-crate publish skips already-published, the tag step no-ops if
   it already points where it should, `gh release` is
   view-then-edit-or-create. Pass `reaudit: true` if you want it to
   re-run the full audit (only needed if main has changed since the
   PR landed).
-- **Release workflow needs to re-emit binaries** for an
+- **Build release binaries workflow needs to re-emit binaries** for an
   already-tagged version: `gh workflow run release.yml --ref main -f
   tag=vX.Y.Z`. The workflow accepts the tag input and runs at that
   tagged code.
 - **Accidentally landed a "Prepare vX.Y.Z release"-style commit on
-  main without the consolidated bump**: the `Bump Release (recovery)`
+  main without the consolidated bump**: the `Open version bump PR (recovery)`
   workflow exists for this. `gh workflow run bump-release.yml` opens
   a historical-style bump PR.
 - **Truly stuck local recovery (very rare)**: run
@@ -147,8 +147,8 @@ That's it. Stop here. The bot takes over once the PR lands.
 ./scripts/release_gate.sh notes
 
 # Manually re-trigger workflows (recovery):
-gh workflow run finalize-release.yml --ref main
-gh workflow run finalize-release.yml --ref main -f reaudit=true
-gh workflow run release.yml --ref main -f tag=vX.Y.Z
+gh workflow run publish-release.yml --ref main
+gh workflow run publish-release.yml --ref main -f reaudit=true
+gh workflow run build-release-binaries.yml --ref main -f tag=vX.Y.Z
 gh workflow run bump-release.yml          # legacy two-PR recovery
 ```

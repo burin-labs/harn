@@ -1,11 +1,11 @@
-name: Finalize Release
+name: Publish release
 
 # Fires whenever main has tag drift — i.e. Cargo.toml's workspace version
 # is ahead of the latest `vX.Y.Z` git tag. Runs ./scripts/release_ship.sh
 # --finalize, which dry-run publishes, tags, publishes to crates.io, and
 # creates/updates the GitHub release. The tag push (under the
-# harn-release-bot App identity) cascades to release.yml for binary
-# tarballs + multi-arch container.
+# harn-release-bot App identity) cascades to build-release-binaries.yml
+# for binary tarballs + multi-arch container.
 #
 # In the consolidated release flow, the human's "Release vX.Y.Z" PR
 # carries both the changelog content AND the Cargo.toml bump. Once it
@@ -61,7 +61,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: finalize-release
+  group: publish-release
   cancel-in-progress: false
 
 env:
@@ -108,8 +108,8 @@ jobs:
             echo "latest_tag=$LATEST_TAG"
           } >> "$GITHUB_OUTPUT"
 
-  finalize:
-    name: Finalize release
+  publish:
+    name: Publish release
     needs: detect-drift
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch' || needs.detect-drift.outputs.drift == 'true'
@@ -118,9 +118,9 @@ jobs:
       # below comes from the harn-release-bot identity instead of
       # GITHUB_TOKEN. GHA suppresses workflow chains triggered by
       # GITHUB_TOKEN-authenticated pushes, so a tag pushed under the
-      # default token would NOT fire .github/workflows/release.yml — and
-      # we'd ship to crates.io without binaries or a container image. An
-      # App token bypasses that suppression cleanly.
+      # default token would NOT fire build-release-binaries.yml — and
+      # we'd ship to crates.io without binaries or a container image.
+      # An App token bypasses that suppression cleanly.
       - name: Mint GitHub App installation token
         id: app-token
         uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1
@@ -185,7 +185,7 @@ jobs:
           git config --global user.name "harn-release-bot[bot]"
           git config --global user.email "harn-release-bot[bot]@users.noreply.github.com"
 
-      - name: Finalize release
+      - name: Publish release
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
           # gh CLI inside release_ship.sh uses GH_TOKEN for `gh release`.
