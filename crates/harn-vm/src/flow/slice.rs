@@ -127,6 +127,31 @@ pub enum InvariantResult {
     Passed,
     Failed { reason: String },
     Waived { reason: String },
+    Blocked { error: InvariantBlockError },
+}
+
+/// Structured hard-block reason for invariant execution failures.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InvariantBlockError {
+    pub code: String,
+    pub message: String,
+}
+
+impl InvariantBlockError {
+    pub fn new(code: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            code: code.into(),
+            message: message.into(),
+        }
+    }
+
+    pub fn budget_exceeded(message: impl Into<String>) -> Self {
+        Self::new("budget_exceeded", message)
+    }
+
+    pub fn nondeterministic_drift(message: impl Into<String>) -> Self {
+        Self::new("nondeterministic_drift", message)
+    }
 }
 
 /// Human or system approval included in the slice audit trail.

@@ -1407,12 +1407,18 @@ impl TypeChecker {
 
     /// Validate attribute usage and emit warnings for unknown attributes.
     /// Recognized attribute names: `deprecated`, `test`, `complexity`,
-    /// `acp_tool`, `invariant`. All other names produce a warning so misspellings
-    /// surface early without breaking compilation.
-    fn check_attributes(&mut self, attributes: &[Attribute], inner: &SNode) {
+    /// `acp_tool`, `invariant`, `deterministic`, `semantic`. All other names
+    /// produce a warning so misspellings surface early without breaking
+    /// compilation.
+    pub(in crate::typechecker) fn check_attributes(
+        &mut self,
+        attributes: &[Attribute],
+        inner: &SNode,
+    ) {
         for attr in attributes {
             match attr.name.as_str() {
-                "deprecated" | "test" | "complexity" | "acp_tool" | "invariant" => {}
+                "deprecated" | "test" | "complexity" | "acp_tool" | "invariant"
+                | "deterministic" | "semantic" => {}
                 other => {
                     self.warning_at(format!("unknown attribute `@{}`", other), attr.span);
                 }
@@ -1427,6 +1433,14 @@ impl TypeChecker {
             if attr.name == "acp_tool" && !matches!(inner.node, Node::FnDecl { .. }) {
                 self.warning_at(
                     "`@acp_tool` only applies to function declarations".to_string(),
+                    attr.span,
+                );
+            }
+            if matches!(attr.name.as_str(), "deterministic" | "semantic")
+                && !matches!(inner.node, Node::FnDecl { .. })
+            {
+                self.warning_at(
+                    format!("`@{}` only applies to function declarations", attr.name),
                     attr.span,
                 );
             }

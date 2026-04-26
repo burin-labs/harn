@@ -7,6 +7,7 @@
 pub mod atom;
 pub mod backend;
 pub mod intent;
+pub mod predicates;
 pub mod slice;
 pub mod store;
 
@@ -20,8 +21,14 @@ pub use intent::{
     IntentClusterOptions, IntentClusterer, IntentError, IntentId, ObservedAtom, SealedIntent,
     TranscriptSpan,
 };
+pub use predicates::{
+    CheapJudge, CheapJudgeRequest, CheapJudgeResponse, PredicateContext, PredicateExecutionRecord,
+    PredicateExecutionReport, PredicateExecutor, PredicateExecutorConfig, PredicateKind,
+    PredicateRunner,
+};
 pub use slice::{
-    derive_slice, Approval, CoverageMap, InvariantResult, PredicateHash, Slice,
-    SliceDerivationError, SliceDerivationInput, SliceId, SliceStatus, TestId, UnresolvedParent,
+    derive_slice, Approval, CoverageMap, InvariantBlockError, InvariantResult, PredicateHash,
+    Slice, SliceDerivationError, SliceDerivationInput, SliceId, SliceStatus, TestId,
+    UnresolvedParent,
 };
 pub use store::{AtomDelta, SqliteFlowStore, StateVector};
