@@ -24,7 +24,13 @@ use tokio::sync::oneshot;
 // full nextest load, while JSON-RPC roundtrips against an already-ready server
 // finish in milliseconds. Use the wider budget for the first protocol response
 // or HTTP readiness URL, and the tighter budget for subsequent message recvs.
-const PROCESS_READY_TIMEOUT: Duration = Duration::from_secs(15);
+//
+// Empirically, cold-starting the debug `harn` binary takes 30–40s when nextest
+// fans out across the full workspace and saturates every core. The 15s budget
+// previously used here was tight enough that it tripped intermittently, even
+// when the binary itself eventually came up healthy. Keep the protocol-level
+// budget tight so logic regressions surface quickly.
+const PROCESS_READY_TIMEOUT: Duration = Duration::from_secs(60);
 const TEST_TIMEOUT: Duration = Duration::from_secs(2);
 
 fn lock_harn_serve_mcp_tests() -> mcp_support::HarnProcessTestLock {

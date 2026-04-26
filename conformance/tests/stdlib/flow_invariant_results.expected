@@ -1,0 +1,22 @@
+[harn] allow
+[harn] false
+[harn] 1.0
+[harn] warn
+[harn] untested helper
+[harn] block
+[harn] true
+[harn] missing_test
+[harn] no test covers this atom
+[harn] require_approval
+[harn] principal
+[harn] user:alice
+[harn] role
+[harn] security-reviewer
+[harn] 4
+[harn] atom_pointer
+[harn] metadata_path
+[harn] transcript_excerpt
+[harn] external_citation
+[harn] strip trailing whitespace
+[harn] 0.42
+[harn] 1.0

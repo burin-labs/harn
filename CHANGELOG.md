@@ -65,6 +65,33 @@ granular archaeology.
   block on hover so the function declaration stays the single source of
   truth. Attribute argument syntax also accepts list literals and
   multi-line forms so provenance blocks can carry rich evidence.
+## Unreleased
+
+### Added
+
+- **Flow `InvariantResult` graded-verdict types and Harn bindings (#581).**
+  Predicates now return a structured `InvariantResult { verdict, evidence,
+  remediation, confidence }` value where `verdict` grades as `Allow`, `Warn`,
+  `Block`, or `RequireApproval` (routing to a specific `Principal` or
+  `Role`). Evidence items cover `AtomPointer`, `MetadataPath`,
+  `TranscriptExcerpt`, and `ExternalCitation`. The Rust types live in
+  `crates/harn-vm/src/flow/predicates/result.rs`; matching Harn-side
+  builtins (`flow_invariant_allow`/`warn`/`block`/`require_approval`,
+  `flow_evidence_*`, `flow_remediation`, `flow_with_*`,
+  `flow_invariant_kind`/`is_blocking`/`confidence`) let `.harn` predicates
+  produce these values idiomatically. Remediations are inert and earmarked
+  for the future Fixer persona (#587).
+
+### Fixed
+
+- **Stabilize integration tests under full nextest load.**
+  `PROCESS_READY_TIMEOUT` in `harn_serve_mcp_cli` and `mcp_server_cli` was
+  raised from 15s to 60s after observing 30–40s cold-starts of the debug
+  `harn` binary when nextest fans out across the full workspace. The
+  in-process healthcheck stub server in `llm::healthcheck` now also runs
+  with a 30s accept/read/write deadline so the test thread doesn't trip
+  when starved of CPU. Protocol/logic budgets remain tight so regressions
+  still surface quickly.
 
 ## v0.7.42
 

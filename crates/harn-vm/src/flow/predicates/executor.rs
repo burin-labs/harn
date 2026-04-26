@@ -319,32 +319,28 @@ impl PredicateExecutor {
         let mut attempts = 1;
         let mut second_hash = None;
 
-        if kind == PredicateKind::Deterministic
-            && !matches!(result, InvariantResult::Blocked { .. })
-        {
+        if kind == PredicateKind::Deterministic && !result.is_blocking() {
             let second = self.run_attempt(slice, runner).await;
             attempts = 2;
             let replay_hash = hash_result(&second);
             second_hash = replay_hash.clone();
-            if matches!(second, InvariantResult::Blocked { .. }) {
+            if second.is_blocking() {
                 result = second;
             } else {
                 match (first_hash.as_ref(), replay_hash.as_ref()) {
                     (Some(left), Some(right)) if left == right => {}
                     (Some(left), Some(right)) => {
-                        result = InvariantResult::Blocked {
-                            error: InvariantBlockError::nondeterministic_drift(format!(
+                        result = InvariantResult::block(InvariantBlockError::nondeterministic_drift(
+                            format!(
                                 "deterministic predicate result drifted across replay: {left} != {right}"
-                            )),
-                        };
+                            ),
+                        ));
                     }
                     _ => {
-                        result = InvariantResult::Blocked {
-                            error: InvariantBlockError::new(
-                                "result_hash_failed",
-                                "failed to hash deterministic predicate replay result",
-                            ),
-                        };
+                        result = InvariantResult::block(InvariantBlockError::new(
+                            "result_hash_failed",
+                            "failed to hash deterministic predicate replay result",
+                        ));
                     }
                 }
             }
@@ -379,16 +375,14 @@ impl PredicateExecutor {
         match tokio::time::timeout(timeout, runner.evaluate(context.clone())).await {
             Ok(result) => context
                 .block_error()
-                .map(|error| InvariantResult::Blocked { error })
+                .map(InvariantResult::block)
                 .unwrap_or(result),
             Err(_) => {
                 context.cancel();
-                InvariantResult::Blocked {
-                    error: InvariantBlockError::budget_exceeded(format!(
-                        "{kind:?} predicate exceeded {}ms budget",
-                        timeout.as_millis()
-                    )),
-                }
+                InvariantResult::block(InvariantBlockError::budget_exceeded(format!(
+                    "{kind:?} predicate exceeded {}ms budget",
+                    timeout.as_millis()
+                )))
             }
         }
     }
@@ -501,11 +495,9 @@ mod tests {
             let calls = self.calls.get();
             self.calls.set(calls + 1);
             if calls == 0 {
-                InvariantResult::Passed
+                InvariantResult::allow()
             } else {
-                InvariantResult::Failed {
-                    reason: "changed".to_string(),
-                }
+                InvariantResult::warn("changed")
             }
         }
     }
@@ -533,9 +525,9 @@ mod tests {
                 let Err(error) = context.cheap_judge("judge the case", "case").await else {
                     continue;
                 };
-                return InvariantResult::Blocked { error };
+                return InvariantResult::block(error);
             }
-            InvariantResult::Passed
+            InvariantResult::allow()
         }
     }
 
@@ -578,7 +570,7 @@ mod tests {
             self.max_active.set(self.max_active.get().max(active));
             tokio::time::sleep(Duration::from_millis(10)).await;
             self.active.set(self.active.get() - 1);
-            InvariantResult::Passed
+            InvariantResult::allow()
         }
     }
 
@@ -588,7 +580,7 @@ mod tests {
         let predicates: Vec<Rc<dyn PredicateRunner>> = vec![Rc::new(StaticPredicate {
             hash: "stable",
             kind: PredicateKind::Deterministic,
-            result: InvariantResult::Passed,
+            result: InvariantResult::allow(),
             delay: Duration::ZERO,
         })];
 
@@ -596,7 +588,7 @@ mod tests {
 
         assert_eq!(report.records.len(), 1);
         let record = &report.records[0];
-        assert_eq!(record.result, InvariantResult::Passed);
+        assert_eq!(record.result, InvariantResult::allow());
         assert_eq!(record.attempts, 2);
         assert_eq!(record.first_result_hash, record.second_result_hash);
     }
@@ -610,11 +602,8 @@ mod tests {
 
         let report = executor.execute_slice(&slice(), &predicates).await;
 
-        assert!(matches!(
-            &report.records[0].result,
-            InvariantResult::Blocked { error }
-                if error.code == "nondeterministic_drift"
-        ));
+        let block = report.records[0].result.block_error().expect("blocked");
+        assert_eq!(block.code, "nondeterministic_drift");
     }
 
     #[tokio::test]
@@ -626,16 +615,14 @@ mod tests {
         let predicates: Vec<Rc<dyn PredicateRunner>> = vec![Rc::new(StaticPredicate {
             hash: "slow",
             kind: PredicateKind::Deterministic,
-            result: InvariantResult::Passed,
+            result: InvariantResult::allow(),
             delay: Duration::from_millis(20),
         })];
 
         let report = executor.execute_slice(&slice(), &predicates).await;
 
-        assert!(matches!(
-            &report.records[0].result,
-            InvariantResult::Blocked { error } if error.code == "budget_exceeded"
-        ));
+        let block = report.records[0].result.block_error().expect("blocked");
+        assert_eq!(block.code, "budget_exceeded");
     }
 
     #[tokio::test]
@@ -674,10 +661,8 @@ mod tests {
 
         let report = executor.execute_slice(&slice(), &predicates).await;
 
-        assert!(matches!(
-            &report.records[0].result,
-            InvariantResult::Blocked { error } if error.code == "budget_exceeded"
-        ));
+        let block = report.records[0].result.block_error().expect("blocked");
+        assert_eq!(block.code, "budget_exceeded");
     }
 
     #[tokio::test]
@@ -696,8 +681,8 @@ mod tests {
 
             async fn evaluate(&self, context: PredicateContext) -> InvariantResult {
                 match context.cheap_judge("judge", "missing").await {
-                    Ok(_) => InvariantResult::Passed,
-                    Err(error) => InvariantResult::Blocked { error },
+                    Ok(_) => InvariantResult::allow(),
+                    Err(error) => InvariantResult::block(error),
                 }
             }
         }
@@ -710,9 +695,7 @@ mod tests {
 
         let report = executor.execute_slice(&slice(), &predicates).await;
 
-        assert!(matches!(
-            &report.records[0].result,
-            InvariantResult::Blocked { error } if error.code == "evidence_missing"
-        ));
+        let block = report.records[0].result.block_error().expect("blocked");
+        assert_eq!(block.code, "evidence_missing");
     }
 }

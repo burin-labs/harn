@@ -1,0 +1,43 @@
+pipeline test(task) {
+  // Simple verdicts
+  let allow = flow_invariant_allow()
+  log(flow_invariant_kind(allow))
+  log(flow_invariant_is_blocking(allow))
+  log(flow_invariant_confidence(allow))
+  let warn = flow_invariant_warn("untested helper")
+  log(flow_invariant_kind(warn))
+  log(warn.verdict.reason)
+  let block = flow_invariant_block("missing_test", "no test covers this atom")
+  log(flow_invariant_kind(block))
+  log(flow_invariant_is_blocking(block))
+  log(block.verdict.error.code)
+  log(block.verdict.error.message)
+  let principal = flow_invariant_require_approval("principal", "user:alice")
+  log(flow_invariant_kind(principal))
+  log(principal.verdict.approver.kind)
+  log(principal.verdict.approver.id)
+  let role = flow_invariant_require_approval("role", "security-reviewer")
+  log(role.verdict.approver.kind)
+  log(role.verdict.approver.name)
+  // Evidence + remediation + confidence builders
+  let atom_hex = "0101010101010101010101010101010101010101010101010101010101010101"
+  let atom_evidence = flow_evidence_atom(atom_hex, 0, 64)
+  let metadata_evidence = flow_evidence_metadata("src/auth", "policy", "min_review_count")
+  let transcript_evidence = flow_evidence_transcript("transcript-0001", 128, 256)
+  let citation_evidence = flow_evidence_citation("https://harnlang.com/spec", "verdicts may grade", "2026-04-26T00:00:00Z")
+  let evidence = [atom_evidence, metadata_evidence, transcript_evidence, citation_evidence]
+  let remediation = flow_remediation("strip trailing whitespace")
+  let with_evidence = flow_with_evidence(warn, evidence)
+  log(len(with_evidence.evidence))
+  log(with_evidence.evidence[0].kind)
+  log(with_evidence.evidence[1].kind)
+  log(with_evidence.evidence[2].kind)
+  log(with_evidence.evidence[3].kind)
+  let with_remediation = flow_with_remediation(block, remediation)
+  log(with_remediation.remediation.description)
+  let with_confidence = flow_with_confidence(warn, 0.42)
+  log(flow_invariant_confidence(with_confidence))
+  // Confidence clamps to [0.0, 1.0]
+  let too_high = flow_with_confidence(warn, 2.0)
+  log(flow_invariant_confidence(too_high))
+}

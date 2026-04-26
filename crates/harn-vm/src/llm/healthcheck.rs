@@ -298,14 +298,19 @@ mod tests {
             .set_nonblocking(true)
             .expect("set listener nonblocking");
 
+        // Use a generous deadline so the stub doesn't trip when nextest fans
+        // out across the workspace and starves this thread of CPU. The
+        // healthcheck client itself completes in milliseconds against the
+        // loopback stub once it gets scheduled — the deadline is just an
+        // upper bound to keep a stuck test from hanging forever.
         let handle = std::thread::spawn(move || {
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
             let (mut stream, _) = loop {
                 match listener.accept() {
                     Ok(pair) => break pair,
                     Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                         if std::time::Instant::now() >= deadline {
-                            panic!("healthcheck stub: no client within 3s");
+                            panic!("healthcheck stub: no client within 30s");
                         }
                         std::thread::sleep(std::time::Duration::from_millis(10));
                     }
@@ -313,10 +318,13 @@ mod tests {
                 }
             };
             stream
-                .set_read_timeout(Some(std::time::Duration::from_secs(3)))
+                .set_nonblocking(false)
+                .expect("set accepted stream blocking");
+            stream
+                .set_read_timeout(Some(std::time::Duration::from_secs(30)))
                 .ok();
             stream
-                .set_write_timeout(Some(std::time::Duration::from_secs(3)))
+                .set_write_timeout(Some(std::time::Duration::from_secs(30)))
                 .ok();
 
             let mut bytes = Vec::new();

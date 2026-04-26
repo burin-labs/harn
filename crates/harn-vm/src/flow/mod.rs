@@ -22,15 +22,16 @@ pub use intent::{
     TranscriptSpan,
 };
 pub use predicates::{
+    Approver, ByteSpan,
     discover_invariants, parse_invariants_source, resolve_predicates, ArchivistMetadata,
     CheapJudge, CheapJudgeRequest, CheapJudgeResponse, DiscoveredInvariantFile,
     DiscoveredPredicate, DiscoveryDiagnostic, DiscoveryDiagnosticSeverity, ParsedInvariantFile,
+    EvidenceItem, InvariantBlockError, InvariantResult,
     PredicateContext, PredicateExecutionRecord, PredicateExecutionReport, PredicateExecutor,
-    PredicateExecutorConfig, PredicateKind, PredicateRunner, INVARIANTS_FILE,
+    PredicateExecutorConfig, PredicateKind, PredicateRunner, Remediation, Verdict, INVARIANTS_FILE,
 };
 pub use slice::{
-    derive_slice, Approval, CoverageMap, InvariantBlockError, InvariantResult, PredicateHash,
-    Slice, SliceDerivationError, SliceDerivationInput, SliceId, SliceStatus, TestId,
-    UnresolvedParent,
+    derive_slice, Approval, CoverageMap, PredicateHash, Slice, SliceDerivationError,
+    SliceDerivationInput, SliceId, SliceStatus, TestId, UnresolvedParent,
 };
 pub use store::{AtomDelta, SqliteFlowStore, StateVector};

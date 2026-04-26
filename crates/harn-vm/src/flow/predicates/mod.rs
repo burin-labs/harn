@@ -2,6 +2,7 @@
 
 pub mod discovery;
 pub mod executor;
+pub mod result;
 
 pub use discovery::{
     discover_invariants, parse_invariants_source, resolve_predicates, ArchivistMetadata,
@@ -12,4 +13,7 @@ pub use executor::{
     CheapJudge, CheapJudgeRequest, CheapJudgeResponse, PredicateContext, PredicateExecutionRecord,
     PredicateExecutionReport, PredicateExecutor, PredicateExecutorConfig, PredicateKind,
     PredicateRunner,
+};
+pub use result::{
+    Approver, ByteSpan, EvidenceItem, InvariantBlockError, InvariantResult, Remediation, Verdict,
 };
