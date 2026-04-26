@@ -81,6 +81,23 @@ granular archaeology.
   prose-wrapped JSON, schema retry recovery, schema-validation
   failure, repair success, repair failure, transport failure, and
   schema-as-type narrowing.
+- **Predicate-count explosion limits for Flow slice union (#733).** A
+  cross-directory slice that touches many leaves with sibling-specific
+  `invariants.harn` files used to silently fan out into hundreds or
+  thousands of predicates, and Ship Captain would just pay the serial
+  evaluation cost. `PredicateCeiling::default()` (256 soft / 1024 hard)
+  now fronts evaluation: at the soft ceiling Flow returns
+  `RequireApproval` routed to the `flow-platform` role; at the hard
+  ceiling it returns `Block` with the stable code
+  `predicate_count_explosion`. Both verdicts carry a structured
+  violation listing the count, threshold, and top-contributing
+  directories so operators can see where to prune. `harn flow ship watch`
+  surfaces the outcome under
+  `predicate_validation.ceiling` and propagates the level into
+  `mock_pr.validation_status`. Calibration data lives in the new
+  `flow_predicate_union` criterion bench: union resolve and the ceiling
+  check stay microsecond-scale even at ~2000 predicates, so the limit is
+  operational (the 50ms-per-predicate evaluation budget), not perf.
 - **`pub import` re-exports for facade modules (#740).** Prefixing any
   `import` with `pub` now re-exports the imported symbols as part of the
   importing module's public surface:

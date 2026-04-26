@@ -103,3 +103,7 @@ tempfile = "3"
 [[bench]]
 name = "flow_store"
 harness = false
+
+[[bench]]
+name = "flow_predicate_union"
+harness = false

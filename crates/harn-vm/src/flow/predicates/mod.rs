@@ -6,9 +6,11 @@ pub mod executor;
 pub mod result;
 
 pub use compose::{
-    compose_predicate_results, resolve_predicates, resolve_predicates_for_touched_directories,
-    ComposedPredicateEvaluation, PredicateEvaluation, PredicateSource, ResolvedPredicate,
-    VerdictStrictness,
+    compose_predicate_results, enforce_predicate_ceiling, resolve_predicates,
+    resolve_predicates_for_touched_directories, ComposedPredicateEvaluation, DirectoryContribution,
+    PredicateCeiling, PredicateCeilingLevel, PredicateCeilingOutcome, PredicateCeilingViolation,
+    PredicateEvaluation, PredicateSource, ResolvedPredicate, VerdictStrictness,
+    PREDICATE_COUNT_EXPLOSION_CODE,
 };
 pub use discovery::{
     discover_invariants, parse_invariants_source, ArchivistMetadata,

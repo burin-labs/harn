@@ -161,6 +161,14 @@ fn run_ship_watch(args: &crate::cli::FlowShipWatchArgs) -> Result<i32, String> {
             })
         })
         .collect::<Vec<_>>();
+    let ceiling = harn_vm::flow::PredicateCeiling::default();
+    let ceiling_outcome = harn_vm::flow::enforce_predicate_ceiling(&predicates, &ceiling);
+    let ceiling_payload = serialize_ceiling_outcome(&ceiling_outcome, &ceiling);
+    let validation_status = match ceiling_outcome.violation().map(|v| v.level) {
+        None => "ok",
+        Some(harn_vm::flow::PredicateCeilingLevel::RequireApproval) => "require_approval",
+        Some(harn_vm::flow::PredicateCeilingLevel::Block) => "blocked",
+    };
 
     let atom_ids: Vec<_> = atom_refs.iter().map(|atom| atom.atom_id).collect();
     let slice = store
@@ -178,12 +186,14 @@ fn run_ship_watch(args: &crate::cli::FlowShipWatchArgs) -> Result<i32, String> {
         "url": format!("mock://github/pull/{}", slice.id),
         "title": format!("Flow slice {}", slice.id),
         "body": format!(
-            "Shadow-mode Ship Captain candidate slice.\n\nAtoms: {}\nIntents: {}\nPredicates discovered: {}\n\nNo remote PR was opened.",
+            "Shadow-mode Ship Captain candidate slice.\n\nAtoms: {}\nIntents: {}\nPredicates discovered: {}\nValidation: {}\n\nNo remote PR was opened.",
             slice.atoms.len(),
             intents.len(),
             predicates.len(),
+            validation_status,
         ),
         "requires_approval": true,
+        "validation_status": validation_status,
     });
     let payload = json!({
         "status": "mock_pr_opened",
@@ -206,8 +216,9 @@ fn run_ship_watch(args: &crate::cli::FlowShipWatchArgs) -> Result<i32, String> {
             } else {
                 args.touched_dirs.clone()
             },
-            "status": "ok",
+            "status": validation_status,
             "predicates": predicate_payload,
+            "ceiling": ceiling_payload,
             "diagnostics": diagnostics.iter().map(|(path, diagnostic)| json!({
                 "path": path,
                 "severity": discovery_severity_label(diagnostic.severity),
@@ -233,6 +244,40 @@ fn run_ship_watch(args: &crate::cli::FlowShipWatchArgs) -> Result<i32, String> {
         &payload,
     );
     Ok(0)
+}
+
+fn serialize_ceiling_outcome(
+    outcome: &harn_vm::flow::PredicateCeilingOutcome,
+    ceiling: &harn_vm::flow::PredicateCeiling,
+) -> serde_json::Value {
+    use harn_vm::flow::{PredicateCeilingLevel, PredicateCeilingOutcome};
+    let mut payload = json!({
+        "count": outcome.count(),
+        "require_approval_threshold": ceiling.require_approval_threshold,
+        "block_threshold": ceiling.block_threshold,
+    });
+    match outcome {
+        PredicateCeilingOutcome::Within { .. } => {
+            payload["status"] = json!("within");
+        }
+        PredicateCeilingOutcome::Exceeded(violation) => {
+            payload["status"] = json!(match violation.level {
+                PredicateCeilingLevel::RequireApproval => "require_approval",
+                PredicateCeilingLevel::Block => "blocked",
+            });
+            payload["threshold"] = json!(violation.threshold);
+            payload["message"] = json!(violation.message());
+            payload["top_contributors"] = json!(violation
+                .top_contributors
+                .iter()
+                .map(|item| json!({
+                    "relative_dir": item.relative_dir,
+                    "count": item.count,
+                }))
+                .collect::<Vec<_>>());
+        }
+    }
+    payload
 }
 
 fn discovery_severity_label(severity: harn_vm::flow::DiscoveryDiagnosticSeverity) -> &'static str {
