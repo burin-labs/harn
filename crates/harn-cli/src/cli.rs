@@ -1013,45 +1013,6 @@ pub(crate) struct TrustArgs {
     pub command: TrustCommand,
 }
 
-#[derive(Debug, Args)]
-pub(crate) struct FlowArgs {
-    #[command(subcommand)]
-    pub command: FlowCommand,
-}
-
-#[derive(Debug, Subcommand)]
-pub(crate) enum FlowCommand {
-    /// Audit historical shipped slices against current retroactive predicates.
-    #[command(name = "replay-audit")]
-    ReplayAudit(FlowReplayAuditArgs),
-}
-
-#[derive(Debug, Args)]
-pub(crate) struct FlowReplayAuditArgs {
-    /// SQLite Flow store to audit.
-    #[arg(
-        long = "store",
-        value_name = "PATH",
-        default_value = ".harn/flow.sqlite"
-    )]
-    pub store: PathBuf,
-    /// Repository root used for `invariants.harn` discovery.
-    #[arg(long = "root", value_name = "PATH", default_value = ".")]
-    pub root: PathBuf,
-    /// Target directory whose effective current predicate set should be used.
-    #[arg(long = "target-dir", value_name = "PATH", default_value = ".")]
-    pub target_dir: PathBuf,
-    /// Include shipped slices created at or after this date/timestamp.
-    #[arg(long = "since", value_name = "DATE")]
-    pub since: String,
-    /// Exit non-zero when advisory drift is found.
-    #[arg(long = "fail-on-drift")]
-    pub fail_on_drift: bool,
-    /// Emit JSON instead of human-readable output.
-    #[arg(long)]
-    pub json: bool,
-}
-
 #[derive(Debug, Subcommand)]
 pub(crate) enum TrustCommand {
     /// Query trust records from the event log.
@@ -1981,6 +1942,99 @@ pub(crate) struct PersonaArgs {
     pub state_dir: PathBuf,
 }
 
+#[derive(Debug, Args)]
+pub(crate) struct FlowArgs {
+    #[command(subcommand)]
+    pub command: FlowCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum FlowCommand {
+    /// Replay-audit historical slices against the current invariant predicates.
+    ReplayAudit(FlowReplayAuditArgs),
+    /// Ship Captain Phase 0 utilities.
+    Ship(FlowShipArgs),
+    /// Archivist Phase 0 utilities.
+    Archivist(FlowArchivistArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct FlowReplayAuditArgs {
+    /// SQLite Flow store path.
+    #[arg(long, value_name = "PATH", default_value = ".harn/flow.sqlite")]
+    pub store: PathBuf,
+    /// Repo root used to discover current `invariants.harn` predicates.
+    #[arg(
+        long = "predicate-root",
+        alias = "root",
+        value_name = "PATH",
+        default_value = "."
+    )]
+    pub predicate_root: PathBuf,
+    /// Touched directory to resolve predicates for. Repeat for cross-directory slices.
+    #[arg(long = "touched-dir", alias = "target-dir", value_name = "PATH")]
+    pub touched_dirs: Vec<PathBuf>,
+    /// SQLite created_at lower bound, for example `2026-04-26` or `2026-04-26 12:00:00`.
+    #[arg(long, value_name = "DATE")]
+    pub since: Option<String>,
+    /// Emit JSON instead of text.
+    #[arg(long)]
+    pub json: bool,
+    /// Exit non-zero when drift is detected.
+    #[arg(long)]
+    pub fail_on_drift: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct FlowShipArgs {
+    #[command(subcommand)]
+    pub command: FlowShipCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum FlowShipCommand {
+    /// Derive a candidate slice from stored atoms and emit a mock PR receipt.
+    Watch(FlowShipWatchArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct FlowShipWatchArgs {
+    /// SQLite Flow store path.
+    #[arg(long, value_name = "PATH", default_value = ".harn/flow.sqlite")]
+    pub store: PathBuf,
+    /// Write the Phase 0 mock PR receipt to this path.
+    #[arg(long = "mock-pr-out", value_name = "PATH")]
+    pub mock_pr_out: Option<PathBuf>,
+    /// Emit JSON instead of text.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct FlowArchivistArgs {
+    #[command(subcommand)]
+    pub command: FlowArchivistCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum FlowArchivistCommand {
+    /// Scan a repo and emit review-ready predicate proposal metadata.
+    Scan(FlowArchivistScanArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct FlowArchivistScanArgs {
+    /// Repo root to scan.
+    #[arg(value_name = "REPO", default_value = ".")]
+    pub repo: PathBuf,
+    /// Write the proposal JSON to this path.
+    #[arg(long, value_name = "PATH")]
+    pub out: Option<PathBuf>,
+    /// Emit JSON instead of text.
+    #[arg(long)]
+    pub json: bool,
+}
+
 #[derive(Debug, Subcommand)]
 pub(crate) enum PersonaCommand {
     /// List personas declared in the resolved harn.toml.
@@ -2766,9 +2820,9 @@ mod tests {
             "replay-audit",
             "--store",
             ".harn/flow.sqlite",
-            "--root",
+            "--predicate-root",
             ".",
-            "--target-dir",
+            "--touched-dir",
             "crates/harn-vm",
             "--since",
             "2026-04-26",
@@ -2779,11 +2833,13 @@ mod tests {
         let Command::Flow(args) = cli.command.unwrap() else {
             panic!("expected flow command");
         };
-        let FlowCommand::ReplayAudit(audit) = args.command;
+        let FlowCommand::ReplayAudit(audit) = args.command else {
+            panic!("expected replay-audit command");
+        };
         assert_eq!(audit.store, PathBuf::from(".harn/flow.sqlite"));
-        assert_eq!(audit.root, PathBuf::from("."));
-        assert_eq!(audit.target_dir, PathBuf::from("crates/harn-vm"));
-        assert_eq!(audit.since, "2026-04-26");
+        assert_eq!(audit.predicate_root, PathBuf::from("."));
+        assert_eq!(audit.touched_dirs, vec![PathBuf::from("crates/harn-vm")]);
+        assert_eq!(audit.since.as_deref(), Some("2026-04-26"));
         assert!(audit.fail_on_drift);
         assert!(audit.json);
     }

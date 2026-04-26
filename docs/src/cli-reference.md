@@ -139,6 +139,29 @@ harn viz main.harn --output docs/graph.mmd
 graph showing pipelines, functions, branches, loops, and other workflow-shaped
 control-flow nodes.
 
+## harn flow
+
+Inspect and operate the Flow shipping substrate.
+
+```bash
+harn flow replay-audit --store .harn/flow.sqlite --predicate-root . --touched-dir crates/harn-vm
+harn flow replay-audit --since 2026-04-26 --fail-on-drift --json
+harn flow ship watch --store .harn/flow.sqlite --mock-pr-out .harn/flow/mock-pr.json --json
+harn flow archivist scan . --out .harn/flow/archivist-proposals.json --json
+```
+
+`replay-audit` compares predicate hashes pinned in derived slices with the
+current `invariants.harn` predicate set. Drift is advisory unless
+`--fail-on-drift` is present.
+
+`ship watch` is the Phase 0 Ship Captain shadow-mode surface. It derives a
+candidate slice from stored atoms and can write a mock PR receipt without
+touching a remote GitHub repository.
+
+`archivist scan` emits review-ready predicate proposal metadata from the repo's
+stack hints and existing Flow predicates. It is propose-only; it does not edit
+`invariants.harn`.
+
 ## harn persona
 
 List, inspect, and control durable agent persona manifests from `harn.toml`.

@@ -1,0 +1,85 @@
+[package]
+name = "harn-flow-personas"
+version = "0.1.0"
+
+[[personas]]
+name = "ship_captain"
+version = "0.1.0"
+description = "Shadow-mode Flow captain that groups atoms into candidate slices, validates gates, and emits mock PR receipts."
+entry_workflow = "workflows/flow_ship_captain.harn#run"
+tools = ["github", "ci", "filesystem", "mcp"]
+capabilities = [
+  "git.get_diff",
+  "project.scan",
+  "project.test_commands",
+  "runtime.approved_plan",
+  "runtime.dry_run",
+  "runtime.record_run",
+]
+autonomy_tier = "act_with_approval"
+receipt_policy = "required"
+triggers = ["flow.atoms_changed", "github.check_failed"]
+schedules = ["*/15 * * * *"]
+handoffs = ["fixer"]
+context_packs = ["repo_policy", "release_policy"]
+evals = ["slice_quality", "false_ship_rate", "coverage_fidelity", "latency_pr_to_merge"]
+owner = "platform"
+budget = { daily_usd = 8.0, frontier_escalations = 1, max_tokens = 50000, max_runtime_seconds = 600 }
+model_policy = { default_model = "gpt-5.4-mini", escalation_model = "gpt-5.4", fallback_models = ["gpt-5.2"], reasoning_effort = "medium" }
+rollout_policy = { mode = "approval_only", percentage = 100, cohorts = ["flow-phase-0"] }
+package_source = { package = "harn-flow-personas", path = "examples/personas" }
+
+[[personas]]
+name = "archivist"
+version = "0.1.0"
+description = "Propose-only Flow predicate author that scans repo conventions and emits review-ready invariant proposals."
+entry_workflow = "workflows/flow_archivist.harn#run"
+tools = ["filesystem", "github", "notion", "mcp"]
+capabilities = [
+  "project.code_patterns",
+  "project.scan",
+  "runtime.dry_run",
+  "runtime.record_run",
+  "session.changed_paths",
+]
+autonomy_tier = "suggest"
+receipt_policy = "required"
+triggers = ["repo.initialized", "deps.changed", "directory_metadata.stale"]
+schedules = ["0 9 * * 1"]
+handoffs = ["ship_captain"]
+context_packs = ["repo_policy", "review_policy"]
+evals = ["predicate_false_positive_rate", "predicate_coverage"]
+owner = "platform"
+budget = { daily_usd = 5.0, frontier_escalations = 1, max_tokens = 40000, max_runtime_seconds = 600 }
+model_policy = { default_model = "gpt-5.4-mini", escalation_model = "gpt-5.4", fallback_models = ["gpt-5.2"], reasoning_effort = "medium" }
+rollout_policy = { mode = "approval_only", percentage = 100, cohorts = ["flow-phase-0"] }
+package_source = { package = "harn-flow-personas", path = "examples/personas" }
+
+[[personas]]
+name = "fixer"
+version = "0.1.0"
+description = "Flow remediation persona that consumes blocked invariant remediation and proposes follow-up slices."
+entry_workflow = "workflows/flow_fixer.harn#run"
+tools = ["filesystem", "github", "ci", "mcp"]
+capabilities = [
+  "workspace.read_text",
+  "workspace.write_text",
+  "workspace.apply_edit",
+  "git.get_diff",
+  "project.test_commands",
+  "runtime.approved_plan",
+  "runtime.dry_run",
+  "runtime.record_run",
+]
+autonomy_tier = "act_with_approval"
+receipt_policy = "required"
+triggers = ["invariant.blocked_with_remediation"]
+schedules = ["*/30 * * * *"]
+handoffs = ["ship_captain"]
+context_packs = ["repo_policy", "review_policy"]
+evals = ["remediation_slice_smoke"]
+owner = "platform"
+budget = { daily_usd = 6.0, frontier_escalations = 1, max_tokens = 50000, max_runtime_seconds = 600 }
+model_policy = { default_model = "gpt-5.4-mini", escalation_model = "gpt-5.4", fallback_models = ["gpt-5.2"], reasoning_effort = "medium" }
+rollout_policy = { mode = "approval_only", percentage = 100, cohorts = ["flow-phase-0"] }
+package_source = { package = "harn-flow-personas", path = "examples/personas" }
