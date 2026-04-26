@@ -7,6 +7,26 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
+## Unreleased
+
+### Tests
+
+- **CLI regression for the `harn lint <dir>` / `harn check --workspace`
+  Linux hang (#748).** The path-spelling explosion in
+  `harn_modules::build()` was fixed in #93 (`harn-modules` unit test
+  `cross_directory_cycle_does_not_explode_module_count`), but burin-code
+  CI still ran a per-file `xargs -n1 harn lint` workaround because the
+  fix only had unit-level coverage. Adds
+  `lint_and_check_complete_on_large_cross_directory_cycle_workspace` in
+  `crates/harn-cli/tests/check_cli.rs`, which builds a 24-file pipeline
+  tree across four sibling directories with relative cross-directory
+  imports — the exact pattern that triggered the OOM-kill on Linux —
+  and asserts both `harn lint <dir>` and `harn check --workspace`
+  complete inside a 60 s budget through the CLI binary. Verified to
+  fail (test process hangs past 60 s) when the canonicalize-before-seen
+  block in `crates/harn-modules/src/lib.rs` is reverted, and to pass
+  (sub-second per command) with the fix in place.
+
 ## v0.7.43
 
 ### Added
