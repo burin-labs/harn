@@ -772,6 +772,7 @@ async fn print_model_info(model: &str) {
     let tool_format = harn_vm::llm_config::default_tool_format(&resolved_id, &provider);
     let context_window =
         harn_vm::llm::fetch_provider_max_context(&provider, &resolved_id, &api_key).await;
+    let readiness = local_openai_readiness(&provider, &resolved_id, &api_key).await;
     let payload = serde_json::json!({
         "alias": model,
         "id": resolved_id,
@@ -779,6 +780,7 @@ async fn print_model_info(model: &str) {
         "tool_format": tool_format,
         "api_key_set": api_key_set,
         "context_window": context_window,
+        "readiness": readiness,
     });
     println!(
         "{}",
@@ -786,6 +788,28 @@ async fn print_model_info(model: &str) {
             command_error(&format!("failed to serialize model info: {error}"))
         })
     );
+}
+
+async fn local_openai_readiness(
+    provider: &str,
+    model: &str,
+    api_key: &str,
+) -> Option<serde_json::Value> {
+    let def = harn_vm::llm_config::provider_config(provider)?;
+    if def.auth_style != "none" || !harn_vm::llm::supports_model_readiness_probe(&def) {
+        return None;
+    }
+    let readiness = harn_vm::llm::probe_openai_compatible_model(provider, model, api_key).await;
+    Some(serde_json::json!({
+        "valid": readiness.valid,
+        "category": readiness.category,
+        "message": readiness.message,
+        "provider": readiness.provider,
+        "model": readiness.model,
+        "url": readiness.url,
+        "status": readiness.status,
+        "available_models": readiness.available_models,
+    }))
 }
 
 fn command_error(message: &str) -> ! {

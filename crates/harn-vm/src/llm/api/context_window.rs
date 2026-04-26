@@ -133,7 +133,10 @@ async fn fetch_openai_compatible_context_window(
 ) -> Option<usize> {
     let pdef = crate::llm_config::provider_config(provider);
     let client = crate::llm::shared_utility_client();
-    let url = format!("{base_url}/models");
+    let url = pdef
+        .as_ref()
+        .and_then(|def| super::readiness::build_models_url(def).ok())
+        .unwrap_or_else(|| format!("{}/models", base_url.trim_end_matches('/')));
     let req = client
         .get(&url)
         .header("Content-Type", "application/json")

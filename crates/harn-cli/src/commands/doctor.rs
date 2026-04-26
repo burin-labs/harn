@@ -582,9 +582,42 @@ async fn check_provider_health(network: bool) -> Vec<DoctorCheck> {
             continue;
         };
 
+        if harn_vm::llm::supports_model_readiness_probe(&def) {
+            if let Some(model) = harn_vm::llm::selected_model_for_provider(&provider_name) {
+                checks.push(run_model_readiness(&provider_name, &model, &auth.value).await);
+                continue;
+            }
+        }
+
         checks.push(run_healthcheck(&client, &provider_name, &def, &auth, healthcheck).await);
     }
     checks
+}
+
+async fn run_model_readiness(
+    provider_name: &str,
+    model: &str,
+    api_key: &Option<String>,
+) -> DoctorCheck {
+    let readiness = harn_vm::llm::probe_openai_compatible_model(
+        provider_name,
+        model,
+        api_key.as_deref().unwrap_or(""),
+    )
+    .await;
+    let status = if readiness.valid {
+        DoctorStatus::Ok
+    } else {
+        match readiness.category.as_str() {
+            "model_missing" | "bad_status" | "invalid_url" => DoctorStatus::Fail,
+            _ => DoctorStatus::Warn,
+        }
+    };
+    DoctorCheck {
+        status,
+        label: format!("provider:{provider_name}"),
+        detail: format!("{}: {}", readiness.category, readiness.message),
+    }
 }
 
 async fn run_healthcheck(

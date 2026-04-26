@@ -1354,7 +1354,7 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 | `llm_pick_model(target, options?)` | target: string, options: dict | dict | Resolve a model alias or tier to `{id, provider, tier}` |
 | `llm_infer_provider(model_id)` | model_id: string | string | Infer provider from model ID (e.g. `"claude-*"` → `"anthropic"`) |
 | `llm_model_tier(model_id)` | model_id: string | string | Get capability tier: `"small"`, `"mid"`, or `"frontier"` |
-| `llm_healthcheck(provider?)` | provider: string | dict | Validate API key. Returns `{valid, message, metadata}` |
+| `llm_healthcheck(provider?, model?)` | provider: string, model: string/dict | dict | Validate provider health. For OpenAI-compatible `/models` healthchecks, an explicit `model` string or `{model: "..."}` verifies the selected model/alias is served and returns distinct `metadata.category` values such as `unreachable`, `bad_status`, `model_missing`, and `invalid_url`. Returns `{valid, message, metadata}` |
 | `llm_rate_limit(provider, options?)` | provider: string, options: dict | int/nil/bool | Set (`{rpm: N}`), query, or clear (`{rpm: 0}`) per-provider rate limit |
 | `llm_providers()` | — | list | List all configured provider names |
 | `llm_config(provider?)` | provider: string | dict | Get provider config (base_url, auth_style, etc.) |
