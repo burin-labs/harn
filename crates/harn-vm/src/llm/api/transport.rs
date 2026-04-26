@@ -185,10 +185,12 @@ pub(crate) async fn vm_call_llm_api_with_body(
         wants_streaming || is_ollama
     };
 
-    if let Some(ref overrides) = opts.provider_overrides {
-        if let Some(obj) = overrides.as_object() {
-            for (k, v) in obj {
-                body[k] = v.clone();
+    if !is_ollama {
+        if let Some(ref overrides) = opts.provider_overrides {
+            if let Some(obj) = overrides.as_object() {
+                for (k, v) in obj {
+                    body[k] = v.clone();
+                }
             }
         }
     }

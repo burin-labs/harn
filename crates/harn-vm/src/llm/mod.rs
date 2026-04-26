@@ -87,6 +87,11 @@ fn client_builder_for_tests(builder: reqwest::ClientBuilder) -> reqwest::ClientB
     builder
 }
 
+pub use api::{
+    ollama_runtime_settings_from_env, warm_ollama_model, warm_ollama_model_with_settings,
+    OllamaRuntimeSettings, HARN_OLLAMA_KEEP_ALIVE_ENV, HARN_OLLAMA_NUM_CTX_ENV,
+    OLLAMA_DEFAULT_KEEP_ALIVE, OLLAMA_DEFAULT_NUM_CTX, OLLAMA_HOST_ENV,
+};
 pub use mock::{
     drain_tool_recordings, load_tool_replay_fixtures, set_tool_recording_mode, ToolRecordingMode,
 };

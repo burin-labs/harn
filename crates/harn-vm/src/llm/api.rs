@@ -32,7 +32,12 @@ pub(crate) use auth::apply_auth_headers;
 pub(crate) use completion::vm_call_completion_full;
 pub(crate) use context_window::adapt_auto_compact_to_provider;
 pub use context_window::fetch_provider_max_context;
-pub(crate) use ollama::{ollama_keep_alive_override, ollama_num_ctx_override};
+pub(crate) use ollama::apply_ollama_runtime_settings;
+pub use ollama::{
+    ollama_runtime_settings_from_env, warm_ollama_model, warm_ollama_model_with_settings,
+    OllamaRuntimeSettings, HARN_OLLAMA_KEEP_ALIVE_ENV, HARN_OLLAMA_NUM_CTX_ENV,
+    OLLAMA_DEFAULT_KEEP_ALIVE, OLLAMA_DEFAULT_NUM_CTX, OLLAMA_HOST_ENV,
+};
 pub(crate) use openai_normalize::{debug_log_message_shapes, normalize_openai_style_messages};
 pub(crate) use options::{
     DeltaSender, LlmCallOptions, LlmRequestPayload, LlmRouteAlternative, LlmRoutePolicy,
@@ -750,6 +755,39 @@ mod tests {
             let json: serde_json::Value = serde_json::from_str(&body).expect("valid request json");
             assert_eq!(json["keep_alive"].as_i64(), Some(-1));
             assert_eq!(json["options"]["num_ctx"].as_u64(), Some(131072));
+        });
+    }
+
+    #[test]
+    fn ollama_warmup_applies_shared_runtime_settings() {
+        let _guard = env_lock().lock().expect("env lock");
+        let _allow_llm_transport = allow_stubbed_llm_transport();
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .worker_threads(2)
+            .build()
+            .expect("runtime");
+
+        runtime.block_on(async {
+            let captured = std::sync::Arc::new(std::sync::Mutex::new(None));
+            let (addr, server) = spawn_ollama_stub_with_body_capture(captured.clone());
+            let _num_ctx = ScopedEnvVar::set("HARN_OLLAMA_NUM_CTX", "65536");
+            let _keep_alive = ScopedEnvVar::set("HARN_OLLAMA_KEEP_ALIVE", "forever");
+
+            super::ollama::warm_ollama_model("qwen3.5:35b", Some(&format!("http://{addr}")))
+                .await
+                .expect("warmup should succeed");
+
+            server.join().expect("stub server");
+            let body = captured
+                .lock()
+                .expect("captured body")
+                .clone()
+                .expect("request body");
+            let json: serde_json::Value = serde_json::from_str(&body).expect("valid request json");
+            assert_eq!(json["model"].as_str(), Some("qwen3.5:35b"));
+            assert_eq!(json["keep_alive"].as_i64(), Some(-1));
+            assert_eq!(json["options"]["num_ctx"].as_u64(), Some(65536));
         });
     }
 

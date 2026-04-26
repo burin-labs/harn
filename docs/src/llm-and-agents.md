@@ -1250,6 +1250,14 @@ println("Remaining: $${llm_budget_remaining()}")
 - Default host: `http://localhost:11434`
 - No authentication required
 - Same message format as OpenAI
+- Harn applies shared runtime settings to Ollama chat, completion,
+  context-window fallback, and warmup requests. `HARN_OLLAMA_NUM_CTX` wins over
+  `OLLAMA_CONTEXT_LENGTH` and `OLLAMA_NUM_CTX`, then defaults to `32768`.
+  `HARN_OLLAMA_KEEP_ALIVE` wins over `OLLAMA_KEEP_ALIVE`, then defaults to
+  `30m`; `forever`, `infinite`, and `-1` normalize to numeric `-1`, while
+  `default` normalizes to `30m`. Hosts that persist IDE preferences should pass
+  the raw stored values via `HARN_OLLAMA_*` and let Harn own validation and
+  defaults.
 
 ### Local OpenAI-compatible server
 

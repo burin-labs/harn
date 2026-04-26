@@ -44,14 +44,6 @@ impl OllamaProvider {
             }
         }
 
-        if body["options"].get("num_ctx").is_none() {
-            if let Some(num_ctx) = crate::llm::api::ollama_num_ctx_override() {
-                body["options"]["num_ctx"] = serde_json::json!(num_ctx);
-            }
-        }
-        if let Some(keep_alive) = crate::llm::api::ollama_keep_alive_override() {
-            body["keep_alive"] = keep_alive;
-        }
         if body["options"].get("min_p").is_none() {
             body["options"]["min_p"] = serde_json::json!(0.05);
         }
@@ -73,6 +65,7 @@ impl OllamaProvider {
             }
             None => serde_json::json!(false),
         };
+        crate::llm::api::apply_ollama_runtime_settings(&mut body, opts.provider_overrides.as_ref());
         body
     }
 
@@ -94,6 +87,30 @@ impl OllamaProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct ScopedEnvVar {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl ScopedEnvVar {
+        fn remove(key: &'static str) -> Self {
+            let previous = std::env::var(key).ok();
+            unsafe {
+                std::env::remove_var(key);
+            }
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for ScopedEnvVar {
+        fn drop(&mut self) {
+            match &self.previous {
+                Some(value) => unsafe { std::env::set_var(self.key, value) },
+                None => unsafe { std::env::remove_var(self.key) },
+            }
+        }
+    }
 
     fn base_payload() -> LlmRequestPayload {
         LlmRequestPayload {
@@ -138,5 +155,40 @@ mod tests {
         payload.json_schema = None;
         let body = OllamaProvider::build_request_body(&payload);
         assert!(body.get("format").is_none());
+    }
+
+    #[test]
+    fn defaults_ollama_runtime_settings() {
+        let _guard = crate::llm::env_lock().lock().expect("env lock");
+        let _env = [
+            ScopedEnvVar::remove("HARN_OLLAMA_NUM_CTX"),
+            ScopedEnvVar::remove("OLLAMA_CONTEXT_LENGTH"),
+            ScopedEnvVar::remove("OLLAMA_NUM_CTX"),
+            ScopedEnvVar::remove("HARN_OLLAMA_KEEP_ALIVE"),
+            ScopedEnvVar::remove("OLLAMA_KEEP_ALIVE"),
+        ];
+        let mut payload = base_payload();
+        payload.response_format = None;
+        payload.json_schema = None;
+        let body = OllamaProvider::build_request_body(&payload);
+        assert_eq!(body["options"]["num_ctx"], serde_json::json!(32768));
+        assert_eq!(body["keep_alive"], serde_json::json!("30m"));
+    }
+
+    #[test]
+    fn maps_provider_runtime_overrides_to_ollama_body() {
+        let mut payload = base_payload();
+        payload.provider_overrides = Some(serde_json::json!({
+            "num_ctx": 65536,
+            "keep_alive": "forever",
+            "options": {"top_k": 40},
+            "think": true,
+        }));
+        let body = OllamaProvider::build_request_body(&payload);
+        assert_eq!(body["options"]["num_ctx"], serde_json::json!(65536));
+        assert_eq!(body["options"]["top_k"], serde_json::json!(40));
+        assert_eq!(body["keep_alive"], serde_json::json!(-1));
+        assert_eq!(body["think"], serde_json::json!(true));
+        assert!(body.get("num_ctx").is_none());
     }
 }

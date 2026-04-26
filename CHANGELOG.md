@@ -11,6 +11,11 @@ granular archaeology.
 
 ### Added
 
+- **Harn-owned Ollama runtime settings (#676).** Centralizes Ollama
+  `num_ctx` and `keep_alive` precedence, defaults, normalization, and
+  warmup request shaping in `harn-vm`. Hosts can pass raw persisted
+  preferences through `HARN_OLLAMA_NUM_CTX` and `HARN_OLLAMA_KEEP_ALIVE`
+  without duplicating env precedence or keep-alive normalization.
 - **Agents Protocol replay-as-API contract (#636).** Adds
   `POST /v1/tasks/{task_id}/replay` to the v1 OpenAPI surface with
   `exact`, `with_overrides`, and `from_checkpoint` modes, deterministic
