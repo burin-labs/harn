@@ -11,6 +11,13 @@ granular archaeology.
 
 ### Added
 
+- **Connector epic closure docs (#151).** Added a connector architecture
+  status page that records the current core/external-package boundary,
+  maps the old Rust-provider library epic to the shipped core substrate, and
+  points provider-specific work at the pure-Harn package repos plus #350/#446.
+  Updated generic webhook docs to describe the current route-backed listener,
+  raw-body `TriggerEvent` path, and durable inbox dedupe instead of the old
+  O-02/T-09 deferrals.
 - **Tool-call timing on ACP `tool_call_update` (#689).** Terminal
   `tool_call_update` events now carry `durationMs` (the parse-to-finish
   total — model emits the call → tool result is appended) and

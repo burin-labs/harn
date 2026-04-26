@@ -1,20 +1,20 @@
 # Generic webhook connector
 
-`GenericWebhookConnector` is the first concrete inbound connector built on top
-of the C-01 `Connector` trait. It accepts generic HTTP webhook deliveries,
-verifies supported HMAC signature conventions against the raw request body, and
-normalizes the delivery into a `TriggerEvent` with the built-in
-`GenericWebhookPayload` shape.
+`GenericWebhookConnector` is the built-in raw HTTP ingress primitive for
+generic webhook deliveries. It verifies supported HMAC signature conventions
+against the raw request body, normalizes the delivery into a `TriggerEvent`
+with the built-in `GenericWebhookPayload` shape, and relies on the
+orchestrator listener for route selection, backpressure, and inbox dedupe.
 
-The current implementation is intentionally small:
+This connector is intentionally provider-neutral:
 
-- activation-only; the O-02 HTTP listener still wires request routing later
+- route-backed ingestion through `harn orchestrator serve`
 - raw-body verification for Standard Webhooks, Stripe-style, and GitHub-style
   signatures
-- `TriggerEvent` normalization with header redaction and provider payload
-  preservation
-- process-local dedupe stub keyed by the manifest `dedupe_key` opt-in until the
-  durable trigger inbox lands
+- `TriggerEvent` normalization with header redaction, `raw_body` retention, and
+  provider payload preservation
+- durable inbox-backed dedupe keyed by the normalized `event.dedupe_key` when
+  the trigger manifest opts into `dedupe_key`
 
 ## Manifest shape
 
@@ -86,22 +86,28 @@ from the binding's optional `webhook.source` override.
 ## Dedupe
 
 If the trigger manifest declares `dedupe_key`, the connector records the
-normalized `event.dedupe_key` in the current inbox dedupe stub and rejects
-replays for the same binding. This is process-local today; durable inbox-backed
-dedupe is still deferred to T-09.
+normalized `event.dedupe_key` in the trigger inbox before dispatch. Replays for
+the same binding are dropped before handler execution, and the dedupe claim is
+durable across orchestrator restarts for the configured retry retention window.
 
 ## Activation and listener integration
 
 The connector's `activate()` hook validates the binding config and reserves
-unique `match.path` values across active bindings. Because O-02 is still
-outstanding, request routing is not implemented here. Until the listener lands:
+unique `match.path` values across active bindings. The orchestrator listener
+maps each incoming HTTP request path to the active trigger binding, passes the
+original bytes through `RawInbound`, applies connector normalization, and then
+appends accepted events to the dispatcher queue.
 
-- a single active binding can call `normalize_inbound(...)` directly
-- multiple active bindings must pass the selected `binding_id` in
-  `RawInbound.metadata.binding_id`
+Direct `normalize_inbound(...)` calls remain useful for tests and embedding.
+When more than one binding is active, callers must pass the selected
+`binding_id` in `RawInbound.metadata.binding_id` so the connector can resolve
+the configured secret and signature variant.
 
 ## Notes and follow-up
 
 - Signature failures are audited even when normalization returns an error.
-- Production TLS handling is owned by the eventual listener, not this connector.
-- Streaming request bodies larger than 10 MiB is still a follow-up item.
+- Production TLS and request-size limits are owned by the orchestrator listener
+  and HTTP server layer, not by this connector.
+- Provider-specific business logic should live in pure-Harn connector packages
+  that compose this raw webhook substrate rather than adding more Rust
+  provider-specific branches here.
