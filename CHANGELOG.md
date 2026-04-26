@@ -84,11 +84,14 @@ granular archaeology.
 
 ### Fixed
 
-- **Stabilize `harn serve mcp` integration tests under full nextest load.**
+- **Stabilize integration tests under full nextest load.**
   `PROCESS_READY_TIMEOUT` in `harn_serve_mcp_cli` and `mcp_server_cli` was
   raised from 15s to 60s after observing 30–40s cold-starts of the debug
-  `harn` binary when nextest fans out across the full workspace. Protocol
-  roundtrip budgets remain tight so logic regressions still surface quickly.
+  `harn` binary when nextest fans out across the full workspace. The
+  in-process healthcheck stub server in `llm::healthcheck` now also runs
+  with a 30s accept/read/write deadline so the test thread doesn't trip
+  when starved of CPU. Protocol/logic budgets remain tight so regressions
+  still surface quickly.
 
 ## v0.7.42
 
