@@ -1,6 +1,7 @@
 use std::rc::Rc;
+use std::sync::Arc;
 
-use crate::agent_events::{self, AgentEvent};
+use crate::agent_events::{self, AgentEvent, AgentEventSink};
 use crate::value::{VmError, VmValue};
 
 use super::agent_config::AgentLoopConfig;
@@ -29,6 +30,49 @@ thread_local! {
     /// entry as a runtime-feedback message.
     static PENDING_FEEDBACK: std::cell::RefCell<Vec<(String, String, String)>> =
         const { std::cell::RefCell::new(Vec::new()) };
+    /// Stack of per-loop event sinks installed via
+    /// `AgentLoopConfig.event_sink`. The agent loop pushes on entry and
+    /// pops on drop (via `LoopSinkGuard`); `emit_agent_event` fans the
+    /// event out to the top-of-stack sink in addition to the global
+    /// `agent_events` registry. Distinct from the global registry on
+    /// purpose: tests that wipe the global registry (`reset_all_sinks`,
+    /// `reset_thread_local_state`) cannot race with a per-loop
+    /// observation, and the host gets a non-cancellable observation
+    /// path that's guaranteed to fire even when no external session
+    /// subscriber is registered. Stack-shaped so nested loops (workflow
+    /// stages, sub-agents) don't bleed events upward into the parent's
+    /// sink.
+    static CURRENT_LOOP_SINKS: std::cell::RefCell<Vec<Arc<dyn AgentEventSink>>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// RAII guard that pushes a per-loop event sink onto the
+/// `CURRENT_LOOP_SINKS` stack and pops it on drop. Constructed from
+/// `AgentLoopConfig.event_sink`; if the config holds `None` the guard
+/// is a no-op.
+pub(crate) struct LoopSinkGuard {
+    pushed: bool,
+}
+
+impl LoopSinkGuard {
+    pub(crate) fn install(sink: Option<Arc<dyn AgentEventSink>>) -> Self {
+        if let Some(sink) = sink {
+            CURRENT_LOOP_SINKS.with(|stack| stack.borrow_mut().push(sink));
+            Self { pushed: true }
+        } else {
+            Self { pushed: false }
+        }
+    }
+}
+
+impl Drop for LoopSinkGuard {
+    fn drop(&mut self) {
+        if self.pushed {
+            CURRENT_LOOP_SINKS.with(|stack| {
+                let _ = stack.borrow_mut().pop();
+            });
+        }
+    }
 }
 
 /// Emit an event through both external sinks (sync) and closure
@@ -46,6 +90,15 @@ thread_local! {
 /// from their emit site.
 pub(crate) async fn emit_agent_event(event: &AgentEvent) {
     agent_events::emit_event(event);
+
+    // Per-loop sink (installed by `LoopSinkGuard` from
+    // `AgentLoopConfig.event_sink`) gets the event after the global
+    // registry. Snapshot the top-of-stack outside the borrow so the
+    // sink can re-enter `emit_agent_event` without panicking.
+    let loop_sink = CURRENT_LOOP_SINKS.with(|stack| stack.borrow().last().cloned());
+    if let Some(sink) = loop_sink {
+        sink.handle_event(event);
+    }
 
     let subscribers = crate::agent_sessions::subscribers_for(event.session_id());
     if subscribers.is_empty() {

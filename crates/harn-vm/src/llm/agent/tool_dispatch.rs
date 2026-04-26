@@ -894,6 +894,8 @@ pub(super) async fn run_tool_dispatch(
             status: ToolCallStatus::InProgress,
             raw_output: None,
             error: None,
+            duration_ms: None,
+            execution_duration_ms: None,
         })
         .await;
         let tool_span_id =
@@ -964,6 +966,8 @@ pub(super) async fn run_tool_dispatch(
                     error: Some(format!(
                         "tool loop detected (skipped after {count} repeats)"
                     )),
+                    duration_ms: Some(tool_started_at.elapsed().as_millis() as u64),
+                    execution_duration_ms: None,
                 })
                 .await;
                 continue;
@@ -1073,6 +1077,8 @@ pub(super) async fn run_tool_dispatch(
         let result_text =
             crate::orchestration::run_post_tool_hooks(tool_name, &tool_args, &result_text).await?;
 
+        let execution_duration_ms = tool_start.elapsed().as_millis() as u64;
+        let duration_ms = tool_started_at.elapsed().as_millis() as u64;
         super::emit_agent_event(&AgentEvent::ToolCallUpdate {
             session_id: ctx.session_id.to_string(),
             tool_call_id: tool_call_id.clone(),
@@ -1091,6 +1097,8 @@ pub(super) async fn run_tool_dispatch(
             } else {
                 None
             },
+            duration_ms: Some(duration_ms),
+            execution_duration_ms: Some(execution_duration_ms),
         })
         .await;
 

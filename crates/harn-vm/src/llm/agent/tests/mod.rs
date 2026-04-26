@@ -36,6 +36,7 @@ mod prompts;
 mod result_build;
 mod retry_after;
 mod tool_classification;
+mod tool_durations;
 mod tool_format;
 mod transcript;
 

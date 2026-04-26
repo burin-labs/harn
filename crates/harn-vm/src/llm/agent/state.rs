@@ -565,6 +565,7 @@ pub(super) struct AgentLoopState {
     pub(super) _approval_guard: ApprovalPolicyGuard,
     pub(super) _policy_guard: ExecutionPolicyGuard,
     pub(super) _sink_guard: SessionSinkGuard,
+    pub(super) _loop_sink_guard: super::LoopSinkGuard,
     pub(super) _current_session_guard: CurrentSessionGuard,
     pub(super) _iteration_guard: TranscriptIterationGuard,
 }
@@ -923,6 +924,7 @@ impl AgentLoopState {
         let _sink_guard = SessionSinkGuard {
             session_id: session_id.clone(),
         };
+        let _loop_sink_guard = super::LoopSinkGuard::install(config.event_sink.clone());
         if !session_id.is_empty() {
             crate::agent_sessions::push_current_session(session_id.clone());
         }
@@ -1308,6 +1310,7 @@ impl AgentLoopState {
             _approval_guard,
             _policy_guard,
             _sink_guard,
+            _loop_sink_guard,
             _current_session_guard,
             _iteration_guard,
         })
