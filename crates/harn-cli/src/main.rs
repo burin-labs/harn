@@ -720,6 +720,15 @@ async fn async_main() {
         },
         Command::ModelInfo(args) => print_model_info(&args.model).await,
         Command::ProviderCatalog(args) => print_provider_catalog(args.available_only),
+        Command::ProviderReady(args) => {
+            run_provider_ready(
+                &args.provider,
+                args.model.as_deref(),
+                args.base_url.as_deref(),
+                args.json,
+            )
+            .await
+        }
         Command::Skills(args) => match args.command {
             SkillsCommand::List(list) => commands::skills::run_list(&list),
             SkillsCommand::Inspect(inspect) => commands::skills::run_inspect(&inspect),
@@ -891,6 +900,29 @@ fn print_provider_catalog(available_only: bool) {
             command_error(&format!("failed to serialize provider catalog: {error}"))
         })
     );
+}
+
+async fn run_provider_ready(
+    provider: &str,
+    model: Option<&str>,
+    base_url: Option<&str>,
+    json: bool,
+) {
+    let readiness =
+        harn_vm::llm::readiness::probe_provider_readiness(provider, model, base_url).await;
+    if json {
+        match serde_json::to_string_pretty(&readiness) {
+            Ok(payload) => println!("{payload}"),
+            Err(error) => command_error(&format!("failed to serialize readiness result: {error}")),
+        }
+    } else if readiness.ok {
+        println!("{}", readiness.message);
+    } else {
+        eprintln!("{}", readiness.message);
+    }
+    if !readiness.ok {
+        process::exit(1);
+    }
 }
 
 fn command_error(message: &str) -> ! {

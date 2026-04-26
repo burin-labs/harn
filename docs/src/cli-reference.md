@@ -423,6 +423,25 @@ harn doctor
 harn doctor --no-network
 ```
 
+For OpenAI-compatible local providers, `/models` checks parse the model
+listing and report missing configured models instead of only checking HTTP
+reachability.
+
+## harn provider-ready
+
+Probe a configured provider's `/models` endpoint and optionally require a
+specific model alias or provider-native model id.
+
+```bash
+harn provider-ready mlx --model mlx-qwen36-27b
+harn provider-ready mlx --base-url http://127.0.0.1:8002 --json
+```
+
+The command exits non-zero for unreachable servers, bad HTTP status,
+unparsable model listings, and missing models. It does not run local launcher
+scripts; host applications that auto-start local servers should report launch
+failures themselves and then call this probe again.
+
 ## harn connect
 
 Authorize connector providers and store local connector secrets in the

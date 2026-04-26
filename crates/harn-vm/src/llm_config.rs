@@ -1031,6 +1031,30 @@ fn default_config() -> ProvidersConfig {
         },
     );
 
+    // Apple Silicon MLX OpenAI-compatible server. Harn owns readiness
+    // probing; hosts that want script-based auto-start should launch the
+    // process first, then call Harn again to verify readiness.
+    config.providers.insert(
+        "mlx".to_string(),
+        ProviderDef {
+            base_url: "http://127.0.0.1:8002".to_string(),
+            base_url_env: Some("MLX_BASE_URL".to_string()),
+            auth_style: "none".to_string(),
+            chat_endpoint: "/v1/chat/completions".to_string(),
+            completion_endpoint: Some("/v1/completions".to_string()),
+            healthcheck: Some(HealthcheckDef {
+                method: "GET".to_string(),
+                path: Some("/v1/models".to_string()),
+                url: None,
+                body: None,
+            }),
+            cost_per_1k_in: Some(0.0),
+            cost_per_1k_out: Some(0.0),
+            latency_p50_ms: Some(900),
+            ..Default::default()
+        },
+    );
+
     // vLLM OpenAI-compatible server.
     config.providers.insert(
         "vllm".to_string(),
@@ -1277,6 +1301,14 @@ fn default_config() -> ProvidersConfig {
             tool_format: None,
         },
     );
+    config.aliases.insert(
+        "mlx-qwen36-27b".to_string(),
+        AliasDef {
+            id: "unsloth/Qwen3.6-27B-UD-MLX-4bit".to_string(),
+            provider: "mlx".to_string(),
+            tool_format: None,
+        },
+    );
 
     config.qc_defaults.extend(BTreeMap::from([
         (
@@ -1448,6 +1480,7 @@ mod tests {
         assert!(names.contains(&"anthropic".to_string()));
         assert!(names.contains(&"together".to_string()));
         assert!(names.contains(&"local".to_string()));
+        assert!(names.contains(&"mlx".to_string()));
         assert!(names.contains(&"openai".to_string()));
         assert!(names.contains(&"ollama".to_string()));
     }
@@ -1475,6 +1508,21 @@ mod tests {
         let pdef = provider_config("anthropic").unwrap();
         assert_eq!(pdef.auth_style, "header");
         assert_eq!(pdef.auth_header.as_deref(), Some("x-api-key"));
+    }
+
+    #[test]
+    fn test_provider_config_mlx() {
+        let pdef = provider_config("mlx").unwrap();
+        assert_eq!(pdef.base_url, "http://127.0.0.1:8002");
+        assert_eq!(pdef.base_url_env.as_deref(), Some("MLX_BASE_URL"));
+        assert_eq!(
+            pdef.healthcheck.unwrap().path.as_deref(),
+            Some("/v1/models")
+        );
+
+        let (model, provider) = resolve_model("mlx-qwen36-27b");
+        assert_eq!(model, "unsloth/Qwen3.6-27B-UD-MLX-4bit");
+        assert_eq!(provider.as_deref(), Some("mlx"));
     }
 
     #[test]

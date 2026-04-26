@@ -16,6 +16,7 @@ environment variable to authenticate or point Harn at a local endpoint:
 | HuggingFace | `HF_TOKEN` or `HUGGINGFACE_API_KEY` | explicit `model` |
 | Ollama | `OLLAMA_HOST` (optional) | `llama3.2` |
 | Local server | `LOCAL_LLM_BASE_URL` | `LOCAL_LLM_MODEL` or explicit `model` |
+| MLX OpenAI-compatible server | `MLX_BASE_URL` | `MLX_MODEL_ID` or `mlx-qwen36-27b` |
 
 Ollama runs locally and doesn't require an API key. The default host is
 `http://localhost:11434`.
@@ -24,6 +25,14 @@ For a generic OpenAI-compatible local server, set `LOCAL_LLM_BASE_URL` to
 something like `http://192.168.86.250:8000` and either pass
 `{provider: "local", model: "qwen2.5-coder-32b"}` or set
 `LOCAL_LLM_MODEL=qwen2.5-coder-32b`.
+
+For an Apple Silicon MLX OpenAI-compatible server, Harn uses
+`MLX_BASE_URL` with a default of `http://127.0.0.1:8002`. Run
+`harn provider-ready mlx --model mlx-qwen36-27b` to probe `/v1/models`
+and verify that the configured model or alias is currently served. Harn
+does not launch MLX scripts itself; hosts that support auto-start should
+run their launcher, report launcher failures, then call the Harn readiness
+probe again.
 
 ## llm_call
 
@@ -1265,6 +1274,14 @@ println("Remaining: $${llm_budget_remaining()}")
 - Default host: `http://localhost:8000`
 - No authentication required
 - Same message format as OpenAI
+
+### MLX OpenAI-compatible server
+
+- Endpoint: `<MLX_BASE_URL>/v1/chat/completions`
+- Readiness probe: `<MLX_BASE_URL>/v1/models`
+- Default host: `http://127.0.0.1:8002`
+- Default alias: `mlx-qwen36-27b`
+- No authentication required
 
 ## Testing with mock LLM responses
 

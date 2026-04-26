@@ -124,6 +124,8 @@ SCRIPTING
     ModelInfo(ModelInfoArgs),
     /// Print the provider/model catalog Harn loaded as JSON.
     ProviderCatalog(ProviderCatalogArgs),
+    /// Probe a provider's /models endpoint and optionally verify a served model.
+    ProviderReady(ProviderReadyArgs),
     /// Manage and inspect Harn skills (list, inspect, match, install, new).
     Skills(SkillsArgs),
     /// Manage skill provenance: keys, signatures, verification, and trust policy.
@@ -2027,6 +2029,21 @@ pub(crate) struct ProviderCatalogArgs {
 }
 
 #[derive(Debug, Args)]
+pub(crate) struct ProviderReadyArgs {
+    /// Provider id from Harn provider config, for example mlx or local.
+    pub provider: String,
+    /// Model alias or provider-native model id to require in /models.
+    #[arg(long)]
+    pub model: Option<String>,
+    /// Override the configured provider base URL for this probe.
+    #[arg(long = "base-url")]
+    pub base_url: Option<String>,
+    /// Emit the full structured readiness result as JSON.
+    #[arg(long, default_value_t = false, action = ArgAction::SetTrue)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
 pub(crate) struct SkillsArgs {
     #[command(subcommand)]
     pub command: SkillsCommand,
@@ -3563,5 +3580,27 @@ mod tests {
             panic!("expected provider-catalog command");
         };
         assert!(args.available_only);
+    }
+
+    #[test]
+    fn test_parses_provider_ready_args() {
+        let cli = Cli::parse_from([
+            "harn",
+            "provider-ready",
+            "mlx",
+            "--model",
+            "mlx-qwen36-27b",
+            "--base-url",
+            "http://127.0.0.1:8002",
+            "--json",
+        ]);
+
+        let Command::ProviderReady(args) = cli.command.unwrap() else {
+            panic!("expected provider-ready command");
+        };
+        assert_eq!(args.provider, "mlx");
+        assert_eq!(args.model.as_deref(), Some("mlx-qwen36-27b"));
+        assert_eq!(args.base_url.as_deref(), Some("http://127.0.0.1:8002"));
+        assert!(args.json);
     }
 }

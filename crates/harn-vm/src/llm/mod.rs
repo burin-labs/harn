@@ -25,6 +25,7 @@ pub(crate) mod helpers;
 pub(crate) mod ledger;
 pub(crate) mod mock;
 pub(crate) mod permissions;
+pub mod readiness;
 pub(crate) mod structural_experiments;
 pub(crate) mod tool_search;
 mod transcript_stats;

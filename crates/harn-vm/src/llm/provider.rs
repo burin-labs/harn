@@ -121,6 +121,7 @@ pub(crate) fn register_default_providers() {
             "fireworks",
             "huggingface",
             "local",
+            "mlx",
             "vllm",
             "tgi",
             "dashscope",
