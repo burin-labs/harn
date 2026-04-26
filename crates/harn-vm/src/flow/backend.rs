@@ -32,6 +32,8 @@ pub enum VcsBackendError {
     Atom(AtomError),
     /// JSON encoding or decoding failed.
     Json(String),
+    /// SQLite storage failed.
+    Sqlite(String),
     /// A git command failed.
     Git {
         args: Vec<String>,
@@ -52,6 +54,7 @@ impl fmt::Display for VcsBackendError {
             }
             VcsBackendError::Atom(error) => write!(f, "{error}"),
             VcsBackendError::Json(message) => write!(f, "vcs backend json error: {message}"),
+            VcsBackendError::Sqlite(message) => write!(f, "vcs backend sqlite error: {message}"),
             VcsBackendError::Git {
                 args,
                 status,
@@ -79,6 +82,12 @@ impl From<AtomError> for VcsBackendError {
 impl From<serde_json::Error> for VcsBackendError {
     fn from(error: serde_json::Error) -> Self {
         Self::Json(error.to_string())
+    }
+}
+
+impl From<rusqlite::Error> for VcsBackendError {
+    fn from(error: rusqlite::Error) -> Self {
+        Self::Sqlite(error.to_string())
     }
 }
 

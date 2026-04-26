@@ -93,7 +93,12 @@ windows-sys = { version = "0.61.2", features = [
 ] }
 
 [dev-dependencies]
+criterion = "0.7"
 proptest = "1"
 rcgen = "0.13"
 rustls = { version = "0.23", features = ["aws-lc-rs"] }
 tempfile = "3"
+
+[[bench]]
+name = "flow_store"
+harness = false
