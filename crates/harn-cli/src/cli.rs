@@ -2017,6 +2017,15 @@ pub(crate) struct PackageCacheVerifyArgs {
 
 #[derive(Debug, Args)]
 pub(crate) struct ModelInfoArgs {
+    /// Verify provider-local readiness for the resolved model when supported.
+    #[arg(long)]
+    pub verify: bool,
+    /// Warm/preload the resolved model when supported. Implies --verify.
+    #[arg(long)]
+    pub warm: bool,
+    /// Ollama keep_alive value to use with --warm (for example 30m, forever, or -1).
+    #[arg(long = "keep-alive", value_name = "VALUE")]
+    pub keep_alive: Option<String>,
     /// Model alias or provider-native model id.
     pub model: String,
 }
@@ -3564,12 +3573,23 @@ mod tests {
 
     #[test]
     fn test_parses_model_info_args() {
-        let cli = Cli::parse_from(["harn", "model-info", "tog-gemma4-31b"]);
+        let cli = Cli::parse_from([
+            "harn",
+            "model-info",
+            "--verify",
+            "--warm",
+            "--keep-alive",
+            "forever",
+            "tog-gemma4-31b",
+        ]);
 
         let Command::ModelInfo(args) = cli.command.unwrap() else {
             panic!("expected model-info command");
         };
         assert_eq!(args.model, "tog-gemma4-31b");
+        assert!(args.verify);
+        assert!(args.warm);
+        assert_eq!(args.keep_alive.as_deref(), Some("forever"));
     }
 
     #[test]

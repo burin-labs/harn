@@ -495,7 +495,10 @@ pub(crate) const BUILTINS: &[(&str, &str)] = &[
     ("eval_metrics", "eval_metrics() -> list"),
     ("llm_providers", "llm_providers() -> list"),
     ("llm_config", "llm_config(provider?) -> dict"),
-    ("llm_healthcheck", "llm_healthcheck(provider?) -> dict"),
+    (
+        "llm_healthcheck",
+        "llm_healthcheck(provider?, options?) -> dict",
+    ),
     // Timers
     ("timer_start", "timer_start(name?) -> dict"),
     ("timer_end", "timer_end(timer) -> int"),
@@ -822,7 +825,7 @@ pub(crate) fn builtin_doc(name: &str) -> Option<String> {
         "llm_resolve_model" => "**llm_resolve_model(alias)** → dict — Resolve a model alias to full model info",
         "llm_providers" => "**llm_providers()** → list — List all configured LLM providers",
         "llm_config" => "**llm_config(provider?)** → dict — Get provider configuration",
-        "llm_healthcheck" => "**llm_healthcheck(provider?)** → dict — Check provider health and connectivity",
+        "llm_healthcheck" => "**llm_healthcheck(provider?, options?)** → dict — Check provider health and connectivity; Ollama accepts `{model, warm}`",
         "transcript" => "**transcript(metadata?)** → dict — Create a new transcript",
         "transcript_compact" => "**transcript_compact(transcript, options?)** → dict — Compact a transcript with the runtime compaction engine",
         "transcript_summarize" => "**transcript_summarize(transcript, options?)** → dict — Summarize and compact a transcript with an LLM",

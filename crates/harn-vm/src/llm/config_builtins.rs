@@ -2,8 +2,11 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use crate::llm_config;
+use crate::stdlib::json_to_vm_value;
 use crate::value::VmValue;
 use crate::vm::Vm;
+
+use super::helpers::vm_value_to_json;
 
 /// Register config-based LLM builtins (llm_infer_provider, llm_resolve_model, etc.).
 pub(crate) fn register_config_builtins(vm: &mut Vm) {
@@ -225,6 +228,68 @@ pub(crate) fn register_config_builtins(vm: &mut Vm) {
 
     vm.register_async_builtin("llm_healthcheck", |args| async move {
         let (provider_name, api_key) = parse_healthcheck_args(&args);
+
+        // Ollama-specific readiness probe (issue #675): supports `model`,
+        // `warm`, `base_url`, and `keep_alive` options to verify the daemon
+        // and optionally pre-warm a tag before the first chat call.
+        if provider_name == "ollama" {
+            let options = args
+                .iter()
+                .filter_map(|value| value.as_dict())
+                .find(|dict| {
+                    dict.contains_key("model")
+                        || dict.contains_key("warm")
+                        || dict.contains_key("preload")
+                        || dict.contains_key("base_url")
+                        || dict.contains_key("url")
+                        || dict.contains_key("keep_alive")
+                });
+            let model = options
+                .and_then(|opts| opts.get("model"))
+                .map(|value| value.display())
+                .or_else(|| std::env::var("HARN_LLM_MODEL").ok())
+                .or_else(|| std::env::var("LOCAL_LLM_MODEL").ok());
+            let warm = options
+                .and_then(|opts| opts.get("warm").or_else(|| opts.get("preload")))
+                .is_some_and(|value| matches!(value, VmValue::Bool(true)));
+
+            if warm && model.as_deref().unwrap_or("").is_empty() {
+                return Ok(json_to_vm_value(&serde_json::json!({
+                    "valid": false,
+                    "status": "invalid_request",
+                    "message": "Ollama warmup requires options.model",
+                })));
+            }
+
+            if let Some(model) = model.filter(|model| !model.trim().is_empty()) {
+                let (resolved_model, _) = llm_config::resolve_model(&model);
+                let mut readiness = super::api::OllamaReadinessOptions::new(resolved_model);
+                readiness.warm = warm;
+                readiness.base_url = options
+                    .and_then(|opts| opts.get("base_url").or_else(|| opts.get("url")))
+                    .map(|value| value.display())
+                    .filter(|value| !value.trim().is_empty());
+                readiness.keep_alive =
+                    options
+                        .and_then(|opts| opts.get("keep_alive"))
+                        .map(|value| match value {
+                            VmValue::String(raw) => super::api::normalize_ollama_keep_alive(raw)
+                                .unwrap_or_else(|| vm_value_to_json(value)),
+                            _ => vm_value_to_json(value),
+                        });
+                let result = super::api::ollama_readiness(readiness).await;
+                return Ok(json_to_vm_value(
+                    &serde_json::to_value(&result).unwrap_or_else(|_| {
+                        serde_json::json!({
+                            "valid": false,
+                            "status": "serialization_error",
+                            "message": "failed to serialize Ollama readiness result",
+                        })
+                    }),
+                ));
+            }
+        }
+
         let requested_model = healthcheck_model_arg(&args)
             .or_else(|| super::selected_model_for_provider(&provider_name));
 

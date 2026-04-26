@@ -25,5 +25,8 @@ pipeline test(task) {
   assert_eq(anthropic_config?.auth_style, "header")
   let local_config = llm_config("local")
   assert_eq(local_config?.auth_style, "none")
+  let ollama_warm_missing = llm_healthcheck("ollama", {warm: true})
+  assert_eq(ollama_warm_missing?.valid, false)
+  assert_eq(ollama_warm_missing?.status, "invalid_request")
   log("All llm_config tests passed")
 }

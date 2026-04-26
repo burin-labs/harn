@@ -161,7 +161,7 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
     },
     BuiltinSig {
         name: "llm_healthcheck",
-        return_type: None,
+        return_type: Some(BuiltinReturn::Named("dict")),
     },
     BuiltinSig {
         name: "llm_available_providers",

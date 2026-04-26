@@ -151,6 +151,11 @@ use self::stream::vm_stream_llm;
 use self::trace::emit_agent_event;
 use self::trace::trace_llm_call;
 
+pub use self::api::{
+    normalize_ollama_keep_alive, ollama_readiness, OllamaReadinessOptions, OllamaReadinessResult,
+    OllamaWarmupResult,
+};
+
 pub fn install_current_host_bridge(bridge: Rc<crate::bridge::HostBridge>) {
     agent::install_current_host_bridge(bridge);
 }
