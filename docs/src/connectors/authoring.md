@@ -40,6 +40,12 @@ Root manifests can override a provider's connector implementation:
 [[providers]]
 id = "echo"
 connector = { harn = "./echo_connector.harn" }
+oauth = {
+  resource = "https://api.echo.example/",
+  authorization_endpoint = "https://auth.echo.example/oauth/authorize",
+  token_endpoint = "https://auth.echo.example/oauth/token",
+  scopes = "echo.read echo.write",
+}
 
 [[triggers]]
 id = "echo-webhook"
@@ -49,6 +55,12 @@ path = "/hooks/echo"
 match = { path = "/hooks/echo", events = ["echo.received"] }
 handler = "handlers::on_echo"
 ```
+
+The optional `oauth` table is package-owned setup metadata consumed by
+`harn connect <provider>`. It supports `resource`,
+`authorization_endpoint`, `token_endpoint`, `registration_endpoint`, `scopes`,
+`client_id`, `client_secret`, and `token_endpoint_auth_method`; operator CLI
+flags override those values for a single run.
 
 The referenced `.harn` module must export:
 
