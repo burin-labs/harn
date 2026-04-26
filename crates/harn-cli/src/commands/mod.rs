@@ -4,6 +4,7 @@ pub(crate) mod check;
 pub(crate) mod connect;
 pub(crate) mod connector;
 pub(crate) mod contracts;
+pub(crate) mod crystallize;
 pub(crate) mod doctor;
 pub(crate) mod dump_highlight_keywords;
 pub(crate) mod dump_trigger_quickref;
