@@ -27,6 +27,13 @@ granular archaeology.
   `reset_all_sinks` / `reset_thread_local_state` calls. Lets host
   embedders observe a single loop's events without contending on the
   shared registry.
+- **Pure-Harn connector pivot closure guard (#350).** Centralizes the
+  deprecated Rust compatibility provider list for GitHub, Slack, Linear,
+  and Notion and adds a VM regression test that permits only core runtime
+  providers or those explicit compatibility shims to remain Rust builtin
+  connectors. The migration and connector reference docs now describe
+  #446 as completed core groundwork under the #350 pivot, with new
+  service connector work directed to pure-Harn packages.
 
 ## v0.7.40
 

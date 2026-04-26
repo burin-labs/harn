@@ -1,11 +1,12 @@
 # Migrating Rust provider connectors to pure-Harn packages
 
-The Rust-side GitHub, Slack, Linear, and Notion connectors are on the sunset
-path tracked by [#446](https://github.com/burin-labs/harn/issues/446). New
-provider business logic ships in pure-Harn connector packages so that
-Harn Cloud and self-hosted orchestrators can adopt connector fixes,
-new event families, and provider API changes without waiting for a Harn core
-release.
+The Rust-side GitHub, Slack, Linear, and Notion connectors are deprecated
+compatibility shims under the pure-Harn connector pivot tracked by
+[#350](https://github.com/burin-labs/harn/issues/350). The core sunset
+groundwork tracked by [#446](https://github.com/burin-labs/harn/issues/446)
+has landed; new provider business logic ships in pure-Harn connector packages
+so that Harn Cloud and self-hosted orchestrators can adopt connector fixes, new
+event families, and provider API changes without waiting for a Harn core release.
 
 This guide is the no-downtime migration path for an orchestrator that today
 uses one of the Rust-side providers and wants to cut over to the pure-Harn
@@ -123,23 +124,23 @@ supported way to express their respective concerns:
 Pure-Harn provider connectors compose these primitives — they do not
 duplicate them.
 
-## Removal timeline
+## Removal status
 
-Following the work breakdown in [#446](https://github.com/burin-labs/harn/issues/446),
-the Rust-side per-provider business logic for GitHub, Slack, Linear, and
-Notion is removed only after:
+The Harn core prerequisites from [#446](https://github.com/burin-labs/harn/issues/446)
+are complete:
 
-1. The connector contract conformance harness ([#468](https://github.com/burin-labs/harn/issues/468))
-   validates the pure-Harn replacements through the same adapter path
-   Harn Cloud and self-hosted orchestrators use.
-2. `NormalizeResult` v1 ([#464](https://github.com/burin-labs/harn/issues/464)),
-   the `poll_tick` scheduled hook ([#465](https://github.com/burin-labs/harn/issues/465)),
-   and the hot-path effect policy ([#467](https://github.com/burin-labs/harn/issues/467))
-   are in place so the pure-Harn connectors can replace every Rust path.
-3. The OAuth / connect CLI ([#176](https://github.com/burin-labs/harn/issues/176))
-   and package-manager pinning sweep ([#445](https://github.com/burin-labs/harn/issues/445))
-   give first-party connector packages a stable install + auth path.
-4. At least GitHub and Slack have parity fixtures landed in their
-   connector repos before the deprecation banners ship in Harn core.
+- The connector contract conformance harness validates pure-Harn replacements
+  through the same adapter path Harn Cloud and self-hosted orchestrators use.
+- `NormalizeResult` v1, `poll_tick`, hot-path effect policy, transport
+  primitives, structured concurrency, and the connector testkit are in core.
+- The OAuth / connect CLI and package manager give connector packages a stable
+  install + auth path.
+- Harn core has parity fixtures for GitHub, Slack, Linear, and Notion that pin
+  the Rust-compatible `TriggerEvent` payload shapes used by first-party package
+  CI.
 
-Until those are complete, the Rust connectors keep working unchanged.
+The remaining Rust code is intentionally compatibility-only for the deprecation
+window. Do not add new provider-specific Rust connector business logic in this
+repository; new service connectors should be packages that register with
+`connector = { harn = "..." }`. Removing the compatibility shims is a release
+coordination decision, not a prerequisite for new connector development.

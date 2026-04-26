@@ -6,21 +6,20 @@ transition plan:
 
 - Cron, generic webhook, A2A push, and stream ingress are core runtime
   providers.
-- GitHub, Slack, Linear, and Notion still have Rust compatibility providers,
-  but new provider business logic should move to pure-Harn packages.
+- GitHub, Slack, Linear, and Notion still have deprecated Rust compatibility
+  shims, but new provider business logic belongs in pure-Harn packages.
 - Community connectors are Harn packages that export connector contract v1 and
   pass `harn connector check`.
 
 > **Deprecated: Rust-side GitHub, Slack, Linear, and Notion connectors.**
-> Per [#446](https://github.com/burin-labs/harn/issues/446), the Rust-side
-> business logic for these four providers is on a sunset path. New deployments
-> should point manifests at the corresponding pure-Harn packages
-> (`harn-github-connector`, `harn-slack-connector`, `harn-linear-connector`,
-> `harn-notion-connector`) by setting `connector = { harn = "..." }` on the
-> `[[providers]]` table. The Rust shims will keep working until the
-> prerequisite tickets enumerated on issue #446 are complete and the
-> deprecation soak elapses; until then, leaving the manifest unchanged still
-> resolves to the existing Rust connector. See the
+> The [#350](https://github.com/burin-labs/harn/issues/350) pure-Harn connector
+> pivot makes the corresponding pure-Harn packages the default path for new
+> deployments: `harn-github-connector`, `harn-slack-connector`,
+> `harn-linear-connector`, and `harn-notion-connector`. Configure one by setting
+> `connector = { harn = "..." }` on the `[[providers]]` table. The Rust shims
+> remain only as compatibility defaults during the deprecation window; leaving
+> the manifest unchanged still resolves to the existing Rust connector and
+> emits an orchestrator-startup warning. See the
 > [Rust-to-Harn-package migration guide](../migrations/rust-connectors-to-harn-packages.md)
 > for a no-downtime cutover.
 
