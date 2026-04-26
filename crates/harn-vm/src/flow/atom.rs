@@ -66,7 +66,7 @@ impl fmt::Display for AtomError {
 impl std::error::Error for AtomError {}
 
 /// 32-byte SHA-256 content address of an `Atom`.
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct AtomId(pub [u8; ATOM_ID_BYTES]);
 
 impl AtomId {
