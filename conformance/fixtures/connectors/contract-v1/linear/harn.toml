@@ -13,8 +13,11 @@ version = 1
 provider = "linear"
 name = "issue update webhook"
 kind = "webhook"
-headers = { "content-type" = "application/json" }
-body_json = { id = "lin-evt-1", type = "Issue", action = "update", data = { id = "ISS-1", title = "Contract fixture" } }
+headers = { "Linear-Delivery" = "delivery-linear-1", "content-type" = "application/json" }
+body_json = { id = "lin-evt-1", type = "Issue", action = "update", organizationId = "org-1", webhookTimestamp = 1715000000000, webhookId = "wh-1", data = { id = "ISS-1", title = "Contract fixture" }, updatedFrom = { title = "Old title" } }
 expect_type = "event"
-expect_kind = "linear.issue.update"
+expect_kind = "issue.update"
+expect_dedupe_key = "delivery-linear-1"
+expect_signature_state = "verified"
+expect_payload_contains = { provider = "linear", event = "issue", action = "update", delivery_id = "delivery-linear-1", organization_id = "org-1", webhook_id = "wh-1", issue = { id = "ISS-1", title = "Contract fixture" } }
 expect_event_count = 1

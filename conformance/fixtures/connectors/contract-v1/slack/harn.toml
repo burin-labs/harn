@@ -16,6 +16,8 @@ kind = "webhook"
 headers = { "content-type" = "application/json" }
 body_json = { type = "url_verification", challenge = "challenge-token" }
 expect_type = "immediate_response"
+expect_response_status = 200
+expect_response_body = "challenge-token"
 expect_event_count = 0
 
 [[connector_contract.fixtures]]
@@ -23,7 +25,10 @@ provider = "slack"
 name = "message event"
 kind = "webhook"
 headers = { "content-type" = "application/json" }
-body_json = { type = "event_callback", event_id = "Ev1", event = { type = "message", text = "hello", channel = "C1" } }
+body_json = { type = "event_callback", event_id = "Ev1", team_id = "T1", api_app_id = "A1", event = { type = "message", text = "hello", channel = "C1", channel_type = "channel", user = "U1", ts = "1710000000.000100", event_ts = "1710000000.000100" } }
 expect_type = "event"
-expect_kind = "slack.message"
+expect_kind = "message.channels"
+expect_dedupe_key = "Ev1"
+expect_signature_state = "verified"
+expect_payload_contains = { provider = "slack", event = "message.channels", event_id = "Ev1", team_id = "T1", api_app_id = "A1", channel_id = "C1", channel_type = "channel", text = "hello", user = "U1" }
 expect_event_count = 1

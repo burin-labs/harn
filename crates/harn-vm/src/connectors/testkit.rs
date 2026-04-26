@@ -516,6 +516,27 @@ pub fn linear_issue_update_fixture(secret: &str, received_at: OffsetDateTime) ->
     WebhookFixture { raw, body }
 }
 
+pub fn notion_page_content_updated_fixture(
+    secret: &str,
+    received_at: OffsetDateTime,
+) -> WebhookFixture {
+    let body = br#"{"id":"evt_1","type":"page.content_updated","workspace_id":"ws_1","subscription_id":"sub_1","integration_id":"int_1","entity":{"id":"page_1","type":"page"},"api_version":"2022-06-28"}"#.to_vec();
+    let mut raw = RawInbound::new(
+        "webhook",
+        BTreeMap::from([
+            ("content-type".to_string(), "application/json".to_string()),
+            (
+                "x-notion-signature".to_string(),
+                format!("sha256={}", hmac_sha256_hex(secret.as_bytes(), &body)),
+            ),
+            ("request-id".to_string(), "req_1".to_string()),
+        ]),
+        body.clone(),
+    );
+    raw.received_at = received_at;
+    WebhookFixture { raw, body }
+}
+
 pub fn webhook_binding(
     provider: impl Into<String>,
     binding_id: impl Into<String>,
@@ -681,5 +702,7 @@ mod tests {
         assert!(slack.raw.headers["x-slack-signature"].starts_with("v0="));
         let linear = linear_issue_update_fixture("topsecret", received_at);
         assert_eq!(linear.raw.headers["linear-signature"].len(), 64);
+        let notion = notion_page_content_updated_fixture("topsecret", received_at);
+        assert!(notion.raw.headers["x-notion-signature"].starts_with("sha256="));
     }
 }

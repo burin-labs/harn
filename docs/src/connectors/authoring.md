@@ -233,6 +233,8 @@ kind = "webhook"
 headers = { "content-type" = "application/json" }
 body_json = { type = "url_verification", challenge = "challenge-token" }
 expect_type = "immediate_response"
+expect_response_status = 200
+expect_response_body = "challenge-token"
 expect_event_count = 0
 ```
 
@@ -250,6 +252,11 @@ Fixture fields:
 | `body_json` | JSON request body encoded as TOML |
 | `expect_type` | Optional expected NormalizeResult type: `event`, `batch`, `immediate_response`, or `reject` |
 | `expect_kind` | Optional expected normalized event kind |
+| `expect_dedupe_key` | Optional exact normalized event dedupe key |
+| `expect_signature_state` | Optional normalized signature state: `verified`, `unsigned`, or `failed` |
+| `expect_payload_contains` | Optional TOML/JSON subset that must be present in the serialized `provider_payload`; use this for Rust-shape parity fixtures |
+| `expect_response_status` | Optional HTTP status expected for `immediate_response` or `reject` results |
+| `expect_response_body` | Optional exact body expected for `immediate_response` or `reject` results |
 | `expect_event_count` | Optional expected number of normalized events |
 | `expect_error_contains` | Optional substring expected in a deterministic `normalize_inbound` error, useful for proving denied effects fail without touching real services |
 

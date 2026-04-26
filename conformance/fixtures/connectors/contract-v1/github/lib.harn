@@ -36,19 +36,15 @@ pub fn normalize_inbound(raw) {
   event_log_emit(
     "connectors.github.contract",
     "normalize",
-    {event: raw.headers["x-github-event"], token: token},
+    {event: raw.headers["X-GitHub-Event"] ?? raw.headers["x-github-event"], token: token},
   )
   return {
     type: "event",
     event: {
-    kind: "github.issues." + body.action,
-    dedupe_key: "github:" + body.id,
-    payload: {
-    delivery_id: body.id,
-    issue_number: body.issue.number,
-    title: body.issue.title,
-    binding_id: raw.binding_id,
-  },
+    kind: raw.headers["X-GitHub-Event"] ?? raw.headers["x-github-event"],
+    dedupe_key: raw.headers["X-GitHub-Delivery"] ?? raw.headers["x-github-delivery"],
+    payload: body,
+    signature_status: {state: "verified"},
   },
   }
 }

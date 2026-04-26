@@ -31,9 +31,14 @@ pub fn normalize_inbound(raw) {
   return {
     type: "event",
     event: {
-    kind: "slack." + body.event.type,
-    dedupe_key: "slack:" + body.event_id,
-    payload: {event_id: body.event_id, event: body.event},
+    kind: if body.event.type == "message" && body.event.channel_type == "channel" {
+    "message.channels"
+  } else {
+    body.event.type
+  },
+    dedupe_key: body.event_id,
+    payload: body,
+    signature_status: {state: "verified"},
   },
   }
 }

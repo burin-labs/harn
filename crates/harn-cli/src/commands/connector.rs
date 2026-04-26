@@ -525,6 +525,7 @@ fn validate_normalize_result(
                     ));
                 }
             }
+            validate_event_expectations(fixture, event.as_ref())?;
             ("event", 1)
         }
         harn_vm::ConnectorNormalizeResult::Batch(events) => {
@@ -538,9 +539,13 @@ fn validate_normalize_result(
                     ));
                 }
             }
+            for event in events {
+                validate_event_expectations(fixture, event)?;
+            }
             ("batch", events.len())
         }
-        harn_vm::ConnectorNormalizeResult::ImmediateResponse { events, .. } => {
+        harn_vm::ConnectorNormalizeResult::ImmediateResponse { response, events } => {
+            validate_response_expectations(fixture, "immediate_response", response)?;
             if let Some(expected_kind) = fixture.expect_kind.as_deref() {
                 if let Some(event) = events.iter().find(|event| event.kind != expected_kind) {
                     return Err(format!(
@@ -551,9 +556,15 @@ fn validate_normalize_result(
                     ));
                 }
             }
+            for event in events {
+                validate_event_expectations(fixture, event)?;
+            }
             ("immediate_response", events.len())
         }
-        harn_vm::ConnectorNormalizeResult::Reject(_) => ("reject", 0),
+        harn_vm::ConnectorNormalizeResult::Reject(response) => {
+            validate_response_expectations(fixture, "reject", response)?;
+            ("reject", 0)
+        }
     };
 
     if let Some(expected_type) = fixture.expect_type.as_deref() {
@@ -582,6 +593,120 @@ fn validate_normalize_result(
         result_type: result_type.to_string(),
         event_count,
     })
+}
+
+fn validate_event_expectations(
+    fixture: &ConnectorContractFixture,
+    event: &harn_vm::TriggerEvent,
+) -> Result<(), String> {
+    if let Some(expected_dedupe_key) = fixture.expect_dedupe_key.as_deref() {
+        if event.dedupe_key != expected_dedupe_key {
+            return Err(format!(
+                "fixture '{}' expected dedupe_key '{}' but got '{}'",
+                fixture_name(fixture),
+                expected_dedupe_key,
+                event.dedupe_key
+            ));
+        }
+    }
+    if let Some(expected_signature_state) = fixture.expect_signature_state.as_deref() {
+        let signature_state = match &event.signature_status {
+            harn_vm::SignatureStatus::Verified => "verified",
+            harn_vm::SignatureStatus::Unsigned => "unsigned",
+            harn_vm::SignatureStatus::Failed { .. } => "failed",
+        };
+        if signature_state != expected_signature_state {
+            return Err(format!(
+                "fixture '{}' expected signature state '{}' but got '{}'",
+                fixture_name(fixture),
+                expected_signature_state,
+                signature_state
+            ));
+        }
+    }
+    if let Some(expected_payload) = &fixture.expect_payload_contains {
+        let expected = toml_to_json(expected_payload)?;
+        let actual = serde_json::to_value(&event.provider_payload).map_err(|error| {
+            format!(
+                "fixture '{}' failed to serialize provider payload: {error}",
+                fixture_name(fixture)
+            )
+        })?;
+        assert_json_contains(fixture, "provider_payload", &actual, &expected)?;
+    }
+    Ok(())
+}
+
+fn validate_response_expectations(
+    fixture: &ConnectorContractFixture,
+    result_type: &str,
+    response: &harn_vm::ConnectorHttpResponse,
+) -> Result<(), String> {
+    if let Some(expected_status) = fixture.expect_response_status {
+        if response.status != expected_status {
+            return Err(format!(
+                "fixture '{}' expected {result_type} HTTP status {} but got {}",
+                fixture_name(fixture),
+                expected_status,
+                response.status
+            ));
+        }
+    }
+    if let Some(expected_body) = &fixture.expect_response_body {
+        let expected = toml_to_json(expected_body)?;
+        if response.body != expected {
+            return Err(format!(
+                "fixture '{}' expected {result_type} body {} but got {}",
+                fixture_name(fixture),
+                expected,
+                response.body
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn assert_json_contains(
+    fixture: &ConnectorContractFixture,
+    path: &str,
+    actual: &JsonValue,
+    expected: &JsonValue,
+) -> Result<(), String> {
+    match expected {
+        JsonValue::Object(expected_map) => {
+            let actual_map = actual.as_object().ok_or_else(|| {
+                format!(
+                    "fixture '{}' expected {path} to be an object containing {} but got {}",
+                    fixture_name(fixture),
+                    expected,
+                    actual
+                )
+            })?;
+            for (key, expected_value) in expected_map {
+                let actual_value = actual_map.get(key).ok_or_else(|| {
+                    format!(
+                        "fixture '{}' expected {path}.{key} to exist in {}",
+                        fixture_name(fixture),
+                        actual
+                    )
+                })?;
+                assert_json_contains(
+                    fixture,
+                    &format!("{path}.{key}"),
+                    actual_value,
+                    expected_value,
+                )?;
+            }
+            Ok(())
+        }
+        _ if actual == expected => Ok(()),
+        _ => Err(format!(
+            "fixture '{}' expected {path} to contain {} but got {}",
+            fixture_name(fixture),
+            expected,
+            actual
+        )),
+    }
 }
 
 fn fixture_name(fixture: &ConnectorContractFixture) -> String {

@@ -531,9 +531,12 @@ granular archaeology.
   generic webhook connector with HMAC verification, A2A push, stream
   ingress, raw-body access, and signing primitives stay in core. Adds a
   `Rust connectors → Harn packages` migration guide under `docs/migrations/`
-  and deprecation banners on each affected connector reference page. No
-  Rust connector business logic has been removed; the timeline for that
-  removal is gated on the prerequisites called out on issue #446.
+  and deprecation banners on each affected connector reference page.
+  `harn connector check` fixtures can also assert dedupe keys, signature
+  state, provider-payload subsets, and immediate-response status/body so
+  first-party pure-Harn connector repos can pin Rust payload-shape parity
+  in CI. No Rust connector business logic has been removed; the timeline
+  for that removal is gated on the prerequisites called out on issue #446.
 
 ### Removed
 

@@ -25,9 +25,10 @@ pub fn normalize_inbound(raw) {
   return {
     type: "event",
     event: {
-    kind: "notion." + body.type,
-    dedupe_key: "notion:" + body.id,
-    payload: {id: body.id, page_id: body.page_id},
+    kind: body.type,
+    dedupe_key: "notion:" + body.entity.id,
+    payload: body,
+    signature_status: {state: "verified"},
   },
   }
 }
