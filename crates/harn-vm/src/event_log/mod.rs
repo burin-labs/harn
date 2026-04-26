@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
+use bytes::Bytes;
 use futures::stream::BoxStream;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -140,6 +141,53 @@ impl LogEvent {
     }
 }
 
+/// Serialized event payload form for large read paths.
+///
+/// `payload` contains the original JSON bytes for backends that can expose
+/// them directly. Callers that only need to forward or hash the payload can
+/// avoid materializing a `serde_json::Value`; callers that need structured
+/// access can opt in with `payload_json`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LogEventBytes {
+    pub kind: String,
+    pub payload: Bytes,
+    pub headers: BTreeMap<String, String>,
+    pub occurred_at_ms: i64,
+}
+
+impl LogEventBytes {
+    pub fn payload_json(&self) -> Result<serde_json::Value, LogError> {
+        serde_json::from_slice(&self.payload)
+            .map_err(|error| LogError::Serde(format!("event log payload parse error: {error}")))
+    }
+
+    pub fn into_log_event(self) -> Result<LogEvent, LogError> {
+        Ok(LogEvent {
+            kind: self.kind,
+            payload: serde_json::from_slice(&self.payload).map_err(|error| {
+                LogError::Serde(format!("event log payload parse error: {error}"))
+            })?,
+            headers: self.headers,
+            occurred_at_ms: self.occurred_at_ms,
+        })
+    }
+}
+
+impl TryFrom<LogEvent> for LogEventBytes {
+    type Error = LogError;
+
+    fn try_from(event: LogEvent) -> Result<Self, Self::Error> {
+        let payload = serde_json::to_vec(&event.payload)
+            .map_err(|error| LogError::Serde(format!("event log payload encode error: {error}")))?;
+        Ok(Self {
+            kind: event.kind,
+            payload: Bytes::from(payload),
+            headers: event.headers,
+            occurred_at_ms: event.occurred_at_ms,
+        })
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompactReport {
     pub removed: usize,
@@ -201,6 +249,19 @@ pub trait EventLog: Send + Sync {
         from: Option<EventId>,
         limit: usize,
     ) -> Result<Vec<(EventId, LogEvent)>, LogError>;
+
+    async fn read_range_bytes(
+        &self,
+        topic: &Topic,
+        from: Option<EventId>,
+        limit: usize,
+    ) -> Result<Vec<(EventId, LogEventBytes)>, LogError> {
+        let events = self.read_range(topic, from, limit).await?;
+        events
+            .into_iter()
+            .map(|(event_id, event)| Ok((event_id, event.try_into()?)))
+            .collect()
+    }
 
     /// `async fn` keeps the ergonomic generic surface; the boxed stream
     /// preserves dyn-dispatch for callers that store `Arc<dyn EventLog>`.
@@ -395,6 +456,19 @@ impl EventLog for AnyEventLog {
             Self::Memory(log) => log.read_range(topic, from, limit).await,
             Self::File(log) => log.read_range(topic, from, limit).await,
             Self::Sqlite(log) => log.read_range(topic, from, limit).await,
+        }
+    }
+
+    async fn read_range_bytes(
+        &self,
+        topic: &Topic,
+        from: Option<EventId>,
+        limit: usize,
+    ) -> Result<Vec<(EventId, LogEventBytes)>, LogError> {
+        match self {
+            Self::Memory(log) => log.read_range_bytes(topic, from, limit).await,
+            Self::File(log) => log.read_range_bytes(topic, from, limit).await,
+            Self::Sqlite(log) => log.read_range_bytes(topic, from, limit).await,
         }
     }
 
@@ -721,13 +795,7 @@ impl FileEventLog {
         let mut latest = 0;
         let path = self.topic_path(topic);
         if path.is_file() {
-            let file = std::fs::File::open(&path)
-                .map_err(|error| LogError::Io(format!("event log open error: {error}")))?;
-            for line in std::io::BufRead::lines(std::io::BufReader::new(file)) {
-                let line =
-                    line.map_err(|error| LogError::Io(format!("event log read error: {error}")))?;
-                let record: FileRecord = serde_json::from_str(&line)
-                    .map_err(|error| LogError::Serde(format!("event log parse error: {error}")))?;
+            for record in read_file_records(&path)? {
                 latest = record.id;
             }
         }
@@ -748,15 +816,9 @@ impl FileEventLog {
         if !path.is_file() {
             return Ok(Vec::new());
         }
-        let file = std::fs::File::open(&path)
-            .map_err(|error| LogError::Io(format!("event log open error: {error}")))?;
         let from = from.unwrap_or(0);
         let mut events = Vec::new();
-        for line in std::io::BufRead::lines(std::io::BufReader::new(file)) {
-            let line =
-                line.map_err(|error| LogError::Io(format!("event log read error: {error}")))?;
-            let record: FileRecord = serde_json::from_str(&line)
-                .map_err(|error| LogError::Serde(format!("event log parse error: {error}")))?;
+        for record in read_file_records(&path)? {
             if record.id > from {
                 events.push((record.id, record.event));
             }
@@ -766,6 +828,34 @@ impl FileEventLog {
         }
         Ok(events)
     }
+}
+
+fn read_file_records(path: &Path) -> Result<Vec<FileRecord>, LogError> {
+    let file = std::fs::File::open(path)
+        .map_err(|error| LogError::Io(format!("event log open error: {error}")))?;
+    let mut reader = std::io::BufReader::new(file);
+    let mut records = Vec::new();
+    let mut line = Vec::new();
+    loop {
+        line.clear();
+        let bytes_read = std::io::BufRead::read_until(&mut reader, b'\n', &mut line)
+            .map_err(|error| LogError::Io(format!("event log read error: {error}")))?;
+        if bytes_read == 0 {
+            break;
+        }
+        if line.iter().all(u8::is_ascii_whitespace) {
+            continue;
+        }
+        let complete_line = line.ends_with(b"\n");
+        match serde_json::from_slice::<FileRecord>(&line) {
+            Ok(record) => records.push(record),
+            Err(_) if !complete_line => break,
+            Err(error) => {
+                return Err(LogError::Serde(format!("event log parse error: {error}")));
+            }
+        }
+    }
+    Ok(records)
 }
 
 impl EventLog for FileEventLog {
@@ -823,6 +913,18 @@ impl EventLog for FileEventLog {
         limit: usize,
     ) -> Result<Vec<(EventId, LogEvent)>, LogError> {
         self.read_range_sync(topic, from, limit)
+    }
+
+    async fn read_range_bytes(
+        &self,
+        topic: &Topic,
+        from: Option<EventId>,
+        limit: usize,
+    ) -> Result<Vec<(EventId, LogEventBytes)>, LogError> {
+        self.read_range_sync(topic, from, limit)?
+            .into_iter()
+            .map(|(event_id, event)| Ok((event_id, event.try_into()?)))
+            .collect()
     }
 
     async fn subscribe(
@@ -972,7 +1074,7 @@ impl SqliteEventLog {
                     topic TEXT NOT NULL,
                     event_id INTEGER NOT NULL,
                     kind TEXT NOT NULL,
-                    payload TEXT NOT NULL,
+                    payload BLOB NOT NULL,
                     headers TEXT NOT NULL,
                     occurred_at_ms INTEGER NOT NULL,
                     PRIMARY KEY (topic, event_id)
@@ -1039,7 +1141,7 @@ impl EventLog for SqliteEventLog {
                 topic.as_str(),
                 event_id_sql,
                 event.kind,
-                serde_json::to_string(&event.payload).map_err(|error| LogError::Serde(format!(
+                serde_json::to_vec(&event.payload).map_err(|error| LogError::Serde(format!(
                     "event log payload encode error: {error}"
                 )))?,
                 serde_json::to_string(&event.headers).map_err(|error| LogError::Serde(format!(
@@ -1089,20 +1191,71 @@ impl EventLog for SqliteEventLog {
         let from_sql = event_id_to_sqlite_i64(from.unwrap_or(0))?;
         let rows = statement
             .query_map(params![topic.as_str(), from_sql, limit as i64], |row| {
-                let payload: String = row.get(2)?;
+                let payload = sqlite_json_bytes_for_row(row, 2, "payload")?;
                 let headers: String = row.get(3)?;
                 let event_id = sqlite_i64_to_event_id_for_row(row.get::<_, i64>(0)?)?;
                 Ok((
                     event_id,
                     LogEvent {
                         kind: row.get(1)?,
-                        payload: serde_json::from_str(&payload).map_err(|error| {
+                        payload: serde_json::from_slice(&payload).map_err(|error| {
                             rusqlite::Error::FromSqlConversionFailure(
                                 payload.len(),
+                                rusqlite::types::Type::Blob,
+                                Box::new(error),
+                            )
+                        })?,
+                        headers: serde_json::from_str(&headers).map_err(|error| {
+                            rusqlite::Error::FromSqlConversionFailure(
+                                headers.len(),
                                 rusqlite::types::Type::Text,
                                 Box::new(error),
                             )
                         })?,
+                        occurred_at_ms: row.get(4)?,
+                    },
+                ))
+            })
+            .map_err(|error| LogError::Sqlite(format!("event log query error: {error}")))?;
+        let mut events = Vec::new();
+        for row in rows {
+            events.push(
+                row.map_err(|error| LogError::Sqlite(format!("event log row error: {error}")))?,
+            );
+        }
+        Ok(events)
+    }
+
+    async fn read_range_bytes(
+        &self,
+        topic: &Topic,
+        from: Option<EventId>,
+        limit: usize,
+    ) -> Result<Vec<(EventId, LogEventBytes)>, LogError> {
+        let connection = self
+            .connection
+            .lock()
+            .expect("sqlite event log connection poisoned");
+        let mut statement = connection
+            .prepare(
+                "SELECT event_id, kind, payload, headers, occurred_at_ms
+                 FROM events
+                 WHERE topic = ?1 AND event_id > ?2
+                 ORDER BY event_id ASC
+                 LIMIT ?3",
+            )
+            .map_err(|error| LogError::Sqlite(format!("event log prepare error: {error}")))?;
+        let from_sql = event_id_to_sqlite_i64(from.unwrap_or(0))?;
+        let rows = statement
+            .query_map(params![topic.as_str(), from_sql, limit as i64], |row| {
+                let payload = sqlite_json_bytes_for_row(row, 2, "payload")?;
+                let headers: String = row.get(3)?;
+                let event_id = sqlite_i64_to_event_id_for_row(row.get::<_, i64>(0)?)?;
+                Ok((
+                    event_id,
+                    LogEventBytes {
+                        kind: row.get(1)?,
+                        payload: Bytes::from(payload),
                         headers: serde_json::from_str(&headers).map_err(|error| {
                             rusqlite::Error::FromSqlConversionFailure(
                                 headers.len(),
@@ -1352,6 +1505,24 @@ fn sqlite_i64_to_event_id_for_row(value: i64) -> rusqlite::Result<EventId> {
     })
 }
 
+fn sqlite_json_bytes_for_row(
+    row: &rusqlite::Row<'_>,
+    index: usize,
+    name: &str,
+) -> rusqlite::Result<Vec<u8>> {
+    let value = row.get_ref(index)?;
+    match value {
+        rusqlite::types::ValueRef::Text(bytes) | rusqlite::types::ValueRef::Blob(bytes) => {
+            Ok(bytes.to_vec())
+        }
+        other => Err(rusqlite::Error::InvalidColumnType(
+            index,
+            name.to_string(),
+            other.data_type(),
+        )),
+    }
+}
+
 fn sqlite_i64_to_usize(value: i64) -> Result<usize, LogError> {
     usize::try_from(value)
         .map_err(|_| LogError::Sqlite(format!("sqlite count {value} is negative")))
@@ -1453,6 +1624,36 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
+    async fn file_backend_skips_torn_tail_on_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let topic = Topic::new("trigger.inbox").unwrap();
+        let first_log = FileEventLog::open(dir.path().to_path_buf(), 8).unwrap();
+        first_log
+            .append(
+                &topic,
+                LogEvent::new("accepted", serde_json::json!({"id": "ok"})),
+            )
+            .await
+            .unwrap();
+        drop(first_log);
+
+        let topic_path = dir.path().join("topics").join("trigger.inbox.jsonl");
+        use std::io::Write as _;
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&topic_path)
+            .unwrap();
+        write!(file, "{{\"id\":2,\"event\":{{\"kind\":\"partial\"").unwrap();
+        drop(file);
+
+        let reopened = FileEventLog::open(dir.path().to_path_buf(), 8).unwrap();
+        let events = reopened.read_range(&topic, None, usize::MAX).await.unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].0, 1);
+        assert_eq!(reopened.latest(&topic).await.unwrap(), Some(1));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
     async fn sqlite_backend_persists_and_checkpoints_after_compact() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("events.sqlite");
@@ -1491,6 +1692,66 @@ mod tests {
         assert!(compact.checkpointed);
         let wal = PathBuf::from(format!("{}-wal", path.display()));
         assert!(file_size(&wal) == 0 || !wal.exists());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn sqlite_bytes_read_preserves_payload_without_value_materialization() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("events.sqlite");
+        let topic = Topic::new("observability.action_graph").unwrap();
+        let log = SqliteEventLog::open(path, 8).unwrap();
+        let event_id = log
+            .append(
+                &topic,
+                LogEvent::new(
+                    "snapshot",
+                    serde_json::json!({"nodes":[{"id":"a"}],"edges":[]}),
+                ),
+            )
+            .await
+            .unwrap();
+
+        let events = log.read_range_bytes(&topic, None, 1).await.unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].0, event_id);
+        assert_eq!(
+            events[0].1.payload_json().unwrap(),
+            serde_json::json!({"nodes":[{"id":"a"}],"edges":[]})
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn sqlite_bytes_read_accepts_legacy_text_payload_rows() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("events.sqlite");
+        let topic = Topic::new("agent.transcript.legacy").unwrap();
+        let log = SqliteEventLog::open(path, 8).unwrap();
+        {
+            let connection = log.connection.lock().unwrap();
+            connection
+                .execute(
+                    "INSERT INTO topic_heads(topic, last_id) VALUES (?1, 1)",
+                    params![topic.as_str()],
+                )
+                .unwrap();
+            connection
+                .execute(
+                    "INSERT INTO events(topic, event_id, kind, payload, headers, occurred_at_ms)
+                     VALUES (?1, 1, 'legacy', ?2, '{}', 1)",
+                    params![topic.as_str(), "{\"text\":\"old\"}"],
+                )
+                .unwrap();
+        }
+
+        let events = log.read_range_bytes(&topic, None, 1).await.unwrap();
+        assert_eq!(
+            events[0].1.payload_json().unwrap(),
+            serde_json::json!({"text": "old"})
+        );
+        assert_eq!(
+            log.read_range(&topic, None, 1).await.unwrap()[0].1.kind,
+            "legacy"
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]

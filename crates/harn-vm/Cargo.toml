@@ -36,6 +36,7 @@ rcgen = "0.13"
 libc = "0.2"
 tokio-stream = "0.1"
 base64 = "0.22"
+bytes = "1"
 data-encoding = "2"
 ed25519-dalek = { version = "2", features = ["pem", "pkcs8", "rand_core"] }
 x25519-dalek = { version = "2", features = ["static_secrets"] }
