@@ -3,8 +3,96 @@
 
 use crate::value::VmValue;
 
-/// Sender for streaming text deltas from an in-flight LLM call.
-pub(crate) type DeltaSender = tokio::sync::mpsc::UnboundedSender<String>;
+/// Lifecycle event for a single provider-streamed native tool call,
+/// emitted by the SSE handler as `tool_use` blocks open and their
+/// arguments JSON streams in. The agent-loop forwarder translates each
+/// event into an `AgentEvent::ToolCall` / `ToolCallUpdate` (harn#693)
+/// so clients can render arguments as they arrive instead of waiting
+/// for the entire streamed call to be parsed at end-of-block.
+#[derive(Clone, Debug)]
+pub(crate) enum NativeToolCallDelta {
+    /// First sighting of a tool block. For Anthropic this fires on the
+    /// `content_block_start` envelope for `type: "tool_use"`; for
+    /// OpenAI-style providers it fires the first time a `tool_calls`
+    /// entry at a given index carries a non-empty `function.name`.
+    Start {
+        tool_use_id: String,
+        tool_name: String,
+    },
+    /// Streaming arguments delta. `accumulated_partial_json` is the
+    /// concatenation of every `partial_json` (Anthropic) /
+    /// `function.arguments` (OpenAI) chunk seen so far for this block,
+    /// **including** the chunk that triggered this event. The SSE
+    /// handler coalesces multiple chunks arriving within ~50ms into a
+    /// single `InputDelta` to keep slow clients off the event-storm
+    /// hot path; consumers should treat each event as a snapshot of the
+    /// current accumulated input rather than a per-chunk delta.
+    InputDelta {
+        tool_use_id: String,
+        tool_name: String,
+        accumulated_partial_json: String,
+    },
+}
+
+/// Channel pair for forwarding streaming-time observations from the LLM
+/// transport up to the agent loop. `text` carries visible/thought text
+/// chunks (the original `delta_tx` contract), and `native_tool` carries
+/// provider-native tool-call lifecycle events (harn#693). The native
+/// channel is `None` for callers that don't care — every legacy call
+/// site continues to compile after the refactor by constructing a
+/// `DeltaSender` that only wires text.
+#[derive(Clone)]
+pub(crate) struct DeltaSender {
+    text: tokio::sync::mpsc::UnboundedSender<String>,
+    native_tool: Option<tokio::sync::mpsc::UnboundedSender<NativeToolCallDelta>>,
+}
+
+impl DeltaSender {
+    /// Wrap an existing text-only sender. Used by all callers that don't
+    /// observe native tool-call streaming.
+    pub(crate) fn text_only(text: tokio::sync::mpsc::UnboundedSender<String>) -> Self {
+        Self {
+            text,
+            native_tool: None,
+        }
+    }
+
+    /// Wrap both a text sender and a native-tool sender. Used by the
+    /// agent loop's progress forwarder, which translates native deltas
+    /// into `AgentEvent::ToolCall` / `ToolCallUpdate`.
+    pub(crate) fn with_native_tool(
+        text: tokio::sync::mpsc::UnboundedSender<String>,
+        native_tool: tokio::sync::mpsc::UnboundedSender<NativeToolCallDelta>,
+    ) -> Self {
+        Self {
+            text,
+            native_tool: Some(native_tool),
+        }
+    }
+
+    /// Send a text chunk. Drops silently if the receiver is gone — the
+    /// historical contract.
+    pub(crate) fn send_text(
+        &self,
+        chunk: String,
+    ) -> Result<(), tokio::sync::mpsc::error::SendError<String>> {
+        self.text.send(chunk)
+    }
+
+    /// Send a native tool-call lifecycle event. No-op when the caller
+    /// did not wire a native channel (most non-agent-loop callers).
+    pub(crate) fn send_native_tool(&self, delta: NativeToolCallDelta) {
+        if let Some(tx) = &self.native_tool {
+            let _ = tx.send(delta);
+        }
+    }
+
+    /// Whether a native-tool channel is wired. Used by the SSE handler
+    /// to skip coalescing bookkeeping when no observer cares.
+    pub(crate) fn has_native_tool(&self) -> bool {
+        self.native_tool.is_some()
+    }
+}
 
 /// Extended thinking configuration.
 #[derive(Clone, Debug, serde::Serialize)]

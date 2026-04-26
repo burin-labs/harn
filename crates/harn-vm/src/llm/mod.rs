@@ -510,6 +510,8 @@ pub(crate) async fn execute_llm_call(
             None,
             user_visible,
             bridged, // offthread=true on the bridge path, local set otherwise
+            // Standalone `llm_call` has no agent-loop session.
+            None,
         )
         .await?;
 

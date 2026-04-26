@@ -11,10 +11,18 @@ use super::errors::classify_http_error;
 use super::openai_normalize::{
     append_paragraph, debug_log_message_shapes, extract_openai_message_field_as_text,
 };
-use super::options::{DeltaSender, LlmRequestPayload};
+use super::options::{DeltaSender, LlmRequestPayload, NativeToolCallDelta};
 use super::response::{extract_cache_read_tokens, extract_cache_write_tokens, parse_llm_response};
 use super::result::LlmResult;
 use super::thinking::ThinkingStreamSplitter;
+
+/// Minimum gap between successive `NativeToolCallDelta::InputDelta` emissions
+/// for the same tool block (harn#693). Bursts of provider deltas inside this
+/// window collapse into a single update so slow clients don't drown in
+/// per-character churn. The block-stop / stream-end paths always flush a
+/// final un-coalesced update so the last seen `accumulated_partial_json`
+/// reaches subscribers regardless of timing.
+const NATIVE_TOOL_DELTA_COALESCE_MS: u64 = 50;
 
 fn parse_ollama_tool_arguments(arguments: &serde_json::Value) -> serde_json::Value {
     match arguments {
@@ -228,7 +236,7 @@ pub(crate) async fn vm_call_llm_api_with_body(
             tx
         } else {
             let (tx, _rx) = tokio::sync::mpsc::unbounded_channel::<String>();
-            tx
+            DeltaSender::text_only(tx)
         };
         let response = req.send().await.map_err(|e| {
             let kind = if e.is_timeout() {
@@ -310,13 +318,31 @@ async fn vm_call_llm_api_sse_from_response(
     resolved: &crate::llm::helpers::ResolvedProvider,
     delta_tx: DeltaSender,
 ) -> Result<LlmResult, VmError> {
-    use tokio::io::AsyncBufReadExt;
     use tokio_stream::StreamExt;
 
     let stream = response.bytes_stream();
     let reader = tokio::io::BufReader::new(tokio_util::io::StreamReader::new(
         stream.map(|r| r.map_err(std::io::Error::other)),
     ));
+    consume_sse_lines(reader, model, resolved, delta_tx).await
+}
+
+/// Inner SSE body parser, factored out from
+/// [`vm_call_llm_api_sse_from_response`] so tests can drive it directly
+/// from a `Cursor` over canned bytes (harn#693). The wire format is
+/// identical between the two paths — the only difference is the source
+/// of the byte stream.
+async fn consume_sse_lines<R>(
+    reader: R,
+    model: &str,
+    resolved: &crate::llm::helpers::ResolvedProvider,
+    delta_tx: DeltaSender,
+) -> Result<LlmResult, VmError>
+where
+    R: tokio::io::AsyncBufRead + Unpin,
+{
+    use tokio::io::AsyncBufReadExt;
+
     let mut lines = reader.lines();
 
     let mut text = String::new();
@@ -329,6 +355,11 @@ async fn vm_call_llm_api_sse_from_response(
         id: String,
         name: String,
         input_json: String,
+        /// Per-block coalescing watermark for `NativeToolCallDelta::InputDelta`
+        /// emissions (harn#693). Reset on block open, updated on every
+        /// emitted delta. The block-stop path always flushes a final
+        /// un-coalesced update so callers see the complete partial JSON.
+        last_emit: Option<std::time::Instant>,
     }
     let mut current_tool: Option<ToolBlock> = None;
     // Mirror structure for server-side tool-search queries: Anthropic
@@ -347,7 +378,20 @@ async fn vm_call_llm_api_sse_from_response(
     let mut cache_read_tokens: i64 = 0;
     let mut cache_write_tokens: i64 = 0;
 
-    let mut oai_tool_map: std::collections::HashMap<u64, (String, String, String)> =
+    /// Per-index OpenAI tool-call accumulator. `start_emitted` gates the
+    /// `NativeToolCallDelta::Start` emission on the first chunk that
+    /// carries the function name (some providers split id and name
+    /// across chunks). `last_emit` drives the same coalescing window
+    /// used by the Anthropic path. `id` may stay empty until the model
+    /// fills it in mid-stream — the agent loop tolerates the empty case.
+    struct OaiToolEntry {
+        id: String,
+        name: String,
+        args: String,
+        start_emitted: bool,
+        last_emit: Option<std::time::Instant>,
+    }
+    let mut oai_tool_map: std::collections::HashMap<u64, OaiToolEntry> =
         std::collections::HashMap::new();
     // Qwen3/3.5 via vLLM emit inline `<think>...</think>`. Strip these
     // out of the visible delta stream so the tool-call parser / progress
@@ -388,10 +432,20 @@ async fn vm_call_llm_api_sse_from_response(
                     let block = &json["content_block"];
                     match block["type"].as_str() {
                         Some("tool_use") => {
+                            let id = block["id"].as_str().unwrap_or("").to_string();
+                            let name = block["name"].as_str().unwrap_or("").to_string();
+                            // Fire the lifecycle `Start` immediately so a
+                            // client can render "calling foo…" before any
+                            // arguments arrive (harn#693).
+                            delta_tx.send_native_tool(NativeToolCallDelta::Start {
+                                tool_use_id: id.clone(),
+                                tool_name: name.clone(),
+                            });
                             current_tool = Some(ToolBlock {
-                                id: block["id"].as_str().unwrap_or("").to_string(),
-                                name: block["name"].as_str().unwrap_or("").to_string(),
+                                id,
+                                name,
                                 input_json: String::new(),
+                                last_emit: None,
                             });
                         }
                         Some("server_tool_use") => {
@@ -429,7 +483,7 @@ async fn vm_call_llm_api_sse_from_response(
                         Some("text_delta") => {
                             if let Some(t) = delta["text"].as_str() {
                                 text.push_str(t);
-                                let _ = delta_tx.send(t.to_string());
+                                let _ = delta_tx.send_text(t.to_string());
                                 blocks.push(serde_json::json!({"type": "output_text", "text": t, "visibility": "public"}));
                             }
                         }
@@ -443,6 +497,21 @@ async fn vm_call_llm_api_sse_from_response(
                             if let Some(ref mut tool) = current_tool {
                                 if let Some(j) = delta["partial_json"].as_str() {
                                     tool.input_json.push_str(j);
+                                    let now = std::time::Instant::now();
+                                    let should_emit = tool.last_emit.is_none_or(|last| {
+                                        now.duration_since(last).as_millis() as u64
+                                            >= NATIVE_TOOL_DELTA_COALESCE_MS
+                                    });
+                                    if should_emit && delta_tx.has_native_tool() {
+                                        delta_tx.send_native_tool(
+                                            NativeToolCallDelta::InputDelta {
+                                                tool_use_id: tool.id.clone(),
+                                                tool_name: tool.name.clone(),
+                                                accumulated_partial_json: tool.input_json.clone(),
+                                            },
+                                        );
+                                        tool.last_emit = Some(now);
+                                    }
                                 }
                             } else if let Some(ref mut server_tool) = current_server_tool {
                                 if let Some(j) = delta["partial_json"].as_str() {
@@ -455,6 +524,16 @@ async fn vm_call_llm_api_sse_from_response(
                 }
                 Some("content_block_stop") => {
                     if let Some(tool) = current_tool.take() {
+                        // Final un-coalesced flush so subscribers see the
+                        // complete `accumulated_partial_json` regardless
+                        // of the 50ms window state (harn#693).
+                        if delta_tx.has_native_tool() {
+                            delta_tx.send_native_tool(NativeToolCallDelta::InputDelta {
+                                tool_use_id: tool.id.clone(),
+                                tool_name: tool.name.clone(),
+                                accumulated_partial_json: tool.input_json.clone(),
+                            });
+                        }
                         let args = serde_json::from_str::<serde_json::Value>(&tool.input_json)
                             .unwrap_or(serde_json::Value::Object(Default::default()));
                         tool_calls.push(serde_json::json!({
@@ -504,7 +583,7 @@ async fn vm_call_llm_api_sse_from_response(
                 let visible = oai_thinking_splitter.push(content);
                 if !visible.is_empty() {
                     text.push_str(&visible);
-                    let _ = delta_tx.send(visible.clone());
+                    let _ = delta_tx.send_text(visible.clone());
                     blocks.push(serde_json::json!({"type": "output_text", "text": visible, "visibility": "public"}));
                 }
             }
@@ -565,13 +644,51 @@ async fn vm_call_llm_api_sse_from_response(
                         continue;
                     }
                     let idx = tc["index"].as_u64().unwrap_or(0);
-                    let entry = oai_tool_map.entry(idx).or_insert_with(|| {
-                        let id = tc["id"].as_str().unwrap_or("").to_string();
-                        let name = tc["function"]["name"].as_str().unwrap_or("").to_string();
-                        (id, name, String::new())
+                    let entry = oai_tool_map.entry(idx).or_insert_with(|| OaiToolEntry {
+                        id: tc["id"].as_str().unwrap_or("").to_string(),
+                        name: tc["function"]["name"].as_str().unwrap_or("").to_string(),
+                        args: String::new(),
+                        start_emitted: false,
+                        last_emit: None,
                     });
+                    // Some providers send the id/name on a later chunk —
+                    // backfill the accumulator and only emit `Start`
+                    // once both are known so downstream UIs don't
+                    // render an empty placeholder.
+                    if entry.id.is_empty() {
+                        if let Some(id) = tc["id"].as_str() {
+                            entry.id = id.to_string();
+                        }
+                    }
+                    if entry.name.is_empty() {
+                        if let Some(name) = tc["function"]["name"].as_str() {
+                            entry.name = name.to_string();
+                        }
+                    }
+                    if !entry.start_emitted && !entry.name.is_empty() {
+                        delta_tx.send_native_tool(NativeToolCallDelta::Start {
+                            tool_use_id: entry.id.clone(),
+                            tool_name: entry.name.clone(),
+                        });
+                        entry.start_emitted = true;
+                    }
                     if let Some(args) = tc["function"]["arguments"].as_str() {
-                        entry.2.push_str(args);
+                        entry.args.push_str(args);
+                        if entry.start_emitted && delta_tx.has_native_tool() {
+                            let now = std::time::Instant::now();
+                            let should_emit = entry.last_emit.is_none_or(|last| {
+                                now.duration_since(last).as_millis() as u64
+                                    >= NATIVE_TOOL_DELTA_COALESCE_MS
+                            });
+                            if should_emit {
+                                delta_tx.send_native_tool(NativeToolCallDelta::InputDelta {
+                                    tool_use_id: entry.id.clone(),
+                                    tool_name: entry.name.clone(),
+                                    accumulated_partial_json: entry.args.clone(),
+                                });
+                                entry.last_emit = Some(now);
+                            }
+                        }
                     }
                 }
             }
@@ -595,19 +712,34 @@ async fn vm_call_llm_api_sse_from_response(
         }
     }
 
-    for (_, (id, name, args_str)) in oai_tool_map {
-        let args = serde_json::from_str::<serde_json::Value>(&args_str)
+    // Stream is over: flush a final un-coalesced `InputDelta` per
+    // accumulated entry so the last seen `accumulated_partial_json`
+    // reaches subscribers regardless of the 50ms window state, then
+    // promote each entry into the canonical `tool_calls` array
+    // (harn#693). Iterate in index order so `tool_calls` matches the
+    // provider's original ordering.
+    let mut oai_entries: Vec<(u64, OaiToolEntry)> = oai_tool_map.into_iter().collect();
+    oai_entries.sort_by_key(|(idx, _)| *idx);
+    for (_, entry) in oai_entries {
+        if entry.start_emitted && delta_tx.has_native_tool() {
+            delta_tx.send_native_tool(NativeToolCallDelta::InputDelta {
+                tool_use_id: entry.id.clone(),
+                tool_name: entry.name.clone(),
+                accumulated_partial_json: entry.args.clone(),
+            });
+        }
+        let args = serde_json::from_str::<serde_json::Value>(&entry.args)
             .unwrap_or(serde_json::Value::Object(Default::default()));
         tool_calls.push(serde_json::json!({
-            "id": id, "name": name, "arguments": args,
+            "id": entry.id, "name": entry.name, "arguments": args,
         }));
-        blocks.push(serde_json::json!({"type": "tool_call", "id": id, "name": name, "arguments": args, "visibility": "internal"}));
+        blocks.push(serde_json::json!({"type": "tool_call", "id": entry.id, "name": entry.name, "arguments": args, "visibility": "internal"}));
     }
 
     let final_visible = oai_thinking_splitter.flush();
     if !final_visible.is_empty() {
         text.push_str(&final_visible);
-        let _ = delta_tx.send(final_visible.clone());
+        let _ = delta_tx.send_text(final_visible.clone());
         blocks.push(serde_json::json!({"type": "output_text", "text": final_visible, "visibility": "public"}));
     }
     if !oai_thinking_splitter.thinking.is_empty() {
@@ -708,13 +840,13 @@ async fn vm_call_llm_api_ndjson_from_response(
         let thinking = json["message"]["thinking"].as_str().unwrap_or("");
         if !content.is_empty() {
             text.push_str(content);
-            let _ = delta_tx.send(content.to_string());
+            let _ = delta_tx.send_text(content.to_string());
             blocks.push(
                 serde_json::json!({"type": "output_text", "text": content, "visibility": "public"}),
             );
         } else if !thinking.is_empty() {
             thinking_text.push_str(thinking);
-            let _ = delta_tx.send(thinking.to_string());
+            let _ = delta_tx.send_text(thinking.to_string());
             blocks.push(
                 serde_json::json!({"type": "reasoning", "text": thinking, "visibility": "private"}),
             );
@@ -811,5 +943,258 @@ mod tests {
         assert_eq!(tool_calls[0]["arguments"]["path"], "README.md");
         assert_eq!(blocks.len(), 1);
         assert_eq!(blocks[0]["type"], "tool_call");
+    }
+}
+
+#[cfg(test)]
+mod native_tool_streaming_tests {
+    //! Coverage for harn#693: the SSE handler must surface
+    //! `NativeToolCallDelta::Start` on the first chunk of a tool block
+    //! (so clients can render "calling foo…" before any arguments
+    //! arrive), then a coalesced sequence of `InputDelta` events as
+    //! `partial_json` / `function.arguments` chunks land, and finally
+    //! a flush at block stop / stream end so the last seen partial
+    //! reaches subscribers regardless of timing.
+
+    use super::{consume_sse_lines, DeltaSender, NativeToolCallDelta};
+    use crate::llm::helpers::ResolvedProvider;
+    use std::io::Cursor;
+    use tokio::sync::mpsc;
+
+    /// Drive `consume_sse_lines` against a canned SSE body and return
+    /// the (LlmResult, text deltas, native tool deltas) triple.
+    async fn drive_sse(
+        body: &str,
+        provider_for_resolve: &str,
+    ) -> (super::LlmResult, Vec<String>, Vec<NativeToolCallDelta>) {
+        let (text_tx, mut text_rx) = mpsc::unbounded_channel::<String>();
+        let (native_tx, mut native_rx) = mpsc::unbounded_channel::<NativeToolCallDelta>();
+        let delta_tx = DeltaSender::with_native_tool(text_tx, native_tx);
+        let resolved = ResolvedProvider::resolve(provider_for_resolve);
+
+        let cursor = Cursor::new(body.to_string().into_bytes());
+        let buffered = tokio::io::BufReader::new(cursor);
+        let result = consume_sse_lines(buffered, "test-model", &resolved, delta_tx)
+            .await
+            .expect("sse parse");
+
+        let mut text_deltas = Vec::new();
+        while let Ok(delta) = text_rx.try_recv() {
+            text_deltas.push(delta);
+        }
+        let mut native_deltas = Vec::new();
+        while let Ok(delta) = native_rx.try_recv() {
+            native_deltas.push(delta);
+        }
+        (result, text_deltas, native_deltas)
+    }
+
+    /// Render the Anthropic-style SSE body for a single `tool_use` block
+    /// where the input JSON arrives in the listed `partial_json` chunks.
+    fn anthropic_tool_use_body(id: &str, name: &str, partials: &[&str]) -> String {
+        let mut out = String::new();
+        out.push_str(
+            "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":1}}}\n",
+        );
+        out.push_str(&format!(
+            "data: {{\"type\":\"content_block_start\",\"content_block\":{{\"type\":\"tool_use\",\"id\":\"{id}\",\"name\":\"{name}\"}}}}\n"
+        ));
+        for partial in partials {
+            // Quote-escape the partial JSON for embedding inside the
+            // outer SSE-line JSON envelope.
+            let escaped = serde_json::to_string(partial).expect("quote partial");
+            out.push_str(&format!(
+                "data: {{\"type\":\"content_block_delta\",\"delta\":{{\"type\":\"input_json_delta\",\"partial_json\":{escaped}}}}}\n"
+            ));
+        }
+        out.push_str("data: {\"type\":\"content_block_stop\"}\n");
+        out.push_str(
+            "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":2}}\n",
+        );
+        out.push_str("data: [DONE]\n");
+        out
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn anthropic_first_event_fires_on_block_start_with_tool_name() {
+        // Single tool block, single chunk of arguments. The first
+        // `NativeToolCallDelta` must be `Start { tool_name }` and must
+        // arrive before any `InputDelta` so a UI can render "calling
+        // search_web…" the moment the model commits to a tool.
+        let body = anthropic_tool_use_body("toolu_1", "search_web", &[r#"{"q": "rust"}"#]);
+        let (result, _text, native) = drive_sse(&body, "anthropic").await;
+        assert!(!native.is_empty(), "expected native tool deltas");
+        match &native[0] {
+            NativeToolCallDelta::Start {
+                tool_use_id,
+                tool_name,
+            } => {
+                assert_eq!(tool_use_id, "toolu_1");
+                assert_eq!(tool_name, "search_web");
+            }
+            other => panic!("first event must be Start, got {other:?}"),
+        }
+        // The terminal LlmResult must still carry the fully-parsed
+        // tool call — streaming events are additive observability.
+        assert_eq!(result.tool_calls.len(), 1);
+        assert_eq!(result.tool_calls[0]["name"], "search_web");
+        assert_eq!(result.tool_calls[0]["arguments"]["q"], "rust");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn anthropic_input_delta_emits_growing_partial_json() {
+        // Three deltas. Coalescing inside the 50ms window may collapse
+        // some intermediate emissions, but the final flush at
+        // `content_block_stop` always carries the full accumulated
+        // string. We assert on the last `InputDelta` rather than the
+        // middle ones so the test is robust to clock jitter.
+        let body = anthropic_tool_use_body(
+            "toolu_1",
+            "edit",
+            &[r#"{"path": "#, r#""src/lib"#, r#".rs"}"#],
+        );
+        let (_result, _text, native) = drive_sse(&body, "anthropic").await;
+        let input_deltas: Vec<&NativeToolCallDelta> = native
+            .iter()
+            .filter(|d| matches!(d, NativeToolCallDelta::InputDelta { .. }))
+            .collect();
+        assert!(
+            !input_deltas.is_empty(),
+            "expected at least one InputDelta, got: {native:?}"
+        );
+        // The last delta must contain the complete accumulated
+        // `partial_json` regardless of coalescing.
+        match input_deltas.last().expect("last input delta") {
+            NativeToolCallDelta::InputDelta {
+                tool_use_id,
+                tool_name,
+                accumulated_partial_json,
+            } => {
+                assert_eq!(tool_use_id, "toolu_1");
+                assert_eq!(tool_name, "edit");
+                assert_eq!(accumulated_partial_json, r#"{"path": "src/lib.rs"}"#);
+            }
+            other => unreachable!("filtered to InputDelta only, got {other:?}"),
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn anthropic_burst_of_deltas_is_coalesced_inside_window() {
+        // 200 fast deltas inside the 50ms window must collapse to far
+        // fewer `InputDelta` emissions than chunks. We don't pin an
+        // exact count (clock jitter), but we assert <= one third of
+        // the chunk count, which is achievable only with coalescing.
+        let chunks: Vec<String> = (0..200).map(|i| format!("\"k{i}\":{i},")).collect();
+        // Wrap as a JSON object: open brace, all chunks, then close.
+        let mut all = String::from("{");
+        for chunk in &chunks {
+            all.push_str(chunk);
+        }
+        all.push_str("\"final\":true}");
+        // Split into 200 single-key chunks for the SSE body.
+        let mut partials: Vec<&str> = chunks.iter().map(String::as_str).collect();
+        let opening = "{";
+        partials.insert(0, opening);
+        partials.push("\"final\":true}");
+        let body = anthropic_tool_use_body("toolu_burst", "noop", &partials);
+
+        let (_result, _text, native) = drive_sse(&body, "anthropic").await;
+        let input_count = native
+            .iter()
+            .filter(|d| matches!(d, NativeToolCallDelta::InputDelta { .. }))
+            .count();
+        assert!(
+            input_count <= partials.len() / 3 + 2, // +2 for the final flush + first emit
+            "expected coalescing to reduce {} chunks to <= {}, got {input_count}",
+            partials.len(),
+            partials.len() / 3 + 2,
+        );
+        // And a final flush must still see the full string.
+        match native
+            .iter()
+            .rev()
+            .find(|d| matches!(d, NativeToolCallDelta::InputDelta { .. }))
+            .expect("last input delta")
+        {
+            NativeToolCallDelta::InputDelta {
+                accumulated_partial_json,
+                ..
+            } => {
+                assert!(accumulated_partial_json.ends_with("\"final\":true}"));
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn anthropic_native_channel_unwired_skips_emissions() {
+        // When the caller doesn't wire the native channel (text-only
+        // DeltaSender), the SSE handler must not waste time formatting
+        // delta events. The `LlmResult` must still come out correct.
+        let body = anthropic_tool_use_body("toolu_1", "edit", &[r#"{"a":1}"#]);
+        let (text_tx, _rx) = mpsc::unbounded_channel::<String>();
+        let delta_tx = DeltaSender::text_only(text_tx);
+        let resolved = ResolvedProvider::resolve("anthropic");
+        let cursor = Cursor::new(body.into_bytes());
+        let buffered = tokio::io::BufReader::new(cursor);
+        let result = consume_sse_lines(buffered, "test-model", &resolved, delta_tx)
+            .await
+            .expect("sse parse");
+        assert_eq!(result.tool_calls.len(), 1);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn openai_first_event_fires_on_first_chunk_with_tool_name() {
+        // OpenAI splits tool start across chunks: first carries id +
+        // function.name, subsequent chunks carry function.arguments
+        // deltas. The `Start` event must arrive before any `InputDelta`.
+        let body = "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_a\",\"function\":{\"name\":\"edit\",\"arguments\":\"\"}}]},\"finish_reason\":null}]}\n\
+data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"{\\\"path\\\":\"}}]}}]}\n\
+data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\"src/lib.rs\\\"}\"}}]}}]}\n\
+data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\
+data: [DONE]\n";
+        let (result, _text, native) = drive_sse(body, "openai").await;
+        assert!(
+            !native.is_empty(),
+            "expected native tool deltas: {native:?}"
+        );
+        match &native[0] {
+            NativeToolCallDelta::Start {
+                tool_use_id,
+                tool_name,
+            } => {
+                assert_eq!(tool_use_id, "call_a");
+                assert_eq!(tool_name, "edit");
+            }
+            other => panic!("first event must be Start, got {other:?}"),
+        }
+        // The full input must round-trip into the LlmResult.
+        assert_eq!(result.tool_calls.len(), 1);
+        assert_eq!(result.tool_calls[0]["arguments"]["path"], "src/lib.rs");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn openai_final_flush_carries_complete_arguments() {
+        // The trailing flush after the SSE stream ends must always
+        // emit one last `InputDelta` per accumulator so subscribers
+        // see the full `accumulated_partial_json` even when coalescing
+        // suppressed the final mid-stream emission.
+        let body = "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_x\",\"function\":{\"name\":\"e\",\"arguments\":\"{}\"}}]}}]}\n\
+data: [DONE]\n";
+        let (_result, _text, native) = drive_sse(body, "openai").await;
+        let last_input = native
+            .iter()
+            .rev()
+            .find(|d| matches!(d, NativeToolCallDelta::InputDelta { .. }))
+            .expect("at least one input delta");
+        match last_input {
+            NativeToolCallDelta::InputDelta {
+                accumulated_partial_json,
+                ..
+            } => {
+                assert_eq!(accumulated_partial_json, "{}");
+            }
+            _ => unreachable!(),
+        }
     }
 }

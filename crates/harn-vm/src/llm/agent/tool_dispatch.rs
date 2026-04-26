@@ -560,6 +560,8 @@ pub(super) async fn run_tool_dispatch(
                 execution_duration_ms: None,
                 error_category: Some(ToolCallErrorCategory::SchemaValidation),
                 executor: None,
+                raw_input: None,
+                raw_input_partial: None,
             })
             .await;
             if ctx.tool_format == "native" {
@@ -628,6 +630,8 @@ pub(super) async fn run_tool_dispatch(
                 execution_duration_ms: None,
                 error_category: Some(ToolCallErrorCategory::PermissionDenied),
                 executor: None,
+                raw_input: None,
+                raw_input_partial: None,
             })
             .await;
             if ctx.tool_format == "native" {
@@ -727,6 +731,8 @@ pub(super) async fn run_tool_dispatch(
                         execution_duration_ms: None,
                         error_category: Some(ToolCallErrorCategory::PermissionDenied),
                         executor: None,
+                        raw_input: None,
+                        raw_input_partial: None,
                     })
                     .await;
                     if ctx.tool_format == "native" {
@@ -854,6 +860,8 @@ pub(super) async fn run_tool_dispatch(
                 execution_duration_ms: None,
                 error_category: Some(ToolCallErrorCategory::PermissionDenied),
                 executor: None,
+                raw_input: None,
+                raw_input_partial: None,
             })
             .await;
             if ctx.tool_format == "native" {
@@ -915,6 +923,8 @@ pub(super) async fn run_tool_dispatch(
                     execution_duration_ms: None,
                     error_category: Some(ToolCallErrorCategory::PermissionDenied),
                     executor: None,
+                    raw_input: None,
+                    raw_input_partial: None,
                 })
                 .await;
                 if ctx.tool_format == "native" {
@@ -962,6 +972,8 @@ pub(super) async fn run_tool_dispatch(
                 execution_duration_ms: None,
                 error_category: Some(ToolCallErrorCategory::SchemaValidation),
                 executor: None,
+                raw_input: None,
+                raw_input_partial: None,
             })
             .await;
             if ctx.tool_format == "native" {
@@ -1006,6 +1018,8 @@ pub(super) async fn run_tool_dispatch(
             // The dispatcher picks the backend below; the in-progress
             // emission is unconditional and runs before that choice.
             executor: None,
+            raw_input: None,
+            raw_input_partial: None,
         })
         .await;
         let tool_span_id =
@@ -1084,6 +1098,8 @@ pub(super) async fn run_tool_dispatch(
                     // Loop intervention preempts the backend choice —
                     // the tool never ran.
                     executor: None,
+                    raw_input: None,
+                    raw_input_partial: None,
                 })
                 .await;
                 continue;
@@ -1260,6 +1276,8 @@ pub(super) async fn run_tool_dispatch(
             execution_duration_ms: Some(execution_duration_ms),
             error_category: final_error_category,
             executor: tool_executor.clone(),
+            raw_input: None,
+            raw_input_partial: None,
         })
         .await;
 

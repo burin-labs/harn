@@ -42,8 +42,8 @@ pub use ollama::{
 pub(crate) use openai_normalize::{debug_log_message_shapes, normalize_openai_style_messages};
 pub(crate) use options::{
     DeltaSender, LlmCallOptions, LlmRequestPayload, LlmRouteAlternative, LlmRoutePolicy,
-    LlmRoutingDecision, ThinkingConfig, ToolSearchConfig, ToolSearchMode, ToolSearchStrategy,
-    ToolSearchVariant,
+    LlmRoutingDecision, NativeToolCallDelta, ThinkingConfig, ToolSearchConfig, ToolSearchMode,
+    ToolSearchStrategy, ToolSearchVariant,
 };
 pub use readiness::{
     probe_openai_compatible_model, selected_model_for_provider, supports_model_readiness_probe,
@@ -59,7 +59,7 @@ use transport::vm_call_llm_api;
 /// handling; non-streaming callers just drop the receiver.
 pub(crate) async fn vm_call_llm_full(opts: &LlmCallOptions) -> Result<LlmResult, VmError> {
     let (delta_tx, _delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
-    vm_call_llm_full_inner(opts, Some(delta_tx)).await
+    vm_call_llm_full_inner(opts, Some(DeltaSender::text_only(delta_tx))).await
 }
 
 /// Execute an LLM call, streaming text deltas to `delta_tx`.
@@ -105,7 +105,7 @@ async fn vm_call_llm_full_inner_request(
         record_cli_llm_result(&result);
         if let Some(tx) = delta_tx {
             if !result.text.is_empty() {
-                let _ = tx.send(result.text.clone());
+                let _ = tx.send_text(result.text.clone());
             }
         }
         return Ok(result);
@@ -121,7 +121,7 @@ async fn vm_call_llm_full_inner_request(
         record_cli_llm_result(&result);
         if let Some(tx) = delta_tx {
             if !result.text.is_empty() {
-                let _ = tx.send(result.text.clone());
+                let _ = tx.send_text(result.text.clone());
             }
         }
         return Ok(result);
@@ -666,7 +666,10 @@ mod tests {
                     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
                     let result = tokio::time::timeout(
                         std::time::Duration::from_secs(5),
-                        vm_call_llm_full_streaming_offthread(&opts, tx),
+                        vm_call_llm_full_streaming_offthread(
+                            &opts,
+                            super::DeltaSender::text_only(tx),
+                        ),
                     )
                     .await
                     .expect("llm call timed out")
@@ -727,7 +730,7 @@ mod tests {
                 .run_until(async {
                     let opts = base_opts("ollama");
                     let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-                    vm_call_llm_full_streaming_offthread(&opts, tx)
+                    vm_call_llm_full_streaming_offthread(&opts, super::DeltaSender::text_only(tx))
                         .await
                         .expect("llm call should succeed")
                 })
@@ -883,7 +886,10 @@ mod tests {
                     let call = tokio::time::timeout(
                         // Must stay inside the stub's fail-fast accept window.
                         std::time::Duration::from_secs(2),
-                        vm_call_llm_full_streaming_offthread(&opts, tx),
+                        vm_call_llm_full_streaming_offthread(
+                            &opts,
+                            super::DeltaSender::text_only(tx),
+                        ),
                     )
                     .await;
                     match call {

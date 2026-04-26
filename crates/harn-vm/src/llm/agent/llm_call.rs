@@ -94,6 +94,10 @@ pub(super) async fn run_llm_call(
         Some(iteration),
         true,
         false, // agent_loop runs on the local set, not offthread
+        // The agent loop owns the session — pass it through so
+        // native tool-call streaming events route to ACP/closure
+        // subscribers under the right session id (harn#693).
+        Some(state.session_id.as_str()),
     )
     .await?;
 
@@ -642,6 +646,8 @@ pub(super) fn provider_native_search_emissions(
                     execution_duration_ms: None,
                     error_category: None,
                     executor: Some(ToolExecutor::ProviderNative),
+                    raw_input: None,
+                    raw_input_partial: None,
                 });
             }
             _ => {}

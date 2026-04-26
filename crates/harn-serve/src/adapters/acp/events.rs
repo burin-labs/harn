@@ -128,6 +128,8 @@ impl AgentEventSink for AcpAgentEventSink {
                 execution_duration_ms,
                 error_category,
                 executor,
+                raw_input,
+                raw_input_partial,
             } => {
                 let mut update = serde_json::json!({
                     "sessionUpdate": "tool_call_update",
@@ -152,6 +154,18 @@ impl AgentEventSink for AcpAgentEventSink {
                 }
                 if let Some(exec) = executor {
                     update["executor"] = Self::executor_to_json(exec);
+                }
+                // Streaming-only fields (harn#693). The two are
+                // mutually exclusive: when the partial JSON parsed, the
+                // structured value lands as `rawInput`; on parse
+                // failure the raw bytes spill into `rawInputPartial`.
+                // Clients keying off `rawInput` get a no-op on parse
+                // failure and can fall back to the partial-bytes path.
+                if let Some(input) = raw_input {
+                    update["rawInput"] = input.clone();
+                }
+                if let Some(partial) = raw_input_partial {
+                    update["rawInputPartial"] = serde_json::Value::String(partial.clone());
                 }
                 self.write_notification(serde_json::json!({
                     "sessionId": session_id,
@@ -404,6 +418,8 @@ mod tests {
                 execution_duration_ms: Some(5),
                 error_category: None,
                 executor: Some(ToolExecutor::HarnBuiltin),
+                raw_input: None,
+                raw_input_partial: None,
             },
             AgentEvent::Plan {
                 session_id: "session-1".to_string(),
@@ -510,6 +526,8 @@ mod tests {
             execution_duration_ms: None,
             error_category: Some(ToolCallErrorCategory::SchemaValidation),
             executor: None,
+            raw_input: None,
+            raw_input_partial: None,
         });
         let line = rx.recv().await.expect("acp tool_call_update");
         let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
@@ -543,6 +561,8 @@ mod tests {
             execution_duration_ms: None,
             error_category: None,
             executor: None,
+            raw_input: None,
+            raw_input_partial: None,
         });
         let line = rx.recv().await.expect("acp tool_call_update");
         let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
@@ -586,6 +606,8 @@ mod tests {
                 execution_duration_ms: None,
                 error_category: None,
                 executor: Some(executor),
+                raw_input: None,
+                raw_input_partial: None,
             });
             let line = rx.recv().await.expect("acp tool_call_update notification");
             let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
@@ -609,6 +631,8 @@ mod tests {
             execution_duration_ms: None,
             error_category: None,
             executor: None,
+            raw_input: None,
+            raw_input_partial: None,
         });
         let line = rx.recv().await.expect("acp tool_call_update notification");
         let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
@@ -616,6 +640,100 @@ mod tests {
             payload["params"]["update"].get("executor").is_none(),
             "got: {payload}"
         );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn tool_call_update_serializes_raw_input_when_partial_parse_succeeded() {
+        // harn#693: streaming `Pending` updates from the native-streaming
+        // forwarder carry the structured value in `rawInput` whenever
+        // the permissive partial-JSON parser succeeded. ACP clients can
+        // render the live preview directly off `rawInput`.
+        use harn_vm::agent_events::ToolCallStatus;
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let sink = AcpAgentEventSink::new(AcpOutput::Channel(tx));
+        sink.handle_event(&AgentEvent::ToolCallUpdate {
+            session_id: "session-1".to_string(),
+            tool_call_id: "tool-toolu_42".to_string(),
+            tool_name: "edit".to_string(),
+            status: ToolCallStatus::Pending,
+            raw_output: None,
+            error: None,
+            duration_ms: None,
+            execution_duration_ms: None,
+            error_category: None,
+            executor: None,
+            raw_input: Some(serde_json::json!({"path": "src/lib"})),
+            raw_input_partial: None,
+        });
+        let line = rx.recv().await.expect("acp tool_call_update notification");
+        let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
+        assert_eq!(payload["params"]["update"]["status"], "pending");
+        assert_eq!(
+            payload["params"]["update"]["rawInput"],
+            serde_json::json!({"path": "src/lib"})
+        );
+        // Mutually exclusive with `rawInputPartial` — must be absent
+        // when `rawInput` was set.
+        assert!(
+            payload["params"]["update"].get("rawInputPartial").is_none(),
+            "got: {payload}"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn tool_call_update_serializes_raw_input_partial_when_partial_parse_failed() {
+        use harn_vm::agent_events::ToolCallStatus;
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let sink = AcpAgentEventSink::new(AcpOutput::Channel(tx));
+        sink.handle_event(&AgentEvent::ToolCallUpdate {
+            session_id: "session-1".to_string(),
+            tool_call_id: "tool-toolu_42".to_string(),
+            tool_name: "edit".to_string(),
+            status: ToolCallStatus::Pending,
+            raw_output: None,
+            error: None,
+            duration_ms: None,
+            execution_duration_ms: None,
+            error_category: None,
+            executor: None,
+            raw_input: None,
+            raw_input_partial: Some(r#"{"path": "a\"#.to_string()),
+        });
+        let line = rx.recv().await.expect("acp tool_call_update notification");
+        let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
+        assert_eq!(
+            payload["params"]["update"]["rawInputPartial"],
+            r#"{"path": "a\"#
+        );
+        assert!(payload["params"]["update"].get("rawInput").is_none());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn tool_call_update_omits_streaming_fields_when_absent() {
+        // Terminal updates (Completed/Failed) carry neither `rawInput`
+        // nor `rawInputPartial`. The wire format must omit both keys
+        // so legacy clients keying off presence aren't confused.
+        use harn_vm::agent_events::ToolCallStatus;
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let sink = AcpAgentEventSink::new(AcpOutput::Channel(tx));
+        sink.handle_event(&AgentEvent::ToolCallUpdate {
+            session_id: "session-1".to_string(),
+            tool_call_id: "tool-toolu_42".to_string(),
+            tool_name: "edit".to_string(),
+            status: ToolCallStatus::Completed,
+            raw_output: Some(serde_json::json!({"ok": true})),
+            error: None,
+            duration_ms: Some(7),
+            execution_duration_ms: Some(5),
+            error_category: None,
+            executor: None,
+            raw_input: None,
+            raw_input_partial: None,
+        });
+        let line = rx.recv().await.expect("acp tool_call_update notification");
+        let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
+        assert!(payload["params"]["update"].get("rawInput").is_none());
+        assert!(payload["params"]["update"].get("rawInputPartial").is_none());
     }
 
     #[test]

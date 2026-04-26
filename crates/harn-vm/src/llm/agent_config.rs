@@ -595,6 +595,10 @@ pub fn register_llm_call_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Host
                 None,
                 user_visible,
                 true,
+                // No session — this is the standalone `llm_call` builtin
+                // path. Native tool-call streaming events have no
+                // ACP/closure subscribers to fan out to.
+                None,
             )
             .await?;
 

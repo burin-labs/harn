@@ -11,6 +11,27 @@ granular archaeology.
 
 ### Added
 
+- **Streaming partial native tool-call arguments (#693).** Provider
+  SSE streams now surface their `tool_use` / `tool_calls` blocks
+  through the agent-event stream the moment they open instead of
+  waiting for `content_block_stop` / end-of-stream. The Anthropic
+  `input_json_delta` and OpenAI `tool_calls[].function.arguments`
+  channels each emit a typed `NativeToolCallDelta` lifecycle: a
+  one-shot `Start { tool_use_id, tool_name }` on the first sighting,
+  then `InputDelta { accumulated_partial_json }` events coalesced
+  into ~50ms windows so slow clients aren't drowned in per-character
+  churn. The agent-loop progress forwarder rewrites those deltas as
+  `AgentEvent::ToolCall { status: Pending, raw_input: {} }` followed
+  by repeating `AgentEvent::ToolCallUpdate { status: Pending,
+  raw_input | raw_input_partial }` notifications, both routed under
+  the owning session id. ACP clients (Burin CLI/TUI/IDE) can render
+  "calling search_web…" instantly and watch the arguments grow as
+  they stream — the live `rawInput` / `rawInputPartial` previews are
+  a permissive partial-JSON parse with a raw-bytes fallback when the
+  in-flight stream is structurally unrecoverable. The terminal
+  `tool_call_update(Pending → InProgress → Completed/Failed)`
+  lifecycle is unchanged, so the existing dispatch-side telemetry
+  still lands as before.
 - **Tool-call timing on ACP `tool_call_update` (#689).** Terminal
   `tool_call_update` events now carry `durationMs` (the parse-to-finish
   total — model emits the call → tool result is appended) and

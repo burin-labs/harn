@@ -42,6 +42,8 @@ use crate::value::VmError;
 use super::api::{vm_call_llm_full_streaming, vm_call_llm_full_streaming_offthread, DeltaSender};
 use super::trace::{trace_llm_call, LlmTraceEntry};
 
+use crate::agent_events::{AgentEvent, ToolCallStatus};
+
 use super::agent_tools::next_call_id;
 
 thread_local! {
@@ -498,23 +500,188 @@ pub(super) fn chrono_now() -> String {
     format!("{}.{:03}", now.as_secs(), now.subsec_millis())
 }
 
-/// Create an unbounded channel and spawn a local task that forwards text
-/// deltas to `bridge.send_call_progress()`.
+/// Create the streaming text + native-tool channels and spawn the
+/// per-call forwarders. Text deltas go to `bridge.send_call_progress()`;
+/// native tool-call lifecycle events are translated into
+/// `AgentEvent::ToolCall` / `ToolCallUpdate` and emitted under the
+/// caller's `session_id` so ACP / closure subscribers see in-progress
+/// argument streaming as `tool_call_update(pending)` events with a
+/// growing `rawInput` (harn#693).
+///
+/// `session_id` is `None` only for callers outside the agent loop (e.g.
+/// the standalone `llm_call` builtin) where there's no session to
+/// route events to. In that case the native channel is never wired —
+/// the SSE handler emits no native deltas and the savings are real.
 pub(super) fn spawn_progress_forwarder(
     bridge: &Rc<crate::bridge::HostBridge>,
     call_id: String,
     user_visible: bool,
+    session_id: Option<String>,
 ) -> DeltaSender {
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
-    let bridge = bridge.clone();
+    let (text_tx, mut text_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let bridge_text = bridge.clone();
+    let call_id_text = call_id.clone();
     tokio::task::spawn_local(async move {
         let mut token_count: u64 = 0;
-        while let Some(delta) = rx.recv().await {
+        while let Some(delta) = text_rx.recv().await {
             token_count += 1;
-            bridge.send_call_progress(&call_id, &delta, token_count, user_visible);
+            bridge_text.send_call_progress(&call_id_text, &delta, token_count, user_visible);
         }
     });
-    tx
+
+    let Some(session_id) = session_id else {
+        return DeltaSender::text_only(text_tx);
+    };
+
+    let (native_tx, mut native_rx) =
+        tokio::sync::mpsc::unbounded_channel::<crate::llm::api::NativeToolCallDelta>();
+    tokio::task::spawn_local(async move {
+        use crate::llm::api::NativeToolCallDelta;
+        while let Some(delta) = native_rx.recv().await {
+            match delta {
+                NativeToolCallDelta::Start {
+                    tool_use_id,
+                    tool_name,
+                } => {
+                    let event = AgentEvent::ToolCall {
+                        session_id: session_id.clone(),
+                        tool_call_id: native_tool_call_id(&tool_use_id),
+                        tool_name,
+                        kind: None,
+                        status: ToolCallStatus::Pending,
+                        raw_input: serde_json::Value::Object(Default::default()),
+                    };
+                    super::agent::emit_agent_event(&event).await;
+                }
+                NativeToolCallDelta::InputDelta {
+                    tool_use_id,
+                    tool_name,
+                    accumulated_partial_json,
+                } => {
+                    let (raw_input, raw_input_partial) =
+                        match try_parse_partial_json(&accumulated_partial_json) {
+                            Some(value) => (Some(value), None),
+                            None => (None, Some(accumulated_partial_json.clone())),
+                        };
+                    let event = AgentEvent::ToolCallUpdate {
+                        session_id: session_id.clone(),
+                        tool_call_id: native_tool_call_id(&tool_use_id),
+                        tool_name,
+                        status: ToolCallStatus::Pending,
+                        raw_output: None,
+                        error: None,
+                        duration_ms: None,
+                        execution_duration_ms: None,
+                        error_category: None,
+                        executor: None,
+                        raw_input,
+                        raw_input_partial,
+                    };
+                    super::agent::emit_agent_event(&event).await;
+                }
+            }
+        }
+    });
+
+    DeltaSender::with_native_tool(text_tx, native_tx)
+}
+
+/// Construct the canonical `tool_call_id` used by both the streaming
+/// `ToolCall(Pending)` events emitted by `spawn_progress_forwarder` and
+/// the post-dispatch lifecycle events emitted by
+/// `crate::llm::agent::tool_dispatch`. Keeping the format aligned (the
+/// `tool-` prefix + provider tool-use id) lets clients correlate the
+/// two halves of the event stream by id.
+fn native_tool_call_id(tool_use_id: &str) -> String {
+    if tool_use_id.is_empty() {
+        "tool-stream".to_string()
+    } else {
+        format!("tool-{tool_use_id}")
+    }
+}
+
+/// Permissive partial-JSON parser used to surface in-progress tool-call
+/// arguments to clients during streaming (harn#693). Returns `Some(value)`
+/// when the input parses cleanly under one of:
+///   1. Direct `serde_json::from_str`. Object/array values that the
+///      provider has already closed parse without recovery.
+///   2. Best-effort completion: walk the input balancing quotes,
+///      braces, and brackets, then append the missing closers and
+///      retry. Recovers the common case where the stream cut mid-token,
+///      mid-string, or after a trailing comma.
+///
+/// Returns `None` when neither attempt succeeds — the forwarder then
+/// stows the raw bytes in `raw_input_partial` instead.
+pub(crate) fn try_parse_partial_json(input: &str) -> Option<serde_json::Value> {
+    let trimmed = input.trim_start();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed) {
+        return Some(value);
+    }
+    let completed = complete_partial_json(trimmed)?;
+    serde_json::from_str::<serde_json::Value>(&completed).ok()
+}
+
+/// Walk `input` and append the smallest suffix (close-string + close
+/// containers) that turns it into a syntactically valid JSON value.
+/// Returns `None` when the input contains a structural impossibility
+/// (e.g. mismatched closers, control chars in a string, lone backslash
+/// at end of input). Strips trailing commas before attempting closure.
+fn complete_partial_json(input: &str) -> Option<String> {
+    let mut stack: Vec<char> = Vec::new();
+    let mut in_string = false;
+    let mut escape = false;
+    for ch in input.chars() {
+        if in_string {
+            if escape {
+                escape = false;
+                continue;
+            }
+            match ch {
+                '\\' => escape = true,
+                '"' => in_string = false,
+                _ => {}
+            }
+            continue;
+        }
+        match ch {
+            '"' => in_string = true,
+            '{' => stack.push('}'),
+            '[' => stack.push(']'),
+            '}' | ']' if stack.pop() != Some(ch) => return None,
+            _ => {}
+        }
+    }
+    if escape {
+        return None;
+    }
+    let mut out = input.to_string();
+    if in_string {
+        out.push('"');
+    }
+    // Trailing commas (e.g. `{"a": 1, `) make `serde_json::from_str`
+    // fail even after closing braces. Strip the trailing comma + any
+    // whitespace that follows it before appending closers. Also
+    // strip a trailing `:` (mid-key, e.g. `{"a"`) by closing the value
+    // with a JSON null so the parse succeeds.
+    while let Some(last) = out.chars().last() {
+        if last.is_whitespace() {
+            out.pop();
+        } else {
+            break;
+        }
+    }
+    if out.ends_with(',') {
+        out.pop();
+    } else if out.ends_with(':') {
+        out.push_str("null");
+    }
+    for closer in stack.into_iter().rev() {
+        out.push(closer);
+    }
+    Some(out)
 }
 
 /// Configuration for LLM call retries.
@@ -553,6 +720,12 @@ fn llm_retry_backoff_ms(
 /// Make one LLM call with full observability: call-id generation, bridge
 /// notifications (call_start / call_progress / call_end), span annotation,
 /// retry with exponential backoff, and tracing.
+///
+/// `session_id` is the agent-loop session that owns this call. Pass `None`
+/// when the call sits outside an agent loop (the standalone `llm_call`
+/// builtin). Forwarded into `spawn_progress_forwarder` so streaming
+/// native-tool deltas can be translated into `AgentEvent::ToolCallUpdate`
+/// notifications routed under the right session (harn#693).
 pub(crate) async fn observed_llm_call(
     opts: &super::api::LlmCallOptions,
     tool_format: Option<&str>,
@@ -561,6 +734,7 @@ pub(crate) async fn observed_llm_call(
     iteration: Option<usize>,
     user_visible: bool,
     offthread: bool,
+    session_id: Option<&str>,
 ) -> Result<super::api::LlmResult, VmError> {
     let effective_tool_format = tool_format
         .map(str::to_string)
@@ -627,7 +801,12 @@ pub(crate) async fn observed_llm_call(
 
         let start = std::time::Instant::now();
         let llm_result = if let Some(b) = bridge {
-            let delta_tx = spawn_progress_forwarder(b, call_id.clone(), user_visible);
+            let delta_tx = spawn_progress_forwarder(
+                b,
+                call_id.clone(),
+                user_visible,
+                session_id.map(str::to_string),
+            );
             if offthread {
                 vm_call_llm_full_streaming_offthread(opts, delta_tx).await
             } else {
@@ -635,7 +814,7 @@ pub(crate) async fn observed_llm_call(
             }
         } else if offthread {
             let (delta_tx, _delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
-            vm_call_llm_full_streaming_offthread(opts, delta_tx).await
+            vm_call_llm_full_streaming_offthread(opts, DeltaSender::text_only(delta_tx)).await
         } else {
             super::api::vm_call_llm_full(opts).await
         };
@@ -919,5 +1098,265 @@ mod retry_tests {
     #[test]
     fn retry_after_malformed_returns_none() {
         assert_eq!(parse_retry_after("retry-after: soon-ish"), None);
+    }
+}
+
+#[cfg(test)]
+mod partial_json_tests {
+    //! Coverage for the permissive partial-JSON parser used to surface
+    //! in-progress native tool-call arguments to clients during streaming
+    //! (harn#693). The parser must:
+    //!   - return the parsed value when input is already syntactically
+    //!     complete,
+    //!   - recover the common "stream cut mid-token" cases,
+    //!   - return `None` when the stream is structurally impossible (so
+    //!     the forwarder falls back to `raw_input_partial`).
+
+    use super::try_parse_partial_json;
+    use serde_json::json;
+
+    #[test]
+    fn complete_object_parses_directly() {
+        assert_eq!(
+            try_parse_partial_json(r#"{"path": "README.md"}"#),
+            Some(json!({"path": "README.md"})),
+        );
+    }
+
+    #[test]
+    fn unterminated_string_recovers() {
+        // The model is mid-write of a string value. Closing the string
+        // and balancing the object should produce a usable preview.
+        let parsed = try_parse_partial_json(r#"{"path": "READ"#);
+        assert_eq!(parsed, Some(json!({"path": "READ"})));
+    }
+
+    #[test]
+    fn unterminated_object_recovers() {
+        let parsed = try_parse_partial_json(r#"{"path": "README.md""#);
+        assert_eq!(parsed, Some(json!({"path": "README.md"})));
+    }
+
+    #[test]
+    fn trailing_comma_is_stripped_before_closing() {
+        let parsed = try_parse_partial_json(r#"{"path": "README.md", "#);
+        assert_eq!(parsed, Some(json!({"path": "README.md"})));
+    }
+
+    #[test]
+    fn trailing_colon_becomes_null_value() {
+        // Mid-key emission ending right after the colon. Closing with
+        // `null` keeps the partial parsable rather than discarding the
+        // whole object.
+        let parsed = try_parse_partial_json(r#"{"path":"#);
+        assert_eq!(parsed, Some(json!({"path": null})));
+    }
+
+    #[test]
+    fn nested_array_recovers() {
+        let parsed = try_parse_partial_json(r#"{"paths": ["a", "b"#);
+        assert_eq!(parsed, Some(json!({"paths": ["a", "b"]})));
+    }
+
+    #[test]
+    fn empty_string_returns_none() {
+        assert!(try_parse_partial_json("").is_none());
+    }
+
+    #[test]
+    fn dangling_backslash_is_unrecoverable() {
+        // A trailing `\` inside a string is structurally impossible to
+        // recover without guessing what byte was about to be escaped.
+        assert!(try_parse_partial_json(r#"{"path": "a\"#).is_none());
+    }
+
+    #[test]
+    fn mismatched_close_is_unrecoverable() {
+        // `]` where a `}` was expected — caller must fall back to
+        // `raw_input_partial`.
+        assert!(try_parse_partial_json("{ \"a\": [1, 2 }").is_none());
+    }
+
+    #[test]
+    fn array_root_recovers() {
+        let parsed = try_parse_partial_json(r#"[1, 2, "#);
+        assert_eq!(parsed, Some(json!([1, 2])));
+    }
+}
+
+#[cfg(test)]
+mod native_tool_forwarder_tests {
+    //! Coverage for the `spawn_progress_forwarder` translation path:
+    //! `NativeToolCallDelta` events from the SSE handler get rewritten
+    //! as `AgentEvent::ToolCall` / `ToolCallUpdate` notifications under
+    //! the caller's session id (harn#693). The forwarder is the seam
+    //! between transport-layer telemetry and the canonical agent-event
+    //! stream; clients see the latter, so it's where we assert the
+    //! `raw_input` / `raw_input_partial` contract.
+
+    use crate::agent_events::{
+        register_sink, reset_all_sinks, AgentEvent, AgentEventSink, ToolCallStatus,
+    };
+    use crate::llm::api::NativeToolCallDelta;
+    use std::sync::{Arc, Mutex};
+
+    /// Test sink that records every event it sees so assertions can
+    /// run after the forwarder task drains its channel.
+    struct CaptureSink(Arc<Mutex<Vec<AgentEvent>>>);
+
+    impl AgentEventSink for CaptureSink {
+        fn handle_event(&self, event: &AgentEvent) {
+            self.0.lock().expect("capture mutex").push(event.clone());
+        }
+    }
+
+    /// Run the same translation logic the production forwarder does,
+    /// but synchronously on the test thread. Mirrors the body of the
+    /// `spawn_local` task in `spawn_progress_forwarder` exactly so the
+    /// assertions cover the real translation rather than a stub.
+    async fn drive_forwarder(
+        session_id: &str,
+        deltas: Vec<NativeToolCallDelta>,
+    ) -> Vec<AgentEvent> {
+        let captured = Arc::new(Mutex::new(Vec::<AgentEvent>::new()));
+        register_sink(session_id, Arc::new(CaptureSink(captured.clone())));
+
+        for delta in deltas {
+            match delta {
+                NativeToolCallDelta::Start {
+                    tool_use_id,
+                    tool_name,
+                } => {
+                    let event = AgentEvent::ToolCall {
+                        session_id: session_id.to_string(),
+                        tool_call_id: super::native_tool_call_id(&tool_use_id),
+                        tool_name,
+                        kind: None,
+                        status: ToolCallStatus::Pending,
+                        raw_input: serde_json::Value::Object(Default::default()),
+                    };
+                    super::super::agent::emit_agent_event(&event).await;
+                }
+                NativeToolCallDelta::InputDelta {
+                    tool_use_id,
+                    tool_name,
+                    accumulated_partial_json,
+                } => {
+                    let (raw_input, raw_input_partial) =
+                        match super::try_parse_partial_json(&accumulated_partial_json) {
+                            Some(value) => (Some(value), None),
+                            None => (None, Some(accumulated_partial_json.clone())),
+                        };
+                    let event = AgentEvent::ToolCallUpdate {
+                        session_id: session_id.to_string(),
+                        tool_call_id: super::native_tool_call_id(&tool_use_id),
+                        tool_name,
+                        status: ToolCallStatus::Pending,
+                        raw_output: None,
+                        error: None,
+                        duration_ms: None,
+                        execution_duration_ms: None,
+                        error_category: None,
+                        executor: None,
+                        raw_input,
+                        raw_input_partial,
+                    };
+                    super::super::agent::emit_agent_event(&event).await;
+                }
+            }
+        }
+
+        let events = captured.lock().expect("capture mutex").clone();
+        reset_all_sinks();
+        events
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn start_event_translates_to_pending_tool_call_with_empty_raw_input() {
+        let events = drive_forwarder(
+            "session-693-start",
+            vec![NativeToolCallDelta::Start {
+                tool_use_id: "toolu_42".into(),
+                tool_name: "search_web".into(),
+            }],
+        )
+        .await;
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            AgentEvent::ToolCall {
+                tool_call_id,
+                tool_name,
+                status,
+                raw_input,
+                ..
+            } => {
+                assert_eq!(tool_call_id, "tool-toolu_42");
+                assert_eq!(tool_name, "search_web");
+                assert_eq!(*status, ToolCallStatus::Pending);
+                assert_eq!(raw_input, &serde_json::json!({}));
+            }
+            other => panic!("expected ToolCall, got {other:?}"),
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn input_delta_with_parsable_partial_populates_raw_input() {
+        let events = drive_forwarder(
+            "session-693-parsable",
+            vec![NativeToolCallDelta::InputDelta {
+                tool_use_id: "toolu_42".into(),
+                tool_name: "edit".into(),
+                accumulated_partial_json: r#"{"path": "src/lib"#.into(),
+            }],
+        )
+        .await;
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            AgentEvent::ToolCallUpdate {
+                status,
+                raw_input,
+                raw_input_partial,
+                ..
+            } => {
+                assert_eq!(*status, ToolCallStatus::Pending);
+                // Partial-JSON parser closes the unterminated string
+                // and surfaces the structured value.
+                assert_eq!(
+                    raw_input.as_ref(),
+                    Some(&serde_json::json!({"path": "src/lib"}))
+                );
+                assert!(raw_input_partial.is_none(), "{raw_input_partial:?}");
+            }
+            other => panic!("expected ToolCallUpdate, got {other:?}"),
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn input_delta_with_unparsable_partial_falls_back_to_raw_input_partial() {
+        // A dangling backslash inside a string is unrecoverable for
+        // the partial-JSON parser. The forwarder must spill the raw
+        // bytes into `raw_input_partial` so streaming clients still
+        // see *something* during that window.
+        let events = drive_forwarder(
+            "session-693-fallback",
+            vec![NativeToolCallDelta::InputDelta {
+                tool_use_id: "toolu_42".into(),
+                tool_name: "edit".into(),
+                accumulated_partial_json: r#"{"path": "a\"#.into(),
+            }],
+        )
+        .await;
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            AgentEvent::ToolCallUpdate {
+                raw_input,
+                raw_input_partial,
+                ..
+            } => {
+                assert!(raw_input.is_none(), "{raw_input:?}");
+                assert_eq!(raw_input_partial.as_deref(), Some(r#"{"path": "a\"#));
+            }
+            other => panic!("expected ToolCallUpdate, got {other:?}"),
+        }
     }
 }
