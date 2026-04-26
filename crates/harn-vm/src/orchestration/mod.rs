@@ -42,6 +42,9 @@ pub use handoffs::*;
 mod friction;
 pub use friction::*;
 
+mod crystallize;
+pub use crystallize::*;
+
 mod policy;
 pub use policy::*;
 

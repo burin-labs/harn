@@ -519,6 +519,12 @@ async fn async_main() {
                 process::exit(1);
             }
         }
+        Command::Crystallize(args) => {
+            if let Err(error) = commands::crystallize::run(args) {
+                eprintln!("error: {error}");
+                process::exit(1);
+            }
+        }
         Command::Trust(args) | Command::TrustGraph(args) => {
             if let Err(error) = commands::trust::handle(args).await {
                 eprintln!("error: {error}");

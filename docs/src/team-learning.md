@@ -12,6 +12,9 @@ capability-scoped, and measurable. It points at explicit queries, docs, tools,
 secrets, refresh policy, output slots, and fallback instructions instead of
 storing raw conversation history.
 
+For repeated action traces that should become deterministic Harn code, use the
+workflow crystallization loop in [Workflow crystallization](./workflow-crystallization.md).
+
 ## Friction Events
 
 Use `friction_record(payload, options?)` to record repeated pain from Harn workflows

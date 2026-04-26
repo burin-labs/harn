@@ -39,6 +39,7 @@
 - [Transcript architecture](./transcript-architecture.md)
 - [Workflow runtime](./workflow-runtime.md)
 - [Team learning and context packs](./team-learning.md)
+- [Workflow crystallization](./workflow-crystallization.md)
 - [Trigger manifests](./triggers/manifest.md)
 - [Trigger budgets](./triggers/budgets.md)
 - [Trigger event schema](./triggers/event-schema.md)

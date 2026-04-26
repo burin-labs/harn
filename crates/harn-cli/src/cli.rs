@@ -83,6 +83,8 @@ SCRIPTING
     Trigger(TriggerArgs),
     /// Import third-party eval traces into replayable Harn fixtures.
     Trace(TraceArgs),
+    /// Mine repeated traces into a reviewable deterministic Harn workflow candidate.
+    Crystallize(CrystallizeArgs),
     /// Query and manage trust-graph autonomy state.
     Trust(TrustArgs),
     /// Query and verify trust-graph autonomy state.
@@ -970,6 +972,37 @@ pub(crate) struct TraceImportArgs {
     /// Output path for the generated replay fixture JSONL.
     #[arg(long = "output", value_name = "PATH")]
     pub output: String,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct CrystallizeArgs {
+    /// Directory containing crystallization trace JSON files or persisted run records.
+    #[arg(long = "from", value_name = "TRACE_DIR")]
+    pub from: String,
+    /// Output path for the generated .harn workflow candidate.
+    #[arg(long = "out", value_name = "WORKFLOW")]
+    pub out: String,
+    /// Output path for the machine-readable crystallization report.
+    #[arg(long = "report", value_name = "REPORT_JSON")]
+    pub report: String,
+    /// Optional output path for a minimal eval pack manifest.
+    #[arg(long = "eval-pack", value_name = "HARN_EVAL_TOML")]
+    pub eval_pack: Option<String>,
+    /// Minimum number of traces that must contain the repeated sequence.
+    #[arg(long = "min-examples", default_value_t = 2)]
+    pub min_examples: usize,
+    /// Override the generated workflow name.
+    #[arg(long = "workflow-name", value_name = "NAME")]
+    pub workflow_name: Option<String>,
+    /// Package name to place in promotion metadata.
+    #[arg(long = "package-name", value_name = "NAME")]
+    pub package_name: Option<String>,
+    /// Author to include in promotion metadata.
+    #[arg(long = "author", value_name = "USER")]
+    pub author: Option<String>,
+    /// Approver to include in promotion metadata.
+    #[arg(long = "approver", value_name = "USER")]
+    pub approver: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -2585,6 +2618,36 @@ mod tests {
         assert_eq!(import.trace_file, "langfuse.jsonl");
         assert_eq!(import.trace_id.as_deref(), Some("trace_123"));
         assert_eq!(import.output, "fixtures/imported.jsonl");
+    }
+
+    #[test]
+    fn test_parses_crystallize_args() {
+        let cli = Cli::parse_from([
+            "harn",
+            "crystallize",
+            "--from",
+            "fixtures/crystallize",
+            "--out",
+            "workflows/version_bump.harn",
+            "--report",
+            "reports/version_bump.json",
+            "--eval-pack",
+            "harn.eval.toml",
+            "--min-examples",
+            "5",
+            "--workflow-name",
+            "version_bump",
+        ]);
+
+        let Command::Crystallize(args) = cli.command.unwrap() else {
+            panic!("expected crystallize command");
+        };
+        assert_eq!(args.from, "fixtures/crystallize");
+        assert_eq!(args.out, "workflows/version_bump.harn");
+        assert_eq!(args.report, "reports/version_bump.json");
+        assert_eq!(args.eval_pack.as_deref(), Some("harn.eval.toml"));
+        assert_eq!(args.min_examples, 5);
+        assert_eq!(args.workflow_name.as_deref(), Some("version_bump"));
     }
 
     #[test]

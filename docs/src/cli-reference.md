@@ -759,6 +759,29 @@ The source file is JSONL. Each line should contain at least
 used directly with `harn run --llm-mock ...`, `harn eval
 --llm-mock ...`, or `harn test --determinism`.
 
+## harn crystallize
+
+Mine repeated traces into a reviewable deterministic workflow candidate.
+
+```bash
+harn crystallize \
+  --from fixtures/crystallize/version-bump \
+  --out workflows/version_bump.harn \
+  --report reports/version_bump.crystallize.json \
+  --eval-pack evals/version_bump.toml \
+  --min-examples 5 \
+  --workflow-name version_bump
+```
+
+The input directory may contain crystallization trace JSON files or persisted
+Harn workflow run records. The report preserves source trace hashes,
+parameters, side effects, approval points, capability and secret requirements,
+shadow-mode pass/fail details, promotion metadata, and cost/token savings.
+Candidates with divergent side effects are rejected instead of promoted.
+
+See [Workflow crystallization](./workflow-crystallization.md) for the trace
+schema and review loop.
+
 ## harn trigger cancel
 
 Request cancellation for pending or in-flight non-replay trigger
