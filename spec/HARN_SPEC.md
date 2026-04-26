@@ -4206,6 +4206,34 @@ directory layout.
 Exports are resolved after the direct `.harn/packages/<path>` lookup, so
 packages can still expose raw file trees when they want that behavior.
 
+### `[asset_roots]` — package-root prompt asset aliases
+
+```toml
+[asset_roots]
+partials = "src/prompts/partials"
+prompts  = "src/prompts"
+```
+
+`[asset_roots]` defines named directories under the project root that
+prompt assets can address through `@<alias>/<rel>` paths. The `render`
+/ `render_prompt` builtins, the `template.render` host capability, and
+`{{ include "..." }}` directives all honor:
+
+- **`@/<rel>`** — anchored at the project root (the harn.toml
+  directory).
+- **`@<alias>/<rel>`** — anchored at the directory `[asset_roots]`
+  maps `<alias>` to.
+
+The project root is derived from the *calling file*, so a render call
+inside an imported module resolves the same way regardless of who
+called it. Both forms reject `..` segments and absolute targets so a
+package-rooted asset can never escape the project root.
+
+`harn check` validates that `@`-prefixed asset paths resolve to a
+real file at preflight time. `harn contracts bundle` records every
+resolved asset under `prompt_assets`. Plain (non-`@`) paths keep their
+legacy source-relative resolution unchanged.
+
 ### `[llm]` — packaged provider extensions
 
 ```toml

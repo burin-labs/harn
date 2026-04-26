@@ -144,6 +144,26 @@ fn scan_node_preflight(
         }
         Node::FunctionCall { name, args } if name == "render" || name == "render_prompt" => {
             if let Some(Node::StringLiteral(template_path)) = args.first().map(|arg| &arg.node) {
+                if let Some(asset_ref) = harn_modules::asset_paths::parse(template_path) {
+                    let anchor = file_path.parent().unwrap_or(Path::new("."));
+                    if let Err(err) = harn_modules::asset_paths::resolve(&asset_ref, anchor) {
+                        // Surface resolver errors (no project root, unknown
+                        // alias) before the file-existence check so the
+                        // user sees the structural cause, not a generic
+                        // "render target does not exist" message.
+                        diagnostics.push(PreflightDiagnostic {
+                            path: file_path.display().to_string(),
+                            source: source.to_string(),
+                            span: args[0].span,
+                            message: format!("preflight: {err}"),
+                            help: Some(
+                                "see docs/src/modules.md#package-root-prompt-assets for `@/...` and `@<alias>/...` syntax".to_string(),
+                            ),
+                            tags: None,
+                        });
+                        return;
+                    }
+                }
                 let resolved = resolve_preflight_target(file_path, template_path, config);
                 if let Some(existing) = resolved.iter().find(|path| path.exists()) {
                     if let Ok(body) = std::fs::read_to_string(existing) {
@@ -176,7 +196,7 @@ fn scan_node_preflight(
                             render_candidate_paths(&resolved)
                         ),
                         help: Some(
-                            "keep template paths relative to the pipeline source file, or set [check].bundle_root / --bundle-root for bundled layouts"
+                            "keep template paths relative to the pipeline source file, or set [check].bundle_root / --bundle-root for bundled layouts. Use `@/...` for project-root paths"
                                 .to_string(),
                         ),
                         tags: None,
@@ -261,6 +281,25 @@ fn scan_node_preflight(
                 }
                 if cap == "template" && op == "render" {
                     if let Some(template_path) = host_render_path_arg(params_arg) {
+                        if let Some(asset_ref) = harn_modules::asset_paths::parse(&template_path) {
+                            let anchor = file_path.parent().unwrap_or(Path::new("."));
+                            if let Err(err) = harn_modules::asset_paths::resolve(&asset_ref, anchor)
+                            {
+                                diagnostics.push(PreflightDiagnostic {
+                                    path: file_path.display().to_string(),
+                                    source: source.to_string(),
+                                    span: params_arg
+                                        .map(|arg| arg.span)
+                                        .unwrap_or(node.span),
+                                    message: format!("preflight: {err}"),
+                                    help: Some(
+                                        "see docs/src/modules.md#package-root-prompt-assets for `@/...` and `@<alias>/...` syntax".to_string(),
+                                    ),
+                                    tags: None,
+                                });
+                                return;
+                            }
+                        }
                         let resolved = resolve_preflight_target(file_path, &template_path, config);
                         if !resolved.iter().any(|path| path.exists()) {
                             diagnostics.push(PreflightDiagnostic {
@@ -273,7 +312,7 @@ fn scan_node_preflight(
                                     render_candidate_paths(&resolved)
                                 ),
                                 help: Some(
-                                    "verify the template path, or set [check].bundle_root / --bundle-root when validating bundled layouts"
+                                    "verify the template path, or set [check].bundle_root / --bundle-root when validating bundled layouts. Use `@/...` for project-root paths"
                                         .to_string(),
                                 ),
                                 tags: None,
@@ -1027,6 +1066,19 @@ pub(super) fn resolve_preflight_target(
     target: &str,
     config: &CheckConfig,
 ) -> Vec<PathBuf> {
+    // `@/...` and `@<alias>/...` always anchor at the project root of
+    // the calling file, never at the bundle root or the source dir, so
+    // the preflight scan must use the same resolver as the runtime
+    // (issue #742). When resolution fails (no harn.toml ancestor /
+    // unknown alias) we still surface a single candidate path so the
+    // caller's diagnostic explains why the target was unreachable.
+    if let Some(asset_ref) = harn_modules::asset_paths::parse(target) {
+        let anchor = current_file.parent().unwrap_or(Path::new("."));
+        return match harn_modules::asset_paths::resolve(&asset_ref, anchor) {
+            Ok(path) => vec![path],
+            Err(_) => vec![PathBuf::from(target)],
+        };
+    }
     let mut candidates = vec![resolve_source_relative(current_file, target)];
     if let Some(bundle_root) = config.bundle_root.as_deref() {
         let bundle_base = PathBuf::from(bundle_root);

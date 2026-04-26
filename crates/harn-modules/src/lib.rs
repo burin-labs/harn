@@ -5,6 +5,7 @@ use harn_lexer::Span;
 use harn_parser::{BindingPattern, Node, Parser, SNode};
 use serde::Deserialize;
 
+pub mod asset_paths;
 mod stdlib;
 
 /// Kind of symbol that can be exported by a module.

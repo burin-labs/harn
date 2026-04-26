@@ -1,0 +1,10 @@
+# Anchor file for `find_project_root` so `@/...` and `@<alias>/...`
+# prompt asset paths resolve to *this* directory regardless of the
+# working dir the conformance runner picks (issue #742).
+
+[package]
+name = "asset_paths_package_root"
+version = "0.0.0"
+
+[asset_roots]
+partials = "prompts"

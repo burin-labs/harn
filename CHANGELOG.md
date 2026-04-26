@@ -42,6 +42,19 @@ granular archaeology.
   originating declaration. Spec, modules guide, tree-sitter grammar, and
   conformance fixtures (selective, wildcard, chained, duplicate) updated
   to match.
+- **Package-root prompt asset paths (#742).** `render`, `render_prompt`,
+  the `template.render` host capability, and `{{ include "..." }}`
+  directives now accept two refactor-safe forms in addition to plain
+  source-relative paths: `@/<rel>` resolves from the calling file's
+  project root (the nearest `harn.toml` ancestor), and
+  `@<alias>/<rel>` resolves from a new `[asset_roots]` table in
+  `harn.toml`. Both forms reject `..` segments so they cannot escape
+  the project root. `harn check` validates `@`-paths during preflight,
+  `harn contracts bundle` records them under `prompt_assets`, and the
+  Harn LSP go-to-definition jumps from a literal
+  `render_prompt("@/...")` argument to the target prompt file. Plain
+  paths keep their existing source-relative behavior; back-compat is
+  exact.
 
 ## v0.7.43
 

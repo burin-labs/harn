@@ -107,5 +107,6 @@
 
 - [0.6.x → 0.7.0](./migrations/v0.7.md)
 - [Prompt templates: v2](./migrations/template-engine-v2.md)
+- [Package-root prompt assets](./migrations/package-root-prompt-assets.md)
 - [Schema-as-type](./migrations/schema-as-type.md)
 - [Rust connectors → Harn packages](./migrations/rust-connectors-to-harn-packages.md)

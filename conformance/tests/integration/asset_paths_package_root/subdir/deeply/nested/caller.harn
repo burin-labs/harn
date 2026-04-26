@@ -1,0 +1,16 @@
+/**
+ * Helper module rendering a prompt asset by its package-root URI.
+ * The caller's relative depth shouldn't affect resolution — that's the
+ * whole point of `@/...`.
+ */
+pub fn render_root(who) {
+  return render_prompt("@/prompts/greeting.harn.prompt", {who: who})
+}
+
+pub fn render_alias(who) {
+  return render_prompt("@partials/greeting.harn.prompt", {who: who})
+}
+
+pub fn render_wrapper() {
+  return render_prompt("@/prompts/wrapper.harn.prompt", {who: "Bob"})
+}
