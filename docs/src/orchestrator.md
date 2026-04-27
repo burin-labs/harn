@@ -260,9 +260,12 @@ harn orchestrator serve \
 
 The default paths are:
 
-- `POST /mcp` for Streamable HTTP
-- `GET /sse` for legacy SSE streams
-- `POST /messages` for legacy SSE messages
+- `POST /mcp` for Streamable HTTP — the recommended transport for new
+  integrations.
+- `GET /sse` and `POST /messages` for the older split-channel SSE
+  transport, kept for compatibility with MCP clients that haven't yet
+  adopted Streamable HTTP. Both endpoints remain supported; they are
+  not slated for removal, but Streamable HTTP is preferred.
 
 Override them with `--mcp-path`, `--mcp-sse-path`, and
 `--mcp-messages-path`. Embedded MCP requires

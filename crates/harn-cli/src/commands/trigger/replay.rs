@@ -313,9 +313,7 @@ pub(crate) fn parse_timestamp(raw: &str) -> Result<OffsetDateTime, String> {
     ))
 }
 
-fn format_timestamp(value: OffsetDateTime) -> String {
-    value.format(&Rfc3339).unwrap_or_else(|_| value.to_string())
-}
+use crate::format::format_timestamp_rfc3339 as format_timestamp;
 
 async fn load_recorded_event(
     event_log: &Arc<AnyEventLog>,

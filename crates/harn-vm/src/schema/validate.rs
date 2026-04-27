@@ -1,5 +1,7 @@
 use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::rc::Rc;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::value::{values_equal, StructLayout, VmValue};
 
@@ -10,6 +12,44 @@ use super::type_check::{
     value_matches_type,
 };
 use super::{child_path, index_path, location_label, schema_bool, schema_i64, schema_number};
+
+// Schema patterns are typically a small, recurring set (e.g. `"^[a-z]+$"`),
+// and recompiling them on every value validated showed up as a hot-path
+// allocation cost. Cap the cache so adversarial schemas can't grow memory
+// unboundedly.
+const PATTERN_CACHE_LIMIT: usize = 256;
+
+#[derive(Clone)]
+enum PatternEntry {
+    Compiled(Arc<regex::Regex>),
+    Invalid(Arc<String>),
+}
+
+fn pattern_cache() -> &'static Mutex<HashMap<String, PatternEntry>> {
+    static CACHE: OnceLock<Mutex<HashMap<String, PatternEntry>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn cached_pattern(pattern: &str) -> PatternEntry {
+    if let Ok(mut cache) = pattern_cache().lock() {
+        if let Some(entry) = cache.get(pattern) {
+            return entry.clone();
+        }
+        let entry = match regex::Regex::new(pattern) {
+            Ok(re) => PatternEntry::Compiled(Arc::new(re)),
+            Err(error) => PatternEntry::Invalid(Arc::new(error.to_string())),
+        };
+        if cache.len() >= PATTERN_CACHE_LIMIT {
+            cache.clear();
+        }
+        cache.insert(pattern.to_string(), entry.clone());
+        return entry;
+    }
+    match regex::Regex::new(pattern) {
+        Ok(re) => PatternEntry::Compiled(Arc::new(re)),
+        Err(error) => PatternEntry::Invalid(Arc::new(error.to_string())),
+    }
+}
 
 #[derive(Clone, Copy, Debug)]
 pub(super) struct ValidationOptions {
@@ -207,8 +247,8 @@ fn validate_against_schema(
                 }
             }
             if let Some(VmValue::String(pattern)) = schema.get("pattern") {
-                match regex::Regex::new(pattern) {
-                    Ok(re) => {
+                match cached_pattern(pattern) {
+                    PatternEntry::Compiled(re) => {
                         if !re.is_match(text) {
                             errors.push(format!(
                                 "at {}: value does not match pattern '{}'",
@@ -217,7 +257,7 @@ fn validate_against_schema(
                             ));
                         }
                     }
-                    Err(error) => errors.push(format!(
+                    PatternEntry::Invalid(error) => errors.push(format!(
                         "at {}: invalid regex pattern '{}': {}",
                         location_label(path),
                         pattern,
