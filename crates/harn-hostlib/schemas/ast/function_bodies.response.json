@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/ast/function_bodies.response.json",
+  "title": "ast.function_bodies response",
+  "description": "Map of function name → extracted body, plus a `missing` list naming requested functions that were not found. All line coordinates inside each body are 1-based, matching Swift.",
+  "type": "object",
+  "properties": {
+    "path": { "type": ["string", "null"] },
+    "language": { "type": "string" },
+    "brace_based": { "type": "boolean" },
+    "bodies": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/Body" },
+      "description": "Function name → extracted body. Names absent from this map are listed under `missing`."
+    },
+    "missing": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  },
+  "required": ["path", "language", "brace_based", "bodies", "missing"],
+  "additionalProperties": false,
+  "$defs": {
+    "Body": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "body_text": { "type": "string" },
+        "start_line": { "type": "integer", "minimum": 0 },
+        "end_line": { "type": "integer", "minimum": 0 },
+        "return_object_fields": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "required": ["name", "body_text", "start_line", "end_line", "return_object_fields"],
+      "additionalProperties": false
+    }
+  }
+}

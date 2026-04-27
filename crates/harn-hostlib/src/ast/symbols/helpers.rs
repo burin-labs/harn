@@ -24,7 +24,7 @@ pub(super) struct NodePos {
 /// Wraps the tree-sitter `child(i: u32)` API so per-language extractors
 /// can write `for child in children(node)` without dealing with the index
 /// cast.
-pub(super) fn children<'tree>(node: Node<'tree>) -> impl Iterator<Item = Node<'tree>> {
+pub(in crate::ast) fn children<'tree>(node: Node<'tree>) -> impl Iterator<Item = Node<'tree>> {
     let count = node.child_count();
     (0..count).filter_map(move |i| node.child(i as u32))
 }
@@ -42,7 +42,7 @@ pub(super) fn point_pos(node: Node<'_>) -> NodePos {
 
 /// UTF-8 source slice for a node. Tree-sitter byte ranges are guaranteed
 /// to land on UTF-8 boundaries, so the slice is always valid.
-pub(super) fn node_text(node: Node<'_>, source: &str) -> String {
+pub(in crate::ast) fn node_text(node: Node<'_>, source: &str) -> String {
     let bytes = source.as_bytes();
     let start = node.start_byte().min(bytes.len());
     let end = node.end_byte().min(bytes.len());

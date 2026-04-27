@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/ast/function_body.request.json",
+  "title": "ast.function_body request",
+  "description": "Extract the body of a single named function from in-memory source or a file path. Mirrors Swift FunctionBodyExtractor.extract.",
+  "type": "object",
+  "properties": {
+    "source": {
+      "type": "string",
+      "description": "Source text. When omitted, the file at `path` is read."
+    },
+    "path": {
+      "type": "string",
+      "description": "Path to a source file. Either `source` or `path` (or both) must be supplied. When both are given, `source` wins and `path` is echoed back unchanged."
+    },
+    "language": {
+      "type": "string",
+      "description": "Canonical language name (e.g. 'typescript', 'rust', 'python'). Required when only `source` is supplied; optional when `path` is given (the extension drives detection)."
+    },
+    "function_name": {
+      "type": "string",
+      "description": "Name to match. The first function-like declaration with this name (in document order) wins."
+    },
+    "container": {
+      "type": "string",
+      "description": "Optional containing class/struct/enum name. When supplied, only matches descendants of a container with that name; otherwise the search is unconstrained."
+    }
+  },
+  "required": ["function_name"],
+  "additionalProperties": false
+}

@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/ast/function_bodies.request.json",
+  "title": "ast.function_bodies request",
+  "description": "Bulk variant of ast.function_body — pull multiple function bodies in a single round-trip. Mirrors Swift FunctionBodyExtractor.extractAll(functionNames:from:language:). The response is keyed by name so callers don't have to re-match.",
+  "type": "object",
+  "properties": {
+    "source": { "type": "string" },
+    "path": { "type": "string" },
+    "language": { "type": "string" },
+    "names": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string" },
+      "description": "Function names to extract. Duplicates are deduped; missing names are surfaced in the response's `missing` list so callers can distinguish 'not present' from 'extractor failed'."
+    },
+    "container": {
+      "type": "string",
+      "description": "Optional containing class/struct/enum name; same semantics as ast.function_body."
+    }
+  },
+  "required": ["names"],
+  "additionalProperties": false
+}

@@ -15,6 +15,33 @@ granular archaeology.
 
 ## v0.7.46
 
+### Added
+
+- **AST hostlib: function-body and import extraction (#774).** Three
+  new builtins land on `crates/harn-hostlib/src/ast/`:
+  `hostlib_ast_function_body` extracts a single named function's body
+  (with an optional containing class/struct filter),
+  `hostlib_ast_function_bodies` is the bulk variant returning a map
+  keyed by name, and `hostlib_ast_extract_imports` returns the
+  document-ordered list of import declarations for a source file.
+  Each accepts either an in-memory `source` string (with `language`)
+  or a `path` (with optional `language` override). The response
+  shapes mirror Swift's `FunctionBodyExtractor.ExtractedBody` and
+  `TreeSitterImportExtractor` byte-for-byte — line coordinates inside
+  function bodies are 1-based to match Swift, while symbols/outline
+  stay 0-based — so burin-code's existing decoders can route through
+  `HarnASTHostlibClient` unchanged. Full tree-sitter coverage: every
+  one of the 21 supported grammars feeds the same walker, including
+  the JS/TS arrow-function and Elixir `def`/`defp` matchers, plus a
+  fallback keyword scan for `extract_imports` when the grammar's AST
+  didn't surface anything. Unblocks burin-code's
+  [#289](https://github.com/burin-labs/burin-code/issues/289) — the
+  ASTEngine call sites in `ASTRPC`, `HarnHostServer+ASTPrimitives`,
+  and `APIContractExtractor+Extraction` can now retire in favor of a
+  single Harn round-trip. JSON schemas ship under
+  `crates/harn-hostlib/schemas/ast/` for the cross-repo schema-drift
+  test in burin-code's `HarnASTHostlibContractTests`.
+
 ### Changed
 
 - **Sharper diagnostics for missing `render_prompt` / `render` targets

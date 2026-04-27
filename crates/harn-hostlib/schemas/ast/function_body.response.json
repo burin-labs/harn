@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/ast/function_body.response.json",
+  "title": "ast.function_body response",
+  "description": "One extracted function body. All line coordinates are 1-based, matching Swift's FunctionBodyExtractor.ExtractedBody convention. (Note: the symbols / outline / parse_file responses are 0-based — this is the documented exception.) When the function isn't found, `found` is false and the line/text fields are zero/empty.",
+  "type": "object",
+  "properties": {
+    "path": { "type": ["string", "null"] },
+    "language": { "type": "string" },
+    "name": { "type": "string" },
+    "found": { "type": "boolean" },
+    "body_text": { "type": "string" },
+    "start_line": { "type": "integer", "minimum": 0 },
+    "end_line": { "type": "integer", "minimum": 0 },
+    "brace_based": {
+      "type": "boolean",
+      "description": "True for every language except Python. Mirrors Swift's `language != \"py\"` flag so callers can branch on indentation-based vs. brace-based body shapes."
+    },
+    "return_object_fields": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Field names extracted from `return { ... }` literals in the body, used by APIContractExtractor to infer response shapes."
+    }
+  },
+  "required": [
+    "path",
+    "language",
+    "name",
+    "found",
+    "body_text",
+    "start_line",
+    "end_line",
+    "brace_based",
+    "return_object_fields"
+  ],
+  "additionalProperties": false
+}

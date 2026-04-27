@@ -85,6 +85,42 @@ pub const SCHEMAS: &[(&str, &str, SchemaKind, &str)] = &[
         SchemaKind::Response,
         include_str!("../schemas/ast/undefined_names.response.json"),
     ),
+    (
+        "ast",
+        "function_body",
+        SchemaKind::Request,
+        include_str!("../schemas/ast/function_body.request.json"),
+    ),
+    (
+        "ast",
+        "function_body",
+        SchemaKind::Response,
+        include_str!("../schemas/ast/function_body.response.json"),
+    ),
+    (
+        "ast",
+        "function_bodies",
+        SchemaKind::Request,
+        include_str!("../schemas/ast/function_bodies.request.json"),
+    ),
+    (
+        "ast",
+        "function_bodies",
+        SchemaKind::Response,
+        include_str!("../schemas/ast/function_bodies.response.json"),
+    ),
+    (
+        "ast",
+        "extract_imports",
+        SchemaKind::Request,
+        include_str!("../schemas/ast/extract_imports.request.json"),
+    ),
+    (
+        "ast",
+        "extract_imports",
+        SchemaKind::Response,
+        include_str!("../schemas/ast/extract_imports.response.json"),
+    ),
     // code_index/
     (
         "code_index",

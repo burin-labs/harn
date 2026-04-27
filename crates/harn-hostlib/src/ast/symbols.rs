@@ -21,7 +21,7 @@ use tree_sitter::{Node, Tree};
 use super::language::Language;
 use super::types::{Symbol, SymbolKind};
 
-mod helpers;
+pub(super) mod helpers;
 
 use helpers::{
     field_text, has_anonymous_child, named_decl_with_keyword, point_pos, push_func, truncate,

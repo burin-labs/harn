@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/ast/extract_imports.request.json",
+  "title": "ast.extract_imports request",
+  "description": "Pull import declarations out of a source file. Either an in-memory `source` (with `language`) or a `path` must be supplied.",
+  "type": "object",
+  "properties": {
+    "source": { "type": "string" },
+    "path": { "type": "string" },
+    "language": { "type": "string" }
+  },
+  "additionalProperties": false
+}
