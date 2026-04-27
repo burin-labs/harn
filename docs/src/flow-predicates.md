@@ -21,6 +21,7 @@ The design in this document assumes the following ticket state as of
 | Area | Status |
 |---|---|
 | Predicate executor and hard kind budgets | Landed in #578 / #704. |
+| Cross-slice fairness scheduler and aggregate budget envelopes | Landed in #736. |
 | `invariants.harn` discovery and attributes | Landed in #579. |
 | `InvariantResult`, evidence, and remediation types | Landed in #581. |
 | Hierarchical predicate composition | In review in #731, closing #582. |
@@ -112,6 +113,33 @@ by sorting records after execution, as the current executor already does.
 This keeps the mental model dumb: predicates are still ordinary Harn functions,
 but admission control is owned by the Flow scheduler instead of by each
 predicate.
+
+### Implementation
+
+The scheduler lives on
+[`PredicateExecutor`](https://docs.rs/harn-vm/latest/harn_vm/flow/struct.PredicateExecutor.html)
+and is configured via `PredicateSchedulerConfig`:
+
+- `max_deterministic_lanes` / `max_semantic_lanes` — global concurrency caps
+  shared across every queued slice. Deterministic and semantic lanes are
+  independent semaphores, which is what makes deterministic work continue to
+  make progress while semantic work is queued behind a scarce cheap-judge
+  budget.
+- `max_deterministic_lanes_per_slice` / `max_semantic_lanes_per_slice` —
+  per-slice caps that prevent any single slice from occupying every global
+  lane. The default semantic-per-slice cap of 1 plus FIFO permit ordering is
+  enough to interleave queued slices fairly under the typical 2-lane semantic
+  budget.
+- `slice_deterministic_envelope` / `slice_semantic_envelope` — aggregate
+  per-kind wall-clock envelopes for one slice. Once exhausted, every
+  remaining predicate of that kind for that slice short-circuits to a
+  structured `Block { error: { code: "budget_exceeded" } }` instead of
+  silently allowing it through.
+
+Use `PredicateExecutor::execute_slices(slices)` when more than one candidate
+slice is queued together. The single-slice convenience method
+`execute_slice(slice, predicates)` still works and routes through the same
+scheduler so per-slice envelopes apply uniformly.
 
 ## Decision 2: Bootstrap Signing
 
@@ -290,8 +318,10 @@ landed and in-review predicate tickets:
   `meta-invariants.harn` bootstrap validation and approval-chain checks.
 - [#735](https://github.com/burin-labs/harn/issues/735): deterministic
   fallback metadata and enforcement for `@semantic` predicates.
-- [#736](https://github.com/burin-labs/harn/issues/736): add cross-slice fair
-  scheduling and aggregate per-slice predicate budget envelopes.
+- ~~[#736](https://github.com/burin-labs/harn/issues/736): add cross-slice
+  fair scheduling and aggregate per-slice predicate budget envelopes.~~
+  Closed by `PredicateSchedulerConfig` and `execute_slices(slices)` documented
+  above.
 - ~~[#733](https://github.com/burin-labs/harn/issues/733): add
   cross-directory union benchmarks and predicate-count explosion limits before
   Ship Captain relies on unattended slice emission.~~ Closed by the

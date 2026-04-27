@@ -40,9 +40,9 @@ pub use predicates::{
     InvariantBlockError, InvariantResult, ParsedInvariantFile, PredicateCeiling,
     PredicateCeilingLevel, PredicateCeilingOutcome, PredicateCeilingViolation, PredicateContext,
     PredicateEvaluation, PredicateExecutionRecord, PredicateExecutionReport, PredicateExecutor,
-    PredicateExecutorConfig, PredicateKind, PredicateRunner, PredicateSource, Remediation,
-    ResolvedPredicate, SemanticReplayAuditMetadata, Verdict, VerdictStrictness, INVARIANTS_FILE,
-    PREDICATE_COUNT_EXPLOSION_CODE,
+    PredicateExecutorConfig, PredicateKind, PredicateRunner, PredicateSchedulerConfig,
+    PredicateSource, Remediation, ResolvedPredicate, SemanticReplayAuditMetadata, Verdict,
+    VerdictStrictness, INVARIANTS_FILE, PREDICATE_COUNT_EXPLOSION_CODE,
 };
 pub use slice::{
     derive_slice, Approval, CoverageMap, PredicateHash, Slice, SliceDerivationError,
