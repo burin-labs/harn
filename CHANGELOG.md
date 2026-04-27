@@ -7,7 +7,23 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
-## v0.7.45
+## Unreleased
+
+### Changed
+
+- **Sharper diagnostics for missing `render_prompt` / `render` targets
+  (#771).** `harn check`'s preflight pass already validated literal
+  template paths, but the message read `preflight: render target ...`
+  regardless of which builtin was called and the help text only ever
+  pointed at the generic guidance. The diagnostic now names the actual
+  builtin (`render_prompt target ...` vs `render target ...`) and, when
+  the missing basename has a unique match elsewhere under the project
+  root, prepends a `did you mean '<rel>'? (found at <abs>)` suggestion
+  so the most common typo — file misfiled in a sibling directory —
+  becomes a one-keystroke fix. Raw string literals (`r"..."`) are also
+  validated alongside ordinary string literals; non-literal first
+  arguments (variables, interpolated strings) continue to be skipped
+  silently.
 
 ### Added
 
