@@ -2,8 +2,31 @@ use std::process;
 
 use harn_fmt::{format_source_opts, FmtOptions};
 
+/// Whether `harn fmt` should rewrite files in place or just report drift.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum FmtMode {
+    /// Rewrite files that aren't already formatted.
+    Write,
+    /// Only report files that would be reformatted; never write to disk.
+    Check,
+}
+
+impl FmtMode {
+    pub(crate) fn from_check_flag(check: bool) -> Self {
+        if check {
+            Self::Check
+        } else {
+            Self::Write
+        }
+    }
+
+    fn is_check(self) -> bool {
+        matches!(self, Self::Check)
+    }
+}
+
 /// Format one or more files or directories. Accepts multiple targets.
-pub(crate) fn fmt_targets(targets: &[&str], check_mode: bool, opts: &FmtOptions) {
+pub(crate) fn fmt_targets(targets: &[&str], mode: FmtMode, opts: &FmtOptions) {
     let mut files = Vec::new();
     for target in targets {
         let path = std::path::Path::new(target);
@@ -20,7 +43,7 @@ pub(crate) fn fmt_targets(targets: &[&str], check_mode: bool, opts: &FmtOptions)
     let mut has_error = false;
     for file in &files {
         let path_str = file.to_string_lossy();
-        if !fmt_file_inner(&path_str, check_mode, opts) {
+        if !fmt_file_inner(&path_str, mode, opts) {
             has_error = true;
         }
     }
@@ -30,7 +53,7 @@ pub(crate) fn fmt_targets(targets: &[&str], check_mode: bool, opts: &FmtOptions)
 }
 
 /// Format a single file. Returns true on success, false on error.
-fn fmt_file_inner(path: &str, check_mode: bool, opts: &FmtOptions) -> bool {
+fn fmt_file_inner(path: &str, mode: FmtMode, opts: &FmtOptions) -> bool {
     let source = match std::fs::read_to_string(path) {
         Ok(s) => s,
         Err(e) => {
@@ -47,7 +70,7 @@ fn fmt_file_inner(path: &str, check_mode: bool, opts: &FmtOptions) -> bool {
         }
     };
 
-    if check_mode {
+    if mode.is_check() {
         if source != formatted {
             eprintln!("{path}: would be reformatted");
             return false;

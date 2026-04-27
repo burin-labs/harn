@@ -757,12 +757,7 @@ fn event_time(event: &LogEvent) -> String {
     format_ms(event.occurred_at_ms)
 }
 
-fn format_ms(ms: i64) -> String {
-    OffsetDateTime::from_unix_timestamp(ms.div_euclid(1000))
-        .unwrap_or(OffsetDateTime::UNIX_EPOCH)
-        .format(&Rfc3339)
-        .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())
-}
+use crate::format::format_unix_ms_rfc3339 as format_ms;
 
 fn parse_time_ms(raw: &str) -> Result<i64, String> {
     parse_time_ms_ok(raw).ok_or_else(|| format!("invalid RFC3339 timestamp '{raw}'"))
