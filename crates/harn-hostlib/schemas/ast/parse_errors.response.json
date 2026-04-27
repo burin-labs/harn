@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/ast/parse_errors.response.json",
+  "title": "ast.parse_errors response",
+  "description": "Tree-sitter ERROR / MISSING node list plus a top-level declaration count. Coordinates are 0-based to match the rest of `ast::*` builtins; consumers that need 1-based line numbers (the Swift fallback shape) add one to `start_row`. `supported` is false only when the grammar refuses to load — a clean parse with zero errors still returns `supported = true`.",
+  "type": "object",
+  "properties": {
+    "path": {
+      "type": "string",
+      "description": "Echo of the request `path` (empty string when content-only)."
+    },
+    "language": {
+      "type": "string",
+      "description": "Resolved language wire name."
+    },
+    "supported": {
+      "type": "boolean",
+      "description": "False when the grammar could not be loaded; in that case `errors` is empty."
+    },
+    "had_errors": {
+      "type": "boolean",
+      "description": "True when the parse tree contains any ERROR or MISSING node."
+    },
+    "errors": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/ParseError" }
+    },
+    "top_level_decl_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Count of top-level declaration nodes per the language profile (mirrors Swift's `topLevelDeclCount`). Languages without an explicit declaration map return 0."
+    }
+  },
+  "required": ["path", "language", "supported", "had_errors", "errors", "top_level_decl_count"],
+  "additionalProperties": false,
+  "$defs": {
+    "ParseError": {
+      "type": "object",
+      "properties": {
+        "start_row": { "type": "integer", "minimum": 0 },
+        "start_col": { "type": "integer", "minimum": 0 },
+        "end_row": { "type": "integer", "minimum": 0 },
+        "end_col": { "type": "integer", "minimum": 0 },
+        "start_byte": { "type": "integer", "minimum": 0 },
+        "end_byte": { "type": "integer", "minimum": 0 },
+        "message": {
+          "type": "string",
+          "description": "Short human-readable description (e.g. \"unexpected '+' \", \"missing ')'\")."
+        },
+        "snippet": {
+          "type": "string",
+          "description": "First 60 chars of the offending node's source text, with newlines escaped as \"\\n\"."
+        },
+        "missing": {
+          "type": "boolean",
+          "description": "True when tree-sitter flagged this as a MISSING token (the grammar expected a token that wasn't present)."
+        }
+      },
+      "required": [
+        "start_row",
+        "start_col",
+        "end_row",
+        "end_col",
+        "start_byte",
+        "end_byte",
+        "message",
+        "snippet",
+        "missing"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

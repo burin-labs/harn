@@ -11,6 +11,29 @@ granular archaeology.
 
 ### Added
 
+- **`hostlib_ast_parse_errors` and `hostlib_ast_undefined_names`
+  (#773).** Two new builtins on the `ast::*` hostlib surface so
+  burin-code's syntax-validation and tertiary-diagnostic paths can
+  delete their Swift `Sources/ASTEngine/TreeSitterParseErrors.swift` /
+  `TreeSitterUndefinedNames.swift` fallbacks. `parse_errors` walks the
+  tree-sitter parse for `ERROR` and `MISSING` nodes and emits a flat
+  list with 0-based row/column ranges, byte ranges, a short
+  human-readable `message`, the offending `snippet` (truncated to 60
+  chars, newlines escaped), and a `missing` flag — plus
+  `top_level_decl_count` keyed off the same per-language declaration
+  table the Swift fallback uses (TypeScript, JavaScript, Go, Rust,
+  Python, Java, C/C++, C#, Kotlin, Ruby, PHP, Scala). Both `content`
+  and `path` payloads are accepted; `language` accepts canonical wire
+  names ("python", "typescript") or bare extensions ("py", "ts") for
+  parity with the Swift call sites. `undefined_names` ports the
+  per-language profile walker for Python, JavaScript (incl. JSX),
+  TypeScript (incl. TSX), Go, and Ruby, dedupes references by name,
+  and filters against the curated builtin stop-list. Profiles for
+  unsupported languages return `supported = false` so callers fall
+  back to an external linter (LSP / ruff / tsc / go vet). New JSON
+  schemas under `crates/harn-hostlib/schemas/ast/parse_errors.*.json`
+  and `undefined_names.*.json` ship with the crate so downstream
+  schema-drift tests see the contract.
 - **Cross-slice predicate budget scheduler (#736).** `PredicateExecutor`
   now schedules predicate work fairly across multiple candidate slices
   via a new `execute_slices(slices)` entrypoint and the
