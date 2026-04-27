@@ -1,10 +1,16 @@
 //! Flow invariant predicate execution.
 
+pub mod bootstrap;
 pub mod compose;
 pub mod discovery;
 pub mod executor;
 pub mod result;
 
+pub use bootstrap::{
+    discover_bootstrap_policy, validate_bootstrap_edit, validate_predicate_edit, BootstrapPolicy,
+    BootstrapValidation, BootstrapViolation, DiscoveredBootstrapPolicy, EditAuthor,
+    DEFAULT_MAINTAINER_ROLE, META_INVARIANTS_FILE,
+};
 pub use compose::{
     compose_predicate_results, enforce_predicate_ceiling, resolve_predicates,
     resolve_predicates_for_touched_directories, ComposedPredicateEvaluation, DirectoryContribution,

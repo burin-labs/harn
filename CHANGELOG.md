@@ -27,6 +27,28 @@ granular archaeology.
   records sort by predicate hash within each slice, and reports stay
   in input slice order. Closes #736 and lands the implementation
   follow-up to the design in `docs/src/flow-predicates.md`.
+- **`meta-invariants.harn` bootstrap policy validation (#734).** Closes
+  decision 2 of the predicate-language design record. A repo-root
+  `meta-invariants.harn` file (separate from per-directory
+  `invariants.harn`) carries a hand-authored bootstrap policy: its
+  `sha256:` content hash and a maintainer list pulled from a
+  `@bootstrap_maintainers(approvers: [...])` attribute (defaulting to
+  `role:flow-platform` when absent). Two new library entrypoints in
+  `crates/harn-vm/src/flow/predicates/bootstrap.rs` enforce the policy:
+  `validate_predicate_edit` promotes the parser's soft warnings on
+  proposed `invariants.harn` edits into hard `Block` verdicts with stable
+  codes (`bootstrap_missing_archivist`,
+  `bootstrap_archivist_provenance_incomplete`,
+  `bootstrap_kind_collision`, `bootstrap_missing_semantic_fallback`),
+  and `validate_bootstrap_edit` rejects Archivist authorship of
+  `meta-invariants.harn` outright (`bootstrap_archivist_cannot_author_bootstrap`)
+  while routing every other author to `RequireApproval` against a
+  maintainer from the previous policy. Both validators pin the previous
+  policy hash so the slice approval chain has an explicit audit pointer.
+  `harn flow ship watch` and `harn flow archivist scan` surface a new
+  `bootstrap_policy` field in their JSON payloads carrying the discovered
+  hash, maintainer list, and parser diagnostics — or `status = "absent"`
+  when the file is missing.
 
 ## v0.7.44
 
