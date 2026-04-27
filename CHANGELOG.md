@@ -7,6 +7,27 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
+## v0.7.45
+
+### Added
+
+- **Cross-slice predicate budget scheduler (#736).** `PredicateExecutor`
+  now schedules predicate work fairly across multiple candidate slices
+  via a new `execute_slices(slices)` entrypoint and the
+  `PredicateSchedulerConfig` knobs. Global semaphores cap concurrent
+  deterministic and semantic predicate evaluations across all slices;
+  per-slice caps (default semantic-per-slice = 1) keep one slice from
+  monopolizing scarce semantic lanes. Each slice independently tracks
+  aggregate per-kind wall-clock against `slice_deterministic_envelope`
+  and `slice_semantic_envelope`. When a slice's envelope exhausts,
+  every remaining predicate of that kind for that slice short-circuits
+  to a structured `Block { error: { code: "budget_exceeded" } }` —
+  never a panic, never an implicit approval — while other queued
+  slices continue unaffected. Output ordering remains deterministic:
+  records sort by predicate hash within each slice, and reports stay
+  in input slice order. Closes #736 and lands the implementation
+  follow-up to the design in `docs/src/flow-predicates.md`.
+
 ## v0.7.44
 
 ### Tests

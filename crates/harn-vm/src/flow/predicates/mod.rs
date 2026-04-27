@@ -20,7 +20,7 @@ pub use discovery::{
 pub use executor::{
     CheapJudge, CheapJudgeRequest, CheapJudgeResponse, PredicateContext, PredicateExecutionRecord,
     PredicateExecutionReport, PredicateExecutor, PredicateExecutorConfig, PredicateKind,
-    PredicateRunner, SemanticReplayAuditMetadata,
+    PredicateRunner, PredicateSchedulerConfig, SemanticReplayAuditMetadata,
 };
 pub use result::{
     Approver, ByteSpan, EvidenceItem, InvariantBlockError, InvariantResult, Remediation, Verdict,
