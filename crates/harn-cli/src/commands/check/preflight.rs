@@ -143,8 +143,8 @@ fn scan_node_preflight(
             }
         }
         Node::FunctionCall { name, args } if name == "render" || name == "render_prompt" => {
-            if let Some(Node::StringLiteral(template_path)) = args.first().map(|arg| &arg.node) {
-                if let Some(asset_ref) = harn_modules::asset_paths::parse(template_path) {
+            if let Some(template_path) = args.first().and_then(literal_template_path) {
+                if let Some(asset_ref) = harn_modules::asset_paths::parse(&template_path) {
                     let anchor = file_path.parent().unwrap_or(Path::new("."));
                     if let Err(err) = harn_modules::asset_paths::resolve(&asset_ref, anchor) {
                         // Surface resolver errors (no project root, unknown
@@ -164,7 +164,7 @@ fn scan_node_preflight(
                         return;
                     }
                 }
-                let resolved = resolve_preflight_target(file_path, template_path, config);
+                let resolved = resolve_preflight_target(file_path, &template_path, config);
                 if let Some(existing) = resolved.iter().find(|path| path.exists()) {
                     if let Ok(body) = std::fs::read_to_string(existing) {
                         if let Err(err) = harn_vm::stdlib::template::validate_template_syntax(&body)
@@ -191,14 +191,11 @@ fn scan_node_preflight(
                         source: source.to_string(),
                         span: args[0].span,
                         message: format!(
-                            "preflight: render target '{}' does not exist at {}",
+                            "preflight: {name} target '{}' does not exist at {}",
                             template_path,
                             render_candidate_paths(&resolved)
                         ),
-                        help: Some(
-                            "keep template paths relative to the pipeline source file, or set [check].bundle_root / --bundle-root for bundled layouts. Use `@/...` for project-root paths"
-                                .to_string(),
-                        ),
+                        help: Some(render_target_miss_help(file_path, &template_path)),
                         tags: None,
                     });
                 }
@@ -1154,6 +1151,108 @@ pub(super) fn literal_string(node: &SNode) -> Option<String> {
     match &node.node {
         Node::StringLiteral(value) => Some(value.clone()),
         _ => None,
+    }
+}
+
+/// `render(...)` and `render_prompt(...)` accept either form of static
+/// string literal as their first argument. Both are statically
+/// verifiable; only `InterpolatedString` and arbitrary expressions are
+/// dynamic and must be skipped.
+fn literal_template_path(node: &SNode) -> Option<String> {
+    match &node.node {
+        Node::StringLiteral(value) | Node::RawStringLiteral(value) => Some(value.clone()),
+        _ => None,
+    }
+}
+
+/// Build the help text for a missing `render(...)` / `render_prompt(...)`
+/// target. When the basename can be located somewhere else under the
+/// caller's project root (and the search produces a unique hit), prepend
+/// a "did you mean ...?" suggestion so the most common typo — file
+/// misfiled in a sibling directory — is one keystroke from a fix. Falls
+/// back to the generic guidance when the search is ambiguous or finds
+/// nothing.
+fn render_target_miss_help(file_path: &Path, template_path: &str) -> String {
+    const GENERIC: &str = "keep template paths relative to the pipeline source file, or set [check].bundle_root / --bundle-root for bundled layouts. Use `@/...` for project-root paths";
+    let Some(basename) = Path::new(template_path)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+    else {
+        return GENERIC.to_string();
+    };
+    let anchor = file_path.parent().unwrap_or(Path::new("."));
+    let project_root = harn_modules::asset_paths::find_project_root(anchor)
+        .unwrap_or_else(|| anchor.to_path_buf());
+    let Some(near) = find_unique_basename(&project_root, &basename) else {
+        return GENERIC.to_string();
+    };
+    let caller_dir = file_path.parent();
+    if near.parent() == caller_dir {
+        // The runtime would have found the file at the caller's dir
+        // anyway; avoid suggesting a redundant "did you mean ...?".
+        return GENERIC.to_string();
+    }
+    let display = near
+        .strip_prefix(&project_root)
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|_| near.display().to_string());
+    format!(
+        "did you mean '{display}'? (found at {}). Otherwise: {GENERIC}",
+        near.display()
+    )
+}
+
+/// Returns the unique location of `basename` under `root`, or `None`
+/// when the search finds zero or multiple matches. Skips standard
+/// build/dependency directories so a misfiled prompt is not lost in
+/// vendor noise.
+fn find_unique_basename(root: &Path, basename: &str) -> Option<PathBuf> {
+    let mut matches: Vec<PathBuf> = Vec::with_capacity(2);
+    walk_for_basename(root, basename, 0, 8, &mut matches);
+    (matches.len() == 1).then(|| matches.into_iter().next().expect("len == 1"))
+}
+
+fn walk_for_basename(
+    dir: &Path,
+    basename: &str,
+    depth: usize,
+    max_depth: usize,
+    out: &mut Vec<PathBuf>,
+) {
+    if depth > max_depth || out.len() > 1 {
+        return;
+    }
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let file_name = entry.file_name();
+        let name_str = file_name.to_string_lossy();
+        if name_str.starts_with('.')
+            || matches!(
+                name_str.as_ref(),
+                "target" | "node_modules" | "dist" | "build" | "out" | ".harn-runs"
+            )
+        {
+            continue;
+        }
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        let path = entry.path();
+        if file_type.is_file() {
+            if name_str == basename {
+                out.push(path);
+                if out.len() > 1 {
+                    return;
+                }
+            }
+        } else if file_type.is_dir() {
+            walk_for_basename(&path, basename, depth + 1, max_depth, out);
+            if out.len() > 1 {
+                return;
+            }
+        }
     }
 }
 

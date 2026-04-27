@@ -75,6 +75,315 @@ pipeline main() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Acceptance for issue #771: `render_prompt(...)` literal-string targets
+/// must be validated alongside `render(...)`, the diagnostic must name
+/// the actual builtin (`render_prompt`), and the resolved candidate path
+/// must be visible so the author can see exactly where the lookup tried
+/// to land.
+#[test]
+fn preflight_reports_missing_literal_render_prompt_target() {
+    let dir = unique_temp_dir("harn-check-render-prompt");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("chat.harn");
+    let source = r#"
+pub fn chat() -> string {
+  let trimmed = "hello"
+  return render_prompt("lane-classifier.harn.prompt", {task: trimmed})
+}
+"#;
+    let program = parse_program(source);
+    let diagnostics =
+        collect_preflight_diagnostics(&file, source, &program, &CheckConfig::default());
+    assert_eq!(diagnostics.len(), 1);
+    let diag = &diagnostics[0];
+    assert!(
+        diag.message.contains("render_prompt target"),
+        "expected diagnostic to name render_prompt, got: {}",
+        diag.message
+    );
+    assert!(
+        diag.message.contains("lane-classifier.harn.prompt"),
+        "expected diagnostic to include the literal path, got: {}",
+        diag.message
+    );
+    assert!(
+        diag.message.contains(
+            &dir.join("lane-classifier.harn.prompt")
+                .display()
+                .to_string()
+        ),
+        "expected diagnostic to include the resolved candidate path, got: {}",
+        diag.message
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Acceptance for issue #771: dynamic first arguments are not statically
+/// checkable, so `render_prompt(some_var, ...)` must be silently
+/// skipped — no false positives on legitimate dynamic dispatch.
+#[test]
+fn preflight_skips_non_literal_render_prompt_target() {
+    let dir = unique_temp_dir("harn-check-render-dynamic");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("main.harn");
+    let source = r#"
+pipeline main() {
+  let path = "missing.harn.prompt"
+  let prompt = render_prompt(path, {})
+  let key = "1"
+  let interp = render_prompt("missing_${key}.prompt", {})
+  println(prompt + interp)
+}
+"#;
+    let program = parse_program(source);
+    let diagnostics =
+        collect_preflight_diagnostics(&file, source, &program, &CheckConfig::default());
+    assert!(
+        diagnostics
+            .iter()
+            .all(|d| !d.message.contains("render_prompt target")),
+        "dynamic first args must not produce render-target diagnostics, got: {:?}",
+        diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Acceptance for issue #771: raw string literals (`r"foo"`) are still
+/// statically known and must be validated like ordinary string literals.
+#[test]
+fn preflight_reports_missing_render_prompt_target_for_raw_string() {
+    let dir = unique_temp_dir("harn-check-render-raw");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("main.harn");
+    let source = r#"
+pipeline main() {
+  let prompt = render_prompt(r"missing.prompt", {})
+  println(prompt)
+}
+"#;
+    let program = parse_program(source);
+    let diagnostics =
+        collect_preflight_diagnostics(&file, source, &program, &CheckConfig::default());
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.message.contains("render_prompt target")),
+        "raw string literal must trigger preflight check, got: {:?}",
+        diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Acceptance for issue #771: the diagnostic span must point at the
+/// literal-string argument, not the whole `render_prompt(...)`
+/// expression — this is what enables an editor's quick-fix to jump
+/// straight to the path that needs editing.
+#[test]
+fn preflight_render_prompt_diagnostic_spans_literal_argument() {
+    let dir = unique_temp_dir("harn-check-render-span");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("main.harn");
+    let source = r#"
+pipeline main() {
+  let prompt = render_prompt("missing.prompt", {})
+  println(prompt)
+}
+"#;
+    let program = parse_program(source);
+    let diagnostics =
+        collect_preflight_diagnostics(&file, source, &program, &CheckConfig::default());
+    let render_diag = diagnostics
+        .iter()
+        .find(|d| d.message.contains("render_prompt target"))
+        .expect("expected render_prompt target diagnostic");
+    let span_text = &source[render_diag.span.start..render_diag.span.end];
+    assert_eq!(
+        span_text, "\"missing.prompt\"",
+        "expected diagnostic span to cover only the literal-string argument"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Acceptance for issue #771: `@/<rel>` forms must resolve through the
+/// same `harn_modules::asset_paths` logic the runtime uses, so a missing
+/// project-root prompt fails the static check.
+#[test]
+fn preflight_reports_missing_project_root_asset_path() {
+    let dir = unique_temp_dir("harn-check-asset-projroot");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("harn.toml"), "[package]\nname = \"x\"\n").unwrap();
+    let file = dir.join("main.harn");
+    let source = r#"
+pipeline main() {
+  let prompt = render_prompt("@/prompts/missing.harn.prompt", {})
+  println(prompt)
+}
+"#;
+    let program = parse_program(source);
+    let diagnostics =
+        collect_preflight_diagnostics(&file, source, &program, &CheckConfig::default());
+    let render_diag = diagnostics
+        .iter()
+        .find(|d| d.message.contains("render_prompt target"))
+        .expect("expected render_prompt target diagnostic for missing @/ asset");
+    assert!(
+        render_diag.message.contains(
+            &dir.join("prompts/missing.harn.prompt")
+                .display()
+                .to_string()
+        ),
+        "expected diagnostic to surface the resolved project-root path, got: {}",
+        render_diag.message
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Acceptance for issue #771: `@<alias>/<rel>` with an unknown alias
+/// must surface the asset-resolver's structural error so the user sees
+/// the missing `[asset_roots]` entry, not a generic file-existence
+/// message.
+#[test]
+fn preflight_reports_unknown_asset_alias() {
+    let dir = unique_temp_dir("harn-check-asset-alias");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("harn.toml"), "[package]\nname = \"x\"\n").unwrap();
+    let file = dir.join("main.harn");
+    let source = r#"
+pipeline main() {
+  let prompt = render_prompt("@unknown/foo.harn.prompt", {})
+  println(prompt)
+}
+"#;
+    let program = parse_program(source);
+    let diagnostics =
+        collect_preflight_diagnostics(&file, source, &program, &CheckConfig::default());
+    let alias_diag = diagnostics
+        .iter()
+        .find(|d| d.message.contains("[asset_roots]"))
+        .expect("expected unknown-alias diagnostic citing [asset_roots]");
+    assert!(
+        alias_diag.message.contains("unknown"),
+        "expected diagnostic to name the missing alias, got: {}",
+        alias_diag.message
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Acceptance for issue #771: a defined `@<alias>/<rel>` resolves
+/// through the same logic the runtime uses, so a missing file under the
+/// alias is still flagged.
+#[test]
+fn preflight_reports_missing_aliased_asset_path() {
+    let dir = unique_temp_dir("harn-check-asset-alias-missing");
+    std::fs::create_dir_all(dir.join("src/prompts")).unwrap();
+    std::fs::write(
+        dir.join("harn.toml"),
+        "[package]\nname = \"x\"\n[asset_roots]\npartials = \"src/prompts\"\n",
+    )
+    .unwrap();
+    let file = dir.join("main.harn");
+    let source = r#"
+pipeline main() {
+  let prompt = render_prompt("@partials/missing.harn.prompt", {})
+  println(prompt)
+}
+"#;
+    let program = parse_program(source);
+    let diagnostics =
+        collect_preflight_diagnostics(&file, source, &program, &CheckConfig::default());
+    let render_diag = diagnostics
+        .iter()
+        .find(|d| d.message.contains("render_prompt target"))
+        .expect("expected render_prompt target diagnostic for missing aliased asset");
+    assert!(
+        render_diag.message.contains(
+            &dir.join("src/prompts/missing.harn.prompt")
+                .display()
+                .to_string()
+        ),
+        "expected diagnostic to surface the alias-resolved path, got: {}",
+        render_diag.message
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Acceptance for issue #771 (the burin-code repro): when the missing
+/// prompt file exists elsewhere under the same project root, the
+/// diagnostic must include a "did you mean ...?" suggestion pointing at
+/// the misfiled location — that's the one-keystroke fix the issue is
+/// asking for.
+#[test]
+fn preflight_suggests_misfiled_render_prompt_target() {
+    let dir = unique_temp_dir("harn-check-render-suggest");
+    std::fs::create_dir_all(dir.join("lib/runtime")).unwrap();
+    std::fs::create_dir_all(dir.join("lib/mode")).unwrap();
+    std::fs::write(dir.join("harn.toml"), "[package]\nname = \"x\"\n").unwrap();
+    std::fs::write(
+        dir.join("lib/mode/lane-classifier.harn.prompt"),
+        "task: {{task}}\n",
+    )
+    .unwrap();
+    let file = dir.join("lib/runtime/chat.harn");
+    let source = r#"
+pub fn chat() -> string {
+  return render_prompt("lane-classifier.harn.prompt", {task: "hi"})
+}
+"#;
+    let program = parse_program(source);
+    let diagnostics =
+        collect_preflight_diagnostics(&file, source, &program, &CheckConfig::default());
+    let render_diag = diagnostics
+        .iter()
+        .find(|d| d.message.contains("render_prompt target"))
+        .expect("expected render_prompt target diagnostic");
+    let help = render_diag
+        .help
+        .as_ref()
+        .expect("expected diagnostic help text");
+    assert!(
+        help.contains("did you mean"),
+        "expected help text to include 'did you mean' suggestion, got: {help}",
+    );
+    assert!(
+        help.contains("lib/mode/lane-classifier.harn.prompt"),
+        "expected help text to point at the misfiled location, got: {help}",
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Acceptance for issue #771: when no near-miss exists, the diagnostic
+/// must still emit useful generic guidance instead of the misleading
+/// "did you mean ..." prefix.
+#[test]
+fn preflight_omits_did_you_mean_when_no_near_miss() {
+    let dir = unique_temp_dir("harn-check-render-no-suggest");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("harn.toml"), "[package]\nname = \"x\"\n").unwrap();
+    let file = dir.join("main.harn");
+    let source = r#"
+pipeline main() {
+  let prompt = render_prompt("nowhere.harn.prompt", {})
+  println(prompt)
+}
+"#;
+    let program = parse_program(source);
+    let diagnostics =
+        collect_preflight_diagnostics(&file, source, &program, &CheckConfig::default());
+    let render_diag = diagnostics
+        .iter()
+        .find(|d| d.message.contains("render_prompt target"))
+        .expect("expected render_prompt target diagnostic");
+    let help = render_diag
+        .help
+        .as_ref()
+        .expect("expected diagnostic help text");
+    assert!(
+        !help.contains("did you mean"),
+        "expected no 'did you mean' when there's no near-miss, got: {help}",
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn preflight_resolves_imports_with_implicit_harn_extension() {
     let dir = unique_temp_dir("harn-check");
