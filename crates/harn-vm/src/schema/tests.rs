@@ -133,3 +133,50 @@ fn merge_schema_dicts_basic() {
     assert_eq!(merged.get("title").unwrap().display(), "Override");
     assert_eq!(merged.get("extra").unwrap().display(), "yes");
 }
+
+#[test]
+fn pattern_validation_accepts_and_rejects_consistently() {
+    // Exercises the cached-pattern path with repeated validations to make
+    // sure the cache returns equivalent results to a fresh compile.
+    let schema = make_vm_dict(vec![("type", s("string")), ("pattern", s(r"^[a-z]+\d+$"))]);
+    for _ in 0..3 {
+        assert!(schema_is_value(&s("abc123"), &schema).unwrap());
+        assert!(!schema_is_value(&s("ABC123"), &schema).unwrap());
+        assert!(!schema_is_value(&s("abc"), &schema).unwrap());
+    }
+}
+
+#[test]
+fn invalid_pattern_surfaces_a_clear_error() {
+    let schema = make_vm_dict(vec![
+        ("type", s("string")),
+        // An unclosed character class is rejected at compile time. The
+        // cache stores the error so we don't recompile every call.
+        ("pattern", s("[unclosed")),
+    ]);
+    let result = schema_result_value(&s("anything"), &schema, false);
+    let VmValue::EnumVariant {
+        variant, fields, ..
+    } = result
+    else {
+        panic!("expected Result variant");
+    };
+    assert_eq!(variant.as_ref(), "Err");
+    let payload_dict = fields
+        .first()
+        .and_then(|value| value.as_dict().cloned())
+        .expect("Err payload is a dict");
+    let errors = match payload_dict.get("errors") {
+        Some(VmValue::List(items)) => items.clone(),
+        other => panic!("expected errors list, got {other:?}"),
+    };
+    assert!(
+        errors
+            .iter()
+            .any(|err| err.display().contains("invalid regex pattern")),
+        "expected an invalid regex error, got: {errors:?}"
+    );
+    // Calling again hits the cached error path and must produce the same
+    // error rather than panicking on a re-compile.
+    let _ = schema_result_value(&s("anything"), &schema, false);
+}

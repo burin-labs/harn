@@ -197,6 +197,154 @@ fn parse_file_meets_perf_budget_on_a_known_input() {
 }
 
 #[test]
+fn parse_errors_returns_clean_payload_for_valid_python() {
+    let registry = ast_registry();
+    let payload = dict(&[
+        ("content", VmValue::String(Rc::from("x = 1\n"))),
+        ("language", VmValue::String(Rc::from("python"))),
+    ]);
+    let result = invoke(&registry, "hostlib_ast_parse_errors", payload);
+
+    assert_eq!(string_value(&dict_field(&result, "language")), "python");
+    let errors = list_value(&dict_field(&result, "errors"));
+    assert!(errors.is_empty(), "valid Python should have no errors");
+    let supported = match dict_field(&result, "supported") {
+        VmValue::Bool(b) => b,
+        other => panic!("expected bool, got {other:?}"),
+    };
+    assert!(supported);
+}
+
+#[test]
+fn parse_errors_flags_typescript_syntax_error() {
+    let registry = ast_registry();
+    let payload = dict(&[
+        // Mismatched paren — tree-sitter will emit at least one ERROR or
+        // MISSING node here.
+        (
+            "content",
+            VmValue::String(Rc::from("function foo(\n  return 1;\n}")),
+        ),
+        ("language", VmValue::String(Rc::from("typescript"))),
+    ]);
+    let result = invoke(&registry, "hostlib_ast_parse_errors", payload);
+    let errors = list_value(&dict_field(&result, "errors"));
+    assert!(!errors.is_empty(), "expected errors, got {errors:?}");
+
+    // Each error has the documented field set.
+    for entry in errors.iter() {
+        for field in [
+            "start_row",
+            "start_col",
+            "end_row",
+            "end_col",
+            "start_byte",
+            "end_byte",
+            "message",
+            "snippet",
+            "missing",
+        ] {
+            let _ = dict_field(entry, field);
+        }
+    }
+}
+
+#[test]
+fn parse_errors_top_level_decl_count_matches_swift_profile() {
+    // Mirrors Swift's `topLevelDeclCount` for a couple of canonical
+    // language profiles. Drift in this number means our profile fell out
+    // of sync with `TreeSitterParseErrors.declarationTypesMap`.
+    let registry = ast_registry();
+
+    let cases = [
+        ("rust", "fn a() {}\nfn b() {}\nstruct C;\n", 3),
+        ("python", "def a():\n    pass\nclass B:\n    pass\n", 2),
+        // TS lists `export_statement` as both a declaration and a
+        // wrapper, so each `export X` contributes 2 (the export itself
+        // plus the wrapped decl). Mirrors Swift exactly.
+        (
+            "typescript",
+            "export function a() {}\nexport const b = 1;\nfunction c() {}\n",
+            5,
+        ),
+    ];
+    for (lang, src, want) in cases {
+        let payload = dict(&[
+            ("content", VmValue::String(Rc::from(src))),
+            ("language", VmValue::String(Rc::from(lang))),
+        ]);
+        let result = invoke(&registry, "hostlib_ast_parse_errors", payload);
+        let count = int_value(&dict_field(&result, "top_level_decl_count"));
+        assert_eq!(count, want, "{lang} top_level_decl_count");
+    }
+}
+
+#[test]
+fn undefined_names_python_returns_dedup_diagnostics() {
+    let registry = ast_registry();
+    let payload = dict(&[
+        (
+            "content",
+            VmValue::String(Rc::from(
+                "import os\n\
+                 def foo(x):\n    \
+                     return x + missing()\n\
+                 missing()\n\
+                 missing()\n",
+            )),
+        ),
+        ("language", VmValue::String(Rc::from("python"))),
+    ]);
+    let result = invoke(&registry, "hostlib_ast_undefined_names", payload);
+    let supported = match dict_field(&result, "supported") {
+        VmValue::Bool(b) => b,
+        other => panic!("expected bool, got {other:?}"),
+    };
+    assert!(supported);
+
+    let diagnostics = list_value(&dict_field(&result, "diagnostics"));
+    let names: Vec<String> = diagnostics
+        .iter()
+        .map(|d| string_value(&dict_field(d, "name")).to_string())
+        .collect();
+    assert_eq!(
+        names,
+        vec!["missing".to_string()],
+        "expected single dedup'd 'missing', got {names:?}"
+    );
+
+    // Each diagnostic carries the documented fields.
+    for d in diagnostics.iter() {
+        let kind_value = dict_field(d, "kind");
+        let kind = string_value(&kind_value).to_string();
+        assert!(kind == "identifier" || kind == "type", "kind = {kind}");
+        let msg_value = dict_field(d, "message");
+        let message = string_value(&msg_value).to_string();
+        assert!(message.contains("undefined name"), "message = {message}");
+    }
+}
+
+#[test]
+fn undefined_names_marks_unsupported_languages() {
+    let registry = ast_registry();
+    let payload = dict(&[
+        ("content", VmValue::String(Rc::from("fn main() {}\n"))),
+        ("language", VmValue::String(Rc::from("rust"))),
+    ]);
+    let result = invoke(&registry, "hostlib_ast_undefined_names", payload);
+    let supported = match dict_field(&result, "supported") {
+        VmValue::Bool(b) => b,
+        other => panic!("expected bool, got {other:?}"),
+    };
+    assert!(
+        !supported,
+        "rust isn't in the Swift profile set; must report supported = false"
+    );
+    let diagnostics = list_value(&dict_field(&result, "diagnostics"));
+    assert!(diagnostics.is_empty());
+}
+
+#[test]
 fn perf_smoke_against_burin_code_when_available() {
     // The issue calls out `~/projects/burin-code/Package.swift`. That
     // path only exists on the maintainer's box; skip silently otherwise

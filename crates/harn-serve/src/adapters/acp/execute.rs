@@ -40,7 +40,9 @@ pub(super) async fn execute_chunk(
 
     if let Some(path) = source_path {
         let path_str = path.to_string_lossy();
-        let source = std::fs::read_to_string(path).unwrap_or_default();
+        let source = std::fs::read_to_string(path).map_err(|error| {
+            format!("failed to read pipeline source '{path_str}' for diagnostic context: {error}")
+        })?;
         vm.set_source_info(&path_str, &source);
         if let Some(parent) = path.parent() {
             if !parent.as_os_str().is_empty() {

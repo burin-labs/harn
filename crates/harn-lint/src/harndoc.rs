@@ -274,7 +274,7 @@ pub(crate) fn extract_harndoc(source: &str, span: &Span) -> Option<String> {
         }
         start_idx -= 1;
     }
-    let mut body = Vec::new();
+    let mut body: Vec<String> = Vec::with_capacity((above_idx + 1).saturating_sub(start_idx));
     for (i, line) in lines.iter().enumerate().take(above_idx + 1).skip(start_idx) {
         let t = line.trim();
         let stripped: &str = if i == start_idx {
@@ -293,16 +293,17 @@ pub(crate) fn extract_harndoc(source: &str, span: &Span) -> Option<String> {
         };
         body.push(stripped.trim_end().to_string());
     }
-    // Trim leading/trailing empty lines.
-    while body.first().is_some_and(|s| s.is_empty()) {
-        body.remove(0);
+    // Trim leading/trailing empty lines without O(n) shifts.
+    let leading = body.iter().take_while(|s| s.is_empty()).count();
+    let trailing = body.iter().rev().take_while(|s| s.is_empty()).count();
+    if leading + trailing >= body.len() {
+        return None;
     }
-    while body.last().is_some_and(|s| s.is_empty()) {
-        body.pop();
-    }
-    if body.is_empty() {
+    let end = body.len() - trailing;
+    let trimmed: Vec<String> = body.drain(leading..end).collect();
+    if trimmed.is_empty() {
         None
     } else {
-        Some(body.join("\n"))
+        Some(trimmed.join("\n"))
     }
 }

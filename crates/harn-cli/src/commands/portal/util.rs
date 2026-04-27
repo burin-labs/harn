@@ -133,15 +133,7 @@ pub(super) fn preview_text(text: &str) -> String {
     }
 }
 
-pub(super) fn format_duration(duration_ms: u64) -> String {
-    if duration_ms >= 60_000 {
-        format!("{:.1}m", duration_ms as f64 / 60_000.0)
-    } else if duration_ms >= 1_000 {
-        format!("{:.1}s", duration_ms as f64 / 1_000.0)
-    } else {
-        format!("{duration_ms}ms")
-    }
-}
+pub(super) use crate::format::format_duration_ms as format_duration;
 
 pub(super) fn is_completed_status(status: &str) -> bool {
     matches!(status, "complete" | "completed" | "success" | "verified")

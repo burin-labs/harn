@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/ast/undefined_names.response.json",
+  "title": "ast.undefined_names response",
+  "description": "Single-file undefined-identifier diagnostics. Coordinates are 0-based to match the rest of `ast::*` builtins. Diagnostics are deduplicated by name (first occurrence wins) so callers see one entry per missing import / typo, not one per usage. The Swift consumer maps `row + 1` / `column + 1` back into `UndefinedNameDiagnostic.line` / `.column`.",
+  "type": "object",
+  "properties": {
+    "path": { "type": "string" },
+    "language": { "type": "string" },
+    "supported": {
+      "type": "boolean",
+      "description": "False when no profile exists for the resolved language. In that case `diagnostics` is empty."
+    },
+    "diagnostics": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Diagnostic" }
+    }
+  },
+  "required": ["path", "language", "supported", "diagnostics"],
+  "additionalProperties": false,
+  "$defs": {
+    "Diagnostic": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "The undefined identifier."
+        },
+        "kind": {
+          "type": "string",
+          "enum": ["identifier", "type"],
+          "description": "Reference flavor: `identifier` for value-side references, `type` for TypeScript type-only references."
+        },
+        "row": { "type": "integer", "minimum": 0 },
+        "column": { "type": "integer", "minimum": 0 },
+        "message": {
+          "type": "string",
+          "description": "Pre-formatted human-readable message (`undefined name 'foo'`)."
+        }
+      },
+      "required": ["name", "kind", "row", "column", "message"],
+      "additionalProperties": false
+    }
+  }
+}

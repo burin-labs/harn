@@ -3,6 +3,7 @@ mod cli;
 mod commands;
 mod config;
 mod env_guard;
+mod format;
 mod package;
 mod skill_loader;
 mod skill_provenance;
@@ -302,7 +303,11 @@ async fn async_main() {
             if let Some(w) = args.separator_width {
                 opts.separator_width = w;
             }
-            commands::check::fmt_targets(&targets, args.check, &opts);
+            commands::check::fmt_targets(
+                &targets,
+                commands::check::FmtMode::from_check_flag(args.check),
+                &opts,
+            );
         }
         Command::Test(args) => {
             if args.target.as_deref() == Some("agents-conformance") {

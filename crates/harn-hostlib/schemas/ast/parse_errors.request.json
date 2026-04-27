@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/ast/parse_errors.request.json",
+  "title": "ast.parse_errors request",
+  "description": "Surface tree-sitter ERROR and MISSING nodes plus the count of top-level declarations. Mirrors the Swift `TreeSitterParseErrors.analyze(content:extension:)` surface from burin-code's ASTEngine. Pass `content` for an in-memory string or `path` to read from disk; supply `language` (canonical name like \"python\" or a bare extension like \"py\") when the path-based grammar lookup is ambiguous.",
+  "type": "object",
+  "properties": {
+    "content": {
+      "type": "string",
+      "description": "Source text to parse. When supplied, takes precedence over `path`."
+    },
+    "path": {
+      "type": "string",
+      "description": "File path to read (used when `content` is omitted, and as a fallback for grammar detection when `language` is omitted)."
+    },
+    "language": {
+      "type": "string",
+      "description": "Language hint. Accepts canonical wire names (\"python\", \"typescript\") or bare extensions (\"py\", \"ts\")."
+    },
+    "max_bytes": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Optional cap on bytes parsed; 0 means unlimited."
+    }
+  },
+  "anyOf": [
+    {"required": ["content"]},
+    {"required": ["path"]}
+  ],
+  "additionalProperties": false
+}

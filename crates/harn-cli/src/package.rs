@@ -30,7 +30,6 @@ const TRIGGER_RETRY_MAX_LIMIT: u32 = 100;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Manifest {
-    #[allow(dead_code)]
     pub package: Option<PackageInfo>,
     #[serde(default)]
     pub dependencies: HashMap<String, Dependency>,
@@ -65,7 +64,6 @@ pub struct Manifest {
     /// Stable exported package modules. Keys are the logical import
     /// suffixes (e.g. `providers/openai`) and values are package-root-
     /// relative file paths. Consumers import them via `<package>/<key>`.
-    #[allow(dead_code)]
     #[serde(default)]
     pub exports: HashMap<String, String>,
     /// `[llm]` section — packaged provider definitions, aliases,

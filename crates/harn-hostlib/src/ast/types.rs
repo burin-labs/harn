@@ -171,3 +171,72 @@ impl ParsedNode {
         VmValue::Dict(Rc::new(dict))
     }
 }
+
+/// One ERROR / MISSING node from a tree-sitter parse. All row/column
+/// coordinates are 0-based, matching tree-sitter's native Point.
+///
+/// `message` is a short human-readable description (e.g. `"unexpected
+/// '+'"`, `"missing ')'"`). `snippet` is the raw source text covered by
+/// the node, truncated to 60 chars and with newlines escaped — kept
+/// separately so callers can render the message without re-parsing it.
+#[derive(Debug, Clone)]
+pub struct ParseError {
+    pub start_row: u32,
+    pub start_col: u32,
+    pub end_row: u32,
+    pub end_col: u32,
+    pub start_byte: u32,
+    pub end_byte: u32,
+    pub message: String,
+    pub snippet: String,
+    pub missing: bool,
+}
+
+impl ParseError {
+    pub fn to_vm_value(&self) -> VmValue {
+        let mut dict: BTreeMap<String, VmValue> = BTreeMap::new();
+        dict.insert("start_row".into(), VmValue::Int(self.start_row as i64));
+        dict.insert("start_col".into(), VmValue::Int(self.start_col as i64));
+        dict.insert("end_row".into(), VmValue::Int(self.end_row as i64));
+        dict.insert("end_col".into(), VmValue::Int(self.end_col as i64));
+        dict.insert("start_byte".into(), VmValue::Int(self.start_byte as i64));
+        dict.insert("end_byte".into(), VmValue::Int(self.end_byte as i64));
+        dict.insert(
+            "message".into(),
+            VmValue::String(Rc::from(self.message.as_str())),
+        );
+        dict.insert(
+            "snippet".into(),
+            VmValue::String(Rc::from(self.snippet.as_str())),
+        );
+        dict.insert("missing".into(), VmValue::Bool(self.missing));
+        VmValue::Dict(Rc::new(dict))
+    }
+}
+
+/// Reference to an identifier that wasn't defined within the current
+/// file. Coordinates are 0-based. `kind` is `"identifier"` for value-side
+/// references and `"type"` for type-only references (TypeScript only).
+#[derive(Debug, Clone)]
+pub struct UndefinedName {
+    pub name: String,
+    pub kind: &'static str,
+    pub row: u32,
+    pub column: u32,
+}
+
+impl UndefinedName {
+    pub fn to_vm_value(&self) -> VmValue {
+        let mut dict: BTreeMap<String, VmValue> = BTreeMap::new();
+        dict.insert("name".into(), VmValue::String(Rc::from(self.name.as_str())));
+        dict.insert("kind".into(), VmValue::String(Rc::from(self.kind)));
+        dict.insert("row".into(), VmValue::Int(self.row as i64));
+        dict.insert("column".into(), VmValue::Int(self.column as i64));
+        let message = format!("undefined name '{}'", self.name);
+        dict.insert(
+            "message".into(),
+            VmValue::String(Rc::from(message.as_str())),
+        );
+        VmValue::Dict(Rc::new(dict))
+    }
+}

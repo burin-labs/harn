@@ -18,6 +18,6 @@ pub(crate) use config::{
     apply_harn_lint_config, build_module_graph, collect_cross_file_imports, collect_harn_targets,
     harn_lint_complexity_threshold, harn_lint_require_file_header,
 };
-pub(crate) use fmt::fmt_targets;
+pub(crate) use fmt::{fmt_targets, FmtMode};
 pub(crate) use host_capabilities::load_host_capabilities;
 pub(crate) use lint::{lint_file_inner, lint_fix_file};

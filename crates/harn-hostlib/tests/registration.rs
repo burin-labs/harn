@@ -29,17 +29,27 @@ fn ast_capability_registers_documented_methods() {
             "hostlib_ast_parse_file",
             "hostlib_ast_symbols",
             "hostlib_ast_outline",
+            "hostlib_ast_parse_errors",
+            "hostlib_ast_undefined_names",
         ]
     );
-    // Issue #564 implemented every AST builtin. With no `path` parameter
-    // each one routes through `MissingParameter` rather than the scaffold
-    // `Unimplemented` — the contract surface is real now.
+    // Each AST builtin must reject an empty payload with `MissingParameter`
+    // (never `Unimplemented`). The required field differs per method:
+    // file-based builtins want `path`; the analysis builtins added by #773
+    // accept either `content` or `path` and surface that as the
+    // `content_or_path` synthetic parameter.
+    let expected_param = |name: &str| -> &'static str {
+        match name {
+            "hostlib_ast_parse_errors" | "hostlib_ast_undefined_names" => "content_or_path",
+            _ => "path",
+        }
+    };
     for entry in registry.iter() {
         let err = (entry.handler)(&[]).expect_err("handler must error on empty args");
         match err {
             HostlibError::MissingParameter { builtin, param } => {
                 assert_eq!(builtin, entry.name);
-                assert_eq!(param, "path");
+                assert_eq!(param, expected_param(entry.name));
             }
             other => panic!(
                 "expected MissingParameter for {}, got {other:?}",
@@ -194,9 +204,9 @@ fn install_default_wires_every_module_into_a_vm() {
         registry.modules(),
         &["ast", "code_index", "scanner", "fs_watch", "tools"]
     );
-    // Builtin count: 3 ast + 5 code_index + 2 scanner + 2 fs_watch + 12
-    // tools + 1 hostlib_enable = 25.
-    assert!(registry.builtins().len() >= 25);
+    // Builtin count: 5 ast + 5 code_index + 2 scanner + 2 fs_watch + 12
+    // tools + 1 hostlib_enable = 27.
+    assert!(registry.builtins().len() >= 27);
 }
 
 #[test]

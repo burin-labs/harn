@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/ast/undefined_names.request.json",
+  "title": "ast.undefined_names request",
+  "description": "Language-aware single-file undefined-identifier detection. Mirrors the Swift `TreeSitterUndefinedNames.diagnose(content:extension:)` surface from burin-code's ASTEngine. Profiles ship for Python, JavaScript (incl. JSX), TypeScript (incl. TSX), Go, and Ruby; other languages return `supported = false` so callers can fall back to an external linter (LSP / ruff / tsc / go vet).",
+  "type": "object",
+  "properties": {
+    "content": {
+      "type": "string",
+      "description": "Source text to analyze. When supplied, takes precedence over `path`."
+    },
+    "path": {
+      "type": "string",
+      "description": "File path to read (used when `content` is omitted, and as a fallback for grammar detection when `language` is omitted)."
+    },
+    "language": {
+      "type": "string",
+      "description": "Language hint. Accepts canonical wire names (\"python\", \"typescript\") or bare extensions (\"py\", \"ts\")."
+    },
+    "max_bytes": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Optional cap on bytes analyzed; 0 means unlimited."
+    }
+  },
+  "anyOf": [
+    {"required": ["content"]},
+    {"required": ["path"]}
+  ],
+  "additionalProperties": false
+}

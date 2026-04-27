@@ -61,6 +61,30 @@ pub const SCHEMAS: &[(&str, &str, SchemaKind, &str)] = &[
         SchemaKind::Response,
         include_str!("../schemas/ast/outline.response.json"),
     ),
+    (
+        "ast",
+        "parse_errors",
+        SchemaKind::Request,
+        include_str!("../schemas/ast/parse_errors.request.json"),
+    ),
+    (
+        "ast",
+        "parse_errors",
+        SchemaKind::Response,
+        include_str!("../schemas/ast/parse_errors.response.json"),
+    ),
+    (
+        "ast",
+        "undefined_names",
+        SchemaKind::Request,
+        include_str!("../schemas/ast/undefined_names.request.json"),
+    ),
+    (
+        "ast",
+        "undefined_names",
+        SchemaKind::Response,
+        include_str!("../schemas/ast/undefined_names.response.json"),
+    ),
     // code_index/
     (
         "code_index",

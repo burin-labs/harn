@@ -51,7 +51,9 @@ SCRIPTING
     Run(RunArgs),
     /// Type-check .harn files or directories without executing them.
     Check(CheckArgs),
-    /// Explain the CFG path behind an invariant violation for one handler.
+    /// Explain the control-flow path that violates a Harn invariant
+    /// (e.g. `fs.writes`, `approval.reachability`) for a specific
+    /// function or trigger handler.
     Explain(ExplainArgs),
     /// Export machine-readable Harn contracts and bundle manifests.
     Contracts(ContractsArgs),
@@ -65,7 +67,10 @@ SCRIPTING
     Init(InitArgs),
     /// Scaffold a new project, package, or connector from a starter template.
     New(NewArgs),
-    /// Diagnose the local Harn environment and provider setup.
+    /// Diagnose the local Harn environment: toolchain version, configured
+    /// LLM providers and credentials, MCP server reachability, file
+    /// permissions on `~/.harn`, and project manifest health. Reports
+    /// each check as ok/warn/fail with a suggested fix.
     Doctor(DoctorArgs),
     /// Register outbound connector resources with a provider.
     Connect(Box<ConnectArgs>),
@@ -89,7 +94,7 @@ SCRIPTING
     Crystallize(CrystallizeArgs),
     /// Query and manage trust-graph autonomy state.
     Trust(TrustArgs),
-    /// Query and verify trust-graph autonomy state.
+    /// Alias for `harn trust`. Query and verify trust-graph autonomy state.
     #[command(name = "trust-graph")]
     TrustGraph(TrustArgs),
     /// Start the orchestrator process that hosts triggers and connector dispatch.
@@ -120,7 +125,11 @@ SCRIPTING
     Lock,
     /// Manage Harn package caches and integrity verification.
     Package(PackageArgs),
-    /// Prepare a package for publication. Real registry submission is not yet enabled.
+    /// Prepare a package manifest and bundle for publication. Validates
+    /// `harn.toml` and produces a publishable archive locally; remote
+    /// registry submission is not yet implemented (the resulting
+    /// archive can be installed via `harn add <repo-or-path>` in the
+    /// meantime).
     Publish(PublishArgs),
     /// List and inspect durable agent persona manifests.
     Persona(PersonaArgs),

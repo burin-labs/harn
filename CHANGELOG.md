@@ -25,8 +25,90 @@ granular archaeology.
   arguments (variables, interpolated strings) continue to be skipped
   silently.
 
+### Performance
+
+- **Cache schema `pattern` regexes.** `schema.is`, `schema.expect`, and
+  `schema.result_of` previously called `regex::Regex::new` once per
+  validated value when the schema declared a `pattern`. Compilation
+  now happens at most once per pattern (capped 256-entry cache,
+  cleared when full), eliminating wasted work for hot-path validators
+  that re-validate the same shape thousands of times.
+  Crate: `harn-vm` (`schema/validate.rs`).
+
+### Fixed
+
+- **`harn-serve` ACP loader no longer silently swallows source-read
+  failures.** When the ACP bridge could not read the requested
+  `.harn` source for diagnostic context, it previously fell back to
+  empty source and continued, which produced misleading runtime
+  errors with no surrounding code. The error is now surfaced as
+  `failed to read pipeline source '<path>' for diagnostic context:
+  …`. Crate: `harn-serve`.
+- **`harn-lint` legacy-doc-comment scan no longer does O(n²) `Vec`
+  shifts** when trimming blank lines off a recovered `///` block.
+  Crate: `harn-lint` (`harndoc.rs`).
+
+### Internal / DX
+
+- **Centralized CLI timestamp/duration formatting in
+  `harn_cli::format`.** Five copies of `format_timestamp`,
+  `format_duration`, and `format_ms` across `trust`, `trigger
+  replay`, `portal/dlq`, `portal/util`, and `orchestrator` commands
+  are gone — the `orchestrator` and `portal` callsites now thinly
+  re-export from the shared module so user-facing output stays
+  byte-identical.
+- **`harn fmt`'s internal API uses `FmtMode::{Check, Write}`** instead
+  of a boolean flag, so call sites read what they mean rather than
+  `fmt_targets(targets, true, ...)`.
+- **CLI help text clarifications** for `harn explain`, `harn doctor`,
+  `harn publish`, and `harn trust-graph`. The previously cryptic
+  `harn explain` description now names the invariants it walks
+  (`fs.writes`, `approval.reachability`, …); `harn publish` is honest
+  about the registry-submission gap and points users at
+  `harn add <repo-or-path>` in the meantime.
+- **Spec preamble now identifies as pre-1.0** (tracking the workspace
+  `0.7.x` series) instead of claiming "Version: 1.0", which was
+  misleading given the surface-level breaking changes that still ship
+  across minor versions.
+- **Removed stale `#[allow(dead_code)]` annotations** on
+  `Manifest::package` and `Manifest::exports`; both fields are read
+  by package-loading and doctor code paths.
+
+### Tests
+
+- Added regression coverage for the new schema `pattern` cache:
+  repeated validation against a valid pattern still succeeds, and an
+  unparsable pattern (e.g. `[unclosed`) returns a stable
+  `invalid regex pattern` error rather than panicking on the cached
+  re-fetch.
+
+## v0.7.45
+
 ### Added
 
+- **`hostlib_ast_parse_errors` and `hostlib_ast_undefined_names`
+  (#773).** Two new builtins on the `ast::*` hostlib surface so
+  burin-code's syntax-validation and tertiary-diagnostic paths can
+  delete their Swift `Sources/ASTEngine/TreeSitterParseErrors.swift` /
+  `TreeSitterUndefinedNames.swift` fallbacks. `parse_errors` walks the
+  tree-sitter parse for `ERROR` and `MISSING` nodes and emits a flat
+  list with 0-based row/column ranges, byte ranges, a short
+  human-readable `message`, the offending `snippet` (truncated to 60
+  chars, newlines escaped), and a `missing` flag — plus
+  `top_level_decl_count` keyed off the same per-language declaration
+  table the Swift fallback uses (TypeScript, JavaScript, Go, Rust,
+  Python, Java, C/C++, C#, Kotlin, Ruby, PHP, Scala). Both `content`
+  and `path` payloads are accepted; `language` accepts canonical wire
+  names ("python", "typescript") or bare extensions ("py", "ts") for
+  parity with the Swift call sites. `undefined_names` ports the
+  per-language profile walker for Python, JavaScript (incl. JSX),
+  TypeScript (incl. TSX), Go, and Ruby, dedupes references by name,
+  and filters against the curated builtin stop-list. Profiles for
+  unsupported languages return `supported = false` so callers fall
+  back to an external linter (LSP / ruff / tsc / go vet). New JSON
+  schemas under `crates/harn-hostlib/schemas/ast/parse_errors.*.json`
+  and `undefined_names.*.json` ship with the crate so downstream
+  schema-drift tests see the contract.
 - **Cross-slice predicate budget scheduler (#736).** `PredicateExecutor`
   now schedules predicate work fairly across multiple candidate slices
   via a new `execute_slices(slices)` entrypoint and the

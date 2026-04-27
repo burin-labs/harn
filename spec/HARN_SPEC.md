@@ -1,6 +1,11 @@
 # Harn language specification
 
-Version: 1.0 (derived from implementation, 2026-04-01)
+Version: tracks the workspace `0.7.x` series; derived from the
+implementation and updated alongside it. The language is still
+pre-1.0 — surface-level breaking changes are possible between minor
+releases. See [`CHANGELOG.md`](../CHANGELOG.md) for what changed and
+when, and the `Stability` column in subsections below for per-feature
+guarantees.
 
 Harn is a pipeline-oriented programming language for orchestrating AI agents.
 It is implemented as a Rust workspace with a lexer, parser, type checker,

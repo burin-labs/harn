@@ -386,26 +386,9 @@ pub(crate) fn absolutize_from_cwd(path: &Path) -> Result<PathBuf, String> {
     Ok(candidate)
 }
 
-pub(super) fn format_timestamp(value: OffsetDateTime) -> String {
-    value.format(&Rfc3339).unwrap_or_else(|_| value.to_string())
-}
-
-pub(super) fn format_duration(value: StdDuration) -> String {
-    if value.as_secs() == 0 {
-        return format!("{}ms", value.as_millis());
-    }
-    let seconds = value.as_secs();
-    if seconds < 60 {
-        return format!("{seconds}s");
-    }
-    if seconds < 60 * 60 {
-        return format!("{}m", seconds / 60);
-    }
-    if seconds < 60 * 60 * 24 {
-        return format!("{}h", seconds / (60 * 60));
-    }
-    format!("{}d", seconds / (60 * 60 * 24))
-}
+pub(super) use crate::format::{
+    format_duration_coarse as format_duration, format_timestamp_rfc3339 as format_timestamp,
+};
 
 fn age_since(then: OffsetDateTime) -> StdDuration {
     let now = OffsetDateTime::now_utc();
