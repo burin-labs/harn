@@ -37,12 +37,14 @@ use crate::registry::{BuiltinRegistry, HostlibCapability, RegisteredBuiltin, Syn
 mod language;
 mod outline;
 mod parse;
+mod parse_errors;
 mod symbols;
 mod symbols_call;
 mod types;
+mod undefined_names;
 
 pub use language::Language;
-pub use types::{OutlineItem, ParsedNode, Symbol, SymbolKind};
+pub use types::{OutlineItem, ParseError, ParsedNode, Symbol, SymbolKind, UndefinedName};
 
 /// Programmatic entry point to the AST builtins. Embedders typically go
 /// through the registered builtins, but tests and tools that want
@@ -121,6 +123,18 @@ impl HostlibCapability for AstCapability {
             symbols_call::run,
         );
         register(registry, "hostlib_ast_outline", "outline", outline::run);
+        register(
+            registry,
+            "hostlib_ast_parse_errors",
+            "parse_errors",
+            parse_errors::run,
+        );
+        register(
+            registry,
+            "hostlib_ast_undefined_names",
+            "undefined_names",
+            undefined_names::run,
+        );
     }
 }
 
