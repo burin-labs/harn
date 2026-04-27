@@ -276,6 +276,7 @@ pub(crate) async fn vm_call_llm_api_with_body(
         if ct.contains("text/event-stream") {
             return vm_call_llm_api_sse_from_response(
                 response,
+                provider,
                 model,
                 &resolved,
                 tx,
@@ -283,7 +284,7 @@ pub(crate) async fn vm_call_llm_api_with_body(
             )
             .await;
         }
-        return vm_call_llm_api_ndjson_from_response(response, model, tx).await;
+        return vm_call_llm_api_ndjson_from_response(response, provider, model, tx).await;
     }
 
     let response = req.send().await.map_err(|e| {
@@ -322,6 +323,7 @@ pub(crate) async fn vm_call_llm_api_with_body(
 /// tests can drive the same code path against an in-memory `AsyncBufRead`.
 async fn vm_call_llm_api_sse_from_response(
     response: reqwest::Response,
+    provider: &str,
     model: &str,
     resolved: &crate::llm::helpers::ResolvedProvider,
     delta_tx: DeltaSender,
@@ -335,6 +337,7 @@ async fn vm_call_llm_api_sse_from_response(
     ));
     consume_sse_lines(
         reader,
+        provider,
         model,
         resolved.is_anthropic_style,
         delta_tx,
@@ -404,6 +407,7 @@ fn streaming_tool_call_id(provider_id: &str, fallback_index: usize) -> String {
 /// the trailing accumulator drain that finalize the call live here.
 pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
     reader: R,
+    provider: &str,
     model: &str,
     is_anthropic_style: bool,
     delta_tx: DeltaSender,
@@ -873,6 +877,20 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
         )))));
     }
 
+    // Use the caller-supplied provider id rather than collapsing every
+    // non-anthropic stream to "openai". The provider name shows up in the
+    // observability transcript (`agent_observe::dump_llm_response`) and is
+    // load-bearing for downstream classifiers (e.g. honors_chat_template_kwargs
+    // routing in capability lookup) — collapsing it to "openai" hides which
+    // OpenAI-compatible server (vLLM, llama.cpp, OpenRouter, llamacpp) the
+    // call actually went to. Anthropic's classic SSE shape still implies
+    // provider="anthropic" because the wire protocol is anthropic-specific
+    // even when the configured provider name disagrees (proxies / mocks).
+    let result_provider = if is_anthropic_style {
+        "anthropic".to_string()
+    } else {
+        provider.to_string()
+    };
     Ok(LlmResult {
         text,
         tool_calls,
@@ -881,11 +899,7 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
         cache_read_tokens,
         cache_write_tokens,
         model: model.to_string(),
-        provider: if is_anthropic_style {
-            "anthropic".to_string()
-        } else {
-            "openai".to_string()
-        },
+        provider: result_provider,
         thinking: if thinking_text.is_empty() {
             None
         } else {
@@ -906,6 +920,7 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
 /// Also supports OpenAI-compatible NDJSON where each line is `data: {...}`.
 async fn vm_call_llm_api_ndjson_from_response(
     response: reqwest::Response,
+    provider: &str,
     model: &str,
     delta_tx: DeltaSender,
 ) -> Result<LlmResult, VmError> {
@@ -1000,7 +1015,12 @@ async fn vm_call_llm_api_ndjson_from_response(
         cache_read_tokens: 0,
         cache_write_tokens: 0,
         model: result_model,
-        provider: "ollama".to_string(),
+        // NDJSON is currently only consumed for Ollama's `/api/chat`, but
+        // pass the caller-supplied provider through anyway so the result
+        // matches `opts.provider` exactly. Future engines that adopt
+        // NDJSON streaming (some llama.cpp builds, mlx-vlm) will get the
+        // right label without additional plumbing.
+        provider: provider.to_string(),
         thinking,
         stop_reason: None,
         blocks,
@@ -1114,6 +1134,7 @@ mod streaming_tool_call_tests {
         let reader = tokio::io::BufReader::new(bytes);
         let result = consume_sse_lines(
             reader,
+            if is_anthropic { "anthropic" } else { "openai" },
             "test-model",
             is_anthropic,
             delta_tx,
@@ -1331,7 +1352,7 @@ mod streaming_tool_call_tests {
         let events = install_capturing_sink(&session_id);
         let (delta_tx, _delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
         let reader = tokio::io::BufReader::new(body.as_bytes());
-        let _result = consume_sse_lines(reader, "test-model", true, delta_tx, None)
+        let _result = consume_sse_lines(reader, "anthropic", "test-model", true, delta_tx, None)
             .await
             .expect("parse");
         let captured = events.lock().expect("capture mutex").clone();
