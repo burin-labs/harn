@@ -167,6 +167,98 @@ fn write_invariants_with_many_predicates(dir: &std::path::Path, count: usize) {
 }
 
 #[test]
+fn flow_ship_watch_surfaces_bootstrap_policy_when_present() {
+    let repo = demo_repo();
+    fs::write(
+        repo.path().join("meta-invariants.harn"),
+        r#"
+@bootstrap_maintainers(approvers: ["role:flow-platform", "user:alice"])
+fn _bootstrap_marker() {
+  return nil
+}
+"#,
+    )
+    .unwrap();
+    let store_path = repo.path().join(".harn/flow.sqlite");
+    let store = SqliteFlowStore::open(&store_path, "flow-bootstrap").unwrap();
+    let mut atoms = Vec::new();
+    for index in 0..3 {
+        let parents = atoms
+            .last()
+            .map(|atom: &Atom| vec![atom.id])
+            .unwrap_or_default();
+        atoms.push(atom(index, parents));
+    }
+    for atom in &atoms {
+        store.emit_atom(atom).unwrap();
+    }
+    drop(store);
+
+    let mock_pr_path = repo.path().join(".harn/flow/mock-pr.json");
+    let output = Command::new(env!("CARGO_BIN_EXE_harn"))
+        .current_dir(repo.path())
+        .args([
+            "flow",
+            "ship",
+            "watch",
+            "--store",
+            store_path.to_str().unwrap(),
+            "--mock-pr-out",
+            mock_pr_path.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stdout={}, stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+
+    let payload: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let bootstrap = &payload["predicate_validation"]["bootstrap_policy"];
+    assert_eq!(bootstrap["status"], "present");
+    let hash = bootstrap["hash"].as_str().unwrap();
+    assert!(hash.starts_with("sha256:"), "{hash}");
+    let maintainers = bootstrap["maintainers"].as_array().unwrap();
+    assert_eq!(maintainers.len(), 2);
+    assert_eq!(maintainers[0]["kind"], "role");
+    assert_eq!(maintainers[0]["id"], "flow-platform");
+    assert_eq!(maintainers[1]["kind"], "principal");
+    assert_eq!(maintainers[1]["id"], "user:alice");
+}
+
+#[test]
+fn flow_ship_watch_marks_bootstrap_policy_absent_when_missing() {
+    let repo = demo_repo();
+    let store_path = repo.path().join(".harn/flow.sqlite");
+    let store = SqliteFlowStore::open(&store_path, "flow-bootstrap-absent").unwrap();
+    store.emit_atom(&atom(0, Vec::new())).unwrap();
+    drop(store);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_harn"))
+        .current_dir(repo.path())
+        .args([
+            "flow",
+            "ship",
+            "watch",
+            "--store",
+            store_path.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+
+    let payload: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        payload["predicate_validation"]["bootstrap_policy"]["status"],
+        "absent"
+    );
+}
+
+#[test]
 fn flow_ship_watch_blocks_when_predicate_union_explodes() {
     let temp = TempDir::new().unwrap();
     let repo = temp.path();

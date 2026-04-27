@@ -172,6 +172,49 @@ in-toto/SLSA: the policy code, the subject it evaluated, and the actor that
 approved it must be separable audit facts. Harn's subject is a Flow slice rather
 than a build artifact, but the trust boundary is the same.
 
+### `meta-invariants.harn` shape and validators
+
+The bootstrap file is parsed by the existing Harn lexer/parser — the only
+syntactic novelty is a top-level `@bootstrap_maintainers(approvers: [...])`
+attribute that lists human maintainer roles or principals allowed to promote
+bootstrap edits. A maintainer entry is `"role:<name>"` (matched as
+`Approver::Role`) or `"user:<id>"` / any other string (matched as
+`Approver::Principal`). Repos that omit the attribute fall back to a single
+`role:flow-platform` approver — the same default used by the Ship Captain
+predicate-count ceiling.
+
+Two Rust functions in
+`crates/harn-vm/src/flow/predicates/bootstrap.rs` carry the policy:
+
+- `validate_predicate_edit(proposed_source, author, previous_policy)` runs
+  the bootstrap rules against a proposed `invariants.harn` edit. Missing
+  `@archivist(...)` provenance, partial provenance fields, kind-collision
+  attributes, and unresolved semantic fallbacks are all promoted from the
+  parser's soft warnings into hard `Block` verdicts with stable codes
+  (`bootstrap_missing_archivist`, `bootstrap_archivist_provenance_incomplete`,
+  `bootstrap_kind_collision`, `bootstrap_missing_semantic_fallback`,
+  `bootstrap_unresolved_semantic_fallback`). The previous bootstrap policy
+  hash is pinned in the validation result so the slice approval chain has an
+  explicit audit pointer.
+- `validate_bootstrap_edit(proposed_source, author, previous_policy)` runs
+  against a proposed `meta-invariants.harn` edit. Archivist authorship is a
+  hard `Block` (`bootstrap_archivist_cannot_author_bootstrap`); any
+  non-Archivist actor returns `RequireApproval` routed to one of the
+  previous policy's maintainers (or the default role on initial seed). The
+  previous policy hash and the proposed policy hash are both pinned in the
+  result.
+
+`harn flow ship watch` and `harn flow archivist scan` now surface the
+discovered bootstrap policy alongside the existing predicate validation
+payload. When `meta-invariants.harn` is present at the predicate root, the
+JSON output includes `bootstrap_policy.status = "present"` together with the
+policy hash and the resolved maintainer list; otherwise the field reports
+`status = "absent"` and the path Flow looked for. The actual `Block` /
+`RequireApproval` verdicts from the validators are returned to in-process
+callers (Archivist promotion, future `harn flow validate` subcommand) — Ship
+Captain only surfaces the discovered policy hash and maintainers, since
+Phase 0 doesn't yet evaluate proposed edits during atom emission.
+
 ## Decision 3: Semantic Predicate Determinism
 
 Default stance: every `@semantic` predicate must have a deterministic fallback.
@@ -314,8 +357,11 @@ absence of atom history explicit.
 The decisions above leave concrete implementation work beyond the already
 landed and in-review predicate tickets:
 
-- [#734](https://github.com/burin-labs/harn/issues/734): add
-  `meta-invariants.harn` bootstrap validation and approval-chain checks.
+- ~~[#734](https://github.com/burin-labs/harn/issues/734): add
+  `meta-invariants.harn` bootstrap validation and approval-chain checks.~~
+  Closed by `validate_predicate_edit` /
+  `validate_bootstrap_edit` plus the `bootstrap_policy` field surfaced in
+  `harn flow ship watch` and `harn flow archivist scan`.
 - [#735](https://github.com/burin-labs/harn/issues/735): deterministic
   fallback metadata and enforcement for `@semantic` predicates.
 - ~~[#736](https://github.com/burin-labs/harn/issues/736): add cross-slice

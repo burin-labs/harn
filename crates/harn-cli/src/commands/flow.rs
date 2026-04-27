@@ -147,6 +147,7 @@ fn run_ship_watch(args: &crate::cli::FlowShipWatchArgs) -> Result<i32, String> {
     if !args.json {
         print_discovery_warnings(&diagnostics);
     }
+    let bootstrap_payload = bootstrap_policy_payload(&args.predicate_root);
     let predicates = harn_vm::flow::resolve_predicates_for_touched_directories(&chains);
     let predicate_payload = predicates
         .iter()
@@ -219,6 +220,7 @@ fn run_ship_watch(args: &crate::cli::FlowShipWatchArgs) -> Result<i32, String> {
             "status": validation_status,
             "predicates": predicate_payload,
             "ceiling": ceiling_payload,
+            "bootstrap_policy": bootstrap_payload,
             "diagnostics": diagnostics.iter().map(|(path, diagnostic)| json!({
                 "path": path,
                 "severity": discovery_severity_label(diagnostic.severity),
@@ -280,6 +282,42 @@ fn serialize_ceiling_outcome(
     payload
 }
 
+fn bootstrap_policy_payload(predicate_root: &Path) -> serde_json::Value {
+    use harn_vm::flow::Approver;
+    let Some(discovered) = harn_vm::flow::discover_bootstrap_policy(predicate_root) else {
+        return json!({
+            "status": "absent",
+            "path": predicate_root.join(harn_vm::flow::META_INVARIANTS_FILE),
+        });
+    };
+    let maintainers = discovered
+        .policy
+        .maintainers
+        .iter()
+        .map(|approver| match approver {
+            Approver::Role { name } => json!({"kind": "role", "id": name}),
+            Approver::Principal { id } => json!({"kind": "principal", "id": id}),
+        })
+        .collect::<Vec<_>>();
+    let diagnostics = discovered
+        .diagnostics
+        .iter()
+        .map(|diagnostic| {
+            json!({
+                "severity": discovery_severity_label(diagnostic.severity),
+                "message": diagnostic.message,
+            })
+        })
+        .collect::<Vec<_>>();
+    json!({
+        "status": "present",
+        "path": discovered.path,
+        "hash": discovered.policy.hash,
+        "maintainers": maintainers,
+        "diagnostics": diagnostics,
+    })
+}
+
 fn discovery_severity_label(severity: harn_vm::flow::DiscoveryDiagnosticSeverity) -> &'static str {
     match severity {
         harn_vm::flow::DiscoveryDiagnosticSeverity::Warning => "warning",
@@ -334,6 +372,7 @@ fn run_archivist_scan(args: &crate::cli::FlowArchivistScanArgs) -> Result<i32, S
     }
     let convention = mine_convention_signals(&repo);
     let motion = mine_motion_signals(&repo);
+    let bootstrap_payload = bootstrap_policy_payload(&repo);
     let proposals = archivist_proposals(
         &repo,
         &inventory,
@@ -363,6 +402,7 @@ fn run_archivist_scan(args: &crate::cli::FlowArchivistScanArgs) -> Result<i32, S
         },
         "existing_predicates": predicates,
         "discovery_diagnostics": discovery_diagnostics,
+        "bootstrap_policy": bootstrap_payload,
         "proposals": proposals,
         "shadow_evaluation": shadow_evaluation,
     });
