@@ -851,21 +851,39 @@ println(text.source.sha256)
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `parse_junit_xml(input)` | input: string or bytes | list of dict | Parse a JUnit XML test report into per-case dicts. Lenient: malformed input returns `[]` instead of throwing |
+| `parse_junit_xml(input)` | input: string or bytes | list of dict | Parse a JUnit XML test report into per-case dicts. Lenient: malformed input returns `[]` |
+| `parse_trx_xml(input)` | input: string or bytes | list of dict | Parse a Visual Studio `.trx` test result file (emitted by `dotnet test --logger trx`) into per-case dicts |
+| `parse_tap(text)` | text: string | list of dict | Parse Test Anything Protocol output (TAP 12/13/14) into per-case dicts. Tolerates interleaved diagnostics, BOM, CRLF, missing version line |
+| `parse_cargo_test_text(text)` | text: string | list of dict | Parse `cargo test`'s default plain-text output (`test foo::bar ... ok` lines + `failures:` block) |
+| `parse_go_test_text(stdout, stderr?)` | stdout: string, stderr: string (optional) | list of dict | Parse `go test`'s default plain-text output (`--- PASS:` / `--- FAIL:` / `--- SKIP:` blocks) |
 
-JUnit XML is the de facto interchange format for compiled-language test
-runners — GTest with `--gtest_output=xml`, Maven Surefire and Gradle for
-JUnit, xUnit/.NET — and is also emitted by pytest, vitest, and
-cargo-nextest's JUnit dialect. Each returned dict has the shape:
+All five parsers return a list of dicts with the same shape, so a
+script wrapping `process.run` of a test command can pick the parser
+that matches the runner and extract structured pass/fail data without
+writing per-runner ad-hoc text scraping. Coverage:
+
+| Format | Languages / runners |
+|---|---|
+| JUnit XML | Maven Surefire, Gradle, JUnit 4/5, xUnit, GTest (`--gtest_output=xml`), pytest (`--junitxml`), vitest (`--reporter=junit`), cargo-nextest, PHPUnit, Swift (`swift test --xunit-output`), ScalaTest, jest-junit |
+| TRX | C# / .NET via `dotnet test --logger trx` |
+| TAP | bats (Bash), Perl `prove`, Lua `busted --output=tap`, deno test, Node `--test-reporter=tap` |
+| cargo libtest text | Rust default (`cargo test`) |
+| `go test` text | Go default (`go test`, no `-json`) |
+
+Each returned dict has the shape:
 
 | Key | Type | Description |
 |---|---|---|
-| `name` | string | Fully qualified test name (`classname::name` when a `classname` attribute is present, else `name` alone) |
+| `name` | string | Fully qualified test name (e.g. `"classname::name"` for JUnit XML) |
 | `status` | string | One of `"passed"`, `"failed"`, `"skipped"`, `"errored"` |
-| `duration_ms` | int | `time` attribute in seconds, converted to milliseconds |
-| `message` | string or nil | Concatenation of any `<failure>` / `<error>` `message` attribute and child text |
-| `stdout` | string or nil | Captured `<system-out>` content |
-| `stderr` | string or nil | Captured `<system-err>` content |
+| `duration_ms` | int | Test duration in milliseconds (0 when the format omits it) |
+| `message` | string or nil | Failure / error message and stack trace (joined with `\n---\n` when there are multiple) |
+| `stdout` | string or nil | Captured stdout (JUnit `<system-out>`, TRX `<StdOut>`, etc.) |
+| `stderr` | string or nil | Captured stderr (JUnit `<system-err>`, TRX `<StdErr>`, etc.) |
+
+All parsers are deliberately lenient: malformed input yields fewer
+records, never an exception. Unknown lines / elements are ignored
+rather than rejected.
 
 ```harn
 pipeline summarize() {
@@ -878,6 +896,11 @@ pipeline summarize() {
   }
 }
 ```
+
+For runners that emit JSON (cargo `--format=json`, go `-json`, vitest
+/ jest `--reporter=json`, pytest with `pytest-json-report`), pipe
+through `json_parse` instead — the formats are stable enough that
+these parsers don't need a Rust implementation.
 
 ## HTTP
 

@@ -6,8 +6,9 @@
 //! `run_test` stores raw stdout/stderr + the JUnit XML path it asked the
 //! runner to write into a process-local cache, keyed by an opaque
 //! `result_handle`. This builtin pulls that record out and parses it into
-//! `TestRecord`s. Parsers in [`crate::tools::test_parsers`] handle the
-//! per-runner formats (JUnit XML, cargo libtest plain text, go test text).
+//! `TestRecord`s. Parsers in [`harn_vm::test_parsers`] handle the
+//! per-runner formats (JUnit XML, cargo libtest plain text, go test text)
+//! and are shared with the `parse_junit_xml` stdlib builtin.
 //!
 //! The cache is intentionally scoped to the hostlib process: handles are
 //! ephemeral, not persisted to disk, and are not shared across embedders.
@@ -26,7 +27,7 @@ use once_cell::sync::Lazy;
 use crate::error::HostlibError;
 use crate::tools::payload::{optional_bool, require_dict_arg, require_string};
 use crate::tools::response::ResponseBuilder;
-use crate::tools::test_parsers;
+use harn_vm::test_parsers;
 
 pub(crate) const NAME: &str = "hostlib_tools_inspect_test_results";
 
