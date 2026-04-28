@@ -1046,6 +1046,9 @@ impl<'a> Linter<'a> {
             if name.starts_with("__") {
                 continue;
             }
+            if name.starts_with("hostlib_") {
+                continue;
+            }
             let suggestion = if let Some(closest) =
                 find_closest_match(name, self.known_functions.iter().map(|s| s.as_str()), 2)
             {

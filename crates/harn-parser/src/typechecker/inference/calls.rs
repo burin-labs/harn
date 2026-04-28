@@ -595,6 +595,13 @@ impl TypeChecker {
                 || imported.contains(name)
                 || scope.is_generic_type_param(name)
                 || name.starts_with("__")
+                // `hostlib_*` builtins are registered onto the VM at
+                // runtime by `harn_hostlib::install_default` (see the
+                // `hostlib` cargo feature in `harn-cli`). The parser
+                // has no static signature for them, so static
+                // resolution treats the prefix as an opaque escape
+                // hatch — same idea as `__`-prefixed names.
+                || name.starts_with("hostlib_")
                 // Built-in value constructors — `Ok`/`Err` are VM
                 // builtins (Result variants) but are not in the
                 // parser's BUILTIN_SIGNATURES table because they have

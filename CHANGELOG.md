@@ -7,6 +7,66 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
+## Unreleased
+
+### Added
+
+- **A2A AgentCard discovery alignment (#806/#821).** Serve
+  `/.well-known/agent-card.json` as the canonical A2A discovery endpoint
+  while preserving legacy aliases (`/agent/card`, `/.well-known/a2a-agent`,
+  `/.well-known/agent.json`). The emitted card now matches the current
+  upstream schema — `supportedInterfaces` array (with `protocolBinding` /
+  `protocolVersion`), `defaultInputModes` / `defaultOutputModes`,
+  per-skill `tags` / `examples` / `inputModes` / `outputModes`,
+  `securitySchemes` as object — and outbound A2A discovery prefers the
+  canonical path with a fallback chain. The Harn Agents API card schema
+  is now `HarnAgentCard` with a nested `a2a_agent_card` projection.
+
+- **ACP lifecycle extension contract formalized (#817/#820).** Harn now
+  advertises its ACP extensions during `initialize` under
+  `agentCapabilities._meta.harn`, including pinned upstream-schema
+  compatibility, extension `sessionUpdate` discriminators, and the
+  tool/content extension fields. Emitted `plan` updates align with the
+  upstream schema by using `entries` instead of the old Harn-local
+  `plan` key. Host rendering and compatibility expectations are
+  documented in `docs/src/bridge-protocol.md`.
+
+### Changed
+
+- **OpenAI-compatible streaming preserves token usage (#173/#818).**
+  OpenAI-compatible streaming endpoints (including Ollama when wired
+  through `/v1/chat/completions`) now request
+  `stream_options.include_usage` so usage figures survive streamed
+  responses. Native Ollama `/api/chat` behavior is preserved (usage
+  arrives in the final NDJSON chunk). OpenRouter / OpenAI-compatible
+  cache-write usage is now read from
+  `usage.prompt_tokens_details.cache_write_tokens`.
+
+- **Documentation IA reorganized (#814/#819).** mdBook summary split
+  into smaller top-level groups (language, agent runtime, protocols,
+  orchestration, packages/connectors, observability, operations,
+  reference, migrations). New protocol support matrix and cross-links
+  to the canonical MCP/ACP/A2A guides. Release-workflow material moved
+  out of the CLI reference, README release section trimmed, and stale
+  implementation-wave issue/path references removed from user docs.
+
+### Fixed
+
+- **`hostlib_*` calls in static `.harn` files no longer break
+  `harn check --workspace` and `harn lint`.** Hostlib builtins
+  (`hostlib_code_index_*`, `hostlib_ast_*`, `hostlib_scanner_*`, …)
+  are registered onto the VM at runtime by
+  `harn_hostlib::install_default` and have no static signature in the
+  parser's BUILTIN_SIGNATURES table. Before this fix, calling them
+  directly from a workspace `.harn` file raised
+  `error: call target X is not defined or imported` at typecheck and
+  `lint[undefined-function]` warnings during lint. The cross-module
+  resolver and the lint's call-graph walk now treat `hostlib_*` as an
+  opaque escape hatch — the same way `__`-prefixed names are
+  treated. The runtime VM still does the real dispatch, so typos
+  surface there instead of at parse time (the same trade-off
+  `host_call("…")` already accepts).
+
 ## v0.7.47
 
 ### Added

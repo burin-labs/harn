@@ -306,3 +306,24 @@ fn test_cross_module_builtin_not_flagged() {
         .collect();
     assert!(errs.is_empty(), "builtin should not error, got: {errs:?}");
 }
+
+#[test]
+fn test_cross_module_hostlib_prefix_not_flagged() {
+    // `hostlib_*` names are registered onto the VM at runtime by
+    // `harn_hostlib::install_default`. The parser's static
+    // BUILTIN_SIGNATURES table does not (and should not) enumerate
+    // them, so the cross-module resolver treats the prefix as an
+    // opaque escape hatch — the same way `__`-prefixed names are
+    // treated.
+    let diags =
+        check_source_with_imports(r#"pipeline t(task) { hostlib_code_index_stats({}) }"#, &[]);
+    let errs: Vec<&String> = diags
+        .iter()
+        .filter(|d| d.severity == DiagnosticSeverity::Error)
+        .map(|d| &d.message)
+        .collect();
+    assert!(
+        errs.is_empty(),
+        "hostlib_-prefixed call should not error, got: {errs:?}"
+    );
+}
