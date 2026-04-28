@@ -74,13 +74,13 @@ struct ReviewFindingPayload {
     category: String,
     #[serde(default)]
     title: String,
-    #[serde(default)]
+    #[serde(default, alias = "description", alias = "body", alias = "message")]
     detail: String,
     #[serde(default)]
     suggestion: Option<String>,
-    #[serde(default)]
+    #[serde(default, alias = "path")]
     file: Option<String>,
-    #[serde(default)]
+    #[serde(default, alias = "line")]
     line_start: Option<i64>,
     #[serde(default)]
     line_end: Option<i64>,
@@ -302,7 +302,27 @@ fn rubric_preset_body(name: &str) -> &'static str {
 }
 
 fn build_review_system_prompt() -> String {
-    "You are a strict self-reviewer for a git diff before pull request open. Return only valid JSON that matches the requested schema. Prefer high-signal findings. Do not invent issues without evidence in the diff.".to_string()
+    r#"You are a strict self-reviewer for a git diff before pull request open. Return only valid JSON in exactly this shape:
+{
+  "summary": "one concise sentence",
+  "findings": [
+    {
+      "severity": "blocking|warning|info",
+      "category": "short category",
+      "title": "short title",
+      "detail": "specific evidence and impact",
+      "suggestion": "optional concrete fix",
+      "file": "optional changed file path",
+      "line_start": 1,
+      "line_end": 1
+    }
+  ]
+}
+Use these key names for findings: `severity`, `category`, `title`, `detail`, `suggestion`, `file`, `line_start`, and `line_end`. Omit optional keys or set them to null when unknown.
+
+Prefer no finding over a speculative finding. Report only concrete correctness, security, compatibility, rollout, or test-coverage risks supported by the diff. Do not report style, naming, or preference-only concerns unless they create a concrete defect.
+
+Read every hunk for a changed file before claiming a switch case, branch, config entry, caller, provider, test, or symbol is missing. If the diff adds the allegedly missing name anywhere in the relevant file, drop that finding. A suggestion that only says to verify, ensure, consider, or monitor something is not actionable enough to report."#.to_string()
 }
 
 fn build_review_prompt(
@@ -315,6 +335,17 @@ fn build_review_prompt(
     prior_findings: &[ReviewFinding],
 ) -> String {
     let rubric_label = rubric_preset.as_deref().unwrap_or("custom");
+    if !prior_findings.is_empty() {
+        return build_review_adjudication_prompt(
+            diff,
+            rubric_text,
+            rubric_label,
+            secret_findings,
+            round,
+            max_rounds,
+            prior_findings,
+        );
+    }
     let secret_context = if secret_findings.is_empty() {
         "Secret scan: clean.".to_string()
     } else {
@@ -330,34 +361,60 @@ fn build_review_prompt(
             .join("\n");
         format!("Secret scan findings:\n{findings}")
     };
-    let prior_context = if prior_findings.is_empty() {
-        "Prior round findings: none.".to_string()
-    } else {
-        let findings = prior_findings
-            .iter()
-            .map(|finding| {
-                format!(
-                    "- [{}] {}: {}",
-                    finding.severity, finding.title, finding.detail
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-        format!("Prior round findings:\n{findings}")
-    };
     format!(
         "Self-review round {round} of {max_rounds}.\n\
 Rubric preset: {rubric_label}\n\
 Rubric:\n{rubric_text}\n\n\
 Rules:\n\
 - Only report issues supported by the diff.\n\
+- Do not ask the author to merely verify, ensure, or consider something; a finding must name a concrete broken contract or risk.\n\
+- A diff is not a full repository listing. Do not claim a required file, provider, config, test, or caller is missing solely because it is absent from the diff.\n\
+- Check all hunks in a changed file before reporting a missing switch case, branch, config entry, caller, provider, test, or symbol; the diff may add it in a later hunk.\n\
+- Do not preserve prior-round findings by default. Treat them as candidates to disprove; the final round should be cleaner and more evidence-backed than the first.\n\
+- Hypothetical compatibility or rollout concerns are not findings unless the diff directly changes a supported contract and explains the likely failure.\n\
+- Drop any candidate whose only concrete recommendation is to verify, ensure, consider, or monitor behavior.\n\
 - Use severity `blocking` for issues that should stop PR open.\n\
 - Use severity `warning` for non-blocking but important follow-up.\n\
 - Use severity `info` sparingly.\n\
 - Prefer the smallest set of high-signal findings.\n\
 - If the diff is clean, return an empty findings list.\n\n\
 {secret_context}\n\n\
-{prior_context}\n\n\
+Diff:\n```diff\n{diff}\n```"
+    )
+}
+
+fn build_review_adjudication_prompt(
+    diff: &str,
+    rubric_text: &str,
+    rubric_label: &str,
+    secret_findings: &[SecretFinding],
+    round: usize,
+    max_rounds: usize,
+    prior_findings: &[ReviewFinding],
+) -> String {
+    let secret_context = if secret_findings.is_empty() {
+        "Secret scan: clean.".to_string()
+    } else {
+        format!(
+            "Secret scan injected {} deterministic finding(s); do not duplicate them.",
+            secret_findings.len()
+        )
+    };
+    let candidates =
+        serde_json::to_string_pretty(prior_findings).unwrap_or_else(|_| "[]".to_string());
+    format!(
+        "Self-review adjudication round {round} of {max_rounds}.\n\
+Rubric preset: {rubric_label}\n\
+Rubric:\n{rubric_text}\n\n\
+Your job is to verify candidate findings from the previous round. Do not add new findings in this round. Return only the subset of candidates that are still clearly supported by the diff, optionally tightening their wording, severity, line range, or suggestion.\n\n\
+Drop a candidate when any of these are true:\n\
+- The candidate points to a file that is not changed in the diff.\n\
+- The candidate claims a switch case, branch, config entry, caller, provider, test, or symbol is missing, but the diff adds that name anywhere in the relevant file.\n\
+- The candidate relies on absence from the diff as proof of absence from the repository.\n\
+- The candidate is hypothetical, preference-only, or only asks the author to verify, ensure, consider, or monitor behavior.\n\
+- The candidate cannot be tied to a concrete changed line and likely user-visible failure.\n\n\
+{secret_context}\n\n\
+Candidate findings JSON:\n```json\n{candidates}\n```\n\n\
 Diff:\n```diff\n{diff}\n```"
     )
 }
@@ -373,16 +430,20 @@ fn build_review_llm_options() -> VmValue {
                 "type": "array",
                 "items": {
                     "type": "object",
-                    "required": ["severity", "category", "title", "detail"],
                     "additionalProperties": false,
                     "properties": {
                         "severity": {"type": "string", "enum": ["blocking", "warning", "info"]},
                         "category": {"type": "string"},
                         "title": {"type": "string"},
                         "detail": {"type": "string"},
+                        "description": {"type": "string"},
+                        "body": {"type": "string"},
+                        "message": {"type": "string"},
                         "suggestion": {"type": ["string", "null"]},
                         "file": {"type": ["string", "null"]},
+                        "path": {"type": ["string", "null"]},
                         "line_start": {"type": ["integer", "null"]},
+                        "line": {"type": ["integer", "null"]},
                         "line_end": {"type": ["integer", "null"]}
                     }
                 }
@@ -396,7 +457,7 @@ fn build_review_llm_options() -> VmValue {
         "response_format": "json",
         "output_schema": schema,
         "output_validation": "error",
-        "schema_retries": 1,
+        "schema_retries": 3,
     }))
 }
 
@@ -725,6 +786,17 @@ mod tests {
     }
 
     #[test]
+    fn self_review_system_prompt_names_exact_json_shape() {
+        let prompt = build_review_system_prompt();
+        assert!(prompt.contains("\"summary\""));
+        assert!(prompt.contains("\"findings\""));
+        assert!(prompt.contains("\"detail\""));
+        assert!(prompt.contains("Use these key names"));
+        assert!(prompt.contains("Prefer no finding over a speculative finding"));
+        assert!(prompt.contains("Read every hunk"));
+    }
+
+    #[test]
     fn self_review_records_llm_and_trust_results() {
         with_mock_provider(|| {
             let out = run_script(
@@ -771,6 +843,50 @@ pipeline test(task) {
     }
 
     #[test]
+    fn self_review_normalizes_missing_finding_fields() {
+        with_mock_provider(|| {
+            let out = run_script(
+                r#"
+import "std/review"
+
+pipeline test(task) {
+  llm_mock({
+    text: "{\"summary\":\"One issue.\",\"findings\":[{\"severity\":\"warning\",\"category\":\"runtime_safety\",\"detail\":\"The changed path can crash on startup.\"}]}"
+  })
+  let result: ReviewResult = self_review("diff --git a/src/main.rs b/src/main.rs\n+panic!(\"startup\")", "code", 1)
+  println(len(result.findings) == 1)
+  println(result.findings[0].title == "Review finding")
+  println(result.findings[0].detail == "The changed path can crash on startup.")
+}
+"#,
+            );
+            assert_eq!(out, "true\ntrue\ntrue");
+        });
+    }
+
+    #[test]
+    fn self_review_accepts_common_finding_aliases() {
+        with_mock_provider(|| {
+            let out = run_script(
+                r#"
+import "std/review"
+
+pipeline test(task) {
+  llm_mock({
+    text: "{\"summary\":\"One issue.\",\"findings\":[{\"severity\":\"warning\",\"category\":\"runtime_safety\",\"title\":\"Startup crash\",\"description\":\"The changed path can crash on startup.\",\"path\":\"src/main.rs\",\"line\":1}]}"
+  })
+  let result: ReviewResult = self_review("diff --git a/src/main.rs b/src/main.rs\n+panic!(\"startup\")", "code", 1)
+  println(result.findings[0].detail == "The changed path can crash on startup.")
+  println(result.findings[0].file == "src/main.rs")
+  println(result.findings[0].line_start == 1)
+}
+"#,
+            );
+            assert_eq!(out, "true\ntrue\ntrue");
+        });
+    }
+
+    #[test]
     fn self_review_runs_multiple_rounds_and_includes_prior_findings_in_prompt() {
         with_mock_provider(|| {
             let out = run_script(
@@ -789,11 +905,12 @@ pipeline test(task) {
   let second_prompt = calls[1].messages[0].content
   println(len(result.rounds) == 2)
   println(result.rounds[1].summary == "Clean after reconsidering the evidence.")
-  println(contains(second_prompt, "Prior round findings"))
+  println(contains(second_prompt, "Candidate findings JSON"))
+  println(contains(second_prompt, "Do not add new findings"))
 }
 "#,
             );
-            assert_eq!(out, "true\ntrue\ntrue");
+            assert_eq!(out, "true\ntrue\ntrue\ntrue");
         });
     }
 }

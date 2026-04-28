@@ -310,9 +310,10 @@ fn parse_schema_nudge(
 
 /// Build the corrective user message appended before a schema-retry
 /// attempt. Callers that want full control pass a string via
-/// `schema_retry_nudge`; the `Auto` variant enumerates the schema's
-/// top-level required keys so small / local models re-emit conforming
-/// JSON reliably (see `docs/llm/harn-quickref.md` "Schema retries").
+/// `schema_retry_nudge`; the `Auto` variant summarizes the schema shape
+/// so small / local models can fix nested object mistakes without seeing
+/// the whole JSON Schema again (see `docs/llm/harn-quickref.md` "Schema
+/// retries").
 fn build_schema_nudge(
     errors: &[String],
     schema: Option<&serde_json::Value>,
@@ -331,6 +332,7 @@ fn build_schema_nudge(
         SchemaNudge::Auto => {
             let mut required_keys: Vec<String> = Vec::new();
             let mut property_keys: Vec<String> = Vec::new();
+            let mut shape_lines: Vec<String> = Vec::new();
             if let Some(schema) = schema {
                 if let Some(req) = schema.get("required").and_then(|v| v.as_array()) {
                     for r in req {
@@ -344,6 +346,7 @@ fn build_schema_nudge(
                         property_keys.push(k.clone());
                     }
                 }
+                collect_schema_shape_lines(schema, "root", 0, &mut shape_lines);
             }
             let mut msg =
                 String::from("Your previous response did not match the required JSON schema.");
@@ -357,12 +360,108 @@ fn build_schema_nudge(
                     property_keys.join(", ")
                 ));
             }
+            if !shape_lines.is_empty() {
+                msg.push_str("\nExpected JSON schema shape:");
+                for line in shape_lines {
+                    msg.push_str("\n- ");
+                    msg.push_str(&line);
+                }
+            }
             msg.push_str(
                 "\nRespond again with ONLY valid JSON conforming to the schema. No prose, no markdown fences.",
             );
             msg
         }
     }
+}
+
+const SCHEMA_NUDGE_MAX_DEPTH: usize = 3;
+const SCHEMA_NUDGE_MAX_LINES: usize = 8;
+const SCHEMA_NUDGE_MAX_KEYS: usize = 16;
+
+fn collect_schema_shape_lines(
+    schema: &serde_json::Value,
+    path: &str,
+    depth: usize,
+    lines: &mut Vec<String>,
+) {
+    if depth > SCHEMA_NUDGE_MAX_DEPTH || lines.len() >= SCHEMA_NUDGE_MAX_LINES {
+        return;
+    }
+
+    let object_like = schema
+        .get("type")
+        .and_then(|value| value.as_str())
+        .is_some_and(|kind| kind == "object")
+        || schema.get("properties").is_some();
+    if object_like {
+        if let Some(props) = schema.get("properties").and_then(|value| value.as_object()) {
+            let mut keys = props.keys().cloned().collect::<Vec<_>>();
+            keys.sort();
+            if !keys.is_empty() {
+                let mut line = format!("{path} object allowed keys: {}", join_limited_keys(&keys));
+                let required = schema_required_keys(schema);
+                if !required.is_empty() {
+                    line.push_str(&format!(
+                        "; required keys: {}",
+                        join_limited_keys(&required)
+                    ));
+                }
+                lines.push(line);
+            }
+
+            for key in keys {
+                if lines.len() >= SCHEMA_NUDGE_MAX_LINES {
+                    break;
+                }
+                if let Some(child_schema) = props.get(&key) {
+                    let child_path = if path == "root" {
+                        key
+                    } else {
+                        format!("{path}.{key}")
+                    };
+                    collect_schema_shape_lines(child_schema, &child_path, depth + 1, lines);
+                }
+            }
+        }
+    }
+
+    let array_like = schema
+        .get("type")
+        .and_then(|value| value.as_str())
+        .is_some_and(|kind| kind == "array")
+        || schema.get("items").is_some();
+    if array_like {
+        if let Some(items) = schema.get("items") {
+            collect_schema_shape_lines(items, &format!("{path}[]"), depth + 1, lines);
+        }
+    }
+}
+
+fn schema_required_keys(schema: &serde_json::Value) -> Vec<String> {
+    let mut keys = schema
+        .get("required")
+        .and_then(|value| value.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_str().map(ToString::to_string))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    keys.sort();
+    keys
+}
+
+fn join_limited_keys(keys: &[String]) -> String {
+    if keys.len() <= SCHEMA_NUDGE_MAX_KEYS {
+        return keys.join(", ");
+    }
+    format!(
+        "{}, ... (+{} more)",
+        keys[..SCHEMA_NUDGE_MAX_KEYS].join(", "),
+        keys.len() - SCHEMA_NUDGE_MAX_KEYS
+    )
 }
 
 pub(crate) use self::agent::parse_skill_match_config_public as parse_skill_match_config_dict;
@@ -1356,7 +1455,8 @@ fn register_llm_stream(vm: &mut Vm) {
 mod tests {
     use super::api::LlmCallOptions;
     use super::{
-        compute_validation_errors, execute_llm_call, reset_llm_state, structured_output_errors,
+        build_schema_nudge, compute_validation_errors, execute_llm_call, reset_llm_state,
+        structured_output_errors, SchemaNudge,
     };
     use crate::llm::mock;
     use crate::value::VmValue;
@@ -1451,6 +1551,43 @@ mod tests {
         assert!(errors.iter().any(|err| err.contains("parseable JSON")));
         assert!(errors.iter().any(|err| err.contains("protocol violations")));
         assert!(errors.iter().any(|err| err.contains("token limit")));
+    }
+
+    #[test]
+    fn schema_retry_nudge_includes_nested_array_object_keys() {
+        let schema = serde_json::json!({
+            "type": "object",
+            "required": ["summary", "findings"],
+            "additionalProperties": false,
+            "properties": {
+                "summary": {"type": "string"},
+                "findings": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                            "severity": {"type": "string"},
+                            "title": {"type": "string"},
+                            "detail": {"type": "string"},
+                            "file": {"type": ["string", "null"]},
+                            "line_start": {"type": ["integer", "null"]}
+                        }
+                    }
+                }
+            }
+        });
+        let nudge = build_schema_nudge(
+            &["findings[0].description is not allowed".to_string()],
+            Some(&schema),
+            &SchemaNudge::Auto,
+        );
+
+        assert!(nudge.contains("Required keys: summary, findings."));
+        assert!(nudge.contains("Expected JSON schema shape:"));
+        assert!(nudge.contains("findings[] object allowed keys"));
+        assert!(nudge.contains("detail"));
+        assert!(nudge.contains("line_start"));
     }
 
     #[tokio::test(flavor = "current_thread")]
