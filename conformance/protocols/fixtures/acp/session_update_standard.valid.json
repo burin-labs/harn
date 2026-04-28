@@ -1,0 +1,59 @@
+{
+  "name": "acp.session_update.standard",
+  "protocol": "acp",
+  "schema": "schemas/acp-session-update.schema.json",
+  "expect": "valid",
+  "documents": [
+    {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": {
+        "sessionId": "session-1",
+        "update": {
+          "sessionUpdate": "agent_message_chunk",
+          "content": {
+            "type": "text",
+            "text": "hello",
+            "visible_text": "hello",
+            "visible_delta": "hello"
+          }
+        }
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": {
+        "sessionId": "session-1",
+        "update": {
+          "sessionUpdate": "tool_call_update",
+          "toolCallId": "tool-1",
+          "title": "read_file",
+          "status": "completed",
+          "durationMs": 8,
+          "executionDurationMs": 6,
+          "executor": "harn_builtin",
+          "rawOutput": {
+            "ok": true
+          }
+        }
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": {
+        "sessionId": "session-1",
+        "update": {
+          "sessionUpdate": "plan",
+          "entries": [
+            {
+              "content": "inspect protocol fixtures",
+              "status": "completed"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

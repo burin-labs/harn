@@ -1,0 +1,227 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/conformance/protocols/acp-session-update.schema.json",
+  "title": "Harn ACP session/update profile",
+  "description": "Pinned profile derived from agentclientprotocol/agent-client-protocol schema v0.12.2 plus Harn-advertised session/update extensions.",
+  "type": "object",
+  "required": ["jsonrpc", "method", "params"],
+  "additionalProperties": true,
+  "properties": {
+    "jsonrpc": { "const": "2.0" },
+    "method": { "const": "session/update" },
+    "params": { "$ref": "#/$defs/SessionUpdateParams" }
+  },
+  "$defs": {
+    "SessionUpdateParams": {
+      "type": "object",
+      "required": ["sessionId", "update"],
+      "additionalProperties": true,
+      "properties": {
+        "sessionId": { "type": "string", "minLength": 1 },
+        "update": { "$ref": "#/$defs/SessionUpdate" }
+      }
+    },
+    "SessionUpdate": {
+      "oneOf": [
+        { "$ref": "#/$defs/UserMessageChunk" },
+        { "$ref": "#/$defs/AgentMessageChunk" },
+        { "$ref": "#/$defs/AgentThoughtChunk" },
+        { "$ref": "#/$defs/ToolCall" },
+        { "$ref": "#/$defs/ToolCallUpdate" },
+        { "$ref": "#/$defs/Plan" },
+        { "$ref": "#/$defs/SessionInfoUpdate" },
+        { "$ref": "#/$defs/SkillActivated" },
+        { "$ref": "#/$defs/SkillDeactivated" },
+        { "$ref": "#/$defs/SkillScopeTools" },
+        { "$ref": "#/$defs/ToolSearchQuery" },
+        { "$ref": "#/$defs/ToolSearchResult" },
+        { "$ref": "#/$defs/TranscriptCompacted" },
+        { "$ref": "#/$defs/Handoff" },
+        { "$ref": "#/$defs/FsWatch" },
+        { "$ref": "#/$defs/WorkerUpdate" }
+      ]
+    },
+    "ContentBlock": {
+      "type": "object",
+      "required": ["type"],
+      "additionalProperties": true,
+      "properties": {
+        "type": { "enum": ["text", "resource_link", "resource", "image", "audio"] },
+        "text": { "type": "string" }
+      }
+    },
+    "UserMessageChunk": {
+      "type": "object",
+      "required": ["sessionUpdate"],
+      "additionalProperties": true,
+      "properties": {
+        "sessionUpdate": { "const": "user_message_chunk" },
+        "content": { "$ref": "#/$defs/ContentBlock" }
+      }
+    },
+    "AgentMessageChunk": {
+      "type": "object",
+      "required": ["sessionUpdate", "content"],
+      "additionalProperties": true,
+      "properties": {
+        "sessionUpdate": { "const": "agent_message_chunk" },
+        "content": { "$ref": "#/$defs/ContentBlock" }
+      }
+    },
+    "AgentThoughtChunk": {
+      "type": "object",
+      "required": ["sessionUpdate", "content"],
+      "additionalProperties": true,
+      "properties": {
+        "sessionUpdate": { "const": "agent_thought_chunk" },
+        "content": { "$ref": "#/$defs/ContentBlock" }
+      }
+    },
+    "ToolCall": {
+      "type": "object",
+      "required": ["sessionUpdate", "toolCallId", "title"],
+      "additionalProperties": true,
+      "properties": {
+        "sessionUpdate": { "const": "tool_call" },
+        "toolCallId": { "type": "string", "minLength": 1 },
+        "title": { "type": "string" },
+        "status": { "$ref": "#/$defs/ToolCallStatus" }
+      }
+    },
+    "ToolCallUpdate": {
+      "type": "object",
+      "required": ["sessionUpdate", "toolCallId"],
+      "additionalProperties": true,
+      "properties": {
+        "sessionUpdate": { "const": "tool_call_update" },
+        "toolCallId": { "type": "string", "minLength": 1 },
+        "title": { "type": ["string", "null"] },
+        "status": { "$ref": "#/$defs/NullableToolCallStatus" },
+        "durationMs": { "type": "number", "minimum": 0 },
+        "executionDurationMs": { "type": "number", "minimum": 0 }
+      }
+    },
+    "ToolCallStatus": {
+      "enum": ["pending", "in_progress", "completed", "failed"]
+    },
+    "NullableToolCallStatus": {
+      "anyOf": [
+        { "$ref": "#/$defs/ToolCallStatus" },
+        { "type": "null" }
+      ]
+    },
+    "Plan": {
+      "type": "object",
+      "required": ["sessionUpdate", "entries"],
+      "additionalProperties": true,
+      "properties": {
+        "sessionUpdate": { "const": "plan" },
+        "entries": { "type": "array" }
+      }
+    },
+    "SessionInfoUpdate": {
+      "type": "object",
+      "required": ["sessionUpdate"],
+      "additionalProperties": true,
+      "properties": {
+        "sessionUpdate": { "const": "session_info_update" }
+      }
+    },
+    "SkillActivated": {
+      "type": "object",
+      "required": ["sessionUpdate", "skillName"],
+      "additionalProperties": true,
+      "properties": {
+        "sessionUpdate": { "const": "skill_activated" },
+        "skillName": { "type": "string", "minLength": 1 },
+        "iteration": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "SkillDeactivated": {
+      "type": "object",
+      "required": ["sessionUpdate", "skillName"],
+      "additionalProperties": true,
+      "properties": {
+        "sessionUpdate": { "const": "skill_deactivated" },
+        "skillName": { "type": "string", "minLength": 1 }
+      }
+    },
+    "SkillScopeTools": {
+      "type": "object",
+      "required": ["sessionUpdate", "skillName", "allowedTools"],
+      "additionalProperties": true,
+      "properties": {
+        "sessionUpdate": { "const": "skill_scope_tools" },
+        "skillName": { "type": "string", "minLength": 1 },
+        "allowedTools": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "ToolSearchQuery": {
+      "type": "object",
+      "required": ["sessionUpdate", "toolUseId", "name", "query"],
+      "additionalProperties": true,
+      "properties": {
+        "sessionUpdate": { "const": "tool_search_query" },
+        "toolUseId": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "query": {}
+      }
+    },
+    "ToolSearchResult": {
+      "type": "object",
+      "required": ["sessionUpdate", "toolUseId", "promoted"],
+      "additionalProperties": true,
+      "properties": {
+        "sessionUpdate": { "const": "tool_search_result" },
+        "toolUseId": { "type": "string", "minLength": 1 },
+        "promoted": { "type": "array" }
+      }
+    },
+    "TranscriptCompacted": {
+      "type": "object",
+      "required": ["sessionUpdate", "mode", "strategy"],
+      "additionalProperties": true,
+      "properties": {
+        "sessionUpdate": { "const": "transcript_compacted" },
+        "mode": { "type": "string" },
+        "strategy": { "type": "string" }
+      }
+    },
+    "Handoff": {
+      "type": "object",
+      "required": ["sessionUpdate", "handoffId", "artifactId", "handoff"],
+      "additionalProperties": true,
+      "properties": {
+        "sessionUpdate": { "const": "handoff" },
+        "handoffId": { "type": "string", "minLength": 1 },
+        "artifactId": { "type": "string", "minLength": 1 },
+        "handoff": { "type": "object" }
+      }
+    },
+    "FsWatch": {
+      "type": "object",
+      "required": ["sessionUpdate", "subscriptionId", "events"],
+      "additionalProperties": true,
+      "properties": {
+        "sessionUpdate": { "const": "fs_watch" },
+        "subscriptionId": { "type": "string", "minLength": 1 },
+        "events": { "type": "array" }
+      }
+    },
+    "WorkerUpdate": {
+      "type": "object",
+      "required": ["sessionUpdate", "workerId", "event", "status", "terminal"],
+      "additionalProperties": true,
+      "properties": {
+        "sessionUpdate": { "const": "worker_update" },
+        "workerId": { "type": "string", "minLength": 1 },
+        "event": { "type": "string", "minLength": 1 },
+        "status": { "type": "string", "minLength": 1 },
+        "terminal": { "type": "boolean" }
+      }
+    }
+  }
+}

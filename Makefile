@@ -1,10 +1,10 @@
-.PHONY: setup install-hooks configure-merge-drivers check fmt fmt-harn fmt-harn-fix lint lint-md lint-actions lint-harn spec-lint test test-cargo test-fast conformance bench-vm all release-gate portal portal-check portal-demo gen-highlight check-highlight gen-trigger-quickref check-trigger-quickref check-trigger-examples check-docs-snippets sync-language-spec check-language-spec
+.PHONY: setup install-hooks configure-merge-drivers check fmt fmt-harn fmt-harn-fix lint lint-md lint-actions lint-harn spec-lint test test-cargo test-fast conformance protocol-conformance bench-vm all release-gate portal portal-check portal-demo gen-highlight check-highlight gen-trigger-quickref check-trigger-quickref check-trigger-examples check-docs-snippets sync-language-spec check-language-spec
 
 # Full quality check: format first, then lint/test in parallel.
 # Usage: make all -j       (parallel checks after formatting)
 #        make all           (sequential, also works)
 all: fmt
-	$(MAKE) lint lint-md lint-actions lint-harn spec-lint fmt-harn test conformance check-highlight check-language-spec check-trigger-quickref check-trigger-examples check-docs-snippets portal-check
+	$(MAKE) lint lint-md lint-actions lint-harn spec-lint fmt-harn test conformance protocol-conformance check-highlight check-language-spec check-trigger-quickref check-trigger-examples check-docs-snippets portal-check
 
 check: all
 
@@ -49,6 +49,9 @@ test-fast:
 # Run Harn conformance test suite
 conformance:
 	HARN_LLM_CALLS_DISABLED=1 cargo run --bin harn -- test conformance
+
+protocol-conformance:
+	HARN_LLM_CALLS_DISABLED=1 cargo run --bin harn -- test protocols
 
 bench-vm:
 	./scripts/bench_vm.sh

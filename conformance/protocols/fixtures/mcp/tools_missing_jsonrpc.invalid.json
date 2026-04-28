@@ -1,0 +1,13 @@
+{
+  "name": "mcp.tools_list.missing_jsonrpc",
+  "protocol": "mcp",
+  "schema": "schemas/mcp-2025-11-25.schema.json",
+  "expect": "invalid",
+  "documents": [
+    {
+      "id": 2,
+      "method": "tools/list",
+      "params": {}
+    }
+  ]
+}

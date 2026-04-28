@@ -1,0 +1,19 @@
+{
+  "name": "acp.session_update.unknown_extension",
+  "protocol": "acp",
+  "schema": "schemas/acp-session-update.schema.json",
+  "expect": "invalid",
+  "documents": [
+    {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": {
+        "sessionId": "session-1",
+        "update": {
+          "sessionUpdate": "unadvertised_harn_extension",
+          "payload": true
+        }
+      }
+    }
+  ]
+}

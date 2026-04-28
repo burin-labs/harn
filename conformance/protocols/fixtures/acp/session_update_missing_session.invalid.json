@@ -1,0 +1,21 @@
+{
+  "name": "acp.session_update.missing_session_id",
+  "protocol": "acp",
+  "schema": "schemas/acp-session-update.schema.json",
+  "expect": "invalid",
+  "documents": [
+    {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": {
+        "update": {
+          "sessionUpdate": "agent_message_chunk",
+          "content": {
+            "type": "text",
+            "text": "missing session id"
+          }
+        }
+      }
+    }
+  ]
+}

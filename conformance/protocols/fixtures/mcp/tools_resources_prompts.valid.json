@@ -1,0 +1,81 @@
+{
+  "name": "mcp.tools_resources_prompts.lists",
+  "protocol": "mcp",
+  "schema": "schemas/mcp-2025-11-25.schema.json",
+  "expect": "valid",
+  "documents": [
+    {
+      "jsonrpc": "2.0",
+      "id": 2,
+      "method": "tools/list",
+      "params": {}
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 2,
+      "result": {
+        "tools": [
+          {
+            "name": "echo",
+            "description": "Echo input",
+            "inputSchema": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string"
+                }
+              }
+            },
+            "annotations": {
+              "readOnlyHint": true
+            }
+          }
+        ]
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 3,
+      "result": {
+        "resources": [
+          {
+            "uri": "harn://resource/readme",
+            "name": "README",
+            "mimeType": "text/markdown"
+          }
+        ]
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 4,
+      "result": {
+        "resourceTemplates": [
+          {
+            "uriTemplate": "harn://resource/{name}",
+            "name": "named-resource",
+            "mimeType": "text/plain"
+          }
+        ]
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 5,
+      "result": {
+        "prompts": [
+          {
+            "name": "review",
+            "description": "Review a change",
+            "arguments": [
+              {
+                "name": "diff",
+                "required": true
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}
