@@ -989,7 +989,7 @@ harn serve mcp agent.harn --card ./card.json
 
 `harn serve a2a` uses the shared `harn-serve` dispatch core and exposes each
 exported `pub fn` in the target module as an A2A skill. The adapter publishes an
-agent card at `/.well-known/a2a-agent` and supports task send, send-and-wait,
+agent card at `/.well-known/agent-card.json` and supports task send, send-and-wait,
 streaming/resubscribe, push callback registration, and cancel propagation. The
 legacy shorthand `harn serve <file>` is preserved and rewrites internally to
 `harn serve a2a <file>`.

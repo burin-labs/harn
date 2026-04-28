@@ -62,16 +62,16 @@ paths:
   /v1/agent-card:
     get:
       tags: [Discovery]
-      operationId: getAgentCard
-      summary: Retrieve the public AgentCard for this Harness.
+      operationId: getHarnAgentCard
+      summary: Retrieve the public Harn AgentCard for this Harness.
       security: []
       responses:
         "200":
-          description: AgentCard.
+          description: Harn AgentCard envelope with a nested A2A AgentCard projection.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/AgentCard"
+                $ref: "#/components/schemas/HarnAgentCard"
         default:
           $ref: "#/components/responses/Error"
 
@@ -2232,15 +2232,19 @@ components:
         metadata:
           $ref: "#/components/schemas/Metadata"
 
-    AgentCard:
+    HarnAgentCard:
       allOf:
         - $ref: "#/components/schemas/ResourceEnvelope"
         - type: object
-          required: [object, name, description, protocol_version, interfaces, skills]
+          required: [object, name, description, protocol_version, interfaces, skills, a2a_agent_card]
           properties:
             object:
               type: string
               enum: [agent_card]
+            kind:
+              type: string
+              enum: [harn_agent_card]
+              description: Stable SDK-friendly discriminator for the Harn Agents API envelope.
             name:
               type: string
             description:
@@ -2282,6 +2286,12 @@ components:
               oneOf:
                 - $ref: "#/components/schemas/CardSignature"
                 - type: "null"
+            a2a_agent_card:
+              $ref: "#/components/schemas/A2aAgentCard"
+              description: |
+                A2A-compatible AgentCard projection. This nested object is the only
+                field clients should pass to A2A SDKs; the surrounding resource is
+                Harn-specific policy and discovery metadata.
     AgentInterface:
       type: object
       required: [transport, url]
@@ -2301,6 +2311,130 @@ components:
         key_id:
           type: string
         value:
+          type: string
+
+    A2aAgentCard:
+      type: object
+      required: [name, description, version, url, capabilities, supportedInterfaces, skills]
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        version:
+          type: string
+          description: Version of the advertised agent implementation.
+        url:
+          type: string
+          format: uri
+          description: Base URL for the A2A agent service.
+        provider:
+          $ref: "#/components/schemas/A2aAgentProvider"
+        capabilities:
+          $ref: "#/components/schemas/A2aAgentCapabilities"
+        supportedInterfaces:
+          type: array
+          items:
+            $ref: "#/components/schemas/A2aAgentInterface"
+        securitySchemes:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/JsonObject"
+        securityRequirements:
+          type: array
+          items:
+            $ref: "#/components/schemas/JsonObject"
+        defaultInputModes:
+          type: array
+          items:
+            type: string
+        defaultOutputModes:
+          type: array
+          items:
+            type: string
+        skills:
+          type: array
+          items:
+            $ref: "#/components/schemas/A2aAgentSkill"
+        signatures:
+          type: array
+          items:
+            $ref: "#/components/schemas/A2aAgentCardSignature"
+    A2aAgentProvider:
+      type: object
+      properties:
+        organization:
+          type: string
+        url:
+          type: string
+          format: uri
+    A2aAgentCapabilities:
+      type: object
+      properties:
+        streaming:
+          type: boolean
+        pushNotifications:
+          type: boolean
+        extendedAgentCard:
+          type: boolean
+        extensions:
+          type: array
+          items:
+            $ref: "#/components/schemas/JsonObject"
+      additionalProperties:
+        $ref: "#/components/schemas/JsonValue"
+    A2aAgentInterface:
+      type: object
+      required: [url, protocolBinding, protocolVersion]
+      properties:
+        url:
+          type: string
+          format: uri
+        protocolBinding:
+          type: string
+          description: A2A protocol binding, for example JSONRPC, GRPC, or HTTP+JSON.
+        protocolVersion:
+          type: string
+          description: A2A protocol version exposed at this interface.
+    A2aAgentSkill:
+      type: object
+      required: [id, name, description]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        examples:
+          type: array
+          items:
+            type: string
+        inputModes:
+          type: array
+          items:
+            type: string
+        outputModes:
+          type: array
+          items:
+            type: string
+        securityRequirements:
+          type: array
+          items:
+            $ref: "#/components/schemas/JsonObject"
+    A2aAgentCardSignature:
+      type: object
+      required: [protected, signature]
+      properties:
+        protected:
+          type: string
+        header:
+          $ref: "#/components/schemas/JsonObject"
+        signature:
           type: string
 
     Event:

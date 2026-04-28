@@ -257,8 +257,11 @@ in Message parts.
 
 ### AgentCard
 
-An AgentCard advertises an agent endpoint and its capabilities. It is aligned
-with A2A agent-card concepts while adding Harn policy and receipt metadata.
+The Harn Agents API `AgentCard` is a Harn resource envelope that advertises
+agent endpoints, policy, and capabilities. It is not itself an A2A AgentCard.
+When an implementation also wants to expose A2A discovery, it MUST place the
+A2A-compatible card in `a2a_agent_card` instead of mixing A2A camelCase fields
+into the Harn envelope.
 
 Required fields:
 
@@ -268,9 +271,22 @@ Required fields:
 - `protocol_version`: supported Harn Agents Protocol version.
 - `interfaces`: available transport interfaces.
 - `skills`: callable skills or exported functions.
+- `a2a_agent_card`: nested A2A AgentCard projection.
 
 Optional fields include `persona_ids`, `capabilities`, `auth_schemes`,
 `receipt_policy`, `quotas`, `provider`, `public_url`, and `signature`.
+
+The nested `a2a_agent_card` MUST use A2A field names such as `version`,
+`url`, `capabilities`, `supportedInterfaces`, `securitySchemes`,
+`securityRequirements`, `defaultInputModes`, `defaultOutputModes`, and
+`skills`. SDK generators should expose the REST resource as `HarnAgentCard`
+and the nested projection as `A2aAgentCard`; clients should pass only the
+nested object to A2A SDKs.
+
+For draft compatibility, servers MAY continue to emit the legacy top-level
+Harn fields `interfaces`, `auth_schemes`, `receipt_policy`, and `public_url`.
+New clients MUST prefer `a2a_agent_card` for A2A interop and treat those legacy
+top-level fields as Harn policy/discovery metadata only.
 
 Signed cards MUST state their signature algorithm and key id. Clients MUST NOT
 trust unsigned card metadata for authorization decisions.

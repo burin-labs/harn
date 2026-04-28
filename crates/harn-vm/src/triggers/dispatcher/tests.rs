@@ -529,13 +529,19 @@ fn handle_mock_a2a_connection<T: Read + Write>(
     task_result: &serde_json::Value,
 ) {
     let (request_line, headers, body) = read_http_request(stream);
-    if request_line.starts_with("GET /.well-known/a2a-agent ") {
+    if request_line.starts_with("GET /.well-known/agent-card.json ")
+        || request_line.starts_with("GET /.well-known/a2a-agent ")
+    {
         write_json_response(
             stream,
             &serde_json::json!({
                 "id": "mock-a2a",
                 "url": format!("{card_scheme}://127.0.0.1:{port}"),
-                "interfaces": [{"protocol": "jsonrpc", "url": "/rpc"}],
+                "supportedInterfaces": [{
+                    "protocolBinding": "JSONRPC",
+                    "protocolVersion": "1.0.0",
+                    "url": "/rpc"
+                }],
             }),
         );
         return;
@@ -1414,7 +1420,7 @@ async fn a2a_handler_returns_pending_task_handle() {
                     "state": "working",
                     "target_agent": "triage",
                     "rpc_url": format!("https://{}/rpc", server.authority),
-                    "card_url": format!("https://{}/.well-known/a2a-agent", server.authority),
+                    "card_url": format!("https://{}/.well-known/agent-card.json", server.authority),
                     "agent_id": "mock-a2a",
                 }))
             );

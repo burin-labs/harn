@@ -418,6 +418,22 @@ async fn agent_card(client: &ConformanceClient) -> ProbeResult {
     expect_field_eq(body, "protocol_version", PROTOCOL_VERSION)?;
     expect_array_field(body, "interfaces")?;
     expect_array_field(body, "skills")?;
+    let a2a_card = expect_object_field(body, "a2a_agent_card")?;
+    expect_string_field(a2a_card, "name")?;
+    expect_string_field(a2a_card, "description")?;
+    expect_string_field(a2a_card, "version")?;
+    expect_string_field(a2a_card, "url")?;
+    expect_object_field(a2a_card, "capabilities")?;
+    let interfaces = expect_array_field(a2a_card, "supportedInterfaces")?;
+    if interfaces.is_empty() {
+        return Err("a2a_agent_card.supportedInterfaces must not be empty".to_string());
+    }
+    for interface in interfaces {
+        expect_string_field(interface, "url")?;
+        expect_string_field(interface, "protocolBinding")?;
+        expect_string_field(interface, "protocolVersion")?;
+    }
+    expect_array_field(a2a_card, "skills")?;
     Ok(())
 }
 
@@ -1687,6 +1703,17 @@ fn expect_array_field<'a>(value: &'a Value, field: &str) -> ProbeResult<&'a [Val
         .and_then(Value::as_array)
         .map(Vec::as_slice)
         .ok_or_else(|| format!("{field} must be an array"))
+}
+
+fn expect_object_field<'a>(value: &'a Value, field: &str) -> ProbeResult<&'a Value> {
+    let object = value
+        .get(field)
+        .ok_or_else(|| format!("{field} must be an object"))?;
+    if object.as_object().is_some() {
+        Ok(object)
+    } else {
+        Err(format!("{field} must be an object"))
+    }
 }
 
 fn expect_string_array_contains(value: &Value, field: &str, expected: &str) -> ProbeResult {

@@ -116,8 +116,8 @@ harn serve a2a --cert certs/prod.pem --key certs/prod-key.pem server.harn
 Behavior today:
 
 - HTTP JSON-RPC endpoint at `/`
-- agent cards at `/.well-known/a2a-agent`, `/.well-known/agent.json`, and
-  `/agent/card`
+- agent cards at `/.well-known/agent-card.json`, with compatibility aliases at
+  `/.well-known/a2a-agent`, `/.well-known/agent.json`, and `/agent/card`
 - `a2a.SendMessage`, `a2a.SendStreamingMessage`, `a2a.GetTask`,
   `a2a.CancelTask`, and `a2a.ListTasks`
 - A2A task aliases `tasks/send`, `tasks/send_and_wait`, `tasks/resubscribe`,

@@ -53,10 +53,11 @@ stable handler kind and target URI in lifecycle logs and action-graph nodes.
 
 For `a2a://host[:port]/path` routes, the dispatcher:
 
-- fetches `/.well-known/a2a-agent` from the target host
+- fetches `/.well-known/agent-card.json` from the target host, with
+  `/.well-known/a2a-agent` as a legacy fallback
 - defaults to HTTPS-only discovery + dispatch; cleartext HTTP is rejected unless
   the trigger binding explicitly sets `allow_cleartext = true`
-- requires exactly one JSON-RPC interface in the agent card before it will
+- requires exactly one JSON-RPC `supportedInterfaces` entry in the agent card before it will
   dispatch
 - treats the URI path as the `target_agent` label that propagates into the
   outbound envelope and the action graph

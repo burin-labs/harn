@@ -622,6 +622,11 @@ harn install --frozen
 harn check main.harn
 ```
 
+Generated Agents API SDKs should keep the discovery types distinct:
+`/v1/agent-card` returns the Harn resource type `HarnAgentCard`, while its
+`a2a_agent_card` field is the A2A-compatible `A2aAgentCard` to pass to A2A
+SDKs or validators.
+
 Equivalent manifest entries:
 
 ```toml

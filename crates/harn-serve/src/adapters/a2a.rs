@@ -26,7 +26,8 @@ use crate::{
     DispatchError, ExportCatalog, HttpTlsConfig, TransportAdapter,
 };
 
-pub const A2A_PROTOCOL_VERSION: &str = "1.0.0";
+pub const A2A_PROTOCOL_VERSION: &str = "1.0";
+const A2A_LEGACY_PROTOCOL_VERSION: &str = "1.0.0";
 
 const A2A_VERSION_HEADER: &str = "a2a-version";
 const A2A_TRACE_HEADER: &str = "a2a-trace-id";
@@ -196,6 +197,7 @@ impl A2aServer {
         let router = Router::new()
             .route("/", post(jsonrpc_request))
             .route("/agent/card", get(agent_card_request))
+            .route("/.well-known/agent-card.json", get(agent_card_request))
             .route("/.well-known/a2a-agent", get(agent_card_request))
             .route("/.well-known/agent.json", get(agent_card_request))
             .route("/tasks/send", post(rest_send_task))
@@ -207,13 +209,14 @@ impl A2aServer {
 
         eprintln!("Harn A2A server listening on {public_url}");
         eprintln!("[harn] A2A workflow server ready on {public_url}");
-        eprintln!("[harn] Agent card: {public_url}/.well-known/a2a-agent");
+        eprintln!("[harn] Agent card: {public_url}/.well-known/agent-card.json");
         crate::tls::serve_router_from_tcp(listener, router, &options.tls)
             .await
             .map_err(|error| format!("A2A HTTP server failed: {error}"))
     }
 
     fn agent_card(&self, public_url: &str) -> JsonValue {
+        let base_url = public_url.trim_end_matches('/');
         let skills = self
             .catalog
             .functions
@@ -223,30 +226,34 @@ impl A2aServer {
                     "id": function.name,
                     "name": function.name,
                     "description": format!("Invoke exported Harn function '{}'.", function.name),
-                    "inputSchema": function.input_schema,
+                    "inputModes": ["application/json", "text/plain"],
+                    "outputModes": ["application/json", "text/plain"],
                 })
             })
             .collect::<Vec<_>>();
         let mut card = json!({
-            "id": self.agent_name,
             "name": self.agent_name,
             "description": "Harn peer agent",
-            "url": public_url,
+            "url": base_url,
             "version": env!("CARGO_PKG_VERSION"),
-            "protocolVersion": A2A_PROTOCOL_VERSION,
             "provider": {
                 "organization": "Harn",
                 "url": "https://harn.dev"
             },
-            "interfaces": [
-                {"protocol": "jsonrpc", "url": "/"}
+            "supportedInterfaces": [
+                {
+                    "url": base_url,
+                    "protocolBinding": "JSONRPC",
+                    "protocolVersion": A2A_PROTOCOL_VERSION
+                }
             ],
-            "securitySchemes": [],
+            "securitySchemes": {},
+            "securityRequirements": [],
+            "defaultInputModes": ["application/json", "text/plain"],
+            "defaultOutputModes": ["application/json", "text/plain"],
             "capabilities": {
                 "streaming": true,
                 "pushNotifications": true,
-                "resubscribe": true,
-                "cancel": true,
                 "extendedAgentCard": false
             },
             "skills": skills
@@ -926,7 +933,7 @@ fn check_version_header(headers: &HeaderMap, body: &[u8]) -> Option<JsonValue> {
     let version = headers
         .get(A2A_VERSION_HEADER)
         .and_then(|value| value.to_str().ok())?;
-    if version == A2A_PROTOCOL_VERSION {
+    if matches!(version, A2A_PROTOCOL_VERSION | A2A_LEGACY_PROTOCOL_VERSION) {
         return None;
     }
     let rpc_id = serde_json::from_slice::<JsonValue>(body)
@@ -1119,10 +1126,12 @@ fn sign_card(card: &mut JsonValue, secret: &str) {
         return;
     };
     mac.update(&bytes);
-    let signature = base64::engine::general_purpose::STANDARD.encode(mac.finalize().into_bytes());
+    let protected = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .encode(r#"{"alg":"HS256","typ":"JWT","kid":"harn-serve"}"#);
+    let signature =
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
     card["signatures"] = json!([{
-        "alg": "HS256",
-        "kid": "harn-serve",
+        "protected": protected,
         "signature": signature,
     }]);
 }
@@ -1245,7 +1254,14 @@ pub fn triage(task: string) -> string {
 
         assert_eq!(card["capabilities"]["streaming"], true);
         assert_eq!(card["capabilities"]["pushNotifications"], true);
+        assert_eq!(card["supportedInterfaces"][0]["protocolBinding"], "JSONRPC");
+        assert_eq!(
+            card["supportedInterfaces"][0]["protocolVersion"],
+            A2A_PROTOCOL_VERSION
+        );
         assert_eq!(card["skills"][0]["id"], "triage");
+        assert!(card.get("interfaces").is_none());
+        assert!(card["skills"][0].get("inputSchema").is_none());
     }
 
     #[tokio::test]
@@ -1442,8 +1458,24 @@ pub fn triage(task: string) -> string {
         let mut card = json!({"id": "agent", "skills": []});
         sign_card(&mut card, "secret");
 
-        assert_eq!(card["signatures"][0]["alg"], "HS256");
+        assert!(card["signatures"][0]["protected"].as_str().unwrap().len() > 16);
         assert!(card["signatures"][0]["signature"].as_str().unwrap().len() > 16);
+    }
+
+    #[test]
+    fn version_header_accepts_current_and_legacy_patch_version() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            A2A_VERSION_HEADER,
+            axum::http::HeaderValue::from_static("1.0"),
+        );
+        assert!(check_version_header(&headers, br#"{"id":1}"#).is_none());
+
+        headers.insert(
+            A2A_VERSION_HEADER,
+            axum::http::HeaderValue::from_static("1.0.0"),
+        );
+        assert!(check_version_header(&headers, br#"{"id":1}"#).is_none());
     }
 
     use harn_vm::agent_events::AgentEventSink as _;

@@ -4054,6 +4054,11 @@ openapi = { git = "https://github.com/burin-labs/harn-openapi", branch = "main" 
 local-fixture = { path = "../fixture-lib" }
 ```
 
+The Agents API OpenAPI package intentionally names the REST discovery resource
+`HarnAgentCard` and the nested A2A projection `A2aAgentCard`. SDK bootstrap code
+should import `HarnAgentCard` for `/v1/agent-card` responses and pass only the
+`a2a_agent_card` field to A2A SDKs or validators.
+
 `[dependencies]` installs package sources into `.harn/packages/` so
 imports like `import "notion-sdk-harn"` or `import "notion/providers"`
 resolve without filesystem-relative hacks.
