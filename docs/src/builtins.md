@@ -847,6 +847,38 @@ println(text.source.sha256)
 | `assert_eq(a, b, msg?)` | a: any, b: any, msg: string (optional) | nil | Assert two values are equal. Throws with message on failure |
 | `assert_ne(a, b, msg?)` | a: any, b: any, msg: string (optional) | nil | Assert two values are not equal. Throws with message on failure |
 
+## Test results
+
+| Function | Parameters | Returns | Description |
+|---|---|---|---|
+| `parse_junit_xml(input)` | input: string or bytes | list of dict | Parse a JUnit XML test report into per-case dicts. Lenient: malformed input returns `[]` instead of throwing |
+
+JUnit XML is the de facto interchange format for compiled-language test
+runners — GTest with `--gtest_output=xml`, Maven Surefire and Gradle for
+JUnit, xUnit/.NET — and is also emitted by pytest, vitest, and
+cargo-nextest's JUnit dialect. Each returned dict has the shape:
+
+| Key | Type | Description |
+|---|---|---|
+| `name` | string | Fully qualified test name (`classname::name` when a `classname` attribute is present, else `name` alone) |
+| `status` | string | One of `"passed"`, `"failed"`, `"skipped"`, `"errored"` |
+| `duration_ms` | int | `time` attribute in seconds, converted to milliseconds |
+| `message` | string or nil | Concatenation of any `<failure>` / `<error>` `message` attribute and child text |
+| `stdout` | string or nil | Captured `<system-out>` content |
+| `stderr` | string or nil | Captured `<system-err>` content |
+
+```harn
+pipeline summarize() {
+  let xml = read_file("build/test-results/test-results.xml")
+  let cases = parse_junit_xml(xml)
+  let failed = cases.filter({ case -> case.status == "failed" || case.status == "errored" })
+  log("failures: ${len(failed)} of ${len(cases)}")
+  for case in failed {
+    log("  ${case.name}: ${case.message}")
+  }
+}
+```
+
 ## HTTP
 
 | Function | Parameters | Returns | Description |
