@@ -84,6 +84,44 @@ impl WordIndex {
         self.index.len()
     }
 
+    /// Capture the inverted index as snapshot-friendly postings. Sorted
+    /// by word so the on-disk JSON is reproducible.
+    pub fn snapshot_postings(&self) -> Vec<super::snapshot::WordPosting> {
+        let mut out: Vec<super::snapshot::WordPosting> = self
+            .index
+            .iter()
+            .map(|(word, hits)| super::snapshot::WordPosting {
+                word: word.clone(),
+                hits: hits.iter().map(|h| (h.file, h.line)).collect(),
+            })
+            .collect();
+        out.sort_by(|a, b| a.word.cmp(&b.word));
+        out
+    }
+
+    /// Rebuild a [`WordIndex`] from a snapshot's postings vector.
+    pub fn from_postings(postings: Vec<super::snapshot::WordPosting>) -> Self {
+        let mut idx = Self::new();
+        for p in postings {
+            let mut contributing_files: HashSet<FileId> = HashSet::new();
+            let entry = idx.index.entry(p.word.clone()).or_default();
+            for (file, line) in &p.hits {
+                entry.push(WordHit {
+                    file: *file,
+                    line: *line,
+                });
+                contributing_files.insert(*file);
+            }
+            for file in contributing_files {
+                idx.file_words
+                    .entry(file)
+                    .or_default()
+                    .insert(p.word.clone());
+            }
+        }
+        idx
+    }
+
     /// Order-of-magnitude resident-bytes estimate. Reported by
     /// `code_index.stats.memory_bytes`.
     pub fn estimated_bytes(&self) -> usize {

@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/agent_heartbeat.request.json",
+  "title": "code_index.agent_heartbeat request",
+  "description": "Refresh `last_seen_ms` for an agent. If the agent isn't registered, the registry transparently registers it with a placeholder name.",
+  "type": "object",
+  "properties": {
+    "agent_id": { "type": "integer", "minimum": 1 }
+  },
+  "required": ["agent_id"],
+  "additionalProperties": false
+}

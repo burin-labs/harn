@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/status.response.json",
+  "title": "code_index.status response",
+  "description": "Snapshot of the workspace index state. Empty/zeroed shape when no rebuild has happened yet.",
+  "type": "object",
+  "properties": {
+    "file_count": { "type": "integer", "minimum": 0 },
+    "current_seq": { "type": "integer", "minimum": 0 },
+    "last_indexed_at_ms": { "type": "integer", "minimum": 0 },
+    "git_head": { "type": ["string", "null"] },
+    "agents": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer", "minimum": 1 },
+          "name": { "type": "string" },
+          "state": { "type": "string", "enum": ["active", "crashed", "gone"] },
+          "last_seen_ms": { "type": "integer" },
+          "edit_count": { "type": "integer", "minimum": 0 },
+          "lock_count": { "type": "integer", "minimum": 0 }
+        },
+        "required": ["id", "name", "state", "last_seen_ms", "edit_count", "lock_count"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["file_count", "current_seq", "last_indexed_at_ms", "git_head", "agents"],
+  "additionalProperties": false
+}

@@ -87,6 +87,39 @@ impl TrigramIndex {
         self.index.len()
     }
 
+    /// Capture the posting table as a snapshot-friendly vector. Used by
+    /// the on-disk snapshot path; sorted by trigram for deterministic
+    /// serialisation.
+    pub fn snapshot_postings(&self) -> Vec<super::snapshot::TrigramPosting> {
+        let mut out: Vec<super::snapshot::TrigramPosting> = self
+            .index
+            .iter()
+            .map(|(tg, files)| {
+                let mut files: Vec<FileId> = files.iter().copied().collect();
+                files.sort_unstable();
+                super::snapshot::TrigramPosting {
+                    trigram: *tg,
+                    files,
+                }
+            })
+            .collect();
+        out.sort_unstable_by_key(|p| p.trigram);
+        out
+    }
+
+    /// Rebuild a [`TrigramIndex`] from a snapshot's postings vector.
+    pub fn from_postings(postings: Vec<super::snapshot::TrigramPosting>) -> Self {
+        let mut idx = Self::new();
+        for p in postings {
+            let entry = idx.index.entry(p.trigram).or_default();
+            for f in &p.files {
+                entry.insert(*f);
+                idx.file_trigrams.entry(*f).or_default().insert(p.trigram);
+            }
+        }
+        idx
+    }
+
     /// Order-of-magnitude resident-bytes estimate. Reported by
     /// `code_index.stats.memory_bytes`.
     pub fn estimated_bytes(&self) -> usize {

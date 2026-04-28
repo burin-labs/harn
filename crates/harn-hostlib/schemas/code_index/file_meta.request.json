@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/file_meta.request.json",
+  "title": "code_index.file_meta request",
+  "description": "Fetch one file's metadata. Either `file_id` or `path` must be supplied; if both are present, `file_id` wins.",
+  "type": "object",
+  "properties": {
+    "file_id": { "type": "integer", "minimum": 1 },
+    "path": { "type": "string", "minLength": 1 }
+  },
+  "anyOf": [
+    { "required": ["file_id"] },
+    { "required": ["path"] }
+  ],
+  "additionalProperties": false
+}

@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/lock_try.request.json",
+  "title": "code_index.lock_try request",
+  "description": "Try to acquire an advisory lock on `path` for `agent_id`. `ttl_ms` defaults to the registry's configured TTL.",
+  "type": "object",
+  "properties": {
+    "agent_id": { "type": "integer", "minimum": 1 },
+    "path": { "type": "string", "minLength": 1 },
+    "ttl_ms": { "type": "integer", "minimum": 1 }
+  },
+  "required": ["agent_id", "path"],
+  "additionalProperties": false
+}

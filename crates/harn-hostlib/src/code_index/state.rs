@@ -1,23 +1,31 @@
 //! Per-workspace index state.
 //!
-//! Owns the file table, trigram index, word index, and dep graph for one
-//! workspace root. Construction is via [`IndexState::build_from_root`],
-//! which walks the workspace, reads every indexable file, and populates
-//! every sub-index in a single pass before resolving imports.
+//! Owns the file table, trigram index, word index, dep graph, version
+//! log, and agent registry for one workspace root. Construction is via
+//! [`IndexState::build_from_root`], which walks the workspace, reads
+//! every indexable file, and populates every sub-index in a single pass
+//! before resolving imports.
+//!
+//! Single-file mutations (`reindex_file`, `remove_file`) flow through
+//! the same paths so the sub-indexes stay consistent across the
+//! incremental host ops the burin-code daemon drives.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use super::agents::AgentRegistry;
 use super::file_table::{fnv1a64, FileId, IndexedFile};
 use super::graph::DepGraph;
 use super::imports;
 use super::trigram::TrigramIndex;
+use super::versions::VersionLog;
 use super::walker::{is_indexable_file, language_for_extension, walk_indexable, MAX_FILE_BYTES};
 use super::words::WordIndex;
 
 /// In-memory index for one workspace. Composed from the per-file table,
-/// the trigram + word sub-indexes, and the dep graph.
+/// the trigram + word sub-indexes, the dep graph, the append-only version
+/// log, and the agent registry.
 pub struct IndexState {
     /// Canonicalised workspace root.
     pub root: PathBuf,
@@ -31,6 +39,10 @@ pub struct IndexState {
     pub words: WordIndex,
     /// Forward + reverse import graph.
     pub deps: DepGraph,
+    /// Append-only log of file mutations.
+    pub versions: VersionLog,
+    /// Live agents + advisory locks.
+    pub agents: AgentRegistry,
     /// Wall-clock timestamp (ms since epoch) of the most recent rebuild.
     pub last_built_unix_ms: i64,
     /// Best-effort `HEAD` SHA, or `None` if the workspace isn't a git repo.
@@ -60,6 +72,8 @@ impl IndexState {
             trigrams: TrigramIndex::new(),
             words: WordIndex::new(),
             deps: DepGraph::new(),
+            versions: VersionLog::new(),
+            agents: AgentRegistry::new(),
             last_built_unix_ms: now_unix_ms(),
             git_head: read_git_head(&canonical_root),
             next_id: 1,
@@ -81,6 +95,46 @@ impl IndexState {
             state.rebuild_deps(id, &rel);
         }
         (state, outcome)
+    }
+
+    /// Re-index a single file by its absolute path. Returns the id of the
+    /// affected file (newly assigned or existing). If the file no longer
+    /// exists or fails the indexability/sensitivity filter, any existing
+    /// entry under that path is removed and `None` is returned.
+    pub fn reindex_file(&mut self, abs: &Path) -> Option<FileId> {
+        if !abs.exists() {
+            self.remove_file_path(abs);
+            return None;
+        }
+        if !is_indexable_file(abs) || super::walker::is_sensitive_path(abs) {
+            self.remove_file_path(abs);
+            return None;
+        }
+        let id = self.ingest(abs)?;
+        let rel = self
+            .files
+            .get(&id)
+            .map(|f| f.relative_path.clone())
+            .unwrap_or_default();
+        if !rel.is_empty() {
+            self.rebuild_deps(id, &rel);
+        }
+        Some(id)
+    }
+
+    /// Remove an existing file from every sub-index. No-op when the file
+    /// isn't tracked.
+    pub fn remove_file_path(&mut self, abs: &Path) {
+        let Some(rel) = relative_path(&self.root, abs) else {
+            return;
+        };
+        let Some(id) = self.path_to_id.remove(&rel) else {
+            return;
+        };
+        self.files.remove(&id);
+        self.trigrams.remove_file(id);
+        self.words.remove_file(id);
+        self.deps.remove_file(id);
     }
 
     fn ingest(&mut self, abs: &Path) -> Option<FileId> {
@@ -191,9 +245,51 @@ impl IndexState {
             .sum();
         self.trigrams.estimated_bytes() + self.words.estimated_bytes() + file_bytes
     }
+
+    /// Resolve a workspace-relative path against the canonical root.
+    /// Used by host builtins that take a `path` argument and need to
+    /// open the underlying file (e.g. `read_range`, `file_hash`).
+    pub fn absolute_path(&self, rel_or_abs: &str) -> PathBuf {
+        let p = Path::new(rel_or_abs);
+        if p.is_absolute() {
+            p.to_path_buf()
+        } else {
+            self.root.join(p)
+        }
+    }
+
+    /// Construct an empty [`IndexState`] anchored at `root`. Used by the
+    /// snapshot path which fills in the sub-indexes itself.
+    pub(crate) fn empty(root: PathBuf) -> Self {
+        Self {
+            root,
+            files: HashMap::new(),
+            path_to_id: HashMap::new(),
+            trigrams: TrigramIndex::new(),
+            words: WordIndex::new(),
+            deps: DepGraph::new(),
+            versions: VersionLog::new(),
+            agents: AgentRegistry::new(),
+            last_built_unix_ms: 0,
+            git_head: None,
+            next_id: 1,
+        }
+    }
+
+    /// Borrow the `next_id` counter — exposed for snapshot serialisation.
+    pub(crate) fn next_file_id_internal(&self) -> FileId {
+        self.next_id
+    }
+
+    /// Restore the `next_id` counter from a serialised snapshot.
+    pub(crate) fn set_next_file_id(&mut self, id: FileId) {
+        self.next_id = id.max(1);
+    }
 }
 
-fn now_unix_ms() -> i64 {
+/// Return the current wall-clock time in milliseconds since the Unix
+/// epoch.
+pub(crate) fn now_unix_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
@@ -205,11 +301,44 @@ fn canonicalize(root: &Path) -> PathBuf {
 }
 
 /// Compute `abs` relative to `root`, using `/` separators. Returns `None`
-/// if `abs` is not inside `root`.
+/// if `abs` is not inside `root`. Handles the missing-file case (where
+/// `canonicalize` would fail) by canonicalising the longest existing
+/// prefix and re-attaching the missing tail — so `remove_file_path` keeps
+/// working when the underlying path has just been deleted.
 pub(crate) fn relative_path(root: &Path, abs: &Path) -> Option<String> {
-    let canonical_abs = std::fs::canonicalize(abs).unwrap_or_else(|_| abs.to_path_buf());
+    let canonical_abs = canonicalize_existing(abs);
     let stripped = canonical_abs.strip_prefix(root).ok()?;
     Some(stripped.to_string_lossy().replace('\\', "/"))
+}
+
+fn canonicalize_existing(abs: &Path) -> PathBuf {
+    if let Ok(c) = std::fs::canonicalize(abs) {
+        return c;
+    }
+    // Walk upward until we find a parent that does exist; canonicalise
+    // that and re-attach the missing tail.
+    let mut tail: Vec<&std::ffi::OsStr> = Vec::new();
+    let mut cursor = abs;
+    loop {
+        if cursor.exists() {
+            if let Ok(canonical) = std::fs::canonicalize(cursor) {
+                let mut out = canonical;
+                for piece in tail.iter().rev() {
+                    out = out.join(piece);
+                }
+                return out;
+            }
+            break;
+        }
+        match (cursor.parent(), cursor.file_name()) {
+            (Some(parent), Some(name)) if !parent.as_os_str().is_empty() => {
+                tail.push(name);
+                cursor = parent;
+            }
+            _ => break,
+        }
+    }
+    abs.to_path_buf()
 }
 
 fn read_git_head(workspace_root: &Path) -> Option<String> {
@@ -282,5 +411,37 @@ mod tests {
         let abs = root.join("a/b/c.py");
         let id = state.lookup_path(abs.to_str().unwrap()).unwrap();
         assert_eq!(state.path_to_id["a/b/c.py"], id);
+    }
+
+    #[test]
+    fn reindex_file_picks_up_changes_in_place() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join("src")).unwrap();
+        fs::write(root.join("src/a.ts"), "export const x = 1;\n").unwrap();
+        let (mut state, _) = IndexState::build_from_root(root);
+        let id = state.path_to_id["src/a.ts"];
+        let before_hash = state.files[&id].content_hash;
+
+        fs::write(root.join("src/a.ts"), "export const x = 2;\n").unwrap();
+        let new_id = state.reindex_file(&root.join("src/a.ts")).unwrap();
+        assert_eq!(new_id, id, "file id should be stable across reindex");
+        let after_hash = state.files[&id].content_hash;
+        assert_ne!(before_hash, after_hash);
+    }
+
+    #[test]
+    fn reindex_file_removes_entry_when_path_disappears() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join("src")).unwrap();
+        fs::write(root.join("src/a.ts"), "export const x = 1;\n").unwrap();
+        let (mut state, _) = IndexState::build_from_root(root);
+        assert!(state.path_to_id.contains_key("src/a.ts"));
+
+        fs::remove_file(root.join("src/a.ts")).unwrap();
+        let result = state.reindex_file(&root.join("src/a.ts"));
+        assert!(result.is_none());
+        assert!(!state.path_to_id.contains_key("src/a.ts"));
     }
 }

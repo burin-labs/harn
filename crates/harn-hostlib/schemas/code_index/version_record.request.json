@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/version_record.request.json",
+  "title": "code_index.version_record request",
+  "description": "Append one entry to the version log after a successful disk write. `op` defaults to `write` when omitted.",
+  "type": "object",
+  "properties": {
+    "agent_id": { "type": "integer", "minimum": 0 },
+    "path": { "type": "string", "minLength": 1 },
+    "op": {
+      "type": "string",
+      "enum": ["snapshot", "write", "replace_range", "insert_after", "delete_range", "patch", "delete"],
+      "default": "write"
+    },
+    "hash": {
+      "description": "Post-edit FNV-1a hash. Accepted as a numeric or decimal-encoded string.",
+      "oneOf": [
+        { "type": "integer", "minimum": 0 },
+        { "type": "string", "minLength": 1 }
+      ]
+    },
+    "size": { "type": "integer", "minimum": 0 }
+  },
+  "required": ["agent_id", "path"],
+  "additionalProperties": false
+}

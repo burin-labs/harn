@@ -1,0 +1,8 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/trigram_query.response.json",
+  "title": "code_index.trigram_query response",
+  "description": "Sorted ascending list of file ids whose contents include all the supplied trigrams.",
+  "type": "array",
+  "items": { "type": "integer", "minimum": 1 }
+}

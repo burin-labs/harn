@@ -126,6 +126,12 @@ pub(crate) fn language_for_extension(ext: &str) -> &str {
     }
 }
 
+/// Public alias for [`is_sensitive`] — the `state` module needs to call
+/// the same predicate from outside this file.
+pub(crate) fn is_sensitive_path(path: &Path) -> bool {
+    is_sensitive(path)
+}
+
 /// Returns `true` if the path looks like a credentials/secrets file that
 /// must never enter the index. Mirrors the Swift `SensitiveFilter`.
 pub(crate) fn is_sensitive(path: &Path) -> bool {

@@ -1,0 +1,7 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/file_hash.response.json",
+  "title": "code_index.file_hash response",
+  "description": "FNV-1a 64-bit content hash as a decimal string, or null when the file can't be read.",
+  "type": ["string", "null"]
+}

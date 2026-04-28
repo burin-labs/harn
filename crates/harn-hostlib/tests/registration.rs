@@ -66,11 +66,38 @@ fn code_index_capability_registers_documented_methods() {
     assert_eq!(
         names,
         vec![
+            // Workspace queries (the original 5).
             "hostlib_code_index_query",
             "hostlib_code_index_rebuild",
             "hostlib_code_index_stats",
             "hostlib_code_index_imports_for",
             "hostlib_code_index_importers_of",
+            // File table accessors (#776).
+            "hostlib_code_index_path_to_id",
+            "hostlib_code_index_id_to_path",
+            "hostlib_code_index_file_ids",
+            "hostlib_code_index_file_meta",
+            "hostlib_code_index_file_hash",
+            // Cached reads (#776).
+            "hostlib_code_index_read_range",
+            "hostlib_code_index_reindex_file",
+            "hostlib_code_index_trigram_query",
+            "hostlib_code_index_extract_trigrams",
+            "hostlib_code_index_word_get",
+            "hostlib_code_index_deps_get",
+            "hostlib_code_index_outline_get",
+            // Change log (#776).
+            "hostlib_code_index_current_seq",
+            "hostlib_code_index_changes_since",
+            "hostlib_code_index_version_record",
+            // Agent registry + locks (#776).
+            "hostlib_code_index_agent_register",
+            "hostlib_code_index_agent_heartbeat",
+            "hostlib_code_index_agent_unregister",
+            "hostlib_code_index_lock_try",
+            "hostlib_code_index_lock_release",
+            "hostlib_code_index_status",
+            "hostlib_code_index_current_agent_id",
         ]
     );
     // Without a populated workspace, code-index read methods return empty
@@ -204,9 +231,9 @@ fn install_default_wires_every_module_into_a_vm() {
         registry.modules(),
         &["ast", "code_index", "scanner", "fs_watch", "tools"]
     );
-    // Builtin count: 5 ast + 5 code_index + 2 scanner + 2 fs_watch + 12
-    // tools + 1 hostlib_enable = 27.
-    assert!(registry.builtins().len() >= 27);
+    // Builtin count: 5 ast + 27 code_index + 2 scanner + 2 fs_watch + 12
+    // tools + 1 hostlib_enable = 49.
+    assert!(registry.builtins().len() >= 49);
 }
 
 #[test]

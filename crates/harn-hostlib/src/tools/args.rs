@@ -112,6 +112,98 @@ pub fn optional_int(
     }
 }
 
+/// Required integer field. Errors if the key is missing or not an int.
+pub fn require_int(
+    builtin: &'static str,
+    dict: &BTreeMap<String, VmValue>,
+    key: &'static str,
+) -> Result<i64, HostlibError> {
+    match dict.get(key) {
+        Some(VmValue::Int(n)) => Ok(*n),
+        Some(VmValue::Float(f)) if f.fract() == 0.0 => Ok(*f as i64),
+        Some(other) => Err(HostlibError::InvalidParameter {
+            builtin,
+            param: key,
+            message: format!("expected integer, got {}", other.type_name()),
+        }),
+        None => Err(HostlibError::MissingParameter {
+            builtin,
+            param: key,
+        }),
+    }
+}
+
+/// Optional list of strings. Missing/`Nil` returns `Vec::new()`.
+pub fn optional_string_list(
+    builtin: &'static str,
+    dict: &BTreeMap<String, VmValue>,
+    key: &'static str,
+) -> Result<Vec<String>, HostlibError> {
+    match dict.get(key) {
+        None | Some(VmValue::Nil) => Ok(Vec::new()),
+        Some(VmValue::List(items)) => {
+            let mut out = Vec::with_capacity(items.len());
+            for item in items.iter() {
+                match item {
+                    VmValue::String(s) => out.push(s.to_string()),
+                    other => {
+                        return Err(HostlibError::InvalidParameter {
+                            builtin,
+                            param: key,
+                            message: format!(
+                                "expected list of strings, got element {}",
+                                other.type_name()
+                            ),
+                        });
+                    }
+                }
+            }
+            Ok(out)
+        }
+        Some(other) => Err(HostlibError::InvalidParameter {
+            builtin,
+            param: key,
+            message: format!("expected list of strings, got {}", other.type_name()),
+        }),
+    }
+}
+
+/// Optional list of integers. Missing/`Nil` returns `Vec::new()`.
+pub fn optional_int_list(
+    builtin: &'static str,
+    dict: &BTreeMap<String, VmValue>,
+    key: &'static str,
+) -> Result<Vec<i64>, HostlibError> {
+    match dict.get(key) {
+        None | Some(VmValue::Nil) => Ok(Vec::new()),
+        Some(VmValue::List(items)) => {
+            let mut out = Vec::with_capacity(items.len());
+            for item in items.iter() {
+                match item {
+                    VmValue::Int(n) => out.push(*n),
+                    VmValue::Float(f) if f.fract() == 0.0 => out.push(*f as i64),
+                    other => {
+                        return Err(HostlibError::InvalidParameter {
+                            builtin,
+                            param: key,
+                            message: format!(
+                                "expected list of integers, got element {}",
+                                other.type_name()
+                            ),
+                        });
+                    }
+                }
+            }
+            Ok(out)
+        }
+        Some(other) => Err(HostlibError::InvalidParameter {
+            builtin,
+            param: key,
+            message: format!("expected list of integers, got {}", other.type_name()),
+        }),
+    }
+}
+
 /// Construct a [`VmValue::Dict`] from a `(key, value)` iterable. Used by
 /// tool handlers when shaping their JSON-Schema-mirrored response.
 pub fn build_dict<I, K>(entries: I) -> VmValue

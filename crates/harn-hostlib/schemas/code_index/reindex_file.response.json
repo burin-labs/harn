@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/reindex_file.response.json",
+  "title": "code_index.reindex_file response",
+  "type": "object",
+  "properties": {
+    "indexed": { "type": "boolean" },
+    "file_id": { "type": ["integer", "null"], "minimum": 1 }
+  },
+  "required": ["indexed", "file_id"],
+  "additionalProperties": false
+}

@@ -1,0 +1,8 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/agent_register.response.json",
+  "title": "code_index.agent_register response",
+  "description": "Assigned agent id (echoes the request value when one was supplied).",
+  "type": "integer",
+  "minimum": 1
+}
