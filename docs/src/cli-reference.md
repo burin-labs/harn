@@ -346,7 +346,7 @@ preflight_allow = ["mystery.*", "runtime.task"]
 [workspace]
 # Directories or files checked by `harn check --workspace`. Paths are
 # resolved relative to harn.toml.
-pipelines = ["Sources/BurinCore/Resources/pipelines", "scripts"]
+pipelines = ["pipelines", "scripts"]
 ```
 
 Preflight diagnostics are reported under the `preflight` category so they
@@ -1041,35 +1041,11 @@ Security guidance:
 - treat configured `client_secret` values as secrets
 - review remote MCP capabilities before using them in autonomous workflows
 
-## Release gate
+## Maintainer release scripts
 
-For repo maintainers, the merge-queue-safe release path opens the automated
-version-bump PR after the release-content PR lands on `main`:
-
-```bash
-./scripts/release_ship.sh --bump patch
-```
-
-After that bump PR lands through the merge queue, finalize from an up-to-date
-`main`:
-
-```bash
-./scripts/release_ship.sh --finalize
-```
-
-The first command runs audit → dry-run publish → bump → commit → push
-`release/vX.Y.Z` → open PR. Finalize runs audit → dry-run publish → tag → push
-tag → `cargo publish` → GitHub release. The tag push happens before
-`cargo publish` so downstream consumers (GitHub release binary workflows,
-`burin-code`'s `fetch-harn`) start in parallel with crates.io.
-
-For piecewise work, the docs audit, verification gate, bump flow, and publish
-sequence are exposed individually:
-
-```bash
-./scripts/release_gate.sh audit
-./scripts/release_gate.sh full --bump patch --dry-run
-```
+Harn's repo-maintainer release scripts are documented in
+[Maintainer release workflow](./maintainer-release.md). They are not part of
+the end-user `harn` CLI surface.
 
 ## harn add
 

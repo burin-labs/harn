@@ -4,6 +4,10 @@
 external callers. It contains the MCP, A2A, and ACP adapters plus the shared
 dispatch, auth, replay, and export-catalog pieces those adapters use.
 
+For user-facing protocol examples, start with
+[MCP, ACP, and A2A integration](./mcp-and-acp.md). For a quick status table
+across entry points, see [Protocol support matrix](./protocol-support.md).
+
 The goal is to keep protocol adapters thin:
 
 - load one `.harn` module and discover its exported `pub fn` entrypoints once

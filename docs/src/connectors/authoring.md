@@ -437,7 +437,7 @@ impl Connector for ExampleConnector {
 
 Webhook-style connectors should reuse
 `harn_vm::connectors::verify_hmac_signed(...)` instead of open-coding HMAC
-checks. The helper enforces the non-negotiable rules from issue `#167`:
+checks. The helper enforces these non-negotiable rules:
 
 - verification happens against the raw request body bytes
 - signature comparisons use constant-time equality

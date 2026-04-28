@@ -1,12 +1,11 @@
 # Migrating Rust provider connectors to pure-Harn packages
 
 The Rust-side GitHub, Slack, Linear, and Notion connectors are deprecated
-compatibility shims under the pure-Harn connector pivot tracked by
-[#350](https://github.com/burin-labs/harn/issues/350). The core sunset
-groundwork tracked by [#446](https://github.com/burin-labs/harn/issues/446)
-has landed; new provider business logic ships in pure-Harn connector packages
-so that Harn Cloud and self-hosted orchestrators can adopt connector fixes, new
-event families, and provider API changes without waiting for a Harn core release.
+compatibility shims under the pure-Harn connector pivot. The core sunset
+groundwork has landed; new provider business logic ships in pure-Harn connector
+packages so that Harn Cloud and self-hosted orchestrators can adopt connector
+fixes, new event families, and provider API changes without waiting for a Harn
+core release.
 
 This guide is the no-downtime migration path for an orchestrator that today
 uses one of the Rust-side providers and wants to cut over to the pure-Harn
@@ -126,8 +125,7 @@ duplicate them.
 
 ## Removal status
 
-The Harn core prerequisites from [#446](https://github.com/burin-labs/harn/issues/446)
-are complete:
+The Harn core prerequisites are complete:
 
 - The connector contract conformance harness validates pure-Harn replacements
   through the same adapter path Harn Cloud and self-hosted orchestrators use.

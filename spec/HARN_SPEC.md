@@ -3991,7 +3991,7 @@ lives outside `harn.toml`.
 
 ```toml
 [workspace]
-pipelines = ["Sources/BurinCore/Resources/pipelines", "scripts"]
+pipelines = ["pipelines", "scripts"]
 ```
 
 `harn check --workspace` resolves each path in `pipelines` relative to
@@ -4071,8 +4071,8 @@ resolve without filesystem-relative hacks.
   shared git cache. Directory path dependencies are live-linked into
   `.harn/packages/<alias>` when the platform supports symlinks, with a
   copy fallback for restricted filesystems. This makes sibling-repo
-  development ergonomic for layouts such as `~/projects/{burin-code,
-  harn-cloud,harn-openapi}`: editing `../harn-openapi/lib.harn` is
+  development ergonomic for layouts such as `~/projects/{app,
+  shared-packages,harn-openapi}`: editing `../harn-openapi/lib.harn` is
   immediately visible to imports in the consuming project.
 
 Transitive package dependencies are resolved from installed package

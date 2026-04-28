@@ -2,30 +2,28 @@
 
 [Introduction](./introduction.md)
 
-# Getting started
+# Getting Started
 
 - [Getting started](./getting-started.md)
 - [Scripting cheatsheet](./scripting-cheatsheet.md)
 - [LLM quick reference](./docs/llm/harn-quickref.md)
 - [Why Harn?](./why-harn.md)
 
-# The language
+# Language
 
 - [Language basics](./language-basics.md)
 - [Error handling](./error-handling.md)
 - [Modules and imports](./modules.md)
 - [Concurrency](./concurrency.md)
-- [Language specification](./language-spec.md)
 - [Runtime context](./runtime-context.md)
+- [Language specification](./language-spec.md)
 
-# Agents and workflows
+# Agent Runtime
 
 - [LLM calls and agent loops](./llm-and-agents.md)
 - [Typed tools for agent loops](./typed-tools.md)
 - [Daemon stdlib](./stdlib/daemon.md)
 - [Current session builtin](./stdlib/agent_session_current_id.md)
-- [Triggers](./triggers.md)
-- [Trigger stdlib](./stdlib/triggers.md)
 - [Monitor stdlib](./stdlib/monitors.md)
 - [Prompt library stdlib](./stdlib/prompt-library.md)
 - [Human in the loop](./hitl.md)
@@ -33,7 +31,6 @@
 - [Skills](./skills.md)
 - [Personas](./personas.md)
 - [Skill provenance](./skill-provenance.md)
-- [Package authoring](./package-authoring.md)
 - [Sessions](./sessions.md)
 - [Agent state](./agent-state.md)
 - [Transcript architecture](./transcript-architecture.md)
@@ -41,16 +38,45 @@
 - [Team learning and context packs](./team-learning.md)
 - [Workflow crystallization](./workflow-crystallization.md)
 - [Flow predicate language](./flow-predicates.md)
+
+# Protocols
+
+- [Protocol support matrix](./protocol-support.md)
+- [MCP, ACP, and A2A integration](./mcp-and-acp.md)
+- [Outbound workflow server](./harn-serve.md)
+- [Bridge protocol](./bridge-protocol.md)
+- [Host tools over the bridge](./bridge/host-tools.md)
+- [ACP over WebSocket](./acp/websocket.md)
+- [Agents Protocol v1](./spec/agents-protocol/v1.md)
+- [Agents Protocol Receipt Format](./spec/agents-protocol/receipt-format-v1.md)
+- [Agents Protocol Replay Contract](./spec/agents-protocol/replay-v1.md)
+
+# Orchestration
+
+- [Triggers](./triggers.md)
+- [Trigger stdlib](./stdlib/triggers.md)
 - [Trigger manifests](./triggers/manifest.md)
 - [Trigger budgets](./triggers/budgets.md)
 - [Trigger event schema](./triggers/event-schema.md)
 - [Trigger dispatcher](./triggers/dispatcher.md)
-- [Trigger observability in the action graph](./observability/triggers-in-action-graph.md)
+- [Trigger registry](./triggers/registry.md)
+- [Orchestrator](./orchestrator.md)
+- [Hot reload](./orchestrator/hot-reload.md)
+- [Orchestrator DLQ management](./orchestrator/dlq.md)
+- [Orchestrator backpressure](./orchestrator/backpressure.md)
+- [Worker dispatch](./orchestrator/worker-dispatch.md)
+- [Orchestrator secrets](./orchestrator/secrets.md)
+- [Multi-tenant orchestrator](./orchestrator/multi-tenant.md)
+- [Connector OAuth](./orchestrator/oauth.md)
+- [Orchestrator MCP server](./mcp-server.md)
+
+# Packages and Connectors
+
+- [Package authoring](./package-authoring.md)
 - [Connector authoring](./connectors/authoring.md)
 - [Connector architecture status](./connectors/architecture.md)
 - [Connector catalog](./connectors/catalog.md)
 - [Connector testkit](./connectors/testkit.md)
-- [Trigger registry](./triggers/registry.md)
 - [Cron connector](./connectors/cron.md)
 - [GitHub App connector](./connectors/github.md)
 - [Linear connector](./connectors/linear.md)
@@ -58,48 +84,39 @@
 - [Slack Events connector](./connectors/slack-events.md)
 - [Generic webhook connector](./connectors/webhook.md)
 - [A2A push connector](./connectors/a2a-push.md)
+
+# Observability
+
+- [Harn portal](./portal.md)
+- [Debugging agent runs](./debugging.md)
+- [Trigger observability in the action graph](./observability/triggers-in-action-graph.md)
+- [Orchestrator observability](./orchestrator/observability.md)
+
+# Operations
+
+- [Playground](./playground.md)
+- [Host boundary](./host-boundary.md)
+- [Deploy to Render](./deploy/render.md)
+- [Deploy to Fly.io](./deploy/fly.md)
+- [Deploy to Railway](./deploy/railway.md)
+- [Maintainer release workflow](./maintainer-release.md)
+
+# Tutorials and Guides
+
 - [Cookbook](./cookbook.md)
 - [Tutorial: code review agent](./tutorial-code-review-agent.md)
 - [Tutorial: MCP server](./tutorial-mcp-server.md)
 - [Tutorial: eval pipeline](./tutorial-eval-pipeline.md)
 - [Best practices](./best-practices.md)
 
-# Hosts and integration
-
-- [Playground](./playground.md)
-- [Host boundary](./host-boundary.md)
-- [Bridge protocol](./bridge-protocol.md)
-- [Host tools over the bridge](./bridge/host-tools.md)
-- [MCP and ACP integration](./mcp-and-acp.md)
-- [ACP over WebSocket](./acp/websocket.md)
-- [Outbound workflow server](./harn-serve.md)
-- [Orchestrator MCP server](./mcp-server.md)
-- [Harn portal](./portal.md)
-- [Orchestrator](./orchestrator.md)
-- [Hot reload](./orchestrator/hot-reload.md)
-- [Orchestrator DLQ management](./orchestrator/dlq.md)
-- [Orchestrator backpressure](./orchestrator/backpressure.md)
-- [Worker dispatch](./orchestrator/worker-dispatch.md)
-- [Orchestrator observability](./orchestrator/observability.md)
-- [Orchestrator secrets](./orchestrator/secrets.md)
-- [Multi-tenant orchestrator](./orchestrator/multi-tenant.md)
-- [Connector OAuth](./orchestrator/oauth.md)
-- [Deploy to Render](./deploy/render.md)
-- [Deploy to Fly.io](./deploy/fly.md)
-- [Deploy to Railway](./deploy/railway.md)
-
 # Reference
 
 - [CLI reference](./cli-reference.md)
-- [Agents Protocol v1](./spec/agents-protocol/v1.md)
-- [Agents Protocol Receipt Format](./spec/agents-protocol/receipt-format-v1.md)
-- [Agents Protocol Replay Contract](./spec/agents-protocol/replay-v1.md)
 - [Builtin functions](./builtins.md)
 - [Postgres](./postgres.md)
 - [Project scanning](./project-scan.md)
 - [Prompt templating](./prompt-templating.md)
 - [Configuring LLM providers](./providers.md)
-- [Debugging agent runs](./debugging.md)
 - [Editor integration](./editor-integration.md)
 - [Testing](./testing.md)
 

@@ -361,7 +361,7 @@ Accepted shapes:
 | OpenRouter / Together / Groq / DeepSeek / Fireworks / HuggingFace / local | ✓ when routed model matches `gpt-5.4+` upstream | hosted forwarded; escape hatch below for proxies |
 | Gemini, Ollama, mock (default model) | ✗ | client fallback works today |
 
-The OpenAI native path (harn#71) emits a flat `{"type": "tool_search",
+The OpenAI native path emits a flat `{"type": "tool_search",
 "mode": "hosted"}` meta-tool at the front of the tools array, alongside
 `defer_loading: true` on the wrapper of each user tool. The server runs
 the search and replies with `tool_search_call` / `tool_search_output`
@@ -515,7 +515,7 @@ and model aliases without editing Rust-side registration code.
 ### Client-executed fallback
 
 On providers without native `defer_loading`, Harn falls back to an
-in-VM execution path (landed in [harn#70](https://github.com/burin-labs/harn/issues/70)).
+in-VM execution path.
 The fallback is identical to the native path from a script's point of
 view: same option surface, same transcript events, same promotion
 behavior across turns. Internally, Harn injects a synthetic tool

@@ -1,10 +1,7 @@
 # Flow Predicate Language
 
-Status: design decision record for Harn Flow v0. Parent issue:
-[harn#571](https://github.com/burin-labs/harn/issues/571). This page
-closes the four predicate-language review questions in
-[harn#584](https://github.com/burin-labs/harn/issues/584) and records the
-implementation work that is already landed or in flight.
+Status: design decision record for Harn Flow v0. This page records the
+predicate-language decisions and the implementation shape they imply.
 
 Flow predicates are repo-local Harn functions that gate candidate slices. They
 are not a separate DSL. A repository declares them in per-directory
@@ -13,21 +10,20 @@ shape used by directory metadata. The goal is a policy surface that can be
 audited, replayed, and proposed by agents without letting agents silently expand
 their own authority.
 
-## Current Implementation State
+## Implementation State
 
-The design in this document assumes the following ticket state as of
-2026-04-26:
+The design in this document assumes the following implementation state:
 
 | Area | Status |
 |---|---|
-| Predicate executor and hard kind budgets | Landed in #578 / #704. |
-| Cross-slice fairness scheduler and aggregate budget envelopes | Landed in #736. |
-| `invariants.harn` discovery and attributes | Landed in #579. |
-| `InvariantResult`, evidence, and remediation types | Landed in #581. |
-| Hierarchical predicate composition | In review in #731, closing #582. |
-| Predicate hash replay audit | In review in #730, closing #583. |
-| Archivist persona | Landed in #586 as deterministic propose-only scan output. |
-| Fixer persona | In review in #729, closing #587. |
+| Predicate executor and hard kind budgets | Landed. |
+| Cross-slice fairness scheduler and aggregate budget envelopes | Landed. |
+| `invariants.harn` discovery and attributes | Landed. |
+| `InvariantResult`, evidence, and remediation types | Landed. |
+| Hierarchical predicate composition | In progress. |
+| Predicate hash replay audit | In progress. |
+| Archivist persona | Landed as deterministic propose-only scan output. |
+| Fixer persona | In progress. |
 
 ## Predicate Declarations
 
@@ -352,29 +348,13 @@ If no Flow store exists, `shadow_evaluation.status` is `no_flow_store` rather
 than an error. That keeps initial repo bootstrap useful while making the
 absence of atom history explicit.
 
-## Follow-Up Implementation Tickets
+## Remaining Implementation Work
 
-The decisions above leave concrete implementation work beyond the already
-landed and in-review predicate tickets:
-
-- ~~[#734](https://github.com/burin-labs/harn/issues/734): add
-  `meta-invariants.harn` bootstrap validation and approval-chain checks.~~
-  Closed by `validate_predicate_edit` /
-  `validate_bootstrap_edit` plus the `bootstrap_policy` field surfaced in
-  `harn flow ship watch` and `harn flow archivist scan`.
-- [#735](https://github.com/burin-labs/harn/issues/735): deterministic
-  fallback metadata and enforcement for `@semantic` predicates.
-- ~~[#736](https://github.com/burin-labs/harn/issues/736): add cross-slice
-  fair scheduling and aggregate per-slice predicate budget envelopes.~~
-  Closed by `PredicateSchedulerConfig` and `execute_slices(slices)` documented
-  above.
-- ~~[#733](https://github.com/burin-labs/harn/issues/733): add
-  cross-directory union benchmarks and predicate-count explosion limits before
-  Ship Captain relies on unattended slice emission.~~ Closed by the
-  `PredicateCeiling` defaults documented above plus the
-  `flow_predicate_union` criterion bench.
-
-These are implementation follow-ups to #584, not new design questions.
+The decisions above leave one concrete implementation gap beyond the landed
+predicate runtime: deterministic fallback metadata and enforcement for
+`@semantic` predicates. Bootstrap validation, approval-chain checks,
+cross-slice scheduling, aggregate predicate budgets, and cross-directory
+predicate ceilings are covered by the implementation described above.
 
 ## External Reference Points
 

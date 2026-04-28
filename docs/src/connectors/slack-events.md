@@ -1,8 +1,7 @@
 # Slack Events connector
 
 > **Deprecated.** The Rust-side `SlackConnector` is a compatibility shim under
-> the [#350](https://github.com/burin-labs/harn/issues/350) pure-Harn connector
-> pivot. The recommended implementation is the pure-Harn
+> the pure-Harn connector pivot. The recommended implementation is the pure-Harn
 > [`harn-slack-connector`](https://github.com/burin-labs/harn-slack-connector)
 > package. This page documents the existing Rust connector for users who have
 > not yet migrated; new deployments should configure the Harn package via

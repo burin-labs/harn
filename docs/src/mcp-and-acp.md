@@ -4,6 +4,10 @@ Harn has built-in support for the Model Context Protocol (MCP), Agent
 Client Protocol (ACP), and Agent-to-Agent (A2A) protocol. This guide
 covers how to use each from both client and server perspectives.
 
+For a scan-friendly status table across all protocol entry points, see the
+[protocol support matrix](./protocol-support.md). For shared serving internals,
+see [Outbound workflow server](./harn-serve.md).
+
 ## MCP client (connecting to MCP servers)
 
 Connect to any MCP-compatible tool server, list its capabilities, and
@@ -78,7 +82,7 @@ url = "https://mcp.notion.com/mcp"
 scopes = "read write"
 ```
 
-### Lazy boot (harn#75)
+### Lazy boot
 
 Servers marked `lazy = true` are NOT booted at pipeline startup. They
 start on the first `mcp_call`, `mcp_ensure_active("name")`, or skill

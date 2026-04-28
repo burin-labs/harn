@@ -1,8 +1,7 @@
 # Linear connector
 
 > **Deprecated.** The Rust-side `LinearConnector` is a compatibility shim under
-> the [#350](https://github.com/burin-labs/harn/issues/350) pure-Harn connector
-> pivot. The recommended implementation is the pure-Harn
+> the pure-Harn connector pivot. The recommended implementation is the pure-Harn
 > [`harn-linear-connector`](https://github.com/burin-labs/harn-linear-connector)
 > package. This page documents the existing Rust connector for users who have
 > not yet migrated; new deployments should configure the Harn package via
@@ -13,7 +12,7 @@
 `LinearConnector` is Harn's built-in Linear integration for inbound webhook
 deliveries plus outbound GraphQL calls.
 
-The current landing covers the core connector contract from `#173`:
+The Rust compatibility shim covers:
 
 - inbound HMAC verification via `Linear-Signature`
 - replay protection using `webhookTimestamp` with a 60s window plus a default

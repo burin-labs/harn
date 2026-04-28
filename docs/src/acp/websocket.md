@@ -8,6 +8,10 @@ wss://<host>/acp
 Authorization: Bearer <api-key>
 ```
 
+This page covers only the WebSocket transport. The canonical ACP behavior guide
+is [MCP, ACP, and A2A integration](../mcp-and-acp.md#acp-agent-client-protocol);
+the broader entry-point table is [Protocol support matrix](../protocol-support.md).
+
 Use `wss://` when the orchestrator is served with `--cert` and `--key`.
 Plain `ws://` is intended for local development or trusted private networks.
 
