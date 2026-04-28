@@ -325,9 +325,10 @@ harn serve mcp agent.harn
 `harn serve mcp` auto-detects whether the script exposes its surface
 through `pub fn` exports or through the `mcp_tools(...)` /
 `mcp_resource(...)` / `mcp_prompt(...)` registration builtins shown
-above and serves the appropriate one over stdio. All `print`/`println`
-output goes to stderr (stdout is the MCP transport). The server supports
-the `2025-11-25` MCP protocol version over stdio.
+above and serves the appropriate one over stdio or Streamable HTTP. All
+`print`/`println` output goes to stderr when stdio is the MCP transport.
+The server supports the `2025-11-25` MCP protocol version on both
+transports.
 
 #### Publishing a Server Card
 

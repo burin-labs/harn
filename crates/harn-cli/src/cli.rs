@@ -682,7 +682,7 @@ pub(crate) enum ServeCommand {
     /// Serve a `.harn` file as an MCP server. Exposes either exported
     /// `pub fn` entrypoints (recommended) or, when the script registers
     /// tools/resources/prompts via `mcp_tools(...)` / `mcp_resource(...)`
-    /// / `mcp_prompt(...)`, that script-driven surface over stdio.
+    /// / `mcp_prompt(...)`, that script-driven surface.
     Mcp(ServeMcpArgs),
 }
 
@@ -766,14 +766,13 @@ pub(crate) struct ServeMcpArgs {
     /// Optional Server Card JSON to advertise (MCP v2.1). Path to a
     /// `.json` file OR an inline JSON string. The card is embedded in
     /// the `initialize` response's `serverInfo.card` field AND exposed
-    /// as a static resource at `well-known://mcp-card`. Honored when
-    /// the script uses the legacy `mcp_tools(...)` registration surface.
+    /// as a static resource at `well-known://mcp-card`.
     #[arg(long = "card", value_name = "PATH_OR_JSON")]
     pub card: Option<String>,
     /// Path to the `.harn` file whose exported `pub fn` entrypoints are
     /// served. Scripts that instead call `mcp_tools(registry)` /
     /// `mcp_resource(...)` / `mcp_prompt(...)` are detected and served
-    /// via the script-driven surface (over stdio).
+    /// via the script-driven surface.
     pub file: String,
 }
 

@@ -12,7 +12,7 @@ use super::pagination::{encode_cursor, parse_cursor};
 use super::uri::match_uri_template;
 use super::PROTOCOL_VERSION;
 
-/// MCP server that exposes Harn tools, resources, and prompts over stdio JSON-RPC.
+/// MCP server that exposes Harn tools, resources, and prompts over MCP JSON-RPC.
 pub struct McpServer {
     server_name: String,
     server_version: String,
@@ -73,36 +73,8 @@ impl McpServer {
                 Err(_) => continue,
             };
 
-            let method = msg.get("method").and_then(|m| m.as_str()).unwrap_or("");
-            let id = msg.get("id").cloned();
-            let params = msg.get("params").cloned().unwrap_or(serde_json::json!({}));
-
-            // Notifications have no id; ignore them silently.
-            if id.is_none() {
+            let Some(response) = self.handle_json_rpc(msg, vm).await else {
                 continue;
-            }
-            let id = id.unwrap();
-
-            let response = match method {
-                "initialize" => self.handle_initialize(&id),
-                "ping" => crate::jsonrpc::response(id.clone(), serde_json::json!({})),
-                "logging/setLevel" => self.handle_logging_set_level(&id, &params),
-                "harn.hitl.respond" => self.handle_hitl_respond(&id, &params).await,
-                "tools/list" => self.handle_tools_list(&id, &params),
-                "tools/call" => self.handle_tools_call(&id, &params, vm).await,
-                "resources/list" => self.handle_resources_list(&id, &params),
-                "resources/read" => self.handle_resources_read(&id, &params, vm).await,
-                "resources/templates/list" => self.handle_resource_templates_list(&id, &params),
-                "prompts/list" => self.handle_prompts_list(&id, &params),
-                "prompts/get" => self.handle_prompts_get(&id, &params, vm).await,
-                _ => serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "id": id,
-                    "error": {
-                        "code": -32601,
-                        "message": format!("Method not found: {method}")
-                    }
-                }),
             };
 
             let mut response_line = serde_json::to_string(&response)
@@ -119,6 +91,39 @@ impl McpServer {
         }
 
         Ok(())
+    }
+
+    /// Handle one MCP JSON-RPC message. Notifications return `None`.
+    pub async fn handle_json_rpc(
+        &self,
+        msg: serde_json::Value,
+        vm: &mut Vm,
+    ) -> Option<serde_json::Value> {
+        let method = msg.get("method").and_then(|m| m.as_str()).unwrap_or("");
+        let id = msg.get("id").cloned()?;
+        let params = msg.get("params").cloned().unwrap_or(serde_json::json!({}));
+
+        Some(match method {
+            "initialize" => self.handle_initialize(&id),
+            "ping" => crate::jsonrpc::response(id.clone(), serde_json::json!({})),
+            "logging/setLevel" => self.handle_logging_set_level(&id, &params),
+            "harn.hitl.respond" => self.handle_hitl_respond(&id, &params).await,
+            "tools/list" => self.handle_tools_list(&id, &params),
+            "tools/call" => self.handle_tools_call(&id, &params, vm).await,
+            "resources/list" => self.handle_resources_list(&id, &params),
+            "resources/read" => self.handle_resources_read(&id, &params, vm).await,
+            "resources/templates/list" => self.handle_resource_templates_list(&id, &params),
+            "prompts/list" => self.handle_prompts_list(&id, &params),
+            "prompts/get" => self.handle_prompts_get(&id, &params, vm).await,
+            _ => serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "error": {
+                    "code": -32601,
+                    "message": format!("Method not found: {method}")
+                }
+            }),
+        })
     }
 
     fn handle_initialize(&self, id: &serde_json::Value) -> serde_json::Value {

@@ -1844,8 +1844,8 @@ harn mcp login notion
 
 Harn pipelines can expose tools, resources, resource templates, and prompts
 as an MCP server using `harn serve mcp`. The CLI serves them over stdio
-using the MCP protocol, making them callable by Claude Desktop, Cursor,
-or any MCP client.
+or Streamable HTTP using the MCP protocol, making them callable by Claude
+Desktop, Cursor, or any MCP client.
 
 **Declarative syntax** (preferred):
 
@@ -1994,8 +1994,8 @@ Notes:
 
 - `mcp_tools(registry)` (or the alias `mcp_serve`) must be called to register tools.
 - Resources, resource templates, and prompts are registered individually.
-- All `print`/`println` output goes to stderr (stdout is the MCP transport).
-- The server supports the `2025-11-25` MCP protocol version over stdio.
+- All `print`/`println` output goes to stderr (stdout is the MCP transport in stdio mode).
+- The server supports the `2025-11-25` MCP protocol version over stdio and Streamable HTTP.
 - Tool handlers receive arguments as a dict and should return a string result.
 - Prompt handlers receive arguments as a dict and return a string (single
   user message) or a list of `{role, content}` dicts.

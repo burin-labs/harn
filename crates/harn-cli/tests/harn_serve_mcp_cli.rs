@@ -63,6 +63,52 @@ pub fn spin(label: string) -> string {
     .unwrap();
 }
 
+fn write_script_surface_fixture(temp: &TempDir) {
+    fs::write(
+        temp.path().join("script_surface.harn"),
+        r##"
+pipeline main(task) {
+  var tools = tool_registry()
+  tools = tool_define(tools, "echo", "Echo input", {
+    parameters: {text: "string"},
+    handler: { args -> args.text },
+    annotations: {title: "Echo Tool", readOnlyHint: true}
+  })
+  mcp_tools(tools)
+
+  mcp_resource({
+    uri: "docs://readme",
+    name: "README",
+    description: "Project readme",
+    mime_type: "text/markdown",
+    text: "# Hello from MCP"
+  })
+
+  mcp_resource_template({
+    uri_template: "config://{key}",
+    name: "Config",
+    description: "Config values",
+    mime_type: "text/plain",
+    handler: { args -> "value:" + args.key }
+  })
+
+  mcp_prompt({
+    name: "review",
+    description: "Review prompt",
+    arguments: [{name: "code", required: true}],
+    handler: { args -> "Review this: " + args.code }
+  })
+}
+"##,
+    )
+    .unwrap();
+    fs::write(
+        temp.path().join("card.json"),
+        r#"{"name":"script-card","version":"1.0.0"}"#,
+    )
+    .unwrap();
+}
+
 fn spawn_stdout_reader(
     stdout: impl std::io::Read + Send + 'static,
 ) -> (Receiver<JsonValue>, thread::JoinHandle<()>) {
@@ -112,6 +158,19 @@ fn wait_for_http_listener(child: &mut std::process::Child, rx: &Receiver<String>
         PROCESS_READY_TIMEOUT,
         "HTTP MCP server",
     )
+}
+
+fn send_stdio_request(
+    stdin: &mut impl Write,
+    rx: &Receiver<JsonValue>,
+    request: JsonValue,
+) -> JsonValue {
+    let id = request.get("id").cloned();
+    writeln!(stdin, "{}", serde_json::to_string(&request).unwrap()).unwrap();
+    stdin.flush().unwrap();
+    recv_until(rx, PROCESS_READY_TIMEOUT, |message| {
+        id.as_ref().is_some_and(|id| message.get("id") == Some(id))
+    })
 }
 
 fn parse_sse_messages(body: &str) -> Vec<JsonValue> {
@@ -293,6 +352,110 @@ fn serve_mcp_stdio_lists_calls_and_cancels_exported_functions() {
     assert!(status.success(), "status={status}");
 }
 
+#[test]
+fn serve_mcp_stdio_exposes_script_registered_surface() {
+    let _guard = lock_harn_serve_mcp_tests();
+    let temp = TempDir::new().unwrap();
+    write_script_surface_fixture(&temp);
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_harn"))
+        .current_dir(temp.path())
+        .arg("serve")
+        .arg("mcp")
+        .arg("--card")
+        .arg("card.json")
+        .arg("script_surface.harn")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+
+    let mut stdin = child.stdin.take().unwrap();
+    let (rx, stdout_handle) = spawn_stdout_reader(child.stdout.take().unwrap());
+    let (_stderr_rx, _stderr_handle) =
+        mcp_support::spawn_stderr_reader(child.stderr.take().unwrap());
+
+    let init = send_stdio_request(
+        &mut stdin,
+        &rx,
+        json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-11-25",
+                "capabilities": {},
+                "clientInfo": { "name": "stdio-test", "version": "1.0.0" }
+            }
+        }),
+    );
+    assert_eq!(init["result"]["serverInfo"]["card"]["name"], "script-card");
+
+    let tools = send_stdio_request(
+        &mut stdin,
+        &rx,
+        json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}),
+    );
+    assert_eq!(tools["result"]["tools"][0]["name"], "echo");
+
+    let resources = send_stdio_request(
+        &mut stdin,
+        &rx,
+        json!({"jsonrpc": "2.0", "id": 3, "method": "resources/list", "params": {}}),
+    );
+    let resource_uris = resources["result"]["resources"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|resource| resource["uri"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert!(resource_uris.contains(&"well-known://mcp-card"));
+    assert!(resource_uris.contains(&"docs://readme"));
+
+    let templates = send_stdio_request(
+        &mut stdin,
+        &rx,
+        json!({
+            "jsonrpc": "2.0",
+            "id": 4,
+            "method": "resources/templates/list",
+            "params": {}
+        }),
+    );
+    assert_eq!(
+        templates["result"]["resourceTemplates"][0]["uriTemplate"],
+        "config://{key}"
+    );
+
+    let prompts = send_stdio_request(
+        &mut stdin,
+        &rx,
+        json!({"jsonrpc": "2.0", "id": 5, "method": "prompts/list", "params": {}}),
+    );
+    assert_eq!(prompts["result"]["prompts"][0]["name"], "review");
+
+    let prompt = send_stdio_request(
+        &mut stdin,
+        &rx,
+        json!({
+            "jsonrpc": "2.0",
+            "id": 6,
+            "method": "prompts/get",
+            "params": {"name": "review", "arguments": {"code": "fn main() {}"}}
+        }),
+    );
+    assert!(prompt["result"]["messages"][0]["content"]["text"]
+        .as_str()
+        .unwrap()
+        .contains("fn main"));
+
+    drop(stdin);
+    let status = child.wait().unwrap();
+    stdout_handle.join().expect("stdout reader thread");
+    assert!(status.success(), "status={status}");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn serve_mcp_http_streams_progress_and_enforces_api_keys() {
     let _guard = lock_harn_serve_mcp_tests();
@@ -467,6 +630,145 @@ async fn serve_mcp_http_streams_progress_and_enforces_api_keys() {
         final_response["result"]["structuredContent"]["message"],
         json!("Hello, http!")
     );
+
+    child.kill().unwrap();
+    child.wait().unwrap();
+    handle.join().unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn serve_mcp_http_exposes_script_registered_surface() {
+    let _guard = lock_harn_serve_mcp_tests();
+    let temp = TempDir::new().unwrap();
+    write_script_surface_fixture(&temp);
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_harn"))
+        .current_dir(temp.path())
+        .arg("serve")
+        .arg("mcp")
+        .arg("--transport")
+        .arg("http")
+        .arg("--bind")
+        .arg("127.0.0.1:0")
+        .arg("--card")
+        .arg("card.json")
+        .arg("script_surface.harn")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+
+    let (rx, handle) = mcp_support::spawn_stderr_reader(child.stderr.take().unwrap());
+    let url = wait_for_http_listener(&mut child, &rx);
+    let client = reqwest::Client::new();
+
+    let init = client
+        .post(&url)
+        .header("Accept", "application/json, text/event-stream")
+        .json(&json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-11-25",
+                "capabilities": {},
+                "clientInfo": { "name": "http-test", "version": "1.0.0" }
+            }
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert!(init.status().is_success());
+    let session_id = init
+        .headers()
+        .get("mcp-session-id")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_string();
+    let init_json: JsonValue = init.json().await.unwrap();
+    assert_eq!(
+        init_json["result"]["serverInfo"]["card"]["name"],
+        "script-card"
+    );
+
+    let resources = client
+        .post(&url)
+        .header("Accept", "application/json, text/event-stream")
+        .header("mcp-session-id", &session_id)
+        .json(&json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "resources/list",
+            "params": {}
+        }))
+        .send()
+        .await
+        .unwrap();
+    let resources_json: JsonValue = resources.json().await.unwrap();
+    let resource_uris = resources_json["result"]["resources"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|resource| resource["uri"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert!(resource_uris.contains(&"well-known://mcp-card"));
+    assert!(resource_uris.contains(&"docs://readme"));
+
+    let templates = client
+        .post(&url)
+        .header("Accept", "application/json, text/event-stream")
+        .header("mcp-session-id", &session_id)
+        .json(&json!({
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "resources/templates/list",
+            "params": {}
+        }))
+        .send()
+        .await
+        .unwrap();
+    let templates_json: JsonValue = templates.json().await.unwrap();
+    assert_eq!(
+        templates_json["result"]["resourceTemplates"][0]["uriTemplate"],
+        "config://{key}"
+    );
+
+    let prompts = client
+        .post(&url)
+        .header("Accept", "application/json, text/event-stream")
+        .header("mcp-session-id", &session_id)
+        .json(&json!({
+            "jsonrpc": "2.0",
+            "id": 4,
+            "method": "prompts/list",
+            "params": {}
+        }))
+        .send()
+        .await
+        .unwrap();
+    let prompts_json: JsonValue = prompts.json().await.unwrap();
+    assert_eq!(prompts_json["result"]["prompts"][0]["name"], "review");
+
+    let prompt = client
+        .post(&url)
+        .header("Accept", "application/json, text/event-stream")
+        .header("mcp-session-id", &session_id)
+        .json(&json!({
+            "jsonrpc": "2.0",
+            "id": 5,
+            "method": "prompts/get",
+            "params": {"name": "review", "arguments": {"code": "fn main() {}"}}
+        }))
+        .send()
+        .await
+        .unwrap();
+    let prompt_json: JsonValue = prompt.json().await.unwrap();
+    assert!(prompt_json["result"]["messages"][0]["content"]["text"]
+        .as_str()
+        .unwrap()
+        .contains("fn main"));
 
     child.kill().unwrap();
     child.wait().unwrap();

@@ -1,7 +1,8 @@
 # Tutorial: Build an MCP server
 
 This tutorial builds a small MCP server in Harn. The same program can expose
-tools, static resources, resource templates, and prompts over stdio.
+tools, static resources, resource templates, and prompts over stdio or
+Streamable HTTP.
 
 Use the companion example as a baseline:
 
@@ -98,7 +99,7 @@ pipeline main(task) {
 Prompts are a good way to standardize a client workflow while still letting the
 client supply the final payload.
 
-## 4. Run it over stdio
+## 4. Run it
 
 Once the pipeline calls `mcp_tools()`, `mcp_resource()`, or `mcp_prompt()`,
 launch the server with:
@@ -110,7 +111,9 @@ harn serve mcp examples/mcp_server.harn
 `harn serve mcp` automatically detects whether the script defines its
 surface through `pub fn` exports (the recommended path) or through the
 `mcp_tools(...)` / `mcp_resource(...)` / `mcp_prompt(...)` registration
-builtins shown above and serves the appropriate one over stdio.
+builtins shown above and serves the appropriate one over the requested
+transport.
+Use `--transport http` to expose the same MCP surface over Streamable HTTP.
 
 All user-visible output goes to stderr; the MCP transport stays on stdout.
 That keeps the server compatible with Claude Desktop, Cursor, and other MCP

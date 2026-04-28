@@ -54,14 +54,21 @@ impl Default for McpHttpServeOptions {
 pub struct McpServerConfig {
     pub core: DispatchCore,
     pub server_name: Option<String>,
+    pub server_card: Option<JsonValue>,
 }
 
 impl McpServerConfig {
     pub fn new(core: DispatchCore) -> Self {
         Self {
             server_name: Some(derived_server_name(core.catalog())),
+            server_card: None,
             core,
         }
+    }
+
+    pub fn with_server_card(mut self, card: JsonValue) -> Self {
+        self.server_card = Some(card);
+        self
     }
 }
 
@@ -70,6 +77,7 @@ pub type McpStdioServer = McpServer;
 pub struct McpServer {
     descriptor: AdapterDescriptor,
     server_name: String,
+    server_card: Option<JsonValue>,
     catalog: ExportCatalog,
     executor: ExecutionRuntime,
 }
@@ -219,6 +227,7 @@ impl McpServer {
                 supports_cancel: true,
             },
             server_name,
+            server_card: config.server_card,
             catalog,
             executor: ExecutionRuntime::start(core.clone()),
         }
@@ -373,13 +382,32 @@ impl McpServer {
             "logging/setLevel" => {
                 ImmediateResult::Response(harn_vm::jsonrpc::response(id, json!({})))
             }
-            "tools/list" => {
-                ImmediateResult::Response(harn_vm::jsonrpc::response(id, self.tools_list_result()))
-            }
+            "tools/list" => ImmediateResult::Response(harn_vm::jsonrpc::response(
+                id,
+                self.tools_list_result(&params),
+            )),
             "tools/call" => match self.prepare_stream_job(id, params, session, connection, auth) {
                 Ok(job) => ImmediateResult::Stream(Box::new(job)),
                 Err(response) => ImmediateResult::Response(response),
             },
+            "resources/list" => ImmediateResult::Response(harn_vm::jsonrpc::response(
+                id,
+                self.resources_list_result(&params),
+            )),
+            "resources/read" => ImmediateResult::Response(self.handle_resources_read(id, &params)),
+            "resources/templates/list" => ImmediateResult::Response(harn_vm::jsonrpc::response(
+                id,
+                paged_result("resourceTemplates", Vec::new(), &params),
+            )),
+            "prompts/list" => ImmediateResult::Response(harn_vm::jsonrpc::response(
+                id,
+                paged_result("prompts", Vec::new(), &params),
+            )),
+            "prompts/get" => ImmediateResult::Response(harn_vm::jsonrpc::error_response(
+                id,
+                -32602,
+                "Unknown prompt",
+            )),
             _ => ImmediateResult::Response(harn_vm::jsonrpc::error_response(
                 id,
                 -32601,
@@ -423,18 +451,29 @@ impl McpServer {
             client_identity: format!("{client_name}/{client_version}"),
         });
 
+        let mut capabilities = serde_json::Map::new();
+        if !self.catalog.functions.is_empty() {
+            capabilities.insert("tools".to_string(), json!({}));
+        }
+        if self.server_card.is_some() {
+            capabilities.insert("resources".to_string(), json!({}));
+        }
+        capabilities.insert("logging".to_string(), json!({}));
+
+        let mut server_info = json!({
+            "name": self.server_name,
+            "version": env!("CARGO_PKG_VERSION"),
+        });
+        if let Some(card) = &self.server_card {
+            server_info["card"] = card.clone();
+        }
+
         harn_vm::jsonrpc::response(
             id,
             json!({
                 "protocolVersion": MCP_PROTOCOL_VERSION,
-                "capabilities": {
-                    "tools": {},
-                    "logging": {},
-                },
-                "serverInfo": {
-                    "name": self.server_name,
-                    "version": env!("CARGO_PKG_VERSION"),
-                },
+                "capabilities": capabilities,
+                "serverInfo": server_info,
             }),
         )
     }
@@ -582,14 +621,53 @@ impl McpServer {
         }
     }
 
-    fn tools_list_result(&self) -> JsonValue {
+    fn tools_list_result(&self, params: &JsonValue) -> JsonValue {
         let tools = self
             .catalog
             .functions
             .values()
             .map(tool_entry)
             .collect::<Vec<_>>();
-        json!({ "tools": tools })
+        paged_result("tools", tools, params)
+    }
+
+    fn resources_list_result(&self, params: &JsonValue) -> JsonValue {
+        let resources = self
+            .server_card
+            .as_ref()
+            .map(|_| {
+                json!({
+                    "uri": "well-known://mcp-card",
+                    "name": "Server Card",
+                    "description": "MCP Server Card advertising this server's identity and capabilities",
+                    "mimeType": "application/json",
+                })
+            })
+            .into_iter()
+            .collect::<Vec<_>>();
+        paged_result("resources", resources, params)
+    }
+
+    fn handle_resources_read(&self, id: JsonValue, params: &JsonValue) -> JsonValue {
+        let uri = params
+            .get("uri")
+            .and_then(JsonValue::as_str)
+            .unwrap_or_default();
+        if uri == "well-known://mcp-card" {
+            if let Some(card) = &self.server_card {
+                return harn_vm::jsonrpc::response(
+                    id,
+                    json!({
+                        "contents": [{
+                            "uri": uri,
+                            "text": serde_json::to_string(card).unwrap_or_else(|_| "{}".to_string()),
+                            "mimeType": "application/json",
+                        }]
+                    }),
+                );
+            }
+        }
+        harn_vm::jsonrpc::error_response(id, -32002, &format!("Resource not found: {uri}"))
     }
 }
 
@@ -928,6 +1006,38 @@ fn build_call_request(
     })
 }
 
+fn paged_result(key: &str, entries: Vec<JsonValue>, params: &JsonValue) -> JsonValue {
+    let (offset, page_size) = parse_cursor(params);
+    let page_end = (offset + page_size).min(entries.len());
+    let page_entries = entries[offset..page_end].to_vec();
+    let mut result = json!({ key: page_entries });
+    if page_end < entries.len() {
+        result["nextCursor"] = json!(encode_cursor(page_end));
+    }
+    result
+}
+
+fn encode_cursor(offset: usize) -> String {
+    use base64::Engine;
+    base64::engine::general_purpose::STANDARD.encode(offset.to_string().as_bytes())
+}
+
+fn parse_cursor(params: &JsonValue) -> (usize, usize) {
+    let offset = params
+        .get("cursor")
+        .and_then(JsonValue::as_str)
+        .and_then(|cursor| {
+            use base64::Engine;
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(cursor)
+                .ok()?;
+            let text = String::from_utf8(bytes).ok()?;
+            text.parse::<usize>().ok()
+        })
+        .unwrap_or(0);
+    (offset, 50)
+}
+
 fn tool_entry(function: &crate::ExportedFunction) -> JsonValue {
     let mut entry = json!({
         "name": function.name,
@@ -1117,10 +1227,75 @@ pub fn greet(name: string) -> string {
         .expect("write script");
         let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
         let server = McpServer::new(McpServerConfig::new(core));
-        let tools = server.tools_list_result();
+        let tools = server.tools_list_result(&json!({}));
         assert_eq!(tools["tools"][0]["name"], "greet");
         assert_eq!(tools["tools"][0]["inputSchema"]["type"], "object");
         assert_eq!(tools["tools"][0]["outputSchema"]["type"], "string");
+    }
+
+    #[tokio::test]
+    async fn initialize_and_resources_expose_server_card() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let script = dir.path().join("server.harn");
+        std::fs::write(
+            &script,
+            r#"
+pub fn greet(name: string) -> string {
+  return name
+}
+"#,
+        )
+        .expect("write script");
+        let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
+        let server = McpServer::new(
+            McpServerConfig::new(core)
+                .with_server_card(json!({"name": "fixture-card", "version": "1"})),
+        );
+
+        let session = SharedSession::new();
+        let init = server.handle_initialize(
+            json!(1),
+            &session,
+            &json!({
+                "protocolVersion": MCP_PROTOCOL_VERSION,
+                "clientInfo": {"name": "test", "version": "1"}
+            }),
+        );
+        assert_eq!(
+            init["result"]["serverInfo"]["card"]["name"],
+            json!("fixture-card")
+        );
+        assert!(init["result"]["capabilities"]["resources"].is_object());
+
+        let resources = server.resources_list_result(&json!({}));
+        assert_eq!(
+            resources["resources"][0]["uri"],
+            json!("well-known://mcp-card")
+        );
+        let read = server.handle_resources_read(json!(2), &json!({"uri": "well-known://mcp-card"}));
+        assert!(read["result"]["contents"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("fixture-card"));
+    }
+
+    #[test]
+    fn paged_result_returns_next_cursor_and_decodes_it() {
+        let entries = (0..55)
+            .map(|index| json!({"name": format!("tool-{index}")}))
+            .collect::<Vec<_>>();
+        let first = paged_result("tools", entries.clone(), &json!({}));
+        assert_eq!(first["tools"].as_array().unwrap().len(), 50);
+        assert_eq!(first["tools"][49]["name"], json!("tool-49"));
+
+        let second = paged_result(
+            "tools",
+            entries,
+            &json!({"cursor": first["nextCursor"].as_str().unwrap()}),
+        );
+        assert_eq!(second["tools"].as_array().unwrap().len(), 5);
+        assert_eq!(second["tools"][0]["name"], json!("tool-50"));
+        assert!(second.get("nextCursor").is_none());
     }
 
     #[test]
