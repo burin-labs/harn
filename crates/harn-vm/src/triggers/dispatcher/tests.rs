@@ -456,7 +456,10 @@ fn spawn_mock_a2a_server_with_schemes(
     let stop_thread = stop.clone();
     let tls_config = (listener_scheme == "https").then(mock_a2a_tls_config);
     let max_connections = if listener_scheme == "http" && card_scheme == "http" {
-        3
+        // HTTPS discovery probes the canonical card path plus legacy
+        // aliases before loopback HTTP fallback. Then the successful HTTP
+        // card fetch and JSON-RPC dispatch each use a connection.
+        6
     } else {
         2
     };
@@ -529,13 +532,33 @@ fn handle_mock_a2a_connection<T: Read + Write>(
     task_result: &serde_json::Value,
 ) {
     let (request_line, headers, body) = read_http_request(stream);
-    if request_line.starts_with("GET /.well-known/a2a-agent ") {
+    if request_line.starts_with("GET /.well-known/agent-card.json ") {
         write_json_response(
             stream,
             &serde_json::json!({
-                "id": "mock-a2a",
-                "url": format!("{card_scheme}://127.0.0.1:{port}"),
-                "interfaces": [{"protocol": "jsonrpc", "url": "/rpc"}],
+                "name": "mock-a2a",
+                "description": "Mock A2A peer",
+                "version": "1.0.0",
+                "supportedInterfaces": [{
+                    "url": format!("{card_scheme}://127.0.0.1:{port}/rpc"),
+                    "protocolBinding": "JSONRPC",
+                    "protocolVersion": "1.0"
+                }],
+                "capabilities": {
+                    "streaming": true,
+                    "pushNotifications": true,
+                    "extendedAgentCard": false
+                },
+                "securitySchemes": {},
+                "security": [],
+                "defaultInputModes": ["application/json", "text/plain"],
+                "defaultOutputModes": ["application/json", "text/plain"],
+                "skills": [{
+                    "id": "triage",
+                    "name": "triage",
+                    "description": "Triage mock events",
+                    "tags": ["test"]
+                }],
             }),
         );
         return;
@@ -1414,8 +1437,8 @@ async fn a2a_handler_returns_pending_task_handle() {
                     "state": "working",
                     "target_agent": "triage",
                     "rpc_url": format!("https://{}/rpc", server.authority),
-                    "card_url": format!("https://{}/.well-known/a2a-agent", server.authority),
-                    "agent_id": "mock-a2a",
+                    "card_url": format!("https://{}/.well-known/agent-card.json", server.authority),
+                    "agent_id": null,
                 }))
             );
 

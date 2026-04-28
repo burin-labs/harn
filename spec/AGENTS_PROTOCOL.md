@@ -255,10 +255,12 @@ Required Artifact fields:
 Servers SHOULD reference large payloads as Artifacts instead of inlining them
 in Message parts.
 
-### AgentCard
+### HarnAgentCard
 
-An AgentCard advertises an agent endpoint and its capabilities. It is aligned
-with A2A agent-card concepts while adding Harn policy and receipt metadata.
+`HarnAgentCard` is the Harn Agents API discovery envelope. It is intentionally
+distinct from the A2A `AgentCard` wire object so SDKs do not treat Harn policy
+and receipt metadata as A2A fields. When a Harn agent is also available through
+A2A, the envelope nests the current A2A card in `a2a_card`.
 
 Required fields:
 
@@ -266,11 +268,13 @@ Required fields:
 - `name`: display name.
 - `description`: agent description.
 - `protocol_version`: supported Harn Agents Protocol version.
-- `interfaces`: available transport interfaces.
+- `a2a_card`: current A2A AgentCard, including `supportedInterfaces`,
+  capabilities, default input/output modes, security declarations, and skills.
 - `skills`: callable skills or exported functions.
 
 Optional fields include `persona_ids`, `capabilities`, `auth_schemes`,
-`receipt_policy`, `quotas`, `provider`, `public_url`, and `signature`.
+`receipt_policy`, `quotas`, `provider`, `harn_interfaces`, `public_url`, and
+`signature`.
 
 Signed cards MUST state their signature algorithm and key id. Clients MUST NOT
 trust unsigned card metadata for authorization decisions.
@@ -389,8 +393,8 @@ delivery ids or equivalent event identities.
 
 ### Skill
 
-A Skill is a callable or loadable capability exposed by a Persona, AgentCard,
-host, connector, or Harn package.
+A Skill is a callable or loadable capability exposed by a Persona,
+HarnAgentCard, host, connector, or Harn package.
 
 Required fields:
 
@@ -450,7 +454,7 @@ The protocol defines three transport profiles over the same resource model:
 - WebSocket for bidirectional interactive sessions and host mediation.
 
 Servers MAY implement a subset of transports according to their conformance
-level. A server that advertises a transport in an AgentCard MUST implement that
+level. A server that advertises a transport in a HarnAgentCard MUST implement that
 transport according to this section.
 
 ### REST
@@ -458,7 +462,7 @@ transport according to this section.
 REST endpoints use HTTPS and JSON. The OpenAPI 3.1 artifact defines the exact
 paths and schemas. This narrative spec requires the REST surface to cover:
 
-- discovery and AgentCard retrieval
+- discovery and HarnAgentCard retrieval
 - Persona, Workspace, Session, Task, Branch, Message, Artifact, Event,
   Receipt, Memory, Connector, Skill, Outcome, and Quota reads
 - Session creation, close, fork, and message append
@@ -832,7 +836,7 @@ Core implementations support:
 
 - version negotiation
 - API key authentication
-- REST AgentCard, Session, Task, Message, Event, Artifact, Outcome reads
+- REST HarnAgentCard, Session, Task, Message, Event, Artifact, Outcome reads
 - Task submit, get, cancel
 - Task lifecycle state machine
 - `Idempotency-Key` for Task and Message creation
@@ -850,7 +854,7 @@ Extended implementations support all Core requirements plus:
 - host-mediated input and authorization requests
 - artifact upload or registration
 - connector delivery dedupe behavior
-- AgentCard signatures
+- HarnAgentCard signatures
 
 ### Receipts
 

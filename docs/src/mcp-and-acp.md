@@ -583,7 +583,7 @@ builtins.
 ## A2A (Agent-to-Agent Protocol)
 
 A2A exposes exported Harn functions as a peer-agent HTTP server that other
-agents can interact with. The server implements A2A protocol version 1.0.0 and
+agents can interact with. The server implements A2A protocol version 1.0 and
 uses the shared `harn-serve` dispatch core.
 
 ### Running the server
@@ -596,9 +596,12 @@ harn serve a2a --port 3000 agent.harn
 
 ### Agent card
 
-The server publishes an agent card at `GET /.well-known/a2a-agent`, with
-compatibility aliases at `GET /.well-known/agent.json` and `GET /agent/card`.
-The card advertises each exported `pub fn` as an A2A skill. Set
+The server publishes an A2A AgentCard at
+`GET /.well-known/agent-card.json`, with compatibility aliases at
+`GET /.well-known/a2a-agent`, `GET /.well-known/agent.json`, and
+`GET /agent/card`. The card advertises each exported `pub fn` as an A2A skill
+through `supportedInterfaces`, default input/output modes, capabilities, and
+security declarations. Set
 `--card-signing-secret` or `HARN_SERVE_A2A_CARD_SECRET` to attach an HS256
 signature envelope to the card.
 

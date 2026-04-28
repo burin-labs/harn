@@ -6,8 +6,13 @@ use tokio::sync::broadcast;
 
 use crate::triggers::TriggerEvent;
 
-const A2A_AGENT_CARD_PATH: &str = ".well-known/a2a-agent";
-const A2A_PROTOCOL_VERSION: &str = "1.0.0";
+const A2A_AGENT_CARD_PATHS: &[&str] = &[
+    ".well-known/agent-card.json",
+    ".well-known/a2a-agent",
+    ".well-known/agent.json",
+    "agent/card",
+];
+const A2A_PROTOCOL_VERSION: &str = "1.0";
 const A2A_PUSH_URL_ENV: &str = "HARN_A2A_PUSH_URL";
 const A2A_PUSH_TOKEN_ENV: &str = "HARN_A2A_PUSH_TOKEN";
 
@@ -316,30 +321,34 @@ async fn resolve_endpoint(
 ) -> Result<ResolvedA2aEndpoint, A2aClientError> {
     let mut last_error = None;
     for scheme in card_resolution_schemes(allow_cleartext) {
-        let card_url = format!("{scheme}://{}/{A2A_AGENT_CARD_PATH}", target.authority);
-        match fetch_agent_card(&card_url, cancel_rx).await {
-            Ok(card) => {
-                return endpoint_from_card(
-                    card_url,
-                    allow_cleartext,
-                    &target.authority,
-                    target.target_agent.clone(),
-                    &card,
-                );
-            }
-            Err(AgentCardFetchError::Cancelled(message)) => {
-                return Err(A2aClientError::Cancelled(message));
-            }
-            Err(error) => {
-                let message = agent_card_fetch_error_message(&error);
-                last_error = Some(message);
-                if should_try_cleartext_fallback(scheme, allow_cleartext, &error, &target.authority)
-                {
-                    continue;
+        let mut last_scheme_error = None;
+        for path in A2A_AGENT_CARD_PATHS {
+            let card_url = format!("{scheme}://{}/{path}", target.authority);
+            match fetch_agent_card(&card_url, cancel_rx).await {
+                Ok(card) => {
+                    return endpoint_from_card(
+                        card_url,
+                        allow_cleartext,
+                        &target.authority,
+                        target.target_agent.clone(),
+                        &card,
+                    );
                 }
-                break;
+                Err(AgentCardFetchError::Cancelled(message)) => {
+                    return Err(A2aClientError::Cancelled(message));
+                }
+                Err(error) => {
+                    last_error = Some(agent_card_fetch_error_message(&error));
+                    last_scheme_error = Some(error);
+                }
             }
         }
+        if last_scheme_error.as_ref().is_some_and(|error| {
+            should_try_cleartext_fallback(scheme, allow_cleartext, error, &target.authority)
+        }) {
+            continue;
+        }
+        break;
     }
     Err(A2aClientError::Discovery(format!(
         "could not resolve A2A agent card for '{}': {}",
@@ -387,6 +396,46 @@ fn endpoint_from_card(
     target_agent: String,
     card: &Value,
 ) -> Result<ResolvedA2aEndpoint, A2aClientError> {
+    if let Some(interfaces) = card.get("supportedInterfaces").and_then(Value::as_array) {
+        let interface = interfaces
+            .iter()
+            .find(|entry| {
+                entry
+                    .get("protocolBinding")
+                    .and_then(Value::as_str)
+                    .is_some_and(|binding| binding.eq_ignore_ascii_case("JSONRPC"))
+            })
+            .ok_or_else(|| {
+                A2aClientError::Discovery(
+                    "A2A agent card does not expose a JSONRPC supportedInterface".to_string(),
+                )
+            })?;
+        let interface_url = interface
+            .get("url")
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                A2aClientError::Discovery("A2A JSONRPC supportedInterface missing url".to_string())
+            })?;
+        let rpc_url = Url::parse(interface_url).map_err(|error| {
+            A2aClientError::Discovery(format!(
+                "invalid A2A JSONRPC supportedInterface url '{interface_url}': {error}"
+            ))
+        })?;
+        ensure_cleartext_allowed(&rpc_url, allow_cleartext, "jsonrpc interface")?;
+        let interface_authority = url_authority(&rpc_url)?;
+        if !authorities_equivalent(&interface_authority, requested_authority) {
+            return Err(A2aClientError::Discovery(format!(
+                "A2A JSONRPC interface authority mismatch: requested '{requested_authority}', card returned '{interface_authority}'"
+            )));
+        }
+        return Ok(ResolvedA2aEndpoint {
+            card_url,
+            rpc_url: rpc_url.to_string(),
+            agent_id: card.get("id").and_then(Value::as_str).map(str::to_string),
+            target_agent,
+        });
+    }
+
     let base_url = card
         .get("url")
         .and_then(Value::as_str)
@@ -409,7 +458,12 @@ fn endpoint_from_card(
         })?;
     let jsonrpc_interfaces: Vec<&Value> = interfaces
         .iter()
-        .filter(|entry| entry.get("protocol").and_then(Value::as_str) == Some("jsonrpc"))
+        .filter(|entry| {
+            entry
+                .get("protocol")
+                .and_then(Value::as_str)
+                .is_some_and(|protocol| protocol.eq_ignore_ascii_case("jsonrpc"))
+        })
         .collect();
     if jsonrpc_interfaces.len() != 1 {
         return Err(A2aClientError::Discovery(format!(
@@ -694,6 +748,31 @@ mod tests {
     }
 
     #[test]
+    fn endpoint_from_card_accepts_current_supported_interfaces() {
+        let endpoint = endpoint_from_card(
+            "https://trusted.example/.well-known/agent-card.json".to_string(),
+            false,
+            "trusted.example",
+            "triage".to_string(),
+            &serde_json::json!({
+                "name": "trusted",
+                "supportedInterfaces": [{
+                    "protocolBinding": "JSONRPC",
+                    "protocolVersion": "1.0",
+                    "url": "https://trusted.example/rpc"
+                }],
+            }),
+        )
+        .expect("current A2A card should resolve");
+        assert_eq!(endpoint.rpc_url, "https://trusted.example/rpc");
+        assert_eq!(
+            endpoint.card_url,
+            "https://trusted.example/.well-known/agent-card.json"
+        );
+        assert_eq!(endpoint.target_agent, "triage");
+    }
+
+    #[test]
     fn cleartext_fallback_only_after_https_connect_refused() {
         assert!(should_try_cleartext_fallback(
             "https",
@@ -795,7 +874,7 @@ mod tests {
     #[test]
     fn endpoint_from_card_rejects_card_url_authority_mismatch() {
         let error = endpoint_from_card(
-            "https://trusted.example/.well-known/a2a-agent".to_string(),
+            "https://trusted.example/.well-known/agent-card.json".to_string(),
             false,
             "trusted.example",
             "triage".to_string(),
@@ -814,7 +893,7 @@ mod tests {
     #[test]
     fn endpoint_from_card_rejects_cleartext_without_opt_in() {
         let error = endpoint_from_card(
-            "https://127.0.0.1:8080/.well-known/a2a-agent".to_string(),
+            "https://127.0.0.1:8080/.well-known/agent-card.json".to_string(),
             false,
             "127.0.0.1:8080",
             "triage".to_string(),
@@ -839,7 +918,7 @@ mod tests {
             "interfaces": [{"protocol": "jsonrpc", "url": "/rpc"}],
         });
         let endpoint = endpoint_from_card(
-            "http://127.0.0.1:8080/.well-known/a2a-agent".to_string(),
+            "http://127.0.0.1:8080/.well-known/agent-card.json".to_string(),
             true,
             "127.0.0.1:8080",
             "triage".to_string(),
@@ -854,7 +933,7 @@ mod tests {
             "interfaces": [{"protocol": "jsonrpc", "url": "/rpc"}],
         });
         let endpoint_v6 = endpoint_from_card(
-            "http://localhost:8080/.well-known/a2a-agent".to_string(),
+            "http://localhost:8080/.well-known/agent-card.json".to_string(),
             true,
             "localhost:8080",
             "triage".to_string(),
@@ -869,7 +948,7 @@ mod tests {
             "interfaces": [{"protocol": "jsonrpc", "url": "/rpc"}],
         });
         let error = endpoint_from_card(
-            "http://127.0.0.1:8080/.well-known/a2a-agent".to_string(),
+            "http://127.0.0.1:8080/.well-known/agent-card.json".to_string(),
             true,
             "127.0.0.1:8080",
             "triage".to_string(),

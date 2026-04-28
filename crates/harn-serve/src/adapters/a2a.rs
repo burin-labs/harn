@@ -26,10 +26,12 @@ use crate::{
     DispatchError, ExportCatalog, HttpTlsConfig, TransportAdapter,
 };
 
-pub const A2A_PROTOCOL_VERSION: &str = "1.0.0";
+pub const A2A_PROTOCOL_VERSION: &str = "1.0";
 
 const A2A_VERSION_HEADER: &str = "a2a-version";
 const A2A_TRACE_HEADER: &str = "a2a-trace-id";
+const A2A_LEGACY_PROTOCOL_VERSION: &str = "1.0.0";
+const A2A_AGENT_CARD_PATH: &str = "/.well-known/agent-card.json";
 
 const A2A_TASK_NOT_FOUND: i64 = -32001;
 const A2A_TASK_NOT_CANCELABLE: i64 = -32002;
@@ -193,8 +195,21 @@ impl A2aServer {
             server: self,
             public_url: public_url.clone(),
         };
-        let router = Router::new()
+        let router = Self::http_router(state);
+        let router = crate::tls::apply_security_headers(router, &options.tls);
+
+        eprintln!("Harn A2A server listening on {public_url}");
+        eprintln!("[harn] A2A workflow server ready on {public_url}");
+        eprintln!("[harn] Agent card: {public_url}{A2A_AGENT_CARD_PATH}");
+        crate::tls::serve_router_from_tcp(listener, router, &options.tls)
+            .await
+            .map_err(|error| format!("A2A HTTP server failed: {error}"))
+    }
+
+    fn http_router(state: HttpState) -> Router {
+        Router::new()
             .route("/", post(jsonrpc_request))
+            .route(A2A_AGENT_CARD_PATH, get(agent_card_request))
             .route("/agent/card", get(agent_card_request))
             .route("/.well-known/a2a-agent", get(agent_card_request))
             .route("/.well-known/agent.json", get(agent_card_request))
@@ -202,15 +217,7 @@ impl A2aServer {
             .route("/tasks/send_and_wait", post(rest_send_and_wait_task))
             .route("/tasks/cancel", post(rest_cancel_task))
             .route("/tasks/resubscribe", post(rest_resubscribe_task))
-            .with_state(state);
-        let router = crate::tls::apply_security_headers(router, &options.tls);
-
-        eprintln!("Harn A2A server listening on {public_url}");
-        eprintln!("[harn] A2A workflow server ready on {public_url}");
-        eprintln!("[harn] Agent card: {public_url}/.well-known/a2a-agent");
-        crate::tls::serve_router_from_tcp(listener, router, &options.tls)
-            .await
-            .map_err(|error| format!("A2A HTTP server failed: {error}"))
+            .with_state(state)
     }
 
     fn agent_card(&self, public_url: &str) -> JsonValue {
@@ -223,30 +230,36 @@ impl A2aServer {
                     "id": function.name,
                     "name": function.name,
                     "description": format!("Invoke exported Harn function '{}'.", function.name),
+                    "tags": ["harn", "function"],
+                    "examples": [],
+                    "inputModes": ["application/json", "text/plain"],
+                    "outputModes": ["application/json", "text/plain"],
                     "inputSchema": function.input_schema,
                 })
             })
             .collect::<Vec<_>>();
         let mut card = json!({
-            "id": self.agent_name,
             "name": self.agent_name,
             "description": "Harn peer agent",
-            "url": public_url,
+            "supportedInterfaces": [
+                {
+                    "url": public_url,
+                    "protocolBinding": "JSONRPC",
+                    "protocolVersion": A2A_PROTOCOL_VERSION,
+                }
+            ],
             "version": env!("CARGO_PKG_VERSION"),
-            "protocolVersion": A2A_PROTOCOL_VERSION,
             "provider": {
                 "organization": "Harn",
                 "url": "https://harn.dev"
             },
-            "interfaces": [
-                {"protocol": "jsonrpc", "url": "/"}
-            ],
-            "securitySchemes": [],
+            "securitySchemes": {},
+            "security": [],
+            "defaultInputModes": ["application/json", "text/plain"],
+            "defaultOutputModes": ["application/json", "text/plain"],
             "capabilities": {
                 "streaming": true,
                 "pushNotifications": true,
-                "resubscribe": true,
-                "cancel": true,
                 "extendedAgentCard": false
             },
             "skills": skills
@@ -926,7 +939,7 @@ fn check_version_header(headers: &HeaderMap, body: &[u8]) -> Option<JsonValue> {
     let version = headers
         .get(A2A_VERSION_HEADER)
         .and_then(|value| value.to_str().ok())?;
-    if version == A2A_PROTOCOL_VERSION {
+    if version == A2A_PROTOCOL_VERSION || version == A2A_LEGACY_PROTOCOL_VERSION {
         return None;
     }
     let rpc_id = serde_json::from_slice::<JsonValue>(body)
@@ -1115,14 +1128,24 @@ fn sign_card(card: &mut JsonValue, secret: &str) {
     let Ok(bytes) = serde_json::to_vec(card) else {
         return;
     };
+    let protected = json!({
+        "alg": "HS256",
+        "typ": "JOSE",
+        "kid": "harn-serve",
+    });
+    let Ok(protected_bytes) = serde_json::to_vec(&protected) else {
+        return;
+    };
+    let protected = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(protected_bytes);
+    let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes);
     let Ok(mut mac) = Hmac::<Sha256>::new_from_slice(secret.as_bytes()) else {
         return;
     };
-    mac.update(&bytes);
-    let signature = base64::engine::general_purpose::STANDARD.encode(mac.finalize().into_bytes());
+    mac.update(format!("{protected}.{payload}").as_bytes());
+    let signature =
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
     card["signatures"] = json!([{
-        "alg": "HS256",
-        "kid": "harn-serve",
+        "protected": protected,
         "signature": signature,
     }]);
 }
@@ -1224,28 +1247,115 @@ impl A2aPrepareError {
 mod tests {
     use super::*;
     use crate::{DispatchCore, DispatchCoreConfig};
+    use axum::body::{to_bytes, Body};
+    use axum::http::Request;
+    use tower::ServiceExt;
+
+    fn test_server(source: &str) -> (tempfile::TempDir, Arc<A2aServer>) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let script = dir.path().join("server.harn");
+        std::fs::write(&script, source).expect("write script");
+        let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
+        (dir, Arc::new(A2aServer::new(A2aServerConfig::new(core))))
+    }
+
+    fn assert_current_agent_card_shape(card: &JsonValue, public_url: &str) {
+        assert_eq!(card["name"], "server");
+        assert_eq!(card["description"], "Harn peer agent");
+        assert_eq!(card["version"], env!("CARGO_PKG_VERSION"));
+        assert!(card.get("url").is_none(), "card must not emit legacy url");
+        assert!(
+            card.get("protocolVersion").is_none(),
+            "card must not emit legacy top-level protocolVersion"
+        );
+        assert!(
+            card.get("interfaces").is_none(),
+            "card must not emit legacy interfaces"
+        );
+        assert_eq!(card["supportedInterfaces"][0]["url"], public_url);
+        assert_eq!(card["supportedInterfaces"][0]["protocolBinding"], "JSONRPC");
+        assert_eq!(
+            card["supportedInterfaces"][0]["protocolVersion"],
+            A2A_PROTOCOL_VERSION
+        );
+        assert_eq!(card["securitySchemes"], json!({}));
+        assert_eq!(card["security"], json!([]));
+        assert_eq!(
+            card["defaultInputModes"],
+            json!(["application/json", "text/plain"])
+        );
+        assert_eq!(
+            card["defaultOutputModes"],
+            json!(["application/json", "text/plain"])
+        );
+        assert_eq!(card["capabilities"]["streaming"], true);
+        assert_eq!(card["capabilities"]["pushNotifications"], true);
+        assert_eq!(card["capabilities"]["extendedAgentCard"], false);
+        assert_eq!(card["skills"][0]["id"], "triage");
+        assert_eq!(card["skills"][0]["tags"], json!(["harn", "function"]));
+        assert_eq!(
+            card["skills"][0]["inputModes"],
+            json!(["application/json", "text/plain"])
+        );
+        assert_eq!(
+            card["skills"][0]["outputModes"],
+            json!(["application/json", "text/plain"])
+        );
+    }
 
     #[tokio::test]
     async fn agent_card_advertises_exported_functions() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let script = dir.path().join("server.harn");
-        std::fs::write(
-            &script,
+        let (_dir, server) = test_server(
             r#"
 pub fn triage(task: string) -> string {
   return task
 }
 "#,
-        )
-        .expect("write script");
-        let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
-        let server = A2aServer::new(A2aServerConfig::new(core));
+        );
 
         let card = server.agent_card("http://localhost:8080");
 
-        assert_eq!(card["capabilities"]["streaming"], true);
-        assert_eq!(card["capabilities"]["pushNotifications"], true);
-        assert_eq!(card["skills"][0]["id"], "triage");
+        assert_current_agent_card_shape(&card, "http://localhost:8080");
+    }
+
+    #[tokio::test]
+    async fn discovery_paths_serve_current_agent_card_shape() {
+        let (_dir, server) = test_server(
+            r#"
+pub fn triage(task: string) -> string {
+  return task
+}
+"#,
+        );
+        let public_url = "http://localhost:8080";
+        let router = A2aServer::http_router(HttpState {
+            server,
+            public_url: public_url.to_string(),
+        });
+
+        for path in [
+            A2A_AGENT_CARD_PATH,
+            "/.well-known/agent.json",
+            "/.well-known/a2a-agent",
+            "/agent/card",
+        ] {
+            let response = router
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri(path)
+                        .body(Body::empty())
+                        .expect("request"),
+                )
+                .await
+                .expect("response");
+            assert_eq!(response.status(), StatusCode::OK, "path: {path}");
+            let bytes = to_bytes(response.into_body(), usize::MAX)
+                .await
+                .expect("body");
+            let card: JsonValue = serde_json::from_slice(&bytes).expect("card json");
+            assert_current_agent_card_shape(&card, public_url);
+        }
     }
 
     #[tokio::test]
@@ -1442,7 +1552,7 @@ pub fn triage(task: string) -> string {
         let mut card = json!({"id": "agent", "skills": []});
         sign_card(&mut card, "secret");
 
-        assert_eq!(card["signatures"][0]["alg"], "HS256");
+        assert!(card["signatures"][0]["protected"].as_str().unwrap().len() > 16);
         assert!(card["signatures"][0]["signature"].as_str().unwrap().len() > 16);
     }
 

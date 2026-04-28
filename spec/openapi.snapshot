@@ -113,8 +113,15 @@ ImageRefPart
 Artifact
 ArtifactList
 RegisterArtifactRequest
-AgentCard
-AgentInterface
+HarnAgentCard
+A2aAgentCard
+A2aAgentInterface
+A2aAgentProvider
+A2aAgentCapabilities
+A2aAgentSkill
+A2aSecurityScheme
+A2aAgentCardSignature
+HarnAgentInterface
 CardSignature
 Event
 EventList
