@@ -394,11 +394,16 @@ EOF
 
   if command -v gh &>/dev/null; then
     log_step "Open bump PR"
-    gh pr create \
+    local pr_url
+    pr_url="$(gh pr create \
       --base "$base" \
       --head "$branch" \
       --title "Bump version to $next" \
-      --body-file "$body_file"
+      --body-file "$body_file")"
+    echo "$pr_url"
+
+    log_step "Enable bump PR auto-merge"
+    gh pr merge "$pr_url" --auto --squash
   else
     echo "warning: gh CLI not found — skipping PR creation"
     echo "hint: open a PR from $branch into $base titled 'Bump version to $next'"
@@ -414,6 +419,7 @@ EOF
   echo "  Base branch:      $base"
   echo "  Bump branch:      $branch"
   echo "  Tag after merge:  $tag"
+  echo "  Auto-merge:       enabled"
   echo "  Total wall time:  $(_ship_fmt_ns "$TOTAL_NS")"
   echo "  Finalize after merge queue lands it: ./scripts/release_ship.sh --finalize"
 }

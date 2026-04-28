@@ -154,8 +154,9 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
           # gh CLI inside release_ship.sh uses GH_TOKEN for `gh pr
-          # create`. Using the App token makes the bump PR author the
-          # bot, consistent with the branch pusher.
+          # create` and `gh pr merge --auto`. Using the App token
+          # makes the bump PR author the bot, consistent with the
+          # branch pusher.
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           # First-release bootstrap for a brand-new workspace crate.
           # release_ship.sh + verify_crate_packages.sh both honor the
