@@ -46,13 +46,13 @@ Each package should declare connector contract v1 metadata, ship deterministic
 fixtures, and pass:
 
 ```sh
-harn connector check .
+harn connector test .
 ```
 
 Poll-based packages should also run:
 
 ```sh
-harn connector check . --run-poll-tick
+harn connector test . --run-poll-tick
 ```
 
 ## Rust compatibility shims
@@ -83,7 +83,7 @@ surfaces exist and are tested:
 | Durable inbox dedupe and dispatcher handoff | `crates/harn-vm/src/triggers/inbox.rs`, `triggers/dispatcher/` |
 | Rate-limit and `Retry-After` behavior | connector clients plus shared HTTP retry/backoff builtins |
 | Harn connector contract, `NormalizeResult`, `poll_tick`, and effect policy | `crates/harn-vm/src/connectors/harn_module.rs`, `crates/harn-lint/src/tests/connector_effect_policy.rs` |
-| Connector package conformance harness | `harn connector check` and connector contract fixtures |
+| Connector package conformance harness | `harn connector test`, `harn connector check`, and connector contract fixtures |
 | Catalog, examples, and migration guidance | `docs/src/connectors/catalog.md`, `examples/triggers/`, `docs/src/migrations/rust-connectors-to-harn-packages.md` |
 
 Future work should update those newer ownership surfaces, not reopen the old

@@ -467,6 +467,8 @@ pub(crate) struct ConnectorArgs {
 pub(crate) enum ConnectorCommand {
     /// Check a pure-Harn connector package against connector contract v1.
     Check(ConnectorCheckArgs),
+    /// Run the full first-party connector package gate.
+    Test(ConnectorTestArgs),
 }
 
 #[derive(Debug, Args, Clone)]
@@ -480,6 +482,22 @@ pub(crate) struct ConnectorCheckArgs {
     #[arg(long = "run-poll-tick")]
     pub run_poll_tick: bool,
     /// Emit the check report as JSON.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args, Clone)]
+pub(crate) struct ConnectorTestArgs {
+    /// Package directory, harn.toml, or file under the package to test.
+    #[arg(default_value = ".")]
+    pub package: String,
+    /// Restrict the gate to one provider id. Repeatable.
+    #[arg(long = "provider", value_name = "ID")]
+    pub providers: Vec<String>,
+    /// Run poll bindings long enough to execute the first poll_tick.
+    #[arg(long = "run-poll-tick")]
+    pub run_poll_tick: bool,
+    /// Emit the gate report as JSON.
     #[arg(long)]
     pub json: bool,
 }
@@ -2478,11 +2496,12 @@ mod tests {
     use std::time::Duration as StdDuration;
 
     use super::{
-        Cli, Command, ConnectCommand, CrystallizeCommand, FlowArchivistCommand, FlowCommand,
-        McpCommand, OrchestratorCommand, OrchestratorDeployProvider, OrchestratorLogFormat,
-        OrchestratorQueueCommand, OrchestratorTenantCommand, PackageCacheCommand, PackageCommand,
-        ProjectTemplate, RunsCommand, SkillCommand, SkillKeyCommand, SkillTrustCommand,
-        SkillsCommand, TraceCommand, TriggerCommand, TrustCommand, TrustOutcomeArg, TrustTierArg,
+        Cli, Command, ConnectCommand, ConnectorCommand, CrystallizeCommand, FlowArchivistCommand,
+        FlowCommand, McpCommand, OrchestratorCommand, OrchestratorDeployProvider,
+        OrchestratorLogFormat, OrchestratorQueueCommand, OrchestratorTenantCommand,
+        PackageCacheCommand, PackageCommand, ProjectTemplate, RunsCommand, SkillCommand,
+        SkillKeyCommand, SkillTrustCommand, SkillsCommand, TraceCommand, TriggerCommand,
+        TrustCommand, TrustOutcomeArg, TrustTierArg,
     };
     use clap::Parser;
 
@@ -3827,6 +3846,30 @@ mod tests {
             panic!("expected package cache verify");
         };
         assert!(verify.materialized);
+    }
+
+    #[test]
+    fn test_parses_connector_test_args() {
+        let cli = Cli::parse_from([
+            "harn",
+            "connector",
+            "test",
+            "pkg",
+            "--provider",
+            "notion",
+            "--run-poll-tick",
+            "--json",
+        ]);
+        let Command::Connector(args) = cli.command.unwrap() else {
+            panic!("expected connector command");
+        };
+        let ConnectorCommand::Test(test) = args.command else {
+            panic!("expected connector test");
+        };
+        assert_eq!(test.package, "pkg");
+        assert_eq!(test.providers, vec!["notion"]);
+        assert!(test.run_poll_tick);
+        assert!(test.json);
     }
 
     #[test]

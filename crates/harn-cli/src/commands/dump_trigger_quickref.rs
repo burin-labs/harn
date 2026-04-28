@@ -16,7 +16,7 @@ struct FirstPartyConnectorPackage {
     provider: &'static str,
     package_url: &'static str,
     install: &'static str,
-    contract_check: &'static str,
+    package_gate: &'static str,
 }
 
 const FIRST_PARTY_CONNECTOR_PACKAGES: &[FirstPartyConnectorPackage] = &[
@@ -24,61 +24,61 @@ const FIRST_PARTY_CONNECTOR_PACKAGES: &[FirstPartyConnectorPackage] = &[
         provider: "GitHub",
         package_url: "https://github.com/burin-labs/harn-github-connector",
         install: "harn add github.com/burin-labs/harn-github-connector@v0.1.0",
-        contract_check: "harn connector check . --provider github",
+        package_gate: "harn connector test . --provider github",
     },
     FirstPartyConnectorPackage {
         provider: "Slack",
         package_url: "https://github.com/burin-labs/harn-slack-connector",
         install: "harn add github.com/burin-labs/harn-slack-connector@v0.1.0",
-        contract_check: "harn connector check . --provider slack",
+        package_gate: "harn connector test . --provider slack",
     },
     FirstPartyConnectorPackage {
         provider: "Linear",
         package_url: "https://github.com/burin-labs/harn-linear-connector",
         install: "harn add github.com/burin-labs/harn-linear-connector@v0.1.0",
-        contract_check: "harn connector check . --provider linear",
+        package_gate: "harn connector test . --provider linear",
     },
     FirstPartyConnectorPackage {
         provider: "Notion",
         package_url: "https://github.com/burin-labs/harn-notion-connector",
         install: "harn add github.com/burin-labs/harn-notion-connector@v0.1.0",
-        contract_check: "harn connector check . --provider notion --run-poll-tick",
+        package_gate: "harn connector test . --provider notion --run-poll-tick",
     },
     FirstPartyConnectorPackage {
         provider: "GitLab",
         package_url: "https://github.com/burin-labs/harn-gitlab-connector",
         install: "harn add github.com/burin-labs/harn-gitlab-connector@v0.1.0",
-        contract_check: "harn connector check . --provider gitlab",
+        package_gate: "harn connector test . --provider gitlab",
     },
     FirstPartyConnectorPackage {
         provider: "Forgejo",
         package_url: "https://github.com/burin-labs/harn-forgejo-connector",
         install: "harn add github.com/burin-labs/harn-forgejo-connector@v0.1.0",
-        contract_check: "harn connector check . --provider forgejo",
+        package_gate: "harn connector test . --provider forgejo",
     },
     FirstPartyConnectorPackage {
         provider: "Gitea",
         package_url: "https://github.com/burin-labs/harn-gitea-connector",
         install: "harn add github.com/burin-labs/harn-gitea-connector@v0.1.0",
-        contract_check: "harn connector check . --provider gitea",
+        package_gate: "harn connector test . --provider gitea",
     },
     FirstPartyConnectorPackage {
         provider: "Bitbucket",
         package_url: "https://github.com/burin-labs/harn-bitbucket-connector",
         install: "harn add github.com/burin-labs/harn-bitbucket-connector@v0.1.0",
-        contract_check: "harn connector check . --provider bitbucket",
+        package_gate: "harn connector test . --provider bitbucket",
     },
     FirstPartyConnectorPackage {
         provider: "SourceHut",
         package_url: "https://github.com/burin-labs/harn-sourcehut-connector",
         install: "harn add github.com/burin-labs/harn-sourcehut-connector@v0.1.0",
-        contract_check: "harn connector check . --provider sourcehut",
+        package_gate: "harn connector test . --provider sourcehut",
     },
     FirstPartyConnectorPackage {
         provider: "Subversion",
         package_url: "https://github.com/burin-labs/harn-svn-connector",
         install: "harn add github.com/burin-labs/harn-svn-connector@v0.1.0",
-        contract_check: "harn connector check . --provider svn --run-poll-tick",
+        package_gate: "harn connector test . --provider svn --run-poll-tick",
     },
 ];
 
@@ -153,12 +153,12 @@ fn generate_file() -> String {
 
     out.push_str("\n## First-party Connector Packages\n\n");
     out.push_str("Prefer pure-Harn packages for provider business logic. The Rust providers remain compatibility defaults while the pure-Harn packages soak.\n\n");
-    out.push_str("| Provider | Package | Install | Contract check |\n");
+    out.push_str("| Provider | Package | Install | Package gate |\n");
     out.push_str("|---|---|---|---|\n");
     for package in FIRST_PARTY_CONNECTOR_PACKAGES {
         out.push_str(&format!(
             "| {} | <{}> | `{}` | `{}` |\n",
-            package.provider, package.package_url, package.install, package.contract_check
+            package.provider, package.package_url, package.install, package.package_gate
         ));
     }
     out.push('\n');
@@ -185,7 +185,7 @@ fn generate_file() -> String {
     out.push_str("## Package Fixtures\n\n");
     out.push_str("Connector packages should declare deterministic fixtures in `harn.toml` and run them in CI:\n\n");
     out.push_str("```toml\n[connector_contract]\nversion = 1\n\n[[connector_contract.fixtures]]\nprovider = \"slack\"\nname = \"url verification\"\nkind = \"webhook\"\nheaders = { \"content-type\" = \"application/json\" }\nbody_json = { type = \"url_verification\", challenge = \"challenge-token\" }\nexpect_type = \"immediate_response\"\nexpect_event_count = 0\n```\n\n");
-    out.push_str("Run `harn connector check .` locally. Use `--provider <id>` for a multi-provider package, `--run-poll-tick` to execute the first poll tick, and `--json` for CI output.\n\n");
+    out.push_str("Run `harn connector test .` locally. Use `--provider <id>` for a multi-provider package, `--run-poll-tick` to execute the first poll tick, and `--json` for CI output.\n\n");
 
     out.push_str("## Example Library\n\n");
     out.push_str("Ready-to-customize pipelines live under `examples/triggers/`. Each example includes `harn.toml`, `lib.harn`, `README.md`, and `SKILL.md` so it can be copied into a project or installed as a local skill bundle. Validate examples with `make check-trigger-examples`.\n");
@@ -303,7 +303,7 @@ mod tests {
         let out = generate_file();
         assert!(out.contains("| `github` | `webhook` | `GitHubEventPayload` |"));
         assert!(out.contains("Connector Contract V1"));
-        assert!(out.contains("harn connector check ."));
+        assert!(out.contains("harn connector test ."));
         assert!(out.contains("harn-forgejo-connector"));
         assert!(out.contains("harn-svn-connector"));
     }
