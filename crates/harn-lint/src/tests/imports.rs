@@ -105,3 +105,18 @@ fn test_import_order_stdlib_before_third_party() {
         "stdlib should come before third-party, got: {diags:?}"
     );
 }
+
+#[test]
+fn test_hostlib_prefix_skips_undefined_function_warning() {
+    // `hostlib_*` names are runtime-registered VM builtins
+    // (`harn_hostlib::install_default`); the lint's static call
+    // graph cannot see them. Suppressing the warning matches the
+    // existing `__`-prefix exemption.
+    let source =
+        "pipeline default(task) {\n  hostlib_code_index_stats({})\n  hostlib_ast_parse_file({})\n}\n";
+    let diags = lint_source(source);
+    assert!(
+        !has_rule(&diags, "undefined-function"),
+        "hostlib_-prefixed calls should not raise undefined-function, got: {diags:?}"
+    );
+}
