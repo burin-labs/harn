@@ -25,73 +25,15 @@ use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 use x509_parser::prelude::{FromDer, X509Certificate};
 
-// Mock HTTP framework (thread-local, mirrors the mock LLM pattern).
+mod mock;
 
-#[derive(Clone)]
-struct MockResponse {
-    status: i64,
-    body: String,
-    headers: BTreeMap<String, VmValue>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct HttpMockResponse {
-    pub status: i64,
-    pub body: String,
-    pub headers: BTreeMap<String, String>,
-}
-
-impl HttpMockResponse {
-    pub fn new(status: i64, body: impl Into<String>) -> Self {
-        Self {
-            status,
-            body: body.into(),
-            headers: BTreeMap::new(),
-        }
-    }
-
-    pub fn with_header(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
-        self.headers.insert(name.into(), value.into());
-        self
-    }
-}
-
-impl From<HttpMockResponse> for MockResponse {
-    fn from(value: HttpMockResponse) -> Self {
-        Self {
-            status: value.status,
-            body: value.body,
-            headers: value
-                .headers
-                .into_iter()
-                .map(|(key, value)| (key, VmValue::String(Rc::from(value))))
-                .collect(),
-        }
-    }
-}
-
-struct HttpMock {
-    method: String,
-    url_pattern: String,
-    responses: Vec<MockResponse>,
-    next_response: usize,
-}
-
-#[derive(Clone)]
-struct HttpMockCall {
-    method: String,
-    url: String,
-    headers: BTreeMap<String, VmValue>,
-    body: Option<String>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct HttpMockCallSnapshot {
-    pub method: String,
-    pub url: String,
-    pub headers: BTreeMap<String, String>,
-    pub body: Option<String>,
-}
+use mock::{
+    clear_http_mocks, consume_http_mock, http_mock_calls_value, parse_mock_responses,
+    register_http_mock, reset_http_mocks, url_matches,
+};
+pub use mock::{http_mock_calls_snapshot, push_http_mock, HttpMockCallSnapshot, HttpMockResponse};
+#[cfg(test)]
+use mock::{mock_call_headers_value, redact_mock_call_url};
 
 #[derive(Clone)]
 struct RetryConfig {
@@ -344,8 +286,6 @@ const MAX_HTTP_SERVERS: usize = 128;
 const MAX_WEBSOCKET_SERVERS: usize = 16;
 
 thread_local! {
-    static HTTP_MOCKS: RefCell<Vec<HttpMock>> = const { RefCell::new(Vec::new()) };
-    static HTTP_MOCK_CALLS: RefCell<Vec<HttpMockCall>> = const { RefCell::new(Vec::new()) };
     static HTTP_CLIENTS: RefCell<HashMap<String, reqwest::Client>> = RefCell::new(HashMap::new());
     static HTTP_SESSIONS: RefCell<HashMap<String, HttpSession>> = RefCell::new(HashMap::new());
     static HTTP_STREAMS: RefCell<HashMap<String, HttpStreamHandle>> = RefCell::new(HashMap::new());
@@ -362,8 +302,7 @@ thread_local! {
 
 /// Reset thread-local HTTP mock state. Call between test runs.
 pub fn reset_http_state() {
-    HTTP_MOCKS.with(|m| m.borrow_mut().clear());
-    HTTP_MOCK_CALLS.with(|c| c.borrow_mut().clear());
+    reset_http_mocks();
     HTTP_CLIENTS.with(|clients| clients.borrow_mut().clear());
     HTTP_SESSIONS.with(|sessions| sessions.borrow_mut().clear());
     HTTP_STREAMS.with(|streams| streams.borrow_mut().clear());
@@ -392,88 +331,6 @@ pub fn reset_http_state() {
     TRANSPORT_MOCK_CALLS.with(|calls| calls.borrow_mut().clear());
     TRANSPORT_HANDLE_COUNTER.with(|counter| *counter.borrow_mut() = 0);
     HTTP_SERVERS.with(|servers| servers.borrow_mut().clear());
-}
-
-pub fn push_http_mock(
-    method: impl Into<String>,
-    url_pattern: impl Into<String>,
-    responses: Vec<HttpMockResponse>,
-) {
-    let responses = if responses.is_empty() {
-        vec![MockResponse::from(HttpMockResponse::new(200, ""))]
-    } else {
-        responses.into_iter().map(MockResponse::from).collect()
-    };
-    let method = method.into();
-    let url_pattern = url_pattern.into();
-    HTTP_MOCKS.with(|mocks| {
-        let mut mocks = mocks.borrow_mut();
-        // Re-registering the same (method, url_pattern) replaces the prior
-        // mock so tests can override per-case responses without first calling
-        // http_mock_clear(). Without this, the original mock keeps matching
-        // forever and the new one is dead.
-        mocks.retain(|mock| !(mock.method == method && mock.url_pattern == url_pattern));
-        mocks.push(HttpMock {
-            method,
-            url_pattern,
-            responses,
-            next_response: 0,
-        });
-    });
-}
-
-pub fn http_mock_calls_snapshot() -> Vec<HttpMockCallSnapshot> {
-    HTTP_MOCK_CALLS.with(|calls| {
-        calls
-            .borrow()
-            .iter()
-            .map(|call| HttpMockCallSnapshot {
-                method: call.method.clone(),
-                url: call.url.clone(),
-                headers: call
-                    .headers
-                    .iter()
-                    .map(|(key, value)| (key.clone(), value.display()))
-                    .collect(),
-                body: call.body.clone(),
-            })
-            .collect()
-    })
-}
-
-/// Check if a URL matches a mock pattern (exact or glob with `*`).
-fn url_matches(pattern: &str, url: &str) -> bool {
-    if pattern == "*" {
-        return true;
-    }
-    if !pattern.contains('*') {
-        return pattern == url;
-    }
-    // Multi-glob: split on `*` and match segments in order.
-    let parts: Vec<&str> = pattern.split('*').collect();
-    let mut remaining = url;
-    for (i, part) in parts.iter().enumerate() {
-        if part.is_empty() {
-            continue;
-        }
-        if i == 0 {
-            if !remaining.starts_with(part) {
-                return false;
-            }
-            remaining = &remaining[part.len()..];
-        } else if i == parts.len() - 1 {
-            if !remaining.ends_with(part) {
-                return false;
-            }
-            remaining = "";
-        } else {
-            match remaining.find(part) {
-                Some(pos) => remaining = &remaining[pos + part.len()..],
-                None => return false,
-            }
-        }
-    }
-    true
 }
 
 /// Build a standard HTTP response dict with status, headers, body, and ok fields.
@@ -772,86 +629,6 @@ async fn http_verb_handler(
         options.insert("body".to_string(), VmValue::String(Rc::from(body)));
     }
     vm_execute_http_request(method, &url, &options).await
-}
-
-fn parse_mock_response_dict(response: &BTreeMap<String, VmValue>) -> MockResponse {
-    let status = response
-        .get("status")
-        .and_then(|v| v.as_int())
-        .unwrap_or(200);
-    let body = response
-        .get("body")
-        .map(|v| v.display())
-        .unwrap_or_default();
-    let headers = response
-        .get("headers")
-        .and_then(|v| v.as_dict())
-        .cloned()
-        .unwrap_or_default();
-    MockResponse {
-        status,
-        body,
-        headers,
-    }
-}
-
-fn parse_mock_responses(response: &BTreeMap<String, VmValue>) -> Vec<MockResponse> {
-    let scripted = response
-        .get("responses")
-        .and_then(|value| match value {
-            VmValue::List(items) => Some(
-                items
-                    .iter()
-                    .filter_map(|item| item.as_dict().map(parse_mock_response_dict))
-                    .collect::<Vec<_>>(),
-            ),
-            _ => None,
-        })
-        .unwrap_or_default();
-
-    if scripted.is_empty() {
-        vec![parse_mock_response_dict(response)]
-    } else {
-        scripted
-    }
-}
-
-fn consume_http_mock(
-    method: &str,
-    url: &str,
-    headers: BTreeMap<String, VmValue>,
-    body: Option<String>,
-) -> Option<MockResponse> {
-    let response = HTTP_MOCKS.with(|mocks| {
-        let mut mocks = mocks.borrow_mut();
-        for mock in mocks.iter_mut() {
-            if (mock.method == "*" || mock.method.eq_ignore_ascii_case(method))
-                && url_matches(&mock.url_pattern, url)
-            {
-                let Some(last_index) = mock.responses.len().checked_sub(1) else {
-                    continue;
-                };
-                let index = mock.next_response.min(last_index);
-                let response = mock.responses[index].clone();
-                if mock.next_response < last_index {
-                    mock.next_response += 1;
-                }
-                return Some(response);
-            }
-        }
-        None
-    })?;
-
-    HTTP_MOCK_CALLS.with(|calls| {
-        calls.borrow_mut().push(HttpMockCall {
-            method: method.to_string(),
-            url: url.to_string(),
-            headers,
-            body,
-        });
-    });
-
-    Some(response)
 }
 
 fn vm_string(value: impl AsRef<str>) -> VmValue {
@@ -1762,54 +1539,30 @@ pub fn register_http_builtins(vm: &mut Vm) {
             .unwrap_or_default();
         let responses = parse_mock_responses(&response);
 
-        HTTP_MOCKS.with(|mocks| {
-            let mut mocks = mocks.borrow_mut();
-            mocks.retain(|mock| !(mock.method == method && mock.url_pattern == url_pattern));
-            mocks.push(HttpMock {
-                method,
-                url_pattern,
-                responses,
-                next_response: 0,
-            });
-        });
+        register_http_mock(method, url_pattern, responses);
         Ok(VmValue::Nil)
     });
 
     // http_mock_clear() -> nil
     vm.register_builtin("http_mock_clear", |_args, _out| {
-        HTTP_MOCKS.with(|mocks| mocks.borrow_mut().clear());
-        HTTP_MOCK_CALLS.with(|calls| calls.borrow_mut().clear());
+        clear_http_mocks();
         HTTP_STREAMS.with(|streams| streams.borrow_mut().clear());
         Ok(VmValue::Nil)
     });
 
-    // http_mock_calls() -> list of {method, url, headers, body}
-    vm.register_builtin("http_mock_calls", |_args, _out| {
-        let calls = HTTP_MOCK_CALLS.with(|calls| calls.borrow().clone());
-        let result: Vec<VmValue> = calls
-            .iter()
-            .map(|c| {
-                let mut dict = BTreeMap::new();
-                dict.insert(
-                    "method".to_string(),
-                    VmValue::String(Rc::from(c.method.as_str())),
-                );
-                dict.insert("url".to_string(), VmValue::String(Rc::from(c.url.as_str())));
-                dict.insert(
-                    "headers".to_string(),
-                    VmValue::Dict(Rc::new(c.headers.clone())),
-                );
-                dict.insert(
-                    "body".to_string(),
-                    match &c.body {
-                        Some(b) => VmValue::String(Rc::from(b.as_str())),
-                        None => VmValue::Nil,
-                    },
-                );
-                VmValue::Dict(Rc::new(dict))
-            })
-            .collect();
-        Ok(VmValue::List(Rc::new(result)))
+    // http_mock_calls(options?) -> list of {method, url, headers, body}
+    vm.register_builtin("http_mock_calls", |args, _out| {
+        let options = get_options_arg(args, 0);
+        let include_sensitive = get_bool_option(&options, "include_sensitive", false)
+            || get_bool_option(&options, "include_sensitive_headers", false);
+        let redact_sensitive = get_bool_option(
+            &options,
+            "redact_sensitive",
+            get_bool_option(&options, "redact_headers", true),
+        ) && !include_sensitive;
+        Ok(VmValue::List(Rc::new(http_mock_calls_value(
+            redact_sensitive,
+        ))))
     });
 
     vm.register_async_builtin("http_request", |args| async move {
@@ -2747,7 +2500,7 @@ fn parse_http_request_parts(
                     .map_err(|e| vm_error(format!("http: invalid auth header value: {e}")))?;
                 header_map.insert(reqwest::header::AUTHORIZATION, hv);
                 recorded_headers.insert(
-                    "Authorization".to_string(),
+                    "authorization".to_string(),
                     VmValue::String(Rc::from(s.as_ref())),
                 );
             }
@@ -2759,7 +2512,7 @@ fn parse_http_request_parts(
                         .map_err(|e| vm_error(format!("http: invalid bearer token: {e}")))?;
                     header_map.insert(reqwest::header::AUTHORIZATION, hv);
                     recorded_headers.insert(
-                        "Authorization".to_string(),
+                        "authorization".to_string(),
                         VmValue::String(Rc::from(authorization)),
                     );
                 } else if let Some(VmValue::Dict(basic)) = d.get("basic") {
@@ -2776,7 +2529,7 @@ fn parse_http_request_parts(
                         .map_err(|e| vm_error(format!("http: invalid basic auth: {e}")))?;
                     header_map.insert(reqwest::header::AUTHORIZATION, hv);
                     recorded_headers.insert(
-                        "Authorization".to_string(),
+                        "authorization".to_string(),
                         VmValue::String(Rc::from(authorization)),
                     );
                 }
@@ -2792,7 +2545,10 @@ fn parse_http_request_parts(
             let val = reqwest::header::HeaderValue::from_str(&v.display())
                 .map_err(|e| vm_error(format!("http: invalid header value for '{k}': {e}")))?;
             header_map.insert(name, val);
-            recorded_headers.insert(k.clone(), VmValue::String(Rc::from(v.display())));
+            recorded_headers.insert(
+                k.to_ascii_lowercase(),
+                VmValue::String(Rc::from(v.display())),
+            );
         }
     }
 
@@ -2822,6 +2578,27 @@ fn parse_http_request_parts(
         },
         multipart,
     })
+}
+
+fn final_http_url(
+    url: &str,
+    options: &BTreeMap<String, VmValue>,
+    builtin: &str,
+) -> Result<String, VmError> {
+    let Some(query) = options.get("query").and_then(VmValue::as_dict) else {
+        return Ok(url.to_string());
+    };
+    let mut parsed = url::Url::parse(url)
+        .map_err(|error| vm_error(format!("{builtin}: invalid URL '{url}': {error}")))?;
+    {
+        let mut pairs = parsed.query_pairs_mut();
+        for (key, value) in query.iter() {
+            if !matches!(value, VmValue::Nil) {
+                pairs.append_pair(key, &value.display());
+            }
+        }
+    }
+    Ok(parsed.to_string())
 }
 
 fn session_from_options(options: &BTreeMap<String, VmValue>) -> Option<String> {
@@ -3799,18 +3576,19 @@ async fn vm_execute_http_request_with_client(
     options: &BTreeMap<String, VmValue>,
 ) -> Result<VmValue, VmError> {
     let parts = parse_http_request_parts(method, options)?;
+    let final_url = final_http_url(url, options, "http")?;
 
-    if !url.starts_with("http://") && !url.starts_with("https://") {
+    if !final_url.starts_with("http://") && !final_url.starts_with("https://") {
         return Err(vm_error(format!(
             "http: URL must start with http:// or https://, got '{url}'"
         )));
     }
-    crate::egress::enforce_url_allowed("http_request", url).await?;
+    crate::egress::enforce_url_allowed("http_request", &final_url).await?;
 
     for attempt in 0..=config.retry.max {
         if let Some(mock_response) = consume_http_mock(
             method,
-            url,
+            &final_url,
             parts.recorded_headers.clone(),
             parts.body.clone(),
         ) {
@@ -3837,7 +3615,7 @@ async fn vm_execute_http_request_with_client(
             ));
         }
 
-        let mut req = client.request(parts.method.clone(), url);
+        let mut req = client.request(parts.method.clone(), &final_url);
         req = req
             .headers(parts.headers.clone())
             .timeout(Duration::from_millis(config.total_timeout_ms));
@@ -3900,9 +3678,10 @@ async fn vm_http_download(
         .unwrap_or_else(|| "GET".to_string())
         .to_uppercase();
     let parts = parse_http_request_parts(&method, options)?;
+    let final_url = final_http_url(url, options, "http_download")?;
     if let Some(mock_response) = consume_http_mock(
         &method,
-        url,
+        &final_url,
         parts.recorded_headers.clone(),
         parts.body.clone(),
     ) {
@@ -3924,12 +3703,12 @@ async fn vm_http_download(
         ));
     }
 
-    if !url.starts_with("http://") && !url.starts_with("https://") {
+    if !final_url.starts_with("http://") && !final_url.starts_with("https://") {
         return Err(vm_error(format!(
             "http_download: URL must start with http:// or https://, got '{url}'"
         )));
     }
-    crate::egress::enforce_url_allowed("http_download", url).await?;
+    crate::egress::enforce_url_allowed("http_download", &final_url).await?;
     let config = parse_http_options(options);
     let client = if let Some(session_id) = session_from_options(options) {
         HTTP_SESSIONS
@@ -3944,7 +3723,7 @@ async fn vm_http_download(
         pooled_http_client(&config)?
     };
     let mut request = client
-        .request(parts.method, url)
+        .request(parts.method, &final_url)
         .headers(parts.headers)
         .timeout(Duration::from_millis(config.total_timeout_ms));
     if let Some(multipart) = &parts.multipart {
@@ -3998,10 +3777,11 @@ async fn vm_http_stream_open(
         .unwrap_or_else(|| "GET".to_string())
         .to_uppercase();
     let parts = parse_http_request_parts(&method, options)?;
+    let final_url = final_http_url(url, options, "http_stream_open")?;
     let id = next_transport_handle("http-stream");
     if let Some(mock_response) = consume_http_mock(
         &method,
-        url,
+        &final_url,
         parts.recorded_headers.clone(),
         parts.body.clone(),
     ) {
@@ -4025,12 +3805,12 @@ async fn vm_http_stream_open(
         return Ok(VmValue::String(Rc::from(id)));
     }
 
-    if !url.starts_with("http://") && !url.starts_with("https://") {
+    if !final_url.starts_with("http://") && !final_url.starts_with("https://") {
         return Err(vm_error(format!(
             "http_stream_open: URL must start with http:// or https://, got '{url}'"
         )));
     }
-    crate::egress::enforce_url_allowed("http_stream_open", url).await?;
+    crate::egress::enforce_url_allowed("http_stream_open", &final_url).await?;
     let config = parse_http_options(options);
     let client = if let Some(session_id) = session_from_options(options) {
         HTTP_SESSIONS
@@ -4045,7 +3825,7 @@ async fn vm_http_stream_open(
         pooled_http_client(&config)?
     };
     let mut request = client
-        .request(parts.method, url)
+        .request(parts.method, &final_url)
         .headers(parts.headers)
         .timeout(Duration::from_millis(config.total_timeout_ms));
     if let Some(multipart) = &parts.multipart {
@@ -5177,12 +4957,12 @@ async fn vm_websocket_close(socket_id: &str) -> Result<VmValue, VmError> {
 #[cfg(test)]
 mod tests {
     use super::{
-        compute_retry_delay, handle_from_value, http_mock_calls_snapshot, parse_retry_after_value,
-        push_http_mock, reset_http_state, vm_execute_http_request, vm_http_download,
-        vm_http_stream_info, vm_http_stream_open, vm_http_stream_read, vm_sse_event_frame,
-        vm_sse_server_cancel, vm_sse_server_heartbeat, vm_sse_server_mock_disconnect,
-        vm_sse_server_mock_receive, vm_sse_server_observed_bool, vm_sse_server_response,
-        vm_sse_server_send, HttpMockResponse,
+        compute_retry_delay, handle_from_value, http_mock_calls_snapshot, mock_call_headers_value,
+        parse_retry_after_value, push_http_mock, redact_mock_call_url, reset_http_state,
+        vm_execute_http_request, vm_http_download, vm_http_stream_info, vm_http_stream_open,
+        vm_http_stream_read, vm_sse_event_frame, vm_sse_server_cancel, vm_sse_server_heartbeat,
+        vm_sse_server_mock_disconnect, vm_sse_server_mock_receive, vm_sse_server_observed_bool,
+        vm_sse_server_response, vm_sse_server_send, HttpMockResponse,
     };
     use crate::connectors::test_util::{
         accept_http_connection, read_http_request, write_http_response,
@@ -5262,6 +5042,98 @@ mod tests {
         assert_eq!(calls.len(), 2);
         assert_eq!(calls[0].url, "https://api.example.com/retry");
         reset_http_state();
+    }
+
+    #[tokio::test]
+    async fn http_mock_records_normalized_headers_and_final_query_url() {
+        reset_http_state();
+        push_http_mock(
+            "GET",
+            "https://api.example.com/items?api_key=secret&limit=2",
+            vec![HttpMockResponse::new(200, "ok")],
+        );
+        let options = BTreeMap::from([
+            (
+                "headers".to_string(),
+                VmValue::Dict(Rc::new(BTreeMap::from([
+                    (
+                        "Authorization".to_string(),
+                        VmValue::String(Rc::from("Bearer secret")),
+                    ),
+                    ("X-Trace".to_string(), VmValue::String(Rc::from("trace-1"))),
+                ]))),
+            ),
+            (
+                "query".to_string(),
+                VmValue::Dict(Rc::new(BTreeMap::from([
+                    ("api_key".to_string(), VmValue::String(Rc::from("secret"))),
+                    ("limit".to_string(), VmValue::Int(2)),
+                ]))),
+            ),
+        ]);
+
+        let response = vm_execute_http_request("GET", "https://api.example.com/items", &options)
+            .await
+            .expect("mocked request with query");
+        let response = response.as_dict().expect("response dict");
+        assert_eq!(response["status"].as_int(), Some(200));
+
+        let calls = http_mock_calls_snapshot();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(
+            calls[0].url,
+            "https://api.example.com/items?api_key=secret&limit=2"
+        );
+        assert_eq!(
+            calls[0].headers.get("authorization").map(String::as_str),
+            Some("Bearer secret")
+        );
+        assert_eq!(
+            calls[0].headers.get("x-trace").map(String::as_str),
+            Some("trace-1")
+        );
+        reset_http_state();
+    }
+
+    #[test]
+    fn mock_call_headers_redact_sensitive_values() {
+        let headers = BTreeMap::from([
+            (
+                "authorization".to_string(),
+                VmValue::String(Rc::from("Bearer secret")),
+            ),
+            (
+                "accept".to_string(),
+                VmValue::String(Rc::from("application/json")),
+            ),
+            ("x-api-key".to_string(), VmValue::String(Rc::from("secret"))),
+        ]);
+        let redacted = mock_call_headers_value(&headers, true);
+        assert_eq!(redacted["authorization"].display(), "[redacted]");
+        assert_eq!(redacted["x-api-key"].display(), "[redacted]");
+        assert_eq!(redacted["accept"].display(), "application/json");
+
+        let raw = mock_call_headers_value(&headers, false);
+        assert_eq!(raw["authorization"].display(), "Bearer secret");
+    }
+
+    #[test]
+    fn mock_call_url_redacts_sensitive_query_values() {
+        assert_eq!(
+            redact_mock_call_url(
+                "https://api.example.com/items?api_key=secret&limit=2&access_token=token",
+                true,
+            ),
+            "https://api.example.com/items?api_key=%5Bredacted%5D&limit=2&access_token=%5Bredacted%5D"
+        );
+        assert_eq!(
+            redact_mock_call_url("https://api.example.com/items?api_key=secret", false),
+            "https://api.example.com/items?api_key=secret"
+        );
+        assert_eq!(
+            redact_mock_call_url("https://api.example.com/items?q=a%20b", true),
+            "https://api.example.com/items?q=a%20b"
+        );
     }
 
     #[tokio::test]

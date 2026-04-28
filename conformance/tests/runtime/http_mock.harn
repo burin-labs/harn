@@ -24,12 +24,12 @@ pipeline test(task) {
   assert_eq(post_resp.status, 201)
   log("post status: " + to_string(post_resp.status))
   // Check recorded calls
-  let calls = http_mock_calls()
+  let calls = http_mock_calls({include_sensitive: true})
   assert_eq(len(calls), 2)
   assert_eq(calls[0].method, "GET")
   assert_eq(calls[1].method, "POST")
-  assert_eq(calls[1].headers.Authorization, "Bearer test-token")
-  assert_eq(calls[1].headers["Content-Type"], "application/json")
+  assert_eq(calls[1].headers.authorization, "Bearer test-token")
+  assert_eq(calls[1].headers["content-type"], "application/json")
   assert_eq(json_parse(calls[1].body).name, "test")
   log("calls: " + to_string(len(calls)))
   // Clear mocks

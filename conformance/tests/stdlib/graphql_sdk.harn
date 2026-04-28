@@ -53,9 +53,9 @@ pipeline test(task) {
   println(envelope.meta.rate_limit.complexity)
   println(envelope.meta.request_id)
   println(envelope.result.meta.status)
-  let calls = http_mock_calls()
+  let calls = http_mock_calls({include_sensitive: true})
   println(json_parse(calls[0].body).operationName)
-  println(calls[0].headers.Authorization)
+  println(calls[0].headers.authorization)
   let page = graphql_page_info({nodes: [{id: "ISS-1"}], pageInfo: {hasNextPage: true, endCursor: "cursor-1"}})
   println(page.nodes[0].id)
   println(

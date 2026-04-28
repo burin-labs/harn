@@ -1,0 +1,39 @@
+pipeline test(task) {
+  http_mock_clear()
+  http_mock(
+    "GET",
+    "https://api.example.com/items?api_key=secret&limit=2",
+    {status: 200, body: "ok", headers: {}},
+  )
+  let get_resp = http_get(
+    "https://api.example.com/items",
+    {
+      headers: {Authorization: "Bearer secret-token", ["X-Api-Key"]: "header-secret", Accept: "application/json"},
+      query: {api_key: "secret", limit: 2},
+    },
+  )
+  assert_eq(get_resp.status, 200)
+  let redacted = http_mock_calls()
+  assert_eq(len(redacted), 1)
+  assert_eq(redacted[0].method, "GET")
+  assert_eq(redacted[0].url, "https://api.example.com/items?api_key=%5Bredacted%5D&limit=2")
+  assert_eq(redacted[0].headers.authorization, "[redacted]")
+  assert_eq(redacted[0].headers["x-api-key"], "[redacted]")
+  assert_eq(redacted[0].headers.accept, "application/json")
+  let raw = http_mock_calls({redact_sensitive: false})
+  assert_eq(raw[0].url, "https://api.example.com/items?api_key=secret&limit=2")
+  assert_eq(raw[0].headers.authorization, "Bearer secret-token")
+  assert_eq(raw[0].headers["x-api-key"], "header-secret")
+  http_mock("POST", "https://api.example.com/items", {status: 201, body: "created", headers: {}})
+  let post_resp = http_post(
+    "https://api.example.com/items",
+    "{\"name\":\"Ada\"}",
+    {headers: {Cookie: "sid=session-secret", ["Content-Type"]: "application/json"}},
+  )
+  assert_eq(post_resp.status, 201)
+  let with_sensitive = http_mock_calls({include_sensitive: true})
+  assert_eq(with_sensitive[1].headers.cookie, "sid=session-secret")
+  assert_eq(with_sensitive[1].headers["content-type"], "application/json")
+  assert_eq(with_sensitive[1].body, "{\"name\":\"Ada\"}")
+  println("http_mock_calls_headers_ok")
+}
