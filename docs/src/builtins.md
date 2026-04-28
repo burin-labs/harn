@@ -950,7 +950,8 @@ Options: `timeout_ms` (alias `timeout`, both in ms), `total_timeout_ms`,
 `connect_timeout_ms`, `read_timeout_ms`, `retry: {max, backoff_ms}`,
 legacy aliases `retries` / `backoff`, optional `retry_on` (status list),
 optional `retry_methods` (defaults to `GET`, `HEAD`, `PUT`, `DELETE`,
-`OPTIONS`), `headers` (dict), `auth` (string or `{bearer: "token"}` or
+`OPTIONS`), `headers` (dict), `query` (dict; nil values omitted and other
+values stringified), `auth` (string or `{bearer: "token"}` or
 `{basic: {user, password}}`), `follow_redirects` (bool),
 `max_redirects` (int), `body` (string), `multipart`
 (`list<{name, value|value_base64|path, filename?, content_type?}>`),
@@ -1154,7 +1155,7 @@ For testing pipelines that make HTTP calls without hitting real servers.
 |---|---|---|---|
 | `http_mock(method, url_pattern, response)` | method: string, url_pattern: string, response: dict | nil | Register a mock. Use `*` in url_pattern for glob matching (supports multiple `*` wildcards, e.g., `https://api.example.com/*/items/*`). `response` may be a single `{status, body, headers}` dict or `{responses: [...]}` to script retries. |
 | `http_mock_clear()` | none | nil | Clear all mocks and recorded calls |
-| `http_mock_calls()` | none | list | Return list of `{method, url, headers, body}` for all intercepted calls |
+| `http_mock_calls(options?)` | options: dict | list | Return list of `{method, url, headers, body}` for all intercepted calls. Header names are normalized to lowercase. Sensitive request headers and query parameters are redacted by default; pass `{redact_sensitive: false}` or `{include_sensitive: true}` to inspect raw values in tests. |
 | `sse_mock(url_pattern, events_or_config)` | url_pattern: string, events_or_config: list or dict | nil | Register an in-process SSE stream mock. Events may be strings or `{event, data, id?, retry_ms?}` dicts. |
 | `websocket_mock(url_pattern, messages_or_config)` | url_pattern: string, messages_or_config: list or dict | nil | Register an in-process WebSocket mock. Messages may be strings/bytes or `{type, data}` dicts; `{messages: [...], echo: true}` enables echoing sends. |
 | `transport_mock_calls()` | none | list | Return recorded mocked SSE/WebSocket connect/send/close calls |
@@ -1171,6 +1172,19 @@ let resp = http_get("https://api.example.com/users", {
   retry: {max: 1, backoff_ms: 0}
 })
 assert_eq(resp.status, 200)
+```
+
+Mocks match and record the final request URL after `query` options are appended:
+
+```harn
+http_mock("GET", "https://api.example.com/users?limit=2", {status: 200})
+http_get("https://api.example.com/users", {
+  headers: {Authorization: "Bearer test-token"},
+  query: {limit: 2},
+})
+let call = http_mock_calls({redact_sensitive: false})[0]
+assert_eq(call.url, "https://api.example.com/users?limit=2")
+assert_eq(call.headers.authorization, "Bearer test-token")
 ```
 
 ```harn
