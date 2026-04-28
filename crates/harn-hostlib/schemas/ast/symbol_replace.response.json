@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/ast/symbol_replace.response.json",
+  "title": "ast.symbol_replace response",
+  "description": "Tagged-union response for ast.symbol_replace. After splicing in `new_text` and collapsing 3+ blank-line runs, the rewritten source is re-parsed; if tree-sitter reports an ERROR/MISSING node the call returns `syntax_error_after_edit` rather than the rewritten source.",
+  "type": "object",
+  "properties": {
+    "result": {
+      "type": "string",
+      "enum": [
+        "replaced",
+        "not_found",
+        "ambiguous",
+        "unsupported_language",
+        "syntax_error_after_edit"
+      ]
+    },
+    "source": {
+      "type": "string",
+      "description": "Rewritten source. Set only when `result` is `replaced`."
+    },
+    "available": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "suggestions": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "match_count": {
+      "type": "integer",
+      "minimum": 2
+    },
+    "language": {
+      "type": "string"
+    },
+    "details": {
+      "type": "string",
+      "description": "First-line diagnostic from the post-edit re-parse. Set only when `result` is `syntax_error_after_edit`."
+    }
+  },
+  "required": ["result"],
+  "additionalProperties": false
+}

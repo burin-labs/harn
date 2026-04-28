@@ -196,6 +196,190 @@ fn parse_file_meets_perf_budget_on_a_known_input() {
     );
 }
 
+// ---------------------------------------------------------------------------
+// Mutation + bracket-balance builtins (issue #775)
+// ---------------------------------------------------------------------------
+
+fn vm_string(s: &str) -> VmValue {
+    VmValue::String(Rc::from(s))
+}
+
+#[test]
+fn symbol_extract_returns_one_based_inclusive_lines() {
+    let registry = ast_registry();
+    let source = "fn alpha() {}\nfn beta() {}\nfn gamma() {}\n";
+    let payload = dict(&[
+        ("source", vm_string(source)),
+        ("language", vm_string("rust")),
+        ("symbol_name", vm_string("beta")),
+    ]);
+    let result = invoke(&registry, "hostlib_ast_symbol_extract", payload);
+    assert_eq!(string_value(&dict_field(&result, "result")), "extracted");
+    assert_eq!(int_value(&dict_field(&result, "start_line")), 2);
+    assert_eq!(int_value(&dict_field(&result, "end_line")), 2);
+    assert_eq!(string_value(&dict_field(&result, "text")), "fn beta() {}");
+}
+
+#[test]
+fn symbol_delete_removes_function_and_keeps_syntax_valid() {
+    let registry = ast_registry();
+    let source = "fn alpha() {}\nfn beta() {}\nfn gamma() {}\n";
+    let payload = dict(&[
+        ("source", vm_string(source)),
+        ("language", vm_string("rust")),
+        ("symbol_name", vm_string("beta")),
+    ]);
+    let result = invoke(&registry, "hostlib_ast_symbol_delete", payload);
+    assert_eq!(string_value(&dict_field(&result, "result")), "removed");
+    let new_source = string_value(&dict_field(&result, "source")).to_string();
+    assert!(!new_source.contains("beta"));
+    assert!(new_source.contains("alpha"));
+    assert!(new_source.contains("gamma"));
+}
+
+#[test]
+fn symbol_replace_swaps_in_caller_text() {
+    let registry = ast_registry();
+    let source = "fn alpha() {}\nfn beta() -> i32 { 0 }\n";
+    let payload = dict(&[
+        ("source", vm_string(source)),
+        ("language", vm_string("rust")),
+        ("symbol_name", vm_string("beta")),
+        ("new_text", vm_string("fn beta() -> i32 { 42 }")),
+    ]);
+    let result = invoke(&registry, "hostlib_ast_symbol_replace", payload);
+    assert_eq!(string_value(&dict_field(&result, "result")), "replaced");
+    assert!(string_value(&dict_field(&result, "source")).contains("42"));
+}
+
+#[test]
+fn symbol_replace_flags_post_edit_syntax_error() {
+    let registry = ast_registry();
+    let source = "fn alpha() {}\nfn beta() {}\n";
+    let payload = dict(&[
+        ("source", vm_string(source)),
+        ("language", vm_string("rust")),
+        ("symbol_name", vm_string("beta")),
+        // Unclosed paren intentionally breaks the edit.
+        ("new_text", vm_string("fn beta( {")),
+    ]);
+    let result = invoke(&registry, "hostlib_ast_symbol_replace", payload);
+    assert_eq!(
+        string_value(&dict_field(&result, "result")),
+        "syntax_error_after_edit"
+    );
+    assert!(!string_value(&dict_field(&result, "details")).is_empty());
+}
+
+#[test]
+fn symbol_lookup_reports_ambiguity_with_match_count() {
+    let registry = ast_registry();
+    let source = "class A:\n    def greet(self): pass\nclass B:\n    def greet(self): pass\n";
+    let payload = dict(&[
+        ("source", vm_string(source)),
+        ("language", vm_string("python")),
+        ("symbol_name", vm_string("greet")),
+    ]);
+    let result = invoke(&registry, "hostlib_ast_symbol_extract", payload);
+    assert_eq!(string_value(&dict_field(&result, "result")), "ambiguous");
+    assert!(int_value(&dict_field(&result, "match_count")) >= 2);
+}
+
+#[test]
+fn symbol_lookup_qualified_name_disambiguates() {
+    let registry = ast_registry();
+    let source = "class A:\n    def greet(self): pass\nclass B:\n    def greet(self): pass\n";
+    let payload = dict(&[
+        ("source", vm_string(source)),
+        ("language", vm_string("python")),
+        ("symbol_name", vm_string("B.greet")),
+    ]);
+    let result = invoke(&registry, "hostlib_ast_symbol_extract", payload);
+    assert_eq!(string_value(&dict_field(&result, "result")), "extracted");
+    assert!(string_value(&dict_field(&result, "text")).contains("greet"));
+    assert_eq!(int_value(&dict_field(&result, "start_line")), 4);
+}
+
+#[test]
+fn symbol_lookup_emits_suggestions_when_typo_misses() {
+    let registry = ast_registry();
+    let source = "fn parse_query() {}\nfn parse_other() {}\n";
+    let payload = dict(&[
+        ("source", vm_string(source)),
+        ("language", vm_string("rust")),
+        ("symbol_name", vm_string("parse_qury")),
+    ]);
+    let result = invoke(&registry, "hostlib_ast_symbol_extract", payload);
+    assert_eq!(string_value(&dict_field(&result, "result")), "not_found");
+    let suggestions = list_value(&dict_field(&result, "suggestions"));
+    assert!(!suggestions.is_empty());
+    let names: Vec<&str> = suggestions.iter().map(string_value).collect();
+    assert!(names.contains(&"parse_query"));
+}
+
+#[test]
+fn unsupported_language_short_circuits_on_mutation_builtins() {
+    let registry = ast_registry();
+    for builtin in &[
+        "hostlib_ast_symbol_extract",
+        "hostlib_ast_symbol_delete",
+        "hostlib_ast_symbol_replace",
+    ] {
+        let mut entries = vec![
+            ("source", vm_string("hello")),
+            ("language", vm_string("klingon")),
+            ("symbol_name", vm_string("greet")),
+        ];
+        if *builtin == "hostlib_ast_symbol_replace" {
+            entries.push(("new_text", vm_string("replacement")));
+        }
+        let result = invoke(&registry, builtin, dict(&entries));
+        assert_eq!(
+            string_value(&dict_field(&result, "result")),
+            "unsupported_language",
+            "{builtin} did not short-circuit on klingon",
+        );
+    }
+}
+
+#[test]
+fn bracket_balance_counts_unmatched_opener() {
+    let registry = ast_registry();
+    let payload = dict(&[
+        ("source", vm_string("fn foo() {")),
+        ("language", vm_string("rust")),
+    ]);
+    let result = invoke(&registry, "hostlib_ast_bracket_balance", payload);
+    assert_eq!(int_value(&dict_field(&result, "parens")), 0);
+    assert_eq!(int_value(&dict_field(&result, "brackets")), 0);
+    assert_eq!(int_value(&dict_field(&result, "braces")), 1);
+}
+
+#[test]
+fn bracket_balance_ignores_brackets_inside_strings() {
+    let registry = ast_registry();
+    let payload = dict(&[
+        ("source", vm_string(r#"let s = "}{)";"#)),
+        ("language", vm_string("rust")),
+    ]);
+    let result = invoke(&registry, "hostlib_ast_bracket_balance", payload);
+    assert_eq!(int_value(&dict_field(&result, "parens")), 0);
+    assert_eq!(int_value(&dict_field(&result, "braces")), 0);
+}
+
+#[test]
+fn bracket_balance_python_uses_hash_comments() {
+    let registry = ast_registry();
+    let payload = dict(&[
+        // Python `//` is integer division; must not be parsed as a comment.
+        ("source", vm_string("x = 5 // 2  # cmt with [\n")),
+        ("language", vm_string("python")),
+    ]);
+    let result = invoke(&registry, "hostlib_ast_bracket_balance", payload);
+    assert_eq!(int_value(&dict_field(&result, "brackets")), 0);
+    assert_eq!(int_value(&dict_field(&result, "parens")), 0);
+}
+
 #[test]
 fn parse_errors_returns_clean_payload_for_valid_python() {
     let registry = ast_registry();

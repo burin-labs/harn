@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/ast/bracket_balance.response.json",
+  "title": "ast.bracket_balance response",
+  "description": "Signed bracket counts. Positive means unclosed openers; negative means unmatched closers. A balanced source returns zeros across all three families.",
+  "type": "object",
+  "properties": {
+    "parens": {
+      "type": "integer",
+      "description": "Net `(` minus `)` outside of strings/comments."
+    },
+    "brackets": {
+      "type": "integer",
+      "description": "Net `[` minus `]` outside of strings/comments."
+    },
+    "braces": {
+      "type": "integer",
+      "description": "Net `{` minus `}` outside of strings/comments."
+    }
+  },
+  "required": ["parens", "brackets", "braces"],
+  "additionalProperties": false
+}

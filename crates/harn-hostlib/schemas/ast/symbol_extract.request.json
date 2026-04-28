@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/ast/symbol_extract.request.json",
+  "title": "ast.symbol_extract request",
+  "description": "Locate a named symbol in `source` and return its full text plus 1-based, inclusive line range. Mirrors the Swift `SymbolOperations.extract` surface so burin-code's symbol-scoped read tool can swap in a hostlib call.",
+  "type": "object",
+  "properties": {
+    "source": {
+      "type": "string",
+      "description": "Full source text to search."
+    },
+    "language": {
+      "type": "string",
+      "description": "Canonical language name, e.g. \"rust\", \"swift\", \"python\". Aliases like `ts`, `py`, `c++` are accepted."
+    },
+    "symbol_name": {
+      "type": "string",
+      "description": "Symbol to locate. Optionally prefixed with a single container, e.g. `Greeter.greet`."
+    }
+  },
+  "required": ["source", "language", "symbol_name"],
+  "additionalProperties": false
+}
