@@ -26,6 +26,7 @@ pub fn get_stdlib_source(module: &str) -> Option<&'static str> {
         "checkpoint" => Some(include_str!("stdlib_checkpoint.harn")),
         "host" => Some(include_str!("stdlib_host.harn")),
         "hitl" => Some(include_str!("stdlib_hitl.harn")),
+        "plan" => Some(include_str!("stdlib_plan.harn")),
         "waitpoints" => Some(include_str!("stdlib_waitpoints.harn")),
         "waitpoint" => Some(include_str!("stdlib_waitpoint.harn")),
         "monitors" => Some(include_str!("stdlib_monitors.harn")),

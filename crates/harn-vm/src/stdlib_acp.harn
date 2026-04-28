@@ -16,7 +16,7 @@ type ToolCall = {sessionUpdate: string, toolCallId: string, title: string | nil,
 
 type ToolCallUpdate = {sessionUpdate: string, toolCallId: string, status: string | nil, title: string | nil, content: list<dict> | nil, locations: list<dict> | nil, rawOutput: dict | nil, executor: string | dict | nil}
 
-type Plan = {sessionUpdate: string, entries: list<{content: string, priority: string | nil, status: string | nil}>}
+type Plan = {sessionUpdate: string, entries: list<{content: string, priority: string | nil, status: string | nil}>, harnPlan?: dict}
 
 type Handoff = {sessionUpdate: string, handoffId: string, artifactId: string | nil, handoff: dict}
 
@@ -57,6 +57,11 @@ pub fn tool_call_update(tool_call_id, status) {
 
 pub fn plan(entries) {
   return {sessionUpdate: "plan", entries: entries}
+}
+
+/** harn_plan builds an ACP plan update from a harn.plan.v1 artifact. */
+pub fn harn_plan(plan_artifact) {
+  return {sessionUpdate: "plan", entries: plan_entries(plan_artifact), harnPlan: plan_artifact}
 }
 
 pub fn handoff_update(handoff_id, artifact_id, handoff) {

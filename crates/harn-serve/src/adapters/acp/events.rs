@@ -187,12 +187,29 @@ impl AgentEventSink for AcpAgentEventSink {
                 }));
             }
             AgentEvent::Plan { session_id, plan } => {
+                let entries = if plan
+                    .get("schema_version")
+                    .and_then(serde_json::Value::as_str)
+                    == Some(harn_vm::llm::plan::PLAN_SCHEMA_VERSION)
+                {
+                    harn_vm::llm::plan::plan_entries(plan)
+                } else {
+                    plan.clone()
+                };
+                let mut update = serde_json::json!({
+                    "sessionUpdate": "plan",
+                    "entries": entries,
+                });
+                if plan
+                    .get("schema_version")
+                    .and_then(serde_json::Value::as_str)
+                    == Some(harn_vm::llm::plan::PLAN_SCHEMA_VERSION)
+                {
+                    update["harnPlan"] = plan.clone();
+                }
                 self.write_notification(serde_json::json!({
                     "sessionId": session_id,
-                    "update": {
-                        "sessionUpdate": "plan",
-                        "entries": plan,
-                    },
+                    "update": update,
                 }));
             }
             AgentEvent::SkillActivated {
@@ -594,6 +611,31 @@ mod tests {
                 "{session_update} is not advertised as a Harn ACP extension"
             );
         }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn structured_plan_extension_fixture_is_pinned() {
+        let plan = harn_vm::llm::plan::normalize_plan_tool_call(
+            harn_vm::llm::plan::EMIT_PLAN_TOOL,
+            &serde_json::json!({
+                "summary": "Ship plan events.",
+                "steps": [
+                    {"content": "Emit plan event.", "status": "completed"},
+                    {"content": "Verify fixtures.", "status": "pending"}
+                ],
+                "verification_commands": ["cargo test -p harn-serve acp"],
+            }),
+        );
+        let actual = collect_notifications(vec![AgentEvent::Plan {
+            session_id: "session-1".to_string(),
+            plan,
+        }])
+        .await;
+        let expected: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../tests/fixtures/acp/session_update_plan_extension.json"
+        ))
+        .expect("fixture json");
+        assert_eq!(serde_json::Value::Array(actual), expected);
     }
 
     #[tokio::test(flavor = "current_thread")]

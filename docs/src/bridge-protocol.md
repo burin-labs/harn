@@ -264,6 +264,11 @@ plus `metadata`/`audit`). Subscribers receive these alongside the
 existing `status`/`message` events on the SSE / push-notification
 streams.
 
+Structured Harn plan emissions use the same task stream. When an agent calls
+`emit_plan` or `update_plan`, A2A subscribers receive a `harn_plan` entry with
+standard ACP-compatible `entries` plus the normalized `harn.plan.v1` artifact
+under `plan`.
+
 ## Daemon idle/resume notifications
 
 Daemon agents stay alive after text-only turns and wait for host activity with adaptive

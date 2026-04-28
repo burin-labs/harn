@@ -1168,10 +1168,9 @@ fn a2a_worker_session_id(task_id: &str) -> String {
 }
 
 /// `AgentEventSink` implementation that publishes worker lifecycle
-/// updates onto an A2A task's event stream. Other variants are
-/// deliberately ignored — only worker-scoped events are first-class on
-/// the A2A surface today, and forwarding chat/tool chunks would mix
-/// concerns.
+/// updates and structured plan emissions onto an A2A task's event
+/// stream. Chat/tool chunks are deliberately ignored here; they belong
+/// to the task history or ACP stream rather than this extension feed.
 struct A2aWorkerSink {
     task_id: String,
     tasks: TaskStore,
@@ -1179,35 +1178,48 @@ struct A2aWorkerSink {
 
 impl harn_vm::agent_events::AgentEventSink for A2aWorkerSink {
     fn handle_event(&self, event: &harn_vm::agent_events::AgentEvent) {
-        let harn_vm::agent_events::AgentEvent::WorkerUpdate {
-            worker_id,
-            worker_name,
-            worker_task,
-            worker_mode,
-            event,
-            status,
-            metadata,
-            audit,
-            ..
-        } = event
-        else {
-            return;
+        let payload = match event {
+            harn_vm::agent_events::AgentEvent::WorkerUpdate {
+                worker_id,
+                worker_name,
+                worker_task,
+                worker_mode,
+                event,
+                status,
+                metadata,
+                audit,
+                ..
+            } => {
+                let mut payload = json!({
+                    "type": "worker_update",
+                    "taskId": self.task_id,
+                    "workerId": worker_id,
+                    "workerName": worker_name,
+                    "workerTask": worker_task,
+                    "workerMode": worker_mode,
+                    "event": event.as_str(),
+                    "status": status,
+                    "terminal": event.is_terminal(),
+                    "metadata": metadata,
+                });
+                if let Some(audit) = audit {
+                    payload["audit"] = audit.clone();
+                }
+                payload
+            }
+            harn_vm::agent_events::AgentEvent::Plan { plan, .. }
+                if plan.get("schema_version").and_then(JsonValue::as_str)
+                    == Some(harn_vm::llm::plan::PLAN_SCHEMA_VERSION) =>
+            {
+                json!({
+                    "type": "harn_plan",
+                    "taskId": self.task_id,
+                    "entries": harn_vm::llm::plan::plan_entries(plan),
+                    "plan": plan,
+                })
+            }
+            _ => return,
         };
-        let mut payload = json!({
-            "type": "worker_update",
-            "taskId": self.task_id,
-            "workerId": worker_id,
-            "workerName": worker_name,
-            "workerTask": worker_task,
-            "workerMode": worker_mode,
-            "event": event.as_str(),
-            "status": status,
-            "terminal": event.is_terminal(),
-            "metadata": metadata,
-        });
-        if let Some(audit) = audit {
-            payload["audit"] = audit.clone();
-        }
         let task_for_push = {
             let mut tasks = self.tasks.lock().expect("tasks poisoned");
             let Some(task) = tasks.get_mut(&self.task_id) else {
@@ -1595,9 +1607,8 @@ pub fn triage(task: string) -> string {
             audit: Some(serde_json::json!({"run_id": "run_x"})),
         });
 
-        // Non-worker events are ignored — the sink is intentionally
-        // narrow so chat/tool chunks don't bleed into the A2A task
-        // stream.
+        // Chat chunks are ignored — the sink is intentionally narrow so
+        // task-stream extension events don't duplicate task history.
         sink.handle_event(&harn_vm::agent_events::AgentEvent::AgentMessageChunk {
             session_id: super::a2a_worker_session_id(&task_id),
             content: "ignored".into(),
@@ -1617,6 +1628,50 @@ pub fn triage(task: string) -> string {
         assert_eq!(event["status"], "awaiting_input");
         assert_eq!(event["terminal"], false);
         assert_eq!(event["audit"]["run_id"], "run_x");
+    }
+
+    #[test]
+    fn a2a_worker_sink_publishes_plan_extension_to_task_stream() {
+        let task_id = "task-plan".to_string();
+        let task = TaskState {
+            id: task_id.clone(),
+            context_id: None,
+            status: TaskStatus::Working,
+            history: Vec::new(),
+            metadata: BTreeMap::new(),
+            push_configs: Vec::new(),
+            events: Vec::new(),
+            subscribers: Vec::new(),
+            cancel_token: None,
+        };
+        let tasks: TaskStore = Arc::new(Mutex::new(HashMap::from([(task_id.clone(), task)])));
+        let sink = super::A2aWorkerSink {
+            task_id: task_id.clone(),
+            tasks: tasks.clone(),
+        };
+        let plan = harn_vm::llm::plan::normalize_plan_tool_call(
+            harn_vm::llm::plan::UPDATE_PLAN_TOOL,
+            &serde_json::json!({
+                "explanation": "Plan the task.",
+                "plan": [{"step": "Inspect files.", "status": "pending"}],
+            }),
+        );
+
+        sink.handle_event(&harn_vm::agent_events::AgentEvent::Plan {
+            session_id: super::a2a_worker_session_id(&task_id),
+            plan,
+        });
+
+        let tasks = tasks.lock().expect("tasks");
+        let task = tasks.get(&task_id).expect("task");
+        let event = task
+            .events
+            .iter()
+            .find(|event| event.get("type").and_then(JsonValue::as_str) == Some("harn_plan"))
+            .expect("harn_plan event");
+        assert_eq!(event["taskId"], task_id);
+        assert_eq!(event["entries"][0]["content"], "Inspect files.");
+        assert_eq!(event["plan"]["schema_version"], "harn.plan.v1");
     }
 
     #[tokio::test]

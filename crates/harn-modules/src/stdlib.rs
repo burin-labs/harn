@@ -43,6 +43,7 @@ pub(crate) const STDLIB_SOURCES: &[(&str, &str)] = &[
     ("checkpoint", include_str!("stdlib/stdlib_checkpoint.harn")),
     ("host", include_str!("stdlib/stdlib_host.harn")),
     ("hitl", include_str!("stdlib/stdlib_hitl.harn")),
+    ("plan", include_str!("stdlib/stdlib_plan.harn")),
     ("waitpoints", include_str!("stdlib/stdlib_waitpoints.harn")),
     ("waitpoint", include_str!("stdlib/stdlib_waitpoint.harn")),
     ("monitors", include_str!("stdlib/stdlib_monitors.harn")),

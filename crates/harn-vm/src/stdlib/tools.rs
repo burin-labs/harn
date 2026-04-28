@@ -84,6 +84,20 @@ fn vm_current_registry_dict(builtin: &str) -> Result<VmValue, VmError> {
 }
 
 pub(crate) fn register_tool_builtins(vm: &mut Vm) {
+    vm.register_builtin("plan_artifact", |args, _out| {
+        let input = args.first().cloned().unwrap_or(VmValue::Nil);
+        let json = crate::llm::vm_value_to_json(&input);
+        let plan =
+            crate::llm::plan::normalize_plan_tool_call(crate::llm::plan::EMIT_PLAN_TOOL, &json);
+        Ok(json_to_vm_value(&plan))
+    });
+
+    vm.register_builtin("plan_entries", |args, _out| {
+        let input = args.first().cloned().unwrap_or(VmValue::Nil);
+        let json = crate::llm::vm_value_to_json(&input);
+        Ok(json_to_vm_value(&crate::llm::plan::plan_entries(&json)))
+    });
+
     vm.register_builtin("tool_registry", |_args, _out| {
         let mut registry = BTreeMap::new();
         registry.insert(

@@ -588,6 +588,12 @@ Canonical ACP envelope types are provided as Harn type aliases in
 return types so a pipeline's contract matches the ACP schema
 byte-for-byte.
 
+`std/plan` provides Harn-owned `emit_plan` and `update_plan` tools plus a
+`harn.plan.v1` artifact shape. ACP keeps emitting the standard
+`sessionUpdate: "plan"` `entries` array; when the source is a Harn plan
+artifact, the update also carries `harnPlan` with the normalized steps,
+assumptions, open questions, verification commands, and approval state.
+
 When a workflow emits a typed handoff artifact, ACP also mirrors it as a
 structured `session/update` with `sessionUpdate: "handoff"`, so hosts can show
 handoff lifecycle entries without scraping transcript prose.

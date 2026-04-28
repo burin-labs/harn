@@ -1311,6 +1311,31 @@ pub(super) async fn run_tool_dispatch(
         })
         .await;
 
+        if !final_status_failed && crate::llm::plan::is_plan_tool(tool_name) {
+            let plan =
+                serde_json::from_str::<serde_json::Value>(&result_text).unwrap_or_else(|_| {
+                    crate::llm::plan::normalize_plan_tool_call(tool_name, &tool_args)
+                });
+            let rendered = crate::llm::plan::render_plan(&plan);
+            state.transcript_events.push(transcript_event(
+                "plan",
+                "assistant",
+                "public",
+                &rendered,
+                Some(serde_json::json!({
+                    "plan": plan,
+                    "entries": crate::llm::plan::plan_entries(&plan),
+                    "tool_name": tool_name,
+                    "tool_use_id": tool_id,
+                })),
+            ));
+            super::emit_agent_event(&AgentEvent::Plan {
+                session_id: ctx.session_id.to_string(),
+                plan,
+            })
+            .await;
+        }
+
         crate::tracing::span_end(tool_span_id);
 
         if crate::llm::mock::get_tool_recording_mode()

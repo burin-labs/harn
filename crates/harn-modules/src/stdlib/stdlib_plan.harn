@@ -1,0 +1,110 @@
+// std/plan — Harn-owned plan artifact and approval helpers.
+//
+// Import with: `import "std/plan"`.
+import "std/hitl"
+
+type PlanStepStatus = "pending" | "in_progress" | "completed" | "blocked" | "cancelled"
+
+type PlanStep = {id: string, content: string, status: PlanStepStatus, priority: string | int | nil}
+
+type PlanApprovalState = "unrequested" | "requested" | "approved" | "rejected"
+
+type PlanApproval = {state: PlanApprovalState, request_id?: string, reviewer?: string, reviewers?: list<string>, approved_at?: string, reason?: string | nil}
+
+type PlanArtifact = {_type: "plan_artifact", schema_version: "harn.plan.v1", id: string, tool: string, title: string, summary: string, steps: list<PlanStep>, assumptions: list<string>, open_questions: list<string>, verification_commands: list<string>, approval: PlanApproval}
+
+/** plan_from normalizes flexible model/user plan shapes into harn.plan.v1. */
+pub fn plan_from(plan) -> PlanArtifact {
+  return plan_artifact(plan)
+}
+
+/** plan_acp_entries returns ACP-compatible plan entries for a harn.plan.v1 artifact. */
+pub fn plan_acp_entries(plan) {
+  return plan_entries(plan)
+}
+
+/** emit_plan_tool registers the Harn-owned terminal plan emission tool. */
+pub fn emit_plan_tool(registry) {
+  return tool_define(
+    registry,
+    "emit_plan",
+    "Emit a structured plan artifact and end the planning turn.",
+    {
+      executor: "harn",
+      parameters: {
+        summary: {type: "string", description: "One-sentence plan summary", required: false},
+        direction: {type: "string", description: "First-order-plan direction alias", required: false},
+        steps: {type: "array", description: "Plan steps with content/step and status", required: false},
+        tasks: {type: "array", description: "First-order-plan tasks alias", required: false},
+        assumptions: {type: "array", description: "Assumptions the plan relies on", required: false},
+        open_questions: {type: "array", description: "Questions that remain unresolved", required: false},
+        verification_commands: {type: "array", description: "Commands or checks to verify the work", required: false},
+        verification: {type: "array", description: "First-order-plan verification alias", required: false},
+        approval: {type: "object", description: "Optional approval state", required: false},
+      },
+      returns: {type: "object"},
+    },
+  )
+}
+
+/** update_plan_tool registers the incremental Harn-owned plan update tool. */
+pub fn update_plan_tool(registry) {
+  return tool_define(
+    registry,
+    "update_plan",
+    "Update the current structured plan artifact.",
+    {
+      executor: "harn",
+      parameters: {
+        explanation: {type: "string", description: "Short reason for the update", required: false},
+        plan: {type: "array", description: "Plan steps with step/content and status"},
+        assumptions: {type: "array", description: "Assumptions the plan relies on", required: false},
+        open_questions: {type: "array", description: "Questions that remain unresolved", required: false},
+        verification_commands: {type: "array", description: "Commands or checks to verify the work", required: false},
+        approval: {type: "object", description: "Optional approval state", required: false},
+      },
+      returns: {type: "object"},
+    },
+  )
+}
+
+/** plan_tools adds emit_plan and update_plan to a tool registry. */
+pub fn plan_tools(registry = nil) {
+  var tools = registry ?? tool_registry()
+  tools = emit_plan_tool(tools)
+  tools = update_plan_tool(tools)
+  return tools
+}
+
+/** plan_approved returns a copy of plan with an approved/rejected approval state. */
+pub fn plan_approved(plan, approval: ApprovalRecord) -> PlanArtifact {
+  let artifact = plan_from(plan)
+  let state = if approval.approved {
+    "approved"
+  } else {
+    "rejected"
+  }
+  return artifact
+    + {
+    approval: {
+      state: state,
+      reviewers: approval.reviewers,
+      approved_at: approval.approved_at,
+      reason: approval.reason,
+    },
+  }
+}
+
+/** request_plan_approval uses std/hitl approval primitives for plan approval/resume flows. */
+pub fn request_plan_approval(plan, options = nil) -> PlanArtifact {
+  let artifact = plan_from(plan)
+  let action = options?.action ?? "Approve plan"
+  var approval_options = if options {
+    options
+  } else {
+    {}
+  }
+  approval_options = approval_options + {detail: artifact}
+  let record: ApprovalRecord = request_approval(action, approval_options)
+  return plan_approved(artifact, record)
+}
