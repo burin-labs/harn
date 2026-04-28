@@ -33,7 +33,7 @@ use crate::tools::payload::{
     optional_bool, optional_string, optional_string_list, optional_timeout, parse_argv_program,
     require_dict_arg,
 };
-use crate::tools::proc::{self, SpawnRequest};
+use crate::tools::proc::{self, CaptureConfig, EnvMode, SpawnRequest};
 use crate::tools::response::ResponseBuilder;
 
 pub(crate) const NAME: &str = "hostlib_tools_run_test";
@@ -66,12 +66,14 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
 
     if long_running {
         let session_id = harn_vm::current_agent_session_id().unwrap_or_default();
-        let info = super::long_running::spawn_long_running(
+        let info = super::long_running::spawn_long_running_with_options(
             NAME,
             program,
             args_tail,
             cwd_path,
             BTreeMap::new(),
+            EnvMode::InheritClean,
+            CaptureConfig::default(),
             session_id,
         )?;
         return Ok(info.into_handle_response());
@@ -83,8 +85,10 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         args: args_tail,
         cwd: cwd_path,
         env: BTreeMap::new(),
+        env_mode: EnvMode::InheritClean,
         stdin: None,
         timeout,
+        capture: CaptureConfig::default(),
     })?;
 
     let artifacts = RawArtifacts {

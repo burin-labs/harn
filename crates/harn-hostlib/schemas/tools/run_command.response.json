@@ -4,13 +4,66 @@
   "title": "tools.run_command response",
   "type": "object",
   "properties": {
-    "exit_code": { "type": "integer" },
+    "command_id": { "type": "string" },
+    "status": {
+      "type": "string",
+      "enum": ["completed", "running", "timed_out", "killed", "blocked", "spawn_failed"]
+    },
+    "pid": { "type": ["integer", "null"] },
+    "process_group_id": { "type": ["integer", "null"] },
+    "handle_id": { "type": ["string", "null"] },
+    "started_at": { "type": "string", "format": "date-time" },
+    "ended_at": { "type": ["string", "null"], "format": "date-time" },
+    "duration_ms": { "type": "integer", "minimum": 0 },
+    "exit_code": { "type": ["integer", "null"] },
     "signal": { "type": ["string", "null"] },
+    "timed_out": { "type": "boolean" },
     "stdout": { "type": "string" },
     "stderr": { "type": "string" },
-    "duration_ms": { "type": "integer", "minimum": 0 },
-    "timed_out": { "type": "boolean" }
+    "output_path": { "type": "string" },
+    "stdout_path": { "type": "string" },
+    "stderr_path": { "type": "string" },
+    "line_count": { "type": "integer", "minimum": 0 },
+    "byte_count": { "type": "integer", "minimum": 0 },
+    "output_sha256": { "type": "string" },
+    "sandbox": {
+      "type": "object",
+      "properties": {
+        "kind": { "type": "string" },
+        "enforced": { "type": "boolean" }
+      },
+      "required": ["kind", "enforced"],
+      "additionalProperties": false
+    },
+    "audit_id": { "type": "string" },
+    "policy_context": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "command": { "type": "string" }
   },
-  "required": ["exit_code", "stdout", "stderr", "duration_ms", "timed_out"],
+  "required": [
+    "command_id",
+    "status",
+    "pid",
+    "process_group_id",
+    "handle_id",
+    "started_at",
+    "ended_at",
+    "duration_ms",
+    "exit_code",
+    "signal",
+    "timed_out",
+    "stdout",
+    "stderr",
+    "output_path",
+    "stdout_path",
+    "stderr_path",
+    "line_count",
+    "byte_count",
+    "output_sha256",
+    "sandbox",
+    "audit_id"
+  ],
   "additionalProperties": false
 }

@@ -647,6 +647,18 @@ pub const SCHEMAS: &[(&str, &str, SchemaKind, &str)] = &[
     ),
     (
         "tools",
+        "read_command_output",
+        SchemaKind::Request,
+        include_str!("../schemas/tools/read_command_output.request.json"),
+    ),
+    (
+        "tools",
+        "read_command_output",
+        SchemaKind::Response,
+        include_str!("../schemas/tools/read_command_output.response.json"),
+    ),
+    (
+        "tools",
         "run_test",
         SchemaKind::Request,
         include_str!("../schemas/tools/run_test.request.json"),

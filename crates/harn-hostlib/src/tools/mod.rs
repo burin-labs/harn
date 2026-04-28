@@ -54,6 +54,7 @@ mod outline;
 mod payload;
 pub mod permissions;
 mod proc;
+mod read_command_output;
 mod response;
 mod run_build_command;
 mod run_command;
@@ -115,6 +116,12 @@ impl HostlibCapability for ToolsCapability {
             "hostlib_tools_run_command",
             "run_command",
             run_command::handle,
+        );
+        register_gated(
+            registry,
+            read_command_output::NAME,
+            "read_command_output",
+            read_command_output::handle,
         );
         register_gated(
             registry,

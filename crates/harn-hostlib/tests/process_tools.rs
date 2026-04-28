@@ -24,6 +24,7 @@ use std::rc::Rc;
 use harn_hostlib::tools::ToolsCapability;
 use harn_hostlib::{BuiltinRegistry, HostlibCapability, HostlibError};
 use harn_vm::VmValue;
+use sha2::{Digest, Sha256};
 use tempfile::tempdir;
 
 fn registry() -> BuiltinRegistry {
@@ -94,8 +95,27 @@ fn run_command_echoes_stdout_and_reports_exit_zero() {
     assert_eq!(require_str(&resp, "stdout").trim(), "hello");
     assert_eq!(require_str(&resp, "stderr"), "");
     assert!(!require_bool(&resp, "timed_out"));
+    assert_eq!(require_str(&resp, "status"), "completed");
+    assert!(require_str(&resp, "command_id").starts_with("cmd_"));
+    assert!(require_int(&resp, "pid") > 0);
+    assert!(require_int(&resp, "process_group_id") > 0);
+    assert!(require_str(&resp, "started_at").contains('T'));
+    assert!(require_str(&resp, "ended_at").contains('T'));
+    assert!(require_str(&resp, "audit_id").starts_with("audit_cmd_"));
     assert!(matches!(resp.get("signal"), Some(VmValue::Nil)));
     assert!(require_int(&resp, "duration_ms") >= 0);
+    let output_path = require_str(&resp, "output_path");
+    assert_eq!(
+        std::fs::read_to_string(&output_path).unwrap().trim(),
+        "hello"
+    );
+    let digest = format!(
+        "sha256:{}",
+        hex::encode(Sha256::digest(std::fs::read(&output_path).unwrap()))
+    );
+    assert_eq!(require_str(&resp, "output_sha256"), digest);
+    assert_eq!(require_int(&resp, "line_count"), 1);
+    assert!(require_int(&resp, "byte_count") >= 6);
 }
 
 #[test]
@@ -137,6 +157,7 @@ fn run_command_kills_child_when_timeout_elapses() {
     req.insert("timeout_ms".into(), VmValue::Int(150));
     let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
     assert!(require_bool(&resp, "timed_out"));
+    assert_eq!(require_str(&resp, "status"), "timed_out");
     // Killed children report exit_code -1 + a signal name.
     assert!(matches!(resp.get("signal"), Some(VmValue::String(_))));
 }
@@ -154,6 +175,52 @@ fn run_command_capture_stderr_false_merges_into_stdout() {
     assert!(stdout.contains("out"), "stdout was {stdout:?}");
     assert!(stdout.contains("err"), "stdout was {stdout:?}");
     assert_eq!(require_str(&resp, "stderr"), "");
+}
+
+#[test]
+fn run_command_supports_explicit_shell_mode() {
+    let mut shell: BTreeMap<String, VmValue> = BTreeMap::new();
+    shell.insert("id".into(), vstr("sh"));
+
+    let mut req = dict();
+    req.insert("mode".into(), vstr("shell"));
+    req.insert("command".into(), vstr("echo shell-ok"));
+    req.insert("shell".into(), VmValue::Dict(Rc::new(shell)));
+    let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
+    assert_eq!(require_str(&resp, "stdout").trim(), "shell-ok");
+}
+
+#[test]
+fn run_command_caps_inline_output_and_read_command_output_reads_artifact() {
+    let mut capture: BTreeMap<String, VmValue> = BTreeMap::new();
+    capture.insert("max_inline_bytes".into(), VmValue::Int(8));
+
+    let mut req = dict();
+    req.insert(
+        "argv".into(),
+        vlist_str(&["bash", "-c", "for i in $(seq 1 2000); do printf x; done"]),
+    );
+    req.insert("capture".into(), VmValue::Dict(Rc::new(capture)));
+    let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
+
+    assert_eq!(require_str(&resp, "stdout").len(), 8);
+    assert_eq!(require_int(&resp, "byte_count"), 2000);
+
+    let mut read_req = dict();
+    read_req.insert("command_id".into(), vstr(&require_str(&resp, "command_id")));
+    read_req.insert("offset".into(), VmValue::Int(1990));
+    read_req.insert("length".into(), VmValue::Int(20));
+    let read_resp = require_dict(call("hostlib_tools_read_command_output", read_req).unwrap());
+    assert_eq!(require_str(&read_resp, "content").len(), 10);
+    assert!(require_bool(&read_resp, "eof"));
+}
+
+#[test]
+fn read_command_output_rejects_arbitrary_path_reads() {
+    let mut req = dict();
+    req.insert("path".into(), vstr("/etc/passwd"));
+    let err = call("hostlib_tools_read_command_output", req).unwrap_err();
+    assert!(matches!(err, HostlibError::InvalidParameter { param, .. } if param == "path"));
 }
 
 #[test]
@@ -429,7 +496,11 @@ fn run_command_long_running_returns_handle_immediately() {
         handle_id.starts_with("hto-"),
         "handle_id should start with hto-, got {handle_id}"
     );
-    assert!(require_int(&resp, "started_at") > 0);
+    assert_eq!(require_str(&resp, "status"), "running");
+    assert!(require_str(&resp, "command_id").starts_with("cmd_"));
+    assert!(require_int(&resp, "pid") > 0);
+    assert!(require_int(&resp, "process_group_id") > 0);
+    assert!(require_str(&resp, "started_at").contains('T'));
     let cmd = require_str(&resp, "command");
     assert!(
         cmd.contains("sleep"),
@@ -485,6 +556,11 @@ fn run_command_long_running_feedback_fires_after_exit() {
                 "handle_id mismatch in feedback"
             );
             assert_eq!(payload["exit_code"], 0);
+            assert_eq!(payload["status"], "completed");
+            assert!(payload["output_path"]
+                .as_str()
+                .unwrap()
+                .contains("combined.txt"));
             assert!(
                 payload["stdout"].as_str().unwrap().contains("hello stdout"),
                 "stdout missing: {}",

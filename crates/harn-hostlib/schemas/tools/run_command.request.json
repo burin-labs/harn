@@ -4,21 +4,77 @@
   "title": "tools.run_command request",
   "type": "object",
   "properties": {
+    "mode": { "type": "string", "enum": ["argv", "shell"], "default": "argv" },
     "argv": {
       "type": "array",
       "minItems": 1,
       "items": { "type": "string" }
+    },
+    "command": { "type": "string" },
+    "shell": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "path": { "type": "string" },
+        "login": { "type": "boolean", "default": false },
+        "interactive": { "type": "boolean", "default": false }
+      },
+      "additionalProperties": false
     },
     "cwd": { "type": "string" },
     "env": {
       "type": "object",
       "additionalProperties": { "type": "string" }
     },
+    "env_mode": {
+      "type": "string",
+      "enum": ["inherit_clean", "replace", "patch"],
+      "default": "inherit_clean"
+    },
     "stdin": { "type": "string" },
     "timeout_ms": { "type": "integer", "minimum": 0 },
-    "capture_stderr": { "type": "boolean", "default": true },
-    "long_running": { "type": "boolean", "default": false }
+    "background": { "type": "boolean", "default": false },
+    "long_running": {
+      "type": "boolean",
+      "default": false,
+      "deprecated": true,
+      "description": "Deprecated alias for background."
+    },
+    "capture": {
+      "type": "object",
+      "properties": {
+        "stdout": { "type": "boolean", "default": true },
+        "stderr": { "type": "boolean", "default": true },
+        "merge_stderr": { "type": "boolean", "default": false },
+        "max_inline_bytes": { "type": "integer", "minimum": 0, "default": 50000 }
+      },
+      "additionalProperties": false
+    },
+    "capture_stderr": {
+      "type": "boolean",
+      "default": true,
+      "deprecated": true,
+      "description": "Deprecated compatibility flag; false maps to capture.merge_stderr."
+    },
+    "max_inline_bytes": {
+      "type": "integer",
+      "minimum": 0,
+      "deprecated": true
+    },
+    "policy_context": {
+      "type": "object",
+      "additionalProperties": true
+    }
   },
-  "required": ["argv"],
+  "oneOf": [
+    {
+      "properties": { "mode": { "const": "argv" } },
+      "required": ["argv"]
+    },
+    {
+      "properties": { "mode": { "const": "shell" } },
+      "required": ["command", "shell"]
+    }
+  ],
   "additionalProperties": false
 }

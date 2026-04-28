@@ -23,7 +23,7 @@ use crate::tools::lang::{detect, Ecosystem};
 use crate::tools::payload::{
     optional_bool, optional_string, optional_string_list, require_dict_arg, require_string,
 };
-use crate::tools::proc::{self, SpawnRequest};
+use crate::tools::proc::{self, CaptureConfig, EnvMode, SpawnRequest};
 use crate::tools::response::ResponseBuilder;
 
 pub(crate) const NAME: &str = "hostlib_tools_manage_packages";
@@ -114,8 +114,10 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         args: args_tail,
         cwd: cwd_path,
         env: BTreeMap::new(),
+        env_mode: EnvMode::InheritClean,
         stdin: None,
         timeout: None,
+        capture: CaptureConfig::default(),
     })?;
 
     let lockfile_after = lockfile.as_deref().and_then(snapshot_mtime);

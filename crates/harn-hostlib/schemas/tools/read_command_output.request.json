@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/tools/read_command_output.request.json",
+  "title": "tools.read_command_output request",
+  "type": "object",
+  "properties": {
+    "command_id": { "type": "string" },
+    "handle_id": { "type": "string" },
+    "path": { "type": "string" },
+    "offset": { "type": "integer", "minimum": 0, "default": 0 },
+    "length": { "type": "integer", "minimum": 0, "default": 65536 }
+  },
+  "anyOf": [
+    { "required": ["command_id"] },
+    { "required": ["handle_id"] },
+    { "required": ["path"] }
+  ],
+  "additionalProperties": false
+}

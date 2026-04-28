@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::process::Stdio;
 use std::rc::Rc;
+use std::time::Instant;
 
 use serde_json::Value as JsonValue;
 
@@ -445,43 +445,85 @@ async fn dispatch_host_operation(
 
     match (capability, operation) {
         ("process", "exec") => {
-            let command = require_param(params, "command")?;
-            let mut cmd = if cfg!(windows) {
-                let mut c = tokio::process::Command::new("cmd");
-                c.arg("/C").arg(&command);
-                c
-            } else {
-                let mut c = tokio::process::Command::new("/bin/sh");
-                c.arg("-lc").arg(&command);
-                c
-            };
-            let output = cmd
-                .stdin(Stdio::null())
-                .output()
+            let (program, args) = process_exec_argv(params)?;
+            let timeout_ms = optional_i64(params, "timeout")
+                .or_else(|| optional_i64(params, "timeout_ms"))
+                .filter(|value| *value > 0)
+                .map(|value| value as u64);
+            let mut cmd =
+                crate::process_sandbox::tokio_command_for(&program, &args).map_err(|e| {
+                    VmError::Runtime(format!("host_call process.exec sandbox setup: {e}"))
+                })?;
+            if let Some(cwd) = optional_string(params, "cwd") {
+                crate::process_sandbox::enforce_process_cwd(std::path::Path::new(&cwd))
+                    .map_err(|e| VmError::Runtime(format!("host_call process.exec cwd: {e}")))?;
+                cmd.current_dir(cwd);
+            }
+            if let Some(env) = optional_string_dict(params, "env")? {
+                let env_mode = optional_string(params, "env_mode");
+                if env_mode.as_deref().unwrap_or("replace") == "replace" {
+                    cmd.env_clear();
+                }
+                for (key, value) in env {
+                    cmd.env(key, value);
+                }
+            }
+            cmd.stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .kill_on_drop(true);
+            let started_at = chrono::Utc::now().to_rfc3339();
+            let started = Instant::now();
+            let child = cmd
+                .spawn()
+                .map_err(|e| VmError::Runtime(format!("host_call process.exec: {e}")))?;
+            let pid = child.id();
+            let timed_out;
+            let output_result = if let Some(timeout_ms) = timeout_ms {
+                match tokio::time::timeout(
+                    std::time::Duration::from_millis(timeout_ms),
+                    child.wait_with_output(),
+                )
                 .await
+                {
+                    Ok(result) => {
+                        timed_out = false;
+                        result
+                    }
+                    Err(_) => {
+                        return Ok(process_exec_response(ProcessExecResponse {
+                            pid,
+                            started_at,
+                            started,
+                            stdout: "",
+                            stderr: "",
+                            exit_code: -1,
+                            status: "timed_out",
+                            success: false,
+                            timed_out: true,
+                        }));
+                    }
+                }
+            } else {
+                timed_out = false;
+                child.wait_with_output().await
+            };
+            let output = output_result
                 .map_err(|e| VmError::Runtime(format!("host_call process.exec: {e}")))?;
             let stdout = String::from_utf8_lossy(&output.stdout).to_string();
             let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-            let mut result = BTreeMap::new();
-            result.insert(
-                "stdout".to_string(),
-                VmValue::String(Rc::from(stdout.clone())),
-            );
-            result.insert(
-                "stderr".to_string(),
-                VmValue::String(Rc::from(stderr.clone())),
-            );
-            result.insert(
-                "combined".to_string(),
-                VmValue::String(Rc::from(format!("{stdout}{stderr}"))),
-            );
-            let status = output.status.code().unwrap_or(-1);
-            result.insert("status".to_string(), VmValue::Int(status as i64));
-            result.insert(
-                "success".to_string(),
-                VmValue::Bool(output.status.success()),
-            );
-            Ok(VmValue::Dict(Rc::new(result)))
+            let exit_code = output.status.code().unwrap_or(-1);
+            Ok(process_exec_response(ProcessExecResponse {
+                pid,
+                started_at,
+                started,
+                stdout: &stdout,
+                stderr: &stderr,
+                exit_code,
+                status: if timed_out { "timed_out" } else { "completed" },
+                success: output.status.success(),
+                timed_out,
+            }))
         }
         ("template", "render") => {
             let path = require_param(params, "path")?;
@@ -532,6 +574,187 @@ async fn dispatch_host_operation(
         _ => Err(VmError::Thrown(VmValue::String(Rc::from(format!(
             "host_call: unsupported operation {capability}.{operation}"
         ))))),
+    }
+}
+
+struct ProcessExecResponse<'a> {
+    pid: Option<u32>,
+    started_at: String,
+    started: Instant,
+    stdout: &'a str,
+    stderr: &'a str,
+    exit_code: i32,
+    status: &'a str,
+    success: bool,
+    timed_out: bool,
+}
+
+fn process_exec_response(response: ProcessExecResponse<'_>) -> VmValue {
+    let combined = format!("{}{}", response.stdout, response.stderr);
+    let mut result = BTreeMap::new();
+    result.insert(
+        "command_id".to_string(),
+        VmValue::String(Rc::from(format!(
+            "cmd_{}_{}",
+            std::process::id(),
+            response.started.elapsed().as_nanos()
+        ))),
+    );
+    result.insert(
+        "status".to_string(),
+        VmValue::String(Rc::from(response.status)),
+    );
+    result.insert(
+        "pid".to_string(),
+        response
+            .pid
+            .map(|pid| VmValue::Int(pid as i64))
+            .unwrap_or(VmValue::Nil),
+    );
+    result.insert(
+        "process_group_id".to_string(),
+        response
+            .pid
+            .map(|pid| VmValue::Int(pid as i64))
+            .unwrap_or(VmValue::Nil),
+    );
+    result.insert("handle_id".to_string(), VmValue::Nil);
+    result.insert(
+        "started_at".to_string(),
+        VmValue::String(Rc::from(response.started_at)),
+    );
+    result.insert(
+        "ended_at".to_string(),
+        VmValue::String(Rc::from(chrono::Utc::now().to_rfc3339())),
+    );
+    result.insert(
+        "duration_ms".to_string(),
+        VmValue::Int(response.started.elapsed().as_millis() as i64),
+    );
+    result.insert(
+        "exit_code".to_string(),
+        VmValue::Int(response.exit_code as i64),
+    );
+    result.insert("signal".to_string(), VmValue::Nil);
+    result.insert("timed_out".to_string(), VmValue::Bool(response.timed_out));
+    result.insert(
+        "stdout".to_string(),
+        VmValue::String(Rc::from(response.stdout.to_string())),
+    );
+    result.insert(
+        "stderr".to_string(),
+        VmValue::String(Rc::from(response.stderr.to_string())),
+    );
+    result.insert("combined".to_string(), VmValue::String(Rc::from(combined)));
+    result.insert(
+        "exit_status".to_string(),
+        VmValue::Int(response.exit_code as i64),
+    );
+    result.insert(
+        "legacy_status".to_string(),
+        VmValue::Int(response.exit_code as i64),
+    );
+    result.insert("success".to_string(), VmValue::Bool(response.success));
+    VmValue::Dict(Rc::new(result))
+}
+
+fn process_exec_argv(params: &BTreeMap<String, VmValue>) -> Result<(String, Vec<String>), VmError> {
+    match optional_string(params, "mode")
+        .as_deref()
+        .unwrap_or("shell")
+    {
+        "argv" => {
+            let argv = optional_string_list(params, "argv").ok_or_else(|| {
+                VmError::Runtime("host_call process.exec missing argv".to_string())
+            })?;
+            split_argv(argv)
+        }
+        "shell" => {
+            let command = require_param(params, "command")?;
+            if cfg!(windows) {
+                Ok(("cmd".to_string(), vec!["/C".to_string(), command]))
+            } else {
+                let shell = params
+                    .get("shell")
+                    .and_then(|value| value.as_dict())
+                    .and_then(|dict| dict.get("path").or_else(|| dict.get("id")))
+                    .and_then(vm_string)
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| "/bin/sh".to_string());
+                Ok((shell, vec!["-lc".to_string(), command]))
+            }
+        }
+        other => Err(VmError::Runtime(format!(
+            "host_call process.exec unsupported mode {other:?}"
+        ))),
+    }
+}
+
+fn split_argv(mut argv: Vec<String>) -> Result<(String, Vec<String>), VmError> {
+    if argv.is_empty() {
+        return Err(VmError::Runtime(
+            "host_call process.exec argv must not be empty".to_string(),
+        ));
+    }
+    let program = argv.remove(0);
+    if program.is_empty() {
+        return Err(VmError::Runtime(
+            "host_call process.exec argv[0] must not be empty".to_string(),
+        ));
+    }
+    Ok((program, argv))
+}
+
+fn optional_i64(params: &BTreeMap<String, VmValue>, key: &str) -> Option<i64> {
+    match params.get(key) {
+        Some(VmValue::Int(value)) => Some(*value),
+        Some(VmValue::Float(value)) if value.fract() == 0.0 => Some(*value as i64),
+        _ => None,
+    }
+}
+
+fn optional_string(params: &BTreeMap<String, VmValue>, key: &str) -> Option<String> {
+    params.get(key).and_then(vm_string).map(ToString::to_string)
+}
+
+fn optional_string_list(params: &BTreeMap<String, VmValue>, key: &str) -> Option<Vec<String>> {
+    let VmValue::List(values) = params.get(key)? else {
+        return None;
+    };
+    values
+        .iter()
+        .map(|value| vm_string(value).map(ToString::to_string))
+        .collect()
+}
+
+fn optional_string_dict(
+    params: &BTreeMap<String, VmValue>,
+    key: &str,
+) -> Result<Option<BTreeMap<String, String>>, VmError> {
+    let Some(value) = params.get(key) else {
+        return Ok(None);
+    };
+    let Some(dict) = value.as_dict() else {
+        return Err(VmError::Runtime(format!(
+            "host_call process.exec {key} must be a dict"
+        )));
+    };
+    let mut out = BTreeMap::new();
+    for (key, value) in dict.iter() {
+        let Some(value) = vm_string(value) else {
+            return Err(VmError::Runtime(format!(
+                "host_call process.exec env value for {key:?} must be a string"
+            )));
+        };
+        out.insert(key.clone(), value.to_string());
+    }
+    Ok(Some(out))
+}
+
+fn vm_string(value: &VmValue) -> Option<&str> {
+    match value {
+        VmValue::String(value) => Some(value.as_ref()),
+        _ => None,
     }
 }
 

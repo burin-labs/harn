@@ -14,13 +14,25 @@ use std::collections::BTreeMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::sync::mpsc;
+use std::rc::Rc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{mpsc, LazyLock, Mutex};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use harn_vm::process_sandbox;
+use harn_vm::VmValue;
+use sha2::{Digest, Sha256};
+use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
 use crate::error::HostlibError;
+use crate::tools::response::ResponseBuilder;
+
+static COMMAND_COUNTER: AtomicU64 = AtomicU64::new(1);
+static ARTIFACTS: LazyLock<Mutex<BTreeMap<String, CommandArtifacts>>> =
+    LazyLock::new(|| Mutex::new(BTreeMap::new()));
+
+const DEFAULT_MAX_INLINE_BYTES: usize = 50_000;
 
 /// Resolved request payload for a subprocess spawn.
 #[derive(Debug, Clone)]
@@ -30,19 +42,88 @@ pub(crate) struct SpawnRequest {
     pub(crate) args: Vec<String>,
     pub(crate) cwd: Option<PathBuf>,
     pub(crate) env: BTreeMap<String, String>,
+    pub(crate) env_mode: EnvMode,
     pub(crate) stdin: Option<String>,
     pub(crate) timeout: Option<Duration>,
+    pub(crate) capture: CaptureConfig,
 }
 
 /// Result of running a subprocess to completion (or to the deadline).
 #[derive(Debug, Clone)]
 pub(crate) struct SpawnOutcome {
+    pub(crate) command_id: String,
+    pub(crate) status: CommandStatus,
+    pub(crate) pid: Option<u32>,
+    pub(crate) process_group_id: Option<u32>,
+    pub(crate) started_at: String,
+    pub(crate) ended_at: Option<String>,
     pub(crate) exit_code: i32,
     pub(crate) signal: Option<String>,
     pub(crate) stdout: String,
     pub(crate) stderr: String,
+    pub(crate) output_path: PathBuf,
+    pub(crate) stdout_path: PathBuf,
+    pub(crate) stderr_path: PathBuf,
+    pub(crate) line_count: u64,
+    pub(crate) byte_count: u64,
+    pub(crate) output_sha256: String,
     pub(crate) duration: Duration,
     pub(crate) timed_out: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EnvMode {
+    InheritClean,
+    Replace,
+    Patch,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct CaptureConfig {
+    pub(crate) stdout: bool,
+    pub(crate) stderr: bool,
+    pub(crate) merge_stderr: bool,
+    pub(crate) max_inline_bytes: usize,
+}
+
+impl Default for CaptureConfig {
+    fn default() -> Self {
+        Self {
+            stdout: true,
+            stderr: true,
+            merge_stderr: false,
+            max_inline_bytes: DEFAULT_MAX_INLINE_BYTES,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CommandStatus {
+    Completed,
+    Running,
+    TimedOut,
+    Killed,
+}
+
+impl CommandStatus {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            CommandStatus::Completed => "completed",
+            CommandStatus::Running => "running",
+            CommandStatus::TimedOut => "timed_out",
+            CommandStatus::Killed => "killed",
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct CommandArtifacts {
+    pub(crate) output_path: PathBuf,
+    pub(crate) stdout_path: PathBuf,
+    pub(crate) stderr_path: PathBuf,
+    pub(crate) line_count: u64,
+    pub(crate) byte_count: u64,
+    pub(crate) output_sha256: String,
 }
 
 /// Spawn the configured command, capture stdout + stderr in full, and
@@ -73,11 +154,10 @@ pub(crate) fn run(req: SpawnRequest) -> Result<SpawnOutcome, HostlibError> {
         command.current_dir(cwd);
     }
 
-    if !req.env.is_empty() {
-        // The caller is responsible for every variable they want set; we
-        // don't merge in the parent env. This
-        // matches the schema (env is a complete map, not a patch).
+    if matches!(req.env_mode, EnvMode::Replace) {
         command.env_clear();
+    }
+    if !req.env.is_empty() {
         for (key, value) in &req.env {
             command.env(key, value);
         }
@@ -91,7 +171,9 @@ pub(crate) fn run(req: SpawnRequest) -> Result<SpawnOutcome, HostlibError> {
         Stdio::null()
     });
 
+    let command_id = next_command_id();
     let started = Instant::now();
+    let started_at = now_rfc3339();
     let mut child = command.spawn().map_err(|e| {
         if let Some(violation) = process_sandbox::process_spawn_error(&e) {
             return HostlibError::Backend {
@@ -104,6 +186,8 @@ pub(crate) fn run(req: SpawnRequest) -> Result<SpawnOutcome, HostlibError> {
             message: format!("spawn failed: {e}"),
         }
     })?;
+    let pid = Some(child.id());
+    let process_group_id = child_process_group_id(child.id());
 
     if let Some(stdin_data) = req.stdin.as_ref() {
         if let Some(mut stdin) = child.stdin.take() {
@@ -147,22 +231,288 @@ pub(crate) fn run(req: SpawnRequest) -> Result<SpawnOutcome, HostlibError> {
     let stdout_bytes: Vec<u8> = out_rx.try_iter().flatten().collect();
     let stderr_bytes: Vec<u8> = err_rx.try_iter().flatten().collect();
 
-    let stdout = String::from_utf8_lossy(&stdout_bytes).into_owned();
-    let stderr = String::from_utf8_lossy(&stderr_bytes).into_owned();
+    let ended_at = Some(now_rfc3339());
 
+    let exited = status.is_some();
     let (exit_code, signal) = match status {
         Some(status) => decode_status(status),
         None => (-1, Some("SIGKILL".to_string())),
     };
+    let command_status = if timed_out {
+        CommandStatus::TimedOut
+    } else if exited {
+        CommandStatus::Completed
+    } else {
+        CommandStatus::Killed
+    };
+    let artifacts = persist_artifacts(&command_id, &stdout_bytes, &stderr_bytes, None)?;
+    let (stdout, stderr) = inline_output(&stdout_bytes, &stderr_bytes, req.capture);
 
     Ok(SpawnOutcome {
+        command_id,
+        status: command_status,
+        pid,
+        process_group_id,
+        started_at,
+        ended_at,
         exit_code,
         signal,
         stdout,
         stderr,
+        output_path: artifacts.output_path,
+        stdout_path: artifacts.stdout_path,
+        stderr_path: artifacts.stderr_path,
+        line_count: artifacts.line_count,
+        byte_count: artifacts.byte_count,
+        output_sha256: artifacts.output_sha256,
         duration: started.elapsed(),
         timed_out,
     })
+}
+
+pub(crate) fn build_response(
+    outcome: SpawnOutcome,
+    handle_id: Option<String>,
+    policy_context: Option<BTreeMap<String, VmValue>>,
+) -> VmValue {
+    let mut builder = ResponseBuilder::new()
+        .str("command_id", outcome.command_id.clone())
+        .str("status", outcome.status.as_str())
+        .int("duration_ms", outcome.duration.as_millis() as i64)
+        .int("exit_code", outcome.exit_code as i64)
+        .opt_str("signal", outcome.signal)
+        .bool("timed_out", outcome.timed_out)
+        .str("stdout", outcome.stdout)
+        .str("stderr", outcome.stderr)
+        .str("output_path", outcome.output_path.display().to_string())
+        .str("stdout_path", outcome.stdout_path.display().to_string())
+        .str("stderr_path", outcome.stderr_path.display().to_string())
+        .int("line_count", outcome.line_count as i64)
+        .int("byte_count", outcome.byte_count as i64)
+        .str("output_sha256", outcome.output_sha256)
+        .str("started_at", outcome.started_at)
+        .str("audit_id", format!("audit_{}", outcome.command_id));
+    builder = match outcome.ended_at {
+        Some(ended_at) => builder.str("ended_at", ended_at),
+        None => builder.nil("ended_at"),
+    };
+    builder = match outcome.pid {
+        Some(pid) => builder.int("pid", pid as i64),
+        None => builder.nil("pid"),
+    };
+    builder = match outcome.process_group_id {
+        Some(pgid) => builder.int("process_group_id", pgid as i64),
+        None => builder.nil("process_group_id"),
+    };
+    builder = match handle_id {
+        Some(handle_id) => builder.str("handle_id", handle_id),
+        None => builder.nil("handle_id"),
+    };
+    let mut sandbox = BTreeMap::new();
+    sandbox.insert(
+        "kind".to_string(),
+        VmValue::String(Rc::from(sandbox_kind())),
+    );
+    sandbox.insert("enforced".to_string(), VmValue::Bool(sandbox_enforced()));
+    builder = builder.dict("sandbox", sandbox);
+    if let Some(policy_context) = policy_context {
+        builder = builder.dict("policy_context", policy_context);
+    }
+    builder.build()
+}
+
+pub(crate) fn running_response(
+    command_id: String,
+    handle_id: String,
+    pid: u32,
+    process_group_id: Option<u32>,
+    started_at: String,
+    command_display: String,
+) -> VmValue {
+    let artifacts = planned_artifact_paths(&command_id);
+    let mut sandbox = BTreeMap::new();
+    sandbox.insert(
+        "kind".to_string(),
+        VmValue::String(Rc::from(sandbox_kind())),
+    );
+    sandbox.insert("enforced".to_string(), VmValue::Bool(sandbox_enforced()));
+    ResponseBuilder::new()
+        .str("command_id", command_id.clone())
+        .str("status", CommandStatus::Running.as_str())
+        .int("pid", pid as i64)
+        .int("process_group_id", process_group_id.unwrap_or(pid) as i64)
+        .str("handle_id", handle_id)
+        .str("started_at", started_at)
+        .nil("ended_at")
+        .int("duration_ms", 0)
+        .nil("exit_code")
+        .nil("signal")
+        .bool("timed_out", false)
+        .str("stdout", "")
+        .str("stderr", "")
+        .str("output_path", artifacts.output_path.display().to_string())
+        .str("stdout_path", artifacts.stdout_path.display().to_string())
+        .str("stderr_path", artifacts.stderr_path.display().to_string())
+        .int("line_count", 0)
+        .int("byte_count", 0)
+        .str("output_sha256", "")
+        .dict("sandbox", sandbox)
+        .str("audit_id", format!("audit_{command_id}"))
+        .str("command", command_display)
+        .build()
+}
+
+pub(crate) fn persist_artifacts(
+    command_id: &str,
+    stdout: &[u8],
+    stderr: &[u8],
+    handle_id: Option<&str>,
+) -> Result<CommandArtifacts, HostlibError> {
+    let artifacts = planned_artifact_paths(command_id);
+    std::fs::create_dir_all(artifacts.output_path.parent().unwrap()).map_err(|e| {
+        HostlibError::Backend {
+            builtin: "hostlib_tools_run_command",
+            message: format!("failed to create command artifact dir: {e}"),
+        }
+    })?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(
+            artifacts.output_path.parent().unwrap(),
+            std::fs::Permissions::from_mode(0o700),
+        );
+    }
+    std::fs::write(&artifacts.stdout_path, stdout).map_err(|e| HostlibError::Backend {
+        builtin: "hostlib_tools_run_command",
+        message: format!("failed to write stdout artifact: {e}"),
+    })?;
+    std::fs::write(&artifacts.stderr_path, stderr).map_err(|e| HostlibError::Backend {
+        builtin: "hostlib_tools_run_command",
+        message: format!("failed to write stderr artifact: {e}"),
+    })?;
+    let mut combined = Vec::with_capacity(stdout.len() + stderr.len());
+    combined.extend_from_slice(stdout);
+    combined.extend_from_slice(stderr);
+    std::fs::write(&artifacts.output_path, &combined).map_err(|e| HostlibError::Backend {
+        builtin: "hostlib_tools_run_command",
+        message: format!("failed to write combined output artifact: {e}"),
+    })?;
+    let output_sha256 = format!("sha256:{}", hex::encode(Sha256::digest(&combined)));
+    let artifacts = CommandArtifacts {
+        output_path: artifacts.output_path,
+        stdout_path: artifacts.stdout_path,
+        stderr_path: artifacts.stderr_path,
+        line_count: line_count(&combined),
+        byte_count: combined.len() as u64,
+        output_sha256,
+    };
+    register_artifacts(command_id, handle_id, &artifacts);
+    Ok(artifacts)
+}
+
+pub(crate) fn next_command_id() -> String {
+    let id = COMMAND_COUNTER.fetch_add(1, Ordering::SeqCst);
+    let now_nanos = SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    format!("cmd_{}_{}_{}", std::process::id(), now_nanos, id)
+}
+
+pub(crate) fn now_rfc3339() -> String {
+    let now: OffsetDateTime = SystemTime::now().into();
+    now.format(&Rfc3339)
+        .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())
+}
+
+pub(crate) fn inline_output(
+    stdout: &[u8],
+    stderr: &[u8],
+    capture: CaptureConfig,
+) -> (String, String) {
+    if capture.merge_stderr {
+        let mut merged = Vec::with_capacity(stdout.len() + stderr.len() + 1);
+        merged.extend_from_slice(stdout);
+        if !stdout.is_empty() && !stdout.ends_with(b"\n") && !stderr.is_empty() {
+            merged.push(b'\n');
+        }
+        merged.extend_from_slice(stderr);
+        return (
+            if capture.stdout {
+                lossy_prefix(&merged, capture.max_inline_bytes)
+            } else {
+                String::new()
+            },
+            String::new(),
+        );
+    }
+    (
+        if capture.stdout {
+            lossy_prefix(stdout, capture.max_inline_bytes)
+        } else {
+            String::new()
+        },
+        if capture.stderr {
+            lossy_prefix(stderr, capture.max_inline_bytes)
+        } else {
+            String::new()
+        },
+    )
+}
+
+pub(crate) fn resolve_output_path(
+    command_id: Option<&str>,
+    handle_id: Option<&str>,
+    path: Option<&str>,
+) -> Option<PathBuf> {
+    if let Some(path) = path {
+        return Some(PathBuf::from(path));
+    }
+    let artifacts = ARTIFACTS.lock().expect("command artifact store poisoned");
+    command_id
+        .and_then(|id| artifacts.get(id))
+        .or_else(|| handle_id.and_then(|id| artifacts.get(id)))
+        .map(|a| a.output_path.clone())
+}
+
+pub(crate) fn child_process_group_id(pid: u32) -> Option<u32> {
+    #[cfg(unix)]
+    {
+        extern "C" {
+            fn getpgid(pid: i32) -> i32;
+        }
+        let pgid = unsafe { getpgid(pid as i32) };
+        if pgid > 0 {
+            Some(pgid as u32)
+        } else {
+            None
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        Some(pid)
+    }
+}
+
+pub(crate) fn configure_background_process_group(command: &mut std::process::Command) {
+    #[cfg(unix)]
+    unsafe {
+        use std::os::unix::process::CommandExt;
+        command.pre_exec(|| {
+            extern "C" {
+                fn setpgid(pid: i32, pgid: i32) -> i32;
+            }
+            if setpgid(0, 0) == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = command;
+    }
 }
 
 fn wait_with_timeout(
@@ -189,6 +539,59 @@ fn wait_with_timeout(
             Err(_) => return (child.wait().ok(), false),
         }
     }
+}
+
+fn planned_artifact_paths(command_id: &str) -> CommandArtifacts {
+    let dir = std::env::temp_dir().join(format!("harn-command-{command_id}"));
+    CommandArtifacts {
+        output_path: dir.join("combined.txt"),
+        stdout_path: dir.join("stdout.txt"),
+        stderr_path: dir.join("stderr.txt"),
+        line_count: 0,
+        byte_count: 0,
+        output_sha256: String::new(),
+    }
+}
+
+fn register_artifacts(command_id: &str, handle_id: Option<&str>, artifacts: &CommandArtifacts) {
+    let mut store = ARTIFACTS.lock().expect("command artifact store poisoned");
+    store.insert(command_id.to_string(), artifacts.clone());
+    if let Some(handle_id) = handle_id {
+        store.insert(handle_id.to_string(), artifacts.clone());
+    }
+}
+
+fn lossy_prefix(bytes: &[u8], max_inline_bytes: usize) -> String {
+    let cap = bytes.len().min(max_inline_bytes);
+    String::from_utf8_lossy(&bytes[..cap]).into_owned()
+}
+
+fn line_count(bytes: &[u8]) -> u64 {
+    if bytes.is_empty() {
+        return 0;
+    }
+    let newlines = bytes.iter().filter(|b| **b == b'\n').count() as u64;
+    if bytes.ends_with(b"\n") {
+        newlines
+    } else {
+        newlines + 1
+    }
+}
+
+fn sandbox_kind() -> &'static str {
+    if cfg!(target_os = "linux") {
+        "landlock"
+    } else if cfg!(target_os = "macos") {
+        "sandbox-exec"
+    } else if cfg!(target_os = "windows") {
+        "appcontainer"
+    } else {
+        "none"
+    }
+}
+
+fn sandbox_enforced() -> bool {
+    harn_vm::orchestration::current_execution_policy().is_some()
 }
 
 #[cfg(unix)]
