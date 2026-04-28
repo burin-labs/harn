@@ -306,23 +306,45 @@ pub(super) fn extract_cache_read_tokens(usage: &serde_json::Value) -> i64 {
 }
 
 /// Extract cache-write (creation) token count from a provider `usage` JSON.
-/// Currently only Anthropic reports this explicitly.
+/// Anthropic reports this at top level; OpenRouter/OpenAI-compatible
+/// providers may nest it under `prompt_tokens_details`.
 pub(super) fn extract_cache_write_tokens(usage: &serde_json::Value) -> i64 {
-    usage
+    if let Some(n) = usage
         .get("cache_creation_input_tokens")
+        .and_then(|v| v.as_i64())
+    {
+        return n;
+    }
+    usage
+        .get("prompt_tokens_details")
+        .and_then(|d| d.get("cache_write_tokens"))
         .and_then(|v| v.as_i64())
         .unwrap_or(0)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::parse_llm_response;
+    use super::{extract_cache_write_tokens, parse_llm_response};
 
     // Build a ResolvedProvider for the Anthropic path without going through
     // the thread-local provider registry — these parser tests only need the
     // is_anthropic_style flag set.
     fn anthropic_resolved() -> crate::llm::helpers::ResolvedProvider {
         crate::llm::helpers::ResolvedProvider::resolve("anthropic")
+    }
+
+    #[test]
+    fn cache_write_tokens_supports_openrouter_prompt_details_shape() {
+        let usage = serde_json::json!({
+            "prompt_tokens": 194,
+            "completion_tokens": 2,
+            "prompt_tokens_details": {
+                "cached_tokens": 0,
+                "cache_write_tokens": 100
+            }
+        });
+
+        assert_eq!(extract_cache_write_tokens(&usage), 100);
     }
 
     #[test]

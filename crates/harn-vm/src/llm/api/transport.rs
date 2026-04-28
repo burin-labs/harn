@@ -87,6 +87,17 @@ fn append_ollama_tool_calls(
     }
 }
 
+fn should_request_stream_usage(is_anthropic_style: bool, is_ollama: bool, endpoint: &str) -> bool {
+    if is_anthropic_style {
+        return false;
+    }
+    // OpenAI-compatible streams expose aggregate usage in a final chunk
+    // when requested. Ollama's native `/api/chat` shape does not use
+    // this field, but its `/v1/chat/completions` compatibility endpoint
+    // does.
+    !is_ollama || endpoint.contains("/v1/")
+}
+
 /// Dispatch an LLM API call to the appropriate provider. This is the main
 /// entry point that routes to provider-specific implementations via the
 /// provider plugin architecture.
@@ -212,7 +223,7 @@ pub(crate) async fn vm_call_llm_api_with_body(
     if use_stream_transport {
         body["stream"] = serde_json::json!(true);
         // OpenAI-style: request usage in the final streaming chunk.
-        if !is_anthropic_style && !is_ollama {
+        if should_request_stream_usage(is_anthropic_style, is_ollama, &resolved.endpoint) {
             body["stream_options"] = serde_json::json!({"include_usage": true});
         }
     }
@@ -1029,7 +1040,25 @@ async fn vm_call_llm_api_ndjson_from_response(
 
 #[cfg(test)]
 mod tests {
-    use super::{append_ollama_tool_calls, parse_ollama_tool_arguments};
+    use super::{
+        append_ollama_tool_calls, parse_ollama_tool_arguments, should_request_stream_usage,
+    };
+
+    #[test]
+    fn stream_usage_requested_for_openai_compatible_endpoints() {
+        assert!(should_request_stream_usage(
+            false,
+            false,
+            "/chat/completions"
+        ));
+        assert!(should_request_stream_usage(
+            false,
+            true,
+            "/v1/chat/completions"
+        ));
+        assert!(!should_request_stream_usage(false, true, "/api/chat"));
+        assert!(!should_request_stream_usage(true, false, "/messages"));
+    }
 
     #[test]
     fn ollama_tool_arguments_accept_object_shape() {
