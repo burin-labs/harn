@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/ast/extract_imports.response.json",
+  "title": "ast.extract_imports response",
+  "description": "Deduped list of import statement strings. The response shape mirrors burin-code's existing handleASTImports decoder — `supported: false` (with empty `statements`) when language detection fails so callers can fall back without having to interpret an error.",
+  "type": "object",
+  "properties": {
+    "path": { "type": ["string", "null"] },
+    "language": { "type": "string" },
+    "supported": { "type": "boolean" },
+    "statements": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Statement" }
+    }
+  },
+  "required": ["path", "language", "supported", "statements"],
+  "additionalProperties": false,
+  "$defs": {
+    "Statement": {
+      "type": "object",
+      "properties": {
+        "text": { "type": "string" },
+        "line": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "1-based line of the first source line that matches the statement's first line. 0 means we couldn't locate it."
+        }
+      },
+      "required": ["text", "line"],
+      "additionalProperties": false
+    }
+  }
+}

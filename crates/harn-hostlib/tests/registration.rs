@@ -31,30 +31,36 @@ fn ast_capability_registers_documented_methods() {
             "hostlib_ast_outline",
             "hostlib_ast_parse_errors",
             "hostlib_ast_undefined_names",
+            "hostlib_ast_function_body",
+            "hostlib_ast_function_bodies",
+            "hostlib_ast_extract_imports",
         ]
     );
-    // Each AST builtin must reject an empty payload with `MissingParameter`
-    // (never `Unimplemented`). The required field differs per method:
-    // file-based builtins want `path`; the analysis builtins added by #773
-    // accept either `content` or `path` and surface that as the
-    // `content_or_path` synthetic parameter.
-    let expected_param = |name: &str| -> &'static str {
-        match name {
-            "hostlib_ast_parse_errors" | "hostlib_ast_undefined_names" => "content_or_path",
-            _ => "path",
-        }
-    };
-    for entry in registry.iter() {
-        let err = (entry.handler)(&[]).expect_err("handler must error on empty args");
+    // Each AST builtin must reject empty input with a structured
+    // `MissingParameter`. The required field differs per method:
+    // file-based builtins want `path`; the analysis builtins added by
+    // #773 accept either `content` or `path` and surface that as the
+    // `content_or_path` synthetic parameter; the new builtins added by
+    // #774 require the function-name / list-of-names / source field.
+    let expected_missing: &[(&str, &str)] = &[
+        ("hostlib_ast_parse_file", "path"),
+        ("hostlib_ast_symbols", "path"),
+        ("hostlib_ast_outline", "path"),
+        ("hostlib_ast_parse_errors", "content_or_path"),
+        ("hostlib_ast_undefined_names", "content_or_path"),
+        ("hostlib_ast_function_body", "function_name"),
+        ("hostlib_ast_function_bodies", "names"),
+        ("hostlib_ast_extract_imports", "source"),
+    ];
+    for (name, expected_param) in expected_missing {
+        let entry = registry.find(name).expect("registered");
+        let err = (entry.handler)(&[]).expect_err("must reject empty args");
         match err {
             HostlibError::MissingParameter { builtin, param } => {
-                assert_eq!(builtin, entry.name);
-                assert_eq!(param, expected_param(entry.name));
+                assert_eq!(builtin, *name);
+                assert_eq!(param, *expected_param);
             }
-            other => panic!(
-                "expected MissingParameter for {}, got {other:?}",
-                entry.name
-            ),
+            other => panic!("expected MissingParameter for {name}, got {other:?}"),
         }
     }
 }
@@ -231,9 +237,9 @@ fn install_default_wires_every_module_into_a_vm() {
         registry.modules(),
         &["ast", "code_index", "scanner", "fs_watch", "tools"]
     );
-    // Builtin count: 5 ast + 27 code_index + 2 scanner + 2 fs_watch + 12
-    // tools + 1 hostlib_enable = 49.
-    assert!(registry.builtins().len() >= 49);
+    // Builtin count: 8 ast + 27 code_index + 2 scanner + 2 fs_watch + 12
+    // tools + 1 hostlib_enable = 52.
+    assert!(registry.builtins().len() >= 52);
 }
 
 #[test]

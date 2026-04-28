@@ -34,6 +34,8 @@ use harn_vm::VmValue;
 use crate::error::HostlibError;
 use crate::registry::{BuiltinRegistry, HostlibCapability, RegisteredBuiltin, SyncHandler};
 
+mod function_body;
+mod imports;
 mod language;
 mod outline;
 mod parse;
@@ -134,6 +136,24 @@ impl HostlibCapability for AstCapability {
             "hostlib_ast_undefined_names",
             "undefined_names",
             undefined_names::run,
+        );
+        register(
+            registry,
+            "hostlib_ast_function_body",
+            "function_body",
+            function_body::run_single,
+        );
+        register(
+            registry,
+            "hostlib_ast_function_bodies",
+            "function_bodies",
+            function_body::run_bulk,
+        );
+        register(
+            registry,
+            "hostlib_ast_extract_imports",
+            "extract_imports",
+            imports::run,
         );
     }
 }
