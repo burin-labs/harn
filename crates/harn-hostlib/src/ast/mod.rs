@@ -34,9 +34,12 @@ use harn_vm::VmValue;
 use crate::error::HostlibError;
 use crate::registry::{BuiltinRegistry, HostlibCapability, RegisteredBuiltin, SyncHandler};
 
+mod bracket_balance;
 mod function_body;
+mod fuzzy;
 mod imports;
 mod language;
+mod mutation;
 mod outline;
 mod parse;
 mod parse_errors;
@@ -154,6 +157,30 @@ impl HostlibCapability for AstCapability {
             "hostlib_ast_extract_imports",
             "extract_imports",
             imports::run,
+        );
+        register(
+            registry,
+            "hostlib_ast_symbol_extract",
+            "symbol_extract",
+            mutation::run_extract,
+        );
+        register(
+            registry,
+            "hostlib_ast_symbol_delete",
+            "symbol_delete",
+            mutation::run_delete,
+        );
+        register(
+            registry,
+            "hostlib_ast_symbol_replace",
+            "symbol_replace",
+            mutation::run_replace,
+        );
+        register(
+            registry,
+            "hostlib_ast_bracket_balance",
+            "bracket_balance",
+            bracket_balance::run,
         );
     }
 }

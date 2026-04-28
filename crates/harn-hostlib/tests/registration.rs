@@ -34,14 +34,18 @@ fn ast_capability_registers_documented_methods() {
             "hostlib_ast_function_body",
             "hostlib_ast_function_bodies",
             "hostlib_ast_extract_imports",
+            "hostlib_ast_symbol_extract",
+            "hostlib_ast_symbol_delete",
+            "hostlib_ast_symbol_replace",
+            "hostlib_ast_bracket_balance",
         ]
     );
     // Each AST builtin must reject empty input with a structured
     // `MissingParameter`. The required field differs per method:
-    // file-based builtins want `path`; the analysis builtins added by
-    // #773 accept either `content` or `path` and surface that as the
-    // `content_or_path` synthetic parameter; the new builtins added by
-    // #774 require the function-name / list-of-names / source field.
+    // file-based builtins want `path`; analysis builtins (#773) accept
+    // either `content` or `path`; the source-mutation builtins (#774/#775)
+    // take `source`; function_body takes `function_name`; function_bodies
+    // takes `names`.
     let expected_missing: &[(&str, &str)] = &[
         ("hostlib_ast_parse_file", "path"),
         ("hostlib_ast_symbols", "path"),
@@ -51,6 +55,10 @@ fn ast_capability_registers_documented_methods() {
         ("hostlib_ast_function_body", "function_name"),
         ("hostlib_ast_function_bodies", "names"),
         ("hostlib_ast_extract_imports", "source"),
+        ("hostlib_ast_symbol_extract", "source"),
+        ("hostlib_ast_symbol_delete", "source"),
+        ("hostlib_ast_symbol_replace", "source"),
+        ("hostlib_ast_bracket_balance", "source"),
     ];
     for (name, expected_param) in expected_missing {
         let entry = registry.find(name).expect("registered");
@@ -237,9 +245,9 @@ fn install_default_wires_every_module_into_a_vm() {
         registry.modules(),
         &["ast", "code_index", "scanner", "fs_watch", "tools"]
     );
-    // Builtin count: 8 ast + 27 code_index + 2 scanner + 2 fs_watch + 12
-    // tools + 1 hostlib_enable = 52.
-    assert!(registry.builtins().len() >= 52);
+    // Builtin count: 12 ast + 27 code_index + 2 scanner + 2 fs_watch + 12
+    // tools + 1 hostlib_enable = 56.
+    assert!(registry.builtins().len() >= 56);
 }
 
 #[test]

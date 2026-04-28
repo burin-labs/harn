@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/ast/symbol_extract.response.json",
+  "title": "ast.symbol_extract response",
+  "description": "Tagged-union response for ast.symbol_extract. The `result` field selects the variant; companion fields are populated only for the variant that produced them.",
+  "type": "object",
+  "properties": {
+    "result": {
+      "type": "string",
+      "enum": ["extracted", "not_found", "ambiguous", "unsupported_language"]
+    },
+    "text": {
+      "type": "string",
+      "description": "Symbol text including its preamble (decorators, doc comments, attributes). Set only when `result` is `extracted`."
+    },
+    "start_line": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "1-based start line, inclusive. Set only when `result` is `extracted`."
+    },
+    "end_line": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "1-based end line, inclusive. Set only when `result` is `extracted`."
+    },
+    "available": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Names of every symbol in `source`. Set only when `result` is `not_found`."
+    },
+    "suggestions": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Up to three fuzzy-matched suggestions for the supplied `symbol_name`. Set only when `result` is `not_found`."
+    },
+    "match_count": {
+      "type": "integer",
+      "minimum": 2,
+      "description": "Number of symbols matching the unqualified `symbol_name`. Set only when `result` is `ambiguous`."
+    },
+    "language": {
+      "type": "string",
+      "description": "Echo of the unrecognized `language` field. Set only when `result` is `unsupported_language`."
+    }
+  },
+  "required": ["result"],
+  "additionalProperties": false
+}

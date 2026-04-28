@@ -121,6 +121,54 @@ pub const SCHEMAS: &[(&str, &str, SchemaKind, &str)] = &[
         SchemaKind::Response,
         include_str!("../schemas/ast/extract_imports.response.json"),
     ),
+    (
+        "ast",
+        "symbol_extract",
+        SchemaKind::Request,
+        include_str!("../schemas/ast/symbol_extract.request.json"),
+    ),
+    (
+        "ast",
+        "symbol_extract",
+        SchemaKind::Response,
+        include_str!("../schemas/ast/symbol_extract.response.json"),
+    ),
+    (
+        "ast",
+        "symbol_delete",
+        SchemaKind::Request,
+        include_str!("../schemas/ast/symbol_delete.request.json"),
+    ),
+    (
+        "ast",
+        "symbol_delete",
+        SchemaKind::Response,
+        include_str!("../schemas/ast/symbol_delete.response.json"),
+    ),
+    (
+        "ast",
+        "symbol_replace",
+        SchemaKind::Request,
+        include_str!("../schemas/ast/symbol_replace.request.json"),
+    ),
+    (
+        "ast",
+        "symbol_replace",
+        SchemaKind::Response,
+        include_str!("../schemas/ast/symbol_replace.response.json"),
+    ),
+    (
+        "ast",
+        "bracket_balance",
+        SchemaKind::Request,
+        include_str!("../schemas/ast/bracket_balance.request.json"),
+    ),
+    (
+        "ast",
+        "bracket_balance",
+        SchemaKind::Response,
+        include_str!("../schemas/ast/bracket_balance.response.json"),
+    ),
     // code_index/
     (
         "code_index",

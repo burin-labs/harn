@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/ast/symbol_delete.request.json",
+  "title": "ast.symbol_delete request",
+  "description": "Locate a named symbol in `source` and return the rewritten text with that symbol removed. Mirrors Swift `SymbolOperations.delete`.",
+  "type": "object",
+  "properties": {
+    "source": {
+      "type": "string",
+      "description": "Full source text to mutate."
+    },
+    "language": {
+      "type": "string",
+      "description": "Canonical language name."
+    },
+    "symbol_name": {
+      "type": "string",
+      "description": "Symbol to delete. Optionally prefixed with a single container, e.g. `Greeter.greet`."
+    }
+  },
+  "required": ["source", "language", "symbol_name"],
+  "additionalProperties": false
+}

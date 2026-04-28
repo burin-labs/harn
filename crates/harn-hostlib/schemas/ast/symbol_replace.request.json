@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/ast/symbol_replace.request.json",
+  "title": "ast.symbol_replace request",
+  "description": "Locate a named symbol in `source` and return the rewritten text with that symbol's lines replaced by `new_text`. Mirrors Swift `SymbolOperations.replace`.",
+  "type": "object",
+  "properties": {
+    "source": {
+      "type": "string",
+      "description": "Full source text to mutate."
+    },
+    "language": {
+      "type": "string",
+      "description": "Canonical language name."
+    },
+    "symbol_name": {
+      "type": "string",
+      "description": "Symbol to replace. Optionally prefixed with a single container, e.g. `Greeter.greet`."
+    },
+    "new_text": {
+      "type": "string",
+      "description": "Replacement text spliced in for the symbol's full preamble + signature + body."
+    }
+  },
+  "required": ["source", "language", "symbol_name", "new_text"],
+  "additionalProperties": false
+}
