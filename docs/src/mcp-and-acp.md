@@ -52,6 +52,25 @@ let prompts = mcp_list_prompts(client)
 let prompt = mcp_get_prompt(client, "review", {code: "fn main() {}"})
 ```
 
+### MCP client support matrix
+
+Harn's MCP client negotiates protocol version `2025-11-25` and advertises no
+client-side roots, sampling, elicitation, or task capabilities. Servers should
+therefore treat those features as unavailable when connected to Harn.
+
+| Method or feature | Harn as MCP client |
+|---|---|
+| `initialize`, `notifications/initialized` | Supported |
+| `ping` | Supported when Harn sends it to a server |
+| `tools/list`, `tools/call` | Supported through `mcp_list_tools` and `mcp_call` |
+| `resources/list`, `resources/read`, `resources/templates/list` | Supported through resource builtins |
+| `prompts/list`, `prompts/get` | Supported through prompt builtins |
+| `completion/complete` | Not exposed as a Harn builtin |
+| `roots/list` | Unsupported; Harn does not advertise roots |
+| `sampling/createMessage` | Unsupported; Harn does not advertise sampling |
+| `elicitation/create` | Unsupported; Harn does not advertise elicitation |
+| MCP task methods and task-augmented requests | Unsupported; Harn does not advertise task support |
+
 ### Disconnecting
 
 ```harn
@@ -333,6 +352,28 @@ above and serves the appropriate one over stdio or Streamable HTTP. All
 `print`/`println` output goes to stderr when stdio is the MCP transport.
 The server supports the `2025-11-25` MCP protocol version on both
 transports.
+
+### MCP server support matrix
+
+Harn's MCP servers implement the core tool/resource/prompt path and explicitly
+reject latest-spec features that are out of scope for this release with a
+JSON-RPC error containing `error.data.type = "mcp.unsupportedFeature"`.
+
+| Method or feature | Harn as MCP server |
+|---|---|
+| `initialize`, `notifications/initialized`, `ping` | Supported |
+| `logging/setLevel` | Accepted |
+| `tools/list`, `tools/call` | Supported |
+| `notifications/progress`, `notifications/cancelled` | Supported for long-running tool calls |
+| `resources/list`, `resources/read`, `resources/templates/list` | Supported for registered entries and cards |
+| `prompts/list`, `prompts/get` | Supported for registered prompts |
+| `completion/complete` | Explicitly unsupported |
+| `resources/subscribe`, `resources/unsubscribe` | Explicitly unsupported |
+| `roots/list` | Explicitly unsupported; client-side roots are not served by Harn |
+| `sampling/createMessage` | Explicitly unsupported; Harn does not let connected servers invoke sampling |
+| `elicitation/create` | Explicitly unsupported; Harn does not expose client-side elicitation |
+| `tasks/get`, `tasks/result`, `tasks/list`, `tasks/cancel` | Explicitly unsupported |
+| `tools/call` with `params.task` | Rejected with `-32602`; task-augmented execution is not advertised |
 
 #### Publishing a Server Card
 

@@ -7,6 +7,7 @@ use super::convert::{annotations_to_json, prompt_value_to_messages};
 use super::tool_registry_to_mcp_tools;
 use super::tools_schema::params_to_json_schema;
 use super::uri::match_uri_template;
+use super::McpServer;
 
 #[test]
 fn test_params_to_json_schema_empty() {
@@ -128,4 +129,71 @@ fn test_annotations_to_json() {
 fn test_annotations_empty_returns_none() {
     let d = BTreeMap::new();
     assert!(annotations_to_json(&VmValue::Dict(Rc::new(d))).is_none());
+}
+
+#[tokio::test]
+async fn server_latest_spec_gap_methods_return_explicit_json_rpc_errors() {
+    let server = McpServer::new(
+        "test".to_string(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+    let mut vm = crate::Vm::new();
+
+    for method in crate::mcp_protocol::UNSUPPORTED_LATEST_SPEC_METHODS
+        .iter()
+        .map(|entry| entry.method)
+    {
+        let response = server
+            .handle_json_rpc(
+                crate::jsonrpc::request(1, method, serde_json::json!({})),
+                &mut vm,
+            )
+            .await
+            .expect("response");
+        assert_eq!(response["error"]["code"], serde_json::json!(-32601));
+        assert_eq!(
+            response["error"]["data"]["method"],
+            serde_json::json!(method)
+        );
+        assert_eq!(
+            response["error"]["data"]["status"],
+            serde_json::json!("unsupported")
+        );
+    }
+}
+
+#[tokio::test]
+async fn server_tool_call_rejects_task_augmentation() {
+    let server = McpServer::new(
+        "test".to_string(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+    let mut vm = crate::Vm::new();
+    let response = server
+        .handle_json_rpc(
+            crate::jsonrpc::request(
+                1,
+                "tools/call",
+                serde_json::json!({
+                    "name": "missing",
+                    "arguments": {},
+                    "task": {"title": "async please"}
+                }),
+            ),
+            &mut vm,
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(response["error"]["code"], serde_json::json!(-32602));
+    assert_eq!(
+        response["error"]["data"]["feature"],
+        serde_json::json!("tasks")
+    );
 }

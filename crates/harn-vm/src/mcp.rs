@@ -183,8 +183,30 @@ async fn stdio_call(
             continue;
         }
 
-        if msg["id"].as_u64() == Some(id) {
+        if msg["id"].as_u64() == Some(id)
+            && (msg.get("result").is_some() || msg.get("error").is_some())
+        {
             return parse_jsonrpc_result(msg);
+        }
+
+        if let Some(response) = client_request_rejection(&msg) {
+            let line = serde_json::to_string(&response)
+                .map_err(|e| VmError::Runtime(format!("MCP serialization error: {e}")))?;
+            inner
+                .stdin
+                .write_all(line.as_bytes())
+                .await
+                .map_err(|e| VmError::Runtime(format!("MCP write error: {e}")))?;
+            inner
+                .stdin
+                .write_all(b"\n")
+                .await
+                .map_err(|e| VmError::Runtime(format!("MCP write error: {e}")))?;
+            inner
+                .stdin
+                .flush()
+                .await
+                .map_err(|e| VmError::Runtime(format!("MCP flush error: {e}")))?;
         }
     }
 }
@@ -484,6 +506,19 @@ fn jsonrpc_error_to_vm_error(error: &serde_json::Value) -> VmError {
     VmError::Thrown(VmValue::String(Rc::from(format!(
         "MCP error ({code}): {message}"
     ))))
+}
+
+fn client_request_rejection(msg: &serde_json::Value) -> Option<serde_json::Value> {
+    let request_id = msg.get("id")?.clone();
+    let method = msg.get("method").and_then(|value| value.as_str())?;
+    crate::mcp_protocol::unsupported_latest_spec_method_response(request_id.clone(), method)
+        .or_else(|| {
+            Some(crate::jsonrpc::error_response(
+                request_id,
+                -32601,
+                &format!("Method not found: {method}"),
+            ))
+        })
 }
 
 async fn mcp_connect_stdio_impl(
@@ -1141,5 +1176,31 @@ mod tests {
         let body = "event: message\ndata: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/message\"}\n\nevent: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"tools\":[]}}\n\n";
         let parsed = parse_sse_jsonrpc_body(body).unwrap();
         assert_eq!(parsed["result"]["tools"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn client_rejects_unadvertised_server_to_client_requests() {
+        let roots = client_request_rejection(&serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": "roots-1",
+            "method": "roots/list",
+            "params": {}
+        }))
+        .expect("rejection");
+        assert_eq!(roots["error"]["code"], serde_json::json!(-32601));
+        assert_eq!(
+            roots["error"]["data"]["feature"],
+            serde_json::json!("roots")
+        );
+
+        let unknown = client_request_rejection(&serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": "custom-1",
+            "method": "custom/method",
+            "params": {}
+        }))
+        .expect("rejection");
+        assert_eq!(unknown["error"]["code"], serde_json::json!(-32601));
+        assert!(unknown["error"].get("data").is_none());
     }
 }
