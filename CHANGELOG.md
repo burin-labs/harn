@@ -9,6 +9,12 @@ granular archaeology.
 
 ## Unreleased
 
+### Unreleased
+
+- No entries yet. Add items here for the next release.
+
+## v0.7.46
+
 ### Changed
 
 - **Sharper diagnostics for missing `render_prompt` / `render` targets
