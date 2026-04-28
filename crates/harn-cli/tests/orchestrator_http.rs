@@ -735,7 +735,7 @@ fn wait_for_path(path: &Path, timeout: Duration) {
     use notify::event::EventKind;
     use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
 
-    if path.exists() {
+    if path_has_content(path) {
         return;
     }
     let parent = path
@@ -780,14 +780,14 @@ fn wait_for_path(path: &Path, timeout: Duration) {
             panic!("failed to watch {}: {error}", parent.display());
         });
 
-    // Race: the file may have been created between the existence check above
+    // Race: the file may have been created between the content check above
     // and the watcher being armed. Re-check, then block on either an event
     // notification or the deadline. Notify events are advisory — fall back
     // to a 250ms wakeup so platforms with eventual-consistency semantics
     // (e.g. FSEvents coalescing) still complete promptly.
     let deadline = Instant::now() + timeout;
     loop {
-        if path.exists() {
+        if path_has_content(path) {
             return;
         }
         let remaining = match deadline.checked_duration_since(Instant::now()) {
@@ -801,6 +801,38 @@ fn wait_for_path(path: &Path, timeout: Duration) {
         }
     }
     panic!("timed out waiting for {}", path.display());
+}
+
+fn path_has_content(path: &Path) -> bool {
+    fs::metadata(path)
+        .map(|metadata| metadata.is_file() && metadata.len() > 0)
+        .unwrap_or(false)
+}
+
+fn wait_for_json_file(path: &Path, timeout: Duration) -> JsonValue {
+    let deadline = Instant::now() + timeout;
+    loop {
+        if let Ok(contents) = fs::read_to_string(path) {
+            if !contents.is_empty() {
+                match serde_json::from_str(&contents) {
+                    Ok(value) => return value,
+                    Err(_) if Instant::now() < deadline => {}
+                    Err(error) => {
+                        panic!(
+                            "timed out waiting for valid JSON in {}: {error}; contents={contents:?}",
+                            path.display()
+                        );
+                    }
+                }
+            }
+        }
+        let remaining = match deadline.checked_duration_since(Instant::now()) {
+            Some(remaining) => remaining,
+            None => break,
+        };
+        thread::sleep(remaining.min(Duration::from_millis(25)));
+    }
+    panic!("timed out waiting for valid JSON in {}", path.display());
 }
 
 #[derive(Clone, Debug)]
@@ -1491,9 +1523,7 @@ async fn harn_connector_module_round_trips_inbound_and_client_calls() {
         .unwrap();
     assert_status(response, StatusCode::OK).await;
 
-    wait_for_path(&marker_path, EVENT_FAIL_FAST_TIMEOUT);
-    let marker: JsonValue =
-        serde_json::from_str(&fs::read_to_string(&marker_path).unwrap()).unwrap();
+    let marker = wait_for_json_file(&marker_path, EVENT_FAIL_FAST_TIMEOUT);
     assert_eq!(
         marker.get("kind").and_then(JsonValue::as_str),
         Some("echo.received")
