@@ -279,7 +279,7 @@ name = "acme/ops"
   checkout to live under `.harn/packages/<name>/skills/` — run
   `harn install` to populate it.
 - `registry` entries are accepted but inert until a Harn Skills
-  marketplace exists (tracked by [#73](https://github.com/burin-labs/harn/issues/73)).
+  marketplace exists.
 
 ## harn doctor
 

@@ -535,8 +535,8 @@ Resolution rules:
 
   ```toml
   [asset_roots]
-  partials = "Sources/BurinCore/Resources/pipelines/partials"
-  prompts  = "Sources/BurinCore/Resources/pipelines"
+  partials = "pipelines/partials"
+  prompts  = "pipelines"
   ```
 
 Both forms reject `..` segments and absolute targets so a

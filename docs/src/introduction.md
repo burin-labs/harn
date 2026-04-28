@@ -50,7 +50,8 @@ guide: install Harn, write a program, and run it in under five minutes.
 - **[Cookbook](./cookbook.md)** -- Practical recipes and patterns
 - **[Host boundary](./host-boundary.md)** -- How Harn integrates with host applications
 - **[Bridge protocol](./bridge-protocol.md)** -- JSON-RPC contract for host bridges
-- **[MCP and ACP integration](./mcp-and-acp.md)** -- MCP client/server, ACP, and A2A protocols
+- **[Protocol support matrix](./protocol-support.md)** -- ACP, A2A, and MCP entry points
+- **[MCP, ACP, and A2A integration](./mcp-and-acp.md)** -- Protocol examples and behavior
 - **[Harn portal](./portal.md)** -- Local observability UI for runs and transcripts
 - **[CLI reference](./cli-reference.md)** -- All CLI commands and flags
 - **[Builtin functions](./builtins.md)** -- Complete reference for all built-in functions

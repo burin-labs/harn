@@ -15,8 +15,8 @@ For the architecture and ownership split that closes the old connector-library
 epic, see [Connector architecture status](./architecture.md).
 
 > **Deprecated: Rust-side GitHub, Slack, Linear, and Notion connectors.**
-> The [#350](https://github.com/burin-labs/harn/issues/350) pure-Harn connector
-> pivot makes the corresponding pure-Harn packages the default path for new
+> The pure-Harn connector pivot makes the corresponding pure-Harn packages the
+> default path for new
 > deployments: `harn-github-connector`, `harn-slack-connector`,
 > `harn-linear-connector`, and `harn-notion-connector`. Configure one by setting
 > `connector = { harn = "..." }` on the `[[providers]]` table. The Rust shims

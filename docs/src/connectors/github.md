@@ -1,8 +1,7 @@
 # GitHub App connector
 
 > **Deprecated.** The Rust-side `GitHubConnector` is a compatibility shim under
-> the [#350](https://github.com/burin-labs/harn/issues/350) pure-Harn connector
-> pivot. The recommended implementation is the pure-Harn
+> the pure-Harn connector pivot. The recommended implementation is the pure-Harn
 > [`harn-github-connector`](https://github.com/burin-labs/harn-github-connector)
 > package. This page documents the existing Rust connector for users who have
 > not yet migrated; new deployments should configure the Harn package via
@@ -13,7 +12,7 @@
 `GitHubConnector` is Harn's built-in GitHub App integration for inbound webhook
 events plus outbound GitHub REST calls authenticated as an installation.
 
-The MVP scope in `#170` is intentionally narrow:
+The Rust compatibility shim intentionally stays narrow:
 
 - inbound GitHub webhook verification with `X-Hub-Signature-256`
 - strongly typed payload narrowing for the monitor-relevant event families:

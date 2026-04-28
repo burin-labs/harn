@@ -298,35 +298,8 @@ execution plus explicit host approval for destructive operations.
 
 ## Release Workflow
 
-Once the release content (code + docs + `CHANGELOG.md` entry for the next
-version) lands on `main` through the merge queue, maintainers open the
-automated version-bump PR with:
-
-```bash
-./scripts/release_ship.sh --bump patch
-```
-
-After that PR lands through the merge queue, finalize the release from an
-up-to-date `main`:
-
-```bash
-./scripts/release_ship.sh --finalize
-```
-
-The first command runs audit → dry-run publish → bump → commit → push
-`release/vX.Y.Z` → open PR. The finalize command runs audit → dry-run publish
-→ tag → push tag → `cargo publish` → GitHub release creation. The tag push
-happens **before** `cargo publish` so downstream consumers and GitHub
-release-binary workflows can start working in parallel with crates.io.
-
-For piecewise work (or a dry run that stops before destructive actions):
-
-```bash
-./scripts/release_gate.sh audit
-./scripts/release_gate.sh full --bump patch --dry-run
-```
-
-`scripts/publish.sh` remains the crates.io publisher used by the gate.
+Maintainer release commands and gates live in
+[Maintainer release workflow](docs/src/maintainer-release.md).
 
 ## Local Development
 
@@ -492,7 +465,8 @@ notifications:
 - [LLM quick reference](https://harnlang.com/docs/llm/harn-quickref.html)
 - [Workflow runtime guide](https://harnlang.com/workflow-runtime.html)
 - [LLM calls and agent loops](https://harnlang.com/llm-and-agents.html)
-- [MCP and ACP integration](https://harnlang.com/mcp-and-acp.html)
+- [Protocol support matrix](https://harnlang.com/protocol-support.html)
+- [MCP, ACP, and A2A integration](https://harnlang.com/mcp-and-acp.html)
 - [CLI reference](https://harnlang.com/cli-reference.html)
 - [Builtin reference](https://harnlang.com/builtins.html)
 - [Language spec](spec/HARN_SPEC.md)

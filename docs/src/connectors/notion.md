@@ -1,8 +1,7 @@
 # Notion connector
 
 > **Deprecated.** The Rust-side `NotionConnector` is a compatibility shim under
-> the [#350](https://github.com/burin-labs/harn/issues/350) pure-Harn connector
-> pivot. The recommended implementation is the pure-Harn
+> the pure-Harn connector pivot. The recommended implementation is the pure-Harn
 > [`harn-notion-connector`](https://github.com/burin-labs/harn-notion-connector)
 > package. This page documents the existing Rust connector for users who have
 > not yet migrated; new deployments should configure the Harn package via

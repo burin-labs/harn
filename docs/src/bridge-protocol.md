@@ -357,7 +357,7 @@ Invocation:
   existing `builtin_call` bridge request using `name` as the builtin
   name and `args` as the single argument payload.
 
-## Skill registry (issue #73)
+## Skill registry
 
 Hosts expose their own managed skill store to the VM through three RPCs.
 Filesystem skill discovery works without the bridge (`harn run` walks

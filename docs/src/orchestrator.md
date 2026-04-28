@@ -16,6 +16,11 @@ Today, the command:
 - expose `/metrics` and configurable process logs for production observability
 - write a state snapshot and stay up until shutdown
 
+For protocol entry-point routing across MCP, ACP, and A2A, see the
+[protocol support matrix](./protocol-support.md). The embedded MCP control
+plane links back to the canonical [Orchestrator MCP Server](./mcp-server.md)
+page.
+
 Current limitations:
 
 - Multi-tenant mode isolates listener ingress, tenant-scoped secrets, and

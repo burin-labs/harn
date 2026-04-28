@@ -4,6 +4,11 @@
 client can fire triggers, inspect queues, replay events, and read runtime state
 without a Harn-specific adapter.
 
+This page is the canonical reference for the orchestrator control-plane MCP
+server. For the general MCP client/server guide, see
+[MCP, ACP, and A2A integration](./mcp-and-acp.md); for the full protocol routing
+table, see [Protocol support matrix](./protocol-support.md).
+
 The server is aimed at closed-loop agent clients that already know how to speak
 MCP, including:
 

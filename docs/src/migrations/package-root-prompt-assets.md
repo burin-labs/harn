@@ -1,7 +1,6 @@
 # Migration: package-root prompt assets
 
-Issue [#742](https://github.com/burin-labs/harn/issues/742) added two
-refactor-safe forms for addressing `.harn.prompt` assets:
+Harn supports two refactor-safe forms for addressing `.harn.prompt` assets:
 
 - `@/<rel>` — anchored at the calling file's project root (the nearest
   `harn.toml` ancestor).
@@ -15,7 +14,7 @@ breaking when callers move.
 ## Before — relative paths break on file moves
 
 ```harn,ignore
-// Sources/BurinCore/Resources/pipelines/lib/runtime/workflow/graph-stages.harn
+// pipelines/lib/runtime/workflow/graph-stages.harn
 render_prompt("../../../partials/tool-examples.harn.prompt", bindings)
 ```
 
@@ -27,7 +26,7 @@ at a non-existent file.
 ## After — project-root form
 
 ```harn,ignore
-render_prompt("@/Sources/BurinCore/Resources/pipelines/partials/tool-examples.harn.prompt", bindings)
+render_prompt("@/pipelines/partials/tool-examples.harn.prompt", bindings)
 ```
 
 Verbose but resilient: the path resolves the same regardless of where
@@ -39,7 +38,7 @@ Define an alias in the project's `harn.toml`:
 
 ```toml
 [asset_roots]
-partials = "Sources/BurinCore/Resources/pipelines/partials"
+partials = "pipelines/partials"
 ```
 
 Then:
