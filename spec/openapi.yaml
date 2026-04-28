@@ -63,15 +63,15 @@ paths:
     get:
       tags: [Discovery]
       operationId: getAgentCard
-      summary: Retrieve the public AgentCard for this Harness.
+      summary: Retrieve the public Harn AgentCard envelope for this Harness.
       security: []
       responses:
         "200":
-          description: AgentCard.
+          description: Harn AgentCard envelope.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/AgentCard"
+                $ref: "#/components/schemas/HarnAgentCard"
         default:
           $ref: "#/components/responses/Error"
 
@@ -2232,29 +2232,31 @@ components:
         metadata:
           $ref: "#/components/schemas/Metadata"
 
-    AgentCard:
+    HarnAgentCard:
       allOf:
         - $ref: "#/components/schemas/ResourceEnvelope"
         - type: object
-          required: [object, name, description, protocol_version, interfaces, skills]
+          required: [object, name, description, protocol_version, a2a_card, skills]
           properties:
             object:
               type: string
-              enum: [agent_card]
+              enum: [harn_agent_card]
             name:
               type: string
             description:
               type: string
             protocol_version:
               type: string
-            interfaces:
-              type: array
-              items:
-                $ref: "#/components/schemas/AgentInterface"
+            a2a_card:
+              $ref: "#/components/schemas/A2aAgentCard"
             skills:
               type: array
               items:
                 $ref: "#/components/schemas/Skill"
+            harn_interfaces:
+              type: array
+              items:
+                $ref: "#/components/schemas/HarnAgentInterface"
             persona_ids:
               type: array
               items:
@@ -2282,7 +2284,156 @@ components:
               oneOf:
                 - $ref: "#/components/schemas/CardSignature"
                 - type: "null"
-    AgentInterface:
+    A2aAgentCard:
+      type: object
+      required:
+        - name
+        - description
+        - supportedInterfaces
+        - version
+        - capabilities
+        - defaultInputModes
+        - defaultOutputModes
+        - skills
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        supportedInterfaces:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/A2aAgentInterface"
+        provider:
+          $ref: "#/components/schemas/A2aAgentProvider"
+        version:
+          type: string
+        documentationUrl:
+          type: [string, "null"]
+          format: uri
+        capabilities:
+          $ref: "#/components/schemas/A2aAgentCapabilities"
+        securitySchemes:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/A2aSecurityScheme"
+        security:
+          type: array
+          items:
+            type: object
+            additionalProperties:
+              type: array
+              items:
+                type: string
+        defaultInputModes:
+          type: array
+          items:
+            type: string
+        defaultOutputModes:
+          type: array
+          items:
+            type: string
+        skills:
+          type: array
+          items:
+            $ref: "#/components/schemas/A2aAgentSkill"
+        signatures:
+          type: array
+          items:
+            $ref: "#/components/schemas/A2aAgentCardSignature"
+        iconUrl:
+          type: [string, "null"]
+          format: uri
+    A2aAgentInterface:
+      type: object
+      required: [url, protocolBinding, protocolVersion]
+      properties:
+        url:
+          type: string
+          format: uri
+        protocolBinding:
+          type: string
+          examples: [JSONRPC, GRPC, HTTP+JSON]
+        tenant:
+          type: [string, "null"]
+        protocolVersion:
+          type: string
+    A2aAgentProvider:
+      type: object
+      required: [organization, url]
+      properties:
+        organization:
+          type: string
+        url:
+          type: string
+          format: uri
+    A2aAgentCapabilities:
+      type: object
+      properties:
+        streaming:
+          type: boolean
+        pushNotifications:
+          type: boolean
+        extensions:
+          type: array
+          items:
+            $ref: "#/components/schemas/JsonObject"
+        extendedAgentCard:
+          type: boolean
+    A2aAgentSkill:
+      type: object
+      required: [id, name, description, tags]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        examples:
+          type: array
+          items:
+            type: string
+        inputModes:
+          type: array
+          items:
+            type: string
+        outputModes:
+          type: array
+          items:
+            type: string
+        security:
+          type: array
+          items:
+            type: object
+            additionalProperties:
+              type: array
+              items:
+                type: string
+        inputSchema:
+          oneOf:
+            - $ref: "#/components/schemas/JsonObject"
+            - type: "null"
+    A2aSecurityScheme:
+      type: object
+      description: A2A SecurityScheme union member, following the A2A/OpenAPI security object shape.
+      additionalProperties: true
+    A2aAgentCardSignature:
+      type: object
+      required: [protected, signature]
+      properties:
+        protected:
+          type: string
+        signature:
+          type: string
+        header:
+          $ref: "#/components/schemas/JsonObject"
+    HarnAgentInterface:
       type: object
       required: [transport, url]
       properties:

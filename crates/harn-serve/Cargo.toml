@@ -30,3 +30,4 @@ uuid = { version = "1", features = ["v4", "v7"] }
 [dev-dependencies]
 hex = "0.4"
 tempfile = "3"
+tower = { version = "0.5", features = ["util"] }
