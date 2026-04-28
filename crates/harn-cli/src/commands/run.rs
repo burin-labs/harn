@@ -16,6 +16,14 @@ use crate::skill_loader::{
     SkillLoaderInputs,
 };
 
+pub(crate) enum RunFileMcpServeMode {
+    Stdio,
+    Http {
+        options: harn_serve::McpHttpServeOptions,
+        auth_policy: harn_serve::AuthPolicy,
+    },
+}
+
 /// Core builtins that are never denied, even when using `--allow`.
 const CORE_BUILTINS: &[&str] = &[
     "println",
@@ -805,8 +813,8 @@ fn print_trace_summary() {
     );
 }
 
-/// Run a .harn file as an MCP server over stdio using the script-driven
-/// surface. The pipeline must call `mcp_tools(registry)` (or the alias
+/// Run a .harn file as an MCP server using the script-driven surface.
+/// The pipeline must call `mcp_tools(registry)` (or the alias
 /// `mcp_serve(registry)`) so the CLI can expose its tools, and may
 /// register additional resources/prompts via `mcp_resource(...)` /
 /// `mcp_resource_template(...)` / `mcp_prompt(...)`.
@@ -818,7 +826,11 @@ fn print_trace_summary() {
 /// a JSON file or an inline JSON string. When present, the card is
 /// embedded in the `initialize` response and exposed as the
 /// `well-known://mcp-card` resource.
-pub(crate) async fn run_file_mcp_serve(path: &str, card_source: Option<&str>) {
+pub(crate) async fn run_file_mcp_serve(
+    path: &str,
+    card_source: Option<&str>,
+    mode: RunFileMcpServeMode,
+) {
     let (source, program) = crate::parse_source_file(path);
 
     let type_diagnostics = typecheck_with_imports(&program, Path::new(path));
@@ -976,9 +988,29 @@ pub(crate) async fn run_file_mcp_serve(path: &str, card_source: Option<&str>) {
                     }
                 }
             }
-            if let Err(e) = server.run(&mut vm).await {
-                eprintln!("error: MCP server error: {e}");
-                process::exit(1);
+            match mode {
+                RunFileMcpServeMode::Stdio => {
+                    if let Err(e) = server.run(&mut vm).await {
+                        eprintln!("error: MCP server error: {e}");
+                        process::exit(1);
+                    }
+                }
+                RunFileMcpServeMode::Http {
+                    options,
+                    auth_policy,
+                } => {
+                    if let Err(e) = crate::commands::serve::run_script_mcp_http_server(
+                        server,
+                        vm,
+                        options,
+                        auth_policy,
+                    )
+                    .await
+                    {
+                        eprintln!("error: MCP server error: {e}");
+                        process::exit(1);
+                    }
+                }
             }
         })
         .await;
@@ -988,7 +1020,7 @@ pub(crate) async fn run_file_mcp_serve(path: &str, card_source: Option<&str>) {
 /// return the parsed `serde_json::Value`. Used by `--card`. Disambiguates
 /// by peeking at the first non-whitespace character: `{` → inline JSON,
 /// anything else → path.
-fn resolve_card_source(source: &str) -> Result<serde_json::Value, String> {
+pub(crate) fn resolve_card_source(source: &str) -> Result<serde_json::Value, String> {
     let trimmed = source.trim_start();
     if trimmed.starts_with('{') || trimmed.starts_with('[') {
         return serde_json::from_str(source).map_err(|e| format!("inline JSON parse error: {e}"));

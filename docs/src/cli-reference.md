@@ -978,9 +978,9 @@ endpoints `--sse-path` and `--messages-path`.
 For scripts that author the MCP surface through the registration
 builtins (`mcp_tools(registry)`, `mcp_resource(...)`, `mcp_prompt(...)`)
 instead of `pub fn` exports, `harn serve mcp` auto-detects that mode,
-runs the script once on stdio, and exposes the registered
-tools / resources / prompts. Pass `--card <PATH_OR_JSON>` to advertise
-an MCP v2.1 Server Card with the script-driven mode.
+runs the script once, and exposes the registered tools / resources /
+prompts over either stdio or Streamable HTTP. Pass `--card <PATH_OR_JSON>`
+to advertise an MCP v2.1 Server Card.
 
 ```bash
 harn serve mcp agent.harn                  # auto-detect surface
