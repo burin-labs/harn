@@ -7,9 +7,35 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
-## Unreleased
+## v0.7.47
 
 ### Added
+
+- **Long-running tool handles for `run_command`, `run_test`,
+  `run_build_command` (#778/#803).** Pass `long_running: true` to spawn
+  the child process without blocking and receive a handle dict immediately
+  — `{ handle_id, started_at, command }`. A background waiter drains
+  stdout/stderr on separate threads (preventing pipe deadlock), calls
+  `child.wait()`, and injects the result into the agent's next turn via a
+  new cross-thread feedback queue (`push_pending_feedback_global` /
+  `drain_pending_feedback`). A new `tools.cancel_handle` builtin
+  SIGKILLs an in-flight handle by ID and suppresses the pending feedback
+  push. Session-end cleanup fires automatically: orphaned child processes
+  are killed when the agent-loop session exits via
+  `register_session_end_hook` / `cancel_session_handles`.
+
+- **AST hostlib symbol mutation + bracket balance (#775/#798).** Four
+  new builtins on the `ast::*` hostlib surface so burin-code can retire
+  `SymbolOperations.swift` and `BracketBalance.swift`:
+  `ast.symbol_extract` locates a named symbol and returns its text with
+  1-based inclusive line range; `ast.symbol_delete` removes it and
+  collapses resulting blank-line runs; `ast.symbol_replace` splices
+  caller-provided text in place of the symbol's preamble + signature +
+  body (both mutating ops re-parse to validate); `ast.bracket_balance`
+  returns signed paren/bracket/brace counts using a string + comment
+  lexer. All four follow the standard tagged-union envelope with result
+  variants `extracted` / `removed` / `replaced` / `not_found` /
+  `ambiguous` / `unsupported_language` / `syntax_error_after_edit`.
 
 - **`parse_junit_xml` stdlib builtin (#801).** New core builtin that
   parses a JUnit XML test report (`string` or `bytes`) into a list of
