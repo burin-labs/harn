@@ -3,9 +3,9 @@
 //! Substring-accelerated full-text index: every 3-byte sliding window in a
 //! file becomes a posting in `index[trigram] -> Set<FileId>`. A query is
 //! decomposed into its trigrams; the candidate set is the intersection of
-//! those posting lists. Matches the Swift `TrigramIndex` byte-for-byte:
-//! ASCII case-fold on each byte (`A-Z` -> `a-z`), non-ASCII passes through,
-//! 3-byte sliding window packed `(a << 16) | (b << 8) | c` into a `u32`.
+//! those posting lists. The wire-stable algorithm ASCII case-folds each
+//! byte (`A-Z` -> `a-z`), leaves non-ASCII bytes unchanged, and packs each
+//! 3-byte sliding window as `(a << 16) | (b << 8) | c` into a `u32`.
 
 use std::collections::{HashMap, HashSet};
 
@@ -133,8 +133,7 @@ impl TrigramIndex {
 
 /// Extract every distinct trigram from `text`. Bytes are lowercased on the
 /// ASCII range; non-ASCII bytes pass through unchanged. Sliding 3-byte
-/// window over the UTF-8 bytes — matches Swift's
-/// `TrigramIndex.extractTrigrams` byte-for-byte.
+/// window over the UTF-8 bytes.
 pub fn extract_trigrams(text: &str) -> HashSet<Trigram> {
     let bytes = text.as_bytes();
     if bytes.len() < 3 {
@@ -151,9 +150,8 @@ pub fn extract_trigrams(text: &str) -> HashSet<Trigram> {
     out
 }
 
-/// Decompose a query into its constituent trigrams (deduped). Mirrors the
-/// Swift `TrigramIndex.queryTrigrams` shape so callers that pre-compute on
-/// the script side stay in lock-step with the host.
+/// Decompose a query into its constituent trigrams (deduped) so callers
+/// that pre-compute on the script side stay in lock-step with the host.
 pub fn query_trigrams(query: &str) -> Vec<Trigram> {
     extract_trigrams(query).into_iter().collect()
 }

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://harnlang.com/schemas/hostlib/ast/function_bodies.response.json",
   "title": "ast.function_bodies response",
-  "description": "Map of function name → extracted body, plus a `missing` list naming requested functions that were not found. All line coordinates inside each body are 1-based, matching Swift.",
+  "description": "Map of function name → extracted body, plus a `missing` list naming requested functions that were not found. All line coordinates inside each body are 1-based.",
   "type": "object",
   "properties": {
     "path": { "type": ["string", "null"] },

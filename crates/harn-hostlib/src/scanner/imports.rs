@@ -1,13 +1,8 @@
-//! Language-aware import-statement extraction. Ports
-//! `Sources/BurinCore/Scanner/ImportParser.swift` line-for-line so the
-//! Rust scanner produces the same `imports`/`dependencies` lists as the
-//! Swift one for any given input.
+//! Language-aware import-statement extraction for the scanner pipeline.
 //!
-//! Only the subset used by the scanner pipeline is ported here:
-//! `extract_imports`. The Swift module's import-rewriting helpers
-//! (`generateImportStatement`, `insertImport`, …) live on the burin-code
-//! editor surface, not the scanner intake — porting them belongs to a
-//! future B-series ticket if anyone needs them on the Rust side.
+//! Only the subset used by the scanner pipeline is implemented here:
+//! `extract_imports`. Import-rewriting belongs to editor-specific host
+//! surfaces and should be added as separate hostlib methods if needed.
 
 use regex::Regex;
 use std::sync::OnceLock;
@@ -15,7 +10,7 @@ use std::sync::OnceLock;
 /// Extract zero or more import-target strings from `content`.
 ///
 /// `language` is the lowercase file extension (`"rs"`, `"ts"`, …). Unknown
-/// languages return an empty vec — matching the Swift `default` arm.
+/// languages return an empty vec.
 pub fn extract_imports(content: &str, language: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut in_go_block = false;

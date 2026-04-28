@@ -14,10 +14,7 @@ use std::rc::Rc;
 use harn_vm::VmValue;
 
 /// Symbol kind. The wire form is the lowercase string returned by
-/// [`SymbolKind::as_str`]. Mirrors `symbolKindString` in
-/// `~/projects/burin-code/Sources/ASTEngine/SymbolOperations.swift` so
-/// burin-code receives the same labels regardless of which side of the
-/// bridge produced the symbol.
+/// [`SymbolKind::as_str`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SymbolKind {
     Function,

@@ -1,11 +1,10 @@
 //! Code index host capability.
 //!
-//! Ports the deterministic trigram/word index plus the live workspace
-//! state (agent registry, advisory locks, append-only version log, file
-//! id assignment, cached reads) that previously lived in
-//! `Sources/BurinCodeIndex/` on the Swift side. The capability owns one
-//! [`SharedIndex`] cell per instance; cloning the capability shares
-//! state with every Harn VM that has been wired against it.
+//! Deterministic trigram/word index plus live workspace state (agent
+//! registry, advisory locks, append-only version log, file id assignment,
+//! cached reads). The capability owns one [`SharedIndex`] cell per
+//! instance; cloning the capability shares state with every Harn VM that
+//! has been wired against it.
 //!
 //! Surface — every builtin is locked by `schemas/code_index/<method>.json`:
 //!
@@ -32,11 +31,10 @@
 //!
 //! ## Concurrency model
 //!
-//! All ops serialise through a single `Arc<Mutex<Option<IndexState>>>`.
-//! That matches the Swift actor: the IDE editor, eval, and live agent all
-//! see one consistent view. The capability is `Send + Sync` so embedders
-//! can share it across threads, but the mutex still serialises actual
-//! work.
+//! All ops serialise through a single `Arc<Mutex<Option<IndexState>>>` so
+//! the IDE editor, eval, and live agent all see one consistent view. The
+//! capability is `Send + Sync` so embedders can share it across threads,
+//! but the mutex still serialises actual work.
 
 mod agents;
 mod builtins;
@@ -112,8 +110,8 @@ impl CodeIndexCapability {
         std::mem::replace(&mut *guard, id)
     }
 
-    /// Restore from a previously saved snapshot at
-    /// `<root>/.burin/index/snapshot.json`. After restoring, runs
+    /// Restore from a previously saved snapshot at the path returned by
+    /// [`CodeIndexSnapshot::path_for`]. After restoring, runs
     /// [`IndexState::reap_after_recovery`] so stale agent records and
     /// locks are dropped before the daemon serves traffic.
     ///
@@ -134,8 +132,8 @@ impl CodeIndexCapability {
         }
     }
 
-    /// Persist the current in-memory state to
-    /// `<root>/.burin/index/snapshot.json`. Returns `Ok(false)` when the
+    /// Persist the current in-memory state to the path returned by
+    /// [`CodeIndexSnapshot::path_for`]. Returns `Ok(false)` when the
     /// capability is empty (nothing to save).
     pub fn persist_to_disk(&self) -> std::io::Result<bool> {
         let snap = {

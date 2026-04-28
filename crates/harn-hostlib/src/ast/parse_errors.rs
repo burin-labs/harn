@@ -1,17 +1,9 @@
 //! `ast.parse_errors` — surface tree-sitter `ERROR` and `MISSING` nodes
 //! plus the count of top-level declarations.
 //!
-//! Mirrors `TreeSitterParseErrors.analyze` in burin-code's Swift
-//! `ASTEngine` (`Sources/ASTEngine/TreeSitterParseErrors.swift`). The
-//! Swift surface returns a `(supported, errors, top_level_decl_count)`
-//! triple keyed off a file extension; this builtin accepts either an
-//! in-memory `content` string or a `path` plus an optional `language`
-//! hint. Coordinates here are 0-based to match the rest of the
-//! `ast::*` builtins.
-//!
-//! The counterpart Swift consumer maps `errors[].start_row + 1` and the
-//! `snippet` field back into `TreeSitterParseError.line` / `.snippet`,
-//! and `errors[].missing` flips through unchanged.
+//! This builtin accepts either an in-memory `content` string or a `path`
+//! plus an optional `language` hint. Coordinates here are 0-based to match
+//! the rest of the `ast::*` builtins.
 
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -95,8 +87,8 @@ fn resolve_language(
 ) -> Result<Language, HostlibError> {
     if let Some(name) = language_hint.filter(|s| !s.is_empty()) {
         // Accept either a canonical wire name or a bare extension here so
-        // callers that only know the file extension (e.g. burin-code's
-        // `extension` field) don't need a separate translation step.
+        // callers that only know the file extension don't need a separate
+        // translation step.
         if let Some(lang) = Language::from_name(name) {
             return Ok(lang);
         }
@@ -185,11 +177,9 @@ fn collect_errors(root: Node<'_>, source: &[u8], out: &mut Vec<ParseError>) {
     out.sort_by_key(|e| e.start_byte);
 }
 
-/// Count top-level declarations in `root` for `language`. Mirrors
-/// `TreeSitterParseErrors.declarationTypesMap` in
-/// `Sources/ASTEngine/TreeSitterParseErrors.swift` verbatim — the
-/// (decls, wrappers) pair determines what counts as a declaration and
-/// which container kinds get expanded one level (e.g. TypeScript's
+/// Count top-level declarations in `root` for `language`. The (decls,
+/// wrappers) pair determines what counts as a declaration and which
+/// container kinds get expanded one level (e.g. TypeScript's
 /// `export_statement` wrapping a `function_declaration`).
 fn count_top_level_declarations(root: Node<'_>, language: Language) -> u32 {
     let (decls, wrappers) = declaration_kinds(language);
@@ -432,8 +422,8 @@ mod tests {
 
     #[test]
     fn extension_is_accepted_as_language_alias() {
-        // burin-code passes the file extension (e.g. "py") rather than
-        // the canonical wire name; we accept both.
+        // Accept both a file extension (e.g. "py") and the canonical wire
+        // name.
         let result = run_with("x = 1\n", "py");
         let language = match &result {
             VmValue::Dict(d) => match d.get("language") {

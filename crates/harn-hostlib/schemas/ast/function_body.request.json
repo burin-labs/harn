@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://harnlang.com/schemas/hostlib/ast/function_body.request.json",
   "title": "ast.function_body request",
-  "description": "Extract the body of a single named function from in-memory source or a file path. Mirrors Swift FunctionBodyExtractor.extract.",
+  "description": "Extract the body of a single named function from in-memory source or a file path.",
   "type": "object",
   "properties": {
     "source": {

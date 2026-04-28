@@ -1,14 +1,11 @@
-//! Owned data model for the scanner output. Mirrors the Swift
-//! `ScanResult`/`FileRecord`/`SymbolRecord`/etc. shape from
-//! `Sources/BurinCore/Scanner/RepoScannerModels.swift`.
+//! Owned data model for the scanner output.
 //!
-//! Fields are renamed `snake_case` (the JSON shape is also snake_case in
-//! schemas/scanner/scan_project.response.json — burin-code's consumers
-//! map between the two via Codable's coding keys).
+//! The JSON shape is snake_case and documented in
+//! `schemas/scanner/scan_project.response.json`.
 
 use serde::{Deserialize, Serialize};
 
-/// Coarse symbol kinds. Matches `SymbolKindRS` on the Swift side.
+/// Coarse symbol kinds emitted by the scanner.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
 pub enum SymbolKind {
@@ -142,7 +139,7 @@ pub struct SymbolRecord {
 /// One folder's aggregate metadata.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct FolderRecord {
-    /// Always equals `relative_path` (used by the Swift consumer for `Identifiable`).
+    /// Always equals `relative_path`, giving hosts a stable folder identifier.
     pub id: String,
     /// Folder path (`"."` for repo root).
     pub relative_path: String,

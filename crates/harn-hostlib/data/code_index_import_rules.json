@@ -1,5 +1,5 @@
 {
-  "_comment": "Ported from burin-code Sources/BurinCodeIndex/Resources/import-rules.json. Strategies and field semantics documented in src/code_index/imports.rs.",
+  "_comment": "Hostlib import-resolution rules. Strategies and field semantics are documented in src/code_index/imports.rs.",
   "languages": {
     "python": {
       "strategy": "dotted",

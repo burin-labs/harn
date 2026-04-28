@@ -11,7 +11,7 @@
 //! - When `filter` is supplied, append it through the runner's
 //!   pattern-filter flag (`-k`, `--filter`, `-run`, …).
 //!
-//! Divergence vs. Swift `runTest`:
+//! Hostlib-specific behavior:
 //! - We never invoke a Makefile or rely on `cachedBuildCommands` —
 //!   that's host-side state we don't have. Callers that drive a Makefile
 //!   should pass `argv: ["make", "test"]` explicitly.

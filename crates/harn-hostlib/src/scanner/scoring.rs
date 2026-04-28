@@ -1,7 +1,5 @@
 //! Reference counting + importance scoring + churn analysis.
 //!
-//! Mirrors the relevant phases in `CoreRepoScanner.swift`:
-//!
 //! * `computeReferenceCounts` — count how many times each symbol name
 //!   appears as the trailing component of an import path, plus 1 per extra
 //!   file that re-defines the same name.
@@ -11,9 +9,9 @@
 //!   `importance = 3*ref_count + 2*type_def + churn`, halved when the
 //!   symbol is contained in another type.
 //!
-//! These are deliberate, well-documented heuristics — burin-code consumers
-//! depend on the exact numeric output, so any changes here must be
-//! coordinated with the Swift implementation.
+//! These are deliberate, documented hostlib heuristics. Any scoring change
+//! is observable in repo-map ordering and should update fixtures and
+//! compatibility tests.
 
 use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
@@ -166,9 +164,9 @@ mod tests {
 
     #[test]
     fn ref_counts_pick_up_trailing_module_segment() {
-        // Swift `computeReferenceCounts` splits only on "/" — so "std::Foo"
-        // never matches because its trailing segment is `std::Foo`, not
-        // `Foo`. Trailing segments from "/" splits do match.
+        // Reference counts split only on "/" — so "std::Foo" never matches
+        // because its trailing segment is `std::Foo`, not `Foo`. Trailing
+        // segments from "/" splits do match.
         let files = vec![
             file("a.rs", &["std::Foo", "Foo"]),
             file("b.rs", &["bar/Foo"]),

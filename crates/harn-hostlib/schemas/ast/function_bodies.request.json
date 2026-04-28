@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://harnlang.com/schemas/hostlib/ast/function_bodies.request.json",
   "title": "ast.function_bodies request",
-  "description": "Bulk variant of ast.function_body — pull multiple function bodies in a single round-trip. Mirrors Swift FunctionBodyExtractor.extractAll(functionNames:from:language:). The response is keyed by name so callers don't have to re-match.",
+  "description": "Bulk variant of ast.function_body — pull multiple function bodies in a single round-trip. The response is keyed by name so callers don't have to re-match.",
   "type": "object",
   "properties": {
     "source": { "type": "string" },

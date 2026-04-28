@@ -3,8 +3,8 @@
 //! Inverted index `identifier -> Vec<(file_id, line)>`. Complements the
 //! trigram index: trigrams answer "which files contain this substring?",
 //! the word index answers "which lines mention this exact identifier?".
-//! Mirrors the Swift `WordIndex`: tokens are runs of `[A-Za-z_][A-Za-z0-9_]*`
-//! (single-character tokens are skipped), one entry per occurrence.
+//! Tokens are runs of `[A-Za-z_][A-Za-z0-9_]*` (single-character tokens
+//! are skipped), one entry per occurrence.
 
 use std::collections::{HashMap, HashSet};
 

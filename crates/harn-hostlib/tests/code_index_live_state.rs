@@ -1,7 +1,6 @@
 //! Integration tests for the live workspace state added in #776.
 //!
-//! Covers everything the burin-code Swift bridge previously round-tripped
-//! through `BurinCodeIndex/`: agent registry + locks, the append-only
+//! Covers live code-index state: agent registry + locks, the append-only
 //! version log, file table accessors, cached read paths, and the snapshot
 //! recovery flow. The cross-process concurrency stress test exercises
 //! `agent_register/heartbeat/unregister + lock_try/release` from a
@@ -221,7 +220,7 @@ fn file_hash_reads_the_file_off_disk() {
     );
     let s = extract_str(&h);
     // FNV-1a of `# project\n` is deterministic; pre-computed by hand
-    // (mirroring the Swift `ContentHasher.hash` reference implementation).
+    // FNV-1a reference value for `hello world`.
     let expected: u64 = {
         let mut h: u64 = 0xcbf2_9ce4_8422_2325;
         for b in b"# project\n" {

@@ -1,11 +1,8 @@
 //! Tree-sitter language registry.
 //!
-//! Mirrors the Swift `TreeSitterLanguage` enum in
-//! `~/projects/burin-code/Sources/ASTEngine/TreeSitterIntegration.swift`
-//! verbatim. The set of languages, their canonical names, and their file
-//! extensions all match Swift exactly so the bridged outputs round-trip
-//! across the harn ↔ burin-code boundary without translation. Adding or
-//! dropping a language requires a coordinated change in both repos.
+//! The set of languages, their canonical names, and their file extensions
+//! form the hostlib AST wire contract. Adding or dropping a language
+//! requires coordinated schema, fixture, and host-bridge updates.
 
 use tree_sitter::Language as TsLanguage;
 
@@ -129,8 +126,7 @@ impl Language {
         })
     }
 
-    /// Resolve a language from a file extension. The mapping mirrors the
-    /// Swift `extensionMap` in `TreeSitterIntegration.swift`.
+    /// Resolve a language from a file extension.
     pub fn from_extension(ext: &str) -> Option<Self> {
         let normalized = ext.trim_start_matches('.').to_ascii_lowercase();
         Some(match normalized.as_str() {

@@ -1,10 +1,9 @@
 //! Per-language tree-sitter symbol extractors.
 //!
 //! Each extractor walks a tree-sitter parse tree depth-first, emitting
-//! [`Symbol`] entries that mirror the Swift `TreeSitterSymbolExtractor`
-//! in `~/projects/burin-code/Sources/ASTEngine/`. Container kinds (class,
-//! struct, enum, ...) are stamped onto the `container` field of nested
-//! symbols so the outline fold in [`super::outline`] can rebuild a tree.
+//! [`Symbol`] entries. Container kinds (class, struct, enum, ...) are
+//! stamped onto the `container` field of nested symbols so the outline
+//! fold in [`super::outline`] can rebuild a tree.
 //!
 //! The shape of every extractor is identical:
 //!

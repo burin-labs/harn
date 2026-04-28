@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://harnlang.com/schemas/hostlib/ast/symbol_replace.request.json",
   "title": "ast.symbol_replace request",
-  "description": "Locate a named symbol in `source` and return the rewritten text with that symbol's lines replaced by `new_text`. Mirrors Swift `SymbolOperations.replace`.",
+  "description": "Locate a named symbol in `source` and return the rewritten text with that symbol's lines replaced by `new_text`.",
   "type": "object",
   "properties": {
     "source": {

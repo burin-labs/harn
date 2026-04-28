@@ -3,8 +3,7 @@
 //! Every per-language extractor in [`super`] reuses the same primitives
 //! (named-tree walk, container tracking, named-declaration shaping,
 //! function-signature shaping). Centralizing them here keeps the
-//! per-language match arms small and prevents the inevitable copy-paste
-//! drift that bit the Swift port.
+//! per-language match arms small and prevents copy-paste drift.
 
 use tree_sitter::Node;
 
@@ -58,8 +57,8 @@ pub(super) fn field_text(node: Node<'_>, field: &str, source: &str) -> Option<St
         .map(|n| node_text(n, source))
 }
 
-/// Truncate to `max` chars with an ellipsis suffix, matching the Swift
-/// `truncate(_, max:)` helper. Operates on Unicode scalars, not bytes.
+/// Truncate to `max` chars with an ellipsis suffix. Operates on Unicode
+/// scalars, not bytes.
 pub(super) fn truncate(s: &str, max: usize) -> String {
     if s.chars().count() > max {
         let mut out: String = s.chars().take(max).collect();
@@ -74,8 +73,7 @@ pub(super) fn truncate(s: &str, max: usize) -> String {
 /// the current container name; it may return a new container string to
 /// stamp on this node's descendants.
 ///
-/// This is the Rust equivalent of Swift's `walkTree(node:source:container:visitor:)`
-/// in `TreeSitterIntegration.swift`.
+/// Walk named descendants while threading the active container symbol.
 pub(super) fn walk_named<'tree, F>(node: Node<'tree>, container: Option<&str>, visitor: &mut F)
 where
     F: FnMut(Node<'tree>, Option<&str>) -> Option<String>,
@@ -151,8 +149,7 @@ pub(super) struct NamedDeclArgs<'src, 'tree, 'out> {
 }
 
 /// Push a "named declaration" symbol. Returns the symbol's name so the
-/// caller can stamp it as a container on descendants. Mirrors
-/// `extractNamedDecl(node:ctx:kind:keyword:)` in `TreeSitterIntegration.swift`.
+/// caller can stamp it as a container on descendants.
 pub(super) fn named_decl_with_keyword(args: NamedDeclArgs<'_, '_, '_>) -> Option<String> {
     let name_node = args.node.child_by_field_name("name")?;
     let name = node_text(name_node, args.source);
@@ -169,7 +166,7 @@ pub(super) fn named_decl_with_keyword(args: NamedDeclArgs<'_, '_, '_>) -> Option
     Some(name)
 }
 
-/// Args for the `extractFuncDecl`-equivalent helper.
+/// Args for function-style symbol extraction.
 pub(super) struct PushFuncArgs<'src, 'tree, 'out> {
     pub node: Node<'tree>,
     pub source: &'src str,
@@ -180,8 +177,7 @@ pub(super) struct PushFuncArgs<'src, 'tree, 'out> {
     pub out: &'out mut Vec<Symbol>,
 }
 
-/// Push a function-style symbol. Mirrors `extractFuncDecl` in
-/// `TreeSitterIntegration.swift`.
+/// Push a function-style symbol.
 pub(super) fn push_func(args: PushFuncArgs<'_, '_, '_>) {
     let Some(name_node) = args.node.child_by_field_name("name") else {
         return;

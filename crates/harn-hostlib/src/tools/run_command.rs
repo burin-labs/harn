@@ -3,13 +3,12 @@
 //!
 //! Schema: `schemas/tools/run_command.{request,response}.json`.
 //!
-//! Divergence vs. Swift `CoreToolExecutor.runCommand`:
-//! - Input is `argv: [String]` (no shell parsing). The Swift implementation
-//!   accepted a shell `command: String` and routed through `ShellPathResolver`.
-//!   We require argv to eliminate the shell-injection surface; callers that
-//!   genuinely need a shell can pass `["sh", "-c", ...]` themselves.
+//! Behavior:
+//! - Input is `argv: [String]` (no shell parsing) to eliminate the
+//!   shell-injection surface; callers that genuinely need a shell can pass
+//!   `["sh", "-c", ...]` themselves.
 //! - `capture_stderr: false` collapses stderr into stdout instead of dropping
-//!   it (matches what Swift returned to LLMs).
+//!   it.
 //! - There is no implicit cap of 300s on `timeout_ms`; the caller decides.
 //!   Sandboxing limits the blast radius regardless.
 //! - `long_running: true` spawns without waiting and returns a handle dict

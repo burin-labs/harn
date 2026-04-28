@@ -1,10 +1,7 @@
 //! Snapshot persistence for incremental scans.
 //!
-//! Mirrors the `loadCached` / `persistResult` pair on the Swift side, but
-//! lives under `<root>/.harn/hostlib/scanner-snapshot.json` instead of
-//! `<root>/.burin/index/scan-result.json` — `.harn/` is the canonical
-//! per-repo Harn working directory; `.burin/` is reserved for the burin-code
-//! IDE caches the bridge consumer maintains. The snapshot stores both the
+//! Snapshots live under `<root>/.harn/hostlib/scanner-snapshot.json`, the
+//! canonical per-repo Harn working directory. The snapshot stores both the
 //! [`ScanResult`] and the canonicalized root so [`load_for_token`] can
 //! refuse cross-root token reuse.
 

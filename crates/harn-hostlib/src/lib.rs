@@ -2,8 +2,7 @@
 //! repo scanning, deterministic indexing) and tool execution (search, file
 //! I/O, git, process lifecycle, file watcher).
 //!
-//! This crate is the Rust home of two classes of code that previously lived
-//! in `burin-labs/burin-code`'s Swift `BurinCore`:
+//! This crate is the Rust home of two classes of optional host capabilities:
 //!
 //! 1. **Code intelligence** — `ast/`, `code_index/`, `scanner/`, `fs_watch/`.
 //! 2. **Deterministic tools** — `tools/` (search, fs, git, process).
@@ -21,8 +20,8 @@
 //! The AST, scanner, code-index, and deterministic-tool surfaces are
 //! implemented. `fs_watch/` still registers its public contract with
 //! [`HostlibError::Unimplemented`] handlers. Module names, method names,
-//! and JSON schemas under `schemas/` are the source of truth for
-//! `burin-code`'s schema-drift tests, so they must stay stable while module
+//! and JSON schemas under `schemas/` are the source of truth for hostlib
+//! request/response compatibility, so they must stay stable while module
 //! bodies evolve.
 
 #![deny(rust_2018_idioms)]

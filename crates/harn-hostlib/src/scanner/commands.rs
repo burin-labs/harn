@@ -1,7 +1,6 @@
-//! Test-command + code-pattern detection. Mirrors
-//! `CoreRepoScanner.detectTestCommands` /
-//! `CoreRepoScanner.detectCodePatterns` and `TestPatternResolver` so the
-//! Rust scanner produces the same hints as the Swift one.
+//! Test-command + code-pattern detection so scanner metadata can power
+//! downstream "run tests" affordances without asking every host to
+//! rediscover package manifests.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -265,7 +264,7 @@ fn scan_package_json(dir: &Path, prefix: Option<String>, commands: &mut BTreeMap
 // MARK: - Code pattern hints
 
 /// Detect ORM/test/auth/middleware patterns that help the agent write
-/// correct code. Best-effort; mirrors `detectCodePatterns` on the Swift side.
+/// correct code. Best-effort.
 pub fn detect_code_patterns(files: &[FileRecord], root: &Path) -> Vec<String> {
     let mut patterns: Vec<String> = Vec::new();
     let helper_candidates = collect_helper_candidates(files);

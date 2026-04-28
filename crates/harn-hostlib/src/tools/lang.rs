@@ -9,11 +9,10 @@
 //! runner by passing `argv` (for `run_*`) or `ecosystem` (for
 //! `manage_packages`), bypassing detection entirely.
 //!
-//! Divergence vs. Swift `BurinCore`: the Swift implementation also
-//! consulted `LanguageConfigRegistry` JSON files shipped inside the IDE
-//! bundle. We do *not* port that here — the IDE shim can keep doing its
-//! own override before invoking `run_test`. The behaviors here are the
-//! sane defaults for the manifests every supported ecosystem ships.
+//! Detection is deliberately hostlib-local. IDE shims can apply their own
+//! project-specific overrides before invoking `run_test`; the behaviors
+//! here are the sane defaults for the manifests every supported ecosystem
+//! ships.
 
 use std::path::Path;
 
@@ -57,7 +56,7 @@ impl Ecosystem {
     }
 
     /// Map the user-facing ecosystem name (from the request payload) to a
-    /// detected variant. Aliases follow Swift's `packageManager(from:)`.
+    /// detected variant.
     pub(crate) fn parse(name: &str) -> Option<Ecosystem> {
         match name.trim().to_ascii_lowercase().as_str() {
             "cargo" | "rust" => Some(Ecosystem::Cargo),
@@ -82,8 +81,8 @@ impl Ecosystem {
 /// Detect the most likely ecosystem for a workspace by inspecting manifests.
 ///
 /// Returns `None` if no recognized manifest is present. Detection order
-/// matches the strictest-first heuristic Swift used: lockfile-bearing JS
-/// managers beat plain `npm`; `uv.lock` / `poetry.lock` beat plain `pip`.
+/// prefers lockfile-bearing JS managers over plain `npm`; `uv.lock` /
+/// `poetry.lock` beat plain `pip`.
 pub(crate) fn detect(cwd: &Path) -> Option<Ecosystem> {
     if cwd.join("Cargo.toml").is_file() {
         return Some(Ecosystem::Cargo);

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://harnlang.com/schemas/hostlib/ast/parse_errors.response.json",
   "title": "ast.parse_errors response",
-  "description": "Tree-sitter ERROR / MISSING node list plus a top-level declaration count. Coordinates are 0-based to match the rest of `ast::*` builtins; consumers that need 1-based line numbers (the Swift fallback shape) add one to `start_row`. `supported` is false only when the grammar refuses to load — a clean parse with zero errors still returns `supported = true`.",
+  "description": "Tree-sitter ERROR / MISSING node list plus a top-level declaration count. Coordinates are 0-based to match the rest of `ast::*` builtins; consumers that need 1-based line numbers add one to `start_row`. `supported` is false only when the grammar refuses to load — a clean parse with zero errors still returns `supported = true`.",
   "type": "object",
   "properties": {
     "path": {
@@ -28,7 +28,7 @@
     "top_level_decl_count": {
       "type": "integer",
       "minimum": 0,
-      "description": "Count of top-level declaration nodes per the language profile (mirrors Swift's `topLevelDeclCount`). Languages without an explicit declaration map return 0."
+      "description": "Count of top-level declaration nodes per the language profile. Languages without an explicit declaration map return 0."
     }
   },
   "required": ["path", "language", "supported", "had_errors", "errors", "top_level_decl_count"],

@@ -1,7 +1,7 @@
 // TrigramIndex.swift
 //
 // Trimmed fixture for the scenario test. Mirrors the public surface of
-// the Swift `TrigramIndex` so the scenario asserts queries by substring
+// the trigram index so the scenario asserts queries by substring
 // can find this file.
 
 import Foundation

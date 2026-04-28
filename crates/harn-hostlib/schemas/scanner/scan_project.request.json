@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://harnlang.com/schemas/hostlib/scanner/scan_project.request.json",
   "title": "scanner.scan_project request",
-  "description": "Walk a project root deterministically and emit a `ScanResult` matching the burin-code Swift CoreRepoScanner schema: project metadata, file/folder/symbol records, dependency edges, and a token-budgeted repo map. Honors `.gitignore` and language-specific excluded directories.",
+  "description": "Walk a project root deterministically and emit the Harn hostlib `ScanResult` contract: project metadata, file/folder/symbol records, dependency edges, and a token-budgeted repo map. Honors `.gitignore` and language-specific excluded directories.",
   "type": "object",
   "properties": {
     "root": {

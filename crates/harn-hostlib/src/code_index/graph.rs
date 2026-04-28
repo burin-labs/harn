@@ -2,9 +2,9 @@
 //!
 //! Edges are "file A imports file B", built from the import strings the
 //! `imports` module surfaces. Forward answers "what does A depend on?";
-//! reverse answers "who depends on A?". Mirrors the Swift `DepGraph`,
-//! including the `unresolved_imports` side-table for raw strings the
-//! resolver could not map back to a known file.
+//! reverse answers "who depends on A?". The `unresolved_imports`
+//! side-table stores raw strings the resolver could not map back to a
+//! known file.
 
 use std::collections::{HashMap, HashSet};
 

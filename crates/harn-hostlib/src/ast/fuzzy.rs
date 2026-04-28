@@ -1,10 +1,8 @@
 //! Fuzzy string matching for "did you mean?" suggestions.
 //!
-//! Direct port of `Sources/ASTEngine/FuzzyMatcher.swift` so the
-//! `not_found` payload returned by symbol-mutation builtins surfaces the
-//! same suggestion list burin-code's Swift fallback produced. Matches
-//! characters in order (not necessarily contiguous): `cmpHndlr` matches
-//! `completionHandler`.
+//! Used by symbol-mutation builtins to populate `not_found` suggestions.
+//! Matches characters in order (not necessarily contiguous): `cmpHndlr`
+//! matches `completionHandler`.
 
 /// Find the best fuzzy matches for `query` in `candidates`. Returns up to
 /// `limit` candidates sorted by descending score.

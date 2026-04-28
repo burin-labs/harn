@@ -128,3 +128,4 @@
 - [Package-root prompt assets](./migrations/package-root-prompt-assets.md)
 - [Schema-as-type](./migrations/schema-as-type.md)
 - [Rust connectors → Harn packages](./migrations/rust-connectors-to-harn-packages.md)
+- [harn-hostlib host contracts](./migrations/harn-hostlib-host-contracts.md)

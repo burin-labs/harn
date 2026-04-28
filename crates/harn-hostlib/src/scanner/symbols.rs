@@ -1,10 +1,8 @@
-//! Symbol extraction for the scanner pipeline. Ports the regex/generic
-//! arms of `Sources/BurinCore/Scanner/SymbolExtractor.swift` plus the
-//! pragma extractor from `PragmaExtractor.swift`.
+//! Symbol extraction for the scanner pipeline.
 //!
-//! The Swift implementation routes most languages through tree-sitter and
-//! falls back to the regex extractor for Swift, Shell, Dart, and unknown
-//! languages. This Rust scanner keeps the same public record shape so the
+//! This regex extractor covers pragma sections, Dart, and the generic
+//! fallback path used for languages where the scanner does not need a full
+//! tree-sitter pass. The scanner keeps the same public record shape so the
 //! orchestrator in [`super::run_scan`] can swap extraction engines without
 //! disturbing callers.
 //!
@@ -112,7 +110,7 @@ fn extract_from_line(
     }
 }
 
-// MARK: - Dart (no tree-sitter grammar available on the Swift side)
+// MARK: - Dart (regex fallback)
 fn extract_dart(line: &str, line_number: usize, file_path: &str) -> Vec<SymbolRecord> {
     let mut out = Vec::new();
     if let Some(name) = capture(dart_class(), line) {
@@ -164,7 +162,7 @@ fn extract_dart(line: &str, line_number: usize, file_path: &str) -> Vec<SymbolRe
     out
 }
 
-// MARK: - Generic regex fallback (matches Swift `extractGeneric`)
+// MARK: - Generic regex fallback
 fn extract_generic(line: &str, line_number: usize, file_path: &str) -> Vec<SymbolRecord> {
     if let Some(name) = capture(generic_function(), line) {
         return vec![make_symbol(
@@ -456,10 +454,9 @@ mod tests {
 
     #[test]
     fn extracts_dart_function_with_signature() {
-        // The Swift regex extractor matches any `<word> <ident>(` line, so
-        // a function-call inside a body shows up as another function entry
-        // — match that behavior exactly. Production callers de-dupe at the
-        // tree-sitter / outline layer.
+        // The regex fallback matches any `<word> <ident>(` line, so a
+        // function-call inside a body shows up as another function entry.
+        // Production callers de-dupe at the tree-sitter / outline layer.
         let src = "void greet(String name) {\n  return name.length;\n}\n";
         let symbols = extract_symbols(src, "dart", "main.dart");
         let fns: Vec<_> = symbols

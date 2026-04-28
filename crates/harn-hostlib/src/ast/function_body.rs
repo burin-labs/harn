@@ -1,30 +1,24 @@
 //! `ast.function_body` — extract a single function's body by name, plus
 //! `ast.function_bodies` — extract many at once into a map keyed by name.
 //!
-//! Mirrors the Swift `FunctionBodyExtractor` in
-//! `~/projects/burin-code/Sources/ASTEngine/FunctionBodyExtractor.swift`
-//! so burin-code's `APIContractExtractor`, `ASTRPC`, and
-//! `HarnHostServer+ASTPrimitives` can replace their direct ASTEngine
-//! call sites with a single Harn hostlib round-trip.
+//! Provides a single hostlib round-trip for hosts that need function-body
+//! text plus return-object field hints.
 //!
 //! ## Wire format
 //!
 //! Both builtins accept either an in-memory `source` string or a file
 //! `path` (with optional `language` hint). At least one must be present.
-//! All line coordinates in the response are **1-based** to match Swift's
-//! `ExtractedBody.startLine` / `endLine` convention exactly. (Symbols /
-//! outline / parse_file responses are 0-based; this builtin is the one
-//! exception and the field name `start_line` vs. `start_row` flags it.)
+//! All line coordinates in the response are **1-based**. Symbols,
+//! outline, and parse_file responses are 0-based; this builtin is the one
+//! exception and the field name `start_line` vs. `start_row` flags it.
 //!
 //! ## Strategy
 //!
-//! Tree-sitter for all 21 supported languages (the Rust hostlib has full
-//! grammar coverage; the Swift port falls back to brace matching for
-//! some languages because its `TreeSitterLanguage` enum is narrower).
-//! For each function-like node whose name matches we read the `body` /
+//! Tree-sitter for all supported languages. For each function-like node
+//! whose name matches we read the `body` /
 //! `block` / `result` field, slice the source by row range, and return
 //! the joined text plus a regex-derived list of return-object field
-//! names — the latter is the signal `APIContractExtractor` needs.
+//! names for hosts that build API contract summaries.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
@@ -42,15 +36,14 @@ use super::symbols::helpers::{children, node_text};
 const SINGLE_BUILTIN: &str = "hostlib_ast_function_body";
 const BULK_BUILTIN: &str = "hostlib_ast_function_bodies";
 
-/// One extracted function body. Wire form mirrors Swift's
-/// `FunctionBodyExtractor.ExtractedBody`.
+/// One extracted function body.
 #[derive(Debug, Clone)]
 pub(super) struct ExtractedBody {
     pub name: String,
     pub body_text: String,
-    /// 1-based start line, matching Swift.
+    /// 1-based start line.
     pub start_line: u32,
-    /// 1-based end line, matching Swift.
+    /// 1-based end line.
     pub end_line: u32,
     pub return_object_fields: Vec<String>,
 }
@@ -277,9 +270,8 @@ pub(super) fn extract_body(
 }
 
 fn split_lines(source: &str) -> Vec<&str> {
-    // `split('\n')` matches the Swift `components(separatedBy: "\n")` —
-    // an N-line file with a trailing newline produces N+1 elements
-    // (the final empty string), but slicing by row range is safe.
+    // `split('\n')` keeps a trailing newline as a final empty element, but
+    // slicing by row range is safe.
     source.split('\n').collect()
 }
 
@@ -464,9 +456,9 @@ fn body_from_function_node(
     }
 
     if matches!(node.kind(), "call") && matches!(language, Language::Elixir) {
-        // For Elixir, body lives inside the second arg's do-block; just
-        // return the entire call node minus the first line as a stable
-        // approximation (the Swift extractor does similarly).
+        // For Elixir, body lives inside the second arg's do-block; return
+        // the entire call node minus the first line as a stable
+        // approximation.
         return whole_minus_first(node, function_name, lines);
     }
 
@@ -583,10 +575,9 @@ fn container_name_if_any(node: Node<'_>, source: &str, language: Language) -> Op
     }
 }
 
-/// Mirrors `FunctionBodyExtractor.extractReturnFields` from the Swift
-/// port. Walks the body line-by-line, tracking whether we're inside a
-/// `return { ... }` (or arrow-function `=> { ... }`) object literal,
-/// and pulls field names off `name:` / `'name':` / `"name":` lines.
+/// Walks the body line-by-line, tracking whether we're inside a `return {
+/// ... }` (or arrow-function `=> { ... }`) object literal, and pulls field
+/// names off `name:` / `'name':` / `"name":` lines.
 pub(super) fn extract_return_fields(body_text: &str) -> Vec<String> {
     let mut fields: Vec<String> = Vec::new();
     let mut in_return_object = false;
@@ -674,8 +665,7 @@ mod tests {
     fn return_fields_picks_up_object_literal() {
         // Each captured field must be followed by `,` or `:`. A bare
         // shorthand identifier on its own line (no trailing comma)
-        // intentionally doesn't count — the Swift regex behaves the
-        // same way and we want byte-identical output.
+        // intentionally doesn't count.
         let body = "return {\n  a: 1,\n  b: 2,\n  c,\n};";
         let fields = extract_return_fields(body);
         assert_eq!(fields, vec!["a", "b", "c"]);

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://harnlang.com/schemas/hostlib/ast/symbol_delete.request.json",
   "title": "ast.symbol_delete request",
-  "description": "Locate a named symbol in `source` and return the rewritten text with that symbol removed. Mirrors Swift `SymbolOperations.delete`.",
+  "description": "Locate a named symbol in `source` and return the rewritten text with that symbol removed.",
   "type": "object",
   "properties": {
     "source": {

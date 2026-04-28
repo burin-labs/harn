@@ -172,9 +172,8 @@ fn outline_caps_depth_when_max_depth_supplied() {
 #[test]
 fn parse_file_meets_perf_budget_on_a_known_input() {
     let registry = ast_registry();
-    // Use the largest fixture we ship (Rust). The issue suggests
-    // burin-code's `Package.swift` as a reference; running against an
-    // in-tree fixture keeps the test hermetic and CI-friendly.
+    // Use the largest fixture we ship (Rust). Running against an in-tree
+    // fixture keeps the test hermetic and CI-friendly.
     let path = fixture_path("rust/source.rs");
     let payload = dict(&[(
         "path",
@@ -435,9 +434,9 @@ fn parse_errors_flags_typescript_syntax_error() {
 
 #[test]
 fn parse_errors_top_level_decl_count_matches_swift_profile() {
-    // Mirrors Swift's `topLevelDeclCount` for a couple of canonical
-    // language profiles. Drift in this number means our profile fell out
-    // of sync with `TreeSitterParseErrors.declarationTypesMap`.
+    // Covers top-level declaration counts for a couple of canonical
+    // language profiles. Drift in this number means our declaration map
+    // changed.
     let registry = ast_registry();
 
     let cases = [
@@ -445,7 +444,7 @@ fn parse_errors_top_level_decl_count_matches_swift_profile() {
         ("python", "def a():\n    pass\nclass B:\n    pass\n", 2),
         // TS lists `export_statement` as both a declaration and a
         // wrapper, so each `export X` contributes 2 (the export itself
-        // plus the wrapped decl). Mirrors Swift exactly.
+        // plus the wrapped decl).
         (
             "typescript",
             "export function a() {}\nexport const b = 1;\nfunction c() {}\n",
@@ -522,20 +521,19 @@ fn undefined_names_marks_unsupported_languages() {
     };
     assert!(
         !supported,
-        "rust isn't in the Swift profile set; must report supported = false"
+        "rust isn't in the undefined-name profile set; must report supported = false"
     );
     let diagnostics = list_value(&dict_field(&result, "diagnostics"));
     assert!(diagnostics.is_empty());
 }
 
 #[test]
-fn perf_smoke_against_burin_code_when_available() {
-    // The issue calls out `~/projects/burin-code/Package.swift`. That
-    // path only exists on the maintainer's box; skip silently otherwise
-    // so CI stays green.
-    let target = std::env::var("HOME")
+fn perf_smoke_against_external_file_when_available() {
+    // Optional maintainer smoke test for a larger real-world file. CI
+    // leaves this unset, so the test remains hermetic by default.
+    let target = std::env::var("HARN_AST_PERF_SMOKE_PATH")
         .ok()
-        .map(|home| PathBuf::from(home).join("projects/burin-code/Package.swift"));
+        .map(PathBuf::from);
     let Some(path) = target.filter(|p| p.exists()) else {
         return;
     };
@@ -551,7 +549,7 @@ fn perf_smoke_against_burin_code_when_available() {
     let elapsed = start.elapsed();
     let bytes = fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
     eprintln!(
-        "burin-code Package.swift parse_file: {elapsed:?} ({} bytes)",
+        "external parse_file perf smoke: {elapsed:?} ({} bytes)",
         bytes
     );
     assert!(

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://harnlang.com/schemas/hostlib/scanner/scan_project.response.json",
   "title": "scanner.scan_project response",
-  "description": "Mirror of the Swift `ScanResult` shape consumed by burin-code today: project metadata, folder/file/symbol records, dependency edges, and a text repo map. Times are ISO-8601 UTC strings. Paths are repo-relative POSIX paths.",
+  "description": "Harn hostlib `ScanResult`: project metadata, folder/file/symbol records, dependency edges, and a text repo map. Times are ISO-8601 UTC strings. Paths are repo-relative POSIX paths.",
   "type": "object",
   "properties": {
     "snapshot_token": {

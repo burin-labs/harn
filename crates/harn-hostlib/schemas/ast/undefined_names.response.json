@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://harnlang.com/schemas/hostlib/ast/undefined_names.response.json",
   "title": "ast.undefined_names response",
-  "description": "Single-file undefined-identifier diagnostics. Coordinates are 0-based to match the rest of `ast::*` builtins. Diagnostics are deduplicated by name (first occurrence wins) so callers see one entry per missing import / typo, not one per usage. The Swift consumer maps `row + 1` / `column + 1` back into `UndefinedNameDiagnostic.line` / `.column`.",
+  "description": "Single-file undefined-identifier diagnostics. Coordinates are 0-based to match the rest of `ast::*` builtins. Diagnostics are deduplicated by name (first occurrence wins) so callers see one entry per missing import / typo, not one per usage.",
   "type": "object",
   "properties": {
     "path": { "type": "string" },

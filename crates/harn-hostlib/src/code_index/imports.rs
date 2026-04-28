@@ -3,10 +3,9 @@
 //! Two phases:
 //!
 //! 1. **Extraction** — scan source line-by-line for tokens that look like
-//!    import statements. Mirrors the *fallback* path of the Swift
-//!    `TreeSitterImportExtractor`: prefix-match common keywords per
-//!    language, capture the trimmed line. A tree-sitter-backed extractor can
-//!    replace this without changing the `code_index` public surface.
+//!    import statements: prefix-match common keywords per language and
+//!    capture the trimmed line. A tree-sitter-backed extractor can replace
+//!    this without changing the `code_index` public surface.
 //!
 //! 2. **Resolution** — for each extracted string, apply a per-language
 //!    rule to produce a workspace-relative path, then look that path up
@@ -453,7 +452,7 @@ mod tests {
     fn resolve_python_dotted() {
         let map = ids();
         // Python rule resolves the *package* (`foo.bar` -> `foo/bar.py`),
-        // not the imported symbol — matches Swift `ImportResolver` behaviour.
+        // not the imported symbol.
         let r = resolve(
             &["from foo.bar import baz".to_string()],
             "src/main.py",

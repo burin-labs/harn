@@ -1,7 +1,6 @@
 //! Filtered directory walker + sensitive-file filter.
 //!
-//! Ports the Swift `FilteredWalker` and `SensitiveFilter` together: a
-//! depth-first walk that prunes noisy directories before descending and
+//! Depth-first walk that prunes noisy directories before descending and
 //! refuses to ingest credential-shaped files. Kept self-contained so the
 //! `tools/search` crate can use `ignore` for honoring `.gitignore` while
 //! the indexer stays deterministic across systems regardless of the user's
@@ -57,7 +56,7 @@ const SKIP_DIRS: &[&str] = &[
     // Test coverage
     "coverage",
     ".nyc_output",
-    // Burin-owned
+    // Legacy host cache
     ".burin",
     // Claude Code
     ".claude",
@@ -97,9 +96,9 @@ pub(crate) fn is_indexable_file(path: &Path) -> bool {
     EXTENSIONLESS_ALLOWED.contains(&base.as_str())
 }
 
-/// Best-effort language tag for the supplied extension. Mirrors the Swift
-/// `languageByExtension` map; unknown extensions return the extension
-/// itself so downstream tools can route language-specific behaviour.
+/// Best-effort language tag for the supplied extension. Unknown extensions
+/// return the extension itself so downstream tools can route
+/// language-specific behaviour.
 pub(crate) fn language_for_extension(ext: &str) -> &str {
     match ext {
         "py" | "pyi" => "python",
@@ -133,7 +132,7 @@ pub(crate) fn is_sensitive_path(path: &Path) -> bool {
 }
 
 /// Returns `true` if the path looks like a credentials/secrets file that
-/// must never enter the index. Mirrors the Swift `SensitiveFilter`.
+/// must never enter the index.
 pub(crate) fn is_sensitive(path: &Path) -> bool {
     let lower = path.to_string_lossy().to_ascii_lowercase();
     let base = Path::new(&lower)
@@ -280,7 +279,7 @@ fn should_skip_basename(name: &str, skip_dirs: &HashSet<&str>) -> bool {
         }
         // Dot-prefixed dirs that aren't in `skip_dirs` (e.g. `.cargo`,
         // `.config`) are still walked — only dot-prefixed *files* are
-        // dropped, matching the Swift behaviour. We can't check
+        // dropped. We can't check
         // file-vs-dir here without another stat, so approximate by
         // returning false; the caller's metadata probe will let the dir
         // through and skip the dotfile via `is_indexable_file` (no

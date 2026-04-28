@@ -53,9 +53,8 @@ pub struct IndexedFile {
     pub imports: Vec<String>,
 }
 
-/// Stable 64-bit FNV-1a hash. Used for content-change detection; matches
-/// the Swift `ContentHasher` byte-for-byte so shared snapshots stay
-/// interchangeable.
+/// Stable 64-bit FNV-1a hash used for content-change detection and
+/// snapshot compatibility.
 pub fn fnv1a64(bytes: &[u8]) -> u64 {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     for byte in bytes {
@@ -71,7 +70,6 @@ mod tests {
 
     #[test]
     fn fnv_matches_swift_reference() {
-        // The Swift `ContentHasher.hash("hello world")` reference value.
         // FNV-1a 64-bit is deterministic; this guards against accidental
         // changes (e.g. switching to a different seed/prime) that would
         // silently break shared snapshot interop.
