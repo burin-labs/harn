@@ -17,6 +17,7 @@ pub(crate) const STDLIB_SOURCES: &[(&str, &str)] = &[
     ("math", include_str!("stdlib/stdlib_math.harn")),
     ("path", include_str!("stdlib/stdlib_path.harn")),
     ("json", include_str!("stdlib/stdlib_json.harn")),
+    ("graphql", include_str!("stdlib/stdlib_graphql.harn")),
     ("schema", include_str!("stdlib/stdlib_schema.harn")),
     ("testing", include_str!("stdlib/stdlib_testing.harn")),
     ("vision", include_str!("stdlib/stdlib_vision.harn")),

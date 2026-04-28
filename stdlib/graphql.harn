@@ -1,0 +1,453 @@
+// std/graphql — provider-neutral GraphQL request, envelope, pagination, and codegen helpers.
+//
+// Import with: import "std/graphql"
+import { filter_nil } from "std/collections"
+import { merge } from "std/json"
+
+fn __graphql_list(value) {
+  if value == nil {
+    return []
+  }
+  if type_of(value) == "list" {
+    return value
+  }
+  return [value]
+}
+
+fn __graphql_payload(response) {
+  let body = response?.body ?? response
+  if type_of(body) == "string" {
+    let parsed = try {
+      json_parse(body)
+    }
+    if is_ok(parsed) {
+      return unwrap(parsed)
+    }
+    return {errors: [{message: "GraphQL response body is not valid JSON"}]}
+  }
+  return body ?? {}
+}
+
+fn __graphql_header(headers, name) {
+  if headers == nil {
+    return nil
+  }
+  if headers[name] != nil {
+    return headers[name]
+  }
+  let lower = lowercase(name)
+  for entry in headers {
+    if lowercase(entry.key) == lower {
+      return entry.value
+    }
+  }
+  return nil
+}
+
+fn __graphql_int_header(headers, name) {
+  let value = __graphql_header(headers, name)
+  if value == nil || value == "" {
+    return nil
+  }
+  let parsed = try {
+    to_int(value)
+  }
+  if is_ok(parsed) {
+    return unwrap(parsed)
+  }
+  return nil
+}
+
+fn __graphql_operation_name(query, fallback = nil) {
+  let trimmed = trim(query ?? "")
+  if trimmed == "" {
+    return fallback
+  }
+  for keyword in ["query ", "mutation ", "subscription "] {
+    if starts_with(trimmed, keyword) {
+      let rest = trim(substring(trimmed, len(keyword)))
+      let name = split(split(rest, "(")[0], " ")[0]
+      if name != "" && name != "{" {
+        return name
+      }
+    }
+  }
+  return fallback
+}
+
+fn __graphql_root_field_from_query(query) {
+  let text = query ?? ""
+  let open = text.index_of("{")
+  if open < 0 {
+    return nil
+  }
+  let rest = trim(substring(text, open + 1))
+  if rest == "" {
+    return nil
+  }
+  let token = split(split(split(rest, "(")[0], "{")[0], " ")[0]
+  if token == "" || token == "..." {
+    return nil
+  }
+  return token
+}
+
+/** graphql_introspection_query. */
+pub fn graphql_introspection_query() {
+  return "query HarnIntrospection { __schema { queryType { name } mutationType { name } subscriptionType { name } types { kind name description fields(includeDeprecated: true) { name description args { name type { kind name ofType { kind name ofType { kind name } } } defaultValue } type { kind name ofType { kind name ofType { kind name } } } isDeprecated deprecationReason } inputFields { name description type { kind name ofType { kind name ofType { kind name } } } defaultValue } enumValues(includeDeprecated: true) { name description isDeprecated deprecationReason } interfaces { kind name } possibleTypes { kind name } } directives { name description locations args { name type { kind name ofType { kind name } } defaultValue } } } }"
+}
+
+/** graphql_auth_headers. */
+pub fn graphql_auth_headers(auth = nil, extra_headers = nil) {
+  var headers = {
+    ["Content-Type"]: "application/json",
+    Accept: "application/graphql-response+json, application/json",
+  }
+  if auth != nil {
+    if type_of(auth) == "string" {
+      headers = merge(headers, {Authorization: "Bearer " + auth})
+    } else if auth.authorization != nil {
+      headers = merge(headers, {Authorization: auth.authorization})
+    } else if auth.access_token != nil {
+      headers = merge(headers, {Authorization: "Bearer " + auth.access_token})
+    } else if auth.api_key != nil {
+      headers = merge(headers, {Authorization: auth.api_key})
+    } else if auth.token != nil {
+      let scheme = auth.scheme ?? "Bearer"
+      headers = merge(headers, {Authorization: scheme + " " + auth.token})
+    }
+  }
+  return merge(headers, extra_headers ?? {})
+}
+
+/** graphql_rate_limit_meta. */
+pub fn graphql_rate_limit_meta(headers = nil) {
+  return filter_nil(
+    {
+      requests_limit: __graphql_int_header(headers, "x-ratelimit-requests-limit")
+        ?? __graphql_int_header(headers, "x-ratelimit-limit"),
+      requests_remaining: __graphql_int_header(headers, "x-ratelimit-requests-remaining")
+        ?? __graphql_int_header(headers, "x-ratelimit-remaining"),
+      requests_reset: __graphql_int_header(headers, "x-ratelimit-requests-reset")
+        ?? __graphql_int_header(headers, "x-ratelimit-reset"),
+      endpoint_requests_limit: __graphql_int_header(headers, "x-ratelimit-endpoint-requests-limit"),
+      endpoint_requests_remaining: __graphql_int_header(headers, "x-ratelimit-endpoint-requests-remaining"),
+      endpoint_requests_reset: __graphql_int_header(headers, "x-ratelimit-endpoint-requests-reset"),
+      endpoint_name: __graphql_header(headers, "x-ratelimit-endpoint-name"),
+      complexity: __graphql_int_header(headers, "x-complexity"),
+      complexity_limit: __graphql_int_header(headers, "x-ratelimit-complexity-limit"),
+      complexity_remaining: __graphql_int_header(headers, "x-ratelimit-complexity-remaining"),
+      complexity_reset: __graphql_int_header(headers, "x-ratelimit-complexity-reset"),
+    },
+  )
+}
+
+/** graphql_persisted_query. */
+pub fn graphql_persisted_query(query, options = nil) {
+  let version = options?.version ?? 1
+  let hash = options?.sha256_hash ?? options?.sha256Hash ?? sha256(query)
+  return {
+    version: version,
+    sha256_hash: hash,
+    extensions: {persistedQuery: {version: version, sha256Hash: hash}},
+  }
+}
+
+/** graphql_request_body. */
+pub fn graphql_request_body(query, variables = nil, options = nil) {
+  var body = {}
+  let persisted = options?.persisted_query ?? options?.persistedQuery
+  if persisted != nil {
+    let persisted_meta = if persisted {
+      graphql_persisted_query(query)
+    } else {
+      persisted
+    }
+    body = merge(body, {extensions: persisted_meta.extensions ?? persisted_meta})
+    if persisted_meta.query && options?.include_query {
+      body = merge(body, {query: query})
+    }
+  } else {
+    body = merge(body, {query: query})
+  }
+  if variables != nil {
+    body = merge(body, {variables: variables})
+  }
+  let op_name = options?.operation_name ?? options?.operationName ?? __graphql_operation_name(query)
+  if op_name != nil {
+    body = merge(body, {operationName: op_name})
+  }
+  return body
+}
+
+/** graphql_normalize_response. */
+pub fn graphql_normalize_response(response, options = nil) {
+  let payload = __graphql_payload(response)
+  let status = response?.status ?? options?.status ?? 200
+  let headers = response?.headers ?? options?.headers ?? {}
+  let errors = __graphql_list(payload?.errors)
+  let has_errors = len(errors) > 0
+  let data = payload?.data
+  return {
+    ok: status >= 200 && status < 300 && !has_errors,
+    partial: data != nil && has_errors,
+    data: data,
+    errors: errors,
+    extensions: payload?.extensions ?? {},
+    meta: filter_nil(
+      {
+        status: status,
+        operation_name: options?.operation_name ?? options?.operationName,
+        request_id: __graphql_header(headers, "x-request-id")
+          ?? __graphql_header(headers, "linear-request-id")
+          ?? __graphql_header(headers, "apollographql-client-request-id"),
+        rate_limit: graphql_rate_limit_meta(headers),
+        persisted_query: options?.persisted_query ?? options?.persistedQuery,
+      },
+    ),
+  }
+}
+
+/** graphql_error_messages. */
+pub fn graphql_error_messages(envelope) {
+  return __graphql_list(envelope?.errors).map({ error -> return error?.message ?? to_string(error) })
+}
+
+/** graphql_assert_ok. */
+pub fn graphql_assert_ok(envelope) {
+  let messages = graphql_error_messages(envelope)
+  if envelope?.ok || (envelope?.ok == nil && len(messages) == 0) {
+    return envelope
+  }
+  if len(messages) == 0 {
+    throw_error("GraphQL request failed")
+  }
+  throw_error("GraphQL request failed: " + messages.join("; "))
+}
+
+/** graphql_extract. */
+pub fn graphql_extract(envelope, field, schema = nil) {
+  let value = envelope?.data?[field]
+  if schema != nil {
+    let checked = schema_check(value, schema)
+    if is_err(checked) {
+      throw_error(unwrap_err(checked).message)
+    }
+    return unwrap(checked)
+  }
+  return value
+}
+
+/** graphql_page_info. */
+pub fn graphql_page_info(connection) {
+  let page_info = connection?.pageInfo ?? {}
+  let nodes = connection?.nodes ?? connection?.edges?.map({ edge -> return edge.node }) ?? []
+  return {
+    nodes: nodes,
+    edges: connection?.edges ?? [],
+    has_next_page: page_info?.hasNextPage ?? false,
+    has_previous_page: page_info?.hasPreviousPage ?? false,
+    end_cursor: page_info?.endCursor,
+    start_cursor: page_info?.startCursor,
+  }
+}
+
+/** graphql_next_page_variables. */
+pub fn graphql_next_page_variables(variables, connection, cursor_key = "after") {
+  let page = graphql_page_info(connection)
+  if !page.has_next_page || page.end_cursor == nil {
+    return nil
+  }
+  return merge(variables ?? {}, {[cursor_key]: page.end_cursor})
+}
+
+/** graphql_request. */
+pub fn graphql_request(endpoint, query, variables = nil, options = nil) {
+  let auth = options?.auth ?? options?.authorization
+  let headers = graphql_auth_headers(auth, options?.headers)
+  let body = graphql_request_body(query, variables, options)
+  let response = http_request(
+    "POST",
+    endpoint,
+    filter_nil(
+      {
+        body: json_stringify(body),
+        headers: headers,
+        timeout_ms: options?.timeout_ms,
+        retry: options?.retry,
+      },
+    ),
+  )
+  return graphql_normalize_response(
+    response,
+    merge(
+      options ?? {},
+      {operation_name: body.operationName, persisted_query: options?.persisted_query},
+    ),
+  )
+}
+
+/** graphql_operation. */
+pub fn graphql_operation(name, document, options = nil) {
+  return merge(
+    options ?? {},
+    {
+      name: name,
+      document: document,
+      operation_name: options?.operation_name ?? options?.operationName ?? __graphql_operation_name(document, name),
+      root_field: options?.root_field ?? __graphql_root_field_from_query(document),
+      persisted_query: options?.persisted_query ?? options?.persistedQuery,
+    },
+  )
+}
+
+/** graphql_execute_operation. */
+pub fn graphql_execute_operation(client, operation, variables = nil, options = nil) {
+  let endpoint = if type_of(client) == "string" {
+    client
+  } else {
+    client.endpoint ?? client.url ?? client.api_base_url
+  }
+  let client_options = if type_of(client) == "dict" {
+    client
+  } else {
+    {}
+  }
+  let request_options = merge(client_options, options ?? {})
+  let checked_variables = if operation.variables_schema != nil {
+    let checked = schema_check(variables ?? {}, operation.variables_schema)
+    if is_err(checked) {
+      throw_error(unwrap_err(checked).message)
+    }
+    unwrap(checked)
+  } else {
+    variables
+  }
+  let envelope = graphql_request(
+    endpoint,
+    operation.document,
+    checked_variables,
+    merge(
+      request_options,
+      {
+        operation_name: operation.operation_name ?? operation.name,
+        persisted_query: request_options.persisted_query ?? operation.persisted_query,
+      },
+    ),
+  )
+  let result = if operation.root_field != nil {
+    graphql_extract(envelope, operation.root_field, operation.result_schema)
+  } else {
+    envelope.data
+  }
+  let shaped_result = if type_of(result) == "dict" {
+    merge(result, {meta: envelope.meta})
+  } else {
+    result
+  }
+  return merge(envelope, {result: shaped_result})
+}
+
+fn __graphql_type_header(line) {
+  for kind in ["type", "input", "interface", "enum", "union", "scalar"] {
+    let prefix = kind + " "
+    if starts_with(line, prefix) {
+      let rest = trim(substring(line, len(prefix)))
+      var name = split(split(split(rest, " ")[0], "{")[0], "=")[0]
+      name = trim(name)
+      if name != "" {
+        return {kind: kind, name: name, fields: []}
+      }
+    }
+  }
+  return nil
+}
+
+fn __graphql_field_from_line(line) {
+  let clean = trim(split(split(line, "#")[0], "@")[0])
+  let name = trim(split(split(clean, "(")[0], ":")[0])
+  let field_type = if contains(clean, ":") {
+    trim(split(clean, ":")[1])
+  } else {
+    nil
+  }
+  return filter_nil({name: name, type: field_type})
+}
+
+/** graphql_parse_schema. */
+pub fn graphql_parse_schema(schema_text) {
+  var types = []
+  var current = nil
+  for raw_line in split(schema_text ?? "", "\n") {
+    let line = trim(raw_line)
+    if line == "" || starts_with(line, "#") {
+      continue
+    }
+    let header = __graphql_type_header(line)
+    if header != nil {
+      if current != nil {
+        types = types + [current]
+      }
+      current = header
+      if contains(line, "}") {
+        types = types + [current]
+        current = nil
+      }
+      continue
+    }
+    if current != nil {
+      if starts_with(line, "}") {
+        types = types + [current]
+        current = nil
+      } else if contains(line, ":") {
+        current = merge(current, {fields: current.fields + [__graphql_field_from_line(line)]})
+      }
+    }
+  }
+  if current != nil {
+    types = types + [current]
+  }
+  return {format: "graphql-sdl", types: types}
+}
+
+/** graphql_schema_from_introspection. */
+pub fn graphql_schema_from_introspection(payload) {
+  let source = __graphql_payload(payload)
+  let schema = source?.data?.__schema ?? source?.__schema ?? source
+  return {
+    format: "graphql-introspection",
+    query_type: schema?.queryType?.name,
+    mutation_type: schema?.mutationType?.name,
+    subscription_type: schema?.subscriptionType?.name,
+    types: schema?.types ?? [],
+    directives: schema?.directives ?? [],
+  }
+}
+
+fn __graphql_harn_name(name) {
+  return replace(replace(name, "-", "_"), " ", "_")
+}
+
+/** graphql_codegen_wrapper. */
+pub fn graphql_codegen_wrapper(operation, client_param = "client") {
+  let name = __graphql_harn_name(operation.name ?? operation.operation_name)
+  let operation_json = json_stringify(operation)
+  let operation_literal = json_stringify(operation_json)
+  return "pub fn " + name + "(" + client_param + ", variables = nil, options = nil) {\n"
+    + "  let operation = json_parse("
+    + operation_literal
+    + ")\n"
+    + "  return graphql_execute_operation("
+    + client_param
+    + ", operation, variables, options)\n"
+    + "}\n"
+}
+
+/** graphql_generate_client. */
+pub fn graphql_generate_client(operations, options = nil) {
+  var source = "import { graphql_execute_operation } from \"std/graphql\"\n\n"
+  for operation in operations {
+    source = source + graphql_codegen_wrapper(operation, options?.client_param ?? "client") + "\n"
+  }
+  return source
+}
