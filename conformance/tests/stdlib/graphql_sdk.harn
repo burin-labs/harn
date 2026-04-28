@@ -1,0 +1,70 @@
+import {
+  graphql_execute_operation,
+  graphql_generate_client,
+  graphql_next_page_variables,
+  graphql_normalize_response,
+  graphql_operation,
+  graphql_page_info,
+  graphql_parse_schema,
+  graphql_persisted_query,
+  graphql_schema_from_introspection,
+} from "std/graphql"
+
+pipeline test(task) {
+  let root = project_root() ?? cwd()
+  let schema_text = read_file(path_join(root, "conformance/fixtures/graphql/linear_fixture.graphql"))
+  let parsed = graphql_parse_schema(schema_text)
+  let issue = parsed.types.find({ entry -> return entry.name == "Issue" })
+  let identifier = issue.fields.find({ field -> return field.name == "identifier" })
+  println(identifier.type)
+  let introspected = graphql_schema_from_introspection(
+    {data: {__schema: {queryType: {name: "Query"}, types: [{kind: "OBJECT", name: "Issue"}]}}},
+  )
+  println(introspected.query_type)
+  let endpoint = "https://linear.example/graphql"
+  let query = "query Viewer($id: String!) { viewer(id: $id) { id name } }"
+  let operation = graphql_operation(
+    "viewer",
+    query,
+    {
+      root_field: "viewer",
+      variables_schema: {type: "dict", required: ["id"], properties: {id: {type: "string"}}},
+    },
+  )
+  let generated = graphql_generate_client([operation])
+  println(contains(generated, "pub fn viewer"))
+  http_mock(
+    "POST",
+    endpoint,
+    {
+      status: 200,
+      body: json_stringify({data: {viewer: {id: "user-1", name: "Ada"}}, extensions: {cost: 1}}),
+      headers: {["X-Complexity"]: "7", ["X-RateLimit-Requests-Remaining"]: "49", ["X-Request-Id"]: "req-1"},
+    },
+  )
+  let envelope = graphql_execute_operation(
+    {endpoint: endpoint, auth: {access_token: "linear-token"}},
+    operation,
+    {id: "user-1"},
+  )
+  println(envelope.ok)
+  println(envelope.result.name)
+  println(envelope.meta.rate_limit.requests_remaining)
+  println(envelope.meta.rate_limit.complexity)
+  println(envelope.meta.request_id)
+  println(envelope.result.meta.status)
+  let calls = http_mock_calls()
+  println(json_parse(calls[0].body).operationName)
+  println(calls[0].headers.Authorization)
+  let page = graphql_page_info({nodes: [{id: "ISS-1"}], pageInfo: {hasNextPage: true, endCursor: "cursor-1"}})
+  println(page.nodes[0].id)
+  println(
+    graphql_next_page_variables({first: 1}, {pageInfo: {hasNextPage: true, endCursor: "cursor-1"}}).after,
+  )
+  let persisted = graphql_persisted_query(query)
+  println(len(persisted.sha256_hash))
+  let normalized = graphql_normalize_response(
+    {status: 200, headers: {}, body: "{\"data\":{\"ok\":true},\"errors\":[{\"message\":\"partial\"}]}"},
+  )
+  println(normalized.partial)
+}

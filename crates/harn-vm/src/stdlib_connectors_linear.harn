@@ -1,4 +1,10 @@
 import { filter_nil } from "std/collections"
+import {
+  graphql_assert_ok,
+  graphql_extract,
+  graphql_operation,
+  graphql_page_info,
+} from "std/graphql"
 import { merge } from "std/json"
 import { wait_for } from "std/monitors"
 
@@ -17,20 +23,85 @@ fn __call(method, params = {}) {
   return connector_call("linear", method, filter_nil(merge(linear_connector_config, params ?? {})))
 }
 
+pub fn operation(name, document, options = nil) {
+  return graphql_operation(name, document, options)
+}
+
+pub fn execute(operation, variables = nil, options = nil) {
+  let raw = graphql(
+    operation.document,
+    variables,
+    merge(options ?? {}, {operation_name: operation.operation_name ?? operation.name}),
+  )
+  let envelope = graphql_assert_ok(raw)
+  let result = if operation.root_field != nil {
+    graphql_extract(envelope, operation.root_field, operation.result_schema)
+  } else {
+    envelope.data
+  }
+  let shaped_result = if type_of(result) == "dict" {
+    merge(result, {meta: envelope.meta})
+  } else {
+    result
+  }
+  return merge(envelope, {result: shaped_result})
+}
+
+fn __list_issues_operation() {
+  return operation(
+    "ListIssues",
+    "query ListIssues($filter: IssueFilter, $first: Int, $after: String, $includeArchived: Boolean) { issues(filter: $filter, first: $first, after: $after, includeArchived: $includeArchived) { nodes { id identifier title priority estimate dueDate url createdAt updatedAt state { id name type } team { id key name } assignee { id name } project { id name } cycle { id name } labels { nodes { id name } } } pageInfo { hasNextPage endCursor } } }",
+    {root_field: "issues"},
+  )
+}
+
+fn __update_issue_operation() {
+  return operation(
+    "UpdateIssue",
+    "mutation UpdateIssue($id: String!, $input: IssueUpdateInput!) { issueUpdate(id: $id, input: $input) { success issue { id identifier title priority estimate dueDate url updatedAt state { id name type } assignee { id name } project { id name } cycle { id name } labels { nodes { id name } } } } }",
+    {root_field: "issueUpdate"},
+  )
+}
+
+fn __create_comment_operation() {
+  return operation(
+    "CreateComment",
+    "mutation CreateComment($input: CommentCreateInput!) { commentCreate(input: $input) { success comment { id body url createdAt user { id name } issue { id identifier title } } } }",
+    {root_field: "commentCreate"},
+  )
+}
+
+fn __search_issues_operation() {
+  return operation(
+    "SearchIssues",
+    "query SearchIssues($query: String!, $first: Int) { searchIssues(query: $query, first: $first) { nodes { id identifier title url priority state { id name type } team { id key name } } pageInfo { hasNextPage endCursor } } }",
+    {root_field: "searchIssues"},
+  )
+}
+
 pub fn list_issues(filter = nil, options = nil) {
-  return __call("list_issues", filter_nil(options ?? {} + {filter: filter}))
+  let variables = filter_nil(
+    {
+      filter: filter,
+      first: options?.first,
+      after: options?.after,
+      includeArchived: options?.include_archived ?? options?.includeArchived,
+    },
+  )
+  let connection = execute(__list_issues_operation(), variables, options).result
+  return merge(connection, {page: graphql_page_info(connection)})
 }
 
 pub fn update_issue(id, changes, options = nil) {
-  return __call("update_issue", options ?? {} + {id: id, changes: changes})
+  return execute(__update_issue_operation(), {id: id, input: changes}, options).result
 }
 
 pub fn create_comment(issue_id, body, options = nil) {
-  return __call("create_comment", options ?? {} + {issue_id: issue_id, body: body})
+  return execute(__create_comment_operation(), {input: {issueId: issue_id, body: body}}, options).result
 }
 
 pub fn search(query, options = nil) {
-  return __call("search", options ?? {} + {query: query})
+  return execute(__search_issues_operation(), {query: query, first: options?.first}, options).result
 }
 
 pub fn graphql(query, variables = nil, options = nil) {
@@ -65,36 +136,36 @@ pub fn issue_state_source(issue_id, target_state = nil, options = nil) {
     label: "linear.issue_state:" + to_string(issue_id) + ":" + to_string(target_state ?? "*"),
     prefers_push: true,
     poll: { ctx ->
-    let payload = __linear_payload(ctx?.last_push_event)
-    if payload != nil && __linear_issue_matches(payload, issue_id) {
+      let payload = __linear_payload(ctx?.last_push_event)
+      if payload != nil && __linear_issue_matches(payload, issue_id) {
+        return {
+          matched: __linear_state_matches(payload.issue, target_state),
+          issue: payload.issue,
+          state: payload?.issue?.state,
+          event: payload,
+        }
+      }
+      let response = graphql(
+        "query HarnMonitorIssue($id: String!) { issue(id: $id) { id identifier title state { id name type } } }",
+        {id: issue_id},
+        options,
+      )
+      let issue = response?.data?.issue
       return {
-    matched: __linear_state_matches(payload.issue, target_state),
-    issue: payload.issue,
-    state: payload?.issue?.state,
-    event: payload,
-  }
-    }
-    let response = graphql(
-    "query HarnMonitorIssue($id: String!) { issue(id: $id) { id identifier title state { id name type } } }",
-    {id: issue_id},
-    options,
-  )
-    let issue = response?.data?.issue
-    return {
-    matched: __linear_state_matches(issue, target_state),
-    issue: issue,
-    state: issue?.state,
-    event: nil,
-  }
-  },
+        matched: __linear_state_matches(issue, target_state),
+        issue: issue,
+        state: issue?.state,
+        event: nil,
+      }
+    },
     push_filter: { log_event ->
-    let event = __linear_event(log_event)
-    let payload = __linear_payload(log_event)
-    return event?.provider == "linear"
-    && event?.kind == "issue"
-    && __linear_issue_matches(payload, issue_id)
-    && __linear_state_matches(payload?.issue, target_state)
-  },
+      let event = __linear_event(log_event)
+      let payload = __linear_payload(log_event)
+      return event?.provider == "linear"
+        && event?.kind == "issue"
+        && __linear_issue_matches(payload, issue_id)
+        && __linear_state_matches(payload?.issue, target_state)
+    },
   }
 }
 
@@ -102,8 +173,8 @@ pub fn issue_state_source(issue_id, target_state = nil, options = nil) {
 pub fn wait_until_issue_state(issue_id, target_state, options = nil) {
   return wait_for(
     merge(
-    options ?? {},
-    {source: issue_state_source(issue_id, target_state, options), condition: { state -> state.matched }},
-  ),
+      options ?? {},
+      {source: issue_state_source(issue_id, target_state, options), condition: { state -> state.matched }},
+    ),
   )
 }

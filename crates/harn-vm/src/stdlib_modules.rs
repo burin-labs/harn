@@ -9,6 +9,7 @@ pub fn get_stdlib_source(module: &str) -> Option<&'static str> {
         "math" => Some(include_str!("stdlib_math.harn")),
         "path" => Some(include_str!("stdlib_path.harn")),
         "json" => Some(include_str!("stdlib_json.harn")),
+        "graphql" => Some(include_str!("stdlib_graphql.harn")),
         "schema" => Some(include_str!("stdlib_schema.harn")),
         "testing" => Some(include_str!("stdlib_testing.harn")),
         "vision" => Some(include_str!("stdlib_vision.harn")),

@@ -79,6 +79,15 @@ granular archaeology.
 
 ### Added
 
+- **GraphQL connector SDK substrate (#811).** Adds `import "std/graphql"`
+  for provider-neutral GraphQL-over-HTTP request bodies, auth headers,
+  normalized `{data, errors, extensions, meta}` envelopes, persisted-query
+  metadata, cursor pagination helpers, SDL/introspection normalization, and
+  generated-style operation wrapper source. The Linear stdlib wrapper now
+  drives outbound issue/comment/search helpers through shared GraphQL
+  operation specs, with a fixture schema and conformance smoke test covering
+  the generated-client path.
+
 - **Long-running tool handles for `run_command`, `run_test`,
   `run_build_command` (#778/#803).** Pass `long_running: true` to spawn
   the child process without blocking and receive a handle dict immediately

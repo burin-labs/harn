@@ -1,0 +1,25 @@
+type Query {
+  viewer(id: String!): User
+  issues(first: Int, after: String): IssueConnection
+}
+
+type User {
+  id: ID!
+  name: String!
+}
+
+type Issue {
+  id: ID!
+  identifier: String!
+  title: String!
+}
+
+type IssueConnection {
+  nodes: [Issue!]!
+  pageInfo: PageInfo!
+}
+
+type PageInfo {
+  hasNextPage: Boolean!
+  endCursor: String
+}
