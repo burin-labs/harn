@@ -20,6 +20,7 @@ use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
 
 use harn_vm::event_log::{EventLog, LogEvent, Topic};
+use harn_vm::mcp_protocol;
 use harn_vm::{append_secret_scan_audit, secret_scan_content, SecretFinding};
 
 use crate::cli::{McpServeArgs, McpServeTransport, OrchestratorLocalArgs};
@@ -262,6 +263,15 @@ impl McpOrchestratorService {
             "tools/call" => self.handle_tools_call(id, session, &params).await,
             "resources/list" => self.handle_resources_list(id).await,
             "resources/read" => self.handle_resources_read(id, &params).await,
+            "resources/templates/list" => {
+                harn_vm::jsonrpc::response(id, json!({"resourceTemplates": []}))
+            }
+            "prompts/list" => harn_vm::jsonrpc::response(id, json!({"prompts": []})),
+            "prompts/get" => harn_vm::jsonrpc::error_response(id, -32602, "Unknown prompt"),
+            _ if mcp_protocol::unsupported_latest_spec_method(method).is_some() => {
+                mcp_protocol::unsupported_latest_spec_method_response(id, method)
+                    .expect("checked unsupported MCP method")
+            }
             _ => {
                 harn_vm::jsonrpc::error_response(id, -32601, &format!("Method not found: {method}"))
             }
@@ -505,6 +515,9 @@ impl McpOrchestratorService {
             .get("name")
             .and_then(JsonValue::as_str)
             .unwrap_or_default();
+        if mcp_protocol::requests_task_augmentation(params) {
+            return mcp_protocol::unsupported_task_augmentation_response(id, "tools/call");
+        }
         let arguments = params
             .get("arguments")
             .cloned()
@@ -1644,6 +1657,89 @@ pub fn on_fail(event: TriggerEvent) -> any {
             .as_str()
             .expect("resource text");
         serde_json::from_str(text).unwrap_or_else(|_| json!(text))
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn latest_spec_gap_methods_return_explicit_json_rpc_errors() {
+        let _guard = lock_harn_state();
+        let temp = TempDir::new().unwrap();
+        write_fixture(&temp);
+        let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
+        let mut session = init_session(&service).await;
+
+        for method in mcp_protocol::UNSUPPORTED_LATEST_SPEC_METHODS
+            .iter()
+            .map(|entry| entry.method)
+        {
+            let response = service
+                .handle_request(
+                    &mut session,
+                    harn_vm::jsonrpc::request(99, method, json!({})),
+                )
+                .await;
+            assert_eq!(response["error"]["code"], json!(-32601), "{method}");
+            assert_eq!(response["error"]["data"]["method"], json!(method));
+            assert_eq!(response["error"]["data"]["status"], json!("unsupported"));
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn empty_prompt_and_resource_template_lists_roundtrip() {
+        let _guard = lock_harn_state();
+        let temp = TempDir::new().unwrap();
+        write_fixture(&temp);
+        let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
+        let mut session = init_session(&service).await;
+
+        let templates = service
+            .handle_request(
+                &mut session,
+                harn_vm::jsonrpc::request(10, "resources/templates/list", json!({})),
+            )
+            .await;
+        assert_eq!(templates["result"]["resourceTemplates"], json!([]));
+
+        let prompts = service
+            .handle_request(
+                &mut session,
+                harn_vm::jsonrpc::request(11, "prompts/list", json!({})),
+            )
+            .await;
+        assert_eq!(prompts["result"]["prompts"], json!([]));
+
+        let prompt = service
+            .handle_request(
+                &mut session,
+                harn_vm::jsonrpc::request(12, "prompts/get", json!({"name": "missing"})),
+            )
+            .await;
+        assert_eq!(prompt["error"]["code"], json!(-32602));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn tool_call_rejects_task_augmentation() {
+        let _guard = lock_harn_state();
+        let temp = TempDir::new().unwrap();
+        write_fixture(&temp);
+        let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
+        let mut session = init_session(&service).await;
+
+        let response = service
+            .handle_request(
+                &mut session,
+                harn_vm::jsonrpc::request(
+                    100,
+                    "tools/call",
+                    json!({
+                        "name": "harn.trigger.list",
+                        "arguments": {},
+                        "task": {"title": "async please"}
+                    }),
+                ),
+            )
+            .await;
+        assert_eq!(response["error"]["code"], json!(-32602));
+        assert_eq!(response["error"]["data"]["feature"], json!("tasks"));
     }
 
     #[tokio::test(flavor = "current_thread")]

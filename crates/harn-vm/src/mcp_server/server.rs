@@ -115,6 +115,10 @@ impl McpServer {
             "resources/templates/list" => self.handle_resource_templates_list(&id, &params),
             "prompts/list" => self.handle_prompts_list(&id, &params),
             "prompts/get" => self.handle_prompts_get(&id, &params, vm).await,
+            _ if crate::mcp_protocol::unsupported_latest_spec_method(method).is_some() => {
+                crate::mcp_protocol::unsupported_latest_spec_method_response(id.clone(), method)
+                    .expect("checked unsupported MCP method")
+            }
             _ => serde_json::json!({
                 "jsonrpc": "2.0",
                 "id": id,
@@ -208,6 +212,12 @@ impl McpServer {
         vm: &mut Vm,
     ) -> serde_json::Value {
         let tool_name = params.get("name").and_then(|n| n.as_str()).unwrap_or("");
+        if crate::mcp_protocol::requests_task_augmentation(params) {
+            return crate::mcp_protocol::unsupported_task_augmentation_response(
+                id.clone(),
+                "tools/call",
+            );
+        }
 
         let tool = match self.tools.iter().find(|t| t.name == tool_name) {
             Some(t) => t,

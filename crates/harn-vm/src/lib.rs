@@ -19,6 +19,7 @@ pub mod llm;
 pub mod llm_config;
 pub mod mcp;
 pub mod mcp_card;
+pub mod mcp_protocol;
 pub mod mcp_registry;
 pub mod mcp_server;
 pub mod metadata;

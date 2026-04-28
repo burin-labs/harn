@@ -215,6 +215,37 @@ The server exposes these MCP resources:
 `harn://event/<event_id>` includes the recorded trigger event plus related
 outbox/attempt/DLQ/action-graph trace entries.
 
+## Protocol Support
+
+`harn mcp serve` negotiates MCP protocol version `2025-11-25`. It is a
+control-plane server for Harn orchestration state, so it supports tools,
+resources, logging, cancellation, progress, and streamable HTTP sessions. It
+does not expose prompts, completions, resource subscriptions, roots, sampling,
+elicitation, or MCP tasks.
+
+| Method or feature | Status |
+|---|---|
+| `initialize`, `notifications/initialized`, `ping` | Supported |
+| `logging/setLevel` | Accepted |
+| `tools/list`, `tools/call` | Supported for the Harn tool catalog above |
+| `notifications/progress`, `notifications/cancelled` | Supported for cancellable work |
+| `resources/list`, `resources/read` | Supported for manifest, event, and DLQ resources |
+| `resources/templates/list` | Supported; returns an empty list |
+| `prompts/list` | Supported; returns an empty list |
+| `prompts/get` | Supported error for unknown prompts; the orchestrator server exposes no prompts |
+| `completion/complete` | Explicitly unsupported |
+| `resources/subscribe`, `resources/unsubscribe` | Explicitly unsupported |
+| `roots/list` | Explicitly unsupported |
+| `sampling/createMessage` | Explicitly unsupported |
+| `elicitation/create` | Explicitly unsupported |
+| `tasks/get`, `tasks/result`, `tasks/list`, `tasks/cancel` | Explicitly unsupported |
+| `tools/call` with `params.task` | Rejected; task-augmented execution is not advertised |
+
+Explicitly unsupported methods return a JSON-RPC error with code `-32601` and
+`error.data.type = "mcp.unsupportedFeature"`. Tool calls that request
+task-augmented execution return `-32602` because the request parameters ask for
+a capability Harn does not advertise.
+
 ## Observability
 
 Every MCP tool call appends an `observability.action_graph` event and emits a

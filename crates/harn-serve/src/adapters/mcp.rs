@@ -14,6 +14,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use futures::channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
 use futures::{stream, StreamExt};
+use harn_vm::mcp_protocol;
 use serde_json::{json, Value as JsonValue};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::{mpsc, oneshot};
@@ -408,6 +409,12 @@ impl McpServer {
                 -32602,
                 "Unknown prompt",
             )),
+            _ if mcp_protocol::unsupported_latest_spec_method(method).is_some() => {
+                ImmediateResult::Response(
+                    mcp_protocol::unsupported_latest_spec_method_response(id, method)
+                        .expect("checked unsupported MCP method"),
+                )
+            }
             _ => ImmediateResult::Response(harn_vm::jsonrpc::error_response(
                 id,
                 -32601,
@@ -499,6 +506,12 @@ impl McpServer {
             .and_then(JsonValue::as_str)
             .unwrap_or_default()
             .to_string();
+        if mcp_protocol::requests_task_augmentation(&params) {
+            return Err(mcp_protocol::unsupported_task_augmentation_response(
+                request_id,
+                "tools/call",
+            ));
+        }
         if self.catalog.function(&tool_name).is_none() {
             return Err(harn_vm::jsonrpc::error_response(
                 request_id,
@@ -1277,6 +1290,105 @@ pub fn greet(name: string) -> string {
             .as_str()
             .unwrap()
             .contains("fixture-card"));
+    }
+
+    #[tokio::test]
+    async fn latest_spec_gap_methods_return_explicit_json_rpc_errors() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let script = dir.path().join("server.harn");
+        std::fs::write(
+            &script,
+            r#"
+pub fn greet(name: string) -> string {
+  return name
+}
+"#,
+        )
+        .expect("write script");
+        let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
+        let server = McpServer::new(McpServerConfig::new(core));
+        let session = SharedSession::new();
+        let _ = server.handle_initialize(
+            json!(1),
+            &session,
+            &json!({
+                "protocolVersion": MCP_PROTOCOL_VERSION,
+                "clientInfo": {"name": "test", "version": "1"}
+            }),
+        );
+
+        for method in harn_vm::mcp_protocol::UNSUPPORTED_LATEST_SPEC_METHODS
+            .iter()
+            .map(|entry| entry.method)
+        {
+            let response = match server
+                .process_message(
+                    harn_vm::jsonrpc::request(2, method, json!({})),
+                    session.clone(),
+                    AuthRequest::default(),
+                )
+                .await
+            {
+                ImmediateResult::Response(response) => response,
+                ImmediateResult::Accepted | ImmediateResult::Stream(_) => {
+                    panic!("expected error response for {method}")
+                }
+            };
+            assert_eq!(response["error"]["code"], json!(-32601), "{method}");
+            assert_eq!(response["error"]["data"]["method"], json!(method));
+            assert_eq!(response["error"]["data"]["status"], json!("unsupported"));
+        }
+    }
+
+    #[tokio::test]
+    async fn tool_call_rejects_task_augmentation() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let script = dir.path().join("server.harn");
+        std::fs::write(
+            &script,
+            r#"
+pub fn greet(name: string) -> string {
+  return name
+}
+"#,
+        )
+        .expect("write script");
+        let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
+        let server = McpServer::new(McpServerConfig::new(core));
+        let session = SharedSession::new();
+        let _ = server.handle_initialize(
+            json!(1),
+            &session,
+            &json!({
+                "protocolVersion": MCP_PROTOCOL_VERSION,
+                "clientInfo": {"name": "test", "version": "1"}
+            }),
+        );
+
+        let response = match server
+            .process_message(
+                harn_vm::jsonrpc::request(
+                    2,
+                    "tools/call",
+                    json!({
+                        "name": "greet",
+                        "arguments": {"name": "alice"},
+                        "task": {"title": "async please"}
+                    }),
+                ),
+                session,
+                AuthRequest::default(),
+            )
+            .await
+        {
+            ImmediateResult::Response(response) => response,
+            ImmediateResult::Accepted | ImmediateResult::Stream(_) => {
+                panic!("expected task-augmentation error response")
+            }
+        };
+
+        assert_eq!(response["error"]["code"], json!(-32602));
+        assert_eq!(response["error"]["data"]["feature"], json!("tasks"));
     }
 
     #[test]
