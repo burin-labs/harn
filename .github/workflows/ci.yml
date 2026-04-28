@@ -75,6 +75,7 @@ jobs:
         env:
           NEXTEST_PROFILE: ci
       - run: make conformance
+      - run: make protocol-conformance
       - run: make lint-harn
       - run: make fmt-harn
       # Audit gates promoted from release_gate.sh audit so a stale

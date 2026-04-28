@@ -340,6 +340,34 @@ async fn async_main() {
                 .await;
                 return;
             }
+            if args.target.as_deref() == Some("protocols") {
+                if args.evals || args.determinism || args.record || args.replay || args.watch {
+                    command_error(
+                        "`harn test protocols` cannot be combined with --evals, --determinism, --record, --replay, or --watch",
+                    );
+                }
+                if args.junit.is_some()
+                    || args.agents_target.is_some()
+                    || args.agents_api_key.is_some()
+                    || !args.agents_category.is_empty()
+                    || args.json
+                    || args.json_out.is_some()
+                    || args.agents_workspace_id.is_some()
+                    || args.agents_session_id.is_some()
+                    || args.parallel
+                    || !args.skill_dir.is_empty()
+                {
+                    command_error(
+                        "`harn test protocols` accepts only --filter, --verbose, --timing, and an optional fixture selection",
+                    );
+                }
+                commands::protocol_conformance::run_protocol_conformance(
+                    args.selection.as_deref(),
+                    args.filter.as_deref(),
+                    args.verbose || args.timing,
+                );
+                return;
+            }
             if args.evals {
                 if args.determinism || args.record || args.replay || args.watch {
                     command_error("--evals cannot be combined with --determinism, --record, --replay, or --watch");

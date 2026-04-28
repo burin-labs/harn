@@ -1,0 +1,21 @@
+{
+  "name": "mcp.initialize.unsupported_version",
+  "protocol": "mcp",
+  "schema": "schemas/mcp-2025-11-25.schema.json",
+  "expect": "invalid",
+  "documents": [
+    {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "method": "initialize",
+      "params": {
+        "protocolVersion": "1900-01-01",
+        "capabilities": {},
+        "clientInfo": {
+          "name": "old-client",
+          "version": "0.0.1"
+        }
+      }
+    }
+  ]
+}

@@ -387,9 +387,9 @@ pub(crate) struct TestArgs {
     /// conformance fixtures so bundled `skills/` dirs are picked up.
     #[arg(long = "skill-dir", value_name = "PATH")]
     pub skill_dir: Vec<String>,
-    /// User test path, or `conformance` to target the conformance suite.
+    /// User test path, `conformance`, or `protocols`.
     pub target: Option<String>,
-    /// Optional file or directory under conformance/ when target is `conformance`.
+    /// Optional file or directory under conformance/ or conformance/protocols/.
     pub selection: Option<String>,
 }
 

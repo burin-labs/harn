@@ -1,0 +1,58 @@
+{
+  "name": "acp.session_update.harn_extensions",
+  "protocol": "acp",
+  "schema": "schemas/acp-session-update.schema.json",
+  "expect": "valid",
+  "documents": [
+    {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": {
+        "sessionId": "session-1",
+        "update": {
+          "sessionUpdate": "skill_activated",
+          "skillName": "rust-review",
+          "iteration": 1,
+          "reason": "matched"
+        }
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": {
+        "sessionId": "session-1",
+        "update": {
+          "sessionUpdate": "tool_search_query",
+          "toolUseId": "search-1",
+          "name": "tool_search",
+          "query": {
+            "q": "filesystem read"
+          },
+          "strategy": "bm25",
+          "mode": "client"
+        }
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": {
+        "sessionId": "session-1",
+        "update": {
+          "sessionUpdate": "worker_update",
+          "workerId": "worker-1",
+          "workerName": "reviewer",
+          "workerTask": "review patch",
+          "workerMode": "delegated_stage",
+          "event": "worker_waiting_for_input",
+          "status": "awaiting_input",
+          "terminal": false,
+          "metadata": {
+            "child_run_id": "run_1"
+          }
+        }
+      }
+    }
+  ]
+}

@@ -16,6 +16,7 @@ pub(crate) mod orchestrator;
 pub(crate) mod persona;
 pub(crate) mod playground;
 pub(crate) mod portal;
+pub(crate) mod protocol_conformance;
 pub(crate) mod repl;
 pub(crate) mod run;
 pub(crate) mod serve;

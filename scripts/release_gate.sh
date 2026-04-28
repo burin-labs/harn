@@ -166,6 +166,7 @@ run_rust_audit() {
 
 run_harn_audit() {
   time_phase "harn conformance" make conformance
+  time_phase "protocol conformance" make protocol-conformance
   time_phase "harn lint" make lint-harn
   time_phase "harn fmt --check" make fmt-harn
 }

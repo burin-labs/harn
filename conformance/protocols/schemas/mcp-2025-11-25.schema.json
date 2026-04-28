@@ -1,0 +1,271 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/conformance/protocols/mcp-2025-11-25.schema.json",
+  "title": "Harn MCP 2025-11-25 adapter profile",
+  "description": "Pinned profile derived from modelcontextprotocol/modelcontextprotocol schema/2025-11-25/schema.json for initialize, tools, resources, and prompts.",
+  "oneOf": [
+    { "$ref": "#/$defs/InitializeRequest" },
+    { "$ref": "#/$defs/ListToolsRequest" },
+    { "$ref": "#/$defs/ListResourcesRequest" },
+    { "$ref": "#/$defs/ListResourceTemplatesRequest" },
+    { "$ref": "#/$defs/ListPromptsRequest" },
+    { "$ref": "#/$defs/JsonRpcResultResponse" },
+    { "$ref": "#/$defs/JsonRpcErrorResponse" },
+    { "$ref": "#/$defs/InitializedNotification" }
+  ],
+  "$defs": {
+    "RequestId": {
+      "type": ["string", "integer"]
+    },
+    "JsonRpcRequestBase": {
+      "type": "object",
+      "required": ["jsonrpc", "id", "method"],
+      "additionalProperties": true,
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/RequestId" },
+        "params": { "type": "object" }
+      }
+    },
+    "InitializeRequest": {
+      "allOf": [
+        { "$ref": "#/$defs/JsonRpcRequestBase" },
+        {
+          "type": "object",
+          "required": ["params"],
+          "properties": {
+            "method": { "const": "initialize" },
+            "params": {
+              "type": "object",
+              "required": ["protocolVersion", "capabilities", "clientInfo"],
+              "additionalProperties": true,
+              "properties": {
+                "protocolVersion": { "const": "2025-11-25" },
+                "capabilities": { "type": "object" },
+                "clientInfo": { "$ref": "#/$defs/Implementation" }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "ListToolsRequest": {
+      "allOf": [
+        { "$ref": "#/$defs/JsonRpcRequestBase" },
+        {
+          "type": "object",
+          "properties": {
+            "method": { "const": "tools/list" }
+          }
+        }
+      ]
+    },
+    "ListResourcesRequest": {
+      "allOf": [
+        { "$ref": "#/$defs/JsonRpcRequestBase" },
+        {
+          "type": "object",
+          "properties": {
+            "method": { "const": "resources/list" }
+          }
+        }
+      ]
+    },
+    "ListResourceTemplatesRequest": {
+      "allOf": [
+        { "$ref": "#/$defs/JsonRpcRequestBase" },
+        {
+          "type": "object",
+          "properties": {
+            "method": { "const": "resources/templates/list" }
+          }
+        }
+      ]
+    },
+    "ListPromptsRequest": {
+      "allOf": [
+        { "$ref": "#/$defs/JsonRpcRequestBase" },
+        {
+          "type": "object",
+          "properties": {
+            "method": { "const": "prompts/list" }
+          }
+        }
+      ]
+    },
+    "InitializedNotification": {
+      "type": "object",
+      "required": ["jsonrpc", "method"],
+      "additionalProperties": true,
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "method": { "const": "notifications/initialized" },
+        "params": { "type": "object" }
+      }
+    },
+    "JsonRpcResultResponse": {
+      "type": "object",
+      "required": ["jsonrpc", "id", "result"],
+      "additionalProperties": true,
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/RequestId" },
+        "result": {
+          "oneOf": [
+            { "$ref": "#/$defs/InitializeResult" },
+            { "$ref": "#/$defs/ListToolsResult" },
+            { "$ref": "#/$defs/ListResourcesResult" },
+            { "$ref": "#/$defs/ListResourceTemplatesResult" },
+            { "$ref": "#/$defs/ListPromptsResult" }
+          ]
+        }
+      }
+    },
+    "JsonRpcErrorResponse": {
+      "type": "object",
+      "required": ["jsonrpc", "id", "error"],
+      "additionalProperties": true,
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": {},
+        "error": {
+          "type": "object",
+          "required": ["code", "message"],
+          "additionalProperties": true,
+          "properties": {
+            "code": { "type": "integer" },
+            "message": { "type": "string" }
+          }
+        }
+      }
+    },
+    "InitializeResult": {
+      "type": "object",
+      "required": ["protocolVersion", "capabilities", "serverInfo"],
+      "additionalProperties": true,
+      "properties": {
+        "protocolVersion": { "const": "2025-11-25" },
+        "capabilities": { "$ref": "#/$defs/ServerCapabilities" },
+        "serverInfo": { "$ref": "#/$defs/Implementation" }
+      }
+    },
+    "Implementation": {
+      "type": "object",
+      "required": ["name", "version"],
+      "additionalProperties": true,
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "version": { "type": "string", "minLength": 1 }
+      }
+    },
+    "ServerCapabilities": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "tools": { "type": "object" },
+        "resources": { "type": "object" },
+        "prompts": { "type": "object" },
+        "logging": { "type": "object" }
+      }
+    },
+    "ListToolsResult": {
+      "type": "object",
+      "required": ["tools"],
+      "additionalProperties": true,
+      "properties": {
+        "tools": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Tool" }
+        },
+        "nextCursor": { "type": "string" }
+      }
+    },
+    "Tool": {
+      "type": "object",
+      "required": ["name", "inputSchema"],
+      "additionalProperties": true,
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "inputSchema": { "type": "object" },
+        "outputSchema": { "type": "object" },
+        "annotations": { "type": "object" }
+      }
+    },
+    "ListResourcesResult": {
+      "type": "object",
+      "required": ["resources"],
+      "additionalProperties": true,
+      "properties": {
+        "resources": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Resource" }
+        },
+        "nextCursor": { "type": "string" }
+      }
+    },
+    "ListResourceTemplatesResult": {
+      "type": "object",
+      "required": ["resourceTemplates"],
+      "additionalProperties": true,
+      "properties": {
+        "resourceTemplates": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ResourceTemplate" }
+        },
+        "nextCursor": { "type": "string" }
+      }
+    },
+    "Resource": {
+      "type": "object",
+      "required": ["uri", "name"],
+      "additionalProperties": true,
+      "properties": {
+        "uri": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "mimeType": { "type": "string" }
+      }
+    },
+    "ResourceTemplate": {
+      "type": "object",
+      "required": ["uriTemplate", "name"],
+      "additionalProperties": true,
+      "properties": {
+        "uriTemplate": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "mimeType": { "type": "string" }
+      }
+    },
+    "ListPromptsResult": {
+      "type": "object",
+      "required": ["prompts"],
+      "additionalProperties": true,
+      "properties": {
+        "prompts": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Prompt" }
+        },
+        "nextCursor": { "type": "string" }
+      }
+    },
+    "Prompt": {
+      "type": "object",
+      "required": ["name"],
+      "additionalProperties": true,
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "arguments": {
+          "type": "array",
+          "items": { "type": "object" }
+        }
+      }
+    }
+  }
+}

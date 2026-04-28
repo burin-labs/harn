@@ -1,0 +1,46 @@
+{
+  "name": "a2a.agent_card.discovery",
+  "protocol": "a2a",
+  "schema": "schemas/a2a-1.0.schema.json",
+  "expect": "valid",
+  "documents": [
+    {
+      "name": "reviewer",
+      "description": "Harn peer agent",
+      "supportedInterfaces": [
+        {
+          "url": "https://agent.example.com/a2a",
+          "protocolBinding": "JSONRPC",
+          "protocolVersion": "1.0"
+        }
+      ],
+      "version": "0.7.48",
+      "provider": {
+        "organization": "Harn",
+        "url": "https://harn.dev"
+      },
+      "securitySchemes": {},
+      "security": [],
+      "defaultInputModes": ["application/json", "text/plain"],
+      "defaultOutputModes": ["application/json", "text/plain"],
+      "capabilities": {
+        "streaming": true,
+        "pushNotifications": true,
+        "extendedAgentCard": false
+      },
+      "skills": [
+        {
+          "id": "review",
+          "name": "review",
+          "description": "Invoke exported Harn function 'review'.",
+          "tags": ["harn", "function"],
+          "inputModes": ["application/json", "text/plain"],
+          "outputModes": ["application/json", "text/plain"],
+          "inputSchema": {
+            "type": "object"
+          }
+        }
+      ]
+    }
+  ]
+}
