@@ -21,6 +21,25 @@ fail-fast = false
 failure-output = "immediate-final"
 success-output = "never"
 
+# Tests that spawn the `harn` debug binary as a subprocess are CPU- and
+# I/O-bound during cold start (dyld + amfi cold-cache + Harn pipeline
+# load is ~1–3s per spawn on a warm cache, much higher on a cold one).
+# When the workspace runs at full nextest worker fan-out, dozens of these
+# subprocesses can be in flight at once, which both starves the kernel
+# scheduler and makes each individual subprocess startup slow enough to
+# trip the 60s slow-test ceiling.
+#
+# Until April 2026 this was enforced by a `flock(2)`-backed cross-process
+# lock that made every subprocess test fully serial — which was *too*
+# tight: the tail of the queue waited 30–40s for its turn under the lock
+# alone, even before doing any work of its own. The correct shape is
+# bounded parallelism, not full serialization. Cap this group at 4
+# in-flight tests so a) cold-start latency stays low (peak concurrency is
+# four, not thirty) while b) wall-clock parallelism remains substantial
+# vs. the old serial behavior.
+[test-groups]
+harn-subprocess = { max-threads = 4 }
+
 # Transport-layer LLM tests do real localhost TCP with a 3s accept deadline.
 # They're bounded internally but give them a bit more room than the default
 # slow-test threshold to reduce false-positive flags on cold CI workers.
@@ -31,3 +50,14 @@ slow-timeout = { period = "30s", terminate-after = 3, grace-period = "5s" }
 [[profile.ci.overrides]]
 filter = 'package(harn-vm) and test(/llm::api::tests/)'
 slow-timeout = { period = "60s", terminate-after = 3, grace-period = "10s" }
+
+# Bound parallelism for any harn-cli integration test that spawns the
+# `harn` debug binary as a subprocess. See the `[test-groups]` block
+# above for rationale.
+[[profile.default.overrides]]
+filter = "package(harn-cli) and kind(test)"
+test-group = "harn-subprocess"
+
+[[profile.ci.overrides]]
+filter = "package(harn-cli) and kind(test)"
+test-group = "harn-subprocess"

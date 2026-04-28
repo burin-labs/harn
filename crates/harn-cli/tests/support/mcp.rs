@@ -8,9 +8,14 @@ use std::thread;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-pub use process::HarnProcessTestLock;
+pub use process::HarnProcessTestNoLock;
 
-pub fn lock_mcp_process_tests() -> HarnProcessTestLock {
+#[allow(dead_code)]
+pub fn lock_mcp_process_tests() -> HarnProcessTestNoLock {
+    // The cross-process lock that this used to acquire was retired in favor
+    // of tempdir + ephemeral-port isolation; see `support::process` for the
+    // full rationale. Returning the unit sentinel keeps existing call sites
+    // compiling and ergonomically correct (`let _lock = ...;`).
     process::lock_harn_process_tests()
 }
 

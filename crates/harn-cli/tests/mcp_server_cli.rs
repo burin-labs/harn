@@ -22,7 +22,7 @@ use tempfile::TempDir;
 // nextest load.
 const PROCESS_READY_TIMEOUT: Duration = Duration::from_secs(60);
 
-fn lock_mcp_cli_tests() -> mcp_support::HarnProcessTestLock {
+fn lock_mcp_cli_tests() -> mcp_support::HarnProcessTestNoLock {
     mcp_support::lock_mcp_process_tests()
 }
 

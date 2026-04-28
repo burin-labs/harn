@@ -1751,6 +1751,7 @@ mod tests {
     use super::*;
     use std::collections::BTreeMap;
     use std::net::TcpStream;
+    use std::sync::{Arc, Barrier};
     use std::thread;
 
     #[test]
@@ -1914,13 +1915,57 @@ mod tests {
 
     #[test]
     fn github_install_callback_captures_installation_id() {
+        // Architectural notes for this test (vs. the previous racey version):
+        //
+        // 1. The production callback listener is non-blocking so it can poll
+        //    the 5-minute OAUTH_CALLBACK_TIMEOUT deadline. That poll cadence
+        //    (50ms sleep between WouldBlock retries) is irrelevant for the
+        //    test's happy path — and it interacts badly with macOS's
+        //    loopback accept queue under nextest load. Switch the listener
+        //    back to blocking so the test exercises the deterministic
+        //    "accept blocks until client connects" path instead of the
+        //    WouldBlock+sleep loop.
+        //
+        // 2. Use a `Barrier` to make the client thread wait until the
+        //    server thread has reached its accept call. Without this the
+        //    client could `connect()` and queue in the kernel backlog
+        //    arbitrarily long before the server-side accept runs, which
+        //    leaves no clear ordering for failure attribution and makes
+        //    the test sensitive to scheduler hiccups.
+        //
+        // 3. Apply a read timeout on the client stream so a hung server
+        //    fails fast (with a clear error) rather than producing a
+        //    test-runner timeout 60+ seconds later.
         let (listener, redirect_uri) =
             bind_loopback_listener("http://127.0.0.1:0/gh-install-callback")
                 .expect("loopback listener");
+        listener
+            .set_nonblocking(false)
+            .expect("revert listener to blocking for deterministic test accept");
         let parsed = Url::parse(&redirect_uri).unwrap();
         let port = parsed.port().unwrap();
+        let redirect_uri_for_server = redirect_uri.clone();
+        let server_ready = Arc::new(Barrier::new(2));
+        let client_ready = Arc::clone(&server_ready);
+        let server = thread::spawn(move || {
+            // The barrier rendezvous happens just before the call into
+            // wait_for_github_installation, which immediately calls
+            // listener.accept(). The kernel queues a connect() that races
+            // here in the listen backlog — but the ordering is still
+            // deterministic: accept() will return as soon as the client
+            // has called connect().
+            server_ready.wait();
+            wait_for_github_installation(listener, &redirect_uri_for_server, Some("state-ok"))
+        });
         let client = thread::spawn(move || {
+            client_ready.wait();
             let mut stream = TcpStream::connect(("127.0.0.1", port)).expect("connect callback");
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .expect("set client read timeout");
+            stream
+                .set_write_timeout(Some(Duration::from_secs(5)))
+                .expect("set client write timeout");
             stream
                 .write_all(
                     b"GET /gh-install-callback?installation_id=12345&state=state-ok HTTP/1.1\r\nHost: 127.0.0.1\r\nOrigin: null\r\n\r\n",
@@ -1932,9 +1977,10 @@ mod tests {
                 .expect("read callback response");
             assert!(response.contains("200 OK"));
         });
-        let installation_id =
-            wait_for_github_installation(listener, &redirect_uri, Some("state-ok"))
-                .expect("installation id");
+        let installation_id = server
+            .join()
+            .expect("server thread")
+            .expect("installation id");
         client.join().expect("callback client");
         assert_eq!(installation_id, "12345");
     }

@@ -6,10 +6,29 @@ use std::process::Child;
 use std::thread;
 use std::time::{Duration, Instant};
 
-pub type OrchestratorProcessTestLock = process::HarnProcessTestLock;
+/// Sentinel "lock" returned by [`lock_orchestrator_process_tests`].
+///
+/// Historically this was a real cross-process file lock so subprocess-based
+/// orchestrator tests serialized end-to-end. Each test already operates on
+/// its own [`tempfile::TempDir`] state directory, binds an ephemeral
+/// loopback port (`127.0.0.1:0`), and configures secrets only via the
+/// subprocess's own environment — there is no shared state for the lock to
+/// guard against. The serialization itself, on the other hand, deeply hurt:
+/// 19 orchestrator-http tests each held the lock through a full subprocess
+/// spawn + shutdown, so the last test in the queue waited tens of seconds
+/// for its turn and frequently exceeded the nextest 60s ceiling.
+///
+/// The lock now exists only as a typed sentinel so existing call sites
+/// continue to compile during incremental migrations. Tests that
+/// previously relied on `let _lock = lock_orchestrator_process_tests();`
+/// run in parallel under nextest and rely on tempdir + ephemeral-port
+/// isolation for correctness.
+#[allow(dead_code)]
+pub type OrchestratorProcessTestLock = process::HarnProcessTestNoLock;
 
+#[allow(dead_code)]
 pub fn lock_orchestrator_process_tests() -> OrchestratorProcessTestLock {
-    process::lock_harn_process_tests()
+    process::HarnProcessTestNoLock
 }
 
 pub fn wait_for_readyz(child: &mut Child, base_url: &str, timeout: Duration) -> Result<(), String> {
