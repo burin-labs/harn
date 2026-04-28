@@ -7,9 +7,17 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
-## Unreleased
+## v0.7.48
 
 ### Added
+
+- **MCP script surfaces served over HTTP (#808/#828).** Script-authored
+  `mcp_tools` / resources / templates / prompts now serve over Streamable
+  HTTP as well as stdio, sharing the VM MCP JSON-RPC handler with the
+  new script HTTP wrapper (sessions, Streamable HTTP POST/GET, legacy
+  SSE compatibility). DispatchCore `pub fn` MCP servers can now carry
+  Server Card metadata, and the surface adds resource/list/read plus
+  prompt/resource-template discovery fallbacks with cursor pagination.
 
 - **A2A AgentCard discovery alignment (#806/#821).** Serve
   `/.well-known/agent-card.json` as the canonical A2A discovery endpoint
