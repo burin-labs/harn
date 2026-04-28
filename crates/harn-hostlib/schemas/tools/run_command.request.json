@@ -16,7 +16,8 @@
     },
     "stdin": { "type": "string" },
     "timeout_ms": { "type": "integer", "minimum": 0 },
-    "capture_stderr": { "type": "boolean", "default": true }
+    "capture_stderr": { "type": "boolean", "default": true },
+    "long_running": { "type": "boolean", "default": false }
   },
   "required": ["argv"],
   "additionalProperties": false

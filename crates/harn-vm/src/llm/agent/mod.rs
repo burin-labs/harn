@@ -1,5 +1,5 @@
 use std::rc::Rc;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock, Mutex};
 
 use crate::agent_events::{self, AgentEvent, AgentEventSink};
 use crate::value::{VmError, VmValue};
@@ -45,6 +45,21 @@ thread_local! {
     static CURRENT_LOOP_SINKS: std::cell::RefCell<Vec<Arc<dyn AgentEventSink>>> =
         const { std::cell::RefCell::new(Vec::new()) };
 }
+
+/// Boxed session-end hook: receives a `session_id` string.
+type SessionEndHook = Arc<dyn Fn(&str) + Send + Sync>;
+
+/// Global (cross-thread) pending feedback queue. Background threads (e.g.
+/// long-running tool monitors) push here; the turn-loop drains both this
+/// and the thread-local `PENDING_FEEDBACK` at each preflight boundary.
+static GLOBAL_PENDING_FEEDBACK: LazyLock<Mutex<Vec<(String, String, String)>>> =
+    LazyLock::new(|| Mutex::new(Vec::new()));
+
+/// Registry of hooks called when an agent-loop session ends (normally or via
+/// budget exhaustion). Each hook receives the session_id so it can release
+/// resources scoped to that session (e.g. killing orphaned child processes).
+static SESSION_END_HOOKS: LazyLock<Mutex<Vec<SessionEndHook>>> =
+    LazyLock::new(|| Mutex::new(Vec::new()));
 
 /// RAII guard that pushes a per-loop event sink onto the
 /// `CURRENT_LOOP_SINKS` stack and pops it on drop. Constructed from
@@ -161,12 +176,65 @@ pub(crate) fn push_pending_feedback(session_id: &str, kind: &str, content: &str)
     });
 }
 
+/// Push a pending-feedback item from any thread (not just the agent-loop
+/// thread). Background tasks (e.g. long-running tool monitors) use this
+/// to deliver results; the turn loop drains it at each preflight boundary.
+pub fn push_pending_feedback_global(session_id: &str, kind: &str, content: &str) {
+    if let Ok(mut q) = GLOBAL_PENDING_FEEDBACK.lock() {
+        q.push((
+            session_id.to_string(),
+            kind.to_string(),
+            content.to_string(),
+        ));
+    }
+}
+
+/// Register a hook that fires when any agent-loop session ends. The hook
+/// receives the session_id and must be `Send + Sync` so it can be stored
+/// across threads. Idempotent registration is the caller's responsibility.
+pub fn register_session_end_hook(hook: SessionEndHook) {
+    if let Ok(mut hooks) = SESSION_END_HOOKS.lock() {
+        hooks.push(hook);
+    }
+}
+
+fn fire_session_end_hooks(session_id: &str) {
+    if let Ok(hooks) = SESSION_END_HOOKS.lock() {
+        for hook in hooks.iter() {
+            hook(session_id);
+        }
+    }
+}
+
+/// Drain every item for `session_id` from the global (cross-thread) queue only.
+/// Intended for integration tests that want to inspect feedback pushed by
+/// background threads without running a full agent loop.
+pub fn drain_global_pending_feedback(session_id: &str) -> Vec<(String, String)> {
+    let mut drained = Vec::new();
+    if let Ok(mut q) = GLOBAL_PENDING_FEEDBACK.lock() {
+        let mut kept = Vec::new();
+        for (sid, kind, content) in q.drain(..) {
+            if sid == session_id {
+                drained.push((kind, content));
+            } else {
+                kept.push((sid, kind, content));
+            }
+        }
+        *q = kept;
+    }
+    drained
+}
+
 /// Drain every pending-feedback item for a session. Called by the turn
-/// loop at injection boundaries.
+/// loop at injection boundaries. Drains both the thread-local queue (items
+/// pushed from the agent-loop thread) and the global queue (items pushed
+/// from background threads).
 pub(super) fn drain_pending_feedback(session_id: &str) -> Vec<(String, String)> {
+    let mut drained: Vec<(String, String)> = Vec::new();
+
+    // Drain thread-local queue.
     PENDING_FEEDBACK.with(|q| {
         let mut queue = q.borrow_mut();
-        let mut drained: Vec<(String, String)> = Vec::new();
         let mut kept: Vec<(String, String, String)> = Vec::new();
         for (sid, kind, content) in queue.drain(..) {
             if sid == session_id {
@@ -176,8 +244,22 @@ pub(super) fn drain_pending_feedback(session_id: &str) -> Vec<(String, String)> 
             }
         }
         *queue = kept;
-        drained
-    })
+    });
+
+    // Drain global (cross-thread) queue.
+    if let Ok(mut q) = GLOBAL_PENDING_FEEDBACK.lock() {
+        let mut kept: Vec<(String, String, String)> = Vec::new();
+        for (sid, kind, content) in q.drain(..) {
+            if sid == session_id {
+                drained.push((kind, content));
+            } else {
+                kept.push((sid, kind, content));
+            }
+        }
+        *q = kept;
+    }
+
+    drained
 }
 
 /// RAII guard that binds the agent loop's tool registry as the thread's
@@ -216,7 +298,7 @@ pub(crate) fn current_host_bridge() -> Option<Rc<crate::bridge::HostBridge>> {
     CURRENT_HOST_BRIDGE.with(|slot| slot.borrow().clone())
 }
 
-pub(crate) fn current_agent_session_id() -> Option<String> {
+pub fn current_agent_session_id() -> Option<String> {
     CURRENT_AGENT_SESSION_ID.with(|slot| slot.borrow().clone())
 }
 
@@ -468,7 +550,7 @@ pub async fn run_agent_loop_internal(
         .await;
     }
 
-    finalize::run_finalize(
+    let result = finalize::run_finalize(
         &mut state,
         opts,
         bridge,
@@ -477,7 +559,13 @@ pub async fn run_agent_loop_internal(
         &tool_format,
         loop_start,
     )
-    .await
+    .await;
+
+    // Notify external resource managers (e.g. long-running tool handles)
+    // that this session has ended so they can clean up orphaned processes.
+    fire_session_end_hooks(&session_id);
+
+    result
 }
 
 #[cfg(test)]

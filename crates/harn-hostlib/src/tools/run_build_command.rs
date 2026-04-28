@@ -42,6 +42,7 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let target = optional_string(NAME, &map, "target")?;
     let release = optional_bool(NAME, &map, "release")?.unwrap_or(false);
     let timeout = optional_timeout(NAME, &map, "timeout_ms")?;
+    let long_running = optional_bool(NAME, &map, "long_running")?.unwrap_or(false);
 
     let (argv, source) = if let Some(argv) = optional_string_list(NAME, &map, "argv")? {
         let source = infer_diagnostic_source(&argv);
@@ -56,6 +57,20 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     };
 
     let (program, args_tail) = parse_argv_program(NAME, argv)?;
+
+    if long_running {
+        let session_id = harn_vm::current_agent_session_id().unwrap_or_default();
+        let info = super::long_running::spawn_long_running(
+            NAME,
+            program,
+            args_tail,
+            cwd_path,
+            BTreeMap::new(),
+            session_id,
+        )?;
+        return Ok(info.into_handle_response());
+    }
+
     let outcome = proc::run(SpawnRequest {
         builtin: NAME,
         program,

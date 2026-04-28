@@ -367,9 +367,13 @@ fn build_schema_nudge(
 
 pub(crate) use self::agent::parse_skill_match_config_public as parse_skill_match_config_dict;
 pub(crate) use self::agent::SkillMatchConfig;
+pub use self::agent::{
+    current_agent_session_id, drain_global_pending_feedback, push_pending_feedback_global,
+    register_session_end_hook,
+};
 pub(crate) use self::agent::{
-    current_agent_session_id, current_host_bridge, emit_agent_event as emit_live_agent_event,
-    parse_skill_config, run_agent_loop_internal,
+    current_host_bridge, emit_agent_event as emit_live_agent_event, parse_skill_config,
+    run_agent_loop_internal,
 };
 pub(crate) use self::agent_config::{
     agent_loop_result_from_llm, AgentLoopConfig, DEFAULT_AGENT_LOOP_LLM_RETRIES,

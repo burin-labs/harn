@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/tools/cancel_handle.response.json",
+  "title": "tools.cancel_handle response",
+  "type": "object",
+  "properties": {
+    "handle_id": { "type": "string" },
+    "cancelled": { "type": "boolean" }
+  },
+  "required": ["handle_id", "cancelled"],
+  "additionalProperties": false
+}

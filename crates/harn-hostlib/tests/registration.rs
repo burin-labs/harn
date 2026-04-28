@@ -197,6 +197,7 @@ fn tools_capability_registers_documented_methods() {
             "hostlib_tools_run_build_command",
             "hostlib_tools_inspect_test_results",
             "hostlib_tools_manage_packages",
+            "hostlib_tools_cancel_handle",
             // Per-session opt-in builtin.
             "hostlib_enable",
         ]
@@ -219,6 +220,7 @@ fn tools_capability_registers_documented_methods() {
         "hostlib_tools_run_build_command",
         "hostlib_tools_inspect_test_results",
         "hostlib_tools_manage_packages",
+        "hostlib_tools_cancel_handle",
     ];
     for name in gated_methods {
         let entry = registry.find(name).expect("registered");
@@ -245,9 +247,9 @@ fn install_default_wires_every_module_into_a_vm() {
         registry.modules(),
         &["ast", "code_index", "scanner", "fs_watch", "tools"]
     );
-    // Builtin count: 12 ast + 27 code_index + 2 scanner + 2 fs_watch + 12
-    // tools + 1 hostlib_enable = 56.
-    assert!(registry.builtins().len() >= 56);
+    // Builtin count: 12 ast + 27 code_index + 2 scanner + 2 fs_watch + 13
+    // tools + 1 hostlib_enable = 57.
+    assert!(registry.builtins().len() >= 57);
 }
 
 #[test]

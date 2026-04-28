@@ -30,7 +30,8 @@ use crate::error::HostlibError;
 use crate::tools::inspect_test_results::{store_run, RawArtifacts, TestSummaryData};
 use crate::tools::lang::{detect, Ecosystem};
 use crate::tools::payload::{
-    optional_string, optional_string_list, optional_timeout, parse_argv_program, require_dict_arg,
+    optional_bool, optional_string, optional_string_list, optional_timeout, parse_argv_program,
+    require_dict_arg,
 };
 use crate::tools::proc::{self, SpawnRequest};
 use crate::tools::response::ResponseBuilder;
@@ -47,6 +48,7 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         .unwrap_or_else(|| PathBuf::from("."));
     let filter = optional_string(NAME, &map, "filter")?;
     let timeout = optional_timeout(NAME, &map, "timeout_ms")?;
+    let long_running = optional_bool(NAME, &map, "long_running")?.unwrap_or(false);
 
     let plan = if let Some(argv) = optional_string_list(NAME, &map, "argv")? {
         TestPlan::Explicit(argv)
@@ -61,6 +63,19 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
 
     let (argv, junit_tmp) = plan.build_argv(filter.as_deref(), &cwd_for_detect)?;
     let (program, args_tail) = parse_argv_program(NAME, argv.clone())?;
+
+    if long_running {
+        let session_id = harn_vm::current_agent_session_id().unwrap_or_default();
+        let info = super::long_running::spawn_long_running(
+            NAME,
+            program,
+            args_tail,
+            cwd_path,
+            BTreeMap::new(),
+            session_id,
+        )?;
+        return Ok(info.into_handle_response());
+    }
 
     let outcome = proc::run(SpawnRequest {
         builtin: NAME,

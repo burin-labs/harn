@@ -11,7 +11,8 @@
     "cwd": { "type": "string" },
     "target": { "type": "string" },
     "release": { "type": "boolean", "default": false },
-    "timeout_ms": { "type": "integer", "minimum": 0 }
+    "timeout_ms": { "type": "integer", "minimum": 0 },
+    "long_running": { "type": "boolean", "default": false }
   },
   "additionalProperties": false
 }
