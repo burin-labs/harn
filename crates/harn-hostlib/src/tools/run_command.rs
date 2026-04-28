@@ -12,6 +12,9 @@
 //!   it (matches what Swift returned to LLMs).
 //! - There is no implicit cap of 300s on `timeout_ms`; the caller decides.
 //!   Sandboxing limits the blast radius regardless.
+//! - `long_running: true` spawns without waiting and returns a handle dict
+//!   immediately. The result arrives via `agent_inject_feedback` when the
+//!   process exits. See `tools/long_running.rs`.
 
 use harn_vm::VmValue;
 
@@ -34,6 +37,15 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let stdin = payload_str(&map, "stdin");
     let timeout = optional_timeout(NAME, &map, "timeout_ms")?;
     let capture_stderr = optional_bool(NAME, &map, "capture_stderr")?.unwrap_or(true);
+    let long_running = optional_bool(NAME, &map, "long_running")?.unwrap_or(false);
+
+    if long_running {
+        let session_id = harn_vm::current_agent_session_id().unwrap_or_default();
+        let info = super::long_running::spawn_long_running(
+            NAME, program, args_tail, cwd, env, session_id,
+        )?;
+        return Ok(info.into_handle_response());
+    }
 
     let outcome = proc::run(SpawnRequest {
         builtin: NAME,

@@ -695,6 +695,18 @@ pub const SCHEMAS: &[(&str, &str, SchemaKind, &str)] = &[
     ),
     (
         "tools",
+        "cancel_handle",
+        SchemaKind::Request,
+        include_str!("../schemas/tools/cancel_handle.request.json"),
+    ),
+    (
+        "tools",
+        "cancel_handle",
+        SchemaKind::Response,
+        include_str!("../schemas/tools/cancel_handle.response.json"),
+    ),
+    (
+        "tools",
         "enable",
         SchemaKind::Request,
         include_str!("../schemas/tools/enable.request.json"),

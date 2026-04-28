@@ -1,6 +1,6 @@
-//! Integration tests for the five process-lifecycle tool builtins
+//! Integration tests for the process-lifecycle tool builtins
 //! (`run_command`, `run_test`, `run_build_command`,
-//! `inspect_test_results`, `manage_packages`).
+//! `inspect_test_results`, `manage_packages`, `cancel_handle`).
 //!
 //! These spawn real subprocesses, so they're gated to Unix and rely only
 //! on coreutils / shell that ship with both macOS and standard Linux
@@ -12,6 +12,9 @@
 //!   through `HostlibError` rather than panicking
 //! - language detection picks the right runner from manifest files
 //! - inspect_test_results parses JUnit XML written by `run_test`
+//! - long_running: true returns a handle synchronously; result lands in the
+//!   global pending-feedback queue after the process exits
+//! - cancel_handle kills the spawned process
 
 #![cfg(unix)]
 
@@ -408,4 +411,186 @@ fn manage_packages_runs_for_detected_npm_workspace_when_manifest_present() {
         }
         Err(other) => panic!("unexpected error variant: {other:?}"),
     }
+}
+
+// -------- long_running handles --------
+
+#[test]
+fn run_command_long_running_returns_handle_immediately() {
+    // A 10-second sleep: the handle must arrive before the process exits.
+    let mut req = dict();
+    req.insert("argv".into(), vlist_str(&["sleep", "10"]));
+    req.insert("long_running".into(), VmValue::Bool(true));
+    let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
+
+    let handle_id = require_str(&resp, "handle_id");
+    assert!(!handle_id.is_empty(), "handle_id must be non-empty");
+    assert!(
+        handle_id.starts_with("hto-"),
+        "handle_id should start with hto-, got {handle_id}"
+    );
+    assert!(require_int(&resp, "started_at") > 0);
+    let cmd = require_str(&resp, "command");
+    assert!(
+        cmd.contains("sleep"),
+        "command should contain 'sleep', got {cmd}"
+    );
+
+    // Clean up: cancel so sleep doesn't outlive the test.
+    let mut cancel_req = dict();
+    cancel_req.insert("handle_id".into(), vstr(&handle_id));
+    let cancel_resp = require_dict(call("hostlib_tools_cancel_handle", cancel_req).unwrap());
+    assert!(require_bool(&cancel_resp, "cancelled"));
+}
+
+#[test]
+fn run_command_long_running_feedback_fires_after_exit() {
+    use std::time::Duration;
+
+    // Use a process-unique session id so parallel tests don't interfere.
+    let session_id = format!(
+        "test-lr-feedback-{}-{:?}",
+        std::process::id(),
+        std::thread::current().id()
+    );
+
+    // Spawn a short-lived process: echoes stdout, stderr, then exits 0.
+    let info = harn_hostlib::tools::long_running::spawn_long_running(
+        "test_builtin",
+        "bash".into(),
+        vec![
+            "-c".into(),
+            "echo 'hello stdout'; echo 'hello stderr' 1>&2".into(),
+        ],
+        None,
+        std::collections::BTreeMap::new(),
+        session_id.clone(),
+    )
+    .expect("spawn_long_running failed");
+
+    assert!(!info.handle_id.is_empty());
+
+    // Poll the global feedback queue until the item arrives (max 5 s).
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let items = harn_vm::drain_global_pending_feedback(&session_id);
+        if !items.is_empty() {
+            let (kind, content) = &items[0];
+            assert_eq!(kind, "tool_result", "unexpected feedback kind: {kind}");
+            let payload: serde_json::Value =
+                serde_json::from_str(content).expect("feedback content not valid JSON");
+            assert_eq!(
+                payload["handle_id"].as_str().unwrap(),
+                info.handle_id,
+                "handle_id mismatch in feedback"
+            );
+            assert_eq!(payload["exit_code"], 0);
+            assert!(
+                payload["stdout"].as_str().unwrap().contains("hello stdout"),
+                "stdout missing: {}",
+                payload["stdout"]
+            );
+            assert!(
+                payload["stderr"].as_str().unwrap().contains("hello stderr"),
+                "stderr missing: {}",
+                payload["stderr"]
+            );
+            assert!(
+                payload["duration_ms"].as_i64().unwrap() >= 0,
+                "duration_ms must be non-negative"
+            );
+            return;
+        }
+        if std::time::Instant::now() >= deadline {
+            panic!("feedback never arrived in 5 s");
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+#[test]
+fn cancel_handle_kills_long_running_process() {
+    use std::time::Duration;
+
+    let session_id = format!(
+        "test-lr-cancel-{}-{:?}",
+        std::process::id(),
+        std::thread::current().id()
+    );
+
+    let info = harn_hostlib::tools::long_running::spawn_long_running(
+        "test_builtin",
+        "sleep".into(),
+        vec!["30".into()],
+        None,
+        std::collections::BTreeMap::new(),
+        session_id.clone(),
+    )
+    .expect("spawn_long_running failed");
+
+    // Cancel via the builtin — should return cancelled: true.
+    let mut req = dict();
+    req.insert("handle_id".into(), vstr(&info.handle_id));
+    let resp = require_dict(call("hostlib_tools_cancel_handle", req).unwrap());
+    assert!(require_bool(&resp, "cancelled"));
+    assert_eq!(require_str(&resp, "handle_id"), info.handle_id);
+
+    // Cancelling the same handle a second time should return cancelled: false.
+    let mut req2 = dict();
+    req2.insert("handle_id".into(), vstr(&info.handle_id));
+    let resp2 = require_dict(call("hostlib_tools_cancel_handle", req2).unwrap());
+    assert!(
+        !require_bool(&resp2, "cancelled"),
+        "second cancel should return false"
+    );
+
+    // A feedback item for the killed process may or may not arrive depending
+    // on whether the waiter thread observed the exit before we removed the
+    // entry. Drain and discard so we don't pollute other tests.
+    std::thread::sleep(Duration::from_millis(200));
+    harn_vm::drain_global_pending_feedback(&session_id);
+}
+
+#[test]
+fn cancel_handle_unknown_handle_returns_false() {
+    let mut req = dict();
+    req.insert("handle_id".into(), vstr("hto-deadbeef-no-such-handle"));
+    let resp = require_dict(call("hostlib_tools_cancel_handle", req).unwrap());
+    assert!(!require_bool(&resp, "cancelled"));
+}
+
+#[test]
+fn run_test_long_running_returns_handle() {
+    let mut req = dict();
+    req.insert("argv".into(), vlist_str(&["sleep", "10"]));
+    req.insert("long_running".into(), VmValue::Bool(true));
+    let resp = require_dict(call("hostlib_tools_run_test", req).unwrap());
+    let handle_id = require_str(&resp, "handle_id");
+    assert!(
+        handle_id.starts_with("hto-"),
+        "unexpected handle_id: {handle_id}"
+    );
+
+    // Clean up.
+    let mut cancel_req = dict();
+    cancel_req.insert("handle_id".into(), vstr(&handle_id));
+    call("hostlib_tools_cancel_handle", cancel_req).unwrap();
+}
+
+#[test]
+fn run_build_command_long_running_returns_handle() {
+    let mut req = dict();
+    req.insert("argv".into(), vlist_str(&["sleep", "10"]));
+    req.insert("long_running".into(), VmValue::Bool(true));
+    let resp = require_dict(call("hostlib_tools_run_build_command", req).unwrap());
+    let handle_id = require_str(&resp, "handle_id");
+    assert!(
+        handle_id.starts_with("hto-"),
+        "unexpected handle_id: {handle_id}"
+    );
+
+    // Clean up.
+    let mut cancel_req = dict();
+    cancel_req.insert("handle_id".into(), vstr(&handle_id));
+    call("hostlib_tools_cancel_handle", cancel_req).unwrap();
 }

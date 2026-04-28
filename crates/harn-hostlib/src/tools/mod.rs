@@ -4,7 +4,7 @@
 //! `grep-searcher` + `ignore`), file I/O, listing, file outline, git
 //! inspection, and
 //! process lifecycle (`run_command`, `run_test`, `run_build_command`,
-//! `inspect_test_results`, `manage_packages`).
+//! `inspect_test_results`, `manage_packages`, `cancel_handle`).
 //!
 //! Implementation status:
 //!
@@ -22,6 +22,7 @@
 //! | `run_build_command`     | implemented                     |
 //! | `inspect_test_results`  | implemented                     |
 //! | `manage_packages`       | implemented                     |
+//! | `cancel_handle`         | implemented                     |
 //!
 //! ### Per-session opt-in
 //!
@@ -42,11 +43,13 @@ use crate::error::HostlibError;
 use crate::registry::{BuiltinRegistry, HostlibCapability, RegisteredBuiltin, SyncHandler};
 
 pub(crate) mod args;
+mod cancel_handle;
 mod diagnostics;
 mod file_io;
 mod git;
 mod inspect_test_results;
 mod lang;
+pub mod long_running;
 mod manage_packages;
 mod outline;
 mod payload;
@@ -71,6 +74,10 @@ impl HostlibCapability for ToolsCapability {
     }
 
     fn register_builtins(&self, registry: &mut BuiltinRegistry) {
+        // Register the session-cleanup hook once per process so long-running
+        // tool handles are killed when the agent-loop session ends.
+        long_running::register_cleanup_hook();
+
         register_gated(registry, "hostlib_tools_search", "search", search::run);
         register_gated(
             registry,
@@ -133,6 +140,12 @@ impl HostlibCapability for ToolsCapability {
             "hostlib_tools_manage_packages",
             "manage_packages",
             manage_packages::handle,
+        );
+        register_gated(
+            registry,
+            cancel_handle::NAME,
+            "cancel_handle",
+            cancel_handle::handle,
         );
 
         // The opt-in builtin lives in the `tools` module so embedders that

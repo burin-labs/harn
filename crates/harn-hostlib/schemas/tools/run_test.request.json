@@ -14,7 +14,8 @@
       "type": "string",
       "description": "Optional test name / path filter passed through to the runner."
     },
-    "timeout_ms": { "type": "integer", "minimum": 0 }
+    "timeout_ms": { "type": "integer", "minimum": 0 },
+    "long_running": { "type": "boolean", "default": false }
   },
   "additionalProperties": false
 }
