@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/changes_since.response.json",
+  "title": "code_index.changes_since response",
+  "description": "Change records ordered by seq ascending. `op` is one of: snapshot, write, replace_range, insert_after, delete_range, patch, delete.",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "properties": {
+      "path": { "type": "string" },
+      "seq": { "type": "integer", "minimum": 1 },
+      "agent_id": { "type": "integer", "minimum": 0 },
+      "op": {
+        "type": "string",
+        "enum": ["snapshot", "write", "replace_range", "insert_after", "delete_range", "patch", "delete"]
+      },
+      "hash": { "type": "string", "description": "FNV-1a 64-bit content hash, decimal-encoded." },
+      "size": { "type": "integer", "minimum": 0 },
+      "timestamp_ms": { "type": "integer" }
+    },
+    "required": ["path", "seq", "agent_id", "op", "hash", "size", "timestamp_ms"],
+    "additionalProperties": false
+  }
+}

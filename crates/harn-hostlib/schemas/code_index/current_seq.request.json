@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/current_seq.request.json",
+  "title": "code_index.current_seq request",
+  "description": "Take no parameters; return the current global edit sequence.",
+  "type": "object",
+  "properties": {},
+  "additionalProperties": false
+}

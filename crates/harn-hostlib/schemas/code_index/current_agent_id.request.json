@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/current_agent_id.request.json",
+  "title": "code_index.current_agent_id request",
+  "description": "Take no parameters; return the agent id bound to the current host call.",
+  "type": "object",
+  "properties": {},
+  "additionalProperties": false
+}

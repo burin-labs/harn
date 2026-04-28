@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/word_get.response.json",
+  "title": "code_index.word_get response",
+  "description": "Per-occurrence hit list. One entry per token occurrence (no per-file dedupe).",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "properties": {
+      "file_id": { "type": "integer", "minimum": 1 },
+      "line": { "type": "integer", "minimum": 1 }
+    },
+    "required": ["file_id", "line"],
+    "additionalProperties": false
+  }
+}

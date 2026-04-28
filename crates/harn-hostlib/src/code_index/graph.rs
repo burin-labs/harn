@@ -104,6 +104,43 @@ impl DepGraph {
     pub fn unresolved_imports(&self, file: FileId) -> &[String] {
         self.unresolved.get(&file).map(Vec::as_slice).unwrap_or(&[])
     }
+
+    /// Capture the forward edges + unresolved side-table as snapshot rows.
+    /// Sorted by source id for deterministic on-disk JSON.
+    pub fn snapshot_rows(&self) -> Vec<super::snapshot::DepRow> {
+        let mut keys: HashSet<FileId> = HashSet::new();
+        keys.extend(self.forward.keys().copied());
+        keys.extend(self.unresolved.keys().copied());
+        let mut keys: Vec<FileId> = keys.into_iter().collect();
+        keys.sort_unstable();
+        keys.into_iter()
+            .map(|from| {
+                let mut to: Vec<FileId> = self
+                    .forward
+                    .get(&from)
+                    .map(|s| s.iter().copied().collect())
+                    .unwrap_or_default();
+                to.sort_unstable();
+                let unresolved = self.unresolved.get(&from).cloned().unwrap_or_default();
+                super::snapshot::DepRow {
+                    from,
+                    to,
+                    unresolved,
+                }
+            })
+            .collect()
+    }
+
+    /// Rebuild a [`DepGraph`] from snapshot rows. Mirrors the per-file
+    /// `set_edges` rule so the reverse map stays in sync.
+    pub fn from_rows(rows: Vec<super::snapshot::DepRow>) -> Self {
+        let mut g = Self::new();
+        for row in rows {
+            let resolved: HashSet<FileId> = row.to.into_iter().collect();
+            g.set_edges(row.from, resolved, row.unresolved);
+        }
+        g
+    }
 }
 
 #[cfg(test)]

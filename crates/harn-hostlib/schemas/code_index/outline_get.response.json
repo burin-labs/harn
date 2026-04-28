@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/outline_get.response.json",
+  "title": "code_index.outline_get response",
+  "description": "List of outline symbols. Empty when the file is unknown or no symbols have been cached.",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "properties": {
+      "name": { "type": "string" },
+      "kind": { "type": "string" },
+      "start_line": { "type": "integer", "minimum": 1 },
+      "end_line": { "type": "integer", "minimum": 1 },
+      "signature": { "type": "string" }
+    },
+    "required": ["name", "kind", "start_line", "end_line", "signature"],
+    "additionalProperties": false
+  }
+}

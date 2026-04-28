@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/agent_register.request.json",
+  "title": "code_index.agent_register request",
+  "description": "Register a new agent. If `agent_id` is supplied the registry uses it (and bumps `next_id` past it); otherwise a fresh id is auto-assigned.",
+  "type": "object",
+  "properties": {
+    "name": { "type": "string", "default": "agent" },
+    "agent_id": { "type": "integer", "minimum": 1 }
+  },
+  "additionalProperties": false
+}

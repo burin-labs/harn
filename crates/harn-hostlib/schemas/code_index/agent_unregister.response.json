@@ -1,0 +1,7 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/agent_unregister.response.json",
+  "title": "code_index.agent_unregister response",
+  "description": "Always `true`; unknown ids resolve to a no-op.",
+  "type": "boolean"
+}

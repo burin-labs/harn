@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/deps_get.request.json",
+  "title": "code_index.deps_get request",
+  "description": "List the import-graph neighbours of a file id. `direction` selects forward (`imports`) vs reverse (`importers`) edges.",
+  "type": "object",
+  "properties": {
+    "file_id": { "type": "integer", "minimum": 1 },
+    "direction": { "type": "string", "enum": ["importers", "imports"] }
+  },
+  "required": ["file_id"],
+  "additionalProperties": false
+}

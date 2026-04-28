@@ -1,0 +1,8 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/current_agent_id.response.json",
+  "title": "code_index.current_agent_id response",
+  "description": "Active agent id, or null when no agent has been bound to this host call.",
+  "type": ["integer", "null"],
+  "minimum": 1
+}

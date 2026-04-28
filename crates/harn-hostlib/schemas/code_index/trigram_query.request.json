@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/trigram_query.request.json",
+  "title": "code_index.trigram_query request",
+  "description": "Find files whose trigram posting list contains every supplied trigram.",
+  "type": "object",
+  "properties": {
+    "trigrams": {
+      "type": "array",
+      "items": { "type": "integer", "minimum": 0 }
+    },
+    "max_files": { "type": "integer", "minimum": 1 }
+  },
+  "required": ["trigrams"],
+  "additionalProperties": false
+}

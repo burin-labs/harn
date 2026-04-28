@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/agent_unregister.request.json",
+  "title": "code_index.agent_unregister request",
+  "description": "Drop an agent record. Idempotent — unknown ids resolve to a no-op.",
+  "type": "object",
+  "properties": {
+    "agent_id": { "type": "integer", "minimum": 1 }
+  },
+  "required": ["agent_id"],
+  "additionalProperties": false
+}

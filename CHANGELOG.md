@@ -109,6 +109,26 @@ granular archaeology.
   schemas under `crates/harn-hostlib/schemas/ast/parse_errors.*.json`
   and `undefined_names.*.json` ship with the crate so downstream
   schema-drift tests see the contract.
+- **`code_index` hostlib gains live workspace state (#776).** The
+  `code_index` capability now ships the agent registry, advisory file
+  locks, append-only version log, file-id assignment surface, and
+  cached read paths that previously lived in burin-code's Swift
+  `Sources/BurinCodeIndex/`. Twenty-two new builtins —
+  `agent_register/heartbeat/unregister`, `current_agent_id`, `status`,
+  `lock_try/release`, `current_seq`, `changes_since`, `version_record`,
+  `path_to_id`, `id_to_path`, `file_ids`, `file_meta`, `file_hash`,
+  `read_range`, `reindex_file`, `trigram_query`, `extract_trigrams`,
+  `word_get`, `deps_get`, and `outline_get` — sit alongside the
+  existing five. Each is JSON-Schema-locked under
+  `crates/harn-hostlib/schemas/code_index/`, and `CodeIndexCapability`
+  now exposes `restore_from_disk`/`persist_to_disk` for daemon
+  recovery (snapshot lives at `<root>/.burin/index/snapshot.json`)
+  plus a `set_current_agent` slot for embedders to bind per-call agent
+  identity. Concurrency is exercised end-to-end by
+  `tests/code_index_live_state.rs`, which fans out 8 native threads
+  through register/heartbeat/lock/release/unregister cycles and asserts
+  `version_record` assigns globally unique seq numbers. Closes #776 and
+  unblocks burin-code#296 (deletion of `Sources/BurinCodeIndex/`).
 - **Cross-slice predicate budget scheduler (#736).** `PredicateExecutor`
   now schedules predicate work fairly across multiple candidate slices
   via a new `execute_slices(slices)` entrypoint and the

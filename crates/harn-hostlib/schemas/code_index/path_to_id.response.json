@@ -1,0 +1,8 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/path_to_id.response.json",
+  "title": "code_index.path_to_id response",
+  "description": "Stable file id for the path, or null if the path is unknown to the index.",
+  "type": ["integer", "null"],
+  "minimum": 1
+}
