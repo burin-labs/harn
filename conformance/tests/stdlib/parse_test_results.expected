@@ -1,0 +1,38 @@
+[harn] 4
+[harn] pkg.Suite::passes
+[harn] passed
+[harn] 1
+[harn] failed
+[harn] 250
+[harn] boom
+stack trace here
+---
+second assert
+second trace
+[harn] skipped
+[harn] errored
+[harn] hello
+[harn] warn: x
+[harn] 1
+[harn] only
+[harn] 3
+[harn] M.Pass
+[harn] passed
+[harn] 5
+[harn] failed
+[harn] Assert.Equal Failure
+[harn] skipped
+[harn] 4
+[harn] alpha
+[harn] passed
+[harn] failed
+[harn] skipped
+[harn] slow
+[harn] passed
+[harn] 2
+[harn] mod_a::fails
+[harn] failed
+[harn] assertion failed
+[harn] 2
+[harn] 10
+[harn] failed

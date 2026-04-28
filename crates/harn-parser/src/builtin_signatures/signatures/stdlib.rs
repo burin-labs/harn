@@ -1686,9 +1686,25 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         name: "csv_stringify",
         return_type: Some(BuiltinReturn::Named("string")),
     },
-    // JUnit XML test results
+    // Test runner output parsers
     BuiltinSig {
         name: "parse_junit_xml",
+        return_type: Some(BuiltinReturn::Named("list")),
+    },
+    BuiltinSig {
+        name: "parse_trx_xml",
+        return_type: Some(BuiltinReturn::Named("list")),
+    },
+    BuiltinSig {
+        name: "parse_tap",
+        return_type: Some(BuiltinReturn::Named("list")),
+    },
+    BuiltinSig {
+        name: "parse_cargo_test_text",
+        return_type: Some(BuiltinReturn::Named("list")),
+    },
+    BuiltinSig {
+        name: "parse_go_test_text",
         return_type: Some(BuiltinReturn::Named("list")),
     },
     // URL

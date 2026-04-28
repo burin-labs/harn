@@ -38,6 +38,7 @@ pub mod stdlib_modules;
 pub mod store;
 pub(crate) mod synchronization;
 pub mod tenant;
+pub mod test_parsers;
 pub mod tool_annotations;
 pub mod tracing;
 pub mod triggers;

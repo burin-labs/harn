@@ -1,0 +1,53 @@
+pipeline test(task) {
+  // ----- JUnit XML: pass/fail/skip/error + classname + system streams.
+  let junit_xml = "<?xml version=\"1.0\"?>\n<testsuites>\n  <testsuite name=\"suite\">\n    <testcase classname=\"pkg.Suite\" name=\"passes\" time=\"0.001\"/>\n    <testcase classname=\"pkg.Suite\" name=\"fails\" time=\"0.250\">\n      <failure message=\"boom\">stack trace here</failure>\n      <failure message=\"second assert\">second trace</failure>\n    </testcase>\n    <testcase classname=\"pkg.Suite\" name=\"skipped\"><skipped/></testcase>\n    <testcase classname=\"pkg.Suite\" name=\"errored\">\n      <error message=\"segfault\">core dumped</error>\n      <system-out>hello</system-out>\n      <system-err>warn: x</system-err>\n    </testcase>\n  </testsuite>\n</testsuites>"
+  let junit = parse_junit_xml(junit_xml)
+  log(len(junit))
+  log(junit[0].name)
+  log(junit[0].status)
+  log(junit[0].duration_ms)
+  log(junit[1].status)
+  log(junit[1].duration_ms)
+  // Multi-failure aggregation (GTest pattern):
+  log(junit[1].message)
+  log(junit[2].status)
+  log(junit[3].status)
+  log(junit[3].stdout)
+  log(junit[3].stderr)
+  // Bytes input is also accepted.
+  let from_bytes = parse_junit_xml(bytes_from_string("<testsuite><testcase name=\"only\"/></testsuite>"))
+  log(len(from_bytes))
+  log(from_bytes[0].name)
+  // ----- TRX (.NET): outcome mapping + duration + ErrorInfo extraction.
+  let trx_xml = "<?xml version=\"1.0\"?>\n<TestRun id=\"x\" xmlns=\"http://microsoft.com/schemas/VisualStudio/TeamTest/2010\">\n  <Results>\n    <UnitTestResult testName=\"M.Pass\" outcome=\"Passed\" duration=\"00:00:00.0050000\"/>\n    <UnitTestResult testName=\"M.Fail\" outcome=\"Failed\" duration=\"00:00:00.1000000\">\n      <Output><ErrorInfo><Message>Assert.Equal Failure</Message></ErrorInfo></Output>\n    </UnitTestResult>\n    <UnitTestResult testName=\"M.Skipped\" outcome=\"NotExecuted\" duration=\"00:00:00\"/>\n  </Results>\n</TestRun>"
+  let trx = parse_trx_xml(trx_xml)
+  log(len(trx))
+  log(trx[0].name)
+  log(trx[0].status)
+  log(trx[0].duration_ms)
+  log(trx[1].status)
+  log(trx[1].message)
+  log(trx[2].status)
+  // ----- TAP: pass/fail/skip + TODO + Bail out!.
+  let tap_text = "TAP version 14\n1..4\nok 1 - alpha\nnot ok 2 - beta\nok 3 - gamma # SKIP slow\nnot ok 4 - delta # TODO not implemented\n"
+  let tap = parse_tap(tap_text)
+  log(len(tap))
+  log(tap[0].name)
+  log(tap[0].status)
+  log(tap[1].status)
+  log(tap[2].status)
+  log(tap[2].message)
+  log(tap[3].status)
+  // ----- cargo test plain text.
+  let cargo_text = "running 2 tests\ntest mod_a::passes ... ok\ntest mod_a::fails ... FAILED\n\nfailures:\n\n---- mod_a::fails stdout ----\nassertion failed\n\nfailures:\n    mod_a::fails\n\ntest result: FAILED. 1 passed; 1 failed; 0 ignored\n"
+  let cargo_records = parse_cargo_test_text(cargo_text)
+  log(len(cargo_records))
+  log(cargo_records[1].name)
+  log(cargo_records[1].status)
+  log(cargo_records[1].message)
+  // ----- go test plain text (with optional stderr).
+  let go_records = parse_go_test_text("--- PASS: TestA (0.01s)\n--- FAIL: TestB (0.02s)\n", "")
+  log(len(go_records))
+  log(go_records[0].duration_ms)
+  log(go_records[1].status)
+}

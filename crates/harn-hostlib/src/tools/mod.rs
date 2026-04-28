@@ -57,7 +57,6 @@ mod run_build_command;
 mod run_command;
 mod run_test;
 mod search;
-mod test_parsers;
 
 pub use permissions::FEATURE_TOOLS_DETERMINISTIC;
 

@@ -11,17 +11,28 @@ granular archaeology.
 
 ### Added
 
-- **`parse_junit_xml` stdlib builtin (#801).** New core builtin that
-  parses a JUnit XML test report (`string` or `bytes`) into a list of
-  per-case dicts with `name`, `status` (`"passed"` / `"failed"` /
-  `"skipped"` / `"errored"`), `duration_ms`, `message`, `stdout`, and
-  `stderr` keys. JUnit XML is the de facto interchange format for
-  GTest (`--gtest_output=xml`), Maven Surefire / Gradle, xUnit,
-  pytest, vitest, and cargo-nextest's JUnit dialect, so a single
-  builtin lets a Harn script wrapping a `process.run` of a compiled
-  test runner extract structured pass/fail data without going through
-  a host capability. The parser is intentionally lenient: malformed
-  input yields `[]` instead of throwing.
+- **Test runner output parsers (#801).** Five new core stdlib
+  builtins covering the cross-language plain-text and XML test
+  output interchange formats: `parse_junit_xml(input)`,
+  `parse_trx_xml(input)`, `parse_tap(text)`,
+  `parse_cargo_test_text(text)`, and
+  `parse_go_test_text(stdout, stderr?)`. All five return a list of
+  dicts with the same shape (`{name, status, duration_ms, message,
+  stdout, stderr}`), so a Harn script wrapping `process.run` of any
+  compiled-language test runner can pick the parser that matches the
+  runner's format and extract structured pass/fail data without
+  per-runner ad-hoc text scraping. Coverage spans GTest, Maven
+  Surefire / Gradle, JUnit 4/5, xUnit, pytest, vitest, cargo-nextest,
+  PHPUnit, Swift's `--xunit-output`, ScalaTest, jest-junit (JUnit
+  XML); `dotnet test --logger trx` (TRX); bats, Perl `prove`, Lua
+  `busted --output=tap`, deno test, Node `--test-reporter=tap` (TAP);
+  plus cargo libtest and `go test` plain text. The JUnit parser was
+  also hardened against real-world quirks (multiple sibling
+  `<failure>` elements per testcase, `status="skipped"` / `"ignored"`
+  attribute, older xUnit.NET `<skip/>` element, comma thousands
+  separators in the `time` attribute, CDATA-wrapped failure bodies)
+  and is now shared with the host-side `inspect_test_results`
+  capability rather than duplicated.
 
 ## v0.7.46
 
