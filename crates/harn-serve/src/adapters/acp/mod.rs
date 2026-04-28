@@ -28,6 +28,48 @@ use crate::{AdapterDescriptor, AuthPolicy, AuthRequest, AuthorizationDecision};
 use events::AcpAgentEventSink;
 use io::send_json_response;
 
+pub(super) const ACP_SCHEMA_COMPATIBILITY: &str =
+    "agentclientprotocol/agent-client-protocol schema v0.12.2";
+
+pub(super) const HARN_SESSION_UPDATE_EXTENSIONS: &[&str] = &[
+    "fs_watch",
+    "handoff",
+    "log",
+    "progress",
+    "skill_activated",
+    "skill_deactivated",
+    "skill_scope_tools",
+    "tool_search_query",
+    "tool_search_result",
+    "transcript_compacted",
+    "worker_update",
+];
+
+pub(super) const HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS: &[&str] = &[
+    "audit",
+    "durationMs",
+    "error",
+    "errorCategory",
+    "executionDurationMs",
+    "executor",
+    "parsing",
+    "rawInputPartial",
+];
+
+pub(super) const HARN_CONTENT_EXTENSION_FIELDS: &[&str] = &["visible_delta", "visible_text"];
+
+fn harn_acp_extension_meta() -> serde_json::Value {
+    serde_json::json!({
+        "harn": {
+            "schemaCompatibility": ACP_SCHEMA_COMPATIBILITY,
+            "sessionUpdateExtensions": HARN_SESSION_UPDATE_EXTENSIONS,
+            "toolLifecycleExtensionFields": HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS,
+            "contentExtensionFields": HARN_CONTENT_EXTENSION_FIELDS,
+            "extensionContract": "docs/src/bridge-protocol.md#acp-compatibility-contract",
+        }
+    })
+}
+
 fn verbose_bridge_logs_enabled() -> bool {
     matches!(
         std::env::var("HARN_ACP_VERBOSE").ok().as_deref(),
@@ -275,6 +317,7 @@ impl AcpServer {
             serde_json::json!({
                 "protocolVersion": 1,
                 "agentCapabilities": {
+                    "_meta": harn_acp_extension_meta(),
                     "promptCapabilities": {},
                     "sessionCapabilities": {
                         "fork": {},
@@ -1227,6 +1270,8 @@ mod tests {
     use super::builtins::normalize_host_capability_manifest;
     use super::{
         sanitize_visible_assistant_text, AcpBridge, AcpOutput, AcpServer, AcpServerConfig,
+        ACP_SCHEMA_COMPATIBILITY, HARN_SESSION_UPDATE_EXTENSIONS,
+        HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS,
     };
     use crate::{ApiKeyAuthConfig, AuthMethodConfig, AuthPolicy};
     use harn_vm::visible_text::VisibleTextState;
@@ -1336,6 +1381,21 @@ mod tests {
                 let initialize = recv_json(&mut response_rx).await;
                 assert_eq!(initialize["id"], 1);
                 assert_eq!(initialize["result"]["agentInfo"]["name"], "harn");
+                assert_eq!(
+                    initialize["result"]["agentCapabilities"]["_meta"]["harn"]
+                        ["schemaCompatibility"],
+                    ACP_SCHEMA_COMPATIBILITY
+                );
+                assert_eq!(
+                    initialize["result"]["agentCapabilities"]["_meta"]["harn"]
+                        ["sessionUpdateExtensions"],
+                    serde_json::json!(HARN_SESSION_UPDATE_EXTENSIONS)
+                );
+                assert_eq!(
+                    initialize["result"]["agentCapabilities"]["_meta"]["harn"]
+                        ["toolLifecycleExtensionFields"],
+                    serde_json::json!(HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS)
+                );
 
                 request_tx
                     .send(serde_json::json!({

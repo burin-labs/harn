@@ -25,6 +25,63 @@ Internally, the agent loop emits `AgentEvent::ToolCall` +
 translates them into `session/update` notifications via an `AgentEventSink` it
 registers per session.
 
+### ACP Compatibility Contract
+
+Harn tracks the upstream Agent Client Protocol schema and pins its
+wire contract against `agentclientprotocol/agent-client-protocol` schema
+`v0.12.2`. The adapter treats these `session/update` values as standard
+ACP variants:
+
+- `agent_message_chunk`
+- `agent_thought_chunk`
+- `tool_call`
+- `tool_call_update`
+- `plan`
+
+Harn also emits host-facing lifecycle updates that are not ACP-standard.
+They are intentionally kept as top-level `sessionUpdate` discriminators
+for compatibility with existing Burin Code and other host renderers, and
+are advertised during `initialize` under
+`agentCapabilities._meta.harn.sessionUpdateExtensions`:
+
+- `fs_watch`
+- `handoff`
+- `log`
+- `progress`
+- `skill_activated`
+- `skill_deactivated`
+- `skill_scope_tools`
+- `tool_search_query`
+- `tool_search_result`
+- `transcript_compacted`
+- `worker_update`
+
+Hosts that do not recognize one of these values should ignore it using
+normal ACP forward-compatibility behavior. Hosts that render Harn
+extensions should key off the explicit extension list from `initialize`
+instead of discovering behavior from a local allow-list.
+
+Harn keeps several high-value tool-rendering fields at the top level of
+`tool_call` / `tool_call_update` rather than moving them under `_meta`,
+because downstream UIs already consume them directly. These field
+extensions are also advertised during `initialize` under
+`agentCapabilities._meta.harn.toolLifecycleExtensionFields`:
+
+- `audit`
+- `durationMs`
+- `error`
+- `errorCategory`
+- `executionDurationMs`
+- `executor`
+- `parsing`
+- `rawInputPartial`
+
+The standard ACP fields (`toolCallId`, `title`, `kind`, `status`,
+`content`, `locations`, `rawInput`, and `rawOutput`) remain available in
+their ACP locations. Harn's pinned fixtures under
+`crates/harn-serve/tests/fixtures/acp/` pin both the standard and
+extension shapes so host integrations can reference stable examples.
+
 ### `audit` tag
 
 Both `tool_call` and `tool_call_update` carry an optional `audit`
@@ -473,6 +530,8 @@ Alternative shapes accepted for host convenience:
 
 Agents emit ACP `session/update` notifications for skill lifecycle
 transitions so hosts can surface active-skill state in real time.
+These are Harn extension variants advertised during `initialize`, not
+upstream ACP `SessionUpdate` variants.
 The packaged `harn-serve` ACP adapter translates the canonical `AgentEvent`
 variants into:
 

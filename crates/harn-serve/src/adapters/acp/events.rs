@@ -191,7 +191,7 @@ impl AgentEventSink for AcpAgentEventSink {
                     "sessionId": session_id,
                     "update": {
                         "sessionUpdate": "plan",
-                        "plan": plan,
+                        "entries": plan,
                     },
                 }));
             }
@@ -382,7 +382,219 @@ mod tests {
     use harn_vm::tool_annotations::ToolKind;
     use tokio::sync::mpsc;
 
+    use super::super::HARN_SESSION_UPDATE_EXTENSIONS;
     use super::{AcpAgentEventSink, AcpOutput};
+
+    const ACP_V0_12_2_SESSION_UPDATES: &[&str] = &[
+        "user_message_chunk",
+        "agent_message_chunk",
+        "agent_thought_chunk",
+        "tool_call",
+        "tool_call_update",
+        "plan",
+        "available_commands_update",
+        "current_mode_update",
+        "config_option_update",
+        "session_info_update",
+    ];
+
+    async fn collect_notifications(events: Vec<AgentEvent>) -> Vec<serde_json::Value> {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let sink = AcpAgentEventSink::new(AcpOutput::Channel(tx));
+        let expected_len = events.len();
+        for event in events {
+            sink.handle_event(&event);
+        }
+
+        let mut notifications = Vec::with_capacity(expected_len);
+        for _ in 0..expected_len {
+            let line = rx.recv().await.expect("ACP event notification");
+            notifications.push(serde_json::from_str(&line).expect("json"));
+        }
+        notifications
+    }
+
+    fn fixture_handoff() -> HandoffArtifact {
+        HandoffArtifact {
+            type_name: "handoff_artifact".to_string(),
+            id: "handoff-1".to_string(),
+            parent_run_id: None,
+            source_persona: "merge_captain".to_string(),
+            target_persona_or_human: HandoffTargetRecord {
+                kind: "persona".to_string(),
+                id: Some("review_captain".to_string()),
+                label: Some("review_captain".to_string()),
+            },
+            task: "Review the patch".to_string(),
+            reason: "Merge queue requires review".to_string(),
+            created_at: "2026-04-28T00:00:00Z".to_string(),
+            ..Default::default()
+        }
+    }
+
+    fn standard_fixture_events() -> Vec<AgentEvent> {
+        vec![
+            AgentEvent::AgentMessageChunk {
+                session_id: "session-1".to_string(),
+                content: "hello".to_string(),
+            },
+            AgentEvent::AgentThoughtChunk {
+                session_id: "session-1".to_string(),
+                content: "thinking".to_string(),
+            },
+            AgentEvent::ToolCall {
+                session_id: "session-1".to_string(),
+                tool_call_id: "tool-1".to_string(),
+                tool_name: "read".to_string(),
+                kind: Some(ToolKind::Read),
+                status: ToolCallStatus::Pending,
+                raw_input: serde_json::json!({"path": "README.md"}),
+                parsing: None,
+                audit: None,
+            },
+            AgentEvent::ToolCallUpdate {
+                session_id: "session-1".to_string(),
+                tool_call_id: "tool-1".to_string(),
+                tool_name: "read".to_string(),
+                status: ToolCallStatus::Completed,
+                raw_output: Some(serde_json::json!({"ok": true})),
+                error: None,
+                duration_ms: Some(7),
+                execution_duration_ms: Some(5),
+                error_category: None,
+                executor: Some(ToolExecutor::HarnBuiltin),
+                parsing: None,
+                raw_input: None,
+                raw_input_partial: None,
+                audit: None,
+            },
+            AgentEvent::Plan {
+                session_id: "session-1".to_string(),
+                plan: serde_json::json!([
+                    {"content": "edit", "status": "pending"}
+                ]),
+            },
+        ]
+    }
+
+    fn extension_fixture_events() -> Vec<AgentEvent> {
+        vec![
+            AgentEvent::SkillActivated {
+                session_id: "session-1".to_string(),
+                skill_name: "rust".to_string(),
+                iteration: 1,
+                reason: "matched".to_string(),
+            },
+            AgentEvent::SkillDeactivated {
+                session_id: "session-1".to_string(),
+                skill_name: "rust".to_string(),
+                iteration: 2,
+            },
+            AgentEvent::SkillScopeTools {
+                session_id: "session-1".to_string(),
+                skill_name: "rust".to_string(),
+                allowed_tools: vec!["read".to_string()],
+            },
+            AgentEvent::ToolSearchQuery {
+                session_id: "session-1".to_string(),
+                tool_use_id: "search-1".to_string(),
+                name: "tool_search".to_string(),
+                query: serde_json::json!({"q": "read"}),
+                strategy: "semantic".to_string(),
+                mode: "client".to_string(),
+            },
+            AgentEvent::ToolSearchResult {
+                session_id: "session-1".to_string(),
+                tool_use_id: "search-1".to_string(),
+                promoted: vec!["read".to_string()],
+                strategy: "semantic".to_string(),
+                mode: "client".to_string(),
+            },
+            AgentEvent::TranscriptCompacted {
+                session_id: "session-1".to_string(),
+                mode: "auto".to_string(),
+                strategy: "summary".to_string(),
+                archived_messages: 3,
+                estimated_tokens_before: 100,
+                estimated_tokens_after: 40,
+                snapshot_asset_id: Some("asset-1".to_string()),
+            },
+            AgentEvent::Handoff {
+                session_id: "session-1".to_string(),
+                artifact_id: "artifact-1".to_string(),
+                handoff: Box::new(fixture_handoff()),
+            },
+            AgentEvent::FsWatch {
+                session_id: "session-1".to_string(),
+                subscription_id: "fsw-1".to_string(),
+                events: vec![FsWatchEvent {
+                    kind: "modify".to_string(),
+                    paths: vec!["/tmp/project/src/lib.rs".to_string()],
+                    relative_paths: vec!["src/lib.rs".to_string()],
+                    raw_kind: "Modify(Any)".to_string(),
+                    error: None,
+                }],
+            },
+            AgentEvent::WorkerUpdate {
+                session_id: "session-1".into(),
+                worker_id: "worker-1".into(),
+                worker_name: "review".into(),
+                worker_task: "review pr".into(),
+                worker_mode: "delegated_stage".into(),
+                event: harn_vm::agent_events::WorkerEvent::WorkerWaitingForInput,
+                status: "awaiting_input".into(),
+                metadata: serde_json::json!({
+                    "child_run_id": "run_x",
+                    "child_run_path": ".harn-runs/run_x",
+                }),
+                audit: Some(serde_json::json!({"run_id": "run_x"})),
+            },
+        ]
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn standard_session_update_fixtures_match_acp_schema_v0_12_2_discriminators() {
+        let actual = collect_notifications(standard_fixture_events()).await;
+        let expected: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../tests/fixtures/acp/session_update_standard.json"
+        ))
+        .expect("fixture json");
+        assert_eq!(serde_json::Value::Array(actual.clone()), expected);
+
+        for notification in actual {
+            let session_update = notification["params"]["update"]["sessionUpdate"]
+                .as_str()
+                .expect("sessionUpdate");
+            assert!(
+                ACP_V0_12_2_SESSION_UPDATES.contains(&session_update),
+                "{session_update} is not a standard ACP v0.12.2 SessionUpdate"
+            );
+            if session_update == "plan" {
+                assert!(notification["params"]["update"].get("entries").is_some());
+                assert!(notification["params"]["update"].get("plan").is_none());
+            }
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn harn_extension_session_update_fixtures_are_pinned() {
+        let actual = collect_notifications(extension_fixture_events()).await;
+        let expected: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../tests/fixtures/acp/session_update_extensions.json"
+        ))
+        .expect("fixture json");
+        assert_eq!(serde_json::Value::Array(actual.clone()), expected);
+
+        for notification in actual {
+            let session_update = notification["params"]["update"]["sessionUpdate"]
+                .as_str()
+                .expect("sessionUpdate");
+            assert!(
+                HARN_SESSION_UPDATE_EXTENSIONS.contains(&session_update),
+                "{session_update} is not advertised as a Harn ACP extension"
+            );
+        }
+    }
 
     #[tokio::test(flavor = "current_thread")]
     async fn worker_update_serializes_to_session_update_with_lifecycle_metadata() {

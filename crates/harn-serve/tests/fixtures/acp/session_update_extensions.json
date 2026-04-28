@@ -1,0 +1,175 @@
+[
+  {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "session-1",
+      "update": {
+        "iteration": 1,
+        "reason": "matched",
+        "sessionUpdate": "skill_activated",
+        "skillName": "rust"
+      }
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "session-1",
+      "update": {
+        "iteration": 2,
+        "sessionUpdate": "skill_deactivated",
+        "skillName": "rust"
+      }
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "session-1",
+      "update": {
+        "allowedTools": [
+          "read"
+        ],
+        "sessionUpdate": "skill_scope_tools",
+        "skillName": "rust"
+      }
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "session-1",
+      "update": {
+        "mode": "client",
+        "name": "tool_search",
+        "query": {
+          "q": "read"
+        },
+        "sessionUpdate": "tool_search_query",
+        "strategy": "semantic",
+        "toolUseId": "search-1"
+      }
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "session-1",
+      "update": {
+        "mode": "client",
+        "promoted": [
+          "read"
+        ],
+        "sessionUpdate": "tool_search_result",
+        "strategy": "semantic",
+        "toolUseId": "search-1"
+      }
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "session-1",
+      "update": {
+        "archivedMessages": 3,
+        "estimatedTokensAfter": 40,
+        "estimatedTokensBefore": 100,
+        "mode": "auto",
+        "sessionUpdate": "transcript_compacted",
+        "snapshotAssetId": "asset-1",
+        "strategy": "summary"
+      }
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "session-1",
+      "update": {
+        "artifactId": "artifact-1",
+        "handoff": {
+          "_type": "handoff_artifact",
+          "allowed_side_effects": [],
+          "blocked_on": [],
+          "budget_remaining": null,
+          "confidence": null,
+          "created_at": "2026-04-28T00:00:00Z",
+          "deadline_checkback": null,
+          "evidence_refs": [],
+          "files_or_entities_touched": [],
+          "id": "handoff-1",
+          "metadata": {},
+          "open_questions": [],
+          "parent_run_id": null,
+          "reason": "Merge queue requires review",
+          "receipt_links": [],
+          "requested_capabilities": [],
+          "source_persona": "merge_captain",
+          "target_persona_or_human": {
+            "id": "review_captain",
+            "kind": "persona",
+            "label": "review_captain"
+          },
+          "task": "Review the patch"
+        },
+        "handoffId": "handoff-1",
+        "sessionUpdate": "handoff"
+      }
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "session-1",
+      "update": {
+        "events": [
+          {
+            "error": null,
+            "kind": "modify",
+            "paths": [
+              "/tmp/project/src/lib.rs"
+            ],
+            "raw_kind": "Modify(Any)",
+            "relative_paths": [
+              "src/lib.rs"
+            ]
+          }
+        ],
+        "sessionUpdate": "fs_watch",
+        "subscriptionId": "fsw-1"
+      }
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "session-1",
+      "update": {
+        "audit": {
+          "run_id": "run_x"
+        },
+        "event": "WorkerWaitingForInput",
+        "metadata": {
+          "child_run_id": "run_x",
+          "child_run_path": ".harn-runs/run_x"
+        },
+        "sessionUpdate": "worker_update",
+        "status": "awaiting_input",
+        "terminal": false,
+        "workerId": "worker-1",
+        "workerMode": "delegated_stage",
+        "workerName": "review",
+        "workerTask": "review pr"
+      }
+    }
+  }
+]

@@ -1,0 +1,84 @@
+[
+  {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "session-1",
+      "update": {
+        "content": {
+          "text": "hello",
+          "type": "text",
+          "visible_delta": "hello",
+          "visible_text": "hello"
+        },
+        "sessionUpdate": "agent_message_chunk"
+      }
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "session-1",
+      "update": {
+        "content": {
+          "text": "thinking",
+          "type": "text"
+        },
+        "sessionUpdate": "agent_thought_chunk"
+      }
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "session-1",
+      "update": {
+        "kind": "read",
+        "rawInput": {
+          "path": "README.md"
+        },
+        "sessionUpdate": "tool_call",
+        "status": "pending",
+        "title": "read",
+        "toolCallId": "tool-1"
+      }
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "session-1",
+      "update": {
+        "durationMs": 7,
+        "executionDurationMs": 5,
+        "executor": "harn_builtin",
+        "rawOutput": {
+          "ok": true
+        },
+        "sessionUpdate": "tool_call_update",
+        "status": "completed",
+        "title": "read",
+        "toolCallId": "tool-1"
+      }
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "session-1",
+      "update": {
+        "entries": [
+          {
+            "content": "edit",
+            "status": "pending"
+          }
+        ],
+        "sessionUpdate": "plan"
+      }
+    }
+  }
+]
