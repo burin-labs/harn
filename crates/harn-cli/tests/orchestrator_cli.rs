@@ -20,8 +20,15 @@ use tempfile::TempDir;
 
 const STARTUP_NEEDLE: &str = "HTTP listener ready on";
 const SHUTDOWN_NEEDLE: &str = "graceful shutdown complete";
-const PROCESS_FAIL_FAST_TIMEOUT: Duration = Duration::from_secs(5);
-const EVENT_FAIL_FAST_TIMEOUT: Duration = Duration::from_secs(2);
+// Process-level deadline mirrors `orchestrator_http`'s 60s budget. Tests in
+// this file no longer serialize through a process-wide lock (see
+// `tests/support/process.rs` for the architectural rationale), so cold
+// subprocess starts may now overlap with sibling tests under nextest. The
+// happy-path subprocess startup is well under 1s; the generous upper bound
+// only affects the panic-message path, where it absorbs macOS dyld + amfi
+// cold-cache spikes for the unsigned debug-build `harn` binary under load.
+const PROCESS_FAIL_FAST_TIMEOUT: Duration = Duration::from_secs(60);
+const EVENT_FAIL_FAST_TIMEOUT: Duration = Duration::from_secs(10);
 
 fn write_file(dir: &Path, relative: &str, contents: &str) {
     let path = dir.join(relative);
