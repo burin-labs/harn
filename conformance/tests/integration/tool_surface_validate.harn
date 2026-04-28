@@ -1,0 +1,59 @@
+pipeline main() {
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "run_command",
+    "Run a command and return a command output artifact.",
+    {
+      parameters: {command: "string"},
+      executor: "host_bridge",
+      host_capability: "process.run",
+      annotations: {kind: "execute", side_effect_level: "process_exec", emits_artifacts: true},
+    },
+  )
+  let missing_reader = tool_surface_validate({tools: tools, policy: {side_effect_level: "process_exec"}})
+  require !missing_reader.valid, "execute artifact tool without reader is invalid"
+  require missing_reader.diagnostics[0].code == "TOOL_SURFACE_MISSING_RESULT_READER", "stable missing-reader code"
+  tools = tool_define(
+    tools,
+    "read_command_output",
+    "Read command output by id.",
+    {
+      parameters: {output_id: "string"},
+      executor: "host_bridge",
+      host_capability: "process.read_output",
+      annotations: {kind: "read", side_effect_level: "read_only"},
+    },
+  )
+  let with_reader = tool_surface_validate(
+    {
+      tools: tools,
+      policy: {
+        tools: ["run_command", "read_command_output"],
+        side_effect_level: "process_exec",
+        tool_arg_constraints: [{tool: "run_command", arg_key: "missing", arg_patterns: ["cargo *"]}],
+      },
+      approval_policy: {auto_deny: ["delete_file"]},
+      system: "Use run_command({command: \"cargo test\"}) and never delete_file({path: \"x\"}).",
+    },
+  )
+  require with_reader.valid, "reader makes artifact tool valid"
+  var saw_arg_key = false
+  var saw_prompt_policy = false
+  var saw_approval = false
+  for diag in with_reader.diagnostics {
+    if diag.code == "TOOL_SURFACE_UNKNOWN_ARG_CONSTRAINT_KEY" {
+      saw_arg_key = true
+    }
+    if diag.code == "TOOL_SURFACE_UNKNOWN_PROMPT_TOOL" {
+      saw_prompt_policy = true
+    }
+    if diag.code == "TOOL_SURFACE_APPROVAL_PATTERN_NO_MATCH" {
+      saw_approval = true
+    }
+  }
+  require saw_arg_key, "invalid arg constraint key is reported"
+  require saw_prompt_policy, "unknown prompt tool reference is reported"
+  require saw_approval, "approval pattern mismatch is reported"
+  log("tool_surface_validate tests passed")
+}

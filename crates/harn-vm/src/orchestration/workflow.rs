@@ -593,6 +593,25 @@ fn parse_tool_annotations(map: &serde_json::Map<String, serde_json::Value>) -> T
         side_effect_level,
         arg_schema,
         capabilities,
+        emits_artifacts: policy
+            .get("emits_artifacts")
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false),
+        result_readers: policy
+            .get("result_readers")
+            .or_else(|| policy.get("readable_result_routes"))
+            .and_then(|value| value.as_array())
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|item| item.as_str().map(|s| s.to_string()))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default(),
+        inline_result: policy
+            .get("inline_result")
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false),
     }
 }
 
@@ -1001,6 +1020,14 @@ pub fn validate_workflow(
             if let Err(error) = ceiling.intersect(&node.capability_policy) {
                 errors.push(format!("node {node_id}: {error}"));
             }
+        }
+    }
+
+    for diagnostic in crate::tool_surface::validate_workflow_graph(graph) {
+        let message = format!("{}: {}", diagnostic.code, diagnostic.message);
+        match diagnostic.severity {
+            crate::tool_surface::ToolSurfaceSeverity::Error => errors.push(message),
+            crate::tool_surface::ToolSurfaceSeverity::Warning => warnings.push(message),
         }
     }
 

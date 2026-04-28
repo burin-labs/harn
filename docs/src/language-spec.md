@@ -1826,6 +1826,38 @@ registry = tool_define(registry, "ask_user", "Ask the user", {
 })
 ```
 
+#### Tool surface validation
+
+`tool_surface_validate(surface, options?)` validates a tool-calling
+surface before a model call. The surface may include `tools`, `policy`,
+`approval_policy`, `system` / `prompt` / `prompts`, and `tool_search`.
+It returns `{valid, diagnostics}` where each diagnostic has a stable
+`code`, `severity`, and `message`.
+
+`agent_loop` runs the validator at startup. Warning diagnostics are
+logged; error diagnostics abort the loop before the first model call.
+`workflow_validate` and `workflow_policy_report` include the same
+diagnostics for workflow and stage surfaces.
+
+Execute tools that can emit large result artifacts declare this in
+`ToolAnnotations`:
+
+```harn,ignore
+annotations: {
+  kind: "execute",
+  side_effect_level: "process_exec",
+  emits_artifacts: true,
+  result_readers: ["read_command_output"],
+}
+```
+
+Set `inline_result: true` instead of `result_readers` when the tool
+always returns complete inline output. Prompt scans ignore fenced code
+blocks and support `harn-tool-surface: ignore-line`,
+`harn-tool-surface: ignore-next-line`, and
+`harn-tool-surface: ignore-start` / `ignore-end` comments for
+historical examples.
+
 #### Deferred tool loading (`defer_loading`)
 
 A tool registered through `tool_define` may set `defer_loading: true`

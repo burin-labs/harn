@@ -148,6 +148,78 @@ pipeline main() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[test]
+fn preflight_reports_prompt_tool_reference_outside_literal_surface() {
+    let dir = unique_temp_dir("harn-check-tool-surface-prompt");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("main.harn");
+    std::fs::write(
+        dir.join("agent.harn.prompt"),
+        "Use run_command({command: \"cargo test\"})",
+    )
+    .unwrap();
+    let source = r#"
+pipeline main() {
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "read_file",
+    "Read a file",
+    {parameters: {path: "string"}, executor: "host_bridge", host_capability: "workspace.read"},
+  )
+  let system = render_prompt("agent.harn.prompt", {})
+  agent_loop("task", system, {tools: tools})
+}
+"#;
+    let program = parse_program(source);
+    let diagnostics =
+        collect_preflight_diagnostics(&file, source, &program, &CheckConfig::default());
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.message.contains("TOOL_SURFACE_UNKNOWN_PROMPT_TOOL")),
+        "expected prompt tool-surface diagnostic, got: {:?}",
+        diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn preflight_honors_prompt_tool_surface_suppression() {
+    let dir = unique_temp_dir("harn-check-tool-surface-suppressed");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("main.harn");
+    std::fs::write(
+        dir.join("agent.harn.prompt"),
+        "<!-- harn-tool-surface: ignore-next-line -->\nrun_command({command: \"old\"})",
+    )
+    .unwrap();
+    let source = r#"
+pipeline main() {
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "read_file",
+    "Read a file",
+    {parameters: {path: "string"}, executor: "host_bridge", host_capability: "workspace.read"},
+  )
+  let system = render_prompt("agent.harn.prompt", {})
+  agent_loop("task", system, {tools: tools})
+}
+"#;
+    let program = parse_program(source);
+    let diagnostics =
+        collect_preflight_diagnostics(&file, source, &program, &CheckConfig::default());
+    assert!(
+        diagnostics
+            .iter()
+            .all(|d| !d.message.contains("TOOL_SURFACE_UNKNOWN_PROMPT_TOOL")),
+        "suppressed prompt example should not report tool-surface diagnostics: {:?}",
+        diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// Acceptance for issue #771: raw string literals (`r"foo"`) are still
 /// statically known and must be validated like ordinary string literals.
 #[test]

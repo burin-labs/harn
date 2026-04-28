@@ -337,6 +337,36 @@ pub async fn run_agent_loop_internal(
     // pre-flight error that names the culprit.
     super::agent_tools::validate_tool_registry_executors(tools_val)?;
 
+    let surface_diagnostics = crate::tool_surface::validate_tool_surface_diagnostics(
+        &crate::tool_surface::ToolSurfaceInput {
+            tools: tools_owned.clone(),
+            native_tools: opts.native_tools.clone(),
+            policy: crate::orchestration::current_execution_policy(),
+            approval_policy: crate::orchestration::current_approval_policy(),
+            prompt_texts: state
+                .base_system
+                .clone()
+                .into_iter()
+                .chain(state.config.tool_examples.clone())
+                .collect(),
+            tool_search_active: opts.tool_search.is_some(),
+        },
+    );
+    for diagnostic in &surface_diagnostics {
+        match diagnostic.severity {
+            crate::tool_surface::ToolSurfaceSeverity::Warning => crate::events::log_warn(
+                "tool_surface.validate",
+                &format!("{}: {}", diagnostic.code, diagnostic.message),
+            ),
+            crate::tool_surface::ToolSurfaceSeverity::Error => {
+                return Err(VmError::Runtime(format!(
+                    "agent_loop tool surface validation failed: {}: {}",
+                    diagnostic.code, diagnostic.message
+                )));
+            }
+        }
+    }
+
     let _tool_registry_guard = ToolRegistryGuard::install(tools_owned.clone());
 
     // Snapshot config/state fields as locals so phase contexts can hold

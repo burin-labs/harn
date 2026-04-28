@@ -165,6 +165,15 @@ pub struct ToolAnnotations {
     /// Capability operations requested by this tool (e.g.
     /// `"workspace": ["read_text", "list"]`).
     pub capabilities: BTreeMap<String, Vec<String>>,
+    /// True when the tool may return only a handle/reference to a large
+    /// output artifact instead of inline output. Execute tools with this
+    /// flag must also declare an inspection route.
+    pub emits_artifacts: bool,
+    /// Tool names that can inspect artifacts/results emitted by this tool.
+    pub result_readers: Vec<String>,
+    /// Explicit escape hatch for tools whose results are always complete
+    /// inline, even though they are execute-like.
+    pub inline_result: bool,
 }
 
 #[cfg(test)]
@@ -246,5 +255,13 @@ mod tests {
         assert!(schema.path_params.is_empty());
         assert!(schema.arg_aliases.is_empty());
         assert!(schema.required.is_empty());
+    }
+
+    #[test]
+    fn annotations_default_result_routes_empty() {
+        let annotations = ToolAnnotations::default();
+        assert!(!annotations.emits_artifacts);
+        assert!(annotations.result_readers.is_empty());
+        assert!(!annotations.inline_result);
     }
 }

@@ -22,6 +22,7 @@
 
 - [LLM calls and agent loops](./llm-and-agents.md)
 - [Typed tools for agent loops](./typed-tools.md)
+- [Tool surface validation](./tool-surface-validation.md)
 - [Daemon stdlib](./stdlib/daemon.md)
 - [Current session builtin](./stdlib/agent_session_current_id.md)
 - [Monitor stdlib](./stdlib/monitors.md)
