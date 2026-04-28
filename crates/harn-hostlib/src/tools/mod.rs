@@ -1,8 +1,7 @@
 //! Deterministic tools capability.
 //!
-//! Ports the Swift `CoreToolExecutor` surface: search (ripgrep via
-//! `grep-searcher` + `ignore`), file I/O, listing, file outline, git
-//! inspection, and
+//! Provides search (ripgrep via `grep-searcher` + `ignore`), file I/O,
+//! listing, file outline, git inspection, and
 //! process lifecycle (`run_command`, `run_test`, `run_build_command`,
 //! `inspect_test_results`, `manage_packages`, `cancel_handle`).
 //!

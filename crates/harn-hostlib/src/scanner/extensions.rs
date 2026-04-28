@@ -1,9 +1,7 @@
-//! Source-extension and excluded-directory tables. Mirrors the constants
-//! in `Sources/BurinCore/Scanner/CoreRepoScanner.swift` so the Rust scanner
-//! and the Swift scanner classify files identically.
+//! Source-extension and excluded-directory tables for deterministic scans.
 
 /// Directory names that the scanner refuses to traverse, regardless of
-/// `.gitignore` state. Matches `CoreRepoScanner.excludedDirs`.
+/// `.gitignore` state.
 pub const EXCLUDED_DIRS: &[&str] = &[
     ".git",
     ".build",
@@ -34,8 +32,7 @@ pub const EXCLUDED_DIRS: &[&str] = &[
     ".parcel-cache",
 ];
 
-/// File extensions the scanner indexes. Matches
-/// `CoreRepoScanner.sourceExtensions`.
+/// File extensions the scanner indexes.
 pub const SOURCE_EXTENSIONS: &[&str] = &[
     "swift",
     "ts",

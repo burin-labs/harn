@@ -5,8 +5,7 @@
 //!
 //! Behavior:
 //! - `ecosystem` is required when `cwd` doesn't contain a recognized
-//!   manifest. (Swift's implementation refused to infer; we keep that
-//!   contract — callers must opt in to a specific manager.)
+//!   manifest; callers must opt in to a specific manager.
 //! - `lockfile_changed` is computed by snapshotting the relevant lockfile
 //!   path before/after the spawn and comparing mtimes. We don't read
 //!   contents to keep the cost predictable on large lockfiles.

@@ -4,8 +4,8 @@
 //! goldens — `symbols.golden.json` and `outline.golden.json` — generated
 //! from the live extractor. Adding a new language is: drop in a source
 //! file, set `HARN_AST_UPDATE_GOLDEN=1`, run the test, commit. The
-//! per-language goldens are the contract burin-code's bridge consumer
-//! checks against, so changes here are visible in code review.
+//! per-language goldens are the hostlib compatibility contract, so changes
+//! here are visible in code review.
 
 use std::fs;
 use std::path::{Path, PathBuf};

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://harnlang.com/schemas/hostlib/ast/symbol_extract.request.json",
   "title": "ast.symbol_extract request",
-  "description": "Locate a named symbol in `source` and return its full text plus 1-based, inclusive line range. Mirrors the Swift `SymbolOperations.extract` surface so burin-code's symbol-scoped read tool can swap in a hostlib call.",
+  "description": "Locate a named symbol in `source` and return its full text plus a 1-based, inclusive line range.",
   "type": "object",
   "properties": {
     "source": {

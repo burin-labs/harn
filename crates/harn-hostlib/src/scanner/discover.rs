@@ -1,7 +1,7 @@
 //! File discovery — walks a project root and produces deterministic
 //! `(relative_path, absolute_path)` tuples.
 //!
-//! Mirrors `CoreRepoScanner.discoverFiles` semantics:
+//! Discovery semantics:
 //!
 //! 1. Try `git ls-files --cached --others --exclude-standard` (so the file
 //!    set matches `git status` perfectly when run inside a checkout).

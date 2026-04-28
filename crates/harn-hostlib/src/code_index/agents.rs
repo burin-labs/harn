@@ -1,6 +1,5 @@
 //! Per-workspace agent registry plus advisory per-file locks.
 //!
-//! Mirrors the Swift `AgentRegistry` actor in `Sources/BurinCodeIndex/`.
 //! Tracks live agents (IDE, background eval, agentic loops, etc.) and the
 //! TTL-based advisory locks they hold over files. Agents call `heartbeat`
 //! on their own cadence; the registry reaps anyone who has gone silent
@@ -62,12 +61,10 @@ pub struct AgentInfo {
     pub locked_paths: HashMap<String, i64>,
 }
 
-/// Registry config — defaults match the Swift actor on the burin-code
-/// side so the cross-repo schema-drift tests stay aligned.
+/// Registry config for agent liveness and lock expiry.
 #[derive(Debug, Clone, Copy)]
 pub struct RegistryConfig {
-    /// Default lock TTL when callers don't supply one. 30 seconds in the
-    /// Swift port.
+    /// Default lock TTL when callers don't supply one.
     pub default_lock_ttl_ms: i64,
     /// How long a registered agent can stay silent before the next reap
     /// downgrades it to `Crashed` and releases its locks. 45 seconds.
@@ -148,8 +145,7 @@ impl AgentRegistry {
     }
 
     /// Refresh an agent's `last_seen_ms`. If the agent isn't registered we
-    /// transparently register it with a placeholder name (`agent-<id>`),
-    /// matching the Swift actor's "self-heal" behaviour.
+    /// transparently register it with a placeholder name (`agent-<id>`).
     pub fn heartbeat(&mut self, id: AgentId, now_ms: i64) {
         match self.agents.get_mut(&id) {
             Some(info) => {
@@ -292,8 +288,8 @@ impl AgentRegistry {
 }
 
 /// On-disk layout for an agent record. Public so the snapshot module can
-/// embed it. Field shapes intentionally mirror the Swift `AgentInfo` so
-/// existing snapshots remain readable across the bridge.
+/// embed it. Field shapes are kept stable so existing snapshots remain
+/// readable across hostlib versions.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SerializedAgent {
     /// Stable identifier.

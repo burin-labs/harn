@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://harnlang.com/schemas/hostlib/ast/parse_errors.request.json",
   "title": "ast.parse_errors request",
-  "description": "Surface tree-sitter ERROR and MISSING nodes plus the count of top-level declarations. Mirrors the Swift `TreeSitterParseErrors.analyze(content:extension:)` surface from burin-code's ASTEngine. Pass `content` for an in-memory string or `path` to read from disk; supply `language` (canonical name like \"python\" or a bare extension like \"py\") when the path-based grammar lookup is ambiguous.",
+  "description": "Surface tree-sitter ERROR and MISSING nodes plus the count of top-level declarations. Pass `content` for an in-memory string or `path` to read from disk; supply `language` (canonical name like \"python\" or a bare extension like \"py\") when the path-based grammar lookup is ambiguous.",
   "type": "object",
   "properties": {
     "content": {

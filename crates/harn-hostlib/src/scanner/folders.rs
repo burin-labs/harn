@@ -1,6 +1,4 @@
-//! Folder aggregates, project metadata, and the text repo map. Mirrors
-//! `buildFolderRecords`, `buildProjectMetadata`, and `RepoMapBuilder.build`
-//! on the Swift side.
+//! Folder aggregates, project metadata, and the text repo map.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -136,7 +134,7 @@ pub fn build_project_metadata(
 }
 
 /// Build the text repo map. Token budget is approximate — the builder caps
-/// emission at `4 * tokens` characters (matches the Swift heuristic).
+/// emission at `4 * tokens` characters.
 pub fn build_repo_map(
     symbols: &[SymbolRecord],
     _files: &[FileRecord],

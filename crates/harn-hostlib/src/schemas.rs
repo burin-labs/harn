@@ -2,9 +2,9 @@
 //!
 //! Schemas live at `schemas/<module>/<method>.{request,response}.json` and
 //! are baked into the crate at compile time via `include_str!`. They're the
-//! source of truth for `burin-code`'s schema-drift tests: the schema files
-//! ship with the crate (see the `include` field in `Cargo.toml`), and
-//! consumers fetch them through this module.
+//! source of truth for hostlib request/response compatibility: the schema
+//! files ship with the crate (see the `include` field in `Cargo.toml`),
+//! and consumers fetch them through this module.
 //!
 //! Schemas use JSON Schema draft 2020-12.
 
@@ -21,7 +21,7 @@ pub enum SchemaKind {
 ///
 /// Embedders use this catalog to:
 /// - assert that every registered builtin has a matching schema (drift test);
-/// - export the schemas to consumers like burin-code;
+/// - export the schemas to downstream consumers;
 /// - validate live request/response payloads in tests.
 pub const SCHEMAS: &[(&str, &str, SchemaKind, &str)] = &[
     // ast/

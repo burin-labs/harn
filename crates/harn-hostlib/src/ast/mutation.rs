@@ -1,8 +1,7 @@
 //! Symbol-targeted source mutation: `extract`, `delete`, `replace`.
 //!
-//! These builtins mirror the surface of Swift `SymbolOperations`
-//! (`Sources/ASTEngine/SymbolOperations.swift`) so burin-code can drop
-//! the Swift fallback once it points its `HarnASTHostlibClient` at hostlib.
+//! These builtins provide symbol-scoped read and edit helpers for hosts
+//! that operate on line ranges.
 //!
 //! ## Wire shape
 //!
@@ -17,13 +16,11 @@
 //! - `syntax_error_after_edit` (delete/replace only) → `{ details }`
 //! - `parse_failure` (delete/replace only) → `{ details }`
 //!
-//! Coordinates are 1-based to match `SymbolOperations.ExtractedSymbol`,
-//! while the existing `ast.symbols` / `ast.outline` builtins stay 0-based
-//! per their tree-sitter native shape. The two conventions live side by
-//! side because they target different consumers — the existing ones feed
-//! editors that already think in tree-sitter coordinates; the new ones
-//! feed line-based file editing helpers that always thought in 1-based
-//! lines.
+//! Coordinates are 1-based, while the existing `ast.symbols` /
+//! `ast.outline` builtins stay 0-based per their tree-sitter native shape.
+//! The two conventions live side by side because they target different
+//! consumers: tree-sitter-oriented editor features and line-based file
+//! editing helpers.
 
 use std::collections::BTreeMap;
 use std::rc::Rc;
@@ -44,8 +41,7 @@ const DELETE_BUILTIN: &str = "hostlib_ast_symbol_delete";
 const REPLACE_BUILTIN: &str = "hostlib_ast_symbol_replace";
 
 /// 1-based, inclusive line range for a located symbol (after preamble
-/// expansion). Mirrors the implicit `(startLine, endLine)` tuple in
-/// `SymbolOperations.findSymbolRange`.
+/// expansion).
 #[derive(Debug, Clone, Copy)]
 struct SymbolRange {
     start_line: usize,
@@ -235,7 +231,7 @@ fn locate_symbol(
 
 /// Walk upward from a declaration line and return the 0-based line index
 /// where the symbol's preamble starts (decorators, doc comments,
-/// attributes). Mirrors `SymbolOperations.findPreambleStart`.
+/// attributes).
 fn find_preamble_start(lines: &[&str], decl_line_zero: usize, language: Language) -> usize {
     if decl_line_zero == 0 {
         return 0;
@@ -289,8 +285,7 @@ fn is_preamble_line(trimmed: &str, language: Language) -> bool {
 }
 
 /// Re-parse `source` and surface the first tree-sitter `ERROR` /
-/// `MISSING` node as a single-line diagnostic. Mirrors the post-edit
-/// guard in Swift `SymbolOperations.validateSyntax`.
+/// `MISSING` node as a single-line diagnostic.
 fn validate_syntax(source: &str, language: Language) -> Result<(), String> {
     let tree = match parse_source(source, language) {
         Ok(tree) => tree,
@@ -341,8 +336,7 @@ fn node_text(node: tree_sitter::Node<'_>, source: &str) -> String {
 // ---------------------------------------------------------------------------
 
 /// Slice `lines[start_line - 1 ..= end_line - 1]` (1-based inclusive)
-/// and re-join with newlines. Tolerates `end_line` past `lines.len()`,
-/// matching Swift's `min(endLine, lines.count)`.
+/// and re-join with newlines. Tolerates `end_line` past `lines.len()`.
 fn slice_lines(lines: &[&str], start_line: usize, end_line: usize) -> String {
     if start_line == 0 || start_line > lines.len() {
         return String::new();
@@ -387,7 +381,7 @@ fn replace_range(
     out
 }
 
-/// Collapse runs of 3+ blank lines to 2, matching Swift's `collapseBlankLines`.
+/// Collapse runs of 3+ blank lines to 2.
 fn collapse_blank_lines(lines: Vec<String>) -> Vec<String> {
     let mut out: Vec<String> = Vec::with_capacity(lines.len());
     let mut blank_count: usize = 0;

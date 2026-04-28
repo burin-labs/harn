@@ -1,16 +1,13 @@
 //! Source-file ↔ test-file pairing.
 //!
-//! Mirrors `CoreRepoScanner.mapTestFiles` and the test-file-pattern table
-//! that lives in `Sources/BurinCore/Resources/languages/*.json` on the
-//! Swift side. The patterns are inlined here rather than loaded from JSON
-//! so the scanner has zero filesystem dependencies — when burin-code adds
-//! a new language config it bumps both repos under the same release.
+//! The patterns are inlined here rather than loaded from JSON so the
+//! scanner has zero filesystem dependencies. Adding language coverage means
+//! updating this table and the matching scanner fixtures together.
 
 use crate::scanner::result::FileRecord;
 
 /// Substrings / suffixes that mark a file as a test for at least one
-/// language. Mirrors the union of `testFilePatterns` across every
-/// `Sources/BurinCore/Resources/languages/*.json`.
+/// language.
 const TEST_PATTERNS: &[&str] = &[
     // C++
     "_test.cpp",
@@ -96,7 +93,7 @@ pub fn is_test_file(relative_path: &str) -> bool {
 /// Populate [`FileRecord::corresponding_test_file`] for every non-test file
 /// that has a recognizable test-file partner. Mutates `files` in place.
 ///
-/// Heuristic (matches the Swift implementation):
+/// Heuristic:
 /// 1. Index test files by their leading basename token
 ///    (`accounts.integration.test.ts` → `accounts`).
 /// 2. For each non-test file, look up by its leading basename token.
@@ -195,7 +192,7 @@ mod tests {
     #[test]
     fn pairs_swift_source_with_swift_tests() {
         // Both files share the leading filename token "Foo" (split on `.`),
-        // so the Swift-matching algorithm pairs them.
+        // so the pairing algorithm matches them.
         let mut files = vec![record("Sources/Foo.swift"), record("Tests/Foo.Tests.swift")];
         map_test_files(&mut files);
         let src = files
@@ -210,10 +207,10 @@ mod tests {
 
     #[test]
     fn skips_when_leading_token_differs() {
-        // The Swift algorithm only pairs files that share their first
-        // dotted token. `test_foo.py` has token `test_foo`; `foo.py` has
-        // `foo` — they don't pair. Recorded as a known limitation; a
-        // future B-series ticket can layer prefix-stripping on top.
+        // The algorithm only pairs files that share their first dotted
+        // token. `test_foo.py` has token `test_foo`; `foo.py` has `foo` —
+        // they don't pair. Recorded as a known limitation; a future
+        // B-series ticket can layer prefix-stripping on top.
         let mut files = vec![record("foo.py"), record("test_foo.py")];
         map_test_files(&mut files);
         let src = files.iter().find(|f| f.relative_path == "foo.py").unwrap();

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://harnlang.com/schemas/hostlib/ast/extract_imports.response.json",
   "title": "ast.extract_imports response",
-  "description": "Deduped list of import statement strings. The response shape mirrors burin-code's existing handleASTImports decoder — `supported: false` (with empty `statements`) when language detection fails so callers can fall back without having to interpret an error.",
+  "description": "Deduped list of import statement strings. `supported: false` (with empty `statements`) means language detection failed, so callers can fall back without having to interpret an error.",
   "type": "object",
   "properties": {
     "path": { "type": ["string", "null"] },

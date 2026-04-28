@@ -1,8 +1,6 @@
 //! `ast.undefined_names` — language-aware undefined-identifier detection.
 //!
-//! Mirrors `TreeSitterUndefinedNames.diagnose` in burin-code's Swift
-//! `ASTEngine` (`Sources/ASTEngine/TreeSitterUndefinedNames.swift`). The
-//! contract:
+//! Contract:
 //!
 //! - Walk the tree-sitter parse, collect every identifier reference and
 //!   every name *defined* in this file (imports, parameters, locals,
@@ -12,14 +10,13 @@
 //! - Deduplicate by name on first occurrence so callers see one
 //!   diagnostic per missing import / typo, not one per usage.
 //!
-//! Profiles ship for Python, JavaScript, TypeScript, Go, and Ruby —
-//! exactly the language set the Swift fallback supports today. Other
+//! Profiles ship for Python, JavaScript, TypeScript, Go, and Ruby. Other
 //! languages return `supported = false` so callers can fall back to an
 //! external linter.
 //!
 //! Single-file scope is a deliberate restriction: cross-file resolution,
 //! re-exports, dynamic attribute access, and `exec`/`eval`-style name
-//! discovery are out of scope, matching the Swift surface.
+//! discovery are out of scope.
 
 use std::collections::HashSet;
 use std::path::PathBuf;

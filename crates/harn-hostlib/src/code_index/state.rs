@@ -8,7 +8,7 @@
 //!
 //! Single-file mutations (`reindex_file`, `remove_file`) flow through
 //! the same paths so the sub-indexes stay consistent across the
-//! incremental host ops the burin-code daemon drives.
+//! incremental host ops drive.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

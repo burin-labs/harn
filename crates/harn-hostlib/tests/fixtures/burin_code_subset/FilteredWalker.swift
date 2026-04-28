@@ -1,6 +1,6 @@
 // FilteredWalker.swift
 //
-// Mirrors the Swift `FilteredWalker` shape. Used by the scenario test
+// Filtered-walker shaped fixture. Used by the scenario test
 // to assert substring queries find this file — the body is irrelevant.
 
 import Foundation

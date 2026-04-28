@@ -7,10 +7,10 @@
 //! sub-project boundaries, repo-map text, and the
 //! `scan_project → scan_incremental` round-trip.
 //!
-//! The fixture below is hand-shaped to exercise the same sub-tree patterns
-//! burin-code's pipeline relies on (Cargo + nested package.json,
-//! `__tests__/` test files, paginated-response helpers, prisma schema)
-//! without forcing a heavyweight checkout.
+//! The fixture below is hand-shaped to exercise common sub-tree patterns
+//! (Cargo + nested package.json, `__tests__/` test files,
+//! paginated-response helpers, prisma schema) without forcing a
+//! heavyweight checkout.
 
 use std::fs;
 use std::path::Path;

@@ -1,10 +1,9 @@
 // CodeIndex.swift
 //
-// Trimmed fixture mirroring the structure of
-// `burin-labs/burin-code/Sources/BurinCodeIndex/CodeIndex.swift`. Used by
-// `tests/code_index_scenario.rs` as a stand-in when the live repo isn't
-// available — the tree-shape and `import` declarations are what the
-// scenario asserts on, not the implementation details.
+// Trimmed Swift-shaped code-index fixture. Used by
+// `tests/code_index_scenario.rs`; the tree-shape and `import`
+// declarations are what the scenario asserts on, not the implementation
+// details.
 
 import Foundation
 

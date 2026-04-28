@@ -1,7 +1,5 @@
 //! `ast.extract_imports` — pull import statements out of a source file.
 //!
-//! Mirrors the Swift `TreeSitterImportExtractor` in
-//! `~/projects/burin-code/Sources/ASTEngine/TreeSitterImportExtractor.swift`.
 //! Walks the parse tree, collects nodes whose kind is on the
 //! [`IMPORT_NODE_TYPES`] list, and returns their text in document
 //! order. Falls back to a top-level keyword scan when the grammar's
@@ -11,8 +9,7 @@
 //! ## Wire format
 //!
 //! Accepts either an in-memory `source` (with `language`) or a `path`.
-//! The response shape mirrors burin-code's existing
-//! `handleASTImports` decoder so the bridge swap is a no-op:
+//! Response shape:
 //!
 //! ```json
 //! {
@@ -42,8 +39,7 @@ use super::symbols::helpers::{children, node_text};
 const BUILTIN: &str = "hostlib_ast_extract_imports";
 
 /// Tree-sitter node kinds that wrap an import declaration. The set is
-/// the union of every grammar's import-like node type — Swift uses the
-/// same superset since these are the actual node kinds emitted by the
+/// the union of every grammar's import-like node type emitted by the
 /// shipped grammars.
 const IMPORT_NODE_TYPES: &[&str] = &[
     // TS / JS / Python
@@ -86,8 +82,7 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
 
     // Soft-fail mode: when language detection fails (unsupported file
     // extension, no language hint), return `{supported: false}` rather
-    // than erroring out. burin-code's import-hint code path expects this
-    // shape so it can fall back to its own scanner.
+    // than erroring out so callers can fall back to another scanner.
     let language_opt = match language_in.as_deref() {
         Some(name) if !name.is_empty() => Language::from_name(name),
         _ => path_in

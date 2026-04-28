@@ -1,6 +1,6 @@
 // WordIndex.swift
 //
-// Fixture stand-in for the Swift `WordIndex` actor. Only shape matters
+// Fixture stand-in for the word index. Only shape matters
 // for the scenario test — substring queries should find this file by
 // name.
 

@@ -1,11 +1,11 @@
 //! `tools/get_file_outline` — convenience wrapper that returns a
 //! structural outline (functions, classes, types) for a single source file.
 //!
-//! This module uses a small language-agnostic regex-backed extractor for the
-//! languages `burin-code` exposes in its outline UI: Swift, Rust, JS/TS,
-//! Python, Go, Ruby, Java/Kotlin, C/C++, and shell. The output shape is
-//! identical to `ast.outline`'s response schema, so the extractor can be
-//! replaced by a tree-sitter implementation without disturbing callers.
+//! This module uses a small language-agnostic regex-backed extractor for
+//! common host languages: Swift, Rust, JS/TS, Python, Go, Ruby,
+//! Java/Kotlin, C/C++, and shell. The output shape is identical to
+//! `ast.outline`'s response schema, so the extractor can be replaced by a
+//! tree-sitter implementation without disturbing callers.
 
 use std::fs;
 use std::path::{Path, PathBuf};

@@ -1,9 +1,8 @@
 //! `tools/search` — ripgrep-style content search backed by `grep-searcher`
 //! and `ignore`.
 //!
-//! Mirrors the Swift `CoreToolExecutor.searchCode` surface but returns
-//! structured matches (path/line/column/text/context) instead of a
-//! preformatted human string. The shape is locked by
+//! Returns structured matches (path/line/column/text/context) instead of
+//! a preformatted human string. The shape is locked by
 //! `schemas/tools/search.{request,response}.json`.
 
 use std::collections::VecDeque;
@@ -179,8 +178,8 @@ fn build_matcher(
         })
 }
 
-/// Normalize a user-supplied glob the way Swift's `searchCode` did so
-/// callers writing `internal/manifest/*.go` get matches at any depth.
+/// Normalize a user-supplied glob so callers writing
+/// `internal/manifest/*.go` get matches at any depth.
 fn normalize_glob(glob: &str) -> String {
     if glob.contains('/') && !glob.starts_with("**/") {
         format!("**/{glob}")

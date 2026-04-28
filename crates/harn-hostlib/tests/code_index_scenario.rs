@@ -1,11 +1,7 @@
-//! Scenario test: build a real index over a Swift fixture that mirrors
-//! the layout of `burin-labs/burin-code`'s `Sources/BurinCodeIndex/`.
+//! Scenario test: build a real index over a Swift-shaped host fixture.
 //!
-//! The issue's "Tests" bullet asks for "a scenario test that builds an
-//! index over the `burin-code` repo itself and asserts known queries
-//! (golden fixture)". We can't depend on a sibling checkout from CI, so
-//! the fixture under `tests/fixtures/burin_code_subset/` reproduces the
-//! shape of the Swift module we're porting (file names, basic content,
+//! The fixture under `tests/fixtures/burin_code_subset/` reproduces the
+//! shape of a code-index host module (file names, basic content,
 //! cross-references). The asserts are picked to catch regressions in:
 //!
 //! - the trigram/word index (does `query("TrigramIndex")` find the file?)
@@ -15,10 +11,10 @@
 //!   not resolve standard-library imports — so the symmetric assertion
 //!   uses an in-fixture cross-reference instead).
 //!
-//! When `BURIN_CODE_REPO=<path>` is set in the environment, the scenario
-//! also rebuilds the index against that path and asserts the same set of
-//! invariants over the live repo. CI doesn't set the env var so the
-//! synthetic fixture path is the default.
+//! When `HARN_HOSTLIB_CODE_INDEX_SCENARIO_ROOT=<path>` is set in the
+//! environment, the scenario also rebuilds the index against that path and
+//! asserts the same set of invariants over a live repo. CI doesn't set the
+//! env var so the synthetic fixture path is the default.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -119,7 +115,7 @@ fn assert_substring_query_finds(registry: &BuiltinRegistry, needle: &str, expect
 }
 
 #[test]
-fn fixture_reproduces_swift_module_invariants() {
+fn fixture_reproduces_code_index_invariants() {
     let cap = CodeIndexCapability::new();
     let mut registry = BuiltinRegistry::new();
     cap.register_builtins(&mut registry);
@@ -161,18 +157,19 @@ fn fixture_reproduces_swift_module_invariants() {
     assert!(extract_int(stats.get("trigrams").unwrap()) > 0);
 }
 
-/// When `BURIN_CODE_REPO` points at a checkout, the same invariants are
-/// asserted over the real repo. The env-var gate keeps CI fast and
-/// hermetic — local runs that opt in get the realistic stress test.
+/// When `HARN_HOSTLIB_CODE_INDEX_SCENARIO_ROOT` points at a checkout, the
+/// same invariants are asserted over a real repo. The env-var gate keeps
+/// CI fast and hermetic; local runs that opt in get the realistic stress
+/// test.
 #[test]
-fn live_burin_code_smoke() {
-    let Some(path) = std::env::var_os("BURIN_CODE_REPO") else {
-        eprintln!("BURIN_CODE_REPO not set; skipping live scenario test");
+fn live_code_index_smoke() {
+    let Some(path) = std::env::var_os("HARN_HOSTLIB_CODE_INDEX_SCENARIO_ROOT") else {
+        eprintln!("HARN_HOSTLIB_CODE_INDEX_SCENARIO_ROOT not set; skipping live scenario test");
         return;
     };
     let path = PathBuf::from(path);
     if !path.exists() {
-        eprintln!("BURIN_CODE_REPO does not exist; skipping");
+        eprintln!("HARN_HOSTLIB_CODE_INDEX_SCENARIO_ROOT does not exist; skipping");
         return;
     }
     let cap = CodeIndexCapability::new();
@@ -183,7 +180,7 @@ fn live_burin_code_smoke() {
     let files_indexed = rebuild(&registry, &path);
     let elapsed = started.elapsed();
     eprintln!(
-        "live burin-code rebuild: {files_indexed} files in {:.2}s",
+        "live code-index scenario rebuild: {files_indexed} files in {:.2}s",
         elapsed.as_secs_f64()
     );
     assert!(files_indexed > 0);

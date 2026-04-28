@@ -1,11 +1,10 @@
 //! `ast.bracket_balance` — count unbalanced `()`, `[]`, `{}` in source.
 //!
-//! Direct port of `Sources/ASTEngine/BracketBalance.swift`. The lexer
-//! treats `//` and `/* */` as comments by default and switches to `#`
-//! line comments for Python; string literals (single, double, backtick)
-//! suppress bracket counting inside them. The output is signed counts
-//! per bracket family — positive means unclosed openers, negative means
-//! unmatched closers.
+//! The lexer treats `//` and `/* */` as comments by default and switches
+//! to `#` line comments for Python; string literals (single, double,
+//! backtick) suppress bracket counting inside them. The output is signed
+//! counts per bracket family — positive means unclosed openers, negative
+//! means unmatched closers.
 
 use harn_vm::VmValue;
 

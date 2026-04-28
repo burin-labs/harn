@@ -3,16 +3,12 @@
 Opt-in host builtins for the Harn VM that provide:
 
 1. **Code intelligence** — tree-sitter–backed parsing, deterministic
-   trigram/word indexing, and project-wide repo scanning. Ports the Swift
-   `Sources/ASTEngine/`, `Sources/BurinCodeIndex/`, and
-   `Sources/BurinCore/Scanner/` surface from
-   [`burin-labs/burin-code`](https://github.com/burin-labs/burin-code).
+   trigram/word indexing, project-wide repo scanning, file watching, and
+   live workspace state.
 2. **Deterministic tools** — content search (`grep-searcher` + `ignore`),
    file I/O, directory listing, file outline, git inspection (`gix`), file
    watching (`notify`), and process lifecycle (`run_command`, `run_test`,
-   `run_build_command`, `inspect_test_results`, `manage_packages`). Ports
-   the Swift `CoreToolExecutor` surface so calls no longer have to bounce
-   Harn → Swift → Harn.
+   `run_build_command`, `inspect_test_results`, `manage_packages`).
 
 ## Status
 
@@ -20,8 +16,7 @@ Opt-in host builtins for the Harn VM that provide:
 scaffold (every method routed through `HostlibError::Unimplemented`).
 [#564](https://github.com/burin-labs/harn/issues/564) lights up the
 `ast/` surface — tree-sitter parsing, symbol extraction, and outline
-generation for 22 host languages, mirroring the Swift `ASTEngine`
-coverage verbatim.
+generation for 22 host languages.
 [#567](https://github.com/burin-labs/harn/issues/567) lights up the
 deterministic-tool surface: `search`, `read_file`, `write_file`,
 `delete_file`, `list_directory`, `get_file_outline`, and `git`.
@@ -39,8 +34,9 @@ debounced AgentEvent batches.
 ### `ast/` languages
 
 Tree-sitter grammars are pinned in [`Cargo.toml`](Cargo.toml). Adding or
-dropping a language requires a coordinated change here, in the Swift
-`TreeSitterLanguage` enum, and in burin-code's bridge consumer.
+dropping a language requires a coordinated change to the language table,
+schemas, fixtures, and any host bridge that relies on the canonical
+language names.
 
 | Language       | Grammar crate                 | Extensions      |
 |----------------|-------------------------------|-----------------|
@@ -69,7 +65,7 @@ dropping a language requires a coordinated change here, in the Swift
 
 The `ast::*` builtins emit row/column coordinates as **0-based** values
 (matching tree-sitter native `Point`s). Symbol kinds are normalized to
-the lowercase string set Swift's `ASTEngine` already produced
+the lowercase hostlib wire set
 (`function`, `method`, `class`, `struct`, `enum`, `interface`,
 `protocol`, `type`, `variable`, `module`, `other`).
 
@@ -135,10 +131,9 @@ boundary.
 
 ## Scanner host capability
 
-`scanner/` ports `Sources/BurinCore/Scanner/CoreRepoScanner.swift` and emits
-the `ScanResult` shape that burin-code's intake pipeline consumes today
-(project metadata + file/folder/symbol records + dependency edges +
-sub-project boundaries + token-budgeted text repo map). Two builtins:
+`scanner/` emits the Harn `ScanResult` contract: project metadata,
+file/folder/symbol records, dependency edges, sub-project boundaries, and
+a token-budgeted text repo map. Two builtins:
 
 - `hostlib_scanner_scan_project({ root, include_hidden?, respect_gitignore?,
   max_files?, include_git_history?, repo_map_token_budget? })` — full scan.
@@ -189,8 +184,8 @@ let _registry = harn_hostlib::install_default(&mut vm);
 ```
 
 `install_default` registers every shipped capability and returns a
-`HostlibRegistry` that can be introspected (e.g. for
-`burin-code`'s schema-drift tests) without mutating the VM further.
+`HostlibRegistry` that can be introspected by schema-compatibility tests
+without mutating the VM further.
 
 Pick-and-choose embedders that only want a subset of modules can build a
 custom registry:
@@ -206,24 +201,23 @@ The cargo feature `hostlib` on `harn-cli` is **default-on**. Embedders
 can disable it with `--no-default-features` for a slimmer build that
 omits the tree-sitter/notify/gix dependency tree entirely.
 
-## How `burin-code` consumes it
+## Schema compatibility
 
-`burin-code` pulls hostlib in transitively via the harn release pinned in
-its `.harn-version` manifest. After this scaffold lands, the parent epic
-ships:
-
-1. A harn release bumping the version in this repo (per
-   [`scripts/release_ship.sh`](../../scripts/release_ship.sh)).
-2. A burin-code PR bumping `.harn-version` to that release.
-3. burin-code progressively retires its Swift-side `BurinCore`
-   counterparts as each implementation issue lands here.
+Harn-owned hosts usually consume hostlib through a pinned `harn` release
+or through a direct Cargo dependency on this crate. Host integrations
+should treat the JSON schemas and registered builtin list as the public
+contract, then run their own compatibility tests against those exported
+contracts during upgrades.
 
 The schemas under `schemas/<module>/<method>.{request,response}.json` are
-the **source of truth** for burin-code's schema-drift tests. They ship
-with the published crate (see the `include` field in `Cargo.toml`) and
-are also mirrored at compile time via `include_str!` into
+the **source of truth** for hostlib request/response compatibility. They
+ship with the published crate (see the `include` field in `Cargo.toml`)
+and are also mirrored at compile time via `include_str!` into
 [`schemas.rs`](src/schemas.rs) so embedders can fetch them
 programmatically without locating the on-disk schema directory.
+
+Historical notes about the original bridge migration live in
+[`docs/src/migrations/harn-hostlib-host-contracts.md`](../../docs/src/migrations/harn-hostlib-host-contracts.md).
 
 ## Directory layout
 
@@ -252,7 +246,7 @@ crates/harn-hostlib/
 └── tests/
     ├── registration.rs        # registration + schema parity tests
     ├── code_index.rs          # builtin-level integration tests
-    └── code_index_scenario.rs # scenario test over a Swift-shaped fixture
+    └── code_index_scenario.rs # scenario test over a host-shaped fixture
 ```
 
 ## Adding a new method

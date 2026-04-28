@@ -6,8 +6,7 @@
 //!    orchestration capability policy applies (Linux seccomp/landlock,
 //!    macOS `sandbox-exec`, workspace-root cwd enforcement).
 //! 2. Pipe drains run on background threads so >64 KB output never
-//!    deadlocks `wait()` (the same trap the Swift implementation called
-//!    out in CoreToolExecutor+Commands.swift).
+//!    deadlocks `wait()`.
 //! 3. Timeout enforcement is uniform: when a deadline elapses, the child
 //!    is killed and `timed_out: true` is reported in the response.
 
@@ -75,8 +74,8 @@ pub(crate) fn run(req: SpawnRequest) -> Result<SpawnOutcome, HostlibError> {
     }
 
     if !req.env.is_empty() {
-        // Mirrors Swift's buildCleanEnvironment: the caller is responsible for
-        // every variable they want set; we don't merge in the parent env. This
+        // The caller is responsible for every variable they want set; we
+        // don't merge in the parent env. This
         // matches the schema (env is a complete map, not a patch).
         command.env_clear();
         for (key, value) in &req.env {
@@ -211,7 +210,7 @@ fn decode_status(status: std::process::ExitStatus) -> (i32, Option<String>) {
 
 #[cfg(unix)]
 fn format_signal(sig: i32) -> String {
-    // Stay minimal: mirror the names exposed by burin-code's UI surfaces.
+    // Stay minimal: expose the conventional signal names hosts render.
     match sig {
         1 => "SIGHUP".into(),
         2 => "SIGINT".into(),

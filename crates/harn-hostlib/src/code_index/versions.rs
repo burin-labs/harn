@@ -1,8 +1,7 @@
 //! Append-only version log of file mutations.
 //!
-//! Mirrors the Swift `VersionLog` struct in `Sources/BurinCodeIndex/`.
-//! Every successful write through the host's `version_record` op lands
-//! here with a monotonic sequence number. Agents call `changes_since(seq)`
+//! Every successful write through the host's `version_record` op lands here
+//! with a monotonic sequence number. Agents call `changes_since(seq)`
 //! to catch up between turns without re-reading every file, and the seq
 //! numbers let higher-level tooling spot "agent fighting itself" loops
 //! before they cause damage.
@@ -15,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// Maximum number of entries kept per path. Older entries roll off the
-/// front in FIFO order — matches the Swift constant.
+/// front in FIFO order.
 pub const HISTORY_LIMIT: usize = 200;
 
 /// Edit-classification for one record. The string forms ride out to Harn
@@ -40,8 +39,7 @@ pub enum EditOp {
 }
 
 impl EditOp {
-    /// String form used by the Harn host bridge. Mirrors the Swift
-    /// `EditOp.rawValue` so cross-repo callers stay aligned.
+    /// String form used by the Harn host bridge.
     pub fn as_str(self) -> &'static str {
         match self {
             EditOp::Snapshot => "snapshot",

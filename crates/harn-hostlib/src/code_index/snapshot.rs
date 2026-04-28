@@ -1,10 +1,9 @@
 //! Persistent on-disk snapshot of the workspace index.
 //!
-//! Mirrors the Swift `CodeIndexSnapshot` struct. v1 uses a single JSON
-//! file at `.burin/index/snapshot.json`. The shape is intentionally
-//! tolerant of missing sections so we can extend it in place without a
-//! version bump (e.g. add a new sub-index without invalidating earlier
-//! snapshots).
+//! v1 uses a single JSON file at `.burin/index/snapshot.json` for
+//! on-disk compatibility. The shape is intentionally tolerant of missing
+//! sections so we can extend it in place without a version bump (e.g. add
+//! a new sub-index without invalidating earlier snapshots).
 //!
 //! The snapshot is the recovery primitive. On daemon startup, the
 //! embedder restores from the snapshot if one exists, then calls

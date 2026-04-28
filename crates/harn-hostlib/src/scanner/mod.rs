@@ -1,13 +1,11 @@
 //! Repo scanner host capability.
 //!
-//! Ports `Sources/BurinCore/Scanner/CoreRepoScanner.swift` from
-//! `burin-labs/burin-code` into Rust: deterministic project-wide file
-//! enumeration honoring `.gitignore` and the [`extensions::EXCLUDED_DIRS`]
-//! table, symbol extraction, import-derived dependency graph,
-//! reference + churn + importance scoring, source/test pairing, folder
-//! aggregates, project metadata (language stats + detected test
-//! commands + code-pattern hints), sub-project detection, and a
-//! token-budgeted text repo map.
+//! Deterministic project-wide file enumeration honoring `.gitignore` and
+//! the [`extensions::EXCLUDED_DIRS`] table, symbol extraction,
+//! import-derived dependency graph, reference + churn + importance
+//! scoring, source/test pairing, folder aggregates, project metadata
+//! (language stats + detected test commands + code-pattern hints),
+//! sub-project detection, and a token-budgeted text repo map.
 //!
 //! `scan_project` returns the full [`result::ScanResult`] alongside an
 //! opaque `snapshot_token` derived from the canonicalized root path. The

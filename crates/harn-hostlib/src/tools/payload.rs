@@ -101,7 +101,7 @@ pub(crate) fn optional_u64(
 }
 
 /// Convert an optional `timeout_ms` field into a `Duration`, treating zero
-/// or absent values as "no timeout" — matches the Swift surface.
+/// or absent values as "no timeout".
 pub(crate) fn optional_timeout(
     builtin: &'static str,
     map: &BTreeMap<String, VmValue>,

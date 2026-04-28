@@ -1,30 +1,26 @@
 //! AST host capability.
 //!
-//! Wraps tree-sitter parsing, symbol extraction, and outline generation —
-//! the Swift `Sources/ASTEngine/` surface ported into Rust. The implementation
-//! is fully wired so AST builtins share one canonical wire format.
+//! Wraps tree-sitter parsing, symbol extraction, and outline generation.
+//! The implementation is fully wired so AST builtins share one canonical
+//! wire format.
 //!
 //! ## Wire format
 //!
 //! - Row/column coordinates are **0-based** across all three builtins,
-//!   matching tree-sitter's native `Point` representation. Swift's
-//!   `ASTEngine` historically returned 1-based coordinates for symbols;
-//!   we normalize on 0-based here so `parse_file`, `symbols`, and
-//!   `outline` share one convention.
+//!   matching tree-sitter's native `Point` representation. `parse_file`,
+//!   `symbols`, and `outline` share one convention.
 //! - `parse_file` emits a flat node list with `parent_id` rather than
 //!   nested children — keeps the wire JSON-serializable without inflating
 //!   it with object copies.
 //! - `symbols` and `outline` carry a `signature` string (e.g.
-//!   `"fn foo(bar: i32)"`) on every entry to match Swift's
-//!   `TreeSitterSymbol.signature`.
+//!   `"fn foo(bar: i32)"`) on every entry.
 //!
 //! ## Languages
 //!
-//! [`language::Language`] mirrors Swift's `TreeSitterLanguage` enum
-//! verbatim: TypeScript/TSX, JavaScript/JSX, Python, Go, Rust, Java,
-//! C, C++, C#, Ruby, Kotlin, PHP, Scala, Bash, Swift, Zig, Elixir, Lua,
-//! Haskell, R. Adding/dropping languages requires a coordinated change
-//! in both repos.
+//! [`language::Language`] covers TypeScript/TSX, JavaScript/JSX, Python,
+//! Go, Rust, Java, C, C++, C#, Ruby, Kotlin, PHP, Scala, Bash, Swift, Zig,
+//! Elixir, Lua, Haskell, and R. Adding/dropping languages requires
+//! coordinated schema, fixture, and host-bridge updates.
 //!
 
 use std::sync::Arc;
