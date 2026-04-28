@@ -1,0 +1,26 @@
+pipeline test(task) {
+  // Mixed pass/fail/skip with classname qualification, time attribute,
+  // and embedded system-out/system-err.
+  let xml = "<?xml version=\"1.0\"?>\n<testsuites>\n  <testsuite name=\"suite\">\n    <testcase classname=\"pkg.Suite\" name=\"passes\" time=\"0.001\"/>\n    <testcase classname=\"pkg.Suite\" name=\"fails\" time=\"0.250\">\n      <failure message=\"boom\">stack trace here</failure>\n    </testcase>\n    <testcase classname=\"pkg.Suite\" name=\"skipped\"><skipped/></testcase>\n    <testcase classname=\"pkg.Suite\" name=\"errored\">\n      <error message=\"segfault\">core dumped</error>\n      <system-out>hello</system-out>\n      <system-err>warn: x</system-err>\n    </testcase>\n  </testsuite>\n</testsuites>"
+  let cases = parse_junit_xml(xml)
+  log(len(cases))
+  log(cases[0].name)
+  log(cases[0].status)
+  log(cases[0].duration_ms)
+  log(cases[1].status)
+  log(cases[1].duration_ms)
+  log(cases[1].message)
+  log(cases[2].status)
+  log(cases[3].status)
+  log(cases[3].message)
+  log(cases[3].stdout)
+  log(cases[3].stderr)
+  // Lenient: malformed input yields an empty list, no exception.
+  let empty = parse_junit_xml("not xml at all")
+  log(len(empty))
+  // Bytes input is accepted alongside strings.
+  let from_bytes = parse_junit_xml(bytes_from_string("<testsuite><testcase name=\"only\"/></testsuite>"))
+  log(len(from_bytes))
+  log(from_bytes[0].name)
+  log(from_bytes[0].status)
+}

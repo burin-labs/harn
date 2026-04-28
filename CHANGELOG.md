@@ -9,9 +9,19 @@ granular archaeology.
 
 ## Unreleased
 
-### Unreleased
+### Added
 
-- No entries yet. Add items here for the next release.
+- **`parse_junit_xml` stdlib builtin (#801).** New core builtin that
+  parses a JUnit XML test report (`string` or `bytes`) into a list of
+  per-case dicts with `name`, `status` (`"passed"` / `"failed"` /
+  `"skipped"` / `"errored"`), `duration_ms`, `message`, `stdout`, and
+  `stderr` keys. JUnit XML is the de facto interchange format for
+  GTest (`--gtest_output=xml`), Maven Surefire / Gradle, xUnit,
+  pytest, vitest, and cargo-nextest's JUnit dialect, so a single
+  builtin lets a Harn script wrapping a `process.run` of a compiled
+  test runner extract structured pass/fail data without going through
+  a host capability. The parser is intentionally lenient: malformed
+  input yields `[]` instead of throwing.
 
 ## v0.7.46
 

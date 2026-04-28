@@ -1686,6 +1686,11 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         name: "csv_stringify",
         return_type: Some(BuiltinReturn::Named("string")),
     },
+    // JUnit XML test results
+    BuiltinSig {
+        name: "parse_junit_xml",
+        return_type: Some(BuiltinReturn::Named("list")),
+    },
     // URL
     BuiltinSig {
         name: "url_parse",

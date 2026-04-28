@@ -25,6 +25,7 @@ pub(crate) mod io;
 mod iter;
 pub(crate) mod json;
 mod json_query;
+mod junit;
 mod logging;
 mod math;
 mod monitors;
@@ -81,6 +82,7 @@ pub fn register_core_stdlib(vm: &mut Vm) {
     compression::register_compression_builtins(vm);
     crypto::register_crypto_builtins(vm);
     csv::register_csv_builtins(vm);
+    junit::register_junit_builtins(vm);
     multipart::register_multipart_builtins(vm);
     url_parse::register_url_builtins(vm);
     cookies::register_cookie_builtins(vm);
