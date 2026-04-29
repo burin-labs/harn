@@ -322,9 +322,10 @@ fn models_url(def: &ProviderDef, base_url: &str) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
+    use std::io::Read;
+
     use super::*;
-    use std::io::{Read, Write};
-    use std::net::TcpListener;
+    use crate::test_stub::{spawn_stub, write_http_response, StubServer};
 
     #[test]
     fn parse_model_ids_reads_openai_compatible_data() {
@@ -344,12 +345,12 @@ mod tests {
 
     #[tokio::test]
     async fn probe_provider_readiness_verifies_served_model() {
-        let (base_url, handle) = spawn_models_stub(
+        let (base_url, server) = spawn_models_stub(
             200,
             r#"{"data":[{"id":"unsloth/Qwen3.6-27B-UD-MLX-4bit"}]}"#,
         );
         let result = probe_provider_readiness("mlx", Some("mlx-qwen36-27b"), Some(&base_url)).await;
-        handle.join().expect("stub joins");
+        drop(server);
         assert!(result.ok);
         assert_eq!(result.status, ReadinessStatus::Ok);
         assert_eq!(
@@ -360,48 +361,23 @@ mod tests {
 
     #[tokio::test]
     async fn probe_provider_readiness_reports_missing_model() {
-        let (base_url, handle) = spawn_models_stub(200, r#"{"data":[{"id":"other-model"}]}"#);
+        let (base_url, server) = spawn_models_stub(200, r#"{"data":[{"id":"other-model"}]}"#);
         let result = probe_provider_readiness("mlx", Some("mlx-qwen36-27b"), Some(&base_url)).await;
-        handle.join().expect("stub joins");
+        drop(server);
         assert!(!result.ok);
         assert_eq!(result.status, ReadinessStatus::ModelMissing);
         assert!(result.message.contains("Currently served: other-model"));
     }
 
-    fn spawn_models_stub(status: u16, body: &'static str) -> (String, std::thread::JoinHandle<()>) {
-        let listener = TcpListener::bind("127.0.0.1:0").expect("bind models stub");
-        let addr = listener.local_addr().expect("stub addr");
-        let handle = std::thread::spawn(move || {
-            listener
-                .set_nonblocking(true)
-                .expect("set listener nonblocking");
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
-            let mut stream = loop {
-                match listener.accept() {
-                    Ok((stream, _)) => break stream,
-                    Err(ref error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                        if std::time::Instant::now() >= deadline {
-                            panic!("models stub: no client within 3s");
-                        }
-                        std::thread::sleep(std::time::Duration::from_millis(20));
-                    }
-                    Err(error) => panic!("models stub: accept failed: {error}"),
-                }
-            };
-            stream.set_nonblocking(false).expect("set stream blocking");
+    fn spawn_models_stub(status: u16, body: &'static str) -> (String, StubServer) {
+        let server = spawn_stub("models stub", move |mut stream| {
             let mut buf = vec![0u8; 4096];
             let n = stream.read(&mut buf).expect("read request");
             let request = String::from_utf8_lossy(&buf[..n]);
             assert!(request.starts_with("GET /v1/models HTTP/1.1\r\n"));
-            let response = format!(
-                "HTTP/1.1 {status} OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
-                body.len(),
-                body
-            );
-            stream
-                .write_all(response.as_bytes())
-                .expect("write response");
+            write_http_response(&mut stream, status, &[], body);
         });
-        (format!("http://{addr}"), handle)
+        let base_url = format!("http://{}", server.addr());
+        (base_url, server)
     }
 }

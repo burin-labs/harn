@@ -122,6 +122,23 @@ impl MockHttpServer {
     pub(crate) fn addr(&self) -> SocketAddr {
         self.addr
     }
+
+    /// Block until the server thread finishes serving its expected request
+    /// count and exits naturally. After this returns, the bound port is
+    /// released and the captured-request collection is fully populated, so
+    /// tests can assert deterministically without polling.
+    ///
+    /// Subsequent `Drop` is a no-op for the join, but the shutdown flag is
+    /// still flipped (harmlessly) for symmetry. If the expected requests
+    /// never arrive, this blocks indefinitely — relying on nextest's
+    /// per-test timeout to surface the bug rather than letting a
+    /// wall-clock deadline mask it.
+    #[allow(dead_code)]
+    pub(crate) fn wait_until_handled(&mut self) {
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
 }
 
 impl Drop for MockHttpServer {

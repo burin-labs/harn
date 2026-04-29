@@ -490,7 +490,7 @@ async fn linear_client_supports_typed_methods_and_escape_hatch() {
 #[tokio::test]
 async fn linear_connector_monitor_reenables_webhook_after_probe_streak() {
     let requests = Arc::new(Mutex::new(Vec::<CapturedRequest>::new()));
-    let server = spawn_monitor_server(requests.clone(), 3);
+    let mut server = spawn_monitor_server(requests.clone(), 3);
     let base_url = server.base_url().to_string();
     let mut binding = binding();
     binding.config = json!({
@@ -510,19 +510,19 @@ async fn linear_connector_monitor_reenables_webhook_after_probe_streak() {
     });
     let (connector, _) = connector_with_binding(binding).await;
 
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
-    while requests.lock().expect("requests lock").len() < 3 {
-        assert!(
-            std::time::Instant::now() < deadline,
-            "timed out waiting for monitor probes"
-        );
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-    }
+    // Block until the mock server has served all three expected probes and
+    // its worker thread exits, instead of polling a shared counter against
+    // a wall-clock deadline. nextest's per-test timeout will surface a
+    // genuine deadlock; we no longer pretend to bound it ourselves.
+    tokio::task::spawn_blocking(move || {
+        server.wait_until_handled();
+    })
+    .await
+    .expect("await monitor server completion");
     connector
         .shutdown(std::time::Duration::from_secs(1))
         .await
         .expect("shutdown connector");
-    drop(server);
 
     let requests = requests.lock().expect("requests lock").clone();
     assert_eq!(requests.len(), 3);
