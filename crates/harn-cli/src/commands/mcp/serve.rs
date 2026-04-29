@@ -5,12 +5,13 @@ use std::sync::{Arc, Mutex};
 
 use axum::body::Bytes;
 use axum::extract::{Query, State};
+use axum::http::header::ACCEPT;
 use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use futures::channel::mpsc::{unbounded, UnboundedSender};
+use futures::channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
 use futures::{stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
@@ -39,6 +40,7 @@ use crate::package::CollectedTriggerHandler;
 const MCP_PROTOCOL_VERSION: &str = "2025-11-25";
 const MCP_SESSION_HEADER: &str = "mcp-session-id";
 const MCP_PROTOCOL_HEADER: &str = "mcp-protocol-version";
+const DEPRECATION_HEADER: &str = "deprecation";
 const ACTION_GRAPH_TOPIC: &str = "observability.action_graph";
 const TRIGGER_EVENTS_TOPIC: &str = "triggers.events";
 const DEFAULT_RESOURCE_LIMIT: usize = 200;
@@ -101,6 +103,7 @@ struct HttpState {
     rpc: RpcBridge,
     sessions: Arc<Mutex<HashMap<String, Arc<HttpSession>>>>,
     mcp_path: String,
+    sse_path: String,
     messages_path: String,
 }
 
@@ -1054,10 +1057,16 @@ fn http_router(
         rpc,
         sessions: Arc::new(Mutex::new(HashMap::new())),
         mcp_path: path.clone(),
+        sse_path: sse_path.clone(),
         messages_path: messages_path.clone(),
     };
     Router::new()
-        .route(&path, post(http_post_request).delete(http_delete_session))
+        .route(
+            &path,
+            post(http_post_request)
+                .get(http_get_stream)
+                .delete(http_delete_session),
+        )
         .route(&sse_path, get(legacy_sse_stream))
         .route(&messages_path, post(legacy_sse_message))
         .with_state(state)
@@ -1086,6 +1095,13 @@ async fn http_post_request(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
+    if let Err(response) = validate_origin(&headers) {
+        return *response;
+    }
+    if let Err(response) = validate_protocol_header(&headers) {
+        return *response;
+    }
+
     let normalized = normalized_headers(&headers);
     if state.service.auth.has_api_keys() {
         let auth_log = match auth_event_log(&state.service.state_dir) {
@@ -1135,22 +1151,104 @@ async fn http_post_request(
         Err(error) => return (StatusCode::INTERNAL_SERVER_ERROR, error).into_response(),
     };
     *session.state.lock().expect("HTTP session poisoned") = updated;
-    let mut response = Json(response_json).into_response();
-    if created {
-        response.headers_mut().insert(
-            HeaderName::from_static(MCP_SESSION_HEADER),
-            HeaderValue::from_str(&session_id)
-                .unwrap_or_else(|_| HeaderValue::from_static("invalid")),
+    if response_json.is_null() {
+        let mut response = StatusCode::ACCEPTED.into_response();
+        attach_streamable_headers(
+            &mut response,
+            created.then_some(session_id.as_str()),
+            MCP_PROTOCOL_VERSION,
         );
+        return response;
     }
-    response.headers_mut().insert(
-        HeaderName::from_static(MCP_PROTOCOL_HEADER),
-        HeaderValue::from_static(MCP_PROTOCOL_VERSION),
+
+    let mut response = if should_stream_post_response(&headers) {
+        sse_single_response(response_json).into_response()
+    } else {
+        Json(response_json).into_response()
+    };
+    attach_streamable_headers(
+        &mut response,
+        created.then_some(session_id.as_str()),
+        MCP_PROTOCOL_VERSION,
     );
     response
 }
 
+async fn http_get_stream(State(state): State<HttpState>, headers: HeaderMap) -> Response {
+    if let Err(response) = validate_origin(&headers) {
+        return *response;
+    }
+    if let Err(response) = validate_protocol_header(&headers) {
+        return *response;
+    }
+    if state.service.auth.has_api_keys() {
+        let normalized = normalized_headers(&headers);
+        let auth_log = match auth_event_log(&state.service.state_dir) {
+            Ok(log) => log,
+            Err(error) => return (StatusCode::INTERNAL_SERVER_ERROR, error).into_response(),
+        };
+        if let Err(()) = state
+            .service
+            .auth
+            .authorize(auth_log.as_ref(), "GET", &state.mcp_path, &normalized, &[])
+            .await
+        {
+            return (StatusCode::UNAUTHORIZED, "auth failed").into_response();
+        }
+    }
+    if !accepts_media(&headers, "text/event-stream") {
+        return StatusCode::NOT_ACCEPTABLE.into_response();
+    }
+    let Some(session_id) = headers
+        .get(MCP_SESSION_HEADER)
+        .and_then(|value| value.to_str().ok())
+    else {
+        return StatusCode::BAD_REQUEST.into_response();
+    };
+    let Some(session) = state
+        .sessions
+        .lock()
+        .expect("MCP sessions poisoned")
+        .get(session_id)
+        .cloned()
+    else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let (tx, rx) = unbounded::<JsonValue>();
+    *session.sse_tx.lock().expect("SSE sender poisoned") = Some(tx);
+    let mut response = sse_response(rx).into_response();
+    attach_streamable_headers(&mut response, None, MCP_PROTOCOL_VERSION);
+    response
+}
+
 async fn http_delete_session(State(state): State<HttpState>, headers: HeaderMap) -> Response {
+    if let Err(response) = validate_origin(&headers) {
+        return *response;
+    }
+    if let Err(response) = validate_protocol_header(&headers) {
+        return *response;
+    }
+    if state.service.auth.has_api_keys() {
+        let normalized = normalized_headers(&headers);
+        let auth_log = match auth_event_log(&state.service.state_dir) {
+            Ok(log) => log,
+            Err(error) => return (StatusCode::INTERNAL_SERVER_ERROR, error).into_response(),
+        };
+        if let Err(()) = state
+            .service
+            .auth
+            .authorize(
+                auth_log.as_ref(),
+                "DELETE",
+                &state.mcp_path,
+                &normalized,
+                &[],
+            )
+            .await
+        {
+            return (StatusCode::UNAUTHORIZED, "auth failed").into_response();
+        }
+    }
     let Some(session_id) = headers
         .get(MCP_SESSION_HEADER)
         .and_then(|value| value.to_str().ok())
@@ -1162,14 +1260,19 @@ async fn http_delete_session(State(state): State<HttpState>, headers: HeaderMap)
         .lock()
         .expect("MCP sessions poisoned")
         .remove(session_id);
-    if removed.is_some() {
+    let mut response = if removed.is_some() {
         StatusCode::NO_CONTENT.into_response()
     } else {
         StatusCode::NOT_FOUND.into_response()
-    }
+    };
+    attach_streamable_headers(&mut response, None, MCP_PROTOCOL_VERSION);
+    response
 }
 
 async fn legacy_sse_stream(State(state): State<HttpState>, headers: HeaderMap) -> Response {
+    if let Err(response) = validate_origin(&headers) {
+        return *response;
+    }
     let normalized = normalized_headers(&headers);
     if state.service.auth.has_api_keys() {
         let auth_log =
@@ -1179,26 +1282,24 @@ async fn legacy_sse_stream(State(state): State<HttpState>, headers: HeaderMap) -
             {
                 Some(log) => log,
                 None => {
-                    return (
+                    let mut response = (
                         StatusCode::INTERNAL_SERVER_ERROR,
                         "failed to open event log",
                     )
-                        .into_response()
+                        .into_response();
+                    attach_legacy_deprecation_headers(&mut response);
+                    return response;
                 }
             };
         if let Err(()) = state
             .service
             .auth
-            .authorize(
-                auth_log.as_ref(),
-                "GET",
-                &state.messages_path,
-                &normalized,
-                &[],
-            )
+            .authorize(auth_log.as_ref(), "GET", &state.sse_path, &normalized, &[])
             .await
         {
-            return (StatusCode::UNAUTHORIZED, "auth failed").into_response();
+            let mut response = (StatusCode::UNAUTHORIZED, "auth failed").into_response();
+            attach_legacy_deprecation_headers(&mut response);
+            return response;
         }
     }
 
@@ -1216,22 +1317,31 @@ async fn legacy_sse_stream(State(state): State<HttpState>, headers: HeaderMap) -
     let stream = stream::once(async move { Ok::<Event, Infallible>(endpoint_event) }).chain(
         rx.map(|message| {
             Ok(Event::default()
+                .id(Uuid::now_v7().to_string())
                 .event("message")
                 .data(serde_json::to_string(&message).unwrap_or_else(|_| "{}".to_string())))
         }),
     );
-    Sse::new(stream)
+    let mut response = Sse::new(stream)
         .keep_alive(KeepAlive::default())
-        .into_response()
+        .into_response();
+    attach_legacy_deprecation_headers(&mut response);
+    response
 }
 
 async fn legacy_sse_message(
     State(state): State<HttpState>,
     Query(query): Query<BTreeMap<String, String>>,
+    headers: HeaderMap,
     body: Bytes,
 ) -> Response {
+    if let Err(response) = validate_origin(&headers) {
+        return *response;
+    }
     let Some(session_id) = query.get("session_id") else {
-        return (StatusCode::BAD_REQUEST, "missing session_id").into_response();
+        let mut response = (StatusCode::BAD_REQUEST, "missing session_id").into_response();
+        attach_legacy_deprecation_headers(&mut response);
+        return response;
     };
     let Some(session) = state
         .sessions
@@ -1240,16 +1350,20 @@ async fn legacy_sse_message(
         .get(session_id)
         .cloned()
     else {
-        return (StatusCode::NOT_FOUND, "unknown session").into_response();
+        let mut response = (StatusCode::NOT_FOUND, "unknown session").into_response();
+        attach_legacy_deprecation_headers(&mut response);
+        return response;
     };
     let request: JsonValue = match serde_json::from_slice(body.as_ref()) {
         Ok(value) => value,
         Err(error) => {
-            return (
+            let mut response = (
                 StatusCode::BAD_REQUEST,
                 format!("invalid JSON-RPC request body: {error}"),
             )
-                .into_response()
+                .into_response();
+            attach_legacy_deprecation_headers(&mut response);
+            return response;
         }
     };
     let current = session
@@ -1259,11 +1373,17 @@ async fn legacy_sse_message(
         .clone();
     let (updated, response) = match state.rpc.call(current, request).await {
         Ok(result) => result,
-        Err(error) => return (StatusCode::INTERNAL_SERVER_ERROR, error).into_response(),
+        Err(error) => {
+            let mut response = (StatusCode::INTERNAL_SERVER_ERROR, error).into_response();
+            attach_legacy_deprecation_headers(&mut response);
+            return response;
+        }
     };
     *session.state.lock().expect("legacy SSE session poisoned") = updated;
     if response.is_null() {
-        return StatusCode::ACCEPTED.into_response();
+        let mut response = StatusCode::ACCEPTED.into_response();
+        attach_legacy_deprecation_headers(&mut response);
+        return response;
     }
     let Some(sender) = session
         .sse_tx
@@ -1272,12 +1392,18 @@ async fn legacy_sse_message(
         .as_ref()
         .cloned()
     else {
-        return (StatusCode::GONE, "session stream closed").into_response();
+        let mut response = (StatusCode::GONE, "session stream closed").into_response();
+        attach_legacy_deprecation_headers(&mut response);
+        return response;
     };
     if sender.unbounded_send(response).is_err() {
-        return (StatusCode::GONE, "session stream closed").into_response();
+        let mut response = (StatusCode::GONE, "session stream closed").into_response();
+        attach_legacy_deprecation_headers(&mut response);
+        return response;
     }
-    StatusCode::ACCEPTED.into_response()
+    let mut response = StatusCode::ACCEPTED.into_response();
+    attach_legacy_deprecation_headers(&mut response);
+    response
 }
 
 #[allow(clippy::result_large_err)] // axum::Response is large but short-lived on the error path.
@@ -1341,6 +1467,103 @@ impl RpcBridge {
         response_rx
             .await
             .map_err(|_| "MCP worker dropped the response channel".to_string())
+    }
+}
+
+fn sse_single_response(
+    message: JsonValue,
+) -> Sse<impl futures::Stream<Item = Result<Event, Infallible>>> {
+    let prime = Event::default().id(Uuid::now_v7().to_string()).data("");
+    let message = Event::default()
+        .id(Uuid::now_v7().to_string())
+        .event("message")
+        .data(serde_json::to_string(&message).unwrap_or_else(|_| "{}".to_string()));
+    Sse::new(stream::iter([
+        Ok::<Event, Infallible>(prime),
+        Ok::<Event, Infallible>(message),
+    ]))
+    .keep_alive(KeepAlive::default())
+}
+
+fn sse_response(
+    rx: UnboundedReceiver<JsonValue>,
+) -> Sse<impl futures::Stream<Item = Result<Event, Infallible>>> {
+    let prime = Event::default().id(Uuid::now_v7().to_string()).data("");
+    let stream =
+        stream::once(async move { Ok::<Event, Infallible>(prime) }).chain(rx.map(|message| {
+            Ok(Event::default()
+                .id(Uuid::now_v7().to_string())
+                .event("message")
+                .data(serde_json::to_string(&message).unwrap_or_else(|_| "{}".to_string())))
+        }));
+    Sse::new(stream).keep_alive(KeepAlive::default())
+}
+
+fn attach_streamable_headers(response: &mut Response, session_id: Option<&str>, protocol: &str) {
+    if let Some(session_id) = session_id {
+        if let Ok(value) = HeaderValue::from_str(session_id) {
+            response
+                .headers_mut()
+                .insert(HeaderName::from_static(MCP_SESSION_HEADER), value);
+        }
+    }
+    if let Ok(value) = HeaderValue::from_str(protocol) {
+        response
+            .headers_mut()
+            .insert(HeaderName::from_static(MCP_PROTOCOL_HEADER), value);
+    }
+}
+
+fn attach_legacy_deprecation_headers(response: &mut Response) {
+    response.headers_mut().insert(
+        HeaderName::from_static(DEPRECATION_HEADER),
+        HeaderValue::from_static("true"),
+    );
+}
+
+fn should_stream_post_response(headers: &HeaderMap) -> bool {
+    accepts_media(headers, "text/event-stream") && !accepts_media(headers, "application/json")
+}
+
+fn accepts_media(headers: &HeaderMap, media_type: &str) -> bool {
+    let Some(value) = headers.get(ACCEPT).and_then(|value| value.to_str().ok()) else {
+        return false;
+    };
+    value.split(',').any(|entry| {
+        let media = entry
+            .split(';')
+            .next()
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase();
+        media == media_type || media == "*/*"
+    })
+}
+
+fn validate_protocol_header(headers: &HeaderMap) -> Result<(), Box<Response>> {
+    let Some(value) = headers
+        .get(MCP_PROTOCOL_HEADER)
+        .and_then(|value| value.to_str().ok())
+    else {
+        return Ok(());
+    };
+    if value == MCP_PROTOCOL_VERSION || value == "2025-03-26" {
+        Ok(())
+    } else {
+        Err(Box::new(StatusCode::BAD_REQUEST.into_response()))
+    }
+}
+
+fn validate_origin(headers: &HeaderMap) -> Result<(), Box<Response>> {
+    let Some(origin) = headers.get("origin").and_then(|value| value.to_str().ok()) else {
+        return Ok(());
+    };
+    let Ok(url) = url::Url::parse(origin) else {
+        return Err(Box::new(StatusCode::FORBIDDEN.into_response()));
+    };
+    match url.host_str() {
+        Some("127.0.0.1") | Some("localhost") | Some("[::1]") | Some("::1") => Ok(()),
+        _ => Err(Box::new(StatusCode::FORBIDDEN.into_response())),
     }
 }
 
@@ -1514,10 +1737,13 @@ fn auth_event_log(state_dir: &Path) -> Result<Arc<harn_vm::event_log::AnyEventLo
 #[allow(clippy::await_holding_lock)]
 mod tests {
     use super::*;
+    use axum::body::{to_bytes, Body};
+    use axum::http::Request;
     use std::fs;
     use std::path::Path;
 
     use tempfile::TempDir;
+    use tower::ServiceExt;
 
     use crate::tests::common::harn_state_lock::lock_harn_state;
 
@@ -2001,5 +2227,195 @@ pub fn on_fail(event: TriggerEvent) -> any {
         let manifest = manifest.as_str().unwrap();
         assert!(manifest.contains("[[triggers]]"));
         assert!(manifest.contains("cron-ok"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn streamable_http_endpoint_supports_sse_get_delete_and_session_headers() {
+        let _guard = lock_harn_state();
+        let temp = TempDir::new().unwrap();
+        write_fixture(&temp);
+        let args = fixture_args(&temp);
+        let router = http_router_for_local(
+            args.local.clone(),
+            "/mcp".to_string(),
+            "/sse".to_string(),
+            "/messages".to_string(),
+        )
+        .unwrap();
+
+        let init = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/mcp")
+                    .header("accept", "application/json, text/event-stream")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        json!({
+                            "jsonrpc": "2.0",
+                            "id": 1,
+                            "method": "initialize",
+                            "params": {
+                                "protocolVersion": MCP_PROTOCOL_VERSION,
+                                "capabilities": {},
+                                "clientInfo": { "name": "streamable-test", "version": "1.0.0" }
+                            }
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(init.status(), StatusCode::OK);
+        assert_eq!(
+            init.headers()
+                .get(MCP_PROTOCOL_HEADER)
+                .and_then(|value| value.to_str().ok()),
+            Some(MCP_PROTOCOL_VERSION)
+        );
+        let session_id = init
+            .headers()
+            .get(MCP_SESSION_HEADER)
+            .and_then(|value| value.to_str().ok())
+            .expect("session id")
+            .to_string();
+
+        let tools = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/mcp")
+                    .header("accept", "text/event-stream")
+                    .header(MCP_SESSION_HEADER, &session_id)
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        harn_vm::jsonrpc::request(2, "tools/list", json!({})).to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(tools.status(), StatusCode::OK);
+        assert!(tools
+            .headers()
+            .get("content-type")
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| value.starts_with("text/event-stream")));
+        let body = to_bytes(tools.into_body(), usize::MAX).await.unwrap();
+        let body = String::from_utf8(body.to_vec()).unwrap();
+        assert!(body.contains("event: message"), "{body}");
+        assert!(body.contains("harn.trigger.list"), "{body}");
+
+        let get = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/mcp")
+                    .header("accept", "text/event-stream")
+                    .header(MCP_SESSION_HEADER, &session_id)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(get.status(), StatusCode::OK);
+        assert!(get
+            .headers()
+            .get("content-type")
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| value.starts_with("text/event-stream")));
+        drop(get);
+
+        let delete = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri("/mcp")
+                    .header(MCP_SESSION_HEADER, &session_id)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(delete.status(), StatusCode::NO_CONTENT);
+
+        let after_delete = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/mcp")
+                    .header("accept", "application/json")
+                    .header(MCP_SESSION_HEADER, &session_id)
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        harn_vm::jsonrpc::request(3, "tools/list", json!({})).to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(after_delete.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn legacy_sse_routes_are_marked_deprecated() {
+        let _guard = lock_harn_state();
+        let temp = TempDir::new().unwrap();
+        write_fixture(&temp);
+        let args = fixture_args(&temp);
+        let router = http_router_for_local(
+            args.local.clone(),
+            "/mcp".to_string(),
+            "/sse".to_string(),
+            "/messages".to_string(),
+        )
+        .unwrap();
+
+        let sse = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/sse")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(sse.status(), StatusCode::OK);
+        assert_eq!(
+            sse.headers()
+                .get(DEPRECATION_HEADER)
+                .and_then(|value| value.to_str().ok()),
+            Some("true")
+        );
+        drop(sse);
+
+        let messages = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/messages")
+                    .header("content-type", "application/json")
+                    .body(Body::from("{}"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(messages.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(
+            messages
+                .headers()
+                .get(DEPRECATION_HEADER)
+                .and_then(|value| value.to_str().ok()),
+            Some("true")
+        );
     }
 }
