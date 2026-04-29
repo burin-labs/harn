@@ -1,0 +1,63 @@
+import "std/plan"
+import { clear_host_mocks, mock_host_response } from "std/testing"
+
+pipeline main() {
+  let tools = plan_tools()
+  require tool_find(tools, "emit_plan") != nil, "emit_plan should be registered"
+  require tool_find(tools, "update_plan") != nil, "update_plan should be registered"
+  let artifact = plan_from(
+    {
+      summary: "Add a health endpoint.",
+      steps: [
+        {content: "Inspect the router.", status: "completed"},
+        {content: "Add the endpoint.", status: "pending"},
+      ],
+      assumptions: ["The existing router owns HTTP endpoints."],
+      open_questions: ["Should the endpoint include dependencies?"],
+      verification_commands: ["npm test"],
+    },
+  )
+  require artifact.schema_version == "harn.plan.v1", "plan artifact schema should be stable"
+  require len(artifact.steps) == 2, "plan steps should normalize"
+  require artifact.steps[0].status == "completed", "step status should normalize"
+  require len(plan_acp_entries(artifact)) == 2, "ACP entries should derive from steps"
+  clear_host_mocks()
+  mock_host_response("hitl", "approval", {approved: true, reviewer: "lead", reason: "ready"})
+  let approved = request_plan_approval(artifact, {reviewers: ["lead"]})
+  require approved.approval.state == "approved", "plan approval should use HITL"
+  require approved.approval.reviewers[0] == "lead", "reviewer should round-trip"
+  llm_mock(
+    {
+      tool_calls: [
+        {
+          id: "plan1",
+          name: "emit_plan",
+          arguments: {
+            summary: "Implement a small parser change.",
+            steps: [
+              {content: "Read parser tests.", status: "completed"},
+              {content: "Patch parser.", status: "pending"},
+            ],
+            verification_commands: ["cargo test -p harn-parser"],
+          },
+        },
+      ],
+    },
+  )
+  llm_mock({text: "Plan emitted."})
+  let result = agent_loop(
+    "Plan a parser change",
+    nil,
+    {provider: "mock", tools: tools, max_iterations: 2, session_id: "plan-conformance"},
+  )
+  let events = transcript_events(result?.transcript)
+  var saw_plan = false
+  for event in events {
+    if event.kind == "plan" {
+      saw_plan = true
+      require event.metadata.plan.schema_version == "harn.plan.v1", "transcript plan metadata should be structured"
+    }
+  }
+  require saw_plan, "agent loop should persist an emitted plan event"
+  log("plan primitives tests passed")
+}

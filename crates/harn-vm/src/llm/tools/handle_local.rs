@@ -59,7 +59,12 @@ pub(super) fn resolve_local_tool_path(path: &str) -> std::path::PathBuf {
 /// list so `executor: "harn"` declarations on these names are accepted
 /// even without a registered handler closure — `handle_tool_locally`
 /// provides the implicit Harn-side handler.
-pub(crate) const VM_STDLIB_SHORT_CIRCUIT_TOOLS: &[&str] = &["read_file", "list_directory"];
+pub(crate) const VM_STDLIB_SHORT_CIRCUIT_TOOLS: &[&str] = &[
+    "read_file",
+    "list_directory",
+    crate::llm::plan::EMIT_PLAN_TOOL,
+    crate::llm::plan::UPDATE_PLAN_TOOL,
+];
 
 /// Returns `true` when `name` is a tool the VM stdlib services
 /// directly via `handle_tool_locally`. Kept in lockstep with the match
@@ -73,6 +78,12 @@ pub(crate) fn is_vm_stdlib_short_circuit(name: &str) -> bool {
 /// This reduces latency and split-brain for passive operations.
 pub(crate) fn handle_tool_locally(name: &str, args: &serde_json::Value) -> Option<String> {
     match name {
+        crate::llm::plan::EMIT_PLAN_TOOL | crate::llm::plan::UPDATE_PLAN_TOOL => {
+            let plan = crate::llm::plan::normalize_plan_tool_call(name, args);
+            Some(serde_json::to_string_pretty(&plan).unwrap_or_else(|_| {
+                "{\"_type\":\"plan_artifact\",\"schema_version\":\"harn.plan.v1\"}".to_string()
+            }))
+        }
         "read_file" => {
             let path = args
                 .get("path")

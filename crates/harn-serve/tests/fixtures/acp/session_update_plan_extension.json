@@ -1,0 +1,52 @@
+[
+  {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "session-1",
+      "update": {
+        "entries": [
+          {
+            "content": "Emit plan event.",
+            "status": "completed"
+          },
+          {
+            "content": "Verify fixtures.",
+            "status": "pending"
+          }
+        ],
+        "harnPlan": {
+          "_type": "plan_artifact",
+          "approval": {
+            "state": "unrequested"
+          },
+          "assumptions": [],
+          "id": "plan_835c9eaf0b1e",
+          "open_questions": [],
+          "schema_version": "harn.plan.v1",
+          "steps": [
+            {
+              "content": "Emit plan event.",
+              "id": "step-1",
+              "priority": null,
+              "status": "completed"
+            },
+            {
+              "content": "Verify fixtures.",
+              "id": "step-2",
+              "priority": null,
+              "status": "pending"
+            }
+          ],
+          "summary": "Ship plan events.",
+          "title": "Plan",
+          "tool": "emit_plan",
+          "verification_commands": [
+            "cargo test -p harn-serve acp"
+          ]
+        },
+        "sessionUpdate": "plan"
+      }
+    }
+  }
+]

@@ -956,6 +956,14 @@ pub(crate) const SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("int")),
     },
     BuiltinSig {
+        name: "plan_artifact",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
+        name: "plan_entries",
+        return_type: Some(BuiltinReturn::Named("list")),
+    },
+    BuiltinSig {
         name: "platform",
         return_type: Some(BuiltinReturn::Named("string")),
     },
