@@ -1,8 +1,6 @@
 use std::collections::BTreeMap;
-use std::io::{Read, Write};
-use std::net::TcpListener;
+use std::io::Write;
 use std::sync::{Arc, Mutex};
-use std::thread::JoinHandle;
 
 use async_trait::async_trait;
 use serde_json::{json, Value as JsonValue};
@@ -11,6 +9,7 @@ use time::OffsetDateTime;
 
 use super::*;
 use crate::connectors::{
+    test_util::{spawn_mock_http_server, MockHttpServer},
     Connector, ConnectorClient, ConnectorCtx, InboxIndex, MetricsRegistry, RateLimiterFactory,
     RawInbound, TriggerBinding,
 };
@@ -385,7 +384,8 @@ async fn linear_connector_rejects_stale_timestamps_and_records_metric() {
 #[tokio::test]
 async fn linear_client_supports_typed_methods_and_escape_hatch() {
     let requests = Arc::new(Mutex::new(Vec::<CapturedRequest>::new()));
-    let (base_url, handle) = spawn_mock_server(requests.clone(), 5);
+    let server = spawn_mock_server(requests.clone(), 5);
+    let base_url = server.base_url().to_string();
     let client = initialized_client(&base_url).await;
 
     let list = client
@@ -449,7 +449,7 @@ async fn linear_client_supports_typed_methods_and_escape_hatch() {
         .await
         .expect("graphql");
 
-    handle.join().expect("join mock server");
+    drop(server);
     let requests = requests.lock().expect("requests lock").clone();
     assert_eq!(requests.len(), 5);
     assert!(requests.iter().all(|request| {
@@ -490,7 +490,8 @@ async fn linear_client_supports_typed_methods_and_escape_hatch() {
 #[tokio::test]
 async fn linear_connector_monitor_reenables_webhook_after_probe_streak() {
     let requests = Arc::new(Mutex::new(Vec::<CapturedRequest>::new()));
-    let (base_url, handle) = spawn_monitor_server(requests.clone(), 3);
+    let server = spawn_monitor_server(requests.clone(), 3);
+    let base_url = server.base_url().to_string();
     let mut binding = binding();
     binding.config = json!({
         "match": { "path": "/hooks/linear" },
@@ -521,7 +522,7 @@ async fn linear_connector_monitor_reenables_webhook_after_probe_streak() {
         .shutdown(std::time::Duration::from_secs(1))
         .await
         .expect("shutdown connector");
-    handle.join().expect("join monitor server");
+    drop(server);
 
     let requests = requests.lock().expect("requests lock").clone();
     assert_eq!(requests.len(), 3);
@@ -549,20 +550,37 @@ async fn linear_connector_monitor_reenables_webhook_after_probe_streak() {
     );
 }
 
+fn capture_request(
+    requests: &Arc<Mutex<Vec<CapturedRequest>>>,
+    raw: &crate::connectors::test_util::CapturedHttpRequest,
+) -> CapturedRequest {
+    let body = if raw.body.is_empty() {
+        None
+    } else {
+        Some(serde_json::from_str(&raw.body).expect("decode request body"))
+    };
+    let captured = CapturedRequest {
+        method: raw.method.clone(),
+        path: raw.path.clone(),
+        headers: raw.headers.clone(),
+        body,
+    };
+    requests
+        .lock()
+        .expect("requests lock")
+        .push(captured.clone());
+    captured
+}
+
 fn spawn_mock_server(
     requests: Arc<Mutex<Vec<CapturedRequest>>>,
     expected_requests: usize,
-) -> (String, JoinHandle<()>) {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock server");
-    let addr = listener.local_addr().expect("mock addr");
-    let handle = std::thread::spawn(move || {
-        for _ in 0..expected_requests {
-            let (mut stream, _) = listener.accept().expect("accept request");
-            let request = read_request(&mut stream);
-            requests
-                .lock()
-                .expect("requests lock")
-                .push(request.clone());
+) -> MockHttpServer {
+    spawn_mock_http_server(
+        expected_requests,
+        "linear mock server",
+        move |_index, _addr, raw, stream| {
+            let request = capture_request(&requests, raw);
             let query = request
                 .body
                 .as_ref()
@@ -612,66 +630,12 @@ fn spawn_mock_server(
                 })
             };
             write_response(
-                &mut stream,
+                stream,
                 &body.to_string(),
                 &[("x-complexity", "12"), ("content-type", "application/json")],
             );
-        }
-    });
-    (format!("http://{}", addr), handle)
-}
-
-fn read_request(stream: &mut std::net::TcpStream) -> CapturedRequest {
-    let mut buffer = Vec::new();
-    let mut temp = [0u8; 4096];
-    let header_end;
-    loop {
-        let n = stream.read(&mut temp).expect("read request");
-        assert!(n > 0, "request ended before headers");
-        buffer.extend_from_slice(&temp[..n]);
-        if let Some(idx) = buffer.windows(4).position(|window| window == b"\r\n\r\n") {
-            header_end = idx + 4;
-            break;
-        }
-    }
-    let header_text = String::from_utf8_lossy(&buffer[..header_end]).to_string();
-    let mut lines = header_text.split("\r\n").filter(|line| !line.is_empty());
-    let request_line = lines.next().expect("request line");
-    let mut request_line_parts = request_line.split_whitespace();
-    let method = request_line_parts
-        .next()
-        .expect("request method")
-        .to_string();
-    let path = request_line_parts.next().expect("request path").to_string();
-    let mut headers = BTreeMap::new();
-    for line in lines {
-        if let Some((name, value)) = line.split_once(':') {
-            headers.insert(name.to_ascii_lowercase(), value.trim().to_string());
-        }
-    }
-    let content_length = headers
-        .get("content-length")
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(0);
-    while buffer.len() < header_end + content_length {
-        let n = stream.read(&mut temp).expect("read body");
-        assert!(n > 0, "request ended before body");
-        buffer.extend_from_slice(&temp[..n]);
-    }
-    let body = if content_length == 0 {
-        None
-    } else {
-        Some(
-            serde_json::from_slice(&buffer[header_end..header_end + content_length])
-                .expect("decode request body"),
-        )
-    };
-    CapturedRequest {
-        method,
-        path,
-        headers,
-        body,
-    }
+        },
+    )
 }
 
 fn write_response(stream: &mut std::net::TcpStream, body: &str, headers: &[(&str, &str)]) {
@@ -704,25 +668,15 @@ fn write_response_status(
 fn spawn_monitor_server(
     requests: Arc<Mutex<Vec<CapturedRequest>>>,
     expected_requests: usize,
-) -> (String, JoinHandle<()>) {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("bind monitor server");
-    let addr = listener.local_addr().expect("monitor addr");
-    let handle = std::thread::spawn(move || {
-        for _ in 0..expected_requests {
-            let (mut stream, _) = listener.accept().expect("accept request");
-            let request = read_request(&mut stream);
-            requests
-                .lock()
-                .expect("requests lock")
-                .push(request.clone());
+) -> MockHttpServer {
+    spawn_mock_http_server(
+        expected_requests,
+        "linear monitor server",
+        move |_index, _addr, raw, stream| {
+            let request = capture_request(&requests, raw);
             match (request.method.as_str(), request.path.as_str()) {
                 ("GET", "/health") => {
-                    write_response_status(
-                        &mut stream,
-                        "200 OK",
-                        "",
-                        &[("content-type", "text/plain")],
-                    );
+                    write_response_status(stream, "200 OK", "", &[("content-type", "text/plain")]);
                 }
                 ("POST", "/") => {
                     let query = request
@@ -736,7 +690,7 @@ fn spawn_monitor_server(
                         "unexpected GraphQL query: {query}"
                     );
                     write_response(
-                        &mut stream,
+                        stream,
                         &json!({
                             "data": {
                                 "webhookUpdate": {
@@ -751,7 +705,6 @@ fn spawn_monitor_server(
                 }
                 other => panic!("unexpected request {other:?}"),
             }
-        }
-    });
-    (format!("http://{}", addr), handle)
+        },
+    )
 }

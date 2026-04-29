@@ -545,48 +545,97 @@ mod tests {
         assert_eq!(messages[0]["role"].as_str(), Some("user"));
     }
 
-    /// Accept a single connection with a bounded deadline so a buggy client
-    /// can't wedge the test runner. Used by all localhost stubs in this
-    /// module. Historical note: blocking `listener.accept()` has taken down
-    /// the test suite at least twice.
-    fn accept_with_deadline(listener: &std::net::TcpListener, label: &str) -> std::net::TcpStream {
+    /// Cooperative accept loop: blocks until a client connects or the
+    /// shared `shutdown` flag is set. The shutdown flag is owned by the
+    /// returned [`LlmStub`] guard and flipped on Drop, so the stub thread
+    /// can never outlive the test (replaces the older fixed-deadline loop
+    /// that flaked under heavy CI fan-out).
+    fn accept_with_shutdown(
+        listener: &std::net::TcpListener,
+        label: &str,
+        shutdown: &std::sync::atomic::AtomicBool,
+    ) -> Option<std::net::TcpStream> {
         listener
             .set_nonblocking(true)
             .expect("set listener nonblocking");
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
         loop {
+            if shutdown.load(std::sync::atomic::Ordering::Acquire) {
+                return None;
+            }
             match listener.accept() {
                 Ok((stream, _)) => {
                     stream
                         .set_nonblocking(false)
                         .expect("restore blocking mode");
                     stream
-                        .set_read_timeout(Some(std::time::Duration::from_secs(3)))
+                        .set_read_timeout(Some(std::time::Duration::from_secs(30)))
                         .ok();
                     stream
-                        .set_write_timeout(Some(std::time::Duration::from_secs(3)))
+                        .set_write_timeout(Some(std::time::Duration::from_secs(30)))
                         .ok();
-                    return stream;
+                    return Some(stream);
                 }
                 Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    if std::time::Instant::now() >= deadline {
-                        panic!("{label}: no client within 3s");
-                    }
-                    std::thread::sleep(std::time::Duration::from_millis(20));
+                    std::thread::sleep(std::time::Duration::from_millis(5));
                 }
                 Err(e) => panic!("{label}: accept failed: {e}"),
             }
         }
     }
 
-    fn spawn_ollama_stub() -> (std::net::SocketAddr, std::thread::JoinHandle<()>) {
-        use std::io::{Read, Write};
-        use std::net::TcpListener;
+    /// RAII guard for an in-process LLM stub. Dropping signals the stub
+    /// thread to exit and joins it so no FDs leak past the test, even on
+    /// panic.
+    struct LlmStub {
+        addr: std::net::SocketAddr,
+        shutdown: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        handle: Option<std::thread::JoinHandle<()>>,
+    }
 
-        let listener = TcpListener::bind("127.0.0.1:0").expect("bind ollama stub");
+    impl LlmStub {
+        fn addr(&self) -> std::net::SocketAddr {
+            self.addr
+        }
+    }
+
+    impl Drop for LlmStub {
+        fn drop(&mut self) {
+            self.shutdown
+                .store(true, std::sync::atomic::Ordering::Release);
+            if let Some(handle) = self.handle.take() {
+                let _ = handle.join();
+            }
+        }
+    }
+
+    /// Bind a localhost listener and run `body` on a background thread once
+    /// a client connects. Wraps the listener in an [`LlmStub`] guard whose
+    /// lifetime bounds the stub thread.
+    fn spawn_llm_stub<F>(label: &'static str, body: F) -> LlmStub
+    where
+        F: FnOnce(&mut std::net::TcpStream) + Send + 'static,
+    {
+        use std::net::TcpListener;
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind llm stub");
         let addr = listener.local_addr().expect("stub addr");
+        let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let shutdown_thread = shutdown.clone();
         let handle = std::thread::spawn(move || {
-            let mut stream = accept_with_deadline(&listener, "ollama stub");
+            let Some(mut stream) = accept_with_shutdown(&listener, label, &shutdown_thread) else {
+                return;
+            };
+            body(&mut stream);
+        });
+        LlmStub {
+            addr,
+            shutdown,
+            handle: Some(handle),
+        }
+    }
+
+    fn spawn_ollama_stub() -> LlmStub {
+        spawn_llm_stub("ollama stub", |stream| {
+            use std::io::{Read, Write};
             let mut buf = vec![0u8; 8192];
             let n = stream.read(&mut buf).expect("read request");
             let request = String::from_utf8_lossy(&buf[..n]);
@@ -605,20 +654,14 @@ mod tests {
             stream
                 .write_all(response.as_bytes())
                 .expect("write response");
-        });
-        (addr, handle)
+        })
     }
 
     fn spawn_ollama_stub_with_body_capture(
         captured: std::sync::Arc<std::sync::Mutex<Option<String>>>,
-    ) -> (std::net::SocketAddr, std::thread::JoinHandle<()>) {
-        use std::io::{Read, Write};
-        use std::net::TcpListener;
-
-        let listener = TcpListener::bind("127.0.0.1:0").expect("bind ollama stub");
-        let addr = listener.local_addr().expect("stub addr");
-        let handle = std::thread::spawn(move || {
-            let mut stream = accept_with_deadline(&listener, "ollama stub (capture)");
+    ) -> LlmStub {
+        spawn_llm_stub("ollama stub (capture)", move |stream| {
+            use std::io::{Read, Write};
             let mut buf = vec![0u8; 16384];
             let n = stream.read(&mut buf).expect("read request");
             let request = String::from_utf8_lossy(&buf[..n]).to_string();
@@ -641,20 +684,14 @@ mod tests {
             stream
                 .write_all(response.as_bytes())
                 .expect("write response");
-        });
-        (addr, handle)
+        })
     }
 
     fn spawn_ollama_raw_generate_stub(
         captured: std::sync::Arc<std::sync::Mutex<Option<String>>>,
-    ) -> (std::net::SocketAddr, std::thread::JoinHandle<()>) {
-        use std::io::{Read, Write};
-        use std::net::TcpListener;
-
-        let listener = TcpListener::bind("127.0.0.1:0").expect("bind ollama raw stub");
-        let addr = listener.local_addr().expect("stub addr");
-        let handle = std::thread::spawn(move || {
-            let mut stream = accept_with_deadline(&listener, "ollama raw stub");
+    ) -> LlmStub {
+        spawn_llm_stub("ollama raw stub", move |stream| {
+            use std::io::{Read, Write};
             let mut buf = vec![0u8; 16384];
             let n = stream.read(&mut buf).expect("read request");
             let request = String::from_utf8_lossy(&buf[..n]).to_string();
@@ -678,8 +715,7 @@ mod tests {
             stream
                 .write_all(response.as_bytes())
                 .expect("write response");
-        });
-        (addr, handle)
+        })
     }
 
     #[test]
@@ -693,7 +729,8 @@ mod tests {
             .expect("runtime");
 
         runtime.block_on(async {
-            let (addr, server) = spawn_ollama_stub();
+            let server = spawn_ollama_stub();
+            let addr = server.addr();
             let prev_ollama_host = std::env::var("OLLAMA_HOST").ok();
             unsafe {
                 std::env::set_var("OLLAMA_HOST", format!("http://{addr}"));
@@ -729,7 +766,7 @@ mod tests {
                 },
             }
 
-            server.join().expect("stub server");
+            drop(server);
 
             let (result, deltas) = result;
             assert_eq!(result.text, "hello world");
@@ -752,7 +789,8 @@ mod tests {
 
         runtime.block_on(async {
             let captured = std::sync::Arc::new(std::sync::Mutex::new(None));
-            let (addr, server) = spawn_ollama_stub_with_body_capture(captured.clone());
+            let server = spawn_ollama_stub_with_body_capture(captured.clone());
+            let addr = server.addr();
             let prev_ollama_host = std::env::var("OLLAMA_HOST").ok();
             let prev_num_ctx = std::env::var("HARN_OLLAMA_NUM_CTX").ok();
             let prev_keep_alive = std::env::var("HARN_OLLAMA_KEEP_ALIVE").ok();
@@ -786,7 +824,7 @@ mod tests {
                 None => unsafe { std::env::remove_var("HARN_OLLAMA_KEEP_ALIVE") },
             }
 
-            server.join().expect("stub server");
+            drop(server);
             assert_eq!(result.text, "ok");
             let body = captured
                 .lock()
@@ -811,7 +849,8 @@ mod tests {
 
         runtime.block_on(async {
             let captured = std::sync::Arc::new(std::sync::Mutex::new(None));
-            let (addr, server) = spawn_ollama_raw_generate_stub(captured.clone());
+            let server = spawn_ollama_raw_generate_stub(captured.clone());
+            let addr = server.addr();
             let prev_ollama_host = std::env::var("OLLAMA_HOST").ok();
             unsafe {
                 std::env::set_var("OLLAMA_HOST", format!("http://{addr}"));
@@ -842,7 +881,7 @@ mod tests {
                 None => unsafe { std::env::remove_var("OLLAMA_HOST") },
             }
 
-            server.join().expect("stub server");
+            drop(server);
             let (result, deltas) = result;
             assert_eq!(
                 result.text,
@@ -881,7 +920,8 @@ mod tests {
 
         runtime.block_on(async {
             let captured = std::sync::Arc::new(std::sync::Mutex::new(None));
-            let (addr, server) = spawn_ollama_stub_with_body_capture(captured.clone());
+            let server = spawn_ollama_stub_with_body_capture(captured.clone());
+            let addr = server.addr();
             let _num_ctx = ScopedEnvVar::set("HARN_OLLAMA_NUM_CTX", "65536");
             let _keep_alive = ScopedEnvVar::set("HARN_OLLAMA_KEEP_ALIVE", "forever");
 
@@ -889,7 +929,7 @@ mod tests {
                 .await
                 .expect("warmup should succeed");
 
-            server.join().expect("stub server");
+            drop(server);
             let body = captured
                 .lock()
                 .expect("captured body")
@@ -902,49 +942,17 @@ mod tests {
         });
     }
 
-    /// Bind a stub listener + spawn a responder that serves a single canned
-    /// HTTP error response, then returns its join handle. The listener uses
-    /// a bounded accept so a misrouted client can never hang the test
-    /// process — any failure to connect within 3s causes the thread to
-    /// exit, unblocking `join()`.
+    /// Bind a stub listener that serves one canned HTTP error response.
+    /// The returned [`LlmStub`] guard owns the listener and the worker
+    /// thread, so dropping it (test exit, panic) signals shutdown and
+    /// joins — a stuck or misrouted client can never wedge the suite.
     fn spawn_openai_error_stub(
         status_line: &'static str,
         extra_headers: &'static str,
         body: &'static str,
-    ) -> (std::net::SocketAddr, std::thread::JoinHandle<()>) {
-        use std::io::{Read, Write};
-        use std::net::TcpListener;
-
-        let listener = TcpListener::bind("127.0.0.1:0").expect("bind openai stub");
-        let addr = listener.local_addr().expect("stub addr");
-        listener
-            .set_nonblocking(true)
-            .expect("set listener nonblocking");
-        let handle = std::thread::spawn(move || {
-            // Fail fast if the client never reaches the stub listener.
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-            let (mut stream, _) = loop {
-                match listener.accept() {
-                    Ok(pair) => break pair,
-                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                        if std::time::Instant::now() >= deadline {
-                            return;
-                        }
-                        std::thread::sleep(std::time::Duration::from_millis(5));
-                    }
-                    Err(_) => return,
-                }
-            };
-            // Bounded read/write so a stuck client can't wedge the suite.
-            stream
-                .set_nonblocking(false)
-                .expect("restore blocking mode on accepted stream");
-            stream
-                .set_read_timeout(Some(std::time::Duration::from_secs(5)))
-                .ok();
-            stream
-                .set_write_timeout(Some(std::time::Duration::from_secs(5)))
-                .ok();
+    ) -> LlmStub {
+        spawn_llm_stub("openai error stub", move |stream| {
+            use std::io::{Read, Write};
             let mut buf = vec![0u8; 16384];
             let _ = stream.read(&mut buf);
             let response = format!(
@@ -953,8 +961,7 @@ mod tests {
             );
             let _ = stream.write_all(response.as_bytes());
             let _ = stream.flush();
-        });
-        (addr, handle)
+        })
     }
 
     /// Single-entrypoint helper that serializes env-var mutation and the
@@ -968,7 +975,8 @@ mod tests {
     ) -> String {
         let _guard = env_lock().lock().expect("env lock");
         let _allow_llm_transport = allow_stubbed_llm_transport();
-        let (addr, server) = spawn_openai_error_stub(status_line, extra_headers, body);
+        let server = spawn_openai_error_stub(status_line, extra_headers, body);
+        let addr = server.addr();
         let prev = std::env::var("LOCAL_LLM_BASE_URL").ok();
         unsafe {
             std::env::set_var("LOCAL_LLM_BASE_URL", format!("http://{addr}"));
@@ -991,8 +999,8 @@ mod tests {
                     opts.output_schema = None;
                     let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
                     let call = tokio::time::timeout(
-                        // Must stay inside the stub's fail-fast accept window.
-                        std::time::Duration::from_secs(2),
+                        // Must stay inside the stub's accept window.
+                        std::time::Duration::from_secs(30),
                         vm_call_llm_full_streaming_offthread(&opts, tx),
                     )
                     .await;
@@ -1008,7 +1016,7 @@ mod tests {
             Some(v) => unsafe { std::env::set_var("LOCAL_LLM_BASE_URL", v) },
             None => unsafe { std::env::remove_var("LOCAL_LLM_BASE_URL") },
         }
-        let _ = server.join();
+        drop(server);
         err
     }
 

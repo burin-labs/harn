@@ -1,7 +1,5 @@
 use std::collections::{BTreeMap, HashMap};
-use std::net::TcpListener;
 use std::sync::{Arc, Mutex};
-use std::thread::JoinHandle;
 use std::time::Duration as StdDuration;
 
 use async_trait::async_trait;
@@ -12,8 +10,8 @@ use time::OffsetDateTime;
 use super::*;
 use crate::connectors::{
     test_util::{
-        accept_http_connection, read_http_request, write_http_response,
-        CapturedHttpRequest as CapturedRequest,
+        spawn_mock_http_server, write_http_response, CapturedHttpRequest as CapturedRequest,
+        MockHttpServer,
     },
     Connector, ConnectorCtx, InboxIndex, MetricsRegistry, RateLimiterFactory, RawInbound,
     TriggerBinding,
@@ -301,25 +299,25 @@ fn spawn_mock_server(
     expected_requests: usize,
     responder: impl Fn(usize, &CapturedRequest) -> (u16, String) + Send + 'static,
     captured: Arc<Mutex<Vec<CapturedRequest>>>,
-) -> (String, JoinHandle<()>) {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let addr = listener.local_addr().unwrap();
-    let handle = std::thread::spawn(move || {
-        for index in 0..expected_requests {
-            let mut stream = accept_http_connection(&listener, "notion mock server");
-            let request = read_http_request(&mut stream);
-            captured.lock().unwrap().push(request.clone());
-            let (status, body) = responder(index, &request);
-            write_response(&mut stream, status, &body);
-        }
-    });
-    (format!("http://{}", addr), handle)
+) -> MockHttpServer {
+    spawn_mock_http_server(
+        expected_requests,
+        "notion mock server",
+        move |index, _addr, request, stream| {
+            captured
+                .lock()
+                .expect("captured requests poisoned")
+                .push(request.clone());
+            let (status, body) = responder(index, request);
+            write_response(stream, status, &body);
+        },
+    )
 }
 
 #[tokio::test]
 async fn notion_client_methods_use_current_api_headers_and_paths() {
     let captured = Arc::new(Mutex::new(Vec::<CapturedRequest>::new()));
-    let (base_url, handle) = spawn_mock_server(
+    let server = spawn_mock_server(
         7,
         |_index, request| {
             let body = if request.path.starts_with("/data_sources/") {
@@ -331,6 +329,7 @@ async fn notion_client_methods_use_current_api_headers_and_paths() {
         },
         captured.clone(),
     );
+    let base_url = server.base_url().to_string();
 
     let secrets = Arc::new(StaticSecretProvider::new("notion", HashMap::new()));
     let mut connector = NotionConnector::new();
@@ -393,7 +392,7 @@ async fn notion_client_methods_use_current_api_headers_and_paths() {
         .await
         .unwrap();
 
-    handle.join().unwrap();
+    drop(server);
     let requests = captured.lock().unwrap().clone();
     assert_eq!(requests.len(), 7);
     assert_eq!(requests[0].method, "GET");
@@ -420,7 +419,7 @@ async fn notion_client_methods_use_current_api_headers_and_paths() {
 #[tokio::test]
 async fn notion_client_retries_once_after_rate_limit() {
     let captured = Arc::new(Mutex::new(Vec::<CapturedRequest>::new()));
-    let (base_url, handle) = spawn_mock_server(
+    let server = spawn_mock_server(
         2,
         |index, _request| {
             if index == 0 {
@@ -434,6 +433,7 @@ async fn notion_client_retries_once_after_rate_limit() {
         },
         captured.clone(),
     );
+    let base_url = server.base_url().to_string();
 
     let secrets = Arc::new(StaticSecretProvider::new("notion", HashMap::new()));
     let ctx = test_ctx(secrets).await;
@@ -447,7 +447,7 @@ async fn notion_client_retries_once_after_rate_limit() {
         .await
         .unwrap();
 
-    handle.join().unwrap();
+    drop(server);
     let requests = captured.lock().unwrap().clone();
     assert_eq!(requests.len(), 2);
     assert_eq!(result.get("id").and_then(JsonValue::as_str), Some("page_1"));
@@ -477,7 +477,7 @@ async fn notion_poll_binding_emits_targeted_inbox_event_and_persists_high_water(
             }
         }
     });
-    let (base_url, handle) = spawn_mock_server(
+    let server = spawn_mock_server(
         1,
         move |_index, _request| {
             (
@@ -492,6 +492,7 @@ async fn notion_poll_binding_emits_targeted_inbox_event_and_persists_high_water(
         },
         captured,
     );
+    let base_url = server.base_url().to_string();
 
     let secrets = Arc::new(StaticSecretProvider::new(
         "notion",
@@ -548,5 +549,5 @@ async fn notion_poll_binding_emits_targeted_inbox_event_and_persists_high_water(
 
     connector.shutdown(StdDuration::from_secs(1)).await.unwrap();
     std::env::remove_var("HARN_TEST_NOTION_API_BASE_URL");
-    handle.join().unwrap();
+    drop(server);
 }

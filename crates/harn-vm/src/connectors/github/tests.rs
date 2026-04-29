@@ -1,7 +1,5 @@
 use std::collections::{BTreeMap, HashSet};
-use std::net::TcpListener;
 use std::sync::{Arc, Mutex};
-use std::thread::JoinHandle;
 
 use async_trait::async_trait;
 use serde_json::json;
@@ -11,8 +9,8 @@ use time::OffsetDateTime;
 use super::*;
 use crate::connectors::{
     test_util::{
-        accept_http_connection, read_http_request, write_http_response,
-        CapturedHttpRequest as CapturedRequest,
+        spawn_mock_http_server, write_http_response, CapturedHttpRequest as CapturedRequest,
+        MockHttpServer,
     },
     Connector, ConnectorCtx, InboxIndex, MetricsRegistry, RateLimiterFactory, RawInbound,
     TriggerBinding,
@@ -137,13 +135,11 @@ fn client_args(api_base_url: &str) -> JsonValue {
 fn spawn_mock_server(
     expected_requests: usize,
     scenario: Arc<Mutex<MockScenario>>,
-) -> (String, JoinHandle<()>) {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock server");
-    let addr = listener.local_addr().expect("mock addr");
-    let handle = std::thread::spawn(move || {
-        for _ in 0..expected_requests {
-            let mut stream = accept_http_connection(&listener, "github mock server");
-            let request = read_http_request(&mut stream);
+) -> MockHttpServer {
+    spawn_mock_http_server(
+        expected_requests,
+        "github mock server",
+        move |_index, _addr, request, stream| {
             let response = {
                 let mut state = scenario.lock().expect("scenario lock");
                 if request.path == "/app/installations/77/access_tokens" {
@@ -220,10 +216,9 @@ fn spawn_mock_server(
                     )
                 }
             };
-            write_http_response(&mut stream, response.0, &response.1, &response.2);
-        }
-    });
-    (format!("http://{}", addr), handle)
+            write_http_response(stream, response.0, &response.1, &response.2);
+        },
+    )
 }
 
 fn github_signature(secret: &str, body: &[u8]) -> String {
@@ -499,7 +494,8 @@ async fn normalizes_monitor_github_webhook_events() {
 #[tokio::test]
 async fn outbound_methods_share_cached_installation_token() {
     let scenario = Arc::new(Mutex::new(MockScenario::default()));
-    let (base_url, server) = spawn_mock_server(8, scenario.clone());
+    let server = spawn_mock_server(8, scenario.clone());
+    let base_url = server.base_url().to_string();
     let client = initialized_client(Arc::new(StaticSecretProvider {
         namespace: "github".to_string(),
         secrets: BTreeMap::new(),
@@ -567,7 +563,7 @@ async fn outbound_methods_share_cached_installation_token() {
         .insert("labels".to_string(), json!(["bug"]));
     client.call("create_issue", args).await.unwrap();
 
-    server.join().unwrap();
+    drop(server);
     let state = scenario.lock().unwrap();
     assert_eq!(state.token_requests, 1);
     assert_eq!(state.api_requests.len(), 7);
@@ -583,7 +579,8 @@ async fn outbound_methods_share_cached_installation_token() {
 #[tokio::test]
 async fn api_call_uses_authenticated_github_rest_request() {
     let scenario = Arc::new(Mutex::new(MockScenario::default()));
-    let (base_url, server) = spawn_mock_server(2, scenario.clone());
+    let server = spawn_mock_server(2, scenario.clone());
+    let base_url = server.base_url().to_string();
     let client = initialized_client(Arc::new(StaticSecretProvider {
         namespace: "github".to_string(),
         secrets: BTreeMap::new(),
@@ -607,7 +604,7 @@ async fn api_call_uses_authenticated_github_rest_request() {
         .await
         .unwrap();
 
-    server.join().unwrap();
+    drop(server);
     let state = scenario.lock().unwrap();
     assert_eq!(state.token_requests, 1);
     assert_eq!(state.api_requests.len(), 1);
@@ -635,7 +632,8 @@ async fn unauthorized_response_invalidates_token_and_remints() {
         unauthorized_once: HashSet::from(["/repos/octo/demo/issues/123/comments".to_string()]),
         ..MockScenario::default()
     }));
-    let (base_url, server) = spawn_mock_server(4, scenario.clone());
+    let server = spawn_mock_server(4, scenario.clone());
+    let base_url = server.base_url().to_string();
     let client = initialized_client(Arc::new(StaticSecretProvider {
         namespace: "github".to_string(),
         secrets: BTreeMap::new(),
@@ -651,7 +649,7 @@ async fn unauthorized_response_invalidates_token_and_remints() {
     object.insert("body".to_string(), JsonValue::String("hello".to_string()));
     client.call("comment", args).await.unwrap();
 
-    server.join().unwrap();
+    drop(server);
     let state = scenario.lock().unwrap();
     assert_eq!(state.token_requests, 2);
     assert_eq!(state.api_requests.len(), 1);
@@ -669,7 +667,8 @@ async fn rate_limited_response_retries_once() {
         rate_limit_once: HashSet::from(["/repos/octo/demo/issues/123/comments".to_string()]),
         ..MockScenario::default()
     }));
-    let (base_url, server) = spawn_mock_server(3, scenario.clone());
+    let server = spawn_mock_server(3, scenario.clone());
+    let base_url = server.base_url().to_string();
     let client = initialized_client(Arc::new(StaticSecretProvider {
         namespace: "github".to_string(),
         secrets: BTreeMap::new(),
@@ -685,7 +684,7 @@ async fn rate_limited_response_retries_once() {
     object.insert("body".to_string(), JsonValue::String("hello".to_string()));
     client.call("comment", args).await.unwrap();
 
-    server.join().unwrap();
+    drop(server);
     let state = scenario.lock().unwrap();
     assert_eq!(state.token_requests, 1);
     assert_eq!(state.api_requests.len(), 1);
