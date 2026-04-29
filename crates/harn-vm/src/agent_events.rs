@@ -196,6 +196,7 @@ impl ToolCallErrorCategory {
             | Internal::EgressBlocked
             | Internal::NotFound
             | Internal::CircuitOpen
+            | Internal::BudgetExceeded
             | Internal::Generic => Self::HostBridgeError,
         }
     }

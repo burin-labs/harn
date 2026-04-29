@@ -557,6 +557,20 @@ pub(crate) fn build_llm_error_dict(err: &VmError, provider: &str, model: &str) -
     let category = crate::value::error_to_category(err);
     let message = llm_error_message(err);
     let llm_error = api::classify_llm_error(category.clone(), &message);
+    if let VmError::Thrown(VmValue::Dict(existing)) = err {
+        let mut dict = existing.as_ref().clone();
+        dict.entry("category".to_string())
+            .or_insert_with(|| VmValue::String(Rc::from(category.as_str())));
+        dict.entry("kind".to_string())
+            .or_insert_with(|| VmValue::String(Rc::from(llm_error.kind.as_str())));
+        dict.entry("reason".to_string())
+            .or_insert_with(|| VmValue::String(Rc::from(llm_error.reason.as_str())));
+        dict.entry("message".to_string())
+            .or_insert_with(|| VmValue::String(Rc::from(message.as_str())));
+        dict.insert("provider".to_string(), VmValue::String(Rc::from(provider)));
+        dict.insert("model".to_string(), VmValue::String(Rc::from(model)));
+        return VmValue::Dict(Rc::new(dict));
+    }
     let mut dict = std::collections::BTreeMap::new();
     dict.insert(
         "category".to_string(),
@@ -1193,6 +1207,7 @@ pub fn register_llm_builtins(vm: &mut Vm) {
         let (skill_registry, skill_match, working_files) =
             crate::llm::agent::parse_skill_config(&options);
         let mut opts = extract_llm_options(&args)?;
+        let budget = opts.budget.clone();
         let result = run_agent_loop_internal(
             &mut opts,
             AgentLoopConfig {
@@ -1219,6 +1234,7 @@ pub fn register_llm_builtins(vm: &mut Vm) {
                     .unwrap_or(profile_defaults.llm_retries) as usize,
                 llm_backoff_ms: opt_int(&options, "llm_backoff_ms").unwrap_or(2000) as u64,
                 token_budget: opt_int(&options, "token_budget"),
+                budget,
                 exit_when_verified,
                 loop_detect_warn: opt_int(&options, "loop_detect_warn").unwrap_or(2) as usize,
                 loop_detect_block: opt_int(&options, "loop_detect_block").unwrap_or(3) as usize,
@@ -1546,6 +1562,7 @@ mod tests {
             timeout: None,
             idle_timeout: None,
             provider_overrides: None,
+            budget: None,
             prefill: None,
             structural_experiment: None,
             applied_structural_experiment: None,

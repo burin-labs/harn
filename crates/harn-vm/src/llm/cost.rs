@@ -20,6 +20,319 @@ pub fn peek_total_cost() -> f64 {
     LLM_ACCUMULATED_COST.with(|acc| *acc.borrow())
 }
 
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct LlmBudgetEnvelope {
+    pub max_cost_usd: Option<f64>,
+    pub total_budget_usd: Option<f64>,
+    pub max_input_tokens: Option<i64>,
+    pub max_output_tokens: Option<i64>,
+}
+
+impl LlmBudgetEnvelope {
+    pub(crate) fn is_empty(&self) -> bool {
+        self.max_cost_usd.is_none()
+            && self.total_budget_usd.is_none()
+            && self.max_input_tokens.is_none()
+            && self.max_output_tokens.is_none()
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct LlmBudgetProjection {
+    pub provider: String,
+    pub model: String,
+    pub projected_input_tokens: i64,
+    pub projected_output_tokens: i64,
+    pub projected_cost_usd: f64,
+    pub session_cost_usd: f64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum BudgetLimitKind {
+    PerCallCost,
+    TotalCost,
+    InputTokens,
+    OutputTokens,
+}
+
+impl BudgetLimitKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            BudgetLimitKind::PerCallCost => "max_cost_usd",
+            BudgetLimitKind::TotalCost => "total_budget_usd",
+            BudgetLimitKind::InputTokens => "max_input_tokens",
+            BudgetLimitKind::OutputTokens => "max_output_tokens",
+        }
+    }
+}
+
+fn numeric_value(value: &VmValue, key: &str) -> Result<f64, VmError> {
+    let value = match value {
+        VmValue::Float(f) => *f,
+        VmValue::Int(n) => *n as f64,
+        _ => {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                "budget.{key}: expected a non-negative number"
+            )))));
+        }
+    };
+    if !value.is_finite() || value < 0.0 {
+        return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+            "budget.{key}: expected a non-negative finite number"
+        )))));
+    }
+    Ok(value)
+}
+
+fn integer_value(value: &VmValue, key: &str) -> Result<i64, VmError> {
+    let value = match value {
+        VmValue::Int(n) => *n,
+        VmValue::Float(f) if f.is_finite() && f.fract() == 0.0 => *f as i64,
+        _ => {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                "budget.{key}: expected a non-negative integer"
+            )))));
+        }
+    };
+    if value < 0 {
+        return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+            "budget.{key}: expected a non-negative integer"
+        )))));
+    }
+    Ok(value)
+}
+
+fn parse_budget_fields(
+    fields: &BTreeMap<String, VmValue>,
+    envelope: &mut LlmBudgetEnvelope,
+) -> Result<(), VmError> {
+    if let Some(value) = fields.get("max_cost_usd") {
+        envelope.max_cost_usd = Some(numeric_value(value, "max_cost_usd")?);
+    }
+    if let Some(value) = fields.get("total_budget_usd") {
+        envelope.total_budget_usd = Some(numeric_value(value, "total_budget_usd")?);
+    }
+    if let Some(value) = fields.get("max_input_tokens") {
+        envelope.max_input_tokens = Some(integer_value(value, "max_input_tokens")?);
+    }
+    if let Some(value) = fields.get("max_output_tokens") {
+        envelope.max_output_tokens = Some(integer_value(value, "max_output_tokens")?);
+    }
+    Ok(())
+}
+
+pub(crate) fn parse_budget_envelope(
+    options: Option<&BTreeMap<String, VmValue>>,
+) -> Result<Option<LlmBudgetEnvelope>, VmError> {
+    let Some(options) = options else {
+        return Ok(None);
+    };
+    let mut envelope = LlmBudgetEnvelope::default();
+    if let Some(value) = options.get("budget") {
+        match value {
+            VmValue::Nil => {}
+            VmValue::Dict(fields) => parse_budget_fields(fields, &mut envelope)?,
+            _ => {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                    "budget: expected a dict {max_cost_usd?, total_budget_usd?, max_input_tokens?, max_output_tokens?}",
+                ))));
+            }
+        }
+    }
+    parse_budget_fields(options, &mut envelope)?;
+    Ok((!envelope.is_empty()).then_some(envelope))
+}
+
+fn estimate_json_tokens(value: &serde_json::Value) -> i64 {
+    match value {
+        serde_json::Value::Null | serde_json::Value::Bool(_) | serde_json::Value::Number(_) => 1,
+        serde_json::Value::String(s) => estimate_text_tokens(s),
+        serde_json::Value::Array(items) => items.iter().map(estimate_json_tokens).sum(),
+        serde_json::Value::Object(map) => map
+            .iter()
+            .map(|(key, value)| estimate_text_tokens(key) + estimate_json_tokens(value))
+            .sum(),
+    }
+}
+
+pub(crate) fn estimate_text_tokens(text: &str) -> i64 {
+    if text.is_empty() {
+        0
+    } else {
+        ((text.len() as f64) / 4.0).ceil() as i64
+    }
+}
+
+pub(crate) fn project_llm_call_cost(
+    opts: &super::api::LlmCallOptions,
+    session_cost_usd: f64,
+) -> LlmBudgetProjection {
+    let system_tokens = opts
+        .system
+        .as_deref()
+        .map(estimate_text_tokens)
+        .unwrap_or(0);
+    let message_tokens: i64 = opts.messages.iter().map(estimate_json_tokens).sum();
+    let tool_tokens: i64 = opts
+        .native_tools
+        .as_ref()
+        .map(|tools| {
+            tools
+                .iter()
+                .map(|tool| estimate_text_tokens(&serde_json::to_string(tool).unwrap_or_default()))
+                .sum()
+        })
+        .unwrap_or(0);
+    let projected_input_tokens = system_tokens
+        .saturating_add(message_tokens)
+        .saturating_add(tool_tokens);
+    let projected_output_tokens = opts.max_tokens.max(0);
+    let projected_cost_usd = calculate_cost_for_provider(
+        &opts.provider,
+        &opts.model,
+        projected_input_tokens,
+        projected_output_tokens,
+    );
+    LlmBudgetProjection {
+        provider: opts.provider.clone(),
+        model: opts.model.clone(),
+        projected_input_tokens,
+        projected_output_tokens,
+        projected_cost_usd,
+        session_cost_usd,
+    }
+}
+
+pub(crate) fn budget_exceeded_error(
+    projection: &LlmBudgetProjection,
+    limit_kind: BudgetLimitKind,
+    limit_value: f64,
+) -> VmError {
+    let mut dict = BTreeMap::new();
+    dict.insert(
+        "category".to_string(),
+        VmValue::String(Rc::from("budget_exceeded")),
+    );
+    dict.insert("kind".to_string(), VmValue::String(Rc::from("terminal")));
+    dict.insert(
+        "reason".to_string(),
+        VmValue::String(Rc::from("budget_exceeded")),
+    );
+    dict.insert(
+        "limit".to_string(),
+        VmValue::String(Rc::from(limit_kind.as_str())),
+    );
+    dict.insert("limit_value".to_string(), VmValue::Float(limit_value));
+    dict.insert(
+        "projected_cost_usd".to_string(),
+        VmValue::Float(projection.projected_cost_usd),
+    );
+    dict.insert(
+        "session_cost_usd".to_string(),
+        VmValue::Float(projection.session_cost_usd),
+    );
+    dict.insert(
+        "projected_input_tokens".to_string(),
+        VmValue::Int(projection.projected_input_tokens),
+    );
+    dict.insert(
+        "projected_output_tokens".to_string(),
+        VmValue::Int(projection.projected_output_tokens),
+    );
+    dict.insert(
+        "provider".to_string(),
+        VmValue::String(Rc::from(projection.provider.clone())),
+    );
+    dict.insert(
+        "model".to_string(),
+        VmValue::String(Rc::from(projection.model.clone())),
+    );
+    dict.insert(
+        "message".to_string(),
+        VmValue::String(Rc::from(format!(
+            "LLM budget exceeded before provider call: {} would exceed {}",
+            match limit_kind {
+                BudgetLimitKind::PerCallCost =>
+                    format!("projected cost ${:.6}", projection.projected_cost_usd),
+                BudgetLimitKind::TotalCost => format!(
+                    "projected session cost ${:.6}",
+                    projection.session_cost_usd + projection.projected_cost_usd
+                ),
+                BudgetLimitKind::InputTokens => format!(
+                    "projected input tokens {}",
+                    projection.projected_input_tokens
+                ),
+                BudgetLimitKind::OutputTokens => format!(
+                    "projected output tokens {}",
+                    projection.projected_output_tokens
+                ),
+            },
+            limit_kind.as_str(),
+        ))),
+    );
+    VmError::Thrown(VmValue::Dict(Rc::new(dict)))
+}
+
+pub(crate) fn budget_exceeded_limit(
+    envelope: &LlmBudgetEnvelope,
+    projection: &LlmBudgetProjection,
+) -> Option<(BudgetLimitKind, f64)> {
+    if let Some(max) = envelope.max_input_tokens {
+        if projection.projected_input_tokens > max {
+            return Some((BudgetLimitKind::InputTokens, max as f64));
+        }
+    }
+    if let Some(max) = envelope.max_output_tokens {
+        if projection.projected_output_tokens > max {
+            return Some((BudgetLimitKind::OutputTokens, max as f64));
+        }
+    }
+    if let Some(max) = envelope.max_cost_usd {
+        if projection.projected_cost_usd > max {
+            return Some((BudgetLimitKind::PerCallCost, max));
+        }
+    }
+    if let Some(max) = envelope.total_budget_usd {
+        if projection.session_cost_usd + projection.projected_cost_usd > max {
+            return Some((BudgetLimitKind::TotalCost, max));
+        }
+    }
+    None
+}
+
+pub(crate) fn check_budget_envelope(
+    envelope: &LlmBudgetEnvelope,
+    projection: &LlmBudgetProjection,
+) -> Result<(), VmError> {
+    if let Some((kind, limit)) = budget_exceeded_limit(envelope, projection) {
+        return Err(budget_exceeded_error(projection, kind, limit));
+    }
+    Ok(())
+}
+
+pub(crate) fn check_llm_preflight_budget(
+    opts: &super::api::LlmCallOptions,
+) -> Result<LlmBudgetProjection, VmError> {
+    let session_cost_usd = peek_total_cost();
+    let projection = project_llm_call_cost(opts, session_cost_usd);
+    if let Some(envelope) = opts.budget.as_ref() {
+        check_budget_envelope(envelope, &projection)?;
+    }
+    LLM_BUDGET.with(|budget| {
+        if let Some(max) = *budget.borrow() {
+            if session_cost_usd + projection.projected_cost_usd > max {
+                return Err(budget_exceeded_error(
+                    &projection,
+                    BudgetLimitKind::TotalCost,
+                    max,
+                ));
+            }
+        }
+        Ok(())
+    })?;
+    Ok(projection)
+}
+
 /// Pricing per million tokens (input, output) in USD, as of early 2026.
 fn model_pricing_per_million(model: &str) -> Option<(f64, f64)> {
     match model {
@@ -123,6 +436,15 @@ pub(crate) fn accumulate_cost_for_provider(
         }
         Ok(())
     })
+}
+
+pub(crate) fn record_llm_usage_for_provider(
+    provider: &str,
+    model: &str,
+    input_tokens: i64,
+    output_tokens: i64,
+) -> Result<(), VmError> {
+    accumulate_cost_for_provider(provider, model, input_tokens, output_tokens)
 }
 
 pub(crate) fn register_cost_builtins(vm: &mut Vm) {

@@ -684,6 +684,7 @@ fn sub_agent_loop_options(spec: &SubAgentRunSpec) -> Result<crate::llm::AgentLoo
         llm_backoff_ms: crate::llm::helpers::opt_int(&options, "llm_backoff_ms").unwrap_or(2000)
             as u64,
         token_budget: crate::llm::helpers::opt_int(&options, "token_budget"),
+        budget: crate::llm::cost::parse_budget_envelope(options.as_ref())?,
         exit_when_verified: crate::llm::helpers::opt_bool(&options, "exit_when_verified"),
         loop_detect_warn: crate::llm::helpers::opt_int(&options, "loop_detect_warn").unwrap_or(2)
             as usize,

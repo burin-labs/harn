@@ -16,6 +16,8 @@ not_found thrown=not_found msg=synthetic-not_found provider=mock model=mock-mode
 not_found safe=not_found msg=safe-not_found ok=false
 circuit_open thrown=circuit_open msg=synthetic-circuit_open provider=mock model=mock-model
 circuit_open safe=circuit_open msg=safe-circuit_open ok=false
+budget_exceeded thrown=budget_exceeded msg=synthetic-budget_exceeded provider=mock model=mock-model
+budget_exceeded safe=budget_exceeded msg=safe-budget_exceeded ok=false
 tool_error thrown=tool_error msg=synthetic-tool_error provider=mock model=mock-model
 tool_error safe=tool_error msg=safe-tool_error ok=false
 tool_rejected thrown=tool_rejected msg=synthetic-tool_rejected provider=mock model=mock-model

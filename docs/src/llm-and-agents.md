@@ -120,6 +120,7 @@ println(result.text)
 | `tools` | list | nil | Tool definitions |
 | `tool_choice` | string/dict | `"auto"` | `"auto"`, `"none"`, `"required"`, or `{name: "tool"}` |
 | `tool_search` | bool/string/dict | nil | Progressive tool disclosure. See [Tool Vault](#tool-vault) |
+| `budget` | dict | nil | Pre-flight LLM budget envelope. Supports `max_cost_usd`, `max_input_tokens`, `max_output_tokens`, and `total_budget_usd` |
 | `cache` | bool | `false` | Enable prompt caching (Anthropic) |
 | `stream` | bool | `true` | Use streaming SSE transport. Set `false` for synchronous request/response. Env: `HARN_LLM_STREAM` |
 | `timeout` | int | `120` | Request timeout in seconds |
@@ -211,7 +212,7 @@ let person = r.data
 
 `r.error.category` is one of the canonical `ErrorCategory` strings
 (`"rate_limit"`, `"timeout"`, `"schema_validation"`, `"auth"`,
-`"transient_network"`, `"generic"`, …) — match on the category
+`"budget_exceeded"`, `"transient_network"`, `"generic"`, …) — match on the category
 instead of string-sniffing the message.
 
 ### Diagnostic envelope variant
@@ -1308,6 +1309,33 @@ println("Output tokens: ${session.output_tokens}")
 llm_budget(1.00)
 println("Remaining: $${llm_budget_remaining()}")
 ```
+
+For per-call controls, pass a `budget` envelope on `llm_call`:
+
+```harn
+let result = try {
+  llm_call("Summarize this", nil, {
+    provider: "openai",
+    model: "gpt-4o",
+    max_tokens: 1024,
+    budget: {
+      max_cost_usd: 0.001,
+      max_input_tokens: 8000,
+      max_output_tokens: 1024,
+    },
+  })
+}
+```
+
+Harn estimates prompt tokens before the provider request leaves the process,
+projects cost with the provider/model pricing table, and throws a terminal
+`budget_exceeded` dict when a limit would be exceeded. In a `try { ... }`
+expression that surfaces as `Result.Err({kind: "terminal", reason:
+"budget_exceeded", projected_cost_usd: ...})`.
+
+`agent_loop` accepts the same envelope. `max_*` limits apply to each model turn;
+`total_budget_usd` is an aggregate loop budget and exits gracefully with
+`status: "budget_exhausted"` before starting a turn that would exceed it.
 
 | Function | Description |
 |---|---|

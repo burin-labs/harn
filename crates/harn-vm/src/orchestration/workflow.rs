@@ -1423,6 +1423,7 @@ pub async fn execute_stage_node(
         ];
         let mut opts = extract_llm_options(&args)?;
         let auto_compact = resolve_stage_auto_compact(node, &opts).await?;
+        let budget = opts.budget.clone();
 
         if node.mode.as_deref() == Some("agent") || !tool_names.is_empty() {
             let tool_policy = workflow_tool_policy_from_tools(&node.tools);
@@ -1481,6 +1482,7 @@ pub async fn execute_stage_node(
                     llm_retries: 2,
                     llm_backoff_ms: 2000,
                     token_budget: None,
+                    budget,
                     exit_when_verified: node.exit_when_verified,
                     loop_detect_warn: 2,
                     loop_detect_block: 3,
